@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux.do 收藏帖子导出到 Notion
 // @namespace    https://linux.do/
-// @version      1.2.1
+// @version      1.2.2
 // @description  批量导出 Linux.do 收藏的帖子到 Notion 数据库，支持自定义筛选、图片上传、权限控制
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -882,7 +882,11 @@
         canExecute: (operation) => {
             const currentLevel = OperationGuard.getLevel();
             const requiredLevel = OperationGuard.OPERATION_LEVELS[operation];
-            if (requiredLevel === undefined) return true; // 未定义的操作默认允许
+            if (requiredLevel === undefined) {
+                // 安全原则: 未定义的操作默认拒绝
+                console.warn(`OperationGuard: 操作 "${operation}" 未定义权限级别，默认拒绝`);
+                return false;
+            }
             return currentLevel >= requiredLevel;
         },
 
@@ -902,11 +906,14 @@
 
             // 危险操作需要确认
             if (OperationGuard.isDangerous(operation) && OperationGuard.requiresConfirm()) {
+                const isPermanent = operation === "deleteBlock";
                 const confirmed = await ConfirmationDialog.show({
-                    title: "危险操作确认",
-                    message: `您即将执行危险操作: ${operation}`,
+                    title: isPermanent ? "⚠️ 永久删除确认" : "危险操作确认",
+                    message: isPermanent
+                        ? `您即将永久删除块，此操作无法撤销！`
+                        : `您即将执行危险操作: ${operation}`,
                     itemName: context.itemName || "未知项目",
-                    countdown: 5,
+                    countdown: isPermanent ? 8 : 5, // 永久删除需要更长倒计时
                     requireNameInput: true,
                 });
 
@@ -932,12 +939,19 @@
                 OperationLog.add(logEntry);
 
                 // 危险操作提供撤销选项
-                if (OperationGuard.isDangerous(operation) && operation === "deletePage") {
-                    UndoManager.register({
-                        operation,
-                        undoAction: () => NotionAPI.restorePage(context.pageId, context.apiKey),
-                        description: `恢复页面: ${context.itemName || context.pageId}`,
-                    });
+                if (OperationGuard.isDangerous(operation)) {
+                    if (operation === "deletePage") {
+                        // deletePage 使用软删除（归档），可以恢复
+                        UndoManager.register({
+                            operation,
+                            undoAction: () => NotionAPI.restorePage(context.pageId, context.apiKey),
+                            description: `恢复页面: ${context.itemName || context.pageId}`,
+                        });
+                    } else if (operation === "deleteBlock") {
+                        // deleteBlock 是永久删除，无法通过 API 恢复
+                        // 仅记录警告日志，不提供撤销选项
+                        console.warn(`OperationGuard: deleteBlock 是永久操作，无法撤销`);
+                    }
                 }
 
                 return result;
