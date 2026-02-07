@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux.do 收藏帖子导出到 Notion
 // @namespace    https://linux.do/
-// @version      1.2.0
+// @version      1.2.1
 // @description  批量导出 Linux.do 收藏的帖子到 Notion 数据库，支持自定义筛选、图片上传、权限控制
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -1557,19 +1557,21 @@
                 try {
                     const fileId = await NotionAPI.uploadImageToNotion(block._originalUrl, apiKey);
                     if (fileId) {
-                        // Notion File Upload API 需要使用 file_upload 类型
+                        // Notion File Upload API 需要使用 file_id 引用
                         // 参考: https://developers.notion.com/docs/working-with-files-and-media
                         block.image = {
                             type: "file",
                             file: {
-                                url: block._originalUrl, // 临时保留原 URL
+                                file_id: fileId, // 使用上传返回的 file_id
                             },
-                            // 注意: 当前 Notion API 对 file_upload 的支持有限
-                            // 如果上传失败，会自动回退到外链模式
                         };
-                        // 标记为已上传
                         block._uploaded = true;
-                        block._fileId = fileId;
+                    } else {
+                        // 上传失败，回退到外链模式
+                        block.image = {
+                            type: "external",
+                            external: { url: block._originalUrl },
+                        };
                     }
                 } catch (e) {
                     console.warn("图片上传失败，保留外链:", block._originalUrl, e.message);
@@ -1590,7 +1592,6 @@
                 delete block._needsUpload;
                 delete block._originalUrl;
                 delete block._uploaded;
-                delete block._fileId;
             }
 
             // 递归处理子 blocks
@@ -2932,7 +2933,7 @@
                     });
 
                     UI.bookmarks = bookmarks;
-                    UI.selectedBookmarks = new Set(bookmarks.map(b => b.topic_id || b.bookmarkable_id));
+                    UI.selectedBookmarks = new Set(bookmarks.map(b => String(b.topic_id || b.bookmarkable_id)));
                     panel.querySelector("#ldb-bookmark-count").textContent = bookmarks.length;
                     panel.querySelector("#ldb-export").disabled = false;
 
@@ -2953,7 +2954,7 @@
             panel.querySelector("#ldb-select-all").onchange = (e) => {
                 const checked = e.target.checked;
                 if (checked) {
-                    UI.selectedBookmarks = new Set(UI.bookmarks.map(b => b.topic_id || b.bookmarkable_id));
+                    UI.selectedBookmarks = new Set(UI.bookmarks.map(b => String(b.topic_id || b.bookmarkable_id)));
                 } else {
                     UI.selectedBookmarks = new Set();
                 }
@@ -3001,7 +3002,7 @@
 
                 // 获取选中的收藏 (过滤已导出的)
                 const toExport = UI.bookmarks.filter(b => {
-                    const topicId = b.topic_id || b.bookmarkable_id;
+                    const topicId = String(b.topic_id || b.bookmarkable_id);
                     return UI.selectedBookmarks.has(topicId) && !Storage.isTopicExported(topicId);
                 });
 
@@ -3228,7 +3229,7 @@
                 };
 
                 checkbox.onchange = () => {
-                    const topicId = item.dataset.topicId;
+                    const topicId = String(item.dataset.topicId);
                     if (checkbox.checked) {
                         UI.selectedBookmarks.add(topicId);
                     } else {
