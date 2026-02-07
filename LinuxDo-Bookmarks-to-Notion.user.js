@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux.do 收藏帖子导出到 Notion
 // @namespace    https://linux.do/
-// @version      1.2.2
+// @version      1.2.3
 // @description  批量导出 Linux.do 收藏的帖子到 Notion 数据库，支持自定义筛选、图片上传、权限控制
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -41,6 +41,7 @@
             REQUIRE_CONFIRM: "ldb_require_confirm",
             ENABLE_AUDIT_LOG: "ldb_enable_audit_log",
             OPERATION_LOG: "ldb_operation_log",
+            REQUEST_DELAY: "ldb_request_delay",
         },
         // 默认值
         DEFAULTS: {
@@ -52,6 +53,7 @@
             permissionLevel: 1, // 默认标准权限
             requireConfirm: true, // 默认需要确认
             enableAuditLog: true, // 默认开启审计日志
+            requestDelay: 500, // 请求间隔（毫秒），防止被封
         },
         // 权限级别
         PERMISSION_LEVELS: {
@@ -1348,7 +1350,8 @@
 
                     // 检查是否还有更多
                     hasMore = data.user_bookmark_list?.more_bookmarks_url != null;
-                    await Utils.sleep(200); // 避免请求过快
+                    const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+                    await Utils.sleep(delay); // 避免请求过快
                 }
             }
 
@@ -1725,7 +1728,8 @@
 
                 // 避免请求过快
                 if (i < bookmarks.length - 1 && !Exporter.isCancelled) {
-                    await Utils.sleep(1000);
+                    const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+                    await Utils.sleep(delay);
                 }
             }
 
@@ -1917,6 +1921,8 @@
                     color: #fff;
                     font-size: 13px;
                     text-align: center;
+                    box-sizing: border-box;
+                    min-width: 0;
                 }
 
                 .ldb-range-group span {
@@ -2783,6 +2789,19 @@
                                     <option value="skip">跳过图片</option>
                                 </select>
                             </div>
+                            <div class="ldb-form-group">
+                                <label>请求间隔 (防封)</label>
+                                <select class="ldb-select" id="ldb-request-delay">
+                                    <option value="200">快速 (200ms)</option>
+                                    <option value="500">正常 (500ms)</option>
+                                    <option value="1000">慢速 (1秒)</option>
+                                    <option value="2000">较慢 (2秒)</option>
+                                    <option value="3000">很慢 (3秒)</option>
+                                    <option value="5000">超慢 (5秒)</option>
+                                    <option value="10000">极慢 (10秒)</option>
+                                    <option value="30000">龟速 (30秒)</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
 
@@ -3043,6 +3062,7 @@
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, settings.rangeStart);
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, settings.rangeEnd);
                 Storage.set(CONFIG.STORAGE_KEYS.IMG_MODE, settings.imgMode);
+                Storage.set(CONFIG.STORAGE_KEYS.REQUEST_DELAY, parseInt(panel.querySelector("#ldb-request-delay").value));
 
                 // 显示控制按钮，隐藏导出按钮
                 panel.querySelector("#ldb-export-btns").style.display = "none";
@@ -3162,6 +3182,7 @@
             panel.querySelector("#ldb-range-start").value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, CONFIG.DEFAULTS.rangeStart);
             panel.querySelector("#ldb-range-end").value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, CONFIG.DEFAULTS.rangeEnd);
             panel.querySelector("#ldb-img-mode").value = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
+            panel.querySelector("#ldb-request-delay").value = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
 
             // 加载权限设置
             panel.querySelector("#ldb-permission-level").value = Storage.get(CONFIG.STORAGE_KEYS.PERMISSION_LEVEL, CONFIG.DEFAULTS.permissionLevel);
