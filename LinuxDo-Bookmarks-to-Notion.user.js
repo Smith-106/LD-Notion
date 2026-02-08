@@ -2042,11 +2042,21 @@ ${explanation ? `我的理解：${explanation}` : ""}
             const input = document.querySelector("#ldb-chat-input");
             if (input) {
                 input.onkeydown = (e) => {
+                    // 阻止事件冒泡到 Notion
+                    e.stopPropagation();
                     if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
                         ChatUI.sendMessage();
                     }
                 };
+
+                // 阻止粘贴、复制、剪切等事件冒泡到 Notion
+                input.onpaste = (e) => e.stopPropagation();
+                input.oncopy = (e) => e.stopPropagation();
+                input.oncut = (e) => e.stopPropagation();
+                input.oninput = (e) => e.stopPropagation();
+                input.onkeyup = (e) => e.stopPropagation();
+                input.onkeypress = (e) => e.stopPropagation();
             }
 
             // 清空对话
