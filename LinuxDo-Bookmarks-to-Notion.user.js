@@ -3846,9 +3846,16 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 NotionSiteUI.showStatus("设置已保存", "success");
             };
 
-            // AI 服务切换 - 更新模型列表
+            // AI 服务切换 - 更新模型列表并保存
             panel.querySelector("#ldb-notion-ai-service").onchange = (e) => {
-                NotionSiteUI.updateAIModelOptions(e.target.value);
+                const newService = e.target.value;
+                Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, newService);
+                NotionSiteUI.updateAIModelOptions(newService);
+                // 重置模型为新服务的默认模型
+                const provider = AIService.PROVIDERS[newService];
+                if (provider?.defaultModel) {
+                    Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, provider.defaultModel);
+                }
             };
 
             // AI 模型切换 - 保存选择
