@@ -3798,6 +3798,16 @@ ${explanation ? `我的理解：${explanation}` : ""}
 
             document.body.appendChild(panel);
             NotionSiteUI.panel = panel;
+
+            // 阻止面板内的键盘和剪贴板事件冒泡到 Notion
+            const stopPropagation = (e) => e.stopPropagation();
+            panel.addEventListener("copy", stopPropagation);
+            panel.addEventListener("paste", stopPropagation);
+            panel.addEventListener("cut", stopPropagation);
+            panel.addEventListener("keydown", stopPropagation);
+            panel.addEventListener("keyup", stopPropagation);
+            panel.addEventListener("keypress", stopPropagation);
+
             return panel;
         },
 
