@@ -3759,6 +3759,14 @@ ${explanation ? `我的理解：${explanation}` : ""}
                             </select>
                         </div>
                         <div class="ldb-input-group">
+                            <label class="ldb-label">模型</label>
+                            <div style="display: flex; gap: 8px;">
+                                <select class="ldb-select" id="ldb-notion-ai-model" style="flex: 1;"></select>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-ai-fetch-models" style="padding: 6px 12px; white-space: nowrap;">🔄 获取</button>
+                            </div>
+                            <div class="ldb-tip" id="ldb-notion-ai-model-tip"></div>
+                        </div>
+                        <div class="ldb-input-group">
                             <label class="ldb-label">AI API Key</label>
                             <input type="password" class="ldb-input" id="ldb-notion-ai-api-key" placeholder="AI 服务的 API Key">
                         </div>
@@ -3820,11 +3828,53 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, panel.querySelector("#ldb-notion-api-key").value.trim());
                 Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, panel.querySelector("#ldb-notion-database-id").value.trim());
                 Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, panel.querySelector("#ldb-notion-ai-service").value);
+                Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, panel.querySelector("#ldb-notion-ai-model").value);
                 Storage.set(CONFIG.STORAGE_KEYS.AI_API_KEY, panel.querySelector("#ldb-notion-ai-api-key").value.trim());
                 Storage.set(CONFIG.STORAGE_KEYS.AI_BASE_URL, panel.querySelector("#ldb-notion-ai-base-url").value.trim());
                 Storage.set(CONFIG.STORAGE_KEYS.AI_CATEGORIES, panel.querySelector("#ldb-notion-ai-categories").value.trim());
 
                 NotionSiteUI.showStatus("设置已保存", "success");
+            };
+
+            // AI 服务切换 - 更新模型列表
+            panel.querySelector("#ldb-notion-ai-service").onchange = (e) => {
+                NotionSiteUI.updateAIModelOptions(e.target.value);
+            };
+
+            // AI 模型切换 - 保存选择
+            panel.querySelector("#ldb-notion-ai-model").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, e.target.value);
+            };
+
+            // 获取模型列表
+            panel.querySelector("#ldb-notion-ai-fetch-models").onclick = async () => {
+                const aiApiKey = panel.querySelector("#ldb-notion-ai-api-key").value.trim();
+                const aiService = panel.querySelector("#ldb-notion-ai-service").value;
+                const aiBaseUrl = panel.querySelector("#ldb-notion-ai-base-url").value.trim();
+                const fetchBtn = panel.querySelector("#ldb-notion-ai-fetch-models");
+                const modelTip = panel.querySelector("#ldb-notion-ai-model-tip");
+
+                if (!aiApiKey) {
+                    NotionSiteUI.showStatus("请先填写 AI API Key", "error");
+                    return;
+                }
+
+                fetchBtn.disabled = true;
+                fetchBtn.innerHTML = "⏳ 获取中...";
+                modelTip.textContent = "";
+
+                try {
+                    const models = await AIService.fetchModels(aiService, aiApiKey, aiBaseUrl);
+                    NotionSiteUI.updateAIModelOptions(aiService, models, true);
+                    modelTip.textContent = `✅ 获取到 ${models.length} 个可用模型`;
+                    modelTip.style.color = "#34d399";
+                } catch (error) {
+                    modelTip.textContent = `❌ ${error.message}`;
+                    modelTip.style.color = "#f87171";
+                } finally {
+                    fetchBtn.disabled = false;
+                    fetchBtn.innerHTML = "🔄 获取";
+                }
             };
 
             // 拖拽面板
@@ -3842,6 +3892,20 @@ ${explanation ? `我的理解：${explanation}` : ""}
             panel.querySelector("#ldb-notion-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, "");
             panel.querySelector("#ldb-notion-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
 
+            // 加载 AI 模型选项
+            const aiService = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
+            NotionSiteUI.updateAIModelOptions(aiService);
+
+            // 设置保存的模型
+            const savedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
+            if (savedModel) {
+                const modelSelect = panel.querySelector("#ldb-notion-ai-model");
+                const optionExists = Array.from(modelSelect.options).some(opt => opt.value === savedModel);
+                if (optionExists) {
+                    modelSelect.value = savedModel;
+                }
+            }
+
             // 恢复面板位置
             const savedPosition = Storage.get(CONFIG.STORAGE_KEYS.NOTION_PANEL_POSITION, null);
             if (savedPosition) {
@@ -3851,6 +3915,28 @@ ${explanation ? `我的理解：${explanation}` : ""}
                     panel.style.bottom = pos.bottom || "96px";
                 } catch (e) {}
             }
+        },
+
+        // 更新 AI 模型选项
+        updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
+            const modelSelect = NotionSiteUI.panel.querySelector("#ldb-notion-ai-model");
+            const provider = AIService.PROVIDERS[service];
+
+            if (!provider || !modelSelect) return;
+
+            const models = customModels || provider.models;
+            const defaultModel = provider.defaultModel;
+
+            // 保留当前选择的模型（如果需要且存在于新列表中）
+            const currentValue = modelSelect.value;
+            const shouldPreserve = preserveSelection && currentValue && models.includes(currentValue);
+
+            modelSelect.innerHTML = models.map(model => {
+                const isSelected = shouldPreserve
+                    ? model === currentValue
+                    : model === defaultModel;
+                return `<option value="${model}" ${isSelected ? 'selected' : ''}>${model}</option>`;
+            }).join("");
         },
 
         // 显示状态
@@ -3920,18 +4006,18 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 const notionPanel = NotionSiteUI.panel;
                 if (notionPanel) {
                     const aiService = notionPanel.querySelector("#ldb-notion-ai-service")?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
-                    const storedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
+                    const selectedModel = notionPanel.querySelector("#ldb-notion-ai-model")?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
 
-                    // 验证存储的模型是否属于当前服务，否则使用默认模型
+                    // 如果没有选择模型，使用默认模型
                     const provider = AIService.PROVIDERS[aiService];
-                    const validModel = provider?.models?.includes(storedModel) ? storedModel : (provider?.defaultModel || "");
+                    const aiModel = selectedModel || provider?.defaultModel || "";
 
                     return {
                         notionApiKey: notionPanel.querySelector("#ldb-notion-api-key")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
                         notionDatabaseId: notionPanel.querySelector("#ldb-notion-database-id")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
                         aiApiKey: notionPanel.querySelector("#ldb-notion-ai-api-key")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, ""),
                         aiService: aiService,
-                        aiModel: validModel,
+                        aiModel: aiModel,
                         aiBaseUrl: notionPanel.querySelector("#ldb-notion-ai-base-url")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, ""),
                         categories: (notionPanel.querySelector("#ldb-notion-ai-categories")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories))
                             .split(/[,，]/).map(c => c.trim()).filter(Boolean),
