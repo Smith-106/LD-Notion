@@ -4516,7 +4516,7 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 .ldb-chat-settings-content {
                     overflow: hidden;
                     transition: max-height 0.3s ease;
-                    max-height: 500px;
+                    max-height: 600px;
                 }
 
                 .ldb-chat-settings-content.collapsed {
@@ -5202,9 +5202,10 @@ ${explanation ? `我的理解：${explanation}` : ""}
                             </div>
                         </div>
 
-                        <div style="display: flex; gap: 8px;">
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-validate-config">验证配置</button>
                             <button class="ldb-btn ldb-btn-primary" id="ldb-setup-database" title="自动在数据库中创建所需属性">自动设置数据库</button>
+                            <span id="ldb-config-status" style="font-size: 12px; margin-left: 4px;"></span>
                         </div>
 
                         <!-- 权限设置 -->
@@ -5515,10 +5516,15 @@ ${explanation ? `我的理解：${explanation}` : ""}
             // 验证配置
             panel.querySelector("#ldb-validate-config").onclick = async () => {
                 const btn = panel.querySelector("#ldb-validate-config");
+                const statusSpan = panel.querySelector("#ldb-config-status");
                 const apiKey = panel.querySelector("#ldb-api-key").value.trim();
                 const exportTargetType = panel.querySelector("#ldb-export-target-page").checked ? "page" : "database";
                 const databaseId = panel.querySelector("#ldb-database-id").value.trim();
                 const parentPageId = panel.querySelector("#ldb-parent-page-id").value.trim();
+
+                // 清除之前的状态
+                statusSpan.textContent = "";
+                statusSpan.style.color = "";
 
                 if (!apiKey) {
                     UI.showStatus("请填写 API Key", "error");
@@ -5543,22 +5549,28 @@ ${explanation ? `我的理解：${explanation}` : ""}
                     if (exportTargetType === "database") {
                         result = await NotionAPI.validateConfig(apiKey, databaseId);
                         if (result.valid) {
-                            UI.showStatus("数据库配置验证成功！", "success");
+                            statusSpan.textContent = "✅ 验证成功";
+                            statusSpan.style.color = "#34d399";
                             Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
                             Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, databaseId);
                         }
                     } else {
                         result = await NotionAPI.validatePage(parentPageId, apiKey);
                         if (result.valid) {
-                            UI.showStatus("页面配置验证成功！", "success");
+                            statusSpan.textContent = "✅ 验证成功";
+                            statusSpan.style.color = "#34d399";
                             Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
                             Storage.set(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, parentPageId);
                         }
                     }
 
                     if (!result.valid) {
-                        UI.showStatus(`验证失败: ${result.error}`, "error");
+                        statusSpan.textContent = `❌ ${result.error}`;
+                        statusSpan.style.color = "#f87171";
                     }
+                } catch (error) {
+                    statusSpan.textContent = `❌ ${error.message}`;
+                    statusSpan.style.color = "#f87171";
                 } finally {
                     btn.disabled = false;
                     btn.innerHTML = "验证配置";
@@ -5569,6 +5581,11 @@ ${explanation ? `我的理解：${explanation}` : ""}
             panel.querySelector("#ldb-setup-database").onclick = async () => {
                 const apiKey = panel.querySelector("#ldb-api-key").value.trim();
                 const databaseId = panel.querySelector("#ldb-database-id").value.trim();
+                const statusSpan = panel.querySelector("#ldb-config-status");
+
+                // 清除之前的状态
+                statusSpan.textContent = "";
+                statusSpan.style.color = "";
 
                 if (!apiKey) {
                     UI.showStatus("请先填写 API Key", "error");
@@ -5587,15 +5604,18 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 try {
                     const result = await NotionAPI.setupDatabaseProperties(databaseId, apiKey);
                     if (result.success) {
-                        UI.showStatus(`✅ ${result.message}`, "success");
+                        statusSpan.textContent = `✅ ${result.message}`;
+                        statusSpan.style.color = "#34d399";
                         // 保存配置
                         Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
                         Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, databaseId);
                     } else {
-                        UI.showStatus(`❌ 设置失败: ${result.error}`, "error");
+                        statusSpan.textContent = `❌ ${result.error}`;
+                        statusSpan.style.color = "#f87171";
                     }
                 } catch (error) {
-                    UI.showStatus(`❌ 设置失败: ${error.message}`, "error");
+                    statusSpan.textContent = `❌ ${error.message}`;
+                    statusSpan.style.color = "#f87171";
                 } finally {
                     btn.disabled = false;
                     btn.innerHTML = "自动设置数据库";
