@@ -1106,7 +1106,10 @@
                     data: JSON.stringify({
                         model: model,
                         messages: [{ role: "user", content: prompt }],
-                        max_tokens: 50,
+                        // 新模型使用 max_completion_tokens，旧模型使用 max_tokens
+                        ...(model.startsWith("o1") || model.startsWith("o3")
+                            ? { max_completion_tokens: 50 }
+                            : { max_tokens: 50 }),
                         temperature: 0,
                     }),
                     onload: (response) => {
@@ -1265,7 +1268,10 @@
                     data: JSON.stringify({
                         model: model,
                         messages: [{ role: "user", content: prompt }],
-                        max_tokens: maxTokens,
+                        // 新模型使用 max_completion_tokens，旧模型使用 max_tokens
+                        ...(model.startsWith("o1") || model.startsWith("o3")
+                            ? { max_completion_tokens: maxTokens }
+                            : { max_tokens: maxTokens }),
                         temperature: 0.7,
                     }),
                     onload: (response) => {
