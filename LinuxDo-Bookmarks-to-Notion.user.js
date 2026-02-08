@@ -1106,10 +1106,7 @@
                     data: JSON.stringify({
                         model: model,
                         messages: [{ role: "user", content: prompt }],
-                        // 新模型使用 max_completion_tokens，旧模型使用 max_tokens
-                        ...(model.startsWith("o1") || model.startsWith("o3")
-                            ? { max_completion_tokens: 50 }
-                            : { max_tokens: 50 }),
+                        max_completion_tokens: 50,
                         temperature: 0,
                     }),
                     onload: (response) => {
@@ -1268,10 +1265,7 @@
                     data: JSON.stringify({
                         model: model,
                         messages: [{ role: "user", content: prompt }],
-                        // 新模型使用 max_completion_tokens，旧模型使用 max_tokens
-                        ...(model.startsWith("o1") || model.startsWith("o3")
-                            ? { max_completion_tokens: maxTokens }
-                            : { max_tokens: maxTokens }),
+                        max_completion_tokens: maxTokens,
                         temperature: 0.7,
                     }),
                     onload: (response) => {
@@ -5358,8 +5352,9 @@ ${explanation ? `我的理解：${explanation}` : ""}
                                 <input type="text" class="ldb-input" id="ldb-ai-categories" placeholder="技术, 生活, 问答, 分享, 资源, 其他">
                                 <div class="ldb-tip">逗号分隔，用于自动分类功能</div>
                             </div>
-                            <div class="ldb-btn-group">
+                            <div class="ldb-btn-group" style="display: flex; align-items: center; gap: 8px;">
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-test">测试连接</button>
+                                <span id="ldb-ai-test-status" style="font-size: 12px;"></span>
                             </div>
                         </div>
                     </div>
@@ -5923,10 +5918,15 @@ ${explanation ? `我的理解：${explanation}` : ""}
             // 测试 AI 连接
             panel.querySelector("#ldb-ai-test").onclick = async () => {
                 const btn = panel.querySelector("#ldb-ai-test");
+                const statusSpan = panel.querySelector("#ldb-ai-test-status");
                 const aiApiKey = panel.querySelector("#ldb-ai-api-key").value.trim();
                 const aiService = panel.querySelector("#ldb-ai-service").value;
                 const aiModel = panel.querySelector("#ldb-ai-model").value;
                 const aiBaseUrl = panel.querySelector("#ldb-ai-base-url").value.trim();
+
+                // 清除之前的状态
+                statusSpan.textContent = "";
+                statusSpan.style.color = "";
 
                 if (!aiApiKey) {
                     UI.showStatus("请先填写 AI API Key", "error");
@@ -5941,9 +5941,11 @@ ${explanation ? `我的理解：${explanation}` : ""}
                         "请回复：连接成功",
                         { aiService, aiApiKey, aiModel, aiBaseUrl }
                     );
-                    UI.showStatus(`AI 连接成功: ${response}`, "success");
+                    statusSpan.textContent = `✅ ${response}`;
+                    statusSpan.style.color = "#34d399";
                 } catch (error) {
-                    UI.showStatus(`AI 连接失败: ${error.message}`, "error");
+                    statusSpan.textContent = `❌ ${error.message}`;
+                    statusSpan.style.color = "#f87171";
                 } finally {
                     btn.disabled = false;
                     btn.innerHTML = "🧪 测试";
