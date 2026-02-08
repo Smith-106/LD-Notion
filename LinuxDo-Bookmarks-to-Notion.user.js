@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux.do 收藏帖子导出到 Notion
 // @namespace    https://linux.do/
-// @version      1.4.0
+// @version      1.5.0
 // @description  批量导出 Linux.do 收藏的帖子到 Notion 数据库或页面，支持自定义筛选、图片上传、权限控制、AI 对话式助手，在 Notion 站点显示 AI 助手面板
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -1538,7 +1538,8 @@
         // 意图类型
         INTENTS: {
             QUERY: "query",           // 查询/统计
-            SEARCH: "search",         // 搜索
+            SEARCH: "search",         // 搜索（数据库内）
+            WORKSPACE_SEARCH: "workspace_search",  // 工作区搜索（全局）
             CLASSIFY: "classify",     // 分类单个
             BATCH_CLASSIFY: "batch_classify",  // 批量分类
             UPDATE: "update",         // 更新属性
@@ -1555,9 +1556,15 @@
 - "统计各分类的帖子数量"
 - "显示最新的 5 个帖子"
 
-🔍 **搜索帖子**
+🔍 **搜索帖子**（在配置的数据库内）
 - "搜索关于 Docker 的帖子"
 - "找一下作者是 xxx 的帖子"
+
+🌐 **工作区搜索**（搜索整个 Notion 工作区）
+- "在整个工作区搜索 Docker"
+- "全局搜索 xxx"
+- "列出所有数据库"
+- "搜索所有页面"
 
 🏷️ **智能分类**
 - "自动分类所有未分类的帖子"
@@ -1585,12 +1592,12 @@
         },
 
         // 检查配置是否完整
-        checkConfig: (settings) => {
+        checkConfig: (settings, requireDatabase = true) => {
             if (!settings.notionApiKey) {
                 return { valid: false, error: "请先配置 Notion API Key" };
             }
-            if (!settings.notionDatabaseId) {
-                return { valid: false, error: "请先配置 Notion 数据库 ID" };
+            if (requireDatabase && !settings.notionDatabaseId) {
+                return { valid: false, error: "请先配置 Notion 数据库 ID（或使用「工作区搜索」功能）" };
             }
             if (!settings.aiApiKey) {
                 return { valid: false, error: "请先配置 AI API Key" };
@@ -1604,23 +1611,29 @@
 
 用户可能想执行以下操作之一：
 1. query - 查询统计（如：有多少帖子、统计分类数量、显示最新帖子）
-2. search - 搜索（如：搜索关于xxx的帖子、找作者是xxx的）
-3. classify - 分类单个（如：把这个帖子分类为技术）
-4. batch_classify - 批量分类（如：自动分类所有未分类的帖子）
-5. update - 更新属性（如：把xxx标记为重要）
-6. help - 帮助（如：帮助、你能做什么）
-7. unknown - 无法理解
+2. search - 在配置的数据库内搜索（如：搜索关于xxx的帖子、找作者是xxx的）
+3. workspace_search - 在整个工作区搜索（如：全局搜索xxx、在工作区搜索、搜索所有页面、列出所有数据库）
+4. classify - 分类单个（如：把这个帖子分类为技术）
+5. batch_classify - 批量分类（如：自动分类所有未分类的帖子）
+6. update - 更新属性（如：把xxx标记为重要）
+7. help - 帮助（如：帮助、你能做什么）
+8. unknown - 无法理解
+
+注意区分 search 和 workspace_search：
+- search: 用户想在配置的帖子数据库中搜索
+- workspace_search: 用户明确提到"工作区"、"全局"、"所有页面"、"所有数据库"等，或者想搜索数据库以外的内容
 
 返回格式（只返回 JSON，不要其他内容）：
 {
-  "intent": "query|search|classify|batch_classify|update|help|unknown",
+  "intent": "query|search|workspace_search|classify|batch_classify|update|help|unknown",
   "params": {
     "keyword": "搜索关键词（如有）",
     "property": "要更新的属性名（如有）",
     "value": "新值（如有）",
     "limit": 5,
     "filter_field": "筛选字段（如 作者、分类）",
-    "filter_value": "筛选值"
+    "filter_value": "筛选值",
+    "object_type": "page 或 database（workspace_search 时使用，默认不限）"
   },
   "explanation": "你对用户意图的理解（中文简短说明）"
 }`;
@@ -1648,16 +1661,16 @@
         handleMessage: async (userMessage) => {
             const settings = AIAssistant.getSettings();
 
-            // 检查配置
-            const configCheck = AIAssistant.checkConfig(settings);
-            if (!configCheck.valid) {
-                return configCheck.error;
-            }
-
-            // 简单的帮助关键词检测
+            // 简单的帮助关键词检测（无需配置）
             const helpKeywords = ["帮助", "help", "你能做什么", "怎么用", "使用说明"];
             if (helpKeywords.some(k => userMessage.includes(k))) {
                 return AIAssistant.getHelpMessage();
+            }
+
+            // 检查基础配置（不检查数据库 ID，因为工作区搜索不需要）
+            const basicConfigCheck = AIAssistant.checkConfig(settings, false);
+            if (!basicConfigCheck.valid) {
+                return basicConfigCheck.error;
             }
 
             // 解析意图
@@ -1665,7 +1678,7 @@
 
             const intentResult = await AIAssistant.parseIntent(userMessage, settings);
 
-            // 执行意图
+            // 执行意图（各个 handler 会检查自己需要的配置）
             return await AIAssistant.executeIntent(intentResult, settings);
         },
 
@@ -1678,6 +1691,8 @@
                     return await AIAssistant.handleQuery(params, settings, explanation);
                 case "search":
                     return await AIAssistant.handleSearch(params, settings, explanation);
+                case "workspace_search":
+                    return await AIAssistant.handleWorkspaceSearch(params, settings, explanation);
                 case "classify":
                     return await AIAssistant.handleClassify(params, settings, explanation);
                 case "batch_classify":
@@ -1697,6 +1712,11 @@ ${explanation ? `我的理解：${explanation}` : ""}
 
         // 处理查询
         handleQuery: async (params, settings, explanation) => {
+            // 检查数据库 ID 配置
+            if (!settings.notionDatabaseId) {
+                return "❌ 请先配置 Notion 数据库 ID。\n\n💡 提示：可以使用「列出所有数据库」来查看工作区中的数据库并获取 ID。";
+            }
+
             ChatState.updateLastMessage(`正在查询数据库...`, "processing");
 
             try {
@@ -1810,6 +1830,11 @@ ${explanation ? `我的理解：${explanation}` : ""}
 
         // 处理搜索
         handleSearch: async (params, settings, explanation) => {
+            // 检查数据库 ID 配置
+            if (!settings.notionDatabaseId) {
+                return "❌ 请先配置 Notion 数据库 ID。\n\n💡 提示：可以使用「在工作区搜索 xxx」来搜索整个工作区，或使用「列出所有数据库」来查看工作区中的数据库并获取 ID。";
+            }
+
             ChatState.updateLastMessage(`正在搜索...`, "processing");
 
             try {
@@ -1852,6 +1877,126 @@ ${explanation ? `我的理解：${explanation}` : ""}
             }
         },
 
+        // 处理工作区搜索（搜索整个 Notion 工作区）
+        handleWorkspaceSearch: async (params, settings, explanation) => {
+            ChatState.updateLastMessage(`正在搜索整个工作区...`, "processing");
+
+            try {
+                const { keyword = "", limit = 10, object_type } = params;
+
+                // 工作区搜索只需要 API Key，不需要数据库 ID
+                const configCheck = AIAssistant.checkConfig(settings, false);
+                if (!configCheck.valid) {
+                    return configCheck.error;
+                }
+
+                // 构建过滤器
+                let filter = null;
+                if (object_type === "page") {
+                    filter = { property: "object", value: "page" };
+                } else if (object_type === "database") {
+                    filter = { property: "object", value: "database" };
+                }
+
+                // 使用 Notion 搜索 API
+                const response = await NotionAPI.search(
+                    keyword,
+                    filter,
+                    settings.notionApiKey
+                );
+
+                const results = response.results || [];
+
+                if (results.length === 0) {
+                    const typeLabel = object_type === "page" ? "页面" : object_type === "database" ? "数据库" : "内容";
+                    return keyword
+                        ? `🌐 在工作区中没有找到包含「${keyword}」的${typeLabel}。`
+                        : `🌐 工作区中没有找到${typeLabel}。`;
+                }
+
+                // 分类结果
+                const pages = results.filter(r => r.object === "page");
+                const databases = results.filter(r => r.object === "database");
+
+                let result = `🌐 **工作区搜索结果**\n\n`;
+
+                if (keyword) {
+                    result += `搜索关键词：「${keyword}」\n`;
+                }
+                result += `共找到 **${results.length}** 个结果`;
+                if (pages.length > 0 && databases.length > 0) {
+                    result += `（${pages.length} 个页面，${databases.length} 个数据库）`;
+                }
+                result += `\n\n`;
+
+                // 显示数据库
+                if (databases.length > 0 && (!object_type || object_type === "database")) {
+                    result += `📁 **数据库** (${databases.length})\n`;
+                    databases.slice(0, limit).forEach((db, i) => {
+                        const title = db.title?.[0]?.plain_text || "无标题数据库";
+                        const url = db.url || "";
+                        const id = db.id?.replace(/-/g, "") || "";
+                        result += `${i + 1}. [${title}](${url})\n`;
+                        result += `   ID: \`${id}\`\n`;
+                    });
+                    if (databases.length > limit) {
+                        result += `   ... 还有 ${databases.length - limit} 个数据库\n`;
+                    }
+                    result += `\n`;
+                }
+
+                // 显示页面
+                if (pages.length > 0 && (!object_type || object_type === "page")) {
+                    result += `📄 **页面** (${pages.length})\n`;
+                    pages.slice(0, limit).forEach((page, i) => {
+                        // 尝试获取页面标题（可能是数据库条目或独立页面）
+                        let title = "无标题";
+                        if (page.properties?.title?.title?.[0]?.plain_text) {
+                            title = page.properties.title.title[0].plain_text;
+                        } else if (page.properties?.["标题"]?.title?.[0]?.plain_text) {
+                            title = page.properties["标题"].title[0].plain_text;
+                        } else if (page.properties?.Name?.title?.[0]?.plain_text) {
+                            title = page.properties.Name.title[0].plain_text;
+                        } else {
+                            // 尝试找任意 title 类型的属性
+                            for (const [key, prop] of Object.entries(page.properties || {})) {
+                                if (prop.type === "title" && prop.title?.[0]?.plain_text) {
+                                    title = prop.title[0].plain_text;
+                                    break;
+                                }
+                            }
+                        }
+
+                        const url = page.url || "";
+                        const parentType = page.parent?.type || "";
+                        let parentLabel = "";
+                        if (parentType === "database_id") {
+                            parentLabel = "📁 数据库条目";
+                        } else if (parentType === "page_id") {
+                            parentLabel = "📄 子页面";
+                        } else if (parentType === "workspace") {
+                            parentLabel = "🌐 工作区页面";
+                        }
+
+                        result += `${i + 1}. [${title}](${url})`;
+                        if (parentLabel) {
+                            result += ` - ${parentLabel}`;
+                        }
+                        result += `\n`;
+                    });
+                    if (pages.length > limit) {
+                        result += `   ... 还有 ${pages.length - limit} 个页面\n`;
+                    }
+                }
+
+                result += `\n💡 提示：复制数据库 ID 可以配置到设置中使用更多功能。`;
+
+                return result;
+            } catch (error) {
+                return `❌ 工作区搜索失败: ${error.message}`;
+            }
+        },
+
         // 处理单个分类
         handleClassify: async (params, settings, explanation) => {
             return "📝 单个分类功能开发中...\n\n目前可以使用「自动分类所有未分类的帖子」来批量分类。";
@@ -1859,6 +2004,11 @@ ${explanation ? `我的理解：${explanation}` : ""}
 
         // 处理批量分类
         handleBatchClassify: async (params, settings, explanation) => {
+            // 检查数据库 ID 配置
+            if (!settings.notionDatabaseId) {
+                return "❌ 请先配置 Notion 数据库 ID。\n\n💡 提示：可以使用「列出所有数据库」来查看工作区中的数据库并获取 ID。";
+            }
+
             if (settings.categories.length < 2) {
                 return "❌ 请先在设置面板中配置至少两个分类选项。";
             }
