@@ -139,6 +139,26 @@
             if (!text || text.length <= maxLen) return text;
             return text.substring(0, maxLen) + "...";
         },
+
+        // 从 Notion 页面对象提取标题
+        getPageTitle: (page, fallback = "无标题") => {
+            if (!page?.properties) return fallback;
+            // 常见标题属性名
+            const titleProps = ["title", "标题", "Name", "名称"];
+            for (const propName of titleProps) {
+                const prop = page.properties[propName];
+                if (prop?.title?.[0]?.plain_text) {
+                    return prop.title[0].plain_text;
+                }
+            }
+            // 遍历所有属性找 title 类型
+            for (const prop of Object.values(page.properties)) {
+                if (prop.type === "title" && prop.title?.[0]?.plain_text) {
+                    return prop.title[0].plain_text;
+                }
+            }
+            return fallback;
+        },
     };
 
     // ===========================================
@@ -1816,7 +1836,7 @@ ${explanation ? `我的理解：${explanation}` : ""}
                     result += `（显示前 ${showLimit} 条）\n\n`;
 
                     pages.slice(0, showLimit).forEach((page, i) => {
-                        const title = page.properties["标题"]?.title?.[0]?.plain_text || "无标题";
+                        const title = Utils.getPageTitle(page);
                         const author = page.properties["作者"]?.rich_text?.[0]?.plain_text || "未知";
                         result += `${i + 1}. **${title}**\n   作者: ${author}\n`;
                     });
@@ -1862,7 +1882,7 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 result += `找到 **${pages.length}** 个包含「${keyword}」的帖子：\n\n`;
 
                 pages.slice(0, limit).forEach((page, i) => {
-                    const title = page.properties["标题"]?.title?.[0]?.plain_text || "无标题";
+                    const title = Utils.getPageTitle(page);
                     const url = page.url || "";
                     result += `${i + 1}. [${title}](${url})\n`;
                 });
@@ -1883,12 +1903,6 @@ ${explanation ? `我的理解：${explanation}` : ""}
 
             try {
                 const { keyword = "", limit = 10, object_type } = params;
-
-                // 工作区搜索只需要 API Key，不需要数据库 ID
-                const configCheck = AIAssistant.checkConfig(settings, false);
-                if (!configCheck.valid) {
-                    return configCheck.error;
-                }
 
                 // 构建过滤器
                 let filter = null;
@@ -1949,24 +1963,7 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 if (pages.length > 0 && (!object_type || object_type === "page")) {
                     result += `📄 **页面** (${pages.length})\n`;
                     pages.slice(0, limit).forEach((page, i) => {
-                        // 尝试获取页面标题（可能是数据库条目或独立页面）
-                        let title = "无标题";
-                        if (page.properties?.title?.title?.[0]?.plain_text) {
-                            title = page.properties.title.title[0].plain_text;
-                        } else if (page.properties?.["标题"]?.title?.[0]?.plain_text) {
-                            title = page.properties["标题"].title[0].plain_text;
-                        } else if (page.properties?.Name?.title?.[0]?.plain_text) {
-                            title = page.properties.Name.title[0].plain_text;
-                        } else {
-                            // 尝试找任意 title 类型的属性
-                            for (const [key, prop] of Object.entries(page.properties || {})) {
-                                if (prop.type === "title" && prop.title?.[0]?.plain_text) {
-                                    title = prop.title[0].plain_text;
-                                    break;
-                                }
-                            }
-                        }
-
+                        const title = Utils.getPageTitle(page);
                         const url = page.url || "";
                         const parentType = page.parent?.type || "";
                         let parentLabel = "";
@@ -2337,13 +2334,9 @@ ${explanation ? `我的理解：${explanation}` : ""}
             return pages;
         },
 
-        // 获取页面标题
+        // 获取页面标题（复用 Utils.getPageTitle）
         getPageTitle: (page) => {
-            const titleProp = page.properties["标题"] || page.properties["Name"] || page.properties["title"];
-            if (titleProp?.title) {
-                return titleProp.title.map(t => t.plain_text).join("");
-            }
-            return "未命名";
+            return Utils.getPageTitle(page, "未命名");
         },
 
         // 分类单个页面
