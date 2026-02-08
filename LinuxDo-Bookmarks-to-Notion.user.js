@@ -63,6 +63,10 @@
             // Notion 站点 UI
             NOTION_PANEL_POSITION: "ldb_notion_panel_position",
             NOTION_PANEL_MINIMIZED: "ldb_notion_panel_minimized",
+            // 模型缓存
+            FETCHED_MODELS: "ldb_fetched_models",
+            // 工作区页面缓存
+            WORKSPACE_PAGES: "ldb_workspace_pages",
         },
         // 默认值
         DEFAULTS: {
@@ -138,6 +142,14 @@
         truncateText: (text, maxLen = 100) => {
             if (!text || text.length <= maxLen) return text;
             return text.substring(0, maxLen) + "...";
+        },
+
+        // HTML 转义，防止 XSS 攻击
+        escapeHtml: (text) => {
+            if (!text) return "";
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         },
 
         // 从 Notion 页面对象提取标题
@@ -855,10 +867,13 @@
         // ========== 搜索和读取操作 (READONLY) ==========
 
         // 搜索工作区
-        search: async (query, filter, apiKey) => {
+        search: async (query, filter, apiKey, startCursor = undefined) => {
             const data = { query };
             if (filter) {
                 data.filter = filter; // { property: "object", value: "page" | "database" }
+            }
+            if (startCursor) {
+                data.start_cursor = startCursor;
             }
             return await NotionAPI.request("POST", "/search", data, apiKey);
         },
@@ -2094,7 +2109,7 @@ ${explanation ? `我的理解：${explanation}` : ""}
         // 安全的 Markdown 渲染（先转义再处理 Markdown）
         safeMarkdown: (text) => {
             // 先转义 HTML 特殊字符
-            let escaped = ChatUI.escapeHtml(text);
+            let escaped = Utils.escapeHtml(text);
             // 再处理安全的 Markdown 格式
             return escaped
                 .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -3901,7 +3916,14 @@ ${explanation ? `我的理解：${explanation}` : ""}
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label">数据库 ID</label>
-                            <input type="text" class="ldb-input" id="ldb-notion-database-id" placeholder="32位数据库ID">
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" class="ldb-input" id="ldb-notion-database-id" placeholder="32位数据库ID" style="flex: 1;">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-refresh-workspace" style="padding: 6px 12px; white-space: nowrap;" title="刷新工作区页面列表">🔄</button>
+                            </div>
+                            <select class="ldb-select" id="ldb-notion-workspace-select" style="margin-top: 6px; display: none;">
+                                <option value="">-- 从工作区选择 --</option>
+                            </select>
+                            <div class="ldb-tip" id="ldb-notion-workspace-tip"></div>
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label">AI 服务</label>
@@ -3999,11 +4021,113 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 NotionSiteUI.showStatus("设置已保存", "success");
             };
 
-            // AI 服务切换 - 更新模型列表并保存
+            // 刷新工作区页面列表
+            panel.querySelector("#ldb-notion-refresh-workspace").onclick = async () => {
+                const apiKey = panel.querySelector("#ldb-notion-api-key").value.trim();
+                const refreshBtn = panel.querySelector("#ldb-notion-refresh-workspace");
+                const workspaceTip = panel.querySelector("#ldb-notion-workspace-tip");
+                const workspaceSelect = panel.querySelector("#ldb-notion-workspace-select");
+
+                if (!apiKey) {
+                    NotionSiteUI.showStatus("请先填写 Notion API Key", "error");
+                    return;
+                }
+
+                refreshBtn.disabled = true;
+                refreshBtn.innerHTML = "⏳";
+                workspaceTip.textContent = "正在获取工作区页面...";
+
+                try {
+                    // 分页获取所有数据库
+                    let allDbResults = [];
+                    let dbCursor = undefined;
+                    do {
+                        const dbResponse = await NotionAPI.search("", { property: "object", value: "database" }, apiKey, dbCursor);
+                        allDbResults = allDbResults.concat(dbResponse.results || []);
+                        dbCursor = dbResponse.has_more ? dbResponse.next_cursor : undefined;
+                    } while (dbCursor);
+
+                    const databases = allDbResults.map(db => ({
+                        id: db.id?.replace(/-/g, "") || "",
+                        title: db.title?.[0]?.plain_text || "无标题数据库",
+                        type: "database",
+                        url: db.url || ""
+                    }));
+
+                    // 分页获取所有页面
+                    let allPageResults = [];
+                    let pageCursor = undefined;
+                    do {
+                        const pageResponse = await NotionAPI.search("", { property: "object", value: "page" }, apiKey, pageCursor);
+                        allPageResults = allPageResults.concat(pageResponse.results || []);
+                        pageCursor = pageResponse.has_more ? pageResponse.next_cursor : undefined;
+                    } while (pageCursor);
+
+                    const pages = allPageResults.map(page => ({
+                        id: page.id?.replace(/-/g, "") || "",
+                        title: Utils.getPageTitle(page),
+                        type: "page",
+                        url: page.url || "",
+                        parent: page.parent?.type || ""
+                    }));
+
+                    // 合并并缓存（包含 API Key 标识）
+                    const apiKeyHash = apiKey.slice(-8);
+                    const workspaceData = {
+                        apiKeyHash,
+                        databases,
+                        pages,
+                        timestamp: Date.now()
+                    };
+                    Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
+
+                    // 更新下拉框
+                    NotionSiteUI.updateWorkspaceSelect(workspaceData);
+                    workspaceSelect.style.display = "block";
+                    workspaceTip.textContent = `✅ 获取到 ${databases.length} 个数据库，${pages.length} 个页面`;
+                    workspaceTip.style.color = "#34d399";
+                } catch (error) {
+                    workspaceTip.textContent = `❌ ${error.message}`;
+                    workspaceTip.style.color = "#f87171";
+                } finally {
+                    refreshBtn.disabled = false;
+                    refreshBtn.innerHTML = "🔄";
+                }
+            };
+
+            // 从工作区选择页面/数据库
+            panel.querySelector("#ldb-notion-workspace-select").onchange = (e) => {
+                const selected = e.target.value;
+                if (selected) {
+                    const [type, id] = selected.split(":");
+                    if (type === "database") {
+                        panel.querySelector("#ldb-notion-database-id").value = id;
+                        Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, id);
+                    } else if (type === "page") {
+                        // 页面类型：提示用户这是页面 ID，不是数据库 ID
+                        NotionSiteUI.showStatus("已选择页面 ID，可用于页面模式导出", "info");
+                        panel.querySelector("#ldb-notion-database-id").value = id;
+                        Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, id);
+                    }
+                }
+            };
+
+            // AI 服务切换 - 更新模型列表并保存（优先使用缓存）
             panel.querySelector("#ldb-notion-ai-service").onchange = (e) => {
                 const newService = e.target.value;
                 Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, newService);
-                NotionSiteUI.updateAIModelOptions(newService);
+                // 优先使用缓存的模型列表
+                const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
+                try {
+                    const modelsData = JSON.parse(cachedModels);
+                    if (modelsData[newService]?.models?.length > 0) {
+                        NotionSiteUI.updateAIModelOptions(newService, modelsData[newService].models);
+                    } else {
+                        NotionSiteUI.updateAIModelOptions(newService);
+                    }
+                } catch {
+                    NotionSiteUI.updateAIModelOptions(newService);
+                }
                 // 重置模型为新服务的默认模型
                 const provider = AIService.PROVIDERS[newService];
                 if (provider?.defaultModel) {
@@ -4036,6 +4160,11 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 try {
                     const models = await AIService.fetchModels(aiService, aiApiKey, aiBaseUrl);
                     NotionSiteUI.updateAIModelOptions(aiService, models, true);
+                    // 持久化保存获取的模型列表
+                    const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
+                    const modelsData = JSON.parse(cachedModels);
+                    modelsData[aiService] = { models, timestamp: Date.now() };
+                    Storage.set(CONFIG.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(modelsData));
                     modelTip.textContent = `✅ 获取到 ${models.length} 个可用模型`;
                     modelTip.style.color = "#34d399";
                 } catch (error) {
@@ -4062,9 +4191,19 @@ ${explanation ? `我的理解：${explanation}` : ""}
             panel.querySelector("#ldb-notion-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, "");
             panel.querySelector("#ldb-notion-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
 
-            // 加载 AI 模型选项
+            // 加载 AI 模型选项（优先使用缓存的模型列表）
             const aiService = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
-            NotionSiteUI.updateAIModelOptions(aiService);
+            const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
+            try {
+                const modelsData = JSON.parse(cachedModels);
+                if (modelsData[aiService]?.models?.length > 0) {
+                    NotionSiteUI.updateAIModelOptions(aiService, modelsData[aiService].models);
+                } else {
+                    NotionSiteUI.updateAIModelOptions(aiService);
+                }
+            } catch {
+                NotionSiteUI.updateAIModelOptions(aiService);
+            }
 
             // 设置保存的模型
             const savedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
@@ -4085,6 +4224,50 @@ ${explanation ? `我的理解：${explanation}` : ""}
                     panel.style.bottom = pos.bottom || "96px";
                 } catch (e) {}
             }
+
+            // 加载缓存的工作区页面列表（校验 API Key）
+            const cachedWorkspace = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
+            try {
+                const workspaceData = JSON.parse(cachedWorkspace);
+                const currentApiKey = panel.querySelector("#ldb-notion-api-key").value.trim();
+                const currentKeyHash = currentApiKey ? currentApiKey.slice(-8) : "";
+                // 仅当 API Key 匹配时才显示缓存
+                if (workspaceData.apiKeyHash === currentKeyHash &&
+                    (workspaceData.databases?.length > 0 || workspaceData.pages?.length > 0)) {
+                    NotionSiteUI.updateWorkspaceSelect(workspaceData);
+                    panel.querySelector("#ldb-notion-workspace-select").style.display = "block";
+                }
+            } catch {}
+        },
+
+        // 更新工作区选择下拉框
+        updateWorkspaceSelect: (workspaceData) => {
+            const select = NotionSiteUI.panel.querySelector("#ldb-notion-workspace-select");
+            if (!select) return;
+
+            const { databases = [], pages = [] } = workspaceData;
+            let options = '<option value="">-- 从工作区选择 --</option>';
+
+            // 数据库组
+            if (databases.length > 0) {
+                options += '<optgroup label="📁 数据库">';
+                databases.forEach(db => {
+                    options += `<option value="database:${db.id}">📁 ${Utils.escapeHtml(db.title)}</option>`;
+                });
+                options += '</optgroup>';
+            }
+
+            // 页面组（只显示工作区顶级页面）
+            const workspacePages = pages.filter(p => p.parent === "workspace");
+            if (workspacePages.length > 0) {
+                options += '<optgroup label="📄 工作区页面">';
+                workspacePages.forEach(page => {
+                    options += `<option value="page:${page.id}">📄 ${Utils.escapeHtml(page.title)}</option>`;
+                });
+                options += '</optgroup>';
+            }
+
+            select.innerHTML = options;
         },
 
         // 更新 AI 模型选项
@@ -5419,8 +5602,14 @@ ${explanation ? `我的理解：${explanation}` : ""}
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label">数据库 ID</label>
-                            <input type="text" class="ldb-input" id="ldb-database-id" placeholder="32位数据库ID">
-                            <div class="ldb-tip">
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" class="ldb-input" id="ldb-database-id" placeholder="32位数据库ID" style="flex: 1;">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-refresh-workspace" style="padding: 6px 12px; white-space: nowrap;" title="刷新工作区页面列表">🔄</button>
+                            </div>
+                            <select class="ldb-select" id="ldb-workspace-select" style="margin-top: 6px; display: none;">
+                                <option value="">-- 从工作区选择 --</option>
+                            </select>
+                            <div class="ldb-tip" id="ldb-workspace-tip">
                                 从数据库链接复制：notion.so/<b>数据库ID</b>?v=xxx
                             </div>
                         </div>
@@ -6111,6 +6300,103 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, e.target.value.trim());
             };
 
+            // 刷新工作区页面列表
+            panel.querySelector("#ldb-refresh-workspace").onclick = async () => {
+                const apiKey = panel.querySelector("#ldb-api-key").value.trim();
+                const refreshBtn = panel.querySelector("#ldb-refresh-workspace");
+                const workspaceTip = panel.querySelector("#ldb-workspace-tip");
+                const workspaceSelect = panel.querySelector("#ldb-workspace-select");
+
+                if (!apiKey) {
+                    UI.showStatus("请先填写 Notion API Key", "error");
+                    return;
+                }
+
+                refreshBtn.disabled = true;
+                refreshBtn.innerHTML = "⏳";
+                workspaceTip.innerHTML = "正在获取工作区页面...";
+
+                try {
+                    // 分页获取所有数据库
+                    let allDbResults = [];
+                    let dbCursor = undefined;
+                    do {
+                        const dbResponse = await NotionAPI.search("", { property: "object", value: "database" }, apiKey, dbCursor);
+                        allDbResults = allDbResults.concat(dbResponse.results || []);
+                        dbCursor = dbResponse.has_more ? dbResponse.next_cursor : undefined;
+                    } while (dbCursor);
+
+                    const databases = allDbResults.map(db => ({
+                        id: db.id?.replace(/-/g, "") || "",
+                        title: db.title?.[0]?.plain_text || "无标题数据库",
+                        type: "database",
+                        url: db.url || ""
+                    }));
+
+                    // 分页获取所有页面
+                    let allPageResults = [];
+                    let pageCursor = undefined;
+                    do {
+                        const pageResponse = await NotionAPI.search("", { property: "object", value: "page" }, apiKey, pageCursor);
+                        allPageResults = allPageResults.concat(pageResponse.results || []);
+                        pageCursor = pageResponse.has_more ? pageResponse.next_cursor : undefined;
+                    } while (pageCursor);
+
+                    const pages = allPageResults.map(page => ({
+                        id: page.id?.replace(/-/g, "") || "",
+                        title: Utils.getPageTitle(page),
+                        type: "page",
+                        url: page.url || "",
+                        parent: page.parent?.type || ""
+                    }));
+
+                    // 合并并缓存（包含 API Key 标识）
+                    const apiKeyHash = apiKey.slice(-8);
+                    const workspaceData = {
+                        apiKeyHash,
+                        databases,
+                        pages,
+                        timestamp: Date.now()
+                    };
+                    Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
+
+                    // 更新下拉框
+                    UI.updateWorkspaceSelect(workspaceData);
+                    workspaceSelect.style.display = "block";
+                    workspaceTip.innerHTML = `✅ 获取到 ${databases.length} 个数据库，${pages.length} 个页面`;
+                    workspaceTip.style.color = "#34d399";
+                } catch (error) {
+                    workspaceTip.innerHTML = `❌ ${error.message}`;
+                    workspaceTip.style.color = "#f87171";
+                } finally {
+                    refreshBtn.disabled = false;
+                    refreshBtn.innerHTML = "🔄";
+                }
+            };
+
+            // 从工作区选择页面/数据库
+            panel.querySelector("#ldb-workspace-select").onchange = (e) => {
+                const selected = e.target.value;
+                if (selected) {
+                    const [type, id] = selected.split(":");
+                    if (type === "database") {
+                        panel.querySelector("#ldb-database-id").value = id;
+                        Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, id);
+                    } else if (type === "page") {
+                        // 页面类型：填入父页面 ID 字段
+                        panel.querySelector("#ldb-parent-page-id").value = id;
+                        Storage.set(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, id);
+                        // 自动切换到页面导出模式
+                        panel.querySelector("#ldb-export-target-page").checked = true;
+                        panel.querySelector("#ldb-parent-page-group").style.display = "block";
+                        panel.querySelector("#ldb-database-id").parentElement.style.display = "none";
+                        panel.querySelector("#ldb-export-target-tip").textContent = "导出为子页面，包含完整内容";
+                        Storage.set(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "page");
+                        UI.showStatus("已选择页面，自动切换为页面导出模式", "info");
+                    }
+                }
+            };
+
             // ===========================================
             // AI 对话事件绑定
             // ===========================================
@@ -6118,10 +6404,22 @@ ${explanation ? `我的理解：${explanation}` : ""}
             // 初始化对话 UI
             ChatUI.init();
 
-            // AI 服务切换 - 更新模型列表
+            // AI 服务切换 - 更新模型列表（优先使用缓存）
             panel.querySelector("#ldb-ai-service").onchange = (e) => {
-                UI.updateAIModelOptions(e.target.value);
-                Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, e.target.value);
+                const newService = e.target.value;
+                // 优先使用缓存的模型列表
+                const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
+                try {
+                    const modelsData = JSON.parse(cachedModels);
+                    if (modelsData[newService]?.models?.length > 0) {
+                        UI.updateAIModelOptions(newService, modelsData[newService].models);
+                    } else {
+                        UI.updateAIModelOptions(newService);
+                    }
+                } catch {
+                    UI.updateAIModelOptions(newService);
+                }
+                Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, newService);
             };
 
             // 保存 AI 配置
@@ -6158,6 +6456,11 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 try {
                     const models = await AIService.fetchModels(aiService, aiApiKey, aiBaseUrl);
                     UI.updateAIModelOptions(aiService, models, true); // 保留当前选择
+                    // 持久化保存获取的模型列表
+                    const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
+                    const modelsData = JSON.parse(cachedModels);
+                    modelsData[aiService] = { models, timestamp: Date.now() };
+                    Storage.set(CONFIG.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(modelsData));
                     modelTip.textContent = `✅ 获取到 ${models.length} 个可用模型`;
                     modelTip.style.color = "#34d399";
                     UI.showStatus(`成功获取 ${models.length} 个模型`, "success");
@@ -6256,14 +6559,25 @@ ${explanation ? `我的理解：${explanation}` : ""}
             const aiService = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
             panel.querySelector("#ldb-ai-service").value = aiService;
 
-            // 验证并加载 AI 模型
+            // 验证并加载 AI 模型（优先使用缓存的模型列表）
             const savedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
             const provider = AIService.PROVIDERS[aiService];
-            const validModels = provider?.models || [];
             const modelSelect = panel.querySelector("#ldb-ai-model");
 
-            // 先更新模型选项列表
-            UI.updateAIModelOptions(aiService);
+            // 先尝试从缓存加载模型列表
+            const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
+            let validModels = provider?.models || [];
+            try {
+                const modelsData = JSON.parse(cachedModels);
+                if (modelsData[aiService]?.models?.length > 0) {
+                    validModels = modelsData[aiService].models;
+                    UI.updateAIModelOptions(aiService, validModels);
+                } else {
+                    UI.updateAIModelOptions(aiService);
+                }
+            } catch {
+                UI.updateAIModelOptions(aiService);
+            }
 
             if (savedModel) {
                 // 检查保存的模型是否在下拉框选项中存在
@@ -6286,6 +6600,20 @@ ${explanation ? `我的理解：${explanation}` : ""}
 
             // 初始化日志面板
             UI.updateLogPanel();
+
+            // 加载缓存的工作区页面列表（校验 API Key）
+            const cachedWorkspace = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
+            try {
+                const workspaceData = JSON.parse(cachedWorkspace);
+                const currentApiKey = panel.querySelector("#ldb-api-key").value.trim();
+                const currentKeyHash = currentApiKey ? currentApiKey.slice(-8) : "";
+                // 仅当 API Key 匹配时才显示缓存
+                if (workspaceData.apiKeyHash === currentKeyHash &&
+                    (workspaceData.databases?.length > 0 || workspaceData.pages?.length > 0)) {
+                    UI.updateWorkspaceSelect(workspaceData);
+                    panel.querySelector("#ldb-workspace-select").style.display = "block";
+                }
+            } catch {}
         },
 
         // 显示状态
@@ -6354,6 +6682,36 @@ ${explanation ? `我的理解：${explanation}` : ""}
                     : model === defaultModel;
                 return `<option value="${model}" ${isSelected ? 'selected' : ''}>${model}</option>`;
             }).join("");
+        },
+
+        // 更新工作区选择下拉框
+        updateWorkspaceSelect: (workspaceData) => {
+            const select = UI.panel.querySelector("#ldb-workspace-select");
+            if (!select) return;
+
+            const { databases = [], pages = [] } = workspaceData;
+            let options = '<option value="">-- 从工作区选择 --</option>';
+
+            // 数据库组
+            if (databases.length > 0) {
+                options += '<optgroup label="📁 数据库">';
+                databases.forEach(db => {
+                    options += `<option value="database:${db.id}">📁 ${Utils.escapeHtml(db.title)}</option>`;
+                });
+                options += '</optgroup>';
+            }
+
+            // 页面组（只显示工作区顶级页面）
+            const workspacePages = pages.filter(p => p.parent === "workspace");
+            if (workspacePages.length > 0) {
+                options += '<optgroup label="📄 工作区页面">';
+                workspacePages.forEach(page => {
+                    options += `<option value="page:${page.id}">📄 ${Utils.escapeHtml(page.title)}</option>`;
+                });
+                options += '</optgroup>';
+            }
+
+            select.innerHTML = options;
         },
 
         // 渲染收藏列表
