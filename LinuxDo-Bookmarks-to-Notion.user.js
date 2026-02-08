@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         Linux.do 收藏帖子导出到 Notion
 // @namespace    https://linux.do/
-// @version      1.2.3
-// @description  批量导出 Linux.do 收藏的帖子到 Notion 数据库，支持自定义筛选、图片上传、权限控制
+// @version      1.4.0
+// @description  批量导出 Linux.do 收藏的帖子到 Notion 数据库或页面，支持自定义筛选、图片上传、权限控制、AI 对话式助手，在 Notion 站点显示 AI 助手面板
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
 // @match        https://linux.do/u/*/activity/bookmarks*
+// @match        https://www.notion.so/*
+// @match        https://notion.so/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_xmlhttpRequest
@@ -14,6 +16,9 @@
 // @connect      linux.do
 // @connect      *.amazonaws.com
 // @connect      s3.amazonaws.com
+// @connect      api.openai.com
+// @connect      api.anthropic.com
+// @connect      generativelanguage.googleapis.com
 // @connect      *
 // @run-at       document-idle
 // ==/UserScript==
@@ -42,6 +47,20 @@
             ENABLE_AUDIT_LOG: "ldb_enable_audit_log",
             OPERATION_LOG: "ldb_operation_log",
             REQUEST_DELAY: "ldb_request_delay",
+            // AI 分类
+            AI_SERVICE: "ldb_ai_service",
+            AI_API_KEY: "ldb_ai_api_key",
+            AI_MODEL: "ldb_ai_model",
+            AI_CATEGORIES: "ldb_ai_categories",
+            AI_BASE_URL: "ldb_ai_base_url",
+            // AI 对话历史
+            CHAT_HISTORY: "ldb_chat_history",
+            // 导出目标配置
+            EXPORT_TARGET_TYPE: "ldb_export_target_type",
+            PARENT_PAGE_ID: "ldb_parent_page_id",
+            // Notion 站点 UI
+            NOTION_PANEL_POSITION: "ldb_notion_panel_position",
+            NOTION_PANEL_MINIMIZED: "ldb_notion_panel_minimized",
         },
         // 默认值
         DEFAULTS: {
@@ -54,6 +73,18 @@
             requireConfirm: true, // 默认需要确认
             enableAuditLog: true, // 默认开启审计日志
             requestDelay: 500, // 请求间隔（毫秒），防止被封
+            // AI 分类默认值
+            aiService: "openai",
+            aiModel: "",
+            aiCategories: "技术, 生活, 问答, 分享, 资源, 其他",
+            aiBaseUrl: "",
+            // 导出目标默认值
+            exportTargetType: "database", // database 或 page
+        },
+        // 导出目标类型
+        EXPORT_TARGET_TYPES: {
+            DATABASE: "database",
+            PAGE: "page",
         },
         // 权限级别
         PERMISSION_LEVELS: {
@@ -139,6 +170,38 @@
         isTopicExported: (topicId) => {
             const exported = Storage.getExportedTopics();
             return !!exported[topicId];
+        },
+    };
+
+    // ===========================================
+    // 站点检测模块
+    // ===========================================
+    const SiteDetector = {
+        SITES: {
+            LINUX_DO: "linux_do",
+            NOTION: "notion",
+        },
+
+        // 检测当前站点
+        detect: () => {
+            const hostname = window.location.hostname;
+            if (hostname.includes("linux.do")) {
+                return SiteDetector.SITES.LINUX_DO;
+            }
+            if (hostname.includes("notion.so")) {
+                return SiteDetector.SITES.NOTION;
+            }
+            return null;
+        },
+
+        // 判断是否在 Linux.do 站点
+        isLinuxDo: () => {
+            return SiteDetector.detect() === SiteDetector.SITES.LINUX_DO;
+        },
+
+        // 判断是否在 Notion 站点
+        isNotion: () => {
+            return SiteDetector.detect() === SiteDetector.SITES.NOTION;
         },
     };
 
@@ -571,6 +634,95 @@
             }
         },
 
+        // 自动设置数据库属性
+        setupDatabaseProperties: async (databaseId, apiKey) => {
+            // 定义所需的属性结构（名称 -> { 类型名, schema }）
+            const requiredProperties = {
+                "标题": { typeName: "title", schema: { title: {} } },
+                "链接": { typeName: "url", schema: { url: {} } },
+                "分类": { typeName: "rich_text", schema: { rich_text: {} } },
+                "标签": { typeName: "multi_select", schema: { multi_select: { options: [] } } },
+                "作者": { typeName: "rich_text", schema: { rich_text: {} } },
+                "收藏时间": { typeName: "date", schema: { date: {} } },
+                "帖子数": { typeName: "number", schema: { number: { format: "number" } } },
+                "浏览数": { typeName: "number", schema: { number: { format: "number" } } },
+                "点赞数": { typeName: "number", schema: { number: { format: "number" } } },
+            };
+
+            try {
+                // 获取当前数据库结构
+                const database = await NotionAPI.request("GET", `/databases/${databaseId}`, null, apiKey);
+                const existingProps = database.properties || {};
+
+                // 分析属性状态
+                const propsToAdd = {};
+                const propsToUpdate = {};
+                const typeConflicts = [];
+
+                for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
+                    const existingProp = existingProps[name];
+
+                    if (!existingProp) {
+                        // 属性不存在
+                        if (typeName === "title") {
+                            // 特殊处理：title 属性需要重命名现有的
+                            const existingTitle = Object.entries(existingProps).find(([_, prop]) => prop.type === "title");
+                            if (existingTitle && existingTitle[0] !== name) {
+                                propsToUpdate[existingTitle[0]] = { name: name };
+                            }
+                        } else {
+                            propsToAdd[name] = schema;
+                        }
+                    } else if (existingProp.type !== typeName) {
+                        // 属性存在但类型不匹配
+                        typeConflicts.push({
+                            name,
+                            expected: typeName,
+                            actual: existingProp.type
+                        });
+                    }
+                    // 如果属性存在且类型匹配，无需处理
+                }
+
+                // 如果有类型冲突，返回错误信息
+                if (typeConflicts.length > 0) {
+                    const conflictDetails = typeConflicts.map(c =>
+                        `"${c.name}": 期望 ${c.expected}，实际 ${c.actual}`
+                    ).join("; ");
+                    return {
+                        success: false,
+                        error: `属性类型不匹配: ${conflictDetails}。请手动修改这些属性的类型，或删除后重新运行自动设置。`
+                    };
+                }
+
+                const allChanges = { ...propsToAdd, ...propsToUpdate };
+
+                if (Object.keys(allChanges).length === 0) {
+                    return { success: true, message: "所有属性已正确配置，无需更新" };
+                }
+
+                // 更新数据库
+                await NotionAPI.request("PATCH", `/databases/${databaseId}`, {
+                    properties: allChanges
+                }, apiKey);
+
+                const addedCount = Object.keys(propsToAdd).length;
+                const renamedCount = Object.keys(propsToUpdate).length;
+                let message = "";
+                if (addedCount > 0) message += `已添加 ${addedCount} 个属性`;
+                if (renamedCount > 0) message += `${addedCount > 0 ? "，" : ""}已重命名 ${renamedCount} 个属性`;
+
+                return {
+                    success: true,
+                    message: message,
+                    added: Object.keys(propsToAdd),
+                    renamed: Object.keys(propsToUpdate)
+                };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        },
+
         // 创建数据库页面（帖子记录）
         createDatabasePage: async (databaseId, properties, children, apiKey) => {
             const data = {
@@ -607,8 +759,8 @@
             }, apiKey);
         },
 
-        // 上传文件内容
-        uploadFileContent: (uploadUrl, blob, contentType, apiKey, filename) => {
+        // 上传文件内容到预签名 URL
+        uploadFileContent: (uploadUrl, blob, contentType, filename) => {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = () => {
@@ -628,8 +780,8 @@
                         method: 'POST',
                         url: uploadUrl,
                         headers: {
-                            'Authorization': `Bearer ${apiKey}`,
-                            'Notion-Version': CONFIG.API.NOTION_VERSION,
+                            // 注意: 不要向 S3 预签名 URL 发送 Authorization 头
+                            // 预签名 URL 已包含授权信息，发送 API Key 会造成安全泄露
                             'Content-Type': `multipart/form-data; boundary=${boundary}`,
                         },
                         data: body.buffer,
@@ -668,8 +820,8 @@
                 const fileUpload = await NotionAPI.createFileUpload(filename, contentType, apiKey);
                 if (!fileUpload?.upload_url) throw new Error("创建上传失败");
 
-                // 上传内容
-                await NotionAPI.uploadFileContent(fileUpload.upload_url, blob, contentType, apiKey, filename);
+                // 上传内容到预签名 URL (不需要 API Key)
+                await NotionAPI.uploadFileContent(fileUpload.upload_url, blob, contentType, filename);
 
                 return fileUpload.id;
             } catch (error) {
@@ -704,6 +856,11 @@
         // 获取数据库信息
         fetchDatabase: async (databaseId, apiKey) => {
             return await NotionAPI.request("GET", `/databases/${databaseId}`, null, apiKey);
+        },
+
+        // 更新数据库 Schema（添加/修改属性）
+        updateDatabase: async (databaseId, properties, apiKey) => {
+            return await NotionAPI.request("PATCH", `/databases/${databaseId}`, { properties }, apiKey);
         },
 
         // 查询数据库
@@ -799,6 +956,40 @@
             return newPage;
         },
 
+        // ========== 子页面操作 ==========
+
+        // 验证页面 ID 是否有效
+        validatePage: async (pageId, apiKey) => {
+            try {
+                await NotionAPI.request("GET", `/pages/${pageId}`, null, apiKey);
+                return { valid: true };
+            } catch (error) {
+                return { valid: false, error: error.message };
+            }
+        },
+
+        // 创建子页面（导出为页面而不是数据库条目）
+        createChildPage: async (parentPageId, title, children, apiKey) => {
+            const data = {
+                parent: { page_id: parentPageId },
+                properties: {
+                    title: {
+                        title: [{ text: { content: title || "无标题" } }]
+                    }
+                },
+                children: children.slice(0, 100), // Notion 限制
+            };
+
+            const page = await NotionAPI.request("POST", "/pages", data, apiKey);
+
+            // 如果有剩余的 blocks，追加
+            if (children.length > 100) {
+                await NotionAPI.appendBlocks(page.id, children.slice(100), apiKey);
+            }
+
+            return page;
+        },
+
         // 软删除页面 (归档)
         deletePage: async (pageId, apiKey) => {
             return await NotionAPI.request("PATCH", `/pages/${pageId}`, { archived: true }, apiKey);
@@ -832,6 +1023,1280 @@
         getUser: async (userId, apiKey) => {
             return await NotionAPI.request("GET", `/users/${userId}`, null, apiKey);
         },
+    };
+
+    // ===========================================
+    // AI 服务模块
+    // ===========================================
+    const AIService = {
+        // 服务商配置
+        PROVIDERS: {
+            openai: {
+                name: "OpenAI",
+                defaultModel: "gpt-4o-mini",
+                models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+                endpoint: "https://api.openai.com/v1/chat/completions",
+            },
+            claude: {
+                name: "Claude",
+                defaultModel: "claude-3-5-haiku-latest",
+                models: ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-opus-latest"],
+                endpoint: "https://api.anthropic.com/v1/messages",
+            },
+            gemini: {
+                name: "Gemini",
+                defaultModel: "gemini-2.0-flash",
+                models: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+                endpoint: "https://generativelanguage.googleapis.com/v1beta/models",
+            }
+        },
+
+        // 调用 AI 进行分类
+        classify: async (title, content, categories, settings) => {
+            const prompt = `请根据以下帖子内容，从给定的分类中选择最合适的一个。
+只返回分类名称，不要任何其他内容、解释或标点符号。
+
+可选分类：${categories.join(", ")}
+
+帖子标题：${title}
+帖子内容：${content.slice(0, 2000)}
+
+分类：`;
+
+            const response = await AIService.request(prompt, settings);
+            return AIService.matchCategory(response, categories);
+        },
+
+        // 发送请求（根据不同服务商格式化）
+        request: async (prompt, settings) => {
+            const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
+            const provider = AIService.PROVIDERS[aiService];
+            if (!provider) throw new Error(`未知的 AI 服务: ${aiService}`);
+
+            const model = aiModel || provider.defaultModel;
+
+            if (aiService === "openai") {
+                return await AIService.requestOpenAI(prompt, model, aiApiKey, aiBaseUrl);
+            } else if (aiService === "claude") {
+                return await AIService.requestClaude(prompt, model, aiApiKey, aiBaseUrl);
+            } else if (aiService === "gemini") {
+                return await AIService.requestGemini(prompt, model, aiApiKey, aiBaseUrl);
+            }
+            throw new Error(`不支持的 AI 服务: ${aiService}`);
+        },
+
+        // OpenAI API 请求
+        requestOpenAI: (prompt, model, apiKey, baseUrl) => {
+            // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
+            const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1$/, "") : "";
+            const url = normalizedBase
+                ? `${normalizedBase}/v1/chat/completions`
+                : "https://api.openai.com/v1/chat/completions";
+
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "POST",
+                    url: url,
+                    headers: {
+                        "Authorization": `Bearer ${apiKey}`,
+                        "Content-Type": "application/json",
+                    },
+                    data: JSON.stringify({
+                        model: model,
+                        messages: [{ role: "user", content: prompt }],
+                        max_tokens: 50,
+                        temperature: 0,
+                    }),
+                    onload: (response) => {
+                        try {
+                            const result = JSON.parse(response.responseText);
+                            if (response.status >= 200 && response.status < 300) {
+                                resolve(result.choices?.[0]?.message?.content?.trim() || "");
+                            } else {
+                                reject(new Error(result.error?.message || `OpenAI 错误: ${response.status}`));
+                            }
+                        } catch (e) {
+                            reject(new Error(`解析响应失败: ${e.message}`));
+                        }
+                    },
+                    onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                });
+            });
+        },
+
+        // Claude API 请求
+        requestClaude: (prompt, model, apiKey, baseUrl) => {
+            const url = baseUrl
+                ? `${baseUrl.replace(/\/$/, "")}/v1/messages`
+                : "https://api.anthropic.com/v1/messages";
+
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "POST",
+                    url: url,
+                    headers: {
+                        "x-api-key": apiKey,
+                        "Content-Type": "application/json",
+                        "anthropic-version": "2023-06-01",
+                    },
+                    data: JSON.stringify({
+                        model: model,
+                        messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+                        max_tokens: 50,
+                    }),
+                    onload: (response) => {
+                        try {
+                            const result = JSON.parse(response.responseText);
+                            if (response.status >= 200 && response.status < 300) {
+                                resolve(result.content?.[0]?.text?.trim() || "");
+                            } else {
+                                reject(new Error(result.error?.message || `Claude 错误: ${response.status}`));
+                            }
+                        } catch (e) {
+                            reject(new Error(`解析响应失败: ${e.message}`));
+                        }
+                    },
+                    onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                });
+            });
+        },
+
+        // Gemini API 请求
+        requestGemini: (prompt, model, apiKey, baseUrl) => {
+            const url = baseUrl
+                ? `${baseUrl.replace(/\/$/, "")}/v1beta/models/${model}:generateContent?key=${apiKey}`
+                : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "POST",
+                    url: url,
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    data: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: {
+                            maxOutputTokens: 50,
+                            temperature: 0,
+                        },
+                    }),
+                    onload: (response) => {
+                        try {
+                            const result = JSON.parse(response.responseText);
+                            if (response.status >= 200 && response.status < 300) {
+                                resolve(result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "");
+                            } else {
+                                reject(new Error(result.error?.message || `Gemini 错误: ${response.status}`));
+                            }
+                        } catch (e) {
+                            reject(new Error(`解析响应失败: ${e.message}`));
+                        }
+                    },
+                    onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                });
+            });
+        },
+
+        // 匹配分类（模糊匹配）
+        matchCategory: (response, categories) => {
+            if (!response) return categories[categories.length - 1]; // 默认最后一个
+
+            const cleaned = response.trim().replace(/[。，,.!！?？]/g, "");
+
+            // 精确匹配
+            for (const cat of categories) {
+                if (cleaned === cat || cleaned.toLowerCase() === cat.toLowerCase()) {
+                    return cat;
+                }
+            }
+
+            // 包含匹配
+            for (const cat of categories) {
+                if (cleaned.includes(cat) || cat.includes(cleaned)) {
+                    return cat;
+                }
+            }
+
+            // 返回默认分类（最后一个，通常是"其他"）
+            return categories[categories.length - 1];
+        },
+
+        // 对话式请求（支持更长输出）
+        requestChat: async (prompt, settings, maxTokens = 1000) => {
+            const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
+            const provider = AIService.PROVIDERS[aiService];
+            if (!provider) throw new Error(`未知的 AI 服务: ${aiService}`);
+
+            const model = aiModel || provider.defaultModel;
+
+            if (aiService === "openai") {
+                return await AIService.requestOpenAIChat(prompt, model, aiApiKey, aiBaseUrl, maxTokens);
+            } else if (aiService === "claude") {
+                return await AIService.requestClaudeChat(prompt, model, aiApiKey, aiBaseUrl, maxTokens);
+            } else if (aiService === "gemini") {
+                return await AIService.requestGeminiChat(prompt, model, aiApiKey, aiBaseUrl, maxTokens);
+            }
+            throw new Error(`不支持的 AI 服务: ${aiService}`);
+        },
+
+        // OpenAI 对话请求
+        requestOpenAIChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
+            // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
+            const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1$/, "") : "";
+            const url = normalizedBase
+                ? `${normalizedBase}/v1/chat/completions`
+                : "https://api.openai.com/v1/chat/completions";
+
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "POST",
+                    url: url,
+                    headers: {
+                        "Authorization": `Bearer ${apiKey}`,
+                        "Content-Type": "application/json",
+                    },
+                    data: JSON.stringify({
+                        model: model,
+                        messages: [{ role: "user", content: prompt }],
+                        max_tokens: maxTokens,
+                        temperature: 0.7,
+                    }),
+                    onload: (response) => {
+                        try {
+                            const result = JSON.parse(response.responseText);
+                            if (response.status >= 200 && response.status < 300) {
+                                resolve(result.choices?.[0]?.message?.content?.trim() || "");
+                            } else {
+                                reject(new Error(result.error?.message || `OpenAI 错误: ${response.status}`));
+                            }
+                        } catch (e) {
+                            reject(new Error(`解析响应失败: ${e.message}`));
+                        }
+                    },
+                    onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                });
+            });
+        },
+
+        // Claude 对话请求
+        requestClaudeChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
+            const url = baseUrl
+                ? `${baseUrl.replace(/\/$/, "")}/v1/messages`
+                : "https://api.anthropic.com/v1/messages";
+
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "POST",
+                    url: url,
+                    headers: {
+                        "x-api-key": apiKey,
+                        "Content-Type": "application/json",
+                        "anthropic-version": "2023-06-01",
+                    },
+                    data: JSON.stringify({
+                        model: model,
+                        messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+                        max_tokens: maxTokens,
+                    }),
+                    onload: (response) => {
+                        try {
+                            const result = JSON.parse(response.responseText);
+                            if (response.status >= 200 && response.status < 300) {
+                                resolve(result.content?.[0]?.text?.trim() || "");
+                            } else {
+                                reject(new Error(result.error?.message || `Claude 错误: ${response.status}`));
+                            }
+                        } catch (e) {
+                            reject(new Error(`解析响应失败: ${e.message}`));
+                        }
+                    },
+                    onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                });
+            });
+        },
+
+        // Gemini 对话请求
+        requestGeminiChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
+            const url = baseUrl
+                ? `${baseUrl.replace(/\/$/, "")}/v1beta/models/${model}:generateContent?key=${apiKey}`
+                : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "POST",
+                    url: url,
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    data: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: {
+                            maxOutputTokens: maxTokens,
+                            temperature: 0.7,
+                        },
+                    }),
+                    onload: (response) => {
+                        try {
+                            const result = JSON.parse(response.responseText);
+                            if (response.status >= 200 && response.status < 300) {
+                                resolve(result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "");
+                            } else {
+                                reject(new Error(result.error?.message || `Gemini 错误: ${response.status}`));
+                            }
+                        } catch (e) {
+                            reject(new Error(`解析响应失败: ${e.message}`));
+                        }
+                    },
+                    onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                });
+            });
+        },
+
+        // 获取可用模型列表
+        fetchModels: async (service, apiKey, baseUrl) => {
+            if (service === "openai") {
+                return await AIService.fetchOpenAIModels(apiKey, baseUrl);
+            } else if (service === "claude") {
+                // Claude 没有公开的模型列表 API，返回预设列表
+                return AIService.PROVIDERS.claude.models;
+            } else if (service === "gemini") {
+                return await AIService.fetchGeminiModels(apiKey, baseUrl);
+            }
+            throw new Error(`不支持的 AI 服务: ${service}`);
+        },
+
+        // 获取 OpenAI 模型列表
+        fetchOpenAIModels: (apiKey, baseUrl) => {
+            // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
+            const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1$/, "") : "";
+            const url = normalizedBase
+                ? `${normalizedBase}/v1/models`
+                : "https://api.openai.com/v1/models";
+
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "GET",
+                    url: url,
+                    headers: {
+                        "Authorization": `Bearer ${apiKey}`,
+                    },
+                    onload: (response) => {
+                        try {
+                            const result = JSON.parse(response.responseText);
+                            if (response.status >= 200 && response.status < 300) {
+                                // 过滤出聊天模型
+                                const chatModels = (result.data || [])
+                                    .filter(m => m.id.includes("gpt") || m.id.includes("o1") || m.id.includes("o3"))
+                                    .map(m => m.id)
+                                    .sort((a, b) => {
+                                        // 优先显示常用模型
+                                        const priority = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"];
+                                        const aIdx = priority.findIndex(p => a.startsWith(p));
+                                        const bIdx = priority.findIndex(p => b.startsWith(p));
+                                        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+                                        if (aIdx !== -1) return -1;
+                                        if (bIdx !== -1) return 1;
+                                        return a.localeCompare(b);
+                                    });
+                                resolve(chatModels.length > 0 ? chatModels : AIService.PROVIDERS.openai.models);
+                            } else {
+                                reject(new Error(result.error?.message || `获取模型失败: ${response.status}`));
+                            }
+                        } catch (e) {
+                            reject(new Error(`解析响应失败: ${e.message}`));
+                        }
+                    },
+                    onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                });
+            });
+        },
+
+        // 获取 Gemini 模型列表
+        fetchGeminiModels: (apiKey, baseUrl) => {
+            const url = baseUrl
+                ? `${baseUrl.replace(/\/$/, "")}/v1beta/models?key=${apiKey}`
+                : `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "GET",
+                    url: url,
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    onload: (response) => {
+                        try {
+                            const result = JSON.parse(response.responseText);
+                            if (response.status >= 200 && response.status < 300) {
+                                // 过滤出支持 generateContent 的模型
+                                const models = (result.models || [])
+                                    .filter(m => m.supportedGenerationMethods?.includes("generateContent"))
+                                    .map(m => m.name.replace("models/", ""))
+                                    .filter(m => m.includes("gemini"))
+                                    .sort((a, b) => {
+                                        // 优先显示常用模型
+                                        const priority = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"];
+                                        const aIdx = priority.findIndex(p => a.startsWith(p));
+                                        const bIdx = priority.findIndex(p => b.startsWith(p));
+                                        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+                                        if (aIdx !== -1) return -1;
+                                        if (bIdx !== -1) return 1;
+                                        return a.localeCompare(b);
+                                    });
+                                resolve(models.length > 0 ? models : AIService.PROVIDERS.gemini.models);
+                            } else {
+                                reject(new Error(result.error?.message || `获取模型失败: ${response.status}`));
+                            }
+                        } catch (e) {
+                            reject(new Error(`解析响应失败: ${e.message}`));
+                        }
+                    },
+                    onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                });
+            });
+        },
+    };
+
+    // ===========================================
+    // 对话状态管理模块
+    // ===========================================
+    const ChatState = {
+        messages: [],
+        isProcessing: false,
+        context: {},
+        MAX_HISTORY: 50,
+
+        // 添加消息
+        addMessage: (role, content, status = "complete") => {
+            ChatState.messages.push({
+                id: Date.now(),
+                role,  // "user" | "assistant"
+                content,
+                status,  // "complete" | "processing" | "error"
+                timestamp: new Date().toISOString()
+            });
+            // 限制历史记录数量
+            if (ChatState.messages.length > ChatState.MAX_HISTORY) {
+                ChatState.messages = ChatState.messages.slice(-ChatState.MAX_HISTORY);
+            }
+            ChatState.save();
+            ChatUI.renderMessages();
+            return ChatState.messages[ChatState.messages.length - 1];
+        },
+
+        // 更新最后一条消息
+        updateLastMessage: (content, status) => {
+            if (ChatState.messages.length === 0) return;
+            const lastMsg = ChatState.messages[ChatState.messages.length - 1];
+            if (content !== undefined) lastMsg.content = content;
+            if (status !== undefined) lastMsg.status = status;
+            ChatState.save();
+            ChatUI.renderMessages();
+        },
+
+        // 保存到存储
+        save: () => {
+            Storage.set(CONFIG.STORAGE_KEYS.CHAT_HISTORY, JSON.stringify(ChatState.messages));
+        },
+
+        // 从存储加载
+        load: () => {
+            try {
+                const data = Storage.get(CONFIG.STORAGE_KEYS.CHAT_HISTORY, "[]");
+                ChatState.messages = JSON.parse(data);
+            } catch {
+                ChatState.messages = [];
+            }
+        },
+
+        // 清空对话
+        clear: () => {
+            ChatState.messages = [];
+            ChatState.context = {};
+            ChatState.save();
+            ChatUI.renderMessages();
+        },
+    };
+
+    // ===========================================
+    // AI 助手模块
+    // ===========================================
+    const AIAssistant = {
+        // 意图类型
+        INTENTS: {
+            QUERY: "query",           // 查询/统计
+            SEARCH: "search",         // 搜索
+            CLASSIFY: "classify",     // 分类单个
+            BATCH_CLASSIFY: "batch_classify",  // 批量分类
+            UPDATE: "update",         // 更新属性
+            HELP: "help",             // 帮助
+            UNKNOWN: "unknown"        // 未知
+        },
+
+        // 获取帮助信息
+        getHelpMessage: () => {
+            return `你好！我是你的 Notion 数据库助手。以下是我能帮你做的事情：
+
+📊 **查询统计**
+- "有多少个帖子？"
+- "统计各分类的帖子数量"
+- "显示最新的 5 个帖子"
+
+🔍 **搜索帖子**
+- "搜索关于 Docker 的帖子"
+- "找一下作者是 xxx 的帖子"
+
+🏷️ **智能分类**
+- "自动分类所有未分类的帖子"
+- "把最近的帖子分类一下"
+
+✏️ **更新属性**
+- "把作者是 xxx 的帖子标记为重要"
+
+💡 **提示**：直接用自然语言告诉我你想做什么就行！`;
+        },
+
+        // 获取 AI 设置
+        getSettings: () => {
+            const panel = UI.panel;
+            return {
+                notionApiKey: panel.querySelector("#ldb-api-key")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
+                notionDatabaseId: panel.querySelector("#ldb-database-id")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
+                aiApiKey: panel.querySelector("#ldb-ai-api-key")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, ""),
+                aiService: panel.querySelector("#ldb-ai-service")?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService),
+                aiModel: panel.querySelector("#ldb-ai-model")?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, ""),
+                aiBaseUrl: panel.querySelector("#ldb-ai-base-url")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, ""),
+                categories: (panel.querySelector("#ldb-ai-categories")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories))
+                    .split(/[,，]/).map(c => c.trim()).filter(Boolean),
+            };
+        },
+
+        // 检查配置是否完整
+        checkConfig: (settings) => {
+            if (!settings.notionApiKey) {
+                return { valid: false, error: "请先配置 Notion API Key" };
+            }
+            if (!settings.notionDatabaseId) {
+                return { valid: false, error: "请先配置 Notion 数据库 ID" };
+            }
+            if (!settings.aiApiKey) {
+                return { valid: false, error: "请先配置 AI API Key" };
+            }
+            return { valid: true };
+        },
+
+        // 解析用户意图
+        parseIntent: async (userMessage, settings) => {
+            const systemPrompt = `你是一个 Notion 数据库助手。分析用户指令，返回 JSON 格式。
+
+用户可能想执行以下操作之一：
+1. query - 查询统计（如：有多少帖子、统计分类数量、显示最新帖子）
+2. search - 搜索（如：搜索关于xxx的帖子、找作者是xxx的）
+3. classify - 分类单个（如：把这个帖子分类为技术）
+4. batch_classify - 批量分类（如：自动分类所有未分类的帖子）
+5. update - 更新属性（如：把xxx标记为重要）
+6. help - 帮助（如：帮助、你能做什么）
+7. unknown - 无法理解
+
+返回格式（只返回 JSON，不要其他内容）：
+{
+  "intent": "query|search|classify|batch_classify|update|help|unknown",
+  "params": {
+    "keyword": "搜索关键词（如有）",
+    "property": "要更新的属性名（如有）",
+    "value": "新值（如有）",
+    "limit": 5,
+    "filter_field": "筛选字段（如 作者、分类）",
+    "filter_value": "筛选值"
+  },
+  "explanation": "你对用户意图的理解（中文简短说明）"
+}`;
+
+            try {
+                const response = await AIService.requestChat(
+                    `${systemPrompt}\n\n用户指令：${userMessage}`,
+                    settings,
+                    500
+                );
+
+                // 尝试提取 JSON
+                const jsonMatch = response.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    return JSON.parse(jsonMatch[0]);
+                }
+                return { intent: "unknown", explanation: "无法解析响应" };
+            } catch (error) {
+                console.error("解析意图失败:", error);
+                return { intent: "unknown", explanation: error.message };
+            }
+        },
+
+        // 处理用户消息
+        handleMessage: async (userMessage) => {
+            const settings = AIAssistant.getSettings();
+
+            // 检查配置
+            const configCheck = AIAssistant.checkConfig(settings);
+            if (!configCheck.valid) {
+                return configCheck.error;
+            }
+
+            // 简单的帮助关键词检测
+            const helpKeywords = ["帮助", "help", "你能做什么", "怎么用", "使用说明"];
+            if (helpKeywords.some(k => userMessage.includes(k))) {
+                return AIAssistant.getHelpMessage();
+            }
+
+            // 解析意图
+            ChatState.updateLastMessage("正在理解你的指令...", "processing");
+
+            const intentResult = await AIAssistant.parseIntent(userMessage, settings);
+
+            // 执行意图
+            return await AIAssistant.executeIntent(intentResult, settings);
+        },
+
+        // 执行意图
+        executeIntent: async (intentResult, settings) => {
+            const { intent, params = {}, explanation } = intentResult;
+
+            switch (intent) {
+                case "query":
+                    return await AIAssistant.handleQuery(params, settings, explanation);
+                case "search":
+                    return await AIAssistant.handleSearch(params, settings, explanation);
+                case "classify":
+                    return await AIAssistant.handleClassify(params, settings, explanation);
+                case "batch_classify":
+                    return await AIAssistant.handleBatchClassify(params, settings, explanation);
+                case "update":
+                    return await AIAssistant.handleUpdate(params, settings, explanation);
+                case "help":
+                    return AIAssistant.getHelpMessage();
+                default:
+                    return `抱歉，我没有完全理解你的指令。
+
+${explanation ? `我的理解：${explanation}` : ""}
+
+试试说「帮助」查看我能做什么，或者换一种方式描述你的需求。`;
+            }
+        },
+
+        // 处理查询
+        handleQuery: async (params, settings, explanation) => {
+            ChatState.updateLastMessage(`正在查询数据库...`, "processing");
+
+            try {
+                const { limit = 10, filter_field, filter_value } = params;
+
+                // 构建过滤条件
+                let filter = null;
+                if (filter_field && filter_value) {
+                    // 字段名称和类型映射
+                    const fieldConfig = {
+                        "作者": { name: "作者", type: "rich_text" },
+                        "分类": { name: "分类", type: "rich_text" },
+                        "标签": { name: "标签", type: "multi_select" },
+                        "AI分类": { name: "AI分类", type: "select" }
+                    };
+                    const config = fieldConfig[filter_field] || { name: filter_field, type: "rich_text" };
+
+                    // 根据属性类型构建正确的过滤器
+                    if (config.type === "select") {
+                        filter = {
+                            property: config.name,
+                            select: { equals: filter_value }
+                        };
+                    } else if (config.type === "multi_select") {
+                        filter = {
+                            property: config.name,
+                            multi_select: { contains: filter_value }
+                        };
+                    } else {
+                        filter = {
+                            property: config.name,
+                            rich_text: { contains: filter_value }
+                        };
+                    }
+                }
+
+                // 查询数据库（支持分页，获取所有结果）
+                const allPages = [];
+                let cursor = null;
+                let hasMore = true;
+                const maxPages = 10; // 最多查询 10 页（1000 条），防止无限循环
+                let pageCount = 0;
+
+                while (hasMore && pageCount < maxPages) {
+                    const response = await NotionAPI.queryDatabase(
+                        settings.notionDatabaseId,
+                        filter,
+                        [{ property: "收藏时间", direction: "descending" }],
+                        cursor,
+                        settings.notionApiKey
+                    );
+
+                    allPages.push(...(response.results || []));
+                    hasMore = response.has_more;
+                    cursor = response.next_cursor;
+                    pageCount++;
+
+                    // 更新进度
+                    if (hasMore) {
+                        ChatState.updateLastMessage(`正在查询数据库... (已获取 ${allPages.length} 条)`, "processing");
+                    }
+                }
+
+                const pages = allPages;
+                const total = pages.length;
+                const isTruncated = hasMore; // 如果还有更多，说明被截断了
+
+                if (total === 0) {
+                    return `📊 数据库中没有找到符合条件的帖子。${filter ? `\n筛选条件：${filter_field} 包含 "${filter_value}"` : ""}`;
+                }
+
+                // 构建结果
+                let result = `📊 **查询结果**\n\n`;
+                result += `共找到 **${total}** 个帖子`;
+                if (isTruncated) {
+                    result += ` (已达查询上限，可能还有更多)`;
+                }
+
+                if (params.keyword?.includes("统计") || params.keyword?.includes("分类")) {
+                    // 统计分类
+                    const categoryCount = {};
+                    pages.forEach(page => {
+                        const cat = page.properties["AI分类"]?.select?.name ||
+                                   page.properties["分类"]?.rich_text?.[0]?.plain_text || "未分类";
+                        categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+                    });
+
+                    result += `\n\n**分类统计：**\n`;
+                    Object.entries(categoryCount)
+                        .sort((a, b) => b[1] - a[1])
+                        .forEach(([cat, count]) => {
+                            result += `- ${cat}: ${count} 个\n`;
+                        });
+                } else {
+                    // 显示前几条
+                    const showLimit = Math.min(limit, total);
+                    result += `（显示前 ${showLimit} 条）\n\n`;
+
+                    pages.slice(0, showLimit).forEach((page, i) => {
+                        const title = page.properties["标题"]?.title?.[0]?.plain_text || "无标题";
+                        const author = page.properties["作者"]?.rich_text?.[0]?.plain_text || "未知";
+                        result += `${i + 1}. **${title}**\n   作者: ${author}\n`;
+                    });
+                }
+
+                return result;
+            } catch (error) {
+                return `❌ 查询失败: ${error.message}`;
+            }
+        },
+
+        // 处理搜索
+        handleSearch: async (params, settings, explanation) => {
+            ChatState.updateLastMessage(`正在搜索...`, "processing");
+
+            try {
+                const { keyword, limit = 10 } = params;
+
+                if (!keyword) {
+                    return "请告诉我你想搜索什么关键词？";
+                }
+
+                // 使用 Notion 搜索
+                const response = await NotionAPI.search(
+                    keyword,
+                    { property: "object", value: "page" },
+                    settings.notionApiKey
+                );
+
+                const pages = (response.results || [])
+                    .filter(p => p.parent?.database_id?.replace(/-/g, "") === settings.notionDatabaseId.replace(/-/g, ""));
+
+                if (pages.length === 0) {
+                    return `🔍 没有找到包含「${keyword}」的帖子。`;
+                }
+
+                let result = `🔍 **搜索结果**\n\n`;
+                result += `找到 **${pages.length}** 个包含「${keyword}」的帖子：\n\n`;
+
+                pages.slice(0, limit).forEach((page, i) => {
+                    const title = page.properties["标题"]?.title?.[0]?.plain_text || "无标题";
+                    const url = page.url || "";
+                    result += `${i + 1}. [${title}](${url})\n`;
+                });
+
+                if (pages.length > limit) {
+                    result += `\n... 还有 ${pages.length - limit} 条结果`;
+                }
+
+                return result;
+            } catch (error) {
+                return `❌ 搜索失败: ${error.message}`;
+            }
+        },
+
+        // 处理单个分类
+        handleClassify: async (params, settings, explanation) => {
+            return "📝 单个分类功能开发中...\n\n目前可以使用「自动分类所有未分类的帖子」来批量分类。";
+        },
+
+        // 处理批量分类
+        handleBatchClassify: async (params, settings, explanation) => {
+            if (settings.categories.length < 2) {
+                return "❌ 请先在设置面板中配置至少两个分类选项。";
+            }
+
+            ChatState.updateLastMessage(`正在准备批量分类...\n分类选项: ${settings.categories.join(", ")}`, "processing");
+
+            try {
+                // 确保数据库有 AI分类 属性
+                await AIClassifier.ensureAICategoryProperty(settings);
+
+                // 获取所有页面
+                ChatState.updateLastMessage(`正在获取数据库页面...`, "processing");
+                const pages = await AIClassifier.fetchAllPages(settings);
+
+                if (pages.length === 0) {
+                    return "📭 数据库中没有找到任何页面。";
+                }
+
+                // 过滤未分类的页面
+                const unclassified = pages.filter(p => {
+                    const aiCategory = p.properties["AI分类"];
+                    return !aiCategory?.select?.name;
+                });
+
+                if (unclassified.length === 0) {
+                    return `✅ 所有 ${pages.length} 个页面都已分类完成！`;
+                }
+
+                // 开始分类
+                const results = { success: 0, failed: 0 };
+                const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+
+                for (let i = 0; i < unclassified.length; i++) {
+                    const page = unclassified[i];
+                    const title = AIClassifier.getPageTitle(page);
+
+                    ChatState.updateLastMessage(
+                        `🔄 正在分类 (${i + 1}/${unclassified.length})\n\n当前: ${title}`,
+                        "processing"
+                    );
+
+                    try {
+                        await AIClassifier.classifyPage(page, settings);
+                        results.success++;
+                    } catch (error) {
+                        console.error(`分类失败: ${title}`, error);
+                        results.failed++;
+                    }
+
+                    if (i < unclassified.length - 1) {
+                        await Utils.sleep(delay);
+                    }
+                }
+
+                let resultMsg = `✅ **批量分类完成**\n\n`;
+                resultMsg += `- 总计: ${pages.length} 个页面\n`;
+                resultMsg += `- 已分类: ${pages.length - unclassified.length} 个\n`;
+                resultMsg += `- 本次分类: ${results.success} 个\n`;
+                if (results.failed > 0) {
+                    resultMsg += `- 失败: ${results.failed} 个\n`;
+                }
+
+                return resultMsg;
+            } catch (error) {
+                return `❌ 批量分类失败: ${error.message}`;
+            }
+        },
+
+        // 处理更新属性
+        handleUpdate: async (params, settings, explanation) => {
+            return "✏️ 属性更新功能开发中...\n\n目前可以使用查询和分类功能。";
+        },
+    };
+
+    // ===========================================
+    // 对话 UI 模块
+    // ===========================================
+    const ChatUI = {
+        // HTML 转义函数，防止 XSS 攻击
+        escapeHtml: (text) => {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        },
+
+        // 安全的 Markdown 渲染（先转义再处理 Markdown）
+        safeMarkdown: (text) => {
+            // 先转义 HTML 特殊字符
+            let escaped = ChatUI.escapeHtml(text);
+            // 再处理安全的 Markdown 格式
+            return escaped
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
+        },
+
+        // 渲染消息列表
+        renderMessages: () => {
+            const container = document.querySelector("#ldb-chat-messages");
+            if (!container) return;
+
+            if (ChatState.messages.length === 0) {
+                container.innerHTML = `
+                    <div class="ldb-chat-welcome">
+                        <div class="ldb-chat-welcome-icon">🤖</div>
+                        <div class="ldb-chat-welcome-text">
+                            你好！我是 AI 助手<br>
+                            <small>试试输入「帮助」查看我能做什么</small>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = ChatState.messages.map(msg => {
+                const isUser = msg.role === "user";
+                const statusClass = msg.status === "processing" ? "processing" : (msg.status === "error" ? "error" : "");
+
+                // 使用安全的 Markdown 渲染（防止 XSS）
+                const content = ChatUI.safeMarkdown(msg.content);
+
+                return `
+                    <div class="ldb-chat-message ${isUser ? 'user' : 'assistant'}">
+                        <div class="ldb-chat-bubble ${isUser ? 'user' : 'assistant'} ${statusClass}">
+                            ${content}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // 滚动到底部
+            container.scrollTop = container.scrollHeight;
+        },
+
+        // 发送消息
+        sendMessage: async () => {
+            const input = document.querySelector("#ldb-chat-input");
+            const sendBtn = document.querySelector("#ldb-chat-send");
+            if (!input) return;
+
+            const message = input.value.trim();
+            if (!message || ChatState.isProcessing) return;
+
+            // 禁用输入区域
+            if (input) input.disabled = true;
+            if (sendBtn) sendBtn.disabled = true;
+
+            // 清空输入框
+            input.value = "";
+
+            // 添加用户消息
+            ChatState.addMessage("user", message);
+
+            // 添加 AI 回复占位
+            ChatState.isProcessing = true;
+            ChatState.addMessage("assistant", "思考中...", "processing");
+
+            try {
+                const response = await AIAssistant.handleMessage(message);
+                ChatState.updateLastMessage(response, "complete");
+            } catch (error) {
+                console.error("AI 处理失败:", error);
+                ChatState.updateLastMessage(`❌ 处理失败: ${error.message}`, "error");
+            } finally {
+                ChatState.isProcessing = false;
+                // 恢复输入区域
+                if (input) input.disabled = false;
+                if (sendBtn) sendBtn.disabled = false;
+                if (input) input.focus();
+            }
+        },
+
+        // 绑定事件
+        bindEvents: () => {
+            // 发送按钮
+            const sendBtn = document.querySelector("#ldb-chat-send");
+            if (sendBtn) {
+                sendBtn.onclick = ChatUI.sendMessage;
+            }
+
+            // Enter 发送
+            const input = document.querySelector("#ldb-chat-input");
+            if (input) {
+                input.onkeydown = (e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        ChatUI.sendMessage();
+                    }
+                };
+            }
+
+            // 清空对话
+            const clearBtn = document.querySelector("#ldb-chat-clear");
+            if (clearBtn) {
+                clearBtn.onclick = () => {
+                    if (confirm("确定要清空对话历史吗？")) {
+                        ChatState.clear();
+                    }
+                };
+            }
+
+            // 设置折叠
+            const settingsToggle = document.querySelector("#ldb-chat-settings-toggle");
+            if (settingsToggle) {
+                settingsToggle.onclick = () => {
+                    const content = document.querySelector("#ldb-chat-settings-content");
+                    const arrow = document.querySelector("#ldb-chat-settings-arrow");
+                    if (content && arrow) {
+                        content.classList.toggle("collapsed");
+                        arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+                    }
+                };
+            }
+        },
+
+        // 初始化
+        init: () => {
+            ChatState.load();
+            ChatUI.renderMessages();
+            ChatUI.bindEvents();
+        },
+    };
+
+    // ===========================================
+    // AI 批量分类模块
+    // ===========================================
+    const AIClassifier = {
+        isPaused: false,
+        isCancelled: false,
+
+        // 批量分类
+        classifyBatch: async (settings, onProgress) => {
+            AIClassifier.reset();
+
+            // 0. 确保数据库有 "AI分类" 属性
+            await AIClassifier.ensureAICategoryProperty(settings);
+
+            // 1. 查询数据库获取所有页面
+            const pages = await AIClassifier.fetchAllPages(settings);
+
+            if (pages.length === 0) {
+                throw new Error("数据库中没有找到任何页面");
+            }
+
+            // 2. 过滤未分类的页面
+            const unclassified = pages.filter(p => {
+                const aiCategory = p.properties["AI分类"];
+                return !aiCategory?.select?.name;
+            });
+
+            if (unclassified.length === 0) {
+                return { total: pages.length, classified: 0, message: "所有页面都已分类" };
+            }
+
+            const results = { success: [], failed: [] };
+            const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+
+            // 3. 批量分类
+            for (let i = 0; i < unclassified.length; i++) {
+                if (AIClassifier.isCancelled) break;
+
+                while (AIClassifier.isPaused) {
+                    await Utils.sleep(500);
+                    if (AIClassifier.isCancelled) break;
+                }
+                if (AIClassifier.isCancelled) break;
+
+                const page = unclassified[i];
+                const title = AIClassifier.getPageTitle(page);
+
+                onProgress?.({
+                    current: i + 1,
+                    total: unclassified.length,
+                    title: title,
+                    isPaused: AIClassifier.isPaused,
+                });
+
+                try {
+                    await AIClassifier.classifyPage(page, settings);
+                    results.success.push({ title });
+                } catch (error) {
+                    results.failed.push({ title, error: error.message });
+                }
+
+                // 请求间隔
+                if (i < unclassified.length - 1) {
+                    await Utils.sleep(delay);
+                }
+            }
+
+            return {
+                total: pages.length,
+                classified: results.success.length,
+                failed: results.failed.length,
+                results,
+            };
+        },
+
+        // 获取所有页面
+        fetchAllPages: async (settings) => {
+            const { notionApiKey, notionDatabaseId } = settings;
+            const pages = [];
+            let cursor = null;
+
+            do {
+                const response = await NotionAPI.queryDatabase(
+                    notionDatabaseId,
+                    null,
+                    null,
+                    cursor,
+                    notionApiKey
+                );
+                pages.push(...(response.results || []));
+                cursor = response.has_more ? response.next_cursor : null;
+            } while (cursor);
+
+            return pages;
+        },
+
+        // 获取页面标题
+        getPageTitle: (page) => {
+            const titleProp = page.properties["标题"] || page.properties["Name"] || page.properties["title"];
+            if (titleProp?.title) {
+                return titleProp.title.map(t => t.plain_text).join("");
+            }
+            return "未命名";
+        },
+
+        // 分类单个页面
+        classifyPage: async (page, settings) => {
+            const title = AIClassifier.getPageTitle(page);
+
+            // 获取页面内容
+            const blocks = await AIClassifier.fetchPageBlocks(page.id, settings.notionApiKey);
+            const content = AIClassifier.extractText(blocks);
+
+            // 调用 AI 分类
+            const category = await AIService.classify(
+                title,
+                content,
+                settings.categories,
+                settings
+            );
+
+            // 更新页面属性
+            await NotionAPI.updatePage(page.id, {
+                "AI分类": { select: { name: category } }
+            }, settings.notionApiKey);
+
+            return category;
+        },
+
+        // 获取页面所有块
+        fetchPageBlocks: async (pageId, apiKey) => {
+            const blocks = [];
+            let cursor = null;
+
+            do {
+                const response = await NotionAPI.fetchBlocks(pageId, cursor, apiKey);
+                blocks.push(...(response.results || []));
+                cursor = response.has_more ? response.next_cursor : null;
+            } while (cursor);
+
+            return blocks;
+        },
+
+        // 提取页面文本
+        extractText: (blocks) => {
+            const texts = [];
+
+            const extractFromBlock = (block) => {
+                const type = block.type;
+                const content = block[type];
+
+                if (!content) return;
+
+                // 提取富文本
+                if (content.rich_text) {
+                    const text = content.rich_text.map(rt => rt.plain_text).join("");
+                    if (text) texts.push(text);
+                }
+
+                // 提取标题
+                if (content.title) {
+                    const text = content.title.map(t => t.plain_text).join("");
+                    if (text) texts.push(text);
+                }
+
+                // 提取代码
+                if (content.caption) {
+                    const text = content.caption.map(c => c.plain_text).join("");
+                    if (text) texts.push(text);
+                }
+            };
+
+            blocks.forEach(extractFromBlock);
+            return texts.join("\n").slice(0, 4000); // 限制长度
+        },
+
+        // 确保数据库有 "AI分类" Select 属性
+        ensureAICategoryProperty: async (settings) => {
+            const { notionApiKey, notionDatabaseId, categories } = settings;
+
+            // 获取数据库 schema
+            const database = await NotionAPI.fetchDatabase(notionDatabaseId, notionApiKey);
+            const properties = database.properties || {};
+
+            // 检查是否已有 "AI分类" 属性
+            if (properties["AI分类"]) {
+                // 属性已存在，更新选项列表（添加新分类）
+                const existingOptions = properties["AI分类"].select?.options || [];
+                const existingNames = new Set(existingOptions.map(o => o.name));
+
+                // 找出需要添加的新分类
+                const newOptions = categories.filter(cat => !existingNames.has(cat));
+
+                if (newOptions.length > 0) {
+                    // 合并现有选项和新选项
+                    const allOptions = [
+                        ...existingOptions,
+                        ...newOptions.map(name => ({ name }))
+                    ];
+
+                    await NotionAPI.updateDatabase(notionDatabaseId, {
+                        "AI分类": {
+                            select: { options: allOptions }
+                        }
+                    }, notionApiKey);
+
+                    console.log(`AI分类属性已更新，新增 ${newOptions.length} 个选项`);
+                }
+                return;
+            }
+
+            // 创建 "AI分类" Select 属性
+            const options = categories.map(name => ({ name }));
+
+            await NotionAPI.updateDatabase(notionDatabaseId, {
+                "AI分类": {
+                    select: { options }
+                }
+            }, notionApiKey);
+
+            console.log("已创建 AI分类 属性");
+        },
+
+        // 控制方法
+        pause: () => { AIClassifier.isPaused = true; },
+        resume: () => { AIClassifier.isPaused = false; },
+        cancel: () => { AIClassifier.isCancelled = true; },
+        reset: () => { AIClassifier.isPaused = false; AIClassifier.isCancelled = false; },
     };
 
     // ===========================================
@@ -1465,7 +2930,9 @@
                     rich_text: [{ text: { content: topic.categoryName || topic.category || "" } }]
                 },
                 "标签": {
-                    multi_select: (topic.tags || []).map(tag => ({ name: tag }))
+                    multi_select: (topic.tags || []).map(tag => ({
+                        name: typeof tag === 'string' ? tag : (tag.name || '')
+                    })).filter(t => t.name)
                 },
                 "作者": {
                     rich_text: [{ text: { content: topic.opUsername || "" } }]
@@ -1574,12 +3041,12 @@
                 try {
                     const fileId = await NotionAPI.uploadImageToNotion(block._originalUrl, apiKey);
                     if (fileId) {
-                        // Notion File Upload API 需要使用 file_id 引用
+                        // Notion File Upload API 需要使用 file_upload 类型引用上传的文件
                         // 参考: https://developers.notion.com/docs/working-with-files-and-media
                         block.image = {
-                            type: "file",
-                            file: {
-                                file_id: fileId, // 使用上传返回的 file_id
+                            type: "file_upload",
+                            file_upload: {
+                                id: fileId, // 使用上传返回的 file_id
                             },
                         };
                         block._uploaded = true;
@@ -1648,16 +3115,27 @@
 
             onProgress?.({ stage: "create", message: "创建 Notion 页面..." });
 
-            // 构建属性
-            const properties = Exporter.buildProperties(topic, bookmark);
+            let page;
 
-            // 创建页面
-            const page = await NotionAPI.createDatabasePage(
-                settings.databaseId,
-                properties,
-                blocks,
-                settings.apiKey
-            );
+            // 根据导出目标类型创建页面
+            if (settings.exportTargetType === CONFIG.EXPORT_TARGET_TYPES.PAGE) {
+                // 创建为子页面
+                page = await NotionAPI.createChildPage(
+                    settings.parentPageId,
+                    topic.title,
+                    blocks,
+                    settings.apiKey
+                );
+            } else {
+                // 创建为数据库条目（默认行为）
+                const properties = Exporter.buildProperties(topic, bookmark);
+                page = await NotionAPI.createDatabasePage(
+                    settings.databaseId,
+                    properties,
+                    blocks,
+                    settings.apiKey
+                );
+            }
 
             // 标记为已导出
             Storage.markTopicExported(topicId);
@@ -1734,6 +3212,742 @@
             }
 
             return results;
+        },
+    };
+
+    // ===========================================
+    // Notion 站点 UI 模块
+    // ===========================================
+    const NotionSiteUI = {
+        panel: null,
+        floatBtn: null,
+        isMinimized: true,
+
+        // 注入样式
+        injectStyles: () => {
+            const style = document.createElement("style");
+            style.textContent = `
+                /* Notion 站点浮动按钮 */
+                .ldb-notion-float-btn {
+                    position: fixed;
+                    right: 24px;
+                    bottom: 24px;
+                    width: 56px;
+                    height: 56px;
+                    background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
+                    border: none;
+                    border-radius: 28px;
+                    color: #fff;
+                    font-size: 24px;
+                    cursor: pointer;
+                    box-shadow: 0 4px 16px rgba(74, 144, 217, 0.4);
+                    z-index: 99999;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: transform 0.2s, box-shadow 0.2s;
+                }
+
+                .ldb-notion-float-btn:hover {
+                    transform: scale(1.1);
+                    box-shadow: 0 6px 20px rgba(74, 144, 217, 0.5);
+                }
+
+                /* Notion 站点浮动面板 */
+                .ldb-notion-panel {
+                    position: fixed;
+                    right: 24px;
+                    bottom: 96px;
+                    width: 380px;
+                    max-height: 70vh;
+                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                    border: 1px solid #0f3460;
+                    border-radius: 16px;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    z-index: 99999;
+                    color: #e0e0e0;
+                    overflow: hidden;
+                    display: none;
+                }
+
+                .ldb-notion-panel.visible {
+                    display: block;
+                    animation: ldb-notion-slide-up 0.3s ease;
+                }
+
+                @keyframes ldb-notion-slide-up {
+                    from { transform: translateY(20px); opacity: 0; }
+                    to { transform: translateY(0); opacity: 1; }
+                }
+
+                .ldb-notion-header {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: 14px 16px;
+                    background: linear-gradient(90deg, #0f3460 0%, #1a1a2e 100%);
+                    cursor: move;
+                }
+
+                .ldb-notion-header h3 {
+                    margin: 0;
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: #fff;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+
+                .ldb-notion-header-btns {
+                    display: flex;
+                    gap: 8px;
+                }
+
+                .ldb-notion-header-btn {
+                    background: rgba(255, 255, 255, 0.1);
+                    border: none;
+                    color: #fff;
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: background 0.2s;
+                    font-size: 14px;
+                }
+
+                .ldb-notion-header-btn:hover {
+                    background: rgba(255, 255, 255, 0.2);
+                }
+
+                .ldb-notion-body {
+                    padding: 16px;
+                    max-height: calc(70vh - 60px);
+                    overflow-y: auto;
+                }
+
+                .ldb-notion-body::-webkit-scrollbar {
+                    width: 6px;
+                }
+
+                .ldb-notion-body::-webkit-scrollbar-track {
+                    background: rgba(255, 255, 255, 0.05);
+                }
+
+                .ldb-notion-body::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.2);
+                    border-radius: 3px;
+                }
+
+                /* 复用聊天样式 */
+                .ldb-notion-panel .ldb-chat-container {
+                    height: 260px;
+                }
+
+                .ldb-notion-panel .ldb-input-group {
+                    margin-bottom: 12px;
+                }
+
+                .ldb-notion-panel .ldb-label {
+                    display: block;
+                    font-size: 13px;
+                    color: #b0b0b0;
+                    margin-bottom: 6px;
+                }
+
+                .ldb-notion-panel .ldb-input {
+                    width: 100%;
+                    padding: 10px 12px;
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 8px;
+                    color: #fff;
+                    font-size: 14px;
+                    box-sizing: border-box;
+                    transition: border-color 0.2s;
+                }
+
+                .ldb-notion-panel .ldb-input:focus {
+                    outline: none;
+                    border-color: #4a90d9;
+                }
+
+                .ldb-notion-panel .ldb-input::placeholder {
+                    color: #666;
+                }
+
+                .ldb-notion-panel .ldb-select {
+                    width: 100%;
+                    padding: 10px 12px;
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 8px;
+                    color: #fff;
+                    font-size: 14px;
+                    cursor: pointer;
+                }
+
+                .ldb-notion-panel .ldb-select option {
+                    background: #1a1a2e;
+                    color: #fff;
+                }
+
+                .ldb-notion-panel .ldb-btn {
+                    width: 100%;
+                    padding: 10px;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 13px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 6px;
+                }
+
+                .ldb-notion-panel .ldb-btn-secondary {
+                    background: rgba(255, 255, 255, 0.1);
+                    color: #fff;
+                }
+
+                .ldb-notion-panel .ldb-btn-secondary:hover {
+                    background: rgba(255, 255, 255, 0.15);
+                }
+
+                .ldb-notion-panel .ldb-tip {
+                    font-size: 11px;
+                    color: #666;
+                    margin-top: 6px;
+                }
+
+                .ldb-notion-panel .ldb-divider {
+                    height: 1px;
+                    background: rgba(255, 255, 255, 0.1);
+                    margin: 16px 0;
+                }
+
+                .ldb-notion-panel .ldb-section-title {
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #a0a0a0;
+                    margin-bottom: 10px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }
+
+                .ldb-notion-panel .ldb-status {
+                    position: relative;
+                    padding: 10px 28px 10px 10px;
+                    background: rgba(74, 144, 217, 0.1);
+                    border: 1px solid rgba(74, 144, 217, 0.3);
+                    border-radius: 8px;
+                    font-size: 12px;
+                    color: #4a90d9;
+                    text-align: center;
+                    margin-top: 12px;
+                }
+
+                .ldb-notion-panel .ldb-status.success {
+                    background: rgba(52, 211, 153, 0.1);
+                    border-color: rgba(52, 211, 153, 0.3);
+                    color: #34d399;
+                }
+
+                .ldb-notion-panel .ldb-status.error {
+                    background: rgba(239, 68, 68, 0.1);
+                    border-color: rgba(239, 68, 68, 0.3);
+                    color: #ef4444;
+                }
+
+                .ldb-notion-toggle-section {
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: 8px 0;
+                    color: #888;
+                    font-size: 12px;
+                }
+
+                .ldb-notion-toggle-section:hover {
+                    color: #fff;
+                }
+
+                .ldb-notion-toggle-content {
+                    overflow: hidden;
+                    transition: max-height 0.3s ease;
+                    max-height: 500px;
+                }
+
+                .ldb-notion-toggle-content.collapsed {
+                    max-height: 0;
+                }
+
+                /* ===== ChatUI 样式 (Notion 站点) ===== */
+                .ldb-chat-container {
+                    height: 260px;
+                    overflow-y: auto;
+                    background: rgba(0, 0, 0, 0.2);
+                    border-radius: 8px;
+                    padding: 12px;
+                    margin-bottom: 12px;
+                }
+
+                .ldb-chat-container::-webkit-scrollbar {
+                    width: 6px;
+                }
+
+                .ldb-chat-container::-webkit-scrollbar-track {
+                    background: rgba(255, 255, 255, 0.05);
+                    border-radius: 3px;
+                }
+
+                .ldb-chat-container::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.2);
+                    border-radius: 3px;
+                }
+
+                .ldb-chat-welcome {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    height: 100%;
+                    text-align: center;
+                    color: #888;
+                }
+
+                .ldb-chat-welcome-icon {
+                    font-size: 48px;
+                    margin-bottom: 12px;
+                }
+
+                .ldb-chat-welcome-text {
+                    font-size: 14px;
+                    line-height: 1.6;
+                }
+
+                .ldb-chat-welcome-text small {
+                    color: #666;
+                }
+
+                .ldb-chat-message {
+                    margin-bottom: 12px;
+                    display: flex;
+                    flex-direction: column;
+                }
+
+                .ldb-chat-message.user {
+                    align-items: flex-end;
+                }
+
+                .ldb-chat-message.assistant {
+                    align-items: flex-start;
+                }
+
+                .ldb-chat-bubble {
+                    max-width: 85%;
+                    padding: 10px 14px;
+                    border-radius: 12px;
+                    font-size: 13px;
+                    line-height: 1.6;
+                    word-break: break-word;
+                }
+
+                .ldb-chat-bubble.user {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    border-bottom-right-radius: 4px;
+                }
+
+                .ldb-chat-bubble.assistant {
+                    background: rgba(255, 255, 255, 0.1);
+                    color: #e0e0e0;
+                    border-bottom-left-radius: 4px;
+                }
+
+                .ldb-chat-bubble.processing {
+                    opacity: 0.8;
+                }
+
+                .ldb-chat-bubble.processing::after {
+                    content: "";
+                    display: inline-block;
+                    width: 12px;
+                    animation: ldb-dots 1.5s infinite;
+                }
+
+                @keyframes ldb-dots {
+                    0%, 20% { content: "."; }
+                    40% { content: ".."; }
+                    60%, 100% { content: "..."; }
+                }
+
+                .ldb-chat-bubble.error {
+                    border: 1px solid rgba(248, 113, 113, 0.5);
+                }
+
+                .ldb-chat-input-container {
+                    display: flex;
+                    gap: 8px;
+                    margin-bottom: 12px;
+                }
+
+                .ldb-chat-input {
+                    flex: 1;
+                    padding: 10px 14px;
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 12px;
+                    color: #fff;
+                    font-size: 14px;
+                    resize: none;
+                    min-height: 40px;
+                    max-height: 80px;
+                }
+
+                .ldb-chat-input:focus {
+                    outline: none;
+                    border-color: #4a90d9;
+                }
+
+                .ldb-chat-input::placeholder {
+                    color: #666;
+                }
+
+                .ldb-chat-send-btn {
+                    padding: 10px 16px;
+                    background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
+                    border: none;
+                    border-radius: 12px;
+                    color: white;
+                    font-size: 14px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    white-space: nowrap;
+                }
+
+                .ldb-chat-send-btn:hover:not(:disabled) {
+                    transform: scale(1.05);
+                }
+
+                .ldb-chat-send-btn:disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                }
+
+                .ldb-chat-actions {
+                    display: flex;
+                    gap: 8px;
+                    margin-bottom: 8px;
+                }
+
+                .ldb-chat-action-btn {
+                    padding: 6px 12px;
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 6px;
+                    color: #b0b0b0;
+                    font-size: 12px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }
+
+                .ldb-chat-action-btn:hover {
+                    background: rgba(255, 255, 255, 0.1);
+                    color: #fff;
+                }
+            `;
+            document.head.appendChild(style);
+        },
+
+        // 创建浮动按钮
+        createFloatButton: () => {
+            const btn = document.createElement("button");
+            btn.className = "ldb-notion-float-btn";
+            btn.innerHTML = "🤖";
+            btn.title = "AI 助手";
+
+            btn.onclick = () => {
+                NotionSiteUI.togglePanel();
+            };
+
+            document.body.appendChild(btn);
+            NotionSiteUI.floatBtn = btn;
+            return btn;
+        },
+
+        // 创建面板
+        createPanel: () => {
+            const panel = document.createElement("div");
+            panel.className = "ldb-notion-panel";
+            panel.innerHTML = `
+                <div class="ldb-notion-header">
+                    <h3>🤖 AI 助手</h3>
+                    <div class="ldb-notion-header-btns">
+                        <button class="ldb-notion-header-btn" id="ldb-notion-close" title="关闭">×</button>
+                    </div>
+                </div>
+                <div class="ldb-notion-body">
+                    <!-- 对话区域 -->
+                    <div class="ldb-chat-container" id="ldb-chat-messages">
+                        <div class="ldb-chat-welcome">
+                            <div class="ldb-chat-welcome-icon">🤖</div>
+                            <div class="ldb-chat-welcome-text">
+                                你好！我是 AI 助手<br>
+                                <small>试试输入「帮助」查看我能做什么</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 输入区域 -->
+                    <div class="ldb-chat-input-container">
+                        <textarea
+                            id="ldb-chat-input"
+                            class="ldb-chat-input"
+                            placeholder="输入指令，如「搜索 Docker」或「自动分类」..."
+                            rows="1"
+                        ></textarea>
+                        <button id="ldb-chat-send" class="ldb-chat-send-btn">发送</button>
+                    </div>
+
+                    <!-- 快捷操作 -->
+                    <div class="ldb-chat-actions">
+                        <button class="ldb-chat-action-btn" id="ldb-chat-clear">🗑️ 清空</button>
+                    </div>
+
+                    <div class="ldb-divider"></div>
+
+                    <!-- 设置折叠区 -->
+                    <div class="ldb-notion-toggle-section" id="ldb-notion-settings-toggle">
+                        <span>⚙️ 设置</span>
+                        <span id="ldb-notion-settings-arrow">▶</span>
+                    </div>
+                    <div class="ldb-notion-toggle-content collapsed" id="ldb-notion-settings-content">
+                        <div class="ldb-input-group" style="margin-top: 12px;">
+                            <label class="ldb-label">Notion API Key</label>
+                            <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx...">
+                        </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">数据库 ID</label>
+                            <input type="text" class="ldb-input" id="ldb-notion-database-id" placeholder="32位数据库ID">
+                        </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">AI 服务</label>
+                            <select class="ldb-select" id="ldb-notion-ai-service">
+                                <option value="openai">OpenAI</option>
+                                <option value="claude">Claude</option>
+                                <option value="gemini">Gemini</option>
+                            </select>
+                        </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">AI API Key</label>
+                            <input type="password" class="ldb-input" id="ldb-notion-ai-api-key" placeholder="AI 服务的 API Key">
+                        </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">自定义端点 (可选)</label>
+                            <input type="text" class="ldb-input" id="ldb-notion-ai-base-url" placeholder="留空使用官方 API">
+                        </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">分类列表</label>
+                            <input type="text" class="ldb-input" id="ldb-notion-ai-categories" placeholder="技术, 生活, 问答, 分享, 资源, 其他">
+                        </div>
+                        <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-save-settings">💾 保存设置</button>
+                    </div>
+
+                    <!-- 状态显示 -->
+                    <div id="ldb-notion-status-container"></div>
+                </div>
+            `;
+
+            document.body.appendChild(panel);
+            NotionSiteUI.panel = panel;
+            return panel;
+        },
+
+        // 切换面板显示
+        togglePanel: () => {
+            if (!NotionSiteUI.panel) return;
+
+            NotionSiteUI.isMinimized = !NotionSiteUI.isMinimized;
+
+            if (NotionSiteUI.isMinimized) {
+                NotionSiteUI.panel.classList.remove("visible");
+            } else {
+                NotionSiteUI.panel.classList.add("visible");
+            }
+
+            Storage.set(CONFIG.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, NotionSiteUI.isMinimized);
+        },
+
+        // 绑定事件
+        bindEvents: () => {
+            const panel = NotionSiteUI.panel;
+
+            // 关闭按钮
+            panel.querySelector("#ldb-notion-close").onclick = () => {
+                NotionSiteUI.togglePanel();
+            };
+
+            // 设置折叠
+            panel.querySelector("#ldb-notion-settings-toggle").onclick = () => {
+                const content = panel.querySelector("#ldb-notion-settings-content");
+                const arrow = panel.querySelector("#ldb-notion-settings-arrow");
+                content.classList.toggle("collapsed");
+                arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            };
+
+            // 保存设置
+            panel.querySelector("#ldb-notion-save-settings").onclick = () => {
+                Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, panel.querySelector("#ldb-notion-api-key").value.trim());
+                Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, panel.querySelector("#ldb-notion-database-id").value.trim());
+                Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, panel.querySelector("#ldb-notion-ai-service").value);
+                Storage.set(CONFIG.STORAGE_KEYS.AI_API_KEY, panel.querySelector("#ldb-notion-ai-api-key").value.trim());
+                Storage.set(CONFIG.STORAGE_KEYS.AI_BASE_URL, panel.querySelector("#ldb-notion-ai-base-url").value.trim());
+                Storage.set(CONFIG.STORAGE_KEYS.AI_CATEGORIES, panel.querySelector("#ldb-notion-ai-categories").value.trim());
+
+                NotionSiteUI.showStatus("设置已保存", "success");
+            };
+
+            // 拖拽面板
+            NotionSiteUI.makeDraggable(panel, panel.querySelector(".ldb-notion-header"));
+        },
+
+        // 加载配置
+        loadConfig: () => {
+            const panel = NotionSiteUI.panel;
+
+            panel.querySelector("#ldb-notion-api-key").value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            panel.querySelector("#ldb-notion-database-id").value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+            panel.querySelector("#ldb-notion-ai-service").value = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
+            panel.querySelector("#ldb-notion-ai-api-key").value = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "");
+            panel.querySelector("#ldb-notion-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, "");
+            panel.querySelector("#ldb-notion-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
+
+            // 恢复面板位置
+            const savedPosition = Storage.get(CONFIG.STORAGE_KEYS.NOTION_PANEL_POSITION, null);
+            if (savedPosition) {
+                try {
+                    const pos = JSON.parse(savedPosition);
+                    panel.style.right = pos.right || "24px";
+                    panel.style.bottom = pos.bottom || "96px";
+                } catch (e) {}
+            }
+        },
+
+        // 显示状态
+        showStatus: (message, type = "info") => {
+            const container = NotionSiteUI.panel.querySelector("#ldb-notion-status-container");
+            container.innerHTML = `
+                <div class="ldb-status ${type}">
+                    ${message}
+                    <button class="ldb-status-close" title="关闭">×</button>
+                </div>
+            `;
+
+            // 添加关闭按钮事件
+            const closeBtn = container.querySelector(".ldb-status-close");
+            if (closeBtn) {
+                closeBtn.onclick = () => { container.innerHTML = ""; };
+            }
+
+            // 错误消息延长显示时间（10秒），其他类型3秒
+            const timeout = type === "error" ? 10000 : 3000;
+            setTimeout(() => {
+                container.innerHTML = "";
+            }, timeout);
+        },
+
+        // 拖拽功能
+        makeDraggable: (element, handle) => {
+            let offsetX, offsetY, isDragging = false;
+
+            handle.onmousedown = (e) => {
+                if (e.target.tagName === "BUTTON") return;
+                isDragging = true;
+                offsetX = e.clientX - element.offsetLeft;
+                offsetY = e.clientY - element.offsetTop;
+                document.body.style.userSelect = "none";
+            };
+
+            document.onmousemove = (e) => {
+                if (!isDragging) return;
+                const x = Math.max(0, Math.min(window.innerWidth - element.offsetWidth, e.clientX - offsetX));
+                const y = Math.max(0, Math.min(window.innerHeight - element.offsetHeight, e.clientY - offsetY));
+                element.style.left = x + "px";
+                element.style.top = y + "px";
+                element.style.right = "auto";
+                element.style.bottom = "auto";
+            };
+
+            document.onmouseup = () => {
+                if (isDragging) {
+                    // 保存位置（使用 right 和 bottom）
+                    const rect = element.getBoundingClientRect();
+                    const right = window.innerWidth - rect.right;
+                    const bottom = window.innerHeight - rect.bottom;
+                    Storage.set(CONFIG.STORAGE_KEYS.NOTION_PANEL_POSITION, JSON.stringify({ right: right + "px", bottom: bottom + "px" }));
+                }
+                isDragging = false;
+                document.body.style.userSelect = "";
+            };
+        },
+
+        // 初始化 AI 助手模块（复用 AIAssistant）
+        initAIAssistant: () => {
+            // 重写 getSettings 以适配 Notion 站点 UI
+            const originalGetSettings = AIAssistant.getSettings;
+            AIAssistant.getSettings = () => {
+                // 优先使用 Notion 站点 UI 的输入框（如果存在）
+                const notionPanel = NotionSiteUI.panel;
+                if (notionPanel) {
+                    const aiService = notionPanel.querySelector("#ldb-notion-ai-service")?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
+                    const storedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
+
+                    // 验证存储的模型是否属于当前服务，否则使用默认模型
+                    const provider = AIService.PROVIDERS[aiService];
+                    const validModel = provider?.models?.includes(storedModel) ? storedModel : (provider?.defaultModel || "");
+
+                    return {
+                        notionApiKey: notionPanel.querySelector("#ldb-notion-api-key")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
+                        notionDatabaseId: notionPanel.querySelector("#ldb-notion-database-id")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
+                        aiApiKey: notionPanel.querySelector("#ldb-notion-ai-api-key")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, ""),
+                        aiService: aiService,
+                        aiModel: validModel,
+                        aiBaseUrl: notionPanel.querySelector("#ldb-notion-ai-base-url")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, ""),
+                        categories: (notionPanel.querySelector("#ldb-notion-ai-categories")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories))
+                            .split(/[,，]/).map(c => c.trim()).filter(Boolean),
+                    };
+                }
+                return originalGetSettings();
+            };
+        },
+
+        // 初始化
+        init: () => {
+            NotionSiteUI.injectStyles();
+            NotionSiteUI.createFloatButton();
+            NotionSiteUI.createPanel();
+            NotionSiteUI.bindEvents();
+            NotionSiteUI.loadConfig();
+            NotionSiteUI.initAIAssistant();
+
+            // 初始化对话 UI
+            ChatState.load();
+            ChatUI.renderMessages();
+            ChatUI.bindEvents();
+
+            // 检查是否需要展开
+            if (!Storage.get(CONFIG.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, true)) {
+                NotionSiteUI.isMinimized = false;
+                NotionSiteUI.panel.classList.add("visible");
+            }
         },
     };
 
@@ -1979,7 +4193,8 @@
                 }
 
                 .ldb-status {
-                    padding: 12px;
+                    position: relative;
+                    padding: 12px 32px 12px 12px;
                     background: rgba(74, 144, 217, 0.1);
                     border: 1px solid rgba(74, 144, 217, 0.3);
                     border-radius: 10px;
@@ -1987,6 +4202,25 @@
                     color: #4a90d9;
                     text-align: center;
                     margin-top: 12px;
+                }
+
+                .ldb-status-close {
+                    position: absolute;
+                    right: 8px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    background: none;
+                    border: none;
+                    color: inherit;
+                    font-size: 16px;
+                    cursor: pointer;
+                    opacity: 0.6;
+                    padding: 4px;
+                    line-height: 1;
+                }
+
+                .ldb-status-close:hover {
+                    opacity: 1;
                 }
 
                 .ldb-status.success {
@@ -2070,6 +4304,205 @@
                 .ldb-mini-btn:hover {
                     transform: scale(1.1);
                     box-shadow: 0 6px 20px rgba(74, 144, 217, 0.5);
+                }
+
+                /* ===== AI 对话界面样式 ===== */
+                .ldb-chat-container {
+                    height: 280px;
+                    overflow-y: auto;
+                    background: rgba(0, 0, 0, 0.2);
+                    border-radius: 8px;
+                    padding: 12px;
+                    margin-bottom: 12px;
+                }
+
+                .ldb-chat-container::-webkit-scrollbar {
+                    width: 6px;
+                }
+
+                .ldb-chat-container::-webkit-scrollbar-track {
+                    background: rgba(255, 255, 255, 0.05);
+                    border-radius: 3px;
+                }
+
+                .ldb-chat-container::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.2);
+                    border-radius: 3px;
+                }
+
+                .ldb-chat-welcome {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    height: 100%;
+                    text-align: center;
+                    color: #888;
+                }
+
+                .ldb-chat-welcome-icon {
+                    font-size: 48px;
+                    margin-bottom: 12px;
+                }
+
+                .ldb-chat-welcome-text {
+                    font-size: 14px;
+                    line-height: 1.6;
+                }
+
+                .ldb-chat-welcome-text small {
+                    color: #666;
+                }
+
+                .ldb-chat-message {
+                    margin-bottom: 12px;
+                    display: flex;
+                    flex-direction: column;
+                }
+
+                .ldb-chat-message.user {
+                    align-items: flex-end;
+                }
+
+                .ldb-chat-message.assistant {
+                    align-items: flex-start;
+                }
+
+                .ldb-chat-bubble {
+                    max-width: 85%;
+                    padding: 10px 14px;
+                    border-radius: 12px;
+                    font-size: 13px;
+                    line-height: 1.6;
+                    word-break: break-word;
+                }
+
+                .ldb-chat-bubble.user {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    border-bottom-right-radius: 4px;
+                }
+
+                .ldb-chat-bubble.assistant {
+                    background: rgba(255, 255, 255, 0.1);
+                    color: #e0e0e0;
+                    border-bottom-left-radius: 4px;
+                }
+
+                .ldb-chat-bubble.processing {
+                    opacity: 0.8;
+                }
+
+                .ldb-chat-bubble.processing::after {
+                    content: "";
+                    display: inline-block;
+                    width: 12px;
+                    animation: ldb-dots 1.5s infinite;
+                }
+
+                @keyframes ldb-dots {
+                    0%, 20% { content: "."; }
+                    40% { content: ".."; }
+                    60%, 100% { content: "..."; }
+                }
+
+                .ldb-chat-bubble.error {
+                    border: 1px solid rgba(248, 113, 113, 0.5);
+                }
+
+                .ldb-chat-input-container {
+                    display: flex;
+                    gap: 8px;
+                    margin-bottom: 12px;
+                }
+
+                .ldb-chat-input {
+                    flex: 1;
+                    padding: 10px 14px;
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 12px;
+                    color: #fff;
+                    font-size: 14px;
+                    resize: none;
+                    min-height: 40px;
+                    max-height: 80px;
+                }
+
+                .ldb-chat-input:focus {
+                    outline: none;
+                    border-color: #4a90d9;
+                }
+
+                .ldb-chat-input::placeholder {
+                    color: #666;
+                }
+
+                .ldb-chat-send-btn {
+                    padding: 10px 16px;
+                    background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
+                    border: none;
+                    border-radius: 12px;
+                    color: white;
+                    font-size: 14px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    white-space: nowrap;
+                }
+
+                .ldb-chat-send-btn:hover:not(:disabled) {
+                    transform: scale(1.05);
+                }
+
+                .ldb-chat-send-btn:disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                }
+
+                .ldb-chat-actions {
+                    display: flex;
+                    gap: 8px;
+                    margin-bottom: 8px;
+                }
+
+                .ldb-chat-action-btn {
+                    padding: 6px 12px;
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 6px;
+                    color: #b0b0b0;
+                    font-size: 12px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }
+
+                .ldb-chat-action-btn:hover {
+                    background: rgba(255, 255, 255, 0.1);
+                    color: #fff;
+                }
+
+                .ldb-chat-settings-toggle {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: 8px 0;
+                    cursor: pointer;
+                    border-top: 1px solid rgba(255, 255, 255, 0.1);
+                    margin-top: 8px;
+                }
+
+                .ldb-chat-settings-toggle:hover {
+                    color: #fff;
+                }
+
+                .ldb-chat-settings-content {
+                    overflow: hidden;
+                    transition: max-height 0.3s ease;
+                    max-height: 500px;
+                }
+
+                .ldb-chat-settings-content.collapsed {
+                    max-height: 0;
                 }
 
                 .ldb-divider {
@@ -2424,6 +4857,7 @@
 
                 .ldb-log-content.collapsed {
                     max-height: 0;
+                    overflow: hidden;
                 }
 
                 .ldb-log-item {
@@ -2722,7 +5156,38 @@
                                 从数据库链接复制：notion.so/<b>数据库ID</b>?v=xxx
                             </div>
                         </div>
-                        <button class="ldb-btn ldb-btn-secondary" id="ldb-validate-config">验证配置</button>
+
+                        <!-- 导出目标类型选择 -->
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">导出目标</label>
+                            <div class="ldb-checkbox-group" style="margin-bottom: 8px;">
+                                <label class="ldb-checkbox-item">
+                                    <input type="radio" name="ldb-export-target" id="ldb-export-target-database" value="database" checked>
+                                    <span>数据库（推荐）</span>
+                                </label>
+                                <label class="ldb-checkbox-item">
+                                    <input type="radio" name="ldb-export-target" id="ldb-export-target-page" value="page">
+                                    <span>页面（子页面）</span>
+                                </label>
+                            </div>
+                            <div class="ldb-tip" id="ldb-export-target-tip">
+                                导出为数据库条目，支持筛选和排序
+                            </div>
+                        </div>
+
+                        <!-- 父页面 ID（页面模式时显示） -->
+                        <div class="ldb-input-group" id="ldb-parent-page-group" style="display: none;">
+                            <label class="ldb-label">父页面 ID</label>
+                            <input type="text" class="ldb-input" id="ldb-parent-page-id" placeholder="32位页面ID">
+                            <div class="ldb-tip">
+                                帖子将作为子页面创建在此页面下
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 8px;">
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-validate-config">验证配置</button>
+                            <button class="ldb-btn ldb-btn-primary" id="ldb-setup-database" title="自动在数据库中创建所需属性">自动设置数据库</button>
+                        </div>
 
                         <!-- 权限设置 -->
                         <div class="ldb-permission-panel">
@@ -2801,6 +5266,81 @@
                                     <option value="10000">极慢 (10秒)</option>
                                     <option value="30000">龟速 (30秒)</option>
                                 </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ldb-divider"></div>
+
+                    <!-- AI 助手对话界面 -->
+                    <div class="ldb-section">
+                        <div class="ldb-section-title">🤖 AI 助手</div>
+
+                        <!-- 对话区域 -->
+                        <div class="ldb-chat-container" id="ldb-chat-messages">
+                            <div class="ldb-chat-welcome">
+                                <div class="ldb-chat-welcome-icon">🤖</div>
+                                <div class="ldb-chat-welcome-text">
+                                    你好！我是 AI 助手<br>
+                                    <small>试试输入「帮助」查看我能做什么</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 输入区域 -->
+                        <div class="ldb-chat-input-container">
+                            <textarea
+                                id="ldb-chat-input"
+                                class="ldb-chat-input"
+                                placeholder="输入指令，如「搜索 Docker」或「自动分类」..."
+                                rows="1"
+                            ></textarea>
+                            <button id="ldb-chat-send" class="ldb-chat-send-btn">发送</button>
+                        </div>
+
+                        <!-- 快捷操作 -->
+                        <div class="ldb-chat-actions">
+                            <button class="ldb-chat-action-btn" id="ldb-chat-clear">🗑️ 清空</button>
+                        </div>
+
+                        <!-- 设置折叠区 -->
+                        <div class="ldb-chat-settings-toggle" id="ldb-chat-settings-toggle">
+                            <span style="font-size: 12px; color: #888;">⚙️ AI 设置</span>
+                            <span id="ldb-chat-settings-arrow">▶</span>
+                        </div>
+                        <div class="ldb-chat-settings-content collapsed" id="ldb-chat-settings-content">
+                            <div class="ldb-input-group" style="margin-top: 12px;">
+                                <label class="ldb-label">AI 服务</label>
+                                <select class="ldb-select" id="ldb-ai-service">
+                                    <option value="openai">OpenAI</option>
+                                    <option value="claude">Claude</option>
+                                    <option value="gemini">Gemini</option>
+                                </select>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">模型</label>
+                                <div style="display: flex; gap: 8px;">
+                                    <select class="ldb-select" id="ldb-ai-model" style="flex: 1;"></select>
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-fetch-models" style="padding: 6px 12px; white-space: nowrap;">🔄 获取</button>
+                                </div>
+                                <div class="ldb-tip" id="ldb-ai-model-tip"></div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">API Key</label>
+                                <input type="password" class="ldb-input" id="ldb-ai-api-key" placeholder="AI 服务的 API Key">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">自定义端点 (可选)</label>
+                                <input type="text" class="ldb-input" id="ldb-ai-base-url" placeholder="留空使用官方 API">
+                                <div class="ldb-tip">支持第三方 OpenAI 兼容 API</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">分类列表</label>
+                                <input type="text" class="ldb-input" id="ldb-ai-categories" placeholder="技术, 生活, 问答, 分享, 资源, 其他">
+                                <div class="ldb-tip">逗号分隔，用于自动分类功能</div>
+                            </div>
+                            <div class="ldb-btn-group">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-test">测试连接</button>
                             </div>
                         </div>
                     </div>
@@ -2926,25 +5466,121 @@
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
+            // 导出目标类型切换
+            const handleExportTargetChange = (e) => {
+                const targetType = e.target.value;
+                const parentPageGroup = panel.querySelector("#ldb-parent-page-group");
+                const databaseIdGroup = panel.querySelector("#ldb-database-id").parentElement;
+                const exportTargetTip = panel.querySelector("#ldb-export-target-tip");
+
+                if (targetType === "page") {
+                    parentPageGroup.style.display = "block";
+                    databaseIdGroup.style.display = "none";
+                    exportTargetTip.textContent = "导出为子页面，包含完整内容";
+                } else {
+                    parentPageGroup.style.display = "none";
+                    databaseIdGroup.style.display = "block";
+                    exportTargetTip.textContent = "导出为数据库条目，支持筛选和排序";
+                }
+
+                Storage.set(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, targetType);
+            };
+
+            panel.querySelector("#ldb-export-target-database").onchange = handleExportTargetChange;
+            panel.querySelector("#ldb-export-target-page").onchange = handleExportTargetChange;
+
+            // 父页面 ID 自动保存
+            panel.querySelector("#ldb-parent-page-id").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, e.target.value.trim());
+            };
+
             // 验证配置
             panel.querySelector("#ldb-validate-config").onclick = async () => {
+                const btn = panel.querySelector("#ldb-validate-config");
                 const apiKey = panel.querySelector("#ldb-api-key").value.trim();
+                const exportTargetType = panel.querySelector("#ldb-export-target-page").checked ? "page" : "database";
                 const databaseId = panel.querySelector("#ldb-database-id").value.trim();
+                const parentPageId = panel.querySelector("#ldb-parent-page-id").value.trim();
 
-                if (!apiKey || !databaseId) {
-                    UI.showStatus("请填写 API Key 和数据库 ID", "error");
+                if (!apiKey) {
+                    UI.showStatus("请填写 API Key", "error");
                     return;
                 }
 
-                UI.showStatus("验证中...", "info");
+                if (exportTargetType === "database" && !databaseId) {
+                    UI.showStatus("请填写数据库 ID", "error");
+                    return;
+                }
 
-                const result = await NotionAPI.validateConfig(apiKey, databaseId);
-                if (result.valid) {
-                    UI.showStatus("配置验证成功！", "success");
-                    Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
-                    Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, databaseId);
-                } else {
-                    UI.showStatus(`验证失败: ${result.error}`, "error");
+                if (exportTargetType === "page" && !parentPageId) {
+                    UI.showStatus("请填写父页面 ID", "error");
+                    return;
+                }
+
+                btn.disabled = true;
+                btn.innerHTML = '<span class="ldb-spin">🔄</span> 验证中...';
+
+                try {
+                    let result;
+                    if (exportTargetType === "database") {
+                        result = await NotionAPI.validateConfig(apiKey, databaseId);
+                        if (result.valid) {
+                            UI.showStatus("数据库配置验证成功！", "success");
+                            Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
+                            Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, databaseId);
+                        }
+                    } else {
+                        result = await NotionAPI.validatePage(parentPageId, apiKey);
+                        if (result.valid) {
+                            UI.showStatus("页面配置验证成功！", "success");
+                            Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
+                            Storage.set(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, parentPageId);
+                        }
+                    }
+
+                    if (!result.valid) {
+                        UI.showStatus(`验证失败: ${result.error}`, "error");
+                    }
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = "验证配置";
+                }
+            };
+
+            // 自动设置数据库属性
+            panel.querySelector("#ldb-setup-database").onclick = async () => {
+                const apiKey = panel.querySelector("#ldb-api-key").value.trim();
+                const databaseId = panel.querySelector("#ldb-database-id").value.trim();
+
+                if (!apiKey) {
+                    UI.showStatus("请先填写 API Key", "error");
+                    return;
+                }
+
+                if (!databaseId) {
+                    UI.showStatus("请先填写数据库 ID", "error");
+                    return;
+                }
+
+                const btn = panel.querySelector("#ldb-setup-database");
+                btn.disabled = true;
+                btn.innerHTML = '<span class="ldb-spin">🔄</span> 设置中...';
+
+                try {
+                    const result = await NotionAPI.setupDatabaseProperties(databaseId, apiKey);
+                    if (result.success) {
+                        UI.showStatus(`✅ ${result.message}`, "success");
+                        // 保存配置
+                        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
+                        Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, databaseId);
+                    } else {
+                        UI.showStatus(`❌ 设置失败: ${result.error}`, "error");
+                    }
+                } catch (error) {
+                    UI.showStatus(`❌ 设置失败: ${error.message}`, "error");
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = "自动设置数据库";
                 }
             };
 
@@ -3021,10 +5657,22 @@
             // 开始导出
             panel.querySelector("#ldb-export").onclick = async () => {
                 const apiKey = panel.querySelector("#ldb-api-key").value.trim();
+                const exportTargetType = panel.querySelector("#ldb-export-target-page").checked ? "page" : "database";
                 const databaseId = panel.querySelector("#ldb-database-id").value.trim();
+                const parentPageId = panel.querySelector("#ldb-parent-page-id").value.trim();
 
-                if (!apiKey || !databaseId) {
-                    UI.showStatus("请先配置 Notion API Key 和数据库 ID", "error");
+                if (!apiKey) {
+                    UI.showStatus("请先配置 Notion API Key", "error");
+                    return;
+                }
+
+                if (exportTargetType === "database" && !databaseId) {
+                    UI.showStatus("请先配置数据库 ID", "error");
+                    return;
+                }
+
+                if (exportTargetType === "page" && !parentPageId) {
+                    UI.showStatus("请先配置父页面 ID", "error");
                     return;
                 }
 
@@ -3047,6 +5695,8 @@
                 const settings = {
                     apiKey,
                     databaseId,
+                    parentPageId,
+                    exportTargetType,
                     onlyFirst: panel.querySelector("#ldb-only-first").checked,
                     onlyOp: panel.querySelector("#ldb-only-op").checked,
                     rangeStart: parseInt(panel.querySelector("#ldb-range-start").value) || 1,
@@ -3056,7 +5706,12 @@
 
                 // 保存设置
                 Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
-                Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, databaseId);
+                Storage.set(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, exportTargetType);
+                if (exportTargetType === "database") {
+                    Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, databaseId);
+                } else {
+                    Storage.set(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, parentPageId);
+                }
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_ONLY_FIRST, settings.onlyFirst);
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, settings.onlyOp);
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, settings.rangeStart);
@@ -3167,6 +5822,96 @@
                 Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, e.target.value.trim());
             };
 
+            // ===========================================
+            // AI 对话事件绑定
+            // ===========================================
+
+            // 初始化对话 UI
+            ChatUI.init();
+
+            // AI 服务切换 - 更新模型列表
+            panel.querySelector("#ldb-ai-service").onchange = (e) => {
+                UI.updateAIModelOptions(e.target.value);
+                Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, e.target.value);
+            };
+
+            // 保存 AI 配置
+            panel.querySelector("#ldb-ai-api-key").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AI_API_KEY, e.target.value.trim());
+            };
+            panel.querySelector("#ldb-ai-base-url").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AI_BASE_URL, e.target.value.trim());
+            };
+            panel.querySelector("#ldb-ai-categories").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AI_CATEGORIES, e.target.value.trim());
+            };
+            panel.querySelector("#ldb-ai-model").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, e.target.value);
+            };
+
+            // 获取模型列表
+            panel.querySelector("#ldb-ai-fetch-models").onclick = async () => {
+                const aiApiKey = panel.querySelector("#ldb-ai-api-key").value.trim();
+                const aiService = panel.querySelector("#ldb-ai-service").value;
+                const aiBaseUrl = panel.querySelector("#ldb-ai-base-url").value.trim();
+                const fetchBtn = panel.querySelector("#ldb-ai-fetch-models");
+                const modelTip = panel.querySelector("#ldb-ai-model-tip");
+
+                if (!aiApiKey) {
+                    UI.showStatus("请先填写 AI API Key", "error");
+                    return;
+                }
+
+                fetchBtn.disabled = true;
+                fetchBtn.innerHTML = "⏳ 获取中...";
+                modelTip.textContent = "";
+
+                try {
+                    const models = await AIService.fetchModels(aiService, aiApiKey, aiBaseUrl);
+                    UI.updateAIModelOptions(aiService, models);
+                    modelTip.textContent = `✅ 获取到 ${models.length} 个可用模型`;
+                    modelTip.style.color = "#34d399";
+                    UI.showStatus(`成功获取 ${models.length} 个模型`, "success");
+                } catch (error) {
+                    modelTip.textContent = `❌ ${error.message}`;
+                    modelTip.style.color = "#f87171";
+                    UI.showStatus(`获取模型失败: ${error.message}`, "error");
+                } finally {
+                    fetchBtn.disabled = false;
+                    fetchBtn.innerHTML = "🔄 获取";
+                }
+            };
+
+            // 测试 AI 连接
+            panel.querySelector("#ldb-ai-test").onclick = async () => {
+                const btn = panel.querySelector("#ldb-ai-test");
+                const aiApiKey = panel.querySelector("#ldb-ai-api-key").value.trim();
+                const aiService = panel.querySelector("#ldb-ai-service").value;
+                const aiModel = panel.querySelector("#ldb-ai-model").value;
+                const aiBaseUrl = panel.querySelector("#ldb-ai-base-url").value.trim();
+
+                if (!aiApiKey) {
+                    UI.showStatus("请先填写 AI API Key", "error");
+                    return;
+                }
+
+                btn.disabled = true;
+                btn.innerHTML = '<span class="ldb-spin">🔄</span> 测试中...';
+
+                try {
+                    const response = await AIService.request(
+                        "请回复：连接成功",
+                        { aiService, aiApiKey, aiModel, aiBaseUrl }
+                    );
+                    UI.showStatus(`AI 连接成功: ${response}`, "success");
+                } catch (error) {
+                    UI.showStatus(`AI 连接失败: ${error.message}`, "error");
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = "🧪 测试";
+                }
+            };
+
             // 拖拽
             UI.makeDraggable(panel, panel.querySelector(".ldb-header"));
         },
@@ -3177,12 +5922,27 @@
 
             panel.querySelector("#ldb-api-key").value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
             panel.querySelector("#ldb-database-id").value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+            panel.querySelector("#ldb-parent-page-id").value = Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "");
             panel.querySelector("#ldb-only-first").checked = Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_FIRST, CONFIG.DEFAULTS.onlyFirst);
             panel.querySelector("#ldb-only-op").checked = Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, CONFIG.DEFAULTS.onlyOp);
             panel.querySelector("#ldb-range-start").value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, CONFIG.DEFAULTS.rangeStart);
             panel.querySelector("#ldb-range-end").value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, CONFIG.DEFAULTS.rangeEnd);
             panel.querySelector("#ldb-img-mode").value = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
             panel.querySelector("#ldb-request-delay").value = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+
+            // 加载导出目标类型设置
+            const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
+            if (exportTargetType === "page") {
+                panel.querySelector("#ldb-export-target-page").checked = true;
+                panel.querySelector("#ldb-parent-page-group").style.display = "block";
+                panel.querySelector("#ldb-database-id").parentElement.style.display = "none";
+                panel.querySelector("#ldb-export-target-tip").textContent = "导出为子页面，包含完整内容";
+            } else {
+                panel.querySelector("#ldb-export-target-database").checked = true;
+                panel.querySelector("#ldb-parent-page-group").style.display = "none";
+                panel.querySelector("#ldb-database-id").parentElement.style.display = "block";
+                panel.querySelector("#ldb-export-target-tip").textContent = "导出为数据库条目，支持筛选和排序";
+            }
 
             // 加载权限设置
             panel.querySelector("#ldb-permission-level").value = Storage.get(CONFIG.STORAGE_KEYS.PERMISSION_LEVEL, CONFIG.DEFAULTS.permissionLevel);
@@ -3196,6 +5956,31 @@
                 logPanel.style.display = enableAuditLog ? "block" : "none";
             }
 
+            // 加载 AI 分类设置
+            const aiService = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
+            panel.querySelector("#ldb-ai-service").value = aiService;
+            UI.updateAIModelOptions(aiService);
+
+            // 验证并加载 AI 模型
+            const savedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
+            const provider = AIService.PROVIDERS[aiService];
+            const validModels = provider?.models || [];
+
+            if (savedModel && validModels.includes(savedModel)) {
+                // 存储的模型与当前服务兼容
+                panel.querySelector("#ldb-ai-model").value = savedModel;
+            } else if (savedModel && !validModels.includes(savedModel)) {
+                // 存储的模型不兼容当前服务，重置为默认模型
+                const defaultModel = provider?.defaultModel || "";
+                panel.querySelector("#ldb-ai-model").value = defaultModel;
+                Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, defaultModel);
+                console.warn(`AI 模型 "${savedModel}" 与当前服务 "${aiService}" 不兼容，已重置为默认模型`);
+            }
+
+            panel.querySelector("#ldb-ai-api-key").value = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "");
+            panel.querySelector("#ldb-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, CONFIG.DEFAULTS.aiBaseUrl);
+            panel.querySelector("#ldb-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
+
             // 初始化日志面板
             UI.updateLogPanel();
         },
@@ -3203,7 +5988,24 @@
         // 显示状态
         showStatus: (message, type = "info") => {
             const container = UI.panel.querySelector("#ldb-status-container");
-            container.innerHTML = `<div class="ldb-status ${type}">${message}</div>`;
+            container.innerHTML = `
+                <div class="ldb-status ${type}">
+                    ${message}
+                    <button class="ldb-status-close" title="关闭">×</button>
+                </div>
+            `;
+
+            // 添加关闭按钮事件
+            const closeBtn = container.querySelector(".ldb-status-close");
+            if (closeBtn) {
+                closeBtn.onclick = () => { container.innerHTML = ""; };
+            }
+
+            // 错误消息延长显示时间（10秒），其他类型3秒
+            const timeout = type === "error" ? 10000 : 3000;
+            setTimeout(() => {
+                container.innerHTML = "";
+            }, timeout);
         },
 
         // 显示进度
@@ -3227,6 +6029,21 @@
         // 隐藏进度
         hideProgress: () => {
             UI.panel.querySelector("#ldb-status-container").innerHTML = "";
+        },
+
+        // 更新 AI 模型选项
+        updateAIModelOptions: (service, customModels = null) => {
+            const modelSelect = UI.panel.querySelector("#ldb-ai-model");
+            const provider = AIService.PROVIDERS[service];
+
+            if (!provider) return;
+
+            const models = customModels || provider.models;
+            const defaultModel = provider.defaultModel;
+
+            modelSelect.innerHTML = models.map(model =>
+                `<option value="${model}" ${model === defaultModel ? 'selected' : ''}>${model}</option>`
+            ).join("");
         },
 
         // 渲染收藏列表
@@ -3427,11 +6244,23 @@
     // 入口
     // ===========================================
     function main() {
+        const initUI = () => {
+            const currentSite = SiteDetector.detect();
+
+            if (currentSite === SiteDetector.SITES.LINUX_DO) {
+                // Linux.do 站点：初始化完整 UI
+                UI.init();
+            } else if (currentSite === SiteDetector.SITES.NOTION) {
+                // Notion 站点：初始化浮动 AI 助手
+                NotionSiteUI.init();
+            }
+        };
+
         // 等待页面加载完成
         if (document.readyState === "loading") {
-            document.addEventListener("DOMContentLoaded", UI.init);
+            document.addEventListener("DOMContentLoaded", initUI);
         } else {
-            UI.init();
+            initUI();
         }
     }
 
