@@ -1126,8 +1126,10 @@
 
         // Claude API 请求
         requestClaude: (prompt, model, apiKey, baseUrl) => {
-            const url = baseUrl
-                ? `${baseUrl.replace(/\/$/, "")}/v1/messages`
+            // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
+            const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1$/, "") : "";
+            const url = normalizedBase
+                ? `${normalizedBase}/v1/messages`
                 : "https://api.anthropic.com/v1/messages";
 
             return new Promise((resolve, reject) => {
@@ -1163,8 +1165,10 @@
 
         // Gemini API 请求
         requestGemini: (prompt, model, apiKey, baseUrl) => {
-            const url = baseUrl
-                ? `${baseUrl.replace(/\/$/, "")}/v1beta/models/${model}:generateContent?key=${apiKey}`
+            // 标准化 baseUrl：移除末尾的 / 和 /v1beta，避免重复路径
+            const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1beta$/, "") : "";
+            const url = normalizedBase
+                ? `${normalizedBase}/v1beta/models/${model}:generateContent?key=${apiKey}`
                 : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
             return new Promise((resolve, reject) => {
@@ -1281,8 +1285,10 @@
 
         // Claude 对话请求
         requestClaudeChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
-            const url = baseUrl
-                ? `${baseUrl.replace(/\/$/, "")}/v1/messages`
+            // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
+            const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1$/, "") : "";
+            const url = normalizedBase
+                ? `${normalizedBase}/v1/messages`
                 : "https://api.anthropic.com/v1/messages";
 
             return new Promise((resolve, reject) => {
@@ -1318,8 +1324,10 @@
 
         // Gemini 对话请求
         requestGeminiChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
-            const url = baseUrl
-                ? `${baseUrl.replace(/\/$/, "")}/v1beta/models/${model}:generateContent?key=${apiKey}`
+            // 标准化 baseUrl：移除末尾的 / 和 /v1beta，避免重复路径
+            const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1beta$/, "") : "";
+            const url = normalizedBase
+                ? `${normalizedBase}/v1beta/models/${model}:generateContent?key=${apiKey}`
                 : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
             return new Promise((resolve, reject) => {
@@ -1414,8 +1422,10 @@
 
         // 获取 Gemini 模型列表
         fetchGeminiModels: (apiKey, baseUrl) => {
-            const url = baseUrl
-                ? `${baseUrl.replace(/\/$/, "")}/v1beta/models?key=${apiKey}`
+            // 标准化 baseUrl：移除末尾的 / 和 /v1beta，避免重复路径
+            const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1beta$/, "") : "";
+            const url = normalizedBase
+                ? `${normalizedBase}/v1beta/models?key=${apiKey}`
                 : `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
 
             return new Promise((resolve, reject) => {
@@ -5868,7 +5878,7 @@ ${explanation ? `我的理解：${explanation}` : ""}
 
                 try {
                     const models = await AIService.fetchModels(aiService, aiApiKey, aiBaseUrl);
-                    UI.updateAIModelOptions(aiService, models);
+                    UI.updateAIModelOptions(aiService, models, true); // 保留当前选择
                     modelTip.textContent = `✅ 获取到 ${models.length} 个可用模型`;
                     modelTip.style.color = "#34d399";
                     UI.showStatus(`成功获取 ${models.length} 个模型`, "success");
@@ -5959,22 +5969,29 @@ ${explanation ? `我的理解：${explanation}` : ""}
             // 加载 AI 分类设置
             const aiService = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
             panel.querySelector("#ldb-ai-service").value = aiService;
-            UI.updateAIModelOptions(aiService);
 
             // 验证并加载 AI 模型
             const savedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
             const provider = AIService.PROVIDERS[aiService];
             const validModels = provider?.models || [];
+            const modelSelect = panel.querySelector("#ldb-ai-model");
 
-            if (savedModel && validModels.includes(savedModel)) {
-                // 存储的模型与当前服务兼容
-                panel.querySelector("#ldb-ai-model").value = savedModel;
-            } else if (savedModel && !validModels.includes(savedModel)) {
-                // 存储的模型不兼容当前服务，重置为默认模型
-                const defaultModel = provider?.defaultModel || "";
-                panel.querySelector("#ldb-ai-model").value = defaultModel;
-                Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, defaultModel);
-                console.warn(`AI 模型 "${savedModel}" 与当前服务 "${aiService}" 不兼容，已重置为默认模型`);
+            // 先更新模型选项列表
+            UI.updateAIModelOptions(aiService);
+
+            if (savedModel) {
+                // 检查保存的模型是否在下拉框选项中存在
+                const optionExists = Array.from(modelSelect.options).some(opt => opt.value === savedModel);
+                if (optionExists || validModels.includes(savedModel)) {
+                    // 存储的模型可用，直接设置
+                    modelSelect.value = savedModel;
+                } else {
+                    // 存储的模型不兼容当前服务，重置为默认模型
+                    const defaultModel = provider?.defaultModel || "";
+                    modelSelect.value = defaultModel;
+                    Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, defaultModel);
+                    console.warn(`AI 模型 "${savedModel}" 与当前服务 "${aiService}" 不兼容，已重置为默认模型`);
+                }
             }
 
             panel.querySelector("#ldb-ai-api-key").value = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "");
@@ -6032,18 +6049,25 @@ ${explanation ? `我的理解：${explanation}` : ""}
         },
 
         // 更新 AI 模型选项
-        updateAIModelOptions: (service, customModels = null) => {
+        updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
             const modelSelect = UI.panel.querySelector("#ldb-ai-model");
             const provider = AIService.PROVIDERS[service];
 
-            if (!provider) return;
+            if (!provider || !modelSelect) return;
 
             const models = customModels || provider.models;
             const defaultModel = provider.defaultModel;
 
-            modelSelect.innerHTML = models.map(model =>
-                `<option value="${model}" ${model === defaultModel ? 'selected' : ''}>${model}</option>`
-            ).join("");
+            // 保留当前选择的模型（如果需要且存在于新列表中）
+            const currentValue = modelSelect.value;
+            const shouldPreserve = preserveSelection && currentValue && models.includes(currentValue);
+
+            modelSelect.innerHTML = models.map(model => {
+                const isSelected = shouldPreserve
+                    ? model === currentValue
+                    : model === defaultModel;
+                return `<option value="${model}" ${isSelected ? 'selected' : ''}>${model}</option>`;
+            }).join("");
         },
 
         // 渲染收藏列表
