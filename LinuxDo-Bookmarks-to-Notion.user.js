@@ -1749,6 +1749,12 @@ compound 格式（仅当 intent 为 compound 时使用）：
                 return AIAssistant.getHelpMessage();
             }
 
+            // 问候语检测（无需配置）
+            const greetings = ["你好", "您好", "hello", "hi", "hey", "嗨", "早上好", "下午好", "晚上好"];
+            if (greetings.some(g => userMessage.toLowerCase().trim() === g || userMessage.trim() === g)) {
+                return `你好！👋 我是你的 Notion 数据库助手。\n\n输入「帮助」查看我能做什么，或者直接告诉我你想执行的操作。`;
+            }
+
             // 检查基础配置（不检查数据库 ID，因为工作区搜索不需要）
             const basicConfigCheck = AIAssistant.checkConfig(settings, false);
             if (!basicConfigCheck.valid) {
