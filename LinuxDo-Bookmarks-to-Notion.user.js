@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux.do 收藏帖子导出到 Notion
 // @namespace    https://linux.do/
-// @version      1.8.0
+// @version      2.0.0
 // @description  批量导出 Linux.do 收藏的帖子到 Notion 数据库或页面，支持自定义筛选、图片上传、权限控制、AI 对话式助手，在 Notion 站点显示 AI 助手面板
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -932,6 +932,16 @@
             return await NotionAPI.request("PATCH", `/pages/${pageId}`, { parent }, apiKey);
         },
 
+        // 创建数据库
+        createDatabase: async (parentPageId, title, properties, apiKey) => {
+            const data = {
+                parent: { type: "page_id", page_id: parentPageId },
+                title: [{ type: "text", text: { content: title } }],
+                properties: properties,
+            };
+            return await NotionAPI.request("POST", "/databases", data, apiKey);
+        },
+
         // 复制页面 (获取内容后创建新页面)
         duplicatePage: async (pageId, targetParentId, parentType, apiKey) => {
             // 获取原页面信息
@@ -1581,6 +1591,13 @@
             UPDATE: "update",         // 更新属性
             MOVE: "move",             // 移动页面
             COPY: "copy",             // 复制页面
+            CREATE_DATABASE: "create_database",  // 创建数据库
+            WRITE_CONTENT: "write_content",      // AI 生成内容追加到页面
+            EDIT_CONTENT: "edit_content",        // AI 改写页面内容
+            TRANSLATE_CONTENT: "translate_content", // AI 翻译页面内容
+            AI_AUTOFILL: "ai_autofill",          // 批量 AI 属性填充
+            ASK: "ask",                          // 全局问答（RAG）
+            AGENT_TASK: "agent_task",            // Agent 自主代理
             HELP: "help",             // 帮助
             COMPOUND: "compound",     // 组合指令
             UNKNOWN: "unknown"        // 未知
@@ -1620,12 +1637,34 @@
 - "复制标题包含 xxx 的帖子到 B 数据库"
 - "把 A 数据库的帖子复制到 B 数据库"
 
+🗄️ **创建数据库**（需要高级权限）
+- "创建一个叫技术文档的数据库"
+- "在 xxx 页面下新建一个项目数据库"
+
 🔗 **组合指令**
 - "把帖子分类后移动到 B 数据库"
 - "先分类所有帖子，再把技术类的移到技术库"
 
+✍️ **内容生成**
+- "在 xxx 页面写一段关于 Docker 的介绍"
+- "改写 xxx 页面的内容，让它更简洁"
+- "把 xxx 页面翻译成英文"
+
+🔮 **AI 数据库属性**（可配置）
+- "给所有帖子生成 AI 摘要"
+- "提取所有帖子的关键词"
+- "把所有帖子标题翻译成英文"
+
+💬 **全局问答**
+- "关于 Docker 的帖子都说了什么？"
+- "总结一下最近的技术帖子"
+
+🤖 **Agent 自主代理**（需要高级权限）
+- "帮我整理所有未分类的帖子并生成摘要"
+- "自动分类帖子，然后把技术类的移到技术库"
+
 💡 **提示**：直接用自然语言告诉我你想做什么就行！
-⚠️ 移动和复制操作需要「高级」权限级别。`;
+⚠️ 移动、复制、创建数据库和 Agent 自主代理操作需要「高级」权限级别。`;
         },
 
         // 获取 AI 设置
@@ -1659,7 +1698,7 @@
 
         // 解析用户意图
         parseIntent: async (userMessage, settings) => {
-            const systemPrompt = `你是一个 Notion 数据库助手。分析用户指令，返回 JSON 格式。
+            const systemPrompt = `你是一个 Notion 全功能助手。分析用户指令，返回 JSON 格式。
 
 用户可能想执行以下操作之一：
 1. query - 查询统计（如：有多少帖子、统计分类数量、显示最新帖子）
@@ -1670,9 +1709,16 @@
 6. update - 更新属性（如：把xxx标记为重要）
 7. move - 移动页面到另一个数据库（如：把A数据库的帖子移到B数据库、把标题包含xxx的帖子移到B数据库）
 8. copy - 复制页面到另一个数据库（如：把A数据库的帖子复制到B数据库、复制标题包含xxx的帖子到B数据库）
-9. compound - 用户指令包含两个及以上需按顺序执行的不同操作（如：先分类再移动、分类后移到B数据库）
-10. help - 帮助（如：帮助、你能做什么）
-11. unknown - 无法理解
+9. create_database - 创建新数据库（如：创建一个叫xxx的数据库、新建数据库、在xxx页面下创建数据库）
+10. write_content - AI 生成新内容追加到指定页面（如：在xxx页面写一段关于Docker的介绍、给xxx页面添加内容）
+11. edit_content - AI 改写页面现有内容（如：把xxx页面的内容改得更简洁、润色xxx页面）
+12. translate_content - AI 翻译页面内容（如：把xxx页面翻译成英文、翻译xxx页面为日文）
+13. ai_autofill - 批量 AI 属性填充（如：给所有帖子生成AI摘要、提取所有帖子的关键词、翻译所有帖子标题）
+14. ask - 全局问答，AI 综合回答问题（如：关于Docker的帖子都说了什么、总结最近的帖子）
+15. agent_task - Agent 自主规划并执行复杂任务（如：帮我整理所有帖子并生成摘要、自动分类后移到不同数据库）
+16. compound - 用户指令包含两个及以上需按顺序执行的不同操作（如：先分类再移动、分类后移到B数据库）
+17. help - 帮助（如：帮助、你能做什么）
+18. unknown - 无法理解
 
 注意区分 search 和 workspace_search：
 - search: 用户想在配置的帖子数据库中搜索
@@ -1683,6 +1729,18 @@
 - copy: 用户想把页面复制到另一个数据库（原数据库的页面保留）
 - 关键词提示：移动/移/搬/转移 → move；复制/拷贝/副本/备份到 → copy
 
+注意区分 ask 和 search：
+- ask: 用户想让 AI 综合分析并回答问题（如"关于Docker的帖子都说了什么"、"总结一下"）
+- search: 用户想列出搜索结果（如"搜索Docker相关的帖子"）
+
+注意区分 agent_task 和 compound：
+- agent_task: 用户给出高层目标，让 AI 自己规划步骤（如"帮我整理所有帖子"）
+- compound: 用户明确给出了顺序步骤（如"先分类再移动"）
+
+注意区分 write_content 和 edit_content：
+- write_content: 生成新内容追加到页面（如"写一段介绍"、"添加内容"）
+- edit_content: 改写页面现有内容（如"改写"、"润色"、"让它更简洁"）
+
 compound 判断依据：
 - 用户指令中含"先...再..."、"...之后..."、"...然后..."、"...后..."等顺序词，且涉及两个不同操作
 - 单个操作不算 compound（如"移动帖子"只是 move）
@@ -1692,7 +1750,7 @@ compound 判断依据：
 
 单操作格式：
 {
-  "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|help|unknown",
+  "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|create_database|write_content|edit_content|translate_content|ai_autofill|ask|agent_task|help|unknown",
   "params": {
     "keyword": "搜索关键词（如有）",
     "property": "要更新的属性名（如有）",
@@ -1706,6 +1764,17 @@ compound 判断依据：
     "target_database_name": "目标数据库名称（move/copy 时必填）",
     "target_database_id": "目标数据库ID（move/copy 时，如用户直接提供了ID）",
     "page_title": "要移动/复制的页面标题关键词（如用户指定了特定页面）",
+    "database_name": "要创建的数据库名称（create_database 时必填）",
+    "parent_page_name": "父页面名称（create_database 时可选，如用户提到了父页面）",
+    "parent_page_id": "父页面ID（create_database 时可选，如用户直接提供了ID）",
+    "content_prompt": "写作/编辑要求（write_content/edit_content 时使用）",
+    "page_name": "目标页面名称（write_content/edit_content/translate_content 时使用）",
+    "page_id": "目标页面ID（write_content/edit_content/translate_content 时，如用户直接提供了ID）",
+    "target_language": "翻译目标语言（translate_content 时使用，如英文、日文）",
+    "autofill_type": "AI属性类型（ai_autofill 时使用：summary/keywords/translation/custom）",
+    "property_name": "自定义属性名（ai_autofill 且 autofill_type=custom 时使用）",
+    "question": "问答问题（ask 时使用）",
+    "task_description": "Agent 任务描述（agent_task 时使用）",
     "batch": true
   },
   "explanation": "你对用户意图的理解（中文简短说明）"
@@ -1797,6 +1866,20 @@ compound 格式（仅当 intent 为 compound 时使用）：
                     return await AIAssistant.handleMove(params, settings, explanation);
                 case "copy":
                     return await AIAssistant.handleCopy(params, settings, explanation);
+                case "create_database":
+                    return await AIAssistant.handleCreateDatabase(params, settings, explanation);
+                case "write_content":
+                    return await AIAssistant.handleWriteContent(params, settings, explanation);
+                case "edit_content":
+                    return await AIAssistant.handleEditContent(params, settings, explanation);
+                case "translate_content":
+                    return await AIAssistant.handleTranslateContent(params, settings, explanation);
+                case "ai_autofill":
+                    return await AIAssistant.handleAIAutofill(params, settings, explanation);
+                case "ask":
+                    return await AIAssistant.handleAsk(params, settings, explanation);
+                case "agent_task":
+                    return await AIAssistant.handleAgentTask(params, settings, explanation);
                 case "help":
                     return AIAssistant.getHelpMessage();
                 default:
@@ -2491,10 +2574,760 @@ ${explanation ? `我的理解：${explanation}` : ""}
 
             return report;
         },
-    };
 
-    // ===========================================
-    // 对话 UI 模块
+        // 处理创建数据库
+        handleCreateDatabase: async (params, settings, explanation) => {
+            // 检查基础配置（需要 API Key，不需要数据库 ID）
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            // 权限检查
+            if (!OperationGuard.canExecute("createDatabase")) {
+                return "❌ 权限不足：创建数据库需要「高级」权限级别。\n\n请在设置面板中将权限级别调整为「高级」或更高。";
+            }
+
+            const { database_name, parent_page_name, parent_page_id } = params;
+
+            // 校验数据库名称必填
+            if (!database_name) {
+                return "❌ 请指定要创建的数据库名称。\n\n💡 示例：「创建一个叫技术文档的数据库」";
+            }
+
+            ChatState.updateLastMessage("正在解析父页面信息...", "processing");
+
+            try {
+                let parentPage = null;
+
+                // 使用共享的页面解析器
+                if (parent_page_id || parent_page_name) {
+                    parentPage = await AIAssistant._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
+                    if (parentPage?.error) return `❌ 父页面解析失败：${parentPage.error}`;
+                    if (!parentPage) {
+                        return `❌ 找不到名为「${parent_page_name}」的页面。\n\n💡 提示：可以使用「在工作区搜索所有页面」查看可用页面。`;
+                    }
+                }
+                // 未指定父页面，搜索工作区页面供选择
+                else {
+                    ChatState.updateLastMessage("未指定父页面，正在搜索工作区页面...", "processing");
+                    const response = await NotionAPI.search(
+                        "",
+                        { property: "object", value: "page" },
+                        settings.notionApiKey
+                    );
+                    const pages = (response.results || []).filter(p => !p.archived && p.parent?.type === "workspace");
+
+                    if (pages.length === 0) {
+                        return "❌ 工作区中没有找到可用的页面作为父页面。\n\n💡 请先在 Notion 中创建一个页面，或指定父页面名称。\n\n示例：「在 xxx 页面下创建一个叫技术文档的数据库」";
+                    }
+
+                    // 使用第一个工作区顶级页面
+                    const firstPage = pages[0];
+                    parentPage = { id: firstPage.id.replace(/-/g, ""), name: Utils.getPageTitle(firstPage) || "未命名页面" };
+                }
+
+                // 构建默认属性 schema
+                ChatState.updateLastMessage(`正在创建数据库「${database_name}」...`, "processing");
+
+                const properties = {
+                    "标题": { title: {} },
+                    "链接": { url: {} },
+                    "分类": { rich_text: {} },
+                    "标签": { multi_select: { options: [] } },
+                    "作者": { rich_text: {} },
+                    "收藏时间": { date: {} },
+                    "帖子数": { number: { format: "number" } },
+                    "浏览数": { number: { format: "number" } },
+                    "点赞数": { number: { format: "number" } },
+                };
+
+                // 调用 API 创建数据库
+                const result = await OperationGuard.execute("createDatabase",
+                    () => NotionAPI.createDatabase(parentPage.id, database_name, properties, settings.notionApiKey),
+                    { itemName: database_name, apiKey: settings.notionApiKey }
+                );
+
+                const newDbId = result.id?.replace(/-/g, "") || "";
+                let msg = `✅ **数据库创建成功**\n\n`;
+                msg += `- 数据库名称: ${database_name}\n`;
+                msg += `- 数据库 ID: \`${newDbId}\`\n`;
+                msg += `- 父页面: ${parentPage.name}\n`;
+                msg += `\n💡 提示：可以将此 ID 填入设置中的「数据库 ID」字段来使用该数据库。`;
+
+                return msg;
+            } catch (error) {
+                return `❌ 创建数据库失败: ${error.message}`;
+            }
+        },
+
+        // ======= 通用工具方法 =======
+
+        // 解析页面名称到 ID（对称于 _resolveDatabaseId）
+        _resolvePageId: async (name, id, apiKey) => {
+            if (id) return { id: id.replace(/-/g, ""), name: name || id };
+            if (!name) return null;
+
+            const response = await NotionAPI.search(
+                name,
+                { property: "object", value: "page" },
+                apiKey
+            );
+
+            const pages = (response.results || []).filter(p => !p.archived);
+            let exactMatch = null;
+            const partialMatches = [];
+            for (const page of pages) {
+                const title = Utils.getPageTitle(page);
+                if (!title) continue;
+                if (title === name) {
+                    exactMatch = { id: page.id.replace(/-/g, ""), name: title };
+                    break;
+                }
+                if (title.includes(name)) {
+                    partialMatches.push({ id: page.id.replace(/-/g, ""), name: title });
+                }
+            }
+
+            if (exactMatch) return exactMatch;
+            if (partialMatches.length === 1) return partialMatches[0];
+            if (partialMatches.length > 1) {
+                const names = partialMatches.map(m => `「${m.name}」`).join("、");
+                return { error: `找到多个匹配的页面: ${names}，请使用更精确的名称。` };
+            }
+            return null;
+        },
+
+        // Markdown 文本转 Notion 块
+        _textToBlocks: (text) => {
+            const blocks = [];
+            const lines = text.split("\n");
+            let inCodeBlock = false;
+            let codeLines = [];
+            let codeLang = "plain text";
+
+            // Notion 接受的代码语言映射（常见缩写 → Notion 标准名）
+            const LANG_MAP = {
+                js: "javascript", ts: "typescript", py: "python", rb: "ruby",
+                sh: "shell", bash: "shell", zsh: "shell", yml: "yaml",
+                md: "markdown", cs: "c#", cpp: "c++", objc: "objective-c",
+                kt: "kotlin", rs: "rust", go: "go", java: "java",
+                html: "html", css: "css", json: "json", xml: "xml",
+                sql: "sql", r: "r", swift: "swift", scala: "scala",
+                php: "php", perl: "perl", lua: "lua", dart: "dart",
+                dockerfile: "docker", makefile: "makefile", toml: "toml",
+                graphql: "graphql", protobuf: "protobuf", sass: "sass",
+                scss: "scss", less: "less", jsx: "javascript", tsx: "typescript",
+            };
+            const NOTION_LANGS = new Set([
+                "abap", "arduino", "bash", "basic", "c", "clojure", "coffeescript",
+                "c++", "c#", "css", "dart", "diff", "docker", "elixir", "elm",
+                "erlang", "flow", "fortran", "f#", "gherkin", "glsl", "go", "graphql",
+                "groovy", "haskell", "html", "java", "javascript", "json", "julia",
+                "kotlin", "latex", "less", "lisp", "livescript", "lua", "makefile",
+                "markdown", "markup", "matlab", "mermaid", "nix", "objective-c",
+                "ocaml", "pascal", "perl", "php", "plain text", "powershell",
+                "prolog", "protobuf", "python", "r", "reason", "ruby", "rust",
+                "sass", "scala", "scheme", "scss", "shell", "sql", "swift",
+                "typescript", "vb.net", "verilog", "vhdl", "visual basic",
+                "webassembly", "xml", "yaml", "java/c/c++/c#",
+            ]);
+            const normalizeLanguage = (lang) => {
+                const lower = (lang || "").toLowerCase().trim();
+                if (!lower) return "plain text";
+                if (LANG_MAP[lower]) return LANG_MAP[lower];
+                if (NOTION_LANGS.has(lower)) return lower;
+                return "plain text";
+            };
+
+            const splitLongText = (str) => {
+                const maxLen = 2000;
+                const chunks = [];
+                if (str.length <= maxLen) {
+                    chunks.push({ type: "text", text: { content: str } });
+                } else {
+                    let remaining = str;
+                    while (remaining.length > 0) {
+                        chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
+                        remaining = remaining.substring(maxLen);
+                    }
+                }
+                return chunks;
+            };
+
+            for (const line of lines) {
+                // 代码块处理
+                if (line.startsWith("```")) {
+                    if (inCodeBlock) {
+                        const code = codeLines.join("\n");
+                        blocks.push({
+                            type: "code",
+                            code: { rich_text: splitLongText(code), language: codeLang }
+                        });
+                        codeLines = [];
+                        inCodeBlock = false;
+                    } else {
+                        inCodeBlock = true;
+                        codeLang = normalizeLanguage(line.slice(3).trim());
+                    }
+                    continue;
+                }
+
+                if (inCodeBlock) {
+                    codeLines.push(line);
+                    continue;
+                }
+
+                // 空行跳过
+                if (!line.trim()) continue;
+
+                // 标题
+                if (line.startsWith("### ")) {
+                    blocks.push({ type: "heading_3", heading_3: { rich_text: splitLongText(line.slice(4)) } });
+                } else if (line.startsWith("## ")) {
+                    blocks.push({ type: "heading_2", heading_2: { rich_text: splitLongText(line.slice(3)) } });
+                } else if (line.startsWith("# ")) {
+                    blocks.push({ type: "heading_1", heading_1: { rich_text: splitLongText(line.slice(2)) } });
+                }
+                // 分割线
+                else if (line.trim() === "---" || line.trim() === "***") {
+                    blocks.push({ type: "divider", divider: {} });
+                }
+                // 引用
+                else if (line.startsWith("> ")) {
+                    blocks.push({ type: "quote", quote: { rich_text: splitLongText(line.slice(2)) } });
+                }
+                // 无序列表
+                else if (/^[-*]\s/.test(line)) {
+                    blocks.push({ type: "bulleted_list_item", bulleted_list_item: { rich_text: splitLongText(line.replace(/^[-*]\s/, "")) } });
+                }
+                // 有序列表
+                else if (/^\d+\.\s/.test(line)) {
+                    blocks.push({ type: "numbered_list_item", numbered_list_item: { rich_text: splitLongText(line.replace(/^\d+\.\s/, "")) } });
+                }
+                // 普通段落
+                else {
+                    blocks.push({ type: "paragraph", paragraph: { rich_text: splitLongText(line) } });
+                }
+            }
+
+            // 处理未闭合的代码块
+            if (inCodeBlock && codeLines.length > 0) {
+                const code = codeLines.join("\n");
+                blocks.push({
+                    type: "code",
+                    code: { rich_text: splitLongText(code), language: codeLang }
+                });
+            }
+
+            return blocks;
+        },
+
+        // 提取页面内容文本
+        _extractPageContent: async (pageId, apiKey, maxChars = 4000) => {
+            const allBlocks = [];
+            let cursor = null;
+            do {
+                const data = await NotionAPI.fetchBlocks(pageId, cursor, apiKey);
+                allBlocks.push(...(data.results || []));
+                cursor = data.has_more ? data.next_cursor : null;
+            } while (cursor);
+            return AIClassifier.extractText(allBlocks).slice(0, maxChars);
+        },
+
+        // ======= 写作/内容生成 =======
+
+        handleWriteContent: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            if (!OperationGuard.canExecute("appendBlocks")) {
+                return "❌ 权限不足：内容生成需要「标准」权限级别。";
+            }
+
+            const { content_prompt, page_name, page_id } = params;
+            if (!content_prompt) {
+                return "❌ 请描述你想生成的内容。\n\n💡 示例：「在 xxx 页面写一段关于 Docker 的介绍」";
+            }
+
+            if (!page_name && !page_id) {
+                return "❌ 请指定目标页面。\n\n💡 示例：「在 xxx 页面写一段关于 Docker 的介绍」";
+            }
+
+            ChatState.updateLastMessage("正在解析目标页面...", "processing");
+
+            try {
+                const targetPage = await AIAssistant._resolvePageId(page_name, page_id, settings.notionApiKey);
+                if (targetPage?.error) return `❌ 页面解析失败：${targetPage.error}`;
+                if (!targetPage) return `❌ 找不到页面「${page_name || page_id}」。\n\n💡 提示：可以使用「在工作区搜索所有页面」查看可用页面。`;
+
+                ChatState.updateLastMessage("正在生成内容...", "processing");
+
+                const prompt = `你是一个内容生成助手。根据用户要求生成内容，使用 Markdown 格式。\n\n用户要求：${content_prompt}`;
+                const aiResponse = await AIService.requestChat(prompt, settings, 2000);
+
+                ChatState.updateLastMessage("正在写入页面...", "processing");
+
+                const blocks = AIAssistant._textToBlocks(aiResponse);
+                await NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
+
+                return `✅ **内容已生成并追加到页面**\n\n- 目标页面: ${targetPage.name}\n- 生成内容: ${aiResponse.length} 字\n\n💡 内容已追加到页面末尾。`;
+            } catch (error) {
+                return `❌ 内容生成失败: ${error.message}`;
+            }
+        },
+
+        // ======= 编辑内容 =======
+
+        handleEditContent: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            if (!OperationGuard.canExecute("appendBlocks")) {
+                return "❌ 权限不足：内容编辑需要「标准」权限级别。";
+            }
+
+            const { content_prompt, page_name, page_id } = params;
+            if (!content_prompt) {
+                return "❌ 请描述编辑要求。\n\n💡 示例：「把 xxx 页面的内容改得更简洁」";
+            }
+
+            if (!page_name && !page_id) {
+                return "❌ 请指定目标页面。\n\n💡 示例：「把 xxx 页面的内容改得更简洁」";
+            }
+
+            ChatState.updateLastMessage("正在解析目标页面...", "processing");
+
+            try {
+                const targetPage = await AIAssistant._resolvePageId(page_name, page_id, settings.notionApiKey);
+                if (targetPage?.error) return `❌ 页面解析失败：${targetPage.error}`;
+                if (!targetPage) return `❌ 找不到页面「${page_name || page_id}」。`;
+
+                ChatState.updateLastMessage("正在读取页面内容...", "processing");
+
+                const existingContent = await AIAssistant._extractPageContent(targetPage.id, settings.notionApiKey);
+                if (!existingContent.trim()) {
+                    return `❌ 页面「${targetPage.name}」没有可编辑的内容。`;
+                }
+
+                ChatState.updateLastMessage("正在改写内容...", "processing");
+
+                const prompt = `你是一个内容编辑助手。根据编辑指令改写以下内容，使用 Markdown 格式输出改写后的完整内容。\n\n原文：\n${existingContent}\n\n编辑指令：${content_prompt}`;
+                const aiResponse = await AIService.requestChat(prompt, settings, 2000);
+
+                ChatState.updateLastMessage("正在写入编辑版本...", "processing");
+
+                const contentBlocks = AIAssistant._textToBlocks(aiResponse);
+                const blocks = [
+                    { type: "divider", divider: {} },
+                    { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: "✏️ AI 编辑版本" } }] } },
+                    ...contentBlocks
+                ];
+                await NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
+
+                return `✅ **编辑版本已追加到页面**\n\n- 目标页面: ${targetPage.name}\n- 编辑指令: ${content_prompt}\n\n💡 编辑后的版本已追加到页面末尾（原内容保留）。`;
+            } catch (error) {
+                return `❌ 内容编辑失败: ${error.message}`;
+            }
+        },
+
+        // ======= 翻译内容 =======
+
+        handleTranslateContent: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            if (!OperationGuard.canExecute("appendBlocks")) {
+                return "❌ 权限不足：内容翻译需要「标准」权限级别。";
+            }
+
+            const { page_name, page_id, target_language } = params;
+            const lang = target_language || "英文";
+
+            if (!page_name && !page_id) {
+                return "❌ 请指定要翻译的页面。\n\n💡 示例：「把 xxx 页面翻译成英文」";
+            }
+
+            ChatState.updateLastMessage("正在解析目标页面...", "processing");
+
+            try {
+                const targetPage = await AIAssistant._resolvePageId(page_name, page_id, settings.notionApiKey);
+                if (targetPage?.error) return `❌ 页面解析失败：${targetPage.error}`;
+                if (!targetPage) return `❌ 找不到页面「${page_name || page_id}」。`;
+
+                ChatState.updateLastMessage("正在读取页面内容...", "processing");
+
+                const existingContent = await AIAssistant._extractPageContent(targetPage.id, settings.notionApiKey);
+                if (!existingContent.trim()) {
+                    return `❌ 页面「${targetPage.name}」没有可翻译的内容。`;
+                }
+
+                ChatState.updateLastMessage(`正在翻译为${lang}...`, "processing");
+
+                const prompt = `你是一个专业翻译。将以下内容翻译为${lang}，使用 Markdown 格式，保持原文结构。\n\n原文：\n${existingContent}`;
+                const aiResponse = await AIService.requestChat(prompt, settings, 2000);
+
+                ChatState.updateLastMessage("正在写入翻译版本...", "processing");
+
+                const contentBlocks = AIAssistant._textToBlocks(aiResponse);
+                const blocks = [
+                    { type: "divider", divider: {} },
+                    { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `🌐 AI 翻译（${lang}）` } }] } },
+                    ...contentBlocks
+                ];
+                await NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
+
+                return `✅ **翻译已追加到页面**\n\n- 目标页面: ${targetPage.name}\n- 翻译语言: ${lang}\n- 翻译内容: ${aiResponse.length} 字\n\n💡 翻译版本已追加到页面末尾（原内容保留）。`;
+            } catch (error) {
+                return `❌ 翻译失败: ${error.message}`;
+            }
+        },
+
+        // ======= AI 数据库属性自动填充 =======
+
+        _ensureAIProperty: async (databaseId, propertyName, propertyType, apiKey) => {
+            const database = await NotionAPI.fetchDatabase(databaseId, apiKey);
+            const properties = database.properties || {};
+
+            if (properties[propertyName]) return;
+
+            const propDef = {};
+            if (propertyType === "multi_select") {
+                propDef[propertyName] = { multi_select: { options: [] } };
+            } else {
+                propDef[propertyName] = { rich_text: {} };
+            }
+
+            await NotionAPI.updateDatabase(databaseId, propDef, apiKey);
+            console.log(`已创建属性「${propertyName}」`);
+        },
+
+        handleAIAutofill: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, true);
+            if (!configCheck.valid) return configCheck.error;
+
+            const { autofill_type, property_name } = params;
+            if (!autofill_type) {
+                return "❌ 请指定填充类型。\n\n💡 支持的类型：\n- 摘要：「给所有帖子生成 AI 摘要」\n- 关键词：「提取所有帖子的关键词」\n- 翻译：「把所有帖子标题翻译成英文」";
+            }
+
+            // 根据类型确定属性名和 AI 提示词
+            let propName, propType, aiPromptTemplate;
+            switch (autofill_type) {
+                case "summary":
+                    propName = "AI摘要";
+                    propType = "rich_text";
+                    aiPromptTemplate = "请用2-3句话简洁概括以下内容的要点：\n\n";
+                    break;
+                case "keywords":
+                    propName = "AI关键词";
+                    propType = "multi_select";
+                    aiPromptTemplate = "请从以下内容中提取3-5个关键词，用逗号分隔，只返回关键词：\n\n";
+                    break;
+                case "translation":
+                    propName = "AI翻译";
+                    propType = "rich_text";
+                    aiPromptTemplate = "请将以下标题翻译为英文，只返回翻译结果：\n\n";
+                    break;
+                case "custom":
+                    propName = property_name || "AI自定义";
+                    propType = "rich_text";
+                    aiPromptTemplate = "请根据以下内容生成对应的属性值：\n\n";
+                    break;
+                default:
+                    return `❌ 不支持的填充类型「${autofill_type}」。支持：summary/keywords/translation/custom`;
+            }
+
+            ChatState.updateLastMessage(`正在准备 AI 属性填充（${propName}）...`, "processing");
+
+            try {
+                await AIAssistant._ensureAIProperty(settings.notionDatabaseId, propName, propType, settings.notionApiKey);
+
+                ChatState.updateLastMessage("正在获取数据库页面...", "processing");
+
+                const allPages = [];
+                let cursor = null;
+                do {
+                    const response = await NotionAPI.queryDatabase(settings.notionDatabaseId, null, null, cursor, settings.notionApiKey);
+                    allPages.push(...(response.results || []));
+                    cursor = response.has_more ? response.next_cursor : null;
+                } while (cursor);
+
+                if (allPages.length === 0) {
+                    return "📭 数据库中没有找到任何页面。";
+                }
+
+                // 过滤属性为空的页面
+                const needFill = allPages.filter(page => {
+                    const prop = page.properties[propName];
+                    if (!prop) return true;
+                    if (propType === "multi_select") {
+                        return !prop.multi_select || prop.multi_select.length === 0;
+                    }
+                    return !prop.rich_text || prop.rich_text.length === 0;
+                });
+
+                if (needFill.length === 0) {
+                    return `✅ 所有 ${allPages.length} 个页面的「${propName}」属性都已填充。`;
+                }
+
+                const results = { success: 0, failed: 0 };
+                const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+
+                for (let i = 0; i < needFill.length; i++) {
+                    const page = needFill[i];
+                    const title = Utils.getPageTitle(page);
+
+                    ChatState.updateLastMessage(
+                        `🔄 正在填充「${propName}」(${i + 1}/${needFill.length})\n\n当前: ${title}`,
+                        "processing"
+                    );
+
+                    try {
+                        // 获取内容：翻译类型只需标题，其他需提取页面内容
+                        let inputText = title;
+                        if (autofill_type !== "translation") {
+                            try {
+                                const content = await AIAssistant._extractPageContent(page.id, settings.notionApiKey, 2000);
+                                inputText = content || title;
+                            } catch { inputText = title; }
+                        }
+
+                        const aiResult = await AIService.requestChat(
+                            aiPromptTemplate + inputText,
+                            settings,
+                            500
+                        );
+
+                        // 更新页面属性
+                        const updateProps = {};
+                        if (propType === "multi_select") {
+                            const keywords = aiResult.split(/[,，]/).map(k => k.trim()).filter(Boolean).slice(0, 10);
+                            updateProps[propName] = { multi_select: keywords.map(k => ({ name: k })) };
+                        } else {
+                            const trimmed = aiResult.slice(0, 2000);
+                            updateProps[propName] = { rich_text: [{ type: "text", text: { content: trimmed } }] };
+                        }
+
+                        await NotionAPI.request("PATCH", `/pages/${page.id}`, { properties: updateProps }, settings.notionApiKey);
+                        results.success++;
+                    } catch (error) {
+                        console.error(`AI 填充失败: ${title}`, error);
+                        results.failed++;
+                    }
+
+                    if (i < needFill.length - 1) {
+                        await Utils.sleep(delay);
+                    }
+                }
+
+                let resultMsg = `✅ **AI 属性填充完成**\n\n`;
+                resultMsg += `- 属性名: ${propName}\n`;
+                resultMsg += `- 总计: ${allPages.length} 个页面\n`;
+                resultMsg += `- 已填充: ${allPages.length - needFill.length} 个\n`;
+                resultMsg += `- 本次填充: ${results.success} 个\n`;
+                if (results.failed > 0) {
+                    resultMsg += `- 失败: ${results.failed} 个\n`;
+                }
+                return resultMsg;
+            } catch (error) {
+                return `❌ AI 属性填充失败: ${error.message}`;
+            }
+        },
+
+        // ======= 全局问答（RAG） =======
+
+        handleAsk: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            const { question, keyword } = params;
+            const searchTerm = question || keyword;
+
+            if (!searchTerm) {
+                return "❌ 请描述你的问题。\n\n💡 示例：「关于 Docker 的帖子都说了什么？」";
+            }
+
+            ChatState.updateLastMessage("正在搜索相关内容...", "processing");
+
+            try {
+                const response = await NotionAPI.search(searchTerm, null, settings.notionApiKey);
+                const results = (response.results || []).filter(r => !r.archived && r.object === "page").slice(0, 5);
+
+                if (results.length === 0) {
+                    return `📭 在工作区中没有找到与「${searchTerm}」相关的内容。`;
+                }
+
+                ChatState.updateLastMessage(`找到 ${results.length} 个相关内容，正在提取...`, "processing");
+
+                // 提取每个页面的内容
+                const contextParts = [];
+                const sourceList = [];
+                for (let i = 0; i < results.length; i++) {
+                    const item = results[i];
+                    const title = Utils.getPageTitle(item, item.object === "database" ? "未命名数据库" : "未命名页面");
+                    const url = item.url || "";
+                    sourceList.push({ title, url });
+
+                    try {
+                        const content = await AIAssistant._extractPageContent(item.id, settings.notionApiKey, 2000);
+                        contextParts.push(`[${i + 1}] ${title}:\n${content || "（无文本内容）"}`);
+                    } catch {
+                        contextParts.push(`[${i + 1}] ${title}:\n（无法读取内容）`);
+                    }
+                }
+
+                ChatState.updateLastMessage("正在分析并生成回答...", "processing");
+
+                const ragPrompt = `你是一个知识问答助手。根据以下来自 Notion 工作区的内容回答用户的问题。
+如果内容中没有相关信息，请如实说明。回答后列出信息来源。
+
+--- 参考内容 ---
+${contextParts.join("\n\n")}
+
+--- 用户问题 ---
+${searchTerm}`;
+
+                const aiAnswer = await AIService.requestChat(ragPrompt, settings, 2000);
+
+                // 拼接来源列表
+                let sourceText = "\n\n📚 **信息来源**：\n";
+                sourceList.forEach((s, i) => {
+                    sourceText += `${i + 1}. ${s.title}${s.url ? ` ([链接](${s.url}))` : ""}\n`;
+                });
+
+                return aiAnswer + sourceText;
+            } catch (error) {
+                return `❌ 问答失败: ${error.message}`;
+            }
+        },
+
+        // ======= Agent 自主代理 =======
+
+        handleAgentTask: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            if (!OperationGuard.canExecute("agentTask")) {
+                return "❌ 权限不足：Agent 自主代理需要「高级」权限级别。\n\n请在设置面板中将权限级别调整为「高级」或更高。";
+            }
+
+            const { task_description } = params;
+            if (!task_description) {
+                return "❌ 请描述你想让 Agent 完成的任务。\n\n💡 示例：「帮我整理所有未分类的帖子并生成摘要」";
+            }
+
+            ChatState.updateLastMessage("🤖 Agent 正在规划任务...", "processing");
+
+            try {
+                const planPrompt = `你是一个 Notion 任务规划器。将用户的高层任务分解为可执行步骤。
+每一步必须是以下操作之一：query, search, workspace_search, classify, batch_classify,
+update, move, copy, create_database, write_content, edit_content, translate_content,
+ai_autofill, ask
+
+返回 JSON（只返回 JSON，不要其他内容）：
+{
+  "plan": [
+    { "intent": "操作名", "params": { 对应操作的参数 }, "explanation": "步骤说明" }
+  ],
+  "explanation": "整体计划说明"
+}
+
+用户任务：${task_description}`;
+
+                const planResponse = await AIService.requestChat(planPrompt, settings, 1500);
+
+                // 解析计划 JSON
+                const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) {
+                    return "❌ Agent 无法生成有效的执行计划。请尝试更具体地描述任务。";
+                }
+
+                let plan;
+                try {
+                    plan = JSON.parse(jsonMatch[0]);
+                } catch {
+                    return "❌ Agent 生成的计划格式无效。请尝试换一种方式描述任务。";
+                }
+
+                if (!plan.plan || plan.plan.length === 0) {
+                    return "❌ Agent 未能分解出有效的执行步骤。请尝试更具体地描述任务。";
+                }
+
+                // 展示计划并等待确认
+                let planMsg = `🤖 **Agent 执行计划**\n${plan.explanation || ""}\n\n`;
+                plan.plan.forEach((step, i) => {
+                    planMsg += `${i + 1}. ${step.explanation}\n`;
+                });
+
+                ChatState.updateLastMessage(planMsg + "\n⏳ 等待确认...", "processing");
+
+                const confirmed = await ConfirmationDialog.show({
+                    title: "🤖 Agent 执行计划确认",
+                    message: plan.plan.map((s, i) => `${i + 1}. ${s.explanation}`).join("\n"),
+                    itemName: task_description,
+                    countdown: 5,
+                    requireNameInput: false,
+                });
+
+                if (!confirmed) {
+                    return "🤖 Agent 任务已取消。";
+                }
+
+                // 执行计划（复用 compound 的执行模式）
+                const results = [];
+                let aborted = false;
+
+                for (let i = 0; i < plan.plan.length; i++) {
+                    const step = plan.plan[i];
+
+                    ChatState.updateLastMessage(
+                        `${planMsg}\n⏳ 步骤 ${i + 1}/${plan.plan.length}: ${step.explanation}`,
+                        "processing"
+                    );
+
+                    try {
+                        const stepResult = await AIAssistant.executeIntent(step, settings);
+
+                        if (typeof stepResult === "string" && stepResult.startsWith("❌")) {
+                            results.push({ index: i + 1, explanation: step.explanation, success: false, result: stepResult });
+                            aborted = true;
+                            break;
+                        }
+
+                        results.push({ index: i + 1, explanation: step.explanation, success: true, result: stepResult });
+                    } catch (error) {
+                        results.push({ index: i + 1, explanation: step.explanation, success: false, result: `❌ ${error.message}` });
+                        aborted = true;
+                        break;
+                    }
+                }
+
+                // 汇总报告
+                let report = `🤖 **Agent 任务${aborted ? "中断" : "完成"}**\n\n`;
+                for (const r of results) {
+                    report += `${r.success ? "✅" : "❌"} 步骤 ${r.index}: ${r.explanation}\n`;
+                }
+
+                if (aborted) {
+                    const skipped = plan.plan.slice(results.length);
+                    if (skipped.length > 0) {
+                        report += `\n⏭️ 已跳过：\n`;
+                        skipped.forEach((step, i) => {
+                            report += `${results.length + i + 1}. ${step.explanation}\n`;
+                        });
+                    }
+                }
+
+                report += `\n---\n`;
+                for (const r of results) {
+                    report += `\n**步骤 ${r.index}**: ${r.explanation}\n${r.result}\n`;
+                }
+
+                return report;
+            } catch (error) {
+                return `❌ Agent 任务失败: ${error.message}`;
+            }
+        },
+    };
     // ===========================================
     const ChatUI = {
         // HTML 转义函数，防止 XSS 攻击
@@ -2915,9 +3748,11 @@ ${explanation ? `我的理解：${explanation}` : ""}
             // 高级操作
             movePage: 2,
             duplicatePage: 2,
+            createDatabase: 2,
             deletePage: 2,
             restorePage: 2,
             deleteBlock: 2,
+            agentTask: 2,
         },
 
         // 危险操作列表（需要额外确认）
