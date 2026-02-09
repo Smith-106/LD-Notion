@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux.do 收藏帖子导出到 Notion
 // @namespace    https://linux.do/
-// @version      1.6.0
+// @version      1.7.0
 // @description  批量导出 Linux.do 收藏的帖子到 Notion 数据库或页面，支持自定义筛选、图片上传、权限控制、AI 对话式助手，在 Notion 站点显示 AI 助手面板
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -1581,6 +1581,7 @@
             MOVE: "move",             // 移动页面
             COPY: "copy",             // 复制页面
             HELP: "help",             // 帮助
+            COMPOUND: "compound",     // 组合指令
             UNKNOWN: "unknown"        // 未知
         },
 
@@ -1617,6 +1618,10 @@
 📋 **复制页面**（需要高级权限）
 - "复制标题包含 xxx 的帖子到 B 数据库"
 - "把 A 数据库的帖子复制到 B 数据库"
+
+🔗 **组合指令**
+- "把帖子分类后移动到 B 数据库"
+- "先分类所有帖子，再把技术类的移到技术库"
 
 💡 **提示**：直接用自然语言告诉我你想做什么就行！
 ⚠️ 移动和复制操作需要「高级」权限级别。`;
@@ -1664,8 +1669,9 @@
 6. update - 更新属性（如：把xxx标记为重要）
 7. move - 移动页面到另一个数据库（如：把A数据库的帖子移到B数据库、把标题包含xxx的帖子移到B数据库）
 8. copy - 复制页面到另一个数据库（如：把A数据库的帖子复制到B数据库、复制标题包含xxx的帖子到B数据库）
-9. help - 帮助（如：帮助、你能做什么）
-10. unknown - 无法理解
+9. compound - 用户指令包含两个及以上需按顺序执行的不同操作（如：先分类再移动、分类后移到B数据库）
+10. help - 帮助（如：帮助、你能做什么）
+11. unknown - 无法理解
 
 注意区分 search 和 workspace_search：
 - search: 用户想在配置的帖子数据库中搜索
@@ -1676,7 +1682,14 @@
 - copy: 用户想把页面复制到另一个数据库（原数据库的页面保留）
 - 关键词提示：移动/移/搬/转移 → move；复制/拷贝/副本/备份到 → copy
 
+compound 判断依据：
+- 用户指令中含"先...再..."、"...之后..."、"...然后..."、"...后..."等顺序词，且涉及两个不同操作
+- 单个操作不算 compound（如"移动帖子"只是 move）
+- 同一操作的补充说明不算 compound（如"搜索 Docker 并显示前5条"只是 search）
+
 返回格式（只返回 JSON，不要其他内容）：
+
+单操作格式：
 {
   "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|help|unknown",
   "params": {
@@ -1695,13 +1708,23 @@
     "batch": true
   },
   "explanation": "你对用户意图的理解（中文简短说明）"
+}
+
+compound 格式（仅当 intent 为 compound 时使用）：
+{
+  "intent": "compound",
+  "steps": [
+    { "intent": "第一步的意图", "params": { ... }, "explanation": "第一步说明" },
+    { "intent": "第二步的意图", "params": { ... }, "explanation": "第二步说明" }
+  ],
+  "explanation": "整体意图说明"
 }`;
 
             try {
                 const response = await AIService.requestChat(
                     `${systemPrompt}\n\n用户指令：${userMessage}`,
                     settings,
-                    500
+                    800
                 );
 
                 // 尝试提取 JSON
@@ -1744,6 +1767,11 @@
         // 执行意图
         executeIntent: async (intentResult, settings) => {
             const { intent, params = {}, explanation } = intentResult;
+
+            // compound 组合指令早期拦截
+            if (intent === "compound") {
+                return await AIAssistant.handleCompound(intentResult, settings);
+            }
 
             switch (intent) {
                 case "query":
@@ -2366,6 +2394,75 @@ ${explanation ? `我的理解：${explanation}` : ""}
             } catch (error) {
                 return `❌ 复制失败: ${error.message}`;
             }
+        },
+
+        // 处理组合指令
+        handleCompound: async (intentResult, settings) => {
+            const { steps, explanation } = intentResult;
+
+            if (!steps || steps.length === 0) {
+                return "❌ 组合指令解析失败：未识别到有效的执行步骤。";
+            }
+
+            // 展示执行计划
+            let planMsg = `🔗 **组合指令** — ${explanation}\n\n📋 执行计划：\n`;
+            steps.forEach((step, i) => {
+                planMsg += `${i + 1}. ${step.explanation}\n`;
+            });
+            ChatState.updateLastMessage(planMsg, "processing");
+
+            const results = [];
+            let aborted = false;
+
+            for (let i = 0; i < steps.length; i++) {
+                const step = steps[i];
+
+                ChatState.updateLastMessage(
+                    `${planMsg}\n⏳ 步骤 ${i + 1}/${steps.length}: ${step.explanation}`,
+                    "processing"
+                );
+
+                try {
+                    const stepResult = await AIAssistant.executeIntent(step, settings);
+
+                    // 检测 handler 返回的错误（以 ❌ 开头的字符串）
+                    if (typeof stepResult === "string" && stepResult.startsWith("❌")) {
+                        results.push({ index: i + 1, explanation: step.explanation, success: false, result: stepResult });
+                        aborted = true;
+                        break;
+                    }
+
+                    results.push({ index: i + 1, explanation: step.explanation, success: true, result: stepResult });
+                } catch (error) {
+                    results.push({ index: i + 1, explanation: step.explanation, success: false, result: `❌ ${error.message}` });
+                    aborted = true;
+                    break;
+                }
+            }
+
+            // 汇总报告
+            let report = `🔗 **组合指令执行${aborted ? "中断" : "完成"}**\n\n`;
+            for (const r of results) {
+                report += `${r.success ? "✅" : "❌"} 步骤 ${r.index}: ${r.explanation}\n`;
+            }
+
+            if (aborted) {
+                const skipped = steps.slice(results.length);
+                if (skipped.length > 0) {
+                    report += `\n⏭️ 已跳过：\n`;
+                    skipped.forEach((step, i) => {
+                        report += `${results.length + i + 1}. ${step.explanation}\n`;
+                    });
+                }
+            }
+
+            // 附加各步骤详细结果
+            report += `\n---\n`;
+            for (const r of results) {
+                report += `\n**步骤 ${r.index}**: ${r.explanation}\n${r.result}\n`;
+            }
+
+            return report;
         },
     };
 
