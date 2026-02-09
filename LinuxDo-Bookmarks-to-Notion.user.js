@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux.do 收藏帖子导出到 Notion
 // @namespace    https://linux.do/
-// @version      2.1.0
+// @version      2.2.0
 // @description  批量导出 Linux.do 收藏的帖子到 Notion 数据库或页面，支持自定义筛选、图片上传、权限控制、AI 对话式助手，在 Notion 站点显示 AI 助手面板
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -68,6 +68,9 @@
             FETCHED_MODELS: "ldb_fetched_models",
             // 工作区页面缓存
             WORKSPACE_PAGES: "ldb_workspace_pages",
+            // 自动导入
+            AUTO_IMPORT_ENABLED: "ldb_auto_import_enabled",
+            AUTO_IMPORT_INTERVAL: "ldb_auto_import_interval",
         },
         // 默认值
         DEFAULTS: {
@@ -87,6 +90,9 @@
             aiBaseUrl: "",
             // 导出目标默认值
             exportTargetType: "database", // database 或 page
+            // 自动导入默认值
+            autoImportEnabled: false,
+            autoImportInterval: 5, // 分钟，0=仅页面加载时
         },
         // 导出目标类型
         EXPORT_TARGET_TYPES: {
@@ -4767,6 +4773,8 @@ ${availableTools}
     // 导出器
     // ===========================================
     const Exporter = {
+        isExporting: false, // 标记是否正在导出（用于与自动导入互斥）
+
         // 筛选帖子
         filterPosts: (posts, topic, settings) => {
             return posts.filter((post) => {
@@ -5030,6 +5038,7 @@ ${availableTools}
         exportBookmarks: async (bookmarks, settings, onProgress, startIndex = 0) => {
             const results = { success: [], failed: [], skipped: [] };
             Exporter.reset();
+            Exporter.isExporting = true;
             Exporter.currentIndex = startIndex;
 
             for (let i = startIndex; i < bookmarks.length; i++) {
@@ -5085,7 +5094,173 @@ ${availableTools}
                 }
             }
 
+            Exporter.isExporting = false;
             return results;
+        },
+    };
+
+    // ===========================================
+    // 自动导入模块
+    // ===========================================
+    const AutoImporter = {
+        isRunning: false,
+        timerId: null,
+
+        // 从 Storage 读取导出设置（不依赖 UI DOM）
+        buildSettings: () => {
+            const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "database");
+            return {
+                apiKey: Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
+                databaseId: Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
+                parentPageId: Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, ""),
+                exportTargetType,
+                onlyFirst: Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_FIRST, false),
+                onlyOp: Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, false),
+                rangeStart: Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, 1),
+                rangeEnd: Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, 999999),
+                imgMode: Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, "external"),
+            };
+        },
+
+        // 检查配置是否足够
+        canStart: () => {
+            if (!Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, false)) return false;
+            const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            if (!apiKey) return false;
+            const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "database");
+            if (exportTargetType === "database") {
+                return !!Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+            } else {
+                return !!Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "");
+            }
+        },
+
+        // 更新状态栏
+        updateStatus: (text) => {
+            const el = document.querySelector("#ldb-auto-import-status");
+            if (el) el.textContent = text;
+        },
+
+        // 执行一次自动导入
+        run: async () => {
+            if (AutoImporter.isRunning) return;
+            if (Exporter.isExporting) return; // 手动导出进行中，跳过
+
+            // 检查配置是否足够（不依赖 AUTO_IMPORT_ENABLED，由调用方判断）
+            const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            if (!apiKey) {
+                AutoImporter.updateStatus("⚠️ 请先配置 Notion API Key");
+                return;
+            }
+            const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "database");
+            if (exportTargetType === "database" && !Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "")) {
+                AutoImporter.updateStatus("⚠️ 请先配置 Notion 数据库 ID");
+                return;
+            }
+            if (exportTargetType === "page" && !Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "")) {
+                AutoImporter.updateStatus("⚠️ 请先配置父页面 ID");
+                return;
+            }
+
+            AutoImporter.isRunning = true;
+            const exportBtn = document.querySelector("#ldb-export");
+
+            try {
+                let username = Utils.getUsernameFromUrl();
+                if (!username) {
+                    const meta = document.querySelector('meta[name="current-user-username"]');
+                    if (meta) username = meta.content;
+                }
+                if (!username) {
+                    const header = document.querySelector(".header-dropdown-toggle .avatar");
+                    if (header) username = header.title || header.alt;
+                }
+                if (!username) return;
+
+                AutoImporter.updateStatus("🔄 正在检查新收藏...");
+
+                const bookmarks = await LinuxDoAPI.fetchAllBookmarks(username);
+
+                const newBookmarks = bookmarks.filter(b => {
+                    const topicId = String(b.topic_id || b.bookmarkable_id);
+                    return !Storage.isTopicExported(topicId);
+                });
+
+                if (newBookmarks.length === 0) {
+                    AutoImporter.updateStatus(`✅ 没有新收藏 (${new Date().toLocaleTimeString()})`);
+                    return;
+                }
+
+                AutoImporter.updateStatus(`📥 发现 ${newBookmarks.length} 个新收藏，正在导入...`);
+
+                if (exportBtn) exportBtn.disabled = true;
+
+                const settings = AutoImporter.buildSettings();
+                const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+                let success = 0, failed = 0;
+
+                for (let i = 0; i < newBookmarks.length; i++) {
+                    const bookmark = newBookmarks[i];
+                    const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
+                    const title = bookmark.title || bookmark.name || `帖子 ${topicId}`;
+
+                    AutoImporter.updateStatus(`📥 导入中 (${i + 1}/${newBookmarks.length}): ${title}`);
+
+                    try {
+                        await Exporter.exportTopic(bookmark, settings);
+                        success++;
+                    } catch (e) {
+                        console.error(`自动导入失败: ${title}`, e);
+                        failed++;
+                    }
+
+                    if (i < newBookmarks.length - 1) await Utils.sleep(delay);
+                }
+
+                if (typeof UI !== "undefined" && UI.renderBookmarkList) {
+                    try { UI.renderBookmarkList(); } catch {}
+                }
+
+                const statusText = `✅ 自动导入完成: ${success} 个成功${failed > 0 ? `，${failed} 个失败` : ""} (${new Date().toLocaleTimeString()})`;
+                AutoImporter.updateStatus(statusText);
+
+                if (success > 0 && typeof GM_notification === "function") {
+                    GM_notification({
+                        title: "自动导入完成",
+                        text: `成功导入 ${success} 个新收藏到 Notion`,
+                        timeout: 5000,
+                    });
+                }
+            } catch (e) {
+                console.error("自动导入出错:", e);
+                AutoImporter.updateStatus(`❌ 自动导入出错: ${e.message}`);
+            } finally {
+                AutoImporter.isRunning = false;
+                if (exportBtn) exportBtn.disabled = false;
+            }
+        },
+
+        startPolling: (intervalMinutes) => {
+            AutoImporter.stopPolling();
+            if (intervalMinutes > 0) {
+                AutoImporter.timerId = setInterval(() => AutoImporter.run(), intervalMinutes * 60 * 1000);
+            }
+        },
+
+        stopPolling: () => {
+            if (AutoImporter.timerId) {
+                clearInterval(AutoImporter.timerId);
+                AutoImporter.timerId = null;
+            }
+        },
+
+        init: () => {
+            if (!AutoImporter.canStart()) return;
+            setTimeout(() => {
+                AutoImporter.run();
+                const interval = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval);
+                if (interval > 0) AutoImporter.startPolling(interval);
+            }, 3000);
         },
     };
 
@@ -7567,6 +7742,26 @@ ${availableTools}
                             <div class="ldb-bookmarks-count" id="ldb-bookmark-count">-</div>
                             <div class="ldb-bookmarks-label">已加载收藏数量</div>
                         </div>
+                        <!-- 自动导入设置 -->
+                        <div class="ldb-setting-row" style="margin-bottom: 8px;">
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="checkbox" id="ldb-auto-import-enabled">
+                                <span>启用自动导入新收藏</span>
+                            </label>
+                        </div>
+                        <div id="ldb-auto-import-options" style="display: none; margin-bottom: 12px;">
+                            <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px;">
+                                <label style="white-space: nowrap;">轮询间隔</label>
+                                <select id="ldb-auto-import-interval" class="ldb-input" style="flex: 1;">
+                                    <option value="0">仅页面加载时</option>
+                                    <option value="3">每 3 分钟</option>
+                                    <option value="5" selected>每 5 分钟</option>
+                                    <option value="10">每 10 分钟</option>
+                                    <option value="30">每 30 分钟</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="ldb-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
                         <button class="ldb-btn ldb-btn-secondary" id="ldb-load-bookmarks" style="margin-bottom: 12px;">
                             🔄 加载收藏列表
                         </button>
@@ -7813,6 +8008,45 @@ ${availableTools}
                 } finally {
                     btn.disabled = false;
                     btn.innerHTML = "自动设置数据库";
+                }
+            };
+
+            // 自动导入设置
+            panel.querySelector("#ldb-auto-import-enabled").onchange = (e) => {
+                const enabled = e.target.checked;
+                Storage.set(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, enabled);
+                panel.querySelector("#ldb-auto-import-options").style.display = enabled ? "block" : "none";
+                if (enabled) {
+                    // 检查 Notion 配置是否完整
+                    const apiKey = panel.querySelector("#ldb-api-key").value.trim();
+                    if (!apiKey) {
+                        AutoImporter.updateStatus("⚠️ 请先配置 Notion API Key");
+                        return;
+                    }
+                    const exportTargetType = panel.querySelector("#ldb-export-target-page").checked ? "page" : "database";
+                    if (exportTargetType === "database" && !panel.querySelector("#ldb-database-id").value.trim()) {
+                        AutoImporter.updateStatus("⚠️ 请先配置 Notion 数据库 ID");
+                        return;
+                    }
+                    if (exportTargetType === "page" && !panel.querySelector("#ldb-parent-page-id").value.trim()) {
+                        AutoImporter.updateStatus("⚠️ 请先配置父页面 ID");
+                        return;
+                    }
+                    AutoImporter.run();
+                    const interval = parseInt(panel.querySelector("#ldb-auto-import-interval").value) || 0;
+                    if (interval > 0) AutoImporter.startPolling(interval);
+                } else {
+                    AutoImporter.stopPolling();
+                    AutoImporter.updateStatus("");
+                }
+            };
+
+            panel.querySelector("#ldb-auto-import-interval").onchange = (e) => {
+                const interval = parseInt(e.target.value) || 0;
+                Storage.set(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, interval);
+                AutoImporter.stopPolling();
+                if (interval > 0 && Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, false)) {
+                    AutoImporter.startPolling(interval);
                 }
             };
 
@@ -8368,6 +8602,13 @@ ${availableTools}
                     panel.querySelector("#ldb-workspace-select").style.display = "block";
                 }
             } catch {}
+
+            // 加载自动导入设置
+            const autoImportEnabled = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.autoImportEnabled);
+            panel.querySelector("#ldb-auto-import-enabled").checked = autoImportEnabled;
+            panel.querySelector("#ldb-auto-import-options").style.display = autoImportEnabled ? "block" : "none";
+            const autoImportInterval = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval);
+            panel.querySelector("#ldb-auto-import-interval").value = autoImportInterval;
         },
 
         // 显示状态
@@ -8659,6 +8900,9 @@ ${availableTools}
                 UI.panel.style.display = "none";
                 UI.miniBtn.style.display = "flex";
             }
+
+            // 启动自动导入
+            AutoImporter.init();
         },
     };
 
