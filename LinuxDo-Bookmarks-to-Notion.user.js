@@ -2186,7 +2186,24 @@ compound 格式（仅当 intent 为 compound 时使用）：
                 return basicConfigCheck.error;
             }
 
-            // 进入 Agent Loop
+            // 先尝试意图解析，已知意图直接执行，未知/复杂意图走 Agent Loop
+            ChatState.updateLastMessage("🤖 正在理解你的需求...", "processing");
+            const intentResult = await AIAssistant.parseIntent(userMessage, settings);
+
+            // 可直接执行的意图（有专用 handler 且不在 Agent Tools 中的）
+            const directIntents = [
+                "query", "search", "workspace_search",
+                "classify", "batch_classify",
+                "update", "move", "copy", "create_database",
+                "write_content", "edit_content", "translate_content",
+                "ai_autofill", "compound"
+            ];
+
+            if (directIntents.includes(intentResult.intent)) {
+                return await AIAssistant.executeIntent(intentResult, settings);
+            }
+
+            // unknown/ask/agent_task/help → Agent Loop
             ChatState.updateLastMessage("🤖 正在思考...", "processing");
             return await AIAssistant.runAgentLoop(userMessage, settings);
         },
@@ -3352,6 +3369,10 @@ ${explanation ? `我的理解：${explanation}` : ""}
         },
 
         handleAIAutofill: async (params, settings, explanation) => {
+            if (!OperationGuard.canExecute("updatePage")) {
+                return "❌ 权限不足：AI 属性填充需要「标准」及以上权限。\n\n请在设置中提升权限级别。";
+            }
+
             const configCheck = AIAssistant.checkConfig(settings, true);
             if (!configCheck.valid) return configCheck.error;
 
