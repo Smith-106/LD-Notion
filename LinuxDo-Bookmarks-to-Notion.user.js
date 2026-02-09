@@ -1850,15 +1850,35 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 let hasMore = true;
                 const maxPages = 10; // 最多查询 10 页（1000 条），防止无限循环
                 let pageCount = 0;
+                let querySorts = [];
 
                 while (hasMore && pageCount < maxPages) {
-                    const response = await NotionAPI.queryDatabase(
-                        settings.notionDatabaseId,
-                        filter,
-                        [{ property: "收藏时间", direction: "descending" }],
-                        cursor,
-                        settings.notionApiKey
-                    );
+                    // 首次尝试按"收藏时间"排序，失败则按创建时间排序
+                    let response;
+                    try {
+                        response = await NotionAPI.queryDatabase(
+                            settings.notionDatabaseId,
+                            filter,
+                            pageCount === 0 ? [{ property: "收藏时间", direction: "descending" }] : querySorts,
+                            cursor,
+                            settings.notionApiKey
+                        );
+                        if (pageCount === 0) querySorts = [{ property: "收藏时间", direction: "descending" }];
+                    } catch (sortError) {
+                        if (pageCount === 0 && sortError.message?.includes("收藏时间")) {
+                            // "收藏时间"属性不存在，改用内置创建时间排序
+                            querySorts = [{ timestamp: "created_time", direction: "descending" }];
+                            response = await NotionAPI.queryDatabase(
+                                settings.notionDatabaseId,
+                                filter,
+                                querySorts,
+                                cursor,
+                                settings.notionApiKey
+                            );
+                        } else {
+                            throw sortError;
+                        }
+                    }
 
                     allPages.push(...(response.results || []));
                     hasMore = response.has_more;
@@ -4033,7 +4053,7 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 .ldb-notion-toggle-content {
                     overflow: hidden;
                     transition: max-height 0.3s ease;
-                    max-height: 500px;
+                    max-height: 800px;
                 }
 
                 .ldb-notion-toggle-content.collapsed {
@@ -4596,17 +4616,15 @@ ${explanation ? `我的理解：${explanation}` : ""}
                 } catch (e) {}
             }
 
-            // 加载缓存的工作区页面列表（校验 API Key）
+            // 预加载缓存的工作区数据（不自动显示下拉框，点击刷新时再显示）
             const cachedWorkspace = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
             try {
                 const workspaceData = JSON.parse(cachedWorkspace);
                 const currentApiKey = panel.querySelector("#ldb-notion-api-key").value.trim();
                 const currentKeyHash = currentApiKey ? currentApiKey.slice(-8) : "";
-                // 仅当 API Key 匹配时才显示缓存
                 if (workspaceData.apiKeyHash === currentKeyHash &&
                     (workspaceData.databases?.length > 0 || workspaceData.pages?.length > 0)) {
                     NotionSiteUI.updateWorkspaceSelect(workspaceData);
-                    panel.querySelector("#ldb-notion-workspace-select").style.display = "block";
                 }
             } catch {}
         },
