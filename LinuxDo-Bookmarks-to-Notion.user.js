@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Linux.do 收藏帖子导出到 Notion
 // @namespace    https://linux.do/
-// @version      2.2.1
+// @version      2.3.0
 // @description  批量导出 Linux.do 收藏的帖子到 Notion 数据库或页面，支持自定义筛选、图片上传、权限控制、AI 对话式助手，在 Notion 站点显示 AI 助手面板
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -71,6 +71,7 @@
             // 自动导入
             AUTO_IMPORT_ENABLED: "ldb_auto_import_enabled",
             AUTO_IMPORT_INTERVAL: "ldb_auto_import_interval",
+            EXPORT_CONCURRENCY: "ldb_export_concurrency",
         },
         // 默认值
         DEFAULTS: {
@@ -93,6 +94,7 @@
             // 自动导入默认值
             autoImportEnabled: false,
             autoImportInterval: 5, // 分钟，0=仅页面加载时
+            exportConcurrency: 1, // 并发导出数量
         },
         // 导出目标类型
         EXPORT_TARGET_TYPES: {
@@ -5061,57 +5063,84 @@ ${availableTools}
             Exporter.reset();
             Exporter.isExporting = true;
             Exporter.currentIndex = startIndex;
+            const concurrency = settings.concurrency || 1;
+            const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
 
-            for (let i = startIndex; i < bookmarks.length; i++) {
-                // 检查暂停
-                while (Exporter.isPaused) {
-                    await Utils.sleep(200);
-                    if (Exporter.isCancelled) break;
-                }
+            // 共享队列索引
+            let nextIndex = startIndex;
+            let completedCount = 0;
 
-                // 检查取消
-                if (Exporter.isCancelled) {
-                    results.skipped = bookmarks.slice(i).map(b => ({
-                        topicId: b.topic_id || b.bookmarkable_id,
-                        title: b.title || b.name || `帖子 ${b.topic_id || b.bookmarkable_id}`,
-                    }));
-                    break;
-                }
+            const worker = async () => {
+                while (true) {
+                    // 检查暂停
+                    while (Exporter.isPaused) {
+                        await Utils.sleep(200);
+                        if (Exporter.isCancelled) return;
+                    }
+                    if (Exporter.isCancelled) return;
 
-                Exporter.currentIndex = i;
-                const bookmark = bookmarks[i];
-                const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
-                const title = bookmark.title || bookmark.name || `帖子 ${topicId}`;
+                    // 取任务
+                    const i = nextIndex;
+                    if (i >= bookmarks.length) return;
+                    nextIndex++;
 
-                onProgress?.({
-                    current: i + 1,
-                    total: bookmarks.length,
-                    title: title,
-                    stage: "start",
-                    isPaused: Exporter.isPaused,
-                });
+                    const bookmark = bookmarks[i];
+                    const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
+                    const title = bookmark.title || bookmark.name || `帖子 ${topicId}`;
+                    const taskNum = i - startIndex + 1;
 
-                try {
-                    await Exporter.exportTopic(bookmark, settings, (detail) => {
-                        onProgress?.({
-                            current: i + 1,
-                            total: bookmarks.length,
-                            title: title,
-                            isPaused: Exporter.isPaused,
-                            ...detail,
-                        });
+                    onProgress?.({
+                        current: taskNum,
+                        total: bookmarks.length,
+                        title: title,
+                        stage: "start",
+                        isPaused: Exporter.isPaused,
                     });
 
-                    results.success.push({ topicId, title, url: `https://linux.do/t/${topicId}` });
-                } catch (error) {
-                    console.error(`导出失败: ${title}`, error);
-                    results.failed.push({ topicId, title, error: error.message });
-                }
+                    try {
+                        await Exporter.exportTopic(bookmark, settings, (detail) => {
+                            onProgress?.({
+                                current: taskNum,
+                                total: bookmarks.length,
+                                title: title,
+                                isPaused: Exporter.isPaused,
+                                ...detail,
+                            });
+                        });
+                        results.success.push({ topicId, title, url: `https://linux.do/t/${topicId}` });
+                    } catch (error) {
+                        console.error(`导出失败: ${title}`, error);
+                        results.failed.push({ topicId, title, error: error.message });
+                    }
 
-                // 避免请求过快
-                if (i < bookmarks.length - 1 && !Exporter.isCancelled) {
-                    const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
-                    await Utils.sleep(delay);
+                    completedCount++;
+                    Exporter.currentIndex = completedCount + startIndex;
+
+                    // 请求间隔
+                    if (delay > 0 && nextIndex < bookmarks.length && !Exporter.isCancelled) {
+                        await Utils.sleep(delay);
+                    }
+                }
+            };
+
+            // 启动 N 个 worker
+            const workerCount = Math.min(concurrency, bookmarks.length - startIndex);
+            const workers = [];
+            for (let w = 0; w < workerCount; w++) {
+                workers.push(worker());
+                // 错开启动避免同时请求
+                if (w < workerCount - 1) await Utils.sleep(100);
+            }
+            await Promise.all(workers);
+
+            // 取消时收集剩余为 skipped
+            if (Exporter.isCancelled && nextIndex < bookmarks.length) {
+                for (let i = nextIndex; i < bookmarks.length; i++) {
+                    const b = bookmarks[i];
+                    results.skipped.push({
+                        topicId: b.topic_id || b.bookmarkable_id,
+                        title: b.title || b.name || `帖子 ${b.topic_id || b.bookmarkable_id}`,
+                    });
                 }
             }
 
@@ -5140,6 +5169,7 @@ ${availableTools}
                 rangeStart: Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, 1),
                 rangeEnd: Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, 999999),
                 imgMode: Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, "external"),
+                concurrency: Storage.get(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG.DEFAULTS.exportConcurrency),
             };
         },
 
@@ -5218,25 +5248,43 @@ ${availableTools}
 
                 const settings = AutoImporter.buildSettings();
                 const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+                const concurrency = settings.concurrency || 1;
                 let success = 0, failed = 0;
 
-                for (let i = 0; i < newBookmarks.length; i++) {
-                    const bookmark = newBookmarks[i];
-                    const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
-                    const title = bookmark.title || bookmark.name || `帖子 ${topicId}`;
+                // 共享队列索引
+                let nextIndex = 0;
 
-                    AutoImporter.updateStatus(`📥 导入中 (${i + 1}/${newBookmarks.length}): ${title}`);
+                const worker = async () => {
+                    while (true) {
+                        const i = nextIndex;
+                        if (i >= newBookmarks.length) return;
+                        nextIndex++;
 
-                    try {
-                        await Exporter.exportTopic(bookmark, settings);
-                        success++;
-                    } catch (e) {
-                        console.error(`自动导入失败: ${title}`, e);
-                        failed++;
+                        const bookmark = newBookmarks[i];
+                        const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
+                        const title = bookmark.title || bookmark.name || `帖子 ${topicId}`;
+
+                        AutoImporter.updateStatus(`📥 导入中 (${i + 1}/${newBookmarks.length}): ${title}`);
+
+                        try {
+                            await Exporter.exportTopic(bookmark, settings);
+                            success++;
+                        } catch (e) {
+                            console.error(`自动导入失败: ${title}`, e);
+                            failed++;
+                        }
+
+                        if (delay > 0 && nextIndex < newBookmarks.length) await Utils.sleep(delay);
                     }
+                };
 
-                    if (i < newBookmarks.length - 1) await Utils.sleep(delay);
+                const workerCount = Math.min(concurrency, newBookmarks.length);
+                const workers = [];
+                for (let w = 0; w < workerCount; w++) {
+                    workers.push(worker());
+                    if (w < workerCount - 1) await Utils.sleep(100);
                 }
+                await Promise.all(workers);
 
                 if (typeof UI !== "undefined" && UI.renderBookmarkList) {
                     try { UI.renderBookmarkList(); } catch {}
@@ -7675,6 +7723,15 @@ ${availableTools}
                                     <option value="30000">龟速 (30秒)</option>
                                 </select>
                             </div>
+                            <div class="ldb-form-group">
+                                <label>并发数</label>
+                                <select class="ldb-select" id="ldb-export-concurrency">
+                                    <option value="1">串行 (1个)</option>
+                                    <option value="2">2 个并发</option>
+                                    <option value="3">3 个并发</option>
+                                    <option value="5">5 个并发</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
 
@@ -8189,6 +8246,7 @@ ${availableTools}
                     rangeStart: parseInt(panel.querySelector("#ldb-range-start").value) || 1,
                     rangeEnd: parseInt(panel.querySelector("#ldb-range-end").value) || 999999,
                     imgMode: panel.querySelector("#ldb-img-mode").value,
+                    concurrency: parseInt(panel.querySelector("#ldb-export-concurrency").value) || 1,
                 };
 
                 // 保存设置
@@ -8205,6 +8263,7 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, settings.rangeEnd);
                 Storage.set(CONFIG.STORAGE_KEYS.IMG_MODE, settings.imgMode);
                 Storage.set(CONFIG.STORAGE_KEYS.REQUEST_DELAY, parseInt(panel.querySelector("#ldb-request-delay").value));
+                Storage.set(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, settings.concurrency);
 
                 // 显示控制按钮，隐藏导出按钮
                 panel.querySelector("#ldb-export-btns").style.display = "none";
@@ -8537,6 +8596,7 @@ ${availableTools}
             panel.querySelector("#ldb-range-end").value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, CONFIG.DEFAULTS.rangeEnd);
             panel.querySelector("#ldb-img-mode").value = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
             panel.querySelector("#ldb-request-delay").value = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+            panel.querySelector("#ldb-export-concurrency").value = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG.DEFAULTS.exportConcurrency);
 
             // 加载导出目标类型设置
             const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
