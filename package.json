@@ -1,0 +1,17 @@
+{
+  "name": "linux-do-notion-exporter",
+  "version": "1.0.0",
+  "description": "Export Notion pages as Linux.do forum posts to HTML.",
+  "main": "notion_to_html_exporter.js",
+  "scripts": {
+    "start": "node notion_to_html_exporter.js"
+  },
+  "keywords": [
+    "notion",
+    "linux.do",
+    "export",
+    "html"
+  ],
+  "author": "",
+  "license": "MIT"
+}

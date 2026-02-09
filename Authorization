@@ -1,0 +1,461 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.notion.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Authorization
+
+> This guide describes the authorization flows for internal and public Notion integrations.
+
+export const integrationsDashboardUrl = "https://www.notion.so/profile/integrations";
+
+## What is authorization?
+
+Authorization is the process of granting an integration access to a user’s Notion data. That process varies depending on whether or not the integration is **public** or **internal**.
+
+<Check>
+  [Link Preview integrations](/guides/link-previews/link-previews) — a subcategory of public integrations — use two-way OAuth, which differs from the authorization flow described in this guide.
+
+  See the [Build a Link Preview integration guide](/guides/link-previews/build-a-link-preview-integration) to learn more about Link Preview authorization.
+</Check>
+
+### What is an internal integration?
+
+An internal integration allows Notion workspace members to interact with the workspace through the Notion REST API. Each internal integration is tied to a single, specific workspace and only members within the workspace can use the integration. After an internal integration is added to a workspace, members must manually [give the integration access to the specific pages or databases](https://www.notion.so/help/add-and-manage-connections-with-the-api#add-connections-to-pages) that they want it to use.
+
+### What is a public integration?
+
+Public integrations can be used by any Notion user in any workspace. They allow members to interact with their workspace using Notion’s REST API once the integration has been properly authorized.
+
+Public integrations follow the [OAuth 2.0](https://oauth.net/2/) protocol. This allows workspace members to give access to Notion pages directly through the auth flow, without having to open each Notion workspace page directly and manually give permission to the integration. (More on this below.)
+
+Public integrations can technically be used without permitting workspace pages access as long as the auth flow is completed and an [access token is created](/reference/create-a-token) — a process which will be described in detail below. For example, if a public integration *only* needs to interact with the Notion [User endpoints](/reference/get-users), it does not need to be given access to workspace pages.
+
+For more details on the differences between public and internal integrations, refer to the [getting started](/guides/get-started/getting-started#internal-vs-public-integrations) page.
+
+Read on to learn how to set up the auth flows for internal and public integrations.
+
+## Internal integration auth flow set-up
+
+To use an internal integration, start by creating your integration in the <a href={integrationsDashboardUrl}>integration's settings page</a>.
+
+The internal integration will be associated with the workspace of your choice. You are required to be a workspace owner to create an integration.
+
+<Frame caption="Click the New integration button on the My integrations page to create a new integration.">
+  <img src="https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/fd25d1f-integrations_7.png?fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=6fcebc5334c9c3499b58208b91b798ae" data-og-width="1198" width="1198" data-og-height="699" height="699" data-path="images/docs/fd25d1f-integrations_7.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/fd25d1f-integrations_7.png?w=280&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=cb7c51998785b7c2f88f11658014be5f 280w, https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/fd25d1f-integrations_7.png?w=560&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=c1a92ab2d5c7413c6d73c288ed84246b 560w, https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/fd25d1f-integrations_7.png?w=840&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=49f8e846a3495e9674129bdbbd4a51c8 840w, https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/fd25d1f-integrations_7.png?w=1100&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=5638368c0a7c3e876d0945aee50d8f26 1100w, https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/fd25d1f-integrations_7.png?w=1650&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=aeba43b917d31cb847d5c044ccc83627 1650w, https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/fd25d1f-integrations_7.png?w=2500&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=a3d54f2aa4e0405039a9a88ac58733db 2500w" />
+</Frame>
+
+Once the integration is created, you can update its settings as needed under the `Configuration` tab and retrieve the integration token in this tab.
+
+The integration token will be used to authenticate REST API requests. The integration sends the same token in every API request.
+
+<Frame caption="Find the integration token in the integration's settings.">
+  <img src="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/69c7487-integrations_8.png?fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=34d293a88ef5911ff43aefe4dde91e2d" data-og-width="1198" width="1198" data-og-height="699" height="699" data-path="images/docs/69c7487-integrations_8.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/69c7487-integrations_8.png?w=280&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=9af91249ad204650765be96b857ab205 280w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/69c7487-integrations_8.png?w=560&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=db81a6d3d2f63dcffaba7bc3a004f38e 560w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/69c7487-integrations_8.png?w=840&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=bdc99c1625bd6e736addf812ff924d98 840w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/69c7487-integrations_8.png?w=1100&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=2c859481c58b6b96aa82ae1354373c81 1100w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/69c7487-integrations_8.png?w=1650&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=147a15fb10f97a9601b754da8d71d45c 1650w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/69c7487-integrations_8.png?w=2500&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=2cfdc4db42a0f68849cefb49df7d7b84 2500w" />
+</Frame>
+
+### Integration permissions
+
+Before an integration can interact with your Notion workspace page(s), the page must be manually shared with the integration. To share a page with an integration, visit the page in your Notion workspace, click the ••• menu at the top right of a page, scroll down to `Add connections`, and use the search bar to find and select the integration from the dropdown list.
+
+Once the integration is shared, you can start making API requests. If the page is not shared, any API requests made will respond with an error.
+
+<Warning>
+  **Keep your token secret**
+
+  Your integration token is a secret. To keep your integration secure, never store the token in your source code or commit it in version control. Instead, read the token from an environment variable. Use a secret manager or deployment system to set the token in the environment.
+
+  [Learn more: Best Practices for Handling API Keys](/guides/resources/best-practices-for-handling-api-keys)
+</Warning>
+
+### Making API requests with an internal integration
+
+Any time your integration is interacting with your workspace, you will need to include the integration token in the `Authorization` header with every API request. However, if you are using Notion’s [SDK for JavaScript](https://github.com/makenotion/notion-sdk-js) to interact with the REST API, the token is set once when a client is initialized.
+
+<CodeGroup>
+  ```http HTTP theme={null}
+  GET /v1/pages/b55c9c91-384d-452b-81db-d1ef79372b75 HTTP/1.1
+  Authorization: Bearer {INTEGRATION_TOKEN}
+  ```
+</CodeGroup>
+
+<CodeGroup>
+  ```javascript JavaScript theme={null}
+  const { Client } = require("@notionhq/client")
+
+  // Initializing a client
+  const notion = new Client({
+  	auth: process.env.NOTION_TOKEN,
+  })
+
+  const getUsers = async () => {
+  	const listUsersResponse = await notion.users.list({})
+  }
+  ```
+</CodeGroup>
+
+<Note>
+  If you are not using the [Notion SDK for JavaScript](https://github.com/makenotion/notion-sdk-js), you will also need to set the [`Notion-Version`](/reference/versioning) and [`Content-type`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Type) headers in all of in your requests, like so:
+
+  ```json JSON theme={null}
+  headers: {
+    Authorization: `Bearer ${process.env.NOTION_TOKEN}`,
+    "Notion-Version": "2022-06-28",
+    "Content-Type": "application/json",
+  },
+  ```
+</Note>
+
+If you receive an error response from the API, check if the integration has been properly [added to the page](https://www.notion.so/help/add-and-manage-connections-with-the-api#manage-connections-in-your-workspace). If this does not solve the problem, refer to our [Status codes](/reference/status-codes) page for more information.
+
+## Public integration auth flow set-up
+
+When an integration is made public, any Notion user in any workspace can use it.
+
+Since a public integration is not tied to a single workspace with a single integration token, public integrations instead follow the [OAuth 2.0 protocol](https://oauth.net/2/) to authorize an integration to interact with a workspace.
+
+### How to make a public integration
+
+Select `New Integration` in your integration dashboard and select `Public` in the integration *Type* during the creation flow. You may also edit an existing internal integration to convert to `Public`.
+
+<Frame caption="Public integration example.">
+  <img src="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/736d786-integrations_9.png?fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=024e202e05d5317ecec829b862ae99a8" data-og-width="1198" width="1198" data-og-height="699" height="699" data-path="images/docs/736d786-integrations_9.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/736d786-integrations_9.png?w=280&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=b1b8e617d40df2b9fd8821dabe9061e2 280w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/736d786-integrations_9.png?w=560&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=159c0107e279098fbc94607ff4999f41 560w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/736d786-integrations_9.png?w=840&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=3598e8b2927ccf3b9ac0cfd9228a1f07 840w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/736d786-integrations_9.png?w=1100&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=809c08de34d84fc8c91237dddbe12fcc 1100w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/736d786-integrations_9.png?w=1650&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=e0fe93fd0e7dbddeb59d8b89f3f6d387 1650w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/736d786-integrations_9.png?w=2500&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=b06a71d1e6c21bdb0d36b76269738958 2500w" />
+</Frame>
+
+You will need to fill out the form with additional information, including your company name, website, and redirect URI(s).
+
+The redirect URI is the URI your users will be redirected to after authorizing the public integration. To learn more, read [OAuth’s description of redirect URIs](https://www.oauth.com/oauth2-servers/redirect-uris/).
+
+### Public integration authorization overview
+
+Once your integration has been made public, you can update your integration code to use the public auth flow.
+
+As an overview, the authorization flow includes the following steps. Each step will be described in more detail below.
+
+<Steps>
+  <Step>
+    Navigate the user to the integration’s authorization URL. This URL is provided in the <a href={integrationsDashboardUrl}>integration's settings page</a>.
+  </Step>
+
+  <Step>
+    After the user selects which workspace pages to share, Notion redirects the user to the integration’s redirect URI and includes a `code` query parameter. The redirect URI is the one you specified in your <a href={integrationsDashboardUrl}>integration's settings page</a>.
+  </Step>
+
+  <Step>
+    You will make a `POST` request to [create an access token](/reference/create-a-token) , which will exchange the temporary `code` for an access token.
+  </Step>
+
+  <Step>
+    The Notion API responds with an access token and some additional information.
+  </Step>
+
+  <Step>
+    You will store the access token for future API requests. View the [API reference docs](/reference/intro) to learn about available endpoints.
+  </Step>
+</Steps>
+
+### Step 1 - Navigate the user to the integration’s authorization URL
+
+After your integration has been successfully made public in your <a href={integrationsDashboardUrl}>integration's settings page</a>, you will be able to access the integration’s secrets in the **Configuration** tab. Similarly to the internal integrations, these values should be protected and should never be included in source code or version control.
+
+<Frame caption="The Authorization URL field populates after a public integration is submitted">
+  <img src="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/c535461-integrations_10.png?fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=ef1174a58a78b04444bea74627ede083" data-og-width="1198" width="1198" data-og-height="699" height="699" data-path="images/docs/c535461-integrations_10.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/c535461-integrations_10.png?w=280&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=b587242b941365656c64f99cd8dc05c9 280w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/c535461-integrations_10.png?w=560&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=c708c30297ae6dee382a5836780b710a 560w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/c535461-integrations_10.png?w=840&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=834150052e2989bfbad4269265035aec 840w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/c535461-integrations_10.png?w=1100&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=3dd55465b81829d22d8c5f524f513f97 1100w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/c535461-integrations_10.png?w=1650&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=cfcd4563c2f383bf6215228f72a6ea82 1650w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/c535461-integrations_10.png?w=2500&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=9ed48b65c760339590d3eecb6299ee23 2500w" />
+</Frame>
+
+As an example, your `.env` file using these secrets could look like this:
+
+<CodeGroup>
+  ```shell Shell theme={null}
+  #.env
+
+  OAUTH_CLIENT_ID=<your-client-id>
+  OAUTH_CLIENT_SECRET=<your-client-secret>
+  NOTION_AUTH_URL=<your-auth-url>
+  ```
+</CodeGroup>
+
+To start the authorization flow for a public integration, you need to direct the prospective user to the authorization URL. To do this, it is common to include a hyperlink in the integration app that will be interacting with the Notion REST API. For example, if you have an app that will allow users to create new Notion pages for their workspace(s), you will first need them to first visit the authorization URL by clicking on the link.
+
+The following example shows an authorization URL made available through a hyperlink:
+
+<CodeGroup>
+  ```html HTML theme={null}
+  <a href="https://api.notion.com/v1/oauth/authorize?owner=user&client_id=463558a3-725e-4f37-b6d3-0889894f68de&redirect_uri=https%3A%2F%2Fexample.com%2Fauth%2Fnotion%2Fcallback&response_type=code">Add to Notion</a>
+  ```
+</CodeGroup>
+
+The URL begins with `https://api.notion.com/v1/oauth/authorize` and has the following parameters:
+
+| Parameter       | Description                                                                                                                                                                         | Required |
+| :-------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------- |
+| `client_id`     | An identifier for your integration, found in the integration settings.                                                                                                              | ✅        |
+| `redirect_uri`  | The URL where the user should return after granting access.                                                                                                                         | ✅        |
+| `response_type` | Always use `code`.                                                                                                                                                                  | ✅        |
+| `owner`         | Always use `user`.                                                                                                                                                                  | ✅        |
+| `state`         | If the user was in the middle of an interaction or operation, then this parameter can be used to restore state after the user returns. It can also be used to prevent CSRF attacks. |          |
+
+Once the authorization URL is visited, the user will be shown a prompt that varies depending on whether or not the integration comes with a Notion template option.
+
+#### Prompt for a standard integration with no template option (Default)
+
+In the standard integration permissions flow, a prompt describes the integration [capabilities](/reference/capabilities), presented to the user as what the integration would like to be able to do in the workspace. A user can either select pages to grant the integration access to, or cancel the request.
+
+<Frame caption="Prompt for authorizing a standard integration (no template option)">
+  <img src="https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/ec39f97-Screen_Shot_2021-07-22_at_2.58.28_PM.png?fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=3a82bcb02f006753164c1334e664b500" data-og-width="1150" width="1150" data-og-height="1390" height="1390" data-path="images/docs/ec39f97-Screen_Shot_2021-07-22_at_2.58.28_PM.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/ec39f97-Screen_Shot_2021-07-22_at_2.58.28_PM.png?w=280&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=cd5de5a9df445d715557662788dff7c2 280w, https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/ec39f97-Screen_Shot_2021-07-22_at_2.58.28_PM.png?w=560&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=4170a3824ecac3fe95e9976e50262bd4 560w, https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/ec39f97-Screen_Shot_2021-07-22_at_2.58.28_PM.png?w=840&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=46ae6c59a3fccd09b03adf828f73c443 840w, https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/ec39f97-Screen_Shot_2021-07-22_at_2.58.28_PM.png?w=1100&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=f57ba2fdb324aa186b87c35aa7e1578b 1100w, https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/ec39f97-Screen_Shot_2021-07-22_at_2.58.28_PM.png?w=1650&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=323a920f9883c9b89c689e6566e16b59 1650w, https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/ec39f97-Screen_Shot_2021-07-22_at_2.58.28_PM.png?w=2500&fit=max&auto=format&n=kSI9TVzPayvF1_1o&q=85&s=18cb8d57b8f8093555222f83699a700a 2500w" />
+</Frame>
+
+If the user presses **Cancel**, they will be redirected to the redirect URI with and `error` query param added.
+
+```
+www.example.com/my-redirect-uri?error=access_denied&state=
+```
+
+You can use this `error`query parameter to conditionally update your app’s state as needed.
+
+If the user opts to `Select pages`, then a page picker interface opens. A user can search for and select pages and databases to share with the integration from the page picker.
+
+<Note>
+  The page picker only displays pages or databases to which a user has [full access](https://www.notion.so/help/sharing-and-permissions), because a user needs full access to a resource in order to be able to share it with an integration.
+</Note>
+
+<Frame caption="Page picker interface">
+  <img src="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/a4009ce-Screen_Shot_2021-07-22_at_3.09.51_PM.png?fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=94186f31f22938dc1c7d850e227e061a" data-og-width="1142" width="1142" data-og-height="1360" height="1360" data-path="images/docs/a4009ce-Screen_Shot_2021-07-22_at_3.09.51_PM.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/a4009ce-Screen_Shot_2021-07-22_at_3.09.51_PM.png?w=280&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=aa81f9caa71de44fc783ac9feaf274c7 280w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/a4009ce-Screen_Shot_2021-07-22_at_3.09.51_PM.png?w=560&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=1c80e906ecb1e3e9275cc7adb4ac9915 560w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/a4009ce-Screen_Shot_2021-07-22_at_3.09.51_PM.png?w=840&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=aebe6c8ce0d2f78e9d7000e730c0e39e 840w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/a4009ce-Screen_Shot_2021-07-22_at_3.09.51_PM.png?w=1100&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=1270ef1211d503f45845ed49d3197836 1100w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/a4009ce-Screen_Shot_2021-07-22_at_3.09.51_PM.png?w=1650&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=83baa449920559a120ca03b4d5f8cbdb 1650w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/a4009ce-Screen_Shot_2021-07-22_at_3.09.51_PM.png?w=2500&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=d8b29f9d96747e4e91e2a5608f611a1f 2500w" />
+</Frame>
+
+Users can select which pages to give the integration access to, including both private and public pages available to them. Parent pages can be selected to quickly provide access to child pages, as giving access to a parent page will provide access to all available child pages. Users can return to this view at a later time to update access settings if circumstances change.
+
+If the user clicks `Allow access`, they are then redirected to the `redirect_uri` with a temporary authorization `code`. If the user denies access, they are redirected to the `redirect_uri` with an `error` query parameter.
+
+If the user clicks `Allow access` and the rest of the auth flow is not completed, the integration will *not* have access to the pages that were selected.
+
+#### Prompt for an integration with a Notion template option
+
+Public integrations offer the option of providing a public Notion page to use as a template during the auth flow.
+
+To add a template to your workspace, complete the following steps:
+
+* Choose a public page in your workspace that you want users to be able to duplicate.
+* Navigate to your <a href={integrationsDashboardUrl}>integration's settings</a> and go to the **Basic Information** tab.
+* Scroll to the bottom of your distribution settings and add the URL of the Notion page you selected to the **Notion URL for optional template** input.
+
+<Frame caption="Notion URL for optional template input in integration settings.">
+  <img src="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/b4ae671-integrations11.png?fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=d83bd80077b7fb6bdab6c38cbadb6579" data-og-width="1198" width="1198" data-og-height="699" height="699" data-path="images/docs/b4ae671-integrations11.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/b4ae671-integrations11.png?w=280&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=a5d2e397a2888aae9d0b3a20a6ab3a57 280w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/b4ae671-integrations11.png?w=560&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=39ca4045f429cb85c91546e0c1e0fecf 560w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/b4ae671-integrations11.png?w=840&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=9cdf90494f856ce84fab433445005dc3 840w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/b4ae671-integrations11.png?w=1100&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=3c3356f04b32cb39e7c3c6891419f945 1100w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/b4ae671-integrations11.png?w=1650&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=45683f06ef94b549f0bb5f03e6b59862 1650w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/b4ae671-integrations11.png?w=2500&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=f5cd7e893edd0864dc2aaaaef09cc031 2500w" />
+</Frame>
+
+Once this URL is added, your auth flow prompt appearance will be updated.
+
+Going back to your prompt view, if the integration offers a Notion template option, the first step in the permissions flow will describe the integration [capabilities](/reference/capabilities). This is presented to the user as what the integration would be able to do in the workspace, and it prompts the user to click `Next`.
+
+<Frame caption="Prompt for an integration with a Notion template option">
+  <img src="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/77076c7-template_prompt1.png?fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=bce36d9f1a69a618dc886d1baf46d50f" data-og-width="1102" width="1102" data-og-height="1462" height="1462" data-path="images/docs/77076c7-template_prompt1.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/77076c7-template_prompt1.png?w=280&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=6ddc1e0e9c726f155c7bac0a0fe0bed0 280w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/77076c7-template_prompt1.png?w=560&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=a1ae1eb9f748c32af5e88111d45d1af1 560w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/77076c7-template_prompt1.png?w=840&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=3af09c117c8a03d74983a9c55cded60c 840w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/77076c7-template_prompt1.png?w=1100&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=73e048e5cf0e2520cf8e218d4763ecd8 1100w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/77076c7-template_prompt1.png?w=1650&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=56472acfdbdfe57e8e8ede6abee82048 1650w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/77076c7-template_prompt1.png?w=2500&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=885dc89b073e5019cd12152a24e45550 2500w" />
+</Frame>
+
+In the next step, a user can either choose to duplicate the template that you provided or to select existing pages to share with the integration.
+
+<Frame caption="A user can select to duplicate a template or to share existing pages with the integration">
+  <img src="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/9788bdb-template_prompt_2.png?fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=d5ff31ef9083f78b60e615758b6f580e" data-og-width="1052" width="1052" data-og-height="1546" height="1546" data-path="images/docs/9788bdb-template_prompt_2.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/9788bdb-template_prompt_2.png?w=280&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=d0bcebf97c2d2d47298b5eb3ed8e9667 280w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/9788bdb-template_prompt_2.png?w=560&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=0df02c964b4ba61b341057ce4ca2b7c1 560w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/9788bdb-template_prompt_2.png?w=840&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=edf55877ba383f2192ad830326ca6885 840w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/9788bdb-template_prompt_2.png?w=1100&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=c236950de91a26a9329f68e904b29565 1100w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/9788bdb-template_prompt_2.png?w=1650&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=ad655a24827c812ebed25fc3e3a7edd6 1650w, https://mintcdn.com/notion-demo/9OFhQspLr8njnajd/images/docs/9788bdb-template_prompt_2.png?w=2500&fit=max&auto=format&n=9OFhQspLr8njnajd&q=85&s=2ca3fc12da1dc649db7f8128100996bf 2500w" />
+</Frame>
+
+If the user chooses to duplicate the template, then the following happens automatically:
+
+* The integration is added to the user’s workspace.
+* The template is duplicated as a new page in the workspace.
+* The new page is shared with the integration.
+
+If the user chooses to select pages to share with the integration, then they continue to the page picker interface that’s part of the [prompt for a standard integration](#prompt-for-a-standard-integration-with-no-template-option-default).
+
+<Note>
+  After a user installs a public integration, only that user is able to interact or share pages and databases with the integration. Unlike internal integrations, if multiple members in a workspace want to use a public integration, each prospective user needs to individually follow the auth flow for the integration.
+</Note>
+
+**User authorization failures**
+
+User authorization failures can happen. If a user chooses to `Cancel` the request, then a failure is triggered. Build your integration to handle these cases gracefully, as needed.
+
+In some cases, Notion redirects the user to the `redirect_uri` that you set up when you created the public integration, along with an `error` query parameter. Notion uses the common [error codes in the OAuth specification](https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1). Use the `error` code to create a helpful prompt for the user when they’re redirected here.
+
+### Step 2 - Notion redirects the user to the integration’s redirect URI and includes a `code` parameter
+
+When you first created the public integration, you specified a redirect URI. If the user follows the prompt to `Allow access` for the integration, then Notion generates a temporary `code` and sends a request to the redirect URI with the following information in the query string:
+
+| Parameter | Description                                                                                                                                        | Required |
+| :-------- | :------------------------------------------------------------------------------------------------------------------------------------------------- | :------- |
+| `code`    | A temporary authorization code.                                                                                                                    | ✅        |
+| `state`   | The value provided by the integration when the user was [prompted for access](#prompt-for-a-standard-integration-with-no-template-option-default). |          |
+
+To complete the next set, you will need to retrieve the `code` query parameter provided in the redirect. How you retrieve this value will vary depending on your app’s tech stack.
+
+In a React component, for example, the query parameters are made available through the `useRouter()` hook:
+
+<CodeGroup>
+  ```javascript JavaScript theme={null}
+  export default function AuthRedirectPage() {
+    const router = useRouter();
+    const { code } = router.query;
+    ...
+  }
+  ```
+</CodeGroup>
+
+### Step 3 - Send the `code` in a `POST` request to the Notion API
+
+The integration needs to exchange the temporary `code` for an `access_token`.
+
+To set up this step, retrieve the `code` from the redirect URI.
+
+Next, you will need to send the `code` as part of a `POST` request to Notion’s token endpoint: [https://api.notion.com/v1/oauth/token](https://api.notion.com/v1/oauth/token).
+
+This endpoint is described in more detail in the API reference docs for [creating a token](/reference/create-a-token).
+
+The request is authorized using HTTP Basic Authentication. The credential is a colon-delimited combination of the integration’s `CLIENT_ID` and `CLIENT_SECRET`, like so:
+
+```bash  theme={null}
+CLIENT_ID:CLIENT_SECRET
+```
+
+You can find both of these values in the <a href={integrationsDashboardUrl}>integration's settings</a>.
+
+Note that in [HTTP Basic Authentication](https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication), credentials are `base64` encoded before being added to the `Authorization` header.
+
+The body of the request contains the following JSON-encoded fields:
+
+| Field            | Type     | Description                                                                                | Required                                                                                                                                                                                                                                                                                                                            |
+| :--------------- | :------- | :----------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"grant_type"`   | `string` | Always use `"authorization_code"`.                                                         | ✅                                                                                                                                                                                                                                                                                                                                   |
+| `"code"`         | `string` | The temporary authorization code received in the incoming request to the `"redirect_uri"`. | ✅                                                                                                                                                                                                                                                                                                                                   |
+| `"redirect_uri"` | `string` | The `"redirect_uri"` that was provided in the Authorization step.                          | ✅/❌\* <br /><br /> \* If the redirect URI was supplied as a query param in the Authorization URL, this field is required. If there are more than one redirect URIs included in your integration settings, this field is required. Otherwise, it is not allowed. Learn more in the [Create a token page](/reference/create-a-token). |
+
+The following is an example request to exchange the authorization code for an access token:
+
+<CodeGroup>
+  ```http HTTP theme={null}
+  POST /v1/oauth/token HTTP/1.1
+  Authorization: Basic "$CLIENT_ID:$CLIENT_SECRET"
+  Content-Type: application/json
+
+  {"grant_type":"authorization_code","code":"e202e8c9-0990-40af-855f-ff8f872b1ec6", "redirect_uri":"https://example.com/auth/notion/callback"}
+  ```
+</CodeGroup>
+
+The Node-equivalent of this example would look something like this:
+
+<CodeGroup>
+  ```javascript JavaScript theme={null}
+  ...
+  const clientId = process.env.OAUTH_CLIENT_ID;
+  const clientSecret = process.env.OAUTH_CLIENT_SECRET;
+  const redirectUri = process.env.OAUTH_REDIRECT_URI;
+
+  // encode in base 64
+  const encoded = btoa(`${clientId}:${clientSecret}`);
+
+  const response = await fetch("https://api.notion.com/v1/oauth/token", {
+  	method: "POST",
+  	headers: {
+  	Accept: "application/json",
+  	"Content-Type": "application/json",
+  	Authorization: `Basic ${encoded}`,
+  },
+  	body: JSON.stringify({
+  		grant_type: "authorization_code",
+  		code: "your-temporary-code",
+  		redirect_uri: redirectUri,
+  	}),
+  });
+  ...
+  ```
+</CodeGroup>
+
+### Step 4 - Notion responds with an `access_token` , `refresh_token`, and additional information
+
+Notion responds to the request with an `access_token`, `refresh_token`, and additional information. The `access_token` will be used to authenticate subsequent Notion REST API requests. The `refresh_token` will be used to refresh the access token, which generates a new `access_token`.
+
+The response contains the following JSON-encoded fields:
+
+| Field                      | Type     | Description                                                                                                                                                                                                                                     | Not null |
+| :------------------------- | :------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------- |
+| `"access_token"`           | `string` | An access token used to authorize requests to the Notion API.                                                                                                                                                                                   | ✅        |
+| `"refresh_token"`          | `string` | A refresh token used to generate a new access token                                                                                                                                                                                             | ✅        |
+| `"bot_id"`                 | `string` | An identifier for this authorization.                                                                                                                                                                                                           | ✅        |
+| `"duplicated_template_id"` | `string` | The ID of the new page created in the user’s workspace. The new page is a duplicate of the template that the developer provided with the integration. If the developer didn’t provide a template for the integration, then the value is `null`. |          |
+| `"owner"`                  | `object` | An object containing information about who can view and share this integration. `{ "workspace": true }` is returned for installations of workspace-level tokens. For user level tokens, a [user object](/reference/user) is returned.           | ✅        |
+| `"workspace_icon"`         | `string` | A URL to an image that can be used to display this authorization in the UI.                                                                                                                                                                     |          |
+| `"workspace_id"`           | `string` | The ID of the workspace where this authorization took place.                                                                                                                                                                                    | ✅        |
+| `"workspace_name"`         | `string` | A human-readable name that can be used to display this authorization in the UI.                                                                                                                                                                 |          |
+
+**Token request failures**
+
+If something goes wrong when the integration attempts to exchange the `code` for an `access_token`, then the response contains a JSON-encoded body with an `"error"` field. Notion uses the common [error codes from the OAuth specification](https://datatracker.ietf.org/doc/html/rfc6749#section-5.2).
+
+### Step 5 - The integration stores the `access_token` and `refresh_token` for future requests
+
+You need to set up a way for your integration to store both the `access_token` and `refresh_token` that it receives. The `access_token` is used to make authorized requests to the Notion API, and the `refresh_token` is used to generate a new `access_token`.
+
+**Tips for storing and using token access**
+
+* Setting up a database is a typical solution for storing access tokens. If you’re using a database, then build relations between an `access_token`, `refresh_token`, and the corresponding Notion resources that your integration accesses with that token. For example, if you store a Notion database or page ID, relate those records with the correct `access_token` that you use to authorize requests to read or write to that database or page, and the `refresh_token` for ongoing token lifecycle support..
+* Store all of the information that your integration receives with the `access_token` and `refresh_token`. You never know when your UI or product requirements might change and you’ll need this data. It's really hard (or impossible) to send users to repeat the authorization flow to generate the information again.
+* The `bot_id` returned along with your tokens should act as your primary key when storing information.
+
+### Step 6 - Refreshing an access token
+
+Refreshing an access token will generate a new access token and a new refresh token.
+
+You will need to send the `refresh_token` provided from [Step 4](/guides/get-started/authorization#step-4-notion-responds-with-an-access-token-%2C-refresh-token%2C-and-additional-information) as part of a `POST` request to Notion’s token endpoint: [https://api.notion.com/v1/oauth/token](https://api.notion.com/v1/oauth/token).
+
+This endpoint is described in more detail in the API reference docs for [refreshing a token](/reference/refresh-a-token).
+
+The request is authorized using HTTP Basic Authentication. The credential is a colon-delimited combination of the integration’s `CLIENT_ID` and `CLIENT_SECRET`, like so:
+
+```bash  theme={null}
+CLIENT_ID:CLIENT_SECRET
+```
+
+You can find both of these values in the <a href={integrationsDashboardUrl}>integration's settings</a>.
+
+Note that in [HTTP Basic Authentication](https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication), credentials are `base64` encoded before being added to the `Authorization` header.
+
+The body of the request contains the following JSON-encoded fields:
+
+| Field             | Type     | Description                                               | Required |
+| :---------------- | :------- | :-------------------------------------------------------- | :------- |
+| `"grant_type"`    | `string` | Always use `"refresh_token"`.                             | ✅        |
+| `"refresh_token"` | `string` | The `"refresh_token"` returned in the Authorization step. | ✅        |
+
+The following is an example request to exchange the `refresh_token` for a new access token and new refresh token
+
+<CodeGroup>
+  ```http HTTP theme={null}
+  POST /v1/oauth/token HTTP/1.1
+  Authorization: Basic "$CLIENT_ID:$CLIENT_SECRET"
+  Content-Type: application/json
+
+  {"grant_type":"refresh_token","refresh_token":"nrt_4991090011501Ejc6Xn4sHguI7jZIN449mKe9PRhpMfNK"}
+  ```
+</CodeGroup>
+
+The Node-equivalent of this example would look something like this:
+
+<CodeGroup>
+  ```javascript JavaScript theme={null}
+  ...
+  const clientId = process.env.OAUTH_CLIENT_ID;
+  const clientSecret = process.env.OAUTH_CLIENT_SECRET;
+
+  // encode in base 64
+  const encoded = btoa(`${clientId}:${clientSecret}`);
+
+  const response = await fetch("https://api.notion.com/v1/oauth/token", {
+  	method: "POST",
+  	headers: {
+  	Accept: "application/json",
+  	"Content-Type": "application/json",
+  	Authorization: `Basic ${encoded}`,
+  },
+  	body: JSON.stringify({
+  		grant_type: "refresh_token",
+  		refresh_token: "your-refresh-token",
+  	}),
+  });
+  ...
+  ```
+</CodeGroup>
+
