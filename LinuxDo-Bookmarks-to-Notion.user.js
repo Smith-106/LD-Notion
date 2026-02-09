@@ -1578,6 +1578,8 @@
             CLASSIFY: "classify",     // 分类单个
             BATCH_CLASSIFY: "batch_classify",  // 批量分类
             UPDATE: "update",         // 更新属性
+            MOVE: "move",             // 移动页面
+            COPY: "copy",             // 复制页面
             HELP: "help",             // 帮助
             UNKNOWN: "unknown"        // 未知
         },
@@ -1608,7 +1610,16 @@
 ✏️ **更新属性**
 - "把作者是 xxx 的帖子标记为重要"
 
-💡 **提示**：直接用自然语言告诉我你想做什么就行！`;
+📦 **移动页面**（需要高级权限）
+- "把标题包含 Docker 的帖子移到 B 数据库"
+- "把 A 数据库的帖子移到 B 数据库"
+
+📋 **复制页面**（需要高级权限）
+- "复制标题包含 xxx 的帖子到 B 数据库"
+- "把 A 数据库的帖子复制到 B 数据库"
+
+💡 **提示**：直接用自然语言告诉我你想做什么就行！
+⚠️ 移动和复制操作需要「高级」权限级别。`;
         },
 
         // 获取 AI 设置
@@ -1651,16 +1662,23 @@
 4. classify - 分类单个（如：把这个帖子分类为技术）
 5. batch_classify - 批量分类（如：自动分类所有未分类的帖子）
 6. update - 更新属性（如：把xxx标记为重要）
-7. help - 帮助（如：帮助、你能做什么）
-8. unknown - 无法理解
+7. move - 移动页面到另一个数据库（如：把A数据库的帖子移到B数据库、把标题包含xxx的帖子移到B数据库）
+8. copy - 复制页面到另一个数据库（如：把A数据库的帖子复制到B数据库、复制标题包含xxx的帖子到B数据库）
+9. help - 帮助（如：帮助、你能做什么）
+10. unknown - 无法理解
 
 注意区分 search 和 workspace_search：
 - search: 用户想在配置的帖子数据库中搜索
 - workspace_search: 用户明确提到"工作区"、"全局"、"所有页面"、"所有数据库"等，或者想搜索数据库以外的内容
 
+注意区分 move 和 copy：
+- move: 用户想把页面从一个数据库移动到另一个数据库（原数据库的页面会消失）
+- copy: 用户想把页面复制到另一个数据库（原数据库的页面保留）
+- 关键词提示：移动/移/搬/转移 → move；复制/拷贝/副本/备份到 → copy
+
 返回格式（只返回 JSON，不要其他内容）：
 {
-  "intent": "query|search|workspace_search|classify|batch_classify|update|help|unknown",
+  "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|help|unknown",
   "params": {
     "keyword": "搜索关键词（如有）",
     "property": "要更新的属性名（如有）",
@@ -1668,7 +1686,13 @@
     "limit": 5,
     "filter_field": "筛选字段（如 作者、分类）",
     "filter_value": "筛选值",
-    "object_type": "page 或 database（workspace_search 时使用，默认不限）"
+    "object_type": "page 或 database（workspace_search 时使用，默认不限）",
+    "source_database_name": "源数据库名称（move/copy 时，如用户提到了源数据库名称）",
+    "source_database_id": "源数据库ID（move/copy 时，如用户直接提供了ID）",
+    "target_database_name": "目标数据库名称（move/copy 时必填）",
+    "target_database_id": "目标数据库ID（move/copy 时，如用户直接提供了ID）",
+    "page_title": "要移动/复制的页面标题关键词（如用户指定了特定页面）",
+    "batch": true
   },
   "explanation": "你对用户意图的理解（中文简短说明）"
 }`;
@@ -1734,6 +1758,10 @@
                     return await AIAssistant.handleBatchClassify(params, settings, explanation);
                 case "update":
                     return await AIAssistant.handleUpdate(params, settings, explanation);
+                case "move":
+                    return await AIAssistant.handleMove(params, settings, explanation);
+                case "copy":
+                    return await AIAssistant.handleCopy(params, settings, explanation);
                 case "help":
                     return AIAssistant.getHelpMessage();
                 default:
@@ -2092,6 +2120,252 @@ ${explanation ? `我的理解：${explanation}` : ""}
         // 处理更新属性
         handleUpdate: async (params, settings, explanation) => {
             return "✏️ 属性更新功能开发中...\n\n目前可以使用查询和分类功能。";
+        },
+
+        // 解析数据库名称到 ID
+        _resolveDatabaseId: async (name, id, apiKey) => {
+            // 优先使用直接提供的 ID
+            if (id) return { id: id.replace(/-/g, ""), name: name || id };
+
+            if (!name) return null;
+
+            // 通过名称搜索数据库
+            const response = await NotionAPI.search(
+                name,
+                { property: "object", value: "database" },
+                apiKey
+            );
+
+            const databases = response.results || [];
+            // 优先精确匹配，再模糊匹配
+            let exactMatch = null;
+            const partialMatches = [];
+            for (const db of databases) {
+                const titleProp = db.title || [];
+                const dbTitle = titleProp.map(t => t.plain_text).join("");
+                if (!dbTitle) continue;
+                if (dbTitle === name) {
+                    exactMatch = { id: db.id.replace(/-/g, ""), name: dbTitle };
+                    break;
+                }
+                if (dbTitle.includes(name)) {
+                    partialMatches.push({ id: db.id.replace(/-/g, ""), name: dbTitle });
+                }
+            }
+
+            if (exactMatch) return exactMatch;
+            if (partialMatches.length === 1) return partialMatches[0];
+            if (partialMatches.length > 1) {
+                // 多个模糊匹配，返回错误避免误操作
+                const names = partialMatches.map(m => `「${m.name}」`).join("、");
+                return { error: `找到多个匹配的数据库: ${names}，请使用更精确的名称。` };
+            }
+
+            return null;
+        },
+
+        // 从源数据库获取页面
+        _fetchSourcePages: async (databaseId, apiKey, pageTitle) => {
+            const allPages = [];
+            let cursor = null;
+
+            do {
+                const response = await NotionAPI.queryDatabase(databaseId, null, null, cursor, apiKey);
+                allPages.push(...(response.results || []));
+                cursor = response.has_more ? response.next_cursor : null;
+            } while (cursor);
+
+            // 如果指定了标题关键词，按标题过滤
+            if (pageTitle) {
+                return allPages.filter(page => {
+                    const title = Utils.getPageTitle(page);
+                    return title.includes(pageTitle);
+                });
+            }
+
+            return allPages;
+        },
+
+        // 处理移动页面
+        handleMove: async (params, settings, explanation) => {
+            // 检查基础配置
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            // 权限检查
+            if (!OperationGuard.canExecute("movePage")) {
+                return "❌ 权限不足：移动页面需要「高级」权限级别。\n\n请在设置面板中将权限级别调整为「高级」或更高。";
+            }
+
+            const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
+
+            ChatState.updateLastMessage("正在解析数据库信息...", "processing");
+
+            try {
+                // 解析源数据库（未指定时使用已配置的数据库）
+                let source = await AIAssistant._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
+                if (source?.error) return `❌ 源数据库解析失败：${source.error}`;
+                if (!source && settings.notionDatabaseId) {
+                    source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "已配置的数据库" };
+                }
+                if (!source) {
+                    return "❌ 无法确定源数据库。请指定源数据库名称，或先在设置中配置数据库 ID。\n\n💡 提示：可以使用「列出所有数据库」查看工作区中的数据库。";
+                }
+
+                // 解析目标数据库
+                const target = await AIAssistant._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+                if (target?.error) return `❌ 目标数据库解析失败：${target.error}`;
+                if (!target) {
+                    return `❌ 找不到目标数据库「${target_database_name || target_database_id}」。\n\n💡 提示：可以使用「列出所有数据库」查看工作区中的数据库。`;
+                }
+
+                // 源=目标拦截
+                if (source.id === target.id) {
+                    return "❌ 源数据库和目标数据库相同，无需移动。";
+                }
+
+                // 获取源页面
+                ChatState.updateLastMessage(`正在从「${source.name}」获取页面...`, "processing");
+                const pages = await AIAssistant._fetchSourcePages(source.id, settings.notionApiKey, page_title);
+
+                if (pages.length === 0) {
+                    return page_title
+                        ? `📭 在「${source.name}」中没有找到标题包含「${page_title}」的页面。`
+                        : `📭「${source.name}」中没有页面。`;
+                }
+
+                // 批量移动
+                const results = { success: 0, failed: 0 };
+                const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+
+                for (let i = 0; i < pages.length; i++) {
+                    const page = pages[i];
+                    const title = Utils.getPageTitle(page);
+
+                    ChatState.updateLastMessage(
+                        `📦 正在移动 (${i + 1}/${pages.length})\n\n当前: ${title}\n→ 目标: ${target.name}`,
+                        "processing"
+                    );
+
+                    try {
+                        await OperationGuard.execute("movePage",
+                            () => NotionAPI.movePage(page.id, target.id, "database", settings.notionApiKey),
+                            { itemName: title, pageId: page.id, apiKey: settings.notionApiKey }
+                        );
+                        results.success++;
+                    } catch (error) {
+                        console.error(`移动失败: ${title}`, error);
+                        results.failed++;
+                    }
+
+                    if (i < pages.length - 1) {
+                        await Utils.sleep(delay);
+                    }
+                }
+
+                let resultMsg = `✅ **移动完成**\n\n`;
+                resultMsg += `- 源数据库: ${source.name}\n`;
+                resultMsg += `- 目标数据库: ${target.name}\n`;
+                resultMsg += `- 成功: ${results.success} 个\n`;
+                if (results.failed > 0) {
+                    resultMsg += `- 失败: ${results.failed} 个\n`;
+                }
+
+                return resultMsg;
+            } catch (error) {
+                return `❌ 移动失败: ${error.message}`;
+            }
+        },
+
+        // 处理复制页面
+        handleCopy: async (params, settings, explanation) => {
+            // 检查基础配置
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            // 权限检查
+            if (!OperationGuard.canExecute("duplicatePage")) {
+                return "❌ 权限不足：复制页面需要「高级」权限级别。\n\n请在设置面板中将权限级别调整为「高级」或更高。";
+            }
+
+            const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
+
+            ChatState.updateLastMessage("正在解析数据库信息...", "processing");
+
+            try {
+                // 解析源数据库（未指定时使用已配置的数据库）
+                let source = await AIAssistant._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
+                if (source?.error) return `❌ 源数据库解析失败：${source.error}`;
+                if (!source && settings.notionDatabaseId) {
+                    source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "已配置的数据库" };
+                }
+                if (!source) {
+                    return "❌ 无法确定源数据库。请指定源数据库名称，或先在设置中配置数据库 ID。\n\n💡 提示：可以使用「列出所有数据库」查看工作区中的数据库。";
+                }
+
+                // 解析目标数据库
+                const target = await AIAssistant._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+                if (target?.error) return `❌ 目标数据库解析失败：${target.error}`;
+                if (!target) {
+                    return `❌ 找不到目标数据库「${target_database_name || target_database_id}」。\n\n💡 提示：可以使用「列出所有数据库」查看工作区中的数据库。`;
+                }
+
+                // 源=目标拦截
+                if (source.id === target.id) {
+                    return "❌ 源数据库和目标数据库相同，无需复制。";
+                }
+
+                // 获取源页面
+                ChatState.updateLastMessage(`正在从「${source.name}」获取页面...`, "processing");
+                const pages = await AIAssistant._fetchSourcePages(source.id, settings.notionApiKey, page_title);
+
+                if (pages.length === 0) {
+                    return page_title
+                        ? `📭 在「${source.name}」中没有找到标题包含「${page_title}」的页面。`
+                        : `📭「${source.name}」中没有页面。`;
+                }
+
+                // 批量复制
+                const results = { success: 0, failed: 0 };
+                const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+
+                for (let i = 0; i < pages.length; i++) {
+                    const page = pages[i];
+                    const title = Utils.getPageTitle(page);
+
+                    ChatState.updateLastMessage(
+                        `📋 正在复制 (${i + 1}/${pages.length})\n\n当前: ${title}\n→ 目标: ${target.name}`,
+                        "processing"
+                    );
+
+                    try {
+                        await OperationGuard.execute("duplicatePage",
+                            () => NotionAPI.duplicatePage(page.id, target.id, "database", settings.notionApiKey),
+                            { itemName: title, pageId: page.id, apiKey: settings.notionApiKey }
+                        );
+                        results.success++;
+                    } catch (error) {
+                        console.error(`复制失败: ${title}`, error);
+                        results.failed++;
+                    }
+
+                    if (i < pages.length - 1) {
+                        await Utils.sleep(delay);
+                    }
+                }
+
+                let resultMsg = `✅ **复制完成**\n\n`;
+                resultMsg += `- 源数据库: ${source.name}\n`;
+                resultMsg += `- 目标数据库: ${target.name}\n`;
+                resultMsg += `- 成功: ${results.success} 个\n`;
+                if (results.failed > 0) {
+                    resultMsg += `- 失败: ${results.failed} 个\n`;
+                }
+
+                return resultMsg;
+            } catch (error) {
+                return `❌ 复制失败: ${error.message}`;
+            }
         },
     };
 
