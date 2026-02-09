@@ -63,6 +63,7 @@
             // Notion 站点 UI
             NOTION_PANEL_POSITION: "ldb_notion_panel_position",
             NOTION_PANEL_MINIMIZED: "ldb_notion_panel_minimized",
+            FLOAT_BTN_POSITION: "ldb_float_btn_position",
             // 模型缓存
             FETCHED_MODELS: "ldb_fetched_models",
             // 工作区页面缓存
@@ -3830,6 +3831,12 @@ ${explanation ? `我的理解：${explanation}` : ""}
                     box-shadow: 0 6px 20px rgba(74, 144, 217, 0.5);
                 }
 
+                .ldb-notion-float-btn.dragging {
+                    transform: none;
+                    opacity: 0.8;
+                    cursor: grabbing;
+                }
+
                 /* Notion 站点浮动面板 */
                 .ldb-notion-panel {
                     position: fixed;
@@ -4244,16 +4251,72 @@ ${explanation ? `我的理解：${explanation}` : ""}
             document.head.appendChild(style);
         },
 
-        // 创建浮动按钮
+        // 创建浮动按钮（可拖拽）
         createFloatButton: () => {
             const btn = document.createElement("button");
             btn.className = "ldb-notion-float-btn";
             btn.innerHTML = "🤖";
             btn.title = "AI 助手";
 
-            btn.onclick = () => {
+            // 拖拽状态
+            let isDragging = false;
+            let hasMoved = false;
+            let offsetX, offsetY;
+
+            btn.addEventListener("mousedown", (e) => {
+                isDragging = true;
+                hasMoved = false;
+                offsetX = e.clientX - btn.getBoundingClientRect().left;
+                offsetY = e.clientY - btn.getBoundingClientRect().top;
+                btn.classList.add("dragging");
+                document.body.style.userSelect = "none";
+                e.preventDefault();
+            });
+
+            document.addEventListener("mousemove", (e) => {
+                if (!isDragging) return;
+                hasMoved = true;
+                const x = Math.max(0, Math.min(window.innerWidth - btn.offsetWidth, e.clientX - offsetX));
+                const y = Math.max(0, Math.min(window.innerHeight - btn.offsetHeight, e.clientY - offsetY));
+                btn.style.left = x + "px";
+                btn.style.top = y + "px";
+                btn.style.right = "auto";
+                btn.style.bottom = "auto";
+            });
+
+            document.addEventListener("mouseup", () => {
+                if (!isDragging) return;
+                isDragging = false;
+                btn.classList.remove("dragging");
+                document.body.style.userSelect = "";
+                if (hasMoved) {
+                    // 保存位置
+                    const rect = btn.getBoundingClientRect();
+                    const right = window.innerWidth - rect.right;
+                    const bottom = window.innerHeight - rect.bottom;
+                    Storage.set(CONFIG.STORAGE_KEYS.FLOAT_BTN_POSITION, JSON.stringify({ right: right + "px", bottom: bottom + "px" }));
+                }
+            });
+
+            btn.addEventListener("click", (e) => {
+                if (hasMoved) {
+                    // 拖拽结束，不触发点击
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
                 NotionSiteUI.togglePanel();
-            };
+            });
+
+            // 恢复保存的位置
+            const savedPosition = Storage.get(CONFIG.STORAGE_KEYS.FLOAT_BTN_POSITION, null);
+            if (savedPosition) {
+                try {
+                    const pos = JSON.parse(savedPosition);
+                    btn.style.right = pos.right || "24px";
+                    btn.style.bottom = pos.bottom || "24px";
+                } catch (e) {}
+            }
 
             document.body.appendChild(btn);
             NotionSiteUI.floatBtn = btn;
