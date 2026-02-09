@@ -1,0 +1,659 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://developers.notion.com/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Build your first integration
+
+> Make your first request to the Notion API.
+
+export const integrationsDashboardUrl = "https://www.notion.so/profile/integrations";
+
+## Integration overview
+
+In this guide, we're going to build an [internal Notion integration](/guides/get-started/getting-started#internal-vs-public-integrations) that can create a new database in your Notion workspace via a web form.
+
+<Frame caption="Demo web app that creates new databases in your Notion workspace.">
+  <img src="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/55d7b4b-dbform.png?fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=495c0648da594ad5462fd3c001350b36" data-og-width="1240" width="1240" data-og-height="480" height="480" data-path="images/docs/55d7b4b-dbform.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/55d7b4b-dbform.png?w=280&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=babebb484a745bffc68c4b019dbf9973 280w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/55d7b4b-dbform.png?w=560&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=74d3a1ba839bb07f80a2be25b90c36ee 560w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/55d7b4b-dbform.png?w=840&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=cabb66c324484c346db4fc8fdab17256 840w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/55d7b4b-dbform.png?w=1100&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=54ec7526a3d6b42ab3650a2c9b615e4a 1100w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/55d7b4b-dbform.png?w=1650&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=e54791499998ea3f7ffcf10821cc4337 1650w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/55d7b4b-dbform.png?w=2500&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=e99f146f8717eb6c05a80c9e0dbf945b 2500w" />
+</Frame>
+
+Internal integrations are a good entry point to building integrations because they have a simpler [authorization](/guides/get-started/authorization) flow than [public integrations](/guides/get-started/getting-started#internal-vs-public-integrations).
+
+Before diving in, let’s quickly review Notion integrations. Integrations define how the public API can programmatically interact with your Notion workspace. They need to be authorized (i.e., given explicit permission) to make any changes your workspace.
+
+All integration types use Notion’s public API to make requests to update a Notion workspace. The specific use case for each integration can vary greatly, from using Notion as a CMS for a blog, to [tracking Github issues](https://github.com/makenotion/notion-cookbook/tree/main/examples/javascript/notion-github-sync), to [sending emails](https://github.com/makenotion/notion-cookbook/tree/main/examples/javascript/database-email-update) in response to Notion changes.
+
+This guide is just one introductory example of what you can build with Notion’s public API.
+
+## Today’s goals
+
+This guide will demonstrate how to build an HTML form that will [create a new Notion database](/reference/create-a-database) when submitted.
+
+By the end of this guide, we’ll have a functional app that looks like this:
+
+<Frame caption="Database form UI.">
+  <img src="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/36a22d6-dbform.png?fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=5cf3ea645145647c5a83a198cc1ddc09" data-og-width="1240" width="1240" data-og-height="480" height="480" data-path="images/docs/36a22d6-dbform.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/36a22d6-dbform.png?w=280&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=7e22e26fb39c0f022073c3276b3dd5e5 280w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/36a22d6-dbform.png?w=560&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=160805bb1f948c7d371a8a420757389e 560w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/36a22d6-dbform.png?w=840&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=d86734afe2acbdc78970d0ad24d88102 840w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/36a22d6-dbform.png?w=1100&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=afc022a25b25d6cb03e7e57cd1a6a286 1100w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/36a22d6-dbform.png?w=1650&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=7673de86e1ec294aacee4f9c85ebd83f 1650w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/36a22d6-dbform.png?w=2500&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=8aa1e187792c7b222481de74e2aa63e8 2500w" />
+</Frame>
+
+The completed [sample code](https://github.com/makenotion/notion-cookbook/tree/main/examples/javascript/web-form-with-express) includes additional examples beyond what’s covered in this guide, including forms to:
+
+* [Add a new page](/reference/post-page) to the database
+* [Add content](/reference/patch-block-children) to the new page
+* [Add a comment](/reference/create-a-comment) to the page content
+
+### Requirements
+
+To follow along with this guide, you will need:
+
+* A [Notion account](https://www.notion.so/signup).
+* To be a [Workspace Owner](https://www.notion.so/help/add-members-admins-guests-and-groups) in the workspace you’re using. You can create a new workspace for testing purposes otherwise.
+* Knowledge of HTML and JavaScript. We’ll use [Express.js](https://expressjs.com/) for a server, as well.
+* [npm and Node.js](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) installed locally to use the [Notion SDK for JavaScript](https://github.com/makenotion/notion-sdk-js) and [Express.js](https://expressjs.com/)
+
+<Note>
+  **SDK usage is recommended, but not required**
+
+  The [sample code](https://github.com/makenotion/notion-cookbook/tree/main/examples/javascript/web-form-with-express) shown below uses the [Notion SDK for JavaScript](https://github.com/makenotion/notion-sdk-js) to make public API requests.
+
+  Using the Notion SDK for JavaScript is not required to build a Notion integration, but many JavaScript developers prefer it due to its ease of use.
+</Note>
+
+## Getting started
+
+### Create your integration in Notion
+
+The first step to building any integration (internal or public) is to create a new integration in Notion's <a href={integrationsDashboardUrl}>integrations dashboard</a>.
+
+<Steps>
+  <Step>
+    Click `+ New integration`.
+
+    <Frame>
+            <img src="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/402cf3d-new_integrations_1.png?fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=925e1a5172b009a41519cbae169e2124" alt="" data-og-width="1198" width="1198" data-og-height="699" height="699" data-path="images/docs/402cf3d-new_integrations_1.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/402cf3d-new_integrations_1.png?w=280&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=b5914bf4a72fcf95a72a8319ef71623e 280w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/402cf3d-new_integrations_1.png?w=560&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=35e68c4b5ebeba5f9e8620b3964b51eb 560w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/402cf3d-new_integrations_1.png?w=840&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=505768b69b23f893447544bae90012e9 840w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/402cf3d-new_integrations_1.png?w=1100&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=5ba93e9965a811b4dc7413d20a7a3153 1100w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/402cf3d-new_integrations_1.png?w=1650&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=a74e3b4eecfa215106e0a2b1d11a59d1 1650w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/402cf3d-new_integrations_1.png?w=2500&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=0a0d6fc6e9d0556314d5f45e5beb36c6 2500w" />
+    </Frame>
+  </Step>
+
+  <Step>
+    Enter the integration name and select the associated workspace for the new integration.
+
+    <Frame>
+            <img src="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/aef3bab-new_integrations_2.png?fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=d55ed2a2949f8b719643d18be3bbbb04" alt="" data-og-width="1198" width="1198" data-og-height="699" height="699" data-path="images/docs/aef3bab-new_integrations_2.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/aef3bab-new_integrations_2.png?w=280&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=e4b3219aab563ad54c0032d620a43b10 280w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/aef3bab-new_integrations_2.png?w=560&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=caeda7d86548b15799fbd931019b8f47 560w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/aef3bab-new_integrations_2.png?w=840&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=9f90147e8b3f222ecd81bcfa8ff00361 840w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/aef3bab-new_integrations_2.png?w=1100&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=0c94783b8719e3cbf074c840dbb16dff 1100w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/aef3bab-new_integrations_2.png?w=1650&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=f1208d185f6a5bec96a598209ab2fb6b 1650w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/aef3bab-new_integrations_2.png?w=2500&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=366dbcfe09e267ee87f8690a47b172e3 2500w" />
+    </Frame>
+  </Step>
+</Steps>
+
+### Get your API secret
+
+API requests require an API secret to be successfully authenticated. Visit the `Configuration` tab to get your integration’s API secret (or “Internal Integration Secret”).
+
+<Frame>
+    <img src="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7ec836a-integrations_3.png?fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=177eb1a48ba6864af95ee77c30f09d6b" alt="" data-og-width="1198" width="1198" data-og-height="699" height="699" data-path="images/docs/7ec836a-integrations_3.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7ec836a-integrations_3.png?w=280&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=963da82b7ac2ba7e945c157992325546 280w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7ec836a-integrations_3.png?w=560&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=9c034050d65a97ba04799a68680e5e6d 560w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7ec836a-integrations_3.png?w=840&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=757ed3f57454c6b415581b69a56832a6 840w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7ec836a-integrations_3.png?w=1100&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=467106a3fe7c63a9ee4249d85dfec778 1100w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7ec836a-integrations_3.png?w=1650&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=616c25badc029560c9b5498999a4bbac 1650w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7ec836a-integrations_3.png?w=2500&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=04b5b81a506d62461508e93ee3380d32 2500w" />
+</Frame>
+
+<Check>
+  **Keep your API secret a secret!**
+
+  Any value used to authenticate API requests should always be kept secret. Use environment variables and avoid committing sensitive data to your version control history.
+
+  If you do accidentally expose it, remember to “refresh” your secret.
+</Check>
+
+### Give your integration page permissions
+
+The database that we’re about to create will be added to a parent Notion page in your workspace. For your integration to interact with the page, it needs explicit permission to read/write to that specific Notion page.
+
+To give the integration permission, you will need to:
+
+<Steps>
+  <Step>
+    Pick (or create) a Notion page.
+  </Step>
+
+  <Step>
+    Click on the `...` More menu in the top-right corner of the page.
+  </Step>
+
+  <Step>
+    Scroll down to `+ Add Connections`.
+  </Step>
+
+  <Step>
+    Search for your integration and select it.
+  </Step>
+
+  <Step>
+    Confirm the integration can access the page and all of its child pages.
+
+    <Frame caption="Give your integration permission to add a database to a page.">
+      <img src="https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/fefc809-permissions.gif?s=c2bfdc69ee0ef51e23ed404f4ee064be" data-og-width="600" width="600" data-og-height="322" height="322" data-path="images/docs/fefc809-permissions.gif" data-optimize="true" data-opv="3" />
+    </Frame>
+  </Step>
+</Steps>
+
+Your integration can now make API requests related to this Notion page and any of its children.
+
+If you are building a public integration, use the authorization instructions included in the [Authorization guide](/guides/get-started/authorization#public-integration-auth-flow-set-up) instead.
+
+<Warning>
+  **Double-check your page access**
+
+  If your API requests are failing, confirm you have given the integration permission to the page you are trying to update. This is a common cause of API request errors.
+</Warning>
+
+## Setting up the demo locally
+
+In this example, we’ll have three key files:
+
+* `index.html`, which will contain our client-side markdown (HTML).
+* `client.js`, which will contain our client-side JavaScript code.
+* `server.js`, which will contain our server-side JavaScript code. This file contains all the endpoints to make requests to Notion’s public API, as well as to serve the `index.html` file. ([More on that below.](#step-3-importing-the-notion-sdk-serverjs))
+
+All of the sample code is available in [GitHub](https://github.com/makenotion/notion-cookbook/tree/main/examples/javascript/web-form-with-express).
+
+<Note>
+  **Various examples are available**
+
+  This integration includes frontend code, but integrations can be server-side only, as well. See more examples of different integration use cases in [GitHub](https://github.com/makenotion/notion-cookbook/tree/main/examples/javascript).
+</Note>
+
+### Clone demo repo
+
+To run this project locally, clone the repo and install its dependencies ([Express.js](https://expressjs.com/en/starter/installing.html), [dotenv](https://www.npmjs.com/package/dotenv), and [Notion’s SDK for JavaScript](https://github.com/makenotion/notion-sdk-js)):
+
+```bash Shell theme={null}
+# Clone this repository locally
+git clone https://github.com/makenotion/notion-cookbook.git
+
+# Switch into this project
+cd notion-cookbook/examples/javascript/web-form-with-express/
+
+# Install the dependencies
+npm install
+```
+
+### Environment variables
+
+In your `.env` file, add the following variables:
+
+```bash .env theme={null}
+NOTION_KEY=<your-notion-api-key>
+NOTION_PAGE_ID=<parent-page-id>
+```
+
+Add the API secret you retrieved in `Getting Started` to `NOTION_KEY`, as well as a page ID (`NOTION_PAGE_ID`) for the page that you gave the integration permission to update.
+
+<Check>
+  **How database IDs work**
+
+  When using the API to [create a database](/reference/create-a-database), the parent of a database must be a Notion page or a [wiki](https://www.notion.so/help/wikis-and-verified-pages) database. To get the ID of the page, locate the 32-character string at the end of the page’s URL.
+
+  <Frame>
+        <img src="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7e8a54d-notion-page-url.png?fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=cca5fbcef0cde568441ed14f791b345e" alt="The page ID is highlighted." data-og-width="1370" width="1370" data-og-height="304" height="304" data-path="images/docs/7e8a54d-notion-page-url.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7e8a54d-notion-page-url.png?w=280&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=a3623f5b4329b1f75f0aa68327da14b2 280w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7e8a54d-notion-page-url.png?w=560&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=f15f23b5410f81525850ee292dc0c097 560w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7e8a54d-notion-page-url.png?w=840&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=4a959124081827e5c7e41e17ad896687 840w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7e8a54d-notion-page-url.png?w=1100&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=d4a9d26d127e76ddbc75599f6ce025df 1100w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7e8a54d-notion-page-url.png?w=1650&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=fd18ebaccea270f9a949bf6368ab86f9 1650w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/7e8a54d-notion-page-url.png?w=2500&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=3f531e50316dfe967795cd9347ba4a46 2500w" />
+  </Frame>
+</Check>
+
+As a best practice, add `.env` to your `.gitignore` file to ensure you don’t accidentally share these values.
+
+### Running the project locally
+
+To run this project locally, you will need to enter the following command in your terminal:
+
+<CodeGroup>
+  ```bash Shell theme={null}
+  npm start
+  ```
+</CodeGroup>
+
+Next, let’s look at how our database form works.
+
+## Creating a new database
+
+### Step 1 - Adding a database form (`index.html`)
+
+In our `index.html` file, we need a form for the user to create a new database and an area for the API response to be displayed. This is how the user will initiate a public API request.
+
+<Frame caption="App design for creating a database.">
+  <img src="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/76077fd-new_database.png?fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=7642bb24306bb44e5902a27acfbf4dad" data-og-width="875" width="875" data-og-height="265" height="265" data-path="images/docs/76077fd-new_database.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/76077fd-new_database.png?w=280&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=847fc88e680e95fd328e549a28eac6a2 280w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/76077fd-new_database.png?w=560&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=937bcdf499869390e88183745643c548 560w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/76077fd-new_database.png?w=840&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=d76055a48e657e1310b6cfd70bcf95c2 840w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/76077fd-new_database.png?w=1100&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=d6815a62fa06d92078b8337ced4ee932 1100w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/76077fd-new_database.png?w=1650&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=7360dcfeac44f4b4cd8330fc8ae0f6c0 1650w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/76077fd-new_database.png?w=2500&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=b7e7acf069f28fb06495a61bb9759eb9 2500w" />
+</Frame>
+
+<Frame caption="Rendered app design for creating a database.">
+  <img src="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/c73de3e-dbform.png?fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=ec19efdc45203dbc0a195a971678a752" data-og-width="1240" width="1240" data-og-height="480" height="480" data-path="images/docs/c73de3e-dbform.png" data-optimize="true" data-opv="3" srcset="https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/c73de3e-dbform.png?w=280&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=acc10c6bd91a5da3cc3053d687a20bce 280w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/c73de3e-dbform.png?w=560&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=7a0e0c2548858683c1233b7d27760973 560w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/c73de3e-dbform.png?w=840&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=5cd002b5c7c52d9856267eaa4033d8ad 840w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/c73de3e-dbform.png?w=1100&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=ee340ec42aa160b0ce0c97ce3f2c066e 1100w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/c73de3e-dbform.png?w=1650&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=00f82aeecc61d134453c67532ce40773 1650w, https://mintcdn.com/notion-demo/LHm9qfrJYJOPRxs6/images/docs/c73de3e-dbform.png?w=2500&fit=max&auto=format&n=LHm9qfrJYJOPRxs6&q=85&s=530a8da074099231041cc52589843dcf 2500w" />
+</Frame>
+
+The corresponding [HTML elements](https://github.com/makenotion/notion-cookbook/blob/main/examples/javascript/web-form-with-express/views/index.html#L40) related to creating a database are shown below:
+
+<CodeGroup>
+  ```html HTML expandable theme={null}
+  <!DOCTYPE html>
+  <html lang="en">
+    <head>
+      ...
+  <!-- Import the webpage's stylesheet -->
+      <link rel="stylesheet" href="/style.css" />
+
+  <!-- Import the webpage's client-side javascript file -->
+      <script src="/client.js" defer></script>
+    </head>
+    <body>
+      ...
+        <table>
+          ...
+          <tr>
+            <td>
+              <h3>1. Create a new database</h3>
+  <!-- Form to create a database -->
+              <form id="databaseForm">
+                <label for="dbName">Database name</label>
+                <input type="text" id="dbName" />
+                <input type="submit" />
+              </form>
+            </td>
+  <!-- Empty table cell to append the API response to -->
+            <td id="dbResponse"></td>
+          </tr>
+          ...
+        </table>
+      </main>
+      ...
+    </body>
+  </html>
+  ```
+</CodeGroup>
+
+In terms of what’s rendered in the `<body>`, notice the `<form>` element and an empty table cell with the ID `dbResponse`. The latter is where we’ll append the Notion API response information.
+
+The database form includes two inputs:
+
+* A text input for the database name
+* A submit input to submit the form
+
+Also of note: the `client.js` file is included in the document’s `<head>` tag, which allows us to apply client-side JavaScript to interact with these HTML elements.
+
+### Step 2 - Handling the form submission (`client.js`)
+
+In `client.js`, we can write a function to describe what should happen when the database form is submitted. In short, we want to make a request to `server.js` to then make an API request to Notion. The actual Notion API request will happen server-side to avoid exposing our API secret in the client. (In other words, it’s more secure!)
+
+<CodeGroup>
+  ```jsx JSX expandable theme={null}
+  // Assign the database form to a variable for later use
+  const dbForm = document.getElementById("databaseForm");
+  // Assign the empty table cell to a variable for later use
+  const dbResponseEl = document.getElementById("dbResponse");
+
+  // Add a submit handler to the form
+  dbForm.onsubmit = async function (event) {
+    event.preventDefault()
+
+  // Get the database name from the form
+    const dbName = event.target.dbName.value
+    const body = JSON.stringify({ dbName })
+
+  // Make a request to /databases endpoint in server.js
+    const newDBResponse = await fetch("/databases", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body,
+    })
+    const newDBData = await newDBResponse.json()
+
+  // Pass the new database info and the empty table cell
+  // to a function that will append it.
+    appendApiResponse(newDBData, dbResponseEl)
+  }
+  ```
+</CodeGroup>
+
+In this code block, we select the form element using its ID attribute with `getElementbyId()`.
+
+Next, we attach an async function to the `onsubmit` event that will make a request to our local server’s `/databases` endpoint. (This endpoint will be described below in our `server.js` code.) The function is asynchronous because we need to wait for a response from our server before proceeding.
+
+The response is then appended to our `index.html` document. ([More on this below.](#step-5-displaying-the-response-indexhtml))
+
+### Step 3 - Importing the Notion SDK (`server.js`)
+
+Let's start by looking at our `server.js` file without the Notion-related endpoints:
+
+<CodeGroup>
+  ```json JSON expandable theme={null}
+  require("dotenv").config();
+  const express = require("express");
+  const app = express();
+
+  // Notion SDK for JavaScript
+  const { Client } = require("@notionhq/client");
+  const notion = new Client({ auth: process.env.NOTION_KEY });
+
+  // <http://expressjs.com/en/starter/static-files.html>
+  app.use(express.static("public"));
+
+  // <http://expressjs.com/en/starter/basic-routing.html>
+  app.get("/", function(request, response) {
+    response.sendFile(__dirname + "/views/index.html");
+  });
+
+  // listen for requests
+  const listener = app.listen(process.env.PORT, function() {
+    console.log("Your app is listening on port " + listener.address().port);
+  });
+  ```
+</CodeGroup>
+
+This Express.js code will listen for requests to `/` (e.g., `localhost:<port>/`) and respond with the `index.html` file. That’s how the app knows to render our `index.html` code when the server is started.
+
+To use the SDK, we import it at the top of `server.js`. We also initialize a new Notion Client instance and set the `auth` option to the Notion API secret already set in the environment variables:
+
+<CodeGroup>
+  ```jsx JSX theme={null}
+  const { Client } = require("@notionhq/client");
+  const notion = new Client({ auth: process.env.NOTION_KEY });
+  ```
+</CodeGroup>
+
+We can now make requests to Notion’s API in this file without having to worry about authentication again.
+
+### Step 4 - Handling the form’s POST request (`server.js`)
+
+Staying in `server.js`, we can add the following code that will be invoked when the database form makes a POST request to `/databases`:
+
+<CodeGroup>
+  ```jsx TypeScript expandable theme={null}
+  app.post("/databases", async function (request, response) {
+    const pageId = process.env.NOTION_PAGE_ID;
+    const title = request.body.dbName;
+
+    try {
+  // Notion API request!
+      const newDb = await notion.databases.create({
+        parent: {
+          type: "page_id",
+          page_id: pageId,
+        },
+        title: [
+          {
+            type: "text",
+            text: {
+              content: title,
+            },
+          },
+        ],
+        properties: {
+          Name: {
+            title: {},
+          },
+        },
+      });
+      response.json({ message: "success!", data: newDb });
+    } catch (error) {
+      response.json({ message: "error", error });
+    }
+  });
+  ```
+</CodeGroup>
+
+`app.post()` indicates this endpoint is for POST requests, and the first argument (`"/databases"`) indicates this function corresponds to requests made to the `/databases` path, as we did in our client-side code above.
+
+Next, we can actually interact with the Notion API.
+
+To create a new database, we’ll use the [Create a database](/reference/create-a-database) endpoint:
+
+<CodeGroup>
+  ```jsx TypeScript theme={null}
+  await notion.databases.create({...options})
+  ```
+</CodeGroup>
+
+To use this endpoint, we need to pass the parent page ID in the body parameters. This page ID is the one already set in the environment variables. The page ID **must** be included in this request.
+
+<CodeGroup>
+  ```jsx TypeScript theme={null}
+  const pageId = process.env.NOTION_PAGE_ID;
+  ...
+  try {
+    const newDb = await notion.databases.create({
+      parent: {
+        type: "page_id",
+        page_id: pageId,
+      },
+      ...
+  ```
+</CodeGroup>
+
+(Note: Environment variables can only be accessed in `server.js` , not `client.js`.)
+
+In this example, the title of the database should also be set. The title was provided in the form the user submitted, which we can access from the request’s body (`request.body.dbName`).
+
+<CodeGroup>
+  ```jsx TypeScript theme={null}
+  const pageId = process.env.NOTION_PAGE_ID;
+  const title = request.body.dbName; // Get the user's title
+
+  try {
+    const newDb = await notion.databases.create({
+      parent: {...},
+      title: [
+        {
+          type: "text",
+          text: {
+            content: title, // Include the user's title in the request
+          },
+        },
+      ],
+      // ...
+  ```
+</CodeGroup>
+
+Finally, we need to describe the [database’s properties](/reference/property-object). The properties represent the columns in a database (or the “schema”, depending on which terminology you prefer.)
+
+In this case, our database will have just one column called “Name”, which will represent the page names of its child pages:
+
+<CodeGroup>
+  ```jsx TypeScript theme={null}
+  try {
+      const newDb = await notion.databases.create({
+        parent: {...},
+        title: [...],
+        properties: {
+          Name: {
+            title: {},
+          },
+        },
+      })
+  ...
+  ```
+</CodeGroup>
+
+Finally, assuming the request works, we can return the response from Notion’s API back to our original fetch request in `client.js`:
+
+<CodeGroup>
+  ```jsx JavaScript theme={null}
+  ...
+  response.json({ message: "success!", data: newDb });
+  ```
+</CodeGroup>
+
+If it doesn’t work, we’ll return whatever error message we get from Notion’s API:
+
+<CodeGroup>
+  ```jsx JavaScript theme={null}
+  try {
+  ...
+  } catch (error) {
+    response.json({ message: "error", error });
+  }
+  ```
+</CodeGroup>
+
+Now that we have our new database, the response can be added to the HTML document via the client-side JavaScript (`client.js`).
+
+### Step 5 - Displaying the response (`index.html`)
+
+Let’s first look at an example of the object the `/databases` endpoint responds with, which includes the [object]() that gets returned from the Notion API when we create a new database:
+
+<CodeGroup>
+  ```json Response expandable theme={null}
+  {
+    message: "success!",
+    data: { // from Notion
+      object: "database",
+      id: "e604f78c-4145-4444-b7d5-1adea4fa5d08",
+      cover: null,
+      icon: null,
+      created_time: "2023-07-18T20:56:00.000Z",
+      created_by: { object: "user", id: "44b170f0-16ac-47cf-aaaa-8f2eab66hhhh" },
+      last_edited_by: {
+        object: "user",
+        id: "44b170f0-16ac-47cf-gggg-8f2eab6rrrra",
+      },
+      last_edited_time: "2023-07-18T20:56:00.000Z",
+      title: [
+        {
+          type: "text",
+          text: [Object],
+          annotations: [Object],
+          plain_text: "test db",
+          href: null,
+        },
+      ],
+      description: [],
+      is_inline: false,
+      properties: {
+        Name: { id: "title", name: "Name", type: "title", title: {} },
+      },
+      parent: {
+        type: "page_id",
+        page_id: "e7261079-9d30-4313-9999-14b29880gggg",
+      },
+      url: "<https://www.notion.so/e604f78c414548c6b7d51adea4fadddd>",
+      public_url: null,
+      archived: false,
+      in_trash: false
+    },
+  }
+  ```
+</CodeGroup>
+
+The most important information here (for our purposes) is the database ID (`data.id`). The ID will be required to make API requests to the [Create a page](/reference/post-page) endpoint, which is the next form in our completed demo’s UI.
+
+Knowing this JSON structure, let’s now look at how `appendApiResponse()` works:
+
+<CodeGroup>
+  ```jsx JSX expandable theme={null}
+  const dbForm = document.getElementById("databaseForm");
+  // Empty table cell where we'll display the API response
+  const dbResponse = document.getElementById("dbResponse");
+  ...
+
+  // Appends the API response to the UI
+  const appendApiResponse = function (apiResponse, el) {
+    // Add success message to UI
+    const newParagraphSuccessMsg = document.createElement("p")
+    newParagraphSuccessMsg.innerHTML = "Result: " + apiResponse.message
+    el.appendChild(newParagraphSuccessMsg)
+
+    // See browser console for more information if there's an error
+    if (apiResponse.message === "error") return
+
+    // Add ID of Notion item (db, page, comment) to UI
+    const newParagraphId = document.createElement("p")
+    newParagraphId.innerHTML = "ID: " + apiResponse.data.id
+    el.appendChild(newParagraphId)
+
+    // Add URL of Notion item (db, page) to UI
+    if (apiResponse.data.url) {
+      const newAnchorTag = document.createElement("a")
+      newAnchorTag.setAttribute("href", apiResponse.data.url)
+      newAnchorTag.innerText = apiResponse.data.url
+      el.appendChild(newAnchorTag)
+    }
+  }
+  ```
+</CodeGroup>
+
+`appendApiResponse(res, form)` accepts two parameters: the response (shown above) and the HTML element where we will append the response — in this case, an empty table cell next to the database form.
+
+In this function, we first add a paragraph element to show the response message (i.e., whether it was a success or the error).
+
+<CodeGroup>
+  ```jsx JSX theme={null}
+  const newParagraphSuccessMsg = document.createElement("p")
+  newParagraphSuccessMsg.innerHTML = "Result: " + apiResponse.message
+  el.appendChild(newParagraphSuccessMsg)
+  ```
+</CodeGroup>
+
+Then, we do the same with the database ID after confirming the response was not an error:
+
+<CodeGroup>
+  ```jsx JSX theme={null}
+  if (apiResponse.message === "error") return
+
+  // Add ID of database and data source to UI
+  const newParagraphId = document.createElement("p")
+  newParagraphId.innerHTML = "Database ID: " + \
+    apiResponse.data.id + "; Data Source ID" + apiResponse.data.data_sources[0].id
+  el.appendChild(newParagraphId)
+  ```
+</CodeGroup>
+
+Finally, if the response has a URL, we display that too with an anchor (`<a>`) tag. This allows the user to visit the database directly in Notion.
+
+<CodeGroup>
+  ```jsx JSX theme={null}
+  if (apiResponse.data.url) {
+    const newAnchorTag = document.createElement("a")
+    newAnchorTag.setAttribute("href", apiResponse.data.url)
+    newAnchorTag.innerText = apiResponse.data.url
+    el.appendChild(newAnchorTag)
+  }
+  ```
+</CodeGroup>
+
+(Note: This function will be reused by other forms. Not all responses have a `url` property, which is why we check for it.)
+
+Once this is done, our HTML document is updated and the form submission is officially complete.
+
+## Testing the feature
+
+Let’s see the final results of testing this new feature:
+
+<Frame caption="Submitting the database form and visiting the Notion URL from the response.">
+  <img src="https://mintcdn.com/notion-demo/kSI9TVzPayvF1_1o/images/docs/e58e2ed-newdb.gif?s=670a791d2d796cb242a446acf1d46896" data-og-width="600" width="600" data-og-height="482" height="482" data-path="images/docs/e58e2ed-newdb.gif" data-optimize="true" data-opv="3" />
+</Frame>
+
+The database form is submitted and the response from Notion's API is appended to our UI. 🎉 We can click the link to visit the new database in Notion and confirm it worked as expected.
+
+As a next step, the new database ID can be copy and pasted into the page form below it to create a new page in the database. We can also use the page ID that the page form returns to add content to the page or comment on it using the block and comment forms.
+
+We won’t cover the code for page, blocks, or comment forms here, but the code is all included in the [source code](https://github.com/makenotion/notion-cookbook/blob/main/examples/javascript/web-form-with-express/views/index.html) for reference. It works the same as the database example.
+
+As a next step, you could also try adding a feature to [retrieve all existing pages](/reference/query-a-data-source) in the database, or [retrieve block children](/reference/get-block-children) (i.e., page content) for an existing page.
+
+## Wrapping up
+
+This guide demonstrated how to use Notion’s public API (via the [Notion SDK for JavaScript](https://github.com/makenotion/notion-sdk-js)) to build an internal integration. With this demo app, users can programmatically create a new database in their Notion workspace by filling out a form in the app UI and making a request to Notion’s public API — the [Create a database](/reference/create-a-database) endpoint.
+
+As a reminder, this example includes client-side code to allow for user interactions via a GUI (graphical user interface). Notion integrations do not require a UI, however. What you build is completely up to you!
+
+To see examples of server-side-only integrations, test out the sample apps in the SDK’s [GitHub repo](https://github.com/makenotion/notion-cookbook/tree/main/examples/javascript).
+
+## Next steps
+
+To learn more about authorizing API requests or to learn how to add an auth flow to your public integration, read the [Authorization guide](/guides/get-started/authorization) next.
+
+### Additional resources
+
+<CardGroup cols={2}>
+  <Card title="Reference documentation" icon="code-simple" href="/reference/intro" horizontal color="#0076d7" />
+
+  <Card title="JavaScript client" icon="js" href="https://github.com/makenotion/notion-sdk-js" horizontal color="#0076d7" />
+
+  <Card title="Postman collection" icon="box" href="https://www.postman.com/notionhq/notion-s-api-workspace/collection/52041987-03f70d8f-b6e5-4306-805c-f95f7cdf05b9" horizontal color="#0076d7" />
+
+  <Card title="TypeScript starter template" icon="code" href="https://github.com/makenotion/notion-sdk-typescript-starter" horizontal color="#0076d7" />
+
+  <Card title="FAQs" icon="circle-question" href="/page/frequently-asked-questions" horizontal color="#0076d7" />
+
+  <Card title="Slack developer community" icon="slack" href="https://join.slack.com/t/notiondevs/shared_invite/zt-20b5996xv-DzJdLiympy6jP0GGzu3AMg" horizontal color="#0076d7" />
+</CardGroup>
+
