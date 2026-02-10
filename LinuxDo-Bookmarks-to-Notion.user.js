@@ -6232,26 +6232,14 @@ ${availableTools}
             panel.querySelector("#ldb-notion-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, "");
             panel.querySelector("#ldb-notion-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
 
-            // 加载数据库下拉框
+            // 加载数据库下拉框（始终调用以确保兼容选项被添加）
             const cachedWsForDb = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
+            let cachedDatabases = [];
             try {
                 const wsData = JSON.parse(cachedWsForDb);
-                if (wsData.databases?.length > 0) {
-                    NotionSiteUI.updateAITargetDbOptions(wsData.databases);
-                }
+                cachedDatabases = wsData.databases || [];
             } catch {}
-            const savedTargetDb = Storage.get(CONFIG.STORAGE_KEYS.AI_TARGET_DB, "");
-            const savedDbId = Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
-            if (savedTargetDb) {
-                panel.querySelector("#ldb-notion-ai-target-db").value = savedTargetDb;
-            } else if (savedDbId) {
-                // 兼容：如果 AI_TARGET_DB 为空但 NOTION_DATABASE_ID 有值，尝试选中匹配项
-                const dbSelect = panel.querySelector("#ldb-notion-ai-target-db");
-                const optionExists = Array.from(dbSelect.options).some(opt => opt.value === savedDbId);
-                if (optionExists) {
-                    dbSelect.value = savedDbId;
-                }
-            }
+            NotionSiteUI.updateAITargetDbOptions(cachedDatabases);
 
             // 加载 AI 模型选项（优先使用缓存的模型列表）
             const aiService = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
@@ -6318,8 +6306,10 @@ ${availableTools}
 
             select.innerHTML = options;
 
-            if (savedValue) {
-                select.value = savedValue;
+            // 恢复选中值：优先 AI_TARGET_DB，其次兼容 NOTION_DATABASE_ID
+            const restoreId = savedValue || savedDbId;
+            if (restoreId) {
+                select.value = restoreId;
             }
         },
 
