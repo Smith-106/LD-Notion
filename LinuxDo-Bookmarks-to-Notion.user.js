@@ -338,12 +338,13 @@
     const DOMToNotion = {
         splitLongText: (text, annotations = {}) => {
             const maxLength = 2000;
+            const maxItems = 100; // Notion API 限制
             const chunks = [];
             if (text.length <= maxLength) {
                 chunks.push({ type: "text", text: { content: text }, annotations: { ...annotations } });
             } else {
                 let remaining = text;
-                while (remaining.length > 0) {
+                while (remaining.length > 0 && chunks.length < maxItems) {
                     const chunk = remaining.substring(0, maxLength);
                     chunks.push({ type: "text", text: { content: chunk }, annotations: { ...annotations } });
                     remaining = remaining.substring(maxLength);
@@ -422,7 +423,8 @@
             };
 
             processNode(node);
-            return result;
+            // Notion API 限制 rich_text 数组最多 100 个元素
+            return result.slice(0, 100);
         },
 
         cookedToBlocks: (cookedHtml, imgMode = "upload") => {
