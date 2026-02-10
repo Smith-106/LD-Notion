@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion — Notion AI 助手 & Linux.do 收藏导出
 // @namespace    https://linux.do/
-// @version      2.4.2
+// @version      2.4.3
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion 数据库或页面，支持自动导入、权限控制
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -74,6 +74,8 @@
             EXPORT_CONCURRENCY: "ldb_export_concurrency",
             // AI 查询目标数据库
             AI_TARGET_DB: "ldb_ai_target_db",
+            // 工作区获取页数上限
+            WORKSPACE_MAX_PAGES: "ldb_workspace_max_pages",
         },
         // 默认值
         DEFAULTS: {
@@ -97,6 +99,7 @@
             autoImportEnabled: false,
             autoImportInterval: 5, // 分钟，0=仅页面加载时
             exportConcurrency: 1, // 并发导出数量
+            workspaceMaxPages: 10, // 刷新工作区时的分页上限
         },
         // 导出目标类型
         EXPORT_TARGET_TYPES: {
@@ -6016,6 +6019,17 @@ ${availableTools}
                             <label class="ldb-label">分类列表</label>
                             <input type="text" class="ldb-input" id="ldb-notion-ai-categories" placeholder="技术, 生活, 问答, 分享, 资源, 其他">
                         </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">刷新页数上限</label>
+                            <select class="ldb-select" id="ldb-notion-workspace-max-pages">
+                                <option value="5">5 页 (500 条)</option>
+                                <option value="10">10 页 (1000 条)</option>
+                                <option value="20">20 页 (2000 条)</option>
+                                <option value="50">50 页 (5000 条)</option>
+                                <option value="0">无限制</option>
+                            </select>
+                            <div class="ldb-tip">刷新工作区列表时每类的最大分页数</div>
+                        </div>
                         <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-save-settings">💾 保存设置</button>
                     </div>
 
@@ -6084,6 +6098,7 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.AI_API_KEY, panel.querySelector("#ldb-notion-ai-api-key").value.trim());
                 Storage.set(CONFIG.STORAGE_KEYS.AI_BASE_URL, panel.querySelector("#ldb-notion-ai-base-url").value.trim());
                 Storage.set(CONFIG.STORAGE_KEYS.AI_CATEGORIES, panel.querySelector("#ldb-notion-ai-categories").value.trim());
+                Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, parseInt(panel.querySelector("#ldb-notion-workspace-max-pages").value) || 0);
 
                 NotionSiteUI.showStatus("设置已保存", "success");
             };
@@ -6107,11 +6122,14 @@ ${availableTools}
                     // 分页获取所有数据库
                     let allDbResults = [];
                     let dbCursor = undefined;
+                    const maxPages = parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages)) || 0;
+                    let dbPageCount = 0;
                     do {
                         const dbResponse = await NotionAPI.search("", { property: "object", value: "database" }, apiKey, dbCursor);
                         allDbResults = allDbResults.concat(dbResponse.results || []);
                         dbCursor = dbResponse.has_more ? dbResponse.next_cursor : undefined;
-                    } while (dbCursor);
+                        dbPageCount++;
+                    } while (dbCursor && (maxPages === 0 || dbPageCount < maxPages));
 
                     const databases = allDbResults.map(db => ({
                         id: db.id?.replace(/-/g, "") || "",
@@ -6123,11 +6141,13 @@ ${availableTools}
                     // 分页获取所有页面
                     let allPageResults = [];
                     let pageCursor = undefined;
+                    let pagePageCount = 0;
                     do {
                         const pageResponse = await NotionAPI.search("", { property: "object", value: "page" }, apiKey, pageCursor);
                         allPageResults = allPageResults.concat(pageResponse.results || []);
                         pageCursor = pageResponse.has_more ? pageResponse.next_cursor : undefined;
-                    } while (pageCursor);
+                        pagePageCount++;
+                    } while (pageCursor && (maxPages === 0 || pagePageCount < maxPages));
 
                     const pages = allPageResults.map(page => ({
                         id: page.id?.replace(/-/g, "") || "",
@@ -6253,6 +6273,7 @@ ${availableTools}
             panel.querySelector("#ldb-notion-ai-api-key").value = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "");
             panel.querySelector("#ldb-notion-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, "");
             panel.querySelector("#ldb-notion-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
+            panel.querySelector("#ldb-notion-workspace-max-pages").value = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages);
 
             // 加载数据库/页面下拉框（始终调用以确保兼容选项被添加）
             const cachedWsForDb = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
@@ -7900,6 +7921,17 @@ ${availableTools}
                                 </div>
                                 <div class="ldb-tip">AI 查询数据库时的目标范围</div>
                             </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">刷新页数上限</label>
+                                <select class="ldb-select" id="ldb-workspace-max-pages">
+                                    <option value="5">5 页 (500 条)</option>
+                                    <option value="10">10 页 (1000 条)</option>
+                                    <option value="20">20 页 (2000 条)</option>
+                                    <option value="50">50 页 (5000 条)</option>
+                                    <option value="0">无限制</option>
+                                </select>
+                                <div class="ldb-tip">刷新工作区列表时每类的最大分页数</div>
+                            </div>
                             <div class="ldb-btn-group" style="display: flex; align-items: center; gap: 8px;">
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-test">测试连接</button>
                                 <span id="ldb-ai-test-status" style="font-size: 12px;"></span>
@@ -8484,11 +8516,14 @@ ${availableTools}
                     // 分页获取所有数据库
                     let allDbResults = [];
                     let dbCursor = undefined;
+                    const maxPages = parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages)) || 0;
+                    let dbPageCount = 0;
                     do {
                         const dbResponse = await NotionAPI.search("", { property: "object", value: "database" }, apiKey, dbCursor);
                         allDbResults = allDbResults.concat(dbResponse.results || []);
                         dbCursor = dbResponse.has_more ? dbResponse.next_cursor : undefined;
-                    } while (dbCursor);
+                        dbPageCount++;
+                    } while (dbCursor && (maxPages === 0 || dbPageCount < maxPages));
 
                     const databases = allDbResults.map(db => ({
                         id: db.id?.replace(/-/g, "") || "",
@@ -8500,11 +8535,13 @@ ${availableTools}
                     // 分页获取所有页面
                     let allPageResults = [];
                     let pageCursor = undefined;
+                    let pagePageCount = 0;
                     do {
                         const pageResponse = await NotionAPI.search("", { property: "object", value: "page" }, apiKey, pageCursor);
                         allPageResults = allPageResults.concat(pageResponse.results || []);
                         pageCursor = pageResponse.has_more ? pageResponse.next_cursor : undefined;
-                    } while (pageCursor);
+                        pagePageCount++;
+                    } while (pageCursor && (maxPages === 0 || pagePageCount < maxPages));
 
                     const pages = allPageResults.map(page => ({
                         id: page.id?.replace(/-/g, "") || "",
@@ -8605,6 +8642,10 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.AI_TARGET_DB, e.target.value);
             };
 
+            panel.querySelector("#ldb-workspace-max-pages").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, parseInt(e.target.value) || 0);
+            };
+
             // 刷新 AI 数据库列表
             panel.querySelector("#ldb-ai-refresh-dbs").onclick = async () => {
                 const apiKey = panel.querySelector("#ldb-api-key").value.trim();
@@ -8622,11 +8663,14 @@ ${availableTools}
                     // 分页获取所有数据库
                     let allDbResults = [];
                     let dbCursor = undefined;
+                    const maxPages = parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages)) || 0;
+                    let dbPageCount = 0;
                     do {
                         const dbResponse = await NotionAPI.search("", { property: "object", value: "database" }, apiKey, dbCursor);
                         allDbResults = allDbResults.concat(dbResponse.results || []);
                         dbCursor = dbResponse.has_more ? dbResponse.next_cursor : undefined;
-                    } while (dbCursor);
+                        dbPageCount++;
+                    } while (dbCursor && (maxPages === 0 || dbPageCount < maxPages));
 
                     const databases = allDbResults.map(db => ({
                         id: db.id?.replace(/-/g, "") || "",
@@ -8818,6 +8862,7 @@ ${availableTools}
             panel.querySelector("#ldb-ai-api-key").value = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "");
             panel.querySelector("#ldb-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, CONFIG.DEFAULTS.aiBaseUrl);
             panel.querySelector("#ldb-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
+            panel.querySelector("#ldb-workspace-max-pages").value = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages);
 
             // 加载 AI 查询目标数据库设置
             const cachedWorkspaceForDb = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
