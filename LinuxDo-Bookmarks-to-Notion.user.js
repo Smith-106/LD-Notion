@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Linux.do 收藏帖子导出到 Notion
+// @name         LD-Notion — Notion AI 助手 & Linux.do 收藏导出
 // @namespace    https://linux.do/
 // @version      2.4.2
-// @description  批量导出 Linux.do 收藏的帖子到 Notion 数据库或页面，支持自定义筛选、图片上传、权限控制、AI 对话式助手，在 Notion 站点显示 AI 助手面板
+// @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion 数据库或页面，支持自动导入、权限控制
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
