@@ -5976,13 +5976,13 @@ ${availableTools}
                             <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx...">
                         </div>
                         <div class="ldb-input-group">
-                            <label class="ldb-label">数据库</label>
+                            <label class="ldb-label">数据库 / 页面</label>
                             <div style="display: flex; gap: 8px;">
                                 <select class="ldb-select" id="ldb-notion-ai-target-db" style="flex: 1;">
                                     <option value="">未选择</option>
                                     <option value="__all__">所有工作区数据库</option>
                                 </select>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-refresh-workspace" style="padding: 6px 12px; white-space: nowrap;" title="刷新数据库列表">🔄</button>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-refresh-workspace" style="padding: 6px 12px; white-space: nowrap;" title="刷新工作区列表">🔄</button>
                             </div>
                             <div class="ldb-tip" id="ldb-notion-workspace-tip"></div>
                         </div>
@@ -6099,9 +6099,10 @@ ${availableTools}
 
                 refreshBtn.disabled = true;
                 refreshBtn.innerHTML = "⏳";
-                workspaceTip.textContent = "正在获取数据库列表...";
+                workspaceTip.textContent = "正在获取工作区列表...";
 
                 try {
+                    // 分页获取所有数据库
                     let allDbResults = [];
                     let dbCursor = undefined;
                     do {
@@ -6117,19 +6118,36 @@ ${availableTools}
                         url: db.url || ""
                     }));
 
-                    // 更新缓存（保留 pages 字段不覆盖）
+                    // 分页获取所有页面
+                    let allPageResults = [];
+                    let pageCursor = undefined;
+                    do {
+                        const pageResponse = await NotionAPI.search("", { property: "object", value: "page" }, apiKey, pageCursor);
+                        allPageResults = allPageResults.concat(pageResponse.results || []);
+                        pageCursor = pageResponse.has_more ? pageResponse.next_cursor : undefined;
+                    } while (pageCursor);
+
+                    const pages = allPageResults.map(page => ({
+                        id: page.id?.replace(/-/g, "") || "",
+                        title: Utils.getPageTitle(page),
+                        type: "page",
+                        url: page.url || "",
+                        parent: page.parent?.type || ""
+                    }));
+
+                    // 更新缓存
                     const apiKeyHash = apiKey.slice(-8);
-                    const cachedWorkspace = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
-                    let workspaceData;
-                    try { workspaceData = JSON.parse(cachedWorkspace); } catch { workspaceData = {}; }
-                    workspaceData.apiKeyHash = apiKeyHash;
-                    workspaceData.databases = databases;
-                    workspaceData.timestamp = Date.now();
+                    const workspaceData = {
+                        apiKeyHash,
+                        databases,
+                        pages,
+                        timestamp: Date.now()
+                    };
                     Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
 
                     // 填充下拉框
-                    NotionSiteUI.updateAITargetDbOptions(databases);
-                    workspaceTip.textContent = `✅ 获取到 ${databases.length} 个数据库`;
+                    NotionSiteUI.updateAITargetDbOptions(databases, pages);
+                    workspaceTip.textContent = `✅ 获取到 ${databases.length} 个数据库，${pages.length} 个页面`;
                     workspaceTip.style.color = "#34d399";
                 } catch (error) {
                     workspaceTip.textContent = `❌ ${error.message}`;
@@ -6232,14 +6250,16 @@ ${availableTools}
             panel.querySelector("#ldb-notion-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, "");
             panel.querySelector("#ldb-notion-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
 
-            // 加载数据库下拉框（始终调用以确保兼容选项被添加）
+            // 加载数据库/页面下拉框（始终调用以确保兼容选项被添加）
             const cachedWsForDb = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
             let cachedDatabases = [];
+            let cachedPages = [];
             try {
                 const wsData = JSON.parse(cachedWsForDb);
                 cachedDatabases = wsData.databases || [];
+                cachedPages = wsData.pages || [];
             } catch {}
-            NotionSiteUI.updateAITargetDbOptions(cachedDatabases);
+            NotionSiteUI.updateAITargetDbOptions(cachedDatabases, cachedPages);
 
             // 加载 AI 模型选项（优先使用缓存的模型列表）
             const aiService = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
@@ -6277,8 +6297,8 @@ ${availableTools}
 
         },
 
-        // 更新数据库下拉框
-        updateAITargetDbOptions: (databases) => {
+        // 更新数据库/页面下拉框
+        updateAITargetDbOptions: (databases, pages = []) => {
             const select = NotionSiteUI.panel.querySelector("#ldb-notion-ai-target-db");
             if (!select) return;
 
@@ -6288,19 +6308,30 @@ ${availableTools}
             let options = '<option value="">未选择</option>';
             options += '<option value="__all__">所有工作区数据库</option>';
 
-            const dbIds = new Set();
+            const knownIds = new Set();
             if (databases.length > 0) {
                 options += '<optgroup label="📁 数据库">';
                 databases.forEach(db => {
-                    dbIds.add(db.id);
+                    knownIds.add(db.id);
                     options += `<option value="${db.id}">📁 ${Utils.escapeHtml(db.title)}</option>`;
+                });
+                options += '</optgroup>';
+            }
+
+            // 只显示工作区顶级页面
+            const workspacePages = pages.filter(p => p.parent === "workspace");
+            if (workspacePages.length > 0) {
+                options += '<optgroup label="📄 页面">';
+                workspacePages.forEach(page => {
+                    knownIds.add(page.id);
+                    options += `<option value="${page.id}">📄 ${Utils.escapeHtml(page.title)}</option>`;
                 });
                 options += '</optgroup>';
             }
 
             // 如果 NOTION_DATABASE_ID 有值但不在列表中，添加一个兼容选项
             const activeId = savedValue || savedDbId;
-            if (activeId && activeId !== "__all__" && !dbIds.has(activeId)) {
+            if (activeId && activeId !== "__all__" && !knownIds.has(activeId)) {
                 options += `<option value="${activeId}">已配置 (ID: ${activeId.slice(0, 8)}...)</option>`;
             }
 
