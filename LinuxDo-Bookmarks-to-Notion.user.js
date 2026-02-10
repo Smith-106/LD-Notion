@@ -6074,7 +6074,7 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, panel.querySelector("#ldb-notion-api-key").value.trim());
                 const targetDbValue = panel.querySelector("#ldb-notion-ai-target-db").value;
                 Storage.set(CONFIG.STORAGE_KEYS.AI_TARGET_DB, targetDbValue);
-                if (targetDbValue && targetDbValue !== "__all__") {
+                if (targetDbValue && targetDbValue !== "__all__" && !targetDbValue.startsWith("page:")) {
                     Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, targetDbValue);
                 }
                 Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, panel.querySelector("#ldb-notion-ai-service").value);
@@ -6158,13 +6158,15 @@ ${availableTools}
                 }
             };
 
-            // 数据库下拉框选择变更
+            // 数据库/页面下拉框选择变更
             panel.querySelector("#ldb-notion-ai-target-db").onchange = (e) => {
                 const value = e.target.value;
                 if (value && value !== "__all__") {
-                    // 选中具体数据库 → 同时保存 NOTION_DATABASE_ID + AI_TARGET_DB
-                    Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, value);
                     Storage.set(CONFIG.STORAGE_KEYS.AI_TARGET_DB, value);
+                    // 选中数据库 → 同时保存 NOTION_DATABASE_ID；选中页面 → 不覆盖
+                    if (!value.startsWith("page:")) {
+                        Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, value);
+                    }
                 } else if (value === "__all__") {
                     Storage.set(CONFIG.STORAGE_KEYS.AI_TARGET_DB, "__all__");
                 } else {
@@ -6318,18 +6320,19 @@ ${availableTools}
                 options += '</optgroup>';
             }
 
-            // 只显示工作区顶级页面
+            // 只显示工作区顶级页面（value 带 page: 前缀以区分类型）
             const workspacePages = pages.filter(p => p.parent === "workspace");
             if (workspacePages.length > 0) {
                 options += '<optgroup label="📄 页面">';
                 workspacePages.forEach(page => {
-                    knownIds.add(page.id);
-                    options += `<option value="${page.id}">📄 ${Utils.escapeHtml(page.title)}</option>`;
+                    const val = `page:${page.id}`;
+                    knownIds.add(val);
+                    options += `<option value="${val}">📄 ${Utils.escapeHtml(page.title)}</option>`;
                 });
                 options += '</optgroup>';
             }
 
-            // 如果 NOTION_DATABASE_ID 有值但不在列表中，添加一个兼容选项
+            // 如果已保存的值不在列表中，添加一个兼容选项
             const activeId = savedValue || savedDbId;
             if (activeId && activeId !== "__all__" && !knownIds.has(activeId)) {
                 options += `<option value="${activeId}">已配置 (ID: ${activeId.slice(0, 8)}...)</option>`;
@@ -6443,7 +6446,7 @@ ${availableTools}
                         notionApiKey: notionPanel.querySelector("#ldb-notion-api-key")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
                         notionDatabaseId: (() => {
                             const targetDb = notionPanel.querySelector("#ldb-notion-ai-target-db")?.value || "";
-                            if (targetDb && targetDb !== "__all__") return targetDb;
+                            if (targetDb && targetDb !== "__all__" && !targetDb.startsWith("page:")) return targetDb;
                             return Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
                         })(),
                         aiApiKey: notionPanel.querySelector("#ldb-notion-ai-api-key")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, ""),
