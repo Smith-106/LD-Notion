@@ -7794,7 +7794,7 @@ ${availableTools}
                                 </select>
                             </div>
                             <div class="ldb-form-group">
-                                <label>请求间隔 (防封)</label>
+                                <label>请求间隔</label>
                                 <select class="ldb-select" id="ldb-request-delay">
                                     <option value="200">快速 (200ms)</option>
                                     <option value="500">正常 (500ms)</option>
