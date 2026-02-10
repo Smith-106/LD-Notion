@@ -2,6 +2,8 @@
 
 一个 Tampermonkey 用户脚本，将 **Linux.do** 与 **Notion** 深度连接：批量导出收藏帖子到 Notion，同时在两个站点提供 AI 对话式助手，支持自然语言管理 Notion 工作区。
 
+[![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md)
+
 ## 两大核心能力
 
 ### 1. Linux.do 收藏导出器
