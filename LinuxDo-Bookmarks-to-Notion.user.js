@@ -10944,7 +10944,7 @@ ${availableTools}
                         <div class="gclip-field">
                             <label>Notion API Key</label>
                             <div style="display:flex;align-items:center;gap:8px;">
-                                <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="secret_..." value="${Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY) || ''}" style="flex:1;font-size:12px;" autocomplete="off" />
+                                <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="${Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY) ? '已配置 (点击保存可更新)' : 'secret_...'}" value="" style="flex:1;font-size:12px;" autocomplete="off" />
                                 <button class="gclip-btn" id="gclip-save-api-key" style="padding:4px 12px;font-size:12px;">保存</button>
                             </div>
                         </div>
@@ -11014,15 +11014,23 @@ ${availableTools}
                 const key = panel.querySelector("#gclip-api-key-input").value.trim();
                 if (key) {
                     Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, key);
+                    panel.querySelector("#gclip-api-key-input").value = "";
+                    panel.querySelector("#gclip-api-key-input").placeholder = "已配置 (点击保存可更新)";
                     GenericUI.showStatus("API Key 已保存", "success");
+                } else {
+                    GenericUI.showStatus("请输入 API Key", "error");
                 }
             });
 
             // 保存配置
             panel.querySelector("#gclip-save-settings").addEventListener("click", async () => {
-                // 优先读取输入框中的值（用户可能还没点保存就直接保存配置）
+                // 仅当用户主动输入了新 key 时才更新（不从 DOM 预填，防止泄漏）
                 const liveKey = panel.querySelector("#gclip-api-key-input").value.trim();
-                if (liveKey) Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, liveKey);
+                if (liveKey) {
+                    Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, liveKey);
+                    panel.querySelector("#gclip-api-key-input").value = "";
+                    panel.querySelector("#gclip-api-key-input").placeholder = "已配置 (点击保存可更新)";
+                }
                 const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
                 const exportType = panel.querySelector("#gclip-export-type").value;
                 const targetId = panel.querySelector("#gclip-target-id").value.trim().replace(/-/g, "");
