@@ -1,15 +1,27 @@
 // ==UserScript==
 // @name         LD-Notion — Notion AI 助手 & Linux.do 收藏导出
 // @namespace    https://linux.do/
-// @version      2.4.3
-// @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion 数据库或页面，支持自动导入、权限控制
+// @version      2.5.0
+// @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion，GitHub Stars 导入与 AI 分类，支持自动导入、权限控制
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
 // @downloadURL  https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
-// @match        https://linux.do/u/*/activity/bookmarks*
+// @match        https://linux.do/*
 // @match        https://www.notion.so/*
 // @match        https://notion.so/*
+// @match        *://*/*
+// @exclude      https://www.google.com/*
+// @exclude      https://www.google.com.hk/*
+// @exclude      https://www.baidu.com/*
+// @exclude      https://www.bing.com/*
+// @exclude      https://duckduckgo.com/*
+// @exclude      https://mail.google.com/*
+// @exclude      https://outlook.live.com/*
+// @exclude      *://localhost/*
+// @exclude      *://localhost:*/*
+// @exclude      *://127.0.0.1/*
+// @exclude      *://127.0.0.1:*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_xmlhttpRequest
@@ -21,6 +33,7 @@
 // @connect      api.openai.com
 // @connect      api.anthropic.com
 // @connect      generativelanguage.googleapis.com
+// @connect      api.github.com
 // @connect      *
 // @run-at       document-idle
 // ==/UserScript==
@@ -76,6 +89,21 @@
             AI_TARGET_DB: "ldb_ai_target_db",
             // 工作区获取页数上限
             WORKSPACE_MAX_PAGES: "ldb_workspace_max_pages",
+            // Agent 个性化
+            AGENT_PERSONA_NAME: "ldb_agent_persona_name",
+            AGENT_PERSONA_TONE: "ldb_agent_persona_tone",
+            AGENT_PERSONA_EXPERTISE: "ldb_agent_persona_expertise",
+            AGENT_PERSONA_INSTRUCTIONS: "ldb_agent_persona_instructions",
+            // AI 输出模板
+            AI_TEMPLATES: "ldb_ai_templates",
+            // GitHub 收藏导入
+            GITHUB_USERNAME: "ldb_github_username",
+            GITHUB_TOKEN: "ldb_github_token",
+            GITHUB_EXPORTED_REPOS: "ldb_github_exported_repos",
+            // 面板尺寸记忆
+            PANEL_SIZE_NOTION: "ldb_panel_size_notion",
+            PANEL_SIZE_MAIN: "ldb_panel_size_main",
+            PANEL_SIZE_GENERIC: "ldb_panel_size_generic",
         },
         // 默认值
         DEFAULTS: {
@@ -100,6 +128,18 @@
             autoImportInterval: 5, // 分钟，0=仅页面加载时
             exportConcurrency: 1, // 并发导出数量
             workspaceMaxPages: 10, // 刷新工作区时的分页上限
+            // Agent 个性化默认值
+            agentPersonaName: "AI 助手",
+            agentPersonaTone: "友好",
+            agentPersonaExpertise: "Notion 工作区管理",
+            agentPersonaInstructions: "",
+            // AI 输出模板默认值
+            aiTemplates: JSON.stringify([
+                { name: "周报", prompt: "根据以下内容生成一份工作周报，包含：本周完成、下周计划、问题与风险。使用 Markdown 格式。", icon: "📋" },
+                { name: "摘要提纲", prompt: "为以下内容生成一份详细的结构化提纲，使用层级编号。使用 Markdown 格式。", icon: "📝" },
+                { name: "SWOT 分析", prompt: "对以下内容进行 SWOT 分析（优势、劣势、机会、威胁），使用 Markdown 表格格式。", icon: "📊" },
+                { name: "行动计划", prompt: "根据以下内容提炼出具体的行动计划，包含：目标、步骤、负责人、截止时间。使用 Markdown 格式。", icon: "🎯" },
+            ]),
         },
         // 导出目标类型
         EXPORT_TARGET_TYPES: {
@@ -228,18 +268,19 @@
         SITES: {
             LINUX_DO: "linux_do",
             NOTION: "notion",
+            GENERIC: "generic",
         },
 
-        // 检测当前站点
+        // 检测当前站点（精确匹配，防止域名仿冒）
         detect: () => {
             const hostname = window.location.hostname;
-            if (hostname.includes("linux.do")) {
+            if (hostname === "linux.do" || hostname.endsWith(".linux.do")) {
                 return SiteDetector.SITES.LINUX_DO;
             }
-            if (hostname.includes("notion.so")) {
+            if (hostname === "notion.so" || hostname === "www.notion.so" || hostname.endsWith(".notion.so")) {
                 return SiteDetector.SITES.NOTION;
             }
-            return null;
+            return SiteDetector.SITES.GENERIC;
         },
 
         // 判断是否在 Linux.do 站点
@@ -250,6 +291,11 @@
         // 判断是否在 Notion 站点
         isNotion: () => {
             return SiteDetector.detect() === SiteDetector.SITES.NOTION;
+        },
+
+        // 判断是否在通用网页
+        isGeneric: () => {
+            return SiteDetector.detect() === SiteDetector.SITES.GENERIC;
         },
     };
 
@@ -789,6 +835,23 @@
             }
 
             return page;
+        },
+
+        // 在页面下创建子页面
+        createPageInPage: async (parentPageId, properties, apiKey) => {
+            const data = {
+                parent: { page_id: parentPageId },
+                properties: properties,
+            };
+            return await NotionAPI.request("POST", "/pages", data, apiKey);
+        },
+
+        // createPageInWorkspace 已移除：Notion API 不支持 parent: { workspace: true }
+        // 创建页面必须指定 parent.page_id 或 parent.database_id
+
+        // 在数据库中创建页面（简化版，无 children）
+        createPage: async (databaseId, properties, apiKey) => {
+            return await NotionAPI.createDatabasePage(databaseId, properties, [], apiKey);
         },
 
         // 追加 blocks
@@ -1626,6 +1689,15 @@
             AI_AUTOFILL: "ai_autofill",          // 批量 AI 属性填充
             ASK: "ask",                          // 全局问答（RAG）
             AGENT_TASK: "agent_task",            // Agent 自主代理
+            DEEP_RESEARCH: "deep_research",      // 深度研究
+            TEMPLATE_OUTPUT: "template_output",  // AI 模板输出
+            SUMMARIZE: "summarize",              // 总结/摘要
+            BRAINSTORM: "brainstorm",            // 头脑风暴/创意生成
+            PROOFREAD: "proofread",              // 校对/纠错/润色
+            BATCH_TRANSLATE: "batch_translate",    // 批量翻译数据库
+            EXTRACT_TO_DB: "extract_to_database",  // 内容提取为数据库
+            GENERATE_PAGES: "generate_pages",      // 多页面结构化生成
+            BATCH_ANALYZE: "batch_analyze",        // 批量页面分析
             HELP: "help",             // 帮助
             COMPOUND: "compound",     // 组合指令
             UNKNOWN: "unknown"        // 未知
@@ -2051,11 +2123,120 @@
                     return `已创建数据库「${name}」(ID: ${newDbId})，父页面: ${parentPage.name}。`;
                 }
             },
+
+            // === 深度研究工具 (Level 0) ===
+            research_report: {
+                description: "深入研究指定主题，多关键词搜索并生成结构化研究报告",
+                params: "research_topic(研究主题), scope(范围:workspace/database,默认workspace)",
+                level: 0,
+                execute: async (args, settings) => {
+                    return await AIAssistant.handleDeepResearch(args, settings, "Agent工具调用");
+                }
+            },
+
+            // === 公式编写辅助 (Level 1) ===
+            generate_formula: {
+                description: "根据自然语言描述生成 Notion 数据库公式",
+                params: "description(功能描述), database_name/database_id(目标数据库,可选), property_name(目标属性名,可选)",
+                level: 1,
+                execute: async (args, settings) => {
+                    const { description, database_name, database_id, property_name } = args;
+                    if (!description) return "错误: 请描述你想要的公式功能。";
+
+                    // 获取数据库 schema 作为上下文
+                    let schemaDesc = "";
+                    const dbId = database_id || settings.notionDatabaseId;
+                    if (dbId) {
+                        try {
+                            const database = await NotionAPI.fetchDatabase(dbId, settings.notionApiKey);
+                            const props = Object.entries(database.properties || {})
+                                .map(([name, prop]) => `${name}(${prop.type})`)
+                                .join(", ");
+                            schemaDesc = `数据库属性: ${props}`;
+                        } catch { schemaDesc = ""; }
+                    }
+
+                    const prompt = `你是 Notion 公式专家。根据以下信息生成 Notion 公式。
+
+${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
+
+请返回以下格式:
+公式: <Notion公式表达式>
+说明: <公式功能简述>
+示例: <公式返回值示例>
+
+注意：使用 Notion 的公式语法（prop(), if(), contains() 等函数）。`;
+
+                    const result = await AIService.requestChat(prompt, settings, 500);
+                    let response = `📐 **Notion 公式生成**\n\n${result}`;
+                    if (property_name) {
+                        response += `\n\n💡 请将此公式手动设置到数据库属性「${property_name}」中（Notion API 暂不支持直接写入公式属性）。`;
+                    }
+                    return response;
+                }
+            },
+            summarize_page: {
+                description: "总结指定页面的内容，生成关键信息摘要",
+                params: "page_name/page_id(目标页面), style(摘要风格:brief/detailed/bullet,默认brief)",
+                level: 0,
+                execute: async (args, settings) => {
+                    return await AIAssistant.handleSummarize(args, settings, "Agent工具调用");
+                }
+            },
+            brainstorm_ideas: {
+                description: "根据主题进行头脑风暴，生成创意列表或方案建议",
+                params: "topic(主题), count(生成数量,默认10), style(风格:practical/creative/wild,默认practical)",
+                level: 0,
+                execute: async (args, settings) => {
+                    return await AIAssistant.handleBrainstorm(args, settings, "Agent工具调用");
+                }
+            },
+            proofread_content: {
+                description: "校对页面内容，纠正拼写、语法和表达问题",
+                params: "page_name/page_id(目标页面)",
+                level: 0,
+                execute: async (args, settings) => {
+                    return await AIAssistant.handleProofread(args, settings, "Agent工具调用");
+                }
+            },
+            batch_translate_database: {
+                description: "批量翻译数据库中所有页面的内容",
+                params: "database_name/database_id(目标数据库), target_language(目标语言,如英文/日文)",
+                level: 1,
+                execute: async (args, settings) => {
+                    return await AIAssistant.handleBatchTranslate(args, settings, "Agent工具调用");
+                }
+            },
+            extract_to_database: {
+                description: "从页面内容中提取结构化信息，创建数据库并填充条目",
+                params: "page_name/page_id(源页面), database_name(新数据库名称), extraction_prompt(提取要求描述)",
+                level: 2,
+                execute: async (args, settings) => {
+                    return await AIAssistant.handleExtractToDatabase(args, settings, "Agent工具调用");
+                }
+            },
+            generate_structured_pages: {
+                description: "根据需求生成多页面结构化内容（如入职指南、竞品分析报告）",
+                params: "topic(主题), structure_prompt(结构描述), parent_page_name/parent_page_id(父页面,可选)",
+                level: 2,
+                execute: async (args, settings) => {
+                    return await AIAssistant.handleGeneratePages(args, settings, "Agent工具调用");
+                }
+            },
+            batch_analyze_pages: {
+                description: "批量分析数据库中的页面，生成跨页面综合分析报告",
+                params: "database_name/database_id(目标数据库), analysis_prompt(分析要求), limit(分析页数,默认10)",
+                level: 0,
+                execute: async (args, settings) => {
+                    return await AIAssistant.handleBatchAnalyze(args, settings, "Agent工具调用");
+                }
+            },
         },
 
         // 获取帮助信息
         getHelpMessage: () => {
-            return `🤖 **我是你的 Notion 工作区助手**
+            const personaName = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName);
+            return `🤖 **我是${personaName}**
 
 直接用自然语言告诉我你想做什么，我会自动规划并执行。例如：
 
@@ -2065,7 +2246,18 @@
 🏷️ "自动分类所有未分类的帖子"
 📦 "把技术类帖子移到技术库"
 💬 "关于 Docker 的帖子都说了什么？"
+🔬 "深入研究一下关于 AI 的所有内容"
+📋 "用周报模板总结本周内容"
+📐 "生成一个计算天数差的公式"
+📝 "总结一下 xxx 页面的内容"
+💡 "围绕远程办公给我一些创意建议"
+✅ "校对一下 xxx 页面的拼写和语法"
+🌐 "把整个数据库翻译成英文"
+📊 "把这个页面的笔记提取为数据库"
+📑 "为新员工创建入职指南（含子页面）"
+🔎 "分析数据库里所有页面，生成综合报告"
 🔮 "给所有帖子生成 AI 摘要"
+🐙 "导入 GitHub 收藏到 Notion"
 🤖 "帮我整理所有帖子，分类后生成摘要"
 
 我会自动调用需要的工具，逐步完成任务。复杂任务我会分步执行。
@@ -2121,9 +2313,19 @@
 13. ai_autofill - 批量 AI 属性填充（如：给所有帖子生成AI摘要、提取所有帖子的关键词、翻译所有帖子标题）
 14. ask - 全局问答，AI 综合回答问题（如：关于Docker的帖子都说了什么、总结最近的帖子）
 15. agent_task - Agent 自主规划并执行复杂任务（如：帮我整理所有帖子并生成摘要、自动分类后移到不同数据库）
-16. compound - 用户指令包含两个及以上需按顺序执行的不同操作（如：先分类再移动、分类后移到B数据库）
-17. help - 帮助（如：帮助、你能做什么）
-18. unknown - 无法理解
+16. deep_research - 深入研究特定主题，多关键词搜索后生成结构化研究报告（如：深入研究一下关于AI的所有内容、帮我调研xxx、综合分析xxx主题）
+17. template_output - 使用AI输出模板生成内容（如：用周报模板总结xxx、用SWOT模板分析xxx、用摘要提纲模板整理xxx）
+18. summarize - 总结/摘要页面内容（如：总结一下xxx页面、帮我概括xxx的内容、给xxx生成摘要）
+19. brainstorm - 头脑风暴/创意生成（如：给我一些关于xxx的创意、围绕xxx做头脑风暴、帮我想10个xxx的方案）
+20. proofread - 校对/纠正页面的拼写、语法和表达（如：校对一下xxx页面、帮我检查xxx的拼写和语法、纠正xxx页面的错误）
+21. batch_translate - 批量翻译数据库中所有页面（如：把整个数据库翻译成日文、翻译xxx数据库的所有页面为英文）
+22. extract_to_database - 从页面内容中提取结构化信息生成数据库（如：把这个页面的笔记转为数据库、从头脑风暴便利贴创建路线图数据库、把待办事项提取为任务数据库）
+23. generate_pages - 生成多页面结构化内容（如：创建入职指南含子页面、生成竞品分析报告、创建包含多个部分的项目文档）
+24. batch_analyze - 批量分析数据库中的页面并生成综合报告（如：分析团队项目生成周报、分析所有帖子找出趋势、综合分析数据库内容）
+25. compound - 用户指令包含两个及以上需按顺序执行的不同操作（如：先分类再移动、分类后移到B数据库）
+26. github_import - 导入 GitHub 收藏/Stars 到 Notion（如：导入GitHub收藏、同步我的GitHub Stars、把GitHub收藏导入到Notion、导入github星标仓库）
+27. help - 帮助（如：帮助、你能做什么）
+28. unknown - 无法理解
 
 注意区分 search 和 workspace_search：
 - search: 用户想在配置的帖子数据库中搜索
@@ -2146,6 +2348,50 @@
 - write_content: 生成新内容追加到页面（如"写一段介绍"、"添加内容"）
 - edit_content: 改写页面现有内容（如"改写"、"润色"、"让它更简洁"）
 
+注意区分 deep_research 和 ask：
+- deep_research: 用户想要深入、系统地研究某个主题（如"深入研究xxx"、"调研xxx"、"综合分析xxx"、"全面了解xxx"）
+- ask: 用户想要简单问答（如"关于Docker的帖子说了什么"、"总结一下"）
+- 关键词提示：研究/调研/深入/综合分析/全面了解/深度分析 → deep_research
+
+注意区分 template_output 和 write_content：
+- template_output: 用户明确提到模板或使用预设格式（如"用周报模板"、"用SWOT模板"、"按提纲模板"）
+- write_content: 用户想要自由生成内容（如"写一段介绍"、"添加xxx内容"）
+
+注意区分 summarize 和 ask：
+- summarize: 用户想要对特定页面生成结构化摘要（如"总结一下xxx页面"、"概括xxx的内容"、"给xxx生成摘要"）
+- ask: 用户想要综合多个页面回答问题（如"关于Docker的帖子都说了什么"）
+- 关键词提示：总结/概括/摘要/归纳/提炼 + 指定页面 → summarize
+
+注意区分 brainstorm 和 ask：
+- brainstorm: 用户想要围绕某主题进行创意发散（如"给我一些关于xxx的创意"、"帮我想10个方案"）
+- ask: 用户想要基于工作区内容回答问题
+- 关键词提示：创意/头脑风暴/想法/灵感/方案建议/点子 → brainstorm
+
+注意区分 proofread 和 edit_content：
+- proofread: 用户想要校对纠错（如"校对一下xxx页面"、"检查拼写和语法"、"纠正错误"）
+- edit_content: 用户想要改写内容（如"改得更简洁"、"润色一下"、"换个风格"）
+- 关键词提示：校对/纠错/拼写/语法/错别字/纠正 → proofread；润色/改写/重写/风格调整 → edit_content
+
+注意区分 batch_translate 和 translate_content：
+- batch_translate: 用户想翻译整个数据库的所有页面（如"把整个数据库翻译成日文"、"翻译所有页面"）
+- translate_content: 用户想翻译单个页面（如"把xxx页面翻译成英文"）
+- 关键词提示：整个/所有/批量 + 数据库/页面 + 翻译 → batch_translate
+
+注意区分 extract_to_database 和 create_database：
+- extract_to_database: 用户想从现有页面内容中提取结构化信息生成数据库（如"把笔记转为数据库"、"提取待办事项为任务"）
+- create_database: 用户想创建一个空数据库或通用数据库（如"创建一个项目数据库"）
+- 关键词提示：转换/提取/整理成数据库 + 提到源页面 → extract_to_database
+
+注意区分 generate_pages 和 write_content：
+- generate_pages: 用户想生成多页面结构化内容（如"创建入职指南含子页面"、"生成包含多个部分的报告"）
+- write_content: 用户想在单个页面写入内容
+- 关键词提示：多页面/子页面/包含多个部分/多章节/完整指南 → generate_pages
+
+注意区分 batch_analyze 和 deep_research：
+- batch_analyze: 用户想批量分析数据库中的多个页面并生成综合报告（如"分析所有项目页面"、"分析团队任务生成周报"）
+- deep_research: 用户想深入研究某个主题（搜索 + 分析）
+- 关键词提示：分析数据库/分析所有页面/团队分析/批量分析 → batch_analyze
+
 compound 判断依据：
 - 用户指令中含"先...再..."、"...之后..."、"...然后..."、"...后..."等顺序词，且涉及两个不同操作
 - 单个操作不算 compound（如"移动帖子"只是 move）
@@ -2155,7 +2401,7 @@ compound 判断依据：
 
 单操作格式：
 {
-  "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|create_database|write_content|edit_content|translate_content|ai_autofill|ask|agent_task|help|unknown",
+  "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|create_database|write_content|edit_content|translate_content|ai_autofill|ask|agent_task|deep_research|template_output|summarize|brainstorm|proofread|batch_translate|extract_to_database|generate_pages|batch_analyze|github_import|help|unknown",
   "params": {
     "keyword": "搜索关键词（如有）",
     "property": "要更新的属性名（如有）",
@@ -2180,6 +2426,17 @@ compound 判断依据：
     "property_name": "自定义属性名（ai_autofill 且 autofill_type=custom 时使用）",
     "question": "问答问题（ask 时使用）",
     "task_description": "Agent 任务描述（agent_task 时使用）",
+    "research_topic": "研究主题（deep_research 时使用）",
+    "template_name": "模板名称（template_output 时使用，如：周报/摘要提纲/SWOT分析/行动计划）",
+    "custom_context": "用户补充说明（template_output 时可选）",
+    "summary_style": "摘要风格（summarize 时使用：brief/detailed/bullet，默认brief）",
+    "brainstorm_topic": "头脑风暴主题（brainstorm 时使用）",
+    "brainstorm_count": 10,
+    "extraction_prompt": "提取要求描述（extract_to_database 时使用，描述要提取什么信息）",
+    "structure_prompt": "结构描述（generate_pages 时使用，描述需要生成的页面结构）",
+    "analysis_prompt": "分析要求（batch_analyze 时使用，描述分析目标和维度）",
+    "username": "GitHub 用户名（github_import 时可选，覆盖已配置的用户名）",
+    "classify": false,
     "batch": true
   },
   "explanation": "你对用户意图的理解（中文简短说明）"
@@ -2227,7 +2484,8 @@ compound 格式（仅当 intent 为 compound 时使用）：
             // 问候语检测（无需配置）
             const greetings = ["你好", "您好", "hello", "hi", "hey", "嗨", "早上好", "下午好", "晚上好"];
             if (greetings.some(g => userMessage.toLowerCase().trim() === g || userMessage.trim() === g)) {
-                return `你好！👋 我是你的 Notion 数据库助手。\n\n输入「帮助」查看我能做什么，或者直接告诉我你想执行的操作。`;
+                const pName = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName);
+                return `你好！👋 我是${pName}。\n\n输入「帮助」查看我能做什么，或者直接告诉我你想执行的操作。`;
             }
 
             // 检查基础配置（不检查数据库 ID，因为工作区搜索不需要）
@@ -2246,7 +2504,11 @@ compound 格式（仅当 intent 为 compound 时使用）：
                 "classify", "batch_classify",
                 "update", "move", "copy", "create_database",
                 "write_content", "edit_content", "translate_content",
-                "ai_autofill", "compound"
+                "ai_autofill", "deep_research", "template_output",
+                "summarize", "brainstorm", "proofread",
+                "batch_translate", "extract_to_database",
+                "generate_pages", "batch_analyze",
+                "github_import", "compound"
             ];
 
             if (directIntents.includes(intentResult.intent)) {
@@ -2294,6 +2556,26 @@ compound 格式（仅当 intent 为 compound 时使用）：
                     return await AIAssistant.handleTranslateContent(params, settings, explanation);
                 case "ai_autofill":
                     return await AIAssistant.handleAIAutofill(params, settings, explanation);
+                case "deep_research":
+                    return await AIAssistant.handleDeepResearch(params, settings, explanation);
+                case "template_output":
+                    return await AIAssistant.handleTemplateOutput(params, settings, explanation);
+                case "summarize":
+                    return await AIAssistant.handleSummarize(params, settings, explanation);
+                case "brainstorm":
+                    return await AIAssistant.handleBrainstorm(params, settings, explanation);
+                case "proofread":
+                    return await AIAssistant.handleProofread(params, settings, explanation);
+                case "batch_translate":
+                    return await AIAssistant.handleBatchTranslate(params, settings, explanation);
+                case "extract_to_database":
+                    return await AIAssistant.handleExtractToDatabase(params, settings, explanation);
+                case "generate_pages":
+                    return await AIAssistant.handleGeneratePages(params, settings, explanation);
+                case "batch_analyze":
+                    return await AIAssistant.handleBatchAnalyze(params, settings, explanation);
+                case "github_import":
+                    return await AIAssistant.handleGitHubImport(params, settings, explanation);
                 case "ask":
                     return await AIAssistant.handleAsk(params, settings, explanation);
                 case "agent_task":
@@ -3626,6 +3908,817 @@ ${searchTerm}`;
             }
         },
 
+        // ======= 深度研究模式 =======
+
+        handleDeepResearch: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            const { research_topic, scope = "workspace" } = params;
+            if (!research_topic) {
+                return "❌ 请描述你的研究主题。\n\n💡 示例：「深入研究一下关于 Docker 的所有内容」";
+            }
+
+            try {
+                // Phase 1: 拆分主题为多个搜索关键词
+                ChatState.updateLastMessage("🔬 正在拆解研究主题...", "processing");
+
+                const keywordsPrompt = `将以下研究主题拆分为3-5个搜索关键词，每行一个关键词，只返回关键词：\n${research_topic}`;
+                const keywordsRaw = await AIService.requestChat(keywordsPrompt, settings, 200);
+                const keywords = keywordsRaw.split("\n")
+                    .map(k => k.trim().replace(/^[-•\d.]+\s*/, ""))
+                    .filter(Boolean)
+                    .slice(0, 5);
+
+                if (keywords.length === 0) keywords.push(research_topic);
+
+                // Phase 2: 多关键词搜索
+                ChatState.updateLastMessage(`🔍 搜索中... (${keywords.length} 个关键词: ${keywords.join(", ")})`, "processing");
+
+                const allResults = [];
+                const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+
+                for (let i = 0; i < keywords.length; i++) {
+                    const response = await NotionAPI.search(keywords[i], null, settings.notionApiKey);
+                    const pages = (response.results || []).filter(r => !r.archived && r.object === "page");
+                    allResults.push(...pages);
+                    if (i < keywords.length - 1) await Utils.sleep(delay);
+                }
+
+                // 去重（按 ID）
+                const uniquePages = [...new Map(allResults.map(r => [r.id, r])).values()];
+
+                if (uniquePages.length === 0) {
+                    return `📭 在工作区中没有找到与「${research_topic}」相关的内容。\n\n尝试用更宽泛的关键词，或确保工作区中有相关页面。`;
+                }
+
+                // Phase 3: 提取内容（最多10个页面）
+                const maxPages = Math.min(10, uniquePages.length);
+                ChatState.updateLastMessage(`📄 提取 ${maxPages}/${uniquePages.length} 个页面内容...`, "processing");
+
+                const contentParts = [];
+                const sourceList = [];
+                for (let i = 0; i < maxPages; i++) {
+                    const page = uniquePages[i];
+                    const title = Utils.getPageTitle(page);
+                    const url = page.url || "";
+                    sourceList.push({ title, url });
+
+                    try {
+                        const content = await AIAssistant._extractPageContent(page.id, settings.notionApiKey, 3000);
+                        contentParts.push(`[${i + 1}] ${title}:\n${content || "（无文本内容）"}`);
+                    } catch {
+                        contentParts.push(`[${i + 1}] ${title}:\n（无法读取内容）`);
+                    }
+                    if (i < maxPages - 1) await Utils.sleep(delay);
+                }
+
+                // Phase 4: AI 生成结构化报告
+                ChatState.updateLastMessage("📊 正在生成研究报告...", "processing");
+
+                const reportPrompt = `你是一个研究分析师。根据以下来自 Notion 工作区的内容，针对主题「${research_topic}」生成一份结构化研究报告。
+
+报告格式要求（使用 Markdown）:
+# 研究报告: ${research_topic}
+## 摘要
+（2-3句话概括核心发现）
+## 主要发现
+（3-5个要点，每个要点一句话）
+## 详细分析
+（按主题分段论述，引用具体来源编号如[1][2]）
+## 建议与行动项
+（可执行的建议，每条一句话）
+## 信息来源
+（列出引用的页面）
+
+--- 参考内容 ---
+${contentParts.join("\n\n---\n\n")}`;
+
+                const report = await AIService.requestChat(reportPrompt, settings, 4000);
+
+                // 拼接来源列表
+                let sourceText = "\n\n📚 **分析基础**：\n";
+                sourceList.forEach((s, i) => {
+                    sourceText += `${i + 1}. ${s.title}${s.url ? ` ([链接](${s.url}))` : ""}\n`;
+                });
+
+                const summary = `🔬 共使用 ${keywords.length} 个关键词，找到 ${uniquePages.length} 个相关页面，深入分析了 ${maxPages} 个。`;
+
+                return `${report}${sourceText}\n---\n${summary}`;
+            } catch (error) {
+                return `❌ 深度研究失败: ${error.message}`;
+            }
+        },
+
+        // ======= 内容总结 =======
+
+        handleSummarize: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            const { page_name, page_id, summary_style } = params;
+            const style = summary_style || "brief";
+
+            if (!page_name && !page_id) {
+                return "❌ 请指定要总结的页面。\n\n💡 示例：「总结一下 xxx 页面的内容」";
+            }
+
+            ChatState.updateLastMessage("正在解析目标页面...", "processing");
+
+            try {
+                const targetPage = await AIAssistant._resolvePageId(page_name, page_id, settings.notionApiKey);
+                if (targetPage?.error) return `❌ 页面解析失败：${targetPage.error}`;
+                if (!targetPage) return `❌ 找不到页面「${page_name || page_id}」。`;
+
+                ChatState.updateLastMessage("正在读取页面内容...", "processing");
+
+                const existingContent = await AIAssistant._extractPageContent(targetPage.id, settings.notionApiKey, 6000);
+                if (!existingContent.trim()) {
+                    return `❌ 页面「${targetPage.name}」没有可总结的内容。`;
+                }
+
+                ChatState.updateLastMessage("📝 正在生成摘要...", "processing");
+
+                const styleInstructions = {
+                    brief: "生成简短摘要（2-3句话），提炼核心要点。",
+                    detailed: "生成详细摘要，包含：核心主题、主要论点、关键细节和结论。",
+                    bullet: "以要点列表形式总结，每个要点一行，提炼关键信息。"
+                };
+
+                const prompt = `你是一个内容摘要助手。${styleInstructions[style] || styleInstructions.brief}\n\n使用 Markdown 格式输出。\n\n以下是需要总结的内容：\n${existingContent}`;
+                const aiResponse = await AIService.requestChat(prompt, settings, 2000);
+
+                return `📝 **页面摘要：${targetPage.name}**\n\n${aiResponse}\n\n---\n📄 摘要风格: ${style === "brief" ? "简短" : style === "detailed" ? "详细" : "要点列表"}`;
+            } catch (error) {
+                return `❌ 内容总结失败: ${error.message}`;
+            }
+        },
+
+        // ======= 头脑风暴 =======
+
+        handleBrainstorm: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            const { brainstorm_topic, page_name, page_id } = params;
+            const count = Math.min(Math.max(parseInt(params.brainstorm_count) || 10, 3), 30);
+            const topic = brainstorm_topic || page_name || explanation;
+
+            if (!topic) {
+                return "❌ 请指定头脑风暴主题。\n\n💡 示例：「围绕远程办公给我一些创意建议」";
+            }
+
+            // 如果指定了页面，读取页面内容作为上下文
+            let pageContext = "";
+            if (page_name || page_id) {
+                ChatState.updateLastMessage("正在读取页面内容作为参考...", "processing");
+                const targetPage = await AIAssistant._resolvePageId(page_name, page_id, settings.notionApiKey);
+                if (targetPage) {
+                    pageContext = await AIAssistant._extractPageContent(targetPage.id, settings.notionApiKey, 3000);
+                }
+            }
+
+            ChatState.updateLastMessage("💡 正在头脑风暴...", "processing");
+
+            try {
+                const contextBlock = pageContext ? `\n\n以下是相关参考内容：\n${pageContext}` : "";
+                const prompt = `你是一个创意顾问。围绕主题「${topic}」进行头脑风暴，生成 ${count} 个创意想法或建议。
+
+要求：
+- 想法要多样化，涵盖不同角度和维度
+- 每个想法包含简短标题和一句话说明
+- 从实用到大胆创新，由近及远排列
+- 使用 Markdown 编号列表格式输出${contextBlock}`;
+
+                const aiResponse = await AIService.requestChat(prompt, settings, 2000);
+
+                return `💡 **头脑风暴：${topic}**\n\n${aiResponse}\n\n---\n🎯 共生成 ${count} 个创意想法`;
+            } catch (error) {
+                return `❌ 头脑风暴失败: ${error.message}`;
+            }
+        },
+
+        // ======= 校对纠错 =======
+
+        handleProofread: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            const { page_name, page_id } = params;
+
+            if (!page_name && !page_id) {
+                return "❌ 请指定要校对的页面。\n\n💡 示例：「校对一下 xxx 页面的拼写和语法」";
+            }
+
+            ChatState.updateLastMessage("正在解析目标页面...", "processing");
+
+            try {
+                const targetPage = await AIAssistant._resolvePageId(page_name, page_id, settings.notionApiKey);
+                if (targetPage?.error) return `❌ 页面解析失败：${targetPage.error}`;
+                if (!targetPage) return `❌ 找不到页面「${page_name || page_id}」。`;
+
+                ChatState.updateLastMessage("正在读取页面内容...", "processing");
+
+                const existingContent = await AIAssistant._extractPageContent(targetPage.id, settings.notionApiKey);
+                if (!existingContent.trim()) {
+                    return `❌ 页面「${targetPage.name}」没有可校对的内容。`;
+                }
+
+                ChatState.updateLastMessage("✅ 正在校对中...", "processing");
+
+                const prompt = `你是一个专业校对编辑。请仔细检查以下内容的拼写、语法和表达问题。
+
+输出格式：
+1. 先列出发现的所有问题（每个问题标注位置和类型：拼写/语法/标点/表达）
+2. 然后给出修正后的完整内容
+
+如果没有发现任何问题，请说明内容无误。
+
+使用 Markdown 格式输出。
+
+以下是需要校对的内容：
+${existingContent}`;
+
+                const aiResponse = await AIService.requestChat(prompt, settings, 3000);
+
+                return `✅ **校对结果：${targetPage.name}**\n\n${aiResponse}`;
+            } catch (error) {
+                return `❌ 校对失败: ${error.message}`;
+            }
+        },
+
+        // ======= 批量翻译数据库 =======
+
+        handleBatchTranslate: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            if (!OperationGuard.canExecute("appendBlocks")) {
+                return "❌ 权限不足：批量翻译需要「标准」权限级别。";
+            }
+
+            const { database_name, database_id, target_language } = params;
+            const lang = target_language || "英文";
+
+            if (!database_name && !database_id) {
+                return "❌ 请指定要翻译的数据库。\n\n💡 示例：「把 xxx 数据库翻译成日文」";
+            }
+
+            ChatState.updateLastMessage("正在查找数据库...", "processing");
+
+            try {
+                // 查找数据库
+                let dbId = database_id;
+                if (!dbId && database_name) {
+                    const searchResp = await NotionAPI.search(database_name, "database", settings.notionApiKey);
+                    const db = (searchResp.results || []).find(r => !r.archived);
+                    if (!db) return `❌ 找不到数据库「${database_name}」。`;
+                    dbId = db.id;
+                }
+
+                // 查询数据库中的页面
+                ChatState.updateLastMessage("正在获取页面列表...", "processing");
+                const queryResp = await NotionAPI.queryDatabase(dbId, null, null, 20, settings.notionApiKey);
+                const pages = (queryResp.results || []).filter(p => !p.archived);
+
+                if (pages.length === 0) {
+                    return `❌ 数据库中没有可翻译的页面。`;
+                }
+
+                // 确认操作
+                const confirmed = await ConfirmationDialog.show({
+                    title: `🌐 批量翻译确认`,
+                    message: `即将翻译 ${pages.length} 个页面为${lang}。\n翻译后的内容将追加到每个页面末尾（原内容保留）。`,
+                    confirmText: "开始翻译",
+                    cancelText: "取消"
+                });
+                if (!confirmed) return "❌ 已取消批量翻译。";
+
+                let successCount = 0;
+                let failCount = 0;
+
+                for (let i = 0; i < pages.length; i++) {
+                    const page = pages[i];
+                    const title = Utils.getPageTitle(page);
+                    ChatState.updateLastMessage(`🌐 翻译中 (${i + 1}/${pages.length}): ${title}...`, "processing");
+
+                    try {
+                        const content = await AIAssistant._extractPageContent(page.id, settings.notionApiKey, 4000);
+                        if (!content.trim()) { failCount++; continue; }
+
+                        const prompt = `你是一个专业翻译。将以下内容翻译为${lang}，使用 Markdown 格式，保持原文结构。\n\n原文：\n${content}`;
+                        const translated = await AIService.requestChat(prompt, settings, 2000);
+
+                        const blocks = [
+                            { type: "divider", divider: {} },
+                            { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `🌐 ${lang}翻译` } }] } },
+                            ...AIAssistant._textToBlocks(translated)
+                        ];
+                        await NotionAPI.appendBlocks(page.id, blocks, settings.notionApiKey);
+                        successCount++;
+                    } catch {
+                        failCount++;
+                    }
+                }
+
+                return `🌐 **批量翻译完成**\n\n- 目标语言: ${lang}\n- 成功: ${successCount} 页\n- 失败: ${failCount} 页\n- 总计: ${pages.length} 页\n\n💡 翻译内容已追加到每个页面末尾。`;
+            } catch (error) {
+                return `❌ 批量翻译失败: ${error.message}`;
+            }
+        },
+
+        // ======= 内容提取为数据库 =======
+
+        handleExtractToDatabase: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            if (!OperationGuard.canExecute("createDatabase")) {
+                return "❌ 权限不足：创建数据库需要「高级」权限级别。";
+            }
+
+            const { page_name, page_id, database_name, extraction_prompt } = params;
+
+            if (!page_name && !page_id) {
+                return "❌ 请指定源页面。\n\n💡 示例：「把 xxx 页面的笔记提取为任务数据库」";
+            }
+
+            ChatState.updateLastMessage("正在读取源页面...", "processing");
+
+            try {
+                const sourcePage = await AIAssistant._resolvePageId(page_name, page_id, settings.notionApiKey);
+                if (sourcePage?.error) return `❌ 页面解析失败：${sourcePage.error}`;
+                if (!sourcePage) return `❌ 找不到页面「${page_name || page_id}」。`;
+
+                const content = await AIAssistant._extractPageContent(sourcePage.id, settings.notionApiKey, 6000);
+                if (!content.trim()) {
+                    return `❌ 页面「${sourcePage.name}」没有可提取的内容。`;
+                }
+
+                // AI 分析内容并生成结构化数据
+                ChatState.updateLastMessage("🔍 正在分析内容结构...", "processing");
+
+                const dbName = database_name || `${sourcePage.name} - 提取数据`;
+                const extractHint = extraction_prompt || explanation || "提取所有结构化条目";
+
+                const analyzePrompt = `你是一个数据提取专家。分析以下页面内容，提取结构化信息。
+
+提取要求：${extractHint}
+
+请返回 JSON 格式（只返回 JSON）：
+{
+  "properties": [
+    { "name": "属性名", "type": "title|rich_text|select|number|checkbox", "description": "属性说明" }
+  ],
+  "entries": [
+    { "属性名1": "值1", "属性名2": "值2" }
+  ]
+}
+
+属性类型说明：
+- 第一个属性必须是 title 类型
+- 分类/状态 → select，数量/金额 → number，是否 → checkbox，其他 → rich_text
+
+页面内容：
+${content}`;
+
+                const aiResponse = await AIService.requestChat(analyzePrompt, settings, 3000);
+
+                const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) {
+                    return `❌ AI 无法从页面内容中提取结构化数据。请尝试更具体地描述提取要求。`;
+                }
+
+                let extractedData;
+                try {
+                    extractedData = JSON.parse(jsonMatch[0]);
+                } catch {
+                    return `❌ AI 提取的数据格式无效。请换一种方式描述提取要求。`;
+                }
+
+                if (!extractedData.properties || !extractedData.entries || extractedData.entries.length === 0) {
+                    return `❌ 未能从页面中提取到有效条目。`;
+                }
+
+                // 确认操作
+                const confirmed = await ConfirmationDialog.show({
+                    title: "📊 创建数据库确认",
+                    message: `将从「${sourcePage.name}」提取 ${extractedData.entries.length} 个条目。\n数据库名称: ${dbName}\n属性: ${extractedData.properties.map(p => p.name).join(", ")}`,
+                    confirmText: "创建",
+                    cancelText: "取消"
+                });
+                if (!confirmed) return "❌ 已取消。";
+
+                // 创建数据库
+                ChatState.updateLastMessage("📊 正在创建数据库...", "processing");
+
+                const dbProperties = {};
+                for (const prop of extractedData.properties) {
+                    if (prop.type === "title") {
+                        dbProperties[prop.name] = { title: {} };
+                    } else if (prop.type === "select") {
+                        dbProperties[prop.name] = { select: {} };
+                    } else if (prop.type === "number") {
+                        dbProperties[prop.name] = { number: {} };
+                    } else if (prop.type === "checkbox") {
+                        dbProperties[prop.name] = { checkbox: {} };
+                    } else {
+                        dbProperties[prop.name] = { rich_text: {} };
+                    }
+                }
+
+                const newDb = await NotionAPI.createDatabase(sourcePage.id, dbName, dbProperties, settings.notionApiKey);
+
+                // 填充条目
+                ChatState.updateLastMessage(`📝 正在填充 ${extractedData.entries.length} 个条目...`, "processing");
+
+                let addedCount = 0;
+                const titleProp = extractedData.properties.find(p => p.type === "title");
+                const titleKey = titleProp ? titleProp.name : extractedData.properties[0].name;
+
+                for (const entry of extractedData.entries) {
+                    try {
+                        const pageProperties = {};
+                        for (const prop of extractedData.properties) {
+                            const val = entry[prop.name];
+                            if (val === undefined || val === null) continue;
+
+                            if (prop.type === "title") {
+                                pageProperties[prop.name] = { title: [{ text: { content: String(val) } }] };
+                            } else if (prop.type === "select") {
+                                pageProperties[prop.name] = { select: { name: String(val) } };
+                            } else if (prop.type === "number") {
+                                pageProperties[prop.name] = { number: Number(val) || 0 };
+                            } else if (prop.type === "checkbox") {
+                                pageProperties[prop.name] = { checkbox: Boolean(val) };
+                            } else {
+                                pageProperties[prop.name] = { rich_text: [{ text: { content: String(val).slice(0, 2000) } }] };
+                            }
+                        }
+
+                        await NotionAPI.createPage(newDb.id, pageProperties, settings.notionApiKey);
+                        addedCount++;
+                    } catch { /* skip failed entries */ }
+                }
+
+                return `📊 **数据库创建完成**\n\n- 数据库: ${dbName}\n- 来源: ${sourcePage.name}\n- 属性: ${extractedData.properties.map(p => p.name).join(", ")}\n- 条目: ${addedCount}/${extractedData.entries.length}\n\n💡 数据库已创建在源页面下方。`;
+            } catch (error) {
+                return `❌ 提取失败: ${error.message}`;
+            }
+        },
+
+        // ======= 多页面结构化生成 =======
+
+        handleGeneratePages: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            if (!OperationGuard.canExecute("createDatabase")) {
+                return "❌ 权限不足：多页面生成需要「高级」权限级别。";
+            }
+
+            const { page_name, page_id, parent_page_name, parent_page_id, structure_prompt } = params;
+            const topic = page_name || structure_prompt || explanation;
+
+            if (!topic) {
+                return "❌ 请描述要生成的内容主题。\n\n💡 示例：「为新员工创建入职指南，包含工具清单、团队介绍、常见问题」";
+            }
+
+            ChatState.updateLastMessage("📑 正在规划页面结构...", "processing");
+
+            try {
+                // AI 规划页面结构
+                const planPrompt = `你是一个 Notion 内容架构师。根据用户需求规划多页面内容结构。
+
+用户需求：${topic}
+${structure_prompt ? `补充要求：${structure_prompt}` : ""}
+
+返回 JSON 格式（只返回 JSON）：
+{
+  "parent_title": "父页面标题",
+  "parent_summary": "父页面简介（1-2句话）",
+  "children": [
+    {
+      "title": "子页面标题",
+      "description": "子页面内容描述（用于生成正文）",
+      "icon": "emoji图标"
+    }
+  ]
+}
+
+要求：
+- 子页面数量控制在 3-8 个
+- 每个子页面应有明确的主题和边界
+- 父页面作为目录/概览页`;
+
+                const planResponse = await AIService.requestChat(planPrompt, settings, 1500);
+
+                const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) {
+                    return `❌ AI 无法规划页面结构。请更具体地描述需求。`;
+                }
+
+                let plan;
+                try {
+                    plan = JSON.parse(jsonMatch[0]);
+                } catch {
+                    return `❌ AI 生成的结构无效。请换一种方式描述。`;
+                }
+
+                if (!plan.children || plan.children.length === 0) {
+                    return `❌ AI 未能规划出有效的子页面结构。`;
+                }
+
+                // 确认
+                const pageList = plan.children.map(c => `${c.icon || "📄"} ${c.title}`).join("\n");
+                const confirmed = await ConfirmationDialog.show({
+                    title: "📑 多页面生成确认",
+                    message: `将创建以下页面结构：\n\n📁 ${plan.parent_title}\n${pageList}\n\n共 ${plan.children.length + 1} 个页面。`,
+                    confirmText: "开始生成",
+                    cancelText: "取消"
+                });
+                if (!confirmed) return "❌ 已取消。";
+
+                // 确定父页面位置
+                let parentPageId = parent_page_id;
+                if (!parentPageId && parent_page_name) {
+                    const parentPage = await AIAssistant._resolvePageId(parent_page_name, null, settings.notionApiKey);
+                    if (parentPage) parentPageId = parentPage.id;
+                }
+
+                // 创建父页面
+                ChatState.updateLastMessage(`📁 正在创建父页面: ${plan.parent_title}...`, "processing");
+
+                const parentProps = {
+                    title: { title: [{ text: { content: plan.parent_title } }] }
+                };
+
+                let parentPage;
+                if (parentPageId) {
+                    parentPage = await NotionAPI.createPageInPage(parentPageId, parentProps, settings.notionApiKey);
+                } else {
+                    // Notion API 不支持在工作区根目录创建页面，必须指定父页面
+                    return `❌ 请指定父页面。Notion API 要求页面必须创建在某个父页面下。\n\n💡 示例：「在 xxx 页面下创建入职指南」`;
+                }
+
+                // 写入父页面概览
+                const overviewBlocks = AIAssistant._textToBlocks(`${plan.parent_summary || ""}\n\n## 📋 目录\n\n${plan.children.map((c, i) => `${i + 1}. ${c.icon || "📄"} **${c.title}** - ${c.description}`).join("\n")}`);
+                await NotionAPI.appendBlocks(parentPage.id, overviewBlocks, settings.notionApiKey);
+
+                // 创建子页面并生成内容
+                let createdCount = 0;
+                for (let i = 0; i < plan.children.length; i++) {
+                    const child = plan.children[i];
+                    ChatState.updateLastMessage(`📝 生成子页面 (${i + 1}/${plan.children.length}): ${child.title}...`, "processing");
+
+                    try {
+                        // 创建子页面
+                        const childProps = {
+                            title: { title: [{ text: { content: `${child.icon || ""} ${child.title}`.trim() } }] }
+                        };
+                        const childPage = await NotionAPI.createPageInPage(parentPage.id, childProps, settings.notionApiKey);
+
+                        // 生成子页面内容
+                        const contentPrompt = `为以下主题生成详细内容，使用 Markdown 格式。
+
+主题：${child.title}
+描述：${child.description}
+上下文：这是「${plan.parent_title}」的子页面
+
+请生成实用、具体的内容，包含合适的标题层级和结构化信息。`;
+
+                        const content = await AIService.requestChat(contentPrompt, settings, 2000);
+                        const contentBlocks = AIAssistant._textToBlocks(content);
+                        await NotionAPI.appendBlocks(childPage.id, contentBlocks, settings.notionApiKey);
+                        createdCount++;
+                    } catch { /* skip failed pages */ }
+                }
+
+                return `📑 **多页面内容生成完成**\n\n- 父页面: ${plan.parent_title}\n- 子页面: ${createdCount}/${plan.children.length} 创建成功\n\n💡 所有页面已创建并填充内容。`;
+            } catch (error) {
+                return `❌ 页面生成失败: ${error.message}`;
+            }
+        },
+
+        // ======= 批量页面分析 =======
+
+        handleBatchAnalyze: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            const { database_name, database_id, analysis_prompt } = params;
+            const limit = Math.min(Math.max(parseInt(params.limit) || 10, 1), 20);
+
+            if (!database_name && !database_id) {
+                // 使用默认配置的数据库
+                if (!settings.notionDatabaseId) {
+                    return "❌ 请指定要分析的数据库，或先配置默认数据库 ID。\n\n💡 示例：「分析 xxx 数据库的所有页面」";
+                }
+            }
+
+            ChatState.updateLastMessage("正在查找数据库...", "processing");
+
+            try {
+                let dbId = database_id || settings.notionDatabaseId;
+                if (!dbId && database_name) {
+                    const searchResp = await NotionAPI.search(database_name, "database", settings.notionApiKey);
+                    const db = (searchResp.results || []).find(r => !r.archived);
+                    if (!db) return `❌ 找不到数据库「${database_name}」。`;
+                    dbId = db.id;
+                }
+
+                // 查询页面
+                ChatState.updateLastMessage("正在获取页面...", "processing");
+                const queryResp = await NotionAPI.queryDatabase(dbId, null, null, limit, settings.notionApiKey);
+                const pages = (queryResp.results || []).filter(p => !p.archived);
+
+                if (pages.length === 0) {
+                    return `❌ 数据库中没有可分析的页面。`;
+                }
+
+                // 提取内容
+                ChatState.updateLastMessage(`🔎 正在提取 ${pages.length} 个页面内容...`, "processing");
+
+                const contentParts = [];
+                for (let i = 0; i < pages.length; i++) {
+                    const page = pages[i];
+                    const title = Utils.getPageTitle(page);
+                    ChatState.updateLastMessage(`🔎 提取中 (${i + 1}/${pages.length}): ${title}...`, "processing");
+
+                    const content = await AIAssistant._extractPageContent(page.id, settings.notionApiKey, 2000);
+                    contentParts.push(`## ${title}\n${content || "（无内容）"}`);
+                }
+
+                // AI 生成综合分析
+                ChatState.updateLastMessage("📊 正在生成综合分析...", "processing");
+
+                const analysisGoal = analysis_prompt || explanation || "综合分析所有页面内容，找出关键主题、趋势和建议";
+
+                const prompt = `你是一个数据分析师。根据以下来自数据库的多个页面内容进行综合分析。
+
+分析要求：${analysisGoal}
+
+请使用 Markdown 格式输出分析报告，包含：
+1. 概述（总体情况摘要）
+2. 关键发现（主要主题和模式）
+3. 详细分析（按主题/类别分组）
+4. 趋势与洞察
+5. 建议与行动项
+
+--- 以下是 ${pages.length} 个页面的内容 ---
+
+${contentParts.join("\n\n---\n\n")}`;
+
+                const report = await AIService.requestChat(prompt, settings, 4000);
+
+                return `📊 **批量分析报告**\n\n${report}\n\n---\n🔎 共分析 ${pages.length} 个页面`;
+            } catch (error) {
+                return `❌ 批量分析失败: ${error.message}`;
+            }
+        },
+
+        // ======= GitHub 收藏导入 =======
+
+        handleGitHubImport: async (params, settings, explanation) => {
+            const username = params.username || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
+            const token = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
+            const databaseId = settings.notionDatabaseId;
+
+            if (!username) {
+                return "❌ 请先在设置中配置 GitHub 用户名。\n\n💡 在 Notion 面板的设置中找到「GitHub 收藏导入」部分填写用户名。";
+            }
+            if (!settings.notionApiKey) {
+                return "❌ 请先配置 Notion API Key。";
+            }
+            if (!databaseId) {
+                return "❌ 请先配置 GitHub 收藏的目标数据库 ID。\n\n💡 可以在设置中专门指定，或使用默认数据库。";
+            }
+
+            const classify = params.classify || false;
+
+            try {
+                let result;
+                await new Promise((resolve, reject) => {
+                    (async () => {
+                        try {
+                            result = await GitHubExporter.exportStars({
+                                apiKey: settings.notionApiKey,
+                                databaseId,
+                                username,
+                                token,
+                            }, (msg, pct) => {
+                                ChatState.updateLastMessage(`🐙 ${msg}`, "processing");
+                            });
+                            resolve();
+                        } catch (e) { reject(e); }
+                    })();
+                });
+
+                let response = `✅ **GitHub 收藏导入完成**\n\n`;
+                response += `📊 共 ${result.total} 个收藏仓库\n`;
+                response += `📥 本次导出 ${result.exported} 个\n`;
+                if (result.failed > 0) response += `❌ 失败 ${result.failed} 个\n`;
+                if (result.exported === 0 && result.failed === 0) response += `\n所有收藏已是最新状态。`;
+
+                // 如果需要分类
+                if (classify && result.exported > 0 && settings.aiApiKey) {
+                    ChatState.updateLastMessage("🏷️ 正在进行 AI 分类...", "processing");
+                    try {
+                        const classifyResult = await GitHubExporter.classifyRepos({
+                            ...settings,
+                            databaseId,
+                        }, (msg, pct) => {
+                            ChatState.updateLastMessage(`🏷️ ${msg}`, "processing");
+                        });
+                        response += `\n\n🏷️ **AI 分类完成**: 已分类 ${classifyResult.classified}/${classifyResult.total} 个`;
+                    } catch (e) {
+                        response += `\n\n⚠️ AI 分类出错: ${e.message}`;
+                    }
+                } else if (classify && !settings.aiApiKey) {
+                    response += `\n\n⚠️ 未配置 AI API Key，跳过自动分类。`;
+                }
+
+                return response;
+            } catch (error) {
+                return `❌ GitHub 导入失败: ${error.message}`;
+            }
+        },
+
+        // ======= AI 输出模板 =======
+
+        handleTemplateOutput: async (params, settings, explanation) => {
+            const configCheck = AIAssistant.checkConfig(settings, false);
+            if (!configCheck.valid) return configCheck.error;
+
+            if (!OperationGuard.canExecute("appendBlocks")) {
+                return "❌ 权限不足：模板输出需要「标准」权限级别。";
+            }
+
+            const { template_name, page_name, page_id, custom_context } = params;
+
+            // 加载模板列表
+            let templates;
+            try {
+                templates = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.AI_TEMPLATES, CONFIG.DEFAULTS.aiTemplates));
+            } catch {
+                templates = JSON.parse(CONFIG.DEFAULTS.aiTemplates);
+            }
+
+            if (!template_name) {
+                // 列出可用模板
+                const list = templates.map(t => `${t.icon} **${t.name}**`).join("\n");
+                return `📋 **可用的 AI 输出模板**\n\n${list}\n\n💡 使用方式：「用周报模板总结 xxx 页面」或「用摘要提纲模板整理 xxx」`;
+            }
+
+            // 查找匹配模板
+            const template = templates.find(t =>
+                t.name === template_name ||
+                t.name.includes(template_name) ||
+                template_name.includes(t.name)
+            );
+
+            if (!template) {
+                const list = templates.map(t => `${t.icon} ${t.name}`).join(", ");
+                return `❌ 找不到模板「${template_name}」。\n\n可用模板: ${list}`;
+            }
+
+            // 获取页面上下文（如指定了页面）
+            let pageContext = "";
+            let targetPage = null;
+            if (page_name || page_id) {
+                ChatState.updateLastMessage("正在读取页面内容...", "processing");
+                targetPage = await AIAssistant._resolvePageId(page_name, page_id, settings.notionApiKey);
+                if (targetPage?.error) return `❌ 页面解析失败：${targetPage.error}`;
+                if (targetPage) {
+                    pageContext = await AIAssistant._extractPageContent(targetPage.id, settings.notionApiKey, 4000);
+                }
+            }
+
+            // 组合 prompt
+            ChatState.updateLastMessage(`${template.icon} 正在使用「${template.name}」模板生成...`, "processing");
+
+            const contextBlock = pageContext ? `\n\n以下是参考内容：\n${pageContext}` : "";
+            const customBlock = custom_context ? `\n\n用户补充说明：${custom_context}` : "";
+            const fullPrompt = `${template.prompt}${contextBlock}${customBlock}\n\n请使用 Markdown 格式输出。`;
+
+            const aiResponse = await AIService.requestChat(fullPrompt, settings, 3000);
+
+            // 如果有目标页面，写入 Notion
+            if (targetPage) {
+                ChatState.updateLastMessage("正在写入页面...", "processing");
+                const contentBlocks = AIAssistant._textToBlocks(aiResponse);
+                const blocks = [
+                    { type: "divider", divider: {} },
+                    { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `${template.icon} ${template.name}` } }] } },
+                    ...contentBlocks
+                ];
+                await NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
+                return `✅ **${template.icon} ${template.name}** 已生成并写入页面「${targetPage.name}」\n\n${aiResponse}`;
+            }
+
+            return `${template.icon} **${template.name}**\n\n${aiResponse}\n\n💡 如需写入页面，请指定目标页面：「用${template.name}模板处理 xxx 页面」`;
+        },
+
         // ======= Agent 自主代理 =======
 
         handleAgentTask: async (params, settings, explanation) => {
@@ -3647,7 +4740,8 @@ ${searchTerm}`;
                 const planPrompt = `你是一个 Notion 任务规划器。将用户的高层任务分解为可执行步骤。
 每一步必须是以下操作之一：query, search, workspace_search, classify, batch_classify,
 update, move, copy, create_database, write_content, edit_content, translate_content,
-ai_autofill, ask
+ai_autofill, ask, deep_research, template_output, summarize, brainstorm, proofread,
+batch_translate, extract_to_database, generate_pages, batch_analyze
 
 返回 JSON（只返回 JSON，不要其他内容）：
 {
@@ -3806,7 +4900,20 @@ ai_autofill, ask
                 dbInfo = settings.notionDatabaseId ? `已配置的数据库 ID: ${settings.notionDatabaseId}` : "未配置数据库 ID";
             }
 
-            const systemPrompt = `你是一个 Notion 工作区助手。你可以使用以下工具来完成用户的任务。
+            // 读取 Agent 个性化配置
+            const persona = {
+                name: Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName),
+                tone: Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, CONFIG.DEFAULTS.agentPersonaTone),
+                expertise: Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG.DEFAULTS.agentPersonaExpertise),
+                instructions: Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG.DEFAULTS.agentPersonaInstructions),
+            };
+
+            const personaBlock = persona.instructions
+                ? `\n个性化指令：${persona.instructions}`
+                : "";
+
+            const systemPrompt = `你是${persona.name}，一个专注于${persona.expertise}的助手。语气风格：${persona.tone}。${personaBlock}
+你可以使用以下工具来完成用户的任务。
 
 当前环境：${dbInfo}
 当前权限级别：${CONFIG.PERMISSION_NAMES[permLevel] || permLevel}
@@ -3909,15 +5016,33 @@ ${availableTools}
             if (!container) return;
 
             if (ChatState.messages.length === 0) {
+                const personaName = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName);
                 container.innerHTML = `
                     <div class="ldb-chat-welcome">
                         <div class="ldb-chat-welcome-icon">🤖</div>
                         <div class="ldb-chat-welcome-text">
-                            你好！我是 AI 助手<br>
-                            <small>试试输入「帮助」查看我能做什么</small>
+                            你好！我是 ${Utils.escapeHtml(personaName)}<br>
+                            <small>试试下面的快捷命令</small>
+                        </div>
+                        <div class="ldb-chat-chips">
+                            <button class="ldb-chat-chip" data-cmd="帮助">💡 帮助</button>
+                            <button class="ldb-chat-chip" data-cmd="搜索">🔍 搜索</button>
+                            <button class="ldb-chat-chip" data-cmd="自动分类">📂 自动分类</button>
+                            <button class="ldb-chat-chip" data-cmd="总结">📝 总结</button>
+                            <button class="ldb-chat-chip" data-cmd="导入GitHub收藏">🐙 GitHub</button>
                         </div>
                     </div>
                 `;
+                // 绑定 chip 点击
+                container.querySelectorAll(".ldb-chat-chip").forEach(chip => {
+                    chip.onclick = () => {
+                        const input = document.querySelector("#ldb-chat-input");
+                        if (input) {
+                            input.value = chip.getAttribute("data-cmd");
+                            ChatUI.sendMessage();
+                        }
+                    };
+                });
                 return;
             }
 
@@ -3925,8 +5050,10 @@ ${availableTools}
                 const isUser = msg.role === "user";
                 const statusClass = msg.status === "processing" ? "processing" : (msg.status === "error" ? "error" : "");
 
-                // 使用安全的 Markdown 渲染（防止 XSS）
-                const content = ChatUI.safeMarkdown(msg.content);
+                // processing 状态使用预设动画，不经过 Markdown 渲染
+                const content = msg.status === "processing"
+                    ? '思考中<span class="ldb-typing-dots"><span></span><span></span><span></span></span>'
+                    : ChatUI.safeMarkdown(msg.content);
 
                 return `
                     <div class="ldb-chat-message ${isUser ? 'user' : 'assistant'}">
@@ -3956,6 +5083,7 @@ ${availableTools}
 
             // 清空输入框
             input.value = "";
+            input.style.height = "auto";
 
             // 添加用户消息
             ChatState.addMessage("user", message);
@@ -4003,7 +5131,12 @@ ${availableTools}
                 input.onpaste = (e) => e.stopPropagation();
                 input.oncopy = (e) => e.stopPropagation();
                 input.oncut = (e) => e.stopPropagation();
-                input.oninput = (e) => e.stopPropagation();
+                input.oninput = (e) => {
+                    e.stopPropagation();
+                    // textarea 自动增高
+                    input.style.height = "auto";
+                    input.style.height = Math.min(input.scrollHeight, 80) + "px";
+                };
                 input.onkeyup = (e) => e.stopPropagation();
                 input.onkeypress = (e) => e.stopPropagation();
             }
@@ -4516,6 +5649,9 @@ ${availableTools}
                             ` : ""}
                         </div>
                         <div class="ldb-confirm-footer">
+                            <div class="ldb-confirm-countdown-bar" id="ldb-confirm-countdown-bar">
+                                <div class="ldb-confirm-countdown-fill" id="ldb-confirm-countdown-fill"></div>
+                            </div>
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-confirm-cancel">取消</button>
                             <button class="ldb-btn ldb-btn-danger" id="ldb-confirm-ok" disabled>
                                 确认 (<span id="ldb-confirm-countdown">${countdown}</span>)
@@ -4534,6 +5670,16 @@ ${availableTools}
 
                 let remaining = countdown;
                 let canConfirm = !requireNameInput;
+
+                // 倒计时进度条
+                const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
+                if (countdownFill) {
+                    // 启动动画（下一帧开始，确保 transition 生效）
+                    requestAnimationFrame(() => {
+                        countdownFill.style.width = "0%";
+                        countdownFill.style.transition = `width ${countdown}s linear`;
+                    });
+                }
 
                 // 倒计时
                 const timer = setInterval(() => {
@@ -4727,6 +5873,253 @@ ${availableTools}
             if (!UndoManager.pendingUndo) return 0;
             const elapsed = Date.now() - UndoManager.pendingUndo.registeredAt;
             return Math.max(0, CONFIG.API.UNDO_TIMEOUT - elapsed);
+        },
+    };
+
+    // ===========================================
+    // 通用网页内容提取器
+    // ===========================================
+    const GenericExtractor = {
+        // 提取页面元数据
+        extractMeta: () => {
+            const getMeta = (name) => {
+                const el = document.querySelector(
+                    `meta[property="${name}"], meta[name="${name}"]`
+                );
+                return el?.getAttribute("content") || "";
+            };
+
+            // 标题：og:title > document.title > h1
+            const title =
+                getMeta("og:title") ||
+                document.title ||
+                document.querySelector("h1")?.textContent?.trim() ||
+                "无标题";
+
+            // 作者
+            const author =
+                getMeta("author") ||
+                getMeta("article:author") ||
+                document.querySelector('[rel="author"], .author, .byline, [itemprop="author"]')?.textContent?.trim() ||
+                "";
+
+            // 发布日期
+            const rawDate =
+                getMeta("article:published_time") ||
+                getMeta("datePublished") ||
+                document.querySelector("time[datetime]")?.getAttribute("datetime") ||
+                getMeta("date") ||
+                "";
+            let publishDate = "";
+            if (rawDate) {
+                try {
+                    publishDate = new Date(rawDate).toISOString().split("T")[0];
+                } catch (e) {}
+            }
+
+            // 站点名称
+            const siteName =
+                getMeta("og:site_name") ||
+                window.location.hostname.replace(/^www\./, "");
+
+            // 摘要
+            const description =
+                getMeta("og:description") ||
+                getMeta("description") ||
+                "";
+
+            return {
+                title: title.substring(0, 200),
+                url: window.location.href,
+                author: author.substring(0, 100),
+                publishDate,
+                siteName: siteName.substring(0, 100),
+                description: description.substring(0, 500),
+            };
+        },
+
+        // 智能提取正文内容 DOM 节点
+        extractContent: () => {
+            // 策略 1：<article> 标签
+            const article = document.querySelector("article");
+            if (article) return article;
+
+            // 策略 2：role="main" 或 <main>
+            const main = document.querySelector('[role="main"], main');
+            if (main) return main;
+
+            // 策略 3：常见正文容器 class/id
+            const selectors = [
+                ".post-content", ".article-content", ".entry-content",
+                ".content", ".post-body", ".article-body",
+                "#content", "#article", "#post-content",
+                ".markdown-body", ".prose", ".rich-text",
+            ];
+            for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (el && el.textContent.trim().length > 200) return el;
+            }
+
+            // 策略 4：启发式 — 找文本密度最高的容器
+            const candidates = document.querySelectorAll("div, section");
+            let best = null;
+            let bestScore = 0;
+            for (const el of candidates) {
+                // 跳过导航、侧边栏、页脚等
+                const tag = el.tagName.toLowerCase();
+                const id = (el.id || "").toLowerCase();
+                const cls = (el.className || "").toLowerCase();
+                const skip = /(nav|sidebar|footer|header|menu|comment|widget|ad|banner)/;
+                if (skip.test(id) || skip.test(cls) || skip.test(tag)) continue;
+
+                const text = el.textContent || "";
+                const pCount = el.querySelectorAll("p").length;
+                const score = text.length * 0.3 + pCount * 100;
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = el;
+                }
+            }
+            if (best && best.textContent.trim().length > 100) return best;
+
+            // 兜底：克隆 body 并移除脚本注入的 UI 元素，避免导出内容混入剪藏面板
+            const clone = document.body.cloneNode(true);
+            clone.querySelectorAll('[class*="gclip-"], [class*="ldb-"], [id*="ldb-"]').forEach(el => el.remove());
+            return clone;
+        },
+
+        // 将提取的 DOM 转为 Notion blocks（复用 DOMToNotion）
+        toNotionBlocks: (contentEl, imgMode) => {
+            return DOMToNotion.cookedToBlocks(contentEl.innerHTML, imgMode);
+        },
+    };
+
+    // ===========================================
+    // 通用网页导出器
+    // ===========================================
+    const GenericExporter = {
+        // 构建通用网页的 Notion 属性
+        buildProperties: (meta) => {
+            const props = {
+                "标题": {
+                    title: [{ text: { content: meta.title || "无标题" } }]
+                },
+                "链接": {
+                    url: meta.url
+                },
+                "来源": {
+                    rich_text: [{ text: { content: meta.siteName || "" } }]
+                },
+                "作者": {
+                    rich_text: [{ text: { content: meta.author || "" } }]
+                },
+            };
+            if (meta.publishDate) {
+                props["发布日期"] = { date: { start: meta.publishDate } };
+            }
+            if (meta.description) {
+                props["摘要"] = {
+                    rich_text: [{ text: { content: meta.description.substring(0, 2000) } }]
+                };
+            }
+            return props;
+        },
+
+        // 导出当前页面
+        exportCurrentPage: async (settings) => {
+            const meta = GenericExtractor.extractMeta();
+            const contentEl = GenericExtractor.extractContent();
+            const blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || "external");
+
+            // 添加来源信息头
+            blocks.unshift({
+                type: "callout",
+                callout: {
+                    icon: { type: "emoji", emoji: "🔗" },
+                    rich_text: [{ type: "text", text: { content: `来源: ${meta.url}` } }],
+                },
+            });
+
+            // 处理图片上传
+            if (settings.imgMode === "upload") {
+                await Exporter.processImageUploads(blocks, settings.apiKey, null);
+            }
+
+            let page;
+            if (settings.exportTargetType === CONFIG.EXPORT_TARGET_TYPES.PAGE) {
+                page = await NotionAPI.createChildPage(
+                    settings.parentPageId,
+                    meta.title,
+                    blocks,
+                    settings.apiKey
+                );
+            } else {
+                const properties = GenericExporter.buildProperties(meta);
+                page = await NotionAPI.createDatabasePage(
+                    settings.databaseId,
+                    properties,
+                    blocks,
+                    settings.apiKey
+                );
+            }
+
+            return { page, meta };
+        },
+
+        // 自动设置通用数据库属性
+        setupDatabaseProperties: async (databaseId, apiKey) => {
+            const requiredProperties = {
+                "标题": { typeName: "title", schema: { title: {} } },
+                "链接": { typeName: "url", schema: { url: {} } },
+                "来源": { typeName: "rich_text", schema: { rich_text: {} } },
+                "作者": { typeName: "rich_text", schema: { rich_text: {} } },
+                "发布日期": { typeName: "date", schema: { date: {} } },
+                "摘要": { typeName: "rich_text", schema: { rich_text: {} } },
+            };
+
+            try {
+                const database = await NotionAPI.request("GET", `/databases/${databaseId}`, null, apiKey);
+                const existingProps = database.properties || {};
+                const propsToAdd = {};
+                const propsToUpdate = {};
+
+                const typeConflicts = [];
+                for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
+                    const existingProp = existingProps[name];
+                    if (!existingProp) {
+                        if (typeName === "title") {
+                            const existingTitle = Object.entries(existingProps).find(([_, prop]) => prop.type === "title");
+                            if (existingTitle && existingTitle[0] !== name) {
+                                propsToUpdate[existingTitle[0]] = { name: name };
+                            }
+                        } else {
+                            propsToAdd[name] = schema;
+                        }
+                    } else if (existingProp.type !== typeName) {
+                        typeConflicts.push(`「${name}」期望 ${typeName}，实际 ${existingProp.type}`);
+                    }
+                }
+
+                if (typeConflicts.length > 0) {
+                    return {
+                        success: false,
+                        message: `属性类型冲突: ${typeConflicts.join("；")}，请手动修改数据库属性后重试`
+                    };
+                }
+
+                const allChanges = { ...propsToAdd, ...propsToUpdate };
+                if (Object.keys(allChanges).length === 0) {
+                    return { success: true, message: "属性已正确配置" };
+                }
+
+                await NotionAPI.request("PATCH", `/databases/${databaseId}`, {
+                    properties: allChanges
+                }, apiKey);
+
+                return { success: true, message: `已添加 ${Object.keys(propsToAdd).length} 个属性` };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
         },
     };
 
@@ -5400,6 +6793,1049 @@ ${availableTools}
     };
 
     // ===========================================
+    // GitHub API 模块
+    // ===========================================
+    const GitHubAPI = {
+        // 获取用户 starred repos（带分页）
+        fetchStarredRepos: (username, token = "") => {
+            return new Promise((resolve, reject) => {
+                const allRepos = [];
+                let page = 1;
+                const perPage = 100;
+
+                const fetchPage = () => {
+                    const url = token
+                        ? `https://api.github.com/user/starred?per_page=${perPage}&page=${page}`
+                        : `https://api.github.com/users/${encodeURIComponent(username)}/starred?per_page=${perPage}&page=${page}`;
+
+                    const headers = {
+                        "Accept": "application/vnd.github.v3+json",
+                        "User-Agent": "LD-Notion-UserScript",
+                    };
+                    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+                    GM_xmlhttpRequest({
+                        method: "GET",
+                        url,
+                        headers,
+                        onload: (response) => {
+                            if (response.status === 200) {
+                                try {
+                                    const repos = JSON.parse(response.responseText);
+                                    if (repos.length === 0) return resolve(allRepos);
+                                    allRepos.push(...repos);
+                                    if (repos.length < perPage) return resolve(allRepos);
+                                    page++;
+                                    setTimeout(fetchPage, 300);
+                                } catch (e) {
+                                    reject(new Error("解析 GitHub 响应失败"));
+                                }
+                            } else if (response.status === 403) {
+                                reject(new Error("GitHub API 速率限制，请稍后再试或配置 Token"));
+                            } else if (response.status === 404) {
+                                reject(new Error(`GitHub 用户 "${username}" 不存在`));
+                            } else {
+                                reject(new Error(`GitHub API 错误: ${response.status}`));
+                            }
+                        },
+                        onerror: () => reject(new Error("网络错误，无法连接 GitHub")),
+                    });
+                };
+
+                fetchPage();
+            });
+        },
+
+        // 获取已导出的 repo 集合
+        getExported: () => {
+            try { return JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}")); }
+            catch { return {}; }
+        },
+
+        markExported: (repoFullName) => {
+            const exported = GitHubAPI.getExported();
+            exported[repoFullName] = Date.now();
+            Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(exported));
+        },
+
+        isExported: (repoFullName) => {
+            return !!GitHubAPI.getExported()[repoFullName];
+        },
+    };
+
+    // ===========================================
+    // GitHub 导出到 Notion 模块
+    // ===========================================
+    const GitHubExporter = {
+        // 构建 Notion 数据库属性
+        buildProperties: (repo) => {
+            const props = {
+                "标题": {
+                    title: [{ text: { content: repo.full_name || repo.name || "无标题" } }]
+                },
+                "链接": {
+                    url: repo.html_url
+                },
+                "描述": {
+                    rich_text: [{ text: { content: (repo.description || "").substring(0, 2000) } }]
+                },
+                "语言": {
+                    rich_text: [{ text: { content: repo.language || "" } }]
+                },
+                "Stars": {
+                    number: repo.stargazers_count || 0
+                },
+                "来源": {
+                    rich_text: [{ text: { content: "GitHub" } }]
+                },
+            };
+            if (repo.topics && repo.topics.length > 0) {
+                props["标签"] = {
+                    multi_select: repo.topics.slice(0, 20).map(t => ({ name: t }))
+                };
+            }
+            if (repo.pushed_at) {
+                props["更新时间"] = { date: { start: repo.pushed_at } };
+            }
+            return props;
+        },
+
+        // 配置数据库属性结构
+        setupDatabaseProperties: async (databaseId, apiKey) => {
+            const requiredProperties = {
+                "标题": { typeName: "title", schema: { title: {} } },
+                "链接": { typeName: "url", schema: { url: {} } },
+                "描述": { typeName: "rich_text", schema: { rich_text: {} } },
+                "语言": { typeName: "rich_text", schema: { rich_text: {} } },
+                "Stars": { typeName: "number", schema: { number: { format: "number" } } },
+                "标签": { typeName: "multi_select", schema: { multi_select: { options: [] } } },
+                "来源": { typeName: "rich_text", schema: { rich_text: {} } },
+                "更新时间": { typeName: "date", schema: { date: {} } },
+                "分类": { typeName: "rich_text", schema: { rich_text: {} } },
+            };
+
+            try {
+                const database = await NotionAPI.request("GET", `/databases/${databaseId}`, null, apiKey);
+                const existingProps = database.properties || {};
+                const propsToAdd = {};
+                const propsToUpdate = {};
+                const typeConflicts = [];
+
+                for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
+                    const existingProp = existingProps[name];
+                    if (!existingProp) {
+                        if (typeName === "title") {
+                            // 特殊处理：title 属性需要重命名现有的
+                            const existingTitle = Object.entries(existingProps).find(([_, prop]) => prop.type === "title");
+                            if (existingTitle && existingTitle[0] !== name) {
+                                propsToUpdate[existingTitle[0]] = { name: name };
+                            }
+                        } else {
+                            propsToAdd[name] = schema;
+                        }
+                    } else if (existingProp.type !== typeName) {
+                        typeConflicts.push({ name, expected: typeName, actual: existingProp.type });
+                    }
+                }
+
+                if (typeConflicts.length > 0) {
+                    const details = typeConflicts.map(c => `"${c.name}": 期望 ${c.expected}，实际 ${c.actual}`).join("; ");
+                    return { success: false, error: `属性类型不匹配: ${details}。请手动修改这些属性的类型。` };
+                }
+
+                const allChanges = { ...propsToAdd, ...propsToUpdate };
+                if (Object.keys(allChanges).length > 0) {
+                    await NotionAPI.request("PATCH", `/databases/${databaseId}`, {
+                        properties: allChanges,
+                    }, apiKey);
+                }
+
+                return { success: true, added: Object.keys(propsToAdd), renamed: Object.keys(propsToUpdate) };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        },
+
+        // 导出 stars 到 Notion
+        exportStars: async (settings, onProgress) => {
+            const { apiKey, databaseId, username, token } = settings;
+
+            if (!apiKey || !databaseId || !username) {
+                throw new Error("请先配置 GitHub 用户名和 Notion 数据库");
+            }
+
+            // 配置数据库结构
+            if (onProgress) onProgress("正在配置数据库结构...", 0);
+            const setupResult = await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
+            if (!setupResult.success) {
+                throw new Error(`数据库配置失败: ${setupResult.error}`);
+            }
+
+            // 获取 starred repos
+            if (onProgress) onProgress("正在获取 GitHub 收藏...", 5);
+            const repos = await GitHubAPI.fetchStarredRepos(username, token);
+
+            // 过滤已导出的
+            const newRepos = repos.filter(r => !GitHubAPI.isExported(r.full_name));
+            if (newRepos.length === 0) {
+                return { total: repos.length, exported: 0, message: "没有新的收藏需要导出" };
+            }
+
+            // 逐个导出
+            let success = 0, failed = 0;
+            const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+
+            for (let i = 0; i < newRepos.length; i++) {
+                const repo = newRepos[i];
+                const pct = Math.round(10 + (i / newRepos.length) * 85);
+                if (onProgress) onProgress(`正在导出 (${i + 1}/${newRepos.length}): ${repo.full_name}`, pct);
+
+                try {
+                    const properties = GitHubExporter.buildProperties(repo);
+                    await NotionAPI.request("POST", "/pages", {
+                        parent: { database_id: databaseId },
+                        properties,
+                    }, apiKey);
+                    GitHubAPI.markExported(repo.full_name);
+                    success++;
+                } catch (e) {
+                    console.warn(`[GitHubExporter] 导出失败: ${repo.full_name}`, e);
+                    failed++;
+                }
+
+                if (i < newRepos.length - 1) {
+                    await new Promise(r => setTimeout(r, delay));
+                }
+            }
+
+            return { total: repos.length, exported: success, failed, newCount: newRepos.length };
+        },
+
+        // AI 分类已导出的 GitHub repos
+        classifyRepos: async (settings, onProgress) => {
+            const { apiKey, databaseId, aiApiKey, aiService, aiModel, aiBaseUrl, categories } = settings;
+
+            if (!apiKey || !databaseId) throw new Error("请先配置 Notion 数据库");
+            if (!aiApiKey) throw new Error("请先配置 AI API Key");
+
+            if (onProgress) onProgress("正在获取待分类的仓库...", 0);
+
+            // 查询数据库中未分类的条目
+            const response = await NotionAPI.request("POST", `/databases/${databaseId}/query`, {
+                filter: {
+                    or: [
+                        { property: "分类", rich_text: { is_empty: true } },
+                        { property: "分类", rich_text: { equals: "" } },
+                    ]
+                },
+                page_size: 100,
+            }, apiKey);
+
+            const pages = response.results || [];
+            if (pages.length === 0) {
+                return { classified: 0, message: "没有待分类的仓库" };
+            }
+
+            let classified = 0;
+            for (let i = 0; i < pages.length; i++) {
+                const page = pages[i];
+                const pct = Math.round((i / pages.length) * 100);
+                const title = page.properties?.["标题"]?.title?.[0]?.text?.content || "";
+                const desc = page.properties?.["描述"]?.rich_text?.[0]?.text?.content || "";
+                const lang = page.properties?.["语言"]?.rich_text?.[0]?.text?.content || "";
+                const tags = (page.properties?.["标签"]?.multi_select || []).map(t => t.name).join(", ");
+
+                if (onProgress) onProgress(`正在分类 (${i + 1}/${pages.length}): ${title}`, pct);
+
+                try {
+                    const prompt = `请根据以下 GitHub 仓库信息，从这些分类中选择最合适的一个: [${categories.join(", ")}]
+
+仓库名: ${title}
+描述: ${desc}
+语言: ${lang}
+标签: ${tags}
+
+只回复分类名，不要其他内容。`;
+
+                    const category = await AIService.request(prompt, {
+                        aiService, aiApiKey, aiModel: aiModel, aiBaseUrl,
+                    });
+
+                    const matched = categories.find(c => category.trim().includes(c)) || category.trim();
+
+                    await NotionAPI.request("PATCH", `/pages/${page.id}`, {
+                        properties: {
+                            "分类": { rich_text: [{ text: { content: matched } }] },
+                        },
+                    }, apiKey);
+                    classified++;
+                } catch (e) {
+                    console.warn(`[GitHubExporter] 分类失败: ${title}`, e);
+                }
+
+                await new Promise(r => setTimeout(r, 500));
+            }
+
+            return { classified, total: pages.length };
+        },
+    };
+
+    // ===========================================
+    // UI 设计系统（Design Tokens + 一次性样式注入）
+    // ===========================================
+    const StyleManager = {
+        injectOnce: (styleId, cssText) => {
+            if (!styleId || !cssText) return null;
+            const root = document.head || document.documentElement;
+            if (!root) return null;
+
+            const existing = document.getElementById(styleId);
+            if (existing) return existing;
+
+            const style = document.createElement("style");
+            style.id = styleId;
+            style.setAttribute("data-ldb-style", styleId);
+            style.textContent = cssText;
+            root.appendChild(style);
+            return style;
+        },
+    };
+
+    const DesignSystem = {
+        STYLE_IDS: {
+            BASE: "ldb-ui-base",
+            CHAT: "ldb-ui-chat",
+            NOTION: "ldb-ui-notion",
+            LINUX_DO: "ldb-ui-linux-do",
+            GENERIC: "ldb-ui-generic",
+        },
+
+        ensureBase: () => {
+            StyleManager.injectOnce(DesignSystem.STYLE_IDS.BASE, DesignSystem.getBaseCSS());
+        },
+        ensureChat: () => {
+            StyleManager.injectOnce(DesignSystem.STYLE_IDS.CHAT, DesignSystem.getChatCSS());
+        },
+
+        getBaseCSS: () => `
+            /* LDB_UI_TOKENS */
+            .ldb-panel,
+            .ldb-notion-panel,
+            .gclip-panel,
+            .ldb-notion-float-btn,
+            .ldb-mini-btn,
+            .gclip-float-btn,
+            .ldb-undo-toast {
+                --ldb-ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+                --ldb-ui-radius: 14px;
+                --ldb-ui-radius-sm: 10px;
+                --ldb-ui-radius-xs: 8px;
+
+                --ldb-ui-shadow: 0 18px 55px rgba(2, 6, 23, 0.22);
+                --ldb-ui-shadow-sm: 0 10px 26px rgba(2, 6, 23, 0.16);
+
+                --ldb-ui-text: #0f172a;
+                --ldb-ui-muted: #64748b;
+                --ldb-ui-border: rgba(15, 23, 42, 0.14);
+
+                --ldb-ui-surface: rgba(255, 255, 255, 0.94);
+                --ldb-ui-surface-2: rgba(248, 250, 252, 0.94);
+                --ldb-ui-surface-3: rgba(241, 245, 249, 0.94);
+
+                --ldb-ui-accent: #2563eb;
+                --ldb-ui-accent-2: #7c3aed;
+
+                --ldb-ui-success: #16a34a;
+                --ldb-ui-warning: #d97706;
+                --ldb-ui-danger: #dc2626;
+
+                --ldb-ui-focus-ring: rgba(37, 99, 235, 0.35);
+                --ldb-ui-backdrop: rgba(2, 6, 23, 0.35);
+
+                font-family: var(--ldb-ui-font);
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .ldb-panel,
+                .ldb-notion-panel,
+                .gclip-panel,
+                .ldb-notion-float-btn,
+                .ldb-mini-btn,
+                .gclip-float-btn,
+                .ldb-undo-toast {
+                    --ldb-ui-text: #e5e7eb;
+                    --ldb-ui-muted: #9ca3af;
+                    --ldb-ui-border: rgba(148, 163, 184, 0.22);
+
+                    --ldb-ui-surface: rgba(17, 24, 39, 0.92);
+                    --ldb-ui-surface-2: rgba(15, 23, 42, 0.92);
+                    --ldb-ui-surface-3: rgba(2, 6, 23, 0.60);
+
+                    --ldb-ui-accent: #60a5fa;
+                    --ldb-ui-accent-2: #c4b5fd;
+
+                    --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
+                    --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
+                }
+            }
+
+            .ldb-panel,
+            .ldb-notion-panel,
+            .gclip-panel,
+            .ldb-undo-toast {
+                color: var(--ldb-ui-text);
+            }
+
+            .ldb-panel *,
+            .ldb-notion-panel *,
+            .gclip-panel *,
+            .ldb-undo-toast * {
+                box-sizing: border-box;
+            }
+
+            .ldb-panel a,
+            .ldb-notion-panel a,
+            .gclip-panel a {
+                color: var(--ldb-ui-accent);
+                text-decoration: none;
+            }
+            .ldb-panel a:hover,
+            .ldb-notion-panel a:hover,
+            .gclip-panel a:hover {
+                text-decoration: underline;
+            }
+
+            .ldb-panel button,
+            .ldb-notion-panel button,
+            .gclip-panel button,
+            .ldb-notion-float-btn,
+            .ldb-mini-btn,
+            .gclip-float-btn {
+                font-family: inherit;
+            }
+
+            .ldb-panel input,
+            .ldb-panel select,
+            .ldb-panel textarea,
+            .ldb-notion-panel input,
+            .ldb-notion-panel select,
+            .ldb-notion-panel textarea,
+            .gclip-panel input,
+            .gclip-panel select,
+            .gclip-panel textarea {
+                font-family: inherit;
+                color: var(--ldb-ui-text);
+                background: var(--ldb-ui-surface-2);
+                border: 1px solid var(--ldb-ui-border);
+                border-radius: var(--ldb-ui-radius-xs);
+                padding: 8px 10px;
+                outline: none;
+            }
+
+            .ldb-panel input::placeholder,
+            .ldb-panel textarea::placeholder,
+            .ldb-notion-panel input::placeholder,
+            .ldb-notion-panel textarea::placeholder,
+            .gclip-panel input::placeholder,
+            .gclip-panel textarea::placeholder {
+                color: var(--ldb-ui-muted);
+            }
+
+            .ldb-panel button:focus-visible,
+            .ldb-panel input:focus-visible,
+            .ldb-panel select:focus-visible,
+            .ldb-panel textarea:focus-visible,
+            .ldb-notion-panel button:focus-visible,
+            .ldb-notion-panel input:focus-visible,
+            .ldb-notion-panel select:focus-visible,
+            .ldb-notion-panel textarea:focus-visible,
+            .gclip-panel button:focus-visible,
+            .gclip-panel input:focus-visible,
+            .gclip-panel select:focus-visible,
+            .gclip-panel textarea:focus-visible,
+            .ldb-notion-float-btn:focus-visible,
+            .ldb-mini-btn:focus-visible,
+            .gclip-float-btn:focus-visible {
+                outline: none;
+                box-shadow: 0 0 0 3px var(--ldb-ui-focus-ring);
+            }
+
+            .ldb-panel,
+            .ldb-notion-panel,
+            .gclip-panel {
+                background: var(--ldb-ui-surface);
+                border: 1px solid var(--ldb-ui-border);
+                border-radius: var(--ldb-ui-radius);
+                box-shadow: var(--ldb-ui-shadow);
+                backdrop-filter: blur(10px);
+            }
+
+            .ldb-header,
+            .ldb-notion-header,
+            .gclip-panel-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 10px;
+                padding: 12px 14px;
+                background: rgba(148, 163, 184, 0.10);
+                border-bottom: 1px solid var(--ldb-ui-border);
+            }
+
+            .ldb-header h3,
+            .ldb-notion-header h3 {
+                margin: 0;
+                font-size: 14px;
+                font-weight: 700;
+                color: var(--ldb-ui-text);
+                letter-spacing: 0.2px;
+            }
+
+            .ldb-header-btn,
+            .ldb-notion-header-btn,
+            .gclip-panel-header .close-btn {
+                width: 30px;
+                height: 30px;
+                border-radius: 10px;
+                border: 1px solid var(--ldb-ui-border);
+                background: rgba(148, 163, 184, 0.12);
+                color: var(--ldb-ui-text);
+                cursor: pointer;
+                user-select: none;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 0;
+                line-height: 1;
+            }
+
+            .ldb-header-btn:hover,
+            .ldb-notion-header-btn:hover,
+            .gclip-panel-header .close-btn:hover {
+                background: rgba(148, 163, 184, 0.18);
+            }
+
+            .ldb-btn,
+            .gclip-btn {
+                border: 1px solid rgba(37, 99, 235, 0.35);
+                background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
+                color: #fff;
+                border-radius: 12px;
+                padding: 8px 12px;
+                cursor: pointer;
+                user-select: none;
+                font-weight: 650;
+            }
+
+            .ldb-btn:disabled,
+            .gclip-btn:disabled {
+                opacity: 0.65;
+                cursor: not-allowed;
+            }
+
+            .ldb-btn-secondary,
+            .gclip-btn-secondary {
+                border: 1px solid var(--ldb-ui-border);
+                background: rgba(148, 163, 184, 0.12);
+                color: var(--ldb-ui-text);
+                font-weight: 600;
+            }
+
+            .ldb-btn-warning {
+                border: 1px solid rgba(217, 119, 6, 0.35);
+                background: linear-gradient(135deg, #f59e0b 0%, var(--ldb-ui-warning) 100%);
+                color: #fff;
+            }
+
+            .ldb-btn-danger {
+                border: 1px solid rgba(220, 38, 38, 0.35);
+                background: linear-gradient(135deg, #ef4444 0%, var(--ldb-ui-danger) 100%);
+                color: #fff;
+            }
+
+            .ldb-section-title {
+                font-size: 13px;
+                font-weight: 700;
+                margin-bottom: 10px;
+                color: var(--ldb-ui-text);
+            }
+
+            .ldb-section {
+                padding: 12px 0;
+            }
+
+            .ldb-body,
+            .ldb-notion-body,
+            .gclip-panel-body {
+                padding: 14px;
+            }
+
+            .ldb-input-group,
+            .gclip-field,
+            .ldb-form-group {
+                margin-bottom: 12px;
+            }
+
+            .ldb-label,
+            .gclip-field label,
+            .ldb-form-group label {
+                display: block;
+                margin-bottom: 6px;
+                font-size: 12px;
+                font-weight: 650;
+                color: var(--ldb-ui-muted);
+            }
+
+            .ldb-input,
+            .ldb-select {
+                width: 100%;
+            }
+
+            .ldb-tip {
+                margin-top: 6px;
+                font-size: 12px;
+                color: var(--ldb-ui-muted);
+            }
+
+            .ldb-divider {
+                height: 1px;
+                background: var(--ldb-ui-border);
+                margin: 12px 0;
+            }
+
+            .ldb-status {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 10px;
+                padding: 10px 12px;
+                border-radius: 12px;
+                border: 1px solid var(--ldb-ui-border);
+                background: rgba(148, 163, 184, 0.10);
+                color: var(--ldb-ui-text);
+                font-size: 12px;
+                line-height: 1.5;
+            }
+
+            .ldb-status.success {
+                border-color: rgba(22, 163, 74, 0.35);
+                background: rgba(22, 163, 74, 0.12);
+            }
+            .ldb-status.error {
+                border-color: rgba(220, 38, 38, 0.35);
+                background: rgba(220, 38, 38, 0.12);
+            }
+            .ldb-status.info {
+                border-color: rgba(37, 99, 235, 0.30);
+                background: rgba(37, 99, 235, 0.10);
+            }
+
+            .ldb-status-close {
+                width: 26px;
+                height: 26px;
+                border-radius: 10px;
+                border: 1px solid var(--ldb-ui-border);
+                background: rgba(148, 163, 184, 0.10);
+                color: var(--ldb-ui-text);
+                cursor: pointer;
+                flex: 0 0 auto;
+                line-height: 1;
+            }
+
+            .ldb-status-close:hover {
+                background: rgba(148, 163, 184, 0.18);
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                .ldb-panel,
+                .ldb-notion-panel,
+                .gclip-panel,
+                .ldb-undo-toast,
+                .ldb-panel *,
+                .ldb-notion-panel *,
+                .gclip-panel *,
+                .ldb-notion-float-btn,
+                .ldb-mini-btn,
+                .gclip-float-btn {
+                    transition: none !important;
+                    animation: none !important;
+                    scroll-behavior: auto !important;
+                }
+            }
+        `,
+
+        getChatCSS: () => `
+            /* LDB_UI_CHAT */
+            .ldb-panel .ldb-chat-container,
+            .ldb-notion-panel .ldb-chat-container {
+                height: 280px;
+                overflow-y: auto;
+                background: var(--ldb-ui-surface-3);
+                border: 1px solid var(--ldb-ui-border);
+                border-radius: var(--ldb-ui-radius-sm);
+                padding: 12px;
+                margin-bottom: 12px;
+            }
+
+            .ldb-panel .ldb-chat-container::-webkit-scrollbar,
+            .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar {
+                width: 6px;
+            }
+            .ldb-panel .ldb-chat-container::-webkit-scrollbar-track,
+            .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar-track {
+                background: rgba(255, 255, 255, 0.06);
+                border-radius: 3px;
+            }
+            .ldb-panel .ldb-chat-container::-webkit-scrollbar-thumb,
+            .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar-thumb {
+                background: rgba(148, 163, 184, 0.35);
+                border-radius: 3px;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .ldb-panel .ldb-chat-container::-webkit-scrollbar-track,
+                .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar-track {
+                    background: rgba(255, 255, 255, 0.06);
+                }
+                .ldb-panel .ldb-chat-container::-webkit-scrollbar-thumb,
+                .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar-thumb {
+                    background: rgba(148, 163, 184, 0.30);
+                }
+            }
+
+            .ldb-panel .ldb-chat-welcome,
+            .ldb-notion-panel .ldb-chat-welcome {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                text-align: center;
+                color: var(--ldb-ui-muted);
+                gap: 10px;
+            }
+
+            .ldb-panel .ldb-chat-welcome-icon,
+            .ldb-notion-panel .ldb-chat-welcome-icon {
+                font-size: 44px;
+                line-height: 1;
+            }
+
+            .ldb-panel .ldb-chat-welcome-text,
+            .ldb-notion-panel .ldb-chat-welcome-text {
+                font-size: 13px;
+                line-height: 1.6;
+            }
+
+            .ldb-panel .ldb-chat-welcome-text small,
+            .ldb-notion-panel .ldb-chat-welcome-text small {
+                color: var(--ldb-ui-muted);
+                opacity: 0.9;
+            }
+
+            .ldb-panel .ldb-chat-chips,
+            .ldb-notion-panel .ldb-chat-chips {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-top: 4px;
+                justify-content: center;
+            }
+
+            .ldb-panel .ldb-chat-chip,
+            .ldb-notion-panel .ldb-chat-chip {
+                padding: 6px 12px;
+                background: rgba(148, 163, 184, 0.14);
+                border: 1px solid var(--ldb-ui-border);
+                border-radius: 999px;
+                color: var(--ldb-ui-text);
+                font-size: 12px;
+                cursor: pointer;
+            }
+
+            .ldb-panel .ldb-chat-chip:hover,
+            .ldb-notion-panel .ldb-chat-chip:hover {
+                background: rgba(37, 99, 235, 0.16);
+                border-color: rgba(37, 99, 235, 0.28);
+            }
+
+            .ldb-panel .ldb-chat-message,
+            .ldb-notion-panel .ldb-chat-message {
+                margin-bottom: 12px;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .ldb-panel .ldb-chat-message.user,
+            .ldb-notion-panel .ldb-chat-message.user {
+                align-items: flex-end;
+            }
+
+            .ldb-panel .ldb-chat-message.assistant,
+            .ldb-notion-panel .ldb-chat-message.assistant {
+                align-items: flex-start;
+            }
+
+            .ldb-panel .ldb-chat-bubble,
+            .ldb-notion-panel .ldb-chat-bubble {
+                max-width: 85%;
+                padding: 10px 12px;
+                border-radius: 12px;
+                font-size: 13px;
+                line-height: 1.6;
+                word-break: break-word;
+                border: 1px solid transparent;
+            }
+
+            .ldb-panel .ldb-chat-bubble.user,
+            .ldb-notion-panel .ldb-chat-bubble.user {
+                background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
+                color: #fff;
+                border-bottom-right-radius: 6px;
+            }
+
+            .ldb-panel .ldb-chat-bubble.assistant,
+            .ldb-notion-panel .ldb-chat-bubble.assistant {
+                background: var(--ldb-ui-surface-2);
+                color: var(--ldb-ui-text);
+                border: 1px solid var(--ldb-ui-border);
+                border-bottom-left-radius: 6px;
+            }
+
+            .ldb-panel .ldb-chat-bubble.processing,
+            .ldb-notion-panel .ldb-chat-bubble.processing {
+                opacity: 0.85;
+            }
+
+            .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots,
+            .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots {
+                display: inline-flex;
+                gap: 4px;
+                margin-left: 6px;
+                vertical-align: middle;
+            }
+
+            .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots span,
+            .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots span {
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: rgba(148, 163, 184, 0.9);
+                display: inline-block;
+                animation: ldb-typing 1.1s infinite ease-in-out;
+            }
+
+            .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(2),
+            .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(2) {
+                animation-delay: 0.2s;
+            }
+            .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(3),
+            .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(3) {
+                animation-delay: 0.4s;
+            }
+
+            @keyframes ldb-typing {
+                0%, 80%, 100% { transform: translateY(0); opacity: 0.6; }
+                40% { transform: translateY(-3px); opacity: 1; }
+            }
+
+            .ldb-panel .ldb-chat-input-container,
+            .ldb-notion-panel .ldb-chat-input-container {
+                display: flex;
+                gap: 8px;
+                align-items: flex-end;
+                margin-top: 10px;
+            }
+
+            .ldb-panel .ldb-chat-input,
+            .ldb-notion-panel .ldb-chat-input {
+                flex: 1;
+                resize: none;
+                min-height: 36px;
+                max-height: 80px;
+                line-height: 1.5;
+            }
+
+            .ldb-panel .ldb-chat-send-btn,
+            .ldb-notion-panel .ldb-chat-send-btn {
+                padding: 8px 12px;
+                border-radius: 10px;
+                border: 1px solid rgba(37, 99, 235, 0.35);
+                background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
+                color: #fff;
+                cursor: pointer;
+                user-select: none;
+            }
+
+            .ldb-panel .ldb-chat-send-btn:disabled,
+            .ldb-notion-panel .ldb-chat-send-btn:disabled {
+                opacity: 0.65;
+                cursor: not-allowed;
+            }
+
+            .ldb-panel .ldb-chat-actions,
+            .ldb-notion-panel .ldb-chat-actions {
+                display: flex;
+                gap: 8px;
+                margin-top: 10px;
+            }
+
+            .ldb-panel .ldb-chat-action-btn,
+            .ldb-notion-panel .ldb-chat-action-btn {
+                padding: 6px 10px;
+                border-radius: 10px;
+                border: 1px solid var(--ldb-ui-border);
+                background: rgba(148, 163, 184, 0.12);
+                color: var(--ldb-ui-text);
+                cursor: pointer;
+                user-select: none;
+                font-size: 12px;
+            }
+
+            .ldb-panel .ldb-chat-action-btn:hover,
+            .ldb-notion-panel .ldb-chat-action-btn:hover {
+                background: rgba(148, 163, 184, 0.18);
+            }
+
+            .ldb-panel .ldb-chat-settings-toggle,
+            .ldb-notion-panel .ldb-chat-settings-toggle {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                cursor: pointer;
+                user-select: none;
+                margin-top: 10px;
+                padding: 8px 10px;
+                border-radius: 10px;
+                border: 1px solid var(--ldb-ui-border);
+                background: rgba(148, 163, 184, 0.10);
+            }
+
+            .ldb-panel .ldb-chat-settings-content.collapsed,
+            .ldb-notion-panel .ldb-chat-settings-content.collapsed {
+                display: none;
+            }
+        `,
+    };
+
+    // ===========================================
+    // 面板拉伸工具
+    // ===========================================
+    const PanelResize = {
+        _stylesInjected: false,
+
+        injectStyles: () => {
+            if (PanelResize._stylesInjected) return;
+            PanelResize._stylesInjected = true;
+            const style = document.createElement("style");
+            style.textContent = `
+                .ldb-resize-handle {
+                    position: absolute;
+                    z-index: 10;
+                }
+                .ldb-resize-handle-l {
+                    left: -3px; top: 0; width: 6px; height: 100%;
+                    cursor: ew-resize;
+                }
+                .ldb-resize-handle-t {
+                    left: 0; top: -3px; width: 100%; height: 6px;
+                    cursor: ns-resize;
+                }
+                .ldb-resize-handle-b {
+                    left: 0; bottom: -3px; width: 100%; height: 6px;
+                    cursor: ns-resize;
+                }
+                .ldb-resize-handle-tl {
+                    left: -3px; top: -3px; width: 12px; height: 12px;
+                    cursor: nwse-resize;
+                }
+                .ldb-resize-handle-bl {
+                    left: -3px; bottom: -3px; width: 12px; height: 12px;
+                    cursor: nesw-resize;
+                }
+            `;
+            document.head.appendChild(style);
+        },
+
+        makeResizable: (element, options = {}) => {
+            const {
+                edges = ["l", "t"],
+                storageKey = null,
+                minWidth = 280,
+                minHeight = 200,
+                maxWidth = 800,
+            } = options;
+
+            PanelResize.injectStyles();
+
+            edges.forEach(edge => {
+                const handle = document.createElement("div");
+                handle.className = `ldb-resize-handle ldb-resize-handle-${edge}`;
+                element.appendChild(handle);
+
+                handle.addEventListener("mousedown", (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const startX = e.clientX;
+                    const startY = e.clientY;
+                    const startWidth = element.offsetWidth;
+                    const startHeight = element.offsetHeight;
+                    document.body.style.userSelect = "none";
+                    element.style.transition = "none";
+
+                    const onMove = (ev) => {
+                        if (edge.includes("l")) {
+                            const dx = startX - ev.clientX;
+                            element.style.width = Math.max(minWidth, Math.min(maxWidth, startWidth + dx)) + "px";
+                        }
+                        if (edge.includes("t")) {
+                            const dy = startY - ev.clientY;
+                            const maxH = window.innerHeight * 0.9;
+                            element.style.maxHeight = Math.max(minHeight, Math.min(maxH, startHeight + dy)) + "px";
+                        }
+                        if (edge.includes("b")) {
+                            const dy = ev.clientY - startY;
+                            const maxH = window.innerHeight * 0.9;
+                            element.style.maxHeight = Math.max(minHeight, Math.min(maxH, startHeight + dy)) + "px";
+                        }
+                    };
+
+                    const onUp = () => {
+                        document.removeEventListener("mousemove", onMove);
+                        document.removeEventListener("mouseup", onUp);
+                        document.body.style.userSelect = "";
+                        element.style.transition = "";
+                        if (storageKey) {
+                            Storage.set(storageKey, JSON.stringify({
+                                width: element.style.width,
+                                maxHeight: element.style.maxHeight,
+                            }));
+                        }
+                    };
+
+                    document.addEventListener("mousemove", onMove);
+                    document.addEventListener("mouseup", onUp);
+                });
+            });
+
+            // 恢复已保存的尺寸
+            if (storageKey) {
+                const saved = Storage.get(storageKey, null);
+                if (saved) {
+                    try {
+                        const size = JSON.parse(saved);
+                        if (size.width) element.style.width = size.width;
+                        if (size.maxHeight) element.style.maxHeight = size.maxHeight;
+                    } catch (e) {}
+                }
+            }
+        },
+    };
+
+    // ===========================================
     // Notion 站点 UI 模块
     // ===========================================
     const NotionSiteUI = {
@@ -5409,85 +7845,55 @@ ${availableTools}
 
         // 注入样式
         injectStyles: () => {
-            const style = document.createElement("style");
-            style.textContent = `
-                /* Notion 站点浮动按钮 */
+            DesignSystem.ensureBase();
+            DesignSystem.ensureChat();
+            StyleManager.injectOnce(DesignSystem.STYLE_IDS.NOTION, `
+                /* LDB_UI_NOTION */
                 .ldb-notion-float-btn {
                     position: fixed;
                     right: 24px;
                     bottom: 24px;
-                    width: 56px;
-                    height: 56px;
-                    background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
-                    border: none;
-                    border-radius: 28px;
+                    width: 52px;
+                    height: 52px;
+                    border-radius: 999px;
+                    border: 1px solid rgba(37, 99, 235, 0.35);
+                    background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
                     color: #fff;
-                    font-size: 24px;
+                    font-size: 22px;
                     cursor: pointer;
-                    box-shadow: 0 4px 16px rgba(74, 144, 217, 0.4);
-                    z-index: 99999;
+                    box-shadow: var(--ldb-ui-shadow-sm);
+                    z-index: 2147483647;
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    transition: transform 0.2s, box-shadow 0.2s;
+                    user-select: none;
+                    transition: transform 0.18s ease, box-shadow 0.18s ease;
                 }
 
                 .ldb-notion-float-btn:hover {
-                    transform: scale(1.1);
-                    box-shadow: 0 6px 20px rgba(74, 144, 217, 0.5);
+                    transform: translateY(-1px) scale(1.03);
+                    box-shadow: var(--ldb-ui-shadow);
                 }
 
                 .ldb-notion-float-btn.dragging {
                     transform: none;
-                    opacity: 0.8;
+                    opacity: 0.85;
                     cursor: grabbing;
                 }
 
-                /* Notion 站点浮动面板 */
                 .ldb-notion-panel {
                     position: fixed;
                     right: 24px;
                     bottom: 96px;
                     width: 380px;
                     max-height: 70vh;
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    border: 1px solid #0f3460;
-                    border-radius: 16px;
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                    z-index: 99999;
-                    color: #e0e0e0;
+                    z-index: 2147483646;
                     overflow: hidden;
                     display: none;
                 }
 
                 .ldb-notion-panel.visible {
                     display: block;
-                    animation: ldb-notion-slide-up 0.3s ease;
-                }
-
-                @keyframes ldb-notion-slide-up {
-                    from { transform: translateY(20px); opacity: 0; }
-                    to { transform: translateY(0); opacity: 1; }
-                }
-
-                .ldb-notion-header {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    padding: 14px 16px;
-                    background: linear-gradient(90deg, #0f3460 0%, #1a1a2e 100%);
-                    cursor: move;
-                }
-
-                .ldb-notion-header h3 {
-                    margin: 0;
-                    font-size: 15px;
-                    font-weight: 600;
-                    color: #fff;
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
                 }
 
                 .ldb-notion-header-btns {
@@ -5495,366 +7901,33 @@ ${availableTools}
                     gap: 8px;
                 }
 
-                .ldb-notion-header-btn {
-                    background: rgba(255, 255, 255, 0.1);
-                    border: none;
-                    color: #fff;
-                    width: 26px;
-                    height: 26px;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    transition: background 0.2s;
-                    font-size: 14px;
-                }
-
-                .ldb-notion-header-btn:hover {
-                    background: rgba(255, 255, 255, 0.2);
-                }
-
                 .ldb-notion-body {
-                    padding: 16px;
-                    max-height: calc(70vh - 60px);
+                    max-height: calc(70vh - 56px);
                     overflow-y: auto;
-                }
-
-                .ldb-notion-body::-webkit-scrollbar {
-                    width: 6px;
-                }
-
-                .ldb-notion-body::-webkit-scrollbar-track {
-                    background: rgba(255, 255, 255, 0.05);
-                }
-
-                .ldb-notion-body::-webkit-scrollbar-thumb {
-                    background: rgba(255, 255, 255, 0.2);
-                    border-radius: 3px;
-                }
-
-                /* 复用聊天样式 */
-                .ldb-notion-panel .ldb-chat-container {
-                    height: 260px;
-                }
-
-                .ldb-notion-panel .ldb-input-group {
-                    margin-bottom: 12px;
-                }
-
-                .ldb-notion-panel .ldb-label {
-                    display: block;
-                    font-size: 13px;
-                    color: #b0b0b0;
-                    margin-bottom: 6px;
-                }
-
-                .ldb-notion-panel .ldb-input {
-                    width: 100%;
-                    padding: 10px 12px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 8px;
-                    color: #fff;
-                    font-size: 14px;
-                    box-sizing: border-box;
-                    transition: border-color 0.2s;
-                }
-
-                .ldb-notion-panel .ldb-input:focus {
-                    outline: none;
-                    border-color: #4a90d9;
-                }
-
-                .ldb-notion-panel .ldb-input::placeholder {
-                    color: #666;
-                }
-
-                .ldb-notion-panel .ldb-select {
-                    width: 100%;
-                    padding: 10px 12px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 8px;
-                    color: #fff;
-                    font-size: 14px;
-                    cursor: pointer;
-                }
-
-                .ldb-notion-panel .ldb-select option {
-                    background: #1a1a2e;
-                    color: #fff;
-                }
-
-                .ldb-notion-panel .ldb-btn {
-                    width: 100%;
-                    padding: 10px;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 13px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.2s;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 6px;
-                }
-
-                .ldb-notion-panel .ldb-btn-secondary {
-                    background: rgba(255, 255, 255, 0.1);
-                    color: #fff;
-                }
-
-                .ldb-notion-panel .ldb-btn-secondary:hover {
-                    background: rgba(255, 255, 255, 0.15);
-                }
-
-                .ldb-notion-panel .ldb-tip {
-                    font-size: 11px;
-                    color: #666;
-                    margin-top: 6px;
-                }
-
-                .ldb-notion-panel .ldb-divider {
-                    height: 1px;
-                    background: rgba(255, 255, 255, 0.1);
-                    margin: 16px 0;
-                }
-
-                .ldb-notion-panel .ldb-section-title {
-                    font-size: 13px;
-                    font-weight: 600;
-                    color: #a0a0a0;
-                    margin-bottom: 10px;
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                }
-
-                .ldb-notion-panel .ldb-status {
-                    position: relative;
-                    padding: 10px 28px 10px 10px;
-                    background: rgba(74, 144, 217, 0.1);
-                    border: 1px solid rgba(74, 144, 217, 0.3);
-                    border-radius: 8px;
-                    font-size: 12px;
-                    color: #4a90d9;
-                    text-align: center;
-                    margin-top: 12px;
-                }
-
-                .ldb-notion-panel .ldb-status.success {
-                    background: rgba(52, 211, 153, 0.1);
-                    border-color: rgba(52, 211, 153, 0.3);
-                    color: #34d399;
-                }
-
-                .ldb-notion-panel .ldb-status.error {
-                    background: rgba(239, 68, 68, 0.1);
-                    border-color: rgba(239, 68, 68, 0.3);
-                    color: #ef4444;
                 }
 
                 .ldb-notion-toggle-section {
-                    cursor: pointer;
                     display: flex;
-                    align-items: center;
                     justify-content: space-between;
-                    padding: 8px 0;
-                    color: #888;
-                    font-size: 12px;
-                }
-
-                .ldb-notion-toggle-section:hover {
-                    color: #fff;
-                }
-
-                .ldb-notion-toggle-content {
-                    overflow: hidden;
-                    transition: max-height 0.3s ease;
-                    max-height: 800px;
+                    align-items: center;
+                    cursor: pointer;
+                    user-select: none;
+                    margin-top: 10px;
+                    padding: 8px 10px;
+                    border-radius: 10px;
+                    border: 1px solid var(--ldb-ui-border);
+                    background: rgba(148, 163, 184, 0.10);
+                    color: var(--ldb-ui-text);
                 }
 
                 .ldb-notion-toggle-content.collapsed {
-                    max-height: 0;
+                    display: none;
                 }
 
-                /* ===== ChatUI 样式 (Notion 站点) ===== */
-                .ldb-chat-container {
-                    height: 260px;
-                    overflow-y: auto;
-                    background: rgba(0, 0, 0, 0.2);
-                    border-radius: 8px;
-                    padding: 12px;
-                    margin-bottom: 12px;
+                #ldb-notion-status-container {
+                    margin-top: 12px;
                 }
-
-                .ldb-chat-container::-webkit-scrollbar {
-                    width: 6px;
-                }
-
-                .ldb-chat-container::-webkit-scrollbar-track {
-                    background: rgba(255, 255, 255, 0.05);
-                    border-radius: 3px;
-                }
-
-                .ldb-chat-container::-webkit-scrollbar-thumb {
-                    background: rgba(255, 255, 255, 0.2);
-                    border-radius: 3px;
-                }
-
-                .ldb-chat-welcome {
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    height: 100%;
-                    text-align: center;
-                    color: #888;
-                }
-
-                .ldb-chat-welcome-icon {
-                    font-size: 48px;
-                    margin-bottom: 12px;
-                }
-
-                .ldb-chat-welcome-text {
-                    font-size: 14px;
-                    line-height: 1.6;
-                }
-
-                .ldb-chat-welcome-text small {
-                    color: #666;
-                }
-
-                .ldb-chat-message {
-                    margin-bottom: 12px;
-                    display: flex;
-                    flex-direction: column;
-                }
-
-                .ldb-chat-message.user {
-                    align-items: flex-end;
-                }
-
-                .ldb-chat-message.assistant {
-                    align-items: flex-start;
-                }
-
-                .ldb-chat-bubble {
-                    max-width: 85%;
-                    padding: 10px 14px;
-                    border-radius: 12px;
-                    font-size: 13px;
-                    line-height: 1.6;
-                    word-break: break-word;
-                }
-
-                .ldb-chat-bubble.user {
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    border-bottom-right-radius: 4px;
-                }
-
-                .ldb-chat-bubble.assistant {
-                    background: rgba(255, 255, 255, 0.1);
-                    color: #e0e0e0;
-                    border-bottom-left-radius: 4px;
-                }
-
-                .ldb-chat-bubble.processing {
-                    opacity: 0.8;
-                }
-
-                .ldb-chat-bubble.processing::after {
-                    content: "";
-                    display: inline-block;
-                    width: 12px;
-                    animation: ldb-dots 1.5s infinite;
-                }
-
-                @keyframes ldb-dots {
-                    0%, 20% { content: "."; }
-                    40% { content: ".."; }
-                    60%, 100% { content: "..."; }
-                }
-
-                .ldb-chat-bubble.error {
-                    border: 1px solid rgba(248, 113, 113, 0.5);
-                }
-
-                .ldb-chat-input-container {
-                    display: flex;
-                    gap: 8px;
-                    margin-bottom: 12px;
-                }
-
-                .ldb-chat-input {
-                    flex: 1;
-                    padding: 10px 14px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 12px;
-                    color: #fff;
-                    font-size: 14px;
-                    resize: none;
-                    min-height: 40px;
-                    max-height: 80px;
-                }
-
-                .ldb-chat-input:focus {
-                    outline: none;
-                    border-color: #4a90d9;
-                }
-
-                .ldb-chat-input::placeholder {
-                    color: #666;
-                }
-
-                .ldb-chat-send-btn {
-                    padding: 10px 16px;
-                    background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
-                    border: none;
-                    border-radius: 12px;
-                    color: white;
-                    font-size: 14px;
-                    cursor: pointer;
-                    transition: all 0.2s;
-                    white-space: nowrap;
-                }
-
-                .ldb-chat-send-btn:hover:not(:disabled) {
-                    transform: scale(1.05);
-                }
-
-                .ldb-chat-send-btn:disabled {
-                    opacity: 0.5;
-                    cursor: not-allowed;
-                }
-
-                .ldb-chat-actions {
-                    display: flex;
-                    gap: 8px;
-                    margin-bottom: 8px;
-                }
-
-                .ldb-chat-action-btn {
-                    padding: 6px 12px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 6px;
-                    color: #b0b0b0;
-                    font-size: 12px;
-                    cursor: pointer;
-                    transition: all 0.2s;
-                }
-
-                .ldb-chat-action-btn:hover {
-                    background: rgba(255, 255, 255, 0.1);
-                    color: #fff;
-                }
-            `;
-            document.head.appendChild(style);
+            `);
         },
 
         // 创建浮动按钮（可拖拽）
@@ -5946,8 +8019,15 @@ ${availableTools}
                         <div class="ldb-chat-welcome">
                             <div class="ldb-chat-welcome-icon">🤖</div>
                             <div class="ldb-chat-welcome-text">
-                                你好！我是 AI 助手<br>
-                                <small>试试输入「帮助」查看我能做什么</small>
+                                你好！我是 ${Utils.escapeHtml(Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName))}<br>
+                                <small>试试下面的快捷命令</small>
+                            </div>
+                            <div class="ldb-chat-chips">
+                                <button class="ldb-chat-chip" data-cmd="帮助">💡 帮助</button>
+                                <button class="ldb-chat-chip" data-cmd="搜索">🔍 搜索</button>
+                                <button class="ldb-chat-chip" data-cmd="自动分类">📂 自动分类</button>
+                                <button class="ldb-chat-chip" data-cmd="总结">📝 总结</button>
+                                <button class="ldb-chat-chip" data-cmd="导入GitHub收藏">🐙 GitHub</button>
                             </div>
                         </div>
                     </div>
@@ -6030,6 +8110,43 @@ ${availableTools}
                             </select>
                             <div class="ldb-tip">刷新工作区列表时每类的最大分页数</div>
                         </div>
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
+                            <span style="font-size: 12px; color: #888;">🤖 Agent 个性化</span>
+                        </div>
+                        <div class="ldb-input-group" style="margin-top: 8px;">
+                            <label class="ldb-label">助手名字</label>
+                            <input type="text" class="ldb-input" id="ldb-notion-persona-name" placeholder="AI 助手">
+                        </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">语气风格</label>
+                            <select class="ldb-select" id="ldb-notion-persona-tone">
+                                <option value="友好">友好</option>
+                                <option value="专业">专业</option>
+                                <option value="幽默">幽默</option>
+                                <option value="简洁">简洁</option>
+                                <option value="热情">热情</option>
+                            </select>
+                        </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">专业领域</label>
+                            <input type="text" class="ldb-input" id="ldb-notion-persona-expertise" placeholder="Notion 工作区管理">
+                        </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">自定义指令 (可选)</label>
+                            <textarea class="ldb-input" id="ldb-notion-persona-instructions" rows="2" placeholder="额外的行为指令..." style="resize: vertical;"></textarea>
+                        </div>
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
+                            <span style="font-size: 12px; color: #888;">🐙 GitHub 收藏导入</span>
+                        </div>
+                        <div class="ldb-input-group" style="margin-top: 8px;">
+                            <label class="ldb-label">GitHub 用户名</label>
+                            <input type="text" class="ldb-input" id="ldb-notion-github-username" placeholder="your-username">
+                        </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">GitHub Token (可选，提高速率限制)</label>
+                            <input type="password" class="ldb-input" id="ldb-notion-github-token" placeholder="ghp_xxx...">
+                            <div class="ldb-tip">不填写也可使用，但有 60 次/小时限制</div>
+                        </div>
                         <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-save-settings">💾 保存设置</button>
                     </div>
 
@@ -6072,6 +8189,18 @@ ${availableTools}
         bindEvents: () => {
             const panel = NotionSiteUI.panel;
 
+            // 快捷命令 chips
+            panel.querySelectorAll(".ldb-chat-chip").forEach(chip => {
+                chip.onclick = () => {
+                    const cmd = chip.getAttribute("data-cmd");
+                    const input = panel.querySelector("#ldb-chat-input");
+                    if (input && cmd) {
+                        input.value = cmd;
+                        ChatUI.sendMessage();
+                    }
+                };
+            });
+
             // 关闭按钮
             panel.querySelector("#ldb-notion-close").onclick = () => {
                 NotionSiteUI.togglePanel();
@@ -6099,6 +8228,12 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.AI_BASE_URL, panel.querySelector("#ldb-notion-ai-base-url").value.trim());
                 Storage.set(CONFIG.STORAGE_KEYS.AI_CATEGORIES, panel.querySelector("#ldb-notion-ai-categories").value.trim());
                 Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, parseInt(panel.querySelector("#ldb-notion-workspace-max-pages").value) || 0);
+                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, panel.querySelector("#ldb-notion-persona-name").value.trim() || CONFIG.DEFAULTS.agentPersonaName);
+                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, panel.querySelector("#ldb-notion-persona-tone").value);
+                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, panel.querySelector("#ldb-notion-persona-expertise").value.trim() || CONFIG.DEFAULTS.agentPersonaExpertise);
+                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, panel.querySelector("#ldb-notion-persona-instructions").value.trim());
+                Storage.set(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, panel.querySelector("#ldb-notion-github-username").value.trim());
+                Storage.set(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, panel.querySelector("#ldb-notion-github-token").value.trim());
 
                 NotionSiteUI.showStatus("设置已保存", "success");
             };
@@ -6274,6 +8409,16 @@ ${availableTools}
             panel.querySelector("#ldb-notion-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, "");
             panel.querySelector("#ldb-notion-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
             panel.querySelector("#ldb-notion-workspace-max-pages").value = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages);
+
+            // 加载 Agent 个性化设置
+            panel.querySelector("#ldb-notion-persona-name").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName);
+            panel.querySelector("#ldb-notion-persona-tone").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, CONFIG.DEFAULTS.agentPersonaTone);
+            panel.querySelector("#ldb-notion-persona-expertise").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG.DEFAULTS.agentPersonaExpertise);
+            panel.querySelector("#ldb-notion-persona-instructions").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG.DEFAULTS.agentPersonaInstructions);
+
+            // 加载 GitHub 设置
+            panel.querySelector("#ldb-notion-github-username").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
+            panel.querySelector("#ldb-notion-github-token").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
 
             // 加载数据库/页面下拉框（始终调用以确保兼容选项被添加）
             const cachedWsForDb = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
@@ -6493,6 +8638,14 @@ ${availableTools}
             NotionSiteUI.loadConfig();
             NotionSiteUI.initAIAssistant();
 
+            // 面板可拉伸（左边+上边+左上角）
+            PanelResize.makeResizable(NotionSiteUI.panel, {
+                edges: ["l", "t", "tl"],
+                storageKey: CONFIG.STORAGE_KEYS.PANEL_SIZE_NOTION,
+                minWidth: 300,
+                minHeight: 250,
+            });
+
             // 初始化对话 UI
             ChatState.load();
             ChatUI.renderMessages();
@@ -6518,23 +8671,20 @@ ${availableTools}
 
         // 样式
         injectStyles: () => {
-            const style = document.createElement("style");
-            style.textContent = `
+            DesignSystem.ensureBase();
+            DesignSystem.ensureChat();
+            StyleManager.injectOnce(DesignSystem.STYLE_IDS.LINUX_DO, `
+                /* LDB_UI_LINUX_DO */
                 .ldb-panel {
                     position: fixed;
                     top: 80px;
                     right: 20px;
                     width: 380px;
                     max-height: 80vh;
-                    overflow-y: auto;
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    border: 1px solid #0f3460;
-                    border-radius: 16px;
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                    z-index: 99999;
-                    color: #e0e0e0;
-                    transition: all 0.3s ease;
+                    z-index: 2147483640;
+                    display: flex;
+                    flex-direction: column;
+                    overflow: hidden;
                 }
 
                 .ldb-panel.minimized {
@@ -6544,23 +8694,9 @@ ${availableTools}
                 }
 
                 .ldb-header {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    padding: 16px;
-                    background: linear-gradient(90deg, #0f3460 0%, #1a1a2e 100%);
-                    border-radius: 16px 16px 0 0;
                     cursor: move;
-                }
-
-                .ldb-header h3 {
-                    margin: 0;
-                    font-size: 16px;
-                    font-weight: 600;
-                    color: #fff;
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
+                    border-top-left-radius: var(--ldb-ui-radius);
+                    border-top-right-radius: var(--ldb-ui-radius);
                 }
 
                 .ldb-header-btns {
@@ -6568,761 +8704,109 @@ ${availableTools}
                     gap: 8px;
                 }
 
-                .ldb-header-btn {
-                    background: rgba(255, 255, 255, 0.1);
-                    border: none;
-                    color: #fff;
-                    width: 28px;
-                    height: 28px;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    transition: background 0.2s;
-                }
-
-                .ldb-header-btn:hover {
-                    background: rgba(255, 255, 255, 0.2);
-                }
-
                 .ldb-body {
-                    padding: 16px;
+                    overflow-y: auto;
+                    padding: 14px;
                 }
 
-                .ldb-section {
-                    margin-bottom: 16px;
+                .ldb-body::-webkit-scrollbar {
+                    width: 8px;
                 }
 
-                .ldb-section-title {
-                    font-size: 13px;
-                    font-weight: 600;
-                    color: #a0a0a0;
-                    margin-bottom: 10px;
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
+                .ldb-body::-webkit-scrollbar-track {
+                    background: transparent;
                 }
 
-                .ldb-input-group {
-                    margin-bottom: 12px;
-                }
-
-                .ldb-label {
-                    display: block;
-                    font-size: 13px;
-                    color: #b0b0b0;
-                    margin-bottom: 6px;
-                }
-
-                .ldb-input {
-                    width: 100%;
-                    padding: 10px 12px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 8px;
-                    color: #fff;
-                    font-size: 14px;
-                    box-sizing: border-box;
-                    transition: border-color 0.2s;
-                }
-
-                .ldb-input:focus {
-                    outline: none;
-                    border-color: #4a90d9;
-                }
-
-                .ldb-input::placeholder {
-                    color: #666;
-                }
-
-                .ldb-checkbox-group {
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 12px;
-                }
-
-                .ldb-checkbox-item {
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                    cursor: pointer;
-                }
-
-                .ldb-checkbox-item input {
-                    width: 16px;
-                    height: 16px;
-                    cursor: pointer;
-                }
-
-                .ldb-checkbox-item span {
-                    font-size: 13px;
-                    color: #b0b0b0;
-                }
-
-                .ldb-select {
-                    width: 100%;
-                    padding: 10px 12px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 8px;
-                    color: #fff;
-                    font-size: 14px;
-                    cursor: pointer;
-                }
-
-                .ldb-select option {
-                    background: #1a1a2e;
-                    color: #fff;
-                }
-
-                .ldb-range-group {
-                    display: flex;
-                    gap: 10px;
-                    align-items: center;
-                }
-
-                .ldb-range-group input {
-                    flex: 1;
-                    padding: 8px 10px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 8px;
-                    color: #fff;
-                    font-size: 13px;
-                    text-align: center;
-                    box-sizing: border-box;
-                    min-width: 0;
-                }
-
-                .ldb-range-group span {
-                    color: #666;
-                }
-
-                .ldb-btn {
-                    width: 100%;
-                    padding: 12px;
-                    border: none;
-                    border-radius: 10px;
-                    font-size: 14px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.2s;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 8px;
-                }
-
-                .ldb-btn-primary {
-                    background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
-                    color: #fff;
-                }
-
-                .ldb-btn-primary:hover:not(:disabled) {
-                    background: linear-gradient(135deg, #5a9fe9 0%, #458acd 100%);
-                    transform: translateY(-1px);
-                }
-
-                .ldb-btn-secondary {
-                    background: rgba(255, 255, 255, 0.1);
-                    color: #fff;
-                }
-
-                .ldb-btn-secondary:hover:not(:disabled) {
-                    background: rgba(255, 255, 255, 0.15);
-                }
-
-                .ldb-btn:disabled {
-                    opacity: 0.6;
-                    cursor: not-allowed;
-                }
-
-                .ldb-btn-group {
-                    display: flex;
-                    gap: 10px;
-                    margin-top: 8px;
-                }
-
-                .ldb-btn-group .ldb-btn {
-                    flex: 1;
-                }
-
-                .ldb-status {
-                    position: relative;
-                    padding: 12px 32px 12px 12px;
-                    background: rgba(74, 144, 217, 0.1);
-                    border: 1px solid rgba(74, 144, 217, 0.3);
-                    border-radius: 10px;
-                    font-size: 13px;
-                    color: #4a90d9;
-                    text-align: center;
-                    margin-top: 12px;
-                }
-
-                .ldb-status-close {
-                    position: absolute;
-                    right: 8px;
-                    top: 50%;
-                    transform: translateY(-50%);
-                    background: none;
-                    border: none;
-                    color: inherit;
-                    font-size: 16px;
-                    cursor: pointer;
-                    opacity: 0.6;
-                    padding: 4px;
-                    line-height: 1;
-                }
-
-                .ldb-status-close:hover {
-                    opacity: 1;
-                }
-
-                .ldb-status.success {
-                    background: rgba(52, 211, 153, 0.1);
-                    border-color: rgba(52, 211, 153, 0.3);
-                    color: #34d399;
-                }
-
-                .ldb-status.error {
-                    background: rgba(239, 68, 68, 0.1);
-                    border-color: rgba(239, 68, 68, 0.3);
-                    color: #ef4444;
-                }
-
-                .ldb-progress {
-                    margin-top: 12px;
-                }
-
-                .ldb-progress-bar {
-                    height: 6px;
-                    background: rgba(255, 255, 255, 0.1);
-                    border-radius: 3px;
-                    overflow: hidden;
-                    margin-bottom: 8px;
-                }
-
-                .ldb-progress-fill {
-                    height: 100%;
-                    background: linear-gradient(90deg, #4a90d9 0%, #34d399 100%);
-                    border-radius: 3px;
-                    transition: width 0.3s ease;
-                }
-
-                .ldb-progress-text {
-                    font-size: 12px;
-                    color: #888;
-                    text-align: center;
-                }
-
-                .ldb-bookmarks-info {
-                    padding: 12px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border-radius: 10px;
-                    margin-bottom: 16px;
-                }
-
-                .ldb-bookmarks-count {
-                    font-size: 24px;
-                    font-weight: 700;
-                    color: #4a90d9;
-                    text-align: center;
-                }
-
-                .ldb-bookmarks-label {
-                    font-size: 12px;
-                    color: #888;
-                    text-align: center;
-                    margin-top: 4px;
+                .ldb-body::-webkit-scrollbar-thumb {
+                    background: rgba(148, 163, 184, 0.25);
+                    border-radius: 999px;
                 }
 
                 .ldb-mini-btn {
                     position: fixed;
                     right: 20px;
                     bottom: 80px;
-                    width: 56px;
-                    height: 56px;
-                    background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
-                    border: none;
-                    border-radius: 28px;
+                    width: 52px;
+                    height: 52px;
+                    border-radius: 999px;
+                    border: 1px solid rgba(37, 99, 235, 0.35);
+                    background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
                     color: #fff;
-                    font-size: 24px;
+                    font-size: 22px;
                     cursor: pointer;
-                    box-shadow: 0 4px 16px rgba(74, 144, 217, 0.4);
-                    z-index: 99998;
-                    display: flex;
+                    box-shadow: var(--ldb-ui-shadow-sm);
+                    z-index: 2147483641;
+                    display: none;
                     align-items: center;
                     justify-content: center;
-                    transition: transform 0.2s, box-shadow 0.2s;
+                    user-select: none;
+                    transition: transform 0.18s ease, box-shadow 0.18s ease;
                 }
 
                 .ldb-mini-btn:hover {
-                    transform: scale(1.1);
-                    box-shadow: 0 6px 20px rgba(74, 144, 217, 0.5);
+                    transform: translateY(-1px) scale(1.03);
+                    box-shadow: var(--ldb-ui-shadow);
                 }
 
-                /* ===== AI 对话界面样式 ===== */
-                .ldb-chat-container {
-                    height: 280px;
-                    overflow-y: auto;
-                    background: rgba(0, 0, 0, 0.2);
-                    border-radius: 8px;
-                    padding: 12px;
-                    margin-bottom: 12px;
+                .ldb-section {
+                    padding: 10px 0;
                 }
 
-                .ldb-chat-container::-webkit-scrollbar {
-                    width: 6px;
-                }
-
-                .ldb-chat-container::-webkit-scrollbar-track {
-                    background: rgba(255, 255, 255, 0.05);
-                    border-radius: 3px;
-                }
-
-                .ldb-chat-container::-webkit-scrollbar-thumb {
-                    background: rgba(255, 255, 255, 0.2);
-                    border-radius: 3px;
-                }
-
-                .ldb-chat-welcome {
+                .ldb-btn-group {
                     display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    height: 100%;
-                    text-align: center;
-                    color: #888;
+                    flex-wrap: wrap;
+                    gap: 10px;
                 }
 
-                .ldb-chat-welcome-icon {
-                    font-size: 48px;
-                    margin-bottom: 12px;
-                }
-
-                .ldb-chat-welcome-text {
-                    font-size: 14px;
-                    line-height: 1.6;
-                }
-
-                .ldb-chat-welcome-text small {
-                    color: #666;
-                }
-
-                .ldb-chat-message {
-                    margin-bottom: 12px;
-                    display: flex;
-                    flex-direction: column;
-                }
-
-                .ldb-chat-message.user {
-                    align-items: flex-end;
-                }
-
-                .ldb-chat-message.assistant {
-                    align-items: flex-start;
-                }
-
-                .ldb-chat-bubble {
-                    max-width: 85%;
-                    padding: 10px 14px;
-                    border-radius: 12px;
-                    font-size: 13px;
-                    line-height: 1.6;
-                    word-break: break-word;
-                }
-
-                .ldb-chat-bubble.user {
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    border-bottom-right-radius: 4px;
-                }
-
-                .ldb-chat-bubble.assistant {
-                    background: rgba(255, 255, 255, 0.1);
-                    color: #e0e0e0;
-                    border-bottom-left-radius: 4px;
-                }
-
-                .ldb-chat-bubble.processing {
-                    opacity: 0.8;
-                }
-
-                .ldb-chat-bubble.processing::after {
-                    content: "";
-                    display: inline-block;
-                    width: 12px;
-                    animation: ldb-dots 1.5s infinite;
-                }
-
-                @keyframes ldb-dots {
-                    0%, 20% { content: "."; }
-                    40% { content: ".."; }
-                    60%, 100% { content: "..."; }
-                }
-
-                .ldb-chat-bubble.error {
-                    border: 1px solid rgba(248, 113, 113, 0.5);
-                }
-
-                .ldb-chat-input-container {
-                    display: flex;
-                    gap: 8px;
-                    margin-bottom: 12px;
-                }
-
-                .ldb-chat-input {
-                    flex: 1;
-                    padding: 10px 14px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 12px;
-                    color: #fff;
-                    font-size: 14px;
-                    resize: none;
-                    min-height: 40px;
-                    max-height: 80px;
-                }
-
-                .ldb-chat-input:focus {
-                    outline: none;
-                    border-color: #4a90d9;
-                }
-
-                .ldb-chat-input::placeholder {
-                    color: #666;
-                }
-
-                .ldb-chat-send-btn {
-                    padding: 10px 16px;
-                    background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
-                    border: none;
-                    border-radius: 12px;
-                    color: white;
-                    font-size: 14px;
-                    cursor: pointer;
-                    transition: all 0.2s;
-                    white-space: nowrap;
-                }
-
-                .ldb-chat-send-btn:hover:not(:disabled) {
-                    transform: scale(1.05);
-                }
-
-                .ldb-chat-send-btn:disabled {
-                    opacity: 0.5;
-                    cursor: not-allowed;
-                }
-
-                .ldb-chat-actions {
-                    display: flex;
-                    gap: 8px;
-                    margin-bottom: 8px;
-                }
-
-                .ldb-chat-action-btn {
-                    padding: 6px 12px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 6px;
-                    color: #b0b0b0;
-                    font-size: 12px;
-                    cursor: pointer;
-                    transition: all 0.2s;
-                }
-
-                .ldb-chat-action-btn:hover {
-                    background: rgba(255, 255, 255, 0.1);
-                    color: #fff;
-                }
-
-                .ldb-chat-settings-toggle {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    padding: 8px 0;
-                    cursor: pointer;
-                    border-top: 1px solid rgba(255, 255, 255, 0.1);
-                    margin-top: 8px;
-                }
-
-                .ldb-chat-settings-toggle:hover {
-                    color: #fff;
-                }
-
-                .ldb-chat-settings-content {
-                    overflow: hidden;
-                    transition: max-height 0.3s ease;
-                    max-height: 600px;
-                }
-
-                .ldb-chat-settings-content.collapsed {
-                    max-height: 0;
-                }
-
-                .ldb-divider {
-                    height: 1px;
-                    background: rgba(255, 255, 255, 0.1);
-                    margin: 16px 0;
-                }
-
-                .ldb-tip {
-                    font-size: 11px;
-                    color: #666;
-                    margin-top: 6px;
-                }
-
-                .ldb-link {
-                    color: #4a90d9;
-                    text-decoration: none;
-                }
-
-                .ldb-link:hover {
-                    text-decoration: underline;
-                }
-
-                @keyframes ldb-spin {
-                    from { transform: rotate(0deg); }
-                    to { transform: rotate(360deg); }
-                }
-
-                .ldb-spin {
-                    animation: ldb-spin 1s linear infinite;
-                }
-
-                .ldb-toggle-section {
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    padding: 8px 0;
-                }
-
-                .ldb-toggle-section:hover {
-                    color: #fff;
-                }
-
-                .ldb-toggle-content {
-                    overflow: hidden;
-                    transition: max-height 0.3s ease;
-                }
-
-                .ldb-toggle-content.collapsed {
-                    max-height: 0;
-                }
-
-                /* 收藏列表样式 */
-                .ldb-bookmark-list {
-                    max-height: 200px;
-                    overflow-y: auto;
-                    background: rgba(0, 0, 0, 0.2);
-                    border-radius: 8px;
-                    margin-bottom: 12px;
-                }
-
-                .ldb-bookmark-item {
-                    display: flex;
-                    align-items: center;
-                    padding: 8px 12px;
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-                    cursor: pointer;
-                    transition: background 0.2s;
-                }
-
-                .ldb-bookmark-item:hover {
-                    background: rgba(255, 255, 255, 0.05);
-                }
-
-                .ldb-bookmark-item:last-child {
-                    border-bottom: none;
-                }
-
-                .ldb-bookmark-item input[type="checkbox"] {
-                    margin-right: 10px;
-                    cursor: pointer;
-                }
-
-                .ldb-bookmark-item .title {
-                    flex: 1;
-                    font-size: 13px;
-                    color: #ccc;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                }
-
-                .ldb-bookmark-item .status {
-                    font-size: 11px;
-                    padding: 2px 6px;
-                    border-radius: 4px;
-                    margin-left: 8px;
-                }
-
-                .ldb-bookmark-item .status.exported {
-                    background: rgba(52, 211, 153, 0.2);
-                    color: #34d399;
-                }
-
-                .ldb-bookmark-item .status.pending {
-                    background: rgba(251, 191, 36, 0.2);
-                    color: #fbbf24;
-                }
-
-                .ldb-select-all {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    padding: 8px 0;
-                    margin-bottom: 8px;
-                }
-
-                .ldb-select-all label {
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                    font-size: 13px;
-                    color: #888;
-                    cursor: pointer;
-                }
-
-                .ldb-select-count {
-                    font-size: 12px;
-                    color: #4a90d9;
-                }
-
-                /* 控制按钮样式 */
-                .ldb-control-btns {
-                    display: flex;
-                    gap: 8px;
-                    margin-top: 8px;
-                }
-
-                .ldb-btn-warning {
-                    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-                    color: #fff;
-                }
-
-                .ldb-btn-warning:hover:not(:disabled) {
-                    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
-                }
-
-                .ldb-btn-danger {
-                    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-                    color: #fff;
-                }
-
-                .ldb-btn-danger:hover:not(:disabled) {
-                    background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+                .ldb-btn-primary {
+                    /* alias for `.ldb-btn` */
                 }
 
                 .ldb-btn-small {
-                    padding: 8px 12px;
-                    font-size: 12px;
-                }
-
-                /* 导出报告样式 */
-                .ldb-report {
-                    margin-top: 12px;
-                    padding: 12px;
-                    background: rgba(0, 0, 0, 0.2);
-                    border-radius: 10px;
-                    max-height: 200px;
-                    overflow-y: auto;
-                }
-
-                .ldb-report-title {
-                    font-size: 14px;
-                    font-weight: 600;
-                    color: #fff;
-                    margin-bottom: 10px;
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                }
-
-                .ldb-report-section {
-                    margin-bottom: 10px;
-                }
-
-                .ldb-report-section-title {
-                    font-size: 12px;
-                    color: #888;
-                    margin-bottom: 4px;
-                }
-
-                .ldb-report-item {
-                    font-size: 12px;
-                    padding: 4px 0;
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                }
-
-                .ldb-report-item.success {
-                    color: #34d399;
-                }
-
-                .ldb-report-item.failed {
-                    color: #ef4444;
-                }
-
-                .ldb-report-item a {
-                    color: inherit;
-                    text-decoration: none;
-                }
-
-                .ldb-report-item a:hover {
-                    text-decoration: underline;
-                }
-
-                .ldb-report-error {
-                    font-size: 11px;
-                    color: #888;
-                    margin-left: 16px;
-                }
-
-                /* 权限设置面板样式 */
-                .ldb-permission-panel {
-                    margin-top: 8px;
-                    padding: 12px;
-                    background: rgba(0, 0, 0, 0.2);
-                    border-radius: 10px;
-                }
-
-                .ldb-permission-row {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    margin-bottom: 10px;
-                }
-
-                .ldb-permission-row:last-child {
-                    margin-bottom: 0;
-                }
-
-                .ldb-permission-label {
-                    font-size: 13px;
-                    color: #b0b0b0;
-                }
-
-                .ldb-permission-select {
-                    width: 120px;
                     padding: 6px 10px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 6px;
-                    color: #fff;
-                    font-size: 13px;
-                    cursor: pointer;
+                    border-radius: 10px;
+                    font-size: 12px;
                 }
 
-                .ldb-permission-select option {
-                    background: #1a1a2e;
-                    color: #fff;
+                .ldb-link {
+                    color: var(--ldb-ui-accent);
+                }
+
+                .ldb-checkbox-group {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                    align-items: center;
+                }
+
+                .ldb-checkbox-item {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    font-size: 12px;
+                    color: var(--ldb-ui-text);
+                    user-select: none;
+                }
+
+                .ldb-checkbox-item input[type="checkbox"],
+                .ldb-checkbox-item input[type="radio"] {
+                    accent-color: var(--ldb-ui-accent);
+                }
+
+                .ldb-toggle-section {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    gap: 10px;
+                    padding: 10px 12px;
+                    border: 1px solid var(--ldb-ui-border);
+                    border-radius: 12px;
+                    background: rgba(148, 163, 184, 0.08);
                 }
 
                 .ldb-toggle-switch {
                     position: relative;
+                    display: inline-block;
                     width: 44px;
                     height: 24px;
                 }
@@ -7336,13 +8820,11 @@ ${availableTools}
                 .ldb-toggle-slider {
                     position: absolute;
                     cursor: pointer;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    background-color: rgba(255, 255, 255, 0.1);
-                    transition: 0.3s;
-                    border-radius: 24px;
+                    inset: 0;
+                    background: rgba(148, 163, 184, 0.28);
+                    border: 1px solid var(--ldb-ui-border);
+                    transition: background 0.2s ease, border-color 0.2s ease;
+                    border-radius: 999px;
                 }
 
                 .ldb-toggle-slider:before {
@@ -7351,77 +8833,211 @@ ${availableTools}
                     height: 18px;
                     width: 18px;
                     left: 3px;
-                    bottom: 3px;
-                    background-color: #fff;
-                    transition: 0.3s;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    background: #fff;
+                    transition: transform 0.2s ease;
                     border-radius: 50%;
+                    box-shadow: 0 6px 16px rgba(2, 6, 23, 0.18);
                 }
 
                 .ldb-toggle-switch input:checked + .ldb-toggle-slider {
-                    background-color: #4a90d9;
+                    background: rgba(37, 99, 235, 0.45);
+                    border-color: rgba(37, 99, 235, 0.35);
                 }
 
                 .ldb-toggle-switch input:checked + .ldb-toggle-slider:before {
-                    transform: translateX(20px);
+                    transform: translateY(-50%) translateX(20px);
                 }
 
-                /* 操作日志面板样式 */
-                .ldb-log-panel {
-                    margin-top: 12px;
-                    background: rgba(0, 0, 0, 0.2);
-                    border-radius: 10px;
+                .ldb-toggle-content.collapsed {
+                    display: none;
+                }
+
+                .ldb-progress {
+                    padding: 10px 12px;
+                    border: 1px solid var(--ldb-ui-border);
+                    border-radius: 12px;
+                    background: rgba(148, 163, 184, 0.08);
+                }
+
+                .ldb-progress-bar {
+                    height: 10px;
+                    background: rgba(148, 163, 184, 0.20);
+                    border-radius: 999px;
                     overflow: hidden;
+                }
+
+                .ldb-progress-fill {
+                    height: 100%;
+                    background: linear-gradient(90deg, var(--ldb-ui-accent), var(--ldb-ui-accent-2));
+                    border-radius: 999px;
+                }
+
+                .ldb-progress-text {
+                    margin-top: 8px;
+                    font-size: 12px;
+                    color: var(--ldb-ui-muted);
+                    display: flex;
+                    justify-content: space-between;
+                    gap: 10px;
+                }
+
+                .ldb-bookmarks-info {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 12px;
+                    padding: 10px 12px;
+                    border: 1px solid var(--ldb-ui-border);
+                    border-radius: 12px;
+                    background: rgba(148, 163, 184, 0.08);
+                }
+
+                .ldb-bookmarks-count {
+                    font-size: 20px;
+                    font-weight: 800;
+                    letter-spacing: 0.2px;
+                    color: var(--ldb-ui-text);
+                }
+
+                .ldb-bookmarks-label {
+                    font-size: 12px;
+                    color: var(--ldb-ui-muted);
+                    text-align: right;
+                }
+
+                .ldb-bookmark-list {
+                    margin-top: 10px;
+                    border: 1px solid var(--ldb-ui-border);
+                    border-radius: 12px;
+                    overflow: hidden;
+                    background: rgba(148, 163, 184, 0.06);
+                    max-height: 260px;
+                    overflow-y: auto;
+                }
+
+                .ldb-bookmark-item {
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 10px;
+                    padding: 10px 12px;
+                    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+                    cursor: pointer;
+                }
+
+                .ldb-bookmark-item:hover {
+                    background: rgba(37, 99, 235, 0.08);
+                }
+
+                .ldb-bookmark-item:last-child {
+                    border-bottom: none;
+                }
+
+                .ldb-bookmark-item input[type="checkbox"] {
+                    margin-top: 2px;
+                }
+
+                .ldb-bookmark-item .title {
+                    font-size: 13px;
+                    font-weight: 650;
+                    line-height: 1.45;
+                    color: var(--ldb-ui-text);
+                }
+
+                .ldb-bookmark-item .status {
+                    font-size: 11px;
+                    margin-top: 4px;
+                    color: var(--ldb-ui-muted);
+                }
+
+                .ldb-bookmark-item .status.exported {
+                    color: var(--ldb-ui-success);
+                }
+
+                .ldb-bookmark-item .status.pending {
+                    color: var(--ldb-ui-warning);
+                }
+
+                .ldb-permission-panel {
+                    border: 1px solid var(--ldb-ui-border);
+                    border-radius: 12px;
+                    background: rgba(148, 163, 184, 0.08);
+                    overflow: hidden;
+                }
+
+                .ldb-permission-row {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 10px;
+                    padding: 10px 12px;
+                    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+                }
+
+                .ldb-permission-row:last-child {
+                    border-bottom: none;
+                }
+
+                .ldb-permission-label {
+                    font-size: 12px;
+                    color: var(--ldb-ui-muted);
+                }
+
+                .ldb-permission-select {
+                    min-width: 160px;
+                }
+
+                .ldb-log-panel {
+                    border: 1px solid var(--ldb-ui-border);
+                    border-radius: 12px;
+                    overflow: hidden;
+                    background: rgba(148, 163, 184, 0.06);
                 }
 
                 .ldb-log-header {
                     display: flex;
-                    align-items: center;
                     justify-content: space-between;
+                    align-items: center;
                     padding: 10px 12px;
-                    background: rgba(0, 0, 0, 0.2);
                     cursor: pointer;
-                }
-
-                .ldb-log-header:hover {
-                    background: rgba(255, 255, 255, 0.05);
+                    user-select: none;
+                    background: rgba(148, 163, 184, 0.10);
+                    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
                 }
 
                 .ldb-log-title {
-                    font-size: 13px;
-                    font-weight: 600;
-                    color: #a0a0a0;
-                    display: flex;
+                    display: inline-flex;
                     align-items: center;
-                    gap: 6px;
+                    gap: 8px;
+                    font-size: 12px;
+                    color: var(--ldb-ui-text);
+                    font-weight: 700;
                 }
 
                 .ldb-log-badge {
-                    background: #4a90d9;
-                    color: #fff;
-                    font-size: 10px;
-                    padding: 2px 6px;
-                    border-radius: 10px;
-                    font-weight: 600;
+                    padding: 1px 8px;
+                    border-radius: 999px;
+                    border: 1px solid var(--ldb-ui-border);
+                    background: rgba(148, 163, 184, 0.10);
+                    font-size: 11px;
+                    color: var(--ldb-ui-muted);
                 }
 
                 .ldb-log-content {
-                    max-height: 200px;
-                    overflow-y: auto;
-                    transition: max-height 0.3s ease;
+                    padding: 10px 12px;
                 }
 
                 .ldb-log-content.collapsed {
-                    max-height: 0;
-                    overflow: hidden;
+                    display: none;
                 }
 
                 .ldb-log-item {
-                    display: flex;
-                    align-items: flex-start;
-                    gap: 8px;
-                    padding: 8px 12px;
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-                    font-size: 12px;
+                    display: grid;
+                    grid-template-columns: 18px 1fr;
+                    gap: 10px;
+                    padding: 8px 0;
+                    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
                 }
 
                 .ldb-log-item:last-child {
@@ -7429,256 +9045,67 @@ ${availableTools}
                 }
 
                 .ldb-log-item .icon {
-                    flex-shrink: 0;
                     font-size: 14px;
+                    line-height: 1.2;
+                    opacity: 0.9;
                 }
 
                 .ldb-log-item .content {
-                    flex: 1;
-                    min-width: 0;
+                    font-size: 12px;
+                    color: var(--ldb-ui-text);
+                    line-height: 1.5;
                 }
 
                 .ldb-log-item .operation {
-                    color: #fff;
-                    font-weight: 500;
+                    font-weight: 650;
                 }
 
-                .ldb-log-item .time {
-                    color: #666;
-                    font-size: 11px;
-                }
-
+                .ldb-log-item .time,
                 .ldb-log-item .duration {
-                    color: #888;
+                    margin-top: 2px;
                     font-size: 11px;
+                    color: var(--ldb-ui-muted);
                 }
 
                 .ldb-log-item .error {
-                    color: #ef4444;
+                    margin-top: 4px;
+                    color: var(--ldb-ui-danger);
                     font-size: 11px;
-                    margin-top: 2px;
                 }
 
                 .ldb-log-empty {
-                    padding: 16px;
-                    text-align: center;
-                    color: #666;
+                    padding: 10px 0;
+                    color: var(--ldb-ui-muted);
                     font-size: 12px;
+                    text-align: center;
                 }
 
                 .ldb-log-actions {
-                    padding: 8px 12px;
-                    border-top: 1px solid rgba(255, 255, 255, 0.05);
+                    margin-top: 10px;
                     display: flex;
                     justify-content: flex-end;
                 }
 
                 .ldb-log-clear-btn {
-                    background: none;
-                    border: none;
-                    color: #888;
-                    font-size: 11px;
+                    border: 1px solid var(--ldb-ui-border);
+                    background: rgba(148, 163, 184, 0.10);
+                    color: var(--ldb-ui-text);
+                    border-radius: 10px;
+                    padding: 6px 10px;
                     cursor: pointer;
-                    padding: 4px 8px;
-                    border-radius: 4px;
+                    font-size: 12px;
                 }
 
                 .ldb-log-clear-btn:hover {
-                    background: rgba(255, 255, 255, 0.1);
-                    color: #fff;
+                    background: rgba(148, 163, 184, 0.16);
                 }
 
-                /* 确认对话框样式 */
-                .ldb-confirm-overlay {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    background: rgba(0, 0, 0, 0.7);
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    z-index: 100000;
-                    animation: ldb-fade-in 0.2s ease;
-                }
-
-                @keyframes ldb-fade-in {
-                    from { opacity: 0; }
-                    to { opacity: 1; }
-                }
-
-                .ldb-confirm-dialog {
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    border: 1px solid #ef4444;
-                    border-radius: 16px;
-                    width: 400px;
-                    max-width: 90%;
-                    box-shadow: 0 8px 32px rgba(239, 68, 68, 0.3);
-                    animation: ldb-slide-up 0.3s ease;
-                }
-
-                @keyframes ldb-slide-up {
-                    from { transform: translateY(20px); opacity: 0; }
-                    to { transform: translateY(0); opacity: 1; }
-                }
-
-                .ldb-confirm-header {
-                    display: flex;
-                    align-items: center;
-                    gap: 10px;
-                    padding: 16px;
-                    background: rgba(239, 68, 68, 0.1);
-                    border-radius: 16px 16px 0 0;
-                    border-bottom: 1px solid rgba(239, 68, 68, 0.2);
-                }
-
-                .ldb-confirm-icon {
-                    font-size: 24px;
-                }
-
-                .ldb-confirm-title {
-                    font-size: 16px;
-                    font-weight: 600;
-                    color: #ef4444;
-                }
-
-                .ldb-confirm-body {
-                    padding: 16px;
-                }
-
-                .ldb-confirm-message {
-                    font-size: 14px;
-                    color: #e0e0e0;
-                    margin: 0 0 12px 0;
-                    line-height: 1.5;
-                }
-
-                .ldb-confirm-item {
-                    font-size: 13px;
-                    color: #a0a0a0;
-                    margin: 0 0 12px 0;
-                    padding: 10px;
-                    background: rgba(0, 0, 0, 0.2);
-                    border-radius: 8px;
-                }
-
-                .ldb-confirm-item strong {
-                    color: #fff;
-                }
-
-                .ldb-confirm-input-group {
-                    margin-top: 12px;
-                }
-
-                .ldb-confirm-input-group label {
-                    display: block;
-                    font-size: 12px;
-                    color: #888;
-                    margin-bottom: 6px;
-                }
-
-                .ldb-confirm-input {
-                    width: 100%;
-                    padding: 10px 12px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(239, 68, 68, 0.3);
-                    border-radius: 8px;
-                    color: #fff;
-                    font-size: 14px;
-                    box-sizing: border-box;
-                }
-
-                .ldb-confirm-input:focus {
-                    outline: none;
-                    border-color: #ef4444;
-                }
-
-                .ldb-confirm-hint {
-                    font-size: 11px;
-                    color: #666;
-                    margin-top: 6px;
-                }
-
-                .ldb-confirm-footer {
+                .ldb-control-btns {
                     display: flex;
                     gap: 10px;
-                    padding: 16px;
-                    border-top: 1px solid rgba(255, 255, 255, 0.1);
+                    flex-wrap: wrap;
                 }
-
-                .ldb-confirm-footer .ldb-btn {
-                    flex: 1;
-                }
-
-                /* 撤销提示 toast 样式 */
-                .ldb-undo-toast {
-                    position: fixed;
-                    bottom: 20px;
-                    left: 50%;
-                    transform: translateX(-50%) translateY(100px);
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    border: 1px solid #4a90d9;
-                    border-radius: 12px;
-                    padding: 12px 16px;
-                    display: flex;
-                    align-items: center;
-                    gap: 12px;
-                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-                    z-index: 100001;
-                    opacity: 0;
-                    transition: transform 0.3s ease, opacity 0.3s ease;
-                }
-
-                .ldb-undo-toast.visible {
-                    transform: translateX(-50%) translateY(0);
-                    opacity: 1;
-                }
-
-                .ldb-undo-message {
-                    font-size: 13px;
-                    color: #e0e0e0;
-                }
-
-                .ldb-undo-btn {
-                    background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
-                    border: none;
-                    color: #fff;
-                    padding: 6px 12px;
-                    border-radius: 6px;
-                    font-size: 12px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: background 0.2s;
-                }
-
-                .ldb-undo-btn:hover {
-                    background: linear-gradient(135deg, #5a9fe9 0%, #458acd 100%);
-                }
-
-                .ldb-undo-progress {
-                    position: absolute;
-                    bottom: 0;
-                    left: 0;
-                    right: 0;
-                    height: 3px;
-                    background: rgba(255, 255, 255, 0.1);
-                    border-radius: 0 0 12px 12px;
-                    overflow: hidden;
-                }
-
-                .ldb-undo-progress-bar {
-                    height: 100%;
-                    background: linear-gradient(90deg, #4a90d9, #34d399);
-                    animation: ldb-undo-countdown 5s linear forwards;
-                }
-
-                @keyframes ldb-undo-countdown {
-                    from { width: 100%; }
-                    to { width: 0%; }
-                }
-            `;
-            document.head.appendChild(style);
+            `);
         },
 
         // 创建面板
@@ -7852,7 +9279,7 @@ ${availableTools}
                             <div class="ldb-chat-welcome">
                                 <div class="ldb-chat-welcome-icon">🤖</div>
                                 <div class="ldb-chat-welcome-text">
-                                    你好！我是 AI 助手<br>
+                                    你好！我是 ${Utils.escapeHtml(Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName))}<br>
                                     <small>试试输入「帮助」查看我能做什么</small>
                                 </div>
                             </div>
@@ -7935,6 +9362,47 @@ ${availableTools}
                             <div class="ldb-btn-group" style="display: flex; align-items: center; gap: 8px;">
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-test">测试连接</button>
                                 <span id="ldb-ai-test-status" style="font-size: 12px;"></span>
+                            </div>
+
+                            <!-- Agent 个性化设置 -->
+                            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
+                                <span style="font-size: 12px; color: #888;">🤖 Agent 个性化</span>
+                            </div>
+                            <div class="ldb-input-group" style="margin-top: 8px;">
+                                <label class="ldb-label">助手名字</label>
+                                <input type="text" class="ldb-input" id="ldb-agent-persona-name" placeholder="AI 助手">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">语气风格</label>
+                                <select class="ldb-select" id="ldb-agent-persona-tone">
+                                    <option value="友好">友好</option>
+                                    <option value="专业">专业</option>
+                                    <option value="幽默">幽默</option>
+                                    <option value="简洁">简洁</option>
+                                    <option value="热情">热情</option>
+                                </select>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">专业领域</label>
+                                <input type="text" class="ldb-input" id="ldb-agent-persona-expertise" placeholder="Notion 工作区管理">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">自定义指令 (可选)</label>
+                                <textarea class="ldb-input" id="ldb-agent-persona-instructions" rows="2" placeholder="额外的行为指令，如：总是用列表格式回复" style="resize: vertical;"></textarea>
+                                <div class="ldb-tip">Agent 每次对话都会遵循的个性化指令</div>
+                            </div>
+                            <!-- GitHub 收藏导入设置 -->
+                            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
+                                <span style="font-size: 12px; color: #888;">🐙 GitHub 收藏导入</span>
+                            </div>
+                            <div class="ldb-input-group" style="margin-top: 8px;">
+                                <label class="ldb-label">GitHub 用户名</label>
+                                <input type="text" class="ldb-input" id="ldb-github-username" placeholder="your-username">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">GitHub Token (可选)</label>
+                                <input type="password" class="ldb-input" id="ldb-github-token" placeholder="ghp_xxx...">
+                                <div class="ldb-tip">不填写也可使用，但有速率限制</div>
                             </div>
                         </div>
                     </div>
@@ -8646,6 +10114,26 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, parseInt(e.target.value) || 0);
             };
 
+            // Agent 个性化设置
+            panel.querySelector("#ldb-agent-persona-name").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, e.target.value.trim() || CONFIG.DEFAULTS.agentPersonaName);
+            };
+            panel.querySelector("#ldb-agent-persona-tone").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, e.target.value);
+            };
+            panel.querySelector("#ldb-agent-persona-expertise").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, e.target.value.trim() || CONFIG.DEFAULTS.agentPersonaExpertise);
+            };
+            panel.querySelector("#ldb-agent-persona-instructions").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, e.target.value.trim());
+            };
+            panel.querySelector("#ldb-github-username").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, e.target.value.trim());
+            };
+            panel.querySelector("#ldb-github-token").onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, e.target.value.trim());
+            };
+
             // 刷新 AI 数据库列表
             panel.querySelector("#ldb-ai-refresh-dbs").onclick = async () => {
                 const apiKey = panel.querySelector("#ldb-api-key").value.trim();
@@ -8864,6 +10352,16 @@ ${availableTools}
             panel.querySelector("#ldb-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
             panel.querySelector("#ldb-workspace-max-pages").value = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages);
 
+            // 加载 Agent 个性化设置
+            panel.querySelector("#ldb-agent-persona-name").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName);
+            panel.querySelector("#ldb-agent-persona-tone").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, CONFIG.DEFAULTS.agentPersonaTone);
+            panel.querySelector("#ldb-agent-persona-expertise").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG.DEFAULTS.agentPersonaExpertise);
+            panel.querySelector("#ldb-agent-persona-instructions").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG.DEFAULTS.agentPersonaInstructions);
+
+            // 加载 GitHub 设置
+            panel.querySelector("#ldb-github-username").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
+            panel.querySelector("#ldb-github-token").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
+
             // 加载 AI 查询目标数据库设置
             const cachedWorkspaceForDb = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
             try {
@@ -8899,7 +10397,13 @@ ${availableTools}
             panel.querySelector("#ldb-auto-import-enabled").checked = autoImportEnabled;
             panel.querySelector("#ldb-auto-import-options").style.display = autoImportEnabled ? "block" : "none";
             const autoImportInterval = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval);
-            panel.querySelector("#ldb-auto-import-interval").value = autoImportInterval;
+            const intervalSelect = panel.querySelector("#ldb-auto-import-interval");
+            intervalSelect.value = autoImportInterval;
+            // 如果存储的值不在选项中，回退到默认值
+            if (intervalSelect.selectedIndex === -1) {
+                intervalSelect.value = CONFIG.DEFAULTS.autoImportInterval;
+                Storage.set(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval);
+            }
         },
 
         // 显示状态
@@ -9213,6 +10717,14 @@ ${availableTools}
             UI.createPanel();
             UI.miniBtn = UI.createMiniButton();
 
+            // 面板可拉伸（左边+下边+左下角）
+            PanelResize.makeResizable(UI.panel, {
+                edges: ["l", "b", "bl"],
+                storageKey: CONFIG.STORAGE_KEYS.PANEL_SIZE_MAIN,
+                minWidth: 300,
+                minHeight: 300,
+            });
+
             // 检查是否需要最小化启动
             if (Storage.get(CONFIG.STORAGE_KEYS.PANEL_MINIMIZED, false)) {
                 UI.panel.style.display = "none";
@@ -9225,6 +10737,437 @@ ${availableTools}
     };
 
     // ===========================================
+    // 通用网页剪藏 UI
+    // ===========================================
+    const GenericUI = {
+        panel: null,
+        floatBtn: null,
+        isExporting: false,
+
+        // 注入样式
+        injectStyles: () => {
+            DesignSystem.ensureBase();
+            StyleManager.injectOnce(DesignSystem.STYLE_IDS.GENERIC, `
+                /* LDB_UI_GENERIC */
+                .gclip-float-btn {
+                    position: fixed;
+                    bottom: 24px;
+                    right: 24px;
+                    width: 48px;
+                    height: 48px;
+                    border-radius: 999px;
+                    background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
+                    color: #fff;
+                    border: 1px solid rgba(37, 99, 235, 0.35);
+                    cursor: pointer;
+                    box-shadow: var(--ldb-ui-shadow-sm);
+                    z-index: 2147483647;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 22px;
+                    transition: transform 0.18s ease, box-shadow 0.18s ease;
+                    user-select: none;
+                }
+
+                .gclip-float-btn:hover {
+                    transform: translateY(-1px) scale(1.03);
+                    box-shadow: var(--ldb-ui-shadow);
+                }
+
+                .gclip-float-btn.exporting {
+                    background: linear-gradient(135deg, #f59e0b, var(--ldb-ui-warning));
+                    border-color: rgba(217, 119, 6, 0.35);
+                    animation: gclip-pulse 1.2s infinite;
+                }
+
+                .gclip-float-btn.success {
+                    background: linear-gradient(135deg, #10b981, var(--ldb-ui-success));
+                    border-color: rgba(22, 163, 74, 0.35);
+                }
+
+                .gclip-float-btn.error {
+                    background: linear-gradient(135deg, #ef4444, var(--ldb-ui-danger));
+                    border-color: rgba(220, 38, 38, 0.35);
+                }
+
+                @keyframes gclip-pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.6; }
+                }
+
+                .gclip-panel {
+                    position: fixed;
+                    bottom: 84px;
+                    right: 24px;
+                    width: 320px;
+                    z-index: 2147483646;
+                    display: none;
+                    overflow: hidden;
+                    transform: translateY(12px);
+                    opacity: 0;
+                    transition: transform 0.22s ease, opacity 0.22s ease;
+                }
+
+                .gclip-panel.visible {
+                    display: block;
+                    transform: translateY(0);
+                    opacity: 1;
+                }
+
+                .gclip-panel-header {
+                    background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
+                    color: #fff;
+                }
+
+                .gclip-panel-header .close-btn {
+                    border-color: rgba(255, 255, 255, 0.22);
+                    background: rgba(255, 255, 255, 0.14);
+                    color: #fff;
+                }
+
+                .gclip-panel-header .close-btn:hover {
+                    background: rgba(255, 255, 255, 0.22);
+                }
+
+                .gclip-preview {
+                    border: 1px solid var(--ldb-ui-border);
+                    border-radius: 12px;
+                    padding: 10px 12px;
+                    background: rgba(148, 163, 184, 0.08);
+                    margin-bottom: 12px;
+                }
+
+                .gclip-preview .title {
+                    font-size: 13px;
+                    font-weight: 700;
+                    line-height: 1.45;
+                    color: var(--ldb-ui-text);
+                }
+
+                .gclip-preview .meta {
+                    margin-top: 4px;
+                    font-size: 12px;
+                    color: var(--ldb-ui-muted);
+                }
+
+                .gclip-status {
+                    margin-top: 10px;
+                    padding: 10px 12px;
+                    border-radius: 12px;
+                    border: 1px solid var(--ldb-ui-border);
+                    font-size: 12px;
+                    display: none;
+                }
+
+                .gclip-status.info {
+                    display: block;
+                    border-color: rgba(37, 99, 235, 0.30);
+                    background: rgba(37, 99, 235, 0.10);
+                    color: var(--ldb-ui-text);
+                }
+
+                .gclip-status.success {
+                    display: block;
+                    border-color: rgba(22, 163, 74, 0.35);
+                    background: rgba(22, 163, 74, 0.12);
+                    color: var(--ldb-ui-text);
+                }
+
+                .gclip-status.error {
+                    display: block;
+                    border-color: rgba(220, 38, 38, 0.35);
+                    background: rgba(220, 38, 38, 0.12);
+                    color: var(--ldb-ui-text);
+                }
+
+                .gclip-btn-primary {
+                    /* alias for `.gclip-btn` */
+                }
+
+                .gclip-btn-setup {
+                    border: 1px solid var(--ldb-ui-border);
+                    background: rgba(148, 163, 184, 0.12);
+                    color: var(--ldb-ui-text);
+                    font-weight: 650;
+                }
+            `);
+        },
+
+        // 创建浮动按钮
+        createFloatButton: () => {
+            const btn = document.createElement("button");
+            btn.className = "gclip-float-btn";
+            btn.innerHTML = "📎";
+            btn.title = "导出到 Notion";
+            btn.addEventListener("click", () => {
+                if (GenericUI.isExporting) return;
+                GenericUI.togglePanel();
+            });
+            document.body.appendChild(btn);
+            GenericUI.floatBtn = btn;
+            return btn;
+        },
+
+        // 创建设置面板
+        createPanel: () => {
+            const panel = document.createElement("div");
+            panel.className = "gclip-panel";
+
+            const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            const dbId = Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+            const parentPageId = Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "");
+            const exportType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "database");
+            const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, "external");
+            const meta = GenericExtractor.extractMeta();
+
+            // 根据导出类型判断是否已配置完成
+            const targetId = exportType === "page" ? parentPageId : dbId;
+            const isConfigured = !!(apiKey && targetId);
+
+            panel.innerHTML = `
+                <div class="gclip-panel-header">
+                    <span>📎 导出到 Notion</span>
+                    <button class="close-btn" id="gclip-close">✕</button>
+                </div>
+                <div class="gclip-panel-body">
+                    <div class="gclip-preview">
+                        <div class="title">${Utils.escapeHtml(meta.title)}</div>
+                        <div class="meta">
+                            ${meta.author ? `作者: ${Utils.escapeHtml(meta.author)}<br>` : ""}
+                            ${meta.siteName ? `来源: ${Utils.escapeHtml(meta.siteName)}` : ""}
+                            ${meta.publishDate ? ` · ${meta.publishDate}` : ""}
+                        </div>
+                    </div>
+
+                    <div id="gclip-settings" style="display: ${isConfigured ? 'none' : 'block'};">
+                        <div class="gclip-field">
+                            <label>Notion API Key</label>
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="secret_..." value="${Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY) || ''}" style="flex:1;font-size:12px;" autocomplete="off" />
+                                <button class="gclip-btn" id="gclip-save-api-key" style="padding:4px 12px;font-size:12px;">保存</button>
+                            </div>
+                        </div>
+                        <div class="gclip-field">
+                            <label>导出目标类型</label>
+                            <select id="gclip-export-type">
+                                <option value="database" ${exportType === "database" ? "selected" : ""}>数据库</option>
+                                <option value="page" ${exportType === "page" ? "selected" : ""}>页面（子页面）</option>
+                            </select>
+                        </div>
+                        <div class="gclip-field">
+                            <label id="gclip-target-label">${exportType === "page" ? "父页面 ID" : "数据库 ID"}</label>
+                            <input type="text" id="gclip-target-id" value="" placeholder="32位ID">
+                        </div>
+                        <div class="gclip-field">
+                            <label>图片处理</label>
+                            <select id="gclip-img-mode">
+                                <option value="external" ${imgMode === "external" ? "selected" : ""}>外链引用</option>
+                                <option value="upload" ${imgMode === "upload" ? "selected" : ""}>上传到 Notion</option>
+                                <option value="skip" ${imgMode === "skip" ? "selected" : ""}>跳过图片</option>
+                            </select>
+                        </div>
+                        <button class="gclip-btn gclip-btn-primary" id="gclip-save-settings">保存配置</button>
+                    </div>
+
+                    <button class="gclip-btn gclip-btn-primary" id="gclip-export" style="display: ${isConfigured ? 'block' : 'none'};">
+                        导出当前页面
+                    </button>
+                    <button class="gclip-btn gclip-btn-setup" id="gclip-show-settings" style="display: ${isConfigured ? 'block' : 'none'};">
+                        修改配置
+                    </button>
+
+                    <div class="gclip-status" id="gclip-status"></div>
+                </div>
+            `;
+
+            document.body.appendChild(panel);
+            GenericUI.panel = panel;
+
+            // 绑定事件
+            GenericUI.bindEvents();
+
+            // 未配置时设置面板可见，仅填充非敏感字段
+            if (!isConfigured) {
+                panel.querySelector("#gclip-target-id").value = targetId;
+            }
+            return panel;
+        },
+
+        // 绑定面板事件
+        bindEvents: () => {
+            const panel = GenericUI.panel;
+
+            // 关闭按钮
+            panel.querySelector("#gclip-close").addEventListener("click", () => {
+                GenericUI.togglePanel(false);
+            });
+
+            // 导出类型切换
+            panel.querySelector("#gclip-export-type").addEventListener("change", (e) => {
+                const isPage = e.target.value === "page";
+                panel.querySelector("#gclip-target-label").textContent = isPage ? "父页面 ID" : "数据库 ID";
+            });
+
+            // 保存 API Key（从面板内密码输入框读取，避免使用可被宿主页面拦截的 prompt()）
+            panel.querySelector("#gclip-save-api-key").addEventListener("click", () => {
+                const key = panel.querySelector("#gclip-api-key-input").value.trim();
+                if (key) {
+                    Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, key);
+                    GenericUI.showStatus("API Key 已保存", "success");
+                }
+            });
+
+            // 保存配置
+            panel.querySelector("#gclip-save-settings").addEventListener("click", async () => {
+                // 优先读取输入框中的值（用户可能还没点保存就直接保存配置）
+                const liveKey = panel.querySelector("#gclip-api-key-input").value.trim();
+                if (liveKey) Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, liveKey);
+                const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
+                const exportType = panel.querySelector("#gclip-export-type").value;
+                const targetId = panel.querySelector("#gclip-target-id").value.trim().replace(/-/g, "");
+                const imgMode = panel.querySelector("#gclip-img-mode").value;
+
+                if (!apiKey) return GenericUI.showStatus("请先设置 Notion API Key", "error");
+                if (!targetId) return GenericUI.showStatus("请输入目标 ID", "error");
+
+                Storage.set(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, exportType);
+                Storage.set(CONFIG.STORAGE_KEYS.IMG_MODE, imgMode);
+
+                if (exportType === "page") {
+                    Storage.set(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, targetId);
+                } else {
+                    Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, targetId);
+                    // 自动设置数据库属性
+                    GenericUI.showStatus("正在配置数据库属性...", "info");
+                    const result = await GenericExporter.setupDatabaseProperties(targetId, apiKey);
+                    if (!result.success) {
+                        return GenericUI.showStatus(`配置失败: ${result.message || result.error}`, "error");
+                    }
+                }
+
+                GenericUI.showStatus("配置已保存", "success");
+                panel.querySelector("#gclip-settings").style.display = "none";
+                panel.querySelector("#gclip-export").style.display = "block";
+                panel.querySelector("#gclip-show-settings").style.display = "block";
+            });
+
+            // 显示设置（不在 DOM 中预填 API Key，防止第三方页面读取）
+            panel.querySelector("#gclip-show-settings").addEventListener("click", () => {
+                const settings = panel.querySelector("#gclip-settings");
+                const showing = settings.style.display === "none";
+                if (showing) {
+                    const exportType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "database");
+                    const tid = exportType === "page"
+                        ? Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "")
+                        : Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+                    panel.querySelector("#gclip-target-id").value = tid;
+                    // API Key 不预填到 DOM，用户需手动输入或留空使用已保存配置
+                }
+                settings.style.display = showing ? "block" : "none";
+            });
+
+            // 导出按钮
+            panel.querySelector("#gclip-export").addEventListener("click", () => {
+                GenericUI.doExport();
+            });
+        },
+
+        // 执行导出
+        doExport: async () => {
+            if (GenericUI.isExporting) return;
+            GenericUI.isExporting = true;
+
+            const btn = GenericUI.panel.querySelector("#gclip-export");
+            const floatBtn = GenericUI.floatBtn;
+            btn.disabled = true;
+            btn.textContent = "导出中...";
+            floatBtn.className = "gclip-float-btn exporting";
+            GenericUI.showStatus("正在提取页面内容...", "info");
+
+            try {
+                const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+                const exportType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "database");
+                const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, "external");
+
+                const settings = {
+                    apiKey,
+                    exportTargetType: exportType,
+                    databaseId: Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
+                    parentPageId: Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, ""),
+                    imgMode,
+                };
+
+                GenericUI.showStatus("正在导出到 Notion...", "info");
+                const { page, meta } = await GenericExporter.exportCurrentPage(settings);
+
+                floatBtn.className = "gclip-float-btn success";
+                GenericUI.showStatus(`导出成功: ${meta.title}`, "success");
+
+                // 3 秒后恢复按钮状态
+                setTimeout(() => {
+                    floatBtn.className = "gclip-float-btn";
+                }, 3000);
+            } catch (error) {
+                floatBtn.className = "gclip-float-btn error";
+                GenericUI.showStatus(`导出失败: ${error.message}`, "error");
+                setTimeout(() => {
+                    floatBtn.className = "gclip-float-btn";
+                }, 3000);
+            } finally {
+                GenericUI.isExporting = false;
+                btn.disabled = false;
+                btn.textContent = "导出当前页面";
+            }
+        },
+
+        // 显示状态
+        showStatus: (message, type = "info") => {
+            const el = GenericUI.panel.querySelector("#gclip-status");
+            el.textContent = message;
+            el.className = `gclip-status ${type}`;
+        },
+
+        // 切换面板显示
+        togglePanel: (show) => {
+            if (!GenericUI.panel) return;
+            const isVisible = GenericUI.panel.classList.contains("visible");
+            const shouldShow = show !== undefined ? show : !isVisible;
+            if (shouldShow) {
+                GenericUI.panel.style.display = "block";
+                // 触发 reflow 使 transition 生效
+                GenericUI.panel.offsetHeight;
+                GenericUI.panel.classList.add("visible");
+            } else {
+                GenericUI.panel.classList.remove("visible");
+                GenericUI.panel.addEventListener("transitionend", function handler() {
+                    if (!GenericUI.panel.classList.contains("visible")) {
+                        GenericUI.panel.style.display = "none";
+                    }
+                    GenericUI.panel.removeEventListener("transitionend", handler);
+                });
+            }
+        },
+
+        // 初始化
+        init: () => {
+            // 非 HTML 文档（如 XML/RSS）无 body，跳过 UI 注入
+            if (!document.body) return;
+            GenericUI.injectStyles();
+            GenericUI.createFloatButton();
+            GenericUI.createPanel();
+
+            // 面板可拉伸（左边+上边+左上角）
+            PanelResize.makeResizable(GenericUI.panel, {
+                edges: ["l", "t", "tl"],
+                storageKey: CONFIG.STORAGE_KEYS.PANEL_SIZE_GENERIC,
+                minWidth: 260,
+                minHeight: 200,
+            });
+        },
+    };
+
+    // ===========================================
     // 入口
     // ===========================================
     function main() {
@@ -9232,11 +11175,19 @@ ${availableTools}
             const currentSite = SiteDetector.detect();
 
             if (currentSite === SiteDetector.SITES.LINUX_DO) {
-                // Linux.do 站点：初始化完整 UI
+                // 所有 Linux.do 页面均显示面板（导出/AI 助手/设置）
                 UI.init();
+                // 非收藏页面额外启动后台自动导入
+                const isBookmarkPage = /\/u\/[^/]+\/activity\/bookmarks/.test(window.location.pathname);
+                if (!isBookmarkPage) {
+                    AutoImporter.init();
+                }
             } else if (currentSite === SiteDetector.SITES.NOTION) {
                 // Notion 站点：初始化浮动 AI 助手
                 NotionSiteUI.init();
+            } else if (currentSite === SiteDetector.SITES.GENERIC) {
+                // 通用网页：初始化剪藏按钮
+                GenericUI.init();
             }
         };
 

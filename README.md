@@ -198,6 +198,12 @@ A: 请检查：
 - DOM 解析转换为 Notion Block 格式
 - 自动处理 API 速率限制 (429 响应自动重试)
 - AI 助手使用 ReAct Agent Loop 架构，支持多轮推理和工具调用
+
+## 开发与验证
+
+- 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）
+- UI 静态校验：`node scripts/validate-userscript-ui.js`（或 `python3 scripts/validate-userscript-ui.py`）
+- UI 手工回归：`docs/ui-regression-checklist.md`
 - 四级权限模型 + OperationGuard 保护所有写入操作
 
 ## 更新日志

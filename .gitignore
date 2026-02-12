@@ -1,2 +1,6 @@
 .ace-tool/
+.workflow/
+.~lock.*
+__pycache__/
+*.pyc
 output_post.html
