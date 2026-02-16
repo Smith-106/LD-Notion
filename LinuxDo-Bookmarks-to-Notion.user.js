@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LD-Notion — Notion AI 助手 & Linux.do 收藏导出
 // @namespace    https://linux.do/
-// @version      2.5.0
-// @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion，GitHub Stars 导入与 AI 分类，支持自动导入、权限控制
+// @version      3.0.0
+// @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion，GitHub 全类型导入（Stars/Repos/Forks/Gists），浏览器书签导入，跨源智能搜索与推荐，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
@@ -100,6 +100,13 @@
             GITHUB_USERNAME: "ldb_github_username",
             GITHUB_TOKEN: "ldb_github_token",
             GITHUB_EXPORTED_REPOS: "ldb_github_exported_repos",
+            GITHUB_IMPORT_TYPES: "ldb_github_import_types",
+            GITHUB_EXPORTED_GISTS: "ldb_github_exported_gists",
+            // 浏览器书签导入
+            BOOKMARK_EXPORTED: "ldb_bookmark_exported",
+            BOOKMARK_IMPORT_FOLDERS: "ldb_bookmark_import_folders",
+            // 跨源设置
+            CROSS_SOURCE_MODE: "ldb_cross_source_mode",
             // 面板尺寸记忆
             PANEL_SIZE_NOTION: "ldb_panel_size_notion",
             PANEL_SIZE_MAIN: "ldb_panel_size_main",
@@ -140,6 +147,10 @@
                 { name: "SWOT 分析", prompt: "对以下内容进行 SWOT 分析（优势、劣势、机会、威胁），使用 Markdown 表格格式。", icon: "📊" },
                 { name: "行动计划", prompt: "根据以下内容提炼出具体的行动计划，包含：目标、步骤、负责人、截止时间。使用 Markdown 格式。", icon: "🎯" },
             ]),
+            // GitHub 导入类型默认值
+            githubImportTypes: JSON.stringify(["stars"]),
+            // 跨源模式默认值
+            crossSourceMode: "separate",  // separate(分库) 或 unified(统一库)
         },
         // 导出目标类型
         EXPORT_TARGET_TYPES: {
@@ -1698,6 +1709,7 @@
             EXTRACT_TO_DB: "extract_to_database",  // 内容提取为数据库
             GENERATE_PAGES: "generate_pages",      // 多页面结构化生成
             BATCH_ANALYZE: "batch_analyze",        // 批量页面分析
+            BOOKMARK_IMPORT: "bookmark_import",    // 导入浏览器书签
             HELP: "help",             // 帮助
             COMPOUND: "compound",     // 组合指令
             UNKNOWN: "unknown"        // 未知
@@ -1914,6 +1926,298 @@
                         lines.push(`- ${name}: ${prop.type}${extra}`);
                     }
                     return lines.join("\n");
+                }
+            },
+
+            // === 跨源工具 (Level 0) ===
+            cross_source_search: {
+                description: "跨源搜索：在 Linux.do、GitHub、浏览器书签等多个来源中统一搜索",
+                params: "query(搜索词), source(可选:'linux.do'|'github'|'书签'|'all', 默认all), limit(数量,默认10)",
+                level: 0,
+                execute: async (args, settings) => {
+                    const { query = "", source = "all", limit = 10 } = args;
+                    const targetDb = Storage.get(CONFIG.STORAGE_KEYS.AI_TARGET_DB, "");
+
+                    // 构建来源过滤
+                    let sourceFilter = null;
+                    if (source !== "all") {
+                        const sourceMap = { "linux.do": "Linux.do", "github": "GitHub", "书签": "浏览器书签" };
+                        const sourceValue = sourceMap[source.toLowerCase()] || source;
+                        sourceFilter = { property: "来源", rich_text: { contains: sourceValue } };
+                    }
+
+                    // 构建搜索过滤
+                    const filters = [];
+                    if (sourceFilter) filters.push(sourceFilter);
+
+                    const queryOneDb = async (dbId) => {
+                        const body = { page_size: Math.min(limit, 100) };
+                        if (filters.length > 0) {
+                            body.filter = filters.length === 1 ? filters[0] : { and: filters };
+                        }
+                        try {
+                            const response = await NotionAPI.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
+                            return response.results || [];
+                        } catch { return []; }
+                    };
+
+                    let results = [];
+                    if (targetDb && targetDb !== "__all__" && !targetDb.startsWith("page:")) {
+                        results = await queryOneDb(targetDb);
+                    } else {
+                        // 搜索所有数据库
+                        const allDbs = await NotionAPI.search("", { property: "object", value: "database" }, settings.notionApiKey);
+                        for (const db of (allDbs.results || []).slice(0, 5)) {
+                            const dbResults = await queryOneDb(db.id);
+                            results.push(...dbResults);
+                        }
+                    }
+
+                    // 如果有搜索词，在结果中过滤
+                    if (query) {
+                        results = results.filter(page => {
+                            const title = Utils.getPageTitle(page).toLowerCase();
+                            const desc = page.properties?.["描述"]?.rich_text?.[0]?.text?.content?.toLowerCase() || "";
+                            return title.includes(query.toLowerCase()) || desc.includes(query.toLowerCase());
+                        });
+                    }
+
+                    results = results.slice(0, limit);
+
+                    if (results.length === 0) {
+                        return `没有找到${source !== "all" ? `来源为「${source}」的` : ""}包含「${query}」的内容。`;
+                    }
+
+                    const lines = results.map(page => {
+                        const title = Utils.getPageTitle(page);
+                        const src = page.properties?.["来源"]?.rich_text?.[0]?.text?.content || "未知";
+                        const srcType = page.properties?.["来源类型"]?.rich_text?.[0]?.text?.content || "";
+                        const url = page.properties?.["链接"]?.url || "";
+                        return `[${src}${srcType ? "/" + srcType : ""}] ${title}${url ? ` (${url})` : ""}`;
+                    });
+
+                    return `跨源搜索结果 (${results.length} 条)：\n${lines.join("\n")}`;
+                }
+            },
+
+            unified_stats: {
+                description: "跨源统计：统计各来源（Linux.do/GitHub/浏览器书签）的数据量、分类分布",
+                params: "无需参数",
+                level: 0,
+                execute: async (args, settings) => {
+                    const targetDb = Storage.get(CONFIG.STORAGE_KEYS.AI_TARGET_DB, "");
+
+                    const queryOneDb = async (dbId) => {
+                        try {
+                            const response = await NotionAPI.request("POST", `/databases/${dbId}/query`, { page_size: 100 }, settings.notionApiKey);
+                            return response.results || [];
+                        } catch { return []; }
+                    };
+
+                    let allPages = [];
+                    if (targetDb && targetDb !== "__all__" && !targetDb.startsWith("page:")) {
+                        allPages = await queryOneDb(targetDb);
+                    } else {
+                        const allDbs = await NotionAPI.search("", { property: "object", value: "database" }, settings.notionApiKey);
+                        for (const db of (allDbs.results || []).slice(0, 5)) {
+                            allPages.push(...await queryOneDb(db.id));
+                        }
+                    }
+
+                    // 按来源统计
+                    const sourceStats = {};
+                    const categoryStats = {};
+                    for (const page of allPages) {
+                        const src = page.properties?.["来源"]?.rich_text?.[0]?.text?.content || "未标记";
+                        const cat = page.properties?.["分类"]?.rich_text?.[0]?.text?.content || "未分类";
+                        sourceStats[src] = (sourceStats[src] || 0) + 1;
+                        categoryStats[cat] = (categoryStats[cat] || 0) + 1;
+                    }
+
+                    let report = `📊 **跨源数据统计** (共 ${allPages.length} 条)\n\n`;
+                    report += `**按来源分布：**\n`;
+                    for (const [src, count] of Object.entries(sourceStats).sort((a, b) => b[1] - a[1])) {
+                        report += `- ${src}: ${count} 条\n`;
+                    }
+                    report += `\n**按分类分布 (前 10)：**\n`;
+                    const topCats = Object.entries(categoryStats).sort((a, b) => b[1] - a[1]).slice(0, 10);
+                    for (const [cat, count] of topCats) {
+                        report += `- ${cat}: ${count} 条\n`;
+                    }
+
+                    return report;
+                }
+            },
+
+            recommend_similar: {
+                description: "智能推荐：根据指定页面，从所有来源中找到相似内容",
+                params: "page_name/page_id(参考页面)",
+                level: 0,
+                execute: async (args, settings) => {
+                    const { page_name, page_id } = args;
+
+                    // 先找到参考页面
+                    let refPage = null;
+                    if (page_id) {
+                        try {
+                            refPage = await NotionAPI.request("GET", `/pages/${page_id}`, null, settings.notionApiKey);
+                        } catch {}
+                    }
+                    if (!refPage && page_name) {
+                        const searchResult = await NotionAPI.search(page_name, null, settings.notionApiKey);
+                        refPage = (searchResult.results || []).find(r => r.object === "page");
+                    }
+
+                    if (!refPage) {
+                        return "❌ 未找到参考页面，请提供页面名称或 ID。";
+                    }
+
+                    const refTitle = Utils.getPageTitle(refPage);
+                    const refDesc = refPage.properties?.["描述"]?.rich_text?.[0]?.text?.content || "";
+                    const refTags = (refPage.properties?.["标签"]?.multi_select || []).map(t => t.name);
+
+                    // 用 AI 分析相似性
+                    if (!settings.aiApiKey) {
+                        return "❌ 需要配置 AI API Key 才能使用智能推荐功能。";
+                    }
+
+                    // 搜索所有数据库获取候选
+                    const allDbs = await NotionAPI.search("", { property: "object", value: "database" }, settings.notionApiKey);
+                    let candidates = [];
+                    for (const db of (allDbs.results || []).slice(0, 5)) {
+                        try {
+                            const res = await NotionAPI.request("POST", `/databases/${db.id}/query`, { page_size: 50 }, settings.notionApiKey);
+                            candidates.push(...(res.results || []));
+                        } catch {}
+                    }
+
+                    // 排除自身
+                    candidates = candidates.filter(p => p.id !== refPage.id);
+                    if (candidates.length === 0) {
+                        return "没有找到其他页面进行比较。";
+                    }
+
+                    // 构建候选列表给 AI
+                    const candidateList = candidates.slice(0, 30).map((p, i) => {
+                        const t = Utils.getPageTitle(p);
+                        const d = p.properties?.["描述"]?.rich_text?.[0]?.text?.content || "";
+                        const tags = (p.properties?.["标签"]?.multi_select || []).map(tag => tag.name).join(", ");
+                        const src = p.properties?.["来源"]?.rich_text?.[0]?.text?.content || "";
+                        return `${i + 1}. [${src}] ${t} | ${d} | 标签: ${tags}`;
+                    }).join("\n");
+
+                    const prompt = `参考内容：
+标题: ${refTitle}
+描述: ${refDesc}
+标签: ${refTags.join(", ")}
+
+候选列表:
+${candidateList}
+
+请从候选列表中选出最相似的 5 个（按相似度排序），只回复编号，用逗号分隔。`;
+
+                    try {
+                        const aiResult = await AIService.request(prompt, settings);
+                        const indices = aiResult.match(/\d+/g)?.map(n => parseInt(n) - 1).filter(i => i >= 0 && i < candidates.length) || [];
+
+                        if (indices.length === 0) {
+                            return "AI 未能识别相似内容。";
+                        }
+
+                        let response = `🔍 **与「${refTitle}」相似的内容：**\n\n`;
+                        for (const idx of indices.slice(0, 5)) {
+                            const p = candidates[idx];
+                            const t = Utils.getPageTitle(p);
+                            const src = p.properties?.["来源"]?.rich_text?.[0]?.text?.content || "";
+                            const url = p.properties?.["链接"]?.url || "";
+                            response += `- [${src}] ${t}${url ? ` (${url})` : ""}\n`;
+                        }
+                        return response;
+                    } catch (e) {
+                        return `❌ 推荐失败: ${e.message}`;
+                    }
+                }
+            },
+
+            batch_tag: {
+                description: "批量打标签：用 AI 为指定来源的所有未标记页面自动添加标签",
+                params: "source(可选:'linux.do'|'github'|'书签'|'all'), tag_count(每页标签数,默认3)",
+                level: 1,
+                execute: async (args, settings) => {
+                    if (!OperationGuard.canExecute("updatePage")) {
+                        return "❌ 权限不足：批量打标签需要「标准」权限级别。";
+                    }
+                    if (!settings.aiApiKey) {
+                        return "❌ 需要配置 AI API Key。";
+                    }
+
+                    const { source = "all", tag_count = 3 } = args;
+                    const targetDb = Storage.get(CONFIG.STORAGE_KEYS.AI_TARGET_DB, "");
+
+                    const queryOneDb = async (dbId) => {
+                        const body = {
+                            filter: { property: "标签", multi_select: { is_empty: true } },
+                            page_size: 50,
+                        };
+                        try {
+                            const response = await NotionAPI.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
+                            return response.results || [];
+                        } catch { return []; }
+                    };
+
+                    let pages = [];
+                    if (targetDb && targetDb !== "__all__" && !targetDb.startsWith("page:")) {
+                        pages = await queryOneDb(targetDb);
+                    } else {
+                        const allDbs = await NotionAPI.search("", { property: "object", value: "database" }, settings.notionApiKey);
+                        for (const db of (allDbs.results || []).slice(0, 3)) {
+                            pages.push(...await queryOneDb(db.id));
+                        }
+                    }
+
+                    // 过滤来源
+                    if (source !== "all") {
+                        const sourceMap = { "linux.do": "Linux.do", "github": "GitHub", "书签": "浏览器书签" };
+                        const sourceValue = sourceMap[source.toLowerCase()] || source;
+                        pages = pages.filter(p => {
+                            const s = p.properties?.["来源"]?.rich_text?.[0]?.text?.content || "";
+                            return s.includes(sourceValue);
+                        });
+                    }
+
+                    if (pages.length === 0) {
+                        return "没有找到需要打标签的页面。";
+                    }
+
+                    let tagged = 0;
+                    for (const page of pages) {
+                        const title = Utils.getPageTitle(page);
+                        const desc = page.properties?.["描述"]?.rich_text?.[0]?.text?.content || "";
+
+                        try {
+                            const prompt = `为以下内容生成 ${tag_count} 个简短标签（每个标签 2-4 个字），用逗号分隔，只回复标签：
+标题: ${title}
+描述: ${desc}`;
+
+                            const result = await AIService.request(prompt, settings);
+                            const tags = result.split(/[,，]/).map(t => t.trim()).filter(t => t.length > 0 && t.length <= 20).slice(0, tag_count);
+
+                            if (tags.length > 0) {
+                                await NotionAPI.request("PATCH", `/pages/${page.id}`, {
+                                    properties: {
+                                        "标签": { multi_select: tags.map(t => ({ name: t })) },
+                                    },
+                                }, settings.notionApiKey);
+                                tagged++;
+                            }
+                        } catch (e) {
+                            console.warn(`[batch_tag] 失败: ${title}`, e);
+                        }
+
+                        await new Promise(r => setTimeout(r, 500));
+                    }
+
+                    return `✅ 批量打标签完成：已为 ${tagged}/${pages.length} 个页面添加标签。`;
                 }
             },
 
@@ -2257,7 +2561,8 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
 📑 "为新员工创建入职指南（含子页面）"
 🔎 "分析数据库里所有页面，生成综合报告"
 🔮 "给所有帖子生成 AI 摘要"
-🐙 "导入 GitHub 收藏到 Notion"
+🐙 "导入 GitHub 收藏到 Notion"（支持 Stars/Repos/Forks/Gists）
+📖 "导入浏览器书签"（需安装配套 Chrome 扩展）
 🤖 "帮我整理所有帖子，分类后生成摘要"
 
 我会自动调用需要的工具，逐步完成任务。复杂任务我会分步执行。
@@ -2323,7 +2628,8 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
 23. generate_pages - 生成多页面结构化内容（如：创建入职指南含子页面、生成竞品分析报告、创建包含多个部分的项目文档）
 24. batch_analyze - 批量分析数据库中的页面并生成综合报告（如：分析团队项目生成周报、分析所有帖子找出趋势、综合分析数据库内容）
 25. compound - 用户指令包含两个及以上需按顺序执行的不同操作（如：先分类再移动、分类后移到B数据库）
-26. github_import - 导入 GitHub 收藏/Stars 到 Notion（如：导入GitHub收藏、同步我的GitHub Stars、把GitHub收藏导入到Notion、导入github星标仓库）
+26. github_import - 导入 GitHub 收藏/Stars/Repos/Gists 到 Notion（如：导入GitHub收藏、同步我的GitHub Stars、把GitHub收藏导入到Notion、导入github星标仓库、导入我的仓库、导入Gists）
+27. bookmark_import - 导入浏览器书签到 Notion（如：导入书签、同步浏览器收藏、把Chrome书签导入到Notion、整理我的书签）
 27. help - 帮助（如：帮助、你能做什么）
 28. unknown - 无法理解
 
@@ -2401,7 +2707,7 @@ compound 判断依据：
 
 单操作格式：
 {
-  "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|create_database|write_content|edit_content|translate_content|ai_autofill|ask|agent_task|deep_research|template_output|summarize|brainstorm|proofread|batch_translate|extract_to_database|generate_pages|batch_analyze|github_import|help|unknown",
+  "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|create_database|write_content|edit_content|translate_content|ai_autofill|ask|agent_task|deep_research|template_output|summarize|brainstorm|proofread|batch_translate|extract_to_database|generate_pages|batch_analyze|github_import|bookmark_import|help|unknown",
   "params": {
     "keyword": "搜索关键词（如有）",
     "property": "要更新的属性名（如有）",
@@ -2508,7 +2814,7 @@ compound 格式（仅当 intent 为 compound 时使用）：
                 "summarize", "brainstorm", "proofread",
                 "batch_translate", "extract_to_database",
                 "generate_pages", "batch_analyze",
-                "github_import", "compound"
+                "github_import", "bookmark_import", "compound"
             ];
 
             if (directIntents.includes(intentResult.intent)) {
@@ -2576,6 +2882,8 @@ compound 格式（仅当 intent 为 compound 时使用）：
                     return await AIAssistant.handleBatchAnalyze(params, settings, explanation);
                 case "github_import":
                     return await AIAssistant.handleGitHubImport(params, settings, explanation);
+                case "bookmark_import":
+                    return await AIAssistant.handleBookmarkImport(params, settings, explanation);
                 case "ask":
                     return await AIAssistant.handleAsk(params, settings, explanation);
                 case "agent_task":
@@ -4595,33 +4903,43 @@ ${contentParts.join("\n\n---\n\n")}`;
             }
 
             const classify = params.classify || false;
+            const importTypes = GitHubAPI.getImportTypes();
 
             try {
-                let result;
-                await new Promise((resolve, reject) => {
-                    (async () => {
-                        try {
-                            result = await GitHubExporter.exportStars({
-                                apiKey: settings.notionApiKey,
-                                databaseId,
-                                username,
-                                token,
-                            }, (msg, pct) => {
-                                ChatState.updateLastMessage(`🐙 ${msg}`, "processing");
-                            });
-                            resolve();
-                        } catch (e) { reject(e); }
-                    })();
+                const allResults = await GitHubExporter.exportAll({
+                    apiKey: settings.notionApiKey,
+                    databaseId,
+                    username,
+                    token,
+                }, (msg, pct) => {
+                    ChatState.updateLastMessage(`🐙 ${msg}`, "processing");
                 });
 
-                let response = `✅ **GitHub 收藏导入完成**\n\n`;
-                response += `📊 共 ${result.total} 个收藏仓库\n`;
-                response += `📥 本次导出 ${result.exported} 个\n`;
-                if (result.failed > 0) response += `❌ 失败 ${result.failed} 个\n`;
-                if (result.exported === 0 && result.failed === 0) response += `\n所有收藏已是最新状态。`;
+                let response = `✅ **GitHub 导入完成**\n\n`;
+                let totalExported = 0;
+                let totalFailed = 0;
+
+                const typeNames = { stars: "Stars", repos: "Repos", forks: "Forks", gists: "Gists" };
+                for (const type of importTypes) {
+                    const r = allResults[type];
+                    if (!r) continue;
+                    if (r.error) {
+                        response += `❌ ${typeNames[type]}: ${r.error}\n`;
+                    } else {
+                        response += `📊 ${typeNames[type]}: 共 ${r.total} 个，导出 ${r.exported} 个`;
+                        if (r.failed > 0) response += `，失败 ${r.failed} 个`;
+                        response += `\n`;
+                        totalExported += r.exported || 0;
+                        totalFailed += r.failed || 0;
+                    }
+                }
+
+                if (totalExported === 0 && totalFailed === 0) {
+                    response += `\n所有内容已是最新状态。`;
+                }
 
                 // 如果需要分类
-                if (classify && result.exported > 0 && settings.aiApiKey) {
+                if (classify && totalExported > 0 && settings.aiApiKey) {
                     ChatState.updateLastMessage("🏷️ 正在进行 AI 分类...", "processing");
                     try {
                         const classifyResult = await GitHubExporter.classifyRepos({
@@ -4641,6 +4959,58 @@ ${contentParts.join("\n\n---\n\n")}`;
                 return response;
             } catch (error) {
                 return `❌ GitHub 导入失败: ${error.message}`;
+            }
+        },
+
+        // ======= 浏览器书签导入 =======
+
+        handleBookmarkImport: async (params, settings, explanation) => {
+            const databaseId = settings.notionDatabaseId;
+
+            if (!settings.notionApiKey) {
+                return "❌ 请先配置 Notion API Key。";
+            }
+            if (!databaseId) {
+                return "❌ 请先配置目标数据库 ID。";
+            }
+            if (!BookmarkBridge.isExtensionAvailable()) {
+                return "❌ 未检测到 LD-Notion 书签桥接扩展。\n\n💡 请安装 `chrome-extension` 目录中的 Chrome 扩展：\n1. 打开 `chrome://extensions/`\n2. 开启「开发者模式」\n3. 点击「加载已解压的扩展」\n4. 选择项目中的 `chrome-extension` 文件夹\n5. 刷新当前页面";
+            }
+
+            try {
+                ChatState.updateLastMessage("📖 正在读取浏览器书签...", "processing");
+                const tree = await BookmarkBridge.getBookmarkTree();
+                const allBookmarks = BookmarkExporter.flattenTree(tree);
+
+                if (allBookmarks.length === 0) {
+                    return "📭 没有找到浏览器书签。";
+                }
+
+                const newCount = allBookmarks.filter(b => !BookmarkExporter.isExported(b.url)).length;
+                ChatState.updateLastMessage(`📖 找到 ${allBookmarks.length} 个书签 (${newCount} 个新书签)，正在导出...`, "processing");
+
+                const result = await BookmarkExporter.exportBookmarks({
+                    apiKey: settings.notionApiKey,
+                    databaseId,
+                    bookmarks: allBookmarks,
+                }, (msg, pct) => {
+                    ChatState.updateLastMessage(`📖 ${msg}`, "processing");
+                });
+
+                let response = `✅ **浏览器书签导入完成**\n\n`;
+                response += `📊 共 ${result.total} 个书签\n`;
+                response += `📥 本次导出 ${result.exported} 个\n`;
+                if (result.failed > 0) response += `❌ 失败 ${result.failed} 个\n`;
+                if (result.exported === 0 && result.failed === 0) response += `\n所有书签已是最新状态。`;
+
+                // 如果有 AI 配置，询问是否分类
+                if (result.exported > 0 && settings.aiApiKey) {
+                    response += `\n\n💡 可以输入「分类书签」让 AI 自动为导入的书签分类。`;
+                }
+
+                return response;
+            } catch (error) {
+                return `❌ 书签导入失败: ${error.message}`;
             }
         },
 
@@ -5030,6 +5400,7 @@ ${availableTools}
                             <button class="ldb-chat-chip" data-cmd="自动分类">📂 自动分类</button>
                             <button class="ldb-chat-chip" data-cmd="总结">📝 总结</button>
                             <button class="ldb-chat-chip" data-cmd="导入GitHub收藏">🐙 GitHub</button>
+                            <button class="ldb-chat-chip" data-cmd="导入浏览器书签">📖 书签</button>
                         </div>
                     </div>
                 `;
@@ -6796,17 +7167,16 @@ ${availableTools}
     // GitHub API 模块
     // ===========================================
     const GitHubAPI = {
-        // 获取用户 starred repos（带分页）
-        fetchStarredRepos: (username, token = "") => {
+        // 通用 GitHub API 分页请求
+        _fetchPaginated: (url, token = "", label = "GitHub") => {
             return new Promise((resolve, reject) => {
-                const allRepos = [];
+                const allItems = [];
                 let page = 1;
                 const perPage = 100;
 
                 const fetchPage = () => {
-                    const url = token
-                        ? `https://api.github.com/user/starred?per_page=${perPage}&page=${page}`
-                        : `https://api.github.com/users/${encodeURIComponent(username)}/starred?per_page=${perPage}&page=${page}`;
+                    const separator = url.includes("?") ? "&" : "?";
+                    const pagedUrl = `${url}${separator}per_page=${perPage}&page=${page}`;
 
                     const headers = {
                         "Accept": "application/vnd.github.v3+json",
@@ -6816,29 +7186,29 @@ ${availableTools}
 
                     GM_xmlhttpRequest({
                         method: "GET",
-                        url,
+                        url: pagedUrl,
                         headers,
                         onload: (response) => {
                             if (response.status === 200) {
                                 try {
-                                    const repos = JSON.parse(response.responseText);
-                                    if (repos.length === 0) return resolve(allRepos);
-                                    allRepos.push(...repos);
-                                    if (repos.length < perPage) return resolve(allRepos);
+                                    const items = JSON.parse(response.responseText);
+                                    if (items.length === 0) return resolve(allItems);
+                                    allItems.push(...items);
+                                    if (items.length < perPage) return resolve(allItems);
                                     page++;
                                     setTimeout(fetchPage, 300);
                                 } catch (e) {
-                                    reject(new Error("解析 GitHub 响应失败"));
+                                    reject(new Error(`解析 ${label} 响应失败`));
                                 }
                             } else if (response.status === 403) {
-                                reject(new Error("GitHub API 速率限制，请稍后再试或配置 Token"));
+                                reject(new Error(`${label} API 速率限制，请稍后再试或配置 Token`));
                             } else if (response.status === 404) {
-                                reject(new Error(`GitHub 用户 "${username}" 不存在`));
+                                reject(new Error(`${label} 资源不存在`));
                             } else {
-                                reject(new Error(`GitHub API 错误: ${response.status}`));
+                                reject(new Error(`${label} API 错误: ${response.status}`));
                             }
                         },
-                        onerror: () => reject(new Error("网络错误，无法连接 GitHub")),
+                        onerror: () => reject(new Error(`网络错误，无法连接 ${label}`)),
                     });
                 };
 
@@ -6846,9 +7216,45 @@ ${availableTools}
             });
         },
 
+        // 获取用户 starred repos（带分页）
+        fetchStarredRepos: (username, token = "") => {
+            const url = token
+                ? `https://api.github.com/user/starred`
+                : `https://api.github.com/users/${encodeURIComponent(username)}/starred`;
+            return GitHubAPI._fetchPaginated(url, token, "GitHub Stars");
+        },
+
+        // 获取用户自己的仓库
+        fetchUserRepos: (username, token = "") => {
+            const url = token
+                ? `https://api.github.com/user/repos?type=owner&sort=updated`
+                : `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated`;
+            return GitHubAPI._fetchPaginated(url, token, "GitHub Repos");
+        },
+
+        // 获取用户 fork 的仓库
+        fetchForkedRepos: async (username, token = "") => {
+            const allRepos = await GitHubAPI.fetchUserRepos(username, token);
+            return allRepos.filter(r => r.fork);
+        },
+
+        // 获取用户的 Gists
+        fetchUserGists: (username, token = "") => {
+            const url = token
+                ? `https://api.github.com/gists`
+                : `https://api.github.com/users/${encodeURIComponent(username)}/gists`;
+            return GitHubAPI._fetchPaginated(url, token, "GitHub Gists");
+        },
+
         // 获取已导出的 repo 集合
         getExported: () => {
             try { return JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}")); }
+            catch { return {}; }
+        },
+
+        // 获取已导出的 gist 集合
+        getExportedGists: () => {
+            try { return JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}")); }
             catch { return {}; }
         },
 
@@ -6858,8 +7264,31 @@ ${availableTools}
             Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(exported));
         },
 
+        markGistExported: (gistId) => {
+            const exported = GitHubAPI.getExportedGists();
+            exported[gistId] = Date.now();
+            Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(exported));
+        },
+
         isExported: (repoFullName) => {
             return !!GitHubAPI.getExported()[repoFullName];
+        },
+
+        isGistExported: (gistId) => {
+            return !!GitHubAPI.getExportedGists()[gistId];
+        },
+
+        // 获取启用的导入类型
+        getImportTypes: () => {
+            try {
+                return JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES, CONFIG.DEFAULTS.githubImportTypes));
+            } catch {
+                return ["stars"];
+            }
+        },
+
+        setImportTypes: (types) => {
+            Storage.set(CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES, JSON.stringify(types));
         },
     };
 
@@ -6867,8 +7296,8 @@ ${availableTools}
     // GitHub 导出到 Notion 模块
     // ===========================================
     const GitHubExporter = {
-        // 构建 Notion 数据库属性
-        buildProperties: (repo) => {
+        // 构建 Notion 数据库属性 (repos/stars/forks)
+        buildRepoProperties: (repo, sourceType = "Star") => {
             const props = {
                 "标题": {
                     title: [{ text: { content: repo.full_name || repo.name || "无标题" } }]
@@ -6888,6 +7317,9 @@ ${availableTools}
                 "来源": {
                     rich_text: [{ text: { content: "GitHub" } }]
                 },
+                "来源类型": {
+                    rich_text: [{ text: { content: sourceType } }]
+                },
             };
             if (repo.topics && repo.topics.length > 0) {
                 props["标签"] = {
@@ -6900,6 +7332,40 @@ ${availableTools}
             return props;
         },
 
+        // 构建 Gist 属性
+        buildGistProperties: (gist) => {
+            const files = Object.keys(gist.files || {});
+            const title = gist.description || files[0] || "无标题 Gist";
+            const language = gist.files?.[files[0]]?.language || "";
+            return {
+                "标题": {
+                    title: [{ text: { content: title.substring(0, 2000) } }]
+                },
+                "链接": {
+                    url: gist.html_url
+                },
+                "描述": {
+                    rich_text: [{ text: { content: `文件: ${files.join(", ")}`.substring(0, 2000) } }]
+                },
+                "语言": {
+                    rich_text: [{ text: { content: language } }]
+                },
+                "Stars": {
+                    number: 0
+                },
+                "来源": {
+                    rich_text: [{ text: { content: "GitHub" } }]
+                },
+                "来源类型": {
+                    rich_text: [{ text: { content: "Gist" } }]
+                },
+                "更新时间": gist.updated_at ? { date: { start: gist.updated_at } } : undefined,
+            };
+        },
+
+        // 向后兼容：原 buildProperties 映射到 buildRepoProperties
+        buildProperties: (repo) => GitHubExporter.buildRepoProperties(repo, "Star"),
+
         // 配置数据库属性结构
         setupDatabaseProperties: async (databaseId, apiKey) => {
             const requiredProperties = {
@@ -6910,6 +7376,7 @@ ${availableTools}
                 "Stars": { typeName: "number", schema: { number: { format: "number" } } },
                 "标签": { typeName: "multi_select", schema: { multi_select: { options: [] } } },
                 "来源": { typeName: "rich_text", schema: { rich_text: {} } },
+                "来源类型": { typeName: "rich_text", schema: { rich_text: {} } },
                 "更新时间": { typeName: "date", schema: { date: {} } },
                 "分类": { typeName: "rich_text", schema: { rich_text: {} } },
             };
@@ -6956,6 +7423,48 @@ ${availableTools}
             }
         },
 
+        // 通用导出方法
+        _exportItems: async (items, settings, sourceType, buildFn, isExportedFn, markExportedFn, getKeyFn, onProgress) => {
+            const { apiKey, databaseId } = settings;
+            const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+
+            const newItems = items.filter(item => !isExportedFn(getKeyFn(item)));
+            if (newItems.length === 0) {
+                return { total: items.length, exported: 0, failed: 0, message: `没有新的 ${sourceType} 需要导出` };
+            }
+
+            let success = 0, failed = 0;
+            for (let i = 0; i < newItems.length; i++) {
+                const item = newItems[i];
+                const key = getKeyFn(item);
+                const pct = Math.round(10 + (i / newItems.length) * 85);
+                if (onProgress) onProgress(`正在导出 ${sourceType} (${i + 1}/${newItems.length}): ${key}`, pct);
+
+                try {
+                    const properties = buildFn(item);
+                    // 清理 undefined 属性
+                    for (const k of Object.keys(properties)) {
+                        if (properties[k] === undefined) delete properties[k];
+                    }
+                    await NotionAPI.request("POST", "/pages", {
+                        parent: { database_id: databaseId },
+                        properties,
+                    }, apiKey);
+                    markExportedFn(key);
+                    success++;
+                } catch (e) {
+                    console.warn(`[GitHubExporter] 导出失败: ${key}`, e);
+                    failed++;
+                }
+
+                if (i < newItems.length - 1) {
+                    await new Promise(r => setTimeout(r, delay));
+                }
+            }
+
+            return { total: items.length, exported: success, failed, newCount: newItems.length };
+        },
+
         // 导出 stars 到 Notion
         exportStars: async (settings, onProgress) => {
             const { apiKey, databaseId, username, token } = settings;
@@ -6964,51 +7473,125 @@ ${availableTools}
                 throw new Error("请先配置 GitHub 用户名和 Notion 数据库");
             }
 
-            // 配置数据库结构
             if (onProgress) onProgress("正在配置数据库结构...", 0);
             const setupResult = await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
             if (!setupResult.success) {
                 throw new Error(`数据库配置失败: ${setupResult.error}`);
             }
 
-            // 获取 starred repos
-            if (onProgress) onProgress("正在获取 GitHub 收藏...", 5);
+            if (onProgress) onProgress("正在获取 GitHub Stars...", 5);
             const repos = await GitHubAPI.fetchStarredRepos(username, token);
 
-            // 过滤已导出的
-            const newRepos = repos.filter(r => !GitHubAPI.isExported(r.full_name));
-            if (newRepos.length === 0) {
-                return { total: repos.length, exported: 0, message: "没有新的收藏需要导出" };
+            return GitHubExporter._exportItems(
+                repos, settings, "Star",
+                (r) => GitHubExporter.buildRepoProperties(r, "Star"),
+                GitHubAPI.isExported, GitHubAPI.markExported,
+                (r) => r.full_name, onProgress
+            );
+        },
+
+        // 导出用户仓库到 Notion
+        exportRepos: async (settings, onProgress) => {
+            const { apiKey, databaseId, username, token } = settings;
+
+            if (!apiKey || !databaseId || !username) {
+                throw new Error("请先配置 GitHub 用户名和 Notion 数据库");
             }
 
-            // 逐个导出
-            let success = 0, failed = 0;
-            const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+            if (onProgress) onProgress("正在配置数据库结构...", 0);
+            await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
 
-            for (let i = 0; i < newRepos.length; i++) {
-                const repo = newRepos[i];
-                const pct = Math.round(10 + (i / newRepos.length) * 85);
-                if (onProgress) onProgress(`正在导出 (${i + 1}/${newRepos.length}): ${repo.full_name}`, pct);
+            if (onProgress) onProgress("正在获取 GitHub Repos...", 5);
+            const repos = await GitHubAPI.fetchUserRepos(username, token);
+            const ownRepos = repos.filter(r => !r.fork);
+
+            return GitHubExporter._exportItems(
+                ownRepos, settings, "Repo",
+                (r) => GitHubExporter.buildRepoProperties(r, "Repo"),
+                GitHubAPI.isExported, GitHubAPI.markExported,
+                (r) => r.full_name, onProgress
+            );
+        },
+
+        // 导出 fork 的仓库到 Notion
+        exportForks: async (settings, onProgress) => {
+            const { apiKey, databaseId, username, token } = settings;
+
+            if (!apiKey || !databaseId || !username) {
+                throw new Error("请先配置 GitHub 用户名和 Notion 数据库");
+            }
+
+            if (onProgress) onProgress("正在配置数据库结构...", 0);
+            await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
+
+            if (onProgress) onProgress("正在获取 GitHub Forks...", 5);
+            const forks = await GitHubAPI.fetchForkedRepos(username, token);
+
+            return GitHubExporter._exportItems(
+                forks, settings, "Fork",
+                (r) => GitHubExporter.buildRepoProperties(r, "Fork"),
+                GitHubAPI.isExported, GitHubAPI.markExported,
+                (r) => r.full_name, onProgress
+            );
+        },
+
+        // 导出 Gists 到 Notion
+        exportGists: async (settings, onProgress) => {
+            const { apiKey, databaseId, username, token } = settings;
+
+            if (!apiKey || !databaseId || !username) {
+                throw new Error("请先配置 GitHub 用户名和 Notion 数据库");
+            }
+
+            if (onProgress) onProgress("正在配置数据库结构...", 0);
+            await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
+
+            if (onProgress) onProgress("正在获取 GitHub Gists...", 5);
+            const gists = await GitHubAPI.fetchUserGists(username, token);
+
+            return GitHubExporter._exportItems(
+                gists, settings, "Gist",
+                GitHubExporter.buildGistProperties,
+                GitHubAPI.isGistExported, GitHubAPI.markGistExported,
+                (g) => g.id, onProgress
+            );
+        },
+
+        // 按用户选择的类型批量导出
+        exportAll: async (settings, onProgress) => {
+            const types = GitHubAPI.getImportTypes();
+            const results = {};
+            const totalTypes = types.length;
+            let typeIndex = 0;
+
+            for (const type of types) {
+                const typeProgress = (msg, pct) => {
+                    const overallPct = Math.round((typeIndex / totalTypes) * 100 + pct / totalTypes);
+                    if (onProgress) onProgress(`[${type}] ${msg}`, overallPct);
+                };
 
                 try {
-                    const properties = GitHubExporter.buildProperties(repo);
-                    await NotionAPI.request("POST", "/pages", {
-                        parent: { database_id: databaseId },
-                        properties,
-                    }, apiKey);
-                    GitHubAPI.markExported(repo.full_name);
-                    success++;
+                    switch (type) {
+                        case "stars":
+                            results.stars = await GitHubExporter.exportStars(settings, typeProgress);
+                            break;
+                        case "repos":
+                            results.repos = await GitHubExporter.exportRepos(settings, typeProgress);
+                            break;
+                        case "forks":
+                            results.forks = await GitHubExporter.exportForks(settings, typeProgress);
+                            break;
+                        case "gists":
+                            results.gists = await GitHubExporter.exportGists(settings, typeProgress);
+                            break;
+                    }
                 } catch (e) {
-                    console.warn(`[GitHubExporter] 导出失败: ${repo.full_name}`, e);
-                    failed++;
+                    results[type] = { error: e.message };
                 }
-
-                if (i < newRepos.length - 1) {
-                    await new Promise(r => setTimeout(r, delay));
-                }
+                typeIndex++;
             }
 
-            return { total: repos.length, exported: success, failed, newCount: newRepos.length };
+            return results;
         },
 
         // AI 分类已导出的 GitHub repos
@@ -7079,6 +7662,241 @@ ${availableTools}
             return { classified, total: pages.length };
         },
     };
+
+    // ===========================================
+    // 浏览器书签桥接模块
+    // ===========================================
+    const BookmarkBridge = {
+        _requestId: 0,
+        _pendingRequests: {},
+
+        // 检测配套 Chrome 扩展是否已安装
+        isExtensionAvailable: () => {
+            return !!document.querySelector('meta[name="ld-notion-ext"][content="ready"]');
+        },
+
+        // 发起书签请求
+        _request: (eventName, detail = {}) => {
+            return new Promise((resolve, reject) => {
+                if (!BookmarkBridge.isExtensionAvailable()) {
+                    reject(new Error("未检测到 LD-Notion 书签桥接扩展。请先安装 chrome-extension 目录中的扩展。"));
+                    return;
+                }
+
+                const requestId = `req_${++BookmarkBridge._requestId}_${Date.now()}`;
+                const timeout = setTimeout(() => {
+                    delete BookmarkBridge._pendingRequests[requestId];
+                    reject(new Error("书签请求超时，请检查扩展是否正常运行。"));
+                }, 10000);
+
+                BookmarkBridge._pendingRequests[requestId] = { resolve, reject, timeout };
+
+                window.dispatchEvent(new CustomEvent(eventName, {
+                    detail: { requestId, ...detail }
+                }));
+            });
+        },
+
+        // 获取书签树
+        getBookmarkTree: () => {
+            return BookmarkBridge._request("ld-notion-request-bookmarks");
+        },
+
+        // 获取指定文件夹的书签
+        getBookmarks: (folderId) => {
+            return BookmarkBridge._request("ld-notion-request-bookmarks", { folderId });
+        },
+
+        // 搜索书签
+        searchBookmarks: (query) => {
+            return BookmarkBridge._request("ld-notion-search-bookmarks", { query });
+        },
+
+        // 初始化响应监听器
+        init: () => {
+            window.addEventListener("ld-notion-bookmarks-data", (event) => {
+                const { requestId, success, data, error } = event.detail || {};
+                const pending = BookmarkBridge._pendingRequests[requestId];
+                if (!pending) return;
+
+                clearTimeout(pending.timeout);
+                delete BookmarkBridge._pendingRequests[requestId];
+
+                if (success) {
+                    pending.resolve(data);
+                } else {
+                    pending.reject(new Error(error || "书签请求失败"));
+                }
+            });
+        },
+    };
+
+    // ===========================================
+    // 浏览器书签导出到 Notion 模块
+    // ===========================================
+    const BookmarkExporter = {
+        // 展平书签树为列表，记录文件夹路径
+        flattenTree: (nodes, parentPath = "") => {
+            const result = [];
+            for (const node of nodes) {
+                const currentPath = parentPath ? `${parentPath} / ${node.title}` : node.title;
+                if (node.url) {
+                    // 书签项
+                    result.push({
+                        title: node.title || node.url,
+                        url: node.url,
+                        folderPath: parentPath,
+                        dateAdded: node.dateAdded ? new Date(node.dateAdded).toISOString() : null,
+                        id: node.id,
+                    });
+                }
+                if (node.children) {
+                    result.push(...BookmarkExporter.flattenTree(node.children, currentPath));
+                }
+            }
+            return result;
+        },
+
+        // 构建 Notion 属性
+        buildProperties: (bookmark) => {
+            const props = {
+                "标题": {
+                    title: [{ text: { content: (bookmark.title || "无标题书签").substring(0, 2000) } }]
+                },
+                "链接": {
+                    url: bookmark.url
+                },
+                "来源": {
+                    rich_text: [{ text: { content: "浏览器书签" } }]
+                },
+                "来源类型": {
+                    rich_text: [{ text: { content: "书签" } }]
+                },
+                "书签路径": {
+                    rich_text: [{ text: { content: (bookmark.folderPath || "").substring(0, 2000) } }]
+                },
+            };
+            if (bookmark.dateAdded) {
+                props["收藏时间"] = { date: { start: bookmark.dateAdded } };
+            }
+            return props;
+        },
+
+        // 配置数据库属性
+        setupDatabaseProperties: async (databaseId, apiKey) => {
+            const requiredProperties = {
+                "标题": { typeName: "title", schema: { title: {} } },
+                "链接": { typeName: "url", schema: { url: {} } },
+                "来源": { typeName: "rich_text", schema: { rich_text: {} } },
+                "来源类型": { typeName: "rich_text", schema: { rich_text: {} } },
+                "标签": { typeName: "multi_select", schema: { multi_select: { options: [] } } },
+                "书签路径": { typeName: "rich_text", schema: { rich_text: {} } },
+                "收藏时间": { typeName: "date", schema: { date: {} } },
+                "分类": { typeName: "rich_text", schema: { rich_text: {} } },
+                "描述": { typeName: "rich_text", schema: { rich_text: {} } },
+            };
+
+            try {
+                const database = await NotionAPI.request("GET", `/databases/${databaseId}`, null, apiKey);
+                const existingProps = database.properties || {};
+                const propsToAdd = {};
+                const propsToUpdate = {};
+
+                for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
+                    const existingProp = existingProps[name];
+                    if (!existingProp) {
+                        if (typeName === "title") {
+                            const existingTitle = Object.entries(existingProps).find(([_, prop]) => prop.type === "title");
+                            if (existingTitle && existingTitle[0] !== name) {
+                                propsToUpdate[existingTitle[0]] = { name: name };
+                            }
+                        } else {
+                            propsToAdd[name] = schema;
+                        }
+                    }
+                }
+
+                const allChanges = { ...propsToAdd, ...propsToUpdate };
+                if (Object.keys(allChanges).length > 0) {
+                    await NotionAPI.request("PATCH", `/databases/${databaseId}`, {
+                        properties: allChanges,
+                    }, apiKey);
+                }
+
+                return { success: true, added: Object.keys(propsToAdd) };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        },
+
+        // 获取已导出的书签集合
+        getExported: () => {
+            try { return JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}")); }
+            catch { return {}; }
+        },
+
+        markExported: (bookmarkUrl) => {
+            const exported = BookmarkExporter.getExported();
+            exported[bookmarkUrl] = Date.now();
+            Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(exported));
+        },
+
+        isExported: (bookmarkUrl) => {
+            return !!BookmarkExporter.getExported()[bookmarkUrl];
+        },
+
+        // 导出书签到 Notion
+        exportBookmarks: async (settings, onProgress) => {
+            const { apiKey, databaseId, bookmarks } = settings;
+
+            if (!apiKey || !databaseId) {
+                throw new Error("请先配置 Notion API Key 和数据库");
+            }
+
+            if (onProgress) onProgress("正在配置数据库结构...", 0);
+            const setupResult = await BookmarkExporter.setupDatabaseProperties(databaseId, apiKey);
+            if (!setupResult.success) {
+                throw new Error(`数据库配置失败: ${setupResult.error}`);
+            }
+
+            // 过滤已导出的
+            const newBookmarks = bookmarks.filter(b => !BookmarkExporter.isExported(b.url));
+            if (newBookmarks.length === 0) {
+                return { total: bookmarks.length, exported: 0, message: "没有新的书签需要导出" };
+            }
+
+            const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+            let success = 0, failed = 0;
+
+            for (let i = 0; i < newBookmarks.length; i++) {
+                const bm = newBookmarks[i];
+                const pct = Math.round(5 + (i / newBookmarks.length) * 90);
+                if (onProgress) onProgress(`正在导出 (${i + 1}/${newBookmarks.length}): ${bm.title}`, pct);
+
+                try {
+                    const properties = BookmarkExporter.buildProperties(bm);
+                    await NotionAPI.request("POST", "/pages", {
+                        parent: { database_id: databaseId },
+                        properties,
+                    }, apiKey);
+                    BookmarkExporter.markExported(bm.url);
+                    success++;
+                } catch (e) {
+                    console.warn(`[BookmarkExporter] 导出失败: ${bm.url}`, e);
+                    failed++;
+                }
+
+                if (i < newBookmarks.length - 1) {
+                    await new Promise(r => setTimeout(r, delay));
+                }
+            }
+
+            return { total: bookmarks.length, exported: success, failed, newCount: newBookmarks.length };
+        },
+    };
+
+    // 初始化书签桥接
+    BookmarkBridge.init();
 
     // ===========================================
     // UI 设计系统（Design Tokens + 一次性样式注入）
@@ -8028,6 +8846,7 @@ ${availableTools}
                                 <button class="ldb-chat-chip" data-cmd="自动分类">📂 自动分类</button>
                                 <button class="ldb-chat-chip" data-cmd="总结">📝 总结</button>
                                 <button class="ldb-chat-chip" data-cmd="导入GitHub收藏">🐙 GitHub</button>
+                            <button class="ldb-chat-chip" data-cmd="导入浏览器书签">📖 书签</button>
                             </div>
                         </div>
                     </div>
@@ -8147,6 +8966,27 @@ ${availableTools}
                             <input type="password" class="ldb-input" id="ldb-notion-github-token" placeholder="ghp_xxx...">
                             <div class="ldb-tip">不填写也可使用，但有 60 次/小时限制</div>
                         </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">导入类型</label>
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px;">
+                                <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #ccc;">
+                                    <input type="checkbox" class="ldb-notion-github-type" value="stars" checked> ⭐ Stars
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #ccc;">
+                                    <input type="checkbox" class="ldb-notion-github-type" value="repos"> 📦 Repos
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #ccc;">
+                                    <input type="checkbox" class="ldb-notion-github-type" value="forks"> 🍴 Forks
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #ccc;">
+                                    <input type="checkbox" class="ldb-notion-github-type" value="gists"> 📝 Gists
+                                </label>
+                            </div>
+                        </div>
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
+                            <span style="font-size: 12px; color: #888;">📖 浏览器书签导入</span>
+                            <div id="ldb-notion-bookmark-status" style="font-size: 11px; margin-top: 4px;"></div>
+                        </div>
                         <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-save-settings">💾 保存设置</button>
                     </div>
 
@@ -8234,6 +9074,9 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, panel.querySelector("#ldb-notion-persona-instructions").value.trim());
                 Storage.set(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, panel.querySelector("#ldb-notion-github-username").value.trim());
                 Storage.set(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, panel.querySelector("#ldb-notion-github-token").value.trim());
+                // 保存 GitHub 导入类型
+                const githubTypes = [...panel.querySelectorAll(".ldb-notion-github-type:checked")].map(cb => cb.value);
+                GitHubAPI.setImportTypes(githubTypes.length > 0 ? githubTypes : ["stars"]);
 
                 NotionSiteUI.showStatus("设置已保存", "success");
             };
@@ -8419,6 +9262,21 @@ ${availableTools}
             // 加载 GitHub 设置
             panel.querySelector("#ldb-notion-github-username").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
             panel.querySelector("#ldb-notion-github-token").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
+            // 加载 GitHub 导入类型
+            const savedGHTypes = GitHubAPI.getImportTypes();
+            panel.querySelectorAll(".ldb-notion-github-type").forEach(cb => {
+                cb.checked = savedGHTypes.includes(cb.value);
+            });
+
+            // 书签扩展状态
+            const bmStatus = panel.querySelector("#ldb-notion-bookmark-status");
+            if (bmStatus) {
+                if (BookmarkBridge.isExtensionAvailable()) {
+                    bmStatus.innerHTML = '<span style="color: #4ade80;">✅ 扩展已安装</span> — 在 AI 对话中输入「导入书签」即可';
+                } else {
+                    bmStatus.innerHTML = '<span style="color: #f87171;">❌ 扩展未安装</span> — 请安装 chrome-extension 目录中的扩展';
+                }
+            }
 
             // 加载数据库/页面下拉框（始终调用以确保兼容选项被添加）
             const cachedWsForDb = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
@@ -9404,6 +10262,28 @@ ${availableTools}
                                 <input type="password" class="ldb-input" id="ldb-github-token" placeholder="ghp_xxx...">
                                 <div class="ldb-tip">不填写也可使用，但有速率限制</div>
                             </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">导入类型</label>
+                                <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px;">
+                                    <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #ccc;">
+                                        <input type="checkbox" class="ldb-github-type" value="stars" checked> ⭐ Stars
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #ccc;">
+                                        <input type="checkbox" class="ldb-github-type" value="repos"> 📦 Repos
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #ccc;">
+                                        <input type="checkbox" class="ldb-github-type" value="forks"> 🍴 Forks
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #ccc;">
+                                        <input type="checkbox" class="ldb-github-type" value="gists"> 📝 Gists
+                                    </label>
+                                </div>
+                            </div>
+                            <!-- 浏览器书签导入 -->
+                            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
+                                <span style="font-size: 12px; color: #888;">📖 浏览器书签导入</span>
+                                <div id="ldb-bookmark-ext-status" style="font-size: 11px; margin-top: 4px;"></div>
+                            </div>
                         </div>
                     </div>
 
@@ -10133,6 +11013,13 @@ ${availableTools}
             panel.querySelector("#ldb-github-token").onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, e.target.value.trim());
             };
+            // GitHub 导入类型
+            panel.querySelectorAll(".ldb-github-type").forEach(cb => {
+                cb.onchange = () => {
+                    const types = [...panel.querySelectorAll(".ldb-github-type:checked")].map(c => c.value);
+                    GitHubAPI.setImportTypes(types.length > 0 ? types : ["stars"]);
+                };
+            });
 
             // 刷新 AI 数据库列表
             panel.querySelector("#ldb-ai-refresh-dbs").onclick = async () => {
@@ -10361,6 +11248,21 @@ ${availableTools}
             // 加载 GitHub 设置
             panel.querySelector("#ldb-github-username").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
             panel.querySelector("#ldb-github-token").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
+            // 加载 GitHub 导入类型
+            const savedGHTypesMain = GitHubAPI.getImportTypes();
+            panel.querySelectorAll(".ldb-github-type").forEach(cb => {
+                cb.checked = savedGHTypesMain.includes(cb.value);
+            });
+
+            // 书签扩展状态
+            const bmStatusMain = panel.querySelector("#ldb-bookmark-ext-status");
+            if (bmStatusMain) {
+                if (BookmarkBridge.isExtensionAvailable()) {
+                    bmStatusMain.innerHTML = '<span style="color: #4ade80;">✅ 扩展已安装</span> — 输入「导入书签」即可';
+                } else {
+                    bmStatusMain.innerHTML = '<span style="color: #f87171;">❌ 扩展未安装</span> — 请安装 chrome-extension 中的扩展';
+                }
+            }
 
             // 加载 AI 查询目标数据库设置
             const cachedWorkspaceForDb = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
