@@ -1,10 +1,10 @@
 # LD-Notion
 
-一个 Tampermonkey 用户脚本，将 **Linux.do** 与 **Notion** 深度连接：批量导出收藏帖子到 Notion，同时在两个站点提供 AI 对话式助手，支持自然语言管理 Notion 工作区。
+一个 Tampermonkey 用户脚本，将 **Linux.do**、**GitHub**、**浏览器书签** 与 **Notion** 深度连接：多源收藏一键导入 Notion，跨源智能搜索与推荐，AI 对话式助手自然语言管理工作区。
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md)
 
-## 两大核心能力
+## 四大核心能力
 
 ### 1. Linux.do 收藏导出器
 
@@ -19,7 +19,28 @@
 - **图片处理**：上传到 Notion / 外链引用 / 跳过图片
 - **格式保留**：代码块（语法高亮）、引用、表格、列表、标题、链接、粗体/斜体/删除线/行内代码、Emoji (100+)
 
-### 2. Notion AI 助手
+### 2. GitHub 活动导入
+
+将 GitHub 上的各类活动导入到 Notion，在设置中勾选需要的类型即可。
+
+- **Stars**：导入你收藏的仓库（名称、描述、语言、Stars 数、标签）
+- **Repos**：导入你自己的仓库
+- **Forks**：导入你 Fork 过的仓库
+- **Gists**：导入你的代码片段
+- **类型可选**：在设置中勾选需要导入的类型，按需开启
+- **AI 分类**：导入完成后可自动用 AI 对仓库进行分类
+- **智能去重**：已导入的不会重复导入
+
+### 3. 浏览器书签导入
+
+通过配套 Chrome 扩展读取浏览器书签，一键导入 Notion 进行整理。
+
+- **Chrome API 直接读取**：无需手动导出书签文件
+- **文件夹路径保留**：书签的文件夹层级结构会记录在「书签路径」字段中
+- **智能去重**：已导入的书签不会重复
+- **配套扩展极简**：仅 2 个文件，不收集任何数据
+
+### 4. Notion AI 助手
 
 在 **Linux.do** 和 **Notion** 站点均可使用的对话式 AI 助手，通过自然语言操作 Notion 工作区。
 
@@ -37,10 +58,14 @@ AI 助手采用 ReAct 推理架构，支持多轮工具调用，自动拆解复�
 | `query_database` | 查询数据库，支持筛选/排序/分页 | 只读 |
 | `read_page` | 读取页面文字内容 | 只读 |
 | `get_database_schema` | 获取数据库属性结构 | 只读 |
+| `cross_source_search` | 跨源搜索（Linux.do/GitHub/书签） | 只读 |
+| `unified_stats` | 跨源数据统计（各来源数量、分类分布） | 只读 |
+| `recommend_similar` | AI 智能推荐相似内容 | 只读 |
 | `write_content` | 向页面追加 Markdown 内容 | 标准 |
 | `update_page` | 更新页面属性值 | 标准 |
 | `create_page` | 在数据库中创建新页面 | 标准 |
 | `auto_classify` | AI 自动分类未分类页面 | 标准 |
+| `batch_tag` | AI 批量自动打标签 | 标准 |
 | `move_page` | 移动页面到另一个数据库 | 高级 |
 | `copy_page` | 复制页面到另一个数据库 | 高级 |
 | `create_database` | 创建新数据库 | 高级 |
@@ -50,13 +75,19 @@ AI 助手采用 ReAct 推理架构，支持多轮工具调用，自动拆解复�
 直接用自然语言发指令，AI 自动识别意图：
 
 - **搜索**：「搜索关于 Docker 的帖子」
+- **跨源搜索**：「在所有来源中搜索 Kubernetes」
 - **查询统计**：「统计各分类的文章数量」
+- **跨源统计**：「各来源分别有多少条数据」
 - **分类**：「给未分类的文章自动分类」
+- **打标签**：「给所有 GitHub 仓库自动打标签」
+- **智能推荐**：「推荐和这篇文章相似的内容」
 - **写入**：「在这个页面末尾加一段总结」
 - **编辑**：「改写这篇文章，语气更正式」
 - **翻译**：「把这篇翻译成英文」
 - **创建**：「创建一个叫"周报"的数据库」
 - **移动/复制**：「把这个页面移到归档数据库」
+- **GitHub 导入**：「导入我的 GitHub 收藏」
+- **书签导入**：「导入浏览器书签」
 - **RAG 问答**：「我的笔记里有没有关于 K8s 的内容」
 
 #### Notion 站点面板
@@ -87,6 +118,14 @@ AI 助手采用 ReAct 推理架构，支持多轮工具调用，自动拆解复�
 1. 点击 Tampermonkey 图标 → 添加新脚本
 2. 复制 `LinuxDo-Bookmarks-to-Notion.user.js` 的全部内容
 3. 粘贴并保存（Ctrl+S）
+
+### 3. 安装书签桥接扩展（可选，仅导入浏览器书签需要）
+
+1. 打开 `chrome://extensions/`
+2. 开启右上角「开发者模式」
+3. 点击「加载已解压的扩展程序」
+4. 选择项目中的 `chrome-extension` 文件夹
+5. 刷新页面，设置面板中会显示「扩展已安装」
 
 ## Notion 配置
 
@@ -158,6 +197,19 @@ https://www.notion.so/xxx/32位数据库ID?v=xxx
 - **Notion 侧**：在任意 Notion 页面点击右下角浮动图标
 - 输入自然语言指令，AI 自动执行对应操作
 
+### GitHub 导入
+
+1. 在设置面板中填写 GitHub 用户名
+2. 可选填写 GitHub Token（提高速率限制到 5000 次/小时）
+3. 勾选需要导入的类型（Stars / Repos / Forks / Gists）
+4. 在 AI 对话中输入「导入 GitHub 收藏」或点击快捷按钮 🐙 GitHub
+
+### 浏览器书签导入
+
+1. 安装配套 Chrome 扩展（见安装步骤第 3 步）
+2. 设置面板中会显示扩展安装状态
+3. 在 AI 对话中输入「导入浏览器书签」或点击快捷按钮 📖 书签
+
 ## 常见问题
 
 ### Q: 验证配置失败？
@@ -193,11 +245,14 @@ A: 请检查：
 
 ## 技术说明
 
-- 基于 Discourse API 获取帖子数据
+- 基于 Discourse API 获取 Linux.do 帖子数据
+- 基于 GitHub REST API 获取 Stars/Repos/Forks/Gists
+- 配套 Chrome Extension 通过 `chrome.bookmarks` API 读取浏览器书签
 - 使用 Notion API 创建数据库记录和子页面
 - DOM 解析转换为 Notion Block 格式
 - 自动处理 API 速率限制 (429 响应自动重试)
 - AI 助手使用 ReAct Agent Loop 架构，支持多轮推理和工具调用
+- 跨源工具支持 Linux.do / GitHub / 浏览器书签统一搜索和推荐
 
 ## 开发与验证
 
@@ -208,7 +263,18 @@ A: 请检查：
 
 ## 更新日志
 
-### v2.4.3
+### v3.0.0
+- 新增：GitHub 全类型导入（Stars / Repos / Forks / Gists），可在设置中勾选启用
+- 新增：浏览器书签导入，配套 Chrome 扩展通过 `chrome.bookmarks` API 直接读取
+- 新增：跨源搜索工具 `cross_source_search`，支持在 Linux.do/GitHub/书签中统一搜索
+- 新增：跨源统计工具 `unified_stats`，展示各来源数量和分类分布
+- 新增：智能推荐工具 `recommend_similar`，AI 找相似内容
+- 新增：批量打标签工具 `batch_tag`，AI 自动为未标记页面添加标签
+- 新增：「来源类型」字段（Star/Fork/Repo/Gist/书签），支持跨源筛选
+- 新增：「书签路径」字段，保留浏览器书签的文件夹层级
+- 优化：GitHub API 请求统一为通用分页方法，减少代码重复
+
+### v2.5.0
 - 新增：刷新页数上限可自定义（5/10/20/50 页或无限制），防止大型工作区过多 API 调用
 - 优化：两侧面板同步支持该设置，选择后立即生效
 
