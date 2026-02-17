@@ -442,7 +442,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 const manifest = {
     manifest_version: 3,
     name: "LD-Notion — Notion AI 助手 & 多源收藏管理",
-    version: source.match(/@version\s+(\S+)/)?.[1] || "3.1.0",
+    version: source.match(/@version\s+(\S+)/)?.[1] || "3.2.0",
     description: "将 Linux.do、GitHub、浏览器书签与 Notion 深度连接：AI 对话式助手、批量导出收藏、跨源智能搜索与推荐",
     permissions: [
         "storage",
