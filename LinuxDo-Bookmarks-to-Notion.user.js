@@ -7902,6 +7902,23 @@ ${availableTools}
     // 初始化书签桥接
     BookmarkBridge.init();
 
+    // 监听扩展 Popup 快捷操作（仅在 Chrome 扩展版中生效）
+    window.addEventListener("ld-notion-popup-action", (event) => {
+        const { action } = event.detail || {};
+        const cmdMap = {
+            "import-bookmarks": "导入浏览器书签",
+            "import-github": "导入GitHub收藏",
+        };
+        const cmd = cmdMap[action];
+        if (!cmd) return;
+
+        const input = document.querySelector("#ldb-chat-input");
+        if (input && typeof ChatUI !== "undefined" && ChatUI.sendMessage) {
+            input.value = cmd;
+            ChatUI.sendMessage();
+        }
+    });
+
     // ===========================================
     // UI 设计系统（Design Tokens + 一次性样式注入）
     // ===========================================

@@ -107,25 +107,55 @@ AI 助手采用 ReAct 推理架构，支持多轮工具调用，自动拆解复�
 
 ## 安装
 
-### 1. 安装 Tampermonkey
+本项目提供两种使用方式，功能完全一致，按需选择：
+
+### 方式 A：油猴脚本（推荐）
+
+#### 1. 安装 Tampermonkey
 
 - [Chrome](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
 - [Firefox](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/)
 - [Edge](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd)
 
-### 2. 安装脚本
+#### 2. 安装脚本
 
 1. 点击 Tampermonkey 图标 → 添加新脚本
 2. 复制 `LinuxDo-Bookmarks-to-Notion.user.js` 的全部内容
 3. 粘贴并保存（Ctrl+S）
 
-### 3. 安装书签桥接扩展（可选，仅导入浏览器书签需要）
+#### 3. 安装书签桥接扩展（可选，仅导入浏览器书签需要）
 
 1. 打开 `chrome://extensions/`
 2. 开启右上角「开发者模式」
 3. 点击「加载已解压的扩展程序」
 4. 选择项目中的 `chrome-extension` 文件夹
 5. 刷新页面，设置面板中会显示「扩展已安装」
+
+### 方式 B：Chrome 扩展（独立版）
+
+无需 Tampermonkey，所有功能打包为独立 Chrome 扩展，书签导入内置支持。
+
+#### 1. 构建扩展
+
+```bash
+node scripts/build-extension.js
+```
+
+输出目录：`chrome-extension-full/`
+
+#### 2. 安装扩展
+
+1. 打开 `chrome://extensions/`
+2. 开启右上角「开发者模式」
+3. 点击「加载已解压的扩展程序」
+4. 选择 `chrome-extension-full` 文件夹
+
+#### 扩展版特点
+
+- **无需 Tampermonkey**：独立运行，不依赖脚本管理器
+- **内置书签 API**：直接通过 `chrome.bookmarks` 读取，无需安装额外桥接扩展
+- **Popup 快速入口**：点击工具栏图标可快速跳转和触发导入操作
+- **CORS 代理**：通过 background service worker 自动处理跨域请求
 
 ## Notion 配置
 
@@ -257,6 +287,7 @@ A: 请检查：
 ## 开发与验证
 
 - 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）
+- 构建扩展版：`node scripts/build-extension.js`（输出到 `chrome-extension-full/`）
 - UI 静态校验：`node scripts/validate-userscript-ui.js`（或 `python3 scripts/validate-userscript-ui.py`）
 - UI 手工回归：`docs/ui-regression-checklist.md`
 - 四级权限模型 + OperationGuard 保护所有写入操作
@@ -269,6 +300,10 @@ A: 请检查：
 - 新增：设置面板分组折叠（筛选设置、AI 设置、GitHub 导入独立折叠区）
 - 新增：主题偏好和 Tab 状态持久化
 - 新增：小屏幕响应式适配（480px 以下面板全宽）
+- 新增：独立 Chrome 扩展版（`node scripts/build-extension.js` 构建），无需 Tampermonkey
+- 新增：扩展版 Popup 快速入口（Notion API / 书签 API 状态检测 + 一键导入）
+- 新增：扩展版 BookmarkBridge 直接使用 `chrome.bookmarks` API，无需桥接扩展
+- 新增：GM_* API 垫片（`chrome.storage.local` + service worker CORS 代理）
 - 优化：Notion 面板添加主题切换按钮
 - 优化：所有硬编码颜色替换为 CSS 变量，暗色模式下显示一致
 - 优化：主题系统从 `prefers-color-scheme` 媒体查询升级为 `data-ldb-theme` 属性驱动
