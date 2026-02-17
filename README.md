@@ -322,6 +322,8 @@ A: 请检查：
 - 新增自动检查更新：可选 24/72/168 小时间隔
 - 新增更新状态持久化：展示上次检查结果与时间
 - 文档补充扩展升级说明：ZIP/解压安装需手动重装或在扩展页重新加载
+- 已发布 Release：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.0>
+- 已上传扩展安装包：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.0/LD-Notion-chrome-extension-full-v3.4.0.zip>
 
 - Tag：`v3.4.0`
 
