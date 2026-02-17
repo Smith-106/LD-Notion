@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion — Notion AI 助手 & Linux.do 收藏导出
 // @namespace    https://linux.do/
-// @version      3.2.0
+// @version      3.3.0
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion，GitHub 全类型导入（Stars/Repos/Forks/Gists），浏览器书签导入，跨源智能搜索与推荐，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -104,9 +104,12 @@
             GITHUB_EXPORTED_REPOS: "ldb_github_exported_repos",
             GITHUB_IMPORT_TYPES: "ldb_github_import_types",
             GITHUB_EXPORTED_GISTS: "ldb_github_exported_gists",
+            GITHUB_AUTO_IMPORT_ENABLED: "ldb_github_auto_import_enabled",
+            GITHUB_AUTO_IMPORT_INTERVAL: "ldb_github_auto_import_interval",
             // 浏览器书签导入
             BOOKMARK_EXPORTED: "ldb_bookmark_exported",
             BOOKMARK_IMPORT_FOLDERS: "ldb_bookmark_import_folders",
+            EXT_INSTALL_PROMPT_SHOWN: "ldb_ext_install_prompt_shown",
             // 跨源设置
             CROSS_SOURCE_MODE: "ldb_cross_source_mode",
             // 面板尺寸记忆
@@ -139,6 +142,8 @@
             // 自动导入默认值
             autoImportEnabled: false,
             autoImportInterval: 5, // 分钟，0=仅页面加载时
+            githubAutoImportEnabled: false,
+            githubAutoImportInterval: 5,
             exportConcurrency: 1, // 并发导出数量
             workspaceMaxPages: 10, // 刷新工作区时的分页上限
             // Agent 个性化默认值
@@ -330,6 +335,21 @@
         // 判断是否在通用网页
         isGeneric: () => {
             return SiteDetector.detect() === SiteDetector.SITES.GENERIC;
+        },
+    };
+
+    const InstallHelper = {
+        BOOKMARK_EXTENSION_URL: "https://github.com/Smith-106/LD-Notion/tree/main/chrome-extension",
+
+        getBookmarkExtensionUrl: () => InstallHelper.BOOKMARK_EXTENSION_URL,
+
+        renderInstallLink: (label = "一键安装浏览器扩展") => {
+            const url = InstallHelper.getBookmarkExtensionUrl();
+            return `<a href="${url}" target="_blank" class="ldb-link">${label}</a>`;
+        },
+
+        openBookmarkExtensionInstall: () => {
+            window.open(InstallHelper.getBookmarkExtensionUrl(), "_blank", "noopener,noreferrer");
         },
     };
 
@@ -4998,7 +5018,8 @@ ${contentParts.join("\n\n---\n\n")}`;
                 return "❌ 请先配置目标数据库 ID。";
             }
             if (!BookmarkBridge.isExtensionAvailable()) {
-                return "❌ 未检测到 LD-Notion 书签桥接扩展。\n\n💡 请安装 `chrome-extension` 目录中的 Chrome 扩展：\n1. 打开 `chrome://extensions/`\n2. 开启「开发者模式」\n3. 点击「加载已解压的扩展」\n4. 选择项目中的 `chrome-extension` 文件夹\n5. 刷新当前页面";
+                const installUrl = InstallHelper.getBookmarkExtensionUrl();
+                return `❌ 未检测到 LD-Notion 书签桥接扩展。\n\n💡 请点击安装：${installUrl}\n\n手动安装步骤：\n1. 打开 chrome://extensions/\n2. 开启「开发者模式」\n3. 点击「加载已解压的扩展」\n4. 选择项目中的 chrome-extension 文件夹\n5. 刷新当前页面`;
             }
 
             try {
@@ -6395,6 +6416,28 @@ ${availableTools}
     const WorkspaceService = {
         _inflightRequests: new Map(),
 
+        _requestSearchItems: async (apiKey, objectType, maxPages = 0, onProgress = null, phase = "") => {
+            let results = [];
+            let cursor = undefined;
+            let pageCount = 0;
+            do {
+                const response = await NotionAPI.search("", { property: "object", value: objectType }, apiKey, cursor);
+                const batch = response.results || [];
+                results = results.concat(batch);
+                cursor = response.has_more ? response.next_cursor : undefined;
+                pageCount++;
+                if (onProgress) {
+                    onProgress({
+                        phase,
+                        loaded: results.length,
+                        hasMore: !!cursor,
+                        pageCount,
+                    });
+                }
+            } while (cursor && (maxPages === 0 || pageCount < maxPages));
+            return results;
+        },
+
         fetchWorkspace: async (apiKey, options = {}) => {
             if (!apiKey) {
                 return { databases: [], pages: [] };
@@ -6411,17 +6454,14 @@ ${availableTools}
             }
 
             const requestPromise = (async () => {
-                let allDbResults = [];
-                let dbCursor = undefined;
-                let dbPageCount = 0;
-                do {
-                    const dbResponse = await NotionAPI.search("", { property: "object", value: "database" }, apiKey, dbCursor);
-                    allDbResults = allDbResults.concat(dbResponse.results || []);
-                    dbCursor = dbResponse.has_more ? dbResponse.next_cursor : undefined;
-                    dbPageCount++;
-                } while (dbCursor && (maxPages === 0 || dbPageCount < maxPages));
-
-                const databases = allDbResults.map(db => ({
+                const dbResults = await WorkspaceService._requestSearchItems(
+                    apiKey,
+                    "database",
+                    maxPages,
+                    options.onProgress,
+                    "databases"
+                );
+                const databases = dbResults.map(db => ({
                     id: db.id?.replace(/-/g, "") || "",
                     title: db.title?.[0]?.plain_text || "无标题数据库",
                     type: "database",
@@ -6432,17 +6472,14 @@ ${availableTools}
                     return { databases, pages: [] };
                 }
 
-                let allPageResults = [];
-                let pageCursor = undefined;
-                let pagePageCount = 0;
-                do {
-                    const pageResponse = await NotionAPI.search("", { property: "object", value: "page" }, apiKey, pageCursor);
-                    allPageResults = allPageResults.concat(pageResponse.results || []);
-                    pageCursor = pageResponse.has_more ? pageResponse.next_cursor : undefined;
-                    pagePageCount++;
-                } while (pageCursor && (maxPages === 0 || pagePageCount < maxPages));
-
-                const pages = allPageResults.map(page => ({
+                const pageResults = await WorkspaceService._requestSearchItems(
+                    apiKey,
+                    "page",
+                    maxPages,
+                    options.onProgress,
+                    "pages"
+                );
+                const pages = pageResults.map(page => ({
                     id: page.id?.replace(/-/g, "") || "",
                     title: Utils.getPageTitle(page),
                     type: "page",
@@ -6459,6 +6496,56 @@ ${availableTools}
             } finally {
                 WorkspaceService._inflightRequests.delete(requestKey);
             }
+        },
+
+        fetchWorkspaceStaged: async (apiKey, options = {}) => {
+            if (!apiKey) {
+                return { databases: [], pages: [] };
+            }
+
+            const includePages = options.includePages !== false;
+            const maxPages = Number.isFinite(options.maxPages)
+                ? options.maxPages
+                : (parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages), 10) || 0);
+
+            const databasesRaw = await WorkspaceService._requestSearchItems(
+                apiKey,
+                "database",
+                maxPages,
+                options.onProgress,
+                "databases"
+            );
+            const databases = databasesRaw.map(db => ({
+                id: db.id?.replace(/-/g, "") || "",
+                title: db.title?.[0]?.plain_text || "无标题数据库",
+                type: "database",
+                url: db.url || "",
+            })).filter(item => item.id);
+
+            options.onPhaseComplete?.("databases", { databases, pages: [] });
+
+            if (!includePages) {
+                return { databases, pages: [] };
+            }
+
+            const pagesRaw = await WorkspaceService._requestSearchItems(
+                apiKey,
+                "page",
+                maxPages,
+                options.onProgress,
+                "pages"
+            );
+            const pages = pagesRaw.map(page => ({
+                id: page.id?.replace(/-/g, "") || "",
+                title: Utils.getPageTitle(page),
+                type: "page",
+                url: page.url || "",
+                parent: page.parent?.type || "",
+            })).filter(item => item.id);
+
+            const finalWorkspace = { databases, pages };
+            options.onPhaseComplete?.("pages", finalWorkspace);
+            return finalWorkspace;
         },
     };
 
@@ -7279,6 +7366,134 @@ ${availableTools}
         },
     };
 
+    const GitHubAutoImporter = {
+        isRunning: false,
+        timerId: null,
+        deferredWhileHidden: false,
+        visibilityListenerBound: false,
+
+        canStart: () => {
+            if (!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return false;
+            const username = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
+            const token = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
+            if (!username && !token) return false;
+            const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            const databaseId = Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+            return !!(apiKey && databaseId);
+        },
+
+        updateStatus: (text) => {
+            const el = (UI.refs && UI.refs.autoImportStatus) || document.querySelector("#ldb-auto-import-status");
+            if (el) el.textContent = text;
+        },
+
+        buildSettings: () => {
+            return {
+                apiKey: Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
+                databaseId: Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
+                username: Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, ""),
+                token: Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, ""),
+            };
+        },
+
+        ensureVisibilityListener: () => {
+            if (GitHubAutoImporter.visibilityListenerBound) return;
+            document.addEventListener("visibilitychange", () => {
+                if (!document.hidden && GitHubAutoImporter.deferredWhileHidden) {
+                    GitHubAutoImporter.deferredWhileHidden = false;
+                    GitHubAutoImporter.run();
+                }
+            });
+            GitHubAutoImporter.visibilityListenerBound = true;
+        },
+
+        run: async () => {
+            if (document.hidden) {
+                GitHubAutoImporter.deferredWhileHidden = true;
+                return;
+            }
+            if (GitHubAutoImporter.isRunning) return;
+
+            const settings = GitHubAutoImporter.buildSettings();
+            if (!settings.apiKey || !settings.databaseId) {
+                GitHubAutoImporter.updateStatus("⚠️ 请先配置 Notion API Key 和数据库 ID");
+                return;
+            }
+            if (!settings.username && !settings.token) {
+                GitHubAutoImporter.updateStatus("⚠️ 请先配置 GitHub 用户名或 Token");
+                return;
+            }
+
+            GitHubAutoImporter.isRunning = true;
+            try {
+                GitHubAutoImporter.updateStatus("🔄 正在检查 GitHub 新收藏...");
+
+                const types = GitHubAPI.getImportTypes();
+                const candidates = [];
+                for (const type of types) {
+                    if (type === "stars") {
+                        const repos = await GitHubAPI.fetchStarredRepos(settings.username, settings.token);
+                        candidates.push(...UI.mapGitHubItemsToBookmarks(repos, "stars"));
+                    } else if (type === "repos") {
+                        const repos = await GitHubAPI.fetchUserRepos(settings.username, settings.token);
+                        const ownRepos = repos.filter(r => !r.fork);
+                        candidates.push(...UI.mapGitHubItemsToBookmarks(ownRepos, "repos"));
+                    } else if (type === "forks") {
+                        const forks = await GitHubAPI.fetchForkedRepos(settings.username, settings.token);
+                        candidates.push(...UI.mapGitHubItemsToBookmarks(forks, "forks"));
+                    } else if (type === "gists") {
+                        const gists = await GitHubAPI.fetchUserGists(settings.username, settings.token);
+                        candidates.push(...UI.mapGitHubItemsToBookmarks(gists, "gists"));
+                    }
+                }
+
+                const newItems = candidates.filter(item => !UI.isBookmarkExported(item));
+                if (newItems.length === 0) {
+                    GitHubAutoImporter.updateStatus(`✅ 没有新的 GitHub 收藏 (${new Date().toLocaleTimeString()})`);
+                    return;
+                }
+
+                const result = await UI.exportGitHubSelected(newItems, {
+                    apiKey: settings.apiKey,
+                    databaseId: settings.databaseId,
+                }, (current, total, title) => {
+                    GitHubAutoImporter.updateStatus(`📥 GitHub 自动导入中 (${current}/${total}): ${title}`);
+                });
+
+                GitHubAutoImporter.updateStatus(`✅ GitHub 自动导入完成: 成功 ${result.success.length} 个${result.failed.length > 0 ? `，失败 ${result.failed.length} 个` : ""} (${new Date().toLocaleTimeString()})`);
+            } catch (error) {
+                console.error("GitHub 自动导入出错:", error);
+                GitHubAutoImporter.updateStatus(`❌ GitHub 自动导入出错: ${error.message}`);
+            } finally {
+                GitHubAutoImporter.isRunning = false;
+            }
+        },
+
+        startPolling: (intervalMinutes) => {
+            GitHubAutoImporter.stopPolling();
+            if (intervalMinutes > 0) {
+                GitHubAutoImporter.timerId = setInterval(() => GitHubAutoImporter.run(), intervalMinutes * 60 * 1000);
+            }
+        },
+
+        stopPolling: () => {
+            if (GitHubAutoImporter.timerId) {
+                clearInterval(GitHubAutoImporter.timerId);
+                GitHubAutoImporter.timerId = null;
+            }
+        },
+
+        init: () => {
+            if (!GitHubAutoImporter.canStart()) return;
+            GitHubAutoImporter.ensureVisibilityListener();
+            setTimeout(() => {
+                GitHubAutoImporter.run();
+                const interval = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.githubAutoImportInterval);
+                if (interval > 0) GitHubAutoImporter.startPolling(interval);
+            }, 3000);
+        },
+    };
+
     // ===========================================
     // GitHub API 模块
     // ===========================================
@@ -7795,7 +8010,8 @@ ${availableTools}
         _request: (eventName, detail = {}) => {
             return new Promise((resolve, reject) => {
                 if (!BookmarkBridge.isExtensionAvailable()) {
-                    reject(new Error("未检测到 LD-Notion 书签桥接扩展。请先安装 chrome-extension 目录中的扩展。"));
+                    const installUrl = InstallHelper.getBookmarkExtensionUrl();
+                    reject(new Error(`未检测到 LD-Notion 书签桥接扩展。请先安装：${installUrl}`));
                     return;
                 }
 
@@ -9317,10 +9533,35 @@ ${availableTools}
 
                 refreshBtn.disabled = true;
                 refreshBtn.innerHTML = "⏳";
-                workspaceTip.textContent = "正在获取工作区列表...";
+                workspaceTip.style.color = "";
+                workspaceTip.textContent = "正在获取数据库列表...";
 
                 try {
-                    const workspace = await WorkspaceService.fetchWorkspace(apiKey, { includePages: true });
+                    const workspace = await WorkspaceService.fetchWorkspaceStaged(apiKey, {
+                        includePages: true,
+                        onProgress: (progress) => {
+                            if (progress.phase === "databases") {
+                                workspaceTip.textContent = `正在获取数据库列表... 已加载 ${progress.loaded} 个`;
+                            } else if (progress.phase === "pages") {
+                                workspaceTip.textContent = `数据库已就绪，正在获取页面... 已加载 ${progress.loaded} 个`;
+                            }
+                        },
+                        onPhaseComplete: (phase, partialWorkspace) => {
+                            const workspaceData = {
+                                apiKeyHash: apiKey.slice(-8),
+                                databases: partialWorkspace.databases || [],
+                                pages: partialWorkspace.pages || [],
+                                timestamp: Date.now(),
+                            };
+                            Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
+                            NotionSiteUI.updateAITargetDbOptions(workspaceData.databases, workspaceData.pages);
+
+                            if (phase === "databases") {
+                                workspaceTip.textContent = `✅ 已加载 ${workspaceData.databases.length} 个数据库，可先选择目标；页面列表继续加载中...`;
+                                workspaceTip.style.color = "#34d399";
+                            }
+                        },
+                    });
 
                     const workspaceData = {
                         apiKeyHash: apiKey.slice(-8),
@@ -9458,7 +9699,7 @@ ${availableTools}
                 if (BookmarkBridge.isExtensionAvailable()) {
                     bmStatus.innerHTML = '<span style="color: #4ade80;">✅ 扩展已安装</span> — 在 AI 对话中输入「导入书签」即可';
                 } else {
-                    bmStatus.innerHTML = '<span style="color: #f87171;">❌ 扩展未安装</span> — 请安装 chrome-extension 目录中的扩展';
+                    bmStatus.innerHTML = `<span style="color: #f87171;">❌ 扩展未安装</span> — ${InstallHelper.renderInstallLink("一键安装浏览器扩展")}`;
                 }
             }
 
@@ -9729,6 +9970,9 @@ ${availableTools}
                 selectCount: panel.querySelector("#ldb-select-count"),
                 selectAll: panel.querySelector("#ldb-select-all"),
                 bookmarkCount: panel.querySelector("#ldb-bookmark-count"),
+                bookmarksLabel: panel.querySelector("#ldb-bookmarks-label"),
+                autoImportLabel: panel.querySelector("#ldb-auto-import-label"),
+                autoImportIntervalLabel: panel.querySelector("#ldb-auto-import-interval-label"),
                 exportBtn: panel.querySelector("#ldb-export"),
                 bookmarkListContainer: panel.querySelector("#ldb-bookmark-list-container"),
                 reportContainer: panel.querySelector("#ldb-report-container"),
@@ -10355,18 +10599,18 @@ ${availableTools}
                         <div class="ldb-section">
                             <div class="ldb-bookmarks-info">
                                 <div class="ldb-bookmarks-count" id="ldb-bookmark-count">-</div>
-                                <div class="ldb-bookmarks-label">已加载收藏数量</div>
+                                <div class="ldb-bookmarks-label" id="ldb-bookmarks-label">已加载收藏数量</div>
                             </div>
                             <!-- 自动导入设置 -->
                             <div class="ldb-setting-row" style="margin-top: 10px; margin-bottom: 8px;">
                                 <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
                                     <input type="checkbox" id="ldb-auto-import-enabled">
-                                    <span>启用自动导入新收藏</span>
+                                    <span id="ldb-auto-import-label">启用自动导入新收藏</span>
                                 </label>
                             </div>
                             <div id="ldb-auto-import-options" style="display: none; margin-bottom: 12px;">
                                 <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px;">
-                                    <label style="white-space: nowrap;">轮询间隔</label>
+                                    <label id="ldb-auto-import-interval-label" style="white-space: nowrap;">轮询间隔</label>
                                     <select id="ldb-auto-import-interval" class="ldb-input" style="flex: 1;">
                                         <option value="0">仅页面加载时</option>
                                         <option value="3">每 3 分钟</option>
@@ -11011,9 +11255,24 @@ ${availableTools}
             // 自动导入设置
             (refs.autoImportEnabled || panel.querySelector("#ldb-auto-import-enabled")).onchange = (e) => {
                 const enabled = e.target.checked;
-                Storage.set(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, enabled);
+                const isGitHub = UI.isGitHubMode();
+                const autoImportEnabledKey = isGitHub
+                    ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED
+                    : CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED;
+                const autoImportIntervalKey = isGitHub
+                    ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL
+                    : CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL;
+                Storage.set(autoImportEnabledKey, enabled);
                 (refs.autoImportOptions || panel.querySelector("#ldb-auto-import-options")).style.display = enabled ? "block" : "none";
                 if (enabled) {
+                    if (isGitHub) {
+                        GitHubAutoImporter.run();
+                        const interval = parseInt((refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval")).value) || 0;
+                        Storage.set(autoImportIntervalKey, interval);
+                        if (interval > 0) GitHubAutoImporter.startPolling(interval);
+                        return;
+                    }
+
                     // 检查 Notion 配置是否完整
                     const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
                     if (!apiKey) {
@@ -11031,19 +11290,40 @@ ${availableTools}
                     }
                     AutoImporter.run();
                     const interval = parseInt((refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval")).value) || 0;
+                    Storage.set(autoImportIntervalKey, interval);
                     if (interval > 0) AutoImporter.startPolling(interval);
                 } else {
-                    AutoImporter.stopPolling();
-                    AutoImporter.updateStatus("");
+                    if (isGitHub) {
+                        GitHubAutoImporter.stopPolling();
+                        GitHubAutoImporter.updateStatus("");
+                    } else {
+                        AutoImporter.stopPolling();
+                        AutoImporter.updateStatus("");
+                    }
                 }
             };
 
             (refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval")).onchange = (e) => {
                 const interval = parseInt(e.target.value) || 0;
-                Storage.set(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, interval);
-                AutoImporter.stopPolling();
-                if (interval > 0 && Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, false)) {
-                    AutoImporter.startPolling(interval);
+                const isGitHub = UI.isGitHubMode();
+                const autoImportEnabledKey = isGitHub
+                    ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED
+                    : CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED;
+                const autoImportIntervalKey = isGitHub
+                    ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL
+                    : CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL;
+
+                Storage.set(autoImportIntervalKey, interval);
+                if (isGitHub) {
+                    GitHubAutoImporter.stopPolling();
+                    if (interval > 0 && Storage.get(autoImportEnabledKey, false)) {
+                        GitHubAutoImporter.startPolling(interval);
+                    }
+                } else {
+                    AutoImporter.stopPolling();
+                    if (interval > 0 && Storage.get(autoImportEnabledKey, false)) {
+                        AutoImporter.startPolling(interval);
+                    }
                 }
             };
 
@@ -11069,17 +11349,16 @@ ${availableTools}
                     const item = checkbox.closest(".ldb-bookmark-item");
                     if (!item) return;
 
-                    const topicId = String(item.dataset.topicId || "");
-                    if (!topicId) return;
+                    const bookmarkKey = String(item.dataset.topicId || "");
+                    if (!bookmarkKey) return;
 
-                    const exportedMap = Storage.getExportedTopics();
-                    const isUnexported = !exportedMap[topicId];
+                    const isUnexported = !UI.isBookmarkKeyExported(bookmarkKey);
 
                     if (checkbox.checked) {
-                        UI.selectedBookmarks.add(topicId);
+                        UI.selectedBookmarks.add(bookmarkKey);
                         if (isUnexported) UI.selectedUnexportedCount++;
                     } else {
-                        UI.selectedBookmarks.delete(topicId);
+                        UI.selectedBookmarks.delete(bookmarkKey);
                         if (isUnexported) UI.selectedUnexportedCount = Math.max(0, UI.selectedUnexportedCount - 1);
                     }
                     UI.updateSelectCount();
@@ -11090,23 +11369,57 @@ ${availableTools}
 
             // 加载收藏
             (refs.loadBookmarksBtn || panel.querySelector("#ldb-load-bookmarks")).onclick = async () => {
-                const username = Utils.getUsernameFromUrl();
-                if (!username) {
-                    UI.showStatus("无法获取用户名", "error");
-                    return;
-                }
-
                 const btn = refs.loadBookmarksBtn || panel.querySelector("#ldb-load-bookmarks");
                 btn.disabled = true;
                 btn.innerHTML = '<span class="ldb-spin">🔄</span> 加载中...';
 
                 try {
-                    const bookmarks = await LinuxDoAPI.fetchAllBookmarks(username, (count) => {
-                        ((UI.refs && UI.refs.bookmarkCount) || panel.querySelector("#ldb-bookmark-count")).textContent = count;
-                    });
+                    let bookmarks = [];
+
+                    if (UI.isGitHubMode()) {
+                        const username = (refs.githubUsernameInput || panel.querySelector("#ldb-github-username")).value.trim()
+                            || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
+                        const token = (refs.githubTokenInput || panel.querySelector("#ldb-github-token")).value.trim()
+                            || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
+                        const types = GitHubAPI.getImportTypes();
+
+                        if (!username && !token) {
+                            UI.showStatus("请先在设置中填写 GitHub 用户名（或配置 Token）", "error");
+                            return;
+                        }
+
+                        const allItems = [];
+                        for (const type of types) {
+                            if (type === "stars") {
+                                const items = await GitHubAPI.fetchStarredRepos(username, token);
+                                allItems.push(...UI.mapGitHubItemsToBookmarks(items, "stars"));
+                            } else if (type === "repos") {
+                                const items = await GitHubAPI.fetchUserRepos(username, token);
+                                const ownRepos = items.filter(r => !r.fork);
+                                allItems.push(...UI.mapGitHubItemsToBookmarks(ownRepos, "repos"));
+                            } else if (type === "forks") {
+                                const items = await GitHubAPI.fetchForkedRepos(username, token);
+                                allItems.push(...UI.mapGitHubItemsToBookmarks(items, "forks"));
+                            } else if (type === "gists") {
+                                const items = await GitHubAPI.fetchUserGists(username, token);
+                                allItems.push(...UI.mapGitHubItemsToBookmarks(items, "gists"));
+                            }
+                            ((UI.refs && UI.refs.bookmarkCount) || panel.querySelector("#ldb-bookmark-count")).textContent = allItems.length;
+                        }
+                        bookmarks = allItems;
+                    } else {
+                        const username = Utils.getUsernameFromUrl();
+                        if (!username) {
+                            UI.showStatus("无法获取用户名", "error");
+                            return;
+                        }
+                        bookmarks = await LinuxDoAPI.fetchAllBookmarks(username, (count) => {
+                            ((UI.refs && UI.refs.bookmarkCount) || panel.querySelector("#ldb-bookmark-count")).textContent = count;
+                        });
+                    }
 
                     UI.bookmarks = bookmarks;
-                    UI.selectedBookmarks = new Set(bookmarks.map(b => String(b.topic_id || b.bookmarkable_id)));
+                    UI.selectedBookmarks = new Set(bookmarks.map(b => UI.getBookmarkKey(b)));
                     UI.recomputeExportStats();
                     ((UI.refs && UI.refs.bookmarkCount) || panel.querySelector("#ldb-bookmark-count")).textContent = bookmarks.length;
                     ((UI.refs && UI.refs.exportBtn) || panel.querySelector("#ldb-export")).disabled = false;
@@ -11115,7 +11428,8 @@ ${availableTools}
                     UI.renderBookmarkList();
                     ((UI.refs && UI.refs.bookmarkListContainer) || panel.querySelector("#ldb-bookmark-list-container")).style.display = "block";
 
-                    UI.showStatus(`成功加载 ${bookmarks.length} 个收藏`, "success");
+                    const sourceText = UI.isGitHubMode() ? "GitHub 收藏" : "收藏";
+                    UI.showStatus(`成功加载 ${bookmarks.length} 个${sourceText}`, "success");
                 } catch (error) {
                     UI.showStatus(`加载失败: ${error.message}`, "error");
                 } finally {
@@ -11128,7 +11442,7 @@ ${availableTools}
             (refs.selectAll || panel.querySelector("#ldb-select-all")).onchange = (e) => {
                 const checked = e.target.checked;
                 if (checked) {
-                    UI.selectedBookmarks = new Set(UI.bookmarks.map(b => String(b.topic_id || b.bookmarkable_id)));
+                    UI.selectedBookmarks = new Set(UI.bookmarks.map(b => UI.getBookmarkKey(b)));
                 } else {
                     UI.selectedBookmarks = new Set();
                 }
@@ -11188,9 +11502,9 @@ ${availableTools}
                 }
 
                 // 获取选中的收藏 (过滤已导出的)
-                const toExport = UI.bookmarks.filter(b => {
-                    const topicId = String(b.topic_id || b.bookmarkable_id);
-                    return UI.selectedBookmarks.has(topicId) && !Storage.isTopicExported(topicId);
+                const toExport = UI.bookmarks.filter((b) => {
+                    const bookmarkKey = UI.getBookmarkKey(b);
+                    return UI.selectedBookmarks.has(bookmarkKey) && !UI.isBookmarkKeyExported(bookmarkKey);
                 });
 
                 if (toExport.length === 0) {
@@ -11238,13 +11552,20 @@ ${availableTools}
                 ((UI.refs && UI.refs.reportContainer) || panel.querySelector("#ldb-report-container")).innerHTML = "";
 
                 try {
-                    const results = await Exporter.exportBookmarks(toExport, settings, (progress) => {
-                        UI.showProgress(
-                            progress.current,
-                            progress.total,
-                            `${progress.title}\n${progress.message || progress.stage}${progress.isPaused ? " (已暂停)" : ""}`
-                        );
-                    });
+                    let results;
+                    if (UI.isGitHubMode()) {
+                        results = await UI.exportGitHubSelected(toExport, settings, (current, total, title) => {
+                            UI.showProgress(current, total, `${title}\n导出中`);
+                        });
+                    } else {
+                        results = await Exporter.exportBookmarks(toExport, settings, (progress) => {
+                            UI.showProgress(
+                                progress.current,
+                                progress.total,
+                                `${progress.title}\n${progress.message || progress.stage}${progress.isPaused ? " (已暂停)" : ""}`
+                            );
+                        });
+                    }
 
                     UI.hideProgress();
 
@@ -11350,10 +11671,36 @@ ${availableTools}
 
                 refreshBtn.disabled = true;
                 refreshBtn.innerHTML = "⏳";
-                workspaceTip.innerHTML = "正在获取工作区页面...";
+                workspaceTip.style.color = "";
+                workspaceTip.textContent = "正在获取数据库列表...";
 
                 try {
-                    const workspace = await WorkspaceService.fetchWorkspace(apiKey, { includePages: true });
+                    const workspace = await WorkspaceService.fetchWorkspaceStaged(apiKey, {
+                        includePages: true,
+                        onProgress: (progress) => {
+                            if (progress.phase === "databases") {
+                                workspaceTip.textContent = `正在获取数据库列表... 已加载 ${progress.loaded} 个`;
+                            } else if (progress.phase === "pages") {
+                                workspaceTip.textContent = `数据库已就绪，正在获取页面... 已加载 ${progress.loaded} 个`;
+                            }
+                        },
+                        onPhaseComplete: (phase, partialWorkspace) => {
+                            const workspaceData = {
+                                apiKeyHash: apiKey.slice(-8),
+                                databases: partialWorkspace.databases || [],
+                                pages: partialWorkspace.pages || [],
+                                timestamp: Date.now(),
+                            };
+                            Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
+                            UI.updateWorkspaceSelect(workspaceData);
+
+                            if (phase === "databases") {
+                                workspaceTip.textContent = `✅ 已加载 ${workspaceData.databases.length} 个数据库，可先选择目标；页面列表继续加载中...`;
+                                workspaceTip.style.color = "#34d399";
+                            }
+                        },
+                    });
+
                     const workspaceData = {
                         apiKeyHash: apiKey.slice(-8),
                         databases: workspace.databases,
@@ -11361,12 +11708,11 @@ ${availableTools}
                         timestamp: Date.now(),
                     };
                     Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
-
                     UI.updateWorkspaceSelect(workspaceData);
-                    workspaceTip.innerHTML = `✅ 获取到 ${workspace.databases.length} 个数据库，${workspace.pages.length} 个页面`;
+                    workspaceTip.textContent = `✅ 获取到 ${workspace.databases.length} 个数据库，${workspace.pages.length} 个页面`;
                     workspaceTip.style.color = "#34d399";
                 } catch (error) {
-                    workspaceTip.innerHTML = `❌ ${error.message}`;
+                    workspaceTip.textContent = `❌ ${error.message}`;
                     workspaceTip.style.color = "#f87171";
                 } finally {
                     refreshBtn.disabled = false;
@@ -11687,13 +12033,24 @@ ${availableTools}
                 cb.checked = savedGHTypesMain.includes(cb.value);
             });
 
+            const isGitHub = UI.isGitHubMode();
+            if (refs.bookmarksLabel) {
+                refs.bookmarksLabel.textContent = isGitHub ? "已加载 GitHub 收藏数量" : "已加载收藏数量";
+            }
+            if (refs.autoImportLabel) {
+                refs.autoImportLabel.textContent = isGitHub ? "启用自动导入 GitHub 收藏" : "启用自动导入新收藏";
+            }
+            if (refs.autoImportIntervalLabel) {
+                refs.autoImportIntervalLabel.textContent = isGitHub ? "轮询间隔" : "轮询间隔";
+            }
+
             // 书签扩展状态
             const bmStatusMain = refs.bookmarkExtStatus || panel.querySelector("#ldb-bookmark-ext-status");
             if (bmStatusMain) {
                 if (BookmarkBridge.isExtensionAvailable()) {
                     bmStatusMain.innerHTML = '<span style="color: #4ade80;">✅ 扩展已安装</span> — 输入「导入书签」即可';
                 } else {
-                    bmStatusMain.innerHTML = '<span style="color: #f87171;">❌ 扩展未安装</span> — 请安装 chrome-extension 中的扩展';
+                    bmStatusMain.innerHTML = `<span style="color: #f87171;">❌ 扩展未安装</span> — ${InstallHelper.renderInstallLink("一键安装浏览器扩展")}`;
                 }
             }
 
@@ -11727,16 +12084,29 @@ ${availableTools}
             } catch {}
 
             // 加载自动导入设置
-            const autoImportEnabled = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.autoImportEnabled);
+            const autoImportEnabledKey = isGitHub
+                ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED
+                : CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED;
+            const autoImportIntervalKey = isGitHub
+                ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL
+                : CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL;
+            const autoImportEnabledDefault = isGitHub
+                ? CONFIG.DEFAULTS.githubAutoImportEnabled
+                : CONFIG.DEFAULTS.autoImportEnabled;
+            const autoImportIntervalDefault = isGitHub
+                ? CONFIG.DEFAULTS.githubAutoImportInterval
+                : CONFIG.DEFAULTS.autoImportInterval;
+
+            const autoImportEnabled = Storage.get(autoImportEnabledKey, autoImportEnabledDefault);
             (refs.autoImportEnabled || panel.querySelector("#ldb-auto-import-enabled")).checked = autoImportEnabled;
             (refs.autoImportOptions || panel.querySelector("#ldb-auto-import-options")).style.display = autoImportEnabled ? "block" : "none";
-            const autoImportInterval = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval);
+            const autoImportInterval = Storage.get(autoImportIntervalKey, autoImportIntervalDefault);
             const intervalSelect = refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval");
             intervalSelect.value = autoImportInterval;
             // 如果存储的值不在选项中，回退到默认值
             if (intervalSelect.selectedIndex === -1) {
-                intervalSelect.value = CONFIG.DEFAULTS.autoImportInterval;
-                Storage.set(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval);
+                intervalSelect.value = autoImportIntervalDefault;
+                Storage.set(autoImportIntervalKey, autoImportIntervalDefault);
             }
         },
 
@@ -11888,6 +12258,116 @@ ${availableTools}
             }
         },
 
+        isGitHubMode: () => SiteDetector.isGitHub(),
+
+        getBookmarkKey: (bookmark) => {
+            if (bookmark?.source === "github") {
+                return `gh:${bookmark.sourceType}:${bookmark.itemKey}`;
+            }
+            return String(bookmark?.topic_id || bookmark?.bookmarkable_id || "");
+        },
+
+        isBookmarkKeyExported: (bookmarkKey) => {
+            if (!bookmarkKey) return false;
+            if (!bookmarkKey.startsWith("gh:")) {
+                return Storage.isTopicExported(bookmarkKey);
+            }
+            const parts = bookmarkKey.split(":");
+            const sourceType = parts[1] || "";
+            const itemKey = parts.slice(2).join(":");
+            if (sourceType === "gists") {
+                return GitHubAPI.isGistExported(itemKey);
+            }
+            return GitHubAPI.isExported(itemKey);
+        },
+
+        isBookmarkExported: (bookmark) => {
+            return UI.isBookmarkKeyExported(UI.getBookmarkKey(bookmark));
+        },
+
+        mapGitHubItemsToBookmarks: (items, sourceType) => {
+            return (items || []).map((item) => {
+                const isGist = sourceType === "gists";
+                const itemKey = isGist ? String(item.id || "") : String(item.full_name || item.name || "");
+                const title = isGist
+                    ? (item.description || Object.keys(item.files || {})[0] || `Gist ${item.id || ""}`)
+                    : (item.full_name || item.name || "未命名仓库");
+                return {
+                    source: "github",
+                    sourceType,
+                    itemKey,
+                    title,
+                    raw: item,
+                };
+            }).filter(item => !!item.itemKey);
+        },
+
+        exportGitHubSelected: async (selectedItems, settings, onProgress) => {
+            const { apiKey, databaseId } = settings;
+            if (!apiKey || !databaseId) {
+                throw new Error("请先配置 Notion API Key 和数据库 ID");
+            }
+            if (!selectedItems || selectedItems.length === 0) {
+                return { success: [], failed: [], skipped: [] };
+            }
+
+            const setupResult = await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
+            if (!setupResult.success) {
+                throw new Error(`数据库配置失败: ${setupResult.error}`);
+            }
+
+            const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+            const success = [];
+            const failed = [];
+
+            for (let i = 0; i < selectedItems.length; i++) {
+                const item = selectedItems[i];
+                const bookmark = item.raw;
+                const sourceType = item.sourceType;
+                const label = item.title || item.itemKey;
+                onProgress?.(i + 1, selectedItems.length, label);
+
+                try {
+                    let properties;
+                    if (sourceType === "gists") {
+                        properties = GitHubExporter.buildGistProperties(bookmark);
+                    } else {
+                        const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
+                        properties = GitHubExporter.buildRepoProperties(bookmark, sourceMap[sourceType] || "Star");
+                    }
+                    for (const key of Object.keys(properties)) {
+                        if (properties[key] === undefined) delete properties[key];
+                    }
+                    await NotionAPI.request("POST", "/pages", {
+                        parent: { database_id: databaseId },
+                        properties,
+                    }, apiKey);
+
+                    if (sourceType === "gists") {
+                        GitHubAPI.markGistExported(item.itemKey);
+                    } else {
+                        GitHubAPI.markExported(item.itemKey);
+                    }
+                    success.push({
+                        title: item.title,
+                        url: bookmark?.html_url || "https://github.com",
+                    });
+                } catch (error) {
+                    console.warn(`[UI] GitHub 手动导出失败: ${item.itemKey}`, error);
+                    failed.push({
+                        title: item.title,
+                        error: error.message,
+                    });
+                }
+
+                if (i < selectedItems.length - 1 && delay > 0) {
+                    await Utils.sleep(delay);
+                }
+            }
+
+            return { success, failed, skipped: [] };
+        },
+
         // 渲染收藏列表
         renderBookmarkList: () => {
             const list = (UI.refs && UI.refs.bookmarkList) || UI.panel.querySelector("#ldb-bookmark-list");
@@ -11898,17 +12378,21 @@ ${availableTools}
                 return;
             }
 
-            list.innerHTML = UI.bookmarks.map(b => {
-                const topicId = String(b.topic_id || b.bookmarkable_id);
-                const title = b.title || b.name || `帖子 ${topicId}`;
-                const isExported = Storage.isTopicExported(topicId);
-                const isSelected = UI.selectedBookmarks?.has(topicId);
+            const githubMode = UI.isGitHubMode();
+            list.innerHTML = UI.bookmarks.map((b) => {
+                const bookmarkKey = UI.getBookmarkKey(b);
+                const title = b.title || b.name || `帖子 ${bookmarkKey}`;
+                const isExported = UI.isBookmarkKeyExported(bookmarkKey);
+                const isSelected = UI.selectedBookmarks?.has(bookmarkKey);
+                const sourceTag = githubMode
+                    ? `<span class="status" style="margin-right: 6px;">${(b.sourceType || "stars").toUpperCase()}</span>`
+                    : "";
 
                 return `
-                    <div class="ldb-bookmark-item" data-topic-id="${topicId}">
+                    <div class="ldb-bookmark-item" data-topic-id="${bookmarkKey}">
                         <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
                         <span class="title" title="${title}">${Utils.truncateText(title, 35)}</span>
-                        ${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
+                        ${sourceTag}${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
                     </div>
                 `;
             }).join("");
@@ -11924,16 +12408,15 @@ ${availableTools}
                 return;
             }
 
-            const exportedMap = Storage.getExportedTopics();
             let totalUnexported = 0;
             let selectedUnexported = 0;
 
             UI.bookmarks.forEach((b) => {
-                const topicId = String(b.topic_id || b.bookmarkable_id);
-                const isUnexported = !exportedMap[topicId];
+                const bookmarkKey = UI.getBookmarkKey(b);
+                const isUnexported = !UI.isBookmarkKeyExported(bookmarkKey);
                 if (isUnexported) {
                     totalUnexported++;
-                    if (UI.selectedBookmarks?.has(topicId)) {
+                    if (UI.selectedBookmarks?.has(bookmarkKey)) {
                         selectedUnexported++;
                     }
                 }
@@ -12075,6 +12558,19 @@ ${availableTools}
             };
         },
 
+        maybePromptBookmarkExtensionInstall: () => {
+            const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
+            if (!isUserscriptMode) return;
+            if (BookmarkBridge.isExtensionAvailable()) return;
+            if (Storage.get(CONFIG.STORAGE_KEYS.EXT_INSTALL_PROMPT_SHOWN, false)) return;
+
+            Storage.set(CONFIG.STORAGE_KEYS.EXT_INSTALL_PROMPT_SHOWN, true);
+            const shouldInstallNow = window.confirm("检测到你尚未安装书签桥接扩展。\n\n是否现在打开安装页面？");
+            if (shouldInstallNow) {
+                InstallHelper.openBookmarkExtensionInstall();
+            }
+        },
+
         // 初始化
         init: () => {
             UI.injectStyles();
@@ -12095,8 +12591,7 @@ ${availableTools}
                 UI.miniBtn.style.display = "flex";
             }
 
-            // 启动自动导入
-            AutoImporter.init();
+            UI.maybePromptBookmarkExtensionInstall();
         },
     };
 
@@ -12438,11 +12933,34 @@ ${availableTools}
                 refreshBtn.textContent = "刷新中";
             }
             if (tip) {
-                tip.textContent = "正在获取工作区列表...";
+                tip.textContent = "正在获取数据库列表...";
             }
 
             try {
-                const workspace = await WorkspaceService.fetchWorkspace(apiKey, { includePages: true });
+                const workspace = await WorkspaceService.fetchWorkspaceStaged(apiKey, {
+                    includePages: true,
+                    onProgress: (progress) => {
+                        if (!tip) return;
+                        if (progress.phase === "databases") {
+                            tip.textContent = `正在获取数据库列表... 已加载 ${progress.loaded} 个`;
+                        } else if (progress.phase === "pages") {
+                            tip.textContent = `数据库已就绪，正在获取页面... 已加载 ${progress.loaded} 个`;
+                        }
+                    },
+                    onPhaseComplete: (phase, partialWorkspace) => {
+                        const workspaceData = {
+                            apiKeyHash: apiKey.slice(-8),
+                            databases: partialWorkspace.databases || [],
+                            pages: partialWorkspace.pages || [],
+                            timestamp: Date.now(),
+                        };
+                        Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
+                        GenericUI.updateTargetSelectOptions(workspaceData.databases, workspaceData.pages);
+                        if (tip && phase === "databases") {
+                            tip.textContent = `✅ 已加载 ${workspaceData.databases.length} 个数据库，可先选择目标；页面列表继续加载中...`;
+                        }
+                    },
+                });
 
                 const workspaceData = {
                     apiKeyHash: apiKey.slice(-8),
@@ -12732,6 +13250,7 @@ ${availableTools}
             } else if (currentSite === SiteDetector.SITES.GITHUB) {
                 // GitHub 站点：使用与 Linux.do 同步的完整面板
                 UI.init();
+                GitHubAutoImporter.init();
             } else if (currentSite === SiteDetector.SITES.GENERIC) {
                 // 通用网页：初始化剪藏按钮
                 GenericUI.init();

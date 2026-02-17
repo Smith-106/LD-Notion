@@ -129,6 +129,8 @@ AI 助手采用 ReAct 推理架构，支持多轮工具调用，自动拆解复�
 
 #### 3. 安装书签桥接扩展（可选，仅导入浏览器书签需要）
 
+- 一键安装浏览器扩展：<https://github.com/Smith-106/LD-Notion/tree/main/chrome-extension>
+
 1. 打开 `chrome://extensions/`
 2. 开启右上角「开发者模式」
 3. 点击「加载已解压的扩展程序」
@@ -148,6 +150,8 @@ node scripts/build-extension.js
 输出目录：`chrome-extension-full/`
 
 #### 2. 安装扩展
+
+- 一键安装浏览器扩展（预构建目录）：<https://github.com/Smith-106/LD-Notion/tree/main/chrome-extension-full>
 
 1. 打开 `chrome://extensions/`
 2. 开启右上角「开发者模式」
@@ -297,6 +301,19 @@ A: 请检查：
 - 四级权限模型 + OperationGuard 保护所有写入操作
 
 ## 更新日志
+
+### v3.3.0
+
+本次版本聚焦「工作区刷新顺滑度 + 安装链路简化 + GitHub 站点独立体验」。
+
+- 工作区刷新改为分阶段加载（数据库优先、页面后补齐），并在三端面板提供阶段性反馈，避免卡在“正在获取工作区页面”
+- GitHub 站点新增独立收藏加载体验（已加载数量、列表勾选导入），并支持独立自动导入开关与轮询间隔
+- 书签扩展未安装状态新增「一键安装浏览器扩展」入口（主面板 + Notion 面板）
+- 书签导入相关错误提示补充安装链接，降低排障路径成本
+- Tampermonkey 首次使用时新增一次性安装提示（可选择立即安装或稍后）
+- README 安装章节新增浏览器扩展一键安装链接（桥接扩展与独立扩展）
+
+- Tag：`v3.3.0`
 
 ### v3.2.0
 
