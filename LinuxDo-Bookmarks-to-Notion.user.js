@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion — Notion AI 助手 & Linux.do 收藏导出
 // @namespace    https://linux.do/
-// @version      3.3.0
+// @version      3.4.0
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion，GitHub 全类型导入（Stars/Repos/Forks/Gists），浏览器书签导入，跨源智能搜索与推荐，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -106,6 +106,12 @@
             GITHUB_EXPORTED_GISTS: "ldb_github_exported_gists",
             GITHUB_AUTO_IMPORT_ENABLED: "ldb_github_auto_import_enabled",
             GITHUB_AUTO_IMPORT_INTERVAL: "ldb_github_auto_import_interval",
+            // 更新检查
+            UPDATE_AUTO_CHECK_ENABLED: "ldb_update_auto_check_enabled",
+            UPDATE_CHECK_INTERVAL_HOURS: "ldb_update_check_interval_hours",
+            UPDATE_LAST_CHECK_AT: "ldb_update_last_check_at",
+            UPDATE_LAST_SEEN_VERSION: "ldb_update_last_seen_version",
+            UPDATE_LAST_RESULT: "ldb_update_last_result",
             // 浏览器书签导入
             BOOKMARK_EXPORTED: "ldb_bookmark_exported",
             BOOKMARK_IMPORT_FOLDERS: "ldb_bookmark_import_folders",
@@ -144,6 +150,8 @@
             autoImportInterval: 5, // 分钟，0=仅页面加载时
             githubAutoImportEnabled: false,
             githubAutoImportInterval: 5,
+            updateAutoCheckEnabled: true,
+            updateCheckIntervalHours: 24,
             exportConcurrency: 1, // 并发导出数量
             workspaceMaxPages: 10, // 刷新工作区时的分页上限
             // Agent 个性化默认值
@@ -7366,6 +7374,181 @@ ${availableTools}
         },
     };
 
+    const UpdateChecker = {
+        timerId: null,
+        isChecking: false,
+
+        getCurrentVersion: () => {
+            if (typeof GM_info !== "undefined" && GM_info?.script?.version) {
+                return GM_info.script.version;
+            }
+            return "3.4.0";
+        },
+
+        compareVersions: (a, b) => {
+            const parse = (v) => String(v || "0")
+                .replace(/^v/i, "")
+                .split(".")
+                .map((n) => parseInt(n, 10) || 0);
+            const va = parse(a);
+            const vb = parse(b);
+            const len = Math.max(va.length, vb.length);
+            for (let i = 0; i < len; i++) {
+                const na = va[i] || 0;
+                const nb = vb[i] || 0;
+                if (na > nb) return 1;
+                if (na < nb) return -1;
+            }
+            return 0;
+        },
+
+        fetchLatestVersion: () => {
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "GET",
+                    url: "https://api.github.com/repos/Smith-106/LD-Notion/releases/latest",
+                    headers: {
+                        "Accept": "application/vnd.github+json",
+                        "User-Agent": "LD-Notion-UserScript",
+                    },
+                    timeout: 15000,
+                    onload: (response) => {
+                        if (response.status !== 200) {
+                            reject(new Error(`更新检查失败: HTTP ${response.status}`));
+                            return;
+                        }
+                        try {
+                            const data = JSON.parse(response.responseText || "{}");
+                            const version = String(data.tag_name || data.name || "").replace(/^v/i, "").trim();
+                            if (!version) {
+                                reject(new Error("未获取到版本号"));
+                                return;
+                            }
+                            resolve(version);
+                        } catch {
+                            reject(new Error("解析更新信息失败"));
+                        }
+                    },
+                    ontimeout: () => reject(new Error("更新检查超时")),
+                    onerror: () => reject(new Error("网络错误，无法检查更新")),
+                });
+            });
+        },
+
+        saveResult: (result) => {
+            const checkedAt = Date.now();
+            Storage.set(CONFIG.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, checkedAt);
+            Storage.set(CONFIG.STORAGE_KEYS.UPDATE_LAST_RESULT, JSON.stringify({ ...result, checkedAt }));
+            if (result.latestVersion) {
+                Storage.set(CONFIG.STORAGE_KEYS.UPDATE_LAST_SEEN_VERSION, result.latestVersion);
+            }
+        },
+
+        updateStatusText: (text) => {
+            const el = (UI.refs && UI.refs.updateCheckStatus) || document.querySelector("#ldb-update-check-status");
+            if (el) el.textContent = text;
+        },
+
+        renderLastStatus: () => {
+            const raw = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_LAST_RESULT, "");
+            if (!raw) {
+                UpdateChecker.updateStatusText("尚未检查更新");
+                return;
+            }
+
+            try {
+                const result = JSON.parse(raw);
+                const checkedAtText = result.checkedAt
+                    ? new Date(result.checkedAt).toLocaleString("zh-CN")
+                    : "未知时间";
+                const latestText = result.latestVersion ? `，最新 v${result.latestVersion}` : "";
+                if (result.status === "update-available") {
+                    UpdateChecker.updateStatusText(`发现新版本（上次检查：${checkedAtText}${latestText}）`);
+                } else if (result.status === "up-to-date") {
+                    UpdateChecker.updateStatusText(`已是最新（上次检查：${checkedAtText}${latestText}）`);
+                } else if (result.status === "error") {
+                    UpdateChecker.updateStatusText(`上次检查失败：${result.message || "未知错误"}`);
+                } else {
+                    UpdateChecker.updateStatusText(`上次检查：${checkedAtText}`);
+                }
+            } catch {
+                UpdateChecker.updateStatusText("更新状态读取失败");
+            }
+        },
+
+        check: async ({ manual = false } = {}) => {
+            if (UpdateChecker.isChecking) return;
+            UpdateChecker.isChecking = true;
+
+            if (manual) {
+                UI.showStatus("正在检查更新...", "info");
+            }
+
+            try {
+                const currentVersion = UpdateChecker.getCurrentVersion();
+                const latestVersion = await UpdateChecker.fetchLatestVersion();
+                const cmp = UpdateChecker.compareVersions(latestVersion, currentVersion);
+
+                if (cmp > 0) {
+                    const message = `发现新版本 v${latestVersion}（当前 v${currentVersion}）。脚本可直接更新；ZIP/解压扩展需手动重新安装或在扩展页重新加载。`;
+                    UpdateChecker.saveResult({
+                        status: "update-available",
+                        latestVersion,
+                        currentVersion,
+                        message,
+                    });
+                    UpdateChecker.renderLastStatus();
+                    if (manual) UI.showStatus(message, "info");
+                } else {
+                    const message = `当前已是最新版本 v${currentVersion}`;
+                    UpdateChecker.saveResult({
+                        status: "up-to-date",
+                        latestVersion,
+                        currentVersion,
+                        message,
+                    });
+                    UpdateChecker.renderLastStatus();
+                    if (manual) UI.showStatus(message, "success");
+                }
+            } catch (error) {
+                const message = error?.message || "更新检查失败";
+                UpdateChecker.saveResult({ status: "error", message });
+                UpdateChecker.renderLastStatus();
+                if (manual) UI.showStatus(message, "error");
+            } finally {
+                UpdateChecker.isChecking = false;
+            }
+        },
+
+        startPolling: (hours) => {
+            UpdateChecker.stopPolling();
+            const intervalHours = parseInt(hours, 10) || 0;
+            if (intervalHours > 0) {
+                UpdateChecker.timerId = setInterval(() => {
+                    UpdateChecker.check({ manual: false });
+                }, intervalHours * 60 * 60 * 1000);
+            }
+        },
+
+        stopPolling: () => {
+            if (UpdateChecker.timerId) {
+                clearInterval(UpdateChecker.timerId);
+                UpdateChecker.timerId = null;
+            }
+        },
+
+        init: () => {
+            const enabled = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG.DEFAULTS.updateAutoCheckEnabled);
+            const intervalHours = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG.DEFAULTS.updateCheckIntervalHours);
+            UpdateChecker.stopPolling();
+            UpdateChecker.renderLastStatus();
+            if (enabled) {
+                UpdateChecker.check({ manual: false });
+                UpdateChecker.startPolling(intervalHours);
+            }
+        },
+    };
+
     const GitHubAutoImporter = {
         isRunning: false,
         timerId: null,
@@ -9977,6 +10160,11 @@ ${availableTools}
                 bookmarkListContainer: panel.querySelector("#ldb-bookmark-list-container"),
                 reportContainer: panel.querySelector("#ldb-report-container"),
                 autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
+                updateCheckBtn: panel.querySelector("#ldb-update-check-btn"),
+                updateAutoEnabled: panel.querySelector("#ldb-update-auto-enabled"),
+                updateAutoOptions: panel.querySelector("#ldb-update-auto-options"),
+                updateIntervalHours: panel.querySelector("#ldb-update-interval-hours"),
+                updateCheckStatus: panel.querySelector("#ldb-update-check-status"),
                 minimizeBtn: panel.querySelector("#ldb-minimize"),
                 closeBtn: panel.querySelector("#ldb-close"),
                 themeToggleBtn: panel.querySelector("#ldb-theme-toggle"),
@@ -10621,6 +10809,26 @@ ${availableTools}
                                 </div>
                             </div>
                             <div id="ldb-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
+
+                            <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-update-check-btn" style="padding: 6px 10px;">检查更新</button>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0;">
+                                    <input type="checkbox" id="ldb-update-auto-enabled">
+                                    <span>自动检查更新</span>
+                                </label>
+                            </div>
+                            <div id="ldb-update-auto-options" style="display: none; margin-bottom: 8px;">
+                                <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px;">
+                                    <label for="ldb-update-interval-hours" style="white-space: nowrap;">检查间隔</label>
+                                    <select id="ldb-update-interval-hours" class="ldb-input" style="flex: 1;">
+                                        <option value="24">每 24 小时</option>
+                                        <option value="72">每 72 小时</option>
+                                        <option value="168">每 168 小时</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="ldb-update-check-status" style="font-size: 12px; color: #666; margin-bottom: 12px;"></div>
+
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-load-bookmarks" style="margin-bottom: 12px;">
                                 🔄 加载收藏列表
                             </button>
@@ -11324,6 +11532,35 @@ ${availableTools}
                     if (interval > 0 && Storage.get(autoImportEnabledKey, false)) {
                         AutoImporter.startPolling(interval);
                     }
+                }
+            };
+
+            (refs.updateCheckBtn || panel.querySelector("#ldb-update-check-btn")).onclick = async () => {
+                await UpdateChecker.check({ manual: true });
+            };
+
+            (refs.updateAutoEnabled || panel.querySelector("#ldb-update-auto-enabled")).onchange = (e) => {
+                const enabled = e.target.checked;
+                const optionsEl = refs.updateAutoOptions || panel.querySelector("#ldb-update-auto-options");
+                optionsEl.style.display = enabled ? "block" : "none";
+                Storage.set(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, enabled);
+
+                if (enabled) {
+                    const hours = parseInt((refs.updateIntervalHours || panel.querySelector("#ldb-update-interval-hours")).value, 10)
+                        || CONFIG.DEFAULTS.updateCheckIntervalHours;
+                    Storage.set(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, hours);
+                    UpdateChecker.check({ manual: false });
+                    UpdateChecker.startPolling(hours);
+                } else {
+                    UpdateChecker.stopPolling();
+                }
+            };
+
+            (refs.updateIntervalHours || panel.querySelector("#ldb-update-interval-hours")).onchange = (e) => {
+                const hours = parseInt(e.target.value, 10) || CONFIG.DEFAULTS.updateCheckIntervalHours;
+                Storage.set(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, hours);
+                if (Storage.get(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG.DEFAULTS.updateAutoCheckEnabled)) {
+                    UpdateChecker.startPolling(hours);
                 }
             };
 
@@ -12108,6 +12345,20 @@ ${availableTools}
                 intervalSelect.value = autoImportIntervalDefault;
                 Storage.set(autoImportIntervalKey, autoImportIntervalDefault);
             }
+
+            const updateAutoEnabled = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG.DEFAULTS.updateAutoCheckEnabled);
+            const updateIntervalHours = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG.DEFAULTS.updateCheckIntervalHours);
+            const updateAutoEnabledEl = refs.updateAutoEnabled || panel.querySelector("#ldb-update-auto-enabled");
+            const updateAutoOptionsEl = refs.updateAutoOptions || panel.querySelector("#ldb-update-auto-options");
+            const updateIntervalEl = refs.updateIntervalHours || panel.querySelector("#ldb-update-interval-hours");
+            updateAutoEnabledEl.checked = updateAutoEnabled;
+            updateAutoOptionsEl.style.display = updateAutoEnabled ? "block" : "none";
+            updateIntervalEl.value = String(updateIntervalHours);
+            if (updateIntervalEl.selectedIndex === -1) {
+                updateIntervalEl.value = String(CONFIG.DEFAULTS.updateCheckIntervalHours);
+                Storage.set(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG.DEFAULTS.updateCheckIntervalHours);
+            }
+            UpdateChecker.renderLastStatus();
         },
 
         // 显示状态
@@ -13239,6 +13490,7 @@ ${availableTools}
             if (currentSite === SiteDetector.SITES.LINUX_DO) {
                 // 所有 Linux.do 页面均显示面板（导出/AI 助手/设置）
                 UI.init();
+                UpdateChecker.init();
                 // 非收藏页面额外启动后台自动导入
                 const isBookmarkPage = /\/u\/[^/]+\/activity\/bookmarks/.test(window.location.pathname);
                 if (!isBookmarkPage) {
@@ -13250,6 +13502,7 @@ ${availableTools}
             } else if (currentSite === SiteDetector.SITES.GITHUB) {
                 // GitHub 站点：使用与 Linux.do 同步的完整面板
                 UI.init();
+                UpdateChecker.init();
                 GitHubAutoImporter.init();
             } else if (currentSite === SiteDetector.SITES.GENERIC) {
                 // 通用网页：初始化剪藏按钮
