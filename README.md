@@ -122,6 +122,10 @@ AI 助手采用 ReAct 推理架构，支持多轮工具调用，自动拆解复�
 1. 点击 Tampermonkey 图标 → 添加新脚本
 2. 复制 `LinuxDo-Bookmarks-to-Notion.user.js` 的全部内容
 3. 粘贴并保存（Ctrl+S）
+4. 打开以下任一站点验证入口是否生效：
+   - `https://linux.do/u/你的用户名/activity/bookmarks`（完整面板）
+   - `https://www.notion.so/`（右下角浮动 AI 按钮）
+   - `https://github.com/`（与 Linux.do 同步的完整面板）
 
 #### 3. 安装书签桥接扩展（可选，仅导入浏览器书签需要）
 
@@ -194,14 +198,14 @@ node scripts/build-extension.js
 2. 点击右上角 `...` → `Connections` → `Connect to`
 3. 选择刚创建的 Integration
 
-### 4. 获取数据库 ID
+### 4. 可选：手动获取数据库 ID（高级兜底）
 
-数据库链接格式：
+默认推荐在面板中点击「🔄 刷新工作区列表」，再从下拉框选择数据库或页面。
+
+如工作区列表加载失败，可手动从链接中复制 ID：
 ```
 https://www.notion.so/xxx/32位数据库ID?v=xxx
 ```
-
-复制链接中的 32 位数据库 ID。
 
 ## 使用方法
 
@@ -209,7 +213,7 @@ https://www.notion.so/xxx/32位数据库ID?v=xxx
 
 1. 访问你的收藏页面：`https://linux.do/u/你的用户名/activity/bookmarks`
 2. 页面右侧会出现工具面板
-3. 填写 Notion API Key，通过数据库选择器选择目标（或手动输入 ID）
+3. 填写 Notion API Key，点击刷新并从工作区下拉框选择目标（加载失败时可在高级项手动输入 ID）
 4. 点击「加载收藏列表」获取收藏
 5. 勾选要导出的帖子，调整筛选设置
 6. 点击「开始导出」
@@ -245,8 +249,8 @@ https://www.notion.so/xxx/32位数据库ID?v=xxx
 ### Q: 验证配置失败？
 A: 请检查：
 1. API Key 是否正确复制（以 `secret_` 开头）
-2. 数据库 ID 是否为 32 位
-3. Integration 是否已关联到数据库
+2. 优先点击「🔄 刷新」并从工作区列表选择目标；若手动输入，确认 ID 为 32 位
+3. Integration 是否已关联到数据库（页面模式需关联到目标页面）
 
 ### Q: 图片显示不出来？
 A: 可能原因：
@@ -300,6 +304,7 @@ A: 请检查：
 - 新增：设置面板分组折叠（筛选设置、AI 设置、GitHub 导入独立折叠区）
 - 新增：主题偏好和 Tab 状态持久化
 - 新增：小屏幕响应式适配（480px 以下面板全宽）
+- 新增：Notion 目标配置默认优先使用工作区下拉选择（数据库/页面），手动输入 32 位 ID 调整为高级兜底入口
 - 新增：独立 Chrome 扩展版（`node scripts/build-extension.js` 构建），无需 Tampermonkey
 - 新增：扩展版 Popup 快速入口（Notion API / 书签 API 状态检测 + 一键导入）
 - 新增：扩展版 BookmarkBridge 直接使用 `chrome.bookmarks` API，无需桥接扩展

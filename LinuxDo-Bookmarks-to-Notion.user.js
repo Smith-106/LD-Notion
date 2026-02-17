@@ -10,6 +10,8 @@
 // @match        https://linux.do/*
 // @match        https://www.notion.so/*
 // @match        https://notion.so/*
+// @match        https://github.com/*
+// @match        https://www.github.com/*
 // @match        *://*/*
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
@@ -283,6 +285,7 @@
         SITES: {
             LINUX_DO: "linux_do",
             NOTION: "notion",
+            GITHUB: "github",
             GENERIC: "generic",
         },
 
@@ -295,6 +298,9 @@
             if (hostname === "notion.so" || hostname === "www.notion.so" || hostname.endsWith(".notion.so")) {
                 return SiteDetector.SITES.NOTION;
             }
+            if (hostname === "github.com" || hostname === "www.github.com") {
+                return SiteDetector.SITES.GITHUB;
+            }
             return SiteDetector.SITES.GENERIC;
         },
 
@@ -306,6 +312,11 @@
         // 判断是否在 Notion 站点
         isNotion: () => {
             return SiteDetector.detect() === SiteDetector.SITES.NOTION;
+        },
+
+        // 判断是否在 GitHub 站点
+        isGitHub: () => {
+            return SiteDetector.detect() === SiteDetector.SITES.GITHUB;
         },
 
         // 判断是否在通用网页
@@ -9728,7 +9739,7 @@ ${availableTools}
                 }
 
                 .ldb-btn-primary {
-                    /* alias for `.ldb-btn` */
+                    /* alias for .ldb-btn */
                 }
 
                 .ldb-btn-small {
@@ -10303,14 +10314,17 @@ ${availableTools}
                             <div class="ldb-input-group">
                                 <label class="ldb-label">数据库 / 页面</label>
                                 <div style="display: flex; gap: 8px;">
-                                    <input type="text" class="ldb-input" id="ldb-database-id" placeholder="32位数据库ID" style="flex: 1;">
+                                    <select class="ldb-select" id="ldb-workspace-select" style="flex: 1;">
+                                        <option value="">-- 从工作区选择 --</option>
+                                    </select>
                                     <button class="ldb-btn ldb-btn-secondary" id="ldb-refresh-workspace" style="padding: 6px 12px; white-space: nowrap;" title="刷新工作区页面列表">🔄</button>
                                 </div>
-                                <select class="ldb-select" id="ldb-workspace-select" style="margin-top: 6px; display: none;">
-                                    <option value="">-- 从工作区选择 --</option>
-                                </select>
+                                <div class="ldb-input-group" id="ldb-manual-db-wrap" style="display: none; margin-top: 8px;">
+                                    <input type="text" class="ldb-input" id="ldb-database-id" placeholder="手动输入 32 位数据库 ID（高级）" style="flex: 1;">
+                                </div>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-toggle-manual-db" style="margin-top: 6px; padding: 4px 10px; font-size: 12px;">高级：手动输入数据库 ID</button>
                                 <div class="ldb-tip" id="ldb-workspace-tip">
-                                    从数据库链接复制：notion.so/<b>数据库ID</b>?v=xxx
+                                    优先从工作区列表选择，无法加载时再手动输入
                                 </div>
                             </div>
 
@@ -10701,16 +10715,15 @@ ${availableTools}
             const handleExportTargetChange = (e) => {
                 const targetType = e.target.value;
                 const parentPageGroup = panel.querySelector("#ldb-parent-page-group");
-                const databaseIdGroup = panel.querySelector("#ldb-database-id").parentElement;
+                const manualDbWrap = panel.querySelector("#ldb-manual-db-wrap");
                 const exportTargetTip = panel.querySelector("#ldb-export-target-tip");
 
                 if (targetType === "page") {
                     parentPageGroup.style.display = "block";
-                    databaseIdGroup.style.display = "none";
+                    manualDbWrap.style.display = "none";
                     exportTargetTip.textContent = "导出为子页面，包含完整内容";
                 } else {
                     parentPageGroup.style.display = "none";
-                    databaseIdGroup.style.display = "block";
                     exportTargetTip.textContent = "导出为数据库条目，支持筛选和排序";
                 }
 
@@ -11113,6 +11126,13 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, e.target.value.trim());
             };
 
+            // 手动输入数据库 ID 开关
+            panel.querySelector("#ldb-toggle-manual-db").onclick = () => {
+                const wrap = panel.querySelector("#ldb-manual-db-wrap");
+                const visible = wrap.style.display !== "none";
+                wrap.style.display = visible ? "none" : "block";
+            };
+
             // 刷新工作区页面列表
             panel.querySelector("#ldb-refresh-workspace").onclick = async () => {
                 const apiKey = panel.querySelector("#ldb-api-key").value.trim();
@@ -11180,7 +11200,6 @@ ${availableTools}
 
                     // 更新下拉框
                     UI.updateWorkspaceSelect(workspaceData);
-                    workspaceSelect.style.display = "block";
                     workspaceTip.innerHTML = `✅ 获取到 ${databases.length} 个数据库，${pages.length} 个页面`;
                     workspaceTip.style.color = "#34d399";
                 } catch (error) {
@@ -11207,7 +11226,7 @@ ${availableTools}
                         // 自动切换到页面导出模式
                         panel.querySelector("#ldb-export-target-page").checked = true;
                         panel.querySelector("#ldb-parent-page-group").style.display = "block";
-                        panel.querySelector("#ldb-database-id").parentElement.style.display = "none";
+                        panel.querySelector("#ldb-manual-db-wrap").style.display = "none";
                         panel.querySelector("#ldb-export-target-tip").textContent = "导出为子页面，包含完整内容";
                         Storage.set(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "page");
                         UI.showStatus("已选择页面，自动切换为页面导出模式", "info");
@@ -11443,12 +11462,11 @@ ${availableTools}
             if (exportTargetType === "page") {
                 panel.querySelector("#ldb-export-target-page").checked = true;
                 panel.querySelector("#ldb-parent-page-group").style.display = "block";
-                panel.querySelector("#ldb-database-id").parentElement.style.display = "none";
+                panel.querySelector("#ldb-manual-db-wrap").style.display = "none";
                 panel.querySelector("#ldb-export-target-tip").textContent = "导出为子页面，包含完整内容";
             } else {
                 panel.querySelector("#ldb-export-target-database").checked = true;
                 panel.querySelector("#ldb-parent-page-group").style.display = "none";
-                panel.querySelector("#ldb-database-id").parentElement.style.display = "block";
                 panel.querySelector("#ldb-export-target-tip").textContent = "导出为数据库条目，支持筛选和排序";
             }
 
@@ -11559,7 +11577,6 @@ ${availableTools}
                 if (workspaceData.apiKeyHash === currentKeyHash &&
                     (workspaceData.databases?.length > 0 || workspaceData.pages?.length > 0)) {
                     UI.updateWorkspaceSelect(workspaceData);
-                    panel.querySelector("#ldb-workspace-select").style.display = "block";
                 }
             } catch {}
 
@@ -11651,13 +11668,23 @@ ${availableTools}
             if (!select) return;
 
             const { databases = [], pages = [] } = workspaceData;
+            const savedDatabaseId = Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+            const savedPageId = Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "");
+            const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
+            const restoreValue = exportTargetType === "page"
+                ? (savedPageId ? `page:${savedPageId}` : "")
+                : (savedDatabaseId ? `database:${savedDatabaseId}` : "");
+
             let options = '<option value="">-- 从工作区选择 --</option>';
+            const knownValues = new Set();
 
             // 数据库组
             if (databases.length > 0) {
                 options += '<optgroup label="📁 数据库">';
                 databases.forEach(db => {
-                    options += `<option value="database:${db.id}">📁 ${Utils.escapeHtml(db.title)}</option>`;
+                    const value = `database:${db.id}`;
+                    knownValues.add(value);
+                    options += `<option value="${value}">📁 ${Utils.escapeHtml(db.title)}</option>`;
                 });
                 options += '</optgroup>';
             }
@@ -11667,12 +11694,22 @@ ${availableTools}
             if (workspacePages.length > 0) {
                 options += '<optgroup label="📄 工作区页面">';
                 workspacePages.forEach(page => {
-                    options += `<option value="page:${page.id}">📄 ${Utils.escapeHtml(page.title)}</option>`;
+                    const value = `page:${page.id}`;
+                    knownValues.add(value);
+                    options += `<option value="${value}">📄 ${Utils.escapeHtml(page.title)}</option>`;
                 });
                 options += '</optgroup>';
             }
 
+            if (restoreValue && !knownValues.has(restoreValue)) {
+                const shortId = restoreValue.split(":")[1] || "";
+                options += `<option value="${restoreValue}">已配置 (ID: ${shortId.slice(0, 8)}...)</option>`;
+            }
+
             select.innerHTML = options;
+            if (restoreValue) {
+                select.value = restoreValue;
+            }
         },
 
         // 更新 AI 查询目标数据库下拉框
@@ -12053,7 +12090,7 @@ ${availableTools}
                 }
 
                 .gclip-btn-primary {
-                    /* alias for `.gclip-btn` */
+                    /* alias for .gclip-btn */
                 }
 
                 .gclip-btn-setup {
@@ -12129,8 +12166,21 @@ ${availableTools}
                             </select>
                         </div>
                         <div class="gclip-field">
-                            <label id="gclip-target-label">${exportType === "page" ? "父页面 ID" : "数据库 ID"}</label>
+                            <label id="gclip-target-label">${exportType === "page" ? "父页面" : "数据库"}</label>
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <select id="gclip-target-select" class="gclip-input" style="flex:1;">
+                                    <option value="">未选择</option>
+                                </select>
+                                <button class="gclip-btn" id="gclip-refresh-workspace" style="padding:4px 12px;font-size:12px;white-space:nowrap;">刷新</button>
+                            </div>
+                            <div id="gclip-target-tip" style="font-size:11px;color:var(--ldb-ui-muted);margin-top:4px;">优先从工作区列表选择，失败时可手动输入 ID</div>
+                        </div>
+                        <div class="gclip-field" id="gclip-manual-target-wrap" style="display:none;">
+                            <label>手动输入 ID（高级）</label>
                             <input type="text" id="gclip-target-id" value="" placeholder="32位ID">
+                        </div>
+                        <div class="gclip-field" style="margin-top:-4px;">
+                            <button class="gclip-btn gclip-btn-secondary" id="gclip-toggle-manual-target" style="padding:4px 10px;font-size:12px;">高级：手动输入 ID</button>
                         </div>
                         <div class="gclip-field">
                             <label>图片处理</label>
@@ -12160,11 +12210,148 @@ ${availableTools}
             // 绑定事件
             GenericUI.bindEvents();
 
-            // 未配置时设置面板可见，仅填充非敏感字段
-            if (!isConfigured) {
-                panel.querySelector("#gclip-target-id").value = targetId;
+            // 初始化导出目标 UI
+            panel.querySelector("#gclip-export-type").value = exportType;
+            panel.querySelector("#gclip-target-label").textContent = exportType === "page" ? "父页面" : "数据库";
+            panel.querySelector("#gclip-target-id").value = targetId;
+
+            const apiKeyForInit = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            GenericUI.loadTargetOptionsFromCache(apiKeyForInit);
+            if (apiKeyForInit) {
+                GenericUI.refreshWorkspaceTargets(apiKeyForInit, true);
             }
             return panel;
+        },
+
+        updateTargetSelectOptions: (databases = [], pages = []) => {
+            const panel = GenericUI.panel;
+            if (!panel) return;
+
+            const select = panel.querySelector("#gclip-target-select");
+            const exportType = panel.querySelector("#gclip-export-type")?.value || "database";
+            if (!select) return;
+
+            const savedDatabaseId = Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+            const savedPageId = Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "");
+            const restoreValue = exportType === "page"
+                ? (savedPageId ? `page:${savedPageId}` : "")
+                : savedDatabaseId;
+
+            let options = '<option value="">未选择</option>';
+            const known = new Set();
+
+            if (exportType === "page") {
+                const workspacePages = pages.filter(p => p.parent === "workspace");
+                workspacePages.forEach(page => {
+                    const value = `page:${page.id}`;
+                    known.add(value);
+                    options += `<option value="${value}">📄 ${Utils.escapeHtml(page.title || "未命名页面")}</option>`;
+                });
+            } else {
+                databases.forEach(db => {
+                    known.add(db.id);
+                    options += `<option value="${db.id}">📁 ${Utils.escapeHtml(db.title || "未命名数据库")}</option>`;
+                });
+            }
+
+            if (restoreValue && !known.has(restoreValue)) {
+                const shortId = restoreValue.replace(/^page:/, "");
+                options += `<option value="${restoreValue}">已配置 (ID: ${shortId.slice(0, 8)}...)</option>`;
+            }
+
+            select.innerHTML = options;
+            if (restoreValue) {
+                select.value = restoreValue;
+            }
+        },
+
+        refreshWorkspaceTargets: async (apiKey, silent = false) => {
+            const panel = GenericUI.panel;
+            if (!panel) return;
+
+            const refreshBtn = panel.querySelector("#gclip-refresh-workspace");
+            const tip = panel.querySelector("#gclip-target-tip");
+
+            if (!apiKey) {
+                if (!silent) GenericUI.showStatus("请先设置 Notion API Key", "error");
+                return;
+            }
+
+            if (refreshBtn) {
+                refreshBtn.disabled = true;
+                refreshBtn.textContent = "刷新中";
+            }
+            if (tip) {
+                tip.textContent = "正在获取工作区列表...";
+            }
+
+            try {
+                const databasesRes = await NotionAPI.search("", { property: "object", value: "database" }, apiKey);
+                const pagesRes = await NotionAPI.search("", { property: "object", value: "page" }, apiKey);
+
+                const databases = (databasesRes.results || []).map(db => ({
+                    id: db.id?.replace(/-/g, "") || "",
+                    title: db.title?.[0]?.plain_text || "无标题数据库",
+                })).filter(item => item.id);
+
+                const pages = (pagesRes.results || []).map(page => ({
+                    id: page.id?.replace(/-/g, "") || "",
+                    title: Utils.getPageTitle(page),
+                    parent: page.parent?.type || "",
+                })).filter(item => item.id);
+
+                const workspaceData = {
+                    apiKeyHash: apiKey.slice(-8),
+                    databases,
+                    pages,
+                    timestamp: Date.now(),
+                };
+                Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
+
+                GenericUI.updateTargetSelectOptions(databases, pages);
+                if (tip) {
+                    tip.textContent = `已加载 ${databases.length} 个数据库，${pages.filter(p => p.parent === "workspace").length} 个页面`;
+                }
+            } catch (error) {
+                if (tip) {
+                    tip.textContent = `加载失败：${error.message}`;
+                }
+            } finally {
+                if (refreshBtn) {
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = "刷新";
+                }
+            }
+        },
+
+        loadTargetOptionsFromCache: (apiKey) => {
+            const panel = GenericUI.panel;
+            if (!panel) return;
+
+            const tip = panel.querySelector("#gclip-target-tip");
+            let databases = [];
+            let pages = [];
+
+            const raw = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
+            try {
+                const wsData = JSON.parse(raw);
+                const keyHash = apiKey ? apiKey.slice(-8) : "";
+                const cacheValid = !apiKey || !wsData.apiKeyHash || wsData.apiKeyHash === keyHash;
+                if (cacheValid) {
+                    databases = wsData.databases || [];
+                    pages = wsData.pages || [];
+                }
+            } catch {}
+
+            GenericUI.updateTargetSelectOptions(databases, pages);
+
+            if (tip) {
+                if (databases.length > 0 || pages.length > 0) {
+                    tip.textContent = "已加载缓存工作区列表，可点击刷新更新";
+                } else {
+                    tip.textContent = "优先从工作区列表选择，失败时可手动输入 ID";
+                }
+            }
         },
 
         // 绑定面板事件
@@ -12177,9 +12364,24 @@ ${availableTools}
             });
 
             // 导出类型切换
-            panel.querySelector("#gclip-export-type").addEventListener("change", (e) => {
-                const isPage = e.target.value === "page";
-                panel.querySelector("#gclip-target-label").textContent = isPage ? "父页面 ID" : "数据库 ID";
+            panel.querySelector("#gclip-export-type").addEventListener("change", () => {
+                const isPage = panel.querySelector("#gclip-export-type").value === "page";
+                panel.querySelector("#gclip-target-label").textContent = isPage ? "父页面" : "数据库";
+                GenericUI.loadTargetOptionsFromCache(Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""));
+            });
+
+            // 刷新工作区目标列表
+            panel.querySelector("#gclip-refresh-workspace").addEventListener("click", async () => {
+                const keyInput = panel.querySelector("#gclip-api-key-input").value.trim();
+                const apiKey = keyInput || Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+                await GenericUI.refreshWorkspaceTargets(apiKey);
+            });
+
+            // 手动输入开关
+            panel.querySelector("#gclip-toggle-manual-target").addEventListener("click", () => {
+                const wrap = panel.querySelector("#gclip-manual-target-wrap");
+                const visible = wrap.style.display !== "none";
+                wrap.style.display = visible ? "none" : "block";
             });
 
             // 保存 API Key（从面板内密码输入框读取，避免使用可被宿主页面拦截的 prompt()）
@@ -12206,11 +12408,14 @@ ${availableTools}
                 }
                 const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
                 const exportType = panel.querySelector("#gclip-export-type").value;
-                const targetId = panel.querySelector("#gclip-target-id").value.trim().replace(/-/g, "");
+                const selectValue = panel.querySelector("#gclip-target-select")?.value || "";
+                const manualTargetId = panel.querySelector("#gclip-target-id").value.trim().replace(/-/g, "");
+                const selectedTargetId = selectValue.startsWith("page:") ? selectValue.slice(5) : selectValue;
+                const targetId = (selectedTargetId || manualTargetId).replace(/-/g, "");
                 const imgMode = panel.querySelector("#gclip-img-mode").value;
 
                 if (!apiKey) return GenericUI.showStatus("请先设置 Notion API Key", "error");
-                if (!targetId) return GenericUI.showStatus("请输入目标 ID", "error");
+                if (!targetId) return GenericUI.showStatus("请先选择目标，或手动输入 ID", "error");
 
                 Storage.set(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, exportType);
                 Storage.set(CONFIG.STORAGE_KEYS.IMG_MODE, imgMode);
@@ -12227,6 +12432,8 @@ ${availableTools}
                     }
                 }
 
+                GenericUI.loadTargetOptionsFromCache(apiKey);
+
                 GenericUI.showStatus("配置已保存", "success");
                 panel.querySelector("#gclip-settings").style.display = "none";
                 panel.querySelector("#gclip-export").style.display = "block";
@@ -12239,10 +12446,19 @@ ${availableTools}
                 const showing = settings.style.display === "none";
                 if (showing) {
                     const exportType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "database");
+                    panel.querySelector("#gclip-export-type").value = exportType;
+                    panel.querySelector("#gclip-target-label").textContent = exportType === "page" ? "父页面" : "数据库";
+
                     const tid = exportType === "page"
                         ? Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "")
                         : Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
                     panel.querySelector("#gclip-target-id").value = tid;
+
+                    const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+                    GenericUI.loadTargetOptionsFromCache(apiKey);
+                    if (apiKey) {
+                        GenericUI.refreshWorkspaceTargets(apiKey, true);
+                    }
                     // API Key 不预填到 DOM，用户需手动输入或留空使用已保存配置
                 }
                 settings.style.display = showing ? "block" : "none";
@@ -12369,6 +12585,9 @@ ${availableTools}
             } else if (currentSite === SiteDetector.SITES.NOTION) {
                 // Notion 站点：初始化浮动 AI 助手
                 NotionSiteUI.init();
+            } else if (currentSite === SiteDetector.SITES.GITHUB) {
+                // GitHub 站点：使用与 Linux.do 同步的完整面板
+                UI.init();
             } else if (currentSite === SiteDetector.SITES.GENERIC) {
                 // 通用网页：初始化剪藏按钮
                 GenericUI.init();
