@@ -129,7 +129,7 @@ AI 助手采用 ReAct 推理架构，支持多轮工具调用，自动拆解复�
 
 #### 3. 安装书签桥接扩展（可选，仅导入浏览器书签需要）
 
-- 一键安装浏览器扩展：<https://github.com/Smith-106/LD-Notion/tree/main/chrome-extension>
+- 一键安装浏览器扩展：<https://github.com/Smith-106/LD-Notion/releases/latest>
 
 1. 打开 `chrome://extensions/`
 2. 开启右上角「开发者模式」
@@ -151,7 +151,7 @@ node scripts/build-extension.js
 
 #### 2. 安装扩展
 
-- 一键安装浏览器扩展（预构建目录）：<https://github.com/Smith-106/LD-Notion/tree/main/chrome-extension-full>
+- 一键安装浏览器扩展（预构建目录）：<https://github.com/Smith-106/LD-Notion/releases/latest>
 
 1. 打开 `chrome://extensions/`
 2. 开启右上角「开发者模式」

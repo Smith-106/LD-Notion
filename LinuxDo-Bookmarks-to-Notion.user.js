@@ -339,7 +339,7 @@
     };
 
     const InstallHelper = {
-        BOOKMARK_EXTENSION_URL: "https://github.com/Smith-106/LD-Notion/tree/main/chrome-extension",
+        BOOKMARK_EXTENSION_URL: "https://github.com/Smith-106/LD-Notion/releases/latest",
 
         getBookmarkExtensionUrl: () => InstallHelper.BOOKMARK_EXTENSION_URL,
 
@@ -12035,13 +12035,13 @@ ${availableTools}
 
             const isGitHub = UI.isGitHubMode();
             if (refs.bookmarksLabel) {
-                refs.bookmarksLabel.textContent = isGitHub ? "已加载 GitHub 收藏数量" : "已加载收藏数量";
+                refs.bookmarksLabel.textContent = "已加载收藏数量";
             }
             if (refs.autoImportLabel) {
-                refs.autoImportLabel.textContent = isGitHub ? "启用自动导入 GitHub 收藏" : "启用自动导入新收藏";
+                refs.autoImportLabel.textContent = "启用自动导入新收藏";
             }
             if (refs.autoImportIntervalLabel) {
-                refs.autoImportIntervalLabel.textContent = isGitHub ? "轮询间隔" : "轮询间隔";
+                refs.autoImportIntervalLabel.textContent = "轮询间隔";
             }
 
             // 书签扩展状态
