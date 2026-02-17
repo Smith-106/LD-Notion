@@ -263,6 +263,16 @@ A: 请检查：
 
 ## 更新日志
 
+### v3.1.0
+- 新增：暗色/亮色主题手动切换（☀️/🌙 按钮），支持 auto/light/dark 三种模式
+- 新增：Linux.do 面板 Tab 导航（📚 收藏 / 🤖 AI / ⚙️ 设置），减少滚动，聚焦当前任务
+- 新增：设置面板分组折叠（筛选设置、AI 设置、GitHub 导入独立折叠区）
+- 新增：主题偏好和 Tab 状态持久化
+- 新增：小屏幕响应式适配（480px 以下面板全宽）
+- 优化：Notion 面板添加主题切换按钮
+- 优化：所有硬编码颜色替换为 CSS 变量，暗色模式下显示一致
+- 优化：主题系统从 `prefers-color-scheme` 媒体查询升级为 `data-ldb-theme` 属性驱动
+
 ### v3.0.0
 - 新增：GitHub 全类型导入（Stars / Repos / Forks / Gists），可在设置中勾选启用
 - 新增：浏览器书签导入，配套 Chrome 扩展通过 `chrome.bookmarks` API 直接读取
