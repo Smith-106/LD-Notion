@@ -4,6 +4,8 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器拓展](https://img.shields.io/badge/安装浏览器拓展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
+- v3.3.0 插件 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.3.0/LD-Notion-chrome-extension-full-v3.3.0.zip>
+
 ## 四大核心能力
 
 ### 1. Linux.do 收藏导出器
