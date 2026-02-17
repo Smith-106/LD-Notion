@@ -298,6 +298,14 @@ A: 请检查：
 
 ## 更新日志
 
+### v3.2.0
+- 优化：新增 `WorkspaceService` 工作区数据服务，统一数据库/页面拉取并对并发请求去重，减少重复 Notion API 调用
+- 优化：Linux.do 面板收藏列表改为事件委托，避免重渲染时重复绑定 `click/change` 事件
+- 优化：导出计数逻辑改为增量统计（`selectedUnexportedCount` / `totalUnexportedCount`），减少全量遍历开销
+- 优化：自动导入在页面隐藏时延后执行，页面恢复可见后自动补跑，降低后台无效轮询
+- 优化：主面板高频 DOM 查询改为 `UI.refs` 缓存优先访问，减少初始化与交互路径的重复 `querySelector`
+- 优化：导出记录读取增加内存缓存，减少 `GM_getValue + JSON.parse` 频次
+
 ### v3.1.0
 - 新增：暗色/亮色主题手动切换（☀️/🌙 按钮），支持 auto/light/dark 三种模式
 - 新增：Linux.do 面板 Tab 导航（📚 收藏 / 🤖 AI / ⚙️ 设置），减少滚动，聚焦当前任务
