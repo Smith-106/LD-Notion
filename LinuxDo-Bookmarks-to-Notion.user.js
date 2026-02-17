@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion — Notion AI 助手 & Linux.do 收藏导出
 // @namespace    https://linux.do/
-// @version      3.4.0
+// @version      3.4.1
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion，GitHub 全类型导入（Stars/Repos/Forks/Gists），浏览器书签导入，跨源智能搜索与推荐，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -7384,7 +7384,7 @@ ${availableTools}
             if (typeof GM_info !== "undefined" && GM_info?.script?.version) {
                 return GM_info.script.version;
             }
-            return "3.4.0";
+            return "3.4.1";
         },
 
         compareVersions: (a, b) => {
@@ -8418,6 +8418,29 @@ ${availableTools}
     // 监听扩展 Popup 快捷操作（仅在 Chrome 扩展版中生效）
     window.addEventListener("ld-notion-popup-action", (event) => {
         const { action } = event.detail || {};
+
+        if (action === "set-bookmark-source") {
+            const source = event.detail?.source === "github" ? "github" : "linuxdo";
+            Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, source);
+            if (typeof UI !== "undefined" && UI.panel && UI.refs) {
+                const sourceSelect = UI.refs.bookmarkSourceSelect || UI.panel.querySelector("#ldb-bookmark-source");
+                if (sourceSelect) {
+                    sourceSelect.value = source;
+                    sourceSelect.dispatchEvent(new Event("change", { bubbles: true }));
+                }
+                const sourceToggle = UI.refs.sourceSettingsToggle || UI.panel.querySelector("#ldb-source-settings-toggle");
+                const sourceContent = UI.refs.sourceSettingsContent || UI.panel.querySelector("#ldb-source-settings-content");
+                const sourceArrow = UI.refs.sourceSettingsArrow || UI.panel.querySelector("#ldb-source-settings-arrow");
+                if (sourceToggle && sourceContent?.classList.contains("collapsed")) {
+                    sourceToggle.click();
+                } else if (sourceContent && sourceArrow) {
+                    sourceContent.classList.remove("collapsed");
+                    sourceArrow.textContent = "▼";
+                }
+            }
+            return;
+        }
+
         const cmdMap = {
             "import-bookmarks": "导入浏览器书签",
             "import-github": "导入GitHub收藏",

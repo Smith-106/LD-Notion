@@ -124,6 +124,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const event = new CustomEvent("ld-notion-popup-action", { detail: { action: "import-github" } });
         window.dispatchEvent(event);
         sendResponse({ ok: true });
+    } else if (message.type === "LD_NOTION_SET_BOOKMARK_SOURCE") {
+        const event = new CustomEvent("ld-notion-popup-action", {
+            detail: { action: "set-bookmark-source", source: message.source || "github" }
+        });
+        window.dispatchEvent(event);
+        sendResponse({ ok: true });
     }
 });
 `;
@@ -364,6 +370,10 @@ body { width: 320px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
         <span class="icon">\ud83d\udc19</span>
         <div><div class="label">GitHub \u6d3b\u52a8\u5bfc\u5165</div><div class="desc">\u5bfc\u5165 Stars\u3001Repos\u3001Forks\u3001Gists</div></div>
     </button>
+    <button class="action-btn" id="open-bookmark-panel">
+        <span class="icon">\ud83e\udde9</span>
+        <div><div class="label">收藏来源页面</div><div class="desc">打开扩展页设置 Linux.do / GitHub 收藏分区</div></div>
+    </button>
 </div>
 <div class="status" id="status-section">
     <div class="status-row">
@@ -432,6 +442,35 @@ document.addEventListener("DOMContentLoaded", async () => {
             } else {
                 chrome.tabs.create({ url: "https://linux.do" });
                 window.close();
+            }
+        });
+    });
+
+    // 收藏来源面板按钮
+    document.getElementById("open-bookmark-panel").addEventListener("click", () => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const tab = tabs[0];
+            const openAndSetSource = (tabId) => {
+                chrome.tabs.sendMessage(tabId, {
+                    type: "LD_NOTION_SET_BOOKMARK_SOURCE",
+                    source: "github"
+                }, () => {
+                    window.close();
+                });
+            };
+
+            if (tab && tab.url && tab.url.includes("linux.do")) {
+                openAndSetSource(tab.id);
+            } else {
+                chrome.tabs.create({ url: "https://linux.do" }, (newTab) => {
+                    if (!newTab || !newTab.id) {
+                        window.close();
+                        return;
+                    }
+                    setTimeout(() => {
+                        openAndSetSource(newTab.id);
+                    }, 900);
+                });
             }
         });
     });
