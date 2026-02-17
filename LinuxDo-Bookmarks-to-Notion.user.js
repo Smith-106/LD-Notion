@@ -248,6 +248,8 @@
     // 存储管理
     // ===========================================
     const Storage = {
+        _exportedTopicsCache: null,
+
         get: (key, defaultValue = null) => {
             const value = GM_getValue(key, defaultValue);
             return value;
@@ -258,17 +260,23 @@
         },
 
         getExportedTopics: () => {
+            if (Storage._exportedTopicsCache) {
+                return Storage._exportedTopicsCache;
+            }
+
             const data = GM_getValue(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, "{}");
             try {
-                return JSON.parse(data);
+                Storage._exportedTopicsCache = JSON.parse(data);
             } catch {
-                return {};
+                Storage._exportedTopicsCache = {};
             }
+            return Storage._exportedTopicsCache;
         },
 
         markTopicExported: (topicId) => {
             const exported = Storage.getExportedTopics();
             exported[topicId] = Date.now();
+            Storage._exportedTopicsCache = exported;
             GM_setValue(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify(exported));
         },
 
@@ -2587,14 +2595,15 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
         // 获取 AI 设置
         getSettings: () => {
             const panel = UI.panel;
+            const refs = UI.refs || {};
             return {
-                notionApiKey: panel.querySelector("#ldb-api-key")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
-                notionDatabaseId: panel.querySelector("#ldb-database-id")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
-                aiApiKey: panel.querySelector("#ldb-ai-api-key")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, ""),
-                aiService: panel.querySelector("#ldb-ai-service")?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService),
-                aiModel: panel.querySelector("#ldb-ai-model")?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, ""),
-                aiBaseUrl: panel.querySelector("#ldb-ai-base-url")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, ""),
-                categories: (panel.querySelector("#ldb-ai-categories")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories))
+                notionApiKey: (refs.apiKeyInput || panel?.querySelector("#ldb-api-key"))?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
+                notionDatabaseId: (refs.databaseIdInput || panel?.querySelector("#ldb-database-id"))?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
+                aiApiKey: (refs.aiApiKeyInput || panel?.querySelector("#ldb-ai-api-key"))?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, ""),
+                aiService: (refs.aiServiceSelect || panel?.querySelector("#ldb-ai-service"))?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService),
+                aiModel: (refs.aiModelSelect || panel?.querySelector("#ldb-ai-model"))?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, ""),
+                aiBaseUrl: (refs.aiBaseUrlInput || panel?.querySelector("#ldb-ai-base-url"))?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, ""),
+                categories: ((refs.aiCategoriesInput || panel?.querySelector("#ldb-ai-categories"))?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories))
                     .split(/[,，]/).map(c => c.trim()).filter(Boolean),
             };
         },
@@ -6381,6 +6390,79 @@ ${availableTools}
     };
 
     // ===========================================
+    // 工作区数据服务（带并发去重）
+    // ===========================================
+    const WorkspaceService = {
+        _inflightRequests: new Map(),
+
+        fetchWorkspace: async (apiKey, options = {}) => {
+            if (!apiKey) {
+                return { databases: [], pages: [] };
+            }
+
+            const includePages = options.includePages !== false;
+            const maxPages = Number.isFinite(options.maxPages)
+                ? options.maxPages
+                : (parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages), 10) || 0);
+            const requestKey = `${apiKey.slice(-8)}:${maxPages}:${includePages ? "all" : "db"}`;
+
+            if (WorkspaceService._inflightRequests.has(requestKey)) {
+                return WorkspaceService._inflightRequests.get(requestKey);
+            }
+
+            const requestPromise = (async () => {
+                let allDbResults = [];
+                let dbCursor = undefined;
+                let dbPageCount = 0;
+                do {
+                    const dbResponse = await NotionAPI.search("", { property: "object", value: "database" }, apiKey, dbCursor);
+                    allDbResults = allDbResults.concat(dbResponse.results || []);
+                    dbCursor = dbResponse.has_more ? dbResponse.next_cursor : undefined;
+                    dbPageCount++;
+                } while (dbCursor && (maxPages === 0 || dbPageCount < maxPages));
+
+                const databases = allDbResults.map(db => ({
+                    id: db.id?.replace(/-/g, "") || "",
+                    title: db.title?.[0]?.plain_text || "无标题数据库",
+                    type: "database",
+                    url: db.url || "",
+                })).filter(item => item.id);
+
+                if (!includePages) {
+                    return { databases, pages: [] };
+                }
+
+                let allPageResults = [];
+                let pageCursor = undefined;
+                let pagePageCount = 0;
+                do {
+                    const pageResponse = await NotionAPI.search("", { property: "object", value: "page" }, apiKey, pageCursor);
+                    allPageResults = allPageResults.concat(pageResponse.results || []);
+                    pageCursor = pageResponse.has_more ? pageResponse.next_cursor : undefined;
+                    pagePageCount++;
+                } while (pageCursor && (maxPages === 0 || pagePageCount < maxPages));
+
+                const pages = allPageResults.map(page => ({
+                    id: page.id?.replace(/-/g, "") || "",
+                    title: Utils.getPageTitle(page),
+                    type: "page",
+                    url: page.url || "",
+                    parent: page.parent?.type || "",
+                })).filter(item => item.id);
+
+                return { databases, pages };
+            })();
+
+            WorkspaceService._inflightRequests.set(requestKey, requestPromise);
+            try {
+                return await requestPromise;
+            } finally {
+                WorkspaceService._inflightRequests.delete(requestKey);
+            }
+        },
+    };
+
+    // ===========================================
     // 通用网页导出器
     // ===========================================
     const GenericExporter = {
@@ -7000,6 +7082,8 @@ ${availableTools}
     const AutoImporter = {
         isRunning: false,
         timerId: null,
+        deferredWhileHidden: false,
+        visibilityListenerBound: false,
 
         // 从 Storage 读取导出设置（不依赖 UI DOM）
         buildSettings: () => {
@@ -7033,12 +7117,17 @@ ${availableTools}
 
         // 更新状态栏
         updateStatus: (text) => {
-            const el = document.querySelector("#ldb-auto-import-status");
+            const el = (UI.refs && UI.refs.autoImportStatus) || document.querySelector("#ldb-auto-import-status");
             if (el) el.textContent = text;
         },
 
         // 执行一次自动导入
         run: async () => {
+            if (document.hidden) {
+                AutoImporter.deferredWhileHidden = true;
+                return;
+            }
+
             if (AutoImporter.isRunning) return;
             if (Exporter.isExporting) return; // 手动导出进行中，跳过
 
@@ -7161,6 +7250,17 @@ ${availableTools}
             }
         },
 
+        ensureVisibilityListener: () => {
+            if (AutoImporter.visibilityListenerBound) return;
+            document.addEventListener("visibilitychange", () => {
+                if (!document.hidden && AutoImporter.deferredWhileHidden) {
+                    AutoImporter.deferredWhileHidden = false;
+                    AutoImporter.run();
+                }
+            });
+            AutoImporter.visibilityListenerBound = true;
+        },
+
         stopPolling: () => {
             if (AutoImporter.timerId) {
                 clearInterval(AutoImporter.timerId);
@@ -7170,6 +7270,7 @@ ${availableTools}
 
         init: () => {
             if (!AutoImporter.canStart()) return;
+            AutoImporter.ensureVisibilityListener();
             setTimeout(() => {
                 AutoImporter.run();
                 const interval = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval);
@@ -9219,57 +9320,18 @@ ${availableTools}
                 workspaceTip.textContent = "正在获取工作区列表...";
 
                 try {
-                    // 分页获取所有数据库
-                    let allDbResults = [];
-                    let dbCursor = undefined;
-                    const maxPages = parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages)) || 0;
-                    let dbPageCount = 0;
-                    do {
-                        const dbResponse = await NotionAPI.search("", { property: "object", value: "database" }, apiKey, dbCursor);
-                        allDbResults = allDbResults.concat(dbResponse.results || []);
-                        dbCursor = dbResponse.has_more ? dbResponse.next_cursor : undefined;
-                        dbPageCount++;
-                    } while (dbCursor && (maxPages === 0 || dbPageCount < maxPages));
+                    const workspace = await WorkspaceService.fetchWorkspace(apiKey, { includePages: true });
 
-                    const databases = allDbResults.map(db => ({
-                        id: db.id?.replace(/-/g, "") || "",
-                        title: db.title?.[0]?.plain_text || "无标题数据库",
-                        type: "database",
-                        url: db.url || ""
-                    }));
-
-                    // 分页获取所有页面
-                    let allPageResults = [];
-                    let pageCursor = undefined;
-                    let pagePageCount = 0;
-                    do {
-                        const pageResponse = await NotionAPI.search("", { property: "object", value: "page" }, apiKey, pageCursor);
-                        allPageResults = allPageResults.concat(pageResponse.results || []);
-                        pageCursor = pageResponse.has_more ? pageResponse.next_cursor : undefined;
-                        pagePageCount++;
-                    } while (pageCursor && (maxPages === 0 || pagePageCount < maxPages));
-
-                    const pages = allPageResults.map(page => ({
-                        id: page.id?.replace(/-/g, "") || "",
-                        title: Utils.getPageTitle(page),
-                        type: "page",
-                        url: page.url || "",
-                        parent: page.parent?.type || ""
-                    }));
-
-                    // 更新缓存
-                    const apiKeyHash = apiKey.slice(-8);
                     const workspaceData = {
-                        apiKeyHash,
-                        databases,
-                        pages,
-                        timestamp: Date.now()
+                        apiKeyHash: apiKey.slice(-8),
+                        databases: workspace.databases,
+                        pages: workspace.pages,
+                        timestamp: Date.now(),
                     };
                     Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
 
-                    // 填充下拉框
-                    NotionSiteUI.updateAITargetDbOptions(databases, pages);
-                    workspaceTip.textContent = `✅ 获取到 ${databases.length} 个数据库，${pages.length} 个页面`;
+                    NotionSiteUI.updateAITargetDbOptions(workspace.databases, workspace.pages);
+                    workspaceTip.textContent = `✅ 获取到 ${workspace.databases.length} 个数据库，${workspace.pages.length} 个页面`;
                     workspaceTip.style.color = "#34d399";
                 } catch (error) {
                     workspaceTip.textContent = `❌ ${error.message}`;
@@ -9648,6 +9710,103 @@ ${availableTools}
         isMinimized: false,
         bookmarks: [],
         selectedBookmarks: new Set(),
+        selectedUnexportedCount: 0,
+        totalUnexportedCount: 0,
+        bookmarkListBound: false,
+        refs: null,
+
+        // 缓存高频节点引用
+        cacheRefs: () => {
+            const panel = UI.panel;
+            if (!panel) {
+                UI.refs = null;
+                return;
+            }
+
+            UI.refs = {
+                statusContainer: panel.querySelector("#ldb-status-container"),
+                bookmarkList: panel.querySelector("#ldb-bookmark-list"),
+                selectCount: panel.querySelector("#ldb-select-count"),
+                selectAll: panel.querySelector("#ldb-select-all"),
+                bookmarkCount: panel.querySelector("#ldb-bookmark-count"),
+                exportBtn: panel.querySelector("#ldb-export"),
+                bookmarkListContainer: panel.querySelector("#ldb-bookmark-list-container"),
+                reportContainer: panel.querySelector("#ldb-report-container"),
+                autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
+                minimizeBtn: panel.querySelector("#ldb-minimize"),
+                closeBtn: panel.querySelector("#ldb-close"),
+                themeToggleBtn: panel.querySelector("#ldb-theme-toggle"),
+                tabs: panel.querySelectorAll(".ldb-tab"),
+                tabContents: panel.querySelectorAll(".ldb-tab-content"),
+                filterToggle: panel.querySelector("#ldb-filter-toggle"),
+                filterContent: panel.querySelector("#ldb-filter-content"),
+                filterArrow: panel.querySelector("#ldb-filter-arrow"),
+                aiSettingsToggle: panel.querySelector("#ldb-ai-settings-toggle"),
+                aiSettingsContent: panel.querySelector("#ldb-ai-settings-content"),
+                aiSettingsArrow: panel.querySelector("#ldb-ai-settings-arrow"),
+                githubSettingsToggle: panel.querySelector("#ldb-github-settings-toggle"),
+                githubSettingsContent: panel.querySelector("#ldb-github-settings-content"),
+                githubSettingsArrow: panel.querySelector("#ldb-github-settings-arrow"),
+                apiKeyInput: panel.querySelector("#ldb-api-key"),
+                databaseIdInput: panel.querySelector("#ldb-database-id"),
+                parentPageIdInput: panel.querySelector("#ldb-parent-page-id"),
+                exportTargetPageRadio: panel.querySelector("#ldb-export-target-page"),
+                exportTargetDatabaseRadio: panel.querySelector("#ldb-export-target-database"),
+                parentPageGroup: panel.querySelector("#ldb-parent-page-group"),
+                manualDbWrap: panel.querySelector("#ldb-manual-db-wrap"),
+                exportTargetTip: panel.querySelector("#ldb-export-target-tip"),
+                configStatus: panel.querySelector("#ldb-config-status"),
+                loadBookmarksBtn: panel.querySelector("#ldb-load-bookmarks"),
+                exportBtns: panel.querySelector("#ldb-export-btns"),
+                controlBtns: panel.querySelector("#ldb-control-btns"),
+                pauseBtn: panel.querySelector("#ldb-pause"),
+                autoImportEnabled: panel.querySelector("#ldb-auto-import-enabled"),
+                autoImportOptions: panel.querySelector("#ldb-auto-import-options"),
+                autoImportInterval: panel.querySelector("#ldb-auto-import-interval"),
+                aiServiceSelect: panel.querySelector("#ldb-ai-service"),
+                aiModelSelect: panel.querySelector("#ldb-ai-model"),
+                aiApiKeyInput: panel.querySelector("#ldb-ai-api-key"),
+                aiBaseUrlInput: panel.querySelector("#ldb-ai-base-url"),
+                aiCategoriesInput: panel.querySelector("#ldb-ai-categories"),
+                workspaceMaxPagesSelect: panel.querySelector("#ldb-workspace-max-pages"),
+                aiTargetDbSelect: panel.querySelector("#ldb-ai-target-db"),
+                permissionLevelSelect: panel.querySelector("#ldb-permission-level"),
+                requireConfirmCheckbox: panel.querySelector("#ldb-require-confirm"),
+                enableAuditLogCheckbox: panel.querySelector("#ldb-enable-audit-log"),
+                logPanel: panel.querySelector("#ldb-log-panel"),
+                workspaceSelect: panel.querySelector("#ldb-workspace-select"),
+                bookmarkExtStatus: panel.querySelector("#ldb-bookmark-ext-status"),
+                onlyFirstCheckbox: panel.querySelector("#ldb-only-first"),
+                onlyOpCheckbox: panel.querySelector("#ldb-only-op"),
+                rangeStartInput: panel.querySelector("#ldb-range-start"),
+                rangeEndInput: panel.querySelector("#ldb-range-end"),
+                imgModeSelect: panel.querySelector("#ldb-img-mode"),
+                requestDelaySelect: panel.querySelector("#ldb-request-delay"),
+                exportConcurrencySelect: panel.querySelector("#ldb-export-concurrency"),
+                validateConfigBtn: panel.querySelector("#ldb-validate-config"),
+                setupDatabaseBtn: panel.querySelector("#ldb-setup-database"),
+                cancelBtn: panel.querySelector("#ldb-cancel"),
+                agentPersonaNameInput: panel.querySelector("#ldb-agent-persona-name"),
+                agentPersonaToneSelect: panel.querySelector("#ldb-agent-persona-tone"),
+                agentPersonaExpertiseInput: panel.querySelector("#ldb-agent-persona-expertise"),
+                agentPersonaInstructionsInput: panel.querySelector("#ldb-agent-persona-instructions"),
+                githubUsernameInput: panel.querySelector("#ldb-github-username"),
+                githubTokenInput: panel.querySelector("#ldb-github-token"),
+                githubTypeCheckboxes: panel.querySelectorAll(".ldb-github-type"),
+                toggleManualDbBtn: panel.querySelector("#ldb-toggle-manual-db"),
+                refreshWorkspaceBtn: panel.querySelector("#ldb-refresh-workspace"),
+                workspaceTip: panel.querySelector("#ldb-workspace-tip"),
+                logToggleBtn: panel.querySelector("#ldb-log-toggle"),
+                logContent: panel.querySelector("#ldb-log-content"),
+                logArrow: panel.querySelector("#ldb-log-arrow"),
+                logClearBtn: panel.querySelector("#ldb-log-clear"),
+                aiRefreshDbsBtn: panel.querySelector("#ldb-ai-refresh-dbs"),
+                aiFetchModelsBtn: panel.querySelector("#ldb-ai-fetch-models"),
+                aiModelTip: panel.querySelector("#ldb-ai-model-tip"),
+                aiTestBtn: panel.querySelector("#ldb-ai-test"),
+                aiTestStatus: panel.querySelector("#ldb-ai-test-status"),
+            };
+        },
 
         // 样式
         injectStyles: () => {
@@ -10617,6 +10776,7 @@ ${availableTools}
 
             document.body.appendChild(panel);
             UI.panel = panel;
+            UI.cacheRefs();
 
             // 绑定事件
             UI.bindEvents();
@@ -10647,34 +10807,35 @@ ${availableTools}
         // 绑定事件
         bindEvents: () => {
             const panel = UI.panel;
+            const refs = UI.refs || {};
 
             // 最小化
-            panel.querySelector("#ldb-minimize").onclick = () => {
+            (refs.minimizeBtn || panel.querySelector("#ldb-minimize")).onclick = () => {
                 panel.style.display = "none";
                 UI.miniBtn.style.display = "flex";
                 Storage.set(CONFIG.STORAGE_KEYS.PANEL_MINIMIZED, true);
             };
 
             // 关闭
-            panel.querySelector("#ldb-close").onclick = () => {
+            (refs.closeBtn || panel.querySelector("#ldb-close")).onclick = () => {
                 panel.remove();
                 UI.miniBtn.remove();
             };
 
             // 主题切换
-            panel.querySelector("#ldb-theme-toggle").onclick = () => {
+            (refs.themeToggleBtn || panel.querySelector("#ldb-theme-toggle")).onclick = () => {
                 DesignSystem.toggleTheme();
             };
 
             // Tab 切换
-            panel.querySelectorAll(".ldb-tab").forEach(tab => {
+            (refs.tabs || panel.querySelectorAll(".ldb-tab")).forEach(tab => {
                 tab.onclick = () => {
                     const tabName = tab.getAttribute("data-tab");
                     // 更新 tab 按钮状态
-                    panel.querySelectorAll(".ldb-tab").forEach(t => t.classList.remove("active"));
+                    (refs.tabs || panel.querySelectorAll(".ldb-tab")).forEach(t => t.classList.remove("active"));
                     tab.classList.add("active");
                     // 更新 tab 内容显示
-                    panel.querySelectorAll(".ldb-tab-content").forEach(c => c.classList.remove("active"));
+                    (refs.tabContents || panel.querySelectorAll(".ldb-tab-content")).forEach(c => c.classList.remove("active"));
                     const content = panel.querySelector(`[data-tab-content="${tabName}"]`);
                     if (content) content.classList.add("active");
                     // 持久化
@@ -10688,25 +10849,25 @@ ${availableTools}
             if (tabBtn) tabBtn.click();
 
             // 折叠筛选设置
-            panel.querySelector("#ldb-filter-toggle").onclick = () => {
-                const content = panel.querySelector("#ldb-filter-content");
-                const arrow = panel.querySelector("#ldb-filter-arrow");
+            (refs.filterToggle || panel.querySelector("#ldb-filter-toggle")).onclick = () => {
+                const content = refs.filterContent || panel.querySelector("#ldb-filter-content");
+                const arrow = refs.filterArrow || panel.querySelector("#ldb-filter-arrow");
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
             // 折叠 AI 设置
-            panel.querySelector("#ldb-ai-settings-toggle").onclick = () => {
-                const content = panel.querySelector("#ldb-ai-settings-content");
-                const arrow = panel.querySelector("#ldb-ai-settings-arrow");
+            (refs.aiSettingsToggle || panel.querySelector("#ldb-ai-settings-toggle")).onclick = () => {
+                const content = refs.aiSettingsContent || panel.querySelector("#ldb-ai-settings-content");
+                const arrow = refs.aiSettingsArrow || panel.querySelector("#ldb-ai-settings-arrow");
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
             // 折叠 GitHub 设置
-            panel.querySelector("#ldb-github-settings-toggle").onclick = () => {
-                const content = panel.querySelector("#ldb-github-settings-content");
-                const arrow = panel.querySelector("#ldb-github-settings-arrow");
+            (refs.githubSettingsToggle || panel.querySelector("#ldb-github-settings-toggle")).onclick = () => {
+                const content = refs.githubSettingsContent || panel.querySelector("#ldb-github-settings-content");
+                const arrow = refs.githubSettingsArrow || panel.querySelector("#ldb-github-settings-arrow");
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
@@ -10714,9 +10875,9 @@ ${availableTools}
             // 导出目标类型切换
             const handleExportTargetChange = (e) => {
                 const targetType = e.target.value;
-                const parentPageGroup = panel.querySelector("#ldb-parent-page-group");
-                const manualDbWrap = panel.querySelector("#ldb-manual-db-wrap");
-                const exportTargetTip = panel.querySelector("#ldb-export-target-tip");
+                const parentPageGroup = refs.parentPageGroup || panel.querySelector("#ldb-parent-page-group");
+                const manualDbWrap = refs.manualDbWrap || panel.querySelector("#ldb-manual-db-wrap");
+                const exportTargetTip = refs.exportTargetTip || panel.querySelector("#ldb-export-target-tip");
 
                 if (targetType === "page") {
                     parentPageGroup.style.display = "block";
@@ -10730,22 +10891,22 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, targetType);
             };
 
-            panel.querySelector("#ldb-export-target-database").onchange = handleExportTargetChange;
-            panel.querySelector("#ldb-export-target-page").onchange = handleExportTargetChange;
+            (refs.exportTargetDatabaseRadio || panel.querySelector("#ldb-export-target-database")).onchange = handleExportTargetChange;
+            (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).onchange = handleExportTargetChange;
 
             // 父页面 ID 自动保存
-            panel.querySelector("#ldb-parent-page-id").onchange = (e) => {
+            (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, e.target.value.trim());
             };
 
             // 验证配置
-            panel.querySelector("#ldb-validate-config").onclick = async () => {
-                const btn = panel.querySelector("#ldb-validate-config");
-                const statusSpan = panel.querySelector("#ldb-config-status");
-                const apiKey = panel.querySelector("#ldb-api-key").value.trim();
-                const exportTargetType = panel.querySelector("#ldb-export-target-page").checked ? "page" : "database";
-                const databaseId = panel.querySelector("#ldb-database-id").value.trim();
-                const parentPageId = panel.querySelector("#ldb-parent-page-id").value.trim();
+            (refs.validateConfigBtn || panel.querySelector("#ldb-validate-config")).onclick = async () => {
+                const btn = refs.validateConfigBtn || panel.querySelector("#ldb-validate-config");
+                const statusSpan = refs.configStatus || panel.querySelector("#ldb-config-status");
+                const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const exportTargetType = (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked ? "page" : "database";
+                const databaseId = (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value.trim();
+                const parentPageId = (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value.trim();
 
                 // 清除之前的状态
                 statusSpan.textContent = "";
@@ -10803,10 +10964,10 @@ ${availableTools}
             };
 
             // 自动设置数据库属性
-            panel.querySelector("#ldb-setup-database").onclick = async () => {
-                const apiKey = panel.querySelector("#ldb-api-key").value.trim();
-                const databaseId = panel.querySelector("#ldb-database-id").value.trim();
-                const statusSpan = panel.querySelector("#ldb-config-status");
+            (refs.setupDatabaseBtn || panel.querySelector("#ldb-setup-database")).onclick = async () => {
+                const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const databaseId = (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value.trim();
+                const statusSpan = refs.configStatus || panel.querySelector("#ldb-config-status");
 
                 // 清除之前的状态
                 statusSpan.textContent = "";
@@ -10822,7 +10983,7 @@ ${availableTools}
                     return;
                 }
 
-                const btn = panel.querySelector("#ldb-setup-database");
+                const btn = refs.setupDatabaseBtn || panel.querySelector("#ldb-setup-database");
                 btn.disabled = true;
                 btn.innerHTML = '<span class="ldb-spin">🔄</span> 设置中...';
 
@@ -10848,28 +11009,28 @@ ${availableTools}
             };
 
             // 自动导入设置
-            panel.querySelector("#ldb-auto-import-enabled").onchange = (e) => {
+            (refs.autoImportEnabled || panel.querySelector("#ldb-auto-import-enabled")).onchange = (e) => {
                 const enabled = e.target.checked;
                 Storage.set(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, enabled);
-                panel.querySelector("#ldb-auto-import-options").style.display = enabled ? "block" : "none";
+                (refs.autoImportOptions || panel.querySelector("#ldb-auto-import-options")).style.display = enabled ? "block" : "none";
                 if (enabled) {
                     // 检查 Notion 配置是否完整
-                    const apiKey = panel.querySelector("#ldb-api-key").value.trim();
+                    const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
                     if (!apiKey) {
                         AutoImporter.updateStatus("⚠️ 请先配置 Notion API Key");
                         return;
                     }
-                    const exportTargetType = panel.querySelector("#ldb-export-target-page").checked ? "page" : "database";
-                    if (exportTargetType === "database" && !panel.querySelector("#ldb-database-id").value.trim()) {
+                    const exportTargetType = (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked ? "page" : "database";
+                    if (exportTargetType === "database" && !(refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value.trim()) {
                         AutoImporter.updateStatus("⚠️ 请先配置 Notion 数据库 ID");
                         return;
                     }
-                    if (exportTargetType === "page" && !panel.querySelector("#ldb-parent-page-id").value.trim()) {
+                    if (exportTargetType === "page" && !(refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value.trim()) {
                         AutoImporter.updateStatus("⚠️ 请先配置父页面 ID");
                         return;
                     }
                     AutoImporter.run();
-                    const interval = parseInt(panel.querySelector("#ldb-auto-import-interval").value) || 0;
+                    const interval = parseInt((refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval")).value) || 0;
                     if (interval > 0) AutoImporter.startPolling(interval);
                 } else {
                     AutoImporter.stopPolling();
@@ -10877,7 +11038,7 @@ ${availableTools}
                 }
             };
 
-            panel.querySelector("#ldb-auto-import-interval").onchange = (e) => {
+            (refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval")).onchange = (e) => {
                 const interval = parseInt(e.target.value) || 0;
                 Storage.set(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, interval);
                 AutoImporter.stopPolling();
@@ -10886,31 +11047,73 @@ ${availableTools}
                 }
             };
 
+            // 收藏列表事件委托（避免每次重渲染重复绑定）
+            if (!UI.bookmarkListBound) {
+                const bookmarkList = (UI.refs && UI.refs.bookmarkList) || panel.querySelector("#ldb-bookmark-list");
+                bookmarkList.addEventListener("click", (e) => {
+                    const item = e.target.closest(".ldb-bookmark-item");
+                    if (!item) return;
+                    if (e.target.tagName === "INPUT") return;
+
+                    const checkbox = item.querySelector('input[type="checkbox"]');
+                    if (!checkbox || checkbox.disabled) return;
+
+                    checkbox.checked = !checkbox.checked;
+                    checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+                });
+
+                bookmarkList.addEventListener("change", (e) => {
+                    const checkbox = e.target;
+                    if (!(checkbox instanceof HTMLInputElement) || checkbox.type !== "checkbox") return;
+
+                    const item = checkbox.closest(".ldb-bookmark-item");
+                    if (!item) return;
+
+                    const topicId = String(item.dataset.topicId || "");
+                    if (!topicId) return;
+
+                    const exportedMap = Storage.getExportedTopics();
+                    const isUnexported = !exportedMap[topicId];
+
+                    if (checkbox.checked) {
+                        UI.selectedBookmarks.add(topicId);
+                        if (isUnexported) UI.selectedUnexportedCount++;
+                    } else {
+                        UI.selectedBookmarks.delete(topicId);
+                        if (isUnexported) UI.selectedUnexportedCount = Math.max(0, UI.selectedUnexportedCount - 1);
+                    }
+                    UI.updateSelectCount();
+                });
+
+                UI.bookmarkListBound = true;
+            }
+
             // 加载收藏
-            panel.querySelector("#ldb-load-bookmarks").onclick = async () => {
+            (refs.loadBookmarksBtn || panel.querySelector("#ldb-load-bookmarks")).onclick = async () => {
                 const username = Utils.getUsernameFromUrl();
                 if (!username) {
                     UI.showStatus("无法获取用户名", "error");
                     return;
                 }
 
-                const btn = panel.querySelector("#ldb-load-bookmarks");
+                const btn = refs.loadBookmarksBtn || panel.querySelector("#ldb-load-bookmarks");
                 btn.disabled = true;
                 btn.innerHTML = '<span class="ldb-spin">🔄</span> 加载中...';
 
                 try {
                     const bookmarks = await LinuxDoAPI.fetchAllBookmarks(username, (count) => {
-                        panel.querySelector("#ldb-bookmark-count").textContent = count;
+                        ((UI.refs && UI.refs.bookmarkCount) || panel.querySelector("#ldb-bookmark-count")).textContent = count;
                     });
 
                     UI.bookmarks = bookmarks;
                     UI.selectedBookmarks = new Set(bookmarks.map(b => String(b.topic_id || b.bookmarkable_id)));
-                    panel.querySelector("#ldb-bookmark-count").textContent = bookmarks.length;
-                    panel.querySelector("#ldb-export").disabled = false;
+                    UI.recomputeExportStats();
+                    ((UI.refs && UI.refs.bookmarkCount) || panel.querySelector("#ldb-bookmark-count")).textContent = bookmarks.length;
+                    ((UI.refs && UI.refs.exportBtn) || panel.querySelector("#ldb-export")).disabled = false;
 
                     // 渲染收藏列表
                     UI.renderBookmarkList();
-                    panel.querySelector("#ldb-bookmark-list-container").style.display = "block";
+                    ((UI.refs && UI.refs.bookmarkListContainer) || panel.querySelector("#ldb-bookmark-list-container")).style.display = "block";
 
                     UI.showStatus(`成功加载 ${bookmarks.length} 个收藏`, "success");
                 } catch (error) {
@@ -10922,20 +11125,21 @@ ${availableTools}
             };
 
             // 全选/取消
-            panel.querySelector("#ldb-select-all").onchange = (e) => {
+            (refs.selectAll || panel.querySelector("#ldb-select-all")).onchange = (e) => {
                 const checked = e.target.checked;
                 if (checked) {
                     UI.selectedBookmarks = new Set(UI.bookmarks.map(b => String(b.topic_id || b.bookmarkable_id)));
                 } else {
                     UI.selectedBookmarks = new Set();
                 }
+                UI.recomputeExportStats();
                 UI.renderBookmarkList();
                 UI.updateSelectCount();
             };
 
             // 暂停按钮
-            panel.querySelector("#ldb-pause").onclick = () => {
-                const pauseBtn = panel.querySelector("#ldb-pause");
+            (refs.pauseBtn || panel.querySelector("#ldb-pause")).onclick = () => {
+                const pauseBtn = refs.pauseBtn || panel.querySelector("#ldb-pause");
                 if (Exporter.isPaused) {
                     Exporter.resume();
                     pauseBtn.innerHTML = "⏸️ 暂停";
@@ -10950,18 +11154,18 @@ ${availableTools}
             };
 
             // 取消按钮
-            panel.querySelector("#ldb-cancel").onclick = () => {
+            (refs.cancelBtn || panel.querySelector("#ldb-cancel")).onclick = () => {
                 if (confirm("确定要取消导出吗？已导出的内容不会被删除。")) {
                     Exporter.cancel();
                 }
             };
 
             // 开始导出
-            panel.querySelector("#ldb-export").onclick = async () => {
-                const apiKey = panel.querySelector("#ldb-api-key").value.trim();
-                const exportTargetType = panel.querySelector("#ldb-export-target-page").checked ? "page" : "database";
-                const databaseId = panel.querySelector("#ldb-database-id").value.trim();
-                const parentPageId = panel.querySelector("#ldb-parent-page-id").value.trim();
+            (refs.exportBtn || panel.querySelector("#ldb-export")).onclick = async () => {
+                const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const exportTargetType = (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked ? "page" : "database";
+                const databaseId = (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value.trim();
+                const parentPageId = (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value.trim();
 
                 if (!apiKey) {
                     UI.showStatus("请先配置 Notion API Key", "error");
@@ -10999,12 +11203,12 @@ ${availableTools}
                     databaseId,
                     parentPageId,
                     exportTargetType,
-                    onlyFirst: panel.querySelector("#ldb-only-first").checked,
-                    onlyOp: panel.querySelector("#ldb-only-op").checked,
-                    rangeStart: parseInt(panel.querySelector("#ldb-range-start").value) || 1,
-                    rangeEnd: parseInt(panel.querySelector("#ldb-range-end").value) || 999999,
-                    imgMode: panel.querySelector("#ldb-img-mode").value,
-                    concurrency: parseInt(panel.querySelector("#ldb-export-concurrency").value) || 1,
+                    onlyFirst: (refs.onlyFirstCheckbox || panel.querySelector("#ldb-only-first")).checked,
+                    onlyOp: (refs.onlyOpCheckbox || panel.querySelector("#ldb-only-op")).checked,
+                    rangeStart: parseInt((refs.rangeStartInput || panel.querySelector("#ldb-range-start")).value) || 1,
+                    rangeEnd: parseInt((refs.rangeEndInput || panel.querySelector("#ldb-range-end")).value) || 999999,
+                    imgMode: (refs.imgModeSelect || panel.querySelector("#ldb-img-mode")).value,
+                    concurrency: parseInt((refs.exportConcurrencySelect || panel.querySelector("#ldb-export-concurrency")).value) || 1,
                 };
 
                 // 保存设置
@@ -11020,18 +11224,18 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, settings.rangeStart);
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, settings.rangeEnd);
                 Storage.set(CONFIG.STORAGE_KEYS.IMG_MODE, settings.imgMode);
-                Storage.set(CONFIG.STORAGE_KEYS.REQUEST_DELAY, parseInt(panel.querySelector("#ldb-request-delay").value));
+                Storage.set(CONFIG.STORAGE_KEYS.REQUEST_DELAY, parseInt((refs.requestDelaySelect || panel.querySelector("#ldb-request-delay")).value));
                 Storage.set(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, settings.concurrency);
 
                 // 显示控制按钮，隐藏导出按钮
-                panel.querySelector("#ldb-export-btns").style.display = "none";
-                panel.querySelector("#ldb-control-btns").style.display = "flex";
-                panel.querySelector("#ldb-pause").innerHTML = "⏸️ 暂停";
-                panel.querySelector("#ldb-pause").classList.add("ldb-btn-warning");
-                panel.querySelector("#ldb-pause").classList.remove("ldb-btn-primary");
+                (refs.exportBtns || panel.querySelector("#ldb-export-btns")).style.display = "none";
+                (refs.controlBtns || panel.querySelector("#ldb-control-btns")).style.display = "flex";
+                (refs.pauseBtn || panel.querySelector("#ldb-pause")).innerHTML = "⏸️ 暂停";
+                (refs.pauseBtn || panel.querySelector("#ldb-pause")).classList.add("ldb-btn-warning");
+                (refs.pauseBtn || panel.querySelector("#ldb-pause")).classList.remove("ldb-btn-primary");
 
                 // 清空之前的报告
-                panel.querySelector("#ldb-report-container").innerHTML = "";
+                ((UI.refs && UI.refs.reportContainer) || panel.querySelector("#ldb-report-container")).innerHTML = "";
 
                 try {
                     const results = await Exporter.exportBookmarks(toExport, settings, (progress) => {
@@ -11072,36 +11276,36 @@ ${availableTools}
                     UI.showStatus(`导出出错: ${error.message}`, "error");
                 } finally {
                     // 恢复按钮状态
-                    panel.querySelector("#ldb-export-btns").style.display = "flex";
-                    panel.querySelector("#ldb-control-btns").style.display = "none";
+                    (refs.exportBtns || panel.querySelector("#ldb-export-btns")).style.display = "flex";
+                    (refs.controlBtns || panel.querySelector("#ldb-control-btns")).style.display = "none";
                     Exporter.reset();
                 }
             };
 
             // 权限设置事件
-            panel.querySelector("#ldb-permission-level").onchange = (e) => {
+            (refs.permissionLevelSelect || panel.querySelector("#ldb-permission-level")).onchange = (e) => {
                 const level = parseInt(e.target.value);
                 OperationGuard.setLevel(level);
                 UI.showStatus(`权限级别已设置为: ${CONFIG.PERMISSION_NAMES[level]}`, "success");
             };
 
-            panel.querySelector("#ldb-require-confirm").onchange = (e) => {
+            (refs.requireConfirmCheckbox || panel.querySelector("#ldb-require-confirm")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.REQUIRE_CONFIRM, e.target.checked);
             };
 
-            panel.querySelector("#ldb-enable-audit-log").onchange = (e) => {
+            (refs.enableAuditLogCheckbox || panel.querySelector("#ldb-enable-audit-log")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, e.target.checked);
                 // 更新日志面板可见性
-                const logPanel = panel.querySelector("#ldb-log-panel");
+                const logPanel = refs.logPanel || panel.querySelector("#ldb-log-panel");
                 if (logPanel) {
                     logPanel.style.display = e.target.checked ? "block" : "none";
                 }
             };
 
             // 日志面板事件
-            panel.querySelector("#ldb-log-toggle").onclick = () => {
-                const content = panel.querySelector("#ldb-log-content");
-                const arrow = panel.querySelector("#ldb-log-arrow");
+            (refs.logToggleBtn || panel.querySelector("#ldb-log-toggle")).onclick = () => {
+                const content = refs.logContent || panel.querySelector("#ldb-log-content");
+                const arrow = refs.logArrow || panel.querySelector("#ldb-log-arrow");
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
 
@@ -11111,7 +11315,7 @@ ${availableTools}
                 }
             };
 
-            panel.querySelector("#ldb-log-clear").onclick = () => {
+            (refs.logClearBtn || panel.querySelector("#ldb-log-clear")).onclick = () => {
                 if (confirm("确定要清除所有操作日志吗？")) {
                     OperationLog.clear();
                     UI.showStatus("日志已清除", "success");
@@ -11119,26 +11323,25 @@ ${availableTools}
             };
 
             // 输入框自动保存
-            panel.querySelector("#ldb-api-key").onchange = (e) => {
+            (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, e.target.value.trim());
             };
-            panel.querySelector("#ldb-database-id").onchange = (e) => {
+            (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, e.target.value.trim());
             };
 
             // 手动输入数据库 ID 开关
-            panel.querySelector("#ldb-toggle-manual-db").onclick = () => {
-                const wrap = panel.querySelector("#ldb-manual-db-wrap");
+            (refs.toggleManualDbBtn || panel.querySelector("#ldb-toggle-manual-db")).onclick = () => {
+                const wrap = refs.manualDbWrap || panel.querySelector("#ldb-manual-db-wrap");
                 const visible = wrap.style.display !== "none";
                 wrap.style.display = visible ? "none" : "block";
             };
 
             // 刷新工作区页面列表
-            panel.querySelector("#ldb-refresh-workspace").onclick = async () => {
-                const apiKey = panel.querySelector("#ldb-api-key").value.trim();
-                const refreshBtn = panel.querySelector("#ldb-refresh-workspace");
-                const workspaceTip = panel.querySelector("#ldb-workspace-tip");
-                const workspaceSelect = panel.querySelector("#ldb-workspace-select");
+            (refs.refreshWorkspaceBtn || panel.querySelector("#ldb-refresh-workspace")).onclick = async () => {
+                const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const refreshBtn = refs.refreshWorkspaceBtn || panel.querySelector("#ldb-refresh-workspace");
+                const workspaceTip = refs.workspaceTip || panel.querySelector("#ldb-workspace-tip");
 
                 if (!apiKey) {
                     UI.showStatus("请先填写 Notion API Key", "error");
@@ -11150,57 +11353,17 @@ ${availableTools}
                 workspaceTip.innerHTML = "正在获取工作区页面...";
 
                 try {
-                    // 分页获取所有数据库
-                    let allDbResults = [];
-                    let dbCursor = undefined;
-                    const maxPages = parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages)) || 0;
-                    let dbPageCount = 0;
-                    do {
-                        const dbResponse = await NotionAPI.search("", { property: "object", value: "database" }, apiKey, dbCursor);
-                        allDbResults = allDbResults.concat(dbResponse.results || []);
-                        dbCursor = dbResponse.has_more ? dbResponse.next_cursor : undefined;
-                        dbPageCount++;
-                    } while (dbCursor && (maxPages === 0 || dbPageCount < maxPages));
-
-                    const databases = allDbResults.map(db => ({
-                        id: db.id?.replace(/-/g, "") || "",
-                        title: db.title?.[0]?.plain_text || "无标题数据库",
-                        type: "database",
-                        url: db.url || ""
-                    }));
-
-                    // 分页获取所有页面
-                    let allPageResults = [];
-                    let pageCursor = undefined;
-                    let pagePageCount = 0;
-                    do {
-                        const pageResponse = await NotionAPI.search("", { property: "object", value: "page" }, apiKey, pageCursor);
-                        allPageResults = allPageResults.concat(pageResponse.results || []);
-                        pageCursor = pageResponse.has_more ? pageResponse.next_cursor : undefined;
-                        pagePageCount++;
-                    } while (pageCursor && (maxPages === 0 || pagePageCount < maxPages));
-
-                    const pages = allPageResults.map(page => ({
-                        id: page.id?.replace(/-/g, "") || "",
-                        title: Utils.getPageTitle(page),
-                        type: "page",
-                        url: page.url || "",
-                        parent: page.parent?.type || ""
-                    }));
-
-                    // 合并并缓存（包含 API Key 标识）
-                    const apiKeyHash = apiKey.slice(-8);
+                    const workspace = await WorkspaceService.fetchWorkspace(apiKey, { includePages: true });
                     const workspaceData = {
-                        apiKeyHash,
-                        databases,
-                        pages,
-                        timestamp: Date.now()
+                        apiKeyHash: apiKey.slice(-8),
+                        databases: workspace.databases,
+                        pages: workspace.pages,
+                        timestamp: Date.now(),
                     };
                     Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
 
-                    // 更新下拉框
                     UI.updateWorkspaceSelect(workspaceData);
-                    workspaceTip.innerHTML = `✅ 获取到 ${databases.length} 个数据库，${pages.length} 个页面`;
+                    workspaceTip.innerHTML = `✅ 获取到 ${workspace.databases.length} 个数据库，${workspace.pages.length} 个页面`;
                     workspaceTip.style.color = "#34d399";
                 } catch (error) {
                     workspaceTip.innerHTML = `❌ ${error.message}`;
@@ -11212,22 +11375,22 @@ ${availableTools}
             };
 
             // 从工作区选择页面/数据库
-            panel.querySelector("#ldb-workspace-select").onchange = (e) => {
+            (refs.workspaceSelect || panel.querySelector("#ldb-workspace-select")).onchange = (e) => {
                 const selected = e.target.value;
                 if (selected) {
                     const [type, id] = selected.split(":");
                     if (type === "database") {
-                        panel.querySelector("#ldb-database-id").value = id;
+                        (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value = id;
                         Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, id);
                     } else if (type === "page") {
                         // 页面类型：填入父页面 ID 字段
-                        panel.querySelector("#ldb-parent-page-id").value = id;
+                        (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value = id;
                         Storage.set(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, id);
                         // 自动切换到页面导出模式
-                        panel.querySelector("#ldb-export-target-page").checked = true;
-                        panel.querySelector("#ldb-parent-page-group").style.display = "block";
-                        panel.querySelector("#ldb-manual-db-wrap").style.display = "none";
-                        panel.querySelector("#ldb-export-target-tip").textContent = "导出为子页面，包含完整内容";
+                        (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked = true;
+                        (refs.parentPageGroup || panel.querySelector("#ldb-parent-page-group")).style.display = "block";
+                        (refs.manualDbWrap || panel.querySelector("#ldb-manual-db-wrap")).style.display = "none";
+                        (refs.exportTargetTip || panel.querySelector("#ldb-export-target-tip")).textContent = "导出为子页面，包含完整内容";
                         Storage.set(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "page");
                         UI.showStatus("已选择页面，自动切换为页面导出模式", "info");
                     }
@@ -11242,7 +11405,7 @@ ${availableTools}
             ChatUI.init();
 
             // AI 服务切换 - 更新模型列表（优先使用缓存）
-            panel.querySelector("#ldb-ai-service").onchange = (e) => {
+            (refs.aiServiceSelect || panel.querySelector("#ldb-ai-service")).onchange = (e) => {
                 const newService = e.target.value;
                 // 优先使用缓存的模型列表
                 const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
@@ -11260,59 +11423,60 @@ ${availableTools}
             };
 
             // 保存 AI 配置
-            panel.querySelector("#ldb-ai-api-key").onchange = (e) => {
+            (refs.aiApiKeyInput || panel.querySelector("#ldb-ai-api-key")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AI_API_KEY, e.target.value.trim());
             };
-            panel.querySelector("#ldb-ai-base-url").onchange = (e) => {
+            (refs.aiBaseUrlInput || panel.querySelector("#ldb-ai-base-url")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AI_BASE_URL, e.target.value.trim());
             };
-            panel.querySelector("#ldb-ai-categories").onchange = (e) => {
+            (refs.aiCategoriesInput || panel.querySelector("#ldb-ai-categories")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AI_CATEGORIES, e.target.value.trim());
             };
-            panel.querySelector("#ldb-ai-model").onchange = (e) => {
+            (refs.aiModelSelect || panel.querySelector("#ldb-ai-model")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, e.target.value);
             };
 
             // AI 查询目标数据库选择
-            panel.querySelector("#ldb-ai-target-db").onchange = (e) => {
+            (refs.aiTargetDbSelect || panel.querySelector("#ldb-ai-target-db")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AI_TARGET_DB, e.target.value);
             };
 
-            panel.querySelector("#ldb-workspace-max-pages").onchange = (e) => {
+            (refs.workspaceMaxPagesSelect || panel.querySelector("#ldb-workspace-max-pages")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, parseInt(e.target.value) || 0);
             };
 
             // Agent 个性化设置
-            panel.querySelector("#ldb-agent-persona-name").onchange = (e) => {
+            (refs.agentPersonaNameInput || panel.querySelector("#ldb-agent-persona-name")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, e.target.value.trim() || CONFIG.DEFAULTS.agentPersonaName);
             };
-            panel.querySelector("#ldb-agent-persona-tone").onchange = (e) => {
+            (refs.agentPersonaToneSelect || panel.querySelector("#ldb-agent-persona-tone")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, e.target.value);
             };
-            panel.querySelector("#ldb-agent-persona-expertise").onchange = (e) => {
+            (refs.agentPersonaExpertiseInput || panel.querySelector("#ldb-agent-persona-expertise")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, e.target.value.trim() || CONFIG.DEFAULTS.agentPersonaExpertise);
             };
-            panel.querySelector("#ldb-agent-persona-instructions").onchange = (e) => {
+            (refs.agentPersonaInstructionsInput || panel.querySelector("#ldb-agent-persona-instructions")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, e.target.value.trim());
             };
-            panel.querySelector("#ldb-github-username").onchange = (e) => {
+            (refs.githubUsernameInput || panel.querySelector("#ldb-github-username")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, e.target.value.trim());
             };
-            panel.querySelector("#ldb-github-token").onchange = (e) => {
+            (refs.githubTokenInput || panel.querySelector("#ldb-github-token")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, e.target.value.trim());
             };
             // GitHub 导入类型
-            panel.querySelectorAll(".ldb-github-type").forEach(cb => {
+            (refs.githubTypeCheckboxes || panel.querySelectorAll(".ldb-github-type")).forEach(cb => {
                 cb.onchange = () => {
-                    const types = [...panel.querySelectorAll(".ldb-github-type:checked")].map(c => c.value);
+                    const source = refs.githubTypeCheckboxes || panel.querySelectorAll(".ldb-github-type:checked");
+                    const types = [...source].filter(c => c.checked).map(c => c.value);
                     GitHubAPI.setImportTypes(types.length > 0 ? types : ["stars"]);
                 };
             });
 
             // 刷新 AI 数据库列表
-            panel.querySelector("#ldb-ai-refresh-dbs").onclick = async () => {
-                const apiKey = panel.querySelector("#ldb-api-key").value.trim();
-                const refreshBtn = panel.querySelector("#ldb-ai-refresh-dbs");
+            (refs.aiRefreshDbsBtn || panel.querySelector("#ldb-ai-refresh-dbs")).onclick = async () => {
+                const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const refreshBtn = refs.aiRefreshDbsBtn || panel.querySelector("#ldb-ai-refresh-dbs");
 
                 if (!apiKey) {
                     UI.showStatus("请先填写 Notion API Key", "error");
@@ -11323,38 +11487,19 @@ ${availableTools}
                 refreshBtn.innerHTML = "⏳";
 
                 try {
-                    // 分页获取所有数据库
-                    let allDbResults = [];
-                    let dbCursor = undefined;
-                    const maxPages = parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages)) || 0;
-                    let dbPageCount = 0;
-                    do {
-                        const dbResponse = await NotionAPI.search("", { property: "object", value: "database" }, apiKey, dbCursor);
-                        allDbResults = allDbResults.concat(dbResponse.results || []);
-                        dbCursor = dbResponse.has_more ? dbResponse.next_cursor : undefined;
-                        dbPageCount++;
-                    } while (dbCursor && (maxPages === 0 || dbPageCount < maxPages));
+                    const workspace = await WorkspaceService.fetchWorkspace(apiKey, { includePages: false });
 
-                    const databases = allDbResults.map(db => ({
-                        id: db.id?.replace(/-/g, "") || "",
-                        title: db.title?.[0]?.plain_text || "无标题数据库",
-                        type: "database",
-                        url: db.url || ""
-                    }));
-
-                    // 更新缓存（复用 WORKSPACE_PAGES 格式）
                     const apiKeyHash = apiKey.slice(-8);
                     const cachedWorkspace = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
                     let workspaceData;
                     try { workspaceData = JSON.parse(cachedWorkspace); } catch { workspaceData = {}; }
                     workspaceData.apiKeyHash = apiKeyHash;
-                    workspaceData.databases = databases;
+                    workspaceData.databases = workspace.databases;
                     workspaceData.timestamp = Date.now();
                     Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
 
-                    // 填充下拉框
-                    UI.updateAITargetDbOptions(databases);
-                    UI.showStatus(`获取到 ${databases.length} 个数据库`, "success");
+                    UI.updateAITargetDbOptions(workspace.databases);
+                    UI.showStatus(`获取到 ${workspace.databases.length} 个数据库`, "success");
                 } catch (error) {
                     UI.showStatus(`获取数据库列表失败: ${error.message}`, "error");
                 } finally {
@@ -11364,12 +11509,12 @@ ${availableTools}
             };
 
             // 获取模型列表
-            panel.querySelector("#ldb-ai-fetch-models").onclick = async () => {
-                const aiApiKey = panel.querySelector("#ldb-ai-api-key").value.trim();
-                const aiService = panel.querySelector("#ldb-ai-service").value;
-                const aiBaseUrl = panel.querySelector("#ldb-ai-base-url").value.trim();
-                const fetchBtn = panel.querySelector("#ldb-ai-fetch-models");
-                const modelTip = panel.querySelector("#ldb-ai-model-tip");
+            (refs.aiFetchModelsBtn || panel.querySelector("#ldb-ai-fetch-models")).onclick = async () => {
+                const aiApiKey = (refs.aiApiKeyInput || panel.querySelector("#ldb-ai-api-key")).value.trim();
+                const aiService = (refs.aiServiceSelect || panel.querySelector("#ldb-ai-service")).value;
+                const aiBaseUrl = (refs.aiBaseUrlInput || panel.querySelector("#ldb-ai-base-url")).value.trim();
+                const fetchBtn = refs.aiFetchModelsBtn || panel.querySelector("#ldb-ai-fetch-models");
+                const modelTip = refs.aiModelTip || panel.querySelector("#ldb-ai-model-tip");
 
                 if (!aiApiKey) {
                     UI.showStatus("请先填写 AI API Key", "error");
@@ -11402,13 +11547,13 @@ ${availableTools}
             };
 
             // 测试 AI 连接
-            panel.querySelector("#ldb-ai-test").onclick = async () => {
-                const btn = panel.querySelector("#ldb-ai-test");
-                const statusSpan = panel.querySelector("#ldb-ai-test-status");
-                const aiApiKey = panel.querySelector("#ldb-ai-api-key").value.trim();
-                const aiService = panel.querySelector("#ldb-ai-service").value;
-                const aiModel = panel.querySelector("#ldb-ai-model").value;
-                const aiBaseUrl = panel.querySelector("#ldb-ai-base-url").value.trim();
+            (refs.aiTestBtn || panel.querySelector("#ldb-ai-test")).onclick = async () => {
+                const btn = refs.aiTestBtn || panel.querySelector("#ldb-ai-test");
+                const statusSpan = refs.aiTestStatus || panel.querySelector("#ldb-ai-test-status");
+                const aiApiKey = (refs.aiApiKeyInput || panel.querySelector("#ldb-ai-api-key")).value.trim();
+                const aiService = (refs.aiServiceSelect || panel.querySelector("#ldb-ai-service")).value;
+                const aiModel = (refs.aiModelSelect || panel.querySelector("#ldb-ai-model")).value;
+                const aiBaseUrl = (refs.aiBaseUrlInput || panel.querySelector("#ldb-ai-base-url")).value.trim();
 
                 // 清除之前的状态
                 statusSpan.textContent = "";
@@ -11445,51 +11590,52 @@ ${availableTools}
         // 加载配置
         loadConfig: () => {
             const panel = UI.panel;
+            const refs = UI.refs || {};
 
-            panel.querySelector("#ldb-api-key").value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
-            panel.querySelector("#ldb-database-id").value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
-            panel.querySelector("#ldb-parent-page-id").value = Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "");
-            panel.querySelector("#ldb-only-first").checked = Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_FIRST, CONFIG.DEFAULTS.onlyFirst);
-            panel.querySelector("#ldb-only-op").checked = Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, CONFIG.DEFAULTS.onlyOp);
-            panel.querySelector("#ldb-range-start").value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, CONFIG.DEFAULTS.rangeStart);
-            panel.querySelector("#ldb-range-end").value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, CONFIG.DEFAULTS.rangeEnd);
-            panel.querySelector("#ldb-img-mode").value = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
-            panel.querySelector("#ldb-request-delay").value = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
-            panel.querySelector("#ldb-export-concurrency").value = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG.DEFAULTS.exportConcurrency);
+            (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+            (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value = Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "");
+            (refs.onlyFirstCheckbox || panel.querySelector("#ldb-only-first")).checked = Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_FIRST, CONFIG.DEFAULTS.onlyFirst);
+            (refs.onlyOpCheckbox || panel.querySelector("#ldb-only-op")).checked = Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, CONFIG.DEFAULTS.onlyOp);
+            (refs.rangeStartInput || panel.querySelector("#ldb-range-start")).value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, CONFIG.DEFAULTS.rangeStart);
+            (refs.rangeEndInput || panel.querySelector("#ldb-range-end")).value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, CONFIG.DEFAULTS.rangeEnd);
+            (refs.imgModeSelect || panel.querySelector("#ldb-img-mode")).value = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
+            (refs.requestDelaySelect || panel.querySelector("#ldb-request-delay")).value = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+            (refs.exportConcurrencySelect || panel.querySelector("#ldb-export-concurrency")).value = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG.DEFAULTS.exportConcurrency);
 
             // 加载导出目标类型设置
             const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
             if (exportTargetType === "page") {
-                panel.querySelector("#ldb-export-target-page").checked = true;
-                panel.querySelector("#ldb-parent-page-group").style.display = "block";
-                panel.querySelector("#ldb-manual-db-wrap").style.display = "none";
-                panel.querySelector("#ldb-export-target-tip").textContent = "导出为子页面，包含完整内容";
+                (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked = true;
+                (refs.parentPageGroup || panel.querySelector("#ldb-parent-page-group")).style.display = "block";
+                (refs.manualDbWrap || panel.querySelector("#ldb-manual-db-wrap")).style.display = "none";
+                (refs.exportTargetTip || panel.querySelector("#ldb-export-target-tip")).textContent = "导出为子页面，包含完整内容";
             } else {
-                panel.querySelector("#ldb-export-target-database").checked = true;
-                panel.querySelector("#ldb-parent-page-group").style.display = "none";
-                panel.querySelector("#ldb-export-target-tip").textContent = "导出为数据库条目，支持筛选和排序";
+                (refs.exportTargetDatabaseRadio || panel.querySelector("#ldb-export-target-database")).checked = true;
+                (refs.parentPageGroup || panel.querySelector("#ldb-parent-page-group")).style.display = "none";
+                (refs.exportTargetTip || panel.querySelector("#ldb-export-target-tip")).textContent = "导出为数据库条目，支持筛选和排序";
             }
 
             // 加载权限设置
-            panel.querySelector("#ldb-permission-level").value = Storage.get(CONFIG.STORAGE_KEYS.PERMISSION_LEVEL, CONFIG.DEFAULTS.permissionLevel);
-            panel.querySelector("#ldb-require-confirm").checked = Storage.get(CONFIG.STORAGE_KEYS.REQUIRE_CONFIRM, CONFIG.DEFAULTS.requireConfirm);
-            panel.querySelector("#ldb-enable-audit-log").checked = Storage.get(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG.DEFAULTS.enableAuditLog);
+            (refs.permissionLevelSelect || panel.querySelector("#ldb-permission-level")).value = Storage.get(CONFIG.STORAGE_KEYS.PERMISSION_LEVEL, CONFIG.DEFAULTS.permissionLevel);
+            (refs.requireConfirmCheckbox || panel.querySelector("#ldb-require-confirm")).checked = Storage.get(CONFIG.STORAGE_KEYS.REQUIRE_CONFIRM, CONFIG.DEFAULTS.requireConfirm);
+            (refs.enableAuditLogCheckbox || panel.querySelector("#ldb-enable-audit-log")).checked = Storage.get(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG.DEFAULTS.enableAuditLog);
 
             // 根据审计日志设置更新面板可见性
             const enableAuditLog = Storage.get(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG.DEFAULTS.enableAuditLog);
-            const logPanel = panel.querySelector("#ldb-log-panel");
+            const logPanel = refs.logPanel || panel.querySelector("#ldb-log-panel");
             if (logPanel) {
                 logPanel.style.display = enableAuditLog ? "block" : "none";
             }
 
             // 加载 AI 分类设置
             const aiService = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
-            panel.querySelector("#ldb-ai-service").value = aiService;
+            (refs.aiServiceSelect || panel.querySelector("#ldb-ai-service")).value = aiService;
 
             // 验证并加载 AI 模型（优先使用缓存的模型列表）
             const savedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
             const provider = AIService.PROVIDERS[aiService];
-            const modelSelect = panel.querySelector("#ldb-ai-model");
+            const modelSelect = refs.aiModelSelect || panel.querySelector("#ldb-ai-model");
 
             // 先尝试从缓存加载模型列表
             const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
@@ -11521,28 +11667,28 @@ ${availableTools}
                 }
             }
 
-            panel.querySelector("#ldb-ai-api-key").value = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "");
-            panel.querySelector("#ldb-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, CONFIG.DEFAULTS.aiBaseUrl);
-            panel.querySelector("#ldb-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
-            panel.querySelector("#ldb-workspace-max-pages").value = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages);
+            (refs.aiApiKeyInput || panel.querySelector("#ldb-ai-api-key")).value = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "");
+            (refs.aiBaseUrlInput || panel.querySelector("#ldb-ai-base-url")).value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, CONFIG.DEFAULTS.aiBaseUrl);
+            (refs.aiCategoriesInput || panel.querySelector("#ldb-ai-categories")).value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
+            (refs.workspaceMaxPagesSelect || panel.querySelector("#ldb-workspace-max-pages")).value = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages);
 
             // 加载 Agent 个性化设置
-            panel.querySelector("#ldb-agent-persona-name").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName);
-            panel.querySelector("#ldb-agent-persona-tone").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, CONFIG.DEFAULTS.agentPersonaTone);
-            panel.querySelector("#ldb-agent-persona-expertise").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG.DEFAULTS.agentPersonaExpertise);
-            panel.querySelector("#ldb-agent-persona-instructions").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG.DEFAULTS.agentPersonaInstructions);
+            (refs.agentPersonaNameInput || panel.querySelector("#ldb-agent-persona-name")).value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName);
+            (refs.agentPersonaToneSelect || panel.querySelector("#ldb-agent-persona-tone")).value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, CONFIG.DEFAULTS.agentPersonaTone);
+            (refs.agentPersonaExpertiseInput || panel.querySelector("#ldb-agent-persona-expertise")).value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG.DEFAULTS.agentPersonaExpertise);
+            (refs.agentPersonaInstructionsInput || panel.querySelector("#ldb-agent-persona-instructions")).value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG.DEFAULTS.agentPersonaInstructions);
 
             // 加载 GitHub 设置
-            panel.querySelector("#ldb-github-username").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
-            panel.querySelector("#ldb-github-token").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
+            (refs.githubUsernameInput || panel.querySelector("#ldb-github-username")).value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
+            (refs.githubTokenInput || panel.querySelector("#ldb-github-token")).value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
             // 加载 GitHub 导入类型
             const savedGHTypesMain = GitHubAPI.getImportTypes();
-            panel.querySelectorAll(".ldb-github-type").forEach(cb => {
+            (refs.githubTypeCheckboxes || panel.querySelectorAll(".ldb-github-type")).forEach(cb => {
                 cb.checked = savedGHTypesMain.includes(cb.value);
             });
 
             // 书签扩展状态
-            const bmStatusMain = panel.querySelector("#ldb-bookmark-ext-status");
+            const bmStatusMain = refs.bookmarkExtStatus || panel.querySelector("#ldb-bookmark-ext-status");
             if (bmStatusMain) {
                 if (BookmarkBridge.isExtensionAvailable()) {
                     bmStatusMain.innerHTML = '<span style="color: #4ade80;">✅ 扩展已安装</span> — 输入「导入书签」即可';
@@ -11561,7 +11707,7 @@ ${availableTools}
             } catch {}
             const savedTargetDb = Storage.get(CONFIG.STORAGE_KEYS.AI_TARGET_DB, "");
             if (savedTargetDb) {
-                panel.querySelector("#ldb-ai-target-db").value = savedTargetDb;
+                (refs.aiTargetDbSelect || panel.querySelector("#ldb-ai-target-db")).value = savedTargetDb;
             }
 
             // 初始化日志面板
@@ -11571,7 +11717,7 @@ ${availableTools}
             const cachedWorkspace = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
             try {
                 const workspaceData = JSON.parse(cachedWorkspace);
-                const currentApiKey = panel.querySelector("#ldb-api-key").value.trim();
+                const currentApiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
                 const currentKeyHash = currentApiKey ? currentApiKey.slice(-8) : "";
                 // 仅当 API Key 匹配时才显示缓存
                 if (workspaceData.apiKeyHash === currentKeyHash &&
@@ -11582,10 +11728,10 @@ ${availableTools}
 
             // 加载自动导入设置
             const autoImportEnabled = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.autoImportEnabled);
-            panel.querySelector("#ldb-auto-import-enabled").checked = autoImportEnabled;
-            panel.querySelector("#ldb-auto-import-options").style.display = autoImportEnabled ? "block" : "none";
+            (refs.autoImportEnabled || panel.querySelector("#ldb-auto-import-enabled")).checked = autoImportEnabled;
+            (refs.autoImportOptions || panel.querySelector("#ldb-auto-import-options")).style.display = autoImportEnabled ? "block" : "none";
             const autoImportInterval = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval);
-            const intervalSelect = panel.querySelector("#ldb-auto-import-interval");
+            const intervalSelect = refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval");
             intervalSelect.value = autoImportInterval;
             // 如果存储的值不在选项中，回退到默认值
             if (intervalSelect.selectedIndex === -1) {
@@ -11596,7 +11742,7 @@ ${availableTools}
 
         // 显示状态
         showStatus: (message, type = "info") => {
-            const container = UI.panel.querySelector("#ldb-status-container");
+            const container = (UI.refs && UI.refs.statusContainer) || UI.panel.querySelector("#ldb-status-container");
             container.innerHTML = `
                 <div class="ldb-status ${type}">
                     ${message}
@@ -11619,7 +11765,7 @@ ${availableTools}
 
         // 显示进度
         showProgress: (current, total, message) => {
-            const container = UI.panel.querySelector("#ldb-status-container");
+            const container = (UI.refs && UI.refs.statusContainer) || UI.panel.querySelector("#ldb-status-container");
             const percent = Math.round((current / total) * 100);
 
             container.innerHTML = `
@@ -11637,12 +11783,13 @@ ${availableTools}
 
         // 隐藏进度
         hideProgress: () => {
-            UI.panel.querySelector("#ldb-status-container").innerHTML = "";
+            ((UI.refs && UI.refs.statusContainer) || UI.panel.querySelector("#ldb-status-container")).innerHTML = "";
         },
 
         // 更新 AI 模型选项
         updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
-            const modelSelect = UI.panel.querySelector("#ldb-ai-model");
+            const refs = UI.refs || {};
+            const modelSelect = refs.aiModelSelect || UI.panel.querySelector("#ldb-ai-model");
             const provider = AIService.PROVIDERS[service];
 
             if (!provider || !modelSelect) return;
@@ -11664,7 +11811,8 @@ ${availableTools}
 
         // 更新工作区选择下拉框
         updateWorkspaceSelect: (workspaceData) => {
-            const select = UI.panel.querySelector("#ldb-workspace-select");
+            const refs = UI.refs || {};
+            const select = refs.workspaceSelect || UI.panel.querySelector("#ldb-workspace-select");
             if (!select) return;
 
             const { databases = [], pages = [] } = workspaceData;
@@ -11714,7 +11862,8 @@ ${availableTools}
 
         // 更新 AI 查询目标数据库下拉框
         updateAITargetDbOptions: (databases) => {
-            const select = UI.panel.querySelector("#ldb-ai-target-db");
+            const refs = UI.refs || {};
+            const select = refs.aiTargetDbSelect || UI.panel.querySelector("#ldb-ai-target-db");
             if (!select) return;
 
             const savedValue = Storage.get(CONFIG.STORAGE_KEYS.AI_TARGET_DB, "");
@@ -11741,76 +11890,83 @@ ${availableTools}
 
         // 渲染收藏列表
         renderBookmarkList: () => {
-            const list = UI.panel.querySelector("#ldb-bookmark-list");
+            const list = (UI.refs && UI.refs.bookmarkList) || UI.panel.querySelector("#ldb-bookmark-list");
+            UI.recomputeExportStats();
             if (!UI.bookmarks || UI.bookmarks.length === 0) {
                 list.innerHTML = '<div style="padding: 12px; text-align: center; color: #666;">暂无收藏</div>';
+                UI.updateSelectCount();
                 return;
             }
 
             list.innerHTML = UI.bookmarks.map(b => {
-                const topicId = b.topic_id || b.bookmarkable_id;
+                const topicId = String(b.topic_id || b.bookmarkable_id);
                 const title = b.title || b.name || `帖子 ${topicId}`;
                 const isExported = Storage.isTopicExported(topicId);
                 const isSelected = UI.selectedBookmarks?.has(topicId);
 
                 return `
                     <div class="ldb-bookmark-item" data-topic-id="${topicId}">
-                        <input type="checkbox" ${isSelected ? 'checked' : ''} ${isExported ? 'disabled' : ''}>
+                        <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
                         <span class="title" title="${title}">${Utils.truncateText(title, 35)}</span>
                         ${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
                     </div>
                 `;
-            }).join('');
-
-            // 绑定点击事件
-            list.querySelectorAll(".ldb-bookmark-item").forEach(item => {
-                const checkbox = item.querySelector('input[type="checkbox"]');
-                if (checkbox.disabled) return;
-
-                item.onclick = (e) => {
-                    if (e.target.tagName === 'INPUT') return;
-                    checkbox.checked = !checkbox.checked;
-                    checkbox.dispatchEvent(new Event('change'));
-                };
-
-                checkbox.onchange = () => {
-                    const topicId = String(item.dataset.topicId);
-                    if (checkbox.checked) {
-                        UI.selectedBookmarks.add(topicId);
-                    } else {
-                        UI.selectedBookmarks.delete(topicId);
-                    }
-                    UI.updateSelectCount();
-                };
-            });
+            }).join("");
 
             UI.updateSelectCount();
+        },
+
+        // 重算导出统计（在列表变更后调用）
+        recomputeExportStats: () => {
+            if (!UI.bookmarks || UI.bookmarks.length === 0) {
+                UI.totalUnexportedCount = 0;
+                UI.selectedUnexportedCount = 0;
+                return;
+            }
+
+            const exportedMap = Storage.getExportedTopics();
+            let totalUnexported = 0;
+            let selectedUnexported = 0;
+
+            UI.bookmarks.forEach((b) => {
+                const topicId = String(b.topic_id || b.bookmarkable_id);
+                const isUnexported = !exportedMap[topicId];
+                if (isUnexported) {
+                    totalUnexported++;
+                    if (UI.selectedBookmarks?.has(topicId)) {
+                        selectedUnexported++;
+                    }
+                }
+            });
+
+            UI.totalUnexportedCount = totalUnexported;
+            UI.selectedUnexportedCount = selectedUnexported;
         },
 
         // 更新选中数量
         updateSelectCount: () => {
             const count = UI.selectedBookmarks?.size || 0;
-            const exportedCount = UI.bookmarks?.filter(b => Storage.isTopicExported(b.topic_id || b.bookmarkable_id)).length || 0;
-            const pendingCount = count - exportedCount;
+            const pendingCount = UI.selectedUnexportedCount || 0;
 
-            UI.panel.querySelector("#ldb-select-count").textContent = `已选 ${count} 个，待导出 ${Math.max(0, pendingCount)} 个`;
+            ((UI.refs && UI.refs.selectCount) || UI.panel.querySelector("#ldb-select-count")).textContent = `已选 ${count} 个，待导出 ${Math.max(0, pendingCount)} 个`;
 
             // 更新全选框状态
-            const selectAll = UI.panel.querySelector("#ldb-select-all");
-            if (UI.bookmarks && count === UI.bookmarks.length) {
-                selectAll.checked = true;
-                selectAll.indeterminate = false;
-            } else if (count === 0) {
+            const selectAll = (UI.refs && UI.refs.selectAll) || UI.panel.querySelector("#ldb-select-all");
+            if (count === 0) {
                 selectAll.checked = false;
                 selectAll.indeterminate = false;
+            } else if (UI.totalUnexportedCount > 0 && pendingCount === UI.totalUnexportedCount) {
+                selectAll.checked = true;
+                selectAll.indeterminate = false;
             } else {
+                selectAll.checked = false;
                 selectAll.indeterminate = true;
             }
         },
 
         // 显示导出报告
         showReport: (results) => {
-            const container = UI.panel.querySelector("#ldb-report-container");
+            const container = (UI.refs && UI.refs.reportContainer) || UI.panel.querySelector("#ldb-report-container");
             const { success, failed, skipped } = results;
 
             let html = '<div class="ldb-report">';
@@ -12286,31 +12442,19 @@ ${availableTools}
             }
 
             try {
-                const databasesRes = await NotionAPI.search("", { property: "object", value: "database" }, apiKey);
-                const pagesRes = await NotionAPI.search("", { property: "object", value: "page" }, apiKey);
-
-                const databases = (databasesRes.results || []).map(db => ({
-                    id: db.id?.replace(/-/g, "") || "",
-                    title: db.title?.[0]?.plain_text || "无标题数据库",
-                })).filter(item => item.id);
-
-                const pages = (pagesRes.results || []).map(page => ({
-                    id: page.id?.replace(/-/g, "") || "",
-                    title: Utils.getPageTitle(page),
-                    parent: page.parent?.type || "",
-                })).filter(item => item.id);
+                const workspace = await WorkspaceService.fetchWorkspace(apiKey, { includePages: true });
 
                 const workspaceData = {
                     apiKeyHash: apiKey.slice(-8),
-                    databases,
-                    pages,
+                    databases: workspace.databases,
+                    pages: workspace.pages,
                     timestamp: Date.now(),
                 };
                 Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
 
-                GenericUI.updateTargetSelectOptions(databases, pages);
+                GenericUI.updateTargetSelectOptions(workspace.databases, workspace.pages);
                 if (tip) {
-                    tip.textContent = `已加载 ${databases.length} 个数据库，${pages.filter(p => p.parent === "workspace").length} 个页面`;
+                    tip.textContent = `已加载 ${workspace.databases.length} 个数据库，${workspace.pages.filter(p => p.parent === "workspace").length} 个页面`;
                 }
             } catch (error) {
                 if (tip) {
