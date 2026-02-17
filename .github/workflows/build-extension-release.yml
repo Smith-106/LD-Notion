@@ -1,0 +1,60 @@
+name: Build Extension Zip
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v3.4.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve target tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout target tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.vars.outputs.tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build extension
+        run: node scripts/build-extension.js
+
+      - name: Package extension zip
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          VERSION="${TAG#v}"
+          ZIP_NAME="LD-Notion-chrome-extension-full-${TAG}.zip"
+          if [ "$TAG" = "$VERSION" ]; then
+            ZIP_NAME="LD-Notion-chrome-extension-full-v${VERSION}.zip"
+          fi
+          cd "$GITHUB_WORKSPACE"
+          zip -r "$ZIP_NAME" chrome-extension-full
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+        id: pack
+
+      - name: Upload asset to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          files: ${{ steps.pack.outputs.zip_name }}
+          overwrite_files: true
