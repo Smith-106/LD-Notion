@@ -493,17 +493,83 @@ fs.writeFileSync(path.join(OUT_DIR, "manifest.json"), JSON.stringify(manifest, n
 // 复制书签桥接的 content script（已在 content script 中通过补丁直接使用 chrome.bookmarks API）
 console.log("ℹ️  书签 API 已通过 BookmarkBridge 补丁 + manifest permissions 直接获取");
 
-// 复制图标（从 chrome-extension 目录，如果存在）
-["icon48.png", "icon128.png"].forEach(icon => {
-    const src = path.resolve(__dirname, "..", "chrome-extension", icon);
-    const fullSrc = path.resolve(__dirname, "..", "chrome-extension-full", icon);
+// 复制或生成图标
+["icon48.png", "icon128.png"].forEach(iconName => {
+    const src = path.resolve(__dirname, "..", "chrome-extension", iconName);
     if (fs.existsSync(src)) {
-        fs.copyFileSync(src, path.join(OUT_DIR, icon));
-        console.log(`📋 复制图标: ${icon}`);
-    } else if (!fs.existsSync(fullSrc)) {
-        console.warn(`⚠️  缺少图标: ${icon}（扩展仍可正常工作，Chrome 会使用默认图标）`);
+        fs.copyFileSync(src, path.join(OUT_DIR, iconName));
+        console.log(`📋 复制图标: ${iconName}`);
+    } else {
+        // 自动生成简约 PNG 图标
+        const size = parseInt(iconName.match(/\d+/)[0]);
+        const png = generateIcon(size);
+        fs.writeFileSync(path.join(OUT_DIR, iconName), png);
+        console.log(`🎨 生成图标: ${iconName} (${png.length} bytes)`);
     }
 });
+
+function generateIcon(size) {
+    const zlib = require("zlib");
+    const pixels = Buffer.alloc(size * size * 4);
+    const r = size * 0.2, thick = Math.max(2, Math.floor(size * 0.06));
+
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+            const i = (y * size + x) * 4;
+            const cx = x / size, cy = y / size;
+            // Rounded rectangle
+            let inRect = true;
+            const corners = [[r, r], [size - r - 1, r], [r, size - r - 1], [size - r - 1, size - r - 1]];
+            if (x < r && y < r) inRect = Math.hypot(x - corners[0][0], y - corners[0][1]) <= r;
+            else if (x >= size - r && y < r) inRect = Math.hypot(x - corners[1][0], y - corners[1][1]) <= r;
+            else if (x < r && y >= size - r) inRect = Math.hypot(x - corners[2][0], y - corners[2][1]) <= r;
+            else if (x >= size - r && y >= size - r) inRect = Math.hypot(x - corners[3][0], y - corners[3][1]) <= r;
+
+            if (inRect) {
+                const t = (cx + cy) / 2;
+                pixels[i] = Math.round(99 * (1 - t) + 139 * t);
+                pixels[i + 1] = Math.round(102 * (1 - t) + 92 * t);
+                pixels[i + 2] = Math.round(241 * (1 - t) + 246 * t);
+                pixels[i + 3] = 255;
+            }
+        }
+    }
+
+    // Draw "LN" letters
+    const ls = Math.floor(size * 0.4), sx = Math.floor(size * 0.15), sy = Math.floor(size * 0.3);
+    function setW(px, py) {
+        for (let dx = 0; dx < thick; dx++) for (let dy = 0; dy < thick; dy++) {
+            const fx = px + dx, fy = py + dy;
+            if (fx < size && fy < size) { const j = (fy * size + fx) * 4; if (pixels[j + 3] > 0) pixels[j] = pixels[j + 1] = pixels[j + 2] = 255; }
+        }
+    }
+    for (let dy = 0; dy < ls; dy++) setW(sx, sy + dy);
+    for (let dx = 0; dx < ls * 0.6; dx++) setW(sx + dx, sy + ls - thick);
+    const ns = sx + Math.floor(ls * 0.7);
+    for (let dy = 0; dy < ls; dy++) { setW(ns, sy + dy); setW(ns + Math.floor(ls * 0.6), sy + dy); setW(ns + Math.floor(dy * ls * 0.6 / ls), sy + dy); }
+
+    // Build PNG
+    const raw = Buffer.alloc(size * (size * 4 + 1));
+    for (let y = 0; y < size; y++) { raw[y * (size * 4 + 1)] = 0; pixels.copy(raw, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4); }
+    const compressed = zlib.deflateSync(raw);
+
+    function crc32(buf) {
+        let c = 0xFFFFFFFF;
+        const tbl = new Int32Array(256);
+        for (let n = 0; n < 256; n++) { let v = n; for (let k = 0; k < 8; k++) v = (v & 1) ? (0xEDB88320 ^ (v >>> 1)) : (v >>> 1); tbl[n] = v; }
+        for (let i = 0; i < buf.length; i++) c = tbl[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+        return (c ^ 0xFFFFFFFF) >>> 0;
+    }
+    function chunk(type, data) {
+        const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+        const td = Buffer.concat([Buffer.from(type), data]);
+        const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td));
+        return Buffer.concat([len, td, crc]);
+    }
+    const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4); ihdr[8] = 8; ihdr[9] = 6;
+    return Buffer.concat([sig, chunk("IHDR", ihdr), chunk("IDAT", compressed), chunk("IEND", Buffer.alloc(0))]);
+}
 
 // 12. 报告
 const contentSize = Buffer.byteLength(contentScript, "utf-8");
