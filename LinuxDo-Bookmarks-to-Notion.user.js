@@ -106,6 +106,7 @@
             GITHUB_EXPORTED_GISTS: "ldb_github_exported_gists",
             GITHUB_AUTO_IMPORT_ENABLED: "ldb_github_auto_import_enabled",
             GITHUB_AUTO_IMPORT_INTERVAL: "ldb_github_auto_import_interval",
+            BOOKMARK_SOURCE: "ldb_bookmark_source",
             // 更新检查
             UPDATE_AUTO_CHECK_ENABLED: "ldb_update_auto_check_enabled",
             UPDATE_CHECK_INTERVAL_HOURS: "ldb_update_check_interval_hours",
@@ -150,6 +151,7 @@
             autoImportInterval: 5, // 分钟，0=仅页面加载时
             githubAutoImportEnabled: false,
             githubAutoImportInterval: 5,
+            bookmarkSource: "linuxdo",
             updateAutoCheckEnabled: true,
             updateCheckIntervalHours: 24,
             exportConcurrency: 1, // 并发导出数量
@@ -10160,6 +10162,7 @@ ${availableTools}
                 bookmarkListContainer: panel.querySelector("#ldb-bookmark-list-container"),
                 reportContainer: panel.querySelector("#ldb-report-container"),
                 autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
+                bookmarkSourceSelect: panel.querySelector("#ldb-bookmark-source"),
                 updateCheckBtn: panel.querySelector("#ldb-update-check-btn"),
                 updateAutoEnabled: panel.querySelector("#ldb-update-auto-enabled"),
                 updateAutoOptions: panel.querySelector("#ldb-update-auto-options"),
@@ -10179,6 +10182,9 @@ ${availableTools}
                 githubSettingsToggle: panel.querySelector("#ldb-github-settings-toggle"),
                 githubSettingsContent: panel.querySelector("#ldb-github-settings-content"),
                 githubSettingsArrow: panel.querySelector("#ldb-github-settings-arrow"),
+                sourceSettingsToggle: panel.querySelector("#ldb-source-settings-toggle"),
+                sourceSettingsContent: panel.querySelector("#ldb-source-settings-content"),
+                sourceSettingsArrow: panel.querySelector("#ldb-source-settings-arrow"),
                 apiKeyInput: panel.querySelector("#ldb-api-key"),
                 databaseIdInput: panel.querySelector("#ldb-database-id"),
                 parentPageIdInput: panel.querySelector("#ldb-parent-page-id"),
@@ -10789,45 +10795,59 @@ ${availableTools}
                                 <div class="ldb-bookmarks-count" id="ldb-bookmark-count">-</div>
                                 <div class="ldb-bookmarks-label" id="ldb-bookmarks-label">已加载收藏数量</div>
                             </div>
-                            <!-- 自动导入设置 -->
-                            <div class="ldb-setting-row" style="margin-top: 10px; margin-bottom: 8px;">
-                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                                    <input type="checkbox" id="ldb-auto-import-enabled">
-                                    <span id="ldb-auto-import-label">启用自动导入新收藏</span>
-                                </label>
-                            </div>
-                            <div id="ldb-auto-import-options" style="display: none; margin-bottom: 12px;">
-                                <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px;">
-                                    <label id="ldb-auto-import-interval-label" style="white-space: nowrap;">轮询间隔</label>
-                                    <select id="ldb-auto-import-interval" class="ldb-input" style="flex: 1;">
-                                        <option value="0">仅页面加载时</option>
-                                        <option value="3">每 3 分钟</option>
-                                        <option value="5" selected>每 5 分钟</option>
-                                        <option value="10">每 10 分钟</option>
-                                        <option value="30">每 30 分钟</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div id="ldb-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
 
-                            <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-update-check-btn" style="padding: 6px 10px;">检查更新</button>
-                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0;">
-                                    <input type="checkbox" id="ldb-update-auto-enabled">
-                                    <span>自动检查更新</span>
-                                </label>
+                            <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px; margin-top: 10px; margin-bottom: 8px;">
+                                <label for="ldb-bookmark-source" style="white-space: nowrap;">收藏来源</label>
+                                <select id="ldb-bookmark-source" class="ldb-input" style="flex: 1;">
+                                    <option value="linuxdo">Linux.do 收藏分区</option>
+                                    <option value="github">GitHub 收藏分区</option>
+                                </select>
                             </div>
-                            <div id="ldb-update-auto-options" style="display: none; margin-bottom: 8px;">
-                                <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px;">
-                                    <label for="ldb-update-interval-hours" style="white-space: nowrap;">检查间隔</label>
-                                    <select id="ldb-update-interval-hours" class="ldb-input" style="flex: 1;">
-                                        <option value="24">每 24 小时</option>
-                                        <option value="72">每 72 小时</option>
-                                        <option value="168">每 168 小时</option>
-                                    </select>
+
+                            <div class="ldb-toggle-section" id="ldb-source-settings-toggle" style="margin-bottom: 8px;">
+                                <span>来源自动化设置</span>
+                                <span class="ldb-arrow" id="ldb-source-settings-arrow">▶</span>
+                            </div>
+                            <div class="ldb-toggle-content collapsed" id="ldb-source-settings-content" style="margin-bottom: 8px;">
+                                <div class="ldb-setting-row" style="margin-bottom: 8px;">
+                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                        <input type="checkbox" id="ldb-auto-import-enabled">
+                                        <span id="ldb-auto-import-label">启用自动导入新收藏</span>
+                                    </label>
                                 </div>
+                                <div id="ldb-auto-import-options" style="display: none; margin-bottom: 8px;">
+                                    <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px;">
+                                        <label id="ldb-auto-import-interval-label" style="white-space: nowrap;">轮询间隔</label>
+                                        <select id="ldb-auto-import-interval" class="ldb-input" style="flex: 1;">
+                                            <option value="0">仅页面加载时</option>
+                                            <option value="3">每 3 分钟</option>
+                                            <option value="5" selected>每 5 分钟</option>
+                                            <option value="10">每 10 分钟</option>
+                                            <option value="30">每 30 分钟</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div id="ldb-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
+
+                                <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-update-check-btn" style="padding: 6px 10px;">检查更新</button>
+                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0;">
+                                        <input type="checkbox" id="ldb-update-auto-enabled">
+                                        <span>自动检查更新</span>
+                                    </label>
+                                </div>
+                                <div id="ldb-update-auto-options" style="display: none; margin-bottom: 8px;">
+                                    <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px;">
+                                        <label for="ldb-update-interval-hours" style="white-space: nowrap;">检查间隔</label>
+                                        <select id="ldb-update-interval-hours" class="ldb-input" style="flex: 1;">
+                                            <option value="24">每 24 小时</option>
+                                            <option value="72">每 72 小时</option>
+                                            <option value="168">每 168 小时</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div id="ldb-update-check-status" style="font-size: 12px; color: #666; margin-bottom: 4px;"></div>
                             </div>
-                            <div id="ldb-update-check-status" style="font-size: 12px; color: #666; margin-bottom: 12px;"></div>
 
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-load-bookmarks" style="margin-bottom: 12px;">
                                 🔄 加载收藏列表
@@ -11324,6 +11344,13 @@ ${availableTools}
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
+            (refs.sourceSettingsToggle || panel.querySelector("#ldb-source-settings-toggle")).onclick = () => {
+                const content = refs.sourceSettingsContent || panel.querySelector("#ldb-source-settings-content");
+                const arrow = refs.sourceSettingsArrow || panel.querySelector("#ldb-source-settings-arrow");
+                content.classList.toggle("collapsed");
+                arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            };
+
             // 导出目标类型切换
             const handleExportTargetChange = (e) => {
                 const targetType = e.target.value;
@@ -11463,20 +11490,14 @@ ${availableTools}
             // 自动导入设置
             (refs.autoImportEnabled || panel.querySelector("#ldb-auto-import-enabled")).onchange = (e) => {
                 const enabled = e.target.checked;
-                const isGitHub = UI.isGitHubMode();
-                const autoImportEnabledKey = isGitHub
-                    ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED
-                    : CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED;
-                const autoImportIntervalKey = isGitHub
-                    ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL
-                    : CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL;
-                Storage.set(autoImportEnabledKey, enabled);
+                const cfg = UI.getAutoImportConfigBySource();
+                Storage.set(cfg.enabledKey, enabled);
                 (refs.autoImportOptions || panel.querySelector("#ldb-auto-import-options")).style.display = enabled ? "block" : "none";
                 if (enabled) {
-                    if (isGitHub) {
+                    if (cfg.isGitHub) {
                         GitHubAutoImporter.run();
                         const interval = parseInt((refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval")).value) || 0;
-                        Storage.set(autoImportIntervalKey, interval);
+                        Storage.set(cfg.intervalKey, interval);
                         if (interval > 0) GitHubAutoImporter.startPolling(interval);
                         return;
                     }
@@ -11498,10 +11519,10 @@ ${availableTools}
                     }
                     AutoImporter.run();
                     const interval = parseInt((refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval")).value) || 0;
-                    Storage.set(autoImportIntervalKey, interval);
+                    Storage.set(cfg.intervalKey, interval);
                     if (interval > 0) AutoImporter.startPolling(interval);
                 } else {
-                    if (isGitHub) {
+                    if (cfg.isGitHub) {
                         GitHubAutoImporter.stopPolling();
                         GitHubAutoImporter.updateStatus("");
                     } else {
@@ -11513,23 +11534,17 @@ ${availableTools}
 
             (refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval")).onchange = (e) => {
                 const interval = parseInt(e.target.value) || 0;
-                const isGitHub = UI.isGitHubMode();
-                const autoImportEnabledKey = isGitHub
-                    ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED
-                    : CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED;
-                const autoImportIntervalKey = isGitHub
-                    ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL
-                    : CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL;
+                const cfg = UI.getAutoImportConfigBySource();
 
-                Storage.set(autoImportIntervalKey, interval);
-                if (isGitHub) {
+                Storage.set(cfg.intervalKey, interval);
+                if (cfg.isGitHub) {
                     GitHubAutoImporter.stopPolling();
-                    if (interval > 0 && Storage.get(autoImportEnabledKey, false)) {
+                    if (interval > 0 && Storage.get(cfg.enabledKey, false)) {
                         GitHubAutoImporter.startPolling(interval);
                     }
                 } else {
                     AutoImporter.stopPolling();
-                    if (interval > 0 && Storage.get(autoImportEnabledKey, false)) {
+                    if (interval > 0 && Storage.get(cfg.enabledKey, false)) {
                         AutoImporter.startPolling(interval);
                     }
                 }
@@ -11561,6 +11576,32 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, hours);
                 if (Storage.get(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG.DEFAULTS.updateAutoCheckEnabled)) {
                     UpdateChecker.startPolling(hours);
+                }
+            };
+
+            (refs.bookmarkSourceSelect || panel.querySelector("#ldb-bookmark-source")).onchange = (e) => {
+                const source = e.target.value === "github" ? "github" : "linuxdo";
+                Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, source);
+                UI.applyBookmarkSourceUI(source);
+                UI.bookmarks = [];
+                UI.selectedBookmarks = new Set();
+                UI.recomputeExportStats();
+                ((UI.refs && UI.refs.bookmarkCount) || panel.querySelector("#ldb-bookmark-count")).textContent = "-";
+                ((UI.refs && UI.refs.exportBtn) || panel.querySelector("#ldb-export")).disabled = true;
+                ((UI.refs && UI.refs.bookmarkListContainer) || panel.querySelector("#ldb-bookmark-list-container")).style.display = "none";
+                UI.renderBookmarkList();
+
+                const cfg = UI.getAutoImportConfigBySource();
+                const autoImportEnabled = Storage.get(cfg.enabledKey, cfg.enabledDefault);
+                const autoImportEnabledEl = refs.autoImportEnabled || panel.querySelector("#ldb-auto-import-enabled");
+                const autoImportOptionsEl = refs.autoImportOptions || panel.querySelector("#ldb-auto-import-options");
+                const intervalEl = refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval");
+                autoImportEnabledEl.checked = autoImportEnabled;
+                autoImportOptionsEl.style.display = autoImportEnabled ? "block" : "none";
+                intervalEl.value = String(Storage.get(cfg.intervalKey, cfg.intervalDefault));
+                if (intervalEl.selectedIndex === -1) {
+                    intervalEl.value = String(cfg.intervalDefault);
+                    Storage.set(cfg.intervalKey, cfg.intervalDefault);
                 }
             };
 
@@ -11613,7 +11654,7 @@ ${availableTools}
                 try {
                     let bookmarks = [];
 
-                    if (UI.isGitHubMode()) {
+                    if (UI.isActiveGitHubSource()) {
                         const username = (refs.githubUsernameInput || panel.querySelector("#ldb-github-username")).value.trim()
                             || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
                         const token = (refs.githubTokenInput || panel.querySelector("#ldb-github-token")).value.trim()
@@ -11665,7 +11706,7 @@ ${availableTools}
                     UI.renderBookmarkList();
                     ((UI.refs && UI.refs.bookmarkListContainer) || panel.querySelector("#ldb-bookmark-list-container")).style.display = "block";
 
-                    const sourceText = UI.isGitHubMode() ? "GitHub 收藏" : "收藏";
+                    const sourceText = UI.isActiveGitHubSource() ? "GitHub 收藏" : "Linux.do 收藏";
                     UI.showStatus(`成功加载 ${bookmarks.length} 个${sourceText}`, "success");
                 } catch (error) {
                     UI.showStatus(`加载失败: ${error.message}`, "error");
@@ -11790,7 +11831,7 @@ ${availableTools}
 
                 try {
                     let results;
-                    if (UI.isGitHubMode()) {
+                    if (UI.isActiveGitHubSource()) {
                         results = await UI.exportGitHubSelected(toExport, settings, (current, total, title) => {
                             UI.showProgress(current, total, `${title}\n导出中`);
                         });
@@ -12270,16 +12311,8 @@ ${availableTools}
                 cb.checked = savedGHTypesMain.includes(cb.value);
             });
 
-            const isGitHub = UI.isGitHubMode();
-            if (refs.bookmarksLabel) {
-                refs.bookmarksLabel.textContent = "已加载收藏数量";
-            }
-            if (refs.autoImportLabel) {
-                refs.autoImportLabel.textContent = "启用自动导入新收藏";
-            }
-            if (refs.autoImportIntervalLabel) {
-                refs.autoImportIntervalLabel.textContent = "轮询间隔";
-            }
+            const source = UI.getActiveBookmarkSource();
+            UI.applyBookmarkSourceUI(source);
 
             // 书签扩展状态
             const bmStatusMain = refs.bookmarkExtStatus || panel.querySelector("#ldb-bookmark-ext-status");
@@ -12321,29 +12354,28 @@ ${availableTools}
             } catch {}
 
             // 加载自动导入设置
-            const autoImportEnabledKey = isGitHub
-                ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED
-                : CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED;
-            const autoImportIntervalKey = isGitHub
-                ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL
-                : CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL;
-            const autoImportEnabledDefault = isGitHub
-                ? CONFIG.DEFAULTS.githubAutoImportEnabled
-                : CONFIG.DEFAULTS.autoImportEnabled;
-            const autoImportIntervalDefault = isGitHub
-                ? CONFIG.DEFAULTS.githubAutoImportInterval
-                : CONFIG.DEFAULTS.autoImportInterval;
+            const sourceSelect = refs.bookmarkSourceSelect || panel.querySelector("#ldb-bookmark-source");
+            const savedSource = Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG.DEFAULTS.bookmarkSource);
+            sourceSelect.value = savedSource === "github" ? "github" : "linuxdo";
+            if (sourceSelect.selectedIndex === -1) {
+                sourceSelect.value = CONFIG.DEFAULTS.bookmarkSource;
+                Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG.DEFAULTS.bookmarkSource);
+            }
+            const resolvedSource = sourceSelect.value === "github" ? "github" : "linuxdo";
+            Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, resolvedSource);
+            UI.applyBookmarkSourceUI(resolvedSource);
 
-            const autoImportEnabled = Storage.get(autoImportEnabledKey, autoImportEnabledDefault);
+            const autoConfig = UI.getAutoImportConfigBySource();
+            const autoImportEnabled = Storage.get(autoConfig.enabledKey, autoConfig.enabledDefault);
             (refs.autoImportEnabled || panel.querySelector("#ldb-auto-import-enabled")).checked = autoImportEnabled;
             (refs.autoImportOptions || panel.querySelector("#ldb-auto-import-options")).style.display = autoImportEnabled ? "block" : "none";
-            const autoImportInterval = Storage.get(autoImportIntervalKey, autoImportIntervalDefault);
+            const autoImportInterval = Storage.get(autoConfig.intervalKey, autoConfig.intervalDefault);
             const intervalSelect = refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval");
             intervalSelect.value = autoImportInterval;
             // 如果存储的值不在选项中，回退到默认值
             if (intervalSelect.selectedIndex === -1) {
-                intervalSelect.value = autoImportIntervalDefault;
-                Storage.set(autoImportIntervalKey, autoImportIntervalDefault);
+                intervalSelect.value = autoConfig.intervalDefault;
+                Storage.set(autoConfig.intervalKey, autoConfig.intervalDefault);
             }
 
             const updateAutoEnabled = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG.DEFAULTS.updateAutoCheckEnabled);
@@ -12511,6 +12543,42 @@ ${availableTools}
 
         isGitHubMode: () => SiteDetector.isGitHub(),
 
+        getActiveBookmarkSource: () => {
+            const source = Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG.DEFAULTS.bookmarkSource);
+            return source === "github" ? "github" : "linuxdo";
+        },
+
+        isActiveGitHubSource: () => UI.getActiveBookmarkSource() === "github",
+
+        getAutoImportConfigBySource: () => {
+            const isGitHub = UI.isActiveGitHubSource();
+            return {
+                isGitHub,
+                enabledKey: isGitHub ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED : CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED,
+                intervalKey: isGitHub ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL : CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL,
+                enabledDefault: isGitHub ? CONFIG.DEFAULTS.githubAutoImportEnabled : CONFIG.DEFAULTS.autoImportEnabled,
+                intervalDefault: isGitHub ? CONFIG.DEFAULTS.githubAutoImportInterval : CONFIG.DEFAULTS.autoImportInterval,
+            };
+        },
+
+        applyBookmarkSourceUI: (source) => {
+            const refs = UI.refs || {};
+            const isGitHub = source === "github";
+            if (refs.bookmarksLabel) {
+                refs.bookmarksLabel.textContent = isGitHub ? "已加载 GitHub 收藏数量" : "已加载 Linux.do 收藏数量";
+            }
+            if (refs.autoImportLabel) {
+                refs.autoImportLabel.textContent = isGitHub ? "启用自动导入新 GitHub 收藏" : "启用自动导入新 Linux.do 收藏";
+            }
+            if (refs.autoImportIntervalLabel) {
+                refs.autoImportIntervalLabel.textContent = "轮询间隔";
+            }
+            const autoStatus = refs.autoImportStatus || UI.panel?.querySelector("#ldb-auto-import-status");
+            if (autoStatus && autoStatus.textContent && !autoStatus.textContent.includes("⚠️")) {
+                autoStatus.textContent = "";
+            }
+        },
+
         getBookmarkKey: (bookmark) => {
             if (bookmark?.source === "github") {
                 return `gh:${bookmark.sourceType}:${bookmark.itemKey}`;
@@ -12629,7 +12697,7 @@ ${availableTools}
                 return;
             }
 
-            const githubMode = UI.isGitHubMode();
+            const githubMode = UI.isActiveGitHubSource();
             list.innerHTML = UI.bookmarks.map((b) => {
                 const bookmarkKey = UI.getBookmarkKey(b);
                 const title = b.title || b.name || `帖子 ${bookmarkKey}`;
