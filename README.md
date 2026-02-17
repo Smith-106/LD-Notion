@@ -4,7 +4,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器拓展](https://img.shields.io/badge/安装浏览器拓展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- v3.3.0 插件 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.3.0/LD-Notion-chrome-extension-full-v3.3.0.zip>
+- v3.4.0 插件 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.0/LD-Notion-chrome-extension-full-v3.4.0.zip>
 
 ## 四大核心能力
 
@@ -313,6 +313,17 @@ A: 请检查：
 - 四级权限模型 + OperationGuard 保护所有写入操作
 
 ## 更新日志
+
+### v3.4.0
+
+本次版本聚焦「更新可见性与升级引导」，让用户能更及时获知新版本。
+
+- 新增面板更新检查能力：支持手动「检查更新」
+- 新增自动检查更新：可选 24/72/168 小时间隔
+- 新增更新状态持久化：展示上次检查结果与时间
+- 文档补充扩展升级说明：ZIP/解压安装需手动重装或在扩展页重新加载
+
+- Tag：`v3.4.0`
 
 ### v3.3.0
 
