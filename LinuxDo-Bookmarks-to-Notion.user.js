@@ -230,6 +230,18 @@
             return text.substring(0, maxLen) + "...";
         },
 
+        base64DecodeUnicode: (input) => {
+            if (!input) return "";
+            try {
+                const normalized = String(input).replace(/\s+/g, "");
+                const binary = atob(normalized);
+                const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+                return new TextDecoder("utf-8").decode(bytes);
+            } catch {
+                return "";
+            }
+        },
+
         // HTML 转义，防止 XSS 攻击
         escapeHtml: (text) => {
             if (!text) return "";
@@ -4965,6 +4977,11 @@ ${contentParts.join("\n\n---\n\n")}`;
                     databaseId,
                     username,
                     token,
+                    aiApiKey: settings.aiApiKey,
+                    aiService: settings.aiService,
+                    aiModel: settings.aiModel,
+                    aiBaseUrl: settings.aiBaseUrl,
+                    categories: settings.categories,
                 }, (msg, pct) => {
                     ChatState.updateLastMessage(`🐙 ${msg}`, "processing");
                 });
@@ -7687,7 +7704,7 @@ ${availableTools}
     // GitHub API 模块
     // ===========================================
     const GitHubAPI = {
-        // 通用 GitHub API 分页请求
+        _readmeCache: {},
         _fetchPaginated: (url, token = "", label = "GitHub") => {
             return new Promise((resolve, reject) => {
                 const allItems = [];
@@ -7810,23 +7827,202 @@ ${availableTools}
         setImportTypes: (types) => {
             Storage.set(CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES, JSON.stringify(types));
         },
+
+        fetchRepoReadme: (repoFullName, token = "") => {
+            if (!repoFullName) return Promise.resolve("");
+            const cacheKey = `${repoFullName}::${token ? "auth" : "anon"}`;
+            if (Object.prototype.hasOwnProperty.call(GitHubAPI._readmeCache, cacheKey)) {
+                return Promise.resolve(GitHubAPI._readmeCache[cacheKey]);
+            }
+
+            return new Promise((resolve) => {
+                const headers = {
+                    "Accept": "application/vnd.github.v3+json",
+                    "User-Agent": "LD-Notion-UserScript",
+                };
+                if (token) headers["Authorization"] = `Bearer ${token}`;
+
+                GM_xmlhttpRequest({
+                    method: "GET",
+                    url: `https://api.github.com/repos/${repoFullName}/readme`,
+                    headers,
+                    onload: (response) => {
+                        if (response.status === 200) {
+                            try {
+                                const data = JSON.parse(response.responseText || "{}");
+                                const decoded = Utils.base64DecodeUnicode(data.content || "");
+                                const text = String(decoded || "").replace(/\r\n/g, "\n");
+                                GitHubAPI._readmeCache[cacheKey] = text;
+                                resolve(text);
+                                return;
+                            } catch {
+                                GitHubAPI._readmeCache[cacheKey] = "";
+                                resolve("");
+                                return;
+                            }
+                        }
+                        GitHubAPI._readmeCache[cacheKey] = "";
+                        resolve("");
+                    },
+                    onerror: () => {
+                        GitHubAPI._readmeCache[cacheKey] = "";
+                        resolve("");
+                    },
+                });
+            });
+        },
     };
 
     // ===========================================
     // GitHub 导出到 Notion 模块
     // ===========================================
     const GitHubExporter = {
+        normalizeText: (text, maxLen = 280) => {
+            if (!text) return "";
+            const normalized = String(text).replace(/\s+/g, " ").trim();
+            return normalized.substring(0, maxLen);
+        },
+
+        composeTitleWithPrefix: (prefix, candidate, maxLen = 180) => {
+            const safePrefix = GitHubExporter.normalizeText(prefix, maxLen);
+            const safeCandidate = GitHubExporter.normalizeText(candidate, maxLen);
+            if (!safePrefix) return safeCandidate || "无标题";
+            if (!safeCandidate || safeCandidate === safePrefix) return safePrefix;
+            if (safeCandidate.startsWith(`${safePrefix} - `) || safeCandidate.startsWith(`${safePrefix} · `)) {
+                return safeCandidate.substring(0, maxLen);
+            }
+            return `${safePrefix} · ${safeCandidate}`.substring(0, maxLen);
+        },
+
+        extractReadmeInsight: (readmeText = "") => {
+            const text = String(readmeText || "").replace(/\r\n/g, "\n");
+            if (!text) return { title: "", summary: "" };
+
+            const headingMatch = text.match(/^#{1,3}\s+(.+)$/m);
+            const title = GitHubExporter.normalizeText(headingMatch?.[1] || "", 120);
+
+            const lines = text
+                .split("\n")
+                .map(line => line.trim())
+                .filter(line => line && !line.startsWith("#") && !line.startsWith("```"));
+            const summary = GitHubExporter.normalizeText(lines.slice(0, 8).join(" "), 320);
+
+            return { title, summary };
+        },
+
+        inferRepoCategoryHeuristic: (repo, insight, categories = []) => {
+            const available = (categories || []).map(c => String(c || "").trim()).filter(Boolean);
+            if (available.length === 0) return "";
+
+            const text = `${repo.full_name || ""} ${repo.name || ""} ${repo.description || ""} ${(repo.topics || []).join(" ")} ${repo.language || ""} ${insight.title || ""} ${insight.summary || ""}`.toLowerCase();
+            for (const cat of available) {
+                if (text.includes(cat.toLowerCase())) return cat;
+            }
+
+            const rules = [
+                { keys: ["llm", "openai", "anthropic", "prompt", "rag", "ai", "agent"], hints: ["ai", "人工智能"] },
+                { keys: ["react", "vue", "next", "svelte", "frontend", "ui", "css", "tailwind"], hints: ["前端", "ui"] },
+                { keys: ["node", "express", "fastapi", "backend", "server", "api", "spring"], hints: ["后端", "服务端", "api"] },
+                { keys: ["devops", "docker", "kubernetes", "k8s", "terraform", "ci", "cd"], hints: ["运维", "devops"] },
+                { keys: ["docs", "guide", "tutorial", "awesome", "resource", "学习", "教程"], hints: ["文档", "资源", "学习"] },
+            ];
+
+            for (const rule of rules) {
+                if (!rule.keys.some(k => text.includes(k))) continue;
+                const matched = available.find(cat => rule.hints.some(h => cat.toLowerCase().includes(h.toLowerCase())));
+                if (matched) return matched;
+            }
+
+            const fallback = available.find(cat => cat.includes("其他"));
+            return fallback || available[available.length - 1];
+        },
+
+        inferRepoTags: (repo, insight) => {
+            const tags = [];
+            const pushTag = (value) => {
+                const clean = GitHubExporter.normalizeText(value, 80);
+                if (!clean) return;
+                if (tags.includes(clean)) return;
+                tags.push(clean);
+            };
+
+            (repo.topics || []).forEach(pushTag);
+            pushTag(repo.language || "");
+
+            const owner = String(repo.full_name || "").split("/")[0] || "";
+            pushTag(owner);
+
+            const lowerText = `${insight.title || ""} ${insight.summary || ""}`.toLowerCase();
+            const keywordTags = ["ai", "llm", "rag", "agent", "react", "vue", "nextjs", "nodejs", "python", "rust", "go", "docker", "kubernetes", "notion", "github", "automation"];
+            keywordTags.forEach((kw) => {
+                if (lowerText.includes(kw)) pushTag(kw);
+            });
+
+            return tags.slice(0, 20);
+        },
+
+        generateAIRepoCategory: async (repo, insight, settings) => {
+            const categories = Array.isArray(settings?.categories) ? settings.categories.filter(Boolean) : [];
+            if (!settings?.aiApiKey || !settings?.aiService || categories.length === 0) return "";
+
+            try {
+                return await AIService.classify(
+                    `${repo.full_name || repo.name || ""} ${insight.title || ""}`,
+                    `${repo.description || ""}\n${insight.summary || ""}`,
+                    categories,
+                    settings
+                );
+            } catch {
+                return "";
+            }
+        },
+
+        enrichRepo: async (repo, settings, context = {}) => {
+            const enriched = { ...repo };
+            const prefix = GitHubExporter.normalizeText(repo.full_name || repo.name || "", 120) || "无标题";
+            let insight = { title: "", summary: "" };
+
+            try {
+                const readme = await GitHubAPI.fetchRepoReadme(repo.full_name, settings?.token || "");
+                insight = GitHubExporter.extractReadmeInsight(readme);
+            } catch {
+                insight = { title: "", summary: "" };
+            }
+
+            const defaultSuffix = insight.title || GitHubExporter.normalizeText(repo.description || "", 80);
+            enriched.generatedTitle = GitHubExporter.composeTitleWithPrefix(prefix, defaultSuffix, 180);
+
+            let inferredCategory = GitHubExporter.inferRepoCategoryHeuristic(repo, insight, settings?.categories || []);
+            const canUseAI = !!(settings?.aiApiKey && settings?.aiService);
+            const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
+            if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
+                const aiCategory = await GitHubExporter.generateAIRepoCategory(repo, insight, settings);
+                if (aiCategory) inferredCategory = aiCategory;
+                context.aiUsedCount = (context.aiUsedCount || 0) + 1;
+            }
+
+            enriched.inferredCategory = inferredCategory;
+            enriched.inferredTags = GitHubExporter.inferRepoTags(repo, insight);
+            enriched.readmeSummary = GitHubExporter.normalizeText(insight.summary || "", 1000);
+            return enriched;
+        },
+
         // 构建 Notion 数据库属性 (repos/stars/forks)
         buildRepoProperties: (repo, sourceType = "Star") => {
+            const titlePrefix = GitHubExporter.normalizeText(repo.full_name || repo.name || "无标题", 120) || "无标题";
+            const titleContent = GitHubExporter.composeTitleWithPrefix(titlePrefix, repo.generatedTitle || "", 2000);
+            const summaryText = GitHubExporter.normalizeText(repo.readmeSummary || "", 1600);
+            const descCandidate = GitHubExporter.normalizeText(repo.description || "", 1200);
+            const description = [descCandidate, summaryText].filter(Boolean).join("\n\n").substring(0, 2000);
             const props = {
                 "标题": {
-                    title: [{ text: { content: repo.full_name || repo.name || "无标题" } }]
+                    title: [{ text: { content: titleContent } }]
                 },
                 "链接": {
                     url: repo.html_url
                 },
                 "描述": {
-                    rich_text: [{ text: { content: (repo.description || "").substring(0, 2000) } }]
+                    rich_text: [{ text: { content: description } }]
                 },
                 "语言": {
                     rich_text: [{ text: { content: repo.language || "" } }]
@@ -7841,9 +8037,23 @@ ${availableTools}
                     rich_text: [{ text: { content: sourceType } }]
                 },
             };
-            if (repo.topics && repo.topics.length > 0) {
+            const topicTags = Array.isArray(repo.topics) ? repo.topics.slice(0, 20) : [];
+            const inferredTags = Array.isArray(repo.inferredTags) ? repo.inferredTags : [];
+            const mergedTags = [];
+            [...topicTags, ...inferredTags].forEach((tag) => {
+                const clean = GitHubExporter.normalizeText(tag, 100);
+                if (!clean) return;
+                if (mergedTags.includes(clean)) return;
+                mergedTags.push(clean);
+            });
+            if (mergedTags.length > 0) {
                 props["标签"] = {
-                    multi_select: repo.topics.slice(0, 20).map(t => ({ name: t }))
+                    multi_select: mergedTags.slice(0, 20).map(t => ({ name: t }))
+                };
+            }
+            if (repo.inferredCategory) {
+                props["分类"] = {
+                    rich_text: [{ text: { content: GitHubExporter.normalizeText(repo.inferredCategory, 300) } }]
                 };
             }
             if (repo.pushed_at) {
@@ -7954,6 +8164,7 @@ ${availableTools}
             }
 
             let success = 0, failed = 0;
+            const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
             for (let i = 0; i < newItems.length; i++) {
                 const item = newItems[i];
                 const key = getKeyFn(item);
@@ -7961,7 +8172,8 @@ ${availableTools}
                 if (onProgress) onProgress(`正在导出 ${sourceType} (${i + 1}/${newItems.length}): ${key}`, pct);
 
                 try {
-                    const properties = buildFn(item);
+                    const enriched = sourceType === "Gist" ? item : await GitHubExporter.enrichRepo(item, settings, enrichContext);
+                    const properties = buildFn(enriched);
                     // 清理 undefined 属性
                     for (const k of Object.keys(properties)) {
                         if (properties[k] === undefined) delete properties[k];
@@ -8288,6 +8500,17 @@ ${availableTools}
             return normalized.substring(0, maxLen);
         },
 
+        composeTitleWithPrefix: (prefix, candidate, maxLen = 180) => {
+            const safePrefix = BookmarkExporter.normalizeText(prefix, maxLen);
+            const safeCandidate = BookmarkExporter.normalizeText(candidate, maxLen);
+            if (!safePrefix) return safeCandidate || "无标题书签";
+            if (!safeCandidate || safeCandidate === safePrefix) return safePrefix;
+            if (safeCandidate.startsWith(`${safePrefix} - `) || safeCandidate.startsWith(`${safePrefix} · `)) {
+                return safeCandidate.substring(0, maxLen);
+            }
+            return `${safePrefix} · ${safeCandidate}`.substring(0, maxLen);
+        },
+
         extractPageInsightFromHtml: (html, url) => {
             const parser = new DOMParser();
             const doc = parser.parseFromString(html || "", "text/html");
@@ -8449,7 +8672,8 @@ ${availableTools}
 
         enrichBookmark: async (bookmark, settings, context = {}) => {
             const enriched = { ...bookmark };
-            const fallbackTitle = BookmarkExporter.normalizeText(bookmark.title || "无标题书签", 180);
+            const prefix = BookmarkExporter.normalizeText(bookmark.title || "无标题书签", 120) || "无标题书签";
+            const fallbackTitle = BookmarkExporter.composeTitleWithPrefix(prefix, "", 180);
 
             if (!BookmarkExporter.isHttpUrl(bookmark.url)) {
                 enriched.generatedTitle = fallbackTitle;
@@ -8461,7 +8685,7 @@ ${availableTools}
 
             try {
                 const insight = await BookmarkExporter.fetchPageInsight(bookmark.url);
-                enriched.generatedTitle = insight.title || fallbackTitle;
+                enriched.generatedTitle = BookmarkExporter.composeTitleWithPrefix(prefix, insight.title || "", 180);
                 enriched.generatedSummary = insight.summary || "";
 
                 let inferredCategory = BookmarkExporter.inferCategoryHeuristic(bookmark, insight, settings?.categories || []);
@@ -8472,7 +8696,7 @@ ${availableTools}
                 if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
                     const aiResult = await BookmarkExporter.generateAISummary(bookmark, insight, settings);
                     if (aiResult?.title) {
-                        enriched.generatedTitle = aiResult.title;
+                        enriched.generatedTitle = BookmarkExporter.composeTitleWithPrefix(prefix, aiResult.title, 180);
                     }
                     if (aiResult?.summary) {
                         enriched.generatedSummary = aiResult.summary;
@@ -12067,6 +12291,16 @@ ${availableTools}
                     rangeEnd: parseInt((refs.rangeEndInput || panel.querySelector("#ldb-range-end")).value) || 999999,
                     imgMode: (refs.imgModeSelect || panel.querySelector("#ldb-img-mode")).value,
                     concurrency: parseInt((refs.exportConcurrencySelect || panel.querySelector("#ldb-export-concurrency")).value) || 1,
+                    aiApiKey: (refs.aiApiKeyInput || panel.querySelector("#ldb-ai-api-key")).value.trim(),
+                    aiService: (refs.aiServiceSelect || panel.querySelector("#ldb-ai-service")).value,
+                    aiModel: (refs.aiModelSelect || panel.querySelector("#ldb-ai-model")).value,
+                    aiBaseUrl: (refs.aiBaseUrlInput || panel.querySelector("#ldb-ai-base-url")).value.trim(),
+                    categories: ((refs.aiCategoriesInput || panel.querySelector("#ldb-ai-categories")).value.trim() || "")
+                        .split(/[，,]/)
+                        .map(s => s.trim())
+                        .filter(Boolean),
+                    githubUsername: (refs.githubUsernameInput || panel.querySelector("#ldb-github-username")).value.trim(),
+                    token: (refs.githubTokenInput || panel.querySelector("#ldb-github-token")).value.trim(),
                 };
 
                 // 保存设置
@@ -12925,7 +13159,8 @@ ${availableTools}
                         properties = GitHubExporter.buildGistProperties(bookmark);
                     } else {
                         const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
-                        properties = GitHubExporter.buildRepoProperties(bookmark, sourceMap[sourceType] || "Star");
+                        const enriched = await GitHubExporter.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
+                        properties = GitHubExporter.buildRepoProperties(enriched, sourceMap[sourceType] || "Star");
                     }
                     for (const key of Object.keys(properties)) {
                         if (properties[key] === undefined) delete properties[key];
