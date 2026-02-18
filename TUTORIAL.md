@@ -22,8 +22,9 @@
 
 这是个浏览器插件，用来运行用户脚本。你可能已经装了，没装的话去对应的商店搜 "Tampermonkey" 安装就行：
 
+> 当前教程按 Chrome / Edge 验证；如果你用其他浏览器，建议优先改用脚本版并自行兼容性测试。
+
 - [Chrome 商店](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
-- [Firefox 商店](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/)
 - [Edge 商店](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd)
 
 装好之后浏览器右上角会多一个图标。
