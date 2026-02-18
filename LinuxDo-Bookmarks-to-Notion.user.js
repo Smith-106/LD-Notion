@@ -220,6 +220,27 @@
             return match ? match[1] : null;
         },
 
+        getCurrentLinuxDoUsername: () => {
+            let username = Utils.getUsernameFromUrl();
+            if (username) return username;
+
+            const meta = document.querySelector('meta[name="current-user-username"]');
+            username = (meta?.content || "").trim();
+            if (username) return username;
+
+            const headerAvatar = document.querySelector(".header-dropdown-toggle .avatar");
+            username = (headerAvatar?.getAttribute("title") || headerAvatar?.getAttribute("alt") || "").trim();
+            if (username) return username;
+
+            try {
+                const discourseUser = window.Discourse?.User?.current?.();
+                username = (discourseUser?.username || "").trim();
+                if (username) return username;
+            } catch {}
+
+            return "";
+        },
+
         formatDate: (dateStr) => {
             if (!dateStr) return "";
             return new Date(dateStr).toLocaleString("zh-CN");
@@ -7269,15 +7290,7 @@ ${availableTools}
             const exportBtn = document.querySelector("#ldb-export");
 
             try {
-                let username = Utils.getUsernameFromUrl();
-                if (!username) {
-                    const meta = document.querySelector('meta[name="current-user-username"]');
-                    if (meta) username = meta.content;
-                }
-                if (!username) {
-                    const header = document.querySelector(".header-dropdown-toggle .avatar");
-                    if (header) username = header.title || header.alt;
-                }
+                const username = Utils.getCurrentLinuxDoUsername();
                 if (!username) return;
 
                 AutoImporter.updateStatus("🔄 正在检查新收藏...");
@@ -12230,9 +12243,9 @@ ${availableTools}
                         }
                         bookmarks = allItems;
                     } else {
-                        const username = Utils.getUsernameFromUrl();
+                        const username = Utils.getCurrentLinuxDoUsername();
                         if (!username) {
-                            UI.showStatus("无法获取用户名", "error");
+                            UI.showStatus("无法获取当前 Linux.do 用户名，请先登录后重试", "error");
                             return;
                         }
                         bookmarks = await LinuxDoAPI.fetchAllBookmarks(username, (count) => {
