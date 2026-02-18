@@ -12587,15 +12587,22 @@ ${availableTools}
         applyBookmarkSourceUI: (source) => {
             const refs = UI.refs || {};
             const isGitHub = source === "github";
+
             if (refs.bookmarksLabel) {
-                refs.bookmarksLabel.textContent = isGitHub ? "已加载 GitHub 收藏数量" : "已加载 Linux.do 收藏数量";
+                refs.bookmarksLabel.textContent = "已加载收藏数量";
             }
             if (refs.autoImportLabel) {
-                refs.autoImportLabel.textContent = isGitHub ? "启用自动导入新 GitHub 收藏" : "启用自动导入新 Linux.do 收藏";
+                refs.autoImportLabel.textContent = "启用自动导入新收藏";
             }
             if (refs.autoImportIntervalLabel) {
                 refs.autoImportIntervalLabel.textContent = "轮询间隔";
             }
+
+            const sourceSelect = refs.bookmarkSourceSelect || UI.panel?.querySelector("#ldb-bookmark-source");
+            if (sourceSelect) {
+                sourceSelect.value = isGitHub ? "github" : "linuxdo";
+            }
+
             const autoStatus = refs.autoImportStatus || UI.panel?.querySelector("#ldb-auto-import-status");
             if (autoStatus && autoStatus.textContent && !autoStatus.textContent.includes("⚠️")) {
                 autoStatus.textContent = "";
