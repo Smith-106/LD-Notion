@@ -8890,10 +8890,10 @@ ${availableTools}
             const source = event.detail?.source === "github" ? "github" : "linuxdo";
             Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, source);
             if (typeof UI !== "undefined" && UI.panel && UI.refs) {
-                const sourceSelect = UI.refs.bookmarkSourceSelect || UI.panel.querySelector("#ldb-bookmark-source");
-                if (sourceSelect) {
-                    sourceSelect.value = source;
-                    sourceSelect.dispatchEvent(new Event("change", { bubbles: true }));
+                if (typeof UI.switchBookmarkSource === "function") {
+                    UI.switchBookmarkSource(source);
+                } else {
+                    UI.applyBookmarkSourceUI(source);
                 }
                 const sourceToggle = UI.refs.sourceSettingsToggle || UI.panel.querySelector("#ldb-source-settings-toggle");
                 const sourceContent = UI.refs.sourceSettingsContent || UI.panel.querySelector("#ldb-source-settings-content");
@@ -10652,7 +10652,11 @@ ${availableTools}
                 bookmarkListContainer: panel.querySelector("#ldb-bookmark-list-container"),
                 reportContainer: panel.querySelector("#ldb-report-container"),
                 autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
-                bookmarkSourceSelect: panel.querySelector("#ldb-bookmark-source"),
+                sourcePartitionsToggle: panel.querySelector("#ldb-source-partitions-toggle"),
+                sourcePartitionsContent: panel.querySelector("#ldb-source-partitions-content"),
+                sourcePartitionsArrow: panel.querySelector("#ldb-source-partitions-arrow"),
+                sourceSelectLinuxdo: panel.querySelector("#ldb-source-select-linuxdo"),
+                sourceSelectGithub: panel.querySelector("#ldb-source-select-github"),
                 updateCheckBtn: panel.querySelector("#ldb-update-check-btn"),
                 updateAutoEnabled: panel.querySelector("#ldb-update-auto-enabled"),
                 updateAutoOptions: panel.querySelector("#ldb-update-auto-options"),
@@ -10869,6 +10873,38 @@ ${availableTools}
                     border: 1px solid var(--ldb-ui-border);
                     border-radius: 12px;
                     background: rgba(148, 163, 184, 0.08);
+                }
+
+                .ldb-source-option-group {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 8px;
+                    margin-bottom: 8px;
+                }
+
+                .ldb-source-option {
+                    border: 1px solid var(--ldb-ui-border);
+                    background: rgba(148, 163, 184, 0.12);
+                    color: var(--ldb-ui-text);
+                    font-size: 12px;
+                    font-weight: 600;
+                    border-radius: 10px;
+                    padding: 8px 10px;
+                    cursor: pointer;
+                    transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+                    text-align: center;
+                    font-family: inherit;
+                }
+
+                .ldb-source-option:hover {
+                    border-color: rgba(37, 99, 235, 0.45);
+                    background: rgba(37, 99, 235, 0.14);
+                }
+
+                .ldb-source-option.active {
+                    border-color: var(--ldb-ui-accent);
+                    background: rgba(37, 99, 235, 0.18);
+                    color: var(--ldb-ui-accent);
                 }
 
                 .ldb-toggle-switch {
@@ -11286,12 +11322,15 @@ ${availableTools}
                                 <div class="ldb-bookmarks-label" id="ldb-bookmarks-label">已加载收藏数量</div>
                             </div>
 
-                            <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px; margin-top: 10px; margin-bottom: 8px;">
-                                <label for="ldb-bookmark-source" style="white-space: nowrap;">收藏来源</label>
-                                <select id="ldb-bookmark-source" class="ldb-input" style="flex: 1;">
-                                    <option value="linuxdo">Linux.do 收藏分区</option>
-                                    <option value="github">GitHub 收藏分区</option>
-                                </select>
+                            <div class="ldb-toggle-section" id="ldb-source-partitions-toggle" style="margin-top: 10px; margin-bottom: 8px;">
+                                <span>收藏来源分区</span>
+                                <span class="ldb-arrow" id="ldb-source-partitions-arrow">▶</span>
+                            </div>
+                            <div class="ldb-toggle-content collapsed" id="ldb-source-partitions-content" style="margin-bottom: 8px;">
+                                <div class="ldb-source-option-group">
+                                    <button class="ldb-source-option" id="ldb-source-select-linuxdo" type="button">Linux.do 收藏分区</button>
+                                    <button class="ldb-source-option" id="ldb-source-select-github" type="button">GitHub 收藏分区</button>
+                                </div>
                             </div>
 
                             <div class="ldb-toggle-section" id="ldb-source-settings-toggle" style="margin-bottom: 8px;">
@@ -11841,6 +11880,21 @@ ${availableTools}
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
+            (refs.sourcePartitionsToggle || panel.querySelector("#ldb-source-partitions-toggle")).onclick = () => {
+                const content = refs.sourcePartitionsContent || panel.querySelector("#ldb-source-partitions-content");
+                const arrow = refs.sourcePartitionsArrow || panel.querySelector("#ldb-source-partitions-arrow");
+                content.classList.toggle("collapsed");
+                arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            };
+
+            (refs.sourceSelectLinuxdo || panel.querySelector("#ldb-source-select-linuxdo")).onclick = () => {
+                UI.switchBookmarkSource("linuxdo");
+            };
+
+            (refs.sourceSelectGithub || panel.querySelector("#ldb-source-select-github")).onclick = () => {
+                UI.switchBookmarkSource("github");
+            };
+
             // 导出目标类型切换
             const handleExportTargetChange = (e) => {
                 const targetType = e.target.value;
@@ -12069,10 +12123,10 @@ ${availableTools}
                 }
             };
 
-            (refs.bookmarkSourceSelect || panel.querySelector("#ldb-bookmark-source")).onchange = (e) => {
-                const source = e.target.value === "github" ? "github" : "linuxdo";
-                Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, source);
-                UI.applyBookmarkSourceUI(source);
+            UI.switchBookmarkSource = (source) => {
+                const resolvedSource = source === "github" ? "github" : "linuxdo";
+                Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, resolvedSource);
+                UI.applyBookmarkSourceUI(resolvedSource);
                 UI.bookmarks = [];
                 UI.selectedBookmarks = new Set();
                 UI.recomputeExportStats();
@@ -12854,14 +12908,8 @@ ${availableTools}
             } catch {}
 
             // 加载自动导入设置
-            const sourceSelect = refs.bookmarkSourceSelect || panel.querySelector("#ldb-bookmark-source");
             const savedSource = Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG.DEFAULTS.bookmarkSource);
-            sourceSelect.value = savedSource === "github" ? "github" : "linuxdo";
-            if (sourceSelect.selectedIndex === -1) {
-                sourceSelect.value = CONFIG.DEFAULTS.bookmarkSource;
-                Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG.DEFAULTS.bookmarkSource);
-            }
-            const resolvedSource = sourceSelect.value === "github" ? "github" : "linuxdo";
+            const resolvedSource = savedSource === "github" ? "github" : "linuxdo";
             Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, resolvedSource);
             UI.applyBookmarkSourceUI(resolvedSource);
 
@@ -13075,9 +13123,11 @@ ${availableTools}
                 refs.autoImportIntervalLabel.textContent = "轮询间隔";
             }
 
-            const sourceSelect = refs.bookmarkSourceSelect || UI.panel?.querySelector("#ldb-bookmark-source");
-            if (sourceSelect) {
-                sourceSelect.value = isGitHub ? "github" : "linuxdo";
+            if (refs.sourceSelectLinuxdo) {
+                refs.sourceSelectLinuxdo.classList.toggle("active", !isGitHub);
+            }
+            if (refs.sourceSelectGithub) {
+                refs.sourceSelectGithub.classList.toggle("active", isGitHub);
             }
 
             const autoStatus = refs.autoImportStatus || UI.panel?.querySelector("#ldb-auto-import-status");
