@@ -5,3 +5,12 @@ __pycache__/
 *.pyc
 output_post.html
 chrome-extension-full/
+
+# Local packaging artifacts
+LD-Notion-chrome-extension-full-v*.zip
+chrome-extension-full.crx
+chrome-extension-full.pem
+
+# Local temporary source snapshots
+GitHub项目页面源码
+linux.do书签页源码
