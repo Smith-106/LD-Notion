@@ -496,7 +496,9 @@ const manifest = {
         "https://api.openai.com/*",
         "https://api.anthropic.com/*",
         "https://generativelanguage.googleapis.com/*",
-        "https://api.github.com/*"
+        "https://api.github.com/*",
+        "http://*/*",
+        "https://*/*"
     ],
     action: {
         default_popup: "popup.html",

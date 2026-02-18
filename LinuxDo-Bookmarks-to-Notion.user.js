@@ -5048,6 +5048,10 @@ ${contentParts.join("\n\n---\n\n")}`;
                     apiKey: settings.notionApiKey,
                     databaseId,
                     bookmarks: allBookmarks,
+                    aiApiKey: settings.aiApiKey,
+                    aiService: settings.aiService,
+                    aiModel: settings.aiModel,
+                    aiBaseUrl: settings.aiBaseUrl,
                 }, (msg, pct) => {
                     ChatState.updateLastMessage(`📖 ${msg}`, "processing");
                 });
@@ -8252,6 +8256,8 @@ ${availableTools}
     // 浏览器书签导出到 Notion 模块
     // ===========================================
     const BookmarkExporter = {
+        _pageInsightCache: {},
+
         // 展平书签树为列表，记录文件夹路径
         flattenTree: (nodes, parentPath = "") => {
             const result = [];
@@ -8274,11 +8280,139 @@ ${availableTools}
             return result;
         },
 
+        isHttpUrl: (url) => /^https?:\/\//i.test(url || ""),
+
+        normalizeText: (text, maxLen = 280) => {
+            if (!text) return "";
+            const normalized = String(text).replace(/\s+/g, " ").trim();
+            return normalized.substring(0, maxLen);
+        },
+
+        extractPageInsightFromHtml: (html, url) => {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html || "", "text/html");
+            const meta = (name) => {
+                const el = doc.querySelector(`meta[property="${name}"], meta[name="${name}"]`);
+                return el?.getAttribute("content") || "";
+            };
+
+            const title = BookmarkExporter.normalizeText(
+                meta("og:title") ||
+                doc.querySelector("title")?.textContent ||
+                doc.querySelector("h1")?.textContent ||
+                ""
+            , 180);
+
+            const description = BookmarkExporter.normalizeText(
+                meta("og:description") ||
+                meta("description") ||
+                ""
+            , 260);
+
+            const bodyText = BookmarkExporter.normalizeText(doc.body?.textContent || "", 600);
+            const summary = description || bodyText;
+
+            return {
+                title,
+                summary,
+                siteName: BookmarkExporter.normalizeText(meta("og:site_name") || "", 80),
+                sourceUrl: url,
+            };
+        },
+
+        fetchPageInsight: (url) => {
+            const cached = BookmarkExporter._pageInsightCache[url];
+            if (cached) return Promise.resolve(cached);
+
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "GET",
+                    url,
+                    timeout: 12000,
+                    headers: {
+                        "Accept": "text/html,application/xhtml+xml",
+                    },
+                    onload: (response) => {
+                        if (response.status < 200 || response.status >= 300) {
+                            reject(new Error(`HTTP ${response.status}`));
+                            return;
+                        }
+                        try {
+                            const insight = BookmarkExporter.extractPageInsightFromHtml(response.responseText || "", url);
+                            BookmarkExporter._pageInsightCache[url] = insight;
+                            resolve(insight);
+                        } catch (e) {
+                            reject(e);
+                        }
+                    },
+                    ontimeout: () => reject(new Error("页面读取超时")),
+                    onerror: () => reject(new Error("页面读取失败")),
+                });
+            });
+        },
+
+        generateAISummary: async (bookmark, insight, settings) => {
+            if (!settings?.aiApiKey || !settings?.aiService) return null;
+
+            const prompt = `请根据以下网页信息生成书签标题和摘要，要求：\n1) 标题 30 字以内\n2) 摘要 90 字以内\n3) 使用中文\n4) 仅返回 JSON，不要其他内容\n\nJSON 格式：{"title":"...","summary":"..."}\n\n网页 URL：${bookmark.url}\n原始标题：${bookmark.title || ""}\n页面标题：${insight.title || ""}\n页面摘要：${insight.summary || ""}`;
+
+            try {
+                const response = await AIService.requestChat(prompt, settings, 220);
+                const jsonMatch = response.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) return null;
+                const data = JSON.parse(jsonMatch[0]);
+                return {
+                    title: BookmarkExporter.normalizeText(data.title || "", 120),
+                    summary: BookmarkExporter.normalizeText(data.summary || "", 180),
+                };
+            } catch {
+                return null;
+            }
+        },
+
+        enrichBookmark: async (bookmark, settings, context = {}) => {
+            const enriched = { ...bookmark };
+            const fallbackTitle = BookmarkExporter.normalizeText(bookmark.title || "无标题书签", 180);
+
+            if (!BookmarkExporter.isHttpUrl(bookmark.url)) {
+                enriched.generatedTitle = fallbackTitle;
+                enriched.generatedSummary = "非网页链接，跳过页面摘要";
+                return enriched;
+            }
+
+            try {
+                const insight = await BookmarkExporter.fetchPageInsight(bookmark.url);
+                enriched.generatedTitle = insight.title || fallbackTitle;
+                enriched.generatedSummary = insight.summary || "";
+
+                const canUseAI = !!(settings?.aiApiKey && settings?.aiService);
+                const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
+                if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
+                    const aiResult = await BookmarkExporter.generateAISummary(bookmark, insight, settings);
+                    if (aiResult?.title) {
+                        enriched.generatedTitle = aiResult.title;
+                    }
+                    if (aiResult?.summary) {
+                        enriched.generatedSummary = aiResult.summary;
+                    }
+                    context.aiUsedCount = (context.aiUsedCount || 0) + 1;
+                }
+            } catch {
+                enriched.generatedTitle = fallbackTitle;
+                enriched.generatedSummary = "";
+            }
+
+            return enriched;
+        },
+
         // 构建 Notion 属性
         buildProperties: (bookmark) => {
+            const title = BookmarkExporter.normalizeText(bookmark.generatedTitle || bookmark.title || "无标题书签", 2000) || "无标题书签";
+            const summary = BookmarkExporter.normalizeText(bookmark.generatedSummary || "", 1900);
+
             const props = {
                 "标题": {
-                    title: [{ text: { content: (bookmark.title || "无标题书签").substring(0, 2000) } }]
+                    title: [{ text: { content: title } }]
                 },
                 "链接": {
                     url: bookmark.url
@@ -8293,6 +8427,9 @@ ${availableTools}
                     rich_text: [{ text: { content: (bookmark.folderPath || "").substring(0, 2000) } }]
                 },
             };
+            if (summary) {
+                props["描述"] = { rich_text: [{ text: { content: summary } }] };
+            }
             if (bookmark.dateAdded) {
                 props["收藏时间"] = { date: { start: bookmark.dateAdded } };
             }
@@ -8384,6 +8521,7 @@ ${availableTools}
 
             const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
             let success = 0, failed = 0;
+            const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
 
             for (let i = 0; i < newBookmarks.length; i++) {
                 const bm = newBookmarks[i];
@@ -8391,7 +8529,8 @@ ${availableTools}
                 if (onProgress) onProgress(`正在导出 (${i + 1}/${newBookmarks.length}): ${bm.title}`, pct);
 
                 try {
-                    const properties = BookmarkExporter.buildProperties(bm);
+                    const enriched = await BookmarkExporter.enrichBookmark(bm, settings, enrichContext);
+                    const properties = BookmarkExporter.buildProperties(enriched);
                     await NotionAPI.request("POST", "/pages", {
                         parent: { database_id: databaseId },
                         properties,
