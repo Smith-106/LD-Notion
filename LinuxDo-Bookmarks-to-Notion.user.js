@@ -8370,6 +8370,83 @@ ${availableTools}
             }
         },
 
+        inferCategoryHeuristic: (bookmark, insight, categories = []) => {
+            const available = (categories || []).map(c => String(c || "").trim()).filter(Boolean);
+            if (available.length === 0) return "";
+
+            const text = `${bookmark.folderPath || ""} ${bookmark.title || ""} ${insight.title || ""} ${insight.summary || ""} ${bookmark.url || ""}`.toLowerCase();
+
+            for (const cat of available) {
+                if (text.includes(cat.toLowerCase())) {
+                    return cat;
+                }
+            }
+
+            const rules = [
+                { keys: ["github", "gitlab", "repo", "docker", "k8s", "linux", "dev", "code", "programming", "技术", "开发", "编程"], hints: ["技术", "开发", "编程"] },
+                { keys: ["news", "blog", "article", "文章", "博客", "资讯"], hints: ["分享", "资源"] },
+                { keys: ["stack", "stackoverflow", "ask", "question", "qa", "问答", "问题"], hints: ["问答"] },
+                { keys: ["life", "travel", "food", "movie", "music", "生活", "日常", "旅游", "美食"], hints: ["生活"] },
+                { keys: ["resource", "docs", "tutorial", "guide", "文档", "教程", "手册", "资源"], hints: ["资源"] },
+            ];
+
+            for (const rule of rules) {
+                if (!rule.keys.some(k => text.includes(k))) continue;
+                const matched = available.find(cat => rule.hints.some(h => cat.includes(h)));
+                if (matched) return matched;
+            }
+
+            const fallback = available.find(cat => cat.includes("其他"));
+            return fallback || available[available.length - 1];
+        },
+
+        inferTags: (bookmark, insight) => {
+            const tags = [];
+            const host = (() => {
+                try {
+                    return new URL(bookmark.url).hostname.replace(/^www\./, "");
+                } catch {
+                    return "";
+                }
+            })();
+            if (host) tags.push(host);
+
+            if (bookmark.folderPath) {
+                const firstFolder = BookmarkExporter.normalizeText(String(bookmark.folderPath).split("/")[0] || "", 40);
+                if (firstFolder) tags.push(firstFolder);
+            }
+
+            if (insight.siteName) {
+                tags.push(BookmarkExporter.normalizeText(insight.siteName, 40));
+            }
+
+            const uniq = [];
+            for (const t of tags) {
+                const clean = BookmarkExporter.normalizeText(t, 80);
+                if (!clean) continue;
+                if (uniq.includes(clean)) continue;
+                uniq.push(clean);
+                if (uniq.length >= 5) break;
+            }
+            return uniq;
+        },
+
+        generateAICategory: async (bookmark, insight, settings) => {
+            const categories = Array.isArray(settings?.categories) ? settings.categories.filter(Boolean) : [];
+            if (!settings?.aiApiKey || !settings?.aiService || categories.length === 0) return "";
+
+            try {
+                return await AIService.classify(
+                    insight.title || bookmark.title || "",
+                    insight.summary || "",
+                    categories,
+                    settings
+                );
+            } catch {
+                return "";
+            }
+        },
+
         enrichBookmark: async (bookmark, settings, context = {}) => {
             const enriched = { ...bookmark };
             const fallbackTitle = BookmarkExporter.normalizeText(bookmark.title || "无标题书签", 180);
@@ -8377,6 +8454,8 @@ ${availableTools}
             if (!BookmarkExporter.isHttpUrl(bookmark.url)) {
                 enriched.generatedTitle = fallbackTitle;
                 enriched.generatedSummary = "非网页链接，跳过页面摘要";
+                enriched.inferredCategory = BookmarkExporter.inferCategoryHeuristic(bookmark, { title: "", summary: "" }, settings?.categories || []);
+                enriched.inferredTags = BookmarkExporter.inferTags(bookmark, { siteName: "" });
                 return enriched;
             }
 
@@ -8384,6 +8463,9 @@ ${availableTools}
                 const insight = await BookmarkExporter.fetchPageInsight(bookmark.url);
                 enriched.generatedTitle = insight.title || fallbackTitle;
                 enriched.generatedSummary = insight.summary || "";
+
+                let inferredCategory = BookmarkExporter.inferCategoryHeuristic(bookmark, insight, settings?.categories || []);
+                enriched.inferredTags = BookmarkExporter.inferTags(bookmark, insight);
 
                 const canUseAI = !!(settings?.aiApiKey && settings?.aiService);
                 const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
@@ -8395,11 +8477,18 @@ ${availableTools}
                     if (aiResult?.summary) {
                         enriched.generatedSummary = aiResult.summary;
                     }
+                    const aiCategory = await BookmarkExporter.generateAICategory(bookmark, insight, settings);
+                    if (aiCategory) {
+                        inferredCategory = aiCategory;
+                    }
                     context.aiUsedCount = (context.aiUsedCount || 0) + 1;
                 }
+                enriched.inferredCategory = inferredCategory;
             } catch {
                 enriched.generatedTitle = fallbackTitle;
                 enriched.generatedSummary = "";
+                enriched.inferredCategory = BookmarkExporter.inferCategoryHeuristic(bookmark, { title: "", summary: "" }, settings?.categories || []);
+                enriched.inferredTags = BookmarkExporter.inferTags(bookmark, { siteName: "" });
             }
 
             return enriched;
@@ -8429,6 +8518,21 @@ ${availableTools}
             };
             if (summary) {
                 props["描述"] = { rich_text: [{ text: { content: summary } }] };
+            }
+            if (bookmark.inferredCategory) {
+                props["分类"] = {
+                    rich_text: [{ text: { content: BookmarkExporter.normalizeText(bookmark.inferredCategory, 300) } }]
+                };
+            }
+            const tags = Array.isArray(bookmark.inferredTags) ? bookmark.inferredTags : [];
+            if (tags.length > 0) {
+                props["标签"] = {
+                    multi_select: tags
+                        .map(tag => BookmarkExporter.normalizeText(tag, 100))
+                        .filter(Boolean)
+                        .map(name => ({ name }))
+                        .slice(0, 8)
+                };
             }
             if (bookmark.dateAdded) {
                 props["收藏时间"] = { date: { start: bookmark.dateAdded } };
