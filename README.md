@@ -4,7 +4,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器拓展](https://img.shields.io/badge/安装浏览器拓展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- v3.4.0 插件 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.0/LD-Notion-chrome-extension-full-v3.4.0.zip>
+- v3.4.1 插件 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.1/LD-Notion-chrome-extension-full-v3.4.1.zip>
 
 ## 四大核心能力
 
@@ -313,6 +313,18 @@ A: 请检查：
 - 四级权限模型 + OperationGuard 保护所有写入操作
 
 ## 更新日志
+
+### v3.4.1
+
+本次版本聚焦「扩展入口与分区操作效率」，减少在脚本面板里手动切换的步骤。
+
+- 扩展弹窗新增「收藏来源页面」入口，可直接进入脚本 UI 的来源分区设置
+- 新增 popup→content 消息桥接：支持一键切换到 GitHub 收藏分区并展开来源自动化设置
+- 脚本 UI 的 Linux.do / GitHub 收藏分区继续保持独立配置（自动导入开关与间隔互不影响）
+- 已发布 Release：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.1>
+- 已上传扩展安装包：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.1/LD-Notion-chrome-extension-full-v3.4.1.zip>
+
+- Tag：`v3.4.1`
 
 ### v3.4.0
 
