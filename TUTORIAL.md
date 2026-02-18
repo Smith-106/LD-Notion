@@ -1,4 +1,4 @@
-# LD-Notion 使用教程
+# LD-Notion Hub 使用教程
 
 我写这篇教程的时候尽量把每一步都说清楚了，跟着做就行。
 
@@ -17,6 +17,12 @@
 ---
 
 ## 怎么装
+
+### 下载链接（v3.4.1）
+
+- 脚本安装：<https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js>
+- 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.1/LD-Notion-chrome-extension-full-v3.4.1.zip>
+- Release 页面：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.1>
 
 ### 先装 Tampermonkey
 

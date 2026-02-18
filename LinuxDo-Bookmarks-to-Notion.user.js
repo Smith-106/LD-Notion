@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         LD-Notion — Notion AI 助手 & Linux.do 收藏导出
+// @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
 // @version      3.4.1
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion，GitHub 全类型导入（Stars/Repos/Forks/Gists），浏览器书签导入，跨源智能搜索与推荐，AI 自动分类与批量打标签
