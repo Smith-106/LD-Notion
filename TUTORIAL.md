@@ -20,7 +20,7 @@
 
 ### 下载链接（v3.4.1）
 
-- 脚本安装：<https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js>
+- 脚本安装：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.1/LD-Notion-chrome-extension-full-v3.4.1.zip>
 - Release 页面：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.1>
 
