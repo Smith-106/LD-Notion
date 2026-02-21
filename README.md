@@ -2,7 +2,7 @@
 
 一个可扩展的 Tampermonkey 用户脚本，统一连接 **Linux.do**、**GitHub**、**浏览器书签** 与 **Notion**：多源收藏导入、跨源智能搜索与推荐、AI 对话式管理工作区，并可继续接入更多内容来源。
 
-[![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器拓展](https://img.shields.io/badge/安装浏览器拓展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
+[![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器拓展](https://img.shields.io/badge/安装浏览器拓展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
 - v3.4.1 插件 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.1/LD-Notion-chrome-extension-full-v3.4.1.zip>
 - v3.4.1 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.1>
@@ -124,6 +124,8 @@ AI 助手采用 ReAct 推理架构，支持多轮工具调用，自动拆解复�
 - [Edge](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd)
 
 #### 2. 安装脚本
+
+- GreasyFork 一键安装：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 
 1. 点击 Tampermonkey 图标 → 添加新脚本
 2. 复制 `LinuxDo-Bookmarks-to-Notion.user.js` 的全部内容
