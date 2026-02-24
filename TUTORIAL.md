@@ -23,10 +23,10 @@
 - **方式 A：Tampermonkey 脚本版（推荐）**：更新方便，适合大多数人
 - **方式 B：Chrome 扩展独立版（进阶）**：不依赖 Tampermonkey，书签能力内置
 
-### 下载链接（v3.4.1）
+### 下载链接（v3.4.2）
 
 - 脚本安装：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
-- 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.1/LD-Notion-chrome-extension-full-v3.4.1.zip>
+- 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.2/LD-Notion-chrome-extension-full-v3.4.2.zip>
 - 安装浏览器扩展（Release）：<https://github.com/Smith-106/LD-Notion/releases/latest>
 
 ### 方式 A：Tampermonkey 脚本版
@@ -439,6 +439,14 @@ GM_setValue("ldb_exported_topics", "{}")
 ---
 
 ## 更新日志
+
+### v3.4.2
+
+- 浏览器书签网页洞察新增字符集感知解码：优先响应头 charset，其次 HTML meta charset / http-equiv，再按 utf-8、gb18030、big5、shift_jis 回退尝试
+- 一般网页 insight 抽取增强稳健性：解析前剔除 script/style/noscript/template 噪声，并补充 twitter:title / twitter:description 回退
+- 统一文本清洗增强：在空白压缩前清理 BOM 与零宽字符，减少显示残留乱码
+- 图片上传回退链路增强：图片上传失败时自动尝试按文件上传，并修复块类型切换时的字段一致性
+- 图片 MIME 推断增强：恢复受控白名单映射，减少异常 URL 导致的上传失败
 
 ### v3.4.1
 

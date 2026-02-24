@@ -4,8 +4,8 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- v3.4.1 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.1/LD-Notion-chrome-extension-full-v3.4.1.zip>
-- v3.4.1 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.1>
+- v3.4.2 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.2/LD-Notion-chrome-extension-full-v3.4.2.zip>
+- v3.4.2 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.2>
 
 ## 四大核心能力
 
@@ -324,6 +324,20 @@ A: 请检查：
 - 四级权限模型 + OperationGuard 保护所有写入操作
 
 ## 更新日志
+
+### v3.4.2
+
+本次版本聚焦「一般网页兼容性与导出稳定性修复」，重点解决非 UTF-8 网页乱码与图片上传异常场景。
+
+- 浏览器书签网页洞察新增字符集感知解码：优先响应头 charset，其次 HTML meta charset / http-equiv，再按 utf-8、gb18030、big5、shift_jis 回退尝试
+- 一般网页 insight 抽取增强稳健性：解析前剔除 script/style/noscript/template 噪声；标题与摘要候选补充 twitter:title / twitter:description
+- 统一文本清洗增强：在空白压缩前清理 BOM 与零宽字符，减少显示残留乱码
+- 图片上传回退链路增强：支持图片失败后自动按文件上传，并修复块类型切换时的字段清理一致性
+- 图片 MIME 推断增强：恢复受控白名单映射，避免 `blob.type` 缺失时产生不稳定 MIME
+- 已发布 Release：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.2>
+- 已上传扩展安装包：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.2/LD-Notion-chrome-extension-full-v3.4.2.zip>
+
+- Tag：`v3.4.2`
 
 ### v3.4.1
 
