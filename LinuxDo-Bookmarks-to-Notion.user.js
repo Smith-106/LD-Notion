@@ -1011,32 +1011,63 @@
             });
         },
 
-        // 下载并上传图片到 Notion
-        uploadImageToNotion: async (imageUrl, apiKey) => {
-            try {
+        // 下载并上传图片到 Notion（失败时回退为文件上传）
+        uploadImageToNotion: async (imageUrl, apiKey, returnDetails = false) => {
+            const uploadRemote = async (forceFileBlock = false) => {
                 // 下载图片
                 const response = await fetch(imageUrl);
                 if (!response.ok) throw new Error(`下载失败: ${response.status}`);
 
                 const blob = await response.blob();
                 const urlObj = new URL(imageUrl);
-                let ext = urlObj.pathname.split(".").pop()?.toLowerCase() || "png";
-                if (!["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext)) ext = "png";
+                let ext = (urlObj.pathname.split(".").pop() || "").toLowerCase();
+                const extToMime = {
+                    jpg: "image/jpeg",
+                    jpeg: "image/jpeg",
+                    png: "image/png",
+                    gif: "image/gif",
+                    webp: "image/webp",
+                    svg: "image/svg+xml",
+                    bmp: "image/bmp",
+                    ico: "image/x-icon",
+                    avif: "image/avif",
+                };
+                if (!extToMime[ext]) ext = "png";
 
-                const contentType = blob.type || `image/${ext}`;
-                const filename = `image-${Date.now()}.${ext}`;
+                const defaultImageMime = extToMime[ext] || "image/png";
+                const contentType = forceFileBlock
+                    ? "application/octet-stream"
+                    : (blob.type || defaultImageMime);
+                const filenamePrefix = forceFileBlock ? "file" : "image";
+                const filename = `${filenamePrefix}-${Date.now()}.${ext}`;
 
-                // 创建上传
                 const fileUpload = await NotionAPI.createFileUpload(filename, contentType, apiKey);
-                if (!fileUpload?.upload_url) throw new Error("创建上传失败");
+                if (!fileUpload?.upload_url || !fileUpload?.id) throw new Error("创建上传失败");
 
                 // 上传内容到预签名 URL (不需要 API Key)
                 await NotionAPI.uploadFileContent(fileUpload.upload_url, blob, contentType, filename);
 
-                return fileUpload.id;
+                if (!returnDetails) {
+                    return fileUpload.id;
+                }
+
+                return {
+                    fileId: fileUpload.id,
+                    blockType: forceFileBlock ? "file" : "image",
+                };
+            };
+
+            try {
+                return await uploadRemote(false);
             } catch (error) {
-                console.error("上传图片失败:", error);
-                return null;
+                // Notion 付费套餐中图片通常受 5MB 限制，失败后回退为文件块上传
+                console.warn("图片上传失败，尝试按文件上传:", imageUrl, error.message);
+                try {
+                    return await uploadRemote(true);
+                } catch (fallbackError) {
+                    console.error("文件回退上传失败:", fallbackError);
+                    return null;
+                }
             }
         },
 
@@ -7010,16 +7041,20 @@ ${availableTools}
 
             for (const block of imageBlocks) {
                 try {
-                    const fileId = await NotionAPI.uploadImageToNotion(block._originalUrl, apiKey);
-                    if (fileId) {
+                    const uploadResult = await NotionAPI.uploadImageToNotion(block._originalUrl, apiKey, true);
+                    if (uploadResult?.fileId) {
                         // Notion File Upload API 需要使用 file_upload 类型引用上传的文件
                         // 参考: https://developers.notion.com/docs/working-with-files-and-media
-                        block.image = {
+                        const blockKey = uploadResult.blockType === "file" ? "file" : "image";
+                        block[blockKey] = {
                             type: "file_upload",
                             file_upload: {
-                                id: fileId, // 使用上传返回的 file_id
+                                id: uploadResult.fileId,
                             },
                         };
+                        if (blockKey !== "image") delete block.image;
+                        if (blockKey !== "file") delete block.file;
+                        block.type = blockKey;
                         block._uploaded = true;
                     } else {
                         // 上传失败，回退到外链模式
@@ -7027,6 +7062,8 @@ ${availableTools}
                             type: "external",
                             external: { url: block._originalUrl },
                         };
+                        delete block.file;
+                        block.type = "image";
                     }
                 } catch (e) {
                     console.warn("图片上传失败，保留外链:", block._originalUrl, e.message);
@@ -7035,6 +7072,8 @@ ${availableTools}
                         type: "external",
                         external: { url: block._originalUrl },
                     };
+                    delete block.file;
+                    block.type = "image";
                 }
 
                 processed++;
@@ -8509,8 +8548,78 @@ ${availableTools}
 
         normalizeText: (text, maxLen = 280) => {
             if (!text) return "";
-            const normalized = String(text).replace(/\s+/g, " ").trim();
+            const normalized = String(text)
+                .replace(/[\uFEFF\u200B-\u200D\u2060]/g, "")
+                .replace(/\s+/g, " ")
+                .trim();
             return normalized.substring(0, maxLen);
+        },
+
+        normalizeCharset: (charset) => {
+            const value = String(charset || "").trim().replace(/^['"]|['"]$/g, "").toLowerCase();
+            if (!value) return "";
+            if (value === "utf8") return "utf-8";
+            if (value === "gbk" || value === "gb2312") return "gb18030";
+            if (value === "big-5") return "big5";
+            if (value === "shift-jis" || value === "sjis") return "shift_jis";
+            return value;
+        },
+
+        extractCharsetFromHeaders: (responseHeaders) => {
+            const headers = String(responseHeaders || "");
+            if (!headers) return "";
+            const match = headers.match(/content-type\s*:\s*[^\r\n]*charset\s*=\s*([^\s;"']+)/i);
+            return BookmarkExporter.normalizeCharset(match?.[1] || "");
+        },
+
+        extractCharsetFromHtmlHead: (bytes) => {
+            if (!(bytes instanceof Uint8Array) || bytes.length === 0) return "";
+            try {
+                const head = new TextDecoder("latin1").decode(bytes.slice(0, 4096));
+                const charsetMatch = head.match(/<meta[^>]+charset\s*=\s*["']?([^\s"'>/]+)/i);
+                if (charsetMatch?.[1]) {
+                    return BookmarkExporter.normalizeCharset(charsetMatch[1]);
+                }
+                const httpEquivMatch = head.match(/<meta[^>]+http-equiv\s*=\s*["']content-type["'][^>]*content\s*=\s*["'][^"']*charset\s*=\s*([^\s"';>]+)/i);
+                return BookmarkExporter.normalizeCharset(httpEquivMatch?.[1] || "");
+            } catch {
+                return "";
+            }
+        },
+
+        getResponseBytes: (response) => {
+            const raw = response?.response;
+            if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
+            if (raw instanceof Uint8Array) return raw;
+            return null;
+        },
+
+        decodeHtmlFromResponse: (response) => {
+            const fallbackText = String(response?.responseText || "");
+            const bytes = BookmarkExporter.getResponseBytes(response);
+            if (!bytes || bytes.length === 0) return fallbackText;
+
+            const headerCharset = BookmarkExporter.extractCharsetFromHeaders(response?.responseHeaders || "");
+            const htmlCharset = BookmarkExporter.extractCharsetFromHtmlHead(bytes);
+            const candidates = [headerCharset, htmlCharset, "utf-8", "gb18030", "big5", "shift_jis"];
+            const tried = new Set();
+            let firstDecoded = "";
+
+            for (const candidate of candidates) {
+                const charset = BookmarkExporter.normalizeCharset(candidate);
+                if (!charset || tried.has(charset)) continue;
+                tried.add(charset);
+                try {
+                    const decoded = new TextDecoder(charset).decode(bytes);
+                    if (!decoded) continue;
+                    if (!firstDecoded) firstDecoded = decoded;
+                    if (!decoded.includes("\uFFFD")) return decoded;
+                } catch {
+                    // ignore and continue trying next charset
+                }
+            }
+
+            return firstDecoded || fallbackText;
         },
 
         composeTitleWithPrefix: (prefix, candidate, maxLen = 180) => {
@@ -8532,16 +8641,20 @@ ${availableTools}
                 return el?.getAttribute("content") || "";
             };
 
+            doc.querySelectorAll("script, style, noscript, template").forEach((node) => node.remove());
+
             const title = BookmarkExporter.normalizeText(
                 meta("og:title") ||
                 doc.querySelector("title")?.textContent ||
                 doc.querySelector("h1")?.textContent ||
+                meta("twitter:title") ||
                 ""
             , 180);
 
             const description = BookmarkExporter.normalizeText(
                 meta("og:description") ||
                 meta("description") ||
+                meta("twitter:description") ||
                 ""
             , 260);
 
@@ -8565,6 +8678,7 @@ ${availableTools}
                     method: "GET",
                     url,
                     timeout: 12000,
+                    responseType: "arraybuffer",
                     headers: {
                         "Accept": "text/html,application/xhtml+xml",
                     },
@@ -8574,7 +8688,8 @@ ${availableTools}
                             return;
                         }
                         try {
-                            const insight = BookmarkExporter.extractPageInsightFromHtml(response.responseText || "", url);
+                            const html = BookmarkExporter.decodeHtmlFromResponse(response);
+                            const insight = BookmarkExporter.extractPageInsightFromHtml(html, url);
                             BookmarkExporter._pageInsightCache[url] = insight;
                             resolve(insight);
                         } catch (e) {
@@ -11598,6 +11713,7 @@ ${availableTools}
                                         <option value="external">外链引用</option>
                                         <option value="skip">跳过图片</option>
                                     </select>
+                                    <div class="ldb-tip">Notion 免费套餐文件需小于 5MB；付费套餐 PDF 小于 20MB、图片小于 5MB。若图片上传报错，脚本会自动尝试按文件上传。</div>
                                 </div>
                                 <div class="ldb-form-group">
                                     <label>请求间隔</label>
