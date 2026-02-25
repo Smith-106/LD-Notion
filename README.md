@@ -6,6 +6,8 @@
 
 - 当前版本：`v3.4.3`（待发布）
 - 最近已发布版本：`v3.4.2`
+- 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
+- 脚本安装（直链）：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
 - v3.4.2 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.2/LD-Notion-chrome-extension-full-v3.4.2.zip>
 - v3.4.2 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.2>
 
