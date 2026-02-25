@@ -26,6 +26,7 @@
 ### 下载链接（v3.4.3）
 
 - 脚本安装：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
+- 脚本安装直链：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
 - 扩展 ZIP 直链（最近已发布 v3.4.2）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.2/LD-Notion-chrome-extension-full-v3.4.2.zip>
 - 安装浏览器扩展（Release）：<https://github.com/Smith-106/LD-Notion/releases/latest>
 
