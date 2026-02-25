@@ -107,6 +107,9 @@
             GITHUB_AUTO_IMPORT_ENABLED: "ldb_github_auto_import_enabled",
             GITHUB_AUTO_IMPORT_INTERVAL: "ldb_github_auto_import_interval",
             BOOKMARK_SOURCE: "ldb_bookmark_source",
+            LINUXDO_IMPORT_DEDUP_MODE: "ldb_linuxdo_import_dedup_mode",
+            BOOKMARK_IMPORT_DEDUP_MODE: "ldb_bookmark_import_dedup_mode",
+            AI_CATEGORY_AUTO_DEDUP: "ldb_ai_category_auto_dedup",
             // 更新检查
             UPDATE_AUTO_CHECK_ENABLED: "ldb_update_auto_check_enabled",
             UPDATE_CHECK_INTERVAL_HOURS: "ldb_update_check_interval_hours",
@@ -152,6 +155,9 @@
             githubAutoImportEnabled: false,
             githubAutoImportInterval: 5,
             bookmarkSource: "linuxdo",
+            linuxdoImportDedupMode: "strict",
+            bookmarkImportDedupMode: "strict",
+            aiCategoryAutoDedup: true,
             updateAutoCheckEnabled: true,
             updateCheckIntervalHours: 24,
             exportConcurrency: 1, // 并发导出数量
@@ -289,6 +295,34 @@
                 }
             }
             return fallback;
+        },
+
+        getLinuxDoImportDedupMode: () => {
+            const mode = Storage.get(CONFIG.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE, CONFIG.DEFAULTS.linuxdoImportDedupMode);
+            return mode === "allow_duplicates" ? "allow_duplicates" : "strict";
+        },
+
+        isLinuxDoDedupStrict: () => Utils.getLinuxDoImportDedupMode() === "strict",
+
+        getBookmarkImportDedupMode: () => {
+            const mode = Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_IMPORT_DEDUP_MODE, CONFIG.DEFAULTS.bookmarkImportDedupMode);
+            return mode === "allow_duplicates" ? "allow_duplicates" : "strict";
+        },
+
+        isBookmarkDedupStrict: () => Utils.getBookmarkImportDedupMode() === "strict",
+
+        parseAICategories: (raw, autoDedupEnabled = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORY_AUTO_DEDUP, CONFIG.DEFAULTS.aiCategoryAutoDedup)) => {
+            const categories = String(raw || "")
+                .split(/[,，]/)
+                .map(c => c.trim())
+                .filter(Boolean);
+            if (!autoDedupEnabled) return categories;
+            const seen = new Set();
+            return categories.filter((item) => {
+                if (seen.has(item)) return false;
+                seen.add(item);
+                return true;
+            });
         },
     };
 
@@ -2697,8 +2731,10 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
                 aiService: (refs.aiServiceSelect || panel?.querySelector("#ldb-ai-service"))?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService),
                 aiModel: (refs.aiModelSelect || panel?.querySelector("#ldb-ai-model"))?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, ""),
                 aiBaseUrl: (refs.aiBaseUrlInput || panel?.querySelector("#ldb-ai-base-url"))?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, ""),
-                categories: ((refs.aiCategoriesInput || panel?.querySelector("#ldb-ai-categories"))?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories))
-                    .split(/[,，]/).map(c => c.trim()).filter(Boolean),
+                categories: Utils.parseAICategories(
+                    (refs.aiCategoriesInput || panel?.querySelector("#ldb-ai-categories"))?.value.trim()
+                        || Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories)
+                ),
             };
         },
 
@@ -5110,7 +5146,10 @@ ${contentParts.join("\n\n---\n\n")}`;
                     return "📭 没有找到浏览器书签。";
                 }
 
-                const newCount = allBookmarks.filter(b => !BookmarkExporter.isExported(b.url)).length;
+                const dedupStrict = Utils.isBookmarkDedupStrict();
+                const newCount = dedupStrict
+                    ? allBookmarks.filter(b => !BookmarkExporter.isExported(b.url)).length
+                    : allBookmarks.length;
                 ChatState.updateLastMessage(`📖 找到 ${allBookmarks.length} 个书签 (${newCount} 个新书签)，正在导出...`, "processing");
 
                 const result = await BookmarkExporter.exportBookmarks({
@@ -7336,6 +7375,7 @@ ${availableTools}
 
                 const bookmarks = await LinuxDoAPI.fetchAllBookmarks(username);
 
+                // 自动导入始终按“新收藏”语义执行，避免轮询时重复全量导入
                 const newBookmarks = bookmarks.filter(b => {
                     const topicId = String(b.topic_id || b.bookmarkable_id);
                     return !Storage.isTopicExported(topicId);
@@ -8970,7 +9010,10 @@ ${availableTools}
             }
 
             // 过滤已导出的
-            const newBookmarks = bookmarks.filter(b => !BookmarkExporter.isExported(b.url));
+            const dedupStrict = Utils.isBookmarkDedupStrict();
+            const newBookmarks = dedupStrict
+                ? bookmarks.filter(b => !BookmarkExporter.isExported(b.url))
+                : bookmarks.slice();
             if (newBookmarks.length === 0) {
                 return { total: bookmarks.length, exported: 0, message: "没有新的书签需要导出" };
             }
@@ -10707,8 +10750,10 @@ ${availableTools}
                         aiService: aiService,
                         aiModel: aiModel,
                         aiBaseUrl: notionPanel.querySelector("#ldb-notion-ai-base-url")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, ""),
-                        categories: (notionPanel.querySelector("#ldb-notion-ai-categories")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories))
-                            .split(/[,，]/).map(c => c.trim()).filter(Boolean),
+                        categories: Utils.parseAICategories(
+                            notionPanel.querySelector("#ldb-notion-ai-categories")?.value.trim()
+                                || Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories)
+                        ),
                     };
                 }
                 return originalGetSettings();
@@ -10823,6 +10868,9 @@ ${availableTools}
                 autoImportEnabled: panel.querySelector("#ldb-auto-import-enabled"),
                 autoImportOptions: panel.querySelector("#ldb-auto-import-options"),
                 autoImportInterval: panel.querySelector("#ldb-auto-import-interval"),
+                linuxdoDedupModeSelect: panel.querySelector("#ldb-linuxdo-dedup-mode"),
+                bookmarkDedupModeSelect: panel.querySelector("#ldb-bookmark-dedup-mode"),
+                aiCategoryAutoDedupCheckbox: panel.querySelector("#ldb-ai-category-auto-dedup"),
                 aiServiceSelect: panel.querySelector("#ldb-ai-service"),
                 aiModelSelect: panel.querySelector("#ldb-ai-model"),
                 aiApiKeyInput: panel.querySelector("#ldb-ai-api-key"),
@@ -11483,6 +11531,26 @@ ${availableTools}
                                             <option value="30">每 30 分钟</option>
                                         </select>
                                     </div>
+                                </div>
+                                <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                    <label for="ldb-linuxdo-dedup-mode" style="white-space: nowrap;">Linux.do 导入去重</label>
+                                    <select id="ldb-linuxdo-dedup-mode" class="ldb-input" style="flex: 1;">
+                                        <option value="strict">自动去重</option>
+                                        <option value="allow_duplicates">允许重复（手动勾选）</option>
+                                    </select>
+                                </div>
+                                <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                    <label for="ldb-bookmark-dedup-mode" style="white-space: nowrap;">书签导入去重</label>
+                                    <select id="ldb-bookmark-dedup-mode" class="ldb-input" style="flex: 1;">
+                                        <option value="strict">自动去重</option>
+                                        <option value="allow_duplicates">允许重复（手动勾选）</option>
+                                    </select>
+                                </div>
+                                <div class="ldb-setting-row" style="margin-bottom: 8px;">
+                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                        <input type="checkbox" id="ldb-ai-category-auto-dedup" checked>
+                                        <span>分类列表自动去重</span>
+                                    </label>
                                 </div>
                                 <div id="ldb-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
 
@@ -12223,6 +12291,22 @@ ${availableTools}
                 }
             };
 
+            (refs.linuxdoDedupModeSelect || panel.querySelector("#ldb-linuxdo-dedup-mode")).onchange = (e) => {
+                const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
+                Storage.set(CONFIG.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE, mode);
+                UI.recomputeExportStats();
+                UI.renderBookmarkList();
+            };
+
+            (refs.bookmarkDedupModeSelect || panel.querySelector("#ldb-bookmark-dedup-mode")).onchange = (e) => {
+                const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
+                Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_IMPORT_DEDUP_MODE, mode);
+            };
+
+            (refs.aiCategoryAutoDedupCheckbox || panel.querySelector("#ldb-ai-category-auto-dedup")).onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AI_CATEGORY_AUTO_DEDUP, !!e.target.checked);
+            };
+
             (refs.updateCheckBtn || panel.querySelector("#ldb-update-check-btn")).onclick = async () => {
                 await UpdateChecker.check({ manual: true });
             };
@@ -12452,7 +12536,7 @@ ${availableTools}
                     return;
                 }
 
-                // 获取选中的收藏 (过滤已导出的)
+                // 获取选中的收藏（严格模式过滤已导出，允许重复模式仅按勾选）
                 const toExport = UI.bookmarks.filter((b) => {
                     const bookmarkKey = UI.getBookmarkKey(b);
                     return UI.selectedBookmarks.has(bookmarkKey) && !UI.isBookmarkKeyExported(bookmarkKey);
@@ -12478,10 +12562,9 @@ ${availableTools}
                     aiService: (refs.aiServiceSelect || panel.querySelector("#ldb-ai-service")).value,
                     aiModel: (refs.aiModelSelect || panel.querySelector("#ldb-ai-model")).value,
                     aiBaseUrl: (refs.aiBaseUrlInput || panel.querySelector("#ldb-ai-base-url")).value.trim(),
-                    categories: ((refs.aiCategoriesInput || panel.querySelector("#ldb-ai-categories")).value.trim() || "")
-                        .split(/[，,]/)
-                        .map(s => s.trim())
-                        .filter(Boolean),
+                    categories: Utils.parseAICategories(
+                        (refs.aiCategoriesInput || panel.querySelector("#ldb-ai-categories")).value.trim() || ""
+                    ),
                     githubUsername: (refs.githubUsernameInput || panel.querySelector("#ldb-github-username")).value.trim(),
                     token: (refs.githubTokenInput || panel.querySelector("#ldb-github-token")).value.trim(),
                 };
@@ -13055,6 +13138,27 @@ ${availableTools}
                 Storage.set(autoConfig.intervalKey, autoConfig.intervalDefault);
             }
 
+            const linuxdoDedupMode = Utils.getLinuxDoImportDedupMode();
+            const linuxdoDedupSelect = refs.linuxdoDedupModeSelect || panel.querySelector("#ldb-linuxdo-dedup-mode");
+            linuxdoDedupSelect.value = linuxdoDedupMode;
+            if (linuxdoDedupSelect.selectedIndex === -1) {
+                linuxdoDedupSelect.value = CONFIG.DEFAULTS.linuxdoImportDedupMode;
+                Storage.set(CONFIG.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE, CONFIG.DEFAULTS.linuxdoImportDedupMode);
+            }
+
+            const bookmarkDedupMode = Utils.getBookmarkImportDedupMode();
+            const bookmarkDedupSelect = refs.bookmarkDedupModeSelect || panel.querySelector("#ldb-bookmark-dedup-mode");
+            bookmarkDedupSelect.value = bookmarkDedupMode;
+            if (bookmarkDedupSelect.selectedIndex === -1) {
+                bookmarkDedupSelect.value = CONFIG.DEFAULTS.bookmarkImportDedupMode;
+                Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_IMPORT_DEDUP_MODE, CONFIG.DEFAULTS.bookmarkImportDedupMode);
+            }
+
+            (refs.aiCategoryAutoDedupCheckbox || panel.querySelector("#ldb-ai-category-auto-dedup")).checked = Storage.get(
+                CONFIG.STORAGE_KEYS.AI_CATEGORY_AUTO_DEDUP,
+                CONFIG.DEFAULTS.aiCategoryAutoDedup
+            );
+
             const updateAutoEnabled = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG.DEFAULTS.updateAutoCheckEnabled);
             const updateIntervalHours = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG.DEFAULTS.updateCheckIntervalHours);
             const updateAutoEnabledEl = refs.updateAutoEnabled || panel.querySelector("#ldb-update-auto-enabled");
@@ -13274,7 +13378,9 @@ ${availableTools}
 
         isBookmarkKeyExported: (bookmarkKey) => {
             if (!bookmarkKey) return false;
+            const dedupStrict = Utils.isLinuxDoDedupStrict();
             if (!bookmarkKey.startsWith("gh:")) {
+                if (!dedupStrict) return false;
                 return Storage.isTopicExported(bookmarkKey);
             }
             const parts = bookmarkKey.split(":");
