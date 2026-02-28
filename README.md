@@ -4,7 +4,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前版本：`v3.4.3`（待发布）
+- 当前版本：`v3.4.3`
 - 最近已发布版本：`v3.4.2`
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装（直链）：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
@@ -340,7 +340,7 @@ A: 请检查：
 - 优化：浏览器书签“新书签数”与导出过滤逻辑按去重模式一致生效
 - 修复：Linux.do 自动导入在允许重复模式下不再每轮重复全量导入（始终按“新收藏”语义）
 
-- Tag：`v3.4.3`（待发布）
+- Tag：`v3.4.3`
 
 ### v3.4.2
 

@@ -113,6 +113,45 @@ function GM_notification(detailsOrTitle, textOrUndefined) {
     }
 }
 
+// 标记桥接扩展可用（兼容 userscript 的 BookmarkBridge 检测）
+if (typeof document !== "undefined" && document.head && !document.querySelector('meta[name="ld-notion-ext"]')) {
+    const marker = document.createElement("meta");
+    marker.name = "ld-notion-ext";
+    marker.content = "ready";
+    document.head.appendChild(marker);
+}
+
+// 兼容 userscript 的 CustomEvent 书签桥接协议
+window.addEventListener("ld-notion-request-bookmarks", async (event) => {
+    const { requestId, folderId } = event.detail || {};
+    try {
+        const data = folderId
+            ? await chrome.bookmarks.getChildren(folderId)
+            : await chrome.bookmarks.getTree();
+        window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
+            detail: { requestId, success: true, data }
+        }));
+    } catch (error) {
+        window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
+            detail: { requestId, success: false, error: error?.message || String(error) }
+        }));
+    }
+});
+
+window.addEventListener("ld-notion-search-bookmarks", async (event) => {
+    const { requestId, query } = event.detail || {};
+    try {
+        const data = await chrome.bookmarks.search(query || "");
+        window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
+            detail: { requestId, success: true, data }
+        }));
+    } catch (error) {
+        window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
+            detail: { requestId, success: false, error: error?.message || String(error) }
+        }));
+    }
+});
+
 // Popup 消息监听 — 接收来自 popup.js 的快捷操作指令
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "LD_NOTION_IMPORT_BOOKMARKS") {
