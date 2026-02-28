@@ -5,7 +5,7 @@
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
 - 当前版本：`v3.4.3`
-- 最近已发布版本：`v3.4.2`
+- 最近已发布版本：`v3.4.3`
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装（直链）：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
 - v3.4.2 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.2/LD-Notion-chrome-extension-full-v3.4.2.zip>
@@ -331,14 +331,18 @@ A: 请检查：
 
 ### v3.4.3
 
-本次版本聚焦「导入去重策略可配置 + 重复导入风控修复」，让去重行为可按场景切换，同时避免自动导入重复风暴。
+本次版本聚焦「面板可达性 + 运行自检 + 模式协作诊断」，重点解决 GitHub Token 区域不易触达、userscript/extension 协作排障成本高的问题。
 
-- 新增：Linux.do 导入去重模式（`自动去重` / `允许重复（手动勾选）`）
-- 新增：浏览器书签导入去重模式（`自动去重` / `允许重复（手动勾选）`）
-- 新增：AI 分类列表自动去重开关（可自动去重，也可保留重复）
-- 优化：Linux.do 手动导出在允许重复模式下可由用户勾选控制导出项
-- 优化：浏览器书签“新书签数”与导出过滤逻辑按去重模式一致生效
-- 修复：Linux.do 自动导入在允许重复模式下不再每轮重复全量导入（始终按“新收藏”语义）
+- 新增：主面板运行模式徽章（Userscript / Extension）
+- 新增：一键定位 GitHub Token 按钮
+- 新增：书签页显式入口「📖 导入浏览器书签」
+- 新增：设置页「🩺 运行自检」模块（执行自检 / 复制诊断信息）
+- 新增：结构化诊断快照（Diagnostics v2：runtime/config/update/issues/env）
+- 优化：主面板可拉伸方向扩展为左/上/下/左上/左下
+- 优化：主面板最大高度由 80vh 提升至 90vh，改善长设置表单可达性
+- 优化：面板区域滚轮增强（header/tab/空白区也可滚动正文）
+- 优化：书签扩展状态文案按运行模式区分（Userscript / Extension）
+- 修复：`chrome-extension-full` 兼容 userscript 书签桥接事件协议（marker + request/search + data 回传）
 
 - Tag：`v3.4.3`
 
