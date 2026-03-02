@@ -4164,7 +4164,6 @@ ${explanation ? `我的理解：${explanation}` : ""}
             }
 
             await NotionAPI.updateDatabase(databaseId, propDef, apiKey);
-            console.log(`已创建属性「${propertyName}」`);
         },
 
         handleAIAutofill: async (params, settings, explanation) => {
@@ -5913,8 +5912,6 @@ ${availableTools}
                             select: { options: allOptions }
                         }
                     }, notionApiKey);
-
-                    console.log(`AI分类属性已更新，新增 ${newOptions.length} 个选项`);
                 }
                 return;
             }
@@ -5927,8 +5924,6 @@ ${availableTools}
                     select: { options }
                 }
             }, notionApiKey);
-
-            console.log("已创建 AI分类 属性");
         },
 
         // 控制方法
