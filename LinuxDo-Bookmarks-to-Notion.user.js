@@ -13793,6 +13793,8 @@ ${availableTools}
             list.innerHTML = UI.bookmarks.map((b) => {
                 const bookmarkKey = UI.getBookmarkKey(b);
                 const title = b.title || b.name || `帖子 ${bookmarkKey}`;
+                const escapedTitle = Utils.escapeHtml(title);
+                const escapedTruncatedTitle = Utils.escapeHtml(Utils.truncateText(title, 35));
                 const isExported = UI.isBookmarkKeyExported(bookmarkKey);
                 const isSelected = UI.selectedBookmarks?.has(bookmarkKey);
                 const sourceTag = githubMode
@@ -13802,7 +13804,7 @@ ${availableTools}
                 return `
                     <div class="ldb-bookmark-item" data-topic-id="${bookmarkKey}">
                         <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
-                        <span class="title" title="${title}">${Utils.truncateText(title, 35)}</span>
+                        <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
                         ${sourceTag}${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
                     </div>
                 `;
