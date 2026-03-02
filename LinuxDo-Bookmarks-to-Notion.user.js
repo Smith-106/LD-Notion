@@ -13869,7 +13869,7 @@ ${availableTools}
                 success.slice(0, 10).forEach(item => {
                     html += `<div class="ldb-report-item success">
                         <span>✓</span>
-                        <a href="${item.url}" target="_blank">${Utils.truncateText(item.title, 40)}</a>
+                        <a href="${Utils.escapeHtml(item.url)}" target="_blank">${Utils.escapeHtml(Utils.truncateText(item.title, 40))}</a>
                     </div>`;
                 });
                 if (success.length > 10) {
@@ -13884,9 +13884,9 @@ ${availableTools}
                 failed.forEach(item => {
                     html += `<div class="ldb-report-item failed">
                         <span>✗</span>
-                        <span>${Utils.truncateText(item.title, 35)}</span>
+                        <span>${Utils.escapeHtml(Utils.truncateText(item.title, 35))}</span>
                     </div>`;
-                    html += `<div class="ldb-report-error">${item.error}</div>`;
+                    html += `<div class="ldb-report-error">${Utils.escapeHtml(item.error)}</div>`;
                 });
                 html += '</div>';
             }
