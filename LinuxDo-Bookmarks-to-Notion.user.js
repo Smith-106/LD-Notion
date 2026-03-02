@@ -13933,9 +13933,9 @@ ${availableTools}
                     <div class="ldb-log-item">
                         <span class="icon">${formatted.statusIcon}</span>
                         <div class="content">
-                            <div class="operation">${formatted.operation}</div>
+                            <div class="operation">${Utils.escapeHtml(formatted.operation)}</div>
                             <div class="time">${formatted.time} · ${formatted.duration}</div>
-                            ${formatted.error ? `<div class="error">${formatted.error}</div>` : ''}
+                            ${formatted.error ? `<div class="error">${Utils.escapeHtml(formatted.error)}</div>` : ''}
                         </div>
                     </div>
                 `;
