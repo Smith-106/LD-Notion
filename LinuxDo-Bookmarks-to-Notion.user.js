@@ -13929,13 +13929,15 @@ ${availableTools}
             let html = '';
             logs.forEach(entry => {
                 const formatted = OperationLog.formatEntry(entry);
+                const escapedOperation = Utils.escapeHtml(formatted.operation);
+                const escapedError = formatted.error ? Utils.escapeHtml(formatted.error) : '';
                 html += `
                     <div class="ldb-log-item">
                         <span class="icon">${formatted.statusIcon}</span>
                         <div class="content">
-                            <div class="operation">${formatted.operation}</div>
+                            <div class="operation">${escapedOperation}</div>
                             <div class="time">${formatted.time} · ${formatted.duration}</div>
-                            ${formatted.error ? `<div class="error">${formatted.error}</div>` : ''}
+                            ${escapedError ? `<div class="error">${escapedError}</div>` : ''}
                         </div>
                     </div>
                 `;
