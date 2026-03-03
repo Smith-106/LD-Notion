@@ -1,0 +1,12 @@
+{
+  "name": "ld-notion-hub",
+  "version": "3.4.3",
+  "description": "LD-Notion Hub — AI 多源知识中枢",
+  "main": "LinuxDo-Bookmarks-to-Notion.user.js",
+  "scripts": {
+    "test": "node tests/utils.test.js"
+  },
+  "keywords": [],
+  "author": "Smith-106",
+  "license": "MIT"
+}
