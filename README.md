@@ -5,11 +5,11 @@
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
 - 当前版本（仓库 / 脚本头）：`v3.4.3`
-- 最近已发布版本：`v3.4.2`
+- 最近已发布版本：`v3.4.3`
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装（直链）：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
-- 最近已发布扩展 ZIP 直链（v3.4.2）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.2/LD-Notion-chrome-extension-full-v3.4.2.zip>
-- 最近已发布 Release 页面（v3.4.2）：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.2>
+- v3.4.3 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.3/LD-Notion-chrome-extension-full-v3.4.3.zip>
+- v3.4.3 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.3>
 
 ## 四大核心能力
 
@@ -350,22 +350,19 @@ A: 请检查：
 
 ## 更新日志
 
-### v3.4.3（当前开发版，尚未发布）
+### v3.4.3
 
-本次版本聚焦「面板可达性 + 运行自检 + 模式协作诊断」，重点解决 GitHub Token 区域不易触达、userscript/extension 协作排障成本高的问题。
+本次版本聚焦「Notion 公开 OAuth 一键授权 + 发布链路收口」，重点解决 Notion 授权门槛高、三端 OAuth 体验不一致，以及生成扩展构建链路对源码形状过于脆弱的问题。
 
-- 新增：主面板运行模式徽章（Userscript / Extension）
-- 新增：一键定位 GitHub Token 按钮
-- 新增：书签页显式入口「📖 导入浏览器书签」
-- 新增：设置页「🩺 运行自检」模块（执行自检 / 复制诊断信息）
-- 新增：结构化诊断快照（Diagnostics v2：runtime/config/update/issues/env）
-- 优化：主面板可拉伸方向扩展为左/上/下/左上/左下
-- 优化：主面板最大高度由 80vh 提升至 90vh，改善长设置表单可达性
-- 优化：面板区域滚轮增强（header/tab/空白区也可滚动正文）
-- 优化：书签扩展状态文案按运行模式区分（Userscript / Extension）
-- 修复：`chrome-extension-full` 兼容 userscript 书签桥接事件协议（marker + request/search + data 回传）
+- 新增：Notion 公开 OAuth 一键授权入口（Linux.do 主面板 / Notion 站内面板 / 通用网页剪藏面板）
+- 新增：OAuth 回调处理、access token 本地落盘与 refresh token 自动续签
+- 新增：OAuth 回归测试，覆盖 callback、失败通知、401 自动 refresh retry、manual fallback 与 main 启动引导
+- 优化：三端 OAuth UX 状态收口，已连接时不再直接把 access token 回填到可见输入框
+- 优化：断开授权文案，明确“仅清除本地凭据，不会撤销 Notion 后台授权”
+- 修复：`scripts/build-extension.js` 对 BookmarkBridge 的脆弱字符串补丁，生成扩展时恢复稳定的 `chrome.bookmarks` 直连替换
+- 文档：README / TUTORIAL 同步补充 OAuth 配置、fallback、Redirect URI 和本地 secret 存储说明
 
-- Release：待发布
+- Tag：`v3.4.3`
 
 ### v3.4.2
 

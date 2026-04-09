@@ -23,11 +23,11 @@
 - **方式 A：Tampermonkey 脚本版（推荐）**：更新方便，适合大多数人
 - **方式 B：Chrome 扩展独立版（进阶）**：不依赖 Tampermonkey，书签能力内置
 
-### 下载链接（当前开发版 v3.4.3 / 最近已发布 v3.4.2）
+### 下载链接（v3.4.3）
 
 - 脚本安装：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装直链：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
-- 扩展 ZIP 直链（最近已发布 v3.4.2）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.2/LD-Notion-chrome-extension-full-v3.4.2.zip>
+- 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.3/LD-Notion-chrome-extension-full-v3.4.3.zip>
 - 安装浏览器扩展（Release）：<https://github.com/Smith-106/LD-Notion/releases/latest>
 
 ### 方式 A：Tampermonkey 脚本版
@@ -458,14 +458,14 @@ GM_setValue("ldb_exported_topics", "{}")
 
 ## 更新日志
 
-### v3.4.3（当前开发版，尚未发布）
+### v3.4.3
 
-- 新增：Linux.do 导入去重模式（`自动去重` / `允许重复（手动勾选）`）
-- 新增：浏览器书签导入去重模式（`自动去重` / `允许重复（手动勾选）`）
-- 新增：AI 分类列表自动去重开关（可自动去重，也可保留重复）
-- 优化：Linux.do 手动导出在允许重复模式下可由用户勾选控制导出项
-- 优化：浏览器书签“新书签数”与导出过滤逻辑按去重模式一致生效
-- 修复：Linux.do 自动导入在允许重复模式下不再每轮重复全量导入（始终按“新收藏”语义）
+- 新增：Notion 公开 OAuth 一键授权
+- 新增：OAuth 回调处理和 refresh token 自动续签
+- 新增：更完整的 OAuth 自动化测试
+- 优化：Linux.do / Notion / 通用网页三端 OAuth 状态与断开语义统一
+- 修复：独立扩展构建时 BookmarkBridge 补丁匹配不稳定的问题
+- 文档：补全 OAuth 配置、fallback、Redirect URI 与本地 secret 存储说明
 
 ### v3.4.2
 
