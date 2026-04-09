@@ -4,12 +4,12 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前版本：`v3.4.3`
-- 最近已发布版本：`v3.4.3`
+- 当前版本（仓库 / 脚本头）：`v3.4.3`
+- 最近已发布版本：`v3.4.2`
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装（直链）：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
-- v3.4.3 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.3/LD-Notion-chrome-extension-full-v3.4.3.zip>
-- v3.4.3 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.3>
+- 最近已发布扩展 ZIP 直链（v3.4.2）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.2/LD-Notion-chrome-extension-full-v3.4.2.zip>
+- 最近已发布 Release 页面（v3.4.2）：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.2>
 
 ## 四大核心能力
 
@@ -350,7 +350,7 @@ A: 请检查：
 
 ## 更新日志
 
-### v3.4.3
+### v3.4.3（当前开发版，尚未发布）
 
 本次版本聚焦「面板可达性 + 运行自检 + 模式协作诊断」，重点解决 GitHub Token 区域不易触达、userscript/extension 协作排障成本高的问题。
 
@@ -365,7 +365,7 @@ A: 请检查：
 - 优化：书签扩展状态文案按运行模式区分（Userscript / Extension）
 - 修复：`chrome-extension-full` 兼容 userscript 书签桥接事件协议（marker + request/search + data 回传）
 
-- Tag：`v3.4.3`
+- Release：待发布
 
 ### v3.4.2
 

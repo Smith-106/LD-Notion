@@ -23,7 +23,7 @@
 - **方式 A：Tampermonkey 脚本版（推荐）**：更新方便，适合大多数人
 - **方式 B：Chrome 扩展独立版（进阶）**：不依赖 Tampermonkey，书签能力内置
 
-### 下载链接（v3.4.3）
+### 下载链接（当前开发版 v3.4.3 / 最近已发布 v3.4.2）
 
 - 脚本安装：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装直链：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
@@ -458,7 +458,7 @@ GM_setValue("ldb_exported_topics", "{}")
 
 ## 更新日志
 
-### v3.4.3
+### v3.4.3（当前开发版，尚未发布）
 
 - 新增：Linux.do 导入去重模式（`自动去重` / `允许重复（手动勾选）`）
 - 新增：浏览器书签导入去重模式（`自动去重` / `允许重复（手动勾选）`）
