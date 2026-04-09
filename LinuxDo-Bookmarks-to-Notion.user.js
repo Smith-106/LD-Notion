@@ -51,6 +51,14 @@
         STORAGE_KEYS: {
             NOTION_API_KEY: "ldb_notion_api_key",
             NOTION_DATABASE_ID: "ldb_notion_database_id",
+            NOTION_AUTH_MODE: "ldb_notion_auth_mode",
+            NOTION_OAUTH_CLIENT_ID: "ldb_notion_oauth_client_id",
+            NOTION_OAUTH_CLIENT_SECRET: "ldb_notion_oauth_client_secret",
+            NOTION_OAUTH_REDIRECT_URI: "ldb_notion_oauth_redirect_uri",
+            NOTION_OAUTH_REFRESH_TOKEN: "ldb_notion_oauth_refresh_token",
+            NOTION_OAUTH_STATE: "ldb_notion_oauth_state",
+            NOTION_OAUTH_META: "ldb_notion_oauth_meta",
+            NOTION_OAUTH_NOTICE: "ldb_notion_oauth_notice",
             FILTER_ONLY_FIRST: "ldb_filter_only_first",
             FILTER_ONLY_OP: "ldb_filter_only_op",
             FILTER_RANGE_START: "ldb_filter_range_start",
@@ -134,6 +142,8 @@
         },
         // 默认值
         DEFAULTS: {
+            notionAuthMode: "manual",
+            notionOauthRedirectUri: "https://www.notion.so/",
             onlyFirst: false,
             onlyOp: false,
             rangeStart: 1,
@@ -270,6 +280,53 @@
             }
         },
 
+        base64Encode: (input) => {
+            const normalized = String(input ?? "");
+            if (typeof btoa === "function") return btoa(normalized);
+            if (typeof Buffer !== "undefined") return Buffer.from(normalized, "utf8").toString("base64");
+            throw new Error("当前环境不支持 Base64 编码");
+        },
+
+        safeJsonParse: (input, fallback = null) => {
+            if (input == null || input === "") return fallback;
+            try {
+                return JSON.parse(input);
+            } catch {
+                return fallback;
+            }
+        },
+
+        randomToken: (prefix = "") => {
+            const bytes = new Uint8Array(16);
+            if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                crypto.getRandomValues(bytes);
+            } else {
+                for (let i = 0; i < bytes.length; i++) {
+                    bytes[i] = Math.floor(Math.random() * 256);
+                }
+            }
+            const value = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+            return prefix ? `${prefix}_${value}` : value;
+        },
+
+        cleanupUrlParams: (paramNames = []) => {
+            if (!Array.isArray(paramNames) || paramNames.length === 0) return;
+            if (!window?.history?.replaceState) return;
+            try {
+                const current = new URL(window.location.href);
+                let changed = false;
+                paramNames.forEach((name) => {
+                    if (current.searchParams.has(name)) {
+                        current.searchParams.delete(name);
+                        changed = true;
+                    }
+                });
+                if (!changed) return;
+                const nextUrl = `${current.pathname}${current.search}${current.hash}`;
+                window.history.replaceState({}, document.title, nextUrl);
+            } catch {}
+        },
+
         // HTML 转义，防止 XSS 攻击
         escapeHtml: (text) => {
             if (!text) return "";
@@ -366,6 +423,451 @@
         isTopicExported: (topicId) => {
             const exported = Storage.getExportedTopics();
             return !!exported[topicId];
+        },
+    };
+
+    const NotionOAuth = {
+        _syncHandlers: [],
+
+        getAuthMode: () => {
+            const mode = Storage.get(CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE, CONFIG.DEFAULTS.notionAuthMode);
+            return mode === "oauth" ? "oauth" : "manual";
+        },
+
+        setAuthMode: (mode) => {
+            Storage.set(CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE, mode === "oauth" ? "oauth" : "manual");
+        },
+
+        getConfig: () => ({
+            clientId: String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "") || "").trim(),
+            clientSecret: String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "") || "").trim(),
+            redirectUri: String(
+                Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, CONFIG.DEFAULTS.notionOauthRedirectUri)
+                || CONFIG.DEFAULTS.notionOauthRedirectUri
+            ).trim(),
+        }),
+
+        saveConfig: ({ clientId, clientSecret, redirectUri } = {}) => {
+            if (typeof clientId !== "undefined") {
+                Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, String(clientId || "").trim());
+            }
+            if (typeof clientSecret !== "undefined") {
+                Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, String(clientSecret || "").trim());
+            }
+            if (typeof redirectUri !== "undefined") {
+                Storage.set(
+                    CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI,
+                    String(redirectUri || "").trim() || CONFIG.DEFAULTS.notionOauthRedirectUri
+                );
+            }
+        },
+
+        getMeta: () => Utils.safeJsonParse(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_META, ""), {}),
+
+        setMeta: (meta = {}) => {
+            Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_META, JSON.stringify(meta || {}));
+        },
+
+        getPendingState: () => Utils.safeJsonParse(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_STATE, ""), null),
+
+        setPendingState: (stateInfo) => {
+            Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_STATE, JSON.stringify(stateInfo || {}));
+        },
+
+        clearPendingState: () => {
+            Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_STATE, "");
+        },
+
+        getRefreshToken: () => String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "") || "").trim(),
+
+        setRefreshToken: (refreshToken = "") => {
+            Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, String(refreshToken || "").trim());
+        },
+
+        getAccessToken: (liveValue = "") => {
+            const manualValue = String(liveValue || "").trim();
+            if (manualValue) return manualValue;
+            return String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "") || "").trim();
+        },
+
+        setManualApiKey: (apiKey = "") => {
+            const normalized = String(apiKey || "").trim();
+            Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, normalized);
+            NotionOAuth.setAuthMode("manual");
+            NotionOAuth.syncApiKeyInputs(normalized);
+            NotionOAuth.syncRegisteredControls();
+        },
+
+        isOAuthReady: () => {
+            const config = NotionOAuth.getConfig();
+            return !!(config.clientId && config.clientSecret && config.redirectUri);
+        },
+
+        isOAuthConnected: () => {
+            return NotionOAuth.getAuthMode() === "oauth" && !!NotionOAuth.getRefreshToken() && !!NotionOAuth.getAccessToken();
+        },
+
+        canAutoRefresh: () => {
+            return NotionOAuth.isOAuthConnected() && NotionOAuth.isOAuthReady();
+        },
+
+        getStatus: () => {
+            const config = NotionOAuth.getConfig();
+            const meta = NotionOAuth.getMeta();
+            const accessToken = NotionOAuth.getAccessToken();
+            const workspaceName = meta.workspaceName || meta.workspaceId || "";
+
+            if (NotionOAuth.isOAuthConnected()) {
+                return {
+                    connected: true,
+                    color: "#34d399",
+                    text: workspaceName
+                        ? `已通过 OAuth 授权: ${workspaceName}。可留空 API Key 输入框，必要时仍可手动覆盖。`
+                        : "已通过 OAuth 授权，Access Token 将自动续签；必要时仍可切回手动 Token。",
+                    apiKeyPlaceholder: "OAuth 已授权；留空即可，手动输入可覆盖",
+                };
+            }
+
+            if (config.clientId && config.clientSecret) {
+                if (accessToken && NotionOAuth.getAuthMode() === "manual") {
+                    return {
+                        connected: false,
+                        color: "#fbbf24",
+                        text: "当前使用手动 API Key，OAuth 配置已保存，可随时切换到一键授权。",
+                        apiKeyPlaceholder: "手动 Token（可选）",
+                    };
+                }
+
+                return {
+                    connected: false,
+                    color: "#94a3b8",
+                    text: "OAuth 配置已保存，点击“一键授权”完成连接；断开只会清除本地凭据。",
+                    apiKeyPlaceholder: "手动 Token（可选）",
+                };
+            }
+
+            return {
+                connected: false,
+                color: "#94a3b8",
+                text: "未配置 OAuth，仍可继续手动填写 API Key",
+                apiKeyPlaceholder: "手动 Token（可选）",
+            };
+        },
+
+        buildAuthorizeUrl: (config, state) => {
+            const normalized = {
+                clientId: String(config?.clientId || "").trim(),
+                redirectUri: String(config?.redirectUri || "").trim(),
+            };
+            if (!normalized.clientId) throw new Error("请先填写 Notion OAuth Client ID");
+            if (!normalized.redirectUri) throw new Error("请先填写 Redirect URI");
+
+            const url = new URL("https://api.notion.com/v1/oauth/authorize");
+            url.searchParams.set("client_id", normalized.clientId);
+            url.searchParams.set("redirect_uri", normalized.redirectUri);
+            url.searchParams.set("response_type", "code");
+            url.searchParams.set("owner", "user");
+            if (state) url.searchParams.set("state", state);
+            return url.toString();
+        },
+
+        matchesRedirectUri: (currentUrl, redirectUri) => {
+            if (!currentUrl || !redirectUri) return false;
+            try {
+                const current = new URL(currentUrl);
+                const expected = new URL(redirectUri);
+                return current.origin === expected.origin && current.pathname === expected.pathname;
+            } catch {
+                return false;
+            }
+        },
+
+        pushNotice: (message, type = "info") => {
+            const payload = { message: String(message || ""), type, timestamp: Date.now() };
+            Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_NOTICE, JSON.stringify(payload));
+            if (typeof GM_notification === "function" && payload.message) {
+                GM_notification({
+                    title: "Notion OAuth",
+                    text: payload.message,
+                    timeout: 5000,
+                });
+            }
+        },
+
+        consumeNotice: () => {
+            const raw = Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_NOTICE, "");
+            if (!raw) return null;
+            Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_NOTICE, "");
+            return Utils.safeJsonParse(raw, null);
+        },
+
+        syncApiKeyInputs: (apiKey = NotionOAuth.getAccessToken()) => {
+            const normalized = String(apiKey || "").trim();
+            const status = NotionOAuth.getStatus();
+            document.querySelectorAll("#ldb-api-key, #ldb-notion-api-key").forEach((input) => {
+                if (!input) return;
+                if (NotionOAuth.isOAuthConnected()) {
+                    input.value = "";
+                    input.placeholder = status.apiKeyPlaceholder;
+                } else {
+                    input.value = normalized;
+                    input.placeholder = "secret_xxx...";
+                }
+            });
+
+            const genericInput = document.querySelector("#gclip-api-key-input");
+            if (genericInput) {
+                if (NotionOAuth.isOAuthConnected()) {
+                    genericInput.value = "";
+                    genericInput.placeholder = "已通过 OAuth 授权（如需覆盖，可手动输入）";
+                } else {
+                    genericInput.placeholder = "secret_...";
+                }
+            }
+        },
+
+        registerSyncHandler: (handler) => {
+            if (typeof handler !== "function") return;
+            NotionOAuth._syncHandlers.push(handler);
+        },
+
+        syncRegisteredControls: () => {
+            NotionOAuth._syncHandlers.forEach((handler) => {
+                try {
+                    handler();
+                } catch (error) {
+                    console.warn("同步 OAuth 控件状态失败", error);
+                }
+            });
+        },
+
+        attachControls: ({ root, selectors, notify } = {}) => {
+            if (!root || !selectors) return;
+            const get = (name) => root.querySelector(selectors[name]);
+            const fields = {
+                clientIdInput: get("clientIdInput"),
+                clientSecretInput: get("clientSecretInput"),
+                redirectUriInput: get("redirectUriInput"),
+                authorizeBtn: get("authorizeBtn"),
+                clearBtn: get("clearBtn"),
+                statusEl: get("statusEl"),
+            };
+
+            if (!fields.clientIdInput || !fields.clientSecretInput || !fields.redirectUriInput || !fields.authorizeBtn || !fields.clearBtn || !fields.statusEl) {
+                return;
+            }
+
+            const sync = () => {
+                const config = NotionOAuth.getConfig();
+                const status = NotionOAuth.getStatus();
+
+                if (document.activeElement !== fields.clientIdInput) {
+                    fields.clientIdInput.value = config.clientId;
+                }
+                if (document.activeElement !== fields.clientSecretInput) {
+                    fields.clientSecretInput.value = config.clientSecret;
+                }
+                if (document.activeElement !== fields.redirectUriInput) {
+                    fields.redirectUriInput.value = config.redirectUri || CONFIG.DEFAULTS.notionOauthRedirectUri;
+                }
+
+                fields.statusEl.textContent = status.text;
+                if (fields.statusEl.style) {
+                    fields.statusEl.style.color = status.color;
+                }
+                fields.authorizeBtn.textContent = status.connected ? "🔄 重新授权" : "🔐 一键授权";
+                fields.clearBtn.textContent = status.connected ? "断开并切回手动" : "清除本地授权";
+                fields.clearBtn.disabled = !status.connected && !NotionOAuth.getRefreshToken();
+            };
+
+            const saveFormConfig = () => {
+                NotionOAuth.saveConfig({
+                    clientId: fields.clientIdInput.value.trim(),
+                    clientSecret: fields.clientSecretInput.value.trim(),
+                    redirectUri: fields.redirectUriInput.value.trim() || CONFIG.DEFAULTS.notionOauthRedirectUri,
+                });
+            };
+
+            [fields.clientIdInput, fields.clientSecretInput, fields.redirectUriInput].forEach((input) => {
+                input.addEventListener("change", () => {
+                    saveFormConfig();
+                    sync();
+                });
+            });
+
+            fields.authorizeBtn.addEventListener("click", () => {
+                try {
+                    saveFormConfig();
+                    NotionOAuth.startAuthorization();
+                    if (typeof notify === "function") {
+                        notify("已打开 Notion OAuth 授权页", "info");
+                    }
+                } catch (error) {
+                    if (typeof notify === "function") {
+                        notify(error.message || String(error), "error");
+                    }
+                } finally {
+                    sync();
+                }
+            });
+
+            fields.clearBtn.addEventListener("click", () => {
+                NotionOAuth.clearConnection();
+                if (typeof notify === "function") {
+                    notify("已清除本地 OAuth 凭据，可继续手动填写 API Key；这不会撤销 Notion 后台授权。", "success");
+                }
+                sync();
+            });
+
+            NotionOAuth.registerSyncHandler(sync);
+            sync();
+        },
+
+        clearConnection: () => {
+            const shouldClearAccessToken = NotionOAuth.getAuthMode() === "oauth";
+            if (shouldClearAccessToken) {
+                Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            }
+            NotionOAuth.setRefreshToken("");
+            NotionOAuth.setMeta({});
+            NotionOAuth.clearPendingState();
+            NotionOAuth.setAuthMode("manual");
+            NotionOAuth.syncApiKeyInputs("");
+            NotionOAuth.syncRegisteredControls();
+        },
+
+        startAuthorization: () => {
+            const config = NotionOAuth.getConfig();
+            if (!config.clientId) throw new Error("请先填写 Notion OAuth Client ID");
+            if (!config.clientSecret) throw new Error("请先填写 Notion OAuth Client Secret");
+            if (!config.redirectUri) throw new Error("请先填写 Redirect URI");
+
+            const state = Utils.randomToken("notion_oauth");
+            NotionOAuth.setPendingState({
+                state,
+                redirectUri: config.redirectUri,
+                createdAt: Date.now(),
+            });
+
+            const authUrl = NotionOAuth.buildAuthorizeUrl(config, state);
+            const opened = window.open(authUrl, "_blank", "noopener,noreferrer");
+            if (!opened) {
+                window.location.href = authUrl;
+            }
+            return authUrl;
+        },
+
+        exchangeToken: (payload) => {
+            const config = NotionOAuth.getConfig();
+            if (!config.clientId) throw new Error("缺少 Notion OAuth Client ID");
+            if (!config.clientSecret) throw new Error("缺少 Notion OAuth Client Secret");
+
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "POST",
+                    url: "https://api.notion.com/v1/oauth/token",
+                    headers: {
+                        "Authorization": `Basic ${Utils.base64Encode(`${config.clientId}:${config.clientSecret}`)}`,
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "Notion-Version": CONFIG.API.NOTION_VERSION,
+                    },
+                    data: JSON.stringify(payload),
+                    onload: (response) => {
+                        const result = Utils.safeJsonParse(response.responseText, {});
+                        if (response.status >= 200 && response.status < 300 && result?.access_token) {
+                            resolve(result);
+                            return;
+                        }
+                        reject(new Error(result?.error_description || result?.message || result?.error || `OAuth 交换失败: ${response.status}`));
+                    },
+                    onerror: (error) => reject(new Error(`OAuth 网络请求失败: ${error?.error || error}`)),
+                });
+            });
+        },
+
+        applyTokenResponse: (result = {}) => {
+            if (!result?.access_token) throw new Error("Notion OAuth 未返回 access_token");
+
+            Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, result.access_token);
+            if (result.refresh_token) {
+                NotionOAuth.setRefreshToken(result.refresh_token);
+            }
+            NotionOAuth.setAuthMode("oauth");
+            NotionOAuth.setMeta({
+                workspaceId: result.workspace_id || "",
+                workspaceName: result.workspace_name || "",
+                workspaceIcon: result.workspace_icon || "",
+                botId: result.bot_id || "",
+                ownerType: result.owner?.type || "",
+                duplicatedTemplateId: result.duplicated_template_id || "",
+                authorizedAt: Date.now(),
+            });
+            NotionOAuth.syncApiKeyInputs(result.access_token);
+            NotionOAuth.syncRegisteredControls();
+        },
+
+        refreshAccessToken: async () => {
+            const refreshToken = NotionOAuth.getRefreshToken();
+            const config = NotionOAuth.getConfig();
+            if (!refreshToken) throw new Error("当前没有可刷新的 Notion OAuth refresh_token");
+            if (!config.clientId || !config.clientSecret) throw new Error("缺少 Notion OAuth Client 配置，无法刷新令牌");
+
+            const result = await NotionOAuth.exchangeToken({
+                grant_type: "refresh_token",
+                refresh_token: refreshToken,
+            });
+            NotionOAuth.applyTokenResponse(result);
+            return result.access_token;
+        },
+
+        handleRedirectCallback: async () => {
+            const pending = NotionOAuth.getPendingState();
+            if (!pending?.state || !pending?.redirectUri) return false;
+
+            let currentUrl;
+            try {
+                currentUrl = new URL(window.location.href);
+            } catch {
+                return false;
+            }
+
+            const code = currentUrl.searchParams.get("code");
+            const error = currentUrl.searchParams.get("error");
+            const state = currentUrl.searchParams.get("state");
+
+            if (!code && !error) return false;
+            if (!NotionOAuth.matchesRedirectUri(window.location.href, pending.redirectUri)) return false;
+
+            try {
+                if (error) {
+                    throw new Error(`授权被拒绝: ${error}`);
+                }
+                if (!state || state !== pending.state) {
+                    throw new Error("OAuth state 校验失败，请重新发起授权");
+                }
+
+                const result = await NotionOAuth.exchangeToken({
+                    grant_type: "authorization_code",
+                    code,
+                    redirect_uri: pending.redirectUri,
+                });
+                NotionOAuth.applyTokenResponse(result);
+                const workspaceName = result.workspace_name || result.workspace_id || "";
+                NotionOAuth.pushNotice(
+                    workspaceName
+                        ? `Notion OAuth 授权成功，已连接到 ${workspaceName}`
+                        : "Notion OAuth 授权成功",
+                    "success"
+                );
+            } catch (errorObj) {
+                NotionOAuth.pushNotice(`Notion OAuth 授权失败: ${errorObj.message}`, "error");
+            } finally {
+                NotionOAuth.clearPendingState();
+                Utils.cleanupUrlParams(["code", "state", "error"]);
+            }
+
+            return true;
         },
     };
 
@@ -812,12 +1314,12 @@
     const NotionAPI = {
         request: (method, endpoint, data, apiKey, retries = 3) => {
             return new Promise((resolve, reject) => {
-                const doRequest = (attempt) => {
+                const doRequest = (attempt, token = NotionOAuth.getAccessToken(apiKey), allowRefresh = true) => {
                     GM_xmlhttpRequest({
                         method: method,
                         url: `https://api.notion.com/v1${endpoint}`,
                         headers: {
-                            "Authorization": `Bearer ${apiKey}`,
+                            "Authorization": `Bearer ${token}`,
                             "Content-Type": "application/json",
                             "Notion-Version": CONFIG.API.NOTION_VERSION,
                         },
@@ -830,14 +1332,21 @@
                                         const retryAfter = parseInt(response.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 1;
                                         console.warn(`Notion API 速率限制，${retryAfter}秒后重试 (${attempt + 1}/${retries})`);
                                         await Utils.sleep(retryAfter * 1000 + 500);
-                                        doRequest(attempt + 1);
+                                        doRequest(attempt + 1, token, allowRefresh);
                                         return;
                                     }
                                 }
 
-                                const result = JSON.parse(response.responseText);
+                                const result = Utils.safeJsonParse(response.responseText, {});
                                 if (response.status >= 200 && response.status < 300) {
                                     resolve(result);
+                                } else if (response.status === 401 && allowRefresh && NotionOAuth.canAutoRefresh()) {
+                                    try {
+                                        const refreshedToken = await NotionOAuth.refreshAccessToken();
+                                        doRequest(attempt, refreshedToken, false);
+                                    } catch (refreshError) {
+                                        reject(new Error(`Notion OAuth 续签失败: ${refreshError.message}`));
+                                    }
                                 } else {
                                     reject(new Error(`Notion API 错误: ${result.message || response.status}`));
                                 }
@@ -2726,7 +3235,7 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
             const panel = UI.panel;
             const refs = UI.refs || {};
             return {
-                notionApiKey: (refs.apiKeyInput || panel?.querySelector("#ldb-api-key"))?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
+                notionApiKey: NotionOAuth.getAccessToken((refs.apiKeyInput || panel?.querySelector("#ldb-api-key"))?.value.trim()),
                 notionDatabaseId: (refs.databaseIdInput || panel?.querySelector("#ldb-database-id"))?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
                 aiApiKey: (refs.aiApiKeyInput || panel?.querySelector("#ldb-ai-api-key"))?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, ""),
                 aiService: (refs.aiServiceSelect || panel?.querySelector("#ldb-ai-service"))?.value || Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService),
@@ -10156,6 +10665,18 @@ ${availableTools}
                             <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx...">
                         </div>
                         <div class="ldb-input-group">
+                            <label class="ldb-label">Notion OAuth（公开集成）</label>
+                            <input type="text" class="ldb-input" id="ldb-notion-oauth-client-id" placeholder="Client ID">
+                            <input type="password" class="ldb-input" id="ldb-notion-oauth-client-secret" placeholder="Client Secret" style="margin-top: 8px;">
+                            <input type="text" class="ldb-input" id="ldb-notion-oauth-redirect-uri" placeholder="Redirect URI" style="margin-top: 8px;">
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
+                                <button class="ldb-btn ldb-btn-primary" id="ldb-notion-oauth-authorize" style="padding: 6px 12px;">🔐 一键授权</button>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-oauth-clear" style="padding: 6px 12px;">断开授权</button>
+                            </div>
+                            <div class="ldb-tip" id="ldb-notion-oauth-status" style="margin-top: 6px;"></div>
+                            <div class="ldb-tip">适用于 Notion 公开集成。纯前端模式下 Client Secret 会保存在本地浏览器存储中，仅建议个人自建集成使用。</div>
+                        </div>
+                        <div class="ldb-input-group">
                             <label class="ldb-label">数据库 / 页面</label>
                             <div style="display: flex; gap: 8px;">
                                 <select class="ldb-select" id="ldb-notion-ai-target-db" style="flex: 1;">
@@ -10337,7 +10858,12 @@ ${availableTools}
 
             // 保存设置
             panel.querySelector("#ldb-notion-save-settings").onclick = () => {
-                Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, panel.querySelector("#ldb-notion-api-key").value.trim());
+                const liveApiKey = panel.querySelector("#ldb-notion-api-key").value.trim();
+                if (liveApiKey) {
+                    NotionOAuth.setManualApiKey(liveApiKey);
+                } else if (NotionOAuth.getAuthMode() !== "oauth") {
+                    NotionOAuth.setManualApiKey("");
+                }
                 const targetDbValue = panel.querySelector("#ldb-notion-ai-target-db").value;
                 Storage.set(CONFIG.STORAGE_KEYS.AI_TARGET_DB, targetDbValue);
                 if (targetDbValue && targetDbValue !== "__all__" && !targetDbValue.startsWith("page:")) {
@@ -10364,7 +10890,8 @@ ${availableTools}
 
             // 刷新数据库列表（合并后的唯一刷新按钮）
             panel.querySelector("#ldb-notion-refresh-workspace").onclick = async () => {
-                const apiKey = panel.querySelector("#ldb-notion-api-key").value.trim();
+                const liveApiKey = panel.querySelector("#ldb-notion-api-key").value.trim();
+                const apiKey = NotionOAuth.getAccessToken(liveApiKey);
                 const refreshBtn = panel.querySelector("#ldb-notion-refresh-workspace");
                 const workspaceTip = panel.querySelector("#ldb-notion-workspace-tip");
 
@@ -10507,6 +11034,19 @@ ${availableTools}
 
             // 拖拽面板
             NotionSiteUI.makeDraggable(panel, panel.querySelector(".ldb-notion-header"));
+
+            NotionOAuth.attachControls({
+                root: panel,
+                selectors: {
+                    clientIdInput: "#ldb-notion-oauth-client-id",
+                    clientSecretInput: "#ldb-notion-oauth-client-secret",
+                    redirectUriInput: "#ldb-notion-oauth-redirect-uri",
+                    authorizeBtn: "#ldb-notion-oauth-authorize",
+                    clearBtn: "#ldb-notion-oauth-clear",
+                    statusEl: "#ldb-notion-oauth-status",
+                },
+                notify: (message, type) => NotionSiteUI.showStatus(message, type),
+            });
         },
 
         // 加载配置
@@ -10736,7 +11276,7 @@ ${availableTools}
                     const aiModel = selectedModel || provider?.defaultModel || "";
 
                     return {
-                        notionApiKey: notionPanel.querySelector("#ldb-notion-api-key")?.value.trim() || Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
+                        notionApiKey: NotionOAuth.getAccessToken(notionPanel.querySelector("#ldb-notion-api-key")?.value.trim()),
                         notionDatabaseId: (() => {
                             const targetDb = notionPanel.querySelector("#ldb-notion-ai-target-db")?.value || "";
                             if (targetDb && targetDb !== "__all__" && !targetDb.startsWith("page:")) return targetDb;
@@ -11700,6 +12240,18 @@ ${availableTools}
                                 </div>
                             </div>
                             <div class="ldb-input-group">
+                                <label class="ldb-label">公开 OAuth 授权（可选）</label>
+                                <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID">
+                                <input type="password" class="ldb-input" id="ldb-oauth-client-secret" placeholder="Client Secret" style="margin-top: 8px;">
+                                <input type="text" class="ldb-input" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" style="margin-top: 8px;">
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
+                                    <button class="ldb-btn ldb-btn-primary" id="ldb-oauth-authorize">🔐 一键授权</button>
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">断开授权</button>
+                                </div>
+                                <div class="ldb-tip" id="ldb-oauth-status" style="margin-top: 6px;"></div>
+                                <div class="ldb-tip">如果你使用 Notion 公开集成，请先把 Redirect URI 加到集成配置里，再点击一键授权。当前项目为纯前端运行，Client Secret 会保存在本地。</div>
+                            </div>
+                            <div class="ldb-input-group">
                                 <label class="ldb-label">数据库 / 页面</label>
                                 <div style="display: flex; gap: 8px;">
                                     <select class="ldb-select" id="ldb-workspace-select" style="flex: 1;">
@@ -12228,7 +12780,8 @@ ${availableTools}
             (refs.validateConfigBtn || panel.querySelector("#ldb-validate-config")).onclick = async () => {
                 const btn = refs.validateConfigBtn || panel.querySelector("#ldb-validate-config");
                 const statusSpan = refs.configStatus || panel.querySelector("#ldb-config-status");
-                const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const liveApiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const apiKey = NotionOAuth.getAccessToken(liveApiKey);
                 const exportTargetType = (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked ? "page" : "database";
                 const databaseId = (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value.trim();
                 const parentPageId = (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value.trim();
@@ -12262,7 +12815,9 @@ ${availableTools}
                         if (result.valid) {
                             statusSpan.textContent = "✅ 验证成功";
                             statusSpan.style.color = "#34d399";
-                            Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
+                            if (liveApiKey) {
+                                NotionOAuth.setManualApiKey(liveApiKey);
+                            }
                             Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, databaseId);
                         }
                     } else {
@@ -12270,7 +12825,9 @@ ${availableTools}
                         if (result.valid) {
                             statusSpan.textContent = "✅ 验证成功";
                             statusSpan.style.color = "#34d399";
-                            Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
+                            if (liveApiKey) {
+                                NotionOAuth.setManualApiKey(liveApiKey);
+                            }
                             Storage.set(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, parentPageId);
                         }
                     }
@@ -12290,7 +12847,8 @@ ${availableTools}
 
             // 自动设置数据库属性
             (refs.setupDatabaseBtn || panel.querySelector("#ldb-setup-database")).onclick = async () => {
-                const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const liveApiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const apiKey = NotionOAuth.getAccessToken(liveApiKey);
                 const databaseId = (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value.trim();
                 const statusSpan = refs.configStatus || panel.querySelector("#ldb-config-status");
 
@@ -12318,7 +12876,9 @@ ${availableTools}
                         statusSpan.textContent = `✅ ${result.message}`;
                         statusSpan.style.color = "#34d399";
                         // 保存配置
-                        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
+                        if (liveApiKey) {
+                            NotionOAuth.setManualApiKey(liveApiKey);
+                        }
                         Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, databaseId);
                     } else {
                         statusSpan.textContent = `❌ ${result.error}`;
@@ -12349,7 +12909,7 @@ ${availableTools}
                     }
 
                     // 检查 Notion 配置是否完整
-                    const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                    const apiKey = NotionOAuth.getAccessToken((refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim());
                     if (!apiKey) {
                         AutoImporter.updateStatus("⚠️ 请先配置 Notion API Key");
                         return;
@@ -12645,7 +13205,8 @@ ${availableTools}
 
             // 开始导出
             (refs.exportBtn || panel.querySelector("#ldb-export")).onclick = async () => {
-                const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const liveApiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const apiKey = NotionOAuth.getAccessToken(liveApiKey);
                 const exportTargetType = (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked ? "page" : "database";
                 const databaseId = (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value.trim();
                 const parentPageId = (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value.trim();
@@ -12704,7 +13265,9 @@ ${availableTools}
                 };
 
                 // 保存设置
-                Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, apiKey);
+                if (liveApiKey) {
+                    NotionOAuth.setManualApiKey(liveApiKey);
+                }
                 Storage.set(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, exportTargetType);
                 if (exportTargetType === "database") {
                     Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, databaseId);
@@ -12823,7 +13386,12 @@ ${availableTools}
 
             // 输入框自动保存
             (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).onchange = (e) => {
-                Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, e.target.value.trim());
+                const value = e.target.value.trim();
+                if (value) {
+                    NotionOAuth.setManualApiKey(value);
+                } else if (NotionOAuth.getAuthMode() !== "oauth") {
+                    NotionOAuth.setManualApiKey("");
+                }
             };
             (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, e.target.value.trim());
@@ -12838,7 +13406,7 @@ ${availableTools}
 
             // 刷新工作区页面列表
             (refs.refreshWorkspaceBtn || panel.querySelector("#ldb-refresh-workspace")).onclick = async () => {
-                const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const apiKey = NotionOAuth.getAccessToken((refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim());
                 const refreshBtn = refs.refreshWorkspaceBtn || panel.querySelector("#ldb-refresh-workspace");
                 const workspaceTip = refs.workspaceTip || panel.querySelector("#ldb-workspace-tip");
 
@@ -12999,7 +13567,7 @@ ${availableTools}
 
             // 刷新 AI 数据库列表
             (refs.aiRefreshDbsBtn || panel.querySelector("#ldb-ai-refresh-dbs")).onclick = async () => {
-                const apiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const apiKey = NotionOAuth.getAccessToken((refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim());
                 const refreshBtn = refs.aiRefreshDbsBtn || panel.querySelector("#ldb-ai-refresh-dbs");
 
                 if (!apiKey) {
@@ -13106,6 +13674,19 @@ ${availableTools}
                     btn.innerHTML = "🧪 测试";
                 }
             };
+
+            NotionOAuth.attachControls({
+                root: panel,
+                selectors: {
+                    clientIdInput: "#ldb-oauth-client-id",
+                    clientSecretInput: "#ldb-oauth-client-secret",
+                    redirectUriInput: "#ldb-oauth-redirect-uri",
+                    authorizeBtn: "#ldb-oauth-authorize",
+                    clearBtn: "#ldb-oauth-clear",
+                    statusEl: "#ldb-oauth-status",
+                },
+                notify: (message, type) => UI.showStatus(message, type),
+            });
 
             // 拖拽
             UI.makeDraggable(panel, panel.querySelector(".ldb-header"));
@@ -13250,7 +13831,7 @@ ${availableTools}
             const cachedWorkspace = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
             try {
                 const workspaceData = JSON.parse(cachedWorkspace);
-                const currentApiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const currentApiKey = NotionOAuth.getAccessToken((refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim());
                 const currentKeyHash = currentApiKey ? currentApiKey.slice(-8) : "";
                 // 仅当 API Key 匹配时才显示缓存
                 if (workspaceData.apiKeyHash === currentKeyHash &&
@@ -14218,6 +14799,18 @@ ${availableTools}
                             </div>
                         </div>
                         <div class="gclip-field">
+                            <label>Notion OAuth（公开集成）</label>
+                            <input type="text" id="gclip-oauth-client-id" class="gclip-input" placeholder="Client ID">
+                            <input type="password" id="gclip-oauth-client-secret" class="gclip-input" placeholder="Client Secret" style="margin-top:8px;">
+                            <input type="text" id="gclip-oauth-redirect-uri" class="gclip-input" placeholder="Redirect URI" style="margin-top:8px;">
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                <button class="gclip-btn gclip-btn-primary" id="gclip-oauth-authorize" style="padding:4px 12px;font-size:12px;">🔐 一键授权</button>
+                                <button class="gclip-btn gclip-btn-secondary" id="gclip-oauth-clear" style="padding:4px 12px;font-size:12px;">断开授权</button>
+                            </div>
+                            <div id="gclip-oauth-status" style="font-size:11px;color:var(--ldb-ui-muted);margin-top:6px;"></div>
+                            <div style="font-size:11px;color:var(--ldb-ui-muted);margin-top:4px;">公开 OAuth 适合个人自建集成；Client Secret 将保存在本地浏览器存储中。</div>
+                        </div>
+                        <div class="gclip-field">
                             <label>导出目标类型</label>
                             <select id="gclip-export-type">
                                 <option value="database" ${exportType === "database" ? "selected" : ""}>数据库</option>
@@ -14443,7 +15036,7 @@ ${availableTools}
             // 刷新工作区目标列表
             panel.querySelector("#gclip-refresh-workspace").addEventListener("click", async () => {
                 const keyInput = panel.querySelector("#gclip-api-key-input").value.trim();
-                const apiKey = keyInput || Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+                const apiKey = NotionOAuth.getAccessToken(keyInput);
                 await GenericUI.refreshWorkspaceTargets(apiKey);
             });
 
@@ -14458,7 +15051,7 @@ ${availableTools}
             panel.querySelector("#gclip-save-api-key").addEventListener("click", () => {
                 const key = panel.querySelector("#gclip-api-key-input").value.trim();
                 if (key) {
-                    Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, key);
+                    NotionOAuth.setManualApiKey(key);
                     panel.querySelector("#gclip-api-key-input").value = "";
                     panel.querySelector("#gclip-api-key-input").placeholder = "已配置 (点击保存可更新)";
                     GenericUI.showStatus("API Key 已保存", "success");
@@ -14472,7 +15065,7 @@ ${availableTools}
                 // 仅当用户主动输入了新 key 时才更新（不从 DOM 预填，防止泄漏）
                 const liveKey = panel.querySelector("#gclip-api-key-input").value.trim();
                 if (liveKey) {
-                    Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, liveKey);
+                    NotionOAuth.setManualApiKey(liveKey);
                     panel.querySelector("#gclip-api-key-input").value = "";
                     panel.querySelector("#gclip-api-key-input").placeholder = "已配置 (点击保存可更新)";
                 }
@@ -14508,6 +15101,19 @@ ${availableTools}
                 panel.querySelector("#gclip-settings").style.display = "none";
                 panel.querySelector("#gclip-export").style.display = "block";
                 panel.querySelector("#gclip-show-settings").style.display = "block";
+            });
+
+            NotionOAuth.attachControls({
+                root: panel,
+                selectors: {
+                    clientIdInput: "#gclip-oauth-client-id",
+                    clientSecretInput: "#gclip-oauth-client-secret",
+                    redirectUriInput: "#gclip-oauth-redirect-uri",
+                    authorizeBtn: "#gclip-oauth-authorize",
+                    clearBtn: "#gclip-oauth-clear",
+                    statusEl: "#gclip-oauth-status",
+                },
+                notify: (message, type) => GenericUI.showStatus(message, type),
             });
 
             // 显示设置（不在 DOM 中预填 API Key，防止第三方页面读取）
@@ -14638,9 +15244,11 @@ ${availableTools}
     // 入口
     // ===========================================
     function main() {
-        const initUI = () => {
+        const initUI = async () => {
             // 初始化主题系统
             DesignSystem.initTheme();
+            await NotionOAuth.handleRedirectCallback();
+            NotionOAuth.syncApiKeyInputs();
 
             const currentSite = SiteDetector.detect();
 
@@ -14664,6 +15272,17 @@ ${availableTools}
             } else if (currentSite === SiteDetector.SITES.GENERIC) {
                 // 通用网页：初始化剪藏按钮
                 GenericUI.init();
+            }
+
+            const notice = NotionOAuth.consumeNotice();
+            if (notice?.message) {
+                if (currentSite === SiteDetector.SITES.NOTION && typeof NotionSiteUI.showStatus === "function") {
+                    NotionSiteUI.showStatus(notice.message, notice.type || "info");
+                } else if (currentSite === SiteDetector.SITES.GENERIC && typeof GenericUI.showStatus === "function") {
+                    GenericUI.showStatus(notice.message, notice.type || "info");
+                } else if (typeof UI.showStatus === "function") {
+                    UI.showStatus(notice.message, notice.type || "info");
+                }
             }
         };
 

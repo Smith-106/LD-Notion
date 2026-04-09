@@ -194,6 +194,24 @@ node scripts/build-extension.js
 6. 点击 Submit
 7. 复制生成的 Internal Integration Token（以 `secret_` 开头）
 
+### 1.1 可选：使用公开 OAuth 一键授权
+
+如果你不想手动粘贴 Token，现在也可以改用 Notion 公开集成的 OAuth 授权流：
+
+1. 在你的 Notion 集成设置里启用 Public/Distribution 能力
+2. 添加 Redirect URI
+   - 推荐填 `https://www.notion.so/`
+   - LD-Notion 的 userscript 和 `chrome-extension-full` 都能在这个地址接住回调
+3. 复制该公开集成的 `Client ID` 和 `Client Secret`
+4. 在 LD-Notion 面板里填写 `Client ID`、`Client Secret`、`Redirect URI`
+5. 点击 `🔐 一键授权`
+6. 完成 Notion 授权后，LD-Notion 会自动把 access token 写入本地配置，后续功能继续按原来的 API Key 流工作
+
+注意：
+- 当前项目是纯前端运行，没有单独后端，因此 `Client Secret` 会保存在你的本地浏览器存储中
+- 这更适合个人自建公开集成，不建议把共享的生产级公开集成 secret 直接放进前端
+- 面板里的“断开授权”只会清除本地保存的 OAuth 凭据，不会撤销 Notion 后台已经批准的授权
+
 ### 2. 创建数据库
 
 在 Notion 中创建一个数据库，需要包含以下属性：
@@ -232,10 +250,13 @@ https://www.notion.so/xxx/32位数据库ID?v=xxx
 1. 推荐访问收藏页：`https://linux.do/u/你的用户名/activity/bookmarks`
 2. 已登录状态下，不在 bookmarks 页也可加载 Linux.do 收藏并导出
 3. 页面右侧会出现工具面板
-4. 填写 Notion API Key，点击刷新并从工作区下拉框选择目标（加载失败时可在高级项手动输入 ID）
-5. 点击「加载收藏列表」获取收藏
-6. 勾选要导出的帖子，调整筛选设置
-7. 点击「开始导出」
+4. 二选一完成 Notion 授权
+   - 手动模式：填写 Notion API Key
+   - OAuth 模式：填写 Client ID / Client Secret / Redirect URI，然后点击 `🔐 一键授权`
+5. 点击刷新并从工作区下拉框选择目标（加载失败时可在高级项手动输入 ID）
+6. 点击「加载收藏列表」获取收藏
+7. 勾选要导出的帖子，调整筛选设置
+8. 点击「开始导出」
 
 ### 自动导入
 

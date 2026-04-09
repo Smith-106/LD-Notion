@@ -4,7 +4,7 @@
   "description": "LD-Notion Hub — AI 多源知识中枢",
   "main": "LinuxDo-Bookmarks-to-Notion.user.js",
   "scripts": {
-    "test": "node tests/utils.test.js"
+    "test": "node tests/utils.test.js && node tests/notion-oauth.test.js"
   },
   "keywords": [],
   "author": "Smith-106",

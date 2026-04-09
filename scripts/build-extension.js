@@ -175,89 +175,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // 5. 在 IIFE body 中将 BookmarkBridge 替换为直接使用 chrome.bookmarks API 的版本
 // 原版通过 CustomEvent 与配套扩展通信，扩展版直接拥有 bookmarks 权限无需桥接
-const bookmarkBridgeOriginal = `const BookmarkBridge = {
-        _requestId: 0,
-        _pendingRequests: {},
-
-        // 检测配套 Chrome 扩展是否已安装
-        isExtensionAvailable: () => {
-            return !!document.querySelector('meta[name="ld-notion-ext"][content="ready"]');
-        },`;
-
-const bookmarkBridgeReplacement = `const BookmarkBridge = {
-        _requestId: 0,
-        _pendingRequests: {},
-
-        // Chrome 扩展版：直接使用 chrome.bookmarks API，无需桥接
-        isExtensionAvailable: () => {
-            return !!(typeof chrome !== "undefined" && chrome.bookmarks);
-        },`;
+const bookmarkBridgeAvailabilityPattern = /(\s*const BookmarkBridge = \{\r?\n\s*_requestId: 0,\r?\n\s*_pendingRequests: \{\},\r?\n\r?\n\s*\/\/ 检测配套 Chrome 扩展是否已安装\r?\n\s*isExtensionAvailable: \(\) => \{\r?\n)\s*return !!document\.querySelector\('meta\[name="ld-notion-ext"\]\[content="ready"\]'\);\r?\n(\s*\},)/;
 
 let patchedBody = iifeBody;
-if (iifeBody.includes(bookmarkBridgeOriginal)) {
-    patchedBody = iifeBody.replace(bookmarkBridgeOriginal, bookmarkBridgeReplacement);
+if (bookmarkBridgeAvailabilityPattern.test(iifeBody)) {
+    patchedBody = iifeBody.replace(
+        bookmarkBridgeAvailabilityPattern,
+        `$1            return !!(typeof chrome !== "undefined" && chrome.bookmarks);\n$2`
+    );
     console.log("🔧 BookmarkBridge.isExtensionAvailable 已替换为 chrome.bookmarks 检测");
 } else {
     console.warn("⚠️  未找到 BookmarkBridge 原始代码，跳过书签 API 补丁");
 }
 
 // 替换 BookmarkBridge 的请求方法为直接 API 调用
-const requestOriginal = `// 发起书签请求
-        _request: (eventName, detail = {}) => {
-            return new Promise((resolve, reject) => {
-                if (!BookmarkBridge.isExtensionAvailable()) {
-                    reject(new Error("未检测到 LD-Notion 书签桥接扩展。请先安装 chrome-extension 目录中的扩展。"));
-                    return;
-                }
-
-                const requestId = \`req_\${++BookmarkBridge._requestId}_\${Date.now()}\`;
-                const timeout = setTimeout(() => {
-                    delete BookmarkBridge._pendingRequests[requestId];
-                    reject(new Error("书签请求超时，请检查扩展是否正常运行。"));
-                }, 10000);
-
-                BookmarkBridge._pendingRequests[requestId] = { resolve, reject, timeout };
-
-                window.dispatchEvent(new CustomEvent(eventName, {
-                    detail: { requestId, ...detail }
-                }));
-            });
-        },
-
-        // 获取书签树
-        getBookmarkTree: () => {
-            return BookmarkBridge._request("ld-notion-request-bookmarks");
-        },
-
-        // 获取指定文件夹的书签
-        getBookmarks: (folderId) => {
-            return BookmarkBridge._request("ld-notion-request-bookmarks", { folderId });
-        },
-
-        // 搜索书签
-        searchBookmarks: (query) => {
-            return BookmarkBridge._request("ld-notion-search-bookmarks", { query });
-        },
-
-        // 初始化响应监听器
-        init: () => {
-            window.addEventListener("ld-notion-bookmarks-data", (event) => {
-                const { requestId, success, data, error } = event.detail || {};
-                const pending = BookmarkBridge._pendingRequests[requestId];
-                if (!pending) return;
-
-                clearTimeout(pending.timeout);
-                delete BookmarkBridge._pendingRequests[requestId];
-
-                if (success) {
-                    pending.resolve(data);
-                } else {
-                    pending.reject(new Error(error || "书签请求失败"));
-                }
-            });
-        },
-    };`;
-
 const requestReplacement = `// Chrome 扩展版：直接调用 chrome.bookmarks API
         _request: () => { throw new Error("扩展版不使用 _request"); },
 
@@ -280,8 +211,10 @@ const requestReplacement = `// Chrome 扩展版：直接调用 chrome.bookmarks 
         init: () => {},
     };`;
 
-if (patchedBody.includes(requestOriginal)) {
-    patchedBody = patchedBody.replace(requestOriginal, requestReplacement);
+const requestPattern = /\s*\/\/ 发起书签请求\r?\n\s*_request: \(eventName, detail = \{\}\) => \{[\s\S]*?\s*\/\/ 初始化响应监听器\r?\n\s*init: \(\) => \{[\s\S]*?\s*\},\r?\n\s*\};/;
+
+if (requestPattern.test(patchedBody)) {
+    patchedBody = patchedBody.replace(requestPattern, `\n    ${requestReplacement}`);
     console.log("🔧 BookmarkBridge 请求方法已替换为 chrome.bookmarks 直接调用");
 } else {
     console.warn("⚠️  未找到 BookmarkBridge._request 原始代码，跳过请求方法补丁");
