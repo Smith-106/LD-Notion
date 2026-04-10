@@ -1,28 +1,33 @@
-# Testing Utils
+# Test Suite
 
-This directory contains unit tests for utility functions in `LinuxDo-Bookmarks-to-Notion.user.js`.
+This directory contains the Node-based regression tests for `LinuxDo-Bookmarks-to-Notion.user.js`.
 
-## How it works
+## Verification model
 
-The tests run in Node.js. To avoid duplicating code and ensure we are testing the actual production logic, the tests programmatically extract the function bodies from the userscript file.
+- `npm test` runs `tests/utils.test.js` and `tests/notion-oauth.test.js`.
+- Both test files read the production userscript, strip the userscript header and IIFE wrapper, and execute the current core in a sandbox with `new Function()`.
+- This is intentional: the tests are tied to the shipped userscript, so they catch both behavior regressions and source-shape changes that would break the existing harness or build pipeline.
 
-The `extractGetPageTitle` function in `utils.test.js`:
-1. Reads the `LinuxDo-Bookmarks-to-Notion.user.js` file.
-2. Uses a regular expression to locate the start of the `getPageTitle` function.
-3. Uses brace counting to find the end of the function body.
-4. Validates that the extracted code contains expected logic patterns (e.g., loops and return statements).
-5. Uses `new Function()` to create a testable version of the function.
+## Current coverage
 
-## Why this approach?
-
-- **No Duplication:** We don't have to maintain two versions of the same logic.
-- **Production-Ready:** Tests run against the exact code that will be used by users.
-- **Self-Validating:** The extraction logic fails if the userscript structure changes significantly, alerting developers to update the tests or extraction mechanism.
+- `utils.test.js`
+  - `Utils.getPageTitle`
+  - `Utils.extractNotionId`
+  - `Utils.extractQuotedText`
+  - `Utils.extractQuotedTexts`
+- `notion-oauth.test.js`
+  - Notion OAuth callback handling, failure notice flow, manual fallback, and 401 refresh retry
+  - `TargetState` behavior for AI target vs export target separation
+  - `quickParseIntent` positive and negative coverage for page / block / comment / database phrasing
+  - structured `assistant_result v1` / tool output normalization
+  - selected `AGENT_TOOLS` structured output behavior
+  - `scripts/build-extension.js` smoke build against the current userscript shape
 
 ## Running tests
 
-Run the following command from the project root:
+From the project root:
 
 ```bash
 npm test
+node --check LinuxDo-Bookmarks-to-Notion.user.js
 ```
