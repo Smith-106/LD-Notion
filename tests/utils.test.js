@@ -210,4 +210,53 @@ runTest('getPageTitle: returns fallback when title array is empty', () => {
     assert.strictEqual(Utils.getPageTitle(page, 'Empty'), 'Empty');
 });
 
+runTest('extractNotionId: returns raw 32-char notion id', () => {
+    assert.strictEqual(
+        Utils.extractNotionId('1234567890abcdef1234567890abcdef'),
+        '1234567890abcdef1234567890abcdef'
+    );
+});
+
+runTest('extractNotionId: normalizes dashed notion id', () => {
+    assert.strictEqual(
+        Utils.extractNotionId('12345678-90ab-cdef-1234-567890abcdef'),
+        '1234567890abcdef1234567890abcdef'
+    );
+});
+
+runTest('extractNotionId: extracts notion id from notion page url', () => {
+    assert.strictEqual(
+        Utils.extractNotionId('https://www.notion.so/My-Page-1234567890abcdef1234567890abcdef'),
+        '1234567890abcdef1234567890abcdef'
+    );
+});
+
+runTest('extractNotionId: returns empty string when notion id is absent', () => {
+    assert.strictEqual(
+        Utils.extractNotionId('这不是 Notion 链接'),
+        ''
+    );
+});
+
+runTest('extractQuotedText: extracts chinese quoted content', () => {
+    assert.strictEqual(
+        Utils.extractQuotedText('请把 block_abc 改成“新的内容”'),
+        '新的内容'
+    );
+});
+
+runTest('extractQuotedTexts: extracts multiple quoted fragments in order', () => {
+    assert.deepStrictEqual(
+        Utils.extractQuotedTexts('在“项目计划”页面插入“新增说明”'),
+        ['项目计划', '新增说明']
+    );
+});
+
+runTest('extractQuotedTexts: returns empty array when no quoted fragments exist', () => {
+    assert.deepStrictEqual(
+        Utils.extractQuotedTexts('没有任何引用内容'),
+        []
+    );
+});
+
 console.log('\nAll tests passed successfully!');

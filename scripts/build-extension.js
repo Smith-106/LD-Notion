@@ -8,28 +8,197 @@
 const fs = require("fs");
 const path = require("path");
 
-const SRC = path.resolve(__dirname, "..", "LinuxDo-Bookmarks-to-Notion.user.js");
-const OUT_DIR = path.resolve(__dirname, "..", "chrome-extension-full");
-
-// 1. 读取源文件
-const source = fs.readFileSync(SRC, "utf-8");
-
-// 2. 提取 IIFE 内部代码（去掉 userscript 元数据和 IIFE 包装）
-const iifeStart = source.indexOf('(function () {');
-const iifeEnd = source.lastIndexOf('})();');
-if (iifeStart === -1 || iifeEnd === -1) {
-    console.error("❌ 无法定位 IIFE 边界");
-    process.exit(1);
+function resolveBuildPaths({ src, outDir } = {}) {
+    const resolvedSrc = src || process.env.LD_NOTION_BUILD_SRC || path.resolve(__dirname, "..", "LinuxDo-Bookmarks-to-Notion.user.js");
+    const resolvedOutDir = outDir || process.env.LD_NOTION_BUILD_OUT_DIR || path.resolve(__dirname, "..", "chrome-extension-full");
+    return {
+        src: path.resolve(resolvedSrc),
+        outDir: path.resolve(resolvedOutDir),
+    };
 }
 
-// 提取 IIFE 内部代码（不含包装）
-const iifeBody = source.substring(iifeStart + '(function () {'.length, iifeEnd);
+function extractUserscriptVersion(source) {
+    return source.match(/@version\s+(\S+)/)?.[1] || "3.2.0";
+}
 
-// 3. 生成输出目录
-if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
+function extractUserscriptIifeBody(source) {
+    if (typeof source !== "string" || !source.trim()) {
+        throw new Error("用户脚本源码为空");
+    }
 
-// 4. 生成 GM_* 垫片
-const gmShim = `/**
+    const iifeStartMatch = /\(function\s*\(\)\s*\{/.exec(source);
+    const iifeEndMatch = /\}\)\(\);\s*$/.exec(source);
+    if (!iifeStartMatch || !iifeEndMatch || iifeEndMatch.index <= iifeStartMatch.index) {
+        throw new Error("无法定位 userscript IIFE 边界");
+    }
+
+    return source.slice(iifeStartMatch.index + iifeStartMatch[0].length, iifeEndMatch.index);
+}
+
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function indentBlock(content, indent) {
+    return content
+        .trim()
+        .split("\n")
+        .map((line) => `${indent}${line}`)
+        .join("\n");
+}
+
+function replaceArrowMethodBlock(objectSource, methodName, replacement) {
+    const pattern = new RegExp(
+        `(^|\\n)(\\s*)${escapeRegExp(methodName)}:\\s*\\([^)]*\\)\\s*=>\\s*\\{[\\s\\S]*?\\n\\2\\},`,
+        "m"
+    );
+
+    if (!pattern.test(objectSource)) {
+        throw new Error(`未找到 BookmarkBridge.${methodName} 的原始实现`);
+    }
+
+    return objectSource.replace(pattern, (match, prefix, indent) => {
+        return `${prefix}${indentBlock(replacement, indent)}`;
+    });
+}
+
+function findMatchingBrace(source, openIndex) {
+    let depth = 0;
+    let quote = "";
+    let escaped = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    for (let i = openIndex; i < source.length; i++) {
+        const char = source[i];
+        const next = source[i + 1];
+
+        if (inLineComment) {
+            if (char === "\n") inLineComment = false;
+            continue;
+        }
+
+        if (inBlockComment) {
+            if (char === "*" && next === "/") {
+                inBlockComment = false;
+                i++;
+            }
+            continue;
+        }
+
+        if (quote) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (char === "\\") {
+                escaped = true;
+                continue;
+            }
+            if (char === quote) {
+                quote = "";
+            }
+            continue;
+        }
+
+        if (char === "/" && next === "/") {
+            inLineComment = true;
+            i++;
+            continue;
+        }
+
+        if (char === "/" && next === "*") {
+            inBlockComment = true;
+            i++;
+            continue;
+        }
+
+        if (char === "'" || char === '"' || char === "`") {
+            quote = char;
+            continue;
+        }
+
+        if (char === "{") {
+            depth++;
+            continue;
+        }
+
+        if (char === "}") {
+            depth--;
+            if (depth === 0) {
+                return i;
+            }
+        }
+    }
+
+    throw new Error("未找到匹配的对象结束大括号");
+}
+
+function patchBookmarkBridgeForExtension(iifeBody) {
+    const declaration = "const BookmarkBridge = {";
+    const objectStart = iifeBody.indexOf(declaration);
+    if (objectStart === -1) {
+        throw new Error("未找到 BookmarkBridge 对象");
+    }
+
+    const braceStart = iifeBody.indexOf("{", objectStart);
+    const braceEnd = findMatchingBrace(iifeBody, braceStart);
+    const semicolonIndex = iifeBody.indexOf(";", braceEnd);
+    if (semicolonIndex === -1) {
+        throw new Error("未找到 BookmarkBridge 对象结束分号");
+    }
+
+    const originalObject = iifeBody.slice(objectStart, semicolonIndex + 1);
+    let patchedObject = originalObject;
+
+    const methodReplacements = {
+        isExtensionAvailable: `
+isExtensionAvailable: () => {
+    return !!(typeof chrome !== "undefined" && chrome.bookmarks);
+},`,
+        _request: `
+_request: () => {
+    throw new Error("扩展版不使用 _request");
+},`,
+        getBookmarkTree: `
+getBookmarkTree: () => {
+    return chrome.bookmarks.getTree();
+},`,
+        getBookmarks: `
+getBookmarks: (folderId) => {
+    return chrome.bookmarks.getChildren(folderId);
+},`,
+        searchBookmarks: `
+searchBookmarks: (query) => {
+    return chrome.bookmarks.search(query || "");
+},`,
+        init: `
+init: () => {},`,
+    };
+
+    const patchedMethods = [];
+    Object.entries(methodReplacements).forEach(([methodName, replacement]) => {
+        patchedObject = replaceArrowMethodBlock(patchedObject, methodName, replacement);
+        patchedMethods.push(methodName);
+    });
+
+    return {
+        code: `${iifeBody.slice(0, objectStart)}${patchedObject}${iifeBody.slice(semicolonIndex + 1)}`,
+        patchedMethods,
+    };
+}
+
+function buildExtension({ src, outDir, source } = {}) {
+    const paths = resolveBuildPaths({ src, outDir });
+    const resolvedSource = typeof source === "string" ? source : fs.readFileSync(paths.src, "utf8");
+    const iifeBody = extractUserscriptIifeBody(resolvedSource);
+    const { code: patchedBody, patchedMethods } = patchBookmarkBridgeForExtension(iifeBody);
+
+    if (!fs.existsSync(paths.outDir)) {
+        fs.mkdirSync(paths.outDir, { recursive: true });
+    }
+
+    const gmShim = `/**
  * GM_* API 垫片 — 将 Tampermonkey API 映射到 Chrome Extension API
  * 由 build-extension.js 自动生成
  */
@@ -173,55 +342,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 `;
 
-// 5. 在 IIFE body 中将 BookmarkBridge 替换为直接使用 chrome.bookmarks API 的版本
-// 原版通过 CustomEvent 与配套扩展通信，扩展版直接拥有 bookmarks 权限无需桥接
-const bookmarkBridgeAvailabilityPattern = /(\s*const BookmarkBridge = \{\r?\n\s*_requestId: 0,\r?\n\s*_pendingRequests: \{\},\r?\n\r?\n\s*\/\/ 检测配套 Chrome 扩展是否已安装\r?\n\s*isExtensionAvailable: \(\) => \{\r?\n)\s*return !!document\.querySelector\('meta\[name="ld-notion-ext"\]\[content="ready"\]'\);\r?\n(\s*\},)/;
-
-let patchedBody = iifeBody;
-if (bookmarkBridgeAvailabilityPattern.test(iifeBody)) {
-    patchedBody = iifeBody.replace(
-        bookmarkBridgeAvailabilityPattern,
-        `$1            return !!(typeof chrome !== "undefined" && chrome.bookmarks);\n$2`
-    );
-    console.log("🔧 BookmarkBridge.isExtensionAvailable 已替换为 chrome.bookmarks 检测");
-} else {
-    console.warn("⚠️  未找到 BookmarkBridge 原始代码，跳过书签 API 补丁");
-}
-
-// 替换 BookmarkBridge 的请求方法为直接 API 调用
-const requestReplacement = `// Chrome 扩展版：直接调用 chrome.bookmarks API
-        _request: () => { throw new Error("扩展版不使用 _request"); },
-
-        // 获取书签树
-        getBookmarkTree: () => {
-            return chrome.bookmarks.getTree();
-        },
-
-        // 获取指定文件夹的书签
-        getBookmarks: (folderId) => {
-            return chrome.bookmarks.getChildren(folderId);
-        },
-
-        // 搜索书签
-        searchBookmarks: (query) => {
-            return chrome.bookmarks.search(query || "");
-        },
-
-        // 初始化（扩展版无需初始化响应监听器）
-        init: () => {},
-    };`;
-
-const requestPattern = /\s*\/\/ 发起书签请求\r?\n\s*_request: \(eventName, detail = \{\}\) => \{[\s\S]*?\s*\/\/ 初始化响应监听器\r?\n\s*init: \(\) => \{[\s\S]*?\s*\},\r?\n\s*\};/;
-
-if (requestPattern.test(patchedBody)) {
-    patchedBody = patchedBody.replace(requestPattern, `\n    ${requestReplacement}`);
-    console.log("🔧 BookmarkBridge 请求方法已替换为 chrome.bookmarks 直接调用");
-} else {
-    console.warn("⚠️  未找到 BookmarkBridge._request 原始代码，跳过请求方法补丁");
-}
-
-// 6. 生成 content script（GM 垫片 + 补丁后 IIFE 内部代码）
-const contentScript = `// LD-Notion Chrome Extension — Content Script
+    const contentScript = `// LD-Notion Chrome Extension — Content Script
 // 由 build-extension.js 从油猴脚本自动生成
 // 版本同步自: LinuxDo-Bookmarks-to-Notion.user.js
 
@@ -237,8 +358,7 @@ ${patchedBody}
 })();
 `;
 
-// 7. 生成 background service worker（处理 CORS 代理）
-const backgroundJs = `// LD-Notion Chrome Extension — Background Service Worker
+    const backgroundJs = `// LD-Notion Chrome Extension — Background Service Worker
 // 代理 HTTP 请求以绕过 CORS 限制
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -284,8 +404,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 `;
 
-// 8. 生成 popup.html（扩展弹出窗口 — 快速入口）
-const popupHtml = `<!DOCTYPE html>
+    const popupHtml = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -361,8 +480,7 @@ body { width: 320px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
 </body>
 </html>`;
 
-// 9. 生成 popup.js
-const popupJs = `// LD-Notion Popup
+    const popupJs = `// LD-Notion Popup
 document.addEventListener("DOMContentLoaded", async () => {
     // 检查 Notion API 配置
     const data = await chrome.storage.local.get(["ldb_notion_api_key"]);
@@ -449,88 +567,105 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 `;
 
-// 10. 生成 manifest.json
-const manifest = {
-    manifest_version: 3,
-    name: "LD-Notion — Notion AI 助手 & 多源收藏管理",
-    version: source.match(/@version\s+(\S+)/)?.[1] || "3.2.0",
-    description: "将 Linux.do、GitHub、浏览器书签与 Notion 深度连接：AI 对话式助手、批量导出收藏、跨源智能搜索与推荐",
-    permissions: [
-        "storage",
-        "bookmarks",
-        "notifications",
-        "activeTab"
-    ],
-    host_permissions: [
-        "https://api.notion.com/*",
-        "https://linux.do/*",
-        "https://*.amazonaws.com/*",
-        "https://api.openai.com/*",
-        "https://api.anthropic.com/*",
-        "https://generativelanguage.googleapis.com/*",
-        "https://api.github.com/*",
-        "http://*/*",
-        "https://*/*"
-    ],
-    action: {
-        default_popup: "popup.html",
-        default_title: "LD-Notion"
-    },
-    background: {
-        service_worker: "background.js"
-    },
-    content_scripts: [
-        {
-            matches: [
-                "https://linux.do/*",
-                "https://www.notion.so/*",
-                "https://notion.so/*"
-            ],
-            js: ["content.js"],
-            run_at: "document_idle"
+    const manifest = {
+        manifest_version: 3,
+        name: "LD-Notion — Notion AI 助手 & 多源收藏管理",
+        version: extractUserscriptVersion(resolvedSource),
+        description: "将 Linux.do、GitHub、浏览器书签与 Notion 深度连接：AI 对话式助手、批量导出收藏、跨源智能搜索与推荐",
+        permissions: [
+            "storage",
+            "bookmarks",
+            "notifications",
+            "activeTab"
+        ],
+        host_permissions: [
+            "https://api.notion.com/*",
+            "https://linux.do/*",
+            "https://*.amazonaws.com/*",
+            "https://api.openai.com/*",
+            "https://api.anthropic.com/*",
+            "https://generativelanguage.googleapis.com/*",
+            "https://api.github.com/*",
+            "http://*/*",
+            "https://*/*"
+        ],
+        action: {
+            default_popup: "popup.html",
+            default_title: "LD-Notion"
+        },
+        background: {
+            service_worker: "background.js"
+        },
+        content_scripts: [
+            {
+                matches: [
+                    "https://linux.do/*",
+                    "https://www.notion.so/*",
+                    "https://notion.so/*"
+                ],
+                js: ["content.js"],
+                run_at: "document_idle"
+            }
+        ],
+        icons: {
+            48: "icon48.png",
+            128: "icon128.png"
         }
-    ],
-    icons: {
-        48: "icon48.png",
-        128: "icon128.png"
-    }
-};
+    };
 
-// 11. 写入文件
-fs.writeFileSync(path.join(OUT_DIR, "content.js"), contentScript, "utf-8");
-fs.writeFileSync(path.join(OUT_DIR, "background.js"), backgroundJs, "utf-8");
-fs.writeFileSync(path.join(OUT_DIR, "popup.html"), popupHtml, "utf-8");
-fs.writeFileSync(path.join(OUT_DIR, "popup.js"), popupJs, "utf-8");
-fs.writeFileSync(path.join(OUT_DIR, "manifest.json"), JSON.stringify(manifest, null, 2), "utf-8");
+    fs.writeFileSync(path.join(paths.outDir, "content.js"), contentScript, "utf8");
+    fs.writeFileSync(path.join(paths.outDir, "background.js"), backgroundJs, "utf8");
+    fs.writeFileSync(path.join(paths.outDir, "popup.html"), popupHtml, "utf8");
+    fs.writeFileSync(path.join(paths.outDir, "popup.js"), popupJs, "utf8");
+    fs.writeFileSync(path.join(paths.outDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
 
-// 复制书签桥接的 content script（已在 content script 中通过补丁直接使用 chrome.bookmarks API）
-console.log("ℹ️  书签 API 已通过 BookmarkBridge 补丁 + manifest permissions 直接获取");
+    console.log(`🔧 BookmarkBridge 扩展补丁已应用: ${patchedMethods.join(", ")}`);
+    console.log("ℹ️  书签 API 已通过 BookmarkBridge 补丁 + manifest permissions 直接获取");
 
-// 复制或生成图标
-["icon48.png", "icon128.png"].forEach(iconName => {
-    const src = path.resolve(__dirname, "..", "chrome-extension", iconName);
-    if (fs.existsSync(src)) {
-        fs.copyFileSync(src, path.join(OUT_DIR, iconName));
-        console.log(`📋 复制图标: ${iconName}`);
-    } else {
-        // 自动生成简约 PNG 图标
-        const size = parseInt(iconName.match(/\d+/)[0]);
-        const png = generateIcon(size);
-        fs.writeFileSync(path.join(OUT_DIR, iconName), png);
-        console.log(`🎨 生成图标: ${iconName} (${png.length} bytes)`);
-    }
-});
+    ["icon48.png", "icon128.png"].forEach((iconName) => {
+        const srcIcon = path.resolve(__dirname, "..", "chrome-extension", iconName);
+        if (fs.existsSync(srcIcon)) {
+            fs.copyFileSync(srcIcon, path.join(paths.outDir, iconName));
+            console.log(`📋 复制图标: ${iconName}`);
+        } else {
+            const size = parseInt(iconName.match(/\d+/)[0], 10);
+            const png = generateIcon(size);
+            fs.writeFileSync(path.join(paths.outDir, iconName), png);
+            console.log(`🎨 生成图标: ${iconName} (${png.length} bytes)`);
+        }
+    });
+
+    const contentSize = Buffer.byteLength(contentScript, "utf8");
+    console.log("\n✅ Chrome 扩展构建完成");
+    console.log(`   📁 输出目录: ${paths.outDir}`);
+    console.log(`   📄 content.js: ${(contentSize / 1024).toFixed(1)} KB`);
+    console.log("   📄 background.js: Service Worker (CORS 代理)");
+    console.log("   📄 manifest.json: Manifest V3");
+    console.log("\n   安装方式:");
+    console.log("   1. 打开 chrome://extensions/");
+    console.log("   2. 开启「开发者模式」");
+    console.log("   3. 点击「加载已解压的扩展程序」");
+    console.log(`   4. 选择 ${paths.outDir}`);
+
+    return {
+        outDir: paths.outDir,
+        patchedMethods,
+        contentPath: path.join(paths.outDir, "content.js"),
+        manifestPath: path.join(paths.outDir, "manifest.json"),
+    };
+}
 
 function generateIcon(size) {
     const zlib = require("zlib");
     const pixels = Buffer.alloc(size * size * 4);
-    const r = size * 0.2, thick = Math.max(2, Math.floor(size * 0.06));
+    const r = size * 0.2;
+    const thick = Math.max(2, Math.floor(size * 0.06));
 
     for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
             const i = (y * size + x) * 4;
-            const cx = x / size, cy = y / size;
-            // Rounded rectangle
+            const cx = x / size;
+            const cy = y / size;
             let inRect = true;
             const corners = [[r, r], [size - r - 1, r], [r, size - r - 1], [size - r - 1, size - r - 1]];
             if (x < r && y < r) inRect = Math.hypot(x - corners[0][0], y - corners[0][1]) <= r;
@@ -548,51 +683,90 @@ function generateIcon(size) {
         }
     }
 
-    // Draw "LN" letters
-    const ls = Math.floor(size * 0.4), sx = Math.floor(size * 0.15), sy = Math.floor(size * 0.3);
+    const ls = Math.floor(size * 0.4);
+    const sx = Math.floor(size * 0.15);
+    const sy = Math.floor(size * 0.3);
+
     function setW(px, py) {
-        for (let dx = 0; dx < thick; dx++) for (let dy = 0; dy < thick; dy++) {
-            const fx = px + dx, fy = py + dy;
-            if (fx < size && fy < size) { const j = (fy * size + fx) * 4; if (pixels[j + 3] > 0) pixels[j] = pixels[j + 1] = pixels[j + 2] = 255; }
+        for (let dx = 0; dx < thick; dx++) {
+            for (let dy = 0; dy < thick; dy++) {
+                const fx = px + dx;
+                const fy = py + dy;
+                if (fx < size && fy < size) {
+                    const j = (fy * size + fx) * 4;
+                    if (pixels[j + 3] > 0) {
+                        pixels[j] = 255;
+                        pixels[j + 1] = 255;
+                        pixels[j + 2] = 255;
+                    }
+                }
+            }
         }
     }
+
     for (let dy = 0; dy < ls; dy++) setW(sx, sy + dy);
     for (let dx = 0; dx < ls * 0.6; dx++) setW(sx + dx, sy + ls - thick);
     const ns = sx + Math.floor(ls * 0.7);
-    for (let dy = 0; dy < ls; dy++) { setW(ns, sy + dy); setW(ns + Math.floor(ls * 0.6), sy + dy); setW(ns + Math.floor(dy * ls * 0.6 / ls), sy + dy); }
+    for (let dy = 0; dy < ls; dy++) {
+        setW(ns, sy + dy);
+        setW(ns + Math.floor(ls * 0.6), sy + dy);
+        setW(ns + Math.floor(dy * ls * 0.6 / ls), sy + dy);
+    }
 
-    // Build PNG
     const raw = Buffer.alloc(size * (size * 4 + 1));
-    for (let y = 0; y < size; y++) { raw[y * (size * 4 + 1)] = 0; pixels.copy(raw, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4); }
+    for (let y = 0; y < size; y++) {
+        raw[y * (size * 4 + 1)] = 0;
+        pixels.copy(raw, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4);
+    }
     const compressed = zlib.deflateSync(raw);
 
-    function crc32(buf) {
-        let c = 0xFFFFFFFF;
-        const tbl = new Int32Array(256);
-        for (let n = 0; n < 256; n++) { let v = n; for (let k = 0; k < 8; k++) v = (v & 1) ? (0xEDB88320 ^ (v >>> 1)) : (v >>> 1); tbl[n] = v; }
-        for (let i = 0; i < buf.length; i++) c = tbl[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
-        return (c ^ 0xFFFFFFFF) >>> 0;
+    function crc32(buffer) {
+        let crc = 0xFFFFFFFF;
+        const table = new Int32Array(256);
+        for (let n = 0; n < 256; n++) {
+            let value = n;
+            for (let k = 0; k < 8; k++) {
+                value = (value & 1) ? (0xEDB88320 ^ (value >>> 1)) : (value >>> 1);
+            }
+            table[n] = value;
+        }
+        for (let i = 0; i < buffer.length; i++) {
+            crc = table[(crc ^ buffer[i]) & 0xFF] ^ (crc >>> 8);
+        }
+        return (crc ^ 0xFFFFFFFF) >>> 0;
     }
+
     function chunk(type, data) {
-        const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+        const len = Buffer.alloc(4);
+        len.writeUInt32BE(data.length);
         const td = Buffer.concat([Buffer.from(type), data]);
-        const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td));
+        const crc = Buffer.alloc(4);
+        crc.writeUInt32BE(crc32(td));
         return Buffer.concat([len, td, crc]);
     }
+
     const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4); ihdr[8] = 8; ihdr[9] = 6;
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(size, 0);
+    ihdr.writeUInt32BE(size, 4);
+    ihdr[8] = 8;
+    ihdr[9] = 6;
     return Buffer.concat([sig, chunk("IHDR", ihdr), chunk("IDAT", compressed), chunk("IEND", Buffer.alloc(0))]);
 }
 
-// 12. 报告
-const contentSize = Buffer.byteLength(contentScript, "utf-8");
-console.log(`\n✅ Chrome 扩展构建完成`);
-console.log(`   📁 输出目录: ${OUT_DIR}`);
-console.log(`   📄 content.js: ${(contentSize / 1024).toFixed(1)} KB`);
-console.log(`   📄 background.js: Service Worker (CORS 代理)`);
-console.log(`   📄 manifest.json: Manifest V3`);
-console.log(`\n   安装方式:`);
-console.log(`   1. 打开 chrome://extensions/`);
-console.log(`   2. 开启「开发者模式」`);
-console.log(`   3. 点击「加载已解压的扩展程序」`);
-console.log(`   4. 选择 ${OUT_DIR}`);
+module.exports = {
+    buildExtension,
+    extractUserscriptIifeBody,
+    extractUserscriptVersion,
+    patchBookmarkBridgeForExtension,
+    resolveBuildPaths,
+};
+
+if (require.main === module) {
+    try {
+        buildExtension();
+    } catch (error) {
+        console.error(`❌ ${error.message}`);
+        process.exit(1);
+    }
+}
