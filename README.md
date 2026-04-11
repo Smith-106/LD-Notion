@@ -4,12 +4,12 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前版本（仓库 / 脚本头）：`v3.4.3`
+- 当前版本（仓库 / 脚本头）：`v3.4.4`
 - 最近已发布版本：`v3.4.3`
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装（直链）：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
-- v3.4.3 扩展 ZIP 直链：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.3/LD-Notion-chrome-extension-full-v3.4.3.zip>
-- v3.4.3 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.3>
+- 最近已发布扩展 ZIP 直链（v3.4.3）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.3/LD-Notion-chrome-extension-full-v3.4.3.zip>
+- 最近已发布 Release 页面（v3.4.3）：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.3>
 
 ## 四大核心能力
 
@@ -100,9 +100,9 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 ### 安全与权限
 
 - **四级权限**：只读 → 标准 → 高级 → 管理员，按需授权
-- **操作守卫**：所有写入操作经过 OperationGuard 权限检查
+- **操作守卫**：用户触发与 AI 触发的写入操作统一经过 `OperationGuard` 守卫层（权限检查 / 审计记录；危险操作额外确认）
 - **审计日志**：记录操作历史，支持查看和清除
-- **撤销支持**：危险操作提供 5 秒撤销窗口
+- **撤销支持**：危险操作提供 5 秒撤销窗口；常规写入默认记录审计，不承诺统一可撤销
 
 ## 安装
 
@@ -151,6 +151,12 @@ node scripts/build-extension.js
 ```
 
 输出目录：`chrome-extension-full/`
+
+构建说明：
+
+- 默认 profile 仍然生成当前发布用的扩展形态，保留多源裁剪所需的广泛 `host_permissions`
+- 如需做更收敛的本地验证，可临时指定 `LD_NOTION_MANIFEST_PROFILE=bounded_hosts` 后再执行构建；这不是当前默认发布配置
+- 当前构建脚本已显式校验 userscript 主体锚点、`BookmarkBridge` 补丁区、GM shim / content script / popup / background / manifest 这些关键 seam，源码形状漂移会更早失败
 
 #### 2. 安装扩展
 
@@ -331,16 +337,37 @@ A: 请检查：
 
 ## 开发与验证
 
+- 推荐验证梯度：
+  1. `npm test`
+  2. `node --check LinuxDo-Bookmarks-to-Notion.user.js`
+  3. `node scripts/validate-userscript-ui.js`
+  4. 如涉及扩展交付：`node scripts/build-extension.js`
+  5. 最后按 `docs/ui-regression-checklist.md` 做 Linux.do / Notion / 通用网页 / `chrome-extension-full` 手工 smoke
+- 一键交付验证：`npm run verify:delivery`
 - `npm test`：运行 `tests/utils.test.js` 和 `tests/notion-oauth.test.js`
-- Node 测试会直接读取并执行当前 `LinuxDo-Bookmarks-to-Notion.user.js` 的核心代码，而不是维护一份单独的测试副本
-- 当前自动化验证重点覆盖：Utils 辅助函数、OAuth 回调与 refresh fallback、`TargetState`、`quickParseIntent` 正/反例、`assistant_result v1` 输出契约，以及 `scripts/build-extension.js` 的构建冒烟
+- Node 测试会直接读取并执行当前 `LinuxDo-Bookmarks-to-Notion.user.js` 的核心代码，并复用 `scripts/build-extension.js` 的提取/构建 seam，而不是维护一份单独的测试副本
+- 当前自动化验证重点覆盖：Utils 辅助函数、OAuth 回调与 refresh fallback、`TargetState`、`quickParseIntent` 正/反例、`assistant_result v1` 输出契约，以及 `scripts/build-extension.js` 的锚点、builder seam、manifest profile 与构建冒烟
 - 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）
 - 构建扩展版：`node scripts/build-extension.js`（输出到 `chrome-extension-full/`）
+- 自动化收敛权限 smoke：`npm run verify:extension:bounded`（写入临时目录并自动清理）；默认 release / README 安装流程仍以默认 profile 为准
 - UI 静态校验：`node scripts/validate-userscript-ui.js`（或 `python3 scripts/validate-userscript-ui.py`）
 - UI 手工回归：`docs/ui-regression-checklist.md`
-- 四级权限模型 + OperationGuard 保护所有写入操作
+- 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.4.4
+
+本次版本聚焦「交付稳定性与发布验证收口」，重点解决 userscript 演进时扩展生成链路过于依赖源码形状、构建验证入口分散，以及交付门槛缺少统一自动化命令的问题。
+
+- 优化：Notion 写入口进一步收口到共享 guarded-write helper，减少 `OperationGuard.execute(...)` 在业务代码中的重复包装
+- 优化：userscript 主体与 `BookmarkBridge` 构建区增加显式 build anchors，扩展构建不再主要依赖 IIFE / 对象文本形状猜测
+- 优化：`scripts/build-extension.js` 为 `background.js`、`popup.html`、`popup.js`、GM shim、`content.js`、`manifest.json` 提供显式 builder seams
+- 优化：生成 content script 的关键注入区增加 section marker，构建校验从散落字符串检查升级为显式契约检查
+- 优化：manifest 生成策略拆成 profile/config seam，默认 release 仍保持当前宽权限形态，同时提供 `bounded_hosts` 作为可选收敛 smoke profile
+- 新增：`npm run verify:baseline`、`npm run verify:extension:bounded`、`npm run build:extension`、`npm run verify:delivery`
+- 优化：发布 workflow 现在先跑 baseline，再跑 `bounded_hosts` smoke，最后才构建默认 release 扩展 ZIP
+- 文档：README / TUTORIAL / tests/README / UI 回归清单同步收口到新的构建与交付验证模型
 
 ### v3.4.3
 

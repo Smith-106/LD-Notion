@@ -1,15 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const { extractUserscriptIifeBody } = require('../scripts/build-extension.js');
 
 // Extract the IIFE body from the userscript
 const userScriptPath = path.resolve(__dirname, '../LinuxDo-Bookmarks-to-Notion.user.js');
 let userScriptContent = fs.readFileSync(userScriptPath, 'utf8');
 
-// Remove userscript header and IIFE wrapper
-const iifeStart = userScriptContent.indexOf('(function () {');
-const iifeEnd = userScriptContent.lastIndexOf('})();');
-let coreCode = userScriptContent.substring(iifeStart + '(function () {'.length, iifeEnd);
+// Reuse the build extraction seam so tests and build agree on source boundaries.
+let coreCode = extractUserscriptIifeBody(userScriptContent);
 
 // Mock browser globals
 const sandbox = {

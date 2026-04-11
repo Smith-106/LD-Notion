@@ -8,6 +8,76 @@
 const fs = require("fs");
 const path = require("path");
 
+const BUILD_ANCHORS = Object.freeze({
+    userscriptBodyStart: "// [LD-NOTION-BUILD:USER_SCRIPT_BODY_START]",
+    userscriptBodyEnd: "// [LD-NOTION-BUILD:USER_SCRIPT_BODY_END]",
+    bookmarkBridgeStart: "// [LD-NOTION-BUILD:BOOKMARK_BRIDGE_START]",
+    bookmarkBridgeEnd: "// [LD-NOTION-BUILD:BOOKMARK_BRIDGE_END]",
+});
+
+const GENERATED_SECTION_MARKERS = Object.freeze({
+    gmShimStart: "// [LD-NOTION-BUILD:GM_SHIM_START]",
+    gmShimEnd: "// [LD-NOTION-BUILD:GM_SHIM_END]",
+    bookmarkEventBridgeStart: "// [LD-NOTION-BUILD:BOOKMARK_EVENT_BRIDGE_START]",
+    bookmarkEventBridgeEnd: "// [LD-NOTION-BUILD:BOOKMARK_EVENT_BRIDGE_END]",
+    popupMessageBridgeStart: "// [LD-NOTION-BUILD:POPUP_MESSAGE_BRIDGE_START]",
+    popupMessageBridgeEnd: "// [LD-NOTION-BUILD:POPUP_MESSAGE_BRIDGE_END]",
+});
+
+const DEFAULT_MANIFEST_PROFILE = "default";
+
+const MANIFEST_SHARED_DEFAULTS = Object.freeze({
+    name: "LD-Notion — Notion AI 助手 & 多源收藏管理",
+    description: "将 Linux.do、GitHub、浏览器书签与 Notion 深度连接：AI 对话式助手、批量导出收藏、跨源智能搜索与推荐",
+    permissions: Object.freeze([
+        "storage",
+        "bookmarks",
+        "notifications",
+        "activeTab"
+    ]),
+    contentScriptMatches: Object.freeze([
+        "https://linux.do/*",
+        "https://www.notion.so/*",
+        "https://notion.so/*"
+    ]),
+    action: Object.freeze({
+        default_popup: "popup.html",
+        default_title: "LD-Notion"
+    }),
+    backgroundServiceWorker: "background.js",
+    icons: Object.freeze({
+        48: "icon48.png",
+        128: "icon128.png"
+    }),
+});
+
+const MANIFEST_PROFILE_PRESETS = Object.freeze({
+    default: Object.freeze({
+        hostPermissions: Object.freeze([
+            "https://api.notion.com/*",
+            "https://linux.do/*",
+            "https://*.amazonaws.com/*",
+            "https://api.openai.com/*",
+            "https://api.anthropic.com/*",
+            "https://generativelanguage.googleapis.com/*",
+            "https://api.github.com/*",
+            "http://*/*",
+            "https://*/*"
+        ]),
+    }),
+    bounded_hosts: Object.freeze({
+        hostPermissions: Object.freeze([
+            "https://api.notion.com/*",
+            "https://linux.do/*",
+            "https://*.amazonaws.com/*",
+            "https://api.openai.com/*",
+            "https://api.anthropic.com/*",
+            "https://generativelanguage.googleapis.com/*",
+            "https://api.github.com/*"
+        ]),
+    }),
+});
+
 function resolveBuildPaths({ src, outDir } = {}) {
     const resolvedSrc = src || process.env.LD_NOTION_BUILD_SRC || path.resolve(__dirname, "..", "LinuxDo-Bookmarks-to-Notion.user.js");
     const resolvedOutDir = outDir || process.env.LD_NOTION_BUILD_OUT_DIR || path.resolve(__dirname, "..", "chrome-extension-full");
@@ -24,6 +94,19 @@ function extractUserscriptVersion(source) {
 function extractUserscriptIifeBody(source) {
     if (typeof source !== "string" || !source.trim()) {
         throw new Error("用户脚本源码为空");
+    }
+
+    const anchoredRegion = findAnchoredRegion(
+        source,
+        BUILD_ANCHORS.userscriptBodyStart,
+        BUILD_ANCHORS.userscriptBodyEnd,
+        "userscript 主体"
+    );
+    if (anchoredRegion) {
+        return source.slice(
+            anchoredRegion.start + BUILD_ANCHORS.userscriptBodyStart.length,
+            anchoredRegion.end - BUILD_ANCHORS.userscriptBodyEnd.length
+        );
     }
 
     const iifeStartMatch = /\(function\s*\(\)\s*\{/.exec(source);
@@ -134,8 +217,50 @@ function findMatchingBrace(source, openIndex) {
     throw new Error("未找到匹配的对象结束大括号");
 }
 
-function patchBookmarkBridgeForExtension(iifeBody) {
+function findAnchoredRegion(source, startMarker, endMarker, label) {
+    const start = source.indexOf(startMarker);
+    if (start === -1) {
+        return null;
+    }
+
+    const end = source.indexOf(endMarker, start + startMarker.length);
+    if (end === -1) {
+        throw new Error(`未找到 ${label} 结束锚点`);
+    }
+
+    return {
+        start,
+        end: end + endMarker.length,
+    };
+}
+
+function locateBookmarkBridgeObject(iifeBody) {
     const declaration = "const BookmarkBridge = {";
+    const anchoredRegion = findAnchoredRegion(
+        iifeBody,
+        BUILD_ANCHORS.bookmarkBridgeStart,
+        BUILD_ANCHORS.bookmarkBridgeEnd,
+        "BookmarkBridge 构建区域"
+    );
+
+    if (anchoredRegion) {
+        const anchoredBody = iifeBody.slice(anchoredRegion.start, anchoredRegion.end);
+        const relativeObjectStart = anchoredBody.indexOf(declaration);
+        if (relativeObjectStart === -1) {
+            throw new Error("BookmarkBridge 构建锚点内未找到对象定义");
+        }
+
+        const objectStart = anchoredRegion.start + relativeObjectStart;
+        const braceStart = iifeBody.indexOf("{", objectStart);
+        const braceEnd = findMatchingBrace(iifeBody, braceStart);
+        const semicolonIndex = iifeBody.indexOf(";", braceEnd);
+        if (semicolonIndex === -1 || semicolonIndex >= anchoredRegion.end) {
+            throw new Error("BookmarkBridge 构建锚点内未找到对象结束分号");
+        }
+
+        return { objectStart, semicolonIndex };
+    }
+
     const objectStart = iifeBody.indexOf(declaration);
     if (objectStart === -1) {
         throw new Error("未找到 BookmarkBridge 对象");
@@ -147,6 +272,12 @@ function patchBookmarkBridgeForExtension(iifeBody) {
     if (semicolonIndex === -1) {
         throw new Error("未找到 BookmarkBridge 对象结束分号");
     }
+
+    return { objectStart, semicolonIndex };
+}
+
+function patchBookmarkBridgeForExtension(iifeBody) {
+    const { objectStart, semicolonIndex } = locateBookmarkBridgeObject(iifeBody);
 
     const originalObject = iifeBody.slice(objectStart, semicolonIndex + 1);
     let patchedObject = originalObject;
@@ -188,17 +319,330 @@ init: () => {},`,
     };
 }
 
-function buildExtension({ src, outDir, source } = {}) {
-    const paths = resolveBuildPaths({ src, outDir });
-    const resolvedSource = typeof source === "string" ? source : fs.readFileSync(paths.src, "utf8");
-    const iifeBody = extractUserscriptIifeBody(resolvedSource);
-    const { code: patchedBody, patchedMethods } = patchBookmarkBridgeForExtension(iifeBody);
+function assertContains(source, snippet, label) {
+    if (!source.includes(snippet)) {
+        throw new Error(`扩展构建前置检查失败：缺少 ${label}`);
+    }
+}
 
-    if (!fs.existsSync(paths.outDir)) {
-        fs.mkdirSync(paths.outDir, { recursive: true });
+function resolveManifestProfile(profileName) {
+    const resolvedName = profileName || process.env.LD_NOTION_MANIFEST_PROFILE || DEFAULT_MANIFEST_PROFILE;
+    const profile = MANIFEST_PROFILE_PRESETS[resolvedName];
+    if (!profile) {
+        throw new Error(`未知 manifest profile: ${resolvedName}`);
+    }
+    return {
+        name: resolvedName,
+        config: profile,
+    };
+}
+
+function validatePatchedBuildAssumptions({ source, patchedBody, contentScript, backgroundScript, popupHtml, popupScript, manifest } = {}) {
+    if (typeof source === "string") {
+        assertContains(source, BUILD_ANCHORS.userscriptBodyStart, "userscript 主体开始锚点");
+        assertContains(source, BUILD_ANCHORS.userscriptBodyEnd, "userscript 主体结束锚点");
+        assertContains(source, BUILD_ANCHORS.bookmarkBridgeStart, "BookmarkBridge 构建开始锚点");
+        assertContains(source, BUILD_ANCHORS.bookmarkBridgeEnd, "BookmarkBridge 构建结束锚点");
+        assertContains(source, "const BookmarkBridge = {", "BookmarkBridge 对象定义");
     }
 
-    const gmShim = `/**
+    if (typeof patchedBody === "string") {
+        assertContains(patchedBody, BUILD_ANCHORS.bookmarkBridgeStart, "补丁后的 BookmarkBridge 开始锚点");
+        assertContains(patchedBody, BUILD_ANCHORS.bookmarkBridgeEnd, "补丁后的 BookmarkBridge 结束锚点");
+        assertContains(patchedBody, "isExtensionAvailable: () => {", "BookmarkBridge 可用性补丁");
+        assertContains(patchedBody, "return chrome.bookmarks.getTree();", "BookmarkBridge getTree 补丁");
+        assertContains(patchedBody, "return chrome.bookmarks.search(query || \"\");", "BookmarkBridge search 补丁");
+    }
+
+    if (typeof contentScript === "string") {
+        assertContains(contentScript, GENERATED_SECTION_MARKERS.gmShimStart, "content script GM shim 开始锚点");
+        assertContains(contentScript, GENERATED_SECTION_MARKERS.gmShimEnd, "content script GM shim 结束锚点");
+        assertContains(contentScript, GENERATED_SECTION_MARKERS.bookmarkEventBridgeStart, "content script 书签桥接开始锚点");
+        assertContains(contentScript, GENERATED_SECTION_MARKERS.bookmarkEventBridgeEnd, "content script 书签桥接结束锚点");
+        assertContains(contentScript, GENERATED_SECTION_MARKERS.popupMessageBridgeStart, "content script popup 桥接开始锚点");
+        assertContains(contentScript, GENERATED_SECTION_MARKERS.popupMessageBridgeEnd, "content script popup 桥接结束锚点");
+        assertContains(contentScript, "await _gmInitStorage();", "GM storage 初始化");
+        assertContains(contentScript, "chrome.runtime.onMessage.addListener", "content script popup 桥接监听");
+        assertContains(contentScript, "window.addEventListener(\"ld-notion-request-bookmarks\"", "content script 书签请求桥接");
+        assertContains(contentScript, "window.addEventListener(\"ld-notion-search-bookmarks\"", "content script 书签搜索桥接");
+    }
+
+    if (typeof backgroundScript === "string") {
+        assertContains(backgroundScript, "message.type !== \"GM_xmlhttpRequest\"", "background GM_xmlhttpRequest 分发");
+        assertContains(backgroundScript, "return true;", "background 异步 sendResponse 约定");
+    }
+
+    if (typeof popupHtml === "string") {
+        assertContains(popupHtml, "<script src=\"popup.js\"></script>", "popup HTML 脚本入口");
+        assertContains(popupHtml, "id=\"import-bookmarks\"", "popup 书签导入按钮");
+        assertContains(popupHtml, "id=\"import-github\"", "popup GitHub 导入按钮");
+        assertContains(popupHtml, "id=\"open-bookmark-panel\"", "popup 收藏来源按钮");
+    }
+
+    if (typeof popupScript === "string") {
+        assertContains(popupScript, "document.addEventListener(\"DOMContentLoaded\"", "popup DOMContentLoaded 入口");
+        assertContains(popupScript, "LD_NOTION_IMPORT_BOOKMARKS", "popup 书签导入消息");
+        assertContains(popupScript, "LD_NOTION_IMPORT_GITHUB", "popup GitHub 导入消息");
+        assertContains(popupScript, "LD_NOTION_SET_BOOKMARK_SOURCE", "popup 收藏来源消息");
+    }
+
+    if (manifest && typeof manifest === "object") {
+        const contentScripts = Array.isArray(manifest.content_scripts) ? manifest.content_scripts : [];
+        const hasContentScript = contentScripts.some((entry) => Array.isArray(entry.js) && entry.js.includes("content.js"));
+        if (!hasContentScript) {
+            throw new Error("扩展构建后置检查失败：manifest 未声明 content.js");
+        }
+        if (manifest.background?.service_worker !== "background.js") {
+            throw new Error("扩展构建后置检查失败：manifest 未声明 background.js");
+        }
+        if (manifest.action?.default_popup !== "popup.html") {
+            throw new Error("扩展构建后置检查失败：manifest 未声明 popup.html");
+        }
+    }
+}
+
+function buildBackgroundScript() {
+    return `// LD-Notion Chrome Extension — Background Service Worker
+// 代理 HTTP 请求以绕过 CORS 限制
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type !== "GM_xmlhttpRequest") return false;
+
+    const { method, url, headers, data } = message.payload;
+
+    const fetchOptions = {
+        method: method || "GET",
+        headers: headers || {},
+    };
+
+    if (data && method !== "GET") {
+        fetchOptions.body = data;
+    }
+
+    fetch(url, fetchOptions)
+        .then(async (response) => {
+            const text = await response.text();
+            // 提取 response headers
+            const respHeaders = [];
+            response.headers.forEach((value, key) => {
+                respHeaders.push(key + ": " + value);
+            });
+            sendResponse({
+                success: true,
+                status: response.status,
+                statusText: response.statusText,
+                responseText: text,
+                responseHeaders: respHeaders.join("\\r\\n"),
+                finalUrl: response.url
+            });
+        })
+        .catch((error) => {
+            sendResponse({
+                success: false,
+                error: error.message
+            });
+        });
+
+    // 返回 true 表示异步 sendResponse
+    return true;
+});
+`;
+}
+
+function buildPopupHtml() {
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+:root {
+    --bg: #fff; --text: #1a1a2e; --muted: #64748b;
+    --accent: #6366f1; --accent-hover: #4f46e5;
+    --border: #e2e8f0; --card-bg: #f8fafc;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #1e1e2e; --text: #cdd6f4; --muted: #a6adc8;
+        --accent: #89b4fa; --accent-hover: #74c7ec;
+        --border: #45475a; --card-bg: #313244;
+    }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 320px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+.header { padding: 16px; text-align: center; border-bottom: 1px solid var(--border); }
+.header h1 { font-size: 16px; font-weight: 600; }
+.header p { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.actions { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.action-btn { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); cursor: pointer; transition: all .15s; text-decoration: none; color: var(--text); }
+.action-btn:hover { border-color: var(--accent); background: var(--bg); }
+.action-btn .icon { font-size: 20px; width: 32px; text-align: center; }
+.action-btn .label { font-size: 13px; font-weight: 500; }
+.action-btn .desc { font-size: 11px; color: var(--muted); }
+.status { padding: 12px; border-top: 1px solid var(--border); }
+.status-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); padding: 4px 0; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.status-dot.ok { background: #22c55e; }
+.status-dot.err { background: #ef4444; }
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>LD-Notion</h1>
+    <p>Notion AI \u52a9\u624b & \u591a\u6e90\u6536\u85cf\u7ba1\u7406</p>
+</div>
+<div class="actions">
+    <a class="action-btn" id="goto-linuxdo" href="https://linux.do" target="_blank">
+        <span class="icon">\ud83d\udcda</span>
+        <div><div class="label">Linux.do \u6536\u85cf</div><div class="desc">\u6253\u5f00\u6536\u85cf\u9875\u9762\uff0c\u5bfc\u51fa\u5e16\u5b50\u5230 Notion</div></div>
+    </a>
+    <a class="action-btn" id="goto-notion" href="https://www.notion.so" target="_blank">
+        <span class="icon">\ud83e\udde0</span>
+        <div><div class="label">Notion AI \u52a9\u624b</div><div class="desc">\u5728 Notion \u4e2d\u4f7f\u7528 AI \u5bf9\u8bdd\u52a9\u624b</div></div>
+    </a>
+    <button class="action-btn" id="import-bookmarks">
+        <span class="icon">\ud83d\udd16</span>
+        <div><div class="label">\u5bfc\u5165\u6d4f\u89c8\u5668\u4e66\u7b7e</div><div class="desc">\u5c06\u4e66\u7b7e\u76f4\u63a5\u5bfc\u5165 Notion \u6570\u636e\u5e93</div></div>
+    </button>
+    <button class="action-btn" id="import-github">
+        <span class="icon">\ud83d\udc19</span>
+        <div><div class="label">GitHub \u6d3b\u52a8\u5bfc\u5165</div><div class="desc">\u5bfc\u5165 Stars\u3001Repos\u3001Forks\u3001Gists</div></div>
+    </button>
+    <button class="action-btn" id="open-bookmark-panel">
+        <span class="icon">\ud83e\udde9</span>
+        <div><div class="label">收藏来源页面</div><div class="desc">打开扩展页设置 Linux.do / GitHub 收藏分区</div></div>
+    </button>
+</div>
+<div class="status" id="status-section">
+    <div class="status-row">
+        <span><span class="status-dot" id="notion-dot"></span>Notion API</span>
+        <span id="notion-status">\u68c0\u6d4b\u4e2d...</span>
+    </div>
+    <div class="status-row">
+        <span><span class="status-dot" id="bookmark-dot"></span>\u4e66\u7b7e API</span>
+        <span id="bookmark-status">\u68c0\u6d4b\u4e2d...</span>
+    </div>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>`;
+}
+
+function buildPopupScript() {
+    return `// LD-Notion Popup
+document.addEventListener("DOMContentLoaded", async () => {
+    // 检查 Notion API 配置
+    const data = await chrome.storage.local.get(["ldb_notion_api_key"]);
+    const notionDot = document.getElementById("notion-dot");
+    const notionStatus = document.getElementById("notion-status");
+    if (data.ldb_notion_api_key) {
+        notionDot.classList.add("ok");
+        notionStatus.textContent = "\u5df2\u914d\u7f6e";
+    } else {
+        notionDot.classList.add("err");
+        notionStatus.textContent = "\u672a\u914d\u7f6e";
+    }
+
+    // 检查书签 API
+    const bookmarkDot = document.getElementById("bookmark-dot");
+    const bookmarkStatus = document.getElementById("bookmark-status");
+    try {
+        await chrome.bookmarks.getTree();
+        bookmarkDot.classList.add("ok");
+        bookmarkStatus.textContent = "\u53ef\u7528";
+    } catch (e) {
+        bookmarkDot.classList.add("err");
+        bookmarkStatus.textContent = "\u4e0d\u53ef\u7528";
+    }
+
+    // 导入书签按钮 — 打开 Linux.do 收藏页面并通知 content script
+    document.getElementById("import-bookmarks").addEventListener("click", () => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const tab = tabs[0];
+            if (tab && tab.url && tab.url.includes("linux.do")) {
+                // 当前在 linux.do，直接发消息
+                chrome.tabs.sendMessage(tab.id, { type: "LD_NOTION_IMPORT_BOOKMARKS" });
+                window.close();
+            } else {
+                // 打开 linux.do
+                chrome.tabs.create({ url: "https://linux.do" });
+                window.close();
+            }
+        });
+    });
+
+    // GitHub 导入按钮
+    document.getElementById("import-github").addEventListener("click", () => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const tab = tabs[0];
+            if (tab && tab.url && tab.url.includes("linux.do")) {
+                chrome.tabs.sendMessage(tab.id, { type: "LD_NOTION_IMPORT_GITHUB" });
+                window.close();
+            } else {
+                chrome.tabs.create({ url: "https://linux.do" });
+                window.close();
+            }
+        });
+    });
+
+    // 收藏来源面板按钮
+    document.getElementById("open-bookmark-panel").addEventListener("click", () => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const tab = tabs[0];
+            const openAndSetSource = (tabId) => {
+                chrome.tabs.sendMessage(tabId, {
+                    type: "LD_NOTION_SET_BOOKMARK_SOURCE",
+                    source: "github"
+                }, () => {
+                    window.close();
+                });
+            };
+
+            if (tab && tab.url && tab.url.includes("linux.do")) {
+                openAndSetSource(tab.id);
+            } else {
+                chrome.tabs.create({ url: "https://linux.do" }, (newTab) => {
+                    if (!newTab || !newTab.id) {
+                        window.close();
+                        return;
+                    }
+                    setTimeout(() => {
+                        openAndSetSource(newTab.id);
+                    }, 900);
+                });
+            }
+        });
+    });
+});
+`;
+}
+
+function buildManifest({ version, profile } = {}) {
+    const { config } = resolveManifestProfile(profile);
+    return {
+        manifest_version: 3,
+        name: MANIFEST_SHARED_DEFAULTS.name,
+        version: version || "3.2.0",
+        description: MANIFEST_SHARED_DEFAULTS.description,
+        permissions: [...MANIFEST_SHARED_DEFAULTS.permissions],
+        host_permissions: [...config.hostPermissions],
+        action: { ...MANIFEST_SHARED_DEFAULTS.action },
+        background: {
+            service_worker: MANIFEST_SHARED_DEFAULTS.backgroundServiceWorker
+        },
+        content_scripts: [
+            {
+                matches: [...MANIFEST_SHARED_DEFAULTS.contentScriptMatches],
+                js: ["content.js"],
+                run_at: "document_idle"
+            }
+        ],
+        icons: { ...MANIFEST_SHARED_DEFAULTS.icons }
+    };
+}
+
+function buildGmShim() {
+    return `${GENERATED_SECTION_MARKERS.gmShimStart}
+/**
  * GM_* API 垫片 — 将 Tampermonkey API 映射到 Chrome Extension API
  * 由 build-extension.js 自动生成
  */
@@ -291,6 +735,7 @@ if (typeof document !== "undefined" && document.head && !document.querySelector(
 }
 
 // 兼容 userscript 的 CustomEvent 书签桥接协议
+${GENERATED_SECTION_MARKERS.bookmarkEventBridgeStart}
 window.addEventListener("ld-notion-request-bookmarks", async (event) => {
     const { requestId, folderId } = event.detail || {};
     try {
@@ -320,8 +765,10 @@ window.addEventListener("ld-notion-search-bookmarks", async (event) => {
         }));
     }
 });
+${GENERATED_SECTION_MARKERS.bookmarkEventBridgeEnd}
 
 // Popup 消息监听 — 接收来自 popup.js 的快捷操作指令
+${GENERATED_SECTION_MARKERS.popupMessageBridgeStart}
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "LD_NOTION_IMPORT_BOOKMARKS") {
         // 触发书签导入（模拟点击 AI 对话中的书签导入）
@@ -340,9 +787,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true });
     }
 });
+${GENERATED_SECTION_MARKERS.popupMessageBridgeEnd}
+${GENERATED_SECTION_MARKERS.gmShimEnd}
 `;
+}
 
-    const contentScript = `// LD-Notion Chrome Extension — Content Script
+function buildContentScript({ gmShim, patchedBody } = {}) {
+    return `// LD-Notion Chrome Extension — Content Script
 // 由 build-extension.js 从油猴脚本自动生成
 // 版本同步自: LinuxDo-Bookmarks-to-Notion.user.js
 
@@ -357,261 +808,29 @@ ${gmShim}
 ${patchedBody}
 })();
 `;
-
-    const backgroundJs = `// LD-Notion Chrome Extension — Background Service Worker
-// 代理 HTTP 请求以绕过 CORS 限制
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type !== "GM_xmlhttpRequest") return false;
-
-    const { method, url, headers, data } = message.payload;
-
-    const fetchOptions = {
-        method: method || "GET",
-        headers: headers || {},
-    };
-
-    if (data && method !== "GET") {
-        fetchOptions.body = data;
-    }
-
-    fetch(url, fetchOptions)
-        .then(async (response) => {
-            const text = await response.text();
-            // 提取 response headers
-            const respHeaders = [];
-            response.headers.forEach((value, key) => {
-                respHeaders.push(key + ": " + value);
-            });
-            sendResponse({
-                success: true,
-                status: response.status,
-                statusText: response.statusText,
-                responseText: text,
-                responseHeaders: respHeaders.join("\\r\\n"),
-                finalUrl: response.url
-            });
-        })
-        .catch((error) => {
-            sendResponse({
-                success: false,
-                error: error.message
-            });
-        });
-
-    // 返回 true 表示异步 sendResponse
-    return true;
-});
-`;
-
-    const popupHtml = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<style>
-:root {
-    --bg: #fff; --text: #1a1a2e; --muted: #64748b;
-    --accent: #6366f1; --accent-hover: #4f46e5;
-    --border: #e2e8f0; --card-bg: #f8fafc;
 }
-@media (prefers-color-scheme: dark) {
-    :root {
-        --bg: #1e1e2e; --text: #cdd6f4; --muted: #a6adc8;
-        --accent: #89b4fa; --accent-hover: #74c7ec;
-        --border: #45475a; --card-bg: #313244;
-    }
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { width: 320px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
-.header { padding: 16px; text-align: center; border-bottom: 1px solid var(--border); }
-.header h1 { font-size: 16px; font-weight: 600; }
-.header p { font-size: 12px; color: var(--muted); margin-top: 4px; }
-.actions { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-.action-btn { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); cursor: pointer; transition: all .15s; text-decoration: none; color: var(--text); }
-.action-btn:hover { border-color: var(--accent); background: var(--bg); }
-.action-btn .icon { font-size: 20px; width: 32px; text-align: center; }
-.action-btn .label { font-size: 13px; font-weight: 500; }
-.action-btn .desc { font-size: 11px; color: var(--muted); }
-.status { padding: 12px; border-top: 1px solid var(--border); }
-.status-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); padding: 4px 0; }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
-.status-dot.ok { background: #22c55e; }
-.status-dot.err { background: #ef4444; }
-</style>
-</head>
-<body>
-<div class="header">
-    <h1>LD-Notion</h1>
-    <p>Notion AI \u52a9\u624b & \u591a\u6e90\u6536\u85cf\u7ba1\u7406</p>
-</div>
-<div class="actions">
-    <a class="action-btn" id="goto-linuxdo" href="https://linux.do" target="_blank">
-        <span class="icon">\ud83d\udcda</span>
-        <div><div class="label">Linux.do \u6536\u85cf</div><div class="desc">\u6253\u5f00\u6536\u85cf\u9875\u9762\uff0c\u5bfc\u51fa\u5e16\u5b50\u5230 Notion</div></div>
-    </a>
-    <a class="action-btn" id="goto-notion" href="https://www.notion.so" target="_blank">
-        <span class="icon">\ud83e\udde0</span>
-        <div><div class="label">Notion AI \u52a9\u624b</div><div class="desc">\u5728 Notion \u4e2d\u4f7f\u7528 AI \u5bf9\u8bdd\u52a9\u624b</div></div>
-    </a>
-    <button class="action-btn" id="import-bookmarks">
-        <span class="icon">\ud83d\udd16</span>
-        <div><div class="label">\u5bfc\u5165\u6d4f\u89c8\u5668\u4e66\u7b7e</div><div class="desc">\u5c06\u4e66\u7b7e\u76f4\u63a5\u5bfc\u5165 Notion \u6570\u636e\u5e93</div></div>
-    </button>
-    <button class="action-btn" id="import-github">
-        <span class="icon">\ud83d\udc19</span>
-        <div><div class="label">GitHub \u6d3b\u52a8\u5bfc\u5165</div><div class="desc">\u5bfc\u5165 Stars\u3001Repos\u3001Forks\u3001Gists</div></div>
-    </button>
-    <button class="action-btn" id="open-bookmark-panel">
-        <span class="icon">\ud83e\udde9</span>
-        <div><div class="label">收藏来源页面</div><div class="desc">打开扩展页设置 Linux.do / GitHub 收藏分区</div></div>
-    </button>
-</div>
-<div class="status" id="status-section">
-    <div class="status-row">
-        <span><span class="status-dot" id="notion-dot"></span>Notion API</span>
-        <span id="notion-status">\u68c0\u6d4b\u4e2d...</span>
-    </div>
-    <div class="status-row">
-        <span><span class="status-dot" id="bookmark-dot"></span>\u4e66\u7b7e API</span>
-        <span id="bookmark-status">\u68c0\u6d4b\u4e2d...</span>
-    </div>
-</div>
-<script src="popup.js"></script>
-</body>
-</html>`;
 
-    const popupJs = `// LD-Notion Popup
-document.addEventListener("DOMContentLoaded", async () => {
-    // 检查 Notion API 配置
-    const data = await chrome.storage.local.get(["ldb_notion_api_key"]);
-    const notionDot = document.getElementById("notion-dot");
-    const notionStatus = document.getElementById("notion-status");
-    if (data.ldb_notion_api_key) {
-        notionDot.classList.add("ok");
-        notionStatus.textContent = "\u5df2\u914d\u7f6e";
-    } else {
-        notionDot.classList.add("err");
-        notionStatus.textContent = "\u672a\u914d\u7f6e";
+function buildExtension({ src, outDir, source, manifestProfile } = {}) {
+    const paths = resolveBuildPaths({ src, outDir });
+    const resolvedSource = typeof source === "string" ? source : fs.readFileSync(paths.src, "utf8");
+    const iifeBody = extractUserscriptIifeBody(resolvedSource);
+    const { code: patchedBody, patchedMethods } = patchBookmarkBridgeForExtension(iifeBody);
+    validatePatchedBuildAssumptions({ source: resolvedSource, patchedBody });
+
+    if (!fs.existsSync(paths.outDir)) {
+        fs.mkdirSync(paths.outDir, { recursive: true });
     }
 
-    // 检查书签 API
-    const bookmarkDot = document.getElementById("bookmark-dot");
-    const bookmarkStatus = document.getElementById("bookmark-status");
-    try {
-        await chrome.bookmarks.getTree();
-        bookmarkDot.classList.add("ok");
-        bookmarkStatus.textContent = "\u53ef\u7528";
-    } catch (e) {
-        bookmarkDot.classList.add("err");
-        bookmarkStatus.textContent = "\u4e0d\u53ef\u7528";
-    }
+    const gmShim = buildGmShim();
+    const contentScript = buildContentScript({ gmShim, patchedBody });
 
-    // 导入书签按钮 — 打开 Linux.do 收藏页面并通知 content script
-    document.getElementById("import-bookmarks").addEventListener("click", () => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            const tab = tabs[0];
-            if (tab && tab.url && tab.url.includes("linux.do")) {
-                // 当前在 linux.do，直接发消息
-                chrome.tabs.sendMessage(tab.id, { type: "LD_NOTION_IMPORT_BOOKMARKS" });
-                window.close();
-            } else {
-                // 打开 linux.do
-                chrome.tabs.create({ url: "https://linux.do" });
-                window.close();
-            }
-        });
-    });
+    const backgroundJs = buildBackgroundScript();
+    const popupHtml = buildPopupHtml();
+    const popupJs = buildPopupScript();
+    const { name: manifestProfileName } = resolveManifestProfile(manifestProfile);
+    const manifest = buildManifest({ version: extractUserscriptVersion(resolvedSource), profile: manifestProfileName });
 
-    // GitHub 导入按钮
-    document.getElementById("import-github").addEventListener("click", () => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            const tab = tabs[0];
-            if (tab && tab.url && tab.url.includes("linux.do")) {
-                chrome.tabs.sendMessage(tab.id, { type: "LD_NOTION_IMPORT_GITHUB" });
-                window.close();
-            } else {
-                chrome.tabs.create({ url: "https://linux.do" });
-                window.close();
-            }
-        });
-    });
-
-    // 收藏来源面板按钮
-    document.getElementById("open-bookmark-panel").addEventListener("click", () => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            const tab = tabs[0];
-            const openAndSetSource = (tabId) => {
-                chrome.tabs.sendMessage(tabId, {
-                    type: "LD_NOTION_SET_BOOKMARK_SOURCE",
-                    source: "github"
-                }, () => {
-                    window.close();
-                });
-            };
-
-            if (tab && tab.url && tab.url.includes("linux.do")) {
-                openAndSetSource(tab.id);
-            } else {
-                chrome.tabs.create({ url: "https://linux.do" }, (newTab) => {
-                    if (!newTab || !newTab.id) {
-                        window.close();
-                        return;
-                    }
-                    setTimeout(() => {
-                        openAndSetSource(newTab.id);
-                    }, 900);
-                });
-            }
-        });
-    });
-});
-`;
-
-    const manifest = {
-        manifest_version: 3,
-        name: "LD-Notion — Notion AI 助手 & 多源收藏管理",
-        version: extractUserscriptVersion(resolvedSource),
-        description: "将 Linux.do、GitHub、浏览器书签与 Notion 深度连接：AI 对话式助手、批量导出收藏、跨源智能搜索与推荐",
-        permissions: [
-            "storage",
-            "bookmarks",
-            "notifications",
-            "activeTab"
-        ],
-        host_permissions: [
-            "https://api.notion.com/*",
-            "https://linux.do/*",
-            "https://*.amazonaws.com/*",
-            "https://api.openai.com/*",
-            "https://api.anthropic.com/*",
-            "https://generativelanguage.googleapis.com/*",
-            "https://api.github.com/*",
-            "http://*/*",
-            "https://*/*"
-        ],
-        action: {
-            default_popup: "popup.html",
-            default_title: "LD-Notion"
-        },
-        background: {
-            service_worker: "background.js"
-        },
-        content_scripts: [
-            {
-                matches: [
-                    "https://linux.do/*",
-                    "https://www.notion.so/*",
-                    "https://notion.so/*"
-                ],
-                js: ["content.js"],
-                run_at: "document_idle"
-            }
-        ],
-        icons: {
-            48: "icon48.png",
-            128: "icon128.png"
-        }
-    };
+    validatePatchedBuildAssumptions({ contentScript, backgroundScript: backgroundJs, popupHtml, popupScript: popupJs, manifest });
 
     fs.writeFileSync(path.join(paths.outDir, "content.js"), contentScript, "utf8");
     fs.writeFileSync(path.join(paths.outDir, "background.js"), backgroundJs, "utf8");
@@ -649,6 +868,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     return {
         outDir: paths.outDir,
+        manifestProfile: manifestProfileName,
         patchedMethods,
         contentPath: path.join(paths.outDir, "content.js"),
         manifestPath: path.join(paths.outDir, "manifest.json"),
@@ -755,11 +975,25 @@ function generateIcon(size) {
 }
 
 module.exports = {
+    BUILD_ANCHORS,
+    DEFAULT_MANIFEST_PROFILE,
+    GENERATED_SECTION_MARKERS,
+    MANIFEST_PROFILE_PRESETS,
+    assertContains,
+    buildBackgroundScript,
+    buildContentScript,
     buildExtension,
+    buildGmShim,
+    buildManifest,
+    buildPopupHtml,
+    buildPopupScript,
     extractUserscriptIifeBody,
     extractUserscriptVersion,
+    findAnchoredRegion,
     patchBookmarkBridgeForExtension,
     resolveBuildPaths,
+    resolveManifestProfile,
+    validatePatchedBuildAssumptions,
 };
 
 if (require.main === module) {

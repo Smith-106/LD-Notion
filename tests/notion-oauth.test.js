@@ -7,8 +7,22 @@ const { execFileSync } = require('child_process');
 const userScriptPath = path.resolve(__dirname, '../LinuxDo-Bookmarks-to-Notion.user.js');
 const buildScriptPath = path.resolve(__dirname, '../scripts/build-extension.js');
 const {
+    BUILD_ANCHORS,
+    DEFAULT_MANIFEST_PROFILE,
+    GENERATED_SECTION_MARKERS,
+    MANIFEST_PROFILE_PRESETS,
+    assertContains,
+    buildBackgroundScript,
+    buildContentScript,
+    buildExtension,
+    buildGmShim,
+    buildManifest,
+    buildPopupHtml,
+    buildPopupScript,
     extractUserscriptIifeBody,
-    patchBookmarkBridgeForExtension
+    patchBookmarkBridgeForExtension,
+    resolveManifestProfile,
+    validatePatchedBuildAssumptions
 } = require(buildScriptPath);
 const userScriptContent = fs.readFileSync(userScriptPath, 'utf8');
 const wrappedCoreCode = extractUserscriptIifeBody(userScriptContent);
@@ -201,7 +215,7 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
 
     const scriptRunner = new Function(
         ...Object.keys(sandbox),
-        `${coreCode}\nreturn { CONFIG, AIAssistant, ChatState, ChatUI, DesignSystem, GenericUI, NotionAPI, NotionOAuth, NotionSiteUI, SiteDetector, TargetState, UI, main };`
+        `${coreCode}\nreturn { AIClassifier, AIService, CONFIG, AIAssistant, ChatState, ChatUI, DesignSystem, GenericUI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, SiteDetector, TargetState, UI, UndoManager, main };`
     );
 
     const exports = scriptRunner(...Object.values(sandbox));
@@ -984,6 +998,44 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
         assert.strictEqual(commentExecutor?.source, 'tool');
         assert.strictEqual(harness.AIAssistant.IntentDispatcher.canExecuteDirectly('help'), false);
         assert.strictEqual(harness.AIAssistant.IntentDispatcher.canExecuteDirectly('create_comment'), true);
+    });
+
+    await runTest('AIAssistant._buildGuardContext: derives apiKey and default item name from page context', async () => {
+        const harness = createHarness();
+
+        const context = harness.AIAssistant._buildGuardContext({
+            pageId: 'page_guard_1'
+        }, {
+            notionApiKey: 'manual_api_key'
+        });
+
+        assert.deepStrictEqual(context, {
+            pageId: 'page_guard_1',
+            itemName: 'page_guard_1',
+            apiKey: 'manual_api_key'
+        });
+    });
+
+    await runTest('AIAssistant._executeGuardedDatabaseWrite: delegates normalized database context through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.itemName, context.databaseId, context.apiKey]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant._executeGuardedDatabaseWrite(
+            'updateDatabase',
+            'db_guard_1',
+            async () => 'ok',
+            'manual_api_key'
+        );
+
+        assert.strictEqual(result, 'ok');
+        assert.deepStrictEqual(calls, [
+            ['guard', 'updateDatabase', 'db_guard_1', 'db_guard_1', 'manual_api_key']
+        ]);
     });
 
     await runTest('AIAssistant.quickParseIntent: recognizes comment detail lookup', async () => {
@@ -1907,6 +1959,389 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
         });
     });
 
+    await runTest('AIAssistant.AGENT_TOOLS.append_content: routes page append writes through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.AIAssistant._resolvePageId = async () => ({ id: 'page_append_1', name: '项目计划' });
+        harness.NotionAPI.appendPageMarkdown = async () => {
+            calls.push('appendPageMarkdown');
+            return { ok: true };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.itemName]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant.AGENT_TOOLS.append_content.execute({
+            page_name: '项目计划',
+            content: '## Added'
+        }, {
+            notionApiKey: 'manual_api_key'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'appendBlocks', '项目计划']);
+        assert.strictEqual(calls[1], 'appendPageMarkdown');
+        assertStructuredToolResult(result, {
+            title: '页面内容追加完成'
+        });
+    });
+
+    await runTest('AIAssistant.AGENT_TOOLS.create_comment: routes comment writes through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.AIAssistant._resolvePageId = async () => ({ id: 'page_comment_1', name: '项目计划' });
+        harness.NotionAPI.createComment = async (payload) => {
+            calls.push(['createComment', payload.pageId, payload.content]);
+            return { id: 'comment_new_1' };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.itemName, context.pageId]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant.AGENT_TOOLS.create_comment.execute({
+            page_name: '项目计划',
+            content: '请补充示例'
+        }, {
+            notionApiKey: 'manual_api_key'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'createComment', '项目计划', 'page_comment_1']);
+        assert.deepStrictEqual(calls[1], ['createComment', 'page_comment_1', '请补充示例']);
+        assertStructuredToolResult(result, {
+            title: '评论已创建'
+        });
+    });
+
+    await runTest('AIAssistant.AGENT_TOOLS.create_page: routes page creation through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.NotionAPI.createPageObject = async (parent, properties) => {
+            calls.push(['createPageObject', parent.database_id, properties['标题'].title[0].text.content]);
+            return { id: 'page_new_1' };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.itemName]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant.AGENT_TOOLS.create_page.execute({
+            title: '新页面'
+        }, {
+            notionApiKey: 'manual_api_key',
+            notionDatabaseId: 'db_parent_1'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'createDatabasePage', '新页面']);
+        assert.deepStrictEqual(calls[1], ['createPageObject', 'db_parent_1', '新页面']);
+        assertStructuredToolResult(result, {
+            title: '页面创建完成'
+        });
+    });
+
+    await runTest('AIAssistant.AGENT_TOOLS.search_replace_page_markdown: routes markdown edits through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.AIAssistant._resolvePageId = async () => ({ id: 'page_markdown_1', name: '项目计划' });
+        harness.NotionAPI.searchReplacePageMarkdown = async (pageId, updates) => {
+            calls.push(['searchReplace', pageId, updates.length]);
+            return { ok: true };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.pageId]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant.AGENT_TOOLS.search_replace_page_markdown.execute({
+            page_name: '项目计划',
+            updates: [{ old_str: '旧内容', new_str: '新内容' }]
+        }, {
+            notionApiKey: 'manual_api_key'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'updatePageMarkdown', 'page_markdown_1']);
+        assert.deepStrictEqual(calls[1], ['searchReplace', 'page_markdown_1', 1]);
+        assertStructuredToolResult(result, {
+            title: 'Markdown 精确替换完成'
+        });
+    });
+
+    await runTest('AIAssistant.AGENT_TOOLS.archive_page: preserves page context for dangerous guarded writes', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.AIAssistant._resolvePageTargets = async () => [{ id: 'page_archive_1', name: '旧页面' }];
+        harness.NotionAPI.deletePage = async (pageId) => {
+            calls.push(['deletePage', pageId]);
+            return { ok: true };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.itemName, context.pageId]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant.AGENT_TOOLS.archive_page.execute({}, {
+            notionApiKey: 'manual_api_key'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'deletePage', '旧页面', 'page_archive_1']);
+        assert.deepStrictEqual(calls[1], ['deletePage', 'page_archive_1']);
+        assertStructuredToolResult(result, {
+            title: '页面归档完成'
+        });
+    });
+
+    await runTest('AIAssistant.AGENT_TOOLS.update_page_property: routes property writes through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.NotionAPI.updatePage = async (pageId, payload) => {
+            calls.push(['updatePage', pageId, payload]);
+            return { ok: true };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.pageId]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant.AGENT_TOOLS.update_page_property.execute({
+            page_id: 'page_prop_1',
+            property: '状态',
+            value: '处理中',
+            type: 'text'
+        }, {
+            notionApiKey: 'manual_api_key'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'updatePage', 'page_prop_1']);
+        assert.strictEqual(calls[1][0], 'updatePage');
+        assertStructuredToolResult(result, {
+            name: 'update_page_property',
+            summary: '已更新页面属性「状态」为「处理中」。',
+            text: '已更新页面属性「状态」为「处理中」。'
+        });
+    });
+
+    await runTest('AIAssistant.AGENT_TOOLS.update_page: routes metadata writes through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.AIAssistant._resolvePageTargets = async () => [{ id: 'page_meta_1', name: '项目计划' }];
+        harness.NotionAPI.updatePageMeta = async (pageId, payload) => {
+            calls.push(['updatePageMeta', pageId, payload.icon?.emoji || '']);
+            return { ok: true };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.pageId]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant.AGENT_TOOLS.update_page.execute({
+            page_name: '项目计划',
+            icon_emoji: '🚀'
+        }, {
+            notionApiKey: 'manual_api_key'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'updatePage', 'page_meta_1']);
+        assert.deepStrictEqual(calls[1], ['updatePageMeta', 'page_meta_1', '🚀']);
+        assertStructuredToolResult(result, {
+            title: '页面更新完成'
+        });
+    });
+
+    await runTest('AIAssistant.handleAIAutofill: routes page property writes through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID] = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.pageId]);
+            return executor();
+        };
+        harness.AIAssistant.checkConfig = () => ({ valid: true });
+        harness.AIAssistant._ensureAIProperty = async () => {};
+        harness.NotionAPI.queryDatabase = async () => ({
+            results: [{
+                id: 'page_auto_1',
+                properties: {
+                    标题: { title: [{ plain_text: '项目计划' }] }
+                }
+            }],
+            has_more: false,
+            next_cursor: null
+        });
+        harness.AIAssistant._extractPageContent = async () => '内容';
+        harness.AIService.requestChat = async () => '自动摘要';
+        harness.NotionAPI.request = async (method, url, body) => {
+            calls.push(['request', method, url, body.properties ? 'properties' : 'none']);
+            return { ok: true };
+        };
+
+        const result = await harness.AIAssistant.handleAIAutofill({
+            autofill_type: 'summary'
+        }, {
+            notionApiKey: 'manual_api_key',
+            notionDatabaseId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            aiApiKey: 'ai_key'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'updatePage', 'page_auto_1']);
+        assert.deepStrictEqual(calls[1][0], 'request');
+        assert.ok(String(result).includes('AI 属性填充完成'));
+    });
+
+    await runTest('AIAssistant.AGENT_TOOLS.update_block_content: routes block writes through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.NotionAPI.fetchBlock = async () => ({
+            type: 'paragraph',
+            paragraph: { rich_text: [] }
+        });
+        harness.NotionAPI.updateBlock = async (blockId) => {
+            calls.push(['updateBlock', blockId]);
+            return { ok: true };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.itemName]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant.AGENT_TOOLS.update_block_content.execute({
+            block_id: 'block_123',
+            content: '新内容'
+        }, {
+            notionApiKey: 'manual_api_key'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'updateBlock', 'block_123']);
+        assert.deepStrictEqual(calls[1], ['updateBlock', 'block_123']);
+        assertStructuredToolResult(result, {
+            title: '块内容更新完成'
+        });
+    });
+
+    await runTest('AIAssistant.handleTranslateContent: routes append translation writes through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.AIAssistant.checkConfig = () => ({ valid: true });
+        harness.AIAssistant._resolvePageId = async () => ({ id: 'page_translate_1', name: '项目计划' });
+        harness.AIAssistant._extractPageContent = async () => '原文';
+        harness.AIService.requestChat = async () => '翻译结果';
+        harness.NotionAPI.appendBlocks = async (pageId) => {
+            calls.push(['appendBlocks', pageId]);
+            return { ok: true };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.pageId]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant.handleTranslateContent({
+            page_name: '项目计划',
+            target_language: '英文'
+        }, {
+            notionApiKey: 'manual_api_key',
+            aiApiKey: 'ai_key'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'appendBlocks', 'page_translate_1']);
+        assert.deepStrictEqual(calls[1], ['appendBlocks', 'page_translate_1']);
+        assert.ok(String(result).includes('翻译已追加到页面'));
+    });
+
+    await runTest('AIAssistant.handleEditContent: append-version writes route through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.AIAssistant.checkConfig = () => ({ valid: true });
+        harness.AIAssistant._resolvePageId = async () => ({ id: 'page_edit_1', name: '项目计划' });
+        harness.AIAssistant._extractPageContent = async () => '原文内容';
+        harness.AIService.requestChat = async () => JSON.stringify({
+            mode: 'append_version',
+            append_markdown: '## 改写版本'
+        });
+        harness.NotionAPI.appendPageMarkdown = async (pageId) => {
+            calls.push(['appendPageMarkdown', pageId]);
+            return { ok: true };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.pageId]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant.handleEditContent({
+            page_name: '项目计划',
+            content_prompt: '改得更简洁'
+        }, {
+            notionApiKey: 'manual_api_key',
+            aiApiKey: 'ai_key'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'appendBlocks', 'page_edit_1']);
+        assert.deepStrictEqual(calls[1], ['appendPageMarkdown', 'page_edit_1']);
+        assert.ok(String(result).includes('编辑版本已追加到页面'));
+    });
+
+    await runTest('AIClassifier.classifyPage: routes page classification writes through OperationGuard.execute', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.AIClassifier.fetchPageBlocks = async () => [];
+        harness.AIService.classify = async () => '技术';
+        harness.NotionAPI.updatePage = async (pageId) => {
+            calls.push(['updatePage', pageId]);
+            return { ok: true };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.pageId]);
+            return executor();
+        };
+
+        const result = await harness.AIClassifier.classifyPage({
+            id: 'page_classify_1',
+            properties: { 标题: { title: [{ plain_text: '项目计划' }] } }
+        }, {
+            notionApiKey: 'manual_api_key',
+            categories: ['技术', '产品']
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'updatePage', 'page_classify_1']);
+        assert.deepStrictEqual(calls[1], ['updatePage', 'page_classify_1']);
+        assert.strictEqual(result, '技术');
+    });
+
+    await runTest('AIClassifier.ensureAICategoryProperty: routes schema writes through OperationGuard.execute at standard level', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        assert.strictEqual(harness.OperationGuard.OPERATION_LEVELS.updateDatabase, 1);
+        harness.NotionAPI.fetchDatabase = async () => ({ properties: {} });
+        harness.NotionAPI.updateDatabase = async (dbId) => {
+            calls.push(['updateDatabase', dbId]);
+            return { ok: true };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.itemName]);
+            return executor();
+        };
+
+        await harness.AIClassifier.ensureAICategoryProperty({
+            notionApiKey: 'manual_api_key',
+            notionDatabaseId: 'db_123',
+            categories: ['技术', '产品']
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'updateDatabase', 'db_123']);
+        assert.deepStrictEqual(calls[1], ['updateDatabase', 'db_123']);
+    });
+
     await runTest('ChatUI.renderMessages: renders structured assistant results without object leakage', async () => {
         const harness = createHarness();
         const container = createElementStub();
@@ -1961,6 +2396,12 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
         const iifeBody = extractUserscriptIifeBody(userScriptContent);
         const patched = patchBookmarkBridgeForExtension(iifeBody);
 
+        assert.ok(userScriptContent.includes(BUILD_ANCHORS.userscriptBodyStart));
+        assert.ok(userScriptContent.includes(BUILD_ANCHORS.userscriptBodyEnd));
+        assert.ok(!iifeBody.includes(BUILD_ANCHORS.userscriptBodyStart));
+        assert.ok(!iifeBody.includes(BUILD_ANCHORS.userscriptBodyEnd));
+        assert.ok(iifeBody.includes(BUILD_ANCHORS.bookmarkBridgeStart));
+        assert.ok(iifeBody.includes(BUILD_ANCHORS.bookmarkBridgeEnd));
         assert.ok(iifeBody.includes('const BookmarkBridge = {'));
         assert.ok(!iifeBody.includes('// ==UserScript=='));
         assert.deepStrictEqual(patched.patchedMethods, [
@@ -1971,10 +2412,131 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
             'searchBookmarks',
             'init'
         ]);
+        assert.ok(patched.code.includes(BUILD_ANCHORS.bookmarkBridgeStart));
+        assert.ok(patched.code.includes(BUILD_ANCHORS.bookmarkBridgeEnd));
         assert.ok(patched.code.includes('return !!(typeof chrome !== "undefined" && chrome.bookmarks);'));
         assert.ok(patched.code.includes('return chrome.bookmarks.getTree();'));
         assert.ok(patched.code.includes('return chrome.bookmarks.search(query || "");'));
         assert.ok(!patched.code.includes("return !!document.querySelector('meta[name=\"ld-notion-ext\"][content=\"ready\"]');"));
+    });
+
+    await runTest('scripts/build-extension.js: exposes reusable generated asset builders', async () => {
+        const backgroundScript = buildBackgroundScript();
+        const gmShim = buildGmShim();
+        const popupHtml = buildPopupHtml();
+        const popupScript = buildPopupScript();
+        const contentScript = buildContentScript({ gmShim, patchedBody: 'console.log("patched");' });
+        const manifest = buildManifest({ version: '9.9.9' });
+
+        assert.ok(backgroundScript.includes('message.type !== "GM_xmlhttpRequest"'));
+        assert.ok(backgroundScript.includes('return true;'));
+        assert.ok(gmShim.includes(GENERATED_SECTION_MARKERS.gmShimStart));
+        assert.ok(gmShim.includes(GENERATED_SECTION_MARKERS.gmShimEnd));
+        assert.ok(contentScript.includes('await _gmInitStorage();'));
+        assert.ok(contentScript.includes('console.log("patched");'));
+        assert.ok(popupHtml.includes('id="import-bookmarks"'));
+        assert.ok(popupHtml.includes('<script src="popup.js"></script>'));
+        assert.ok(popupScript.includes('LD_NOTION_IMPORT_BOOKMARKS'));
+        assert.ok(popupScript.includes('LD_NOTION_IMPORT_GITHUB'));
+        assert.ok(popupScript.includes('LD_NOTION_SET_BOOKMARK_SOURCE'));
+        assert.strictEqual(manifest.version, '9.9.9');
+        assert.strictEqual(manifest.background?.service_worker, 'background.js');
+        assert.strictEqual(manifest.action?.default_popup, 'popup.html');
+    });
+
+    await runTest('scripts/build-extension.js: resolves manifest profiles and keeps default output policy stable', async () => {
+        const resolvedDefault = resolveManifestProfile();
+        const resolvedBounded = resolveManifestProfile('bounded_hosts');
+        const manifest = buildManifest({ version: '9.9.9' });
+        const boundedManifest = buildManifest({ version: '9.9.9', profile: 'bounded_hosts' });
+
+        assert.strictEqual(resolvedDefault.name, DEFAULT_MANIFEST_PROFILE);
+        assert.deepStrictEqual(resolvedDefault.config, MANIFEST_PROFILE_PRESETS.default);
+        assert.strictEqual(resolvedBounded.name, 'bounded_hosts');
+        assert.deepStrictEqual(resolvedBounded.config, MANIFEST_PROFILE_PRESETS.bounded_hosts);
+        assert.ok(manifest.host_permissions.includes('https://*/*'));
+        assert.ok(manifest.host_permissions.includes('http://*/*'));
+        assert.ok(!boundedManifest.host_permissions.includes('https://*/*'));
+        assert.ok(!boundedManifest.host_permissions.includes('http://*/*'));
+    });
+
+    await runTest('scripts/build-extension.js: validates critical bridge assumptions before writing extension output', async () => {
+        const iifeBody = extractUserscriptIifeBody(userScriptContent);
+        const patched = patchBookmarkBridgeForExtension(iifeBody);
+        const backgroundScript = buildBackgroundScript();
+        const popupHtml = buildPopupHtml();
+        const popupScript = buildPopupScript();
+        const manifest = buildManifest({ version: '3.4.3' });
+        const contentScript = `
+            ${GENERATED_SECTION_MARKERS.gmShimStart}
+            ${GENERATED_SECTION_MARKERS.bookmarkEventBridgeStart}
+            window.addEventListener("ld-notion-request-bookmarks", () => {});
+            window.addEventListener("ld-notion-search-bookmarks", () => {});
+            ${GENERATED_SECTION_MARKERS.bookmarkEventBridgeEnd}
+            ${GENERATED_SECTION_MARKERS.popupMessageBridgeStart}
+            chrome.runtime.onMessage.addListener(() => {});
+            ${GENERATED_SECTION_MARKERS.popupMessageBridgeEnd}
+            await _gmInitStorage();
+            ${GENERATED_SECTION_MARKERS.gmShimEnd}
+        `;
+
+        assert.doesNotThrow(() => {
+            validatePatchedBuildAssumptions({
+                source: userScriptContent,
+                patchedBody: patched.code,
+                contentScript,
+                backgroundScript,
+                popupHtml,
+                popupScript,
+                manifest
+            });
+        });
+
+        assert.throws(() => {
+            validatePatchedBuildAssumptions({
+                source: userScriptContent.replace('const BookmarkBridge = {', 'const BookmarkBridgeMissing = {'),
+                patchedBody: patched.code
+            });
+        }, /BookmarkBridge 对象定义/);
+
+        assert.throws(() => {
+            validatePatchedBuildAssumptions({
+                source: userScriptContent.replace(BUILD_ANCHORS.userscriptBodyStart, '// body anchor removed'),
+                patchedBody: patched.code
+            });
+        }, /userscript 主体开始锚点/);
+
+        assert.throws(() => {
+            validatePatchedBuildAssumptions({
+                source: userScriptContent.replace(BUILD_ANCHORS.bookmarkBridgeStart, '// anchor removed'),
+                patchedBody: patched.code
+            });
+        }, /BookmarkBridge 构建开始锚点/);
+
+        assert.throws(() => {
+            assertContains('', 'needle', '测试片段');
+        }, /测试片段/);
+    });
+
+    await runTest('scripts/build-extension.js: buildExtension accepts manifest profile override without changing shared manifest seams', async () => {
+        const tempOutDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ld-notion-build-profile-'));
+
+        try {
+            const result = buildExtension({
+                source: userScriptContent,
+                outDir: tempOutDir,
+                manifestProfile: 'bounded_hosts'
+            });
+            const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8'));
+
+            assert.strictEqual(result.manifestProfile, 'bounded_hosts');
+            assert.ok(!manifest.host_permissions.includes('https://*/*'));
+            assert.ok(!manifest.host_permissions.includes('http://*/*'));
+            assert.strictEqual(manifest.background?.service_worker, 'background.js');
+            assert.strictEqual(manifest.action?.default_popup, 'popup.html');
+        } finally {
+            fs.rmSync(tempOutDir, { recursive: true, force: true });
+        }
     });
 
     await runTest('scripts/build-extension.js: builds extension artifacts from the current userscript shape', async () => {
@@ -1994,8 +2556,14 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
 
             const manifestPath = path.join(tempOutDir, 'manifest.json');
             const contentPath = path.join(tempOutDir, 'content.js');
+            const backgroundPath = path.join(tempOutDir, 'background.js');
+            const popupHtmlPath = path.join(tempOutDir, 'popup.html');
+            const popupJsPath = path.join(tempOutDir, 'popup.js');
             const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
             const contentScript = fs.readFileSync(contentPath, 'utf8');
+            const backgroundScript = fs.readFileSync(backgroundPath, 'utf8');
+            const popupHtml = fs.readFileSync(popupHtmlPath, 'utf8');
+            const popupScript = fs.readFileSync(popupJsPath, 'utf8');
 
             assert.strictEqual(manifest.manifest_version, 3);
             assert.strictEqual(manifest.background?.service_worker, 'background.js');
@@ -2003,15 +2571,29 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
                 Array.isArray(manifest.content_scripts) &&
                 manifest.content_scripts.some((entry) => Array.isArray(entry.js) && entry.js.includes('content.js'))
             );
-            assert.ok(fs.existsSync(path.join(tempOutDir, 'background.js')));
-            assert.ok(fs.existsSync(path.join(tempOutDir, 'popup.html')));
+            assert.ok(fs.existsSync(backgroundPath));
+            assert.ok(fs.existsSync(popupHtmlPath));
+            assert.ok(fs.existsSync(popupJsPath));
             assert.ok(fs.existsSync(path.join(tempOutDir, 'icon48.png')));
             assert.ok(fs.existsSync(path.join(tempOutDir, 'icon128.png')));
+            assert.ok(contentScript.includes(GENERATED_SECTION_MARKERS.gmShimStart));
+            assert.ok(contentScript.includes(GENERATED_SECTION_MARKERS.gmShimEnd));
+            assert.ok(contentScript.includes(GENERATED_SECTION_MARKERS.bookmarkEventBridgeStart));
+            assert.ok(contentScript.includes(GENERATED_SECTION_MARKERS.bookmarkEventBridgeEnd));
+            assert.ok(contentScript.includes(GENERATED_SECTION_MARKERS.popupMessageBridgeStart));
+            assert.ok(contentScript.includes(GENERATED_SECTION_MARKERS.popupMessageBridgeEnd));
             assert.ok(contentScript.includes('LD-Notion Chrome Extension — Content Script'));
             assert.ok(contentScript.includes('await _gmInitStorage();'));
             assert.ok(contentScript.includes('chrome.bookmarks.getTree()'));
             assert.ok(contentScript.includes('return !!(typeof chrome !== "undefined" && chrome.bookmarks);'));
             assert.ok(!contentScript.includes('// ==UserScript=='));
+            assert.ok(backgroundScript.includes('message.type !== "GM_xmlhttpRequest"'));
+            assert.ok(backgroundScript.includes('return true;'));
+            assert.ok(popupHtml.includes('id="import-bookmarks"'));
+            assert.ok(popupHtml.includes('<script src="popup.js"></script>'));
+            assert.ok(popupScript.includes('LD_NOTION_IMPORT_BOOKMARKS'));
+            assert.ok(popupScript.includes('LD_NOTION_IMPORT_GITHUB'));
+            assert.ok(popupScript.includes('LD_NOTION_SET_BOOKMARK_SOURCE'));
         } finally {
             fs.rmSync(tempOutDir, { recursive: true, force: true });
         }

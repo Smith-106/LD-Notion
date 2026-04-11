@@ -1,8 +1,8 @@
-# UI 手工回归清单（Linux.do / Notion / 通用网页）
+# UI 手工回归清单（Linux.do / Notion / 通用网页 / chrome-extension-full）
 
 > 适用脚本：`LinuxDo-Bookmarks-to-Notion.user.js`
 >
-> 建议每次 UI 大改后先跑静态校验：`node scripts/validate-userscript-ui.js`（或无 Node 时用 `python3 scripts/validate-userscript-ui.py`），再按本清单做手工回归。
+> 建议每次 UI 大改后先跑自动化基线：`npm run verify:baseline`。如涉及扩展形态，再补 `npm run verify:extension:bounded` 与 `npm run build:extension`，然后按本清单做手工回归。
 
 ## 0. 通用检查（所有站点）
 
@@ -40,3 +40,18 @@
 - [ ] 设置 API Key 的流程正常（Key 不预填到 DOM）
 - [ ] 导出按钮可触发导出；exporting/success/error 三种状态视觉可区分且可读
 - [ ] 面板可拉伸（左边/上边/左上角），不会遮挡主要操作按钮
+
+## 4. `chrome-extension-full`（独立扩展形态）
+
+准备：
+
+- [ ] 先执行 `node scripts/build-extension.js`
+- [ ] 在 `chrome://extensions/` 中以“加载已解压的扩展程序”方式加载 `chrome-extension-full/`
+
+检查：
+
+- [ ] 扩展 Popup 可以正常打开，不出现空白页或脚本报错
+- [ ] Popup 中的快捷入口文案与当前稳定能力一致，不宣传内部或不稳定能力
+- [ ] 点击 Popup 中的来源/导入入口后，能把当前页面引导到对应宿主面或触发对应消息桥接
+- [ ] 在 Linux.do / Notion / 支持的页面上，content script 注入后不会出现明显的重复 UI、缺失样式或初始化失败
+- [ ] 重新执行 `node scripts/build-extension.js` 后，扩展目录结构仍可被浏览器正常加载

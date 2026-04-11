@@ -36,8 +36,14 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Verify userscript/build smoke baseline
+        run: npm run verify:baseline
+
+      - name: Smoke bounded-host manifest profile
+        run: npm run verify:extension:bounded
+
       - name: Build extension
-        run: node scripts/build-extension.js
+        run: npm run build:extension
 
       - name: Package extension zip
         run: |

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.4.3
+// @version      3.4.4
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion，GitHub 全类型导入（Stars/Repos/Forks/Gists），浏览器书签导入，跨源智能搜索与推荐，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -41,6 +41,7 @@
 // ==/UserScript==
 
 (function () {
+    // [LD-NOTION-BUILD:USER_SCRIPT_BODY_START]
     "use strict";
 
     // ===========================================
@@ -3350,6 +3351,63 @@
             return { propertyUpdates, metaPayload };
         },
 
+        _resolveGuardApiKey: (settingsOrApiKey, fallbackApiKey) => {
+            if (typeof settingsOrApiKey === "string" && settingsOrApiKey) {
+                return settingsOrApiKey;
+            }
+            if (settingsOrApiKey?.notionApiKey) {
+                return settingsOrApiKey.notionApiKey;
+            }
+            if (settingsOrApiKey?.apiKey) {
+                return settingsOrApiKey.apiKey;
+            }
+            return fallbackApiKey;
+        },
+
+        _buildGuardContext: (context = {}, settingsOrApiKey) => {
+            const guardContext = { ...context };
+            const apiKey = AIAssistant._resolveGuardApiKey(settingsOrApiKey, guardContext.apiKey);
+            if (apiKey) {
+                guardContext.apiKey = apiKey;
+            }
+            if (!guardContext.itemName && guardContext.pageId) {
+                guardContext.itemName = guardContext.pageId;
+            }
+            return guardContext;
+        },
+
+        _executeGuardedWrite: async (operation, executor, context = {}, settingsOrApiKey) => {
+            return await OperationGuard.execute(
+                operation,
+                executor,
+                AIAssistant._buildGuardContext(context, settingsOrApiKey)
+            );
+        },
+
+        _executeGuardedPageWrite: async (operation, target, executor, settingsOrApiKey, context = {}) => {
+            const pageId = context.pageId || target?.id || "";
+            const itemName = context.itemName || target?.name || target?.id || pageId || "未知页面";
+            return await AIAssistant._executeGuardedWrite(
+                operation,
+                executor,
+                { ...context, itemName, pageId },
+                settingsOrApiKey
+            );
+        },
+
+        _executeGuardedDatabaseWrite: async (operation, databaseId, executor, settingsOrApiKey, context = {}) => {
+            return await AIAssistant._executeGuardedWrite(
+                operation,
+                executor,
+                {
+                    ...context,
+                    itemName: context.itemName || databaseId,
+                    databaseId: context.databaseId || databaseId,
+                },
+                settingsOrApiKey
+            );
+        },
+
         _applyPageUpdatesToTargets: async (targets, params, settings) => {
             const built = AIAssistant._buildPageUpdatePayloads(params);
             if (built.error) {
@@ -3365,10 +3423,16 @@
                 const target = targets[i];
                 try {
                     if (Object.keys(propertyUpdates).length > 0) {
-                        await NotionAPI.updatePage(target.id, propertyUpdates, settings.notionApiKey);
+                        await AIAssistant._executeGuardedPageWrite("updatePage", target,
+                            () => NotionAPI.updatePage(target.id, propertyUpdates, settings.notionApiKey),
+                            settings
+                        );
                     }
                     if (Object.keys(metaPayload).length > 0) {
-                        await NotionAPI.updatePageMeta(target.id, metaPayload, settings.notionApiKey);
+                        await AIAssistant._executeGuardedPageWrite("updatePage", target,
+                            () => NotionAPI.updatePageMeta(target.id, metaPayload, settings.notionApiKey),
+                            settings
+                        );
                     }
                     success++;
                 } catch {
@@ -4473,11 +4537,15 @@ ${candidateList}
                             const tags = result.split(/[,，]/).map(t => t.trim()).filter(t => t.length > 0 && t.length <= 20).slice(0, tag_count);
 
                             if (tags.length > 0) {
-                                await NotionAPI.request("PATCH", `/pages/${page.id}`, {
-                                    properties: {
-                                        "标签": { multi_select: tags.map(t => ({ name: t })) },
-                                    },
-                                }, settings.notionApiKey);
+                                await AIAssistant._executeGuardedPageWrite("updatePage",
+                                    { id: page.id, name: title || page.id },
+                                    () => NotionAPI.request("PATCH", `/pages/${page.id}`, {
+                                        properties: {
+                                            "标签": { multi_select: tags.map(t => ({ name: t })) },
+                                        },
+                                    }, settings.notionApiKey),
+                                    settings
+                                );
                                 tagged++;
                             }
                         } catch (e) {
@@ -4505,12 +4573,17 @@ ${candidateList}
                     if (page?.error) return `错误: ${page.error}`;
                     if (!page) return `错误: 找不到页面「${page_name || page_id}」。`;
 
-                    try {
-                        await NotionAPI.appendPageMarkdown(page.id, content, settings.notionApiKey);
-                    } catch {
-                        const blocks = AIAssistant._textToBlocks(content);
-                        await NotionAPI.appendBlocks(page.id, blocks, settings.notionApiKey);
-                    }
+                    await AIAssistant._executeGuardedPageWrite("appendBlocks", page,
+                        async () => {
+                            try {
+                                await NotionAPI.appendPageMarkdown(page.id, content, settings.notionApiKey);
+                            } catch {
+                                const blocks = AIAssistant._textToBlocks(content);
+                                await NotionAPI.appendBlocks(page.id, blocks, settings.notionApiKey);
+                            }
+                        },
+                        settings
+                    );
                     return AIAssistant._formatToolResult({
                         title: "页面内容追加完成",
                         fields: [
@@ -4550,7 +4623,11 @@ ${candidateList}
                         return "错误: insert_position 仅支持 end 或 after_block。";
                     }
 
-                    await NotionAPI.appendBlockChildren(parentId, blocks, settings.notionApiKey, options);
+                    await AIAssistant._executeGuardedWrite("appendBlocks",
+                        () => NotionAPI.appendBlockChildren(parentId, blocks, settings.notionApiKey, options),
+                        { itemName: targetName || parentId, pageId: parentId },
+                        settings
+                    );
                     return AIAssistant._formatToolResult({
                         title: "块插入完成",
                         fields: [
@@ -4575,9 +4652,9 @@ ${candidateList}
                     if (page?.error) return `错误: ${page.error}`;
                     if (!page) return `错误: 找不到页面「${page_name || page_id}」。`;
 
-                    await OperationGuard.execute("updatePageMarkdown",
+                    await AIAssistant._executeGuardedPageWrite("updatePageMarkdown", page,
                         () => NotionAPI.searchReplacePageMarkdown(page.id, updates, settings.notionApiKey),
-                        { itemName: page.name, pageId: page.id, apiKey: settings.notionApiKey }
+                        settings
                     );
 
                     return AIAssistant._formatToolResult({
@@ -4603,9 +4680,9 @@ ${candidateList}
                     if (page?.error) return `错误: ${page.error}`;
                     if (!page) return `错误: 找不到页面「${page_name || page_id}」。`;
 
-                    await OperationGuard.execute("replacePageMarkdown",
+                    await AIAssistant._executeGuardedPageWrite("replacePageMarkdown", page,
                         () => NotionAPI.replacePageMarkdown(page.id, new_markdown, settings.notionApiKey, true),
-                        { itemName: page.name, pageId: page.id, apiKey: settings.notionApiKey }
+                        settings
                     );
 
                     return AIAssistant._formatToolResult({
@@ -4649,14 +4726,15 @@ ${candidateList}
                         targetName = page.name;
                     }
 
-                    const result = await OperationGuard.execute("createComment",
+                    const result = await AIAssistant._executeGuardedWrite("createComment",
                         () => NotionAPI.createComment({
                             pageId: page?.id,
                             blockId: block_id,
                             discussionId: resolvedDiscussionId,
                             content,
                         }, settings.notionApiKey),
-                        { itemName: targetName || "评论目标", apiKey: settings.notionApiKey }
+                        { itemName: targetName || "评论目标", pageId: page?.id },
+                        settings
                     );
 
                     const newCommentId = result.id?.replace(/-/g, "") || "";
@@ -4700,7 +4778,11 @@ ${candidateList}
                             break;
                     }
 
-                    await NotionAPI.updatePage(page_id.replace(/-/g, ""), updateProps, settings.notionApiKey);
+                    await AIAssistant._executeGuardedPageWrite("updatePage",
+                        { id: page_id.replace(/-/g, ""), name: page_id },
+                        () => NotionAPI.updatePage(page_id.replace(/-/g, ""), updateProps, settings.notionApiKey),
+                        settings
+                    );
                     return `已更新页面属性「${property}」为「${value}」。`;
                 }
             },
@@ -4747,7 +4829,11 @@ ${candidateList}
                     const icon = AIAssistant._buildPageIconPayload(args);
                     const cover = AIAssistant._buildPageCoverPayload(args);
 
-                    const page = await NotionAPI.createPageObject(parent, properties, children, settings.notionApiKey, { icon, cover });
+                    const page = await AIAssistant._executeGuardedWrite("createDatabasePage",
+                        () => NotionAPI.createPageObject(parent, properties, children, settings.notionApiKey, { icon, cover }),
+                        { itemName: title },
+                        settings
+                    );
                     const newId = page.id?.replace(/-/g, "") || "";
                     return AIAssistant._formatToolResult({
                         title: "页面创建完成",
@@ -4811,7 +4897,11 @@ ${candidateList}
                             const icon = AIAssistant._buildPageIconPayload(item);
                             const cover = AIAssistant._buildPageCoverPayload(item);
 
-                            await NotionAPI.createPageObject(parent, properties, children, settings.notionApiKey, { icon, cover });
+                            await AIAssistant._executeGuardedWrite("createDatabasePage",
+                                () => NotionAPI.createPageObject(parent, properties, children, settings.notionApiKey, { icon, cover }),
+                                { itemName: title },
+                                settings
+                            );
                             success++;
                         } catch {
                             failed++;
@@ -4856,9 +4946,9 @@ ${candidateList}
                         return "错误: 请至少提供一个可更新字段，如 icon_emoji、icon_url、cover_url、clear_icon、clear_cover、is_locked。";
                     }
 
-                    await OperationGuard.execute("updatePage",
+                    await AIAssistant._executeGuardedPageWrite("updatePage", page,
                         () => NotionAPI.updatePageMeta(page.id, payload, settings.notionApiKey),
-                        { itemName: page.name, pageId: page.id, apiKey: settings.notionApiKey }
+                        settings
                     );
 
                     return AIAssistant._formatToolResult({
@@ -4935,7 +5025,11 @@ ${candidateList}
 
                     const block = await NotionAPI.fetchBlock(block_id, settings.notionApiKey);
                     const payload = AIAssistant._buildBlockUpdatePayload(block, content, { checked, color });
-                    await NotionAPI.updateBlock(block_id.replace(/-/g, ""), payload, settings.notionApiKey);
+                    await AIAssistant._executeGuardedWrite("updateBlock",
+                        () => NotionAPI.updateBlock(block_id.replace(/-/g, ""), payload, settings.notionApiKey),
+                        { itemName: String(block_id).replace(/-/g, "") },
+                        settings
+                    );
                     return AIAssistant._formatToolResult({
                         title: "块内容更新完成",
                         fields: [
@@ -4994,9 +5088,10 @@ ${candidateList}
                     if (target?.error) return `错误: ${target.error}`;
                     if (!target) return `错误: 找不到目标数据库「${target_database_name || target_database_id}」。`;
 
-                    await OperationGuard.execute("movePage",
+                    await AIAssistant._executeGuardedPageWrite("movePage",
+                        { id: page_id.replace(/-/g, ""), name: page_id },
                         () => NotionAPI.movePage(page_id.replace(/-/g, ""), target.id, "database", settings.notionApiKey),
-                        { itemName: page_id, pageId: page_id, apiKey: settings.notionApiKey }
+                        settings
                     );
                     return `已将页面 ${page_id} 移动到数据库「${target.name}」。`;
                 }
@@ -5014,9 +5109,10 @@ ${candidateList}
                     if (target?.error) return `错误: ${target.error}`;
                     if (!target) return `错误: 找不到目标数据库「${target_database_name || target_database_id}」。`;
 
-                    await OperationGuard.execute("duplicatePage",
+                    await AIAssistant._executeGuardedPageWrite("duplicatePage",
+                        { id: page_id.replace(/-/g, ""), name: page_id },
                         () => NotionAPI.duplicatePage(page_id.replace(/-/g, ""), target.id, "database", settings.notionApiKey),
-                        { itemName: page_id, pageId: page_id, apiKey: settings.notionApiKey }
+                        settings
                     );
                     return `已将页面 ${page_id} 复制到数据库「${target.name}」。`;
                 }
@@ -5040,9 +5136,9 @@ ${candidateList}
                     for (let i = 0; i < targets.length; i++) {
                         const target = targets[i];
                         try {
-                            await OperationGuard.execute("deletePage",
+                            await AIAssistant._executeGuardedPageWrite("deletePage", target,
                                 () => NotionAPI.deletePage(target.id, settings.notionApiKey),
-                                { itemName: target.name, pageId: target.id, apiKey: settings.notionApiKey }
+                                settings
                             );
                             success++;
                         } catch {
@@ -5083,9 +5179,9 @@ ${candidateList}
                     for (let i = 0; i < targets.length; i++) {
                         const target = targets[i];
                         try {
-                            await OperationGuard.execute("restorePage",
+                            await AIAssistant._executeGuardedPageWrite("restorePage", target,
                                 () => NotionAPI.restorePage(target.id, settings.notionApiKey),
-                                { itemName: target.name, pageId: target.id, apiKey: settings.notionApiKey }
+                                settings
                             );
                             success++;
                         } catch {
@@ -5136,9 +5232,10 @@ ${candidateList}
                         "作者": { rich_text: {} },
                     };
 
-                    const result = await OperationGuard.execute("createDatabase",
+                    const result = await AIAssistant._executeGuardedWrite("createDatabase",
                         () => NotionAPI.createDatabase(parentPage.id, name, properties, settings.notionApiKey),
-                        { itemName: name, apiKey: settings.notionApiKey }
+                        { itemName: name },
+                        settings
                     );
 
                     const newDbId = result.id?.replace(/-/g, "") || "";
@@ -6247,9 +6344,10 @@ compound 格式（仅当 intent 为 compound 时使用）：
                     );
 
                     try {
-                        await OperationGuard.execute("movePage",
+                        await AIAssistant._executeGuardedPageWrite("movePage",
+                            { id: page.id, name: title },
                             () => NotionAPI.movePage(page.id, target.id, "database", settings.notionApiKey),
-                            { itemName: title, pageId: page.id, apiKey: settings.notionApiKey }
+                            settings
                         );
                         results.success++;
                     } catch (error) {
@@ -6338,9 +6436,10 @@ compound 格式（仅当 intent 为 compound 时使用）：
                     );
 
                     try {
-                        await OperationGuard.execute("duplicatePage",
+                        await AIAssistant._executeGuardedPageWrite("duplicatePage",
+                            { id: page.id, name: title },
                             () => NotionAPI.duplicatePage(page.id, target.id, "database", settings.notionApiKey),
-                            { itemName: title, pageId: page.id, apiKey: settings.notionApiKey }
+                            settings
                         );
                         results.success++;
                     } catch (error) {
@@ -6507,9 +6606,10 @@ compound 格式（仅当 intent 为 compound 时使用）：
                 };
 
                 // 调用 API 创建数据库
-                const result = await OperationGuard.execute("createDatabase",
+                const result = await AIAssistant._executeGuardedWrite("createDatabase",
                     () => NotionAPI.createDatabase(parentPage.id, database_name, properties, settings.notionApiKey),
-                    { itemName: database_name, apiKey: settings.notionApiKey }
+                    { itemName: database_name },
+                    settings
                 );
 
                 const newDbId = result.id?.replace(/-/g, "") || "";
@@ -6748,12 +6848,20 @@ compound 格式（仅当 intent 为 compound 时使用）：
                 ChatState.updateLastMessage("正在写入页面...", "processing");
 
                 try {
-                    await NotionAPI.appendPageMarkdown(targetPage.id, aiResponse, settings.notionApiKey);
-                } catch {
-                    const blocks = AIAssistant._textToBlocks(aiResponse);
-                    await NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
-                }
-
+                        await AIAssistant._executeGuardedPageWrite("appendBlocks", targetPage,
+                            async () => {
+                                try {
+                                    await NotionAPI.appendPageMarkdown(targetPage.id, aiResponse, settings.notionApiKey);
+                                } catch {
+                                    const blocks = AIAssistant._textToBlocks(aiResponse);
+                                    await NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
+                                }
+                            },
+                            settings
+                        );
+                    } catch (error) {
+                        return `❌ 内容生成失败: ${error.message}`;
+                    }
                 return `✅ **内容已生成并追加到页面**\n\n- 目标页面: ${targetPage.name}\n- 生成内容: ${aiResponse.length} 字\n\n💡 内容已追加到页面末尾。`;
             } catch (error) {
                 return `❌ 内容生成失败: ${error.message}`;
@@ -6834,13 +6942,13 @@ ${content_prompt}`;
                 if (editPlan?.mode === "update_content" && Array.isArray(editPlan.content_updates) && editPlan.content_updates.length > 0) {
                     ChatState.updateLastMessage("正在执行原位精确编辑...", "processing");
 
-                    await OperationGuard.execute("updatePageMarkdown",
+                    await AIAssistant._executeGuardedPageWrite("updatePageMarkdown", targetPage,
                         () => NotionAPI.searchReplacePageMarkdown(
                             targetPage.id,
                             editPlan.content_updates,
                             settings.notionApiKey
                         ),
-                        { itemName: targetPage.name, pageId: targetPage.id, apiKey: settings.notionApiKey }
+                        settings
                     );
 
                     return `✅ **页面已原位更新**\n\n- 目标页面: ${targetPage.name}\n- 编辑指令: ${content_prompt}\n- 精确替换: ${editPlan.content_updates.length} 处`;
@@ -6858,17 +6966,22 @@ ${content_prompt}`;
                 ChatState.updateLastMessage("正在写入编辑版本...", "processing");
 
                 const versionMarkdown = `---\n\n## ✏️ AI 编辑版本\n\n${aiResponse}`;
-                try {
-                    await NotionAPI.appendPageMarkdown(targetPage.id, versionMarkdown, settings.notionApiKey);
-                } catch {
-                    const contentBlocks = AIAssistant._textToBlocks(aiResponse);
-                    const blocks = [
-                        { type: "divider", divider: {} },
-                        { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: "✏️ AI 编辑版本" } }] } },
-                        ...contentBlocks
-                    ];
-                    await NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
-                }
+                await AIAssistant._executeGuardedPageWrite("appendBlocks", targetPage,
+                    async () => {
+                        try {
+                            await NotionAPI.appendPageMarkdown(targetPage.id, versionMarkdown, settings.notionApiKey);
+                        } catch {
+                            const contentBlocks = AIAssistant._textToBlocks(aiResponse);
+                            const blocks = [
+                                { type: "divider", divider: {} },
+                                { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: "✏️ AI 编辑版本" } }] } },
+                                ...contentBlocks
+                            ];
+                            await NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
+                        }
+                    },
+                    settings
+                );
 
                 return `✅ **编辑版本已追加到页面**\n\n- 目标页面: ${targetPage.name}\n- 编辑指令: ${content_prompt}\n\n💡 本次未执行原位替换，已将完整编辑版本追加到页面末尾（原内容保留）。`;
             } catch (error) {
@@ -6920,7 +7033,10 @@ ${content_prompt}`;
                     { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `🌐 AI 翻译（${lang}）` } }] } },
                     ...contentBlocks
                 ];
-                await NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
+                await AIAssistant._executeGuardedPageWrite("appendBlocks", targetPage,
+                    () => NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
+                    settings
+                );
 
                 return `✅ **翻译已追加到页面**\n\n- 目标页面: ${targetPage.name}\n- 翻译语言: ${lang}\n- 翻译内容: ${aiResponse.length} 字\n\n💡 翻译版本已追加到页面末尾（原内容保留）。`;
             } catch (error) {
@@ -6943,7 +7059,10 @@ ${content_prompt}`;
                 propDef[propertyName] = { rich_text: {} };
             }
 
-            await NotionAPI.updateDatabase(databaseId, propDef, apiKey);
+            await AIAssistant._executeGuardedDatabaseWrite("updateDatabase", databaseId,
+                () => NotionAPI.updateDatabase(databaseId, propDef, apiKey),
+                apiKey
+            );
         },
 
         handleAIAutofill: async (params, settings, explanation) => {
@@ -7057,7 +7176,11 @@ ${content_prompt}`;
                             updateProps[propName] = { rich_text: [{ type: "text", text: { content: trimmed } }] };
                         }
 
-                        await NotionAPI.request("PATCH", `/pages/${page.id}`, { properties: updateProps }, settings.notionApiKey);
+                        await AIAssistant._executeGuardedPageWrite("updatePage",
+                            { id: page.id, name: title },
+                            () => NotionAPI.request("PATCH", `/pages/${page.id}`, { properties: updateProps }, settings.notionApiKey),
+                            settings
+                        );
                         results.success++;
                     } catch (error) {
                         console.error(`AI 填充失败: ${title}`, error);
@@ -8712,9 +8835,13 @@ ${availableTools}
             );
 
             // 更新页面属性
-            await NotionAPI.updatePage(page.id, {
-                "AI分类": { select: { name: category } }
-            }, settings.notionApiKey);
+            await AIAssistant._executeGuardedPageWrite("updatePage",
+                { id: page.id, name: title },
+                () => NotionAPI.updatePage(page.id, {
+                    "AI分类": { select: { name: category } }
+                }, settings.notionApiKey),
+                settings
+            );
 
             return category;
         },
@@ -8790,11 +8917,14 @@ ${availableTools}
                         ...newOptions.map(name => ({ name }))
                     ];
 
-                    await NotionAPI.updateDatabase(notionDatabaseId, {
-                        "AI分类": {
-                            select: { options: allOptions }
-                        }
-                    }, notionApiKey);
+                    await AIAssistant._executeGuardedDatabaseWrite("updateDatabase", notionDatabaseId,
+                        () => NotionAPI.updateDatabase(notionDatabaseId, {
+                            "AI分类": {
+                                select: { options: allOptions }
+                            }
+                        }, notionApiKey),
+                        notionApiKey
+                    );
                 }
                 return;
             }
@@ -8802,11 +8932,14 @@ ${availableTools}
             // 创建 "AI分类" Select 属性
             const options = categories.map(name => ({ name }));
 
-            await NotionAPI.updateDatabase(notionDatabaseId, {
-                "AI分类": {
-                    select: { options }
-                }
-            }, notionApiKey);
+            await AIAssistant._executeGuardedDatabaseWrite("updateDatabase", notionDatabaseId,
+                () => NotionAPI.updateDatabase(notionDatabaseId, {
+                    "AI分类": {
+                        select: { options }
+                    }
+                }, notionApiKey),
+                notionApiKey
+            );
         },
 
         // 控制方法
@@ -8852,6 +8985,7 @@ ${availableTools}
             updateBlock: 1,
             appendBlocks: 1,
             updatePageMarkdown: 1,
+            updateDatabase: 1,
             // 高级操作
             movePage: 2,
             duplicatePage: 2,
@@ -10379,7 +10513,7 @@ ${availableTools}
             if (typeof GM_info !== "undefined" && GM_info?.script?.version) {
                 return GM_info.script.version;
             }
-            return "3.4.3";
+            return "3.4.4";
         },
 
         compareVersions: (a, b) => {
@@ -11372,6 +11506,7 @@ ${availableTools}
     // ===========================================
     // 浏览器书签桥接模块
     // ===========================================
+    // [LD-NOTION-BUILD:BOOKMARK_BRIDGE_START]
     const BookmarkBridge = {
         _requestId: 0,
         _pendingRequests: {},
@@ -11437,6 +11572,7 @@ ${availableTools}
             });
         },
     };
+    // [LD-NOTION-BUILD:BOOKMARK_BRIDGE_END]
 
     // ===========================================
     // 浏览器书签导出到 Notion 模块
@@ -17723,4 +17859,5 @@ ${availableTools}
     }
 
     main();
+    // [LD-NOTION-BUILD:USER_SCRIPT_BODY_END]
 })();
