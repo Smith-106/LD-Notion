@@ -223,6 +223,13 @@
         },
     };
 
+    // 通用提示消息
+    const MSG = {
+        NO_NOTION_KEY: "请先填写 Notion API Key",
+        NO_AI_KEY: "请先填写 AI API Key",
+        SETUP_NOTION_KEY: "请先设置 Notion API Key",
+    };
+
     // ===========================================
     // 工具函数
     // ===========================================
@@ -9546,9 +9553,8 @@ ${availableTools}
                 "";
             let publishDate = "";
             if (rawDate) {
-                try {
-                    publishDate = new Date(rawDate).toISOString().split("T")[0];
-                } catch (e) {}
+                const d = new Date(rawDate);
+                if (!isNaN(d.getTime())) publishDate = d.toISOString().split("T")[0];
             }
 
             // 站点名称
@@ -10001,12 +10007,10 @@ ${availableTools}
             };
 
             // 尝试获取分类名称
-            try {
-                const categoryBadge = document.querySelector(`.badge-category[data-category-id="${mainData.category_id}"]`);
-                if (categoryBadge) {
-                    topic.categoryName = categoryBadge.textContent.trim();
-                }
-            } catch (e) {}
+            const categoryBadge = document.querySelector(`.badge-category[data-category-id="${mainData.category_id}"]`);
+            if (categoryBadge) {
+                topic.categoryName = categoryBadge.textContent.trim();
+            }
 
             // 分批获取帖子详情
             let allPosts = [];
@@ -13048,7 +13052,11 @@ ${availableTools}
                         const size = JSON.parse(saved);
                         if (size.width) element.style.width = size.width;
                         if (size.maxHeight) element.style.maxHeight = size.maxHeight;
-                    } catch (e) {}
+                    } catch (e) {
+                        console.warn("[LD-Notion] corrupted panel size, resetting:", storageKey);
+                        Storage.remove(storageKey);
+                    }
+
                 }
             }
         },
@@ -13216,7 +13224,11 @@ ${availableTools}
                     const pos = JSON.parse(savedPosition);
                     btn.style.right = pos.right || "24px";
                     btn.style.bottom = pos.bottom || "24px";
-                } catch (e) {}
+                } catch (e) {
+                    console.warn("[LD-Notion] corrupted float btn position, resetting");
+                    Storage.remove(CONFIG.STORAGE_KEYS.FLOAT_BTN_POSITION);
+                }
+
             }
 
             document.body.appendChild(btn);
@@ -13523,7 +13535,7 @@ ${availableTools}
                 const workspaceTip = panel.querySelector("#ldb-notion-workspace-tip");
 
                 if (!apiKey) {
-                    NotionSiteUI.showStatus("请先填写 Notion API Key", "error");
+                    NotionSiteUI.showStatus(MSG.NO_NOTION_KEY, "error");
                     return;
                 }
 
@@ -13621,7 +13633,7 @@ ${availableTools}
                 const modelTip = panel.querySelector("#ldb-notion-ai-model-tip");
 
                 if (!aiApiKey) {
-                    NotionSiteUI.showStatus("请先填写 AI API Key", "error");
+                    NotionSiteUI.showStatus(MSG.NO_AI_KEY, "error");
                     return;
                 }
 
@@ -13743,7 +13755,11 @@ ${availableTools}
                     const pos = JSON.parse(savedPosition);
                     panel.style.right = pos.right || "24px";
                     panel.style.bottom = pos.bottom || "96px";
-                } catch (e) {}
+                } catch (e) {
+                    console.warn("[LD-Notion] corrupted panel position, resetting");
+                    Storage.remove(CONFIG.STORAGE_KEYS.NOTION_PANEL_POSITION);
+                }
+
             }
 
         },
@@ -16115,7 +16131,7 @@ ${availableTools}
                 const workspaceTip = refs.workspaceTip || panel.querySelector("#ldb-workspace-tip");
 
                 if (!apiKey) {
-                    UI.showStatus("请先填写 Notion API Key", "error");
+                    UI.showStatus(MSG.NO_NOTION_KEY, "error");
                     return;
                 }
 
@@ -16278,7 +16294,7 @@ ${availableTools}
                 const refreshBtn = refs.aiRefreshDbsBtn || panel.querySelector("#ldb-ai-refresh-dbs");
 
                 if (!apiKey) {
-                    UI.showStatus("请先填写 Notion API Key", "error");
+                    UI.showStatus(MSG.NO_NOTION_KEY, "error");
                     return;
                 }
 
@@ -16316,7 +16332,7 @@ ${availableTools}
                 const modelTip = refs.aiModelTip || panel.querySelector("#ldb-ai-model-tip");
 
                 if (!aiApiKey) {
-                    UI.showStatus("请先填写 AI API Key", "error");
+                    UI.showStatus(MSG.NO_AI_KEY, "error");
                     return;
                 }
 
@@ -16359,7 +16375,7 @@ ${availableTools}
                 statusSpan.style.color = "";
 
                 if (!aiApiKey) {
-                    UI.showStatus("请先填写 AI API Key", "error");
+                    UI.showStatus(MSG.NO_AI_KEY, "error");
                     return;
                 }
 
@@ -17680,7 +17696,7 @@ ${availableTools}
             const tip = panel.querySelector("#gclip-target-tip");
 
             if (!apiKey) {
-                if (!silent) GenericUI.showStatus("请先设置 Notion API Key", "error");
+                if (!silent) GenericUI.showStatus(MSG.SETUP_NOTION_KEY, "error");
                 return;
             }
 
@@ -17832,7 +17848,7 @@ ${availableTools}
                 const targetId = (selectedTargetId || manualTargetId).replace(/-/g, "");
                 const imgMode = panel.querySelector("#gclip-img-mode").value;
 
-                if (!apiKey) return GenericUI.showStatus("请先设置 Notion API Key", "error");
+                if (!apiKey) return GenericUI.showStatus(MSG.SETUP_NOTION_KEY, "error");
                 if (!targetId) return GenericUI.showStatus("请先选择目标，或手动输入 ID", "error");
 
                 TargetState.setExportTargetType(exportType);
