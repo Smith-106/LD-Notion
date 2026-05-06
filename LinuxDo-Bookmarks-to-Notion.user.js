@@ -10367,9 +10367,47 @@ ${availableTools}
 
         // 导出当前页面
         exportCurrentPage: async (settings) => {
-            const meta = GenericExtractor.extractMeta();
-            const contentEl = GenericExtractor.extractContent();
-            const blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG.DEFAULTS.imgMode);
+            let meta, blocks;
+
+            // 知乎页面使用专用提取器
+            if (SiteDetector.detect() === SiteDetector.SITES.ZHIHU) {
+                const content = ZhihuAPI.extractContent();
+                if (content) {
+                    meta = {
+                        title: content.title,
+                        url: content.url,
+                        siteName: "知乎",
+                        author: content.author,
+                    };
+                    blocks = ZhihuAPI.htmlToBlocks(content.html || "");
+                    if (content.type === "question" && content.answers) {
+                        for (const ans of content.answers) {
+                            const ansBlocks = ZhihuAPI.htmlToBlocks(ans.html || "");
+                            blocks.push({
+                                type: "divider",
+                                divider: {},
+                            });
+                            blocks.push({
+                                type: "callout",
+                                callout: {
+                                    icon: { type: "emoji", emoji: "👤" },
+                                    rich_text: [{ type: "text", text: { content: `${ans.author} · 👍 ${ans.voteCount}` } }],
+                                },
+                            });
+                            blocks.push(...ansBlocks);
+                        }
+                    }
+                } else {
+                    // 降级到通用提取
+                    meta = GenericExtractor.extractMeta();
+                    const contentEl = GenericExtractor.extractContent();
+                    blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG.DEFAULTS.imgMode);
+                }
+            } else {
+                meta = GenericExtractor.extractMeta();
+                const contentEl = GenericExtractor.extractContent();
+                blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG.DEFAULTS.imgMode);
+            }
 
             // 添加来源信息头
             blocks.unshift({
@@ -11145,6 +11183,8 @@ ${availableTools}
                 AutoImporter.updateStatus(`📥 发现 ${newBookmarks.length} 个新收藏，正在导入...`);
 
                 if (exportBtn) exportBtn.disabled = true;
+                const obsExportBtn = document.querySelector("#ldb-obs-export");
+                if (obsExportBtn) obsExportBtn.disabled = true;
 
                 const settings = AutoImporter.buildSettings();
                 const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
@@ -11206,6 +11246,8 @@ ${availableTools}
             } finally {
                 AutoImporter.isRunning = false;
                 if (exportBtn) exportBtn.disabled = false;
+                const obsExportBtn2 = document.querySelector("#ldb-obs-export");
+                if (obsExportBtn2) obsExportBtn2.disabled = false;
             }
         },
 
@@ -15723,6 +15765,7 @@ ${availableTools}
                 UI.recomputeExportStats();
                 UI.refs.bookmarkCount.textContent = "-";
                 UI.refs.exportBtn.disabled = true;
+                UI.refs.obsExportBtn.disabled = true;
                 UI.refs.bookmarkListContainer.style.display = "none";
                 UI.renderBookmarkList();
 
@@ -15836,6 +15879,7 @@ ${availableTools}
                     UI.recomputeExportStats();
                     UI.refs.bookmarkCount.textContent = bookmarks.length;
                     UI.refs.exportBtn.disabled = false;
+                    UI.refs.obsExportBtn.disabled = false;
 
                     // 渲染收藏列表
                     UI.renderBookmarkList();
@@ -16062,6 +16106,158 @@ ${availableTools}
                     refs.exportBtns.style.display = "flex";
                     refs.controlBtns.style.display = "none";
                     Exporter.reset();
+                }
+            };
+
+            // 导出到 Obsidian
+            refs.obsExportBtn.onclick = async () => {
+                const obsUrl = refs.obsApiUrlInput.value.trim();
+                const obsKey = refs.obsApiKeyInput.value.trim();
+                const obsDir = refs.obsDirInput.value.trim() || "Linux.do";
+                const obsImgMode = refs.obsImgModeSelect.value;
+                const obsImgDir = refs.obsImgDirInput.value.trim() || "Linux.do/attachments";
+
+                if (!obsUrl || !obsKey) {
+                    UI.showStatus("请先在设置中配置 Obsidian API 地址和 Key", "error");
+                    return;
+                }
+
+                const selected = UI.getSelectedBookmarks();
+                if (selected.length === 0) {
+                    UI.showStatus("请先选择要导出的帖子", "error");
+                    return;
+                }
+
+                refs.exportBtns.style.display = "none";
+                refs.controlBtns.style.display = "flex";
+                UI.refs.reportContainer.innerHTML = "";
+
+                const results = { success: [], failed: [] };
+
+                try {
+                    for (let i = 0; i < selected.length; i++) {
+                        const bookmark = selected[i];
+                        const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
+
+                        UI.showProgress(i + 1, selected.length, `导出帖子到 Obsidian...`);
+
+                        try {
+                            const { topic, posts } = await LinuxDoAPI.fetchAllPosts(topicId);
+                            const filteredPosts = Exporter.filterPosts(posts, topic, {
+                                onlyFirst: refs.onlyFirstCheckbox.checked,
+                                onlyOp: refs.onlyOpCheckbox.checked,
+                                rangeStart: parseInt(refs.rangeStartInput.value) || 1,
+                                rangeEnd: parseInt(refs.rangeEndInput.value) || 999999,
+                                imgFilter: refs.filterImgSelect.value,
+                                filterUsers: refs.filterUsersInput.value.trim(),
+                                filterInclude: refs.filterIncludeInput.value.trim(),
+                                filterExclude: refs.filterExcludeInput.value.trim(),
+                                filterMinLen: parseInt(refs.filterMinLenInput.value) || 0,
+                            });
+
+                            // 构建 Markdown
+                            const meta = {
+                                title: topic.title,
+                                url: topic.url,
+                                author: topic.opUsername,
+                                topicId: topic.topicId || topic.topic_id,
+                                category: topic.categoryName || topic.category,
+                                tags: topic.tags || [],
+                                floors: filteredPosts.length,
+                            };
+                            let md = HTMLToMarkdown.buildFrontmatter(meta);
+
+                            // 元数据 callout
+                            md += `> [!info] 帖子信息\n`;
+                            md += `> - **原始链接**: [${topic.title}](${topic.url})\n`;
+                            md += `> - **楼主**: @${topic.opUsername || "未知"}\n`;
+                            md += `> - **分类**: ${meta.category || "无"}\n`;
+                            md += `> - **标签**: ${(topic.tags || []).join(", ") || "无"}\n`;
+                            md += `> - **导出时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
+
+                            // 各楼层
+                            filteredPosts.forEach((post, idx) => {
+                                const isOp = post.username === topic.opUsername;
+                                md += HTMLToMarkdown.buildPostCallout(post, idx, isOp);
+                            });
+
+                            // 处理图片（file 模式下载到 Obsidian）
+                            if (obsImgMode === "file") {
+                                const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+                                let match;
+                                const imgDownloads = [];
+                                while ((match = imgRegex.exec(md)) !== null) {
+                                    imgDownloads.push({ full: match[0], alt: match[1], url: match[2] });
+                                }
+                                for (const img of imgDownloads) {
+                                    try {
+                                        const ext = img.url.split(".").pop().split("?")[0] || "png";
+                                        const safeName = `img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+                                        const imgPath = `${obsImgDir}/${safeName}`;
+                                        const blob = await new Promise((resolve, reject) => {
+                                            GM_xmlhttpRequest({
+                                                method: "GET",
+                                                url: img.url,
+                                                responseType: "blob",
+                                                onload: (r) => resolve(r.response),
+                                                onerror: (e) => reject(e),
+                                            });
+                                        });
+                                        await ObsidianAPI.writeImage(obsUrl, obsKey, imgPath, blob);
+                                        md = md.replace(img.full, `![${img.alt}](${encodeURI(imgPath)})`);
+                                    } catch {
+                                        // 图片下载失败，保留原始链接
+                                    }
+                                }
+                            } else if (obsImgMode === "base64") {
+                                // Base64 模式：内嵌图片
+                                const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+                                const matches = [];
+                                let m;
+                                while ((m = imgRegex.exec(md)) !== null) matches.push(m);
+                                for (const match of matches.reverse()) {
+                                    try {
+                                        const resp = await new Promise((resolve, reject) => {
+                                            GM_xmlhttpRequest({
+                                                method: "GET",
+                                                url: match[2],
+                                                responseType: "blob",
+                                                onload: (r) => resolve(r),
+                                                onerror: (e) => reject(e),
+                                            });
+                                        });
+                                        const b64 = await new Promise((resolve) => {
+                                            const reader = new FileReader();
+                                            reader.onloadend = () => resolve(reader.result);
+                                            reader.readAsDataURL(resp.response);
+                                        });
+                                        md = md.replace(match[0], `![${match[1]}](${b64})`);
+                                    } catch {
+                                        // 跳过失败的图片
+                                    }
+                                }
+                            }
+
+                            // 写入笔记
+                            const fileName = topic.title.replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
+                            await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
+                            results.success.push(bookmark);
+                        } catch (e) {
+                            results.failed.push({ bookmark, error: e.message });
+                        }
+                    }
+
+                    UI.hideProgress();
+                    UI.showReport(results);
+                    UI.renderBookmarkList();
+
+                    const msg = `Obsidian 导出完成：成功 ${results.success.length} 个${results.failed.length ? `，失败 ${results.failed.length} 个` : ""}`;
+                    UI.showStatus(msg, results.failed.length > 0 ? "warning" : "success");
+                } catch (error) {
+                    UI.showStatus(`Obsidian 导出出错: ${error.message}`, "error");
+                } finally {
+                    refs.exportBtns.style.display = "flex";
+                    refs.controlBtns.style.display = "none";
                 }
             };
 
@@ -16465,6 +16661,7 @@ ${availableTools}
                 autoImportLabel: panel.querySelector("#ldb-auto-import-label"),
                 autoImportIntervalLabel: panel.querySelector("#ldb-auto-import-interval-label"),
                 exportBtn: panel.querySelector("#ldb-export"),
+                obsExportBtn: panel.querySelector("#ldb-obs-export"),
                 bookmarkListContainer: panel.querySelector("#ldb-bookmark-list-container"),
                 reportContainer: panel.querySelector("#ldb-report-container"),
                 autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
@@ -16718,6 +16915,9 @@ ${availableTools}
                             <div class="ldb-btn-group" id="ldb-export-btns">
                                 <button class="ldb-btn ldb-btn-primary" id="ldb-export" disabled>
                                     📤 开始导出
+                                </button>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-obs-export" disabled>
+                                    📝 导出到 Obsidian
                                 </button>
                             </div>
 
