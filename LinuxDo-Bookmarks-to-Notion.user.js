@@ -15397,38 +15397,38 @@ ${availableTools}
 
             // 折叠筛选设置
             refs.filterToggle.onclick = () => {
-                const content = refs.filterContent || panel.querySelector("#ldb-filter-content");
-                const arrow = refs.filterArrow || panel.querySelector("#ldb-filter-arrow");
+                const content = refs.filterContent
+                const arrow = refs.filterArrow
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
             // 折叠 AI 设置
             refs.aiSettingsToggle.onclick = () => {
-                const content = refs.aiSettingsContent || panel.querySelector("#ldb-ai-settings-content");
-                const arrow = refs.aiSettingsArrow || panel.querySelector("#ldb-ai-settings-arrow");
+                const content = refs.aiSettingsContent
+                const arrow = refs.aiSettingsArrow
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
             // 折叠 GitHub 设置
             refs.githubSettingsToggle.onclick = () => {
-                const content = refs.githubSettingsContent || panel.querySelector("#ldb-github-settings-content");
-                const arrow = refs.githubSettingsArrow || panel.querySelector("#ldb-github-settings-arrow");
+                const content = refs.githubSettingsContent
+                const arrow = refs.githubSettingsArrow
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
             refs.sourceSettingsToggle.onclick = () => {
-                const content = refs.sourceSettingsContent || panel.querySelector("#ldb-source-settings-content");
-                const arrow = refs.sourceSettingsArrow || panel.querySelector("#ldb-source-settings-arrow");
+                const content = refs.sourceSettingsContent
+                const arrow = refs.sourceSettingsArrow
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
             refs.sourcePartitionsToggle.onclick = () => {
-                const content = refs.sourcePartitionsContent || panel.querySelector("#ldb-source-partitions-content");
-                const arrow = refs.sourcePartitionsArrow || panel.querySelector("#ldb-source-partitions-arrow");
+                const content = refs.sourcePartitionsContent
+                const arrow = refs.sourcePartitionsArrow
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
@@ -15446,9 +15446,9 @@ ${availableTools}
                 if (settingsTab && !settingsTab.classList.contains("active")) {
                     settingsTab.click();
                 }
-                const content = refs.githubSettingsContent || panel.querySelector("#ldb-github-settings-content");
-                const arrow = refs.githubSettingsArrow || panel.querySelector("#ldb-github-settings-arrow");
-                const tokenInput = refs.githubTokenInput || panel.querySelector("#ldb-github-token");
+                const content = refs.githubSettingsContent
+                const arrow = refs.githubSettingsArrow
+                const tokenInput = refs.githubTokenInput
                 if (content?.classList.contains("collapsed")) {
                     content.classList.remove("collapsed");
                     if (arrow) arrow.textContent = "▼";
@@ -15472,9 +15472,9 @@ ${availableTools}
             // 导出目标类型切换
             const handleExportTargetChange = (e) => {
                 const targetType = e.target.value;
-                const parentPageGroup = refs.parentPageGroup || panel.querySelector("#ldb-parent-page-group");
-                const manualDbWrap = refs.manualDbWrap || panel.querySelector("#ldb-manual-db-wrap");
-                const exportTargetTip = refs.exportTargetTip || panel.querySelector("#ldb-export-target-tip");
+                const parentPageGroup = refs.parentPageGroup
+                const manualDbWrap = refs.manualDbWrap
+                const exportTargetTip = refs.exportTargetTip
 
                 if (targetType === "page") {
                     parentPageGroup.style.display = "block";
@@ -15499,8 +15499,8 @@ ${availableTools}
 
             // 验证配置
             refs.validateConfigBtn.onclick = async () => {
-                const btn = refs.validateConfigBtn || panel.querySelector("#ldb-validate-config");
-                const statusSpan = refs.configStatus || panel.querySelector("#ldb-config-status");
+                const btn = refs.validateConfigBtn
+                const statusSpan = refs.configStatus
                 const liveApiKey = refs.apiKeyInput.value.trim();
                 const apiKey = NotionOAuth.getAccessToken(liveApiKey);
                 const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
@@ -15571,7 +15571,7 @@ ${availableTools}
                 const liveApiKey = refs.apiKeyInput.value.trim();
                 const apiKey = NotionOAuth.getAccessToken(liveApiKey);
                 const databaseId = refs.databaseIdInput.value.trim();
-                const statusSpan = refs.configStatus || panel.querySelector("#ldb-config-status");
+                const statusSpan = refs.configStatus
 
                 // 清除之前的状态
                 statusSpan.textContent = "";
@@ -15587,7 +15587,7 @@ ${availableTools}
                     return;
                 }
 
-                const btn = refs.setupDatabaseBtn || panel.querySelector("#ldb-setup-database");
+                const btn = refs.setupDatabaseBtn
                 btn.disabled = true;
                 btn.innerHTML = '<span class="ldb-spin">🔄</span> 设置中...';
 
@@ -15699,7 +15699,7 @@ ${availableTools}
 
             refs.updateAutoEnabled.onchange = (e) => {
                 const enabled = e.target.checked;
-                const optionsEl = refs.updateAutoOptions || panel.querySelector("#ldb-update-auto-options");
+                const optionsEl = refs.updateAutoOptions
                 optionsEl.style.display = enabled ? "block" : "none";
                 Storage.set(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, enabled);
 
@@ -15730,16 +15730,16 @@ ${availableTools}
                 UI.bookmarks = [];
                 UI.selectedBookmarks = new Set();
                 UI.recomputeExportStats();
-                ((UI.refs && UI.refs.bookmarkCount) || panel.querySelector("#ldb-bookmark-count")).textContent = "-";
-                ((UI.refs && UI.refs.exportBtn) || panel.querySelector("#ldb-export")).disabled = true;
-                ((UI.refs && UI.refs.bookmarkListContainer) || panel.querySelector("#ldb-bookmark-list-container")).style.display = "none";
+                UI.refs.bookmarkCount.textContent = "-";
+                UI.refs.exportBtn.disabled = true;
+                UI.refs.bookmarkListContainer.style.display = "none";
                 UI.renderBookmarkList();
 
                 const cfg = UI.getAutoImportConfigBySource();
                 const autoImportEnabled = Storage.get(cfg.enabledKey, cfg.enabledDefault);
-                const autoImportEnabledEl = refs.autoImportEnabled || panel.querySelector("#ldb-auto-import-enabled");
-                const autoImportOptionsEl = refs.autoImportOptions || panel.querySelector("#ldb-auto-import-options");
-                const intervalEl = refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval");
+                const autoImportEnabledEl = refs.autoImportEnabled
+                const autoImportOptionsEl = refs.autoImportOptions
+                const intervalEl = refs.autoImportInterval
                 autoImportEnabledEl.checked = autoImportEnabled;
                 autoImportOptionsEl.style.display = autoImportEnabled ? "block" : "none";
                 intervalEl.value = String(Storage.get(cfg.intervalKey, cfg.intervalDefault));
@@ -15751,7 +15751,7 @@ ${availableTools}
 
             // 收藏列表事件委托（避免每次重渲染重复绑定）
             if (!UI.bookmarkListBound) {
-                const bookmarkList = (UI.refs && UI.refs.bookmarkList) || panel.querySelector("#ldb-bookmark-list");
+                const bookmarkList = UI.refs.bookmarkList;
                 bookmarkList.addEventListener("click", (e) => {
                     const item = e.target.closest(".ldb-bookmark-item");
                     if (!item) return;
@@ -15791,7 +15791,7 @@ ${availableTools}
 
             // 加载收藏
             refs.loadBookmarksBtn.onclick = async () => {
-                const btn = refs.loadBookmarksBtn || panel.querySelector("#ldb-load-bookmarks");
+                const btn = refs.loadBookmarksBtn
                 btn.disabled = true;
                 btn.innerHTML = '<span class="ldb-spin">🔄</span> 加载中...';
 
@@ -15826,7 +15826,7 @@ ${availableTools}
                                 const items = await GitHubAPI.fetchUserGists(username, token);
                                 allItems.push(...UI.mapGitHubItemsToBookmarks(items, "gists"));
                             }
-                            ((UI.refs && UI.refs.bookmarkCount) || panel.querySelector("#ldb-bookmark-count")).textContent = allItems.length;
+                            UI.refs.bookmarkCount.textContent = allItems.length;
                         }
                         bookmarks = allItems;
                     } else {
@@ -15836,19 +15836,19 @@ ${availableTools}
                             return;
                         }
                         bookmarks = await LinuxDoAPI.fetchAllBookmarks(username, (count) => {
-                            ((UI.refs && UI.refs.bookmarkCount) || panel.querySelector("#ldb-bookmark-count")).textContent = count;
+                            UI.refs.bookmarkCount.textContent = count;
                         });
                     }
 
                     UI.bookmarks = bookmarks;
                     UI.selectedBookmarks = new Set(bookmarks.map(b => UI.getBookmarkKey(b)));
                     UI.recomputeExportStats();
-                    ((UI.refs && UI.refs.bookmarkCount) || panel.querySelector("#ldb-bookmark-count")).textContent = bookmarks.length;
-                    ((UI.refs && UI.refs.exportBtn) || panel.querySelector("#ldb-export")).disabled = false;
+                    UI.refs.bookmarkCount.textContent = bookmarks.length;
+                    UI.refs.exportBtn.disabled = false;
 
                     // 渲染收藏列表
                     UI.renderBookmarkList();
-                    ((UI.refs && UI.refs.bookmarkListContainer) || panel.querySelector("#ldb-bookmark-list-container")).style.display = "block";
+                    UI.refs.bookmarkListContainer.style.display = "block";
 
                     const sourceText = UI.isActiveGitHubSource() ? "GitHub 收藏" : "Linux.do 收藏";
                     UI.showStatus(`成功加载 ${bookmarks.length} 个${sourceText}`, "success");
@@ -15861,12 +15861,12 @@ ${availableTools}
             };
 
             refs.importBrowserBookmarksBtn.onclick = async () => {
-                const btn = refs.importBrowserBookmarksBtn || panel.querySelector("#ldb-import-browser-bookmarks");
+                const btn = refs.importBrowserBookmarksBtn
                 const source = UI.getActiveBookmarkSource();
                 if (source !== "linuxdo") {
                     UI.switchBookmarkSource("linuxdo");
-                    const toggle = refs.sourceSettingsToggle || panel.querySelector("#ldb-source-settings-toggle");
-                    const content = refs.sourceSettingsContent || panel.querySelector("#ldb-source-settings-content");
+                    const toggle = refs.sourceSettingsToggle
+                    const content = refs.sourceSettingsContent
                     if (toggle && content?.classList.contains("collapsed")) {
                         toggle.click();
                     }
@@ -15903,7 +15903,7 @@ ${availableTools}
 
             // 暂停按钮
             refs.pauseBtn.onclick = () => {
-                const pauseBtn = refs.pauseBtn || panel.querySelector("#ldb-pause");
+                const pauseBtn = refs.pauseBtn
                 if (Exporter.isPaused) {
                     Exporter.resume();
                     pauseBtn.innerHTML = "⏸️ 暂停";
@@ -16010,7 +16010,7 @@ ${availableTools}
                 refs.pauseBtn.classList.remove("ldb-btn-primary");
 
                 // 清空之前的报告
-                ((UI.refs && UI.refs.reportContainer) || panel.querySelector("#ldb-report-container")).innerHTML = "";
+                UI.refs.reportContainer.innerHTML = "";
 
                 try {
                     let results;
@@ -16078,7 +16078,7 @@ ${availableTools}
             refs.enableAuditLogCheckbox.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, e.target.checked);
                 // 更新日志面板可见性
-                const logPanel = refs.logPanel || panel.querySelector("#ldb-log-panel");
+                const logPanel = refs.logPanel
                 if (logPanel) {
                     logPanel.style.display = e.target.checked ? "block" : "none";
                 }
@@ -16086,8 +16086,8 @@ ${availableTools}
 
             // 日志面板事件
             refs.logToggleBtn.onclick = () => {
-                const content = refs.logContent || panel.querySelector("#ldb-log-content");
-                const arrow = refs.logArrow || panel.querySelector("#ldb-log-arrow");
+                const content = refs.logContent
+                const arrow = refs.logArrow
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
 
@@ -16119,7 +16119,7 @@ ${availableTools}
 
             // 手动输入数据库 ID 开关
             refs.toggleManualDbBtn.onclick = () => {
-                const wrap = refs.manualDbWrap || panel.querySelector("#ldb-manual-db-wrap");
+                const wrap = refs.manualDbWrap
                 const visible = wrap.style.display !== "none";
                 wrap.style.display = visible ? "none" : "block";
             };
@@ -16127,8 +16127,8 @@ ${availableTools}
             // 刷新工作区页面列表
             refs.refreshWorkspaceBtn.onclick = async () => {
                 const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
-                const refreshBtn = refs.refreshWorkspaceBtn || panel.querySelector("#ldb-refresh-workspace");
-                const workspaceTip = refs.workspaceTip || panel.querySelector("#ldb-workspace-tip");
+                const refreshBtn = refs.refreshWorkspaceBtn
+                const workspaceTip = refs.workspaceTip
 
                 if (!apiKey) {
                     UI.showStatus(MSG.NO_NOTION_KEY, "error");
@@ -16291,7 +16291,7 @@ ${availableTools}
             // 刷新 AI 数据库列表
             refs.aiRefreshDbsBtn.onclick = async () => {
                 const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
-                const refreshBtn = refs.aiRefreshDbsBtn || panel.querySelector("#ldb-ai-refresh-dbs");
+                const refreshBtn = refs.aiRefreshDbsBtn
 
                 if (!apiKey) {
                     UI.showStatus(MSG.NO_NOTION_KEY, "error");
@@ -16328,8 +16328,8 @@ ${availableTools}
                 const aiApiKey = refs.aiApiKeyInput.value.trim();
                 const aiService = refs.aiServiceSelect.value;
                 const aiBaseUrl = refs.aiBaseUrlInput.value.trim();
-                const fetchBtn = refs.aiFetchModelsBtn || panel.querySelector("#ldb-ai-fetch-models");
-                const modelTip = refs.aiModelTip || panel.querySelector("#ldb-ai-model-tip");
+                const fetchBtn = refs.aiFetchModelsBtn
+                const modelTip = refs.aiModelTip
 
                 if (!aiApiKey) {
                     UI.showStatus(MSG.NO_AI_KEY, "error");
@@ -16363,8 +16363,8 @@ ${availableTools}
 
             // 测试 AI 连接
             refs.aiTestBtn.onclick = async () => {
-                const btn = refs.aiTestBtn || panel.querySelector("#ldb-ai-test");
-                const statusSpan = refs.aiTestStatus || panel.querySelector("#ldb-ai-test-status");
+                const btn = refs.aiTestBtn
+                const statusSpan = refs.aiTestStatus
                 const aiApiKey = refs.aiApiKeyInput.value.trim();
                 const aiService = refs.aiServiceSelect.value;
                 const aiModel = refs.aiModelSelect.value;
@@ -16452,7 +16452,7 @@ ${availableTools}
 
             // 根据审计日志设置更新面板可见性
             const enableAuditLog = Storage.get(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG.DEFAULTS.enableAuditLog);
-            const logPanel = refs.logPanel || panel.querySelector("#ldb-log-panel");
+            const logPanel = refs.logPanel
             if (logPanel) {
                 logPanel.style.display = enableAuditLog ? "block" : "none";
             }
@@ -16464,7 +16464,7 @@ ${availableTools}
             // 验证并加载 AI 模型（优先使用缓存的模型列表）
             const savedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
             const provider = AIService.PROVIDERS[aiService];
-            const modelSelect = refs.aiModelSelect || panel.querySelector("#ldb-ai-model");
+            const modelSelect = refs.aiModelSelect
 
             // 先尝试从缓存加载模型列表
             const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
@@ -16520,7 +16520,7 @@ ${availableTools}
             UI.applyBookmarkSourceUI(source);
 
             // 书签扩展状态
-            const bmStatusMain = refs.bookmarkExtStatus || panel.querySelector("#ldb-bookmark-ext-status");
+            const bmStatusMain = refs.bookmarkExtStatus
             if (bmStatusMain) {
                 if (BookmarkBridge.isExtensionAvailable()) {
                     const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
@@ -16571,7 +16571,7 @@ ${availableTools}
             refs.autoImportEnabled.checked = autoImportEnabled;
             refs.autoImportOptions.style.display = autoImportEnabled ? "block" : "none";
             const autoImportInterval = Storage.get(autoConfig.intervalKey, autoConfig.intervalDefault);
-            const intervalSelect = refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval");
+            const intervalSelect = refs.autoImportInterval
             intervalSelect.value = autoImportInterval;
             // 如果存储的值不在选项中，回退到默认值
             if (intervalSelect.selectedIndex === -1) {
@@ -16580,7 +16580,7 @@ ${availableTools}
             }
 
             const linuxdoDedupMode = Utils.getLinuxDoImportDedupMode();
-            const linuxdoDedupSelect = refs.linuxdoDedupModeSelect || panel.querySelector("#ldb-linuxdo-dedup-mode");
+            const linuxdoDedupSelect = refs.linuxdoDedupModeSelect
             linuxdoDedupSelect.value = linuxdoDedupMode;
             if (linuxdoDedupSelect.selectedIndex === -1) {
                 linuxdoDedupSelect.value = CONFIG.DEFAULTS.linuxdoImportDedupMode;
@@ -16588,7 +16588,7 @@ ${availableTools}
             }
 
             const bookmarkDedupMode = Utils.getBookmarkImportDedupMode();
-            const bookmarkDedupSelect = refs.bookmarkDedupModeSelect || panel.querySelector("#ldb-bookmark-dedup-mode");
+            const bookmarkDedupSelect = refs.bookmarkDedupModeSelect
             bookmarkDedupSelect.value = bookmarkDedupMode;
             if (bookmarkDedupSelect.selectedIndex === -1) {
                 bookmarkDedupSelect.value = CONFIG.DEFAULTS.bookmarkImportDedupMode;
@@ -16602,9 +16602,9 @@ ${availableTools}
 
             const updateAutoEnabled = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG.DEFAULTS.updateAutoCheckEnabled);
             const updateIntervalHours = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG.DEFAULTS.updateCheckIntervalHours);
-            const updateAutoEnabledEl = refs.updateAutoEnabled || panel.querySelector("#ldb-update-auto-enabled");
-            const updateAutoOptionsEl = refs.updateAutoOptions || panel.querySelector("#ldb-update-auto-options");
-            const updateIntervalEl = refs.updateIntervalHours || panel.querySelector("#ldb-update-interval-hours");
+            const updateAutoEnabledEl = refs.updateAutoEnabled
+            const updateAutoOptionsEl = refs.updateAutoOptions
+            const updateIntervalEl = refs.updateIntervalHours
             updateAutoEnabledEl.checked = updateAutoEnabled;
             updateAutoOptionsEl.style.display = updateAutoEnabled ? "block" : "none";
             updateIntervalEl.value = String(updateIntervalHours);
@@ -16620,7 +16620,7 @@ ${availableTools}
             if (!panel) return;
 
             const refs = UI.refs || {};
-            const resultEl = refs.selfCheckResult || panel.querySelector("#ldb-self-check-result");
+            const resultEl = refs.selfCheckResult
             if (!resultEl) return;
 
             const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
