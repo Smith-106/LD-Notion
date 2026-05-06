@@ -963,6 +963,8 @@
                         reject(new Error(result?.error_description || result?.message || result?.error || `OAuth 交换失败: ${response.status}`));
                     },
                     onerror: (error) => reject(new Error(`OAuth 网络请求失败: ${error?.error || error}`)),
+                    timeout: 30000,
+                    ontimeout: () => reject(new Error("OAuth 请求超时，请检查网络连接")),
                 });
             });
         },
@@ -1510,6 +1512,8 @@
                         const message = error?.error || error?.message || String(error);
                         reject(new Error(`网络请求失败: ${message}`));
                     },
+                    timeout: 30000,
+                    ontimeout: () => reject(new Error("Notion API 请求超时")),
                 });
             });
         },
@@ -1794,6 +1798,8 @@
                             }
                         },
                         onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                    timeout: 60000,
+                    ontimeout: () => reject(new Error("文件上传超时")),
                     });
                 };
                 reader.onerror = () => reject(new Error("读取文件数据失败"));
@@ -2357,6 +2363,8 @@
                         }
                     },
                     onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                    timeout: 30000,
+                    ontimeout: () => reject(new Error("AI 分类请求超时")),
                 });
             });
         },
@@ -2396,6 +2404,8 @@
                         }
                     },
                     onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                    timeout: 30000,
+                    ontimeout: () => reject(new Error("AI 分类请求超时")),
                 });
             });
         },
@@ -2435,6 +2445,8 @@
                         }
                     },
                     onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                    timeout: 30000,
+                    ontimeout: () => reject(new Error("AI 分类请求超时")),
                 });
             });
         },
@@ -2516,6 +2528,8 @@
                         }
                     },
                     onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                    timeout: 90000,
+                    ontimeout: () => reject(new Error("AI 对话请求超时")),
                 });
             });
         },
@@ -2555,6 +2569,8 @@
                         }
                     },
                     onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                    timeout: 90000,
+                    ontimeout: () => reject(new Error("AI 对话请求超时")),
                 });
             });
         },
@@ -2594,6 +2610,8 @@
                         }
                     },
                     onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                    timeout: 90000,
+                    ontimeout: () => reject(new Error("AI 对话请求超时")),
                 });
             });
         },
@@ -2666,6 +2684,8 @@
                         }
                     },
                     onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                    timeout: 15000,
+                    ontimeout: () => reject(new Error("获取模型列表超时")),
                 });
             });
         },
@@ -2713,6 +2733,8 @@
                         }
                     },
                     onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                    timeout: 15000,
+                    ontimeout: () => reject(new Error("获取模型列表超时")),
                 });
             });
         },
@@ -10886,6 +10908,8 @@ ${availableTools}
                             }
                         },
                         onerror: () => reject(new Error(`网络错误，无法连接 ${label}`)),
+                    timeout: 30000,
+                    ontimeout: () => reject(new Error("GitHub API 请求超时")),
                     });
                 };
 
@@ -11008,6 +11032,8 @@ ${availableTools}
                         GitHubAPI._readmeCache[cacheKey] = "";
                         resolve("");
                     },
+                    timeout: 15000,
+                    ontimeout: () => reject(new Error("GitHub README 请求超时")),
                 });
             });
         },
@@ -13328,6 +13354,7 @@ ${availableTools}
 
             document.body.appendChild(panel);
             NotionSiteUI.panel = panel;
+            NotionSiteUI._abortController = new AbortController();
 
             // 阻止面板内的键盘和剪贴板事件冒泡到 Notion
             const stopPropagation = (e) => e.stopPropagation();
@@ -13956,6 +13983,14 @@ ${availableTools}
                     NotionSiteUI.panel.classList.add("visible");
                 });
             }
+        },
+
+        destroy: () => {
+            NotionSiteUI._abortController?.abort();
+            NotionSiteUI._abortController = null;
+            NotionSiteUI.panel?.remove();
+            NotionSiteUI.panel = null;
+            NotionSiteUI.isPanelReady = false;
         },
     };
 
@@ -17242,6 +17277,17 @@ ${availableTools}
             }
 
             UI.maybePromptBookmarkExtensionInstall();
+        },
+
+        destroy: () => {
+            UI._abortController?.abort();
+            UI._abortController = null;
+            UI.panel?.remove();
+            UI.panel = null;
+            UI.miniBtn?.remove();
+            UI.miniBtn = null;
+            UI.refs = null;
+            UI.isMinimized = true;
         },
     };
 
