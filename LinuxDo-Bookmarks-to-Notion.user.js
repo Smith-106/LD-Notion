@@ -826,7 +826,7 @@
                 try {
                     handler();
                 } catch (error) {
-                    console.warn("同步 OAuth 控件状态失败", error);
+                    console.warn("[LD-Notion] 同步 OAuth 控件状态失败", error);
                 }
             });
         },
@@ -1866,11 +1866,11 @@
                 return await uploadRemote(false);
             } catch (error) {
                 // Notion 付费套餐中图片通常受 5MB 限制，失败后回退为文件块上传
-                console.warn("图片上传失败，尝试按文件上传:", imageUrl, error.message);
+                console.warn("[LD-Notion] 图片上传失败，尝试按文件上传:", imageUrl, error.message);
                 try {
                     return await uploadRemote(true);
                 } catch (fallbackError) {
-                    console.error("文件回退上传失败:", fallbackError);
+                    console.error("[LD-Notion] 文件回退上传失败:", fallbackError);
                     return null;
                 }
             }
@@ -5108,7 +5108,7 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
                     await AIClassifier.classifyPage(page, settings);
                     results.success++;
                 } catch (error) {
-                    console.error(`分类失败: ${title}`, error);
+                    console.error(`[LD-Notion] 分类失败: ${title}`, error);
                     results.failed++;
                 }
 
@@ -5305,7 +5305,7 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
                     );
                     results.success++;
                 } catch (error) {
-                    console.error(`移动失败: ${title}`, error);
+                    console.error(`[LD-Notion] 移动失败: ${title}`, error);
                     results.failed++;
                 }
 
@@ -5396,7 +5396,7 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
                     );
                     results.success++;
                 } catch (error) {
-                    console.error(`复制失败: ${title}`, error);
+                    console.error(`[LD-Notion] 复制失败: ${title}`, error);
                     results.failed++;
                 }
 
@@ -6121,7 +6121,7 @@ ${content_prompt}`;
                     );
                     results.success++;
                 } catch (error) {
-                    console.error(`AI 填充失败: ${title}`, error);
+                    console.error(`[LD-Notion] AI 填充失败: ${title}`, error);
                     results.failed++;
                 }
 
@@ -8032,7 +8032,7 @@ compound 格式（仅当 intent 为 compound 时使用）：
                 }
                 return { intent: "unknown", explanation: "无法解析响应" };
             } catch (error) {
-                console.error("解析意图失败:", error);
+                console.error("[LD-Notion] 解析意图失败:", error);
                 return { intent: "unknown", explanation: error.message };
             }
         },
@@ -8727,7 +8727,7 @@ ${availableTools}
                 const response = await AIAssistant.handleMessage(message);
                 ChatState.updateLastMessage(response, "complete");
             } catch (error) {
-                console.error("AI 处理失败:", error);
+                console.error("[LD-Notion] AI 处理失败:", error);
                 ChatState.updateLastMessage(`❌ 处理失败: ${error.message}`, "error");
             } finally {
                 ChatState.isProcessing = false;
@@ -9435,7 +9435,7 @@ ${availableTools}
 
                 return true;
             } catch (error) {
-                console.error("撤销失败:", error);
+                console.error("[LD-Notion] 撤销失败:", error);
                 OperationLog.add({
                     operation: "undo",
                     context: { description: UndoManager.pendingUndo?.description },
@@ -10208,7 +10208,7 @@ ${availableTools}
                         block.type = "image";
                     }
                 } catch (e) {
-                    console.warn("图片上传失败，保留外链:", block._originalUrl, e.message);
+                    console.warn("[LD-Notion] 图片上传失败，保留外链:", block._originalUrl, e.message);
                     // 保留外链模式
                     block.image = {
                         type: "external",
@@ -10356,7 +10356,7 @@ ${availableTools}
                         });
                         results.success.push({ topicId, title, url: `https://linux.do/t/${topicId}` });
                     } catch (error) {
-                        console.error(`导出失败: ${title}`, error);
+                        console.error(`[LD-Notion] 导出失败: ${title}`, error);
                         results.failed.push({ topicId, title, error: error.message });
                     }
 
@@ -10522,7 +10522,7 @@ ${availableTools}
                             await Exporter.exportTopic(bookmark, settings);
                             success++;
                         } catch (e) {
-                            console.error(`自动导入失败: ${title}`, e);
+                            console.error(`[LD-Notion] 自动导入失败: ${title}`, e);
                             failed++;
                         }
 
@@ -10553,7 +10553,7 @@ ${availableTools}
                     });
                 }
             } catch (e) {
-                console.error("自动导入出错:", e);
+                console.error("[LD-Notion] 自动导入出错:", e);
                 AutoImporter.updateStatus(`❌ 自动导入出错: ${e.message}`);
             } finally {
                 AutoImporter.isRunning = false;
@@ -10882,7 +10882,7 @@ ${availableTools}
 
                 GitHubAutoImporter.updateStatus(`✅ GitHub 自动导入完成: 成功 ${result.success.length} 个${result.failed.length > 0 ? `，失败 ${result.failed.length} 个` : ""} (${new Date().toLocaleTimeString()})`);
             } catch (error) {
-                console.error("GitHub 自动导入出错:", error);
+                console.error("[LD-Notion] GitHub 自动导入出错:", error);
                 GitHubAutoImporter.updateStatus(`❌ GitHub 自动导入出错: ${error.message}`);
             } finally {
                 GitHubAutoImporter.isRunning = false;
@@ -16492,7 +16492,7 @@ ${availableTools}
                     const defaultModel = provider?.defaultModel || "";
                     modelSelect.value = defaultModel;
                     Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, defaultModel);
-                    console.warn(`AI 模型 "${savedModel}" 与当前服务 "${aiService}" 不兼容，已重置为默认模型`);
+                    console.warn(`[LD-Notion] AI 模型 "${savedModel}" 与当前服务 "${aiService}" 不兼容，已重置为默认模型`);
                 }
             }
 
