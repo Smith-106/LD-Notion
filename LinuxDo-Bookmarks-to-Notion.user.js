@@ -214,7 +214,7 @@
             obsApiUrl: "https://127.0.0.1:27124",
             obsApiKey: "",
             obsDir: "Linux.do",
-            obsImgMode: "file", // file / base64 / none
+            obsImgMode: "file", // file / base64 / skip
             obsImgDir: "Linux.do/attachments",
         },
         // 导出目标类型
@@ -2746,8 +2746,8 @@
             const type = isOp ? "success" : "note";
             const collapsed = index > 0 ? "+" : "";
             const username = post.username || "未知";
-            const date = post.createdAt
-                ? new Date(post.createdAt).toLocaleString("zh-CN")
+            const date = post.created_at
+                ? new Date(post.created_at).toLocaleString("zh-CN")
                 : "未知时间";
             const header = `#${index + 1} ${username} (@${post.username || ""})${isOp ? " 楼主" : ""} · ${date}`;
             const content = HTMLToMarkdown.convert(post.cooked || "");
@@ -19050,9 +19050,8 @@ ${availableTools}
                 Utils.runWhenBrowserIdle(() => UpdateChecker.init());
                 Utils.runWhenBrowserIdle(() => GitHubAutoImporter.init());
             } else if (currentSite === SiteDetector.SITES.ZHIHU) {
-                // 知乎站点：使用完整面板，支持回答/文章导出
-                UI.init();
-                Utils.runWhenBrowserIdle(() => UpdateChecker.init());
+                // 知乎站点：使用剪藏模式（GenericUI 内含 Zhihu 检测逻辑）
+                GenericUI.init();
             } else if (currentSite === SiteDetector.SITES.GENERIC) {
                 // 通用网页：初始化剪藏按钮
                 GenericUI.init();
