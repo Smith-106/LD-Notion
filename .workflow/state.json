@@ -1,0 +1,22 @@
+{
+  "version": "2.0",
+  "project_name": "LD-Notion Hub",
+  "status": "idle",
+  "current_milestone": null,
+  "current_task_id": null,
+  "milestones": [],
+  "artifacts": [],
+  "last_updated": "2026-05-06T14:45:00+08:00",
+  "accumulated_context": {
+    "key_decisions": [
+      "v3.5.0: 文件处理系统全面升级（54种文件类型、去重上传、多分片、video/audio block）",
+      "架构: 单文件 Userscript + Chrome Extension 双形态",
+      "认证: 支持 Manual API Key + OAuth 双模式",
+      "AI: 多服务商（OpenAI/Anthropic/Gemini）统一接口"
+    ],
+    "blockers": [],
+    "deferred": []
+  },
+  "transition_history": [],
+  "milestone_history": []
+}
