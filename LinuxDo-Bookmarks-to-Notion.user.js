@@ -10380,6 +10380,20 @@ ${availableTools}
                         author: content.author,
                     };
                     blocks = ZhihuAPI.htmlToBlocks(content.html || "");
+                    // 问题详情
+                    if (content.type === "question" && content.detail) {
+                        const detailBlocks = ZhihuAPI.htmlToBlocks(content.detail);
+                        if (detailBlocks.length > 0) {
+                            blocks.push({
+                                type: "callout",
+                                callout: {
+                                    icon: { type: "emoji", emoji: "❓" },
+                                    rich_text: [{ type: "text", text: { content: "问题描述" } }],
+                                },
+                            });
+                            blocks.push(...detailBlocks);
+                        }
+                    }
                     if (content.type === "question" && content.answers) {
                         for (const ans of content.answers) {
                             const ansBlocks = ZhihuAPI.htmlToBlocks(ans.html || "");
@@ -18631,6 +18645,9 @@ ${availableTools}
                     <button class="gclip-btn gclip-btn-primary" id="gclip-export" style="display: ${isConfigured ? 'block' : 'none'};">
                         导出当前页面
                     </button>
+                    <button class="gclip-btn gclip-btn-secondary" id="gclip-obs-export" style="display: block;">
+                        导出到 Obsidian
+                    </button>
                     <button class="gclip-btn gclip-btn-setup" id="gclip-show-settings" style="display: ${isConfigured ? 'block' : 'none'};">
                         修改配置
                     </button>
@@ -18923,6 +18940,70 @@ ${availableTools}
             // 导出按钮
             panel.querySelector("#gclip-export").addEventListener("click", () => {
                 GenericUI.doExport();
+            });
+
+            // 导出到 Obsidian
+            panel.querySelector("#gclip-obs-export").addEventListener("click", async () => {
+                if (GenericUI.isExporting) return;
+                GenericUI.isExporting = true;
+
+                const obsUrl = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_URL, CONFIG.DEFAULTS.obsApiUrl);
+                const obsKey = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
+                const obsDir = Storage.get(CONFIG.STORAGE_KEYS.OBS_DIR, CONFIG.DEFAULTS.obsDir);
+
+                if (!obsUrl || !obsKey) {
+                    GenericUI.showStatus("请先配置 Obsidian API（在 LinuxDo 页面设置面板中）", "error");
+                    GenericUI.isExporting = false;
+                    return;
+                }
+
+                const btn = GenericUI.panel.querySelector("#gclip-obs-export");
+                btn.disabled = true;
+                btn.textContent = "导出中...";
+                GenericUI.showStatus("正在提取页面内容...", "info");
+
+                try {
+                    const content = SiteDetector.detect() === SiteDetector.SITES.ZHIHU
+                        ? ZhihuAPI.extractContent()
+                        : null;
+
+                    let md = "";
+                    let title = document.title || "未命名页面";
+
+                    if (content) {
+                        title = content.title || title;
+                        const meta = { title, url: location.href, author: content.author };
+                        md = HTMLToMarkdown.buildFrontmatter(meta);
+                        md += `> [!info] 页面信息\n> - **来源**: 知乎\n> - **链接**: [${title}](${location.href})\n> - **作者**: ${content.author || "未知"}\n> - **导出时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
+
+                        if (content.detail) md += HTMLToMarkdown.convert(content.detail) + "\n\n";
+                        if (content.html) md += HTMLToMarkdown.convert(content.html) + "\n\n";
+                        if (content.answers) {
+                            content.answers.forEach((ans, i) => {
+                                md += `> [!note]+ #${i + 1} ${ans.author} · 👍 ${ans.voteCount}\n`;
+                                const lines = HTMLToMarkdown.convert(ans.html || "").trim().split("\n");
+                                md += lines.map(l => `> ${l}`).join("\n") + "\n\n";
+                            });
+                        }
+                    } else {
+                        const meta = { title, url: location.href };
+                        md = HTMLToMarkdown.buildFrontmatter(meta);
+                        md += `> [!info] 页面信息\n> - **链接**: [${title}](${location.href})\n> - **导出时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
+                        const body = document.querySelector("article") || document.querySelector("main") || document.body;
+                        md += HTMLToMarkdown.convert(body.innerHTML) + "\n";
+                    }
+
+                    const fileName = title.replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
+                    await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
+
+                    GenericUI.showStatus(`导出到 Obsidian 成功: ${title}`, "success");
+                } catch (error) {
+                    GenericUI.showStatus(`Obsidian 导出失败: ${error.message}`, "error");
+                } finally {
+                    GenericUI.isExporting = false;
+                    btn.disabled = false;
+                    btn.textContent = " 导出到 Obsidian";
+                }
             });
         },
 
