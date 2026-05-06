@@ -12579,6 +12579,16 @@ ${availableTools}
                 color: var(--ldb-ui-text);
             }
 
+            .ldb-flex-1 { flex: 1; }
+            .ldb-mt-8 { margin-top: 8px; }
+            .ldb-mt-12 { margin-top: 12px; }
+            .ldb-mb-8 { margin-bottom: 8px; }
+            .ldb-flex-gap { display: flex; gap: 8px; }
+            .ldb-nowrap-badge { padding: 6px 12px; white-space: nowrap; }
+            .ldb-hint { font-size: 12px; color: var(--ldb-ui-muted); }
+            .ldb-section-divider { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ldb-ui-border); }
+            .ldb-flex-center-gap { display: flex; align-items: center; gap: 8px; }
+
             .ldb-section {
                 padding: 12px 0;
             }
@@ -13280,15 +13290,15 @@ ${availableTools}
                         <span id="ldb-notion-settings-arrow">▶</span>
                     </div>
                     <div class="ldb-notion-toggle-content collapsed" id="ldb-notion-settings-content">
-                        <div class="ldb-input-group" style="margin-top: 12px;">
+                        <div class="ldb-input-group" class="ldb-mt-12">
                             <label class="ldb-label">Notion API Key</label>
                             <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx...">
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label">Notion OAuth（公开集成）</label>
                             <input type="text" class="ldb-input" id="ldb-notion-oauth-client-id" placeholder="Client ID">
-                            <input type="password" class="ldb-input" id="ldb-notion-oauth-client-secret" placeholder="Client Secret" style="margin-top: 8px;">
-                            <input type="text" class="ldb-input" id="ldb-notion-oauth-redirect-uri" placeholder="Redirect URI" style="margin-top: 8px;">
+                            <input type="password" class="ldb-input" id="ldb-notion-oauth-client-secret" placeholder="Client Secret" class="ldb-mt-8">
+                            <input type="text" class="ldb-input" id="ldb-notion-oauth-redirect-uri" placeholder="Redirect URI" class="ldb-mt-8">
                             <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
                                 <button class="ldb-btn ldb-btn-primary" id="ldb-notion-oauth-authorize" style="padding: 6px 12px;">🔐 一键授权</button>
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-oauth-clear" style="padding: 6px 12px;">断开授权</button>
@@ -13298,12 +13308,12 @@ ${availableTools}
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label">数据库 / 页面</label>
-                            <div style="display: flex; gap: 8px;">
-                                <select class="ldb-select" id="ldb-notion-ai-target-db" style="flex: 1;">
+                            <div class="ldb-flex-gap">
+                                <select class="ldb-select" id="ldb-notion-ai-target-db" class="ldb-flex-1">
                                     <option value="">默认（跟随导出数据库）</option>
                                     <option value="__all__">所有工作区数据库</option>
                                 </select>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-refresh-workspace" style="padding: 6px 12px; white-space: nowrap;" title="刷新工作区列表">🔄</button>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-refresh-workspace" class="ldb-nowrap-badge" title="刷新工作区列表">🔄</button>
                             </div>
                             <div class="ldb-tip" id="ldb-notion-workspace-tip"></div>
                         </div>
@@ -13317,9 +13327,9 @@ ${availableTools}
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label">模型</label>
-                            <div style="display: flex; gap: 8px;">
-                                <select class="ldb-select" id="ldb-notion-ai-model" style="flex: 1;"></select>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-ai-fetch-models" style="padding: 6px 12px; white-space: nowrap;">🔄 获取</button>
+                            <div class="ldb-flex-gap">
+                                <select class="ldb-select" id="ldb-notion-ai-model" class="ldb-flex-1"></select>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-ai-fetch-models" class="ldb-nowrap-badge">🔄 获取</button>
                             </div>
                             <div class="ldb-tip" id="ldb-notion-ai-model-tip"></div>
                         </div>
@@ -13346,10 +13356,10 @@ ${availableTools}
                             </select>
                             <div class="ldb-tip">刷新工作区列表时每类的最大分页数</div>
                         </div>
-                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ldb-ui-border);">
-                            <span style="font-size: 12px; color: var(--ldb-ui-muted);">🤖 Agent 个性化</span>
+                        <div class="ldb-section-divider">
+                            <span class="ldb-hint">🤖 Agent 个性化</span>
                         </div>
-                        <div class="ldb-input-group" style="margin-top: 8px;">
+                        <div class="ldb-input-group" class="ldb-mt-8">
                             <label class="ldb-label">助手名字</label>
                             <input type="text" class="ldb-input" id="ldb-notion-persona-name" placeholder="AI 助手">
                         </div>
@@ -13371,10 +13381,10 @@ ${availableTools}
                             <label class="ldb-label">自定义指令 (可选)</label>
                             <textarea class="ldb-input" id="ldb-notion-persona-instructions" rows="2" placeholder="额外的行为指令..." style="resize: vertical;"></textarea>
                         </div>
-                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ldb-ui-border);">
-                            <span style="font-size: 12px; color: var(--ldb-ui-muted);">🐙 GitHub 收藏导入</span>
+                        <div class="ldb-section-divider">
+                            <span class="ldb-hint">🐙 GitHub 收藏导入</span>
                         </div>
-                        <div class="ldb-input-group" style="margin-top: 8px;">
+                        <div class="ldb-input-group" class="ldb-mt-8">
                             <label class="ldb-label">GitHub 用户名</label>
                             <input type="text" class="ldb-input" id="ldb-notion-github-username" placeholder="your-username">
                         </div>
@@ -13400,8 +13410,8 @@ ${availableTools}
                                 </label>
                             </div>
                         </div>
-                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ldb-ui-border);">
-                            <span style="font-size: 12px; color: var(--ldb-ui-muted);">📖 浏览器书签导入</span>
+                        <div class="ldb-section-divider">
+                            <span class="ldb-hint">📖 浏览器书签导入</span>
                             <div id="ldb-notion-bookmark-status" style="font-size: 11px; margin-top: 4px;"></div>
                         </div>
                         <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-save-settings">💾 保存设置</button>
@@ -14803,28 +14813,28 @@ ${availableTools}
                                 <span>收藏来源分区</span>
                                 <span class="ldb-arrow" id="ldb-source-partitions-arrow">▶</span>
                             </div>
-                            <div class="ldb-toggle-content collapsed" id="ldb-source-partitions-content" style="margin-bottom: 8px;">
+                            <div class="ldb-toggle-content collapsed" id="ldb-source-partitions-content" class="ldb-mb-8">
                                 <div class="ldb-source-option-group">
                                     <button class="ldb-source-option" id="ldb-source-select-linuxdo" type="button">Linux.do 收藏分区</button>
                                     <button class="ldb-source-option" id="ldb-source-select-github" type="button">GitHub 收藏分区</button>
                                 </div>
                             </div>
 
-                            <div class="ldb-toggle-section" id="ldb-source-settings-toggle" style="margin-bottom: 8px;">
+                            <div class="ldb-toggle-section" id="ldb-source-settings-toggle" class="ldb-mb-8">
                                 <span>来源自动化设置</span>
                                 <span class="ldb-arrow" id="ldb-source-settings-arrow">▶</span>
                             </div>
-                            <div class="ldb-toggle-content collapsed" id="ldb-source-settings-content" style="margin-bottom: 8px;">
-                                <div class="ldb-setting-row" style="margin-bottom: 8px;">
+                            <div class="ldb-toggle-content collapsed" id="ldb-source-settings-content" class="ldb-mb-8">
+                                <div class="ldb-setting-row" class="ldb-mb-8">
                                     <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
                                         <input type="checkbox" id="ldb-auto-import-enabled">
                                         <span id="ldb-auto-import-label">启用自动导入新收藏</span>
                                     </label>
                                 </div>
                                 <div id="ldb-auto-import-options" style="display: none; margin-bottom: 8px;">
-                                    <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px;">
+                                    <div class="ldb-setting-row" class="ldb-flex-center-gap">
                                         <label id="ldb-auto-import-interval-label" style="white-space: nowrap;">轮询间隔</label>
-                                        <select id="ldb-auto-import-interval" class="ldb-input" style="flex: 1;">
+                                        <select id="ldb-auto-import-interval" class="ldb-input" class="ldb-flex-1">
                                             <option value="0">仅页面加载时</option>
                                             <option value="3">每 3 分钟</option>
                                             <option value="5" selected>每 5 分钟</option>
@@ -14833,21 +14843,21 @@ ${availableTools}
                                         </select>
                                     </div>
                                 </div>
-                                <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
                                     <label for="ldb-linuxdo-dedup-mode" style="white-space: nowrap;">Linux.do 导入去重</label>
-                                    <select id="ldb-linuxdo-dedup-mode" class="ldb-input" style="flex: 1;">
+                                    <select id="ldb-linuxdo-dedup-mode" class="ldb-input" class="ldb-flex-1">
                                         <option value="strict">自动去重</option>
                                         <option value="allow_duplicates">允许重复（手动勾选）</option>
                                     </select>
                                 </div>
-                                <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
                                     <label for="ldb-bookmark-dedup-mode" style="white-space: nowrap;">书签导入去重</label>
-                                    <select id="ldb-bookmark-dedup-mode" class="ldb-input" style="flex: 1;">
+                                    <select id="ldb-bookmark-dedup-mode" class="ldb-input" class="ldb-flex-1">
                                         <option value="strict">自动去重</option>
                                         <option value="allow_duplicates">允许重复（手动勾选）</option>
                                     </select>
                                 </div>
-                                <div class="ldb-setting-row" style="margin-bottom: 8px;">
+                                <div class="ldb-setting-row" class="ldb-mb-8">
                                     <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
                                         <input type="checkbox" id="ldb-ai-category-auto-dedup" checked>
                                         <span>分类列表自动去重</span>
@@ -14855,7 +14865,7 @@ ${availableTools}
                                 </div>
                                 <div id="ldb-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
 
-                                <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
                                     <button class="ldb-btn ldb-btn-secondary" id="ldb-update-check-btn" style="padding: 6px 10px;">检查更新</button>
                                     <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0;">
                                         <input type="checkbox" id="ldb-update-auto-enabled">
@@ -14863,9 +14873,9 @@ ${availableTools}
                                     </label>
                                 </div>
                                 <div id="ldb-update-auto-options" style="display: none; margin-bottom: 8px;">
-                                    <div class="ldb-setting-row" style="display: flex; align-items: center; gap: 8px;">
+                                    <div class="ldb-setting-row" class="ldb-flex-center-gap">
                                         <label for="ldb-update-interval-hours" style="white-space: nowrap;">检查间隔</label>
-                                        <select id="ldb-update-interval-hours" class="ldb-input" style="flex: 1;">
+                                        <select id="ldb-update-interval-hours" class="ldb-input" class="ldb-flex-1">
                                             <option value="24">每 24 小时</option>
                                             <option value="72">每 72 小时</option>
                                             <option value="168">每 168 小时</option>
@@ -14962,8 +14972,8 @@ ${availableTools}
                             <div class="ldb-input-group">
                                 <label class="ldb-label">公开 OAuth 授权（可选）</label>
                                 <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID">
-                                <input type="password" class="ldb-input" id="ldb-oauth-client-secret" placeholder="Client Secret" style="margin-top: 8px;">
-                                <input type="text" class="ldb-input" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" style="margin-top: 8px;">
+                                <input type="password" class="ldb-input" id="ldb-oauth-client-secret" placeholder="Client Secret" class="ldb-mt-8">
+                                <input type="text" class="ldb-input" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" class="ldb-mt-8">
                                 <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
                                     <button class="ldb-btn ldb-btn-primary" id="ldb-oauth-authorize">🔐 一键授权</button>
                                     <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">断开授权</button>
@@ -14973,14 +14983,14 @@ ${availableTools}
                             </div>
                             <div class="ldb-input-group">
                                 <label class="ldb-label">数据库 / 页面</label>
-                                <div style="display: flex; gap: 8px;">
-                                    <select class="ldb-select" id="ldb-workspace-select" style="flex: 1;">
+                                <div class="ldb-flex-gap">
+                                    <select class="ldb-select" id="ldb-workspace-select" class="ldb-flex-1">
                                         <option value="">-- 从工作区选择 --</option>
                                     </select>
-                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-refresh-workspace" style="padding: 6px 12px; white-space: nowrap;" title="刷新工作区页面列表">🔄</button>
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-refresh-workspace" class="ldb-nowrap-badge" title="刷新工作区页面列表">🔄</button>
                                 </div>
                                 <div class="ldb-input-group" id="ldb-manual-db-wrap" style="display: none; margin-top: 8px;">
-                                    <input type="text" class="ldb-input" id="ldb-database-id" placeholder="手动输入 32 位数据库 ID（高级）" style="flex: 1;">
+                                    <input type="text" class="ldb-input" id="ldb-database-id" placeholder="手动输入 32 位数据库 ID（高级）" class="ldb-flex-1">
                                 </div>
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-toggle-manual-db" style="margin-top: 6px; padding: 4px 10px; font-size: 12px;">高级：手动输入数据库 ID</button>
                                 <div class="ldb-tip" id="ldb-workspace-tip">
@@ -14991,7 +15001,7 @@ ${availableTools}
                             <!-- 导出目标类型选择 -->
                             <div class="ldb-input-group">
                                 <label class="ldb-label">导出目标</label>
-                                <div class="ldb-checkbox-group" style="margin-bottom: 8px;">
+                                <div class="ldb-checkbox-group" class="ldb-mb-8">
                                     <label class="ldb-checkbox-item">
                                         <input type="radio" name="ldb-export-target" id="ldb-export-target-database" value="database" checked>
                                         <span>数据库（推荐）</span>
@@ -15022,7 +15032,7 @@ ${availableTools}
                             </div>
 
                             <!-- 权限设置 -->
-                            <div class="ldb-permission-panel" style="margin-top: 12px;">
+                            <div class="ldb-permission-panel" class="ldb-mt-12">
                                 <div class="ldb-permission-row">
                                     <span class="ldb-permission-label">权限级别</span>
                                     <select class="ldb-permission-select" id="ldb-permission-level">
@@ -15058,7 +15068,7 @@ ${availableTools}
                                 <span id="ldb-filter-arrow">▶</span>
                             </div>
                             <div class="ldb-toggle-content collapsed" id="ldb-filter-content">
-                                <div class="ldb-input-group" style="margin-top: 12px;">
+                                <div class="ldb-input-group" class="ldb-mt-12">
                                     <div class="ldb-checkbox-group">
                                         <label class="ldb-checkbox-item">
                                             <input type="checkbox" id="ldb-only-first">
@@ -15121,7 +15131,7 @@ ${availableTools}
                                 <span id="ldb-ai-settings-arrow">▶</span>
                             </div>
                             <div class="ldb-toggle-content collapsed" id="ldb-ai-settings-content">
-                                <div class="ldb-input-group" style="margin-top: 12px;">
+                                <div class="ldb-input-group" class="ldb-mt-12">
                                     <label class="ldb-label">AI 服务</label>
                                     <select class="ldb-select" id="ldb-ai-service">
                                         <option value="openai">OpenAI</option>
@@ -15131,9 +15141,9 @@ ${availableTools}
                                 </div>
                                 <div class="ldb-input-group">
                                     <label class="ldb-label">模型</label>
-                                    <div style="display: flex; gap: 8px;">
-                                        <select class="ldb-select" id="ldb-ai-model" style="flex: 1;"></select>
-                                        <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-fetch-models" style="padding: 6px 12px; white-space: nowrap;">🔄 获取</button>
+                                    <div class="ldb-flex-gap">
+                                        <select class="ldb-select" id="ldb-ai-model" class="ldb-flex-1"></select>
+                                        <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-fetch-models" class="ldb-nowrap-badge">🔄 获取</button>
                                     </div>
                                     <div class="ldb-tip" id="ldb-ai-model-tip"></div>
                                 </div>
@@ -15153,12 +15163,12 @@ ${availableTools}
                                 </div>
                                 <div class="ldb-input-group">
                                     <label class="ldb-label">查询数据库</label>
-                                    <div style="display: flex; gap: 8px;">
-                                        <select class="ldb-select" id="ldb-ai-target-db" style="flex: 1;">
+                                    <div class="ldb-flex-gap">
+                                        <select class="ldb-select" id="ldb-ai-target-db" class="ldb-flex-1">
                                             <option value="">当前配置的数据库</option>
                                             <option value="__all__">所有工作区数据库</option>
                                         </select>
-                                        <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-refresh-dbs" style="padding: 6px 12px; white-space: nowrap;">🔄</button>
+                                        <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-refresh-dbs" class="ldb-nowrap-badge">🔄</button>
                                     </div>
                                     <div class="ldb-tip">AI 查询数据库时的目标范围</div>
                                 </div>
@@ -15173,16 +15183,16 @@ ${availableTools}
                                     </select>
                                     <div class="ldb-tip">刷新工作区列表时每类的最大分页数</div>
                                 </div>
-                                <div class="ldb-btn-group" style="display: flex; align-items: center; gap: 8px;">
+                                <div class="ldb-btn-group" class="ldb-flex-center-gap">
                                     <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-test">测试连接</button>
                                     <span id="ldb-ai-test-status" style="font-size: 12px;"></span>
                                 </div>
 
                                 <!-- Agent 个性化设置 -->
-                                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ldb-ui-border);">
-                                    <span style="font-size: 12px; color: var(--ldb-ui-muted);">🤖 Agent 个性化</span>
+                                <div class="ldb-section-divider">
+                                    <span class="ldb-hint">🤖 Agent 个性化</span>
                                 </div>
-                                <div class="ldb-input-group" style="margin-top: 8px;">
+                                <div class="ldb-input-group" class="ldb-mt-8">
                                     <label class="ldb-label">助手名字</label>
                                     <input type="text" class="ldb-input" id="ldb-agent-persona-name" placeholder="AI 助手">
                                 </div>
@@ -15222,7 +15232,7 @@ ${availableTools}
                                 </button>
                             </div>
                             <div class="ldb-toggle-content collapsed" id="ldb-github-settings-content">
-                                <div class="ldb-input-group" style="margin-top: 12px;">
+                                <div class="ldb-input-group" class="ldb-mt-12">
                                     <label class="ldb-label">GitHub 用户名</label>
                                     <input type="text" class="ldb-input" id="ldb-github-username" placeholder="your-username">
                                 </div>
@@ -15268,7 +15278,7 @@ ${availableTools}
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-self-check-btn" style="padding: 6px 10px; font-size: 12px;">执行自检</button>
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-copy-diagnostics-btn" style="padding: 6px 10px; font-size: 12px;">复制诊断信息</button>
                             </div>
-                            <div id="ldb-self-check-result" style="font-size: 12px; color: var(--ldb-ui-muted);"></div>
+                            <div id="ldb-self-check-result" class="ldb-hint"></div>
                         </div>
 
                         <div class="ldb-divider"></div>
