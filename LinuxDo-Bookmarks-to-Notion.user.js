@@ -12,6 +12,8 @@
 // @match        https://notion.so/*
 // @match        https://github.com/*
 // @match        https://www.github.com/*
+// @match        https://www.zhihu.com/*
+// @match        https://zhuanlan.zhihu.com/*
 // @match        *://*/*
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
@@ -1167,6 +1169,7 @@
             LINUX_DO: "linux_do",
             NOTION: "notion",
             GITHUB: "github",
+            ZHIHU: "zhihu",
             GENERIC: "generic",
         },
 
@@ -1181,6 +1184,9 @@
             }
             if (hostname === "github.com" || hostname === "www.github.com") {
                 return SiteDetector.SITES.GITHUB;
+            }
+            if (hostname === "www.zhihu.com" || hostname === "zhuanlan.zhihu.com") {
+                return SiteDetector.SITES.ZHIHU;
             }
             return SiteDetector.SITES.GENERIC;
         },
@@ -15375,6 +15381,35 @@ ${availableTools}
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
+            // 折叠 Obsidian 设置
+            refs.obsSettingsToggle.onclick = () => {
+                const content = refs.obsSettingsContent;
+                const arrow = refs.obsSettingsArrow;
+                content.classList.toggle("collapsed");
+                arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            };
+
+            // Obsidian 测试连接
+            refs.obsTestBtn.onclick = async () => {
+                const url = refs.obsApiUrlInput.value.trim();
+                const key = refs.obsApiKeyInput.value.trim();
+                if (!url || !key) {
+                    refs.obsTestStatus.innerHTML = '<span style="color: #f87171;">请填写 API 地址和 Key</span>';
+                    return;
+                }
+                refs.obsTestStatus.innerHTML = '<span style="color: #60a5fa;">连接中...</span>';
+                try {
+                    const result = await ObsidianAPI.testConnection(url, key);
+                    if (result.ok) {
+                        refs.obsTestStatus.innerHTML = '<span style="color: #4ade80;">✅ 连接成功</span>';
+                    } else {
+                        refs.obsTestStatus.innerHTML = `<span style="color: #f87171;">❌ ${result.error}</span>`;
+                    }
+                } catch (e) {
+                    refs.obsTestStatus.innerHTML = `<span style="color: #f87171;">❌ ${e.message}</span>`;
+                }
+            };
+
             refs.sourceSettingsToggle.onclick = () => {
                 const content = refs.sourceSettingsContent
                 const arrow = refs.sourceSettingsArrow
@@ -15939,6 +15974,11 @@ ${availableTools}
                     ),
                     githubUsername: refs.githubUsernameInput.value.trim(),
                     token: refs.githubTokenInput.value.trim(),
+                    imgFilter: refs.filterImgSelect.value,
+                    filterUsers: refs.filterUsersInput.value.trim(),
+                    filterInclude: refs.filterIncludeInput.value.trim(),
+                    filterExclude: refs.filterExcludeInput.value.trim(),
+                    filterMinLen: parseInt(refs.filterMinLenInput.value) || 0,
                 };
 
                 // 保存设置
@@ -16240,6 +16280,22 @@ ${availableTools}
             refs.githubTokenInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, e.target.value.trim());
             };
+            // Obsidian 设置变更保存
+            refs.obsApiUrlInput.onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.OBS_API_URL, e.target.value.trim());
+            };
+            refs.obsApiKeyInput.onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.OBS_API_KEY, e.target.value.trim());
+            };
+            refs.obsDirInput.onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.OBS_DIR, e.target.value.trim());
+            };
+            refs.obsImgModeSelect.onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.OBS_IMG_MODE, e.target.value);
+            };
+            refs.obsImgDirInput.onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.OBS_IMG_DIR, e.target.value.trim());
+            };
             // GitHub 导入类型
             refs.githubTypeCheckboxes.forEach(cb => {
                 cb.onchange = () => {
@@ -16484,6 +16540,11 @@ ${availableTools}
                 imgModeSelect: panel.querySelector("#ldb-img-mode"),
                 requestDelaySelect: panel.querySelector("#ldb-request-delay"),
                 exportConcurrencySelect: panel.querySelector("#ldb-export-concurrency"),
+                filterImgSelect: panel.querySelector("#ldb-filter-img"),
+                filterUsersInput: panel.querySelector("#ldb-filter-users"),
+                filterIncludeInput: panel.querySelector("#ldb-filter-include"),
+                filterExcludeInput: panel.querySelector("#ldb-filter-exclude"),
+                filterMinLenInput: panel.querySelector("#ldb-filter-minlen"),
                 validateConfigBtn: panel.querySelector("#ldb-validate-config"),
                 setupDatabaseBtn: panel.querySelector("#ldb-setup-database"),
                 cancelBtn: panel.querySelector("#ldb-cancel"),
@@ -16494,6 +16555,16 @@ ${availableTools}
                 githubUsernameInput: panel.querySelector("#ldb-github-username"),
                 githubTokenInput: panel.querySelector("#ldb-github-token"),
                 githubTypeCheckboxes: panel.querySelectorAll(".ldb-github-type"),
+                obsSettingsToggle: panel.querySelector("#ldb-obs-settings-toggle"),
+                obsSettingsContent: panel.querySelector("#ldb-obs-settings-content"),
+                obsSettingsArrow: panel.querySelector("#ldb-obs-settings-arrow"),
+                obsApiUrlInput: panel.querySelector("#ldb-obs-api-url"),
+                obsApiKeyInput: panel.querySelector("#ldb-obs-api-key"),
+                obsDirInput: panel.querySelector("#ldb-obs-dir"),
+                obsImgModeSelect: panel.querySelector("#ldb-obs-img-mode"),
+                obsImgDirInput: panel.querySelector("#ldb-obs-img-dir"),
+                obsTestBtn: panel.querySelector("#ldb-obs-test-btn"),
+                obsTestStatus: panel.querySelector("#ldb-obs-test-status"),
                 toggleManualDbBtn: panel.querySelector("#ldb-toggle-manual-db"),
                 refreshWorkspaceBtn: panel.querySelector("#ldb-refresh-workspace"),
                 workspaceTip: panel.querySelector("#ldb-workspace-tip"),
@@ -16856,6 +16927,34 @@ ${availableTools}
                                         <option value="5">5 个并发</option>
                                     </select>
                                 </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">图片筛选</label>
+                                    <select class="ldb-select" id="ldb-filter-img">
+                                        <option value="all">全部</option>
+                                        <option value="only_img">仅含图楼层</option>
+                                        <option value="no_img">仅无图楼层</option>
+                                    </select>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">指定用户</label>
+                                    <input type="text" class="ldb-input" id="ldb-filter-users" placeholder="user1, user2">
+                                    <div class="ldb-tip">逗号分隔，仅导出这些用户的回复</div>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">包含关键词</label>
+                                    <input type="text" class="ldb-input" id="ldb-filter-include" placeholder="教程, 指南">
+                                    <div class="ldb-tip">逗号分隔，必须包含任一关键词</div>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">排除关键词</label>
+                                    <input type="text" class="ldb-input" id="ldb-filter-exclude" placeholder="广告, 水贴">
+                                    <div class="ldb-tip">逗号分隔，排除包含关键词的楼层</div>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">最少字数</label>
+                                    <input type="number" class="ldb-input" id="ldb-filter-minlen" value="0" min="0" placeholder="0">
+                                    <div class="ldb-tip">过滤字数不足的楼层</div>
+                                </div>
                             </div>
                         </div>
 
@@ -17000,6 +17099,47 @@ ${availableTools}
 
                         <div class="ldb-divider"></div>
 
+                        <!-- Obsidian 导出设置 -->
+                        <div class="ldb-section">
+                            <div class="ldb-toggle-section" id="ldb-obs-settings-toggle">
+                                <span class="ldb-section-title" style="margin-bottom: 0;">📝 Obsidian 导出</span>
+                                <span id="ldb-obs-settings-arrow">▶</span>
+                            </div>
+                            <div class="ldb-toggle-content collapsed" id="ldb-obs-settings-content">
+                                <div class="ldb-input-group" class="ldb-mt-12">
+                                    <label class="ldb-label">API 地址</label>
+                                    <input type="text" class="ldb-input" id="ldb-obs-api-url" placeholder="https://127.0.0.1:27124">
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">API Key</label>
+                                    <input type="password" class="ldb-input" id="ldb-obs-api-key" placeholder="Obsidian Local REST API Key">
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">导出目录</label>
+                                    <input type="text" class="ldb-input" id="ldb-obs-dir" placeholder="Linux.do">
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">图片模式</label>
+                                    <select class="ldb-select" id="ldb-obs-img-mode">
+                                        <option value="file">保存图片并引用</option>
+                                        <option value="base64">Base64 内嵌</option>
+                                        <option value="skip">不导出图片</option>
+                                    </select>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">图片目录</label>
+                                    <input type="text" class="ldb-input" id="ldb-obs-img-dir" placeholder="Linux.do/attachments">
+                                    <div class="ldb-tip">仅"保存图片并引用"模式有效</div>
+                                </div>
+                                <div style="margin-top: 8px;">
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-obs-test-btn" style="padding: 6px 10px; font-size: 12px;">🔗 测试连接</button>
+                                    <span id="ldb-obs-test-status" style="font-size: 12px; margin-left: 8px;"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="ldb-divider"></div>
+
                         <!-- 浏览器书签导入 -->
                         <div class="ldb-section">
                             <div style="font-size: 13px; font-weight: 700; color: var(--ldb-ui-text);">📖 浏览器书签</div>
@@ -17090,6 +17230,11 @@ ${availableTools}
             refs.imgModeSelect.value = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
             refs.requestDelaySelect.value = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
             refs.exportConcurrencySelect.value = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG.DEFAULTS.exportConcurrency);
+            refs.filterImgSelect.value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_IMG, CONFIG.DEFAULTS.imgFilter);
+            refs.filterUsersInput.value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_USERS, CONFIG.DEFAULTS.filterUsers);
+            refs.filterIncludeInput.value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_INCLUDE, CONFIG.DEFAULTS.filterInclude);
+            refs.filterExcludeInput.value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_EXCLUDE, CONFIG.DEFAULTS.filterExclude);
+            refs.filterMinLenInput.value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_MINLEN, CONFIG.DEFAULTS.filterMinLen);
 
             // 加载导出目标类型设置
             const exportTargetType = exportState.targetType;
@@ -17174,6 +17319,13 @@ ${availableTools}
             refs.githubTypeCheckboxes.forEach(cb => {
                 cb.checked = savedGHTypesMain.includes(cb.value);
             });
+
+            // 加载 Obsidian 设置
+            refs.obsApiUrlInput.value = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_URL, CONFIG.DEFAULTS.obsApiUrl);
+            refs.obsApiKeyInput.value = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
+            refs.obsDirInput.value = Storage.get(CONFIG.STORAGE_KEYS.OBS_DIR, CONFIG.DEFAULTS.obsDir);
+            refs.obsImgModeSelect.value = Storage.get(CONFIG.STORAGE_KEYS.OBS_IMG_MODE, CONFIG.DEFAULTS.obsImgMode);
+            refs.obsImgDirInput.value = Storage.get(CONFIG.STORAGE_KEYS.OBS_IMG_DIR, CONFIG.DEFAULTS.obsImgDir);
 
             const source = UI.getActiveBookmarkSource();
             UI.applyBookmarkSourceUI(source);
@@ -18697,6 +18849,10 @@ ${availableTools}
                 UI.init();
                 Utils.runWhenBrowserIdle(() => UpdateChecker.init());
                 Utils.runWhenBrowserIdle(() => GitHubAutoImporter.init());
+            } else if (currentSite === SiteDetector.SITES.ZHIHU) {
+                // 知乎站点：使用完整面板，支持回答/文章导出
+                UI.init();
+                Utils.runWhenBrowserIdle(() => UpdateChecker.init());
             } else if (currentSite === SiteDetector.SITES.GENERIC) {
                 // 通用网页：初始化剪藏按钮
                 GenericUI.init();
