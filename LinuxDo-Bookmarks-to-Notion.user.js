@@ -64,6 +64,11 @@
             FILTER_ONLY_OP: "ldb_filter_only_op",
             FILTER_RANGE_START: "ldb_filter_range_start",
             FILTER_RANGE_END: "ldb_filter_range_end",
+            FILTER_IMG: "ldb_filter_img",
+            FILTER_USERS: "ldb_filter_users",
+            FILTER_INCLUDE: "ldb_filter_include",
+            FILTER_EXCLUDE: "ldb_filter_exclude",
+            FILTER_MINLEN: "ldb_filter_minlen",
             IMG_MODE: "ldb_img_mode",
             PANEL_MINIMIZED: "ldb_panel_minimized",
             EXPORTED_TOPICS: "ldb_exported_topics",
@@ -132,6 +137,12 @@
             MODE_CONFLICT_TIP_SHOWN: "ldb_mode_conflict_tip_shown",
             // 跨源设置
             CROSS_SOURCE_MODE: "ldb_cross_source_mode",
+            // Obsidian 导出
+            OBS_API_URL: "ldb_obs_api_url",
+            OBS_API_KEY: "ldb_obs_api_key",
+            OBS_DIR: "ldb_obs_dir",
+            OBS_IMG_MODE: "ldb_obs_img_mode",
+            OBS_IMG_DIR: "ldb_obs_img_dir",
             // 面板尺寸记忆
             PANEL_SIZE_NOTION: "ldb_panel_size_notion",
             PANEL_SIZE_MAIN: "ldb_panel_size_main",
@@ -149,6 +160,11 @@
             onlyOp: false,
             rangeStart: 1,
             rangeEnd: 999999,
+            imgFilter: "all", // all / only_img / no_img
+            filterUsers: "",
+            filterInclude: "",
+            filterExclude: "",
+            filterMinLen: 0,
             imgMode: "external", // upload, external, skip
             permissionLevel: 1, // 默认标准权限
             requireConfirm: true, // 默认需要确认
@@ -192,6 +208,12 @@
             themePreference: "auto",
             // 跨源模式默认值
             crossSourceMode: "separate",  // separate(分库) 或 unified(统一库)
+            // Obsidian 导出默认值
+            obsApiUrl: "https://127.0.0.1:27124",
+            obsApiKey: "",
+            obsDir: "Linux.do",
+            obsImgMode: "file", // file / base64 / none
+            obsImgDir: "Linux.do/attachments",
         },
         // 导出目标类型
         EXPORT_TARGET_TYPES: {
@@ -2522,6 +2544,323 @@
                     allow_deleting_content: !!allowDeletingContent,
                 },
             }, apiKey);
+        },
+    };
+
+    // ===========================================
+    // Obsidian Local REST API 模块
+    // ===========================================
+    const ObsidianAPI = {
+        testConnection: async (apiUrl, apiKey) => {
+            const resp = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "GET",
+                    url: `${apiUrl}/vault/`,
+                    headers: { Authorization: `Bearer ${apiKey}` },
+                    responseType: "json",
+                    onload: (r) => resolve(r),
+                    onerror: (e) => reject(e),
+                });
+            });
+            if (resp.status === 200 || resp.status === 204) return { ok: true };
+            return { ok: false, error: `HTTP ${resp.status}: ${resp.statusText}` };
+        },
+
+        writeNote: async (apiUrl, apiKey, path, content) => {
+            const resp = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "PUT",
+                    url: `${apiUrl}/vault/${encodeURIComponent(path)}`,
+                    headers: {
+                        Authorization: `Bearer ${apiKey}`,
+                        "Content-Type": "text/markdown",
+                    },
+                    data: content,
+                    onload: (r) => resolve(r),
+                    onerror: (e) => reject(e),
+                });
+            });
+            if (resp.status === 200 || resp.status === 204 || resp.status === 201) {
+                return { ok: true };
+            }
+            return { ok: false, error: `HTTP ${resp.status}: ${resp.statusText}` };
+        },
+
+        writeImage: async (apiUrl, apiKey, path, blob, contentType) => {
+            const resp = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "PUT",
+                    url: `${apiUrl}/vault/${encodeURIComponent(path)}`,
+                    headers: {
+                        Authorization: `Bearer ${apiKey}`,
+                        "Content-Type": contentType || "application/octet-stream",
+                    },
+                    data: blob,
+                    onload: (r) => resolve(r),
+                    onerror: (e) => reject(e),
+                });
+            });
+            if (resp.status === 200 || resp.status === 204 || resp.status === 201) {
+                return { ok: true };
+            }
+            return { ok: false, error: `HTTP ${resp.status}: ${resp.statusText}` };
+        },
+    };
+
+    // ===========================================
+    // HTML → Markdown 转换模块
+    // ===========================================
+    const HTMLToMarkdown = {
+        convert: (html) => {
+            const doc = new DOMParser().parseFromString(html, "text/html");
+            return HTMLToMarkdown._convertNode(doc.body);
+        },
+
+        _convertNode: (node) => {
+            if (node.nodeType === Node.TEXT_NODE) {
+                return node.textContent || "";
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE) return "";
+
+            const tag = node.tagName.toLowerCase();
+            const children = HTMLToMarkdown._convertChildren(node);
+
+            switch (tag) {
+                case "h1": return `# ${children}\n\n`;
+                case "h2": return `## ${children}\n\n`;
+                case "h3": return `### ${children}\n\n`;
+                case "h4": return `#### ${children}\n\n`;
+                case "h5": return `##### ${children}\n\n`;
+                case "h6": return `###### ${children}\n\n`;
+                case "p": return `${children}\n\n`;
+                case "br": return "\n";
+                case "hr": return "---\n\n";
+                case "strong": case "b": return `**${children}**`;
+                case "em": case "i": return `*${children}*`;
+                case "del": case "s": return `~~${children}~~`;
+                case "code": {
+                    const parent = node.parentElement;
+                    if (parent && parent.tagName.toLowerCase() === "pre") return children;
+                    return `\`${children}\``;
+                }
+                case "pre": {
+                    const codeEl = node.querySelector("code");
+                    const lang = codeEl?.className?.match(/language-(\w+)/)?.[1] || "";
+                    const text = codeEl ? codeEl.textContent : node.textContent;
+                    return `\`\`\`${lang}\n${text}\n\`\`\`\n\n`;
+                }
+                case "blockquote": {
+                    const lines = children.trim().split("\n");
+                    return lines.map((l) => `> ${l}`).join("\n") + "\n\n";
+                }
+                case "a": {
+                    const href = node.getAttribute("href") || "";
+                    if (href.startsWith("http")) return `[${children}](${href})`;
+                    return children;
+                }
+                case "img": {
+                    const src = node.getAttribute("src") || "";
+                    const alt = node.getAttribute("alt") || "";
+                    return `![${alt}](${src})`;
+                }
+                case "ul": return children;
+                case "ol": {
+                    const items = node.querySelectorAll(":scope > li");
+                    let idx = 1;
+                    return Array.from(items).map((li) => {
+                        const md = HTMLToMarkdown._convertNode(li).trim();
+                        const result = `${idx}. ${md}\n`;
+                        idx++;
+                        return result;
+                    }).join("") + "\n";
+                }
+                case "li": return `- ${children}\n`;
+                case "table": return HTMLToMarkdown._convertTable(node) + "\n\n";
+                case "iframe": {
+                    const src = node.getAttribute("src") || "";
+                    return `[嵌入内容](${src})\n\n`;
+                }
+                case "video": {
+                    const src = node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "";
+                    return `[视频](${src})\n\n`;
+                }
+                case "audio": {
+                    const src = node.getAttribute("src") || "";
+                    return `[音频](${src})\n\n`;
+                }
+                case "div": {
+                    const cls = node.className || "";
+                    if (cls.includes("onebox")) {
+                        return `> [!quote]\n> ${children.trim()}\n\n`;
+                    }
+                    return children;
+                }
+                default: return children;
+            }
+        },
+
+        _convertChildren: (node) => {
+            return Array.from(node.childNodes).map(HTMLToMarkdown._convertNode).join("");
+        },
+
+        _convertTable: (table) => {
+            const rows = table.querySelectorAll("tr");
+            if (rows.length === 0) return "";
+            const result = [];
+            rows.forEach((row, i) => {
+                const cells = Array.from(row.querySelectorAll("th, td")).map((c) => {
+                    return HTMLToMarkdown._convertChildren(c).replace(/\n/g, " ").trim();
+                });
+                result.push(`| ${cells.join(" | ")} |`);
+                if (i === 0) {
+                    result.push(`| ${cells.map(() => "---").join(" | ")} |`);
+                }
+            });
+            return result.join("\n");
+        },
+
+        buildFrontmatter: (meta) => {
+            const lines = ["---"];
+            if (meta.title) lines.push(`title: "${meta.title.replace(/"/g, '\\"')}"`);
+            if (meta.url) lines.push(`url: "${meta.url}"`);
+            if (meta.author) lines.push(`author: "${meta.author}"`);
+            if (meta.topicId) lines.push(`topic_id: ${meta.topicId}`);
+            if (meta.category) lines.push(`category: "${meta.category}"`);
+            if (meta.tags && meta.tags.length > 0) {
+                lines.push("tags:");
+                meta.tags.forEach((t) => lines.push(`  - "${t}"`));
+            }
+            lines.push(`export_time: "${new Date().toISOString()}"`);
+            if (meta.floors !== undefined) lines.push(`floors: ${meta.floors}`);
+            lines.push("---");
+            return lines.join("\n") + "\n\n";
+        },
+
+        buildPostCallout: (post, index, isOp) => {
+            const type = isOp ? "success" : "note";
+            const collapsed = index > 0 ? "+" : "";
+            const username = post.username || "未知";
+            const date = post.createdAt
+                ? new Date(post.createdAt).toLocaleString("zh-CN")
+                : "未知时间";
+            const header = `#${index + 1} ${username} (@${post.username || ""})${isOp ? " 楼主" : ""} · ${date}`;
+            const content = HTMLToMarkdown.convert(post.cooked || "");
+            const lines = content.trim().split("\n");
+            const quoted = lines.map((l) => `> ${l}`).join("\n");
+            return `> [!${type}]${collapsed} ${header}\n${quoted}\n> ^floor-${index + 1}\n\n`;
+        },
+    };
+
+    // ===========================================
+    // 知乎内容提取模块
+    // ===========================================
+    const ZhihuAPI = {
+        detectPage: () => {
+            const url = location.href;
+            if (/zhihu\.com\/question\/\d+\/answer\/\d+/.test(url)) return "answer";
+            if (/zhihu\.com\/question\/\d+/.test(url)) return "question";
+            if (/zhihu\.com\/p\/\d+/.test(url)) return "article";
+            if (/zhihu\.com\/column\/[^/]+\/p\/\d+/.test(url)) return "column_article";
+            return null;
+        },
+
+        extractContent: () => {
+            const pageType = ZhihuAPI.detectPage();
+            if (!pageType) return null;
+
+            if (pageType === "answer") return ZhihuAPI._extractAnswer();
+            if (pageType === "question") return ZhihuAPI._extractQuestion();
+            if (pageType === "article" || pageType === "column_article") return ZhihuAPI._extractArticle();
+            return null;
+        },
+
+        _extractAnswer: () => {
+            const answerEl = document.querySelector(".AnswerItem .RichContent-inner")
+                || document.querySelector(".Post-RichTextContainer");
+            if (!answerEl) return null;
+
+            const questionEl = document.querySelector(".QuestionHeader-title");
+            const authorEl = document.querySelector(".AuthorInfo-name .UserLink-link");
+            const voteEl = document.querySelector(".VoteButton--up") || document.querySelector(".TopstoryNumber");
+
+            return {
+                type: "answer",
+                title: questionEl?.textContent?.trim() || "知乎回答",
+                author: authorEl?.textContent?.trim() || "匿名",
+                url: location.href,
+                html: answerEl.innerHTML,
+                voteCount: ZhihuAPI._parseVoteCount(voteEl?.textContent),
+            };
+        },
+
+        _extractQuestion: () => {
+            const questionEl = document.querySelector(".QuestionHeader-title");
+            if (!questionEl) return null;
+
+            const detailEl = document.querySelector(".QuestionHeader-detail");
+            const answerEls = document.querySelectorAll(".AnswerItem");
+
+            const answers = Array.from(answerEls).slice(0, 20).map((el, i) => {
+                const contentEl = el.querySelector(".RichContent-inner");
+                const authorEl = el.querySelector(".AuthorInfo-name .UserLink-link");
+                const voteEl = el.querySelector(".VoteButton--up");
+                return {
+                    index: i,
+                    author: authorEl?.textContent?.trim() || "匿名",
+                    html: contentEl?.innerHTML || "",
+                    voteCount: ZhihuAPI._parseVoteCount(voteEl?.textContent),
+                };
+            });
+
+            return {
+                type: "question",
+                title: questionEl.textContent.trim(),
+                url: location.href,
+                detail: detailEl?.innerHTML || "",
+                answers,
+            };
+        },
+
+        _extractArticle: () => {
+            const articleEl = document.querySelector(".Post-RichTextContainer")
+                || document.querySelector(".RichText");
+            if (!articleEl) return null;
+
+            const titleEl = document.querySelector(".Post-Title") || document.querySelector(".ArticleHeader-title");
+            const authorEl = document.querySelector(".AuthorInfo-name .UserLink-link");
+
+            return {
+                type: "article",
+                title: titleEl?.textContent?.trim() || "知乎文章",
+                author: authorEl?.textContent?.trim() || "未知",
+                url: location.href,
+                html: articleEl.innerHTML,
+            };
+        },
+
+        _parseVoteCount: (text) => {
+            if (!text) return 0;
+            const match = text.match(/(\d[\d,]*)/);
+            return match ? parseInt(match[1].replace(/,/g, ""), 10) : 0;
+        },
+
+        htmlToBlocks: (html) => {
+            return DOMToNotion.cookedToBlocks(html);
+        },
+
+        buildProperties: (content) => {
+            const props = {
+                title: {
+                    title: [{ text: { content: content.title || "知乎内容" } }],
+                },
+            };
+            if (content.author) {
+                props["来源"] = { rich_text: [{ text: { content: `知乎 - ${content.author}` } }] };
+            }
+            if (content.type) {
+                props["类型"] = { select: { name: content.type === "answer" ? "回答" : content.type === "article" ? "文章" : "问题" } };
+            }
+            return props;
         },
     };
 
@@ -10252,22 +10591,34 @@ ${availableTools}
 
         // 筛选帖子
         filterPosts: (posts, topic, settings) => {
+            const wantUsers = (settings.filterUsers || "").split(/[,;，；\s]+/).filter(Boolean).map(u => u.toLowerCase());
+            const includeKws = (settings.filterInclude || "").split(/[,;，；\s]+/).filter(Boolean).map(k => k.toLowerCase());
+            const excludeKws = (settings.filterExclude || "").split(/[,;，；\s]+/).filter(Boolean).map(k => k.toLowerCase());
+            const minLen = settings.filterMinLen || 0;
+
             return posts.filter((post) => {
                 const postNum = post.post_number;
 
-                // 楼层范围
-                if (postNum < settings.rangeStart || postNum > settings.rangeEnd) {
-                    return false;
-                }
+                if (postNum < settings.rangeStart || postNum > settings.rangeEnd) return false;
+                if (settings.onlyFirst && postNum !== 1) return false;
+                if (settings.onlyOp && post.username !== topic.opUsername) return false;
 
-                // 只要第一楼
-                if (settings.onlyFirst && postNum !== 1) {
-                    return false;
-                }
+                // 用户过滤
+                if (wantUsers.length && !wantUsers.includes((post.username || "").toLowerCase())) return false;
 
-                // 只要楼主
-                if (settings.onlyOp && post.username !== topic.opUsername) {
-                    return false;
+                // 图片筛选
+                if (settings.imgFilter === "only_img" && !(post.cooked || "").includes("<img")) return false;
+                if (settings.imgFilter === "no_img" && (post.cooked || "").includes("<img")) return false;
+
+                // 文本内容检查（关键词 + 最少字数）
+                if (includeKws.length || excludeKws.length || minLen > 0) {
+                    const textEl = document.createElement("div");
+                    textEl.innerHTML = post.cooked || "";
+                    const plainText = (textEl.textContent || "").trim();
+
+                    if (minLen > 0 && plainText.length < minLen) return false;
+                    if (includeKws.length && !includeKws.some(k => plainText.toLowerCase().includes(k))) return false;
+                    if (excludeKws.length && excludeKws.some(k => plainText.toLowerCase().includes(k))) return false;
                 }
 
                 return true;
@@ -10313,12 +10664,31 @@ ${availableTools}
         buildContentBlocks: (posts, topic, settings) => {
             const blocks = [];
 
-            // 添加帖子信息头
+            // 添加帖子元数据 callout（类似 frontmatter）
+            const metaLines = [
+                { label: "原始链接", value: topic.url, link: true },
+                { label: "主题 ID", value: String(topic.topicId || topic.topic_id || "") },
+                { label: "楼主", value: `@${topic.opUsername || "未知"}` },
+                { label: "分类", value: topic.categoryName || topic.category || "无" },
+                { label: "标签", value: (topic.tags || []).join(", ") || "无" },
+                { label: "导出时间", value: new Date().toLocaleString("zh-CN") },
+                { label: "楼层数", value: String(posts.length) },
+            ];
+            const metaRichText = [];
+            metaLines.forEach((line, i) => {
+                if (i > 0) metaRichText.push({ type: "text", text: { content: "\n" } });
+                metaRichText.push({ type: "text", text: { content: `${line.label}: ` }, annotations: { bold: true } });
+                if (line.link && line.value) {
+                    metaRichText.push({ type: "text", text: { content: line.value, link: { url: line.value } } });
+                } else {
+                    metaRichText.push({ type: "text", text: { content: line.value || "无" } });
+                }
+            });
             blocks.push({
                 type: "callout",
                 callout: {
-                    icon: { type: "emoji", emoji: "📌" },
-                    rich_text: [{ type: "text", text: { content: `帖子来源: ${topic.url}` } }],
+                    icon: { type: "emoji", emoji: "📋" },
+                    rich_text: metaRichText,
                 },
             });
 
@@ -10686,6 +11056,11 @@ ${availableTools}
                 onlyOp: Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, false),
                 rangeStart: Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, 1),
                 rangeEnd: Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, 999999),
+                imgFilter: Storage.get(CONFIG.STORAGE_KEYS.FILTER_IMG, CONFIG.DEFAULTS.imgFilter),
+                filterUsers: Storage.get(CONFIG.STORAGE_KEYS.FILTER_USERS, CONFIG.DEFAULTS.filterUsers),
+                filterInclude: Storage.get(CONFIG.STORAGE_KEYS.FILTER_INCLUDE, CONFIG.DEFAULTS.filterInclude),
+                filterExclude: Storage.get(CONFIG.STORAGE_KEYS.FILTER_EXCLUDE, CONFIG.DEFAULTS.filterExclude),
+                filterMinLen: Storage.get(CONFIG.STORAGE_KEYS.FILTER_MINLEN, CONFIG.DEFAULTS.filterMinLen),
                 imgMode: Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode),
                 concurrency: Storage.get(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG.DEFAULTS.exportConcurrency),
             };
@@ -15579,6 +15954,11 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, settings.onlyOp);
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, settings.rangeStart);
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, settings.rangeEnd);
+                Storage.set(CONFIG.STORAGE_KEYS.FILTER_IMG, settings.imgFilter);
+                Storage.set(CONFIG.STORAGE_KEYS.FILTER_USERS, settings.filterUsers);
+                Storage.set(CONFIG.STORAGE_KEYS.FILTER_INCLUDE, settings.filterInclude);
+                Storage.set(CONFIG.STORAGE_KEYS.FILTER_EXCLUDE, settings.filterExclude);
+                Storage.set(CONFIG.STORAGE_KEYS.FILTER_MINLEN, settings.filterMinLen);
                 Storage.set(CONFIG.STORAGE_KEYS.IMG_MODE, settings.imgMode);
                 Storage.set(CONFIG.STORAGE_KEYS.REQUEST_DELAY, parseInt(refs.requestDelaySelect.value));
                 Storage.set(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, settings.concurrency);
