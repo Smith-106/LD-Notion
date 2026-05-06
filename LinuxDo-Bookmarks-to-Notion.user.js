@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.4.4
+// @version      3.4.5
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手自然语言管理 Notion 工作区，批量导出收藏帖子到 Notion，GitHub 全类型导入（Stars/Repos/Forks/Gists），浏览器书签导入，跨源智能搜索与推荐，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -226,6 +226,15 @@
     // ===========================================
     const Utils = {
         sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+
+        runWhenBrowserIdle: (task, timeout = 1200) => {
+            if (typeof task !== "function") return;
+            if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+                window.requestIdleCallback(() => task(), { timeout });
+                return;
+            }
+            task();
+        },
 
         absoluteUrl: (src) => {
             if (!src) return "";
@@ -10317,6 +10326,8 @@ ${availableTools}
         timerId: null,
         deferredWhileHidden: false,
         visibilityListenerBound: false,
+        lastRunAt: 0,
+        minimumRunGapMs: 60 * 1000,
 
         // 从 Storage 读取导出设置（不依赖 UI DOM）
         buildSettings: () => {
@@ -10380,6 +10391,9 @@ ${availableTools}
                 return;
             }
 
+            const now = Date.now();
+            if (now - AutoImporter.lastRunAt < AutoImporter.minimumRunGapMs) return;
+            AutoImporter.lastRunAt = now;
             AutoImporter.isRunning = true;
             const exportBtn = document.querySelector("#ldb-export");
 
@@ -10472,7 +10486,7 @@ ${availableTools}
         startPolling: (intervalMinutes) => {
             AutoImporter.stopPolling();
             if (intervalMinutes > 0) {
-                AutoImporter.timerId = setInterval(() => AutoImporter.run(), intervalMinutes * 60 * 1000);
+                AutoImporter.timerId = setInterval(() => Utils.runWhenBrowserIdle(() => AutoImporter.run()), intervalMinutes * 60 * 1000);
             }
         },
 
@@ -10481,7 +10495,7 @@ ${availableTools}
             document.addEventListener("visibilitychange", () => {
                 if (!document.hidden && AutoImporter.deferredWhileHidden) {
                     AutoImporter.deferredWhileHidden = false;
-                    AutoImporter.run();
+                    Utils.runWhenBrowserIdle(() => AutoImporter.run());
                 }
             });
             AutoImporter.visibilityListenerBound = true;
@@ -10498,7 +10512,7 @@ ${availableTools}
             if (!AutoImporter.canStart()) return;
             AutoImporter.ensureVisibilityListener();
             setTimeout(() => {
-                AutoImporter.run();
+                Utils.runWhenBrowserIdle(() => AutoImporter.run());
                 const interval = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval);
                 if (interval > 0) AutoImporter.startPolling(interval);
             }, 3000);
@@ -10509,11 +10523,18 @@ ${availableTools}
         timerId: null,
         isChecking: false,
 
+        shouldCheckNow: (intervalHours) => {
+            const intervalMs = (parseInt(intervalHours, 10) || 0) * 60 * 60 * 1000;
+            if (intervalMs <= 0) return true;
+            const lastCheckAt = parseInt(Storage.get(CONFIG.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, 0), 10) || 0;
+            return !lastCheckAt || (Date.now() - lastCheckAt >= intervalMs);
+        },
+
         getCurrentVersion: () => {
             if (typeof GM_info !== "undefined" && GM_info?.script?.version) {
                 return GM_info.script.version;
             }
-            return "3.4.4";
+            return "3.4.5";
         },
 
         compareVersions: (a, b) => {
@@ -10656,7 +10677,7 @@ ${availableTools}
             const intervalHours = parseInt(hours, 10) || 0;
             if (intervalHours > 0) {
                 UpdateChecker.timerId = setInterval(() => {
-                    UpdateChecker.check({ manual: false });
+                    Utils.runWhenBrowserIdle(() => UpdateChecker.check({ manual: false }));
                 }, intervalHours * 60 * 60 * 1000);
             }
         },
@@ -10674,7 +10695,9 @@ ${availableTools}
             UpdateChecker.stopPolling();
             UpdateChecker.renderLastStatus();
             if (enabled) {
-                UpdateChecker.check({ manual: false });
+                if (UpdateChecker.shouldCheckNow(intervalHours)) {
+                    Utils.runWhenBrowserIdle(() => UpdateChecker.check({ manual: false }));
+                }
                 UpdateChecker.startPolling(intervalHours);
             }
         },
@@ -10685,6 +10708,8 @@ ${availableTools}
         timerId: null,
         deferredWhileHidden: false,
         visibilityListenerBound: false,
+        lastRunAt: 0,
+        minimumRunGapMs: 60 * 1000,
 
         canStart: () => {
             if (!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return false;
@@ -10715,7 +10740,7 @@ ${availableTools}
             document.addEventListener("visibilitychange", () => {
                 if (!document.hidden && GitHubAutoImporter.deferredWhileHidden) {
                     GitHubAutoImporter.deferredWhileHidden = false;
-                    GitHubAutoImporter.run();
+                    Utils.runWhenBrowserIdle(() => GitHubAutoImporter.run());
                 }
             });
             GitHubAutoImporter.visibilityListenerBound = true;
@@ -10738,6 +10763,9 @@ ${availableTools}
                 return;
             }
 
+            const now = Date.now();
+            if (now - GitHubAutoImporter.lastRunAt < GitHubAutoImporter.minimumRunGapMs) return;
+            GitHubAutoImporter.lastRunAt = now;
             GitHubAutoImporter.isRunning = true;
             try {
                 GitHubAutoImporter.updateStatus("🔄 正在检查 GitHub 新收藏...");
@@ -10786,7 +10814,7 @@ ${availableTools}
         startPolling: (intervalMinutes) => {
             GitHubAutoImporter.stopPolling();
             if (intervalMinutes > 0) {
-                GitHubAutoImporter.timerId = setInterval(() => GitHubAutoImporter.run(), intervalMinutes * 60 * 1000);
+                GitHubAutoImporter.timerId = setInterval(() => Utils.runWhenBrowserIdle(() => GitHubAutoImporter.run()), intervalMinutes * 60 * 1000);
             }
         },
 
@@ -10801,7 +10829,7 @@ ${availableTools}
             if (!GitHubAutoImporter.canStart()) return;
             GitHubAutoImporter.ensureVisibilityListener();
             setTimeout(() => {
-                GitHubAutoImporter.run();
+                Utils.runWhenBrowserIdle(() => GitHubAutoImporter.run());
                 const interval = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.githubAutoImportInterval);
                 if (interval > 0) GitHubAutoImporter.startPolling(interval);
             }, 3000);
@@ -12955,6 +12983,7 @@ ${availableTools}
         panel: null,
         floatBtn: null,
         isMinimized: true,
+        isPanelReady: false,
 
         // 注入样式
         injectStyles: () => {
@@ -13098,6 +13127,7 @@ ${availableTools}
                     e.stopPropagation();
                     return;
                 }
+                NotionSiteUI.ensurePanelReady();
                 NotionSiteUI.togglePanel();
             });
 
@@ -13307,8 +13337,30 @@ ${availableTools}
             return panel;
         },
 
+        ensurePanelReady: () => {
+            if (NotionSiteUI.isPanelReady && NotionSiteUI.panel) return;
+            NotionSiteUI.createPanel();
+            NotionSiteUI.bindEvents();
+            NotionSiteUI.loadConfig();
+
+            // 面板可拉伸（左边+上边+左上角）
+            PanelResize.makeResizable(NotionSiteUI.panel, {
+                edges: ["l", "t", "tl"],
+                storageKey: CONFIG.STORAGE_KEYS.PANEL_SIZE_NOTION,
+                minWidth: 300,
+                minHeight: 250,
+            });
+
+            // 初始化对话 UI
+            ChatState.load();
+            ChatUI.renderMessages();
+            ChatUI.bindEvents();
+            NotionSiteUI.isPanelReady = true;
+        },
+
         // 切换面板显示
         togglePanel: () => {
+            NotionSiteUI.ensurePanelReady();
             if (!NotionSiteUI.panel) return;
 
             NotionSiteUI.isMinimized = !NotionSiteUI.isMinimized;
@@ -13876,28 +13928,15 @@ ${availableTools}
         init: () => {
             NotionSiteUI.injectStyles();
             NotionSiteUI.createFloatButton();
-            NotionSiteUI.createPanel();
-            NotionSiteUI.bindEvents();
-            NotionSiteUI.loadConfig();
             NotionSiteUI.initAIAssistant();
-
-            // 面板可拉伸（左边+上边+左上角）
-            PanelResize.makeResizable(NotionSiteUI.panel, {
-                edges: ["l", "t", "tl"],
-                storageKey: CONFIG.STORAGE_KEYS.PANEL_SIZE_NOTION,
-                minWidth: 300,
-                minHeight: 250,
-            });
-
-            // 初始化对话 UI
-            ChatState.load();
-            ChatUI.renderMessages();
-            ChatUI.bindEvents();
 
             // 检查是否需要展开
             if (!Storage.get(CONFIG.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, true)) {
-                NotionSiteUI.isMinimized = false;
-                NotionSiteUI.panel.classList.add("visible");
+                Utils.runWhenBrowserIdle(() => {
+                    NotionSiteUI.ensurePanelReady();
+                    NotionSiteUI.isMinimized = false;
+                    NotionSiteUI.panel.classList.add("visible");
+                });
             }
         },
     };
@@ -13910,6 +13949,7 @@ ${availableTools}
         miniBtn: null,
         isMinimized: false,
         bookmarks: [],
+        renderJobId: 0,
         selectedBookmarks: new Set(),
         selectedUnexportedCount: 0,
         totalUnexportedCount: 0,
@@ -15739,7 +15779,7 @@ ${availableTools}
                     UI.selectedBookmarks = new Set();
                 }
                 UI.recomputeExportStats();
-                UI.renderBookmarkList();
+                UI.syncRenderedSelectionState();
                 UI.updateSelectCount();
             };
 
@@ -16921,10 +16961,32 @@ ${availableTools}
             return { success, failed, skipped: [] };
         },
 
+        buildBookmarkItemHtml: (bookmark, githubMode = false) => {
+            const bookmarkKey = UI.getBookmarkKey(bookmark);
+            const title = bookmark.title || bookmark.name || `帖子 ${bookmarkKey}`;
+            const escapedTitle = Utils.escapeHtml(title);
+            const escapedTruncatedTitle = Utils.escapeHtml(Utils.truncateText(title, 35));
+            const isExported = UI.isBookmarkKeyExported(bookmarkKey);
+            const isSelected = UI.selectedBookmarks?.has(bookmarkKey);
+            const sourceTag = githubMode
+                ? `<span class="status" style="margin-right: 6px;">${(bookmark.sourceType || "stars").toUpperCase()}</span>`
+                : "";
+
+            return `
+                <div class="ldb-bookmark-item" data-topic-id="${bookmarkKey}">
+                    <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
+                    <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
+                    ${sourceTag}${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
+                </div>
+            `;
+        },
+
         // 渲染收藏列表
         renderBookmarkList: () => {
             const list = (UI.refs && UI.refs.bookmarkList) || UI.panel.querySelector("#ldb-bookmark-list");
             UI.recomputeExportStats();
+            UI.renderJobId += 1;
+            const renderJobId = UI.renderJobId;
             if (!UI.bookmarks || UI.bookmarks.length === 0) {
                 list.innerHTML = '<div style="padding: 12px; text-align: center; color: #666;">暂无收藏</div>';
                 UI.updateSelectCount();
@@ -16932,26 +16994,26 @@ ${availableTools}
             }
 
             const githubMode = UI.isActiveGitHubSource();
-            list.innerHTML = UI.bookmarks.map((b) => {
-                const bookmarkKey = UI.getBookmarkKey(b);
-                const title = b.title || b.name || `帖子 ${bookmarkKey}`;
-                const escapedTitle = Utils.escapeHtml(title);
-                const escapedTruncatedTitle = Utils.escapeHtml(Utils.truncateText(title, 35));
-                const isExported = UI.isBookmarkKeyExported(bookmarkKey);
-                const isSelected = UI.selectedBookmarks?.has(bookmarkKey);
-                const sourceTag = githubMode
-                    ? `<span class="status" style="margin-right: 6px;">${(b.sourceType || "stars").toUpperCase()}</span>`
-                    : "";
+            const bookmarks = UI.bookmarks.slice();
+            const chunkSize = bookmarks.length > 150 ? 80 : bookmarks.length;
+            let cursor = 0;
+            list.innerHTML = "";
 
-                return `
-                    <div class="ldb-bookmark-item" data-topic-id="${bookmarkKey}">
-                        <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
-                        <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
-                        ${sourceTag}${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
-                    </div>
-                `;
-            }).join("");
+            const appendChunk = () => {
+                if (UI.renderJobId !== renderJobId) return;
+                const chunk = bookmarks.slice(cursor, cursor + chunkSize).map((bookmark) => UI.buildBookmarkItemHtml(bookmark, githubMode)).join("");
+                list.insertAdjacentHTML("beforeend", chunk);
+                cursor += chunkSize;
+                if (cursor < bookmarks.length) {
+                    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+                        window.requestAnimationFrame(appendChunk);
+                    } else {
+                        setTimeout(appendChunk, 0);
+                    }
+                }
+            };
 
+            appendChunk();
             UI.updateSelectCount();
         },
 
@@ -17000,6 +17062,19 @@ ${availableTools}
                 selectAll.checked = false;
                 selectAll.indeterminate = true;
             }
+        },
+
+        syncRenderedSelectionState: () => {
+            const list = (UI.refs && UI.refs.bookmarkList) || UI.panel?.querySelector("#ldb-bookmark-list");
+            if (!list) return;
+
+            list.querySelectorAll(".ldb-bookmark-item").forEach((item) => {
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                if (!checkbox || checkbox.disabled) return;
+                const bookmarkKey = String(item.dataset.topicId || "");
+                if (!bookmarkKey) return;
+                checkbox.checked = UI.selectedBookmarks?.has(bookmarkKey) || false;
+            });
         },
 
         // 显示导出报告
@@ -17819,11 +17894,11 @@ ${availableTools}
             if (currentSite === SiteDetector.SITES.LINUX_DO) {
                 // 所有 Linux.do 页面均显示面板（导出/AI 助手/设置）
                 UI.init();
-                UpdateChecker.init();
+                Utils.runWhenBrowserIdle(() => UpdateChecker.init());
                 // 非收藏页面额外启动后台自动导入
                 const isBookmarkPage = /\/u\/[^/]+\/activity\/bookmarks/.test(window.location.pathname);
                 if (!isBookmarkPage) {
-                    AutoImporter.init();
+                    Utils.runWhenBrowserIdle(() => AutoImporter.init());
                 }
             } else if (currentSite === SiteDetector.SITES.NOTION) {
                 // Notion 站点：初始化浮动 AI 助手
@@ -17831,8 +17906,8 @@ ${availableTools}
             } else if (currentSite === SiteDetector.SITES.GITHUB) {
                 // GitHub 站点：使用与 Linux.do 同步的完整面板
                 UI.init();
-                UpdateChecker.init();
-                GitHubAutoImporter.init();
+                Utils.runWhenBrowserIdle(() => UpdateChecker.init());
+                Utils.runWhenBrowserIdle(() => GitHubAutoImporter.init());
             } else if (currentSite === SiteDetector.SITES.GENERIC) {
                 // 通用网页：初始化剪藏按钮
                 GenericUI.init();

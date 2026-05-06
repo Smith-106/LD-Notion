@@ -4,7 +4,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前版本（仓库 / 脚本头）：`v3.4.4`
+- 当前版本（仓库 / 脚本头）：`v3.4.5`
 - 最近已发布版本：`v3.4.3`
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装（直链）：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
@@ -355,6 +355,16 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.4.5
+
+本次版本聚焦「预防性性能稳定性优化」，核心目标是降低大收藏列表与后台轮询同时存在时的主线程抖动，减少非必要重算与重复执行。
+
+- 优化：Linux.do 收藏列表改为分片增量渲染，避免大批量条目一次性重绘带来的卡顿
+- 优化：Linux.do 列表全选路径不再强制整表重新渲染，批量勾选反馈更平滑
+- 优化：Notion 站内面板改为懒初始化，未使用前不抢占启动成本
+- 优化：自动导入、GitHub 自动导入与更新检查改为按需/到期执行，并尽量切到浏览器空闲时运行
+- 优化：自动导入增加最小运行间隔保护，降低多标签页或短时重复触发时的抖动风险
 
 ### v3.4.4
 

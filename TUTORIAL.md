@@ -23,7 +23,7 @@
 - **方式 A：Tampermonkey 脚本版（推荐）**：更新方便，适合大多数人
 - **方式 B：Chrome 扩展独立版（进阶）**：不依赖 Tampermonkey，书签能力内置
 
-### 下载链接（仓库当前 v3.4.4 / 最近已发布 v3.4.3）
+### 下载链接（仓库当前 v3.4.5 / 最近已发布 v3.4.3）
 
 - 脚本安装：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装直链：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
@@ -475,6 +475,14 @@ GM_setValue("ldb_exported_topics", "{}")
 ---
 
 ## 更新日志
+
+### v3.4.5
+
+- 优化：Linux.do 收藏列表改为分片增量渲染，大量收藏时更不容易卡顿
+- 优化：Linux.do 全选不再强制整表重绘，批量选择反馈更顺
+- 优化：Notion 面板改成懒初始化，没用到时先不占启动成本
+- 优化：自动导入、GitHub 自动导入和更新检查尽量在空闲时执行，并且只在到期时才自动跑
+- 优化：自动导入增加最小运行间隔，减少多标签页或短时间重复触发带来的抖动
 
 ### v3.4.4
 
