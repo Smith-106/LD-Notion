@@ -4762,12 +4762,10 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
             }
         },
     };
-
     // ===========================================
     // AI Handlers — 意图执行处理器
     // ===========================================
     const AIHandlers = {
-
     handleQuery: async (params, settings, explanation) => {
         // 检查数据库 ID 配置
         if (!settings.notionDatabaseId) {
@@ -4904,7 +4902,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
             return `❌ 查询失败: ${error.message}`;
         }
     },
-
     handleSearch: async (params, settings, explanation) => {
         // 检查数据库 ID 配置
         if (!settings.notionDatabaseId) {
@@ -4952,7 +4949,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
             return `❌ 搜索失败: ${error.message}`;
         }
     },
-
     handleWorkspaceSearch: async (params, settings, explanation) => {
         ChatState.updateLastMessage(`正在搜索整个工作区...`, "processing");
 
@@ -5052,11 +5048,9 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
             return `❌ 工作区搜索失败: ${error.message}`;
         }
     },
-
     handleClassify: async (params, settings, explanation) => {
         return "📝 单个分类功能开发中...\n\n目前可以使用「自动分类所有未分类的帖子」来批量分类。";
     },
-
     handleBatchClassify: async (params, settings, explanation) => {
         // 检查数据库 ID 配置
         if (!settings.notionDatabaseId) {
@@ -5130,7 +5124,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
             return `❌ 批量分类失败: ${error.message}`;
         }
     },
-
     handleUpdate: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -5168,7 +5161,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
             return `❌ 更新页面失败: ${error.message}`;
         }
     },
-
     _resolveDatabaseId: async (name, id, apiKey) => {
         // 优先使用直接提供的 ID
         if (id) {
@@ -5215,7 +5207,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
 
         return null;
     },
-
     _fetchSourcePages: async (databaseId, apiKey, pageTitle) => {
         const allPages = [];
         let cursor = null;
@@ -5236,7 +5227,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
 
         return allPages;
     },
-
     handleMove: async (params, settings, explanation) => {
         // 检查基础配置
         const configCheck = AIAssistant.checkConfig(settings, false);
@@ -5327,7 +5317,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
             return `❌ 移动失败: ${error.message}`;
         }
     },
-
     handleCopy: async (params, settings, explanation) => {
         // 检查基础配置
         const configCheck = AIAssistant.checkConfig(settings, false);
@@ -5418,7 +5407,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
             return `❌ 复制失败: ${error.message}`;
         }
     },
-
     handleCompound: async (intentResult, settings) => {
         const { steps, explanation } = intentResult;
 
@@ -5491,7 +5479,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
 
         return report;
     },
-
     handleCreateDatabase: async (params, settings, explanation) => {
         // 检查基础配置（需要 API Key，不需要数据库 ID）
         const configCheck = AIAssistant.checkConfig(settings, false);
@@ -5575,7 +5562,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
             return `❌ 创建数据库失败: ${error.message}`;
         }
     },
-
     _resolvePageId: async (name, id, apiKey) => {
         if (id) {
             const parsedId = Utils.extractNotionId(id) || String(id).replace(/-/g, "");
@@ -5614,7 +5600,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
         }
         return null;
     },
-
     _textToBlocks: (text) => {
         const blocks = [];
         const lines = text.split("\n");
@@ -5738,7 +5723,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
 
         return blocks;
     },
-
     _extractPageContent: async (pageId, apiKey, maxChars = 4000) => {
         try {
             const markdownResponse = await NotionAPI.fetchPageMarkdown(pageId, apiKey);
@@ -5759,7 +5743,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
         } while (cursor);
         return AIClassifier.extractText(allBlocks).slice(0, maxChars);
     },
-
     handleWriteContent: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -5811,7 +5794,6 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
             return `❌ 内容生成失败: ${error.message}`;
         }
     },
-
     handleEditContent: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -5930,7 +5912,6 @@ ${content_prompt}`;
             return `❌ 内容编辑失败: ${error.message}`;
         }
     },
-
     handleTranslateContent: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -5983,7 +5964,6 @@ ${content_prompt}`;
             return `❌ 翻译失败: ${error.message}`;
         }
     },
-
     _ensureAIProperty: async (databaseId, propertyName, propertyType, apiKey) => {
         const database = await NotionAPI.fetchDatabase(databaseId, apiKey);
         const properties = database.properties || {};
@@ -6002,7 +5982,6 @@ ${content_prompt}`;
             apiKey
         );
     },
-
     handleAIAutofill: async (params, settings, explanation) => {
         if (!OperationGuard.canExecute("updatePage")) {
             return "❌ 权限不足：AI 属性填充需要「标准」及以上权限。\n\n请在设置中提升权限级别。";
@@ -6143,7 +6122,6 @@ ${content_prompt}`;
             return `❌ AI 属性填充失败: ${error.message}`;
         }
     },
-
     handleAsk: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -6208,7 +6186,6 @@ ${searchTerm}`;
             return `❌ 问答失败: ${error.message}`;
         }
     },
-
     handleDeepResearch: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -6308,7 +6285,6 @@ ${contentParts.join("\n\n---\n\n")}`;
             return `❌ 深度研究失败: ${error.message}`;
         }
     },
-
     handleSummarize: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -6350,7 +6326,6 @@ ${contentParts.join("\n\n---\n\n")}`;
             return `❌ 内容总结失败: ${error.message}`;
         }
     },
-
     handleBrainstorm: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -6392,7 +6367,6 @@ ${contentParts.join("\n\n---\n\n")}`;
             return `❌ 头脑风暴失败: ${error.message}`;
         }
     },
-
     handleProofread: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -6439,7 +6413,6 @@ ${existingContent}`;
             return `❌ 校对失败: ${error.message}`;
         }
     },
-
     handleBatchTranslate: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -6517,7 +6490,6 @@ ${existingContent}`;
             return `❌ 批量翻译失败: ${error.message}`;
         }
     },
-
     handleExtractToDatabase: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -6655,7 +6627,6 @@ ${content}`;
             return `❌ 提取失败: ${error.message}`;
         }
     },
-
     handleGeneratePages: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -6786,7 +6757,6 @@ ${structure_prompt ? `补充要求：${structure_prompt}` : ""}
             return `❌ 页面生成失败: ${error.message}`;
         }
     },
-
     handleBatchAnalyze: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -6861,7 +6831,6 @@ ${contentParts.join("\n\n---\n\n")}`;
             return `❌ 批量分析失败: ${error.message}`;
         }
     },
-
     handleGitHubImport: async (params, settings, explanation) => {
         const username = params.username || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
         const token = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
@@ -6941,7 +6910,6 @@ ${contentParts.join("\n\n---\n\n")}`;
             return `❌ GitHub 导入失败: ${error.message}`;
         }
     },
-
     handleBookmarkImport: async (params, settings, explanation) => {
         const databaseId = settings.notionDatabaseId;
 
@@ -6999,7 +6967,6 @@ ${contentParts.join("\n\n---\n\n")}`;
             return `❌ 书签导入失败: ${error.message}`;
         }
     },
-
     handleTemplateOutput: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -7073,7 +7040,6 @@ ${contentParts.join("\n\n---\n\n")}`;
         return `${template.icon} **${template.name}**\n\n${aiResponse}\n\n💡 如需写入页面，请指定目标页面：「用${template.name}模板处理 xxx 页面」`;
     },
     };
-
     const AIAssistant = {
         // 意图类型
         INTENTS: {
@@ -8535,7 +8501,6 @@ ${availableTools}
             return "🤖 Agent 达到最大执行步数，已停止。如果任务尚未完成，请继续描述你的需求。";
         },
     };
-
     // Mixin handlers for dynamic dispatch (AIAssistant[handlerName])
     Object.assign(AIAssistant, AIHandlers);
 
@@ -13066,7 +13031,6 @@ ${availableTools}
                         console.warn("[LD-Notion] corrupted panel size, resetting:", storageKey);
                         Storage.remove(storageKey);
                     }
-
                 }
             }
         },
@@ -13191,31 +13155,24 @@ ${availableTools}
                 e.preventDefault();
             });
 
-            document.addEventListener("mousemove", (e) => {
-                if (!isDragging) return;
+            NotionSiteUI._floatDragMove = (e) => {                if (!isDragging) return;
                 hasMoved = true;
                 const x = Math.max(0, Math.min(window.innerWidth - btn.offsetWidth, e.clientX - offsetX));
                 const y = Math.max(0, Math.min(window.innerHeight - btn.offsetHeight, e.clientY - offsetY));
                 btn.style.left = x + "px";
                 btn.style.top = y + "px";
                 btn.style.right = "auto";
-                btn.style.bottom = "auto";
-            });
-
-            document.addEventListener("mouseup", () => {
-                if (!isDragging) return;
+                btn.style.bottom = "auto";            };            document.addEventListener("mousemove", NotionSiteUI._floatDragMove);
+            NotionSiteUI._floatDragEnd = () => {                if (!isDragging) return;
                 isDragging = false;
                 btn.classList.remove("dragging");
                 document.body.style.userSelect = "";
                 if (hasMoved) {
-                    // 保存位置
                     const rect = btn.getBoundingClientRect();
                     const right = window.innerWidth - rect.right;
                     const bottom = window.innerHeight - rect.bottom;
                     Storage.set(CONFIG.STORAGE_KEYS.FLOAT_BTN_POSITION, JSON.stringify({ right: right + "px", bottom: bottom + "px" }));
-                }
-            });
-
+                }            };            document.addEventListener("mouseup", NotionSiteUI._floatDragEnd);
             btn.addEventListener("click", (e) => {
                 if (hasMoved) {
                     // 拖拽结束，不触发点击
@@ -13238,7 +13195,6 @@ ${availableTools}
                     console.warn("[LD-Notion] corrupted float btn position, resetting");
                     Storage.remove(CONFIG.STORAGE_KEYS.FLOAT_BTN_POSITION);
                 }
-
             }
 
             document.body.appendChild(btn);
@@ -13769,7 +13725,6 @@ ${availableTools}
                     console.warn("[LD-Notion] corrupted panel position, resetting");
                     Storage.remove(CONFIG.STORAGE_KEYS.NOTION_PANEL_POSITION);
                 }
-
             }
 
         },
@@ -14060,10 +14015,14 @@ ${availableTools}
         },
 
         destroy: () => {
+            if (NotionSiteUI._floatDragMove) document.removeEventListener("mousemove", NotionSiteUI._floatDragMove);
+            if (NotionSiteUI._floatDragEnd) document.removeEventListener("mouseup", NotionSiteUI._floatDragEnd);
             NotionSiteUI._abortController?.abort();
             NotionSiteUI._abortController = null;
             NotionSiteUI.panel?.remove();
             NotionSiteUI.panel = null;
+            NotionSiteUI.floatBtn?.remove();
+            NotionSiteUI.floatBtn = null;
             NotionSiteUI.isPanelReady = false;
         },
     };
@@ -18075,4 +18034,4 @@ ${availableTools}
 
     main();
     // [LD-NOTION-BUILD:USER_SCRIPT_BODY_END]
-})();
+})();
