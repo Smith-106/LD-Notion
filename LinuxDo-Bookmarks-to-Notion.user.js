@@ -2746,14 +2746,15 @@
             const type = isOp ? "success" : "note";
             const collapsed = index > 0 ? "+" : "";
             const username = post.username || "未知";
+            const postNum = post.post_number || (index + 1);
             const date = post.created_at
                 ? new Date(post.created_at).toLocaleString("zh-CN")
                 : "未知时间";
-            const header = `#${index + 1} ${username} (@${post.username || ""})${isOp ? " 楼主" : ""} · ${date}`;
+            const header = `#${postNum} ${username} (@${post.username || ""})${isOp ? " 楼主" : ""} · ${date}`;
             const content = HTMLToMarkdown.convert(post.cooked || "");
             const lines = content.trim().split("\n");
             const quoted = lines.map((l) => `> ${l}`).join("\n");
-            return `> [!${type}]${collapsed} ${header}\n${quoted}\n> ^floor-${index + 1}\n\n`;
+            return `> [!${type}]${collapsed} ${header}\n${quoted}\n> ^floor-${postNum}\n\n`;
         },
     };
 
