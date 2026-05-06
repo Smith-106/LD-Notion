@@ -15295,20 +15295,20 @@ ${availableTools}
             }, { passive: false });
 
             // 最小化
-            (refs.minimizeBtn || panel.querySelector("#ldb-minimize")).onclick = () => {
+            refs.minimizeBtn.onclick = () => {
                 panel.style.display = "none";
                 UI.miniBtn.style.display = "flex";
                 Storage.set(CONFIG.STORAGE_KEYS.PANEL_MINIMIZED, true);
             };
 
             // 关闭
-            (refs.closeBtn || panel.querySelector("#ldb-close")).onclick = () => {
+            refs.closeBtn.onclick = () => {
                 panel.remove();
                 UI.miniBtn.remove();
             };
 
             // 主题切换
-            (refs.themeToggleBtn || panel.querySelector("#ldb-theme-toggle")).onclick = () => {
+            refs.themeToggleBtn.onclick = () => {
                 DesignSystem.toggleTheme();
             };
 
@@ -15334,7 +15334,7 @@ ${availableTools}
             if (tabBtn) tabBtn.click();
 
             // 折叠筛选设置
-            (refs.filterToggle || panel.querySelector("#ldb-filter-toggle")).onclick = () => {
+            refs.filterToggle.onclick = () => {
                 const content = refs.filterContent || panel.querySelector("#ldb-filter-content");
                 const arrow = refs.filterArrow || panel.querySelector("#ldb-filter-arrow");
                 content.classList.toggle("collapsed");
@@ -15342,7 +15342,7 @@ ${availableTools}
             };
 
             // 折叠 AI 设置
-            (refs.aiSettingsToggle || panel.querySelector("#ldb-ai-settings-toggle")).onclick = () => {
+            refs.aiSettingsToggle.onclick = () => {
                 const content = refs.aiSettingsContent || panel.querySelector("#ldb-ai-settings-content");
                 const arrow = refs.aiSettingsArrow || panel.querySelector("#ldb-ai-settings-arrow");
                 content.classList.toggle("collapsed");
@@ -15350,36 +15350,36 @@ ${availableTools}
             };
 
             // 折叠 GitHub 设置
-            (refs.githubSettingsToggle || panel.querySelector("#ldb-github-settings-toggle")).onclick = () => {
+            refs.githubSettingsToggle.onclick = () => {
                 const content = refs.githubSettingsContent || panel.querySelector("#ldb-github-settings-content");
                 const arrow = refs.githubSettingsArrow || panel.querySelector("#ldb-github-settings-arrow");
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
-            (refs.sourceSettingsToggle || panel.querySelector("#ldb-source-settings-toggle")).onclick = () => {
+            refs.sourceSettingsToggle.onclick = () => {
                 const content = refs.sourceSettingsContent || panel.querySelector("#ldb-source-settings-content");
                 const arrow = refs.sourceSettingsArrow || panel.querySelector("#ldb-source-settings-arrow");
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
-            (refs.sourcePartitionsToggle || panel.querySelector("#ldb-source-partitions-toggle")).onclick = () => {
+            refs.sourcePartitionsToggle.onclick = () => {
                 const content = refs.sourcePartitionsContent || panel.querySelector("#ldb-source-partitions-content");
                 const arrow = refs.sourcePartitionsArrow || panel.querySelector("#ldb-source-partitions-arrow");
                 content.classList.toggle("collapsed");
                 arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
             };
 
-            (refs.sourceSelectLinuxdo || panel.querySelector("#ldb-source-select-linuxdo")).onclick = () => {
+            refs.sourceSelectLinuxdo.onclick = () => {
                 UI.switchBookmarkSource("linuxdo");
             };
 
-            (refs.sourceSelectGithub || panel.querySelector("#ldb-source-select-github")).onclick = () => {
+            refs.sourceSelectGithub.onclick = () => {
                 UI.switchBookmarkSource("github");
             };
 
-            (refs.openGithubSettingsBtn || panel.querySelector("#ldb-open-github-settings")).onclick = () => {
+            refs.openGithubSettingsBtn.onclick = () => {
                 const settingsTab = panel.querySelector('.ldb-tab[data-tab="settings"]');
                 if (settingsTab && !settingsTab.classList.contains("active")) {
                     settingsTab.click();
@@ -15398,12 +15398,12 @@ ${availableTools}
                 UI.showStatus("已定位到 GitHub Token 设置", "info");
             };
 
-            (refs.selfCheckBtn || panel.querySelector("#ldb-self-check-btn")).onclick = () => {
+            refs.selfCheckBtn.onclick = () => {
                 UI.renderSelfCheckResult();
                 UI.showStatus("自检已完成", "info");
             };
 
-            (refs.copyDiagBtn || panel.querySelector("#ldb-copy-diagnostics-btn")).onclick = async () => {
+            refs.copyDiagBtn.onclick = async () => {
                 await UI.copyDiagnostics();
             };
 
@@ -15427,23 +15427,23 @@ ${availableTools}
                 TargetState.setExportTargetType(targetType);
             };
 
-            (refs.exportTargetDatabaseRadio || panel.querySelector("#ldb-export-target-database")).onchange = handleExportTargetChange;
-            (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).onchange = handleExportTargetChange;
+            refs.exportTargetDatabaseRadio.onchange = handleExportTargetChange;
+            refs.exportTargetPageRadio.onchange = handleExportTargetChange;
 
             // 父页面 ID 自动保存
-            (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).onchange = (e) => {
+            refs.parentPageIdInput.onchange = (e) => {
                 TargetState.setExportPageId(e.target.value.trim());
             };
 
             // 验证配置
-            (refs.validateConfigBtn || panel.querySelector("#ldb-validate-config")).onclick = async () => {
+            refs.validateConfigBtn.onclick = async () => {
                 const btn = refs.validateConfigBtn || panel.querySelector("#ldb-validate-config");
                 const statusSpan = refs.configStatus || panel.querySelector("#ldb-config-status");
-                const liveApiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+                const liveApiKey = refs.apiKeyInput.value.trim();
                 const apiKey = NotionOAuth.getAccessToken(liveApiKey);
-                const exportTargetType = (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked ? "page" : "database";
-                const databaseId = (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value.trim();
-                const parentPageId = (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value.trim();
+                const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
+                const databaseId = refs.databaseIdInput.value.trim();
+                const parentPageId = refs.parentPageIdInput.value.trim();
 
                 // 清除之前的状态
                 statusSpan.textContent = "";
@@ -15505,10 +15505,10 @@ ${availableTools}
             };
 
             // 自动设置数据库属性
-            (refs.setupDatabaseBtn || panel.querySelector("#ldb-setup-database")).onclick = async () => {
-                const liveApiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+            refs.setupDatabaseBtn.onclick = async () => {
+                const liveApiKey = refs.apiKeyInput.value.trim();
                 const apiKey = NotionOAuth.getAccessToken(liveApiKey);
-                const databaseId = (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value.trim();
+                const databaseId = refs.databaseIdInput.value.trim();
                 const statusSpan = refs.configStatus || panel.querySelector("#ldb-config-status");
 
                 // 清除之前的状态
@@ -15553,37 +15553,37 @@ ${availableTools}
             };
 
             // 自动导入设置
-            (refs.autoImportEnabled || panel.querySelector("#ldb-auto-import-enabled")).onchange = (e) => {
+            refs.autoImportEnabled.onchange = (e) => {
                 const enabled = e.target.checked;
                 const cfg = UI.getAutoImportConfigBySource();
                 Storage.set(cfg.enabledKey, enabled);
-                (refs.autoImportOptions || panel.querySelector("#ldb-auto-import-options")).style.display = enabled ? "block" : "none";
+                refs.autoImportOptions.style.display = enabled ? "block" : "none";
                 if (enabled) {
                     if (cfg.isGitHub) {
                         GitHubAutoImporter.run();
-                        const interval = parseInt((refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval")).value) || 0;
+                        const interval = parseInt(refs.autoImportInterval.value) || 0;
                         Storage.set(cfg.intervalKey, interval);
                         if (interval > 0) GitHubAutoImporter.startPolling(interval);
                         return;
                     }
 
                     // 检查 Notion 配置是否完整
-                    const apiKey = NotionOAuth.getAccessToken((refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim());
+                    const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
                     if (!apiKey) {
                         AutoImporter.updateStatus("⚠️ 请先配置 Notion API Key");
                         return;
                     }
-                    const exportTargetType = (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked ? "page" : "database";
-                    if (exportTargetType === "database" && !(refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value.trim()) {
+                    const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
+                    if (exportTargetType === "database" && !refs.databaseIdInput.value.trim()) {
                         AutoImporter.updateStatus("⚠️ 请先配置 Notion 数据库 ID");
                         return;
                     }
-                    if (exportTargetType === "page" && !(refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value.trim()) {
+                    if (exportTargetType === "page" && !refs.parentPageIdInput.value.trim()) {
                         AutoImporter.updateStatus("⚠️ 请先配置父页面 ID");
                         return;
                     }
                     AutoImporter.run();
-                    const interval = parseInt((refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval")).value) || 0;
+                    const interval = parseInt(refs.autoImportInterval.value) || 0;
                     Storage.set(cfg.intervalKey, interval);
                     if (interval > 0) AutoImporter.startPolling(interval);
                 } else {
@@ -15597,7 +15597,7 @@ ${availableTools}
                 }
             };
 
-            (refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval")).onchange = (e) => {
+            refs.autoImportInterval.onchange = (e) => {
                 const interval = parseInt(e.target.value) || 0;
                 const cfg = UI.getAutoImportConfigBySource();
 
@@ -15615,34 +15615,34 @@ ${availableTools}
                 }
             };
 
-            (refs.linuxdoDedupModeSelect || panel.querySelector("#ldb-linuxdo-dedup-mode")).onchange = (e) => {
+            refs.linuxdoDedupModeSelect.onchange = (e) => {
                 const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
                 Storage.set(CONFIG.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE, mode);
                 UI.recomputeExportStats();
                 UI.renderBookmarkList();
             };
 
-            (refs.bookmarkDedupModeSelect || panel.querySelector("#ldb-bookmark-dedup-mode")).onchange = (e) => {
+            refs.bookmarkDedupModeSelect.onchange = (e) => {
                 const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
                 Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_IMPORT_DEDUP_MODE, mode);
             };
 
-            (refs.aiCategoryAutoDedupCheckbox || panel.querySelector("#ldb-ai-category-auto-dedup")).onchange = (e) => {
+            refs.aiCategoryAutoDedupCheckbox.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AI_CATEGORY_AUTO_DEDUP, !!e.target.checked);
             };
 
-            (refs.updateCheckBtn || panel.querySelector("#ldb-update-check-btn")).onclick = async () => {
+            refs.updateCheckBtn.onclick = async () => {
                 await UpdateChecker.check({ manual: true });
             };
 
-            (refs.updateAutoEnabled || panel.querySelector("#ldb-update-auto-enabled")).onchange = (e) => {
+            refs.updateAutoEnabled.onchange = (e) => {
                 const enabled = e.target.checked;
                 const optionsEl = refs.updateAutoOptions || panel.querySelector("#ldb-update-auto-options");
                 optionsEl.style.display = enabled ? "block" : "none";
                 Storage.set(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, enabled);
 
                 if (enabled) {
-                    const hours = parseInt((refs.updateIntervalHours || panel.querySelector("#ldb-update-interval-hours")).value, 10)
+                    const hours = parseInt(refs.updateIntervalHours.value, 10)
                         || CONFIG.DEFAULTS.updateCheckIntervalHours;
                     Storage.set(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, hours);
                     UpdateChecker.check({ manual: false });
@@ -15652,7 +15652,7 @@ ${availableTools}
                 }
             };
 
-            (refs.updateIntervalHours || panel.querySelector("#ldb-update-interval-hours")).onchange = (e) => {
+            refs.updateIntervalHours.onchange = (e) => {
                 const hours = parseInt(e.target.value, 10) || CONFIG.DEFAULTS.updateCheckIntervalHours;
                 Storage.set(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, hours);
                 if (Storage.get(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG.DEFAULTS.updateAutoCheckEnabled)) {
@@ -15728,7 +15728,7 @@ ${availableTools}
             }
 
             // 加载收藏
-            (refs.loadBookmarksBtn || panel.querySelector("#ldb-load-bookmarks")).onclick = async () => {
+            refs.loadBookmarksBtn.onclick = async () => {
                 const btn = refs.loadBookmarksBtn || panel.querySelector("#ldb-load-bookmarks");
                 btn.disabled = true;
                 btn.innerHTML = '<span class="ldb-spin">🔄</span> 加载中...';
@@ -15737,9 +15737,9 @@ ${availableTools}
                     let bookmarks = [];
 
                     if (UI.isActiveGitHubSource()) {
-                        const username = (refs.githubUsernameInput || panel.querySelector("#ldb-github-username")).value.trim()
+                        const username = refs.githubUsernameInput.value.trim()
                             || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
-                        const token = (refs.githubTokenInput || panel.querySelector("#ldb-github-token")).value.trim()
+                        const token = refs.githubTokenInput.value.trim()
                             || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
                         const types = GitHubAPI.getImportTypes();
 
@@ -15798,7 +15798,7 @@ ${availableTools}
                 }
             };
 
-            (refs.importBrowserBookmarksBtn || panel.querySelector("#ldb-import-browser-bookmarks")).onclick = async () => {
+            refs.importBrowserBookmarksBtn.onclick = async () => {
                 const btn = refs.importBrowserBookmarksBtn || panel.querySelector("#ldb-import-browser-bookmarks");
                 const source = UI.getActiveBookmarkSource();
                 if (source !== "linuxdo") {
@@ -15827,7 +15827,7 @@ ${availableTools}
             };
 
             // 全选/取消
-            (refs.selectAll || panel.querySelector("#ldb-select-all")).onchange = (e) => {
+            refs.selectAll.onchange = (e) => {
                 const checked = e.target.checked;
                 if (checked) {
                     UI.selectedBookmarks = new Set(UI.bookmarks.map(b => UI.getBookmarkKey(b)));
@@ -15840,7 +15840,7 @@ ${availableTools}
             };
 
             // 暂停按钮
-            (refs.pauseBtn || panel.querySelector("#ldb-pause")).onclick = () => {
+            refs.pauseBtn.onclick = () => {
                 const pauseBtn = refs.pauseBtn || panel.querySelector("#ldb-pause");
                 if (Exporter.isPaused) {
                     Exporter.resume();
@@ -15856,19 +15856,19 @@ ${availableTools}
             };
 
             // 取消按钮
-            (refs.cancelBtn || panel.querySelector("#ldb-cancel")).onclick = () => {
+            refs.cancelBtn.onclick = () => {
                 if (confirm("确定要取消导出吗？已导出的内容不会被删除。")) {
                     Exporter.cancel();
                 }
             };
 
             // 开始导出
-            (refs.exportBtn || panel.querySelector("#ldb-export")).onclick = async () => {
-                const liveApiKey = (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim();
+            refs.exportBtn.onclick = async () => {
+                const liveApiKey = refs.apiKeyInput.value.trim();
                 const apiKey = NotionOAuth.getAccessToken(liveApiKey);
-                const exportTargetType = (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked ? "page" : "database";
-                const databaseId = (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value.trim();
-                const parentPageId = (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value.trim();
+                const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
+                const databaseId = refs.databaseIdInput.value.trim();
+                const parentPageId = refs.parentPageIdInput.value.trim();
 
                 if (!apiKey) {
                     UI.showStatus("请先配置 Notion API Key", "error");
@@ -15906,21 +15906,21 @@ ${availableTools}
                     databaseId,
                     parentPageId,
                     exportTargetType,
-                    onlyFirst: (refs.onlyFirstCheckbox || panel.querySelector("#ldb-only-first")).checked,
-                    onlyOp: (refs.onlyOpCheckbox || panel.querySelector("#ldb-only-op")).checked,
-                    rangeStart: parseInt((refs.rangeStartInput || panel.querySelector("#ldb-range-start")).value) || 1,
-                    rangeEnd: parseInt((refs.rangeEndInput || panel.querySelector("#ldb-range-end")).value) || 999999,
-                    imgMode: (refs.imgModeSelect || panel.querySelector("#ldb-img-mode")).value,
-                    concurrency: parseInt((refs.exportConcurrencySelect || panel.querySelector("#ldb-export-concurrency")).value) || 1,
-                    aiApiKey: (refs.aiApiKeyInput || panel.querySelector("#ldb-ai-api-key")).value.trim(),
-                    aiService: (refs.aiServiceSelect || panel.querySelector("#ldb-ai-service")).value,
-                    aiModel: (refs.aiModelSelect || panel.querySelector("#ldb-ai-model")).value,
-                    aiBaseUrl: (refs.aiBaseUrlInput || panel.querySelector("#ldb-ai-base-url")).value.trim(),
+                    onlyFirst: refs.onlyFirstCheckbox.checked,
+                    onlyOp: refs.onlyOpCheckbox.checked,
+                    rangeStart: parseInt(refs.rangeStartInput.value) || 1,
+                    rangeEnd: parseInt(refs.rangeEndInput.value) || 999999,
+                    imgMode: refs.imgModeSelect.value,
+                    concurrency: parseInt(refs.exportConcurrencySelect.value) || 1,
+                    aiApiKey: refs.aiApiKeyInput.value.trim(),
+                    aiService: refs.aiServiceSelect.value,
+                    aiModel: refs.aiModelSelect.value,
+                    aiBaseUrl: refs.aiBaseUrlInput.value.trim(),
                     categories: Utils.parseAICategories(
-                        (refs.aiCategoriesInput || panel.querySelector("#ldb-ai-categories")).value.trim() || ""
+                        refs.aiCategoriesInput.value.trim() || ""
                     ),
-                    githubUsername: (refs.githubUsernameInput || panel.querySelector("#ldb-github-username")).value.trim(),
-                    token: (refs.githubTokenInput || panel.querySelector("#ldb-github-token")).value.trim(),
+                    githubUsername: refs.githubUsernameInput.value.trim(),
+                    token: refs.githubTokenInput.value.trim(),
                 };
 
                 // 保存设置
@@ -15937,15 +15937,15 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, settings.rangeStart);
                 Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, settings.rangeEnd);
                 Storage.set(CONFIG.STORAGE_KEYS.IMG_MODE, settings.imgMode);
-                Storage.set(CONFIG.STORAGE_KEYS.REQUEST_DELAY, parseInt((refs.requestDelaySelect || panel.querySelector("#ldb-request-delay")).value));
+                Storage.set(CONFIG.STORAGE_KEYS.REQUEST_DELAY, parseInt(refs.requestDelaySelect.value));
                 Storage.set(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, settings.concurrency);
 
                 // 显示控制按钮，隐藏导出按钮
-                (refs.exportBtns || panel.querySelector("#ldb-export-btns")).style.display = "none";
-                (refs.controlBtns || panel.querySelector("#ldb-control-btns")).style.display = "flex";
-                (refs.pauseBtn || panel.querySelector("#ldb-pause")).innerHTML = "⏸️ 暂停";
-                (refs.pauseBtn || panel.querySelector("#ldb-pause")).classList.add("ldb-btn-warning");
-                (refs.pauseBtn || panel.querySelector("#ldb-pause")).classList.remove("ldb-btn-primary");
+                refs.exportBtns.style.display = "none";
+                refs.controlBtns.style.display = "flex";
+                refs.pauseBtn.innerHTML = "⏸️ 暂停";
+                refs.pauseBtn.classList.add("ldb-btn-warning");
+                refs.pauseBtn.classList.remove("ldb-btn-primary");
 
                 // 清空之前的报告
                 ((UI.refs && UI.refs.reportContainer) || panel.querySelector("#ldb-report-container")).innerHTML = "";
@@ -15996,24 +15996,24 @@ ${availableTools}
                     UI.showStatus(`导出出错: ${error.message}`, "error");
                 } finally {
                     // 恢复按钮状态
-                    (refs.exportBtns || panel.querySelector("#ldb-export-btns")).style.display = "flex";
-                    (refs.controlBtns || panel.querySelector("#ldb-control-btns")).style.display = "none";
+                    refs.exportBtns.style.display = "flex";
+                    refs.controlBtns.style.display = "none";
                     Exporter.reset();
                 }
             };
 
             // 权限设置事件
-            (refs.permissionLevelSelect || panel.querySelector("#ldb-permission-level")).onchange = (e) => {
+            refs.permissionLevelSelect.onchange = (e) => {
                 const level = parseInt(e.target.value);
                 OperationGuard.setLevel(level);
                 UI.showStatus(`权限级别已设置为: ${CONFIG.PERMISSION_NAMES[level]}`, "success");
             };
 
-            (refs.requireConfirmCheckbox || panel.querySelector("#ldb-require-confirm")).onchange = (e) => {
+            refs.requireConfirmCheckbox.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.REQUIRE_CONFIRM, e.target.checked);
             };
 
-            (refs.enableAuditLogCheckbox || panel.querySelector("#ldb-enable-audit-log")).onchange = (e) => {
+            refs.enableAuditLogCheckbox.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, e.target.checked);
                 // 更新日志面板可见性
                 const logPanel = refs.logPanel || panel.querySelector("#ldb-log-panel");
@@ -16023,7 +16023,7 @@ ${availableTools}
             };
 
             // 日志面板事件
-            (refs.logToggleBtn || panel.querySelector("#ldb-log-toggle")).onclick = () => {
+            refs.logToggleBtn.onclick = () => {
                 const content = refs.logContent || panel.querySelector("#ldb-log-content");
                 const arrow = refs.logArrow || panel.querySelector("#ldb-log-arrow");
                 content.classList.toggle("collapsed");
@@ -16035,7 +16035,7 @@ ${availableTools}
                 }
             };
 
-            (refs.logClearBtn || panel.querySelector("#ldb-log-clear")).onclick = () => {
+            refs.logClearBtn.onclick = () => {
                 if (confirm("确定要清除所有操作日志吗？")) {
                     OperationLog.clear();
                     UI.showStatus("日志已清除", "success");
@@ -16043,7 +16043,7 @@ ${availableTools}
             };
 
             // 输入框自动保存
-            (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).onchange = (e) => {
+            refs.apiKeyInput.onchange = (e) => {
                 const value = e.target.value.trim();
                 if (value) {
                     NotionOAuth.setManualApiKey(value);
@@ -16051,20 +16051,20 @@ ${availableTools}
                     NotionOAuth.setManualApiKey("");
                 }
             };
-            (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).onchange = (e) => {
+            refs.databaseIdInput.onchange = (e) => {
                 TargetState.setExportDatabaseId(e.target.value.trim());
             };
 
             // 手动输入数据库 ID 开关
-            (refs.toggleManualDbBtn || panel.querySelector("#ldb-toggle-manual-db")).onclick = () => {
+            refs.toggleManualDbBtn.onclick = () => {
                 const wrap = refs.manualDbWrap || panel.querySelector("#ldb-manual-db-wrap");
                 const visible = wrap.style.display !== "none";
                 wrap.style.display = visible ? "none" : "block";
             };
 
             // 刷新工作区页面列表
-            (refs.refreshWorkspaceBtn || panel.querySelector("#ldb-refresh-workspace")).onclick = async () => {
-                const apiKey = NotionOAuth.getAccessToken((refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim());
+            refs.refreshWorkspaceBtn.onclick = async () => {
+                const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
                 const refreshBtn = refs.refreshWorkspaceBtn || panel.querySelector("#ldb-refresh-workspace");
                 const workspaceTip = refs.workspaceTip || panel.querySelector("#ldb-workspace-tip");
 
@@ -16125,25 +16125,25 @@ ${availableTools}
             };
 
             // 从工作区选择页面/数据库
-            (refs.workspaceSelect || panel.querySelector("#ldb-workspace-select")).onchange = (e) => {
+            refs.workspaceSelect.onchange = (e) => {
                 const selected = e.target.value;
                 if (selected) {
                     const [type, id] = selected.split(":");
                     if (type === "database") {
-                        (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value = id;
-                        (refs.exportTargetDatabaseRadio || panel.querySelector("#ldb-export-target-database")).checked = true;
+                        refs.databaseIdInput.value = id;
+                        refs.exportTargetDatabaseRadio.checked = true;
                         handleExportTargetChange({ target: { value: CONFIG.EXPORT_TARGET_TYPES.DATABASE } });
                         TargetState.setExportDatabaseId(id);
                         UI.showStatus("已选择数据库，自动切换为数据库导出模式", "info");
                     } else if (type === "page") {
                         // 页面类型：填入父页面 ID 字段
-                        (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value = id;
+                        refs.parentPageIdInput.value = id;
                         TargetState.setExportPageId(id);
                         // 自动切换到页面导出模式
-                        (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked = true;
-                        (refs.parentPageGroup || panel.querySelector("#ldb-parent-page-group")).style.display = "block";
-                        (refs.manualDbWrap || panel.querySelector("#ldb-manual-db-wrap")).style.display = "none";
-                        (refs.exportTargetTip || panel.querySelector("#ldb-export-target-tip")).textContent = "导出为子页面，包含完整内容";
+                        refs.exportTargetPageRadio.checked = true;
+                        refs.parentPageGroup.style.display = "block";
+                        refs.manualDbWrap.style.display = "none";
+                        refs.exportTargetTip.textContent = "导出为子页面，包含完整内容";
                         TargetState.setExportTargetType(CONFIG.EXPORT_TARGET_TYPES.PAGE);
                         UI.showStatus("已选择页面，自动切换为页面导出模式", "info");
                     }
@@ -16158,7 +16158,7 @@ ${availableTools}
             ChatUI.init();
 
             // AI 服务切换 - 更新模型列表（优先使用缓存）
-            (refs.aiServiceSelect || panel.querySelector("#ldb-ai-service")).onchange = (e) => {
+            refs.aiServiceSelect.onchange = (e) => {
                 const newService = e.target.value;
                 // 优先使用缓存的模型列表
                 const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
@@ -16176,45 +16176,45 @@ ${availableTools}
             };
 
             // 保存 AI 配置
-            (refs.aiApiKeyInput || panel.querySelector("#ldb-ai-api-key")).onchange = (e) => {
+            refs.aiApiKeyInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AI_API_KEY, e.target.value.trim());
             };
-            (refs.aiBaseUrlInput || panel.querySelector("#ldb-ai-base-url")).onchange = (e) => {
+            refs.aiBaseUrlInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AI_BASE_URL, e.target.value.trim());
             };
-            (refs.aiCategoriesInput || panel.querySelector("#ldb-ai-categories")).onchange = (e) => {
+            refs.aiCategoriesInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AI_CATEGORIES, e.target.value.trim());
             };
-            (refs.aiModelSelect || panel.querySelector("#ldb-ai-model")).onchange = (e) => {
+            refs.aiModelSelect.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, e.target.value);
             };
 
             // AI 查询目标数据库选择
-            (refs.aiTargetDbSelect || panel.querySelector("#ldb-ai-target-db")).onchange = (e) => {
+            refs.aiTargetDbSelect.onchange = (e) => {
                 TargetState.setAITarget(e.target.value);
             };
 
-            (refs.workspaceMaxPagesSelect || panel.querySelector("#ldb-workspace-max-pages")).onchange = (e) => {
+            refs.workspaceMaxPagesSelect.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, parseInt(e.target.value) || 0);
             };
 
             // Agent 个性化设置
-            (refs.agentPersonaNameInput || panel.querySelector("#ldb-agent-persona-name")).onchange = (e) => {
+            refs.agentPersonaNameInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, e.target.value.trim() || CONFIG.DEFAULTS.agentPersonaName);
             };
-            (refs.agentPersonaToneSelect || panel.querySelector("#ldb-agent-persona-tone")).onchange = (e) => {
+            refs.agentPersonaToneSelect.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, e.target.value);
             };
-            (refs.agentPersonaExpertiseInput || panel.querySelector("#ldb-agent-persona-expertise")).onchange = (e) => {
+            refs.agentPersonaExpertiseInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, e.target.value.trim() || CONFIG.DEFAULTS.agentPersonaExpertise);
             };
-            (refs.agentPersonaInstructionsInput || panel.querySelector("#ldb-agent-persona-instructions")).onchange = (e) => {
+            refs.agentPersonaInstructionsInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, e.target.value.trim());
             };
-            (refs.githubUsernameInput || panel.querySelector("#ldb-github-username")).onchange = (e) => {
+            refs.githubUsernameInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, e.target.value.trim());
             };
-            (refs.githubTokenInput || panel.querySelector("#ldb-github-token")).onchange = (e) => {
+            refs.githubTokenInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, e.target.value.trim());
             };
             // GitHub 导入类型
@@ -16227,8 +16227,8 @@ ${availableTools}
             });
 
             // 刷新 AI 数据库列表
-            (refs.aiRefreshDbsBtn || panel.querySelector("#ldb-ai-refresh-dbs")).onclick = async () => {
-                const apiKey = NotionOAuth.getAccessToken((refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim());
+            refs.aiRefreshDbsBtn.onclick = async () => {
+                const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
                 const refreshBtn = refs.aiRefreshDbsBtn || panel.querySelector("#ldb-ai-refresh-dbs");
 
                 if (!apiKey) {
@@ -16262,10 +16262,10 @@ ${availableTools}
             };
 
             // 获取模型列表
-            (refs.aiFetchModelsBtn || panel.querySelector("#ldb-ai-fetch-models")).onclick = async () => {
-                const aiApiKey = (refs.aiApiKeyInput || panel.querySelector("#ldb-ai-api-key")).value.trim();
-                const aiService = (refs.aiServiceSelect || panel.querySelector("#ldb-ai-service")).value;
-                const aiBaseUrl = (refs.aiBaseUrlInput || panel.querySelector("#ldb-ai-base-url")).value.trim();
+            refs.aiFetchModelsBtn.onclick = async () => {
+                const aiApiKey = refs.aiApiKeyInput.value.trim();
+                const aiService = refs.aiServiceSelect.value;
+                const aiBaseUrl = refs.aiBaseUrlInput.value.trim();
                 const fetchBtn = refs.aiFetchModelsBtn || panel.querySelector("#ldb-ai-fetch-models");
                 const modelTip = refs.aiModelTip || panel.querySelector("#ldb-ai-model-tip");
 
@@ -16300,13 +16300,13 @@ ${availableTools}
             };
 
             // 测试 AI 连接
-            (refs.aiTestBtn || panel.querySelector("#ldb-ai-test")).onclick = async () => {
+            refs.aiTestBtn.onclick = async () => {
                 const btn = refs.aiTestBtn || panel.querySelector("#ldb-ai-test");
                 const statusSpan = refs.aiTestStatus || panel.querySelector("#ldb-ai-test-status");
-                const aiApiKey = (refs.aiApiKeyInput || panel.querySelector("#ldb-ai-api-key")).value.trim();
-                const aiService = (refs.aiServiceSelect || panel.querySelector("#ldb-ai-service")).value;
-                const aiModel = (refs.aiModelSelect || panel.querySelector("#ldb-ai-model")).value;
-                const aiBaseUrl = (refs.aiBaseUrlInput || panel.querySelector("#ldb-ai-base-url")).value.trim();
+                const aiApiKey = refs.aiApiKeyInput.value.trim();
+                const aiService = refs.aiServiceSelect.value;
+                const aiModel = refs.aiModelSelect.value;
+                const aiBaseUrl = refs.aiBaseUrlInput.value.trim();
 
                 // 清除之前的状态
                 statusSpan.textContent = "";
@@ -16359,34 +16359,34 @@ ${availableTools}
             const refs = UI.refs || {};
             const exportState = TargetState.getExportState();
 
-            (refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
-            (refs.databaseIdInput || panel.querySelector("#ldb-database-id")).value = exportState.databaseId;
-            (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value = exportState.parentPageId;
-            (refs.onlyFirstCheckbox || panel.querySelector("#ldb-only-first")).checked = Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_FIRST, CONFIG.DEFAULTS.onlyFirst);
-            (refs.onlyOpCheckbox || panel.querySelector("#ldb-only-op")).checked = Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, CONFIG.DEFAULTS.onlyOp);
-            (refs.rangeStartInput || panel.querySelector("#ldb-range-start")).value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, CONFIG.DEFAULTS.rangeStart);
-            (refs.rangeEndInput || panel.querySelector("#ldb-range-end")).value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, CONFIG.DEFAULTS.rangeEnd);
-            (refs.imgModeSelect || panel.querySelector("#ldb-img-mode")).value = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
-            (refs.requestDelaySelect || panel.querySelector("#ldb-request-delay")).value = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
-            (refs.exportConcurrencySelect || panel.querySelector("#ldb-export-concurrency")).value = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG.DEFAULTS.exportConcurrency);
+            refs.apiKeyInput.value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            refs.databaseIdInput.value = exportState.databaseId;
+            refs.parentPageIdInput.value = exportState.parentPageId;
+            refs.onlyFirstCheckbox.checked = Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_FIRST, CONFIG.DEFAULTS.onlyFirst);
+            refs.onlyOpCheckbox.checked = Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, CONFIG.DEFAULTS.onlyOp);
+            refs.rangeStartInput.value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, CONFIG.DEFAULTS.rangeStart);
+            refs.rangeEndInput.value = Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, CONFIG.DEFAULTS.rangeEnd);
+            refs.imgModeSelect.value = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
+            refs.requestDelaySelect.value = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+            refs.exportConcurrencySelect.value = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG.DEFAULTS.exportConcurrency);
 
             // 加载导出目标类型设置
             const exportTargetType = exportState.targetType;
             if (exportTargetType === "page") {
-                (refs.exportTargetPageRadio || panel.querySelector("#ldb-export-target-page")).checked = true;
-                (refs.parentPageGroup || panel.querySelector("#ldb-parent-page-group")).style.display = "block";
-                (refs.manualDbWrap || panel.querySelector("#ldb-manual-db-wrap")).style.display = "none";
-                (refs.exportTargetTip || panel.querySelector("#ldb-export-target-tip")).textContent = "导出为子页面，包含完整内容";
+                refs.exportTargetPageRadio.checked = true;
+                refs.parentPageGroup.style.display = "block";
+                refs.manualDbWrap.style.display = "none";
+                refs.exportTargetTip.textContent = "导出为子页面，包含完整内容";
             } else {
-                (refs.exportTargetDatabaseRadio || panel.querySelector("#ldb-export-target-database")).checked = true;
-                (refs.parentPageGroup || panel.querySelector("#ldb-parent-page-group")).style.display = "none";
-                (refs.exportTargetTip || panel.querySelector("#ldb-export-target-tip")).textContent = "导出为数据库条目，支持筛选和排序";
+                refs.exportTargetDatabaseRadio.checked = true;
+                refs.parentPageGroup.style.display = "none";
+                refs.exportTargetTip.textContent = "导出为数据库条目，支持筛选和排序";
             }
 
             // 加载权限设置
-            (refs.permissionLevelSelect || panel.querySelector("#ldb-permission-level")).value = Storage.get(CONFIG.STORAGE_KEYS.PERMISSION_LEVEL, CONFIG.DEFAULTS.permissionLevel);
-            (refs.requireConfirmCheckbox || panel.querySelector("#ldb-require-confirm")).checked = Storage.get(CONFIG.STORAGE_KEYS.REQUIRE_CONFIRM, CONFIG.DEFAULTS.requireConfirm);
-            (refs.enableAuditLogCheckbox || panel.querySelector("#ldb-enable-audit-log")).checked = Storage.get(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG.DEFAULTS.enableAuditLog);
+            refs.permissionLevelSelect.value = Storage.get(CONFIG.STORAGE_KEYS.PERMISSION_LEVEL, CONFIG.DEFAULTS.permissionLevel);
+            refs.requireConfirmCheckbox.checked = Storage.get(CONFIG.STORAGE_KEYS.REQUIRE_CONFIRM, CONFIG.DEFAULTS.requireConfirm);
+            refs.enableAuditLogCheckbox.checked = Storage.get(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG.DEFAULTS.enableAuditLog);
 
             // 根据审计日志设置更新面板可见性
             const enableAuditLog = Storage.get(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG.DEFAULTS.enableAuditLog);
@@ -16397,7 +16397,7 @@ ${availableTools}
 
             // 加载 AI 分类设置
             const aiService = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
-            (refs.aiServiceSelect || panel.querySelector("#ldb-ai-service")).value = aiService;
+            refs.aiServiceSelect.value = aiService;
 
             // 验证并加载 AI 模型（优先使用缓存的模型列表）
             const savedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
@@ -16434,20 +16434,20 @@ ${availableTools}
                 }
             }
 
-            (refs.aiApiKeyInput || panel.querySelector("#ldb-ai-api-key")).value = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "");
-            (refs.aiBaseUrlInput || panel.querySelector("#ldb-ai-base-url")).value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, CONFIG.DEFAULTS.aiBaseUrl);
-            (refs.aiCategoriesInput || panel.querySelector("#ldb-ai-categories")).value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
-            (refs.workspaceMaxPagesSelect || panel.querySelector("#ldb-workspace-max-pages")).value = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages);
+            refs.aiApiKeyInput.value = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "");
+            refs.aiBaseUrlInput.value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, CONFIG.DEFAULTS.aiBaseUrl);
+            refs.aiCategoriesInput.value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
+            refs.workspaceMaxPagesSelect.value = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages);
 
             // 加载 Agent 个性化设置
-            (refs.agentPersonaNameInput || panel.querySelector("#ldb-agent-persona-name")).value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName);
-            (refs.agentPersonaToneSelect || panel.querySelector("#ldb-agent-persona-tone")).value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, CONFIG.DEFAULTS.agentPersonaTone);
-            (refs.agentPersonaExpertiseInput || panel.querySelector("#ldb-agent-persona-expertise")).value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG.DEFAULTS.agentPersonaExpertise);
-            (refs.agentPersonaInstructionsInput || panel.querySelector("#ldb-agent-persona-instructions")).value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG.DEFAULTS.agentPersonaInstructions);
+            refs.agentPersonaNameInput.value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName);
+            refs.agentPersonaToneSelect.value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, CONFIG.DEFAULTS.agentPersonaTone);
+            refs.agentPersonaExpertiseInput.value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG.DEFAULTS.agentPersonaExpertise);
+            refs.agentPersonaInstructionsInput.value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG.DEFAULTS.agentPersonaInstructions);
 
             // 加载 GitHub 设置
-            (refs.githubUsernameInput || panel.querySelector("#ldb-github-username")).value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
-            (refs.githubTokenInput || panel.querySelector("#ldb-github-token")).value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
+            refs.githubUsernameInput.value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
+            refs.githubTokenInput.value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
             // 加载 GitHub 导入类型
             const savedGHTypesMain = GitHubAPI.getImportTypes();
             (refs.githubTypeCheckboxes || panel.querySelectorAll(".ldb-github-type")).forEach(cb => {
@@ -16489,7 +16489,7 @@ ${availableTools}
             const cachedWorkspace = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
             try {
                 const workspaceData = JSON.parse(cachedWorkspace);
-                const currentApiKey = NotionOAuth.getAccessToken((refs.apiKeyInput || panel.querySelector("#ldb-api-key")).value.trim());
+                const currentApiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
                 const currentKeyHash = currentApiKey ? currentApiKey.slice(-8) : "";
                 // 仅当 API Key 匹配时才显示缓存
                 if (workspaceData.apiKeyHash === currentKeyHash &&
@@ -16506,8 +16506,8 @@ ${availableTools}
 
             const autoConfig = UI.getAutoImportConfigBySource();
             const autoImportEnabled = Storage.get(autoConfig.enabledKey, autoConfig.enabledDefault);
-            (refs.autoImportEnabled || panel.querySelector("#ldb-auto-import-enabled")).checked = autoImportEnabled;
-            (refs.autoImportOptions || panel.querySelector("#ldb-auto-import-options")).style.display = autoImportEnabled ? "block" : "none";
+            refs.autoImportEnabled.checked = autoImportEnabled;
+            refs.autoImportOptions.style.display = autoImportEnabled ? "block" : "none";
             const autoImportInterval = Storage.get(autoConfig.intervalKey, autoConfig.intervalDefault);
             const intervalSelect = refs.autoImportInterval || panel.querySelector("#ldb-auto-import-interval");
             intervalSelect.value = autoImportInterval;
@@ -16533,7 +16533,7 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_IMPORT_DEDUP_MODE, CONFIG.DEFAULTS.bookmarkImportDedupMode);
             }
 
-            (refs.aiCategoryAutoDedupCheckbox || panel.querySelector("#ldb-ai-category-auto-dedup")).checked = Storage.get(
+            refs.aiCategoryAutoDedupCheckbox.checked = Storage.get(
                 CONFIG.STORAGE_KEYS.AI_CATEGORY_AUTO_DEDUP,
                 CONFIG.DEFAULTS.aiCategoryAutoDedup
             );
