@@ -9428,7 +9428,7 @@ ${availableTools}
                 if (success) {
                     UI.showStatus("撤销成功", "success");
                 } else {
-                    UI.showStatus("撤销失败", "error");
+                    UI.showStatus("撤销失败，请手动检查 Notion 中的变更", "error");
                 }
             };
 
