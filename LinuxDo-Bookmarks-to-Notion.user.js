@@ -12159,9 +12159,9 @@ ${availableTools}
                 } else {
                     UI.applyBookmarkSourceUI(source);
                 }
-                const sourceToggle = UI.refs.sourceSettingsToggle || UI.panel.querySelector("#ldb-source-settings-toggle");
-                const sourceContent = UI.refs.sourceSettingsContent || UI.panel.querySelector("#ldb-source-settings-content");
-                const sourceArrow = UI.refs.sourceSettingsArrow || UI.panel.querySelector("#ldb-source-settings-arrow");
+                const sourceToggle = UI.refs.sourceSettingsToggle;
+                const sourceContent = UI.refs.sourceSettingsContent;
+                const sourceArrow = UI.refs.sourceSettingsArrow;
                 if (sourceToggle && sourceContent?.classList.contains("collapsed")) {
                     sourceToggle.click();
                 } else if (sourceContent && sourceArrow) {
@@ -15344,14 +15344,14 @@ ${availableTools}
             };
 
             // Tab 切换
-            (refs.tabs || panel.querySelectorAll(".ldb-tab")).forEach(tab => {
+            refs.tabs.forEach(tab => {
                 tab.onclick = () => {
                     const tabName = tab.getAttribute("data-tab");
                     // 更新 tab 按钮状态
-                    (refs.tabs || panel.querySelectorAll(".ldb-tab")).forEach(t => t.classList.remove("active"));
+                    refs.tabs.forEach(t => t.classList.remove("active"));
                     tab.classList.add("active");
                     // 更新 tab 内容显示
-                    (refs.tabContents || panel.querySelectorAll(".ldb-tab-content")).forEach(c => c.classList.remove("active"));
+                    refs.tabContents.forEach(c => c.classList.remove("active"));
                     const content = panel.querySelector(`[data-tab-content="${tabName}"]`);
                     if (content) content.classList.add("active");
                     // 持久化
@@ -16249,9 +16249,9 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, e.target.value.trim());
             };
             // GitHub 导入类型
-            (refs.githubTypeCheckboxes || panel.querySelectorAll(".ldb-github-type")).forEach(cb => {
+            refs.githubTypeCheckboxes.forEach(cb => {
                 cb.onchange = () => {
-                    const source = refs.githubTypeCheckboxes || panel.querySelectorAll(".ldb-github-type:checked");
+                    const source = [...refs.githubTypeCheckboxes].filter(c => c.checked);
                     const types = [...source].filter(c => c.checked).map(c => c.value);
                     GitHubAPI.setImportTypes(types.length > 0 ? types : ["stars"]);
                 };
@@ -16481,7 +16481,7 @@ ${availableTools}
             refs.githubTokenInput.value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
             // 加载 GitHub 导入类型
             const savedGHTypesMain = GitHubAPI.getImportTypes();
-            (refs.githubTypeCheckboxes || panel.querySelectorAll(".ldb-github-type")).forEach(cb => {
+            refs.githubTypeCheckboxes.forEach(cb => {
                 cb.checked = savedGHTypesMain.includes(cb.value);
             });
 
@@ -16740,7 +16740,7 @@ ${availableTools}
 
         // 显示状态
         showStatus: (message, type = "info") => {
-            const container = (UI.refs && UI.refs.statusContainer) || UI.panel.querySelector("#ldb-status-container");
+            const container = UI.refs.statusContainer
             container.innerHTML = `
                 <div class="ldb-status ${type}">
                     ${message}
@@ -16763,7 +16763,7 @@ ${availableTools}
 
         // 显示进度
         showProgress: (current, total, message) => {
-            const container = (UI.refs && UI.refs.statusContainer) || UI.panel.querySelector("#ldb-status-container");
+            const container = UI.refs.statusContainer
             const percent = Math.round((current / total) * 100);
 
             container.innerHTML = `
@@ -16781,13 +16781,13 @@ ${availableTools}
 
         // 隐藏进度
         hideProgress: () => {
-            ((UI.refs && UI.refs.statusContainer) || UI.panel.querySelector("#ldb-status-container")).innerHTML = "";
+            UI.refs.statusContainer.innerHTML = "";
         },
 
         // 更新 AI 模型选项
         updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
             const refs = UI.refs || {};
-            const modelSelect = refs.aiModelSelect || UI.panel.querySelector("#ldb-ai-model");
+            const modelSelect = refs.aiModelSelect;
             const provider = AIService.PROVIDERS[service];
 
             if (!provider || !modelSelect) return;
@@ -16810,7 +16810,7 @@ ${availableTools}
         // 更新工作区选择下拉框
         updateWorkspaceSelect: (workspaceData) => {
             const refs = UI.refs || {};
-            const select = refs.workspaceSelect || UI.panel.querySelector("#ldb-workspace-select");
+            const select = refs.workspaceSelect;
             if (!select) return;
 
             const { databases = [], pages = [] } = workspaceData;
@@ -16859,7 +16859,7 @@ ${availableTools}
         // 更新 AI 查询目标数据库下拉框
         updateAITargetDbOptions: (databases) => {
             const refs = UI.refs || {};
-            const select = refs.aiTargetDbSelect || UI.panel.querySelector("#ldb-ai-target-db");
+            const select = refs.aiTargetDbSelect;
             if (!select) return;
 
             const savedValue = TargetState.getDisplayAITargetState().value;
@@ -17071,7 +17071,7 @@ ${availableTools}
 
         // 渲染收藏列表
         renderBookmarkList: () => {
-            const list = (UI.refs && UI.refs.bookmarkList) || UI.panel.querySelector("#ldb-bookmark-list");
+            const list = UI.refs.bookmarkList
             UI.recomputeExportStats();
             UI.renderJobId += 1;
             const renderJobId = UI.renderJobId;
@@ -17136,10 +17136,10 @@ ${availableTools}
             const count = UI.selectedBookmarks?.size || 0;
             const pendingCount = UI.selectedUnexportedCount || 0;
 
-            ((UI.refs && UI.refs.selectCount) || UI.panel.querySelector("#ldb-select-count")).textContent = `已选 ${count} 个，待导出 ${Math.max(0, pendingCount)} 个`;
+            UI.refs.selectCount.textContent = `已选 ${count} 个，待导出 ${Math.max(0, pendingCount)} 个`;
 
             // 更新全选框状态
-            const selectAll = (UI.refs && UI.refs.selectAll) || UI.panel.querySelector("#ldb-select-all");
+            const selectAll = UI.refs.selectAll
             if (count === 0) {
                 selectAll.checked = false;
                 selectAll.indeterminate = false;
@@ -17167,7 +17167,7 @@ ${availableTools}
 
         // 显示导出报告
         showReport: (results) => {
-            const container = (UI.refs && UI.refs.reportContainer) || UI.panel.querySelector("#ldb-report-container");
+            const container = UI.refs.reportContainer
             const { success, failed, skipped } = results;
 
             let html = '<div class="ldb-report">';
