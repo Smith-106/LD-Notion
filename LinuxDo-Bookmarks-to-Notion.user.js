@@ -14028,144 +14028,8 @@ ${availableTools}
     };
 
     // ===========================================
-    // UI 组件
-    // ===========================================
-    const UI = {
-        panel: null,
-        miniBtn: null,
-        isMinimized: false,
-        bookmarks: [],
-        renderJobId: 0,
-        selectedBookmarks: new Set(),
-        selectedUnexportedCount: 0,
-        totalUnexportedCount: 0,
-        bookmarkListBound: false,
-        refs: null,
-
-        // 缓存高频节点引用
-        cacheRefs: () => {
-            const panel = UI.panel;
-            if (!panel) {
-                UI.refs = null;
-                return;
-            }
-
-            UI.refs = {
-                statusContainer: panel.querySelector("#ldb-status-container"),
-                bookmarkList: panel.querySelector("#ldb-bookmark-list"),
-                selectCount: panel.querySelector("#ldb-select-count"),
-                selectAll: panel.querySelector("#ldb-select-all"),
-                bookmarkCount: panel.querySelector("#ldb-bookmark-count"),
-                bookmarksLabel: panel.querySelector("#ldb-bookmarks-label"),
-                autoImportLabel: panel.querySelector("#ldb-auto-import-label"),
-                autoImportIntervalLabel: panel.querySelector("#ldb-auto-import-interval-label"),
-                exportBtn: panel.querySelector("#ldb-export"),
-                bookmarkListContainer: panel.querySelector("#ldb-bookmark-list-container"),
-                reportContainer: panel.querySelector("#ldb-report-container"),
-                autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
-                sourcePartitionsToggle: panel.querySelector("#ldb-source-partitions-toggle"),
-                sourcePartitionsContent: panel.querySelector("#ldb-source-partitions-content"),
-                sourcePartitionsArrow: panel.querySelector("#ldb-source-partitions-arrow"),
-                sourceSelectLinuxdo: panel.querySelector("#ldb-source-select-linuxdo"),
-                sourceSelectGithub: panel.querySelector("#ldb-source-select-github"),
-                updateCheckBtn: panel.querySelector("#ldb-update-check-btn"),
-                updateAutoEnabled: panel.querySelector("#ldb-update-auto-enabled"),
-                updateAutoOptions: panel.querySelector("#ldb-update-auto-options"),
-                updateIntervalHours: panel.querySelector("#ldb-update-interval-hours"),
-                updateCheckStatus: panel.querySelector("#ldb-update-check-status"),
-                minimizeBtn: panel.querySelector("#ldb-minimize"),
-                closeBtn: panel.querySelector("#ldb-close"),
-                themeToggleBtn: panel.querySelector("#ldb-theme-toggle"),
-                runtimeBadge: panel.querySelector("#ldb-runtime-badge"),
-                tabs: panel.querySelectorAll(".ldb-tab"),
-                tabContents: panel.querySelectorAll(".ldb-tab-content"),
-                filterToggle: panel.querySelector("#ldb-filter-toggle"),
-                filterContent: panel.querySelector("#ldb-filter-content"),
-                filterArrow: panel.querySelector("#ldb-filter-arrow"),
-                aiSettingsToggle: panel.querySelector("#ldb-ai-settings-toggle"),
-                aiSettingsContent: panel.querySelector("#ldb-ai-settings-content"),
-                aiSettingsArrow: panel.querySelector("#ldb-ai-settings-arrow"),
-                githubSettingsToggle: panel.querySelector("#ldb-github-settings-toggle"),
-                githubSettingsContent: panel.querySelector("#ldb-github-settings-content"),
-                githubSettingsArrow: panel.querySelector("#ldb-github-settings-arrow"),
-                openGithubSettingsBtn: panel.querySelector("#ldb-open-github-settings"),
-                sourceSettingsToggle: panel.querySelector("#ldb-source-settings-toggle"),
-                sourceSettingsContent: panel.querySelector("#ldb-source-settings-content"),
-                sourceSettingsArrow: panel.querySelector("#ldb-source-settings-arrow"),
-                apiKeyInput: panel.querySelector("#ldb-api-key"),
-                databaseIdInput: panel.querySelector("#ldb-database-id"),
-                parentPageIdInput: panel.querySelector("#ldb-parent-page-id"),
-                exportTargetPageRadio: panel.querySelector("#ldb-export-target-page"),
-                exportTargetDatabaseRadio: panel.querySelector("#ldb-export-target-database"),
-                parentPageGroup: panel.querySelector("#ldb-parent-page-group"),
-                manualDbWrap: panel.querySelector("#ldb-manual-db-wrap"),
-                exportTargetTip: panel.querySelector("#ldb-export-target-tip"),
-                configStatus: panel.querySelector("#ldb-config-status"),
-                loadBookmarksBtn: panel.querySelector("#ldb-load-bookmarks"),
-                importBrowserBookmarksBtn: panel.querySelector("#ldb-import-browser-bookmarks"),
-                exportBtns: panel.querySelector("#ldb-export-btns"),
-                controlBtns: panel.querySelector("#ldb-control-btns"),
-                pauseBtn: panel.querySelector("#ldb-pause"),
-                autoImportEnabled: panel.querySelector("#ldb-auto-import-enabled"),
-                autoImportOptions: panel.querySelector("#ldb-auto-import-options"),
-                autoImportInterval: panel.querySelector("#ldb-auto-import-interval"),
-                linuxdoDedupModeSelect: panel.querySelector("#ldb-linuxdo-dedup-mode"),
-                bookmarkDedupModeSelect: panel.querySelector("#ldb-bookmark-dedup-mode"),
-                aiCategoryAutoDedupCheckbox: panel.querySelector("#ldb-ai-category-auto-dedup"),
-                aiServiceSelect: panel.querySelector("#ldb-ai-service"),
-                aiModelSelect: panel.querySelector("#ldb-ai-model"),
-                aiApiKeyInput: panel.querySelector("#ldb-ai-api-key"),
-                aiBaseUrlInput: panel.querySelector("#ldb-ai-base-url"),
-                aiCategoriesInput: panel.querySelector("#ldb-ai-categories"),
-                workspaceMaxPagesSelect: panel.querySelector("#ldb-workspace-max-pages"),
-                aiTargetDbSelect: panel.querySelector("#ldb-ai-target-db"),
-                permissionLevelSelect: panel.querySelector("#ldb-permission-level"),
-                requireConfirmCheckbox: panel.querySelector("#ldb-require-confirm"),
-                enableAuditLogCheckbox: panel.querySelector("#ldb-enable-audit-log"),
-                logPanel: panel.querySelector("#ldb-log-panel"),
-                workspaceSelect: panel.querySelector("#ldb-workspace-select"),
-                bookmarkExtStatus: panel.querySelector("#ldb-bookmark-ext-status"),
-                selfCheckBtn: panel.querySelector("#ldb-self-check-btn"),
-                copyDiagBtn: panel.querySelector("#ldb-copy-diagnostics-btn"),
-                selfCheckResult: panel.querySelector("#ldb-self-check-result"),
-                onlyFirstCheckbox: panel.querySelector("#ldb-only-first"),
-                onlyOpCheckbox: panel.querySelector("#ldb-only-op"),
-                rangeStartInput: panel.querySelector("#ldb-range-start"),
-                rangeEndInput: panel.querySelector("#ldb-range-end"),
-                imgModeSelect: panel.querySelector("#ldb-img-mode"),
-                requestDelaySelect: panel.querySelector("#ldb-request-delay"),
-                exportConcurrencySelect: panel.querySelector("#ldb-export-concurrency"),
-                validateConfigBtn: panel.querySelector("#ldb-validate-config"),
-                setupDatabaseBtn: panel.querySelector("#ldb-setup-database"),
-                cancelBtn: panel.querySelector("#ldb-cancel"),
-                agentPersonaNameInput: panel.querySelector("#ldb-agent-persona-name"),
-                agentPersonaToneSelect: panel.querySelector("#ldb-agent-persona-tone"),
-                agentPersonaExpertiseInput: panel.querySelector("#ldb-agent-persona-expertise"),
-                agentPersonaInstructionsInput: panel.querySelector("#ldb-agent-persona-instructions"),
-                githubUsernameInput: panel.querySelector("#ldb-github-username"),
-                githubTokenInput: panel.querySelector("#ldb-github-token"),
-                githubTypeCheckboxes: panel.querySelectorAll(".ldb-github-type"),
-                toggleManualDbBtn: panel.querySelector("#ldb-toggle-manual-db"),
-                refreshWorkspaceBtn: panel.querySelector("#ldb-refresh-workspace"),
-                workspaceTip: panel.querySelector("#ldb-workspace-tip"),
-                logToggleBtn: panel.querySelector("#ldb-log-toggle"),
-                logContent: panel.querySelector("#ldb-log-content"),
-                logArrow: panel.querySelector("#ldb-log-arrow"),
-                logClearBtn: panel.querySelector("#ldb-log-clear"),
-                aiRefreshDbsBtn: panel.querySelector("#ldb-ai-refresh-dbs"),
-                aiFetchModelsBtn: panel.querySelector("#ldb-ai-fetch-models"),
-                aiModelTip: panel.querySelector("#ldb-ai-model-tip"),
-                aiTestBtn: panel.querySelector("#ldb-ai-test"),
-                aiTestStatus: panel.querySelector("#ldb-ai-test-status"),
-            };
-        },
-
-        // 样式
-        injectStyles: () => {
-            DesignSystem.ensureBase();
-            DesignSystem.ensureChat();
-            StyleManager.injectOnce(DesignSystem.STYLE_IDS.LINUX_DO, `
-                /* LDB_UI_LINUX_DO */
+    // UI 面板 CSS 样式
+    const UI_CSS = `
                 .ldb-panel {
                     position: fixed;
                     top: 80px;
@@ -14735,564 +14599,10 @@ ${availableTools}
                         bottom: 12px;
                     }
                 }
-            `);
-        },
+    `;
 
-        // 创建面板
-        createPanel: () => {
-            const panel = document.createElement("div");
-            const personaName = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName);
-            panel.className = "ldb-panel";
-            panel.setAttribute("data-ldb-root", "");
-            panel.innerHTML = `
-                <div class="ldb-header">
-                    <h3>📚 LD-Notion <span class="ldb-runtime-badge" id="ldb-runtime-badge">检测中...</span></h3>
-                    <div class="ldb-header-btns">
-                        <button class="ldb-theme-btn" id="ldb-theme-toggle" title="切换主题">🌙</button>
-                        <button class="ldb-header-btn" id="ldb-minimize" title="最小化">−</button>
-                        <button class="ldb-header-btn" id="ldb-close" title="关闭">×</button>
-                    </div>
-                </div>
-                <div class="ldb-tabs">
-                    <button class="ldb-tab active" data-tab="bookmarks">📚 收藏</button>
-                    <button class="ldb-tab" data-tab="ai">🤖 AI</button>
-                    <button class="ldb-tab" data-tab="settings">⚙️ 设置</button>
-                </div>
-                <div class="ldb-body">
-                    <!-- ============ Tab 1: 收藏 ============ -->
-                    <div class="ldb-tab-content active" data-tab-content="bookmarks">
-                        <!-- 收藏信息 -->
-                        <div class="ldb-section">
-                            <div class="ldb-bookmarks-info">
-                                <div class="ldb-bookmarks-count" id="ldb-bookmark-count">-</div>
-                                <div class="ldb-bookmarks-label" id="ldb-bookmarks-label">已加载收藏数量</div>
-                            </div>
-
-                            <div class="ldb-toggle-section" id="ldb-source-partitions-toggle" style="margin-top: 10px; margin-bottom: 8px;">
-                                <span>收藏来源分区</span>
-                                <span class="ldb-arrow" id="ldb-source-partitions-arrow">▶</span>
-                            </div>
-                            <div class="ldb-toggle-content collapsed" id="ldb-source-partitions-content" class="ldb-mb-8">
-                                <div class="ldb-source-option-group">
-                                    <button class="ldb-source-option" id="ldb-source-select-linuxdo" type="button">Linux.do 收藏分区</button>
-                                    <button class="ldb-source-option" id="ldb-source-select-github" type="button">GitHub 收藏分区</button>
-                                </div>
-                            </div>
-
-                            <div class="ldb-toggle-section" id="ldb-source-settings-toggle" class="ldb-mb-8">
-                                <span>来源自动化设置</span>
-                                <span class="ldb-arrow" id="ldb-source-settings-arrow">▶</span>
-                            </div>
-                            <div class="ldb-toggle-content collapsed" id="ldb-source-settings-content" class="ldb-mb-8">
-                                <div class="ldb-setting-row" class="ldb-mb-8">
-                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                                        <input type="checkbox" id="ldb-auto-import-enabled">
-                                        <span id="ldb-auto-import-label">启用自动导入新收藏</span>
-                                    </label>
-                                </div>
-                                <div id="ldb-auto-import-options" style="display: none; margin-bottom: 8px;">
-                                    <div class="ldb-setting-row" class="ldb-flex-center-gap">
-                                        <label id="ldb-auto-import-interval-label" style="white-space: nowrap;">轮询间隔</label>
-                                        <select id="ldb-auto-import-interval" class="ldb-input" class="ldb-flex-1">
-                                            <option value="0">仅页面加载时</option>
-                                            <option value="3">每 3 分钟</option>
-                                            <option value="5" selected>每 5 分钟</option>
-                                            <option value="10">每 10 分钟</option>
-                                            <option value="30">每 30 分钟</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
-                                    <label for="ldb-linuxdo-dedup-mode" style="white-space: nowrap;">Linux.do 导入去重</label>
-                                    <select id="ldb-linuxdo-dedup-mode" class="ldb-input" class="ldb-flex-1">
-                                        <option value="strict">自动去重</option>
-                                        <option value="allow_duplicates">允许重复（手动勾选）</option>
-                                    </select>
-                                </div>
-                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
-                                    <label for="ldb-bookmark-dedup-mode" style="white-space: nowrap;">书签导入去重</label>
-                                    <select id="ldb-bookmark-dedup-mode" class="ldb-input" class="ldb-flex-1">
-                                        <option value="strict">自动去重</option>
-                                        <option value="allow_duplicates">允许重复（手动勾选）</option>
-                                    </select>
-                                </div>
-                                <div class="ldb-setting-row" class="ldb-mb-8">
-                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                                        <input type="checkbox" id="ldb-ai-category-auto-dedup" checked>
-                                        <span>分类列表自动去重</span>
-                                    </label>
-                                </div>
-                                <div id="ldb-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
-
-                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
-                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-update-check-btn" style="padding: 6px 10px;">检查更新</button>
-                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0;">
-                                        <input type="checkbox" id="ldb-update-auto-enabled">
-                                        <span>自动检查更新</span>
-                                    </label>
-                                </div>
-                                <div id="ldb-update-auto-options" style="display: none; margin-bottom: 8px;">
-                                    <div class="ldb-setting-row" class="ldb-flex-center-gap">
-                                        <label for="ldb-update-interval-hours" style="white-space: nowrap;">检查间隔</label>
-                                        <select id="ldb-update-interval-hours" class="ldb-input" class="ldb-flex-1">
-                                            <option value="24">每 24 小时</option>
-                                            <option value="72">每 72 小时</option>
-                                            <option value="168">每 168 小时</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div id="ldb-update-check-status" style="font-size: 12px; color: #666; margin-bottom: 4px;"></div>
-                            </div>
-
-                            <div class="ldb-btn-group" style="margin-bottom: 12px;">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-load-bookmarks">
-                                    🔄 加载收藏列表
-                                </button>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-import-browser-bookmarks">
-                                    📖 导入浏览器书签
-                                </button>
-                            </div>
-
-                            <!-- 收藏列表 (加载后显示) -->
-                            <div id="ldb-bookmark-list-container" style="display: none;">
-                                <div class="ldb-select-all">
-                                    <label>
-                                        <input type="checkbox" id="ldb-select-all" checked>
-                                        <span>全选/取消</span>
-                                    </label>
-                                    <span class="ldb-select-count" id="ldb-select-count">已选 0 个</span>
-                                </div>
-                                <div class="ldb-bookmark-list" id="ldb-bookmark-list"></div>
-                            </div>
-
-                            <!-- 导出按钮组 -->
-                            <div class="ldb-btn-group" id="ldb-export-btns">
-                                <button class="ldb-btn ldb-btn-primary" id="ldb-export" disabled>
-                                    📤 开始导出
-                                </button>
-                            </div>
-
-                            <!-- 控制按钮 (导出时显示) -->
-                            <div class="ldb-control-btns" id="ldb-control-btns" style="display: none;">
-                                <button class="ldb-btn ldb-btn-warning ldb-btn-small" id="ldb-pause">
-                                    ⏸️ 暂停
-                                </button>
-                                <button class="ldb-btn ldb-btn-danger ldb-btn-small" id="ldb-cancel">
-                                    ⏹️ 取消
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- 状态显示 -->
-                        <div id="ldb-status-container"></div>
-
-                        <!-- 导出报告 -->
-                        <div id="ldb-report-container"></div>
-                    </div>
-
-                    <!-- ============ Tab 2: AI 助手 ============ -->
-                    <div class="ldb-tab-content" data-tab-content="ai">
-                        <div class="ldb-section">
-                            <!-- 对话区域 -->
-                            <div class="ldb-chat-container" id="ldb-chat-messages">
-                                ${AIWelcomeUI.render(personaName)}
-                            </div>
-
-                            <!-- 输入区域 -->
-                            <div class="ldb-chat-input-container">
-                                <textarea
-                                    id="ldb-chat-input"
-                                    class="ldb-chat-input"
-                                    placeholder="${Utils.escapeHtml(AIWelcomeUI.getInputPlaceholder())}"
-                                    rows="1"
-                                ></textarea>
-                                <button id="ldb-chat-send" class="ldb-chat-send-btn">发送</button>
-                            </div>
-
-                            <!-- 快捷操作 -->
-                            <div class="ldb-chat-actions">
-                                <button class="ldb-chat-action-btn" id="ldb-chat-clear">🗑️ 清空</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- ============ Tab 3: 设置 ============ -->
-                    <div class="ldb-tab-content" data-tab-content="settings">
-                        <!-- Notion 配置 -->
-                        <div class="ldb-section">
-                            <div class="ldb-section-title">Notion 配置</div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">API Key</label>
-                                <input type="password" class="ldb-input" id="ldb-api-key" placeholder="secret_xxx...">
-                                <div class="ldb-tip">
-                                    在 <a href="https://www.notion.so/my-integrations" target="_blank" class="ldb-link">Notion Integrations</a> 创建
-                                </div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">公开 OAuth 授权（可选）</label>
-                                <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID">
-                                <input type="password" class="ldb-input" id="ldb-oauth-client-secret" placeholder="Client Secret" class="ldb-mt-8">
-                                <input type="text" class="ldb-input" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" class="ldb-mt-8">
-                                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
-                                    <button class="ldb-btn ldb-btn-primary" id="ldb-oauth-authorize">🔐 一键授权</button>
-                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">断开授权</button>
-                                </div>
-                                <div class="ldb-tip" id="ldb-oauth-status" style="margin-top: 6px;"></div>
-                                <div class="ldb-tip">如果你使用 Notion 公开集成，请先把 Redirect URI 加到集成配置里，再点击一键授权。当前项目为纯前端运行，Client Secret 会保存在本地。</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">数据库 / 页面</label>
-                                <div class="ldb-flex-gap">
-                                    <select class="ldb-select" id="ldb-workspace-select" class="ldb-flex-1">
-                                        <option value="">-- 从工作区选择 --</option>
-                                    </select>
-                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-refresh-workspace" class="ldb-nowrap-badge" title="刷新工作区页面列表">🔄</button>
-                                </div>
-                                <div class="ldb-input-group" id="ldb-manual-db-wrap" style="display: none; margin-top: 8px;">
-                                    <input type="text" class="ldb-input" id="ldb-database-id" placeholder="手动输入 32 位数据库 ID（高级）" class="ldb-flex-1">
-                                </div>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-toggle-manual-db" style="margin-top: 6px; padding: 4px 10px; font-size: 12px;">高级：手动输入数据库 ID</button>
-                                <div class="ldb-tip" id="ldb-workspace-tip">
-                                    优先从工作区列表选择，无法加载时再手动输入
-                                </div>
-                            </div>
-
-                            <!-- 导出目标类型选择 -->
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">导出目标</label>
-                                <div class="ldb-checkbox-group" class="ldb-mb-8">
-                                    <label class="ldb-checkbox-item">
-                                        <input type="radio" name="ldb-export-target" id="ldb-export-target-database" value="database" checked>
-                                        <span>数据库（推荐）</span>
-                                    </label>
-                                    <label class="ldb-checkbox-item">
-                                        <input type="radio" name="ldb-export-target" id="ldb-export-target-page" value="page">
-                                        <span>页面（子页面）</span>
-                                    </label>
-                                </div>
-                                <div class="ldb-tip" id="ldb-export-target-tip">
-                                    导出为数据库条目，支持筛选和排序
-                                </div>
-                            </div>
-
-                            <!-- 父页面 ID（页面模式时显示） -->
-                            <div class="ldb-input-group" id="ldb-parent-page-group" style="display: none;">
-                                <label class="ldb-label">父页面 ID</label>
-                                <input type="text" class="ldb-input" id="ldb-parent-page-id" placeholder="32位页面ID">
-                                <div class="ldb-tip">
-                                    帖子将作为子页面创建在此页面下
-                                </div>
-                            </div>
-
-                            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-validate-config">验证配置</button>
-                                <button class="ldb-btn ldb-btn-primary" id="ldb-setup-database" title="自动在数据库中创建所需属性">自动设置数据库</button>
-                                <span id="ldb-config-status" style="font-size: 12px; margin-left: 4px;"></span>
-                            </div>
-
-                            <!-- 权限设置 -->
-                            <div class="ldb-permission-panel" class="ldb-mt-12">
-                                <div class="ldb-permission-row">
-                                    <span class="ldb-permission-label">权限级别</span>
-                                    <select class="ldb-permission-select" id="ldb-permission-level">
-                                        <option value="0">只读</option>
-                                        <option value="1">标准</option>
-                                        <option value="2">高级</option>
-                                        <option value="3">管理员</option>
-                                    </select>
-                                </div>
-                                <div class="ldb-permission-row">
-                                    <span class="ldb-permission-label">危险操作确认</span>
-                                    <label class="ldb-toggle-switch">
-                                        <input type="checkbox" id="ldb-require-confirm" checked>
-                                        <span class="ldb-toggle-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="ldb-permission-row">
-                                    <span class="ldb-permission-label">审计日志</span>
-                                    <label class="ldb-toggle-switch">
-                                        <input type="checkbox" id="ldb-enable-audit-log" checked>
-                                        <span class="ldb-toggle-slider"></span>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="ldb-divider"></div>
-
-                        <!-- 筛选设置 -->
-                        <div class="ldb-section">
-                            <div class="ldb-toggle-section" id="ldb-filter-toggle">
-                                <span class="ldb-section-title" style="margin-bottom: 0;">筛选设置</span>
-                                <span id="ldb-filter-arrow">▶</span>
-                            </div>
-                            <div class="ldb-toggle-content collapsed" id="ldb-filter-content">
-                                <div class="ldb-input-group" class="ldb-mt-12">
-                                    <div class="ldb-checkbox-group">
-                                        <label class="ldb-checkbox-item">
-                                            <input type="checkbox" id="ldb-only-first">
-                                            <span>仅主楼</span>
-                                        </label>
-                                        <label class="ldb-checkbox-item">
-                                            <input type="checkbox" id="ldb-only-op">
-                                            <span>仅楼主</span>
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">楼层范围</label>
-                                    <div class="ldb-range-group">
-                                        <input type="number" id="ldb-range-start" value="1" min="1">
-                                        <span>至</span>
-                                        <input type="number" id="ldb-range-end" value="999999" min="1">
-                                    </div>
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">图片处理</label>
-                                    <select class="ldb-select" id="ldb-img-mode">
-                                        <option value="upload">上传到 Notion</option>
-                                        <option value="external">外链引用</option>
-                                        <option value="skip">跳过图片</option>
-                                    </select>
-                                    <div class="ldb-tip">Notion 免费套餐文件需小于 5MB；付费套餐 PDF 小于 20MB、图片小于 5MB。若图片上传报错，脚本会自动尝试按文件上传。</div>
-                                </div>
-                                <div class="ldb-form-group">
-                                    <label>请求间隔</label>
-                                    <select class="ldb-select" id="ldb-request-delay">
-                                        <option value="200">快速 (200ms)</option>
-                                        <option value="500">正常 (500ms)</option>
-                                        <option value="1000">慢速 (1秒)</option>
-                                        <option value="2000">较慢 (2秒)</option>
-                                        <option value="3000">很慢 (3秒)</option>
-                                        <option value="5000">超慢 (5秒)</option>
-                                        <option value="10000">极慢 (10秒)</option>
-                                        <option value="30000">龟速 (30秒)</option>
-                                    </select>
-                                </div>
-                                <div class="ldb-form-group">
-                                    <label>并发数</label>
-                                    <select class="ldb-select" id="ldb-export-concurrency">
-                                        <option value="1">串行 (1个)</option>
-                                        <option value="2">2 个并发</option>
-                                        <option value="3">3 个并发</option>
-                                        <option value="5">5 个并发</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="ldb-divider"></div>
-
-                        <!-- AI 设置 -->
-                        <div class="ldb-section">
-                            <div class="ldb-toggle-section" id="ldb-ai-settings-toggle">
-                                <span class="ldb-section-title" style="margin-bottom: 0;">AI 设置</span>
-                                <span id="ldb-ai-settings-arrow">▶</span>
-                            </div>
-                            <div class="ldb-toggle-content collapsed" id="ldb-ai-settings-content">
-                                <div class="ldb-input-group" class="ldb-mt-12">
-                                    <label class="ldb-label">AI 服务</label>
-                                    <select class="ldb-select" id="ldb-ai-service">
-                                        <option value="openai">OpenAI</option>
-                                        <option value="claude">Claude</option>
-                                        <option value="gemini">Gemini</option>
-                                    </select>
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">模型</label>
-                                    <div class="ldb-flex-gap">
-                                        <select class="ldb-select" id="ldb-ai-model" class="ldb-flex-1"></select>
-                                        <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-fetch-models" class="ldb-nowrap-badge">🔄 获取</button>
-                                    </div>
-                                    <div class="ldb-tip" id="ldb-ai-model-tip"></div>
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">API Key</label>
-                                    <input type="password" class="ldb-input" id="ldb-ai-api-key" placeholder="AI 服务的 API Key">
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">自定义端点 (可选)</label>
-                                    <input type="text" class="ldb-input" id="ldb-ai-base-url" placeholder="留空使用官方 API">
-                                    <div class="ldb-tip">支持第三方 OpenAI 兼容 API</div>
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">分类列表</label>
-                                    <input type="text" class="ldb-input" id="ldb-ai-categories" placeholder="技术, 生活, 问答, 分享, 资源, 其他">
-                                    <div class="ldb-tip">逗号分隔，用于自动分类功能</div>
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">查询数据库</label>
-                                    <div class="ldb-flex-gap">
-                                        <select class="ldb-select" id="ldb-ai-target-db" class="ldb-flex-1">
-                                            <option value="">当前配置的数据库</option>
-                                            <option value="__all__">所有工作区数据库</option>
-                                        </select>
-                                        <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-refresh-dbs" class="ldb-nowrap-badge">🔄</button>
-                                    </div>
-                                    <div class="ldb-tip">AI 查询数据库时的目标范围</div>
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">刷新页数上限</label>
-                                    <select class="ldb-select" id="ldb-workspace-max-pages">
-                                        <option value="5">5 页 (500 条)</option>
-                                        <option value="10">10 页 (1000 条)</option>
-                                        <option value="20">20 页 (2000 条)</option>
-                                        <option value="50">50 页 (5000 条)</option>
-                                        <option value="0">无限制</option>
-                                    </select>
-                                    <div class="ldb-tip">刷新工作区列表时每类的最大分页数</div>
-                                </div>
-                                <div class="ldb-btn-group" class="ldb-flex-center-gap">
-                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-test">测试连接</button>
-                                    <span id="ldb-ai-test-status" style="font-size: 12px;"></span>
-                                </div>
-
-                                <!-- Agent 个性化设置 -->
-                                <div class="ldb-section-divider">
-                                    <span class="ldb-hint">🤖 Agent 个性化</span>
-                                </div>
-                                <div class="ldb-input-group" class="ldb-mt-8">
-                                    <label class="ldb-label">助手名字</label>
-                                    <input type="text" class="ldb-input" id="ldb-agent-persona-name" placeholder="AI 助手">
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">语气风格</label>
-                                    <select class="ldb-select" id="ldb-agent-persona-tone">
-                                        <option value="友好">友好</option>
-                                        <option value="专业">专业</option>
-                                        <option value="幽默">幽默</option>
-                                        <option value="简洁">简洁</option>
-                                        <option value="热情">热情</option>
-                                    </select>
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">专业领域</label>
-                                    <input type="text" class="ldb-input" id="ldb-agent-persona-expertise" placeholder="Notion 工作区管理">
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">自定义指令 (可选)</label>
-                                    <textarea class="ldb-input" id="ldb-agent-persona-instructions" rows="2" placeholder="额外的行为指令，如：总是用列表格式回复" style="resize: vertical;"></textarea>
-                                    <div class="ldb-tip">Agent 每次对话都会遵循的个性化指令</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="ldb-divider"></div>
-
-                        <!-- GitHub 收藏导入设置 -->
-                        <div class="ldb-section">
-                            <div class="ldb-toggle-section" id="ldb-github-settings-toggle">
-                                <span class="ldb-section-title" style="margin-bottom: 0;">🐙 GitHub 导入</span>
-                                <span id="ldb-github-settings-arrow">▶</span>
-                            </div>
-                            <div style="margin-top: 8px; margin-bottom: 6px;">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-open-github-settings" style="padding: 6px 10px; font-size: 12px;">
-                                    🎯 一键定位 GitHub Token
-                                </button>
-                            </div>
-                            <div class="ldb-toggle-content collapsed" id="ldb-github-settings-content">
-                                <div class="ldb-input-group" class="ldb-mt-12">
-                                    <label class="ldb-label">GitHub 用户名</label>
-                                    <input type="text" class="ldb-input" id="ldb-github-username" placeholder="your-username">
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">GitHub Token (可选)</label>
-                                    <input type="password" class="ldb-input" id="ldb-github-token" placeholder="ghp_xxx...">
-                                    <div class="ldb-tip">不填写也可使用，但有速率限制</div>
-                                </div>
-                                <div class="ldb-input-group">
-                                    <label class="ldb-label">导入类型</label>
-                                    <div class="ldb-checkbox-group" style="margin-top: 4px;">
-                                        <label class="ldb-checkbox-item">
-                                            <input type="checkbox" class="ldb-github-type" value="stars" checked> ⭐ Stars
-                                        </label>
-                                        <label class="ldb-checkbox-item">
-                                            <input type="checkbox" class="ldb-github-type" value="repos"> 📦 Repos
-                                        </label>
-                                        <label class="ldb-checkbox-item">
-                                            <input type="checkbox" class="ldb-github-type" value="forks"> 🍴 Forks
-                                        </label>
-                                        <label class="ldb-checkbox-item">
-                                            <input type="checkbox" class="ldb-github-type" value="gists"> 📝 Gists
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="ldb-divider"></div>
-
-                        <!-- 浏览器书签导入 -->
-                        <div class="ldb-section">
-                            <div style="font-size: 13px; font-weight: 700; color: var(--ldb-ui-text);">📖 浏览器书签</div>
-                            <div id="ldb-bookmark-ext-status" style="font-size: 11px; margin-top: 4px; color: var(--ldb-ui-muted);"></div>
-                        </div>
-
-                        <div class="ldb-divider"></div>
-
-                        <!-- 运行自检 -->
-                        <div class="ldb-section">
-                            <div style="font-size: 13px; font-weight: 700; color: var(--ldb-ui-text);">🩺 运行自检</div>
-                            <div class="ldb-btn-group" style="margin-top: 8px; margin-bottom: 8px;">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-self-check-btn" style="padding: 6px 10px; font-size: 12px;">执行自检</button>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-copy-diagnostics-btn" style="padding: 6px 10px; font-size: 12px;">复制诊断信息</button>
-                            </div>
-                            <div id="ldb-self-check-result" class="ldb-hint"></div>
-                        </div>
-
-                        <div class="ldb-divider"></div>
-
-                        <!-- 操作日志面板 -->
-                        <div class="ldb-log-panel" id="ldb-log-panel">
-                            <div class="ldb-log-header" id="ldb-log-toggle">
-                                <span class="ldb-log-title">
-                                    📋 操作日志
-                                    <span class="ldb-log-badge" id="ldb-log-count">0</span>
-                                </span>
-                                <span id="ldb-log-arrow">▶</span>
-                            </div>
-                            <div class="ldb-log-content collapsed" id="ldb-log-content">
-                                <div id="ldb-log-list"></div>
-                                <div class="ldb-log-actions">
-                                    <button class="ldb-log-clear-btn" id="ldb-log-clear">清除日志</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            document.body.appendChild(panel);
-            UI.panel = panel;
-            UI.cacheRefs();
-
-            // 绑定事件
-            UI.bindEvents();
-
-            // 加载保存的配置
-            UI.loadConfig();
-        },
-
-        // 创建最小化按钮
-        createMiniButton: () => {
-            const btn = document.createElement("button");
-            btn.className = "ldb-mini-btn";
-            btn.setAttribute("data-ldb-root", "");
-            btn.innerHTML = "📚";
-            btn.title = "打开收藏导出工具";
-            btn.style.display = "none";
-
-            btn.onclick = () => {
-                UI.panel.style.display = "block";
-                btn.style.display = "none";
-                Storage.set(CONFIG.STORAGE_KEYS.PANEL_MINIMIZED, false);
-            };
-
-            document.body.appendChild(btn);
-            return btn;
-        },
-
-        // 绑定事件
+    // UI 事件绑定
+    const UIEvents = {
         bindEvents: () => {
             const panel = UI.panel;
             const refs = UI.refs || {};
@@ -16382,7 +15692,705 @@ ${availableTools}
 
             // 拖拽
             UI.makeDraggable(panel, panel.querySelector(".ldb-header"));
+        }
+    };
+
+    // UI 组件
+    // ===========================================
+    const UI = {
+        panel: null,
+        miniBtn: null,
+        isMinimized: false,
+        bookmarks: [],
+        renderJobId: 0,
+        selectedBookmarks: new Set(),
+        selectedUnexportedCount: 0,
+        totalUnexportedCount: 0,
+        bookmarkListBound: false,
+        refs: null,
+
+        // 缓存高频节点引用
+        cacheRefs: () => {
+            const panel = UI.panel;
+            if (!panel) {
+                UI.refs = null;
+                return;
+            }
+
+            UI.refs = {
+                statusContainer: panel.querySelector("#ldb-status-container"),
+                bookmarkList: panel.querySelector("#ldb-bookmark-list"),
+                selectCount: panel.querySelector("#ldb-select-count"),
+                selectAll: panel.querySelector("#ldb-select-all"),
+                bookmarkCount: panel.querySelector("#ldb-bookmark-count"),
+                bookmarksLabel: panel.querySelector("#ldb-bookmarks-label"),
+                autoImportLabel: panel.querySelector("#ldb-auto-import-label"),
+                autoImportIntervalLabel: panel.querySelector("#ldb-auto-import-interval-label"),
+                exportBtn: panel.querySelector("#ldb-export"),
+                bookmarkListContainer: panel.querySelector("#ldb-bookmark-list-container"),
+                reportContainer: panel.querySelector("#ldb-report-container"),
+                autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
+                sourcePartitionsToggle: panel.querySelector("#ldb-source-partitions-toggle"),
+                sourcePartitionsContent: panel.querySelector("#ldb-source-partitions-content"),
+                sourcePartitionsArrow: panel.querySelector("#ldb-source-partitions-arrow"),
+                sourceSelectLinuxdo: panel.querySelector("#ldb-source-select-linuxdo"),
+                sourceSelectGithub: panel.querySelector("#ldb-source-select-github"),
+                updateCheckBtn: panel.querySelector("#ldb-update-check-btn"),
+                updateAutoEnabled: panel.querySelector("#ldb-update-auto-enabled"),
+                updateAutoOptions: panel.querySelector("#ldb-update-auto-options"),
+                updateIntervalHours: panel.querySelector("#ldb-update-interval-hours"),
+                updateCheckStatus: panel.querySelector("#ldb-update-check-status"),
+                minimizeBtn: panel.querySelector("#ldb-minimize"),
+                closeBtn: panel.querySelector("#ldb-close"),
+                themeToggleBtn: panel.querySelector("#ldb-theme-toggle"),
+                runtimeBadge: panel.querySelector("#ldb-runtime-badge"),
+                tabs: panel.querySelectorAll(".ldb-tab"),
+                tabContents: panel.querySelectorAll(".ldb-tab-content"),
+                filterToggle: panel.querySelector("#ldb-filter-toggle"),
+                filterContent: panel.querySelector("#ldb-filter-content"),
+                filterArrow: panel.querySelector("#ldb-filter-arrow"),
+                aiSettingsToggle: panel.querySelector("#ldb-ai-settings-toggle"),
+                aiSettingsContent: panel.querySelector("#ldb-ai-settings-content"),
+                aiSettingsArrow: panel.querySelector("#ldb-ai-settings-arrow"),
+                githubSettingsToggle: panel.querySelector("#ldb-github-settings-toggle"),
+                githubSettingsContent: panel.querySelector("#ldb-github-settings-content"),
+                githubSettingsArrow: panel.querySelector("#ldb-github-settings-arrow"),
+                openGithubSettingsBtn: panel.querySelector("#ldb-open-github-settings"),
+                sourceSettingsToggle: panel.querySelector("#ldb-source-settings-toggle"),
+                sourceSettingsContent: panel.querySelector("#ldb-source-settings-content"),
+                sourceSettingsArrow: panel.querySelector("#ldb-source-settings-arrow"),
+                apiKeyInput: panel.querySelector("#ldb-api-key"),
+                databaseIdInput: panel.querySelector("#ldb-database-id"),
+                parentPageIdInput: panel.querySelector("#ldb-parent-page-id"),
+                exportTargetPageRadio: panel.querySelector("#ldb-export-target-page"),
+                exportTargetDatabaseRadio: panel.querySelector("#ldb-export-target-database"),
+                parentPageGroup: panel.querySelector("#ldb-parent-page-group"),
+                manualDbWrap: panel.querySelector("#ldb-manual-db-wrap"),
+                exportTargetTip: panel.querySelector("#ldb-export-target-tip"),
+                configStatus: panel.querySelector("#ldb-config-status"),
+                loadBookmarksBtn: panel.querySelector("#ldb-load-bookmarks"),
+                importBrowserBookmarksBtn: panel.querySelector("#ldb-import-browser-bookmarks"),
+                exportBtns: panel.querySelector("#ldb-export-btns"),
+                controlBtns: panel.querySelector("#ldb-control-btns"),
+                pauseBtn: panel.querySelector("#ldb-pause"),
+                autoImportEnabled: panel.querySelector("#ldb-auto-import-enabled"),
+                autoImportOptions: panel.querySelector("#ldb-auto-import-options"),
+                autoImportInterval: panel.querySelector("#ldb-auto-import-interval"),
+                linuxdoDedupModeSelect: panel.querySelector("#ldb-linuxdo-dedup-mode"),
+                bookmarkDedupModeSelect: panel.querySelector("#ldb-bookmark-dedup-mode"),
+                aiCategoryAutoDedupCheckbox: panel.querySelector("#ldb-ai-category-auto-dedup"),
+                aiServiceSelect: panel.querySelector("#ldb-ai-service"),
+                aiModelSelect: panel.querySelector("#ldb-ai-model"),
+                aiApiKeyInput: panel.querySelector("#ldb-ai-api-key"),
+                aiBaseUrlInput: panel.querySelector("#ldb-ai-base-url"),
+                aiCategoriesInput: panel.querySelector("#ldb-ai-categories"),
+                workspaceMaxPagesSelect: panel.querySelector("#ldb-workspace-max-pages"),
+                aiTargetDbSelect: panel.querySelector("#ldb-ai-target-db"),
+                permissionLevelSelect: panel.querySelector("#ldb-permission-level"),
+                requireConfirmCheckbox: panel.querySelector("#ldb-require-confirm"),
+                enableAuditLogCheckbox: panel.querySelector("#ldb-enable-audit-log"),
+                logPanel: panel.querySelector("#ldb-log-panel"),
+                workspaceSelect: panel.querySelector("#ldb-workspace-select"),
+                bookmarkExtStatus: panel.querySelector("#ldb-bookmark-ext-status"),
+                selfCheckBtn: panel.querySelector("#ldb-self-check-btn"),
+                copyDiagBtn: panel.querySelector("#ldb-copy-diagnostics-btn"),
+                selfCheckResult: panel.querySelector("#ldb-self-check-result"),
+                onlyFirstCheckbox: panel.querySelector("#ldb-only-first"),
+                onlyOpCheckbox: panel.querySelector("#ldb-only-op"),
+                rangeStartInput: panel.querySelector("#ldb-range-start"),
+                rangeEndInput: panel.querySelector("#ldb-range-end"),
+                imgModeSelect: panel.querySelector("#ldb-img-mode"),
+                requestDelaySelect: panel.querySelector("#ldb-request-delay"),
+                exportConcurrencySelect: panel.querySelector("#ldb-export-concurrency"),
+                validateConfigBtn: panel.querySelector("#ldb-validate-config"),
+                setupDatabaseBtn: panel.querySelector("#ldb-setup-database"),
+                cancelBtn: panel.querySelector("#ldb-cancel"),
+                agentPersonaNameInput: panel.querySelector("#ldb-agent-persona-name"),
+                agentPersonaToneSelect: panel.querySelector("#ldb-agent-persona-tone"),
+                agentPersonaExpertiseInput: panel.querySelector("#ldb-agent-persona-expertise"),
+                agentPersonaInstructionsInput: panel.querySelector("#ldb-agent-persona-instructions"),
+                githubUsernameInput: panel.querySelector("#ldb-github-username"),
+                githubTokenInput: panel.querySelector("#ldb-github-token"),
+                githubTypeCheckboxes: panel.querySelectorAll(".ldb-github-type"),
+                toggleManualDbBtn: panel.querySelector("#ldb-toggle-manual-db"),
+                refreshWorkspaceBtn: panel.querySelector("#ldb-refresh-workspace"),
+                workspaceTip: panel.querySelector("#ldb-workspace-tip"),
+                logToggleBtn: panel.querySelector("#ldb-log-toggle"),
+                logContent: panel.querySelector("#ldb-log-content"),
+                logArrow: panel.querySelector("#ldb-log-arrow"),
+                logClearBtn: panel.querySelector("#ldb-log-clear"),
+                aiRefreshDbsBtn: panel.querySelector("#ldb-ai-refresh-dbs"),
+                aiFetchModelsBtn: panel.querySelector("#ldb-ai-fetch-models"),
+                aiModelTip: panel.querySelector("#ldb-ai-model-tip"),
+                aiTestBtn: panel.querySelector("#ldb-ai-test"),
+                aiTestStatus: panel.querySelector("#ldb-ai-test-status"),
+            };
         },
+
+        // 样式
+        injectStyles: () => {
+            DesignSystem.ensureBase();
+            DesignSystem.ensureChat();
+            StyleManager.injectOnce(DesignSystem.STYLE_IDS.LINUX_DO, UI_CSS);
+        },
+
+        // 创建面板
+        createPanel: () => {
+            const panel = document.createElement("div");
+            const personaName = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG.DEFAULTS.agentPersonaName);
+            panel.className = "ldb-panel";
+            panel.setAttribute("data-ldb-root", "");
+            panel.innerHTML = `
+                <div class="ldb-header">
+                    <h3>📚 LD-Notion <span class="ldb-runtime-badge" id="ldb-runtime-badge">检测中...</span></h3>
+                    <div class="ldb-header-btns">
+                        <button class="ldb-theme-btn" id="ldb-theme-toggle" title="切换主题">🌙</button>
+                        <button class="ldb-header-btn" id="ldb-minimize" title="最小化">−</button>
+                        <button class="ldb-header-btn" id="ldb-close" title="关闭">×</button>
+                    </div>
+                </div>
+                <div class="ldb-tabs">
+                    <button class="ldb-tab active" data-tab="bookmarks">📚 收藏</button>
+                    <button class="ldb-tab" data-tab="ai">🤖 AI</button>
+                    <button class="ldb-tab" data-tab="settings">⚙️ 设置</button>
+                </div>
+                <div class="ldb-body">
+                    <!-- ============ Tab 1: 收藏 ============ -->
+                    <div class="ldb-tab-content active" data-tab-content="bookmarks">
+                        <!-- 收藏信息 -->
+                        <div class="ldb-section">
+                            <div class="ldb-bookmarks-info">
+                                <div class="ldb-bookmarks-count" id="ldb-bookmark-count">-</div>
+                                <div class="ldb-bookmarks-label" id="ldb-bookmarks-label">已加载收藏数量</div>
+                            </div>
+
+                            <div class="ldb-toggle-section" id="ldb-source-partitions-toggle" style="margin-top: 10px; margin-bottom: 8px;">
+                                <span>收藏来源分区</span>
+                                <span class="ldb-arrow" id="ldb-source-partitions-arrow">▶</span>
+                            </div>
+                            <div class="ldb-toggle-content collapsed" id="ldb-source-partitions-content" class="ldb-mb-8">
+                                <div class="ldb-source-option-group">
+                                    <button class="ldb-source-option" id="ldb-source-select-linuxdo" type="button">Linux.do 收藏分区</button>
+                                    <button class="ldb-source-option" id="ldb-source-select-github" type="button">GitHub 收藏分区</button>
+                                </div>
+                            </div>
+
+                            <div class="ldb-toggle-section" id="ldb-source-settings-toggle" class="ldb-mb-8">
+                                <span>来源自动化设置</span>
+                                <span class="ldb-arrow" id="ldb-source-settings-arrow">▶</span>
+                            </div>
+                            <div class="ldb-toggle-content collapsed" id="ldb-source-settings-content" class="ldb-mb-8">
+                                <div class="ldb-setting-row" class="ldb-mb-8">
+                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                        <input type="checkbox" id="ldb-auto-import-enabled">
+                                        <span id="ldb-auto-import-label">启用自动导入新收藏</span>
+                                    </label>
+                                </div>
+                                <div id="ldb-auto-import-options" style="display: none; margin-bottom: 8px;">
+                                    <div class="ldb-setting-row" class="ldb-flex-center-gap">
+                                        <label id="ldb-auto-import-interval-label" style="white-space: nowrap;">轮询间隔</label>
+                                        <select id="ldb-auto-import-interval" class="ldb-input" class="ldb-flex-1">
+                                            <option value="0">仅页面加载时</option>
+                                            <option value="3">每 3 分钟</option>
+                                            <option value="5" selected>每 5 分钟</option>
+                                            <option value="10">每 10 分钟</option>
+                                            <option value="30">每 30 分钟</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                                    <label for="ldb-linuxdo-dedup-mode" style="white-space: nowrap;">Linux.do 导入去重</label>
+                                    <select id="ldb-linuxdo-dedup-mode" class="ldb-input" class="ldb-flex-1">
+                                        <option value="strict">自动去重</option>
+                                        <option value="allow_duplicates">允许重复（手动勾选）</option>
+                                    </select>
+                                </div>
+                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                                    <label for="ldb-bookmark-dedup-mode" style="white-space: nowrap;">书签导入去重</label>
+                                    <select id="ldb-bookmark-dedup-mode" class="ldb-input" class="ldb-flex-1">
+                                        <option value="strict">自动去重</option>
+                                        <option value="allow_duplicates">允许重复（手动勾选）</option>
+                                    </select>
+                                </div>
+                                <div class="ldb-setting-row" class="ldb-mb-8">
+                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                        <input type="checkbox" id="ldb-ai-category-auto-dedup" checked>
+                                        <span>分类列表自动去重</span>
+                                    </label>
+                                </div>
+                                <div id="ldb-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
+
+                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-update-check-btn" style="padding: 6px 10px;">检查更新</button>
+                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0;">
+                                        <input type="checkbox" id="ldb-update-auto-enabled">
+                                        <span>自动检查更新</span>
+                                    </label>
+                                </div>
+                                <div id="ldb-update-auto-options" style="display: none; margin-bottom: 8px;">
+                                    <div class="ldb-setting-row" class="ldb-flex-center-gap">
+                                        <label for="ldb-update-interval-hours" style="white-space: nowrap;">检查间隔</label>
+                                        <select id="ldb-update-interval-hours" class="ldb-input" class="ldb-flex-1">
+                                            <option value="24">每 24 小时</option>
+                                            <option value="72">每 72 小时</option>
+                                            <option value="168">每 168 小时</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div id="ldb-update-check-status" style="font-size: 12px; color: #666; margin-bottom: 4px;"></div>
+                            </div>
+
+                            <div class="ldb-btn-group" style="margin-bottom: 12px;">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-load-bookmarks">
+                                    🔄 加载收藏列表
+                                </button>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-import-browser-bookmarks">
+                                    📖 导入浏览器书签
+                                </button>
+                            </div>
+
+                            <!-- 收藏列表 (加载后显示) -->
+                            <div id="ldb-bookmark-list-container" style="display: none;">
+                                <div class="ldb-select-all">
+                                    <label>
+                                        <input type="checkbox" id="ldb-select-all" checked>
+                                        <span>全选/取消</span>
+                                    </label>
+                                    <span class="ldb-select-count" id="ldb-select-count">已选 0 个</span>
+                                </div>
+                                <div class="ldb-bookmark-list" id="ldb-bookmark-list"></div>
+                            </div>
+
+                            <!-- 导出按钮组 -->
+                            <div class="ldb-btn-group" id="ldb-export-btns">
+                                <button class="ldb-btn ldb-btn-primary" id="ldb-export" disabled>
+                                    📤 开始导出
+                                </button>
+                            </div>
+
+                            <!-- 控制按钮 (导出时显示) -->
+                            <div class="ldb-control-btns" id="ldb-control-btns" style="display: none;">
+                                <button class="ldb-btn ldb-btn-warning ldb-btn-small" id="ldb-pause">
+                                    ⏸️ 暂停
+                                </button>
+                                <button class="ldb-btn ldb-btn-danger ldb-btn-small" id="ldb-cancel">
+                                    ⏹️ 取消
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 状态显示 -->
+                        <div id="ldb-status-container"></div>
+
+                        <!-- 导出报告 -->
+                        <div id="ldb-report-container"></div>
+                    </div>
+
+                    <!-- ============ Tab 2: AI 助手 ============ -->
+                    <div class="ldb-tab-content" data-tab-content="ai">
+                        <div class="ldb-section">
+                            <!-- 对话区域 -->
+                            <div class="ldb-chat-container" id="ldb-chat-messages">
+                                ${AIWelcomeUI.render(personaName)}
+                            </div>
+
+                            <!-- 输入区域 -->
+                            <div class="ldb-chat-input-container">
+                                <textarea
+                                    id="ldb-chat-input"
+                                    class="ldb-chat-input"
+                                    placeholder="${Utils.escapeHtml(AIWelcomeUI.getInputPlaceholder())}"
+                                    rows="1"
+                                ></textarea>
+                                <button id="ldb-chat-send" class="ldb-chat-send-btn">发送</button>
+                            </div>
+
+                            <!-- 快捷操作 -->
+                            <div class="ldb-chat-actions">
+                                <button class="ldb-chat-action-btn" id="ldb-chat-clear">🗑️ 清空</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ============ Tab 3: 设置 ============ -->
+                    <div class="ldb-tab-content" data-tab-content="settings">
+                        <!-- Notion 配置 -->
+                        <div class="ldb-section">
+                            <div class="ldb-section-title">Notion 配置</div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">API Key</label>
+                                <input type="password" class="ldb-input" id="ldb-api-key" placeholder="secret_xxx...">
+                                <div class="ldb-tip">
+                                    在 <a href="https://www.notion.so/my-integrations" target="_blank" class="ldb-link">Notion Integrations</a> 创建
+                                </div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">公开 OAuth 授权（可选）</label>
+                                <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID">
+                                <input type="password" class="ldb-input" id="ldb-oauth-client-secret" placeholder="Client Secret" class="ldb-mt-8">
+                                <input type="text" class="ldb-input" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" class="ldb-mt-8">
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
+                                    <button class="ldb-btn ldb-btn-primary" id="ldb-oauth-authorize">🔐 一键授权</button>
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">断开授权</button>
+                                </div>
+                                <div class="ldb-tip" id="ldb-oauth-status" style="margin-top: 6px;"></div>
+                                <div class="ldb-tip">如果你使用 Notion 公开集成，请先把 Redirect URI 加到集成配置里，再点击一键授权。当前项目为纯前端运行，Client Secret 会保存在本地。</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">数据库 / 页面</label>
+                                <div class="ldb-flex-gap">
+                                    <select class="ldb-select" id="ldb-workspace-select" class="ldb-flex-1">
+                                        <option value="">-- 从工作区选择 --</option>
+                                    </select>
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-refresh-workspace" class="ldb-nowrap-badge" title="刷新工作区页面列表">🔄</button>
+                                </div>
+                                <div class="ldb-input-group" id="ldb-manual-db-wrap" style="display: none; margin-top: 8px;">
+                                    <input type="text" class="ldb-input" id="ldb-database-id" placeholder="手动输入 32 位数据库 ID（高级）" class="ldb-flex-1">
+                                </div>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-toggle-manual-db" style="margin-top: 6px; padding: 4px 10px; font-size: 12px;">高级：手动输入数据库 ID</button>
+                                <div class="ldb-tip" id="ldb-workspace-tip">
+                                    优先从工作区列表选择，无法加载时再手动输入
+                                </div>
+                            </div>
+
+                            <!-- 导出目标类型选择 -->
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">导出目标</label>
+                                <div class="ldb-checkbox-group" class="ldb-mb-8">
+                                    <label class="ldb-checkbox-item">
+                                        <input type="radio" name="ldb-export-target" id="ldb-export-target-database" value="database" checked>
+                                        <span>数据库（推荐）</span>
+                                    </label>
+                                    <label class="ldb-checkbox-item">
+                                        <input type="radio" name="ldb-export-target" id="ldb-export-target-page" value="page">
+                                        <span>页面（子页面）</span>
+                                    </label>
+                                </div>
+                                <div class="ldb-tip" id="ldb-export-target-tip">
+                                    导出为数据库条目，支持筛选和排序
+                                </div>
+                            </div>
+
+                            <!-- 父页面 ID（页面模式时显示） -->
+                            <div class="ldb-input-group" id="ldb-parent-page-group" style="display: none;">
+                                <label class="ldb-label">父页面 ID</label>
+                                <input type="text" class="ldb-input" id="ldb-parent-page-id" placeholder="32位页面ID">
+                                <div class="ldb-tip">
+                                    帖子将作为子页面创建在此页面下
+                                </div>
+                            </div>
+
+                            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-validate-config">验证配置</button>
+                                <button class="ldb-btn ldb-btn-primary" id="ldb-setup-database" title="自动在数据库中创建所需属性">自动设置数据库</button>
+                                <span id="ldb-config-status" style="font-size: 12px; margin-left: 4px;"></span>
+                            </div>
+
+                            <!-- 权限设置 -->
+                            <div class="ldb-permission-panel" class="ldb-mt-12">
+                                <div class="ldb-permission-row">
+                                    <span class="ldb-permission-label">权限级别</span>
+                                    <select class="ldb-permission-select" id="ldb-permission-level">
+                                        <option value="0">只读</option>
+                                        <option value="1">标准</option>
+                                        <option value="2">高级</option>
+                                        <option value="3">管理员</option>
+                                    </select>
+                                </div>
+                                <div class="ldb-permission-row">
+                                    <span class="ldb-permission-label">危险操作确认</span>
+                                    <label class="ldb-toggle-switch">
+                                        <input type="checkbox" id="ldb-require-confirm" checked>
+                                        <span class="ldb-toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="ldb-permission-row">
+                                    <span class="ldb-permission-label">审计日志</span>
+                                    <label class="ldb-toggle-switch">
+                                        <input type="checkbox" id="ldb-enable-audit-log" checked>
+                                        <span class="ldb-toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="ldb-divider"></div>
+
+                        <!-- 筛选设置 -->
+                        <div class="ldb-section">
+                            <div class="ldb-toggle-section" id="ldb-filter-toggle">
+                                <span class="ldb-section-title" style="margin-bottom: 0;">筛选设置</span>
+                                <span id="ldb-filter-arrow">▶</span>
+                            </div>
+                            <div class="ldb-toggle-content collapsed" id="ldb-filter-content">
+                                <div class="ldb-input-group" class="ldb-mt-12">
+                                    <div class="ldb-checkbox-group">
+                                        <label class="ldb-checkbox-item">
+                                            <input type="checkbox" id="ldb-only-first">
+                                            <span>仅主楼</span>
+                                        </label>
+                                        <label class="ldb-checkbox-item">
+                                            <input type="checkbox" id="ldb-only-op">
+                                            <span>仅楼主</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">楼层范围</label>
+                                    <div class="ldb-range-group">
+                                        <input type="number" id="ldb-range-start" value="1" min="1">
+                                        <span>至</span>
+                                        <input type="number" id="ldb-range-end" value="999999" min="1">
+                                    </div>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">图片处理</label>
+                                    <select class="ldb-select" id="ldb-img-mode">
+                                        <option value="upload">上传到 Notion</option>
+                                        <option value="external">外链引用</option>
+                                        <option value="skip">跳过图片</option>
+                                    </select>
+                                    <div class="ldb-tip">Notion 免费套餐文件需小于 5MB；付费套餐 PDF 小于 20MB、图片小于 5MB。若图片上传报错，脚本会自动尝试按文件上传。</div>
+                                </div>
+                                <div class="ldb-form-group">
+                                    <label>请求间隔</label>
+                                    <select class="ldb-select" id="ldb-request-delay">
+                                        <option value="200">快速 (200ms)</option>
+                                        <option value="500">正常 (500ms)</option>
+                                        <option value="1000">慢速 (1秒)</option>
+                                        <option value="2000">较慢 (2秒)</option>
+                                        <option value="3000">很慢 (3秒)</option>
+                                        <option value="5000">超慢 (5秒)</option>
+                                        <option value="10000">极慢 (10秒)</option>
+                                        <option value="30000">龟速 (30秒)</option>
+                                    </select>
+                                </div>
+                                <div class="ldb-form-group">
+                                    <label>并发数</label>
+                                    <select class="ldb-select" id="ldb-export-concurrency">
+                                        <option value="1">串行 (1个)</option>
+                                        <option value="2">2 个并发</option>
+                                        <option value="3">3 个并发</option>
+                                        <option value="5">5 个并发</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="ldb-divider"></div>
+
+                        <!-- AI 设置 -->
+                        <div class="ldb-section">
+                            <div class="ldb-toggle-section" id="ldb-ai-settings-toggle">
+                                <span class="ldb-section-title" style="margin-bottom: 0;">AI 设置</span>
+                                <span id="ldb-ai-settings-arrow">▶</span>
+                            </div>
+                            <div class="ldb-toggle-content collapsed" id="ldb-ai-settings-content">
+                                <div class="ldb-input-group" class="ldb-mt-12">
+                                    <label class="ldb-label">AI 服务</label>
+                                    <select class="ldb-select" id="ldb-ai-service">
+                                        <option value="openai">OpenAI</option>
+                                        <option value="claude">Claude</option>
+                                        <option value="gemini">Gemini</option>
+                                    </select>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">模型</label>
+                                    <div class="ldb-flex-gap">
+                                        <select class="ldb-select" id="ldb-ai-model" class="ldb-flex-1"></select>
+                                        <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-fetch-models" class="ldb-nowrap-badge">🔄 获取</button>
+                                    </div>
+                                    <div class="ldb-tip" id="ldb-ai-model-tip"></div>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">API Key</label>
+                                    <input type="password" class="ldb-input" id="ldb-ai-api-key" placeholder="AI 服务的 API Key">
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">自定义端点 (可选)</label>
+                                    <input type="text" class="ldb-input" id="ldb-ai-base-url" placeholder="留空使用官方 API">
+                                    <div class="ldb-tip">支持第三方 OpenAI 兼容 API</div>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">分类列表</label>
+                                    <input type="text" class="ldb-input" id="ldb-ai-categories" placeholder="技术, 生活, 问答, 分享, 资源, 其他">
+                                    <div class="ldb-tip">逗号分隔，用于自动分类功能</div>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">查询数据库</label>
+                                    <div class="ldb-flex-gap">
+                                        <select class="ldb-select" id="ldb-ai-target-db" class="ldb-flex-1">
+                                            <option value="">当前配置的数据库</option>
+                                            <option value="__all__">所有工作区数据库</option>
+                                        </select>
+                                        <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-refresh-dbs" class="ldb-nowrap-badge">🔄</button>
+                                    </div>
+                                    <div class="ldb-tip">AI 查询数据库时的目标范围</div>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">刷新页数上限</label>
+                                    <select class="ldb-select" id="ldb-workspace-max-pages">
+                                        <option value="5">5 页 (500 条)</option>
+                                        <option value="10">10 页 (1000 条)</option>
+                                        <option value="20">20 页 (2000 条)</option>
+                                        <option value="50">50 页 (5000 条)</option>
+                                        <option value="0">无限制</option>
+                                    </select>
+                                    <div class="ldb-tip">刷新工作区列表时每类的最大分页数</div>
+                                </div>
+                                <div class="ldb-btn-group" class="ldb-flex-center-gap">
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-test">测试连接</button>
+                                    <span id="ldb-ai-test-status" style="font-size: 12px;"></span>
+                                </div>
+
+                                <!-- Agent 个性化设置 -->
+                                <div class="ldb-section-divider">
+                                    <span class="ldb-hint">🤖 Agent 个性化</span>
+                                </div>
+                                <div class="ldb-input-group" class="ldb-mt-8">
+                                    <label class="ldb-label">助手名字</label>
+                                    <input type="text" class="ldb-input" id="ldb-agent-persona-name" placeholder="AI 助手">
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">语气风格</label>
+                                    <select class="ldb-select" id="ldb-agent-persona-tone">
+                                        <option value="友好">友好</option>
+                                        <option value="专业">专业</option>
+                                        <option value="幽默">幽默</option>
+                                        <option value="简洁">简洁</option>
+                                        <option value="热情">热情</option>
+                                    </select>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">专业领域</label>
+                                    <input type="text" class="ldb-input" id="ldb-agent-persona-expertise" placeholder="Notion 工作区管理">
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">自定义指令 (可选)</label>
+                                    <textarea class="ldb-input" id="ldb-agent-persona-instructions" rows="2" placeholder="额外的行为指令，如：总是用列表格式回复" style="resize: vertical;"></textarea>
+                                    <div class="ldb-tip">Agent 每次对话都会遵循的个性化指令</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="ldb-divider"></div>
+
+                        <!-- GitHub 收藏导入设置 -->
+                        <div class="ldb-section">
+                            <div class="ldb-toggle-section" id="ldb-github-settings-toggle">
+                                <span class="ldb-section-title" style="margin-bottom: 0;">🐙 GitHub 导入</span>
+                                <span id="ldb-github-settings-arrow">▶</span>
+                            </div>
+                            <div style="margin-top: 8px; margin-bottom: 6px;">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-open-github-settings" style="padding: 6px 10px; font-size: 12px;">
+                                    🎯 一键定位 GitHub Token
+                                </button>
+                            </div>
+                            <div class="ldb-toggle-content collapsed" id="ldb-github-settings-content">
+                                <div class="ldb-input-group" class="ldb-mt-12">
+                                    <label class="ldb-label">GitHub 用户名</label>
+                                    <input type="text" class="ldb-input" id="ldb-github-username" placeholder="your-username">
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">GitHub Token (可选)</label>
+                                    <input type="password" class="ldb-input" id="ldb-github-token" placeholder="ghp_xxx...">
+                                    <div class="ldb-tip">不填写也可使用，但有速率限制</div>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">导入类型</label>
+                                    <div class="ldb-checkbox-group" style="margin-top: 4px;">
+                                        <label class="ldb-checkbox-item">
+                                            <input type="checkbox" class="ldb-github-type" value="stars" checked> ⭐ Stars
+                                        </label>
+                                        <label class="ldb-checkbox-item">
+                                            <input type="checkbox" class="ldb-github-type" value="repos"> 📦 Repos
+                                        </label>
+                                        <label class="ldb-checkbox-item">
+                                            <input type="checkbox" class="ldb-github-type" value="forks"> 🍴 Forks
+                                        </label>
+                                        <label class="ldb-checkbox-item">
+                                            <input type="checkbox" class="ldb-github-type" value="gists"> 📝 Gists
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="ldb-divider"></div>
+
+                        <!-- 浏览器书签导入 -->
+                        <div class="ldb-section">
+                            <div style="font-size: 13px; font-weight: 700; color: var(--ldb-ui-text);">📖 浏览器书签</div>
+                            <div id="ldb-bookmark-ext-status" style="font-size: 11px; margin-top: 4px; color: var(--ldb-ui-muted);"></div>
+                        </div>
+
+                        <div class="ldb-divider"></div>
+
+                        <!-- 运行自检 -->
+                        <div class="ldb-section">
+                            <div style="font-size: 13px; font-weight: 700; color: var(--ldb-ui-text);">🩺 运行自检</div>
+                            <div class="ldb-btn-group" style="margin-top: 8px; margin-bottom: 8px;">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-self-check-btn" style="padding: 6px 10px; font-size: 12px;">执行自检</button>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-copy-diagnostics-btn" style="padding: 6px 10px; font-size: 12px;">复制诊断信息</button>
+                            </div>
+                            <div id="ldb-self-check-result" class="ldb-hint"></div>
+                        </div>
+
+                        <div class="ldb-divider"></div>
+
+                        <!-- 操作日志面板 -->
+                        <div class="ldb-log-panel" id="ldb-log-panel">
+                            <div class="ldb-log-header" id="ldb-log-toggle">
+                                <span class="ldb-log-title">
+                                    📋 操作日志
+                                    <span class="ldb-log-badge" id="ldb-log-count">0</span>
+                                </span>
+                                <span id="ldb-log-arrow">▶</span>
+                            </div>
+                            <div class="ldb-log-content collapsed" id="ldb-log-content">
+                                <div id="ldb-log-list"></div>
+                                <div class="ldb-log-actions">
+                                    <button class="ldb-log-clear-btn" id="ldb-log-clear">清除日志</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(panel);
+            UI.panel = panel;
+            UI.cacheRefs();
+
+            // 绑定事件
+            UI.bindEvents();
+
+            // 加载保存的配置
+            UI.loadConfig();
+        },
+
+        // 创建最小化按钮
+        createMiniButton: () => {
+            const btn = document.createElement("button");
+            btn.className = "ldb-mini-btn";
+            btn.setAttribute("data-ldb-root", "");
+            btn.innerHTML = "📚";
+            btn.title = "打开收藏导出工具";
+            btn.style.display = "none";
+
+            btn.onclick = () => {
+                UI.panel.style.display = "block";
+                btn.style.display = "none";
+                Storage.set(CONFIG.STORAGE_KEYS.PANEL_MINIMIZED, false);
+            };
+
+            document.body.appendChild(btn);
+            return btn;
+        },
+
+
+        // 绑定事件
+        bindEvents: UIEvents.bindEvents,
 
         // 加载配置
         loadConfig: () => {
