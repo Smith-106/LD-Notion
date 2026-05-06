@@ -149,7 +149,7 @@
             onlyOp: false,
             rangeStart: 1,
             rangeEnd: 999999,
-            imgMode: "upload", // upload, external, skip
+            imgMode: "external", // upload, external, skip
             permissionLevel: 1, // 默认标准权限
             requireConfirm: true, // 默认需要确认
             enableAuditLog: true, // 默认开启审计日志
@@ -188,6 +188,8 @@
             ]),
             // GitHub 导入类型默认值
             githubImportTypes: JSON.stringify(["stars"]),
+            activeTab: "bookmarks",
+            themePreference: "auto",
             // 跨源模式默认值
             crossSourceMode: "separate",  // separate(分库) 或 unified(统一库)
         },
@@ -4413,7 +4415,7 @@
                     if (page_id) {
                         try {
                             refPage = await NotionAPI.request("GET", `/pages/${page_id}`, null, settings.notionApiKey);
-                        } catch {}
+                        } catch { /* page may not exist or be inaccessible */ }
                     }
                     if (!refPage && page_name) {
                         const searchResult = await NotionAPI.search(page_name, null, settings.notionApiKey);
@@ -4440,7 +4442,7 @@
                         try {
                             const res = await NotionAPI.request("POST", `/databases/${db.id}/query`, { page_size: 50 }, settings.notionApiKey);
                             candidates.push(...(res.results || []));
-                        } catch {}
+                        } catch { /* database may not be queryable */ }
                     }
 
                     // 排除自身
@@ -9757,7 +9759,7 @@ ${availableTools}
         exportCurrentPage: async (settings) => {
             const meta = GenericExtractor.extractMeta();
             const contentEl = GenericExtractor.extractContent();
-            const blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || "external");
+            const blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG.DEFAULTS.imgMode);
 
             // 添加来源信息头
             blocks.unshift({
@@ -10357,7 +10359,7 @@ ${availableTools}
 
         // 从 Storage 读取导出设置（不依赖 UI DOM）
         buildSettings: () => {
-            const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "database");
+            const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
             return {
                 apiKey: Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
                 databaseId: Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
@@ -10367,7 +10369,7 @@ ${availableTools}
                 onlyOp: Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, false),
                 rangeStart: Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, 1),
                 rangeEnd: Storage.get(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, 999999),
-                imgMode: Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, "external"),
+                imgMode: Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode),
                 concurrency: Storage.get(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG.DEFAULTS.exportConcurrency),
             };
         },
@@ -10377,7 +10379,7 @@ ${availableTools}
             if (!Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, false)) return false;
             const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
             if (!apiKey) return false;
-            const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "database");
+            const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
             if (exportTargetType === "database") {
                 return !!Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
             } else {
@@ -10407,7 +10409,7 @@ ${availableTools}
                 AutoImporter.updateStatus("⚠️ 请先配置 Notion API Key");
                 return;
             }
-            const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, "database");
+            const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
             if (exportTargetType === "database" && !Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "")) {
                 AutoImporter.updateStatus("⚠️ 请先配置 Notion 数据库 ID");
                 return;
@@ -12204,7 +12206,7 @@ ${availableTools}
         _mediaQuery: null,
 
         initTheme: () => {
-            DesignSystem._theme = Storage.get(CONFIG.STORAGE_KEYS.THEME_PREFERENCE, "auto");
+            DesignSystem._theme = Storage.get(CONFIG.STORAGE_KEYS.THEME_PREFERENCE, CONFIG.DEFAULTS.themePreference);
             DesignSystem._applyTheme();
             // 监听系统主题变化（auto 模式下自动跟随）
             DesignSystem._mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -13661,7 +13663,7 @@ ${availableTools}
                 const wsData = JSON.parse(cachedWsForDb);
                 cachedDatabases = wsData.databases || [];
                 cachedPages = wsData.pages || [];
-            } catch {}
+            } catch { cachedDatabases = []; cachedPages = []; }
             NotionSiteUI.updateAITargetDbOptions(cachedDatabases, cachedPages);
 
             // 加载 AI 模型选项（优先使用缓存的模型列表）
@@ -15327,7 +15329,7 @@ ${availableTools}
             });
 
             // 恢复上次选择的 tab
-            const savedTab = Storage.get(CONFIG.STORAGE_KEYS.ACTIVE_TAB, "bookmarks");
+            const savedTab = Storage.get(CONFIG.STORAGE_KEYS.ACTIVE_TAB, CONFIG.DEFAULTS.activeTab);
             const tabBtn = panel.querySelector(`.ldb-tab[data-tab="${savedTab}"]`);
             if (tabBtn) tabBtn.click();
 
@@ -16494,7 +16496,7 @@ ${availableTools}
                     (workspaceData.databases?.length > 0 || workspaceData.pages?.length > 0)) {
                     UI.updateWorkspaceSelect(workspaceData);
                 }
-            } catch {}
+            } catch { /* workspace cache invalid, will refresh */ }
 
             // 加载自动导入设置
             const savedSource = Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG.DEFAULTS.bookmarkSource);
@@ -16624,7 +16626,7 @@ ${availableTools}
             const bookmarkSource = UI.getActiveBookmarkSource();
             const hasGitHubUsername = !!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
             const hasGitHubToken = !!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "").trim();
-            const activeTab = Storage.get(CONFIG.STORAGE_KEYS.ACTIVE_TAB, "bookmarks");
+            const activeTab = Storage.get(CONFIG.STORAGE_KEYS.ACTIVE_TAB, CONFIG.DEFAULTS.activeTab);
             const updateLastResultRaw = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_LAST_RESULT, "");
             const updateLastSeenVersion = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_LAST_SEEN_VERSION, "");
             const updateLastCheckAt = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, "");
@@ -17476,7 +17478,7 @@ ${availableTools}
             const dbId = exportState.databaseId;
             const parentPageId = exportState.parentPageId;
             const exportType = exportState.targetType;
-            const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, "external");
+            const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
             const meta = GenericExtractor.extractMeta();
 
             // 根据导出类型判断是否已配置完成
@@ -17711,7 +17713,7 @@ ${availableTools}
                     databases = wsData.databases || [];
                     pages = wsData.pages || [];
                 }
-            } catch {}
+            } catch { /* workspace cache invalid */ }
 
             GenericUI.updateTargetSelectOptions(databases, pages);
 
@@ -17866,7 +17868,7 @@ ${availableTools}
             try {
                 const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
                 const exportState = TargetState.getExportState();
-                const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, "external");
+                const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
 
                 const settings = {
                     apiKey,
