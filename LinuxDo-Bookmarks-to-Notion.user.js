@@ -223,6 +223,80 @@
         },
     };
 
+    // ===========================================
+    // 文件类型支持 (Notion File Upload API)
+    // 参考: https://developers.notion.com/docs/working-with-files-and-media
+    // ===========================================
+    const SUPPORTED_FILE_TYPES = Object.freeze(new Set([
+        // Audio
+        "aac", "adts", "mid", "midi", "mp3", "mpga", "m4a", "m4b", "mp4", "oga", "ogg", "wav", "wma",
+        // Document
+        "pdf", "txt", "json", "doc", "dot", "docx", "dotx", "xls", "xlt", "xla", "xlsx", "xltx",
+        "ppt", "pot", "pps", "ppa", "pptx", "potx",
+        // Image
+        "gif", "heic", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp", "ico",
+        // Video
+        "amv", "asf", "wmv", "avi", "f4v", "flv", "gifv", "m4v", "mp4", "mkv", "webm", "mov", "qt", "mpeg",
+    ]));
+
+    const EXT_TO_MIME = Object.freeze({
+        // Audio
+        aac: "audio/aac", adts: "audio/aac", mid: "audio/midi", midi: "audio/midi",
+        mp3: "audio/mpeg", mpga: "audio/mpeg", m4a: "audio/mp4", m4b: "audio/mp4",
+        oga: "audio/ogg", ogg: "audio/ogg", wav: "audio/wav", wma: "audio/x-ms-wma",
+        // Document
+        pdf: "application/pdf", txt: "text/plain", json: "application/json",
+        doc: "application/msword", dot: "application/msword",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        dotx: "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+        xls: "application/vnd.ms-excel", xlt: "application/vnd.ms-excel", xla: "application/vnd.ms-excel",
+        xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        xltx: "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+        ppt: "application/vnd.ms-powerpoint", pot: "application/vnd.ms-powerpoint",
+        pps: "application/vnd.ms-powerpoint", ppa: "application/vnd.ms-powerpoint",
+        pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        potx: "application/vnd.openxmlformats-officedocument.presentationml.template",
+        // Image
+        gif: "image/gif", heic: "image/heic", jpeg: "image/jpeg", jpg: "image/jpeg",
+        png: "image/png", svg: "image/svg+xml", tif: "image/tiff", tiff: "image/tiff",
+        webp: "image/webp", ico: "image/vnd.microsoft.icon",
+        // Video
+        amv: "video/x-amv", asf: "video/x-ms-asf", wmv: "video/x-ms-asf",
+        avi: "video/x-msvideo", f4v: "video/x-f4v", flv: "video/x-flv",
+        m4v: "video/mp4", mp4: "video/mp4", mkv: "video/mp4",
+        webm: "video/webm", mov: "video/quicktime", qt: "video/quicktime", mpeg: "video/mpeg",
+    });
+
+    const FILE_TYPE_CATEGORY = Object.freeze({
+        aac: "audio", adts: "audio", mid: "audio", midi: "audio",
+        mp3: "audio", mpga: "audio", m4a: "audio", m4b: "audio",
+        oga: "audio", ogg: "audio", wav: "audio", wma: "audio",
+        pdf: "file", txt: "file", json: "file",
+        doc: "file", dot: "file", docx: "file", dotx: "file",
+        xls: "file", xlt: "file", xla: "file", xlsx: "file", xltx: "file",
+        ppt: "file", pot: "file", pps: "file", ppa: "file", pptx: "file", potx: "file",
+        gif: "image", heic: "image", jpeg: "image", jpg: "image", png: "image",
+        svg: "image", tif: "image", tiff: "image", webp: "image", ico: "image",
+        amv: "video", asf: "video", wmv: "video", avi: "video",
+        f4v: "video", flv: "video", gifv: "video", m4v: "video",
+        mp4: "video", mkv: "video", webm: "video", mov: "video", qt: "video", mpeg: "video",
+    });
+
+    const SUPPORTED_IMAGE_TYPES = new Set(["gif", "heic", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp", "ico"]);
+    const MULTI_PART_THRESHOLD = 20 * 1024 * 1024; // 20 MiB
+
+    function isSupportedFileType(ext) {
+        return SUPPORTED_FILE_TYPES.has((ext || "").toLowerCase());
+    }
+
+    function getMimeType(ext, fallback = "application/octet-stream") {
+        return EXT_TO_MIME[(ext || "").toLowerCase()] || fallback;
+    }
+
+    function getFileCategory(ext) {
+        return FILE_TYPE_CATEGORY[(ext || "").toLowerCase()] || "file";
+    }
+
     // 通用提示消息
     const MSG = {
         NO_NOTION_KEY: "请先填写 Notion API Key",
@@ -1329,10 +1403,86 @@
                                 image: { type: "external", external: { url: full } },
                                 _needsUpload: imgMode === "upload",
                                 _originalUrl: full,
+                                _fileType: "image",
                             });
                         }
                     }
                     return;
+                }
+
+                // 处理附件链接 (<a class="attachment">)
+                if (tag === "a" && el.classList && el.classList.contains("attachment")) {
+                    const href = el.getAttribute("href") || "";
+                    const fileName = el.textContent?.trim() || "attachment";
+                    const full = Utils.absoluteUrl(href);
+                    if (full && imgMode !== "skip") {
+                        blocks.push({
+                            type: "file",
+                            file: {
+                                type: "external",
+                                external: { url: full },
+                                caption: [{ type: "text", text: { content: fileName } }],
+                            },
+                            _needsUpload: imgMode === "upload",
+                            _originalUrl: full,
+                            _fileType: "file",
+                            _fileName: fileName,
+                        });
+                    }
+                    return;
+                }
+
+                // 处理视频元素
+                if (tag === "video") {
+                    const source = el.querySelector("source");
+                    const src = el.getAttribute("src") || source?.getAttribute("src") || "";
+                    const full = Utils.absoluteUrl(src);
+                    if (full && imgMode !== "skip") {
+                        const ext = (full.split(".").pop() || "").split("?")[0].toLowerCase();
+                        if (isSupportedFileType(ext)) {
+                            blocks.push({
+                                type: "video",
+                                video: { type: "external", external: { url: full } },
+                                _needsUpload: imgMode === "upload",
+                                _originalUrl: full,
+                                _fileType: "video",
+                            });
+                        } else {
+                            blocks.push({
+                                type: "embed",
+                                embed: { url: full },
+                            });
+                        }
+                    }
+                    return;
+                }
+
+                // 处理音频元素
+                if (tag === "audio") {
+                    const source = el.querySelector("source");
+                    const src = el.getAttribute("src") || source?.getAttribute("src") || "";
+                    const full = Utils.absoluteUrl(src);
+                    if (full && imgMode !== "skip") {
+                        blocks.push({
+                            type: "audio",
+                            audio: { type: "external", external: { url: full } },
+                            _needsUpload: imgMode === "upload",
+                            _originalUrl: full,
+                            _fileType: "audio",
+                        });
+                    }
+                    return;
+                }
+
+                // 处理 iframe 嵌入（视频/外部内容）
+                if (tag === "iframe") {
+                    const src = el.getAttribute("src") || "";
+                    if (src && (src.includes("youtube.com") || src.includes("youtu.be") ||
+                        src.includes("vimeo.com") || src.includes("bilibili.com") ||
+                        src.includes("player."))) {
+                        blocks.push({ type: "embed", embed: { url: src } });
+                        return;
+                    }
                 }
 
                 // 处理引用块
@@ -1354,7 +1504,7 @@
                         blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
                     }
 
-                    // 处理段落中的图片
+                    // 处理段落中的图片和附件
                     el.querySelectorAll("img").forEach((img) => {
                         const src = img.getAttribute("src") || "";
                         const full = Utils.absoluteUrl(src);
@@ -1365,8 +1515,29 @@
                                     image: { type: "external", external: { url: full } },
                                     _needsUpload: imgMode === "upload",
                                     _originalUrl: full,
+                                    _fileType: "image",
                                 });
                             }
+                        }
+                    });
+                    // 处理段落中的附件
+                    el.querySelectorAll("a.attachment").forEach((a) => {
+                        const href = a.getAttribute("href") || "";
+                        const fileName = a.textContent?.trim() || "attachment";
+                        const full = Utils.absoluteUrl(href);
+                        if (full && imgMode !== "skip") {
+                            blocks.push({
+                                type: "file",
+                                file: {
+                                    type: "external",
+                                    external: { url: full },
+                                    caption: [{ type: "text", text: { content: fileName } }],
+                                },
+                                _needsUpload: imgMode === "upload",
+                                _originalUrl: full,
+                                _fileType: "file",
+                                _fileName: fileName,
+                            });
                         }
                     });
                     return;
@@ -1485,6 +1656,7 @@
                                 image: { type: "external", external: { url: full } },
                                 _needsUpload: imgMode === "upload",
                                 _originalUrl: full,
+                                _fileType: "image",
                             });
                         }
                     }
@@ -1763,13 +1935,46 @@
             }
         },
 
-        // 创建文件上传
+        // 创建文件上传 (single_part ≤ 20MB)
         createFileUpload: async (filename, contentType, apiKey) => {
             return await NotionAPI.request("POST", "/file_uploads", {
                 mode: "single_part",
                 filename: filename,
                 content_type: contentType,
             }, apiKey);
+        },
+
+        // 创建多分片上传 (>20MB)
+        createMultiPartUpload: async (filename, contentType, fileSize, apiKey) => {
+            return await NotionAPI.request("POST", "/file_uploads", {
+                mode: "multi_part",
+                filename: filename,
+                content_type: contentType,
+                file_size: fileSize,
+            }, apiKey);
+        },
+
+        // 发送分片
+        sendFilePart: async (uploadId, partData, partNumber, apiKey) => {
+            return await NotionAPI.request("POST", `/file_uploads/${uploadId}/send`, {
+                data: partData,
+                part_number: partNumber,
+            }, apiKey);
+        },
+
+        // 完成多分片上传
+        completeFileUpload: async (uploadId, apiKey) => {
+            return await NotionAPI.request("POST", `/file_uploads/${uploadId}/complete`, {}, apiKey);
+        },
+
+        // 获取工作区文件大小限制
+        getWorkspaceLimits: async (apiKey) => {
+            try {
+                const user = await NotionAPI.request("GET", "/users/me", null, apiKey);
+                return user?.bot?.workspace_limits?.max_file_upload_size_in_bytes || 5 * 1024 * 1024;
+            } catch {
+                return 5 * 1024 * 1024; // 默认 5MB (Free 计划)
+            }
         },
 
         // 上传文件内容到预签名 URL
@@ -1793,7 +1998,6 @@
                         method: 'POST',
                         url: uploadUrl,
                         headers: {
-                            // 注意: 不要向 S3 预签名 URL 发送 Authorization 头
                             // 预签名 URL 已包含授权信息，发送 API Key 会造成安全泄露
                             'Content-Type': `multipart/form-data; boundary=${boundary}`,
                         },
@@ -1816,59 +2020,103 @@
             });
         },
 
-        // 下载并上传图片到 Notion（失败时回退为文件上传）
-        uploadImageToNotion: async (imageUrl, apiKey, returnDetails = false) => {
-            const uploadRemote = async (forceFileBlock = false) => {
-                // 下载图片
-                const response = await fetch(imageUrl);
-                if (!response.ok) throw new Error(`下载失败: ${response.status}`);
+        // 通用文件上传（支持所有类型：图片/视频/音频/附件）
+        // 自动判断 single_part / multi_part，自动识别 block 类型
+        uploadFileToNotion: async (fileUrl, apiKey, originalFileName = null) => {
+            const urlObj = new URL(fileUrl);
+            let ext = (urlObj.pathname.split(".").pop() || "").split("?")[0].toLowerCase();
 
-                const blob = await response.blob();
-                const urlObj = new URL(imageUrl);
-                let ext = (urlObj.pathname.split(".").pop() || "").toLowerCase();
-                const extToMime = {
-                    jpg: "image/jpeg",
-                    jpeg: "image/jpeg",
-                    png: "image/png",
-                    gif: "image/gif",
-                    webp: "image/webp",
-                    svg: "image/svg+xml",
-                    bmp: "image/bmp",
-                    ico: "image/x-icon",
-                    avif: "image/avif",
-                };
-                if (!extToMime[ext]) ext = "png";
+            // 优先使用原始文件名的扩展名
+            if (originalFileName) {
+                const origExt = originalFileName.split(".").pop()?.toLowerCase();
+                if (origExt && origExt.length <= 10 && /^[a-z0-9]+$/i.test(origExt)) {
+                    ext = origExt;
+                }
+            }
 
-                const defaultImageMime = extToMime[ext] || "image/png";
-                const contentType = forceFileBlock
-                    ? "application/octet-stream"
-                    : (blob.type || defaultImageMime);
-                const filenamePrefix = forceFileBlock ? "file" : "image";
-                const filename = `${filenamePrefix}-${Date.now()}.${ext}`;
+            // 校验扩展名格式
+            if (!ext || ext.length > 10 || !/^[a-z0-9]+$/i.test(ext)) ext = "bin";
 
-                const fileUpload = await NotionAPI.createFileUpload(filename, contentType, apiKey);
-                if (!fileUpload?.upload_url || !fileUpload?.id) throw new Error("创建上传失败");
+            // 校验文件类型是否被 Notion API 支持
+            if (!isSupportedFileType(ext)) {
+                throw new Error(`不支持的文件类型: .${ext}`);
+            }
 
-                // 上传内容到预签名 URL (不需要 API Key)
-                await NotionAPI.uploadFileContent(fileUpload.upload_url, blob, contentType, filename);
+            // 下载文件
+            const response = await fetch(fileUrl);
+            if (!response.ok) throw new Error(`下载失败: ${response.status}`);
 
-                if (!returnDetails) {
-                    return fileUpload.id;
+            const blob = await response.blob();
+            const contentType = blob.type || getMimeType(ext);
+            const category = getFileCategory(ext);
+
+            // 根据文件类型确定 block 类型和文件名前缀
+            let blockType = "image";
+            if (category === "video") blockType = "video";
+            else if (category === "audio") blockType = "audio";
+            else if (category === "file") blockType = "file";
+
+            const filename = originalFileName || `${blockType}-${Date.now()}.${ext}`;
+
+            // 大文件使用 multi_part 模式
+            if (blob.size > MULTI_PART_THRESHOLD) {
+                const multiUpload = await NotionAPI.createMultiPartUpload(
+                    filename, contentType, blob.size, apiKey
+                );
+                if (!multiUpload?.id) throw new Error("创建多分片上传失败");
+
+                const PART_SIZE = 20 * 1024 * 1024; // 每片 20MB
+                const totalParts = Math.ceil(blob.size / PART_SIZE);
+
+                for (let i = 0; i < totalParts; i++) {
+                    const start = i * PART_SIZE;
+                    const end = Math.min(start + PART_SIZE, blob.size);
+                    const partBlob = blob.slice(start, end);
+                    const partBuffer = await partBlob.arrayBuffer();
+                    const partBase64 = btoa(String.fromCharCode(...new Uint8Array(partBuffer)));
+
+                    await NotionAPI.sendFilePart(multiUpload.id, partBase64, i + 1, apiKey);
                 }
 
-                return {
-                    fileId: fileUpload.id,
-                    blockType: forceFileBlock ? "file" : "image",
-                };
-            };
+                await NotionAPI.completeFileUpload(multiUpload.id, apiKey);
+                return { fileId: multiUpload.id, blockType };
+            }
 
+            // 普通文件使用 single_part 模式
+            const typedBlob = new Blob([blob], { type: contentType });
+            const fileUpload = await NotionAPI.createFileUpload(filename, contentType, apiKey);
+            if (!fileUpload?.upload_url || !fileUpload?.id) throw new Error("创建上传失败");
+
+            await NotionAPI.uploadFileContent(fileUpload.upload_url, typedBlob, contentType, filename);
+
+            return { fileId: fileUpload.id, blockType };
+        },
+
+        // 下载并上传图片到 Notion（保留向后兼容，内部委托给 uploadFileToNotion）
+        uploadImageToNotion: async (imageUrl, apiKey, returnDetails = false) => {
             try {
-                return await uploadRemote(false);
+                const result = await NotionAPI.uploadFileToNotion(imageUrl, apiKey);
+                if (!returnDetails) return result.fileId;
+                return result;
             } catch (error) {
-                // Notion 付费套餐中图片通常受 5MB 限制，失败后回退为文件块上传
-                console.warn("[LD-Notion] 图片上传失败，尝试按文件上传:", imageUrl, error.message);
+                // 不支持的文件类型或上传失败，尝试按 file block 上传
+                if (error.message?.includes("不支持")) {
+                    console.warn("[LD-Notion] 图片类型不支持，跳过:", imageUrl);
+                    return null;
+                }
+                console.warn("[LD-Notion] 图片上传失败:", imageUrl, error.message);
                 try {
-                    return await uploadRemote(true);
+                    // 回退: 按 application/octet-stream 上传为 file block
+                    const response = await fetch(imageUrl);
+                    if (!response.ok) throw new Error(`下载失败: ${response.status}`);
+                    const blob = await response.blob();
+                    const filename = `file-${Date.now()}.bin`;
+                    const fileUpload = await NotionAPI.createFileUpload(filename, "application/octet-stream", apiKey);
+                    if (!fileUpload?.upload_url || !fileUpload?.id) throw new Error("创建上传失败");
+                    await NotionAPI.uploadFileContent(fileUpload.upload_url, blob, "application/octet-stream", filename);
+                    const result = { fileId: fileUpload.id, blockType: "file" };
+                    if (!returnDetails) return result.fileId;
+                    return result;
                 } catch (fallbackError) {
                     console.error("[LD-Notion] 文件回退上传失败:", fallbackError);
                     return null;
@@ -10139,68 +10387,122 @@ ${availableTools}
             return blocks;
         },
 
-        // 处理图片上传
-        // 注意: Notion File Upload API 返回的 file_id 需要在创建页面时使用特定格式
-        // 由于 API 限制，目前采用外链模式作为后备方案
-        processImageUploads: async (blocks, apiKey, onProgress) => {
-            const imageBlocks = blocks.filter(b => b._needsUpload && b.type === "image");
-            let processed = 0;
+        // 处理文件上传（图片、视频、音频、附件）
+        // 支持 URL 去重 + 受控并发 + 递归子 block
+        processImageUploads: async (blocks, apiKey, onProgress, _fileUrlCache) => {
+            const fileUrlCache = _fileUrlCache || new Map();
+            const pendingBlocks = [];
 
-            for (const block of imageBlocks) {
-                try {
-                    const uploadResult = await NotionAPI.uploadImageToNotion(block._originalUrl, apiKey, true);
-                    if (uploadResult?.fileId) {
-                        // Notion File Upload API 需要使用 file_upload 类型引用上传的文件
-                        // 参考: https://developers.notion.com/docs/working-with-files-and-media
-                        const blockKey = uploadResult.blockType === "file" ? "file" : "image";
-                        block[blockKey] = {
-                            type: "file_upload",
-                            file_upload: {
-                                id: uploadResult.fileId,
-                            },
-                        };
-                        if (blockKey !== "image") delete block.image;
-                        if (blockKey !== "file") delete block.file;
-                        block.type = blockKey;
-                        block._uploaded = true;
-                    } else {
-                        // 上传失败，回退到外链模式
-                        block.image = {
-                            type: "external",
-                            external: { url: block._originalUrl },
-                        };
-                        delete block.file;
-                        block.type = "image";
+            // 收集所有待上传 block（递归）
+            const collectPending = (items) => {
+                for (const block of (items || [])) {
+                    if (block._needsUpload && block._originalUrl) {
+                        pendingBlocks.push(block);
                     }
+                    // 递归子容器
+                    const containers = Exporter._getChildContainers(block);
+                    for (const c of containers) {
+                        collectPending(c.children);
+                    }
+                }
+            };
+            collectPending(blocks);
+
+            if (pendingBlocks.length === 0) return;
+
+            // 收集去重后的唯一 URL
+            const uniqueUrls = [...new Set(pendingBlocks.map(b => b._originalUrl))];
+            let uploaded = 0;
+
+            // 受控并发上传 (最多 3 个并行)
+            const CONCURRENCY = 3;
+            const uploadWithRetry = async (url) => {
+                try {
+                    const result = await NotionAPI.uploadFileToNotion(url, apiKey);
+                    fileUrlCache.set(url, result);
                 } catch (e) {
-                    console.warn("[LD-Notion] 图片上传失败，保留外链:", block._originalUrl, e.message);
-                    // 保留外链模式
-                    block.image = {
-                        type: "external",
-                        external: { url: block._originalUrl },
-                    };
-                    delete block.file;
-                    block.type = "image";
+                    console.warn("[LD-Notion] 文件上传失败:", url, e.message);
+                    fileUrlCache.set(url, null);
                 }
+                uploaded++;
+                if (onProgress) onProgress(uploaded, uniqueUrls.length);
+            };
 
-                processed++;
-                if (onProgress) onProgress(processed, imageBlocks.length);
-                await Utils.sleep(500); // 避免请求过快
-            }
-
-            // 清理临时属性
-            for (const block of blocks) {
-                delete block._needsUpload;
-                delete block._originalUrl;
-                delete block._uploaded;
-            }
-
-            // 递归处理子 blocks
-            for (const block of blocks) {
-                if (block.callout?.children) {
-                    await Exporter.processImageUploads(block.callout.children, apiKey, null);
+            for (let i = 0; i < uniqueUrls.length; i += CONCURRENCY) {
+                const batch = uniqueUrls.slice(i, i + CONCURRENCY);
+                await Promise.all(batch.map(url => {
+                    if (fileUrlCache.has(url)) {
+                        uploaded++;
+                        if (onProgress) onProgress(uploaded, uniqueUrls.length);
+                        return Promise.resolve();
+                    }
+                    return uploadWithRetry(url);
+                }));
+                if (i + CONCURRENCY < uniqueUrls.length) {
+                    await Utils.sleep(300);
                 }
             }
+
+            // 批量替换 block 引用
+            const applyUploadedRefs = (items) => {
+                for (const block of (items || [])) {
+                    if (block._needsUpload && block._originalUrl) {
+                        const uploadResult = fileUrlCache.get(block._originalUrl);
+                        if (uploadResult?.fileId) {
+                            const blockType = uploadResult.blockType || block._fileType || "image";
+                            const blockKey = blockType === "image" ? "image" : blockType === "video" ? "video" : blockType === "audio" ? "audio" : "file";
+                            block[blockKey] = { type: "file_upload", file_upload: { id: uploadResult.fileId } };
+                            // 清理其他类型的 block 属性
+                            ["image", "file", "video", "audio"].forEach(k => {
+                                if (k !== blockKey) delete block[k];
+                            });
+                            if (block._fileType === "file" && block.file?.caption) {
+                                block[blockKey].caption = block.file.caption;
+                            }
+                            block.type = blockKey;
+                            block._uploaded = true;
+                        } else {
+                            // 上传失败，回退到外链
+                            const fallbackKey = block._fileType || "image";
+                            const ext = (block._originalUrl.split(".").pop() || "").toLowerCase();
+                            const category = getFileCategory(ext);
+                            const fallbackBlockKey = category === "video" ? "video" : category === "audio" ? "audio" : fallbackKey === "file" ? "file" : "image";
+                            block[fallbackBlockKey] = {
+                                type: "external",
+                                external: { url: block._originalUrl },
+                            };
+                            if (fallbackKey === "file" && block.file?.caption) {
+                                block[fallbackBlockKey].caption = block.file.caption;
+                            }
+                            ["image", "file", "video", "audio"].forEach(k => {
+                                if (k !== fallbackBlockKey) delete block[k];
+                            });
+                            block.type = fallbackBlockKey;
+                        }
+                        delete block._needsUpload;
+                        delete block._originalUrl;
+                        delete block._uploaded;
+                        delete block._fileType;
+                        delete block._fileName;
+                    }
+                    // 递归子容器
+                    const containers = Exporter._getChildContainers(block);
+                    for (const c of containers) {
+                        applyUploadedRefs(c.children);
+                    }
+                }
+            };
+            applyUploadedRefs(blocks);
+        },
+
+        _getChildContainers: (block) => {
+            const containers = [];
+            if (block.callout?.children) containers.push(block.callout);
+            if (block.quote?.children) containers.push(block.quote);
+            if (block.synced_block?.children) containers.push(block.synced_block);
+            if (block.column_list?.children) containers.push(block.column_list);
+            if (block.toggle?.children) containers.push(block.toggle);
+            return containers;
         },
 
         // 导出单个帖子
