@@ -8525,12 +8525,13 @@ ${availableTools}
 
     // ===========================================
     const AI_WELCOME_ENTRY_POINTS = Object.freeze({
-        subtitle: "稳定支持：数据库 / 页面检索、批量分类、GitHub / 书签导入；更多能力看「帮助」",
+        subtitle: "稳定支持：数据库 / 页面检索、跨源搜索、批量分类、GitHub / 书签导入、页面摘要；更多能力看「帮助」",
         inputPlaceholder: "输入指令，如「列出所有数据库」或「导入GitHub收藏」...",
         chips: Object.freeze([
             { command: "帮助", label: "💡 帮助" },
             { command: "列出所有数据库", label: "🗂️ 数据库" },
             { command: "在工作区搜索所有页面", label: "📄 页面" },
+            { command: "跨源搜索最近收藏的帖子", label: "🔍 跨源搜索" },
             { command: "自动分类所有未分类的帖子", label: "🏷️ 分类" },
             { command: "导入GitHub收藏", label: "🐙 GitHub" },
             { command: "导入浏览器书签", label: "📖 书签" }
@@ -9632,6 +9633,8 @@ ${availableTools}
                     type: "page",
                     url: page.url || "",
                     parent: page.parent?.type || "",
+                    parentId: (page.parent?.database_id || page.parent?.page_id || "").replace(/-/g, ""),
+                parentId: (page.parent?.database_id || page.parent?.page_id || "").replace(/-/g, ""),
                 })).filter(item => item.id);
 
                 return { databases, pages };
@@ -9688,6 +9691,7 @@ ${availableTools}
                 type: "page",
                 url: page.url || "",
                 parent: page.parent?.type || "",
+                parentId: (page.parent?.database_id || page.parent?.page_id || "").replace(/-/g, ""),
             })).filter(item => item.id);
 
             const finalWorkspace = { databases, pages };
@@ -13685,25 +13689,39 @@ ${availableTools}
             return String(page?.parent?.type || "").trim();
         },
 
-        getAITargetPageParentLabel: (page) => {
+        getAITargetPageParentLabel: (page, { databases = [], pages: allPages = [] } = {}) => {
             const parentType = NotionSiteUI.getAITargetPageParentType(page);
-            if (parentType === "database_id") return "数据库条目";
-            if (parentType === "page_id") return "子页面";
+            const parentId = page?.parentId;
+            let parentName = "";
+            if (parentId) {
+                const parentDb = databases.find(db => db.id === parentId);
+                if (parentDb) parentName = parentDb.title;
+                else {
+                    const parentPage = allPages.find(p => p.id === parentId);
+                    if (parentPage) parentName = parentPage.title;
+                }
+            }
+            if (parentType === "database_id") {
+                return parentName ? "数据库「" + parentName + "」内" : "数据库条目";
+            }
+            if (parentType === "page_id") {
+                return parentName ? "页面「" + parentName + "」下" : "子页面";
+            }
             if (parentType === "block_id") return "块内页面";
             if (parentType === "workspace") return "工作区页面";
             return parentType ? "非顶级页面" : "";
         },
 
-        getAITargetPageOptionLabel: (page, { includeParentLabel = false } = {}) => {
+        getAITargetPageOptionLabel: (page, { includeParentLabel = false, databases = [], pages: allPages = [] } = {}) => {
             const title = String(page?.title || "").trim() || "未命名页面";
             const parentType = NotionSiteUI.getAITargetPageParentType(page);
-            const parentLabel = NotionSiteUI.getAITargetPageParentLabel(page);
+            const parentLabel = NotionSiteUI.getAITargetPageParentLabel(page, { databases, pages: allPages });
             const prefix = parentType === "workspace" ? "📄" : "↳";
 
             if (!includeParentLabel || !parentLabel || parentType === "workspace") {
-                return `${prefix} ${title}`;
+                return prefix + " " + title;
             }
-            return `${prefix} ${title}（${parentLabel}）`;
+            return prefix + " " + title + "（" + parentLabel + "）";
         },
 
         getAITargetCompatibilityOptionLabel: (savedValue, { storedTarget, databases = [], pages = [] } = {}) => {
@@ -13724,6 +13742,7 @@ ${availableTools}
                 if (matchedPage) {
                     return `${NotionSiteUI.getAITargetPageOptionLabel(matchedPage, {
                         includeParentLabel: NotionSiteUI.getAITargetPageParentType(matchedPage) !== "workspace",
+                        databases, pages,
                     })}（已保存）`;
                 }
                 return `已保存页面（当前列表之外，ID: ${parsedTarget.pageId.slice(0, 8)}...）`;
@@ -13747,8 +13766,7 @@ ${availableTools}
             if (!select) return;
 
             const storedTarget = TargetState.getStoredAITarget();
-            const aiTargetState = TargetState.getDisplayAITargetState();
-            const savedValue = aiTargetState.value;
+            const savedValue = storedTarget.exists ? storedTarget.state.value : "";
 
             let options = `<option value="">${Utils.escapeHtml(NotionSiteUI.getAITargetDefaultOptionLabel(databases))}</option>`;
             options += '<option value="__all__">所有工作区数据库</option>';
@@ -13779,12 +13797,12 @@ ${availableTools}
 
             const nestedPages = pages.filter(page => NotionSiteUI.getAITargetPageParentType(page) !== "workspace");
             if (nestedPages.length > 0) {
-                options += '<optgroup label="📄 非顶级页面">';
+                options += '<optgroup label="📄 嵌套页面（数据库内/子页面）">';
                 nestedPages.forEach(page => {
                     const val = `page:${page.id}`;
                     knownIds.add(val);
                     options += `<option value="${val}">${Utils.escapeHtml(
-                        NotionSiteUI.getAITargetPageOptionLabel(page, { includeParentLabel: true })
+                        NotionSiteUI.getAITargetPageOptionLabel(page, { includeParentLabel: true, databases, pages })
                     )}</option>`;
                 });
                 options += '</optgroup>';
@@ -15365,6 +15383,7 @@ ${availableTools}
                     exportTargetTip.textContent = "导出为子页面，包含完整内容";
                 } else {
                     parentPageGroup.style.display = "none";
+                    manualDbWrap.style.display = "none";
                     exportTargetTip.textContent = "导出为数据库条目，支持筛选和排序";
                 }
 
@@ -16078,6 +16097,7 @@ ${availableTools}
                         (refs.exportTargetDatabaseRadio || panel.querySelector("#ldb-export-target-database")).checked = true;
                         handleExportTargetChange({ target: { value: CONFIG.EXPORT_TARGET_TYPES.DATABASE } });
                         TargetState.setExportDatabaseId(id);
+                        UI.showStatus("已选择数据库，自动切换为数据库导出模式", "info");
                     } else if (type === "page") {
                         // 页面类型：填入父页面 ID 字段
                         (refs.parentPageIdInput || panel.querySelector("#ldb-parent-page-id")).value = id;

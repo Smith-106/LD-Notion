@@ -329,12 +329,13 @@ function assertStructuredToolResult(output, options = {}) {
     });
 }
 
-const STABLE_WELCOME_SUBTITLE = '稳定支持：数据库 / 页面检索、批量分类、GitHub / 书签导入；更多能力看「帮助」';
+const STABLE_WELCOME_SUBTITLE = '稳定支持：数据库 / 页面检索、跨源搜索、批量分类、GitHub / 书签导入、页面摘要；更多能力看「帮助」';
 const STABLE_WELCOME_PLACEHOLDER = '输入指令，如「列出所有数据库」或「导入GitHub收藏」...';
 const STABLE_WELCOME_CHIPS = [
     { command: '帮助', label: '💡 帮助' },
     { command: '列出所有数据库', label: '🗂️ 数据库' },
     { command: '在工作区搜索所有页面', label: '📄 页面' },
+    { command: '跨源搜索最近收藏的帖子', label: '🔍 跨源搜索' },
     { command: '自动分类所有未分类的帖子', label: '🏷️ 分类' },
     { command: '导入GitHub收藏', label: '🐙 GitHub' },
     { command: '导入浏览器书签', label: '📖 书签' }
@@ -1750,7 +1751,7 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
             { id: exportDb, title: 'Legacy Export DB' }
         ], []);
 
-        assert.strictEqual(select.value, exportDb);
+        assert.strictEqual(select.value, '');
         assert.ok(select.innerHTML.includes('默认（跟随导出数据库：Legacy Export DB）'), select.innerHTML);
     });
 
@@ -1791,7 +1792,7 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
         ]);
 
         assert.strictEqual(select.value, `page:${nestedPageId}`);
-        assert.ok(select.innerHTML.includes('<optgroup label="📄 非顶级页面">'), select.innerHTML);
+        assert.ok(select.innerHTML.includes('<optgroup label="📄 嵌套页面（数据库内/子页面）">'), select.innerHTML);
         assert.ok(select.innerHTML.includes('↳ 项目计划（子页面）'), select.innerHTML);
         assert.ok(select.innerHTML.includes('↳ 周报归档（数据库条目）'), select.innerHTML);
         assert.ok(!select.innerHTML.includes('已配置 (ID:'), select.innerHTML);
