@@ -1,9 +1,42 @@
+import { useRef, useCallback } from "react";
 import { useAppStore } from "../store/appStore";
+import { searchPages } from "../services/api";
 import "./SearchBar.css";
+
+const DEBOUNCE_MS = 300;
+const MIN_QUERY_LEN = 2;
 
 function SearchBar() {
   const searchQuery = useAppStore((s) => s.searchQuery);
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
+  const setSearchResults = useAppStore((s) => s.setSearchResults);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const q = e.target.value;
+      setSearchQuery(q);
+
+      if (timerRef.current) clearTimeout(timerRef.current);
+
+      if (q.trim().length < MIN_QUERY_LEN) {
+        setSearchResults([]);
+        return;
+      }
+
+      timerRef.current = setTimeout(() => {
+        searchPages(q.trim())
+          .then((results) => setSearchResults(results))
+          .catch(() => setSearchResults([]));
+      }, DEBOUNCE_MS);
+    },
+    [setSearchQuery, setSearchResults],
+  );
+
+  const handleClear = useCallback(() => {
+    setSearchQuery("");
+    setSearchResults([]);
+  }, [setSearchQuery, setSearchResults]);
 
   return (
     <div className="search-bar-container">
@@ -15,12 +48,12 @@ function SearchBar() {
         type="text"
         placeholder="搜索页面..."
         value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
+        onChange={handleChange}
       />
       {searchQuery && (
         <button
           className="search-clear-btn"
-          onClick={() => setSearchQuery("")}
+          onClick={handleClear}
           aria-label="清除搜索"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { PageTreeNode, Workspace } from "../services/api";
+import type { PageTreeNode, SearchResult, Workspace } from "../services/api";
 
 export type ThemeMode = "light" | "dark" | "auto";
 
@@ -40,6 +40,8 @@ interface AppState {
   // 搜索
   searchQuery: string;
   setSearchQuery: (query: string) => void;
+  searchResults: SearchResult[];
+  setSearchResults: (results: SearchResult[]) => void;
 
   // 当前页面
   currentPage: CurrentPage | null;
@@ -118,7 +120,9 @@ export const useAppStore = create<AppState>((set) => ({
   collapseAll: () => set({ expandedNodes: new Set() }),
 
   searchQuery: "",
-  setSearchQuery: (searchQuery) => set({ searchQuery }),
+  setSearchQuery: (searchQuery) => set({ searchQuery, ...(searchQuery === "" ? { searchResults: [] } : {}) }),
+  searchResults: [],
+  setSearchResults: (searchResults) => set({ searchResults }),
 
   currentPage: null,
   setCurrentPage: (page) => set({ currentPage: page }),

@@ -2,6 +2,7 @@ import { useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import PageTree from "./PageTree";
 import SearchBar from "./SearchBar";
+import SearchResults from "./SearchResults";
 import StatusIndicator from "./StatusIndicator";
 import { useAppStore } from "../store/appStore";
 import { useMcpStatus } from "../hooks/useMcpStatus";
@@ -20,6 +21,7 @@ function Sidebar() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const setActiveWorkspaceId = useAppStore((s) => s.setActiveWorkspaceId);
   const setPageTree = useAppStore((s) => s.setPageTree);
+  const searchResults = useAppStore((s) => s.searchResults);
   useMcpStatus();
 
   useEffect(() => {
@@ -109,7 +111,7 @@ function Sidebar() {
 
       <SearchBar />
       <div className="page-tree-wrapper">
-        <PageTree />
+        {searchResults.length > 0 ? <SearchResults /> : <PageTree />}
       </div>
       <div className="sidebar-footer">
         <StatusIndicator />
