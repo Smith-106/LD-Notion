@@ -20,5 +20,10 @@ export default defineConfig(async () => ({
     watch: {
       ignored: ["**/src-tauri/**"],
     },
+    proxy: {
+      "/api": "http://localhost:3000",
+      "/health": "http://localhost:3000",
+      "/mcp": "http://localhost:3000",
+    },
   },
 }));

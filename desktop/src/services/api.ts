@@ -1,6 +1,6 @@
 // API 客户端 — 连接 LD-Notion Hub 后端
 
-const API_BASE = "http://localhost:3000";
+const API_BASE = "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
