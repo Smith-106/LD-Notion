@@ -1,120 +1,15 @@
-import { useMemo } from "react";
-import { useAppStore, PageNode } from "../store/appStore";
+import { useEffect, useCallback, useMemo } from "react";
+import { useAppStore } from "../store/appStore";
+import {
+  getPageTree,
+  getPageContent,
+  deletePage,
+} from "../services/api";
 import "./PageTree.css";
 
-const MOCK_PAGES: PageNode[] = [
-  {
-    id: "welcome",
-    title: "欢迎使用 LD-Notion Hub",
-    children: [],
-  },
-  {
-    id: "getting-started",
-    title: "快速入门",
-    children: [
-      {
-        id: "gs-install",
-        title: "安装与配置",
-        children: [
-          { id: "gs-install-desktop", title: "桌面客户端", children: [] },
-          { id: "gs-install-browser", title: "浏览器扩展", children: [] },
-          { id: "gs-install-mcp", title: "MCP 服务配置", children: [] },
-        ],
-      },
-      {
-        id: "gs-concepts",
-        title: "核心概念",
-        children: [
-          { id: "gs-concepts-workspace", title: "工作区", children: [] },
-          { id: "gs-concepts-page", title: "页面与块", children: [] },
-          { id: "gs-concepts-graph", title: "知识图谱", children: [] },
-        ],
-      },
-    ],
-  },
-  {
-    id: "knowledge-base",
-    title: "知识库",
-    children: [
-      {
-        id: "kb-tech",
-        title: "技术笔记",
-        children: [
-          { id: "kb-tech-arch", title: "系统架构", children: [] },
-          {
-            id: "kb-tech-frontend",
-            title: "前端开发",
-            children: [
-              { id: "kb-tech-frontend-react", title: "React 最佳实践", children: [] },
-              { id: "kb-tech-frontend-css", title: "CSS 设计模式", children: [] },
-            ],
-          },
-          {
-            id: "kb-tech-backend",
-            title: "后端开发",
-            children: [
-              { id: "kb-tech-backend-rust", title: "Rust 笔记", children: [] },
-              { id: "kb-tech-backend-api", title: "API 设计", children: [] },
-            ],
-          },
-        ],
-      },
-      {
-        id: "kb-projects",
-        title: "项目文档",
-        children: [
-          { id: "kb-projects-ld-notion", title: "LD-Notion Hub", children: [] },
-          { id: "kb-projects-side", title: "辅助项目", children: [] },
-        ],
-      },
-      {
-        id: "kb-meetings",
-        title: "会议记录",
-        children: [],
-      },
-    ],
-  },
-  {
-    id: "templates",
-    title: "模板库",
-    children: [
-      { id: "tpl-daily", title: "日报模板", children: [] },
-      { id: "tpl-weekly", title: "周报模板", children: [] },
-      { id: "tpl-review", title: "复盘模板", children: [] },
-    ],
-  },
-];
-
-function flattenNodes(
-  nodes: PageNode[],
-  query: string
-): { node: PageNode; depth: number }[] {
-  const result: { node: PageNode; depth: number }[] = [];
-  const lowerQuery = query.toLowerCase();
-
-  function walk(items: PageNode[], depth: number) {
-    for (const node of items) {
-      const titleMatch = node.title.toLowerCase().includes(lowerQuery);
-      const hasMatchingChildren = query
-        ? flattenNodes(node.children, query).length > 0
-        : false;
-
-      if (!query || titleMatch || hasMatchingChildren) {
-        result.push({ node, depth });
-        if (node.children.length > 0) {
-          walk(node.children, depth + 1);
-        }
-      }
-    }
-  }
-
-  walk(nodes, 0);
-  return result;
-}
-
-function collectAllIds(nodes: PageNode[]): string[] {
+function collectAllIds(nodes: { id: string; children: any[] }[]): string[] {
   const ids: string[] = [];
-  function walk(items: PageNode[]) {
+  function walk(items: typeof nodes) {
     for (const node of items) {
       ids.push(node.id);
       walk(node.children);
@@ -125,7 +20,11 @@ function collectAllIds(nodes: PageNode[]): string[] {
 }
 
 interface TreeNodeProps {
-  node: PageNode;
+  node: {
+    id: string;
+    title: string;
+    children: any[];
+  };
   depth: number;
 }
 
@@ -134,9 +33,40 @@ function TreeNode({ node, depth }: TreeNodeProps) {
   const toggleNode = useAppStore((s) => s.toggleNode);
   const currentPage = useAppStore((s) => s.currentPage);
   const setCurrentPage = useAppStore((s) => s.setCurrentPage);
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const setPageTree = useAppStore((s) => s.setPageTree);
   const isExpanded = expandedNodes.has(node.id);
   const hasChildren = node.children.length > 0;
   const isActive = currentPage?.id === node.id;
+
+  const handleSelect = useCallback(async () => {
+    try {
+      const content = await getPageContent(node.id);
+      setCurrentPage({ id: node.id, title: content.title, body: content.body, saved: true });
+    } catch {
+      setCurrentPage({ id: node.id, title: node.title, body: "", saved: true });
+    }
+  }, [node.id, node.title, setCurrentPage]);
+
+  const handleDelete = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!confirm(`删除页面「${node.title}」？`)) return;
+      try {
+        await deletePage(node.id);
+        if (activeWorkspaceId) {
+          const tree = await getPageTree(activeWorkspaceId);
+          setPageTree(tree);
+        }
+        if (currentPage?.id === node.id) {
+          setCurrentPage(null);
+        }
+      } catch (err) {
+        alert(`删除失败: ${err}`);
+      }
+    },
+    [node.id, node.title, activeWorkspaceId, currentPage, setPageTree, setCurrentPage],
+  );
 
   return (
     <div className="tree-node-container">
@@ -146,12 +76,15 @@ function TreeNode({ node, depth }: TreeNodeProps) {
         role="treeitem"
         aria-expanded={hasChildren ? isExpanded : undefined}
         aria-selected={isActive}
-        onClick={() => setCurrentPage({ id: node.id, title: node.title, body: "" })}
+        onClick={handleSelect}
       >
         {hasChildren ? (
           <button
             className="tree-node-chevron"
-            onClick={() => toggleNode(node.id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleNode(node.id);
+            }}
             aria-label={isExpanded ? "折叠" : "展开"}
           >
             <svg
@@ -185,14 +118,20 @@ function TreeNode({ node, depth }: TreeNodeProps) {
             </svg>
           ) : (
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path
-                d="M3 2h10l-5 8-5-8z"
-                opacity="0.4"
-              />
+              <path d="M3 2h10l-5 8-5-8z" opacity="0.4" />
             </svg>
           )}
         </span>
         <span className="tree-node-label">{node.title}</span>
+        <button
+          className="tree-node-delete"
+          onClick={handleDelete}
+          title="删除页面"
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M4.28 3.22a.75.75 0 00-1.06 1.06L6.94 8l-3.72 3.72a.75.75 0 101.06 1.06L8 9.06l3.72 3.72a.75.75 0 101.06-1.06L9.06 8l3.72-3.72a.75.75 0 00-1.06-1.06L8 6.94 4.28 3.22z" />
+          </svg>
+        </button>
       </div>
       {hasChildren && isExpanded && (
         <div className="tree-node-children" role="group">
@@ -208,27 +147,50 @@ function TreeNode({ node, depth }: TreeNodeProps) {
 function PageTree() {
   const searchQuery = useAppStore((s) => s.searchQuery);
   const expandAll = useAppStore((s) => s.expandAll);
+  const pageTree = useAppStore((s) => s.pageTree);
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const setPageTree = useAppStore((s) => s.setPageTree);
 
-  const filteredNodes = useMemo(
-    () => flattenNodes(MOCK_PAGES, searchQuery),
-    [searchQuery]
-  );
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      setPageTree([]);
+      return;
+    }
+    getPageTree(activeWorkspaceId)
+      .then((tree) => setPageTree(tree))
+      .catch(() => setPageTree([]));
+  }, [activeWorkspaceId, setPageTree]);
+
+  const filteredNodes = useMemo(() => {
+    if (!searchQuery) return pageTree;
+    const lower = searchQuery.toLowerCase();
+    function filter(nodes: typeof pageTree): typeof pageTree {
+      return nodes
+        .map((n) => ({ ...n, children: filter(n.children) }))
+        .filter(
+          (n) =>
+            n.title.toLowerCase().includes(lower) || n.children.length > 0,
+        );
+    }
+    return filter(pageTree);
+  }, [pageTree, searchQuery]);
 
   const handleExpandAll = () => {
-    if (searchQuery) {
-      const visibleIds = filteredNodes
-        .filter(({ node }) => node.children.length > 0)
-        .map(({ node }) => node.id);
-      expandAll(visibleIds);
-    } else {
-      expandAll(collectAllIds(MOCK_PAGES));
-    }
+    expandAll(collectAllIds(filteredNodes));
   };
+
+  if (!activeWorkspaceId) {
+    return (
+      <div className="page-tree-empty">
+        <p>请先选择或创建工作区</p>
+      </div>
+    );
+  }
 
   if (filteredNodes.length === 0) {
     return (
       <div className="page-tree-empty">
-        <p>未找到匹配的页面</p>
+        <p>{searchQuery ? "未找到匹配的页面" : "暂无页面，点击 + 创建"}</p>
       </div>
     );
   }
@@ -243,8 +205,8 @@ function PageTree() {
           </button>
         </div>
       )}
-      {filteredNodes.map(({ node, depth }) => (
-        <TreeNode key={node.id} node={node} depth={depth} />
+      {filteredNodes.map((node) => (
+        <TreeNode key={node.id} node={node} depth={0} />
       ))}
     </div>
   );

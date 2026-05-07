@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useAppStore } from "../store/appStore";
 
-const MCP_HEALTH_URL = "http://localhost:9876/health";
+const MCP_HEALTH_URL = "http://localhost:3000/health";
 const POLL_INTERVAL_MS = 10_000;
 
 export function useMcpStatus() {

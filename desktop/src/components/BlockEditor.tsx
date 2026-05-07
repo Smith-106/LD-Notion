@@ -8,15 +8,17 @@ import { common, createLowlight } from "lowlight";
 import { Markdown as tiptapMarkdown } from "tiptap-markdown";
 import { useEffect, useCallback, useRef } from "react";
 import { useAppStore } from "../store/appStore";
+import { updatePageContent } from "../services/api";
 import "./BlockEditor.css";
 
 const lowlight = createLowlight(common);
 
-const SAVE_DEBOUNCE_MS = 800;
+const SAVE_DEBOUNCE_MS = 1200;
 
 export default function BlockEditor() {
   const currentPage = useAppStore((s) => s.currentPage);
   const setCurrentPageContent = useAppStore((s) => s.setCurrentPageContent);
+  const setCurrentPageSaved = useAppStore((s) => s.setCurrentPageSaved);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const editor = useEditor({
@@ -42,6 +44,12 @@ export default function BlockEditor() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const md = (editor.storage as any).markdown.getMarkdown();
         setCurrentPageContent(md);
+        if (currentPage?.id) {
+          updatePageContent(currentPage.id, md).then(
+            () => setCurrentPageSaved(true),
+            () => {},
+          );
+        }
       }, SAVE_DEBOUNCE_MS);
     },
   });
@@ -69,10 +77,14 @@ export default function BlockEditor() {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const md = (editor.storage as any).markdown.getMarkdown();
           setCurrentPageContent(md);
+          updatePageContent(currentPage.id, md).then(
+            () => setCurrentPageSaved(true),
+            () => {},
+          );
         }
       }
     },
-    [editor, currentPage, setCurrentPageContent],
+    [editor, currentPage, setCurrentPageContent, setCurrentPageSaved],
   );
 
   if (!currentPage) {
@@ -87,7 +99,7 @@ export default function BlockEditor() {
           </div>
           <h1 className="editor-welcome-title">欢迎使用 LD-Notion Hub</h1>
           <p className="editor-welcome-desc">
-            从左侧页面树中选择一个页面开始编辑，或创建新页面。
+            从左侧选择或创建工作区，然后选择页面开始编辑。
           </p>
         </div>
       </div>

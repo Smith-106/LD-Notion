@@ -1,35 +1,51 @@
 import { create } from "zustand";
+import type { PageTreeNode, Workspace } from "../services/api";
 
 export type ThemeMode = "light" | "dark" | "auto";
 
-export interface PageNode {
-  id: string;
-  title: string;
-  children: PageNode[];
-}
+export type MCPStatus = "connected" | "disconnected" | "error";
 
 export interface CurrentPage {
   id: string;
   title: string;
   body: string;
+  saved: boolean;
 }
 
-export type MCPStatus = "connected" | "disconnected" | "error";
-
 interface AppState {
+  // 主题
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
+
+  // MCP 状态
   mcpStatus: MCPStatus;
   setMcpStatus: (status: MCPStatus) => void;
+
+  // 工作区
+  workspaces: Workspace[];
+  setWorkspaces: (workspaces: Workspace[]) => void;
+  activeWorkspaceId: string | null;
+  setActiveWorkspaceId: (id: string | null) => void;
+
+  // 页面树
+  pageTree: PageTreeNode[];
+  setPageTree: (tree: PageTreeNode[]) => void;
+
+  // 展开状态
   expandedNodes: Set<string>;
   toggleNode: (nodeId: string) => void;
   expandAll: (nodeIds: string[]) => void;
   collapseAll: () => void;
+
+  // 搜索
   searchQuery: string;
   setSearchQuery: (query: string) => void;
+
+  // 当前页面
   currentPage: CurrentPage | null;
   setCurrentPage: (page: CurrentPage | null) => void;
   setCurrentPageContent: (body: string) => void;
+  setCurrentPageSaved: (saved: boolean) => void;
 }
 
 function loadTheme(): ThemeMode {
@@ -42,6 +58,14 @@ function loadTheme(): ThemeMode {
     // localStorage 不可用时忽略
   }
   return "auto";
+}
+
+function loadActiveWorkspaceId(): string | null {
+  try {
+    return localStorage.getItem("ldb-active-workspace");
+  } catch {
+    return null;
+  }
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -57,6 +81,22 @@ export const useAppStore = create<AppState>((set) => ({
 
   mcpStatus: "disconnected",
   setMcpStatus: (mcpStatus) => set({ mcpStatus }),
+
+  workspaces: [],
+  setWorkspaces: (workspaces) => set({ workspaces }),
+  activeWorkspaceId: loadActiveWorkspaceId(),
+  setActiveWorkspaceId: (id) => {
+    try {
+      if (id) localStorage.setItem("ldb-active-workspace", id);
+      else localStorage.removeItem("ldb-active-workspace");
+    } catch {
+      // ignore
+    }
+    set({ activeWorkspaceId: id, currentPage: null });
+  },
+
+  pageTree: [],
+  setPageTree: (pageTree) => set({ pageTree }),
 
   expandedNodes: new Set<string>(),
   toggleNode: (nodeId) =>
@@ -85,6 +125,11 @@ export const useAppStore = create<AppState>((set) => ({
   setCurrentPageContent: (body) =>
     set((state) => {
       if (!state.currentPage) return state;
-      return { currentPage: { ...state.currentPage, body } };
+      return { currentPage: { ...state.currentPage, body, saved: false } };
+    }),
+  setCurrentPageSaved: (saved) =>
+    set((state) => {
+      if (!state.currentPage) return state;
+      return { currentPage: { ...state.currentPage, saved } };
     }),
 }));
