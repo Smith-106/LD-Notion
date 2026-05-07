@@ -16260,6 +16260,10 @@ ${availableTools}
                         } catch (e) {
                             results.failed.push({ bookmark, error: e.message });
                         }
+                        // 帖子间延迟，避免速率限制
+                        if (i < selected.length - 1) {
+                            await Utils.sleep(300);
+                        }
                     }
 
                     UI.hideProgress();
