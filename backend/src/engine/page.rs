@@ -16,7 +16,9 @@ pub fn create(
 ) -> Result<Page, Box<dyn std::error::Error>> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
-    let slug = title_to_slug(title);
+    let slug_base = title_to_slug(title);
+    let short_id = &id[..8];
+    let slug = format!("{}-{}", slug_base, short_id);
     let file_path = format!("{}.md", slug);
 
     // 确定 sort_order
@@ -142,12 +144,34 @@ pub fn update_content(
     Ok(())
 }
 
-/// 删除页面
+/// 删除页面（级联删除所有子页面）
 pub fn delete(conn: &Connection, id: &str, ws_root: &Path) -> Result<bool, Box<dyn std::error::Error>> {
     if let Some(page) = find(conn, id)? {
+        // 收集所有后代页面 ID
+        let descendants: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT descendant_id FROM page_tree WHERE ancestor_id = ?1 AND depth > 0",
+            )?;
+            let rows = stmt.query_map([id], |row| row.get::<_, String>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+
+        // 删除所有后代
+        for desc_id in &descendants {
+            if let Some(child) = find(conn, desc_id)? {
+                let full_path = ws_root.join(&child.file_path);
+                let _ = std::fs::remove_file(full_path);
+            }
+            conn.execute("DELETE FROM fts_index WHERE page_id = ?1", [desc_id])?;
+            conn.execute("DELETE FROM pages WHERE id = ?1", [desc_id])?;
+        }
+
+        // 删除自身
         let full_path = ws_root.join(&page.file_path);
         let _ = std::fs::remove_file(full_path);
-        conn.execute("DELETE FROM page_tree WHERE descendant_id = ?1", [id])?;
+
+        // 删除所有树关系（以 id 为祖先或后代的）
+        conn.execute("DELETE FROM page_tree WHERE ancestor_id = ?1 OR descendant_id = ?1", [id])?;
         conn.execute("DELETE FROM fts_index WHERE page_id = ?1", [id])?;
         conn.execute("DELETE FROM pages WHERE id = ?1", [id])?;
         Ok(true)

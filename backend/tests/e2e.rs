@@ -204,7 +204,7 @@ async fn e2e_page_tree_hierarchy() {
     let (_, body) = send(&app, get_uri(&format!("/api/workspaces/{}/tree", ws_id))).await;
     assert_eq!(body["ok"], true);
     let tree = body["data"].as_array().unwrap();
-    assert!(tree.len() >= 1);
+    assert!(!tree.is_empty());
 
     // MCP: page/list 验证树结构
     let mcp_req = Request::builder()
