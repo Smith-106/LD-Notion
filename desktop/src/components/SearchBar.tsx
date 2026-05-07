@@ -1,4 +1,4 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import { useAppStore } from "../store/appStore";
 import { searchPages } from "../services/api";
 import "./SearchBar.css";
@@ -37,6 +37,12 @@ function SearchBar() {
     setSearchQuery("");
     setSearchResults([]);
   }, [setSearchQuery, setSearchResults]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   return (
     <div className="search-bar-container">

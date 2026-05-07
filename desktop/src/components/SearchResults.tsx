@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useAppStore } from "../store/appStore";
 import { getPageContent } from "../services/api";
 import "./SearchResults.css";
@@ -9,16 +10,19 @@ function SearchResults() {
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
   const setSearchResults = useAppStore((s) => s.setSearchResults);
 
-  const handleSelect = async (pageId: string, title: string) => {
-    try {
-      const content = await getPageContent(pageId);
-      setCurrentPage({ id: pageId, title: content.title, body: content.body, saved: true });
-    } catch {
-      setCurrentPage({ id: pageId, title, body: "", saved: true });
-    }
-    setSearchQuery("");
-    setSearchResults([]);
-  };
+  const handleSelect = useCallback(
+    async (pageId: string, title: string) => {
+      try {
+        const content = await getPageContent(pageId);
+        setCurrentPage({ id: pageId, title: content.title, body: content.body, saved: true });
+      } catch {
+        setCurrentPage({ id: pageId, title, body: "", saved: true });
+      }
+      setSearchQuery("");
+      setSearchResults([]);
+    },
+    [setCurrentPage, setSearchQuery, setSearchResults],
+  );
 
   if (!searchQuery || searchResults.length === 0) return null;
 
