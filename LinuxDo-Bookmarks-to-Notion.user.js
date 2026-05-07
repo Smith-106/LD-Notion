@@ -16151,6 +16151,12 @@ ${availableTools}
 
                 try {
                     for (let i = 0; i < selected.length; i++) {
+                        if (Exporter.isCancelled) break;
+                        while (Exporter.isPaused) {
+                            await Utils.sleep(200);
+                            if (Exporter.isCancelled) break;
+                        }
+                        if (Exporter.isCancelled) break;
                         const bookmark = selected[i];
                         const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
 
