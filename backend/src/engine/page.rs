@@ -140,8 +140,8 @@ pub fn update_content(
     });
     content.body = body.to_string();
     content.updated = now.clone();
+    // 先写文件，再更新 DB — 文件写入失败时两者都不变（内容安全优先于时间戳准确）
     markdown_io::write(&full_path, &content)?;
-
     conn.execute(
         "UPDATE pages SET updated_at = ?1 WHERE id = ?2",
         params![&now, id],
@@ -161,13 +161,18 @@ pub fn delete(conn: &Connection, id: &str, ws_root: &Path) -> Result<bool, Box<d
             rows.filter_map(std::result::Result::ok).collect()
         };
 
-        // 删除所有后代
+        // 阶段 1: 删除所有 page_tree 关系（必须在删除 pages 之前，避免 FK 约束失败）
+        for desc_id in &descendants {
+            conn.execute("DELETE FROM page_tree WHERE descendant_id = ?1", [desc_id])?;
+        }
+        conn.execute("DELETE FROM page_tree WHERE ancestor_id = ?1 OR descendant_id = ?1", [id])?;
+
+        // 阶段 2: 删除搜索索引和页面记录 + 文件
         for desc_id in &descendants {
             if let Some(child) = find(conn, desc_id)? {
                 let full_path = ws_root.join(&child.file_path);
                 let _ = std::fs::remove_file(full_path);
             }
-            conn.execute("DELETE FROM page_tree WHERE descendant_id = ?1", [desc_id])?;
             conn.execute("DELETE FROM fts_index WHERE page_id = ?1", [desc_id])?;
             conn.execute("DELETE FROM pages WHERE id = ?1", [desc_id])?;
         }
@@ -175,9 +180,6 @@ pub fn delete(conn: &Connection, id: &str, ws_root: &Path) -> Result<bool, Box<d
         // 删除自身
         let full_path = ws_root.join(&page.file_path);
         let _ = std::fs::remove_file(full_path);
-
-        // 删除所有树关系（以 id 为祖先或后代的）
-        conn.execute("DELETE FROM page_tree WHERE ancestor_id = ?1 OR descendant_id = ?1", [id])?;
         conn.execute("DELETE FROM fts_index WHERE page_id = ?1", [id])?;
         conn.execute("DELETE FROM pages WHERE id = ?1", [id])?;
         Ok(true)

@@ -223,6 +223,64 @@ async fn e2e_page_tree_hierarchy() {
 }
 
 #[tokio::test]
+async fn e2e_cascade_delete_deep_hierarchy() {
+    let app = make_app();
+
+    let (_, body) = send(&app, post_json("/api/workspaces", &json!({"name": "级联删除测试"}))).await;
+    let ws_id = body["data"]["id"].as_str().unwrap();
+
+    // 创建三层嵌套: 根 → 子 → 孙
+    let (_, body) = send(
+        &app,
+        post_json("/api/pages", &json!({"workspace_id": ws_id, "title": "根页面"})),
+    )
+    .await;
+    let root_id = body["data"]["id"].as_str().unwrap();
+
+    let (_, body) = send(
+        &app,
+        post_json("/api/pages", &json!({
+            "workspace_id": ws_id,
+            "parent_id": root_id,
+            "title": "子页面"
+        })),
+    )
+    .await;
+    let child_id = body["data"]["id"].as_str().unwrap();
+
+    let (_, body) = send(
+        &app,
+        post_json("/api/pages", &json!({
+            "workspace_id": ws_id,
+            "parent_id": child_id,
+            "title": "孙页面"
+        })),
+    )
+    .await;
+    let grandchild_id = body["data"]["id"].as_str().unwrap();
+
+    // 写入内容
+    send(
+        &app,
+        put_json(&format!("/api/pages/{grandchild_id}/content"), &json!({"body": "孙页面内容"})),
+    )
+    .await;
+
+    // 删除根页面（应级联删除所有后代）
+    let (status, body) = send(&app, delete_uri(&format!("/api/pages/{root_id}"))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+
+    // 验证子页面已删除
+    let (_, body) = send(&app, get_uri(&format!("/api/pages/{child_id}"))).await;
+    assert_eq!(body["ok"], false);
+
+    // 验证孙页面已删除
+    let (_, body) = send(&app, get_uri(&format!("/api/pages/{grandchild_id}"))).await;
+    assert_eq!(body["ok"], false);
+}
+
+#[tokio::test]
 async fn e2e_search_and_or_modes() {
     let app = make_app();
 

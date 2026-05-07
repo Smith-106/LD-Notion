@@ -31,8 +31,22 @@ impl Config {
     }
 
     /// 获取完整的监听地址
-    #[must_use] 
+    #[must_use]
     pub fn bind_address(&self) -> String {
         format!("{}:{}", self.host, self.port)
+    }
+
+    /// 验证配置合法性
+    pub fn validate(&self) -> Result<(), String> {
+        if self.port == 0 {
+            return Err("端口号不能为 0".to_string());
+        }
+        if self.database_path.as_os_str().is_empty() {
+            return Err("数据库路径不能为空".to_string());
+        }
+        if self.storage_root.as_os_str().is_empty() {
+            return Err("存储根目录不能为空".to_string());
+        }
+        Ok(())
     }
 }

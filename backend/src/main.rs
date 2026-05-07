@@ -14,6 +14,7 @@ async fn main() {
         .init();
 
     let cfg = config::Config::from_env();
+    cfg.validate().expect("配置验证失败");
 
     let conn = db::initialize(&cfg.database_path, &cfg.storage_root)
         .expect("数据库初始化失败");
