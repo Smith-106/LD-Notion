@@ -2778,7 +2778,7 @@
             const date = post.created_at
                 ? new Date(post.created_at).toLocaleString("zh-CN")
                 : "未知时间";
-            const header = `#${postNum} ${username} (@${post.username || ""})${isOp ? " 楼主" : ""} · ${date}`;
+            const header = `#${postNum} ${username}${post.username ? ` (@${post.username})` : ""}${isOp ? " 楼主" : ""} · ${date}`;
             const content = HTMLToMarkdown.convert(post.cooked || "");
             const lines = content.trim().split("\n");
             const quoted = lines.map((l) => `> ${l}`).join("\n");
