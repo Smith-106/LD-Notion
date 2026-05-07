@@ -2854,21 +2854,6 @@
         htmlToBlocks: (html) => {
             return DOMToNotion.cookedToBlocks(html);
         },
-
-        buildProperties: (content) => {
-            const props = {
-                title: {
-                    title: [{ text: { content: content.title || "知乎内容" } }],
-                },
-            };
-            if (content.author) {
-                props["来源"] = { rich_text: [{ text: { content: `知乎 - ${content.author}` } }] };
-            }
-            if (content.type) {
-                props["类型"] = { select: { name: content.type === "answer" ? "回答" : content.type === "article" ? "文章" : "问题" } };
-            }
-            return props;
-        },
     };
 
     // ===========================================
