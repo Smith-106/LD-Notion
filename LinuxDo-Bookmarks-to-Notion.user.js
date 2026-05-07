@@ -2070,11 +2070,21 @@
                 throw new Error(`不支持的文件类型: .${ext}`);
             }
 
-            // 下载文件
-            const response = await fetch(fileUrl);
-            if (!response.ok) throw new Error(`下载失败: ${response.status}`);
-
-            const blob = await response.blob();
+            // 下载文件（使用 GM_xmlhttpRequest 避免 CORS 限制）
+            const blob = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "GET",
+                    url: fileUrl,
+                    responseType: "blob",
+                    timeout: 60000,
+                    onload: (r) => {
+                        if (r.status >= 200 && r.status < 300) resolve(r.response);
+                        else reject(new Error(`下载失败: ${r.status}`));
+                    },
+                    onerror: (e) => reject(new Error(`下载失败: ${e}`)),
+                    ontimeout: () => reject(new Error("下载超时")),
+                });
+            });
             const contentType = blob.type || getMimeType(ext);
             const category = getFileCategory(ext);
 
@@ -2100,8 +2110,14 @@
                     const start = i * PART_SIZE;
                     const end = Math.min(start + PART_SIZE, blob.size);
                     const partBlob = blob.slice(start, end);
-                    const partBuffer = await partBlob.arrayBuffer();
-                    const partBase64 = btoa(String.fromCharCode(...new Uint8Array(partBuffer)));
+                    const partBase64 = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                            const dataUrl = reader.result;
+                            resolve(dataUrl.split(",")[1]);
+                        };
+                        reader.readAsDataURL(partBlob);
+                    });
 
                     await NotionAPI.sendFilePart(multiUpload.id, partBase64, i + 1, apiKey);
                 }
@@ -2135,9 +2151,20 @@
                 console.warn("[LD-Notion] 图片上传失败:", imageUrl, error.message);
                 try {
                     // 回退: 按 application/octet-stream 上传为 file block
-                    const response = await fetch(imageUrl);
-                    if (!response.ok) throw new Error(`下载失败: ${response.status}`);
-                    const blob = await response.blob();
+                    const blob = await new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                            method: "GET",
+                            url: imageUrl,
+                            responseType: "blob",
+                            timeout: 60000,
+                            onload: (r) => {
+                                if (r.status >= 200 && r.status < 300) resolve(r.response);
+                                else reject(new Error(`下载失败: ${r.status}`));
+                            },
+                            onerror: (e) => reject(new Error(`下载失败: ${e}`)),
+                            ontimeout: () => reject(new Error("下载超时")),
+                        });
+                    });
                     const filename = `file-${Date.now()}.bin`;
                     const fileUpload = await NotionAPI.createFileUpload(filename, "application/octet-stream", apiKey);
                     if (!fileUpload?.upload_url || !fileUpload?.id) throw new Error("创建上传失败");
@@ -2727,14 +2754,15 @@
 
         buildFrontmatter: (meta) => {
             const lines = ["---"];
-            if (meta.title) lines.push(`title: "${meta.title.replace(/"/g, '\\"')}"`);
-            if (meta.url) lines.push(`url: "${meta.url}"`);
-            if (meta.author) lines.push(`author: "${meta.author}"`);
+            const esc = (s) => String(s || "").replace(/"/g, '\\"');
+            if (meta.title) lines.push(`title: "${esc(meta.title)}"`);
+            if (meta.url) lines.push(`url: "${esc(meta.url)}"`);
+            if (meta.author) lines.push(`author: "${esc(meta.author)}"`);
             if (meta.topicId) lines.push(`topic_id: ${meta.topicId}`);
-            if (meta.category) lines.push(`category: "${meta.category}"`);
+            if (meta.category) lines.push(`category: "${esc(meta.category)}"`);
             if (meta.tags && meta.tags.length > 0) {
                 lines.push("tags:");
-                meta.tags.forEach((t) => lines.push(`  - "${t}"`));
+                meta.tags.forEach((t) => lines.push(`  - "${esc(t)}"`));
             }
             lines.push(`export_time: "${new Date().toISOString()}"`);
             if (meta.floors !== undefined) lines.push(`floors: ${meta.floors}`);
@@ -10409,6 +10437,14 @@ ${availableTools}
                 blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG.DEFAULTS.imgMode);
             }
 
+            // 确保有内容
+            if (!blocks || blocks.length === 0) {
+                blocks = [{
+                    type: "paragraph",
+                    paragraph: { rich_text: [{ type: "text", text: { content: meta.url } }] },
+                }];
+            }
+
             // 添加来源信息头
             blocks.unshift({
                 type: "callout",
@@ -16210,8 +16246,10 @@ ${availableTools}
                                                 method: "GET",
                                                 url: img.url,
                                                 responseType: "blob",
+                                                timeout: 30000,
                                                 onload: (r) => resolve(r.response),
                                                 onerror: (e) => reject(e),
+                                                ontimeout: () => reject(new Error("图片下载超时")),
                                             });
                                         });
                                         const imgResult = await ObsidianAPI.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType(ext));
@@ -16234,8 +16272,10 @@ ${availableTools}
                                                 method: "GET",
                                                 url: match[2],
                                                 responseType: "blob",
+                                                timeout: 30000,
                                                 onload: (r) => resolve(r),
                                                 onerror: (e) => reject(e),
+                                                ontimeout: () => reject(new Error("图片下载超时")),
                                             });
                                         });
                                         const b64 = await new Promise((resolve) => {
