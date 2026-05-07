@@ -17,6 +17,8 @@ pub fn initialize(database_path: &Path, storage_root: &Path) -> Result<Connectio
 
     // 启用 WAL 模式以提升并发读取性能
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+    // 启用外键约束以维护数据完整性
+    conn.execute_batch("PRAGMA foreign_keys=ON;")?;
 
     // 执行 schema 迁移脚本
     let schema_sql = include_str!("schema.sql");

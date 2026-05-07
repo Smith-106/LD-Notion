@@ -65,13 +65,31 @@ pub fn find(conn: &Connection, id: &str) -> Result<Option<Workspace>, Box<dyn st
     }
 }
 
-/// 删除工作区（及其所有页面记录）
-pub fn delete(conn: &Connection, id: &str) -> Result<bool, Box<dyn std::error::Error>> {
-    // 先获取 root_path 以删除文件
-    if let Some(ws) = find(conn, id)? {
-        let _ = fs::remove_dir_all(&ws.root_path);
+/// 删除工作区（及其所有页面记录和 Markdown 文件）
+pub fn delete(conn: &Connection, id: &str, storage_root: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    // 先获取 root_path 以删除空的工作区目录
+    let ws = find(conn, id)?;
+
+    // 删除该工作区下所有页面的 Markdown 文件
+    let file_paths: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT file_path FROM pages WHERE workspace_id = ?1",
+        )?;
+        let rows = stmt.query_map([id], |row| row.get::<_, String>(0))?;
+        rows.filter_map(std::result::Result::ok).collect()
+    };
+    for fp in &file_paths {
+        let full_path = storage_root.join(fp);
+        let _ = fs::remove_file(full_path);
     }
-    // 删除关联页面和树
+
+    if let Some(ws) = ws {
+        if !ws.root_path.is_empty() {
+            let _ = fs::remove_dir_all(&ws.root_path);
+        }
+    }
+
+    // 删除关联页面树、索引、页面记录
     conn.execute("DELETE FROM page_tree WHERE descendant_id IN (SELECT id FROM pages WHERE workspace_id = ?1)", [id])?;
     conn.execute("DELETE FROM fts_index WHERE page_id IN (SELECT id FROM pages WHERE workspace_id = ?1)", [id])?;
     conn.execute("DELETE FROM pages WHERE workspace_id = ?1", [id])?;

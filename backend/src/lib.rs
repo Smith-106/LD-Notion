@@ -89,7 +89,7 @@ pub async fn delete_workspace(
     Path(id): Path<String>,
 ) -> Json<Value> {
     let conn = state.db.lock().await;
-    match engine::workspace::delete(&conn, &id) {
+    match engine::workspace::delete(&conn, &id, &state.config.storage_root) {
         Ok(removed) => Json(json!({"ok": true, "removed": removed})),
         Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
     }

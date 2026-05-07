@@ -18,7 +18,11 @@ pub fn create(
     let now = chrono::Utc::now().to_rfc3339();
     let slug_base = title_to_slug(title);
     let short_id = &id[..8];
-    let slug = format!("{slug_base}-{short_id}");
+    let slug = if slug_base.is_empty() {
+        short_id.to_string()
+    } else {
+        format!("{slug_base}-{short_id}")
+    };
     let file_path = format!("{slug}.md");
 
     // 确定 sort_order

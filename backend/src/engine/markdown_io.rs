@@ -59,7 +59,7 @@ fn parse(content: &str) -> MarkdownContent {
     for line in frontmatter.lines() {
         let line = line.trim();
         if let Some(val) = line.strip_prefix("title:") {
-            title = val.trim().trim_matches('"').to_string();
+            title = val.trim().trim_matches('"').replace("\\\"", "\"").to_string();
         } else if let Some(val) = line.strip_prefix("tags:") {
             let val = val.trim();
             if val.starts_with('[') && val.ends_with(']') {
@@ -84,12 +84,14 @@ fn serialize(content: &MarkdownContent) -> String {
     let tags_str = if content.tags.is_empty() {
         "[]".to_string()
     } else {
-        format!("[{}]", content.tags.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", "))
+        format!("[{}]", content.tags.iter().map(|t| format!("\"{}\"", t.replace('"', "\\\""))).collect::<Vec<_>>().join(", "))
     };
+
+    let escaped_title = content.title.replace('"', "\\\"");
 
     format!(
         "---\ntitle: \"{}\"\ntags: {}\ncreated: {}\nupdated: {}\n---\n{}",
-        content.title, tags_str, content.created, content.updated, content.body
+        escaped_title, tags_str, content.created, content.updated, content.body
     )
 }
 
@@ -120,5 +122,20 @@ mod tests {
         assert_eq!(parsed.title, original.title);
         assert_eq!(parsed.tags, original.tags);
         assert_eq!(parsed.body, original.body);
+    }
+
+    #[test]
+    fn test_roundtrip_quoted_title() {
+        let original = MarkdownContent {
+            title: r#"Hello "World" Test"#.to_string(),
+            tags: vec![],
+            created: "2026-01-01".to_string(),
+            updated: "2026-01-01".to_string(),
+            body: "内容".to_string(),
+        };
+        let serialized = serialize(&original);
+        assert!(serialized.contains(r#"Hello \"World\" Test"#));
+        let parsed = parse(&serialized);
+        assert_eq!(parsed.title, original.title);
     }
 }

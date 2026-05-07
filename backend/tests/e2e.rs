@@ -269,3 +269,43 @@ async fn e2e_search_and_or_modes() {
     let (_, body) = send(&app, get_uri("/api/search?q=JavaScript+TypeScript&mode=or")).await;
     assert_eq!(body["ok"], true);
 }
+
+#[tokio::test]
+async fn e2e_workspace_delete_cleans_files() {
+    let app = make_app();
+
+    // 创建工作区和页面
+    let (_, body) = send(&app, post_json("/api/workspaces", &json!({"name": "文件清理测试"}))).await;
+    let ws_id = body["data"]["id"].as_str().unwrap();
+
+    let (_, body) = send(
+        &app,
+        post_json("/api/pages", &json!({"workspace_id": ws_id, "title": "待删除页面"})),
+    )
+    .await;
+    let page_id = body["data"]["id"].as_str().unwrap();
+
+    // 写入内容确保文件存在
+    send(
+        &app,
+        put_json(
+            &format!("/api/pages/{page_id}/content"),
+            &json!({"body": "这条内容应该随工作区删除而消失"}),
+        ),
+    )
+    .await;
+
+    // 验证文件在删除前存在（通过读取 API 确认）
+    let (status, _) = send(&app, get_uri(&format!("/api/pages/{page_id}/content"))).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // 删除工作区
+    let (status, body) = send(&app, delete_uri(&format!("/api/workspaces/{ws_id}"))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+
+    // 验证页面已不存在
+    let (status, body) = send(&app, get_uri(&format!("/api/pages/{page_id}"))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], false);
+}

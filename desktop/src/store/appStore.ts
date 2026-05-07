@@ -47,7 +47,11 @@ function loadTheme(): ThemeMode {
 export const useAppStore = create<AppState>((set) => ({
   theme: loadTheme(),
   setTheme: (theme) => {
-    localStorage.setItem("ldb-theme", theme);
+    try {
+      localStorage.setItem("ldb-theme", theme);
+    } catch {
+      // localStorage 不可用时忽略
+    }
     set({ theme });
   },
 

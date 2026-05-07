@@ -47,6 +47,12 @@ export default function BlockEditor() {
   });
 
   useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
     if (editor && currentPage?.body != null) {
       const md = currentPage.body;
       if (editor.getHTML() !== md) {
