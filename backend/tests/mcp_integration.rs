@@ -59,13 +59,11 @@ async fn send_request(app: Router, req: Request<Body>) -> (StatusCode, Value) {
     let body_bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
         .await
         .unwrap();
-    let val: Value = match serde_json::from_slice(&body_bytes) {
-        Ok(v) => v,
-        Err(_) => {
+    let val: Value = serde_json::from_slice(&body_bytes)
+        .unwrap_or_else(|_| {
             let text = String::from_utf8_lossy(&body_bytes);
             panic!("Non-JSON response (status={}): {}", status, text);
-        }
-    };
+        });
     (status, val)
 }
 

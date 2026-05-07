@@ -38,7 +38,7 @@ pub struct Page {
 pub struct PageTreeNode {
     #[serde(flatten)]
     pub page: Page,
-    pub children: Vec<PageTreeNode>,
+    pub children: Vec<Self>,
 }
 
 /// Markdown 文件内容（含 frontmatter）

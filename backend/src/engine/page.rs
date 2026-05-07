@@ -126,7 +126,7 @@ pub fn update_content(
     let page = find(conn, id)?.ok_or("页面不存在")?;
     let full_path = ws_root.join(&page.file_path);
     let now = chrono::Utc::now().to_rfc3339();
-    let mut content = markdown_io::read(&full_path).unwrap_or(MarkdownContent {
+    let mut content = markdown_io::read(&full_path).unwrap_or_else(|_| MarkdownContent {
         title: page.title.clone(),
         tags: vec![],
         created: page.created_at.clone(),

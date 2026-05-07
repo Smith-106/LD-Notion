@@ -31,12 +31,7 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("data/storage"));
 
-        Config {
-            host,
-            port,
-            database_path,
-            storage_root,
-        }
+        Self { host, port, database_path, storage_root }
     }
 
     /// 获取完整的监听地址

@@ -51,7 +51,7 @@ pub struct SearchQuery {
 }
 
 fn default_mode() -> String { "and".to_string() }
-fn default_limit() -> i32 { 20 }
+const fn default_limit() -> i32 { 20 }
 
 // ── 健康检查 ──
 

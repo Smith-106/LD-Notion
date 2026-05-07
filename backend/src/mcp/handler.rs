@@ -91,7 +91,7 @@ pub async fn handle_tools_call(
         None => return JsonRpcResponse::error(req.id.clone(), -32602, "Missing tool name"),
     };
 
-    let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+    let arguments = params.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({}));
 
     let result = match tool_name {
         "page/list" => handle_page_list(state, &arguments).await,
@@ -119,9 +119,11 @@ async fn handle_page_list(
         .as_str()
         .ok_or("Missing workspace_id")?;
 
-    let conn = state.db.lock().await;
-    let tree = crate::engine::page_tree::get_tree(&conn, workspace_id, None)
-        .map_err(|e| e.to_string())?;
+    let tree = {
+        let conn = state.db.lock().await;
+        crate::engine::page_tree::get_tree(&conn, workspace_id, None)
+            .map_err(|e| e.to_string())?
+    };
 
     Ok(serde_json::json!({ "tree": tree }))
 }
@@ -132,10 +134,12 @@ async fn handle_page_read(
 ) -> Result<serde_json::Value, String> {
     let page_id = args["page_id"].as_str().ok_or("Missing page_id")?;
 
-    let conn = state.db.lock().await;
-    let content = crate::engine::page::read_content(&conn, page_id, &state.config.storage_root)
-        .map_err(|e| e.to_string())?
-        .ok_or("Page not found")?;
+    let content = {
+        let conn = state.db.lock().await;
+        crate::engine::page::read_content(&conn, page_id, &state.config.storage_root)
+            .map_err(|e| e.to_string())?
+            .ok_or("Page not found")?
+    };
 
     Ok(serde_json::json!({
         "title": content.title,
@@ -154,9 +158,11 @@ async fn handle_search(
     let mode = args["mode"].as_str().unwrap_or("and");
     let limit = args["limit"].as_i64().unwrap_or(20) as i32;
 
-    let conn = state.db.lock().await;
-    let output = crate::search::search(&conn, query, mode, limit, 0)
-        .map_err(|e| e.to_string())?;
+    let output = {
+        let conn = state.db.lock().await;
+        crate::search::search(&conn, query, mode, limit, 0)
+            .map_err(|e| e.to_string())?
+    };
 
     Ok(serde_json::json!({
         "total": output.total,
