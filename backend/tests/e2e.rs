@@ -309,3 +309,59 @@ async fn e2e_workspace_delete_cleans_files() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], false);
 }
+
+#[tokio::test]
+async fn e2e_validation_errors() {
+    let app = make_app();
+
+    // 空工作区名称
+    let (status, body) = send(&app, post_json("/api/workspaces", &json!({"name": ""}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], false);
+    assert!(body["error"].as_str().unwrap().contains("不能为空"));
+
+    // 纯空格名称
+    let (status, body) = send(&app, post_json("/api/workspaces", &json!({"name": "   "}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], false);
+
+    // 空页面标题
+    let (_, body) = send(&app, post_json("/api/workspaces", &json!({"name": "验证测试"}))).await;
+    let ws_id = body["data"]["id"].as_str().unwrap();
+
+    let (status, body) = send(
+        &app,
+        post_json("/api/pages", &json!({"workspace_id": ws_id, "title": ""})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], false);
+
+    // 不存在的页面
+    let (status, body) = send(&app, get_uri("/api/pages/nonexistent-id")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], false);
+
+    // 不存在的页面内容
+    let (status, body) = send(&app, get_uri("/api/pages/nonexistent-id/content")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], false);
+}
+
+#[tokio::test]
+async fn e2e_create_page_invalid_workspace() {
+    let app = make_app();
+
+    // 不存在的工作区 ID
+    let (status, body) = send(
+        &app,
+        post_json("/api/pages", &json!({
+            "workspace_id": "00000000-0000-0000-0000-000000000000",
+            "title": "测试页面"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], false);
+    assert!(body["error"].as_str().unwrap().contains("工作区不存在"));
+}

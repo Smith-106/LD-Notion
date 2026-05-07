@@ -80,10 +80,17 @@ pub fn search(
         _ => safe_tokens.join(" AND "),
     };
 
-    let sql = "SELECT f.page_id, f.title, highlight(fts_index, 2, '<mark>', '</mark>') as snippet, bm25(fts_index) as score
-         FROM fts_index f WHERE fts_index MATCH ?1 ORDER BY score LIMIT ?2 OFFSET ?3".to_string();
+    // 获取总匹配数（不受 LIMIT 约束）
+    let total: i32 = conn.query_row(
+        "SELECT count(*) FROM fts_index WHERE fts_index MATCH ?1",
+        [&fts_query],
+        |row| row.get(0),
+    )?;
 
-    let mut stmt = conn.prepare(&sql)?;
+    let sql = "SELECT f.page_id, f.title, highlight(fts_index, 2, '<mark>', '</mark>') as snippet, bm25(fts_index) as score
+         FROM fts_index f WHERE fts_index MATCH ?1 ORDER BY score LIMIT ?2 OFFSET ?3";
+
+    let mut stmt = conn.prepare(sql)?;
     let rows = stmt.query_map(params![&fts_query, limit, offset], |row| {
         let score: f64 = row.get(3)?;
         Ok(SearchResult {
@@ -95,7 +102,6 @@ pub fn search(
     })?;
 
     let results: Vec<SearchResult> = rows.filter_map(std::result::Result::ok).collect();
-    let total = i32::try_from(results.len()).unwrap_or(i32::MAX);
 
     Ok(SearchOutput {
         query: query.to_string(),
@@ -198,5 +204,18 @@ mod tests {
 
         let output = search(&conn, "(test)", "and", 10, 0).unwrap();
         assert_eq!(output.total, 1);
+    }
+
+    #[test]
+    fn test_search_total_independent_of_limit() {
+        let conn = test_conn();
+        for i in 0..5 {
+            index_page(&conn, &format!("p{i}"), &format!("Rust {i}"), "Rust 内容", "").unwrap();
+        }
+
+        // LIMIT=2 应只返回 2 条结果，但 total 应为 5
+        let output = search(&conn, "Rust", "and", 2, 0).unwrap();
+        assert_eq!(output.results.len(), 2);
+        assert_eq!(output.total, 5);
     }
 }

@@ -25,12 +25,6 @@ tower-http = { version = "0.6", features = ["cors"] }
 # 日志
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# YAML 解析（frontmatter）
-serde_yaml = "0.9"
-# 异步 trait
-async-trait = "0.1"
-# 错误处理
-thiserror = "2"
 
 [dev-dependencies]
 tower = "0.5"

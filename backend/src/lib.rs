@@ -77,8 +77,12 @@ pub async fn create_workspace(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateWorkspaceReq>,
 ) -> Json<Value> {
+    let name = body.name.trim();
+    if name.is_empty() {
+        return Json(json!({"ok": false, "error": "工作区名称不能为空"}));
+    }
     let conn = state.db.lock().await;
-    match engine::workspace::create(&conn, &body.name, &state.config.storage_root) {
+    match engine::workspace::create(&conn, name, &state.config.storage_root) {
         Ok(ws) => Json(json!({"ok": true, "data": ws})),
         Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
     }
@@ -101,17 +105,28 @@ pub async fn create_page(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreatePageReq>,
 ) -> Json<Value> {
+    let title = body.title.trim();
+    if title.is_empty() {
+        return Json(json!({"ok": false, "error": "页面标题不能为空"}));
+    }
     let conn = state.db.lock().await;
     let parent_id = body.parent_id.as_deref().filter(|s| !s.is_empty());
     match engine::page::create(
         &conn,
         &body.workspace_id,
         parent_id,
-        &body.title,
+        title,
         &state.config.storage_root,
     ) {
         Ok(page) => Json(json!({"ok": true, "data": page})),
-        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("FOREIGN KEY") {
+                Json(json!({"ok": false, "error": "工作区不存在"}))
+            } else {
+                Json(json!({"ok": false, "error": msg}))
+            }
+        }
     }
 }
 
