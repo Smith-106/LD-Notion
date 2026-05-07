@@ -161,13 +161,18 @@ pub fn delete(conn: &Connection, id: &str, ws_root: &Path) -> Result<bool, Box<d
             rows.filter_map(std::result::Result::ok).collect()
         };
 
-        // 阶段 1: 删除所有 page_tree 关系（必须在删除 pages 之前，避免 FK 约束失败）
+        // 阶段 1: 清除所有后代的 parent_id 引用（避免 pages.parent_id FK 约束失败）
+        for desc_id in &descendants {
+            conn.execute("UPDATE pages SET parent_id = NULL WHERE id = ?1", [desc_id])?;
+        }
+
+        // 阶段 2: 删除所有 page_tree 关系（必须在删除 pages 之前）
         for desc_id in &descendants {
             conn.execute("DELETE FROM page_tree WHERE descendant_id = ?1", [desc_id])?;
         }
         conn.execute("DELETE FROM page_tree WHERE ancestor_id = ?1 OR descendant_id = ?1", [id])?;
 
-        // 阶段 2: 删除搜索索引和页面记录 + 文件
+        // 阶段 3: 删除搜索索引和页面记录 + 文件
         for desc_id in &descendants {
             if let Some(child) = find(conn, desc_id)? {
                 let full_path = ws_root.join(&child.file_path);
@@ -219,4 +224,84 @@ fn title_to_slug(title: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use std::path::PathBuf;
+
+    fn setup() -> (Connection, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("ld-notion-page-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("test.db");
+        let storage = dir.join("storage");
+        std::fs::create_dir_all(&storage).unwrap();
+        let conn = db::initialize(&db_path, &storage).unwrap();
+        (conn, storage)
+    }
+
+    fn create_ws(conn: &Connection, storage: &Path) -> String {
+        crate::engine::workspace::create(conn, "test", storage).unwrap().id
+    }
+
+    #[test]
+    fn test_create_and_find() {
+        let (conn, storage) = setup();
+        let ws_id = create_ws(&conn, &storage);
+
+        let page = super::create(&conn, &ws_id, None, "测试页面", &storage).unwrap();
+        assert_eq!(page.title, "测试页面");
+        assert!(page.slug.contains("测试页面"));
+        assert!(page.parent_id.is_none());
+
+        let found = super::find(&conn, &page.id).unwrap().unwrap();
+        assert_eq!(found.title, page.title);
+    }
+
+    #[test]
+    fn test_create_child_page() {
+        let (conn, storage) = setup();
+        let ws_id = create_ws(&conn, &storage);
+
+        let parent = super::create(&conn, &ws_id, None, "父", &storage).unwrap();
+        let child = super::create(&conn, &ws_id, Some(&parent.id), "子", &storage).unwrap();
+        assert_eq!(child.parent_id, Some(parent.id));
+    }
+
+    #[test]
+    fn test_update_content() {
+        let (conn, storage) = setup();
+        let ws_id = create_ws(&conn, &storage);
+        let page = super::create(&conn, &ws_id, None, "内容测试", &storage).unwrap();
+
+        super::update_content(&conn, &page.id, "Hello World", &storage).unwrap();
+        let content = super::read_content(&conn, &page.id, &storage).unwrap().unwrap();
+        assert_eq!(content.body, "Hello World");
+    }
+
+    #[test]
+    fn test_delete_cascade() {
+        let (conn, storage) = setup();
+        let ws_id = create_ws(&conn, &storage);
+
+        let p1 = super::create(&conn, &ws_id, None, "根", &storage).unwrap();
+        let p2 = super::create(&conn, &ws_id, Some(&p1.id), "子", &storage).unwrap();
+        let p3 = super::create(&conn, &ws_id, Some(&p2.id), "孙", &storage).unwrap();
+
+        let removed = super::delete(&conn, &p1.id, &storage).unwrap();
+        assert!(removed);
+
+        assert!(super::find(&conn, &p1.id).unwrap().is_none());
+        assert!(super::find(&conn, &p2.id).unwrap().is_none());
+        assert!(super::find(&conn, &p3.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_slug_for_special_chars() {
+        assert!(super::title_to_slug("!!!").is_empty());
+        assert!(super::title_to_slug("Hello World").contains("hello-world"));
+        assert_eq!(super::title_to_slug("你好"), "你好");
+    }
 }

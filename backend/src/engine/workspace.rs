@@ -89,7 +89,8 @@ pub fn delete(conn: &Connection, id: &str, storage_root: &Path) -> Result<bool, 
         }
     }
 
-    // 删除关联页面树、索引、页面记录（page_tree 必须在 pages 之前删除）
+    // 清除页面间 parent_id 引用 → 删除页面树 → 删除索引 → 删除页面（FK 安全顺序）
+    conn.execute("UPDATE pages SET parent_id = NULL WHERE workspace_id = ?1 AND parent_id IS NOT NULL", [id])?;
     conn.execute("DELETE FROM page_tree WHERE descendant_id IN (SELECT id FROM pages WHERE workspace_id = ?1)", [id])?;
     conn.execute("DELETE FROM page_tree WHERE ancestor_id IN (SELECT id FROM pages WHERE workspace_id = ?1)", [id])?;
     conn.execute("DELETE FROM fts_index WHERE page_id IN (SELECT id FROM pages WHERE workspace_id = ?1)", [id])?;
