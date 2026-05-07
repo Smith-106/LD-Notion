@@ -16218,7 +16218,8 @@ ${availableTools}
                                                 onerror: (e) => reject(e),
                                             });
                                         });
-                                        await ObsidianAPI.writeImage(obsUrl, obsKey, imgPath, blob);
+                                        const imgResult = await ObsidianAPI.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType(ext));
+                                        if (!imgResult.ok) throw new Error(imgResult.error);
                                         md = md.replace(img.full, `![${img.alt}](${encodeURI(imgPath)})`);
                                     } catch {
                                         // 图片下载失败，保留原始链接
@@ -16255,7 +16256,8 @@ ${availableTools}
 
                             // 写入笔记
                             const fileName = topic.title.replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
-                            await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
+                            const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
+                            if (!noteResult.ok) throw new Error(noteResult.error);
                             results.success.push(bookmark);
                         } catch (e) {
                             results.failed.push({ bookmark, error: e.message });
@@ -18999,7 +19001,8 @@ ${availableTools}
                     }
 
                     const fileName = title.replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
-                    await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
+                    const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
+                    if (!noteResult.ok) throw new Error(noteResult.error);
 
                     GenericUI.showStatus(`导出到 Obsidian 成功: ${title}`, "success");
                 } catch (error) {
