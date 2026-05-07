@@ -10,7 +10,7 @@ function App() {
   useTheme();
 
   return (
-    <div className="app-shell" data-ldb-theme="light">
+    <div className="app-shell">
       <header className="app-header" role="banner">
         <div className="header-left">
           <span className="app-logo">LD-Notion Hub</span>

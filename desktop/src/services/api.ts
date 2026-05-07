@@ -4,9 +4,20 @@ const API_BASE = "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...init?.headers as Record<string, string>,
+    },
   });
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body.error) message = body.error;
+    } catch {}
+    throw new Error(message);
+  }
   const data = await res.json();
   if (!data.ok && data.error) {
     throw new Error(data.error);
