@@ -162,6 +162,7 @@ pub fn delete(conn: &Connection, id: &str, ws_root: &Path) -> Result<bool, Box<d
                 let full_path = ws_root.join(&child.file_path);
                 let _ = std::fs::remove_file(full_path);
             }
+            conn.execute("DELETE FROM page_tree WHERE descendant_id = ?1", [desc_id])?;
             conn.execute("DELETE FROM fts_index WHERE page_id = ?1", [desc_id])?;
             conn.execute("DELETE FROM pages WHERE id = ?1", [desc_id])?;
         }

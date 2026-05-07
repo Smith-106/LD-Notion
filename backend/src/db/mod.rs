@@ -47,19 +47,25 @@ pub fn validate_schema(conn: &Connection) -> Result<()> {
         .filter_map(|r| r.ok())
         .collect();
 
+    let mut missing = Vec::new();
     for table in &expected_tables {
         if !existing.iter().any(|t| t == table) {
-            tracing::warn!("核心表缺失: {}（可能尚未创建）", table);
+            missing.push(*table);
         }
     }
 
-    tracing::info!(
-        "Schema 验证完成，已存在 {} 张表/视图: {:?}",
-        existing.len(),
-        existing
-    );
-
-    Ok(())
+    if missing.is_empty() {
+        tracing::info!(
+            "Schema 验证完成，已存在 {} 张表/视图: {:?}",
+            existing.len(),
+            existing
+        );
+        Ok(())
+    } else {
+        Err(rusqlite::Error::InvalidParameterName(format!(
+            "核心表缺失: {:?}", missing
+        )))
+    }
 }
 
 #[cfg(test)]

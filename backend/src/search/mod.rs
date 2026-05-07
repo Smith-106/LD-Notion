@@ -43,9 +43,41 @@ pub fn search(
     limit: i32,
     offset: i32,
 ) -> Result<SearchOutput, Box<dyn std::error::Error>> {
+    let tokens: Vec<&str> = query.split_whitespace().collect();
+    if tokens.is_empty() {
+        return Ok(SearchOutput {
+            query: query.to_string(),
+            mode: mode.to_string(),
+            total: 0,
+            results: vec![],
+        });
+    }
+
+    // 转义 FTS5 特殊字符，防止查询语法错误
+    let safe_tokens: Vec<String> = tokens
+        .into_iter()
+        .map(|t| {
+            let safe: String = t
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                .collect();
+            if safe.is_empty() { "*".to_string() } else { safe }
+        })
+        .filter(|t| t != "*")
+        .collect();
+
+    if safe_tokens.is_empty() {
+        return Ok(SearchOutput {
+            query: query.to_string(),
+            mode: mode.to_string(),
+            total: 0,
+            results: vec![],
+        });
+    }
+
     let fts_query = match mode {
-        "or" => query.split_whitespace().collect::<Vec<_>>().join(" OR "),
-        _ => query.split_whitespace().collect::<Vec<_>>().join(" AND "),
+        "or" => safe_tokens.join(" OR "),
+        _ => safe_tokens.join(" AND "),
     };
 
     let sql = "SELECT f.page_id, f.title, highlight(fts_index, 2, '<mark>', '</mark>') as snippet, bm25(fts_index) as score
@@ -141,5 +173,30 @@ mod tests {
         let output = search(&conn, "新内容", "and", 10, 0).unwrap();
         assert_eq!(output.total, 1);
         assert_eq!(output.results[0].title, "新标题");
+    }
+
+    #[test]
+    fn test_search_empty_query() {
+        let conn = test_conn();
+        index_page(&conn, "p1", "Test", "内容", "").unwrap();
+
+        let output = search(&conn, "", "and", 10, 0).unwrap();
+        assert_eq!(output.total, 0);
+
+        let output = search(&conn, "   ", "and", 10, 0).unwrap();
+        assert_eq!(output.total, 0);
+    }
+
+    #[test]
+    fn test_search_special_chars() {
+        let conn = test_conn();
+        index_page(&conn, "p1", "Test", "内容", "").unwrap();
+
+        // 特殊字符应被过滤，不应 panic
+        let output = search(&conn, "test***", "and", 10, 0).unwrap();
+        assert_eq!(output.total, 1);
+
+        let output = search(&conn, "(test)", "and", 10, 0).unwrap();
+        assert_eq!(output.total, 1);
     }
 }

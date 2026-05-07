@@ -98,10 +98,11 @@ pub async fn create_page(
     Json(body): Json<CreatePageReq>,
 ) -> Json<Value> {
     let conn = state.db.lock().await;
+    let parent_id = body.parent_id.as_deref().filter(|s| !s.is_empty());
     match engine::page::create(
         &conn,
         &body.workspace_id,
-        body.parent_id.as_deref(),
+        parent_id,
         &body.title,
         &state.config.storage_root,
     ) {
