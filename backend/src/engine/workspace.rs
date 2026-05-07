@@ -98,3 +98,65 @@ pub fn delete(conn: &Connection, id: &str, storage_root: &Path) -> Result<bool, 
     let removed = conn.execute("DELETE FROM workspaces WHERE id = ?1", [id])?;
     Ok(removed > 0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use std::path::PathBuf;
+
+    fn setup() -> (Connection, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("ld-notion-ws-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("test.db");
+        let storage = dir.join("storage");
+        std::fs::create_dir_all(&storage).unwrap();
+        let conn = db::initialize(&db_path, &storage).unwrap();
+        (conn, storage)
+    }
+
+    #[test]
+    fn test_create_and_find() {
+        let (conn, storage) = setup();
+        let ws = super::create(&conn, "测试工作区", &storage).unwrap();
+        assert_eq!(ws.name, "测试工作区");
+        assert!(!ws.id.is_empty());
+
+        let found = super::find(&conn, &ws.id).unwrap().unwrap();
+        assert_eq!(found.name, ws.name);
+    }
+
+    #[test]
+    fn test_list() {
+        let (conn, storage) = setup();
+        super::create(&conn, "A", &storage).unwrap();
+        super::create(&conn, "B", &storage).unwrap();
+        let list = super::list(&conn).unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn test_delete_cascades_pages() {
+        let (conn, storage) = setup();
+        let ws = super::create(&conn, "待删除", &storage).unwrap();
+
+        // 创建带嵌套的页面
+        let p1 = crate::engine::page::create(&conn, &ws.id, None, "根", &storage).unwrap();
+        crate::engine::page::create(&conn, &ws.id, Some(&p1.id), "子", &storage).unwrap();
+
+        let removed = super::delete(&conn, &ws.id, &storage).unwrap();
+        assert!(removed);
+
+        // 工作区已删除
+        assert!(super::find(&conn, &ws.id).unwrap().is_none());
+        // 页面已级联删除
+        assert!(crate::engine::page::find(&conn, &p1.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_delete_nonexistent() {
+        let (conn, storage) = setup();
+        let removed = super::delete(&conn, "nonexistent", &storage).unwrap();
+        assert!(!removed);
+    }
+}

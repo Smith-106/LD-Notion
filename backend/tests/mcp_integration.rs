@@ -157,3 +157,23 @@ async fn test_mcp_method_not_found() {
     assert_eq!(status, StatusCode::OK);
     assert!(body["error"]["code"] == -32601);
 }
+
+#[tokio::test]
+async fn test_mcp_invalid_jsonrpc_version() {
+    let app = make_app();
+    let body = json!({
+        "jsonrpc": "1.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/mcp/message")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+    let (status, resp) = send_request(app, req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(resp["error"]["code"], -32600);
+}

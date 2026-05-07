@@ -48,3 +48,61 @@ fn prune_tree(nodes: Vec<PageTreeNode>, max_depth: i32) -> Vec<PageTreeNode> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_page(id: &str, title: &str) -> Page {
+        Page {
+            id: id.to_string(),
+            workspace_id: "ws".to_string(),
+            parent_id: None,
+            title: title.to_string(),
+            slug: title.to_lowercase(),
+            file_path: format!("{title}.md"),
+            sort_order: 0,
+            is_folder: false,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_build_tree_flat() {
+        let pages = vec![make_page("1", "A"), make_page("2", "B")];
+        let tree = build_tree(&pages, None);
+        assert_eq!(tree.len(), 2);
+    }
+
+    #[test]
+    fn test_build_tree_nested() {
+        let mut parent = make_page("1", "父");
+        let child = Page {
+            parent_id: Some("1".to_string()),
+            ..make_page("2", "子")
+        };
+        parent.parent_id = None;
+        let pages = vec![parent, child];
+        let tree = build_tree(&pages, None);
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].page.title, "子");
+    }
+
+    #[test]
+    fn test_prune_tree() {
+        let mut root = make_page("1", "根");
+        root.parent_id = None;
+        let child = Page {
+            parent_id: Some("1".to_string()),
+            ..make_page("2", "子")
+        };
+        let pages = vec![root, child];
+        let tree = build_tree(&pages, None);
+
+        let pruned = prune_tree(tree, 1);
+        assert_eq!(pruned.len(), 1);
+        assert!(pruned[0].children.is_empty());
+    }
+}

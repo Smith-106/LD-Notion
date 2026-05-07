@@ -39,6 +39,9 @@ async fn message_handler(
     Json(req): Json<JsonRpcRequest>,
 ) -> Json<JsonRpcResponse> {
     let id = req.id.clone();
+    if req.jsonrpc != "2.0" {
+        return Json(JsonRpcResponse::error(id, -32600, "Invalid Request: jsonrpc must be \"2.0\""));
+    }
     let response = match req.method.as_str() {
         "initialize" => super::handler::handle_initialize(&req),
         "notifications/initialized" => {
