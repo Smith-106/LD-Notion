@@ -37,10 +37,12 @@ pub struct JsonRpcError {
 }
 
 impl JsonRpcResponse {
+    #[must_use] 
     pub fn success(id: Option<serde_json::Value>, result: serde_json::Value) -> Self {
         Self { jsonrpc: "2.0".to_string(), id, result: Some(result), error: None }
     }
 
+    #[must_use] 
     pub fn error(id: Option<serde_json::Value>, code: i32, message: &str) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
@@ -52,6 +54,7 @@ impl JsonRpcResponse {
 }
 
 /// MCP Server 信息
+#[must_use] 
 pub fn server_info() -> serde_json::Value {
     serde_json::json!({
         "name": "ld-notion-mcp",
@@ -60,6 +63,7 @@ pub fn server_info() -> serde_json::Value {
 }
 
 /// MCP 能力声明
+#[must_use] 
 pub fn server_capabilities() -> serde_json::Value {
     serde_json::json!({
         "tools": { "listChanged": false }

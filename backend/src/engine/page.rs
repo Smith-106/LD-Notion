@@ -18,8 +18,8 @@ pub fn create(
     let now = chrono::Utc::now().to_rfc3339();
     let slug_base = title_to_slug(title);
     let short_id = &id[..8];
-    let slug = format!("{}-{}", slug_base, short_id);
-    let file_path = format!("{}.md", slug);
+    let slug = format!("{slug_base}-{short_id}");
+    let file_path = format!("{slug}.md");
 
     // 确定 sort_order
     let sort_order: i32 = conn
@@ -64,7 +64,7 @@ pub fn create(
     Ok(Page {
         id,
         workspace_id: workspace_id.to_string(),
-        parent_id: parent_id.map(|s| s.to_string()),
+        parent_id: parent_id.map(std::string::ToString::to_string),
         title: title.to_string(),
         slug,
         file_path,
@@ -117,6 +117,7 @@ pub fn read_content(
 }
 
 /// 更新页面内容
+#[allow(clippy::missing_errors_doc)]
 pub fn update_content(
     conn: &Connection,
     id: &str,
@@ -130,7 +131,7 @@ pub fn update_content(
         title: page.title.clone(),
         tags: vec![],
         created: page.created_at.clone(),
-        updated: now.clone(),
+        updated: String::new(),
         body: String::new(),
     });
     content.body = body.to_string();
@@ -153,7 +154,7 @@ pub fn delete(conn: &Connection, id: &str, ws_root: &Path) -> Result<bool, Box<d
                 "SELECT descendant_id FROM page_tree WHERE ancestor_id = ?1 AND depth > 0",
             )?;
             let rows = stmt.query_map([id], |row| row.get::<_, String>(0))?;
-            rows.filter_map(|r| r.ok()).collect()
+            rows.filter_map(std::result::Result::ok).collect()
         };
 
         // 删除所有后代
@@ -201,7 +202,7 @@ pub fn list_by_workspace(conn: &Connection, workspace_id: &str) -> Result<Vec<Pa
             updated_at: row.get(9)?,
         })
     })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    Ok(rows.filter_map(std::result::Result::ok).collect())
 }
 
 fn title_to_slug(title: &str) -> String {

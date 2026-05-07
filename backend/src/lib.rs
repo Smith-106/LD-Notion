@@ -1,5 +1,8 @@
 // LD-Notion Hub 后端 — 公共接口
 
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::must_use_candidate)]
+
 pub mod config;
 pub mod db;
 pub mod engine;
@@ -55,6 +58,7 @@ const fn default_limit() -> i32 { 20 }
 
 // ── 健康检查 ──
 
+#[allow(clippy::unused_async)]
 pub async fn health_check() -> Json<Value> {
     Json(json!({"status": "ok"}))
 }

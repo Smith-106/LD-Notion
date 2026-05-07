@@ -42,7 +42,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Workspace>, Box<dyn std::error::Err
             updated_at: row.get(4)?,
         })
     })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    Ok(rows.filter_map(std::result::Result::ok).collect())
 }
 
 /// 按 ID 查找工作区

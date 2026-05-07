@@ -62,7 +62,7 @@ async fn send_request(app: Router, req: Request<Body>) -> (StatusCode, Value) {
     let val: Value = serde_json::from_slice(&body_bytes)
         .unwrap_or_else(|_| {
             let text = String::from_utf8_lossy(&body_bytes);
-            panic!("Non-JSON response (status={}): {}", status, text);
+            panic!("Non-JSON response (status={status}): {text}");
         });
     (status, val)
 }

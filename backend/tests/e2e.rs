@@ -1,4 +1,5 @@
 // E2E 测试 — 创建工作区 → 创建页面 → 写入内容 → 搜索 → MCP 读取 完整链路
+#![allow(clippy::unnecessary_to_owned)]
 
 use axum::{
     body::Body,
@@ -54,12 +55,12 @@ async fn send(app: &Router, req: Request<Body>) -> (StatusCode, Value) {
     let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
     let text = String::from_utf8_lossy(&bytes);
     let val: Value = serde_json::from_str(&text).unwrap_or_else(|_| {
-        panic!("Non-JSON response (status={}): {}", status, text);
+        panic!("Non-JSON response (status={status}): {text}");
     });
     (status, val)
 }
 
-fn post_json(uri: &str, body: Value) -> Request<Body> {
+fn post_json(uri: &str, body: &Value) -> Request<Body> {
     Request::builder()
         .method("POST")
         .uri(uri)
@@ -68,7 +69,7 @@ fn post_json(uri: &str, body: Value) -> Request<Body> {
         .unwrap()
 }
 
-fn put_json(uri: &str, body: Value) -> Request<Body> {
+fn put_json(uri: &str, body: &Value) -> Request<Body> {
     Request::builder()
         .method("PUT")
         .uri(uri)
@@ -90,7 +91,7 @@ async fn e2e_create_workspace_page_search_mcp() {
     let app = make_app();
 
     // 1. 创建工作区
-    let (status, body) = send(&app, post_json("/api/workspaces", json!({"name": "测试工作区"}))).await;
+    let (status, body) = send(&app, post_json("/api/workspaces", &json!({"name": "测试工作区"}))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
     let ws_id = body["data"]["id"].as_str().unwrap();
@@ -98,7 +99,7 @@ async fn e2e_create_workspace_page_search_mcp() {
     // 2. 创建页面
     let (status, body) = send(
         &app,
-        post_json("/api/pages", json!({
+        post_json("/api/pages", &json!({
             "workspace_id": ws_id,
             "title": "Rust 异步编程"
         })),
@@ -113,8 +114,8 @@ async fn e2e_create_workspace_page_search_mcp() {
     let (status, body) = send(
         &app,
         put_json(
-            &format!("/api/pages/{}/content", page_id),
-            json!({"body": "# Rust 异步编程\n\nTokio 是 Rust 最流行的异步运行时。\n\n## async/await\n\n使用 async fn 和 .await 语法。"}),
+            &format!("/api/pages/{page_id}/content"),
+            &json!({"body": "# Rust 异步编程\n\nTokio 是 Rust 最流行的异步运行时。\n\n## async/await\n\n使用 async fn 和 .await 语法。"}),
         ),
     )
     .await;
@@ -122,7 +123,7 @@ async fn e2e_create_workspace_page_search_mcp() {
     assert_eq!(body["ok"], true);
 
     // 4. 读取页面内容
-    let (status, body) = send(&app, get_uri(&format!("/api/pages/{}/content", page_id))).await;
+    let (status, body) = send(&app, get_uri(&format!("/api/pages/{page_id}/content"))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["title"], "Rust 异步编程");
     assert!(body["data"]["body"].as_str().unwrap().contains("Tokio"));
@@ -162,12 +163,12 @@ async fn e2e_create_workspace_page_search_mcp() {
     assert!(content_text.contains("Rust 异步编程"));
 
     // 8. 删除页面
-    let (status, body) = send(&app, delete_uri(&format!("/api/pages/{}", page_id))).await;
+    let (status, body) = send(&app, delete_uri(&format!("/api/pages/{page_id}"))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
 
     // 9. 删除工作区
-    let (status, body) = send(&app, delete_uri(&format!("/api/workspaces/{}", ws_id))).await;
+    let (status, body) = send(&app, delete_uri(&format!("/api/workspaces/{ws_id}"))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
 }
@@ -177,13 +178,13 @@ async fn e2e_page_tree_hierarchy() {
     let app = make_app();
 
     // 创建工作区
-    let (_, body) = send(&app, post_json("/api/workspaces", json!({"name": "树测试"}))).await;
+    let (_, body) = send(&app, post_json("/api/workspaces", &json!({"name": "树测试"}))).await;
     let ws_id = body["data"]["id"].as_str().unwrap();
 
     // 创建父页面
     let (_, body) = send(
         &app,
-        post_json("/api/pages", json!({"workspace_id": ws_id, "title": "父页面"})),
+        post_json("/api/pages", &json!({"workspace_id": ws_id, "title": "父页面"})),
     )
     .await;
     let parent_id = body["data"]["id"].as_str().unwrap();
@@ -191,7 +192,7 @@ async fn e2e_page_tree_hierarchy() {
     // 创建子页面
     let (_, body) = send(
         &app,
-        post_json("/api/pages", json!({
+        post_json("/api/pages", &json!({
             "workspace_id": ws_id,
             "parent_id": parent_id,
             "title": "子页面"
@@ -201,7 +202,7 @@ async fn e2e_page_tree_hierarchy() {
     assert_eq!(body["ok"], true);
 
     // 获取页面树
-    let (_, body) = send(&app, get_uri(&format!("/api/workspaces/{}/tree", ws_id))).await;
+    let (_, body) = send(&app, get_uri(&format!("/api/workspaces/{ws_id}/tree"))).await;
     assert_eq!(body["ok"], true);
     let tree = body["data"].as_array().unwrap();
     assert!(!tree.is_empty());
@@ -225,12 +226,12 @@ async fn e2e_page_tree_hierarchy() {
 async fn e2e_search_and_or_modes() {
     let app = make_app();
 
-    let (_, body) = send(&app, post_json("/api/workspaces", json!({"name": "搜索测试"}))).await;
+    let (_, body) = send(&app, post_json("/api/workspaces", &json!({"name": "搜索测试"}))).await;
     let ws_id = body["data"]["id"].as_str().unwrap();
 
     let (_, body) = send(
         &app,
-        post_json("/api/pages", json!({"workspace_id": ws_id, "title": "JavaScript 教程"})),
+        post_json("/api/pages", &json!({"workspace_id": ws_id, "title": "JavaScript 教程"})),
     )
     .await;
     let page1 = body["data"]["id"].as_str().unwrap();
@@ -238,15 +239,15 @@ async fn e2e_search_and_or_modes() {
     send(
         &app,
         put_json(
-            &format!("/api/pages/{}/content", page1),
-            json!({"body": "JavaScript 是一门动态类型的编程语言，广泛用于 Web 开发。"}),
+            &format!("/api/pages/{page1}/content"),
+            &json!({"body": "JavaScript 是一门动态类型的编程语言，广泛用于 Web 开发。"}),
         ),
     )
     .await;
 
     let (_, body) = send(
         &app,
-        post_json("/api/pages", json!({"workspace_id": ws_id, "title": "TypeScript 进阶"})),
+        post_json("/api/pages", &json!({"workspace_id": ws_id, "title": "TypeScript 进阶"})),
     )
     .await;
     let page2 = body["data"]["id"].as_str().unwrap();
@@ -254,8 +255,8 @@ async fn e2e_search_and_or_modes() {
     send(
         &app,
         put_json(
-            &format!("/api/pages/{}/content", page2),
-            json!({"body": "TypeScript 是 JavaScript 的超集，增加了静态类型检查。"}),
+            &format!("/api/pages/{page2}/content"),
+            &json!({"body": "TypeScript 是 JavaScript 的超集，增加了静态类型检查。"}),
         ),
     )
     .await;

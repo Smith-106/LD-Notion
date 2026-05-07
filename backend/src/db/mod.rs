@@ -44,7 +44,7 @@ pub fn validate_schema(conn: &Connection) -> Result<()> {
     )?;
     let existing: Vec<String> = stmt
         .query_map([], |row| row.get(0))?
-        .filter_map(|r| r.ok())
+        .filter_map(std::result::Result::ok)
         .collect();
 
     let mut missing = Vec::new();
@@ -63,7 +63,7 @@ pub fn validate_schema(conn: &Connection) -> Result<()> {
         Ok(())
     } else {
         Err(rusqlite::Error::InvalidParameterName(format!(
-            "核心表缺失: {:?}", missing
+            "核心表缺失: {missing:?}"
         )))
     }
 }

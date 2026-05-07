@@ -5,12 +5,13 @@ use rusqlite::Connection;
 use super::{Page, PageTreeNode};
 
 /// 将扁平页面列表构建为树形结构
+#[must_use] 
 pub fn build_tree(pages: &[Page], parent_id: Option<&str>) -> Vec<PageTreeNode> {
     pages
         .iter()
         .filter(|p| match (parent_id, &p.parent_id) {
             (None, None) => true,
-            (Some(pid), Some(ppid)) => pid == ppid,
+            (Some(target), Some(page_parent)) => target == page_parent,
             _ => false,
         })
         .map(|p| {

@@ -53,6 +53,7 @@ fn get_tools() -> Vec<ToolDef> {
 }
 
 /// 处理 initialize 请求
+#[must_use] 
 pub fn handle_initialize(req: &JsonRpcRequest) -> JsonRpcResponse {
     JsonRpcResponse::success(
         req.id.clone(),
@@ -65,6 +66,7 @@ pub fn handle_initialize(req: &JsonRpcRequest) -> JsonRpcResponse {
 }
 
 /// 处理 tools/list 请求
+#[must_use] 
 pub fn handle_tools_list(req: &JsonRpcRequest) -> JsonRpcResponse {
     let tools: Vec<serde_json::Value> = get_tools()
         .into_iter()
@@ -86,9 +88,8 @@ pub async fn handle_tools_call(
     state: &Arc<AppState>,
 ) -> JsonRpcResponse {
     let params = &req.params;
-    let tool_name = match params.get("name").and_then(|v| v.as_str()) {
-        Some(name) => name,
-        None => return JsonRpcResponse::error(req.id.clone(), -32602, "Missing tool name"),
+    let Some(tool_name) = params.get("name").and_then(|v| v.as_str()) else {
+        return JsonRpcResponse::error(req.id.clone(), -32602, "Missing tool name");
     };
 
     let arguments = params.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({}));
@@ -97,7 +98,7 @@ pub async fn handle_tools_call(
         "page/list" => handle_page_list(state, &arguments).await,
         "page/read" => handle_page_read(state, &arguments).await,
         "search" => handle_search(state, &arguments).await,
-        _ => Err(format!("Unknown tool: {}", tool_name)),
+        _ => Err(format!("Unknown tool: {tool_name}")),
     };
 
     match result {
@@ -156,7 +157,7 @@ async fn handle_search(
 ) -> Result<serde_json::Value, String> {
     let query = args["query"].as_str().ok_or("Missing query")?;
     let mode = args["mode"].as_str().unwrap_or("and");
-    let limit = args["limit"].as_i64().unwrap_or(20) as i32;
+    let limit = i32::try_from(args["limit"].as_i64().unwrap_or(20)).unwrap_or(20);
 
     let output = {
         let conn = state.db.lock().await;

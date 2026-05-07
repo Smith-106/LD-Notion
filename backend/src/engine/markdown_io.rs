@@ -37,17 +37,14 @@ fn parse(content: &str) -> MarkdownContent {
 
     // 查找结束的 ---
     let rest = &trimmed[3..];
-    let end = match rest.find("---") {
-        Some(i) => i,
-        None => {
-            return MarkdownContent {
-                title: String::new(),
-                tags: vec![],
-                created: String::new(),
-                updated: String::new(),
-                body: content.to_string(),
-            };
-        }
+    let Some(end) = rest.find("---") else {
+        return MarkdownContent {
+            title: String::new(),
+            tags: vec![],
+            created: String::new(),
+            updated: String::new(),
+            body: content.to_string(),
+        };
     };
 
     let frontmatter = &rest[..end];
@@ -87,7 +84,7 @@ fn serialize(content: &MarkdownContent) -> String {
     let tags_str = if content.tags.is_empty() {
         "[]".to_string()
     } else {
-        format!("[{}]", content.tags.iter().map(|t| format!("\"{}\"", t)).collect::<Vec<_>>().join(", "))
+        format!("[{}]", content.tags.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", "))
     };
 
     format!(

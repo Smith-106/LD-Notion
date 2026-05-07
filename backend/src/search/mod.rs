@@ -94,8 +94,8 @@ pub fn search(
         })
     })?;
 
-    let results: Vec<SearchResult> = rows.filter_map(|r| r.ok()).collect();
-    let total = results.len() as i32;
+    let results: Vec<SearchResult> = rows.filter_map(std::result::Result::ok).collect();
+    let total = i32::try_from(results.len()).unwrap_or(i32::MAX);
 
     Ok(SearchOutput {
         query: query.to_string(),
