@@ -59,7 +59,7 @@ fn parse(content: &str) -> MarkdownContent {
     for line in frontmatter.lines() {
         let line = line.trim();
         if let Some(val) = line.strip_prefix("title:") {
-            title = val.trim().trim_matches('"').replace("\\\"", "\"").to_string();
+            title.clone_from(&val.trim().trim_matches('"').replace("\\\"", "\""));
         } else if let Some(val) = line.strip_prefix("tags:") {
             let val = val.trim();
             if val.starts_with('[') && val.ends_with(']') {
