@@ -20,6 +20,12 @@ export default function BlockEditor() {
   const setCurrentPageContent = useAppStore((s) => s.setCurrentPageContent);
   const setCurrentPageSaved = useAppStore((s) => s.setCurrentPageSaved);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentPageIdRef = useRef<string | null>(null);
+
+  // 保持 ref 与 store 同步，避免 onUpdate 闭包捕获过时值
+  useEffect(() => {
+    currentPageIdRef.current = currentPage?.id ?? null;
+  }, [currentPage?.id]);
 
   const editor = useEditor({
     extensions: [
@@ -44,8 +50,9 @@ export default function BlockEditor() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const md = (editor.storage as any).markdown.getMarkdown();
         setCurrentPageContent(md);
-        if (currentPage?.id) {
-          updatePageContent(currentPage.id, md).then(
+        const pageId = currentPageIdRef.current;
+        if (pageId) {
+          updatePageContent(pageId, md).then(
             () => setCurrentPageSaved(true),
             () => {},
           );
