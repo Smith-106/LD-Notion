@@ -1,0 +1,142 @@
+// TipTap 块编辑器 — 支持文本/标题/代码/列表
+
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
+import Placeholder from "@tiptap/extension-placeholder";
+import { common, createLowlight } from "lowlight";
+import { Markdown as tiptapMarkdown } from "tiptap-markdown";
+import { useEffect, useCallback, useRef } from "react";
+import { useAppStore } from "../store/appStore";
+import "./BlockEditor.css";
+
+const lowlight = createLowlight(common);
+
+const SAVE_DEBOUNCE_MS = 800;
+
+export default function BlockEditor() {
+  const currentPage = useAppStore((s) => s.currentPage);
+  const setCurrentPageContent = useAppStore((s) => s.setCurrentPageContent);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        codeBlock: false,
+        heading: { levels: [1, 2, 3] },
+      }),
+      CodeBlockLowlight.configure({ lowlight }),
+      Placeholder.configure({
+        placeholder: "开始输入内容，或使用 / 命令…",
+      }),
+      tiptapMarkdown,
+    ],
+    editorProps: {
+      attributes: {
+        class: "block-editor-content",
+      },
+    },
+    onUpdate: ({ editor }) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const md = (editor.storage as any).markdown.getMarkdown();
+        setCurrentPageContent(md);
+      }, SAVE_DEBOUNCE_MS);
+    },
+  });
+
+  useEffect(() => {
+    if (editor && currentPage?.body != null) {
+      const md = currentPage.body;
+      if (editor.getHTML() !== md) {
+        editor.commands.setContent(md || "");
+      }
+    }
+  }, [currentPage?.id]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (editor && currentPage) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const md = (editor.storage as any).markdown.getMarkdown();
+          setCurrentPageContent(md);
+        }
+      }
+    },
+    [editor, currentPage, setCurrentPageContent],
+  );
+
+  if (!currentPage) {
+    return (
+      <div className="editor-page">
+        <div className="editor-welcome">
+          <div className="editor-welcome-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+          </div>
+          <h1 className="editor-welcome-title">欢迎使用 LD-Notion Hub</h1>
+          <p className="editor-welcome-desc">
+            从左侧页面树中选择一个页面开始编辑，或创建新页面。
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="block-editor" onKeyDown={handleKeyDown}>
+      <div className="block-editor-toolbar">
+        <ToolbarButton editor={editor} action="toggleHeading" args={{ level: 1 }} label="H1" />
+        <ToolbarButton editor={editor} action="toggleHeading" args={{ level: 2 }} label="H2" />
+        <ToolbarButton editor={editor} action="toggleHeading" args={{ level: 3 }} label="H3" />
+        <div className="toolbar-separator" />
+        <ToolbarButton editor={editor} action="toggleBold" label="B" />
+        <ToolbarButton editor={editor} action="toggleItalic" label="I" />
+        <ToolbarButton editor={editor} action="toggleCode" label="&lt;/&gt;" />
+        <div className="toolbar-separator" />
+        <ToolbarButton editor={editor} action="toggleBulletList" label="UL" />
+        <ToolbarButton editor={editor} action="toggleOrderedList" label="OL" />
+        <ToolbarButton editor={editor} action="toggleCodeBlock" label="Code" />
+      </div>
+      <EditorContent editor={editor} />
+    </div>
+  );
+}
+
+function ToolbarButton({
+  editor,
+  action,
+  args,
+  label,
+}: {
+  editor: ReturnType<typeof useEditor>;
+  action: string;
+  args?: Record<string, unknown>;
+  label: string;
+}) {
+  if (!editor) return null;
+
+  const isActive =
+    args && args.level
+      ? editor.isActive("heading", args)
+      : editor.isActive(action.replace("toggle", "").toLowerCase());
+
+  return (
+    <button
+      className={`toolbar-btn ${isActive ? "toolbar-btn-active" : ""}`}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        const cmd = (editor.chain().focus() as any)[action](args);
+        cmd.run();
+      }}
+      title={label}
+    >
+      {label}
+    </button>
+  );
+}

@@ -1,0 +1,85 @@
+.app-shell {
+  display: grid;
+  grid-template-rows: var(--ldb-header-height) 1fr;
+  height: 100vh;
+  background: var(--ldb-color-surface-background);
+  color: var(--ldb-color-text-primary);
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 var(--ldb-spacing-4);
+  height: var(--ldb-header-height);
+  border-bottom: 1px solid var(--ldb-color-border-subtle);
+  background: var(--ldb-color-surface-elevated);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--ldb-spacing-3);
+}
+
+.app-logo {
+  font-size: var(--ldb-font-size-sm);
+  font-weight: var(--ldb-font-weight-semibold);
+  color: var(--ldb-color-text-primary);
+  letter-spacing: var(--ldb-letter-spacing-tight);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--ldb-spacing-2);
+  -webkit-app-region: no-drag;
+}
+
+.app-body {
+  display: grid;
+  grid-template-columns: var(--ldb-sidebar-width) 1fr;
+  overflow: hidden;
+}
+
+.editor-area {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: var(--ldb-spacing-6);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--ldb-color-border-subtle);
+  background: var(--ldb-color-surface-background);
+  overflow-y: auto;
+  min-width: var(--ldb-sidebar-width);
+  max-width: var(--ldb-sidebar-width);
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ldb-spacing-3) var(--ldb-spacing-3);
+  border-bottom: 1px solid var(--ldb-color-border-subtle);
+}
+
+.sidebar-header-title {
+  font-size: var(--ldb-font-size-xs);
+  font-weight: var(--ldb-font-weight-semibold);
+  color: var(--ldb-color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: var(--ldb-letter-spacing-wide);
+}
+
+.sidebar-footer {
+  padding: var(--ldb-spacing-3);
+  border-top: 1px solid var(--ldb-color-border-subtle);
+  font-size: var(--ldb-font-size-xs);
+  color: var(--ldb-color-text-tertiary);
+}

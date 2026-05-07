@@ -1,0 +1,44 @@
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ldb-spacing-1);
+}
+
+.sidebar-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--ldb-radius-sm);
+  color: var(--ldb-color-text-tertiary);
+  transition: var(--ldb-transition-color);
+}
+
+.sidebar-action-btn:hover {
+  color: var(--ldb-color-text-primary);
+  background: oklch(0.14 0.015 260 / 0.06);
+}
+
+[data-ldb-theme="dark"] .sidebar-action-btn:hover {
+  background: oklch(0.93 0.004 260 / 0.08);
+}
+
+.page-tree-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--ldb-spacing-2) var(--ldb-spacing-2);
+}
+
+.sidebar-settings-link {
+  display: flex;
+  align-items: center;
+  gap: var(--ldb-spacing-2);
+  color: var(--ldb-color-text-tertiary);
+  font-size: var(--ldb-font-size-xs);
+  transition: color var(--ldb-duration-fast) var(--ldb-easing-ease-out);
+}
+
+.sidebar-settings-link:hover {
+  color: var(--ldb-color-text-primary);
+}

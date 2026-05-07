@@ -1,0 +1,61 @@
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--ldb-spacing-1_5);
+  padding: var(--ldb-spacing-1) var(--ldb-spacing-2);
+  border-radius: var(--ldb-radius-full);
+  background: oklch(0.14 0.015 260 / 0.05);
+}
+
+[data-ldb-theme="dark"] .status-indicator {
+  background: oklch(0.93 0.004 260 / 0.06);
+}
+
+.status-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--ldb-radius-full);
+  flex-shrink: 0;
+}
+
+.status-label {
+  font-size: var(--ldb-font-size-xs);
+  font-weight: var(--ldb-font-weight-normal);
+  white-space: nowrap;
+}
+
+/* ===== Connected — 绿色呼吸动画 ===== */
+.status-connected .status-dot {
+  background: var(--ldb-color-semantic-success);
+  animation: ldb-breath 2s var(--ldb-easing-ease-in-out) infinite;
+}
+
+.status-connected .status-label {
+  color: var(--ldb-color-semantic-success);
+  font-weight: var(--ldb-font-weight-medium);
+}
+
+/* ===== Disconnected — 灰色静态 ===== */
+.status-disconnected .status-dot {
+  background: oklch(0.55 0.015 260);
+}
+
+[data-ldb-theme="dark"] .status-disconnected .status-dot {
+  background: oklch(0.50 0.012 260);
+}
+
+.status-disconnected .status-label {
+  color: var(--ldb-color-text-tertiary);
+}
+
+/* ===== Error — 红色脉冲动画 ===== */
+.status-error .status-dot {
+  background: var(--ldb-color-semantic-error);
+  animation: ldb-pulse 1.5s var(--ldb-easing-ease-in-out) infinite;
+}
+
+.status-error .status-label {
+  color: var(--ldb-color-semantic-error);
+  font-weight: var(--ldb-font-weight-medium);
+}

@@ -1,0 +1,188 @@
+// LD-Notion Hub 后端 — 公共接口
+
+pub mod config;
+pub mod db;
+pub mod engine;
+pub mod mcp;
+pub mod search;
+
+use axum::{
+    extract::{Path, Query, State},
+    Json,
+};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+pub struct AppState {
+    pub db: Mutex<rusqlite::Connection>,
+    pub config: config::Config,
+}
+
+// ── 请求体 ──
+
+#[derive(Deserialize)]
+pub struct CreateWorkspaceReq {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreatePageReq {
+    pub workspace_id: String,
+    pub parent_id: Option<String>,
+    pub title: String,
+}
+
+#[derive(Deserialize)]
+pub struct UpdatePageReq {
+    pub body: String,
+}
+
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    pub q: String,
+    #[serde(default = "default_mode")]
+    pub mode: String,
+    #[serde(default = "default_limit")]
+    pub limit: i32,
+    #[serde(default)]
+    pub offset: i32,
+}
+
+fn default_mode() -> String { "and".to_string() }
+fn default_limit() -> i32 { 20 }
+
+// ── 健康检查 ──
+
+pub async fn health_check() -> Json<Value> {
+    Json(json!({"status": "ok"}))
+}
+
+// ── 工作区 API ──
+
+pub async fn list_workspaces(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::workspace::list(&conn) {
+        Ok(list) => Json(json!({"ok": true, "data": list})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn create_workspace(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateWorkspaceReq>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::workspace::create(&conn, &body.name, &state.config.storage_root) {
+        Ok(ws) => Json(json!({"ok": true, "data": ws})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn delete_workspace(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::workspace::delete(&conn, &id) {
+        Ok(removed) => Json(json!({"ok": true, "removed": removed})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+// ── 页面 API ──
+
+pub async fn create_page(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreatePageReq>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::page::create(
+        &conn,
+        &body.workspace_id,
+        body.parent_id.as_deref(),
+        &body.title,
+        &state.config.storage_root,
+    ) {
+        Ok(page) => Json(json!({"ok": true, "data": page})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn get_page(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::page::find(&conn, &id) {
+        Ok(Some(page)) => Json(json!({"ok": true, "data": page})),
+        Ok(None) => Json(json!({"ok": false, "error": "page not found"})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn get_page_content(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::page::read_content(&conn, &id, &state.config.storage_root) {
+        Ok(Some(content)) => Json(json!({"ok": true, "data": content})),
+        Ok(None) => Json(json!({"ok": false, "error": "page not found"})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn update_page_content(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdatePageReq>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::page::update_content(&conn, &id, &body.body, &state.config.storage_root) {
+        Ok(()) => {
+            if let Ok(Some(content)) = engine::page::read_content(&conn, &id, &state.config.storage_root) {
+                let _ = search::index_page(&conn, &id, &content.title, &content.body, &content.tags.join(", "));
+            }
+            Json(json!({"ok": true}))
+        }
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn delete_page(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    let _ = search::deindex_page(&conn, &id);
+    match engine::page::delete(&conn, &id, &state.config.storage_root) {
+        Ok(removed) => Json(json!({"ok": true, "removed": removed})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn get_page_tree(
+    State(state): State<Arc<AppState>>,
+    Path(ws_id): Path<String>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::page_tree::get_tree(&conn, &ws_id, None) {
+        Ok(tree) => Json(json!({"ok": true, "data": tree})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+// ── 搜索 API ──
+
+pub async fn search_pages(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<SearchQuery>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match search::search(&conn, &params.q, &params.mode, params.limit, params.offset) {
+        Ok(output) => Json(json!({"ok": true, "data": output})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}

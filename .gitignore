@@ -14,3 +14,23 @@ chrome-extension-full.pem
 # Local temporary source snapshots
 GitHub项目页面源码
 linux.do书签页源码
+
+# Rust
+target/
+**/target/
+
+# Node
+node_modules/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data
+data/
