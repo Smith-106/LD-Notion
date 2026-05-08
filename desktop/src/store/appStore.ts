@@ -102,7 +102,7 @@ export const useAppStore = create<AppState>((set) => ({
     } catch {
       // ignore
     }
-    set({ activeWorkspaceId: id, currentPage: null });
+    set({ activeWorkspaceId: id, currentPage: null, currentTags: [], tagFilter: null });
   },
 
   pageTree: [],

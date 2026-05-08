@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useAppStore } from "../store/appStore";
 import { updatePageTags, listTags } from "../services/api";
 import "./TagBar.css";
@@ -12,7 +12,6 @@ export default function TagBar() {
   const workspaceTags = useAppStore((s) => s.workspaceTags);
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const refreshWorkspaceTags = useCallback(async () => {
     if (!activeWorkspaceId) return;
@@ -88,7 +87,6 @@ export default function TagBar() {
       ))}
       <div className="tag-input-wrapper">
         <input
-          ref={inputRef}
           className="tag-input"
           type="text"
           value={input}
