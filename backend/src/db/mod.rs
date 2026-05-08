@@ -24,6 +24,13 @@ pub fn initialize(database_path: &Path, storage_root: &Path) -> Result<Connectio
     let schema_sql = include_str!("schema.sql");
     conn.execute_batch(schema_sql)?;
 
+    // 增量迁移：为旧数据库添加 is_pinned 列
+    match conn.execute_batch("ALTER TABLE pages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;") {
+        Ok(()) => {}
+        Err(e) if e.to_string().contains("duplicate column") => {}
+        Err(e) => return Err(e),
+    }
+
     // 初始化 Markdown 存储目录结构（按 workspace 隔离）
     // 实际子目录在创建 workspace 时动态建立，此处仅确保根目录存在
     fs::create_dir_all(storage_root)

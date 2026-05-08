@@ -6,6 +6,7 @@ import {
   deletePage,
   renamePage,
   searchPages,
+  togglePagePin,
 } from "../services/api";
 import "./PageTree.css";
 
@@ -25,6 +26,7 @@ interface TreeNodeProps {
   node: {
     id: string;
     title: string;
+    is_pinned?: boolean;
     children: any[];
   };
   depth: number;
@@ -111,6 +113,13 @@ function TreeNode({ node, depth }: TreeNodeProps) {
     [node.id, node.title, activeWorkspaceId, currentPage, setPageTree, setCurrentPage],
   );
 
+  const handlePin = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await togglePagePin(node.id);
+    } catch {}
+  }, [node.id]);
+
   return (
     <div className="tree-node-container">
       <div
@@ -181,6 +190,13 @@ function TreeNode({ node, depth }: TreeNodeProps) {
         ) : (
           <span className="tree-node-label">{node.title}</span>
         )}
+        <button
+          className="tree-node-action"
+          onClick={handlePin}
+          title={node.is_pinned ? "取消收藏" : "收藏"}
+        >
+          {node.is_pinned ? "★" : "☆"}
+        </button>
         <button
           className="tree-node-action"
           onClick={startEditing}

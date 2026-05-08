@@ -76,8 +76,15 @@ pub struct SearchQuery {
     pub offset: i32,
 }
 
+#[derive(Deserialize)]
+pub struct RecentQuery {
+    #[serde(default = "default_recent_limit")]
+    pub limit: i32,
+}
+
 fn default_mode() -> String { "and".to_string() }
 const fn default_limit() -> i32 { 20 }
+const fn default_recent_limit() -> i32 { 10 }
 
 // ── 健康检查 ──
 
@@ -318,6 +325,42 @@ pub async fn list_tags(
                 .collect();
             Json(json!({"ok": true, "data": tag_list}))
         }
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+// ── 最近编辑 & 收藏 API ──
+
+pub async fn list_recent(
+    State(state): State<Arc<AppState>>,
+    Path(ws_id): Path<String>,
+    Query(params): Query<RecentQuery>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::page::list_recent(&conn, &ws_id, params.limit) {
+        Ok(pages) => Json(json!({"ok": true, "data": pages})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn list_pinned(
+    State(state): State<Arc<AppState>>,
+    Path(ws_id): Path<String>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::page::list_pinned(&conn, &ws_id) {
+        Ok(pages) => Json(json!({"ok": true, "data": pages})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn toggle_pin(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::page::toggle_pin(&conn, &id) {
+        Ok(page) => Json(json!({"ok": true, "data": page})),
         Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
     }
 }

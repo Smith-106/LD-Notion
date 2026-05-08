@@ -20,10 +20,15 @@ CREATE TABLE IF NOT EXISTS pages (
     file_path TEXT NOT NULL,
     sort_order INTEGER NOT NULL DEFAULT 0,
     is_folder INTEGER NOT NULL DEFAULT 0,
+    is_pinned INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(workspace_id, file_path)
 );
+
+-- 增量迁移：为旧数据库添加 is_pinned 列（幂等，忽略已存在的情况）
+-- SQLite 不支持 IF NOT EXISTS for ALTER TABLE，通过忽略错误实现幂等
+-- 实际在 Rust 代码中处理
 
 -- 页面树表（物化路径缓存，加速祖先/后代查询）
 CREATE TABLE IF NOT EXISTS page_tree (

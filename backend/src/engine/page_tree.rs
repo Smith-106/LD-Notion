@@ -63,6 +63,7 @@ mod tests {
             file_path: format!("{title}.md"),
             sort_order: 0,
             is_folder: false,
+            is_pinned: false,
             created_at: String::new(),
             updated_at: String::new(),
         }

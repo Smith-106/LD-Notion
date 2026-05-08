@@ -29,6 +29,7 @@ pub struct Page {
     pub file_path: String,
     pub sort_order: i32,
     pub is_folder: bool,
+    pub is_pinned: bool,
     pub created_at: String,
     pub updated_at: String,
 }

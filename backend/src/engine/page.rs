@@ -35,8 +35,8 @@ pub fn create(
         .unwrap_or(1);
 
     conn.execute(
-        "INSERT INTO pages (id, workspace_id, parent_id, title, slug, file_path, sort_order, is_folder, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9)",
+        "INSERT INTO pages (id, workspace_id, parent_id, title, slug, file_path, sort_order, is_folder, is_pinned, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, ?8, ?9)",
         params![id, workspace_id, parent_id, title, &slug, &file_path, sort_order, &now, &now],
     )?;
 
@@ -74,6 +74,7 @@ pub fn create(
         file_path,
         sort_order,
         is_folder: false,
+        is_pinned: false,
         created_at: now.clone(),
         updated_at: now,
     })
@@ -82,7 +83,7 @@ pub fn create(
 /// 按 ID 读取页面
 pub fn find(conn: &Connection, id: &str) -> Result<Option<Page>, Box<dyn std::error::Error>> {
     let mut stmt = conn.prepare(
-        "SELECT id, workspace_id, parent_id, title, slug, file_path, sort_order, is_folder, created_at, updated_at
+        "SELECT id, workspace_id, parent_id, title, slug, file_path, sort_order, is_folder, is_pinned, created_at, updated_at
          FROM pages WHERE id = ?1",
     )?;
     let mut rows = stmt.query_map([id], |row| {
@@ -95,8 +96,9 @@ pub fn find(conn: &Connection, id: &str) -> Result<Option<Page>, Box<dyn std::er
             file_path: row.get(5)?,
             sort_order: row.get(6)?,
             is_folder: row.get(7)?,
-            created_at: row.get(8)?,
-            updated_at: row.get(9)?,
+            is_pinned: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
         })
     })?;
     match rows.next() {
@@ -196,7 +198,7 @@ pub fn delete(conn: &Connection, id: &str, ws_root: &Path) -> Result<bool, Box<d
 /// 列出工作区下的页面
 pub fn list_by_workspace(conn: &Connection, workspace_id: &str) -> Result<Vec<Page>, Box<dyn std::error::Error>> {
     let mut stmt = conn.prepare(
-        "SELECT id, workspace_id, parent_id, title, slug, file_path, sort_order, is_folder, created_at, updated_at
+        "SELECT id, workspace_id, parent_id, title, slug, file_path, sort_order, is_folder, is_pinned, created_at, updated_at
          FROM pages WHERE workspace_id = ?1 ORDER BY sort_order",
     )?;
     let rows = stmt.query_map([workspace_id], |row| {
@@ -209,8 +211,9 @@ pub fn list_by_workspace(conn: &Connection, workspace_id: &str) -> Result<Vec<Pa
             file_path: row.get(5)?,
             sort_order: row.get(6)?,
             is_folder: row.get(7)?,
-            created_at: row.get(8)?,
-            updated_at: row.get(9)?,
+            is_pinned: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
         })
     })?;
     Ok(rows.filter_map(std::result::Result::ok).collect())
@@ -434,6 +437,68 @@ fn title_to_slug(title: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_string()
+}
+
+/// 列出最近编辑的页面
+pub fn list_recent(conn: &Connection, workspace_id: &str, limit: i32) -> Result<Vec<Page>, Box<dyn std::error::Error>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, workspace_id, parent_id, title, slug, file_path, sort_order, is_folder, is_pinned, created_at, updated_at
+         FROM pages WHERE workspace_id = ?1 ORDER BY updated_at DESC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![workspace_id, limit], |row| {
+        Ok(Page {
+            id: row.get(0)?,
+            workspace_id: row.get(1)?,
+            parent_id: row.get(2)?,
+            title: row.get(3)?,
+            slug: row.get(4)?,
+            file_path: row.get(5)?,
+            sort_order: row.get(6)?,
+            is_folder: row.get(7)?,
+            is_pinned: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        })
+    })?;
+    Ok(rows.filter_map(std::result::Result::ok).collect())
+}
+
+/// 列出收藏的页面
+pub fn list_pinned(conn: &Connection, workspace_id: &str) -> Result<Vec<Page>, Box<dyn std::error::Error>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, workspace_id, parent_id, title, slug, file_path, sort_order, is_folder, is_pinned, created_at, updated_at
+         FROM pages WHERE workspace_id = ?1 AND is_pinned = 1 ORDER BY sort_order",
+    )?;
+    let rows = stmt.query_map([workspace_id], |row| {
+        Ok(Page {
+            id: row.get(0)?,
+            workspace_id: row.get(1)?,
+            parent_id: row.get(2)?,
+            title: row.get(3)?,
+            slug: row.get(4)?,
+            file_path: row.get(5)?,
+            sort_order: row.get(6)?,
+            is_folder: row.get(7)?,
+            is_pinned: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        })
+    })?;
+    Ok(rows.filter_map(std::result::Result::ok).collect())
+}
+
+/// 切换页面收藏状态
+pub fn toggle_pin(conn: &Connection, id: &str) -> Result<Page, Box<dyn std::error::Error>> {
+    let page = find(conn, id)?.ok_or("页面不存在")?;
+    let new_pinned = !page.is_pinned;
+    conn.execute(
+        "UPDATE pages SET is_pinned = ?1 WHERE id = ?2",
+        params![i32::from(new_pinned), id],
+    )?;
+    Ok(Page {
+        is_pinned: new_pinned,
+        ..page
+    })
 }
 
 #[cfg(test)]

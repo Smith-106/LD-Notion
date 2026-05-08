@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { PageTreeNode, SearchResult, TagInfo, Workspace } from "../services/api";
+import type { Page, PageTreeNode, SearchResult, TagInfo, Workspace } from "../services/api";
 
 export type ThemeMode = "light" | "dark" | "auto";
 
@@ -56,6 +56,12 @@ interface AppState {
   setCurrentTags: (tags: string[]) => void;
   tagFilter: string | null;
   setTagFilter: (tag: string | null) => void;
+
+  // 最近 & 收藏
+  recentPages: Page[];
+  setRecentPages: (pages: Page[]) => void;
+  pinnedPages: Page[];
+  setPinnedPages: (pages: Page[]) => void;
 }
 
 function loadTheme(): ThemeMode {
@@ -151,4 +157,9 @@ export const useAppStore = create<AppState>((set) => ({
   setCurrentTags: (currentTags) => set({ currentTags }),
   tagFilter: null,
   setTagFilter: (tagFilter) => set({ tagFilter }),
+
+  recentPages: [],
+  setRecentPages: (recentPages) => set({ recentPages }),
+  pinnedPages: [],
+  setPinnedPages: (pinnedPages) => set({ pinnedPages }),
 }));

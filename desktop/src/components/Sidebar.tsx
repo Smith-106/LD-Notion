@@ -13,6 +13,10 @@ import {
   importPage,
   getPageTree,
   listTags,
+  listRecentPages,
+  listPinnedPages,
+  togglePagePin,
+  getPageContent,
 } from "../services/api";
 import "./Sidebar.css";
 
@@ -27,6 +31,12 @@ function Sidebar() {
   const workspaceTags = useAppStore((s) => s.workspaceTags);
   const tagFilter = useAppStore((s) => s.tagFilter);
   const setTagFilter = useAppStore((s) => s.setTagFilter);
+  const recentPages = useAppStore((s) => s.recentPages);
+  const setRecentPages = useAppStore((s) => s.setRecentPages);
+  const pinnedPages = useAppStore((s) => s.pinnedPages);
+  const setPinnedPages = useAppStore((s) => s.setPinnedPages);
+  const setCurrentPage = useAppStore((s) => s.setCurrentPage);
+  const setCurrentTags = useAppStore((s) => s.setCurrentTags);
   const searchQuery = useAppStore((s) => s.searchQuery);
   useMcpStatus();
 
@@ -40,10 +50,14 @@ function Sidebar() {
     if (!activeWorkspaceId) {
       setWorkspaceTags([]);
       setTagFilter(null);
+      setRecentPages([]);
+      setPinnedPages([]);
       return;
     }
     listTags(activeWorkspaceId).then(setWorkspaceTags).catch(() => {});
-  }, [activeWorkspaceId, setWorkspaceTags, setTagFilter]);
+    listRecentPages(activeWorkspaceId).then(setRecentPages).catch(() => {});
+    listPinnedPages(activeWorkspaceId).then(setPinnedPages).catch(() => {});
+  }, [activeWorkspaceId, setWorkspaceTags, setTagFilter, setRecentPages, setPinnedPages]);
 
   const handleCreateWorkspace = useCallback(async () => {
     const name = prompt("工作区名称:");
@@ -91,6 +105,27 @@ function Sidebar() {
     };
     input.click();
   }, [activeWorkspaceId, setPageTree]);
+
+  const handleQuickSelect = useCallback(async (pageId: string, title: string) => {
+    try {
+      const content = await getPageContent(pageId);
+      setCurrentPage({ id: pageId, title: content.title, body: content.body, saved: true });
+      setCurrentTags(content.tags);
+    } catch {
+      setCurrentPage({ id: pageId, title, body: "", saved: true });
+      setCurrentTags([]);
+    }
+  }, [setCurrentPage, setCurrentTags]);
+
+  const handleTogglePin = useCallback(async (pageId: string) => {
+    try {
+      await togglePagePin(pageId);
+      if (activeWorkspaceId) {
+        listPinnedPages(activeWorkspaceId).then(setPinnedPages).catch(() => {});
+        listRecentPages(activeWorkspaceId).then(setRecentPages).catch(() => {});
+      }
+    } catch {}
+  }, [activeWorkspaceId, setPinnedPages, setRecentPages]);
 
   return (
     <aside className="sidebar" role="navigation" aria-label="页面导航">
@@ -156,6 +191,57 @@ function Sidebar() {
       </div>
 
       <SearchBar />
+      {pinnedPages.length > 0 && (
+        <div className="sidebar-section">
+          <span className="sidebar-section-label">收藏</span>
+          {pinnedPages.map((p) => (
+            <button
+              key={p.id}
+              className="sidebar-quick-item"
+              onClick={() => handleQuickSelect(p.id, p.title)}
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" className="sidebar-pin-icon active">
+                <path d="M8 1l2.2 4.5 5 .7-3.6 3.5.9 5L8 12.4 3.5 14.7l.9-5L.8 6.2l5-.7z" />
+              </svg>
+              <span className="sidebar-quick-title">{p.title}</span>
+              <button
+                className="sidebar-quick-unpin"
+                onClick={(e) => { e.stopPropagation(); handleTogglePin(p.id); }}
+                title="取消收藏"
+              >
+                ×
+              </button>
+            </button>
+          ))}
+        </div>
+      )}
+      {recentPages.length > 0 && (
+        <div className="sidebar-section">
+          <span className="sidebar-section-label">最近编辑</span>
+          {recentPages.slice(0, 5).map((p) => (
+            <button
+              key={p.id}
+              className="sidebar-quick-item"
+              onClick={() => handleQuickSelect(p.id, p.title)}
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" className="sidebar-clock-icon">
+                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                <path d="M8 4v4l3 2" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+              </svg>
+              <span className="sidebar-quick-title">{p.title}</span>
+              {!p.is_pinned && (
+                <button
+                  className="sidebar-quick-pin"
+                  onClick={(e) => { e.stopPropagation(); handleTogglePin(p.id); }}
+                  title="收藏"
+                >
+                  ☆
+                </button>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
       {workspaceTags.length > 0 && (
         <div className="sidebar-tags">
           <button

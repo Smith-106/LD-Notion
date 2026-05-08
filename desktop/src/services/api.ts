@@ -63,6 +63,7 @@ export interface Page {
   file_path: string;
   sort_order: number;
   is_folder: boolean;
+  is_pinned: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -189,6 +190,34 @@ export async function updatePageTags(
     method: "PUT",
     body: JSON.stringify({ tags }),
   });
+}
+
+// ── 最近 & 收藏 ──
+
+export async function listRecentPages(
+  workspaceId: string,
+  limit = 10,
+): Promise<Page[]> {
+  const data = await request<{ data: Page[] }>(
+    `/api/workspaces/${workspaceId}/recent?limit=${limit}`,
+  );
+  return data.data;
+}
+
+export async function listPinnedPages(
+  workspaceId: string,
+): Promise<Page[]> {
+  const data = await request<{ data: Page[] }>(
+    `/api/workspaces/${workspaceId}/pinned`,
+  );
+  return data.data;
+}
+
+export async function togglePagePin(id: string): Promise<Page> {
+  const data = await request<{ data: Page }>(`/api/pages/${id}/pin`, {
+    method: "PUT",
+  });
+  return data.data;
 }
 
 // ── 搜索 ──
