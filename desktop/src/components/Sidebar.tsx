@@ -10,6 +10,7 @@ import {
   listWorkspaces,
   createWorkspace,
   createPage,
+  importPage,
   getPageTree,
 } from "../services/api";
 import "./Sidebar.css";
@@ -56,6 +57,27 @@ function Sidebar() {
     }
   }, [activeWorkspaceId, setPageTree]);
 
+  const handleImport = useCallback(async () => {
+    if (!activeWorkspaceId) return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".md,.markdown,.txt";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      const title = file.name.replace(/\.(md|markdown|txt)$/, "");
+      try {
+        await importPage(activeWorkspaceId, title, text);
+        const tree = await getPageTree(activeWorkspaceId);
+        setPageTree(tree);
+      } catch (err) {
+        alert(`导入失败: ${err}`);
+      }
+    };
+    input.click();
+  }, [activeWorkspaceId, setPageTree]);
+
   return (
     <aside className="sidebar" role="navigation" aria-label="页面导航">
       <div className="sidebar-header">
@@ -79,6 +101,16 @@ function Sidebar() {
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 2v12M2 8h12" stroke="currentColor" strokeWidth="1.5" fill="none" />
+            </svg>
+          </button>
+          <button
+            className="sidebar-action-btn"
+            onClick={handleImport}
+            title="导入 Markdown"
+            disabled={!activeWorkspaceId}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M2 3h12v10H2V3zm1 1v8h10V4H3zm1 1l3 3 2-2 3 3H4z" fill="none" stroke="currentColor" strokeWidth="1" />
             </svg>
           </button>
         </div>

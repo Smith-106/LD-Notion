@@ -128,3 +128,40 @@
 .tree-node-children {
   animation: ldb-fade-in var(--ldb-duration-fast) var(--ldb-easing-ease-out);
 }
+
+/* ---- 节点操作按钮 ---- */
+.tree-node-action {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: var(--ldb-radius-xs);
+  color: var(--ldb-color-text-tertiary);
+  margin-left: auto;
+  transition: background var(--ldb-duration-fast) var(--ldb-easing-ease-out);
+}
+
+.tree-node:hover .tree-node-action {
+  display: flex;
+}
+
+.tree-node-action:hover {
+  background: oklch(0.14 0.015 260 / 0.10);
+  color: var(--ldb-color-text-primary);
+}
+
+/* ---- 内联编辑输入框 ---- */
+.tree-node-edit-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  border: 1px solid var(--ldb-color-brand-primary);
+  border-radius: var(--ldb-radius-xs);
+  background: var(--ldb-color-bg-primary);
+  color: var(--ldb-color-text-primary);
+  font-size: inherit;
+  font-family: inherit;
+  outline: none;
+}

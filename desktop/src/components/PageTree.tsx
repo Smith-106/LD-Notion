@@ -1,9 +1,10 @@
-import { useEffect, useCallback, useMemo } from "react";
+import { useEffect, useCallback, useMemo, useState, useRef } from "react";
 import { useAppStore } from "../store/appStore";
 import {
   getPageTree,
   getPageContent,
   deletePage,
+  renamePage,
 } from "../services/api";
 import "./PageTree.css";
 
@@ -38,6 +39,44 @@ function TreeNode({ node, depth }: TreeNodeProps) {
   const isExpanded = expandedNodes.has(node.id);
   const hasChildren = node.children.length > 0;
   const isActive = currentPage?.id === node.id;
+
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  const handleRename = useCallback(async () => {
+    const trimmed = editTitle.trim();
+    if (!trimmed || trimmed === node.title) {
+      setEditing(false);
+      return;
+    }
+    try {
+      await renamePage(node.id, trimmed);
+      if (activeWorkspaceId) {
+        const tree = await getPageTree(activeWorkspaceId);
+        setPageTree(tree);
+      }
+      if (currentPage?.id === node.id) {
+        setCurrentPage({ ...currentPage, title: trimmed });
+      }
+    } catch (err) {
+      alert(`重命名失败: ${err}`);
+    }
+    setEditing(false);
+  }, [editTitle, node.id, node.title, activeWorkspaceId, currentPage, setPageTree, setCurrentPage]);
+
+  const startEditing = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditTitle(node.title);
+    setEditing(true);
+  }, [node.title]);
 
   const handleSelect = useCallback(async () => {
     try {
@@ -122,9 +161,33 @@ function TreeNode({ node, depth }: TreeNodeProps) {
             </svg>
           )}
         </span>
-        <span className="tree-node-label">{node.title}</span>
+        {editing ? (
+          <input
+            ref={inputRef}
+            className="tree-node-edit-input"
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            onBlur={handleRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleRename();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className="tree-node-label">{node.title}</span>
+        )}
         <button
-          className="tree-node-delete"
+          className="tree-node-action"
+          onClick={startEditing}
+          title="重命名"
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M12.146.146a.5.5 0 01.708 0l2.5 2.5a.5.5 0 010 .708l-10 10a.5.5 0 01-.168.11l-4 1.5a.5.5 0 01-.618-.618l1.5-4a.5.5 0 01.11-.168l10-10z" />
+          </svg>
+        </button>
+        <button
+          className="tree-node-action tree-node-delete"
           onClick={handleDelete}
           title="删除页面"
         >

@@ -127,6 +127,37 @@ export async function deletePage(id: string): Promise<void> {
   await request(`/api/pages/${id}`, { method: "DELETE" });
 }
 
+export async function renamePage(id: string, title: string): Promise<Page> {
+  const data = await request<{ data: Page }>(`/api/pages/${id}/rename`, {
+    method: "PUT",
+    body: JSON.stringify({ title }),
+  });
+  return data.data;
+}
+
+export async function movePage(id: string, parentId: string | null): Promise<Page> {
+  const data = await request<{ data: Page }>(`/api/pages/${id}/move`, {
+    method: "PUT",
+    body: JSON.stringify({ parent_id: parentId }),
+  });
+  return data.data;
+}
+
+export async function importPage(
+  workspaceId: string,
+  title: string,
+  body: string,
+  parentId?: string,
+): Promise<Page> {
+  const reqBody: Record<string, string> = { workspace_id: workspaceId, title, body };
+  if (parentId) reqBody.parent_id = parentId;
+  const data = await request<{ data: Page }>("/api/pages/import", {
+    method: "POST",
+    body: JSON.stringify(reqBody),
+  });
+  return data.data;
+}
+
 export async function getPageTree(
   workspaceId: string,
 ): Promise<PageTreeNode[]> {

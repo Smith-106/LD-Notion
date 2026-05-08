@@ -113,6 +113,19 @@ export default function BlockEditor() {
     );
   }
 
+  const handleExport = useCallback(() => {
+    if (!editor || !currentPage) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const md = (editor.storage as any).markdown.getMarkdown();
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${currentPage.title || "page"}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [editor, currentPage]);
+
   return (
     <div className="block-editor" onKeyDown={handleKeyDown}>
       <div className="block-editor-toolbar">
@@ -127,6 +140,12 @@ export default function BlockEditor() {
         <ToolbarButton editor={editor} action="toggleBulletList" label="UL" />
         <ToolbarButton editor={editor} action="toggleOrderedList" label="OL" />
         <ToolbarButton editor={editor} action="toggleCodeBlock" label="Code" />
+        <div className="toolbar-separator" />
+        <button className="toolbar-btn" onClick={handleExport} title="导出 Markdown">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 11l6 3 6-3M8 2v10" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
       </div>
       <EditorContent editor={editor} />
     </div>

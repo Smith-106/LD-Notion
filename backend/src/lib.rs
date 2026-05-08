@@ -43,6 +43,24 @@ pub struct UpdatePageReq {
 }
 
 #[derive(Deserialize)]
+pub struct RenamePageReq {
+    pub title: String,
+}
+
+#[derive(Deserialize)]
+pub struct MovePageReq {
+    pub parent_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ImportPageReq {
+    pub workspace_id: String,
+    pub parent_id: Option<String>,
+    pub title: String,
+    pub body: String,
+}
+
+#[derive(Deserialize)]
 pub struct SearchQuery {
     pub q: String,
     #[serde(default = "default_mode")]
@@ -204,5 +222,66 @@ pub async fn search_pages(
     match search::search(&conn, &params.q, &params.mode, params.limit, params.offset) {
         Ok(output) => Json(json!({"ok": true, "data": output})),
         Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+// ── 页面管理 API ──
+
+pub async fn rename_page(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<RenamePageReq>,
+) -> Json<Value> {
+    let title = body.title.trim();
+    if title.is_empty() {
+        return Json(json!({"ok": false, "error": "页面标题不能为空"}));
+    }
+    let conn = state.db.lock().await;
+    match engine::page::rename(&conn, &id, title, &state.config.storage_root) {
+        Ok(page) => Json(json!({"ok": true, "data": page})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn move_page(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<MovePageReq>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    let parent_id = body.parent_id.as_deref().filter(|s| !s.is_empty());
+    match engine::page::move_to(&conn, &id, parent_id) {
+        Ok(page) => Json(json!({"ok": true, "data": page})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+// ── 导入 API ──
+
+pub async fn import_page(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ImportPageReq>,
+) -> Json<Value> {
+    let title = body.title.trim();
+    if title.is_empty() {
+        return Json(json!({"ok": false, "error": "页面标题不能为空"}));
+    }
+    let conn = state.db.lock().await;
+    let parent_id = body.parent_id.as_deref().filter(|s| !s.is_empty());
+    match engine::page::create(&conn, &body.workspace_id, parent_id, title, &state.config.storage_root) {
+        Ok(page) => {
+            if !body.body.is_empty() {
+                let _ = engine::page::update_content(&conn, &page.id, &body.body, &state.config.storage_root);
+            }
+            Json(json!({"ok": true, "data": page}))
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("FOREIGN KEY") {
+                Json(json!({"ok": false, "error": "工作区不存在"}))
+            } else {
+                Json(json!({"ok": false, "error": msg}))
+            }
+        }
     }
 }

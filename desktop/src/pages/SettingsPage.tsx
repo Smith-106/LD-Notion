@@ -1,9 +1,33 @@
+import { useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import ThemeToggle from "../components/ThemeToggle";
 import StatusIndicator from "../components/StatusIndicator";
+import { useAppStore } from "../store/appStore";
+import { listWorkspaces, deleteWorkspace } from "../services/api";
 import "./SettingsPage.css";
 
 function SettingsPage() {
+  const workspaces = useAppStore((s) => s.workspaces);
+  const setWorkspaces = useAppStore((s) => s.setWorkspaces);
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const setActiveWorkspaceId = useAppStore((s) => s.setActiveWorkspaceId);
+
+  useEffect(() => {
+    listWorkspaces().then(setWorkspaces).catch(() => {});
+  }, [setWorkspaces]);
+
+  const handleDelete = useCallback(async (id: string, name: string) => {
+    if (!confirm(`删除工作区「${name}」及其所有页面？此操作不可撤销。`)) return;
+    try {
+      await deleteWorkspace(id);
+      const updated = await listWorkspaces();
+      setWorkspaces(updated);
+      if (activeWorkspaceId === id) setActiveWorkspaceId(null);
+    } catch (err) {
+      alert(`删除失败: ${err}`);
+    }
+  }, [activeWorkspaceId, setActiveWorkspaceId, setWorkspaces]);
+
   return (
     <div className="settings-page">
       <div className="settings-header">
@@ -17,35 +41,37 @@ function SettingsPage() {
       </div>
 
       <div className="settings-content">
-        {/* 工作区管理 */}
         <section className="settings-section">
           <h2 className="settings-section-title">工作区管理</h2>
           <p className="settings-section-desc">
-            管理本地工作区目录，工作区包含所有页面数据和配置。
+            管理本地工作区，每个工作区包含独立的页面数据。
           </p>
           <div className="settings-card">
-            <div className="settings-field">
-              <label className="settings-label">当前工作区</label>
-              <div className="settings-field-row">
-                <code className="settings-path">~/ld-notion-workspace</code>
-                <button className="settings-btn settings-btn-secondary">
-                  更改
-                </button>
+            {workspaces.length === 0 ? (
+              <p className="settings-section-desc">暂无工作区</p>
+            ) : (
+              <div className="settings-workspace-list">
+                {workspaces.map((ws) => (
+                  <div key={ws.id} className="settings-workspace-item">
+                    <div className="settings-workspace-info">
+                      <span className="settings-workspace-name">{ws.name}</span>
+                      <span className="settings-workspace-meta">
+                        {ws.root_path}
+                      </span>
+                    </div>
+                    <button
+                      className="settings-btn settings-btn-danger"
+                      onClick={() => handleDelete(ws.id, ws.name)}
+                    >
+                      删除
+                    </button>
+                  </div>
+                ))}
               </div>
-            </div>
-            <div className="settings-field">
-              <label className="settings-label">存储使用</label>
-              <div className="settings-usage">
-                <div className="settings-usage-bar">
-                  <div className="settings-usage-fill" style={{ width: "12%" }} />
-                </div>
-                <span className="settings-usage-text">128 MB / 1 GB</span>
-              </div>
-            </div>
+            )}
           </div>
         </section>
 
-        {/* MCP 端点配置 */}
         <section className="settings-section">
           <h2 className="settings-section-title">MCP 端点配置</h2>
           <p className="settings-section-desc">
@@ -55,15 +81,6 @@ function SettingsPage() {
             <div className="settings-field">
               <label className="settings-label">连接状态</label>
               <StatusIndicator />
-            </div>
-            <div className="settings-field">
-              <label className="settings-label">服务地址</label>
-              <input
-                className="settings-input"
-                type="text"
-                defaultValue="http://localhost:9876"
-                readOnly
-              />
             </div>
             <div className="settings-field">
               <label className="settings-label">健康检查端点</label>
@@ -77,7 +94,6 @@ function SettingsPage() {
           </div>
         </section>
 
-        {/* 主题 */}
         <section className="settings-section">
           <h2 className="settings-section-title">外观</h2>
           <p className="settings-section-desc">
@@ -91,7 +107,6 @@ function SettingsPage() {
           </div>
         </section>
 
-        {/* 关于 */}
         <section className="settings-section">
           <h2 className="settings-section-title">关于</h2>
           <div className="settings-card">

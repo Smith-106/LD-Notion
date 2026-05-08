@@ -216,6 +216,121 @@ pub fn list_by_workspace(conn: &Connection, workspace_id: &str) -> Result<Vec<Pa
     Ok(rows.filter_map(std::result::Result::ok).collect())
 }
 
+/// 重命名页面
+pub fn rename(
+    conn: &Connection,
+    id: &str,
+    new_title: &str,
+    ws_root: &Path,
+) -> Result<Page, Box<dyn std::error::Error>> {
+    let page = find(conn, id)?.ok_or("页面不存在")?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // 更新 markdown 文件中的 title
+    let full_path = ws_root.join(&page.file_path);
+    if let Ok(mut content) = markdown_io::read(&full_path) {
+        content.title = new_title.to_string();
+        content.updated.clone_from(&now);
+        markdown_io::write(&full_path, &content)?;
+    }
+
+    // 更新搜索索引
+    let _ = crate::search::index_page(conn, id, new_title, "", "");
+
+    conn.execute(
+        "UPDATE pages SET title = ?1, updated_at = ?2 WHERE id = ?3",
+        params![new_title, &now, id],
+    )?;
+
+    Ok(Page {
+        title: new_title.to_string(),
+        updated_at: now,
+        ..page
+    })
+}
+
+/// 移动页面到新父级
+pub fn move_to(
+    conn: &Connection,
+    id: &str,
+    new_parent_id: Option<&str>,
+) -> Result<Page, Box<dyn std::error::Error>> {
+    let page = find(conn, id)?.ok_or("页面不存在")?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // 不允许移动到自身或自身后代下
+    if let Some(pid) = new_parent_id {
+        if pid == id {
+            return Err("不能移动到自身下".into());
+        }
+        let is_descendant: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM page_tree WHERE ancestor_id = ?1 AND descendant_id = ?2)",
+                params![id, pid],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if is_descendant {
+            return Err("不能移动到自身后代下".into());
+        }
+    }
+
+    // 确定 sort_order
+    let sort_order: i32 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM pages WHERE workspace_id = ?1 AND parent_id IS ?2",
+            params![page.workspace_id, new_parent_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(1);
+
+    // 删除旧的 page_tree 关系
+    conn.execute("DELETE FROM page_tree WHERE descendant_id = ?1", [id])?;
+
+    // 重新插入自身
+    conn.execute(
+        "INSERT INTO page_tree (ancestor_id, descendant_id, depth) VALUES (?1, ?1, 0)",
+        [id],
+    )?;
+
+    // 插入到新父级的祖先路径
+    if let Some(pid) = new_parent_id {
+        let ancestors: Vec<(String, i32)> = {
+            let mut stmt = conn.prepare(
+                "SELECT ancestor_id, depth FROM page_tree WHERE descendant_id = ?1",
+            )?;
+            let rows = stmt.query_map([pid], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+            })?;
+            rows.filter_map(std::result::Result::ok).collect()
+        };
+        for (ancestor_id, depth) in ancestors {
+            conn.execute(
+                "INSERT OR IGNORE INTO page_tree (ancestor_id, descendant_id, depth) VALUES (?1, ?2, ?3 + 1)",
+                params![&ancestor_id, id, depth],
+            )?;
+        }
+        // 直接父级关系
+        conn.execute(
+            "INSERT OR IGNORE INTO page_tree (ancestor_id, descendant_id, depth) VALUES (?1, ?2, 1)",
+            params![pid, id],
+        )?;
+    }
+
+    // 更新页面的 parent_id 和 sort_order
+    conn.execute(
+        "UPDATE pages SET parent_id = ?1, sort_order = ?2, updated_at = ?3 WHERE id = ?4",
+        params![new_parent_id, sort_order, &now, id],
+    )?;
+
+    Ok(Page {
+        parent_id: new_parent_id.map(std::string::ToString::to_string),
+        sort_order,
+        updated_at: now,
+        ..page
+    })
+}
+
 fn title_to_slug(title: &str) -> String {
     title
         .to_lowercase()

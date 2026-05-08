@@ -160,6 +160,62 @@
   color: var(--ldb-color-text-tertiary);
 }
 
+/* ---- 工作区列表 ---- */
+.settings-workspace-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ldb-spacing-2);
+}
+
+.settings-workspace-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ldb-spacing-3);
+  border: 1px solid var(--ldb-color-border-subtle);
+  border-radius: var(--ldb-radius-md);
+}
+
+.settings-workspace-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-workspace-name {
+  font-size: var(--ldb-font-size-sm);
+  font-weight: var(--ldb-font-weight-medium);
+  color: var(--ldb-color-text-primary);
+}
+
+.settings-workspace-meta {
+  font-size: var(--ldb-font-size-xs);
+  color: var(--ldb-color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-btn-danger {
+  background: transparent;
+  color: oklch(0.55 0.2 25);
+  border: 1px solid oklch(0.55 0.2 25 / 0.30);
+}
+
+.settings-btn-danger:hover {
+  background: oklch(0.55 0.2 25 / 0.08);
+}
+
+[data-ldb-theme="dark"] .settings-btn-danger {
+  color: oklch(0.7 0.15 25);
+  border: 1px solid oklch(0.7 0.15 25 / 0.30);
+}
+
+[data-ldb-theme="dark"] .settings-btn-danger:hover {
+  background: oklch(0.7 0.15 25 / 0.10);
+}
+
 /* ---- 关于 ---- */
 .settings-about {
   display: flex;
