@@ -1,5 +1,19 @@
 # LD-Notion Hub — AI 多源知识中枢
 
+> **本项目包含两条产品线，共用同一仓库：**
+>
+> | 产品 | 版本前缀 | 技术栈 | 说明 |
+> |------|----------|--------|------|
+> | **浏览器脚本/扩展** | `v2.x` ~ `v3.x` | Tampermonkey / Chrome Extension | 多源收藏导入、跨源搜索、AI 对话管理，连接 Notion |
+> | **桌面应用** | `desktop-v0.x` | Tauri v2 + React 18 + Rust + SQLite | 独立本地知识库，Markdown 编辑、页面树、全文搜索、MCP |
+>
+> - 桌面应用源码：[`backend/`](./backend)（Rust 后端）、[`desktop/`](./desktop)（Tauri 前端）
+> - 桌面应用最新版本：`desktop-v0.9.0`
+
+---
+
+## 浏览器脚本/扩展
+
 一个可扩展的 Tampermonkey 用户脚本，统一连接 **Linux.do**、**GitHub**、**浏览器书签** 与 **Notion**：多源收藏导入、跨源智能搜索与推荐、AI 对话式管理工作区，并可继续接入更多内容来源。
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
@@ -555,6 +569,62 @@ A: 请检查：
 - 初始版本发布
 
 ## 致谢
+
+---
+
+## 桌面应用（desktop-v0.x）
+
+基于 Tauri v2 + React 18 + Rust + SQLite 的独立桌面知识库应用，不依赖 Notion，数据完全本地存储。
+
+### 功能概览
+
+- **工作区管理** — 多工作区创建、重命名、删除、统计
+- **页面树** — 层级页面结构，拖拽移动，闭包表存储
+- **Markdown 编辑器** — TipTap 块编辑器，支持标题/代码块/列表，自动保存
+- **全文搜索** — FTS5 索引，支持 AND/OR 模式
+- **标签系统** — 页面标签编辑，工作区级标签过滤
+- **收藏 & 最近** — 页面置顶收藏，最近编辑快速访问
+- **页面操作** — 复制页面、批量删除、Markdown 导入导出
+- **MCP 端点** — Model Context Protocol 支持，AI 助手可连接知识库
+- **主题** — 亮色/暗色/自动切换
+
+### 桌面应用版本日志
+
+#### desktop-v0.9.0
+- 页面复制（含内容和标签）
+- 代码块一键复制按钮
+- 工作区统计（设置页显示页面数量）
+- 批量删除模式
+
+#### desktop-v0.8.0
+- 工作区重命名
+- 编辑器状态栏（字数统计 + 保存状态）
+- Ctrl+K 全局搜索快捷键
+
+#### desktop-v0.7.0
+- 最近编辑页面快速访问
+- 页面收藏/置顶
+- 侧边栏收藏区和最近编辑区
+
+#### desktop-v0.6.0
+- 标签系统 — 后端标签 API + 前端标签编辑器
+- 侧边栏标签过滤
+
+#### desktop-v0.5.0 ~ v0.5.1
+- 页面移动（闭包表重建）
+- 页面重命名（同步更新搜索索引）
+- Markdown 导入导出
+- Bug 修复
+
+#### desktop-v0.4.0 ~ v0.4.2
+- 全文搜索（FTS5）
+- 搜索组件优化
+
+#### desktop-v0.3.0 ~ v0.3.2
+- 前端集成（Tauri v2 + React）
+- 工作区选择、页面树、编辑器
+
+## 致谢（续）
 
 本项目参考了以下优秀作品：
 - [Linux.do 帖子导出到 Notion](https://greasyfork.org/scripts/561916) by flobby
