@@ -1,1 +1,0 @@
-{"compilerOptions":{"noUnusedLocals":false,"noUnusedParameters":false},"extends":"./tsconfig.json","include":["src-tauri"]}
