@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import ThemeToggle from "../components/ThemeToggle";
 import StatusIndicator from "../components/StatusIndicator";
 import { useAppStore } from "../store/appStore";
-import { listWorkspaces, deleteWorkspace } from "../services/api";
+import { listWorkspaces, deleteWorkspace, renameWorkspace } from "../services/api";
 import "./SettingsPage.css";
 
 function SettingsPage() {
@@ -27,6 +27,18 @@ function SettingsPage() {
       alert(`删除失败: ${err}`);
     }
   }, [activeWorkspaceId, setActiveWorkspaceId, setWorkspaces]);
+
+  const handleRename = useCallback(async (id: string, currentName: string) => {
+    const name = prompt("新名称:", currentName);
+    if (!name?.trim() || name.trim() === currentName) return;
+    try {
+      await renameWorkspace(id, name.trim());
+      const updated = await listWorkspaces();
+      setWorkspaces(updated);
+    } catch (err) {
+      alert(`重命名失败: ${err}`);
+    }
+  }, [setWorkspaces]);
 
   return (
     <div className="settings-page">
@@ -59,12 +71,20 @@ function SettingsPage() {
                         {ws.root_path}
                       </span>
                     </div>
-                    <button
-                      className="settings-btn settings-btn-danger"
-                      onClick={() => handleDelete(ws.id, ws.name)}
-                    >
-                      删除
-                    </button>
+                    <div className="settings-workspace-actions">
+                      <button
+                        className="settings-btn"
+                        onClick={() => handleRename(ws.id, ws.name)}
+                      >
+                        重命名
+                      </button>
+                      <button
+                        className="settings-btn settings-btn-danger"
+                        onClick={() => handleDelete(ws.id, ws.name)}
+                      >
+                        删除
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -117,7 +137,7 @@ function SettingsPage() {
               </div>
               <div className="settings-about-row">
                 <span className="settings-about-key">版本</span>
-                <span className="settings-about-value">v0.7.0</span>
+                <span className="settings-about-value">v0.8.0</span>
               </div>
               <div className="settings-about-row">
                 <span className="settings-about-key">技术栈</span>

@@ -52,6 +52,14 @@ export async function deleteWorkspace(id: string): Promise<void> {
   await request(`/api/workspaces/${id}`, { method: "DELETE" });
 }
 
+export async function renameWorkspace(id: string, name: string): Promise<Workspace> {
+  const data = await request<{ data: Workspace }>(`/api/workspaces/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ name }),
+  });
+  return data.data;
+}
+
 // ── 页面 ──
 
 export interface Page {

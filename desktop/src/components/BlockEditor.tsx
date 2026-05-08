@@ -150,6 +150,18 @@ export default function BlockEditor() {
       </div>
       <TagBar />
       <EditorContent editor={editor} />
+      <div className="editor-status-bar">
+        <span className="editor-status-info">
+          {currentPage && currentPage.body.trim() && (
+            <>
+              {currentPage.body.trim().split(/\s+/).filter(Boolean).length} 字
+            </>
+          )}
+        </span>
+        <span className="editor-status-save">
+          {currentPage && (currentPage.saved ? "已保存" : "保存中…")}
+        </span>
+      </div>
     </div>
   );
 }

@@ -31,6 +31,11 @@ pub struct CreateWorkspaceReq {
 }
 
 #[derive(Deserialize)]
+pub struct RenameWorkspaceReq {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
 pub struct CreatePageReq {
     pub workspace_id: String,
     pub parent_id: Option<String>,
@@ -125,6 +130,22 @@ pub async fn delete_workspace(
     let conn = state.db.lock().await;
     match engine::workspace::delete(&conn, &id, &state.config.storage_root) {
         Ok(removed) => Json(json!({"ok": true, "removed": removed})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn rename_workspace(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<RenameWorkspaceReq>,
+) -> Json<Value> {
+    let name = body.name.trim();
+    if name.is_empty() {
+        return Json(json!({"ok": false, "error": "工作区名称不能为空"}));
+    }
+    let conn = state.db.lock().await;
+    match engine::workspace::rename(&conn, &id, name) {
+        Ok(ws) => Json(json!({"ok": true, "data": ws})),
         Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
     }
 }

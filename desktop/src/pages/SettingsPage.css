@@ -176,6 +176,12 @@
   border-radius: var(--ldb-radius-md);
 }
 
+.settings-workspace-actions {
+  display: flex;
+  gap: var(--ldb-spacing-2);
+  flex-shrink: 0;
+}
+
 .settings-workspace-info {
   display: flex;
   flex-direction: column;

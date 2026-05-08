@@ -133,3 +133,24 @@
   pointer-events: none;
   height: 0;
 }
+
+.editor-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 16px;
+  font-size: 11px;
+  color: var(--ldb-color-text-tertiary);
+  border-top: 1px solid var(--ldb-border);
+  min-height: 24px;
+  flex-shrink: 0;
+}
+
+.editor-status-info {
+  display: flex;
+  gap: 12px;
+}
+
+.editor-status-save {
+  opacity: 0.7;
+}

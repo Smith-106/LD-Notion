@@ -65,6 +65,21 @@ pub fn find(conn: &Connection, id: &str) -> Result<Option<Workspace>, Box<dyn st
     }
 }
 
+/// 重命名工作区
+pub fn rename(conn: &Connection, id: &str, new_name: &str) -> Result<Workspace, Box<dyn std::error::Error>> {
+    let ws = find(conn, id)?.ok_or("工作区不存在")?;
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE workspaces SET name = ?1, updated_at = ?2 WHERE id = ?3",
+        params![new_name, &now, id],
+    )?;
+    Ok(Workspace {
+        name: new_name.to_string(),
+        updated_at: now,
+        ..ws
+    })
+}
+
 /// 删除工作区（及其所有页面记录和 Markdown 文件）
 pub fn delete(conn: &Connection, id: &str, storage_root: &Path) -> Result<bool, Box<dyn std::error::Error>> {
     // 先获取 root_path 以删除空的工作区目录
