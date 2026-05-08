@@ -7,6 +7,7 @@ import {
   renamePage,
   searchPages,
   togglePagePin,
+  duplicatePage,
   listPinnedPages,
   listRecentPages,
 } from "../services/api";
@@ -44,6 +45,9 @@ function TreeNode({ node, depth }: TreeNodeProps) {
   const setPageTree = useAppStore((s) => s.setPageTree);
   const setPinnedPages = useAppStore((s) => s.setPinnedPages);
   const setRecentPages = useAppStore((s) => s.setRecentPages);
+  const batchMode = useAppStore((s) => s.batchMode);
+  const batchIds = useAppStore((s) => s.batchIds);
+  const toggleBatchId = useAppStore((s) => s.toggleBatchId);
   const isExpanded = expandedNodes.has(node.id);
   const hasChildren = node.children.length > 0;
   const isActive = currentPage?.id === node.id;
@@ -87,6 +91,10 @@ function TreeNode({ node, depth }: TreeNodeProps) {
   }, [node.title]);
 
   const handleSelect = useCallback(async () => {
+    if (batchMode) {
+      toggleBatchId(node.id);
+      return;
+    }
     try {
       const content = await getPageContent(node.id);
       setCurrentPage({ id: node.id, title: content.title, body: content.body, saved: true });
@@ -95,7 +103,7 @@ function TreeNode({ node, depth }: TreeNodeProps) {
       setCurrentPage({ id: node.id, title: node.title, body: "", saved: true });
       setCurrentTags([]);
     }
-  }, [node.id, node.title, setCurrentPage, setCurrentTags]);
+  }, [node.id, node.title, setCurrentPage, setCurrentTags, batchMode, toggleBatchId]);
 
   const handleDelete = useCallback(
     async (e: React.MouseEvent) => {
@@ -116,6 +124,19 @@ function TreeNode({ node, depth }: TreeNodeProps) {
     },
     [node.id, node.title, activeWorkspaceId, currentPage, setPageTree, setCurrentPage],
   );
+
+  const handleDuplicate = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await duplicatePage(node.id);
+      if (activeWorkspaceId) {
+        const tree = await getPageTree(activeWorkspaceId);
+        setPageTree(tree);
+      }
+    } catch (err) {
+      alert(`复制失败: ${err}`);
+    }
+  }, [node.id, activeWorkspaceId, setPageTree]);
 
   const handlePin = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -138,6 +159,15 @@ function TreeNode({ node, depth }: TreeNodeProps) {
         aria-selected={isActive}
         onClick={handleSelect}
       >
+        {batchMode && (
+          <input
+            type="checkbox"
+            className="tree-node-checkbox"
+            checked={batchIds.has(node.id)}
+            onChange={() => toggleBatchId(node.id)}
+            onClick={(e) => e.stopPropagation()}
+          />
+        )}
         {hasChildren ? (
           <button
             className="tree-node-chevron"
@@ -204,6 +234,15 @@ function TreeNode({ node, depth }: TreeNodeProps) {
           title={node.is_pinned ? "取消收藏" : "收藏"}
         >
           {node.is_pinned ? "★" : "☆"}
+        </button>
+        <button
+          className="tree-node-action"
+          onClick={handleDuplicate}
+          title="复制页面"
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M4 1a1 1 0 00-1 1v9a1 1 0 001 1h1V4a1 1 0 011-1h7V2a1 1 0 00-1-1H4zm3 3a1 1 0 00-1 1v9a1 1 0 001 1h7a1 1 0 001-1V5a1 1 0 00-1-1H7z" />
+          </svg>
         </button>
         <button
           className="tree-node-action"

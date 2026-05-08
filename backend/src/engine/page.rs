@@ -195,6 +195,30 @@ pub fn delete(conn: &Connection, id: &str, ws_root: &Path) -> Result<bool, Box<d
     }
 }
 
+/// 复制页面（含内容，作为同级页面）
+pub fn duplicate(
+    conn: &Connection,
+    id: &str,
+    ws_root: &Path,
+) -> Result<Page, Box<dyn std::error::Error>> {
+    let source = find(conn, id)?.ok_or("页面不存在")?;
+    let new_title = format!("{} (副本)", source.title);
+    let new_page = create(conn, &source.workspace_id, source.parent_id.as_deref(), &new_title, ws_root)?;
+
+    if let Ok(Some(content)) = read_content(conn, id, ws_root) {
+        let _ = update_content(conn, &new_page.id, &content.body, ws_root);
+        let _ = crate::search::index_page(
+            conn,
+            &new_page.id,
+            &new_title,
+            &content.body,
+            &content.tags.join(", "),
+        );
+    }
+
+    Ok(new_page)
+}
+
 /// 列出工作区下的页面
 pub fn list_by_workspace(conn: &Connection, workspace_id: &str) -> Result<Vec<Page>, Box<dyn std::error::Error>> {
     let mut stmt = conn.prepare(

@@ -11,6 +11,7 @@ import {
   createWorkspace,
   createPage,
   importPage,
+  deletePage,
   getPageTree,
   listTags,
   listRecentPages,
@@ -38,6 +39,11 @@ function Sidebar() {
   const setCurrentPage = useAppStore((s) => s.setCurrentPage);
   const setCurrentTags = useAppStore((s) => s.setCurrentTags);
   const searchQuery = useAppStore((s) => s.searchQuery);
+  const pageTree = useAppStore((s) => s.pageTree);
+  const batchMode = useAppStore((s) => s.batchMode);
+  const setBatchMode = useAppStore((s) => s.setBatchMode);
+  const batchIds = useAppStore((s) => s.batchIds);
+  const setBatchIds = useAppStore((s) => s.setBatchIds);
   useMcpStatus();
 
   useEffect(() => {
@@ -127,6 +133,36 @@ function Sidebar() {
     } catch {}
   }, [activeWorkspaceId, setPinnedPages, setRecentPages]);
 
+  const handleBatchDelete = useCallback(async () => {
+    if (batchIds.size === 0) return;
+    if (!confirm(`确认删除选中的 ${batchIds.size} 个页面？此操作不可撤销。`)) return;
+    let failed = 0;
+    for (const id of batchIds) {
+      try { await deletePage(id); } catch { failed++; }
+    }
+    setBatchMode(false);
+    setBatchIds(new Set());
+    if (activeWorkspaceId) {
+      const tree = await getPageTree(activeWorkspaceId);
+      setPageTree(tree);
+      listRecentPages(activeWorkspaceId).then(setRecentPages).catch(() => {});
+      listPinnedPages(activeWorkspaceId).then(setPinnedPages).catch(() => {});
+    }
+    if (failed > 0) alert(`${failed} 个页面删除失败`);
+  }, [batchIds, activeWorkspaceId, setPageTree, setRecentPages, setPinnedPages, setBatchMode]);
+
+  const collectAllPageIds = useCallback((): string[] => {
+    const ids: string[] = [];
+    function walk(nodes: typeof pageTree) {
+      for (const n of nodes) {
+        ids.push(n.id);
+        if (n.children) walk(n.children);
+      }
+    }
+    walk(pageTree);
+    return ids;
+  }, [pageTree]);
+
   return (
     <aside className="sidebar" role="navigation" aria-label="页面导航">
       <div className="sidebar-header">
@@ -162,6 +198,44 @@ function Sidebar() {
               <path d="M2 3h12v10H2V3zm1 1v8h10V4H3zm1 1l3 3 2-2 3 3H4z" fill="none" stroke="currentColor" strokeWidth="1" />
             </svg>
           </button>
+          {batchMode ? (
+            <>
+              <button
+                className="sidebar-action-btn"
+                onClick={() => { setBatchIds(new Set(collectAllPageIds())); }}
+                title="全选"
+              >
+                全选
+              </button>
+              <button
+                className="sidebar-action-btn"
+                onClick={handleBatchDelete}
+                title={`删除选中 (${batchIds.size})`}
+                disabled={batchIds.size === 0}
+              >
+                删除({batchIds.size})
+              </button>
+              <button
+                className="sidebar-action-btn"
+                onClick={() => { setBatchMode(false); }}
+                title="取消"
+              >
+                ✕
+              </button>
+            </>
+          ) : (
+            <button
+              className="sidebar-action-btn"
+              onClick={() => setBatchMode(true)}
+              title="批量删除"
+              disabled={!activeWorkspaceId}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M5.5 5.5A.5.5 0 016 6v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm2.5 0a.5.5 0 01.5.5v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm3 .5a.5.5 0 00-1 0v6a.5.5 0 001 0V6z" />
+                <path fillRule="evenodd" d="M14.5 3a1 1 0 01-1 1H13v9a2 2 0 01-2 2H5a2 2 0 01-2-2V4h-.5a1 1 0 01-1-1V2a1 1 0 011-1H5.5l1-1h3l1 1h2.5a1 1 0 011 1v1z" clipRule="evenodd" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 

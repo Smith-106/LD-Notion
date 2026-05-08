@@ -116,6 +116,26 @@
   padding: var(--ldb-spacing-4);
   margin: var(--ldb-spacing-3) 0;
   overflow-x: auto;
+  position: relative;
+}
+
+.code-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--ldb-color-border-default);
+  border-radius: var(--ldb-radius-sm);
+  background: var(--ldb-color-surface-card);
+  color: var(--ldb-color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--ldb-duration-fast);
+}
+.code-copy-btn:hover {
+  opacity: 1;
+  background: var(--ldb-color-surface-hover);
 }
 
 .block-editor-content pre code {

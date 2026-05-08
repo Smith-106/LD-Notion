@@ -62,6 +62,13 @@ interface AppState {
   setRecentPages: (pages: Page[]) => void;
   pinnedPages: Page[];
   setPinnedPages: (pages: Page[]) => void;
+
+  // 批量删除
+  batchMode: boolean;
+  setBatchMode: (mode: boolean) => void;
+  batchIds: Set<string>;
+  setBatchIds: (ids: Set<string>) => void;
+  toggleBatchId: (id: string) => void;
 }
 
 function loadTheme(): ThemeMode {
@@ -162,4 +169,15 @@ export const useAppStore = create<AppState>((set) => ({
   setRecentPages: (recentPages) => set({ recentPages }),
   pinnedPages: [],
   setPinnedPages: (pinnedPages) => set({ pinnedPages }),
+
+  batchMode: false,
+  setBatchMode: (batchMode) => set({ batchMode, batchIds: batchMode ? new Set() : new Set() }),
+  batchIds: new Set<string>(),
+  setBatchIds: (batchIds) => set({ batchIds }),
+  toggleBatchId: (id) =>
+    set((state) => {
+      const next = new Set(state.batchIds);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return { batchIds: next };
+    }),
 }));

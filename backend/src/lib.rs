@@ -150,7 +150,33 @@ pub async fn rename_workspace(
     }
 }
 
+pub async fn workspace_stats(
+    State(state): State<Arc<AppState>>,
+    Path(ws_id): Path<String>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    let page_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pages WHERE workspace_id = ?1",
+            [&ws_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    Json(json!({"ok": true, "data": {"page_count": page_count}}))
+}
+
 // ── 页面 API ──
+
+pub async fn duplicate_page(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::page::duplicate(&conn, &id, &state.config.storage_root) {
+        Ok(page) => Json(json!({"ok": true, "data": page})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
 
 pub async fn create_page(
     State(state): State<Arc<AppState>>,

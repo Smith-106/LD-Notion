@@ -1,9 +1,9 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import ThemeToggle from "../components/ThemeToggle";
 import StatusIndicator from "../components/StatusIndicator";
 import { useAppStore } from "../store/appStore";
-import { listWorkspaces, deleteWorkspace, renameWorkspace } from "../services/api";
+import { listWorkspaces, deleteWorkspace, renameWorkspace, getWorkspaceStats } from "../services/api";
 import "./SettingsPage.css";
 
 function SettingsPage() {
@@ -11,9 +11,17 @@ function SettingsPage() {
   const setWorkspaces = useAppStore((s) => s.setWorkspaces);
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const setActiveWorkspaceId = useAppStore((s) => s.setActiveWorkspaceId);
+  const [wsStats, setWsStats] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    listWorkspaces().then(setWorkspaces).catch(() => {});
+    listWorkspaces().then((ws) => {
+      setWorkspaces(ws);
+      ws.forEach((w) => {
+        getWorkspaceStats(w.id).then((s) => {
+          setWsStats((prev) => ({ ...prev, [w.id]: s.page_count }));
+        }).catch(() => {});
+      });
+    }).catch(() => {});
   }, [setWorkspaces]);
 
   const handleDelete = useCallback(async (id: string, name: string) => {
@@ -68,7 +76,7 @@ function SettingsPage() {
                     <div className="settings-workspace-info">
                       <span className="settings-workspace-name">{ws.name}</span>
                       <span className="settings-workspace-meta">
-                        {ws.root_path}
+                        {ws.root_path}{wsStats[ws.id] !== undefined ? ` · ${wsStats[ws.id]} 个页面` : ""}
                       </span>
                     </div>
                     <div className="settings-workspace-actions">
@@ -137,7 +145,7 @@ function SettingsPage() {
               </div>
               <div className="settings-about-row">
                 <span className="settings-about-key">版本</span>
-                <span className="settings-about-value">v0.8.0</span>
+                <span className="settings-about-value">v0.9.0</span>
               </div>
               <div className="settings-about-row">
                 <span className="settings-about-key">技术栈</span>

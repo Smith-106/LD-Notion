@@ -97,6 +97,13 @@
   flex-shrink: 0;
 }
 
+.tree-node-checkbox {
+  margin-right: 4px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--ldb-color-brand-default);
+}
+
 .chevron-icon {
   transition: transform var(--ldb-duration-fast) var(--ldb-easing-ease-out);
 }

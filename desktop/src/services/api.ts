@@ -228,6 +228,22 @@ export async function togglePagePin(id: string): Promise<Page> {
   return data.data;
 }
 
+export async function duplicatePage(id: string): Promise<Page> {
+  const data = await request<{ data: Page }>(`/api/pages/${id}/duplicate`, {
+    method: "POST",
+  });
+  return data.data;
+}
+
+export async function getWorkspaceStats(
+  workspaceId: string,
+): Promise<{ page_count: number }> {
+  const data = await request<{ data: { page_count: number } }>(
+    `/api/workspaces/${workspaceId}/stats`,
+  );
+  return data.data;
+}
+
 // ── 搜索 ──
 
 export interface SearchResult {

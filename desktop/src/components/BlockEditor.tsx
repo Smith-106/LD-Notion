@@ -6,7 +6,7 @@ import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import Placeholder from "@tiptap/extension-placeholder";
 import { common, createLowlight } from "lowlight";
 import { Markdown as tiptapMarkdown } from "tiptap-markdown";
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { useAppStore } from "../store/appStore";
 import { updatePageContent } from "../services/api";
 import TagBar from "./TagBar";
@@ -22,6 +22,8 @@ export default function BlockEditor() {
   const setCurrentPageSaved = useAppStore((s) => s.setCurrentPageSaved);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentPageIdRef = useRef<string | null>(null);
+
+  const [copyActive, setCopyActive] = useState(false);
 
   // 保持 ref 与 store 同步，避免 onUpdate 闭包捕获过时值
   useEffect(() => {
@@ -61,6 +63,50 @@ export default function BlockEditor() {
       }, SAVE_DEBOUNCE_MS);
     },
   });
+
+  // 代码块复制按钮 — 事件委托
+  useEffect(() => {
+    if (!editor) return;
+    const el = document.querySelector(".block-editor-content")?.parentElement;
+    if (!el) return;
+
+    const handleClick = (e: Event) => {
+      const target = (e.target as HTMLElement).closest("[data-code-copy]");
+      if (!target) return;
+      const pre = target.closest("pre");
+      const code = pre?.querySelector("code");
+      if (!code) return;
+      navigator.clipboard.writeText(code.textContent || "").then(() => {
+        setCopyActive(true);
+        setTimeout(() => setCopyActive(false), 1500);
+      });
+    };
+
+    const handleEnter = (e: Event) => {
+      const pre = (e.target as HTMLElement).closest("pre");
+      if (!pre || pre.querySelector("[data-code-copy]")) return;
+      const btn = document.createElement("button");
+      btn.setAttribute("data-code-copy", "");
+      btn.textContent = "复制";
+      btn.className = "code-copy-btn";
+      pre.style.position = "relative";
+      pre.appendChild(btn);
+    };
+
+    const handleLeave = (e: Event) => {
+      const pre = (e.target as HTMLElement).closest("pre");
+      pre?.querySelector("[data-code-copy]")?.remove();
+    };
+
+    el.addEventListener("click", handleClick);
+    el.addEventListener("mouseenter", handleEnter, true);
+    el.addEventListener("mouseleave", handleLeave, true);
+    return () => {
+      el.removeEventListener("click", handleClick);
+      el.removeEventListener("mouseenter", handleEnter, true);
+      el.removeEventListener("mouseleave", handleLeave, true);
+    };
+  }, [editor]);
 
   useEffect(() => {
     return () => {
@@ -159,7 +205,7 @@ export default function BlockEditor() {
           )}
         </span>
         <span className="editor-status-save">
-          {currentPage && (currentPage.saved ? "已保存" : "保存中…")}
+          {copyActive ? "已复制" : currentPage && (currentPage.saved ? "已保存" : "保存中…")}
         </span>
       </div>
     </div>
