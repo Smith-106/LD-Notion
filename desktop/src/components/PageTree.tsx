@@ -7,6 +7,8 @@ import {
   renamePage,
   searchPages,
   togglePagePin,
+  listPinnedPages,
+  listRecentPages,
 } from "../services/api";
 import "./PageTree.css";
 
@@ -40,6 +42,8 @@ function TreeNode({ node, depth }: TreeNodeProps) {
   const setCurrentTags = useAppStore((s) => s.setCurrentTags);
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const setPageTree = useAppStore((s) => s.setPageTree);
+  const setPinnedPages = useAppStore((s) => s.setPinnedPages);
+  const setRecentPages = useAppStore((s) => s.setRecentPages);
   const isExpanded = expandedNodes.has(node.id);
   const hasChildren = node.children.length > 0;
   const isActive = currentPage?.id === node.id;
@@ -117,8 +121,12 @@ function TreeNode({ node, depth }: TreeNodeProps) {
     e.stopPropagation();
     try {
       await togglePagePin(node.id);
+      if (activeWorkspaceId) {
+        listPinnedPages(activeWorkspaceId).then(setPinnedPages).catch(() => {});
+        listRecentPages(activeWorkspaceId).then(setRecentPages).catch(() => {});
+      }
     } catch {}
-  }, [node.id]);
+  }, [node.id, activeWorkspaceId, setPinnedPages, setRecentPages]);
 
   return (
     <div className="tree-node-container">
