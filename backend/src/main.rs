@@ -1,7 +1,7 @@
 // LD-Notion Hub 后端服务入口
 
 use axum::{routing::{delete, get, post, put}, Router};
-use ld_notion_backend::{config, db, AppState, health_check, list_workspaces, create_workspace, delete_workspace, create_page, get_page, delete_page, get_page_content, update_page_content, get_page_tree, search_pages, rename_page, move_page, import_page, mcp};
+use ld_notion_backend::{config, db, AppState, health_check, list_workspaces, create_workspace, delete_workspace, create_page, get_page, delete_page, get_page_content, update_page_content, get_page_tree, search_pages, rename_page, move_page, import_page, update_tags, list_tags as list_workspace_tags, mcp};
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -43,6 +43,8 @@ async fn main() {
         .route("/api/pages/{id}/rename", put(rename_page))
         .route("/api/pages/{id}/move", put(move_page))
         .route("/api/pages/import", post(import_page))
+        .route("/api/pages/{id}/tags", put(update_tags))
+        .route("/api/workspaces/{ws_id}/tags", get(list_workspace_tags))
         .route("/api/workspaces/{ws_id}/tree", get(get_page_tree))
         .route("/api/search", get(search_pages))
         .nest("/mcp", mcp::transport::mcp_routes())

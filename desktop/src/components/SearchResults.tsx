@@ -7,6 +7,7 @@ function SearchResults() {
   const searchQuery = useAppStore((s) => s.searchQuery);
   const searchResults = useAppStore((s) => s.searchResults);
   const setCurrentPage = useAppStore((s) => s.setCurrentPage);
+  const setCurrentTags = useAppStore((s) => s.setCurrentTags);
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
   const setSearchResults = useAppStore((s) => s.setSearchResults);
 
@@ -15,13 +16,15 @@ function SearchResults() {
       try {
         const content = await getPageContent(pageId);
         setCurrentPage({ id: pageId, title: content.title, body: content.body, saved: true });
+        setCurrentTags(content.tags);
       } catch {
         setCurrentPage({ id: pageId, title, body: "", saved: true });
+        setCurrentTags([]);
       }
       setSearchQuery("");
       setSearchResults([]);
     },
-    [setCurrentPage, setSearchQuery, setSearchResults],
+    [setCurrentPage, setCurrentTags, setSearchQuery, setSearchResults],
   );
 
   if (!searchQuery) return null;

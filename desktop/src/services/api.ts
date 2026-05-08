@@ -167,6 +167,30 @@ export async function getPageTree(
   return data.data;
 }
 
+// ── 标签 ──
+
+export interface TagInfo {
+  name: string;
+  count: number;
+}
+
+export async function listTags(workspaceId: string): Promise<TagInfo[]> {
+  const data = await request<{ data: TagInfo[] }>(
+    `/api/workspaces/${workspaceId}/tags`,
+  );
+  return data.data;
+}
+
+export async function updatePageTags(
+  id: string,
+  tags: string[],
+): Promise<void> {
+  await request(`/api/pages/${id}/tags`, {
+    method: "PUT",
+    body: JSON.stringify({ tags }),
+  });
+}
+
 // ── 搜索 ──
 
 export interface SearchResult {

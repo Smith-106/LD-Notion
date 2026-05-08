@@ -117,7 +117,7 @@ function SettingsPage() {
               </div>
               <div className="settings-about-row">
                 <span className="settings-about-key">版本</span>
-                <span className="settings-about-value">v0.5.1</span>
+                <span className="settings-about-value">v0.6.0</span>
               </div>
               <div className="settings-about-row">
                 <span className="settings-about-key">技术栈</span>

@@ -12,6 +12,7 @@ import {
   createPage,
   importPage,
   getPageTree,
+  listTags,
 } from "../services/api";
 import "./Sidebar.css";
 
@@ -22,6 +23,10 @@ function Sidebar() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const setActiveWorkspaceId = useAppStore((s) => s.setActiveWorkspaceId);
   const setPageTree = useAppStore((s) => s.setPageTree);
+  const setWorkspaceTags = useAppStore((s) => s.setWorkspaceTags);
+  const workspaceTags = useAppStore((s) => s.workspaceTags);
+  const tagFilter = useAppStore((s) => s.tagFilter);
+  const setTagFilter = useAppStore((s) => s.setTagFilter);
   const searchQuery = useAppStore((s) => s.searchQuery);
   useMcpStatus();
 
@@ -30,6 +35,15 @@ function Sidebar() {
       .then(setWorkspaces)
       .catch(() => setWorkspaces([]));
   }, [setWorkspaces]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      setWorkspaceTags([]);
+      setTagFilter(null);
+      return;
+    }
+    listTags(activeWorkspaceId).then(setWorkspaceTags).catch(() => {});
+  }, [activeWorkspaceId, setWorkspaceTags, setTagFilter]);
 
   const handleCreateWorkspace = useCallback(async () => {
     const name = prompt("工作区名称:");
@@ -142,6 +156,26 @@ function Sidebar() {
       </div>
 
       <SearchBar />
+      {workspaceTags.length > 0 && (
+        <div className="sidebar-tags">
+          <button
+            className={`sidebar-tag-chip ${!tagFilter ? "sidebar-tag-chip-active" : ""}`}
+            onClick={() => setTagFilter(null)}
+          >
+            全部
+          </button>
+          {workspaceTags.map((t) => (
+            <button
+              key={t.name}
+              className={`sidebar-tag-chip ${tagFilter === t.name ? "sidebar-tag-chip-active" : ""}`}
+              onClick={() => setTagFilter(tagFilter === t.name ? null : t.name)}
+            >
+              {t.name}
+              <span className="sidebar-tag-count">{t.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="page-tree-wrapper">
         {searchQuery.trim().length >= 2 ? <SearchResults /> : <PageTree />}
       </div>

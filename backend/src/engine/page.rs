@@ -370,6 +370,62 @@ pub fn move_to(
     })
 }
 
+/// 更新页面标签
+pub fn update_tags(
+    conn: &Connection,
+    id: &str,
+    tags: &[String],
+    ws_root: &Path,
+) -> Result<Page, Box<dyn std::error::Error>> {
+    let page = find(conn, id)?.ok_or("页面不存在")?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let full_path = ws_root.join(&page.file_path);
+    let mut content = markdown_io::read(&full_path).unwrap_or_else(|_| MarkdownContent {
+        title: page.title.clone(),
+        tags: vec![],
+        created: page.created_at.clone(),
+        updated: String::new(),
+        body: String::new(),
+    });
+    content.tags = tags.to_vec();
+    content.updated.clone_from(&now);
+    markdown_io::write(&full_path, &content)?;
+
+    let _ = crate::search::index_page(conn, id, &content.title, &content.body, &tags.join(", "));
+
+    conn.execute(
+        "UPDATE pages SET updated_at = ?1 WHERE id = ?2",
+        params![&now, id],
+    )?;
+
+    Ok(Page {
+        updated_at: now,
+        ..page
+    })
+}
+
+/// 列出工作区所有标签（去重，附带使用次数）
+pub fn list_tags(
+    conn: &Connection,
+    workspace_id: &str,
+    ws_root: &Path,
+) -> Result<Vec<(String, i32)>, Box<dyn std::error::Error>> {
+    let pages = list_by_workspace(conn, workspace_id)?;
+    let mut tag_counts: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
+    for page in &pages {
+        let full_path = ws_root.join(&page.file_path);
+        if let Ok(content) = markdown_io::read(&full_path) {
+            for tag in &content.tags {
+                *tag_counts.entry(tag.clone()).or_insert(0) += 1;
+            }
+        }
+    }
+    let mut result: Vec<(String, i32)> = tag_counts.into_iter().collect();
+    result.sort_by(|a, b| b.1.cmp(&a.1));
+    Ok(result)
+}
+
 fn title_to_slug(title: &str) -> String {
     title
         .to_lowercase()

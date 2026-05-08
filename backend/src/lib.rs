@@ -61,6 +61,11 @@ pub struct ImportPageReq {
 }
 
 #[derive(Deserialize)]
+pub struct UpdateTagsReq {
+    pub tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
 pub struct SearchQuery {
     pub q: String,
     #[serde(default = "default_mode")]
@@ -283,5 +288,36 @@ pub async fn import_page(
                 Json(json!({"ok": false, "error": msg}))
             }
         }
+    }
+}
+
+// ── 标签 API ──
+
+pub async fn update_tags(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateTagsReq>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::page::update_tags(&conn, &id, &body.tags, &state.config.storage_root) {
+        Ok(page) => Json(json!({"ok": true, "data": page})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn list_tags(
+    State(state): State<Arc<AppState>>,
+    Path(ws_id): Path<String>,
+) -> Json<Value> {
+    let conn = state.db.lock().await;
+    match engine::page::list_tags(&conn, &ws_id, &state.config.storage_root) {
+        Ok(tags) => {
+            let tag_list: Vec<Value> = tags
+                .into_iter()
+                .map(|(name, count)| json!({"name": name, "count": count}))
+                .collect();
+            Json(json!({"ok": true, "data": tag_list}))
+        }
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
     }
 }

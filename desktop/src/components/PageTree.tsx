@@ -5,6 +5,7 @@ import {
   getPageContent,
   deletePage,
   renamePage,
+  searchPages,
 } from "../services/api";
 import "./PageTree.css";
 
@@ -34,6 +35,7 @@ function TreeNode({ node, depth }: TreeNodeProps) {
   const toggleNode = useAppStore((s) => s.toggleNode);
   const currentPage = useAppStore((s) => s.currentPage);
   const setCurrentPage = useAppStore((s) => s.setCurrentPage);
+  const setCurrentTags = useAppStore((s) => s.setCurrentTags);
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const setPageTree = useAppStore((s) => s.setPageTree);
   const isExpanded = expandedNodes.has(node.id);
@@ -82,10 +84,12 @@ function TreeNode({ node, depth }: TreeNodeProps) {
     try {
       const content = await getPageContent(node.id);
       setCurrentPage({ id: node.id, title: content.title, body: content.body, saved: true });
+      setCurrentTags(content.tags);
     } catch {
       setCurrentPage({ id: node.id, title: node.title, body: "", saved: true });
+      setCurrentTags([]);
     }
-  }, [node.id, node.title, setCurrentPage]);
+  }, [node.id, node.title, setCurrentPage, setCurrentTags]);
 
   const handleDelete = useCallback(
     async (e: React.MouseEvent) => {
@@ -213,6 +217,8 @@ function PageTree() {
   const pageTree = useAppStore((s) => s.pageTree);
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const setPageTree = useAppStore((s) => s.setPageTree);
+  const tagFilter = useAppStore((s) => s.tagFilter);
+  const [tagMatchIds, setTagMatchIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!activeWorkspaceId) {
@@ -224,19 +230,40 @@ function PageTree() {
       .catch(() => setPageTree([]));
   }, [activeWorkspaceId, setPageTree]);
 
-  const filteredNodes = useMemo(() => {
-    if (!searchQuery) return pageTree;
-    const lower = searchQuery.toLowerCase();
-    function filter(nodes: typeof pageTree): typeof pageTree {
-      return nodes
-        .map((n) => ({ ...n, children: filter(n.children) }))
-        .filter(
-          (n) =>
-            n.title.toLowerCase().includes(lower) || n.children.length > 0,
-        );
+  useEffect(() => {
+    if (!tagFilter) {
+      setTagMatchIds(new Set());
+      return;
     }
-    return filter(pageTree);
-  }, [pageTree, searchQuery]);
+    searchPages(tagFilter).then((results) => {
+      setTagMatchIds(new Set(results.map((r) => r.page_id)));
+    }).catch(() => setTagMatchIds(new Set()));
+  }, [tagFilter]);
+
+  const filteredNodes = useMemo(() => {
+    let nodes = pageTree;
+    if (searchQuery) {
+      const lower = searchQuery.toLowerCase();
+      function filterByTitle(tree: typeof nodes): typeof nodes {
+        return tree
+          .map((n) => ({ ...n, children: filterByTitle(n.children) }))
+          .filter(
+            (n) =>
+              n.title.toLowerCase().includes(lower) || n.children.length > 0,
+          );
+      }
+      nodes = filterByTitle(nodes);
+    }
+    if (tagFilter && tagMatchIds.size > 0) {
+      function filterByTag(tree: typeof nodes): typeof nodes {
+        return tree
+          .map((n) => ({ ...n, children: filterByTag(n.children) }))
+          .filter((n) => tagMatchIds.has(n.id) || n.children.length > 0);
+      }
+      nodes = filterByTag(nodes);
+    }
+    return nodes;
+  }, [pageTree, searchQuery, tagFilter, tagMatchIds]);
 
   const handleExpandAll = () => {
     expandAll(collectAllIds(filteredNodes));

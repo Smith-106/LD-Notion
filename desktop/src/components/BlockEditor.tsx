@@ -9,6 +9,7 @@ import { Markdown as tiptapMarkdown } from "tiptap-markdown";
 import { useEffect, useCallback, useRef } from "react";
 import { useAppStore } from "../store/appStore";
 import { updatePageContent } from "../services/api";
+import TagBar from "./TagBar";
 import "./BlockEditor.css";
 
 const lowlight = createLowlight(common);
@@ -147,6 +148,7 @@ export default function BlockEditor() {
           </svg>
         </button>
       </div>
+      <TagBar />
       <EditorContent editor={editor} />
     </div>
   );
