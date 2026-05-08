@@ -24,7 +24,15 @@ function SearchResults() {
     [setCurrentPage, setSearchQuery, setSearchResults],
   );
 
-  if (!searchQuery || searchResults.length === 0) return null;
+  if (!searchQuery) return null;
+
+  if (searchResults.length === 0) {
+    return (
+      <div className="search-results-empty">
+        <span>未找到匹配的页面</span>
+      </div>
+    );
+  }
 
   return (
     <div className="search-results" role="list" aria-label="搜索结果">

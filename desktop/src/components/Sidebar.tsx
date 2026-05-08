@@ -21,7 +21,7 @@ function Sidebar() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const setActiveWorkspaceId = useAppStore((s) => s.setActiveWorkspaceId);
   const setPageTree = useAppStore((s) => s.setPageTree);
-  const searchResults = useAppStore((s) => s.searchResults);
+  const searchQuery = useAppStore((s) => s.searchQuery);
   useMcpStatus();
 
   useEffect(() => {
@@ -111,7 +111,7 @@ function Sidebar() {
 
       <SearchBar />
       <div className="page-tree-wrapper">
-        {searchResults.length > 0 ? <SearchResults /> : <PageTree />}
+        {searchQuery.trim().length >= 2 ? <SearchResults /> : <PageTree />}
       </div>
       <div className="sidebar-footer">
         <StatusIndicator />
