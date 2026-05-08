@@ -234,8 +234,10 @@ pub fn rename(
         markdown_io::write(&full_path, &content)?;
     }
 
-    // 更新搜索索引
-    let _ = crate::search::index_page(conn, id, new_title, "", "");
+    // 更新搜索索引（保留原内容）
+    if let Ok(Some(content)) = read_content(conn, id, ws_root) {
+        let _ = crate::search::index_page(conn, id, new_title, &content.body, &content.tags.join(", "));
+    }
 
     conn.execute(
         "UPDATE pages SET title = ?1, updated_at = ?2 WHERE id = ?3",
@@ -247,6 +249,37 @@ pub fn rename(
         updated_at: now,
         ..page
     })
+}
+
+fn rebuild_descendants(conn: &Connection, parent_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let kids: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT id FROM pages WHERE parent_id = ?1")?;
+        let rows = stmt.query_map([parent_id], |row| row.get::<_, String>(0))?;
+        rows.filter_map(std::result::Result::ok).collect()
+    };
+    for kid in &kids {
+        let parent_ancestors: Vec<(String, i32)> = {
+            let mut stmt = conn.prepare(
+                "SELECT ancestor_id, depth FROM page_tree WHERE descendant_id = ?1",
+            )?;
+            let rows = stmt.query_map([parent_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+            })?;
+            rows.filter_map(std::result::Result::ok).collect()
+        };
+        for (anc, depth) in &parent_ancestors {
+            conn.execute(
+                "INSERT INTO page_tree (ancestor_id, descendant_id, depth) VALUES (?1, ?2, ?3 + 1)",
+                params![anc, kid, depth],
+            )?;
+        }
+        conn.execute(
+            "INSERT INTO page_tree (ancestor_id, descendant_id, depth) VALUES (?1, ?2, 0)",
+            [kid, kid],
+        )?;
+        rebuild_descendants(conn, kid)?;
+    }
+    Ok(())
 }
 
 /// 移动页面到新父级
@@ -284,16 +317,25 @@ pub fn move_to(
         )
         .unwrap_or(1);
 
-    // 删除旧的 page_tree 关系
-    conn.execute("DELETE FROM page_tree WHERE descendant_id = ?1", [id])?;
+    // 收集所有后代
+    let descendants: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT descendant_id FROM page_tree WHERE ancestor_id = ?1 AND depth > 0",
+        )?;
+        let rows = stmt.query_map([id], |row| row.get::<_, String>(0))?;
+        rows.filter_map(std::result::Result::ok).collect()
+    };
 
-    // 重新插入自身
+    // 删除自身及所有后代的 page_tree
+    for desc_id in descendants.iter().chain(std::iter::once(&id.to_string())) {
+        conn.execute("DELETE FROM page_tree WHERE descendant_id = ?1", [desc_id])?;
+    }
+
+    // 重建自身
     conn.execute(
         "INSERT INTO page_tree (ancestor_id, descendant_id, depth) VALUES (?1, ?1, 0)",
         [id],
     )?;
-
-    // 插入到新父级的祖先路径
     if let Some(pid) = new_parent_id {
         let ancestors: Vec<(String, i32)> = {
             let mut stmt = conn.prepare(
@@ -304,18 +346,15 @@ pub fn move_to(
             })?;
             rows.filter_map(std::result::Result::ok).collect()
         };
-        for (ancestor_id, depth) in ancestors {
+        for (ancestor_id, depth) in &ancestors {
             conn.execute(
-                "INSERT OR IGNORE INTO page_tree (ancestor_id, descendant_id, depth) VALUES (?1, ?2, ?3 + 1)",
-                params![&ancestor_id, id, depth],
+                "INSERT INTO page_tree (ancestor_id, descendant_id, depth) VALUES (?1, ?2, ?3 + 1)",
+                params![ancestor_id, id, depth],
             )?;
         }
-        // 直接父级关系
-        conn.execute(
-            "INSERT OR IGNORE INTO page_tree (ancestor_id, descendant_id, depth) VALUES (?1, ?2, 1)",
-            params![pid, id],
-        )?;
     }
+
+    rebuild_descendants(conn, id)?;
 
     // 更新页面的 parent_id 和 sort_order
     conn.execute(
