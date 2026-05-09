@@ -112,6 +112,7 @@
             AGENT_PERSONA_TONE: "ldb_agent_persona_tone",
             AGENT_PERSONA_EXPERTISE: "ldb_agent_persona_expertise",
             AGENT_PERSONA_INSTRUCTIONS: "ldb_agent_persona_instructions",
+            AGENT_MAX_ITERATIONS: "ldb_agent_max_iterations",
             // AI 输出模板
             AI_TEMPLATES: "ldb_ai_templates",
             // GitHub 收藏导入
@@ -197,6 +198,7 @@
             agentPersonaTone: "友好",
             agentPersonaExpertise: "Notion 工作区管理",
             agentPersonaInstructions: "",
+            agentMaxIterations: 8,
             // AI 输出模板默认值
             aiTemplates: JSON.stringify([
                 { name: "周报", prompt: "根据以下内容生成一份工作周报，包含：本周完成、下周计划、问题与风险。使用 Markdown 格式。", icon: "📋" },
@@ -8977,7 +8979,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
         },
 
         // 核心 Agent 循环
-        runAgentLoop: async (userMessage, settings, maxIterations = 8) => {
+        runAgentLoop: async (userMessage, settings, maxIterations = Storage.get(CONFIG.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG.DEFAULTS.agentMaxIterations)) => {
             const permLevel = OperationGuard.getLevel();
 
             // 1. 构建系统提示（含可用工具列表，根据权限过滤）
@@ -15762,6 +15764,11 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.AI_CATEGORY_AUTO_DEDUP, !!e.target.checked);
             };
 
+            refs.crossSourceModeSelect.onchange = (e) => {
+                const mode = e.target.value === "unified" ? "unified" : "separate";
+                Storage.set(CONFIG.STORAGE_KEYS.CROSS_SOURCE_MODE, mode);
+            };
+
             refs.updateCheckBtn.onclick = async () => {
                 await UpdateChecker.check({ manual: true });
             };
@@ -16527,6 +16534,9 @@ ${availableTools}
             refs.agentPersonaInstructionsInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, e.target.value.trim());
             };
+            refs.agentMaxIterationsSelect.onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AGENT_MAX_ITERATIONS, parseInt(e.target.value) || 8);
+            };
             refs.githubUsernameInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, e.target.value.trim());
             };
@@ -16668,6 +16678,69 @@ ${availableTools}
                 }
             };
 
+            // AI 模板管理
+            UI._loadTemplates = () => {
+                try {
+                    return JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.AI_TEMPLATES, CONFIG.DEFAULTS.aiTemplates));
+                } catch {
+                    return JSON.parse(CONFIG.DEFAULTS.aiTemplates);
+                }
+            };
+
+            UI._saveTemplates = (templates) => {
+                Storage.set(CONFIG.STORAGE_KEYS.AI_TEMPLATES, JSON.stringify(templates));
+            };
+
+            UI.renderTemplateList = () => {
+                const list = refs.templateList;
+                if (!list) return;
+                const templates = UI._loadTemplates();
+                if (templates.length === 0) {
+                    list.innerHTML = '<div class="ldb-tip">暂无模板，请添加</div>';
+                    return;
+                }
+                list.innerHTML = templates.map((t, i) => {
+                    const icon = t.icon || "📝";
+                    const name = Utils.escapeHtml(t.name || "未命名");
+                    const prompt = Utils.escapeHtml((t.prompt || "").substring(0, 50));
+                    return `<div class="ldb-setting-row" style="justify-content: space-between; padding: 4px 0;">
+                        <span style="font-size: 12px;">${icon} <strong>${name}</strong> <span style="color: var(--ldb-ui-muted);">${prompt}${t.prompt && t.prompt.length > 50 ? "..." : ""}</span></span>
+                        <button class="ldb-btn ldb-btn-secondary" data-template-delete="${i}" style="padding: 2px 6px; font-size: 11px;">删除</button>
+                    </div>`;
+                }).join("");
+
+                list.querySelectorAll("[data-template-delete]").forEach(btn => {
+                    btn.onclick = () => {
+                        const idx = parseInt(btn.dataset.templateDelete);
+                        const ts = UI._loadTemplates();
+                        ts.splice(idx, 1);
+                        UI._saveTemplates(ts);
+                        UI.renderTemplateList();
+                        UI.showStatus("模板已删除", "success");
+                    };
+                });
+            };
+
+            refs.templateAddBtn.onclick = () => {
+                const name = refs.templateNameInput.value.trim();
+                const icon = refs.templateIconInput.value.trim() || "📝";
+                const prompt = refs.templatePromptInput.value.trim();
+                if (!name || !prompt) {
+                    UI.showStatus("请填写模板名称和 prompt", "error");
+                    return;
+                }
+                const templates = UI._loadTemplates();
+                templates.push({ name, icon, prompt });
+                UI._saveTemplates(templates);
+                refs.templateNameInput.value = "";
+                refs.templateIconInput.value = "";
+                refs.templatePromptInput.value = "";
+                UI.renderTemplateList();
+                UI.showStatus(`模板「${name}」已添加`, "success");
+            };
+
+            UI.renderTemplateList();
+
             NotionOAuth.attachControls({
                 root: panel,
                 selectors: {
@@ -16771,6 +16844,7 @@ ${availableTools}
                 linuxdoDedupModeSelect: panel.querySelector("#ldb-linuxdo-dedup-mode"),
                 bookmarkDedupModeSelect: panel.querySelector("#ldb-bookmark-dedup-mode"),
                 aiCategoryAutoDedupCheckbox: panel.querySelector("#ldb-ai-category-auto-dedup"),
+                crossSourceModeSelect: panel.querySelector("#ldb-cross-source-mode"),
                 aiServiceSelect: panel.querySelector("#ldb-ai-service"),
                 aiModelSelect: panel.querySelector("#ldb-ai-model"),
                 aiApiKeyInput: panel.querySelector("#ldb-ai-api-key"),
@@ -16806,6 +16880,7 @@ ${availableTools}
                 agentPersonaToneSelect: panel.querySelector("#ldb-agent-persona-tone"),
                 agentPersonaExpertiseInput: panel.querySelector("#ldb-agent-persona-expertise"),
                 agentPersonaInstructionsInput: panel.querySelector("#ldb-agent-persona-instructions"),
+                agentMaxIterationsSelect: panel.querySelector("#ldb-agent-max-iterations"),
                 githubUsernameInput: panel.querySelector("#ldb-github-username"),
                 githubTokenInput: panel.querySelector("#ldb-github-token"),
                 githubTypeCheckboxes: panel.querySelectorAll(".ldb-github-type"),
@@ -16831,6 +16906,11 @@ ${availableTools}
                 aiModelTip: panel.querySelector("#ldb-ai-model-tip"),
                 aiTestBtn: panel.querySelector("#ldb-ai-test"),
                 aiTestStatus: panel.querySelector("#ldb-ai-test-status"),
+                templateList: panel.querySelector("#ldb-template-list"),
+                templateNameInput: panel.querySelector("#ldb-template-name"),
+                templateIconInput: panel.querySelector("#ldb-template-icon"),
+                templatePromptInput: panel.querySelector("#ldb-template-prompt"),
+                templateAddBtn: panel.querySelector("#ldb-template-add"),
             };
         },
 
@@ -16924,6 +17004,13 @@ ${availableTools}
                                         <input type="checkbox" id="ldb-ai-category-auto-dedup" checked>
                                         <span>分类列表自动去重</span>
                                     </label>
+                                </div>
+                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                                    <label for="ldb-cross-source-mode" style="white-space: nowrap;">跨源存储模式</label>
+                                    <select id="ldb-cross-source-mode" class="ldb-input" class="ldb-flex-1">
+                                        <option value="separate">分库（各来源独立数据库）</option>
+                                        <option value="unified">统一库（所有来源同一数据库）</option>
+                                    </select>
                                 </div>
                                 <div id="ldb-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
 
@@ -17281,6 +17368,21 @@ ${availableTools}
                                     <span id="ldb-ai-test-status" style="font-size: 12px;"></span>
                                 </div>
 
+                                <!-- AI 输出模板管理 -->
+                                <div class="ldb-section-divider">
+                                    <span class="ldb-hint">📋 AI 输出模板</span>
+                                </div>
+                                <div id="ldb-template-list" style="margin-bottom: 8px;"></div>
+                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                                    <input type="text" class="ldb-input" id="ldb-template-name" placeholder="模板名称" style="width: 80px;">
+                                    <input type="text" class="ldb-input" id="ldb-template-icon" placeholder="图标" style="width: 50px;">
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-template-add" style="padding: 4px 8px; font-size: 12px;">添加</button>
+                                </div>
+                                <div class="ldb-input-group" style="margin-bottom: 4px;">
+                                    <textarea class="ldb-input" id="ldb-template-prompt" rows="2" placeholder="模板 prompt，用于 AI 生成内容" style="resize: vertical;"></textarea>
+                                </div>
+                                <div class="ldb-tip">添加后可在 AI 对话中使用「用xx模板总结xxx页面」</div>
+
                                 <!-- Agent 个性化设置 -->
                                 <div class="ldb-section-divider">
                                     <span class="ldb-hint">🤖 Agent 个性化</span>
@@ -17307,6 +17409,17 @@ ${availableTools}
                                     <label class="ldb-label">自定义指令 (可选)</label>
                                     <textarea class="ldb-input" id="ldb-agent-persona-instructions" rows="2" placeholder="额外的行为指令，如：总是用列表格式回复" style="resize: vertical;"></textarea>
                                     <div class="ldb-tip">Agent 每次对话都会遵循的个性化指令</div>
+                                </div>
+                                <div class="ldb-input-group">
+                                    <label class="ldb-label">Agent 最大执行步数</label>
+                                    <select class="ldb-select" id="ldb-agent-max-iterations">
+                                        <option value="4">4 步 (快速)</option>
+                                        <option value="8" selected>8 步 (默认)</option>
+                                        <option value="12">12 步 (深入)</option>
+                                        <option value="16">16 步 (复杂任务)</option>
+                                        <option value="24">24 步 (极限)</option>
+                                    </select>
+                                    <div class="ldb-tip">Agent 循环的最大工具调用次数</div>
                                 </div>
                             </div>
                         </div>
@@ -17567,6 +17680,7 @@ ${availableTools}
             refs.agentPersonaToneSelect.value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, CONFIG.DEFAULTS.agentPersonaTone);
             refs.agentPersonaExpertiseInput.value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG.DEFAULTS.agentPersonaExpertise);
             refs.agentPersonaInstructionsInput.value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG.DEFAULTS.agentPersonaInstructions);
+            refs.agentMaxIterationsSelect.value = String(Storage.get(CONFIG.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG.DEFAULTS.agentMaxIterations));
 
             // 加载 GitHub 设置
             refs.githubUsernameInput.value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
@@ -17667,6 +17781,12 @@ ${availableTools}
                 CONFIG.STORAGE_KEYS.AI_CATEGORY_AUTO_DEDUP,
                 CONFIG.DEFAULTS.aiCategoryAutoDedup
             );
+
+            const crossSourceMode = Storage.get(
+                CONFIG.STORAGE_KEYS.CROSS_SOURCE_MODE,
+                CONFIG.DEFAULTS.crossSourceMode
+            );
+            refs.crossSourceModeSelect.value = crossSourceMode;
 
             const updateAutoEnabled = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG.DEFAULTS.updateAutoCheckEnabled);
             const updateIntervalHours = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG.DEFAULTS.updateCheckIntervalHours);
