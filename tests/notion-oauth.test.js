@@ -215,7 +215,7 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
 
     const scriptRunner = new Function(
         ...Object.keys(sandbox),
-        `${coreCode}\nreturn { AIClassifier, AIService, CONFIG, AIAssistant, ChatState, ChatUI, DesignSystem, GenericUI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, SiteDetector, TargetState, UI, UndoManager, main };`
+        `${coreCode}\nreturn { AIClassifier, AIService, CONFIG, AIAssistant, ChatState, ChatUI, DesignSystem, GenericExporter, GenericUI, GitHubAPI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, SiteDetector, TargetState, UI, UICommandService, UndoManager, WorkspaceService, main };`
     );
 
     const exports = scriptRunner(...Object.values(sandbox));
@@ -1737,6 +1737,372 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
         assert.strictEqual(harness.AIAssistant.getActiveSettingsAdapter(), null);
     });
 
+    await runTest('WorkspaceService.refreshWorkspaceSnapshot: persists staged workspace data and notifies standardized UI callbacks', async () => {
+        const harness = createHarness();
+        const partialWorkspace = {
+            databases: [{ id: 'db1', title: '知识库' }],
+            pages: []
+        };
+        const finalWorkspace = {
+            databases: partialWorkspace.databases,
+            pages: [{ id: 'page1', title: '项目计划', parent: 'workspace' }]
+        };
+        const updates = [];
+
+        harness.WorkspaceService.fetchWorkspaceStaged = async (apiKey, options) => {
+            assert.strictEqual(apiKey, 'manual_api_key');
+            options.onPhaseComplete('databases', partialWorkspace);
+            options.onPhaseComplete('pages', finalWorkspace);
+            return finalWorkspace;
+        };
+
+        const result = await harness.WorkspaceService.refreshWorkspaceSnapshot('manual_api_key', {
+            includePages: true,
+            onWorkspaceData: (workspaceData, meta) => updates.push({ workspaceData, meta })
+        });
+
+        const cachedWorkspace = JSON.parse(harness.store[harness.CONFIG.STORAGE_KEYS.WORKSPACE_PAGES]);
+        assert.deepStrictEqual(updates.map(({ meta }) => meta.phase), ['databases', 'pages']);
+        assert.deepStrictEqual(updates.map(({ meta }) => meta.isFinal), [false, true]);
+        assert.strictEqual(updates[0].workspaceData.databases.length, 1);
+        assert.strictEqual(updates[1].workspaceData.pages.length, 1);
+        assert.strictEqual(cachedWorkspace.apiKeyHash, 'manual_api_key'.slice(-8));
+        assert.strictEqual(cachedWorkspace.pages[0].id, 'page1');
+        assert.strictEqual(result.workspaceData.pages[0].title, '项目计划');
+    });
+
+    await runTest('AIService.fetchModelsSnapshot: persists fetched model snapshots in the shared cache format', async () => {
+        const harness = createHarness();
+
+        harness.AIService.fetchModels = async (service, apiKey, baseUrl) => {
+            assert.strictEqual(service, 'openai');
+            assert.strictEqual(apiKey, 'sk-test');
+            assert.strictEqual(baseUrl, 'https://example.com');
+            return ['gpt-4.1-mini', 'gpt-4o'];
+        };
+
+        const result = await harness.AIService.fetchModelsSnapshot('openai', 'sk-test', 'https://example.com');
+        const cachedModels = JSON.parse(harness.store[harness.CONFIG.STORAGE_KEYS.FETCHED_MODELS]);
+
+        assert.deepStrictEqual(result.models, ['gpt-4.1-mini', 'gpt-4o']);
+        assert.deepStrictEqual(cachedModels.openai.models, ['gpt-4.1-mini', 'gpt-4o']);
+        assert.strictEqual(typeof cachedModels.openai.timestamp, 'number');
+    });
+
+    await runTest('UICommandService.execute: select_ai_target delegates to TargetState.setAITarget and exposes legacy write boundary metadata', async () => {
+        const harness = createHarness();
+        let selectedValue = null;
+
+        harness.TargetState.setAITarget = (value) => {
+            selectedValue = value;
+            return { value };
+        };
+
+        const result = await harness.UICommandService.execute('select_ai_target', { targetValue: 'page:cccc' });
+
+        assert.strictEqual(selectedValue, 'page:cccc');
+        assert.deepStrictEqual(result, { value: 'page:cccc' });
+        assert.ok(harness.UICommandService.LEGACY_DIRECT_NOTION_WRITE_BOUNDARY.allowedSources.includes('GenericExporter.setupDatabaseProperties'));
+    });
+
+    await runTest('UICommandService.execute: save_command_boundary_settings persists notion-site command payloads through one boundary', async () => {
+        const harness = createHarness();
+        let selectedValue = null;
+        let importTypes = null;
+
+        harness.TargetState.setAITarget = (value) => {
+            selectedValue = value;
+            return { value };
+        };
+        harness.GitHubAPI.setImportTypes = (types) => {
+            importTypes = types;
+        };
+
+        await harness.UICommandService.execute('save_command_boundary_settings', {
+            scope: 'notion-site',
+            liveApiKey: 'manual_api_key',
+            clearManualApiKey: true,
+            aiTargetValue: 'page:cccc',
+            aiService: 'openai',
+            aiModel: 'gpt-4.1-mini',
+            aiApiKey: 'sk-test',
+            aiBaseUrl: 'https://example.com',
+            aiCategories: 'AI,工具',
+            workspaceMaxPages: 50,
+            personaName: 'Niko',
+            personaTone: 'professional',
+            personaExpertise: 'notion',
+            personaInstructions: 'be concise',
+            githubUsername: 'smith',
+            githubToken: 'ghp_xxx',
+            githubImportTypes: ['stars', 'repos']
+        });
+
+        assert.strictEqual(selectedValue, 'page:cccc');
+        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.AI_SERVICE], 'openai');
+        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.AI_MODEL], 'gpt-4.1-mini');
+        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES], 50);
+        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME], 'Niko');
+        assert.deepStrictEqual(importTypes, ['stars', 'repos']);
+    });
+
+    await runTest('UICommandService.execute: refresh_workspace_targets delegates to WorkspaceService.refreshWorkspaceSnapshot with forwarded hooks', async () => {
+        const harness = createHarness();
+        const progressEvents = [];
+        const workspaceEvents = [];
+
+        harness.WorkspaceService.refreshWorkspaceSnapshot = async (apiKey, options) => {
+            assert.strictEqual(apiKey, 'manual_api_key');
+            assert.strictEqual(options.includePages, false);
+            options.onProgress({ phase: 'databases', loaded: 1 });
+            options.onWorkspaceData({ databases: [{ id: 'db1' }], pages: [] }, { phase: 'databases', isFinal: true });
+            return { workspaceData: { databases: [{ id: 'db1' }], pages: [] } };
+        };
+
+        const result = await harness.UICommandService.execute('refresh_workspace_targets', {
+            apiKey: 'manual_api_key',
+            includePages: false,
+            onProgress: (progress) => progressEvents.push(progress),
+            onWorkspaceData: (workspaceData, meta) => workspaceEvents.push({ workspaceData, meta }),
+        });
+
+        assert.strictEqual(progressEvents[0].phase, 'databases');
+        assert.strictEqual(workspaceEvents[0].workspaceData.databases[0].id, 'db1');
+        assert.strictEqual(result.workspaceData.databases[0].id, 'db1');
+    });
+
+    await runTest('UICommandService.execute: apply_workspace_selection normalizes page/database selections through TargetState.saveExportState', async () => {
+        const harness = createHarness();
+        const savedStates = [];
+
+        harness.TargetState.saveExportState = (state) => {
+            savedStates.push(state);
+            return { ...state };
+        };
+        harness.TargetState.getExportState = () => ({ targetType: 'page', parentPageId: 'page1' });
+
+        const result = await harness.UICommandService.execute('apply_workspace_selection', { selectedValue: 'page:page1' });
+
+        assert.deepStrictEqual(savedStates[0], {
+            targetType: harness.CONFIG.EXPORT_TARGET_TYPES.PAGE,
+            parentPageId: 'page1'
+        });
+        assert.strictEqual(result.selectedType, 'page');
+        assert.strictEqual(result.selectedId, 'page1');
+    });
+
+    await runTest('UICommandService.execute: set_export_target_state centralizes explicit export target updates', async () => {
+        const harness = createHarness();
+        const savedStates = [];
+
+        harness.TargetState.saveExportState = (state) => {
+            savedStates.push(state);
+            return state;
+        };
+        harness.TargetState.getExportState = () => ({ targetType: 'database', databaseId: 'db1' });
+
+        const result = await harness.UICommandService.execute('set_export_target_state', {
+            targetType: harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE,
+            databaseId: 'db1'
+        });
+
+        assert.deepStrictEqual(savedStates[0], {
+            targetType: harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE,
+            databaseId: 'db1',
+            parentPageId: undefined
+        });
+        assert.strictEqual(result.exportState.databaseId, 'db1');
+    });
+
+    await runTest('UICommandService.execute: validate_export_target delegates validation and persists success state', async () => {
+        const harness = createHarness();
+        const savedStates = [];
+
+        harness.NotionAPI.validateConfig = async (apiKey, databaseId) => {
+            assert.strictEqual(apiKey, 'manual_api_key');
+            assert.strictEqual(databaseId, 'db1');
+            return { valid: true };
+        };
+        harness.TargetState.saveExportState = (state) => {
+            savedStates.push(state);
+            return state;
+        };
+
+        const result = await harness.UICommandService.execute('validate_export_target', {
+            apiKey: 'manual_api_key',
+            liveApiKey: 'manual_api_key',
+            exportTargetType: harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE,
+            databaseId: 'db1'
+        });
+
+        assert.strictEqual(result.valid, true);
+        assert.strictEqual(savedStates[0].databaseId, 'db1');
+    });
+
+    await runTest('UICommandService.execute: setup_export_database_properties delegates setup and persists export database on success', async () => {
+        const harness = createHarness();
+        let persistedDatabaseId = null;
+
+        harness.NotionAPI.setupDatabaseProperties = async (databaseId, apiKey) => {
+            assert.strictEqual(databaseId, 'db1');
+            assert.strictEqual(apiKey, 'manual_api_key');
+            return { success: true, message: 'ok' };
+        };
+        harness.TargetState.setExportDatabaseId = (databaseId) => {
+            persistedDatabaseId = databaseId;
+            return databaseId;
+        };
+
+        const result = await harness.UICommandService.execute('setup_export_database_properties', {
+            apiKey: 'manual_api_key',
+            liveApiKey: 'manual_api_key',
+            databaseId: 'db1'
+        });
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(persistedDatabaseId, 'db1');
+    });
+
+    await runTest('UICommandService.execute: save_command_boundary_settings generic-export-target keeps schema setup inside declared legacy boundary', async () => {
+        const harness = createHarness();
+        let setupCall = null;
+
+        harness.GenericExporter = harness.GenericExporter || {};
+        harness.GenericExporter.setupDatabaseProperties = async (targetId, apiKey) => {
+            setupCall = { targetId, apiKey };
+            return { success: true, message: 'ok' };
+        };
+
+        const result = await harness.UICommandService.execute('save_command_boundary_settings', {
+            scope: 'generic-export-target',
+            liveApiKey: 'manual_api_key',
+            apiKey: 'manual_api_key',
+            exportType: harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE,
+            targetId: 'db1',
+            imgMode: 'embed',
+            autoSetupDatabaseProperties: true,
+        });
+
+        assert.deepStrictEqual(setupCall, { targetId: 'db1', apiKey: 'manual_api_key' });
+        assert.strictEqual(result.setupResult.success, true);
+        assert.ok(harness.UICommandService.LEGACY_DIRECT_NOTION_WRITE_BOUNDARY.note.includes('direct NotionAPI 写路径'));
+    });
+
+    await runTest('NotionSiteUI.bindEvents: workspace refresh delegates to WorkspaceService.refreshWorkspaceSnapshot', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#ldb-notion-api-key': Object.assign(createElementStub(), { value: 'manual_api_key' }),
+            '#ldb-notion-refresh-workspace': createElementStub(),
+            '#ldb-notion-workspace-tip': createElementStub(),
+            '#ldb-notion-ai-target-db': createElementStub()
+        });
+        const targetUpdates = [];
+        let refreshCalls = 0;
+
+        harness.NotionSiteUI.panel = panel;
+        harness.NotionOAuth.getAccessToken = (value) => value;
+        harness.WorkspaceService.fetchWorkspaceStaged = async () => {
+            throw new Error('fetchWorkspaceStaged should not be called directly from NotionSiteUI');
+        };
+        harness.WorkspaceService.refreshWorkspaceSnapshot = async (apiKey, options) => {
+            refreshCalls += 1;
+            assert.strictEqual(apiKey, 'manual_api_key');
+            options.onProgress({ phase: 'databases', loaded: 1 });
+            options.onWorkspaceData({
+                apiKeyHash: 'manual_api_key'.slice(-8),
+                databases: [{ id: 'db1', title: '知识库' }],
+                pages: [],
+                timestamp: 1
+            }, { phase: 'databases', isFinal: false });
+            return {
+                databases: [{ id: 'db1', title: '知识库' }],
+                pages: [{ id: 'page1', title: '项目计划' }],
+                workspaceData: {
+                    apiKeyHash: 'manual_api_key'.slice(-8),
+                    databases: [{ id: 'db1', title: '知识库' }],
+                    pages: [{ id: 'page1', title: '项目计划' }],
+                    timestamp: 2
+                }
+            };
+        };
+        harness.NotionSiteUI.updateAITargetDbOptions = (databases, pages) => {
+            targetUpdates.push({ databases, pages });
+        };
+
+        harness.NotionSiteUI.bindEvents();
+        await panel.querySelector('#ldb-notion-refresh-workspace').onclick();
+
+        assert.strictEqual(refreshCalls, 1);
+        assert.strictEqual(targetUpdates.length, 2);
+        assert.strictEqual(targetUpdates[1].pages[0].id, 'page1');
+        assert.ok(panel.querySelector('#ldb-notion-workspace-tip').textContent.includes('获取到 1 个数据库，1 个页面'));
+    });
+
+    await runTest('NotionSiteUI.bindEvents: AI target selector and save settings delegate through UICommandService', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#ldb-notion-ai-target-db': Object.assign(createElementStub(), { value: 'page:cccc' }),
+            '#ldb-notion-save-settings': createElementStub(),
+            '#ldb-notion-api-key': Object.assign(createElementStub(), { value: 'manual_api_key' }),
+            '#ldb-notion-ai-service': Object.assign(createElementStub(), { value: 'openai' }),
+            '#ldb-notion-ai-model': Object.assign(createElementStub(), { value: 'gpt-4.1-mini' }),
+            '#ldb-notion-ai-api-key': Object.assign(createElementStub(), { value: 'sk-test' }),
+            '#ldb-notion-ai-base-url': Object.assign(createElementStub(), { value: 'https://example.com' }),
+            '#ldb-notion-ai-categories': Object.assign(createElementStub(), { value: 'AI,工具' }),
+            '#ldb-notion-workspace-max-pages': Object.assign(createElementStub(), { value: '50' }),
+            '#ldb-notion-persona-name': Object.assign(createElementStub(), { value: 'Niko' }),
+            '#ldb-notion-persona-tone': Object.assign(createElementStub(), { value: 'professional' }),
+            '#ldb-notion-persona-expertise': Object.assign(createElementStub(), { value: 'notion' }),
+            '#ldb-notion-persona-instructions': Object.assign(createElementStub(), { value: 'be concise' }),
+            '#ldb-notion-github-username': Object.assign(createElementStub(), { value: 'smith' }),
+            '#ldb-notion-github-token': Object.assign(createElementStub(), { value: 'ghp_xxx' })
+        }, {
+            '.ldb-notion-github-type:checked': [Object.assign(createElementStub(), { value: 'stars' })]
+        });
+
+        harness.NotionSiteUI.panel = panel;
+
+        harness.NotionSiteUI.bindEvents();
+        assert.ok(panel.querySelector('#ldb-notion-ai-target-db').onchange.toString().includes('UICommandService.execute("select_ai_target"'));
+        assert.ok(panel.querySelector('#ldb-notion-save-settings').onclick.toString().includes('save_command_boundary_settings'));
+    });
+
+    await runTest('NotionSiteUI.bindEvents: model fetch delegates to AIService.fetchModelsSnapshot', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#ldb-notion-ai-api-key': Object.assign(createElementStub(), { value: 'sk-test' }),
+            '#ldb-notion-ai-service': Object.assign(createElementStub(), { value: 'openai' }),
+            '#ldb-notion-ai-base-url': Object.assign(createElementStub(), { value: 'https://example.com' }),
+            '#ldb-notion-ai-fetch-models': createElementStub(),
+            '#ldb-notion-ai-model-tip': createElementStub(),
+            '#ldb-notion-ai-model': createElementStub()
+        });
+        const updates = [];
+        let fetchCalls = 0;
+
+        harness.NotionSiteUI.panel = panel;
+        harness.AIService.fetchModels = async () => {
+            throw new Error('fetchModels should not be called directly from NotionSiteUI');
+        };
+        harness.AIService.fetchModelsSnapshot = async (service, apiKey, baseUrl) => {
+            fetchCalls += 1;
+            assert.strictEqual(service, 'openai');
+            assert.strictEqual(apiKey, 'sk-test');
+            assert.strictEqual(baseUrl, 'https://example.com');
+            return { models: ['gpt-4.1-mini', 'gpt-4o'], timestamp: 1 };
+        };
+        harness.NotionSiteUI.updateAIModelOptions = (service, models) => {
+            updates.push({ service, models });
+        };
+
+        harness.NotionSiteUI.bindEvents();
+        await panel.querySelector('#ldb-notion-ai-fetch-models').onclick();
+
+        assert.strictEqual(fetchCalls, 1);
+        assert.deepStrictEqual(updates[0], { service: 'openai', models: ['gpt-4.1-mini', 'gpt-4o'] });
+        assert.ok(panel.querySelector('#ldb-notion-ai-model-tip').textContent.includes('获取到 2 个可用模型'));
+    });
+
     await runTest('NotionSiteUI.updateAITargetDbOptions: restores legacy exporter database in the selector', async () => {
         const harness = createHarness();
         const exportDb = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -1873,6 +2239,80 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
         assert.strictEqual(select.value, exportDb);
     });
 
+    await runTest('GenericUI.refreshWorkspaceTargets: delegates backend refresh through WorkspaceService.refreshWorkspaceSnapshot', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#gclip-refresh-workspace': createElementStub(),
+            '#gclip-target-tip': createElementStub()
+        });
+        const targetUpdates = [];
+        let refreshCalls = 0;
+
+        harness.GenericUI.panel = panel;
+        harness.WorkspaceService.fetchWorkspaceStaged = async () => {
+            throw new Error('fetchWorkspaceStaged should not be called directly from GenericUI');
+        };
+        harness.WorkspaceService.refreshWorkspaceSnapshot = async (apiKey, options) => {
+            refreshCalls += 1;
+            assert.strictEqual(apiKey, 'manual_api_key');
+            options.onProgress({ phase: 'databases', loaded: 1 });
+            options.onWorkspaceData({
+                apiKeyHash: 'manual_api_key'.slice(-8),
+                databases: [{ id: 'db1', title: '知识库' }],
+                pages: [],
+                timestamp: 1
+            }, { phase: 'databases', isFinal: false });
+            return {
+                databases: [{ id: 'db1', title: '知识库' }],
+                pages: [{ id: 'page1', title: '项目计划', parent: 'workspace' }],
+                workspaceData: {
+                    apiKeyHash: 'manual_api_key'.slice(-8),
+                    databases: [{ id: 'db1', title: '知识库' }],
+                    pages: [{ id: 'page1', title: '项目计划', parent: 'workspace' }],
+                    timestamp: 2
+                }
+            };
+        };
+        harness.GenericUI.updateTargetSelectOptions = (databases, pages) => {
+            targetUpdates.push({ databases, pages });
+        };
+
+        await harness.GenericUI.refreshWorkspaceTargets('manual_api_key');
+
+        assert.strictEqual(refreshCalls, 1);
+        assert.strictEqual(targetUpdates.length, 2);
+        assert.strictEqual(targetUpdates[1].pages[0].parent, 'workspace');
+        assert.ok(panel.querySelector('#gclip-target-tip').textContent.includes('已加载 1 个数据库，1 个页面'));
+    });
+
+    await runTest('GenericUI.refreshWorkspaceTargets and save settings delegate through UICommandService', async () => {
+        const harness = createHarness();
+        const saveSettingsBtn = Object.assign(createElementStub(), {
+            addEventListener(eventName, handler) {
+                this[`on${eventName}`] = handler;
+            }
+        });
+        const panel = createAutoPanelStub({
+            '#gclip-refresh-workspace': createElementStub(),
+            '#gclip-target-tip': createElementStub(),
+            '#gclip-save-settings': saveSettingsBtn,
+            '#gclip-api-key-input': Object.assign(createElementStub(), { value: 'manual_api_key' }),
+            '#gclip-export-type': Object.assign(createElementStub(), { value: 'database' }),
+            '#gclip-target-select': Object.assign(createElementStub(), { value: 'db1' }),
+            '#gclip-target-id': Object.assign(createElementStub(), { value: '' }),
+            '#gclip-img-mode': Object.assign(createElementStub(), { value: 'embed' }),
+            '#gclip-settings': Object.assign(createElementStub(), { style: { display: 'block' } }),
+            '#gclip-export': Object.assign(createElementStub(), { style: { display: 'none' } }),
+            '#gclip-show-settings': Object.assign(createElementStub(), { style: { display: 'none' } })
+        });
+
+        harness.GenericUI.panel = panel;
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
+        harness.GenericUI.bindEvents();
+        assert.ok(harness.GenericUI.refreshWorkspaceTargets.toString().includes('UICommandService.execute("refresh_workspace_targets"'));
+        assert.ok(saveSettingsBtn.onclick.toString().includes('save_command_boundary_settings'));
+    });
+
     await runTest('UI.bindEvents: workspace picker selecting a database switches exporter back from page mode', async () => {
         const harness = createHarness();
         const oldDb = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -1907,6 +2347,184 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
         assert.strictEqual(exportState.targetType, harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE);
         assert.strictEqual(exportState.databaseId, newDb);
         assert.strictEqual(exportState.targetId, newDb);
+    });
+
+    await runTest('UI.bindEvents: workspace refresh delegates to WorkspaceService.refreshWorkspaceSnapshot', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#ldb-api-key': Object.assign(createElementStub(), { value: 'manual_api_key' }),
+            '#ldb-refresh-workspace': createElementStub(),
+            '#ldb-workspace-tip': createElementStub()
+        });
+        const workspaceUpdates = [];
+        let refreshCalls = 0;
+
+        harness.UI.panel = panel;
+        harness.UI.cacheRefs();
+        harness.NotionOAuth.getAccessToken = (value) => value;
+        harness.WorkspaceService.fetchWorkspaceStaged = async () => {
+            throw new Error('fetchWorkspaceStaged should not be called directly from UI');
+        };
+        harness.WorkspaceService.refreshWorkspaceSnapshot = async (apiKey, options) => {
+            refreshCalls += 1;
+            assert.strictEqual(apiKey, 'manual_api_key');
+            options.onProgress({ phase: 'databases', loaded: 1 });
+            options.onWorkspaceData({
+                apiKeyHash: 'manual_api_key'.slice(-8),
+                databases: [{ id: 'db1', title: '知识库' }],
+                pages: [],
+                timestamp: 1
+            }, { phase: 'databases', isFinal: false });
+            return {
+                databases: [{ id: 'db1', title: '知识库' }],
+                pages: [{ id: 'page1', title: '项目计划' }],
+                workspaceData: {
+                    apiKeyHash: 'manual_api_key'.slice(-8),
+                    databases: [{ id: 'db1', title: '知识库' }],
+                    pages: [{ id: 'page1', title: '项目计划' }],
+                    timestamp: 2
+                }
+            };
+        };
+        harness.UI.updateWorkspaceSelect = (workspaceData) => {
+            workspaceUpdates.push(workspaceData);
+        };
+
+        harness.UI.bindEvents();
+        await harness.UI.refs.refreshWorkspaceBtn.onclick();
+
+        assert.strictEqual(refreshCalls, 1);
+        assert.strictEqual(workspaceUpdates.length, 2);
+        assert.strictEqual(workspaceUpdates[1].pages[0].id, 'page1');
+        assert.ok(harness.UI.refs.workspaceTip.textContent.includes('获取到 1 个数据库，1 个页面'));
+    });
+
+    await runTest('UI.bindEvents: workspace selector delegates through UICommandService.apply_workspace_selection', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub();
+
+        harness.UI.panel = panel;
+        harness.UI.cacheRefs();
+
+        harness.UI.bindEvents();
+        assert.ok(panel.querySelector('#ldb-workspace-select').onchange.toString().includes('apply_workspace_selection'));
+    });
+
+    await runTest('UI.bindEvents: export target radio, parent page save, validate and setup delegate through UICommandService', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#ldb-api-key': Object.assign(createElementStub(), { value: 'manual_api_key' }),
+            '#ldb-database-id': Object.assign(createElementStub(), { value: 'db1' }),
+            '#ldb-parent-page-id': Object.assign(createElementStub(), { value: 'page1' }),
+            '#ldb-export-target-database': Object.assign(createElementStub(), { checked: true, value: 'database' }),
+            '#ldb-export-target-page': Object.assign(createElementStub(), { checked: false, value: 'page' }),
+            '#ldb-validate-config': createElementStub(),
+            '#ldb-setup-database': createElementStub(),
+            '#ldb-config-status': createElementStub()
+        });
+
+        harness.UI.panel = panel;
+        harness.UI.cacheRefs();
+        harness.UI.bindEvents();
+
+        assert.ok(harness.UI.refs.exportTargetDatabaseRadio.onchange.toString().includes('set_export_target_state'));
+        assert.ok(harness.UI.refs.parentPageIdInput.onchange.toString().includes('set_export_target_state'));
+        assert.ok(harness.UI.refs.validateConfigBtn.onclick.toString().includes('validate_export_target'));
+        assert.ok(harness.UI.refs.setupDatabaseBtn.onclick.toString().includes('setup_export_database_properties'));
+    });
+
+    await runTest('UI.bindEvents: AI database refresh delegates to WorkspaceService.refreshWorkspaceSnapshot with database-only mode', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#ldb-api-key': Object.assign(createElementStub(), { value: 'manual_api_key' }),
+            '#ldb-ai-refresh-dbs': createElementStub(),
+            '#ldb-ai-model-tip': createElementStub()
+        });
+        const dbUpdates = [];
+        let refreshCalls = 0;
+
+        harness.UI.panel = panel;
+        harness.UI.cacheRefs();
+        harness.NotionOAuth.getAccessToken = (value) => value;
+        harness.WorkspaceService.fetchWorkspace = async () => {
+            throw new Error('fetchWorkspace should not be called directly from UI AI db refresh');
+        };
+        harness.WorkspaceService.refreshWorkspaceSnapshot = async (apiKey, options) => {
+            refreshCalls += 1;
+            assert.strictEqual(apiKey, 'manual_api_key');
+            assert.strictEqual(options.includePages, false);
+            options.onWorkspaceData({
+                apiKeyHash: 'manual_api_key'.slice(-8),
+                databases: [{ id: 'db1', title: '知识库' }],
+                pages: [],
+                timestamp: 1
+            }, { phase: 'databases', isFinal: true });
+            return {
+                databases: [{ id: 'db1', title: '知识库' }],
+                pages: [],
+                workspaceData: {
+                    apiKeyHash: 'manual_api_key'.slice(-8),
+                    databases: [{ id: 'db1', title: '知识库' }],
+                    pages: [],
+                    timestamp: 1
+                }
+            };
+        };
+        harness.UI.updateAITargetDbOptions = (databases) => {
+            dbUpdates.push(databases);
+        };
+        harness.UI.showStatus = (message, type) => {
+            harness.notifications.push({ message, type });
+        };
+
+        harness.UI.bindEvents();
+        await harness.UI.refs.aiRefreshDbsBtn.onclick();
+
+        assert.strictEqual(refreshCalls, 1);
+        assert.strictEqual(dbUpdates.length, 2);
+        assert.strictEqual(dbUpdates[1][0].id, 'db1');
+        assert.deepStrictEqual(harness.notifications.at(-1), { message: '获取到 1 个数据库', type: 'success' });
+    });
+
+    await runTest('UI.bindEvents: AI model fetch delegates to AIService.fetchModelsSnapshot', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#ldb-ai-api-key': Object.assign(createElementStub(), { value: 'sk-test' }),
+            '#ldb-ai-service': Object.assign(createElementStub(), { value: 'openai' }),
+            '#ldb-ai-base-url': Object.assign(createElementStub(), { value: 'https://example.com' }),
+            '#ldb-ai-fetch-models': createElementStub(),
+            '#ldb-ai-model-tip': createElementStub(),
+            '#ldb-ai-model': createElementStub()
+        });
+        const updates = [];
+        let fetchCalls = 0;
+
+        harness.UI.panel = panel;
+        harness.UI.cacheRefs();
+        harness.AIService.fetchModels = async () => {
+            throw new Error('fetchModels should not be called directly from UI AI model fetch');
+        };
+        harness.AIService.fetchModelsSnapshot = async (service, apiKey, baseUrl) => {
+            fetchCalls += 1;
+            assert.strictEqual(service, 'openai');
+            assert.strictEqual(apiKey, 'sk-test');
+            assert.strictEqual(baseUrl, 'https://example.com');
+            return { models: ['gpt-4.1-mini', 'gpt-4o'], timestamp: 1 };
+        };
+        harness.UI.updateAIModelOptions = (service, models) => {
+            updates.push({ service, models });
+        };
+        harness.UI.showStatus = (message, type) => {
+            harness.notifications.push({ message, type });
+        };
+
+        harness.UI.bindEvents();
+        await harness.UI.refs.aiFetchModelsBtn.onclick();
+
+        assert.strictEqual(fetchCalls, 1);
+        assert.deepStrictEqual(updates[0], { service: 'openai', models: ['gpt-4.1-mini', 'gpt-4o'] });
+        assert.ok(harness.UI.refs.aiModelTip.textContent.includes('获取到 2 个可用模型'));
+        assert.deepStrictEqual(harness.notifications.at(-1), { message: '成功获取 2 个模型', type: 'success' });
     });
 
     await runTest('AIAssistant.AGENT_TOOLS.query_database: reuses legacy export database when AI target is missing', async () => {

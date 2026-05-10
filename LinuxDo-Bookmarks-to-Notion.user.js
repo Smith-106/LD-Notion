@@ -3248,6 +3248,42 @@
         },
 
         // 获取可用模型列表
+        getFetchedModelsCache: () => {
+            const raw = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
+            try {
+                const parsed = JSON.parse(raw);
+                return parsed && typeof parsed === "object" ? parsed : {};
+            } catch {
+                return {};
+            }
+        },
+
+        getCachedModels: (service) => {
+            const cache = AIService.getFetchedModelsCache();
+            return Array.isArray(cache[service]?.models) ? cache[service].models : [];
+        },
+
+        getAvailableModels: (service) => {
+            const cachedModels = AIService.getCachedModels(service);
+            if (cachedModels.length > 0) return cachedModels;
+            return AIService.PROVIDERS[service]?.models || [];
+        },
+
+        persistFetchedModels: (service, models) => {
+            const normalizedModels = Array.isArray(models) ? models : [];
+            const cache = AIService.getFetchedModelsCache();
+            const snapshot = { models: normalizedModels, timestamp: Date.now() };
+            cache[service] = snapshot;
+            Storage.set(CONFIG.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(cache));
+            return snapshot;
+        },
+
+        fetchModelsSnapshot: async (service, apiKey, baseUrl) => {
+            const models = await AIService.fetchModels(service, apiKey, baseUrl);
+            const snapshot = AIService.persistFetchedModels(service, models);
+            return { models: snapshot.models, timestamp: snapshot.timestamp };
+        },
+
         fetchModels: async (service, apiKey, baseUrl) => {
             if (service === "openai") {
                 return await AIService.fetchOpenAIModels(apiKey, baseUrl);
@@ -10348,7 +10384,305 @@ ${availableTools}
             options.onPhaseComplete?.("pages", finalWorkspace);
             return finalWorkspace;
         },
+
+        buildWorkspaceData: (apiKey, workspace = {}) => ({
+            apiKeyHash: apiKey ? apiKey.slice(-8) : "",
+            databases: Array.isArray(workspace.databases) ? workspace.databases : [],
+            pages: Array.isArray(workspace.pages) ? workspace.pages : [],
+            timestamp: Date.now(),
+        }),
+
+        persistWorkspaceData: (apiKey, workspace = {}) => {
+            const workspaceData = WorkspaceService.buildWorkspaceData(apiKey, workspace);
+            Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
+            return workspaceData;
+        },
+
+        // 统一工作区刷新边界，负责后端读取、缓存持久化与 staged 回调。
+        refreshWorkspaceSnapshot: async (apiKey, options = {}) => {
+            if (!apiKey) {
+                return { databases: [], pages: [], workspaceData: WorkspaceService.buildWorkspaceData("", {}) };
+            }
+
+            const includePages = options.includePages !== false;
+            const notifyWorkspaceData = typeof options.onWorkspaceData === "function"
+                ? options.onWorkspaceData
+                : null;
+            let finalPhaseHandled = false;
+            let lastWorkspaceData = null;
+
+            const workspace = await WorkspaceService.fetchWorkspaceStaged(apiKey, {
+                includePages,
+                maxPages: options.maxPages,
+                onProgress: options.onProgress,
+                onPhaseComplete: (phase, partialWorkspace) => {
+                    lastWorkspaceData = WorkspaceService.persistWorkspaceData(apiKey, partialWorkspace);
+                    finalPhaseHandled = phase === "pages" || (!includePages && phase === "databases");
+                    notifyWorkspaceData?.(lastWorkspaceData, { phase, isFinal: finalPhaseHandled });
+                    options.onPhaseComplete?.(phase, partialWorkspace, lastWorkspaceData);
+                },
+            });
+
+            if (!finalPhaseHandled) {
+                lastWorkspaceData = WorkspaceService.persistWorkspaceData(apiKey, workspace);
+                const finalPhase = includePages ? "pages" : "databases";
+                notifyWorkspaceData?.(lastWorkspaceData, { phase: finalPhase, isFinal: true });
+                options.onPhaseComplete?.(finalPhase, workspace, lastWorkspaceData);
+            }
+
+            return {
+                databases: workspace.databases || [],
+                pages: workspace.pages || [],
+                workspaceData: lastWorkspaceData || WorkspaceService.buildWorkspaceData(apiKey, workspace),
+            };
+        },
     };
+
+    const UICommandService = Object.freeze({
+        LEGACY_DIRECT_NOTION_WRITE_BOUNDARY: Object.freeze({
+            allowedSources: Object.freeze([
+                "AIAssistant.AGENT_TOOLS.*",
+                "AIAssistant.handleTranslateContent / handleEditContent / handleAIAutofill",
+                "AIClassifier.*",
+                "GenericExporter.setupDatabaseProperties",
+                "GitHubExporter.setupDatabaseProperties",
+                "BookmarkExporter.setupDatabaseProperties",
+            ]),
+            note: "M2-P1 只收口 UI 事件到 command boundary；遗留 direct NotionAPI 写路径暂限定在工具执行器和导出 schema 初始化 helper 内，不允许继续从 UI 事件直接扩散。",
+        }),
+
+        _persistStorageEntries: (entries = {}) => {
+            for (const [key, value] of Object.entries(entries)) {
+                Storage.set(key, value);
+            }
+        },
+
+        _saveNotionSiteSettings: (payload = {}) => {
+            const {
+                liveApiKey = "",
+                clearManualApiKey = false,
+                aiTargetValue = "",
+                aiService = CONFIG.DEFAULTS.aiService,
+                aiModel = "",
+                aiApiKey = "",
+                aiBaseUrl = "",
+                aiCategories = CONFIG.DEFAULTS.aiCategories,
+                workspaceMaxPages = 0,
+                personaName = CONFIG.DEFAULTS.agentPersonaName,
+                personaTone = CONFIG.DEFAULTS.agentPersonaTone,
+                personaExpertise = CONFIG.DEFAULTS.agentPersonaExpertise,
+                personaInstructions = "",
+                githubUsername = "",
+                githubToken = "",
+                githubImportTypes = ["stars"],
+            } = payload;
+
+            if (liveApiKey) {
+                NotionOAuth.setManualApiKey(liveApiKey);
+            } else if (clearManualApiKey && NotionOAuth.getAuthMode() !== "oauth") {
+                NotionOAuth.setManualApiKey("");
+            }
+
+            TargetState.setAITarget(aiTargetValue);
+            UICommandService._persistStorageEntries({
+                [CONFIG.STORAGE_KEYS.AI_SERVICE]: aiService,
+                [CONFIG.STORAGE_KEYS.AI_MODEL]: aiModel,
+                [CONFIG.STORAGE_KEYS.AI_API_KEY]: aiApiKey,
+                [CONFIG.STORAGE_KEYS.AI_BASE_URL]: aiBaseUrl,
+                [CONFIG.STORAGE_KEYS.AI_CATEGORIES]: aiCategories,
+                [CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES]: parseInt(workspaceMaxPages, 10) || 0,
+                [CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME]: personaName || CONFIG.DEFAULTS.agentPersonaName,
+                [CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE]: personaTone,
+                [CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE]: personaExpertise || CONFIG.DEFAULTS.agentPersonaExpertise,
+                [CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS]: personaInstructions,
+                [CONFIG.STORAGE_KEYS.GITHUB_USERNAME]: githubUsername,
+                [CONFIG.STORAGE_KEYS.GITHUB_TOKEN]: githubToken,
+            });
+            GitHubAPI.setImportTypes(Array.isArray(githubImportTypes) && githubImportTypes.length > 0 ? githubImportTypes : ["stars"]);
+
+            return {
+                aiTargetState: TargetState.getDisplayAITargetState(),
+                aiService,
+                aiModel,
+            };
+        },
+
+        _saveMainExportSessionSettings: (payload = {}) => {
+            const {
+                liveApiKey = "",
+                exportState = {},
+                storageValues = {},
+            } = payload;
+
+            if (liveApiKey) {
+                NotionOAuth.setManualApiKey(liveApiKey);
+            }
+            TargetState.saveExportState(exportState);
+            UICommandService._persistStorageEntries(storageValues);
+            return {
+                exportState: TargetState.getExportState(),
+            };
+        },
+
+        _saveGenericExportTargetSettings: async (payload = {}) => {
+            const {
+                liveApiKey = "",
+                exportType,
+                targetId = "",
+                imgMode,
+                autoSetupDatabaseProperties = false,
+                apiKey = "",
+            } = payload;
+
+            if (liveApiKey) {
+                NotionOAuth.setManualApiKey(liveApiKey);
+            }
+
+            TargetState.setExportTargetType(exportType);
+            Storage.set(CONFIG.STORAGE_KEYS.IMG_MODE, imgMode);
+
+            if (exportType === CONFIG.EXPORT_TARGET_TYPES.PAGE) {
+                TargetState.setExportPageId(targetId);
+                return { exportState: TargetState.getExportState(), setupResult: null };
+            }
+
+            TargetState.setExportDatabaseId(targetId);
+            let setupResult = null;
+            if (autoSetupDatabaseProperties) {
+                // M2-P1 明确保留的 legacy direct NotionAPI 写路径：导出目标 schema 初始化仍复用现有 helper。
+                setupResult = await GenericExporter.setupDatabaseProperties(targetId, apiKey);
+            }
+            return { exportState: TargetState.getExportState(), setupResult };
+        },
+
+        _applyWorkspaceSelection: (payload = {}) => {
+            const selectedValue = String(payload.selectedValue || "").trim();
+            if (!selectedValue) {
+                return { selectedType: "", selectedId: "", exportState: TargetState.getExportState() };
+            }
+
+            const [selectedType, selectedId] = selectedValue.split(":");
+            if (selectedType === "database") {
+                TargetState.saveExportState({
+                    targetType: CONFIG.EXPORT_TARGET_TYPES.DATABASE,
+                    databaseId: selectedId,
+                    parentPageId: "",
+                });
+            } else if (selectedType === "page") {
+                TargetState.saveExportState({
+                    targetType: CONFIG.EXPORT_TARGET_TYPES.PAGE,
+                    parentPageId: selectedId,
+                });
+            }
+
+            return {
+                selectedType,
+                selectedId,
+                exportState: TargetState.getExportState(),
+            };
+        },
+
+        _setExportTargetState: (payload = {}) => {
+            const {
+                targetType,
+                databaseId,
+                parentPageId,
+            } = payload;
+            TargetState.saveExportState({
+                targetType,
+                databaseId,
+                parentPageId,
+            });
+            return { exportState: TargetState.getExportState() };
+        },
+
+        _validateExportTarget: async (payload = {}) => {
+            const {
+                apiKey = "",
+                liveApiKey = "",
+                exportTargetType = CONFIG.EXPORT_TARGET_TYPES.DATABASE,
+                databaseId = "",
+                parentPageId = "",
+            } = payload;
+
+            const result = exportTargetType === CONFIG.EXPORT_TARGET_TYPES.DATABASE
+                ? await NotionAPI.validateConfig(apiKey, databaseId)
+                : await NotionAPI.validatePage(parentPageId, apiKey);
+
+            if (result.valid) {
+                if (liveApiKey) {
+                    NotionOAuth.setManualApiKey(liveApiKey);
+                }
+                TargetState.saveExportState({
+                    targetType: exportTargetType,
+                    databaseId: exportTargetType === CONFIG.EXPORT_TARGET_TYPES.DATABASE ? databaseId : undefined,
+                    parentPageId: exportTargetType === CONFIG.EXPORT_TARGET_TYPES.PAGE ? parentPageId : undefined,
+                });
+            }
+
+            return result;
+        },
+
+        _setupExportDatabaseProperties: async (payload = {}) => {
+            const {
+                apiKey = "",
+                liveApiKey = "",
+                databaseId = "",
+            } = payload;
+            const result = await NotionAPI.setupDatabaseProperties(databaseId, apiKey);
+            if (result.success) {
+                if (liveApiKey) {
+                    NotionOAuth.setManualApiKey(liveApiKey);
+                }
+                TargetState.setExportDatabaseId(databaseId);
+            }
+            return result;
+        },
+
+        execute: async (command, payload = {}) => {
+            switch (command) {
+                case "select_ai_target":
+                    return TargetState.setAITarget(payload.targetValue || "");
+                case "refresh_workspace_targets": {
+                    const apiKey = String(payload.apiKey || "").trim();
+                    if (!apiKey) throw new Error(payload.missingApiKeyMessage || MSG.NO_NOTION_KEY);
+                    return await WorkspaceService.refreshWorkspaceSnapshot(apiKey, {
+                        includePages: payload.includePages !== false,
+                        maxPages: payload.maxPages,
+                        onProgress: payload.onProgress,
+                        onWorkspaceData: payload.onWorkspaceData,
+                        onPhaseComplete: payload.onPhaseComplete,
+                    });
+                }
+                case "fetch_ai_models": {
+                    const aiApiKey = String(payload.aiApiKey || "").trim();
+                    if (!aiApiKey) throw new Error(payload.missingApiKeyMessage || MSG.NO_AI_KEY);
+                    return await AIService.fetchModelsSnapshot(payload.aiService, aiApiKey, payload.aiBaseUrl || "");
+                }
+                case "save_command_boundary_settings":
+                    switch (payload.scope) {
+                        case "notion-site":
+                            return UICommandService._saveNotionSiteSettings(payload);
+                        case "main-export-session":
+                            return UICommandService._saveMainExportSessionSettings(payload);
+                        case "generic-export-target":
+                            return await UICommandService._saveGenericExportTargetSettings(payload);
+                        default:
+                            throw new Error(`未知的 settings scope: ${payload.scope || ""}`);
+                    }
+                case "apply_workspace_selection":
+                    return UICommandService._applyWorkspaceSelection(payload);
+                case "set_export_target_state":
+                    return UICommandService._setExportTargetState(payload);
+                case "validate_export_target":
+                    return await UICommandService._validateExportTarget(payload);
+                case "setup_export_database_properties":
+                    return await UICommandService._setupExportDatabaseProperties(payload);
+                default:
+                    throw new Error(`未知的 command: ${command}`);
+            }
+        },
+    });
 
     // ===========================================
     // 通用网页导出器
@@ -14229,31 +14563,31 @@ ${availableTools}
             };
 
             // 保存设置
-            panel.querySelector("#ldb-notion-save-settings").onclick = () => {
-                const liveApiKey = panel.querySelector("#ldb-notion-api-key").value.trim();
-                if (liveApiKey) {
-                    NotionOAuth.setManualApiKey(liveApiKey);
-                } else if (NotionOAuth.getAuthMode() !== "oauth") {
-                    NotionOAuth.setManualApiKey("");
+            panel.querySelector("#ldb-notion-save-settings").onclick = async () => {
+                try {
+                    await UICommandService.execute("save_command_boundary_settings", {
+                        scope: "notion-site",
+                        liveApiKey: panel.querySelector("#ldb-notion-api-key").value.trim(),
+                        clearManualApiKey: true,
+                        aiTargetValue: panel.querySelector("#ldb-notion-ai-target-db").value,
+                        aiService: panel.querySelector("#ldb-notion-ai-service").value,
+                        aiModel: panel.querySelector("#ldb-notion-ai-model").value,
+                        aiApiKey: panel.querySelector("#ldb-notion-ai-api-key").value.trim(),
+                        aiBaseUrl: panel.querySelector("#ldb-notion-ai-base-url").value.trim(),
+                        aiCategories: panel.querySelector("#ldb-notion-ai-categories").value.trim(),
+                        workspaceMaxPages: parseInt(panel.querySelector("#ldb-notion-workspace-max-pages").value) || 0,
+                        personaName: panel.querySelector("#ldb-notion-persona-name").value.trim() || CONFIG.DEFAULTS.agentPersonaName,
+                        personaTone: panel.querySelector("#ldb-notion-persona-tone").value,
+                        personaExpertise: panel.querySelector("#ldb-notion-persona-expertise").value.trim() || CONFIG.DEFAULTS.agentPersonaExpertise,
+                        personaInstructions: panel.querySelector("#ldb-notion-persona-instructions").value.trim(),
+                        githubUsername: panel.querySelector("#ldb-notion-github-username").value.trim(),
+                        githubToken: panel.querySelector("#ldb-notion-github-token").value.trim(),
+                        githubImportTypes: [...panel.querySelectorAll(".ldb-notion-github-type:checked")].map(cb => cb.value),
+                    });
+                    NotionSiteUI.showStatus("设置已保存", "success");
+                } catch (error) {
+                    NotionSiteUI.showStatus(`设置保存失败: ${error.message}`, "error");
                 }
-                TargetState.setAITarget(panel.querySelector("#ldb-notion-ai-target-db").value);
-                Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, panel.querySelector("#ldb-notion-ai-service").value);
-                Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, panel.querySelector("#ldb-notion-ai-model").value);
-                Storage.set(CONFIG.STORAGE_KEYS.AI_API_KEY, panel.querySelector("#ldb-notion-ai-api-key").value.trim());
-                Storage.set(CONFIG.STORAGE_KEYS.AI_BASE_URL, panel.querySelector("#ldb-notion-ai-base-url").value.trim());
-                Storage.set(CONFIG.STORAGE_KEYS.AI_CATEGORIES, panel.querySelector("#ldb-notion-ai-categories").value.trim());
-                Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, parseInt(panel.querySelector("#ldb-notion-workspace-max-pages").value) || 0);
-                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME, panel.querySelector("#ldb-notion-persona-name").value.trim() || CONFIG.DEFAULTS.agentPersonaName);
-                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE, panel.querySelector("#ldb-notion-persona-tone").value);
-                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, panel.querySelector("#ldb-notion-persona-expertise").value.trim() || CONFIG.DEFAULTS.agentPersonaExpertise);
-                Storage.set(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, panel.querySelector("#ldb-notion-persona-instructions").value.trim());
-                Storage.set(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, panel.querySelector("#ldb-notion-github-username").value.trim());
-                Storage.set(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, panel.querySelector("#ldb-notion-github-token").value.trim());
-                // 保存 GitHub 导入类型
-                const githubTypes = [...panel.querySelectorAll(".ldb-notion-github-type:checked")].map(cb => cb.value);
-                GitHubAPI.setImportTypes(githubTypes.length > 0 ? githubTypes : ["stars"]);
-
-                NotionSiteUI.showStatus("设置已保存", "success");
             };
 
             // 刷新数据库列表（合并后的唯一刷新按钮）
@@ -14274,7 +14608,8 @@ ${availableTools}
                 workspaceTip.textContent = "正在获取数据库列表...";
 
                 try {
-                    const workspace = await WorkspaceService.fetchWorkspaceStaged(apiKey, {
+                    const { workspaceData } = await UICommandService.execute("refresh_workspace_targets", {
+                        apiKey,
                         includePages: true,
                         onProgress: (progress) => {
                             if (progress.phase === "databases") {
@@ -14283,33 +14618,18 @@ ${availableTools}
                                 workspaceTip.textContent = `数据库已就绪，正在获取页面... 已加载 ${progress.loaded} 个`;
                             }
                         },
-                        onPhaseComplete: (phase, partialWorkspace) => {
-                            const workspaceData = {
-                                apiKeyHash: apiKey.slice(-8),
-                                databases: partialWorkspace.databases || [],
-                                pages: partialWorkspace.pages || [],
-                                timestamp: Date.now(),
-                            };
-                            Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
+                        onWorkspaceData: (workspaceData, meta) => {
                             NotionSiteUI.updateAITargetDbOptions(workspaceData.databases, workspaceData.pages);
 
-                            if (phase === "databases") {
+                            if (meta.phase === "databases") {
                                 workspaceTip.textContent = `✅ 已加载 ${workspaceData.databases.length} 个数据库，可先选择目标；页面列表继续加载中...`;
                                 workspaceTip.style.color = "#34d399";
                             }
                         },
                     });
 
-                    const workspaceData = {
-                        apiKeyHash: apiKey.slice(-8),
-                        databases: workspace.databases,
-                        pages: workspace.pages,
-                        timestamp: Date.now(),
-                    };
-                    Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
-
-                    NotionSiteUI.updateAITargetDbOptions(workspace.databases, workspace.pages);
-                    workspaceTip.textContent = `✅ 获取到 ${workspace.databases.length} 个数据库，${workspace.pages.length} 个页面`;
+                    NotionSiteUI.updateAITargetDbOptions(workspaceData.databases, workspaceData.pages);
+                    workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面`;
                     workspaceTip.style.color = "#34d399";
                 } catch (error) {
                     workspaceTip.textContent = `❌ ${error.message}`;
@@ -14322,25 +14642,15 @@ ${availableTools}
 
             // 数据库/页面下拉框选择变更
             panel.querySelector("#ldb-notion-ai-target-db").onchange = (e) => {
-                TargetState.setAITarget(e.target.value);
+                void UICommandService.execute("select_ai_target", { targetValue: e.target.value });
             };
 
             // AI 服务切换 - 更新模型列表并保存（优先使用缓存）
             panel.querySelector("#ldb-notion-ai-service").onchange = (e) => {
                 const newService = e.target.value;
                 Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, newService);
-                // 优先使用缓存的模型列表
-                const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
-                try {
-                    const modelsData = JSON.parse(cachedModels);
-                    if (modelsData[newService]?.models?.length > 0) {
-                        NotionSiteUI.updateAIModelOptions(newService, modelsData[newService].models);
-                    } else {
-                        NotionSiteUI.updateAIModelOptions(newService);
-                    }
-                } catch {
-                    NotionSiteUI.updateAIModelOptions(newService);
-                }
+                    const availableModels = AIService.getAvailableModels(newService);
+                    NotionSiteUI.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : undefined);
                 // 重置模型为新服务的默认模型
                 const provider = AIService.PROVIDERS[newService];
                 if (provider?.defaultModel) {
@@ -14371,13 +14681,12 @@ ${availableTools}
                 modelTip.textContent = "";
 
                 try {
-                    const models = await AIService.fetchModels(aiService, aiApiKey, aiBaseUrl);
+                    const { models } = await UICommandService.execute("fetch_ai_models", {
+                        aiService,
+                        aiApiKey,
+                        aiBaseUrl,
+                    });
                     NotionSiteUI.updateAIModelOptions(aiService, models, true);
-                    // 持久化保存获取的模型列表
-                    const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
-                    const modelsData = JSON.parse(cachedModels);
-                    modelsData[aiService] = { models, timestamp: Date.now() };
-                    Storage.set(CONFIG.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(modelsData));
                     modelTip.textContent = `✅ 获取到 ${models.length} 个可用模型`;
                     modelTip.style.color = "#34d399";
                 } catch (error) {
@@ -14455,17 +14764,8 @@ ${availableTools}
 
             // 加载 AI 模型选项（优先使用缓存的模型列表）
             const aiService = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
-            const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
-            try {
-                const modelsData = JSON.parse(cachedModels);
-                if (modelsData[aiService]?.models?.length > 0) {
-                    NotionSiteUI.updateAIModelOptions(aiService, modelsData[aiService].models);
-                } else {
-                    NotionSiteUI.updateAIModelOptions(aiService);
-                }
-            } catch {
-                NotionSiteUI.updateAIModelOptions(aiService);
-            }
+            const notionSiteModels = AIService.getAvailableModels(aiService);
+            NotionSiteUI.updateAIModelOptions(aiService, notionSiteModels.length > 0 ? notionSiteModels : undefined);
 
             // 设置保存的模型
             const savedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
@@ -15557,7 +15857,7 @@ ${availableTools}
                     exportTargetTip.textContent = "导出为数据库条目，支持筛选和排序";
                 }
 
-                TargetState.setExportTargetType(targetType);
+                void UICommandService.execute("set_export_target_state", { targetType });
             };
 
             refs.exportTargetDatabaseRadio.onchange = handleExportTargetChange;
@@ -15565,7 +15865,10 @@ ${availableTools}
 
             // 父页面 ID 自动保存
             refs.parentPageIdInput.onchange = (e) => {
-                TargetState.setExportPageId(e.target.value.trim());
+                void UICommandService.execute("set_export_target_state", {
+                    targetType: CONFIG.EXPORT_TARGET_TYPES.PAGE,
+                    parentPageId: e.target.value.trim(),
+                });
             };
 
             // 验证配置
@@ -15601,27 +15904,17 @@ ${availableTools}
                 btn.innerHTML = '<span class="ldb-spin">🔄</span> 验证中...';
 
                 try {
-                    let result;
-                    if (exportTargetType === "database") {
-                        result = await NotionAPI.validateConfig(apiKey, databaseId);
-                        if (result.valid) {
-                            statusSpan.textContent = "✅ 验证成功";
-                            statusSpan.style.color = "#34d399";
-                            if (liveApiKey) {
-                                NotionOAuth.setManualApiKey(liveApiKey);
-                            }
-                            TargetState.setExportDatabaseId(databaseId);
-                        }
-                    } else {
-                        result = await NotionAPI.validatePage(parentPageId, apiKey);
-                        if (result.valid) {
-                            statusSpan.textContent = "✅ 验证成功";
-                            statusSpan.style.color = "#34d399";
-                            if (liveApiKey) {
-                                NotionOAuth.setManualApiKey(liveApiKey);
-                            }
-                            TargetState.setExportPageId(parentPageId);
-                        }
+                    const result = await UICommandService.execute("validate_export_target", {
+                        apiKey,
+                        liveApiKey,
+                        exportTargetType,
+                        databaseId,
+                        parentPageId,
+                    });
+
+                    if (result.valid) {
+                        statusSpan.textContent = "✅ 验证成功";
+                        statusSpan.style.color = "#34d399";
                     }
 
                     if (!result.valid) {
@@ -15663,15 +15956,14 @@ ${availableTools}
                 btn.innerHTML = '<span class="ldb-spin">🔄</span> 设置中...';
 
                 try {
-                    const result = await NotionAPI.setupDatabaseProperties(databaseId, apiKey);
+                    const result = await UICommandService.execute("setup_export_database_properties", {
+                        apiKey,
+                        liveApiKey,
+                        databaseId,
+                    });
                     if (result.success) {
                         statusSpan.textContent = `✅ ${result.message}`;
                         statusSpan.style.color = "#34d399";
-                        // 保存配置
-                        if (liveApiKey) {
-                            NotionOAuth.setManualApiKey(liveApiKey);
-                        }
-                        TargetState.setExportDatabaseId(databaseId);
                     } else {
                         statusSpan.textContent = `❌ ${result.error}`;
                         statusSpan.style.color = "#f87171";
@@ -16069,26 +16361,29 @@ ${availableTools}
                 };
 
                 // 保存设置
-                if (liveApiKey) {
-                    NotionOAuth.setManualApiKey(liveApiKey);
-                }
-                TargetState.saveExportState({
-                    targetType: exportTargetType,
-                    databaseId: exportTargetType === CONFIG.EXPORT_TARGET_TYPES.DATABASE ? databaseId : undefined,
-                    parentPageId: exportTargetType === CONFIG.EXPORT_TARGET_TYPES.PAGE ? parentPageId : undefined,
+                await UICommandService.execute("save_command_boundary_settings", {
+                    scope: "main-export-session",
+                    liveApiKey,
+                    exportState: {
+                        targetType: exportTargetType,
+                        databaseId: exportTargetType === CONFIG.EXPORT_TARGET_TYPES.DATABASE ? databaseId : undefined,
+                        parentPageId: exportTargetType === CONFIG.EXPORT_TARGET_TYPES.PAGE ? parentPageId : undefined,
+                    },
+                    storageValues: {
+                        [CONFIG.STORAGE_KEYS.FILTER_ONLY_FIRST]: settings.onlyFirst,
+                        [CONFIG.STORAGE_KEYS.FILTER_ONLY_OP]: settings.onlyOp,
+                        [CONFIG.STORAGE_KEYS.FILTER_RANGE_START]: settings.rangeStart,
+                        [CONFIG.STORAGE_KEYS.FILTER_RANGE_END]: settings.rangeEnd,
+                        [CONFIG.STORAGE_KEYS.FILTER_IMG]: settings.imgFilter,
+                        [CONFIG.STORAGE_KEYS.FILTER_USERS]: settings.filterUsers,
+                        [CONFIG.STORAGE_KEYS.FILTER_INCLUDE]: settings.filterInclude,
+                        [CONFIG.STORAGE_KEYS.FILTER_EXCLUDE]: settings.filterExclude,
+                        [CONFIG.STORAGE_KEYS.FILTER_MINLEN]: settings.filterMinLen,
+                        [CONFIG.STORAGE_KEYS.IMG_MODE]: settings.imgMode,
+                        [CONFIG.STORAGE_KEYS.REQUEST_DELAY]: parseInt(refs.requestDelaySelect.value),
+                        [CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY]: settings.concurrency,
+                    },
                 });
-                Storage.set(CONFIG.STORAGE_KEYS.FILTER_ONLY_FIRST, settings.onlyFirst);
-                Storage.set(CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, settings.onlyOp);
-                Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_START, settings.rangeStart);
-                Storage.set(CONFIG.STORAGE_KEYS.FILTER_RANGE_END, settings.rangeEnd);
-                Storage.set(CONFIG.STORAGE_KEYS.FILTER_IMG, settings.imgFilter);
-                Storage.set(CONFIG.STORAGE_KEYS.FILTER_USERS, settings.filterUsers);
-                Storage.set(CONFIG.STORAGE_KEYS.FILTER_INCLUDE, settings.filterInclude);
-                Storage.set(CONFIG.STORAGE_KEYS.FILTER_EXCLUDE, settings.filterExclude);
-                Storage.set(CONFIG.STORAGE_KEYS.FILTER_MINLEN, settings.filterMinLen);
-                Storage.set(CONFIG.STORAGE_KEYS.IMG_MODE, settings.imgMode);
-                Storage.set(CONFIG.STORAGE_KEYS.REQUEST_DELAY, parseInt(refs.requestDelaySelect.value));
-                Storage.set(CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, settings.concurrency);
 
                 // 显示控制按钮，隐藏导出按钮
                 refs.exportBtns.style.display = "none";
@@ -16375,7 +16670,7 @@ ${availableTools}
                 }
             };
             refs.databaseIdInput.onchange = (e) => {
-                TargetState.setExportDatabaseId(e.target.value.trim());
+                void UICommandService.execute("apply_workspace_selection", { selectedValue: `database:${e.target.value.trim()}` });
             };
 
             // 手动输入数据库 ID 开关
@@ -16402,7 +16697,7 @@ ${availableTools}
                 workspaceTip.textContent = "正在获取数据库列表...";
 
                 try {
-                    const workspace = await WorkspaceService.fetchWorkspaceStaged(apiKey, {
+                    const { workspaceData } = await WorkspaceService.refreshWorkspaceSnapshot(apiKey, {
                         includePages: true,
                         onProgress: (progress) => {
                             if (progress.phase === "databases") {
@@ -16411,32 +16706,17 @@ ${availableTools}
                                 workspaceTip.textContent = `数据库已就绪，正在获取页面... 已加载 ${progress.loaded} 个`;
                             }
                         },
-                        onPhaseComplete: (phase, partialWorkspace) => {
-                            const workspaceData = {
-                                apiKeyHash: apiKey.slice(-8),
-                                databases: partialWorkspace.databases || [],
-                                pages: partialWorkspace.pages || [],
-                                timestamp: Date.now(),
-                            };
-                            Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
+                        onWorkspaceData: (workspaceData, meta) => {
                             UI.updateWorkspaceSelect(workspaceData);
 
-                            if (phase === "databases") {
+                            if (meta.phase === "databases") {
                                 workspaceTip.textContent = `✅ 已加载 ${workspaceData.databases.length} 个数据库，可先选择目标；页面列表继续加载中...`;
                                 workspaceTip.style.color = "#34d399";
                             }
                         },
                     });
-
-                    const workspaceData = {
-                        apiKeyHash: apiKey.slice(-8),
-                        databases: workspace.databases,
-                        pages: workspace.pages,
-                        timestamp: Date.now(),
-                    };
-                    Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
                     UI.updateWorkspaceSelect(workspaceData);
-                    workspaceTip.textContent = `✅ 获取到 ${workspace.databases.length} 个数据库，${workspace.pages.length} 个页面`;
+                    workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面`;
                     workspaceTip.style.color = "#34d399";
                 } catch (error) {
                     workspaceTip.textContent = `❌ ${error.message}`;
@@ -16456,18 +16736,17 @@ ${availableTools}
                         refs.databaseIdInput.value = id;
                         refs.exportTargetDatabaseRadio.checked = true;
                         handleExportTargetChange({ target: { value: CONFIG.EXPORT_TARGET_TYPES.DATABASE } });
-                        TargetState.setExportDatabaseId(id);
+                        void UICommandService.execute("apply_workspace_selection", { selectedValue: `database:${id}` });
                         UI.showStatus("已选择数据库，自动切换为数据库导出模式", "info");
                     } else if (type === "page") {
                         // 页面类型：填入父页面 ID 字段
                         refs.parentPageIdInput.value = id;
-                        TargetState.setExportPageId(id);
                         // 自动切换到页面导出模式
                         refs.exportTargetPageRadio.checked = true;
                         refs.parentPageGroup.style.display = "block";
                         refs.manualDbWrap.style.display = "none";
                         refs.exportTargetTip.textContent = "导出为子页面，包含完整内容";
-                        TargetState.setExportTargetType(CONFIG.EXPORT_TARGET_TYPES.PAGE);
+                        void UICommandService.execute("apply_workspace_selection", { selectedValue: `page:${id}` });
                         UI.showStatus("已选择页面，自动切换为页面导出模式", "info");
                     }
                 }
@@ -16483,18 +16762,8 @@ ${availableTools}
             // AI 服务切换 - 更新模型列表（优先使用缓存）
             refs.aiServiceSelect.onchange = (e) => {
                 const newService = e.target.value;
-                // 优先使用缓存的模型列表
-                const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
-                try {
-                    const modelsData = JSON.parse(cachedModels);
-                    if (modelsData[newService]?.models?.length > 0) {
-                        UI.updateAIModelOptions(newService, modelsData[newService].models);
-                    } else {
-                        UI.updateAIModelOptions(newService);
-                    }
-                } catch {
-                    UI.updateAIModelOptions(newService);
-                }
+                const availableModels = AIService.getAvailableModels(newService);
+                UI.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : undefined);
                 Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, newService);
             };
 
@@ -16514,7 +16783,7 @@ ${availableTools}
 
             // AI 查询目标数据库选择
             refs.aiTargetDbSelect.onchange = (e) => {
-                TargetState.setAITarget(e.target.value);
+                void UICommandService.execute("select_ai_target", { targetValue: e.target.value });
             };
 
             refs.workspaceMaxPagesSelect.onchange = (e) => {
@@ -16582,19 +16851,16 @@ ${availableTools}
                 refreshBtn.innerHTML = "⏳";
 
                 try {
-                    const workspace = await WorkspaceService.fetchWorkspace(apiKey, { includePages: false });
+                    const { workspaceData } = await UICommandService.execute("refresh_workspace_targets", {
+                        apiKey,
+                        includePages: false,
+                        onWorkspaceData: (workspaceData) => {
+                            UI.updateAITargetDbOptions(workspaceData.databases);
+                        },
+                    });
 
-                    const apiKeyHash = apiKey.slice(-8);
-                    const cachedWorkspace = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
-                    let workspaceData;
-                    try { workspaceData = JSON.parse(cachedWorkspace); } catch { workspaceData = {}; }
-                    workspaceData.apiKeyHash = apiKeyHash;
-                    workspaceData.databases = workspace.databases;
-                    workspaceData.timestamp = Date.now();
-                    Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
-
-                    UI.updateAITargetDbOptions(workspace.databases);
-                    UI.showStatus(`获取到 ${workspace.databases.length} 个数据库`, "success");
+                    UI.updateAITargetDbOptions(workspaceData.databases);
+                    UI.showStatus(`获取到 ${workspaceData.databases.length} 个数据库`, "success");
                 } catch (error) {
                     UI.showStatus(`获取数据库列表失败: ${error.message}`, "error");
                 } finally {
@@ -16621,13 +16887,12 @@ ${availableTools}
                 modelTip.textContent = "";
 
                 try {
-                    const models = await AIService.fetchModels(aiService, aiApiKey, aiBaseUrl);
+                    const { models } = await UICommandService.execute("fetch_ai_models", {
+                        aiService,
+                        aiApiKey,
+                        aiBaseUrl,
+                    });
                     UI.updateAIModelOptions(aiService, models, true); // 保留当前选择
-                    // 持久化保存获取的模型列表
-                    const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
-                    const modelsData = JSON.parse(cachedModels);
-                    modelsData[aiService] = { models, timestamp: Date.now() };
-                    Storage.set(CONFIG.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(modelsData));
                     modelTip.textContent = `✅ 获取到 ${models.length} 个可用模型`;
                     modelTip.style.color = "#34d399";
                     UI.showStatus(`成功获取 ${models.length} 个模型`, "success");
@@ -17637,23 +17902,10 @@ ${availableTools}
 
             // 验证并加载 AI 模型（优先使用缓存的模型列表）
             const savedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
-            const provider = AIService.PROVIDERS[aiService];
             const modelSelect = refs.aiModelSelect
 
-            // 先尝试从缓存加载模型列表
-            const cachedModels = Storage.get(CONFIG.STORAGE_KEYS.FETCHED_MODELS, "{}");
-            let validModels = provider?.models || [];
-            try {
-                const modelsData = JSON.parse(cachedModels);
-                if (modelsData[aiService]?.models?.length > 0) {
-                    validModels = modelsData[aiService].models;
-                    UI.updateAIModelOptions(aiService, validModels);
-                } else {
-                    UI.updateAIModelOptions(aiService);
-                }
-            } catch {
-                UI.updateAIModelOptions(aiService);
-            }
+            const validModels = AIService.getAvailableModels(aiService);
+            UI.updateAIModelOptions(aiService, validModels.length > 0 ? validModels : undefined);
 
             if (savedModel) {
                 // 检查保存的模型是否在下拉框选项中存在
@@ -18900,7 +19152,8 @@ ${availableTools}
             }
 
             try {
-                const workspace = await WorkspaceService.fetchWorkspaceStaged(apiKey, {
+                const { workspaceData } = await UICommandService.execute("refresh_workspace_targets", {
+                    apiKey,
                     includePages: true,
                     onProgress: (progress) => {
                         if (!tip) return;
@@ -18910,32 +19163,17 @@ ${availableTools}
                             tip.textContent = `数据库已就绪，正在获取页面... 已加载 ${progress.loaded} 个`;
                         }
                     },
-                    onPhaseComplete: (phase, partialWorkspace) => {
-                        const workspaceData = {
-                            apiKeyHash: apiKey.slice(-8),
-                            databases: partialWorkspace.databases || [],
-                            pages: partialWorkspace.pages || [],
-                            timestamp: Date.now(),
-                        };
-                        Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
+                    onWorkspaceData: (workspaceData, meta) => {
                         GenericUI.updateTargetSelectOptions(workspaceData.databases, workspaceData.pages);
-                        if (tip && phase === "databases") {
+                        if (tip && meta.phase === "databases") {
                             tip.textContent = `✅ 已加载 ${workspaceData.databases.length} 个数据库，可先选择目标；页面列表继续加载中...`;
                         }
                     },
                 });
 
-                const workspaceData = {
-                    apiKeyHash: apiKey.slice(-8),
-                    databases: workspace.databases,
-                    pages: workspace.pages,
-                    timestamp: Date.now(),
-                };
-                Storage.set(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
-
-                GenericUI.updateTargetSelectOptions(workspace.databases, workspace.pages);
+                GenericUI.updateTargetSelectOptions(workspaceData.databases, workspaceData.pages);
                 if (tip) {
-                    tip.textContent = `已加载 ${workspace.databases.length} 个数据库，${workspace.pages.filter(p => p.parent === "workspace").length} 个页面`;
+                    tip.textContent = `已加载 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.filter(p => p.parent === "workspace").length} 个页面`;
                 }
             } catch (error) {
                 if (tip) {
@@ -19042,19 +19280,20 @@ ${availableTools}
                 if (!apiKey) return GenericUI.showStatus(MSG.SETUP_NOTION_KEY, "error");
                 if (!targetId) return GenericUI.showStatus("请先选择目标，或手动输入 ID", "error");
 
-                TargetState.setExportTargetType(exportType);
-                Storage.set(CONFIG.STORAGE_KEYS.IMG_MODE, imgMode);
-
-                if (exportType === "page") {
-                    TargetState.setExportPageId(targetId);
-                } else {
-                    TargetState.setExportDatabaseId(targetId);
-                    // 自动设置数据库属性
+                if (exportType === "database") {
                     GenericUI.showStatus("正在配置数据库属性...", "info");
-                    const result = await GenericExporter.setupDatabaseProperties(targetId, apiKey);
-                    if (!result.success) {
-                        return GenericUI.showStatus(`配置失败: ${result.message || result.error}`, "error");
-                    }
+                }
+                const { setupResult } = await UICommandService.execute("save_command_boundary_settings", {
+                    scope: "generic-export-target",
+                    liveApiKey: liveKey,
+                    apiKey,
+                    exportType,
+                    targetId,
+                    imgMode,
+                    autoSetupDatabaseProperties: exportType === "database",
+                });
+                if (setupResult && !setupResult.success) {
+                    return GenericUI.showStatus(`配置失败: ${setupResult.message || setupResult.error}`, "error");
                 }
 
                 GenericUI.loadTargetOptionsFromCache(apiKey);
@@ -19324,4 +19563,4 @@ ${availableTools}
 
     main();
     // [LD-NOTION-BUILD:USER_SCRIPT_BODY_END]
-})();
+})();
