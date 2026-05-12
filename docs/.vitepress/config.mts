@@ -46,14 +46,19 @@ export default defineConfig({
       {
         text: 'Integrations / 来源集成',
         items: [
-          { text: '整体架构', link: '/architecture/overview' },
-          { text: '关键流程图', link: '/architecture/flows' }
+          { text: 'Linux.do Adapter', link: '/integrations/linuxdo' },
+          { text: 'GitHub Adapter', link: '/integrations/github' },
+          { text: 'Bookmarks Adapter', link: '/integrations/bookmarks' },
+          { text: 'Zhihu Adapter', link: '/integrations/zhihu' },
+          { text: 'Web Clipper Adapter', link: '/integrations/web-clipper' }
         ]
       },
       {
         text: 'Extension / 扩展与部署',
         items: [
-          { text: 'Extension Architecture', link: '/concepts/extension-architecture' }
+          { text: 'Chrome Extension Architecture', link: '/extension/architecture' },
+          { text: 'Extension Permissions', link: '/extension/permissions' },
+          { text: 'Build Seams', link: '/extension/build-seams' }
         ]
       },
       {
@@ -61,6 +66,7 @@ export default defineConfig({
         items: [
           { text: 'Normalized Content Schema', link: '/reference/normalized-content-schema' },
           { text: 'Audit Events', link: '/reference/audit-events' },
+          { text: 'Deployment', link: '/reference/deployment' },
           { text: '安全与权限', link: '/architecture/security' },
           { text: '常见问题', link: '/faq' }
         ]
