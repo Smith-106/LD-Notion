@@ -4,14 +4,29 @@
 
 > **桌面应用已拆分为独立仓库**：[LD-Notion-Desktop](https://github.com/Smith-106/LD-Notion-Desktop)（Tauri v2 + React + Rust 本地知识库）
 
-[![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
+[![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前版本（仓库 / 脚本头）：`v3.4.5`
-- 最近已发布版本：`v3.4.3`
+- 当前脚本 / 扩展核心版本：`v3.6.4`
+- 最近已发布版本：`v3.6.6`
+- 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装（直链）：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
-- 最近已发布扩展 ZIP 直链（v3.4.3）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.3/LD-Notion-chrome-extension-full-v3.4.3.zip>
-- 最近已发布 Release 页面（v3.4.3）：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.4.3>
+- 最近已发布扩展 ZIP 直链（v3.6.6）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.6.6/LD-Notion-chrome-extension-full-v3.6.6.zip>
+- 最近已发布 Release 页面（v3.6.6）：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.6.6>
+
+## 文档站
+
+完整文档已发布到 GitHub Pages：<https://smith-106.github.io/LD-Notion/>
+
+推荐阅读路径：
+
+- **快速开始**：[安装与首次导入](https://smith-106.github.io/LD-Notion/guide/getting-started)
+- **功能地图**：[Linux.do、GitHub、书签、AI 助手与网页剪藏](https://smith-106.github.io/LD-Notion/features/)
+- **原理机制**：[Concepts / 机制地图](https://smith-106.github.io/LD-Notion/concepts/)
+- **路由规则**：[Routing Rules](https://smith-106.github.io/LD-Notion/concepts/routing-rules)
+- **导入流水线**：[Import Pipeline](https://smith-106.github.io/LD-Notion/concepts/import-pipeline)
+- **安全边界**：[OperationGuard](https://smith-106.github.io/LD-Notion/concepts/operation-guard) 与 [Auth Model](https://smith-106.github.io/LD-Notion/concepts/auth-model)
+- **扩展与部署**：[Chrome Extension Architecture](https://smith-106.github.io/LD-Notion/extension/architecture) 与 [Deployment](https://smith-106.github.io/LD-Notion/reference/deployment)
 
 ## 四大核心能力
 
