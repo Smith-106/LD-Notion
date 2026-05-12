@@ -22,6 +22,8 @@ target/
 # Node
 node_modules/
 dist/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
 
 # IDE
 .idea/
