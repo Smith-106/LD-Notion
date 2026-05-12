@@ -9,8 +9,7 @@ export default defineConfig({
     logo: '/logo.svg',
     nav: [
       { text: '指南', link: '/guide/getting-started' },
-      { text: '架构', link: '/architecture/overview' },
-      { text: '流程图', link: '/architecture/flows' },
+      { text: 'Concepts', link: '/concepts/' },
       { text: 'GitHub', link: 'https://github.com/Smith-106/LD-Notion' }
     ],
     sidebar: [
@@ -34,18 +33,42 @@ export default defineConfig({
         ]
       },
       {
-        text: '架构与流程',
+        text: 'Concepts / 原理机制',
+        items: [
+          { text: '机制地图', link: '/concepts/' },
+          { text: 'Routing Rules', link: '/concepts/routing-rules' },
+          { text: 'Import Pipeline', link: '/concepts/import-pipeline' },
+          { text: 'OperationGuard', link: '/concepts/operation-guard' },
+          { text: 'AI Agent Loop', link: '/concepts/ai-agent-loop' },
+          { text: 'Auth Model', link: '/concepts/auth-model' }
+        ]
+      },
+      {
+        text: 'Integrations / 来源集成',
         items: [
           { text: '整体架构', link: '/architecture/overview' },
-          { text: '关键流程图', link: '/architecture/flows' },
-          { text: '安全与权限', link: '/architecture/security' }
+          { text: '关键流程图', link: '/architecture/flows' }
+        ]
+      },
+      {
+        text: 'Extension / 扩展与部署',
+        items: [
+          { text: 'Extension Architecture', link: '/concepts/extension-architecture' }
+        ]
+      },
+      {
+        text: 'Reference / 参考',
+        items: [
+          { text: 'Normalized Content Schema', link: '/reference/normalized-content-schema' },
+          { text: 'Audit Events', link: '/reference/audit-events' },
+          { text: '安全与权限', link: '/architecture/security' },
+          { text: '常见问题', link: '/faq' }
         ]
       },
       {
         text: '维护',
         items: [
-          { text: '开发与验证', link: '/development' },
-          { text: '常见问题', link: '/faq' }
+          { text: '开发与验证', link: '/development' }
         ]
       }
     ],
