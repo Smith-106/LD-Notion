@@ -8,6 +8,7 @@ chrome-extension-full/
 
 # Local packaging artifacts
 LD-Notion-chrome-extension-full-v*.zip
+LD-Notion-v*-extension.zip
 chrome-extension-full.crx
 chrome-extension-full.pem
 
