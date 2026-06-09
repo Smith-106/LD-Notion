@@ -673,6 +673,11 @@ function GM_setValue(key, value) {
     chrome.storage.local.set({ [key]: value });
 }
 
+function GM_deleteValue(key) {
+    delete _gmStorage[key];
+    chrome.storage.local.remove(key);
+}
+
 // HTTP 请求垫片 — 通过 background service worker 代理
 function GM_xmlhttpRequest(details) {
     const { method, url, headers, data, onload, onerror } = details;

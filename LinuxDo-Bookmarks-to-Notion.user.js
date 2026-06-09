@@ -28,6 +28,7 @@
 // @exclude      *://127.0.0.1:*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_deleteValue
 // @grant        GM_xmlhttpRequest
 // @grant        GM_notification
 // @connect      api.notion.com
@@ -62,6 +63,7 @@
             NOTION_OAUTH_STATE: "ldb_notion_oauth_state",
             NOTION_OAUTH_META: "ldb_notion_oauth_meta",
             NOTION_OAUTH_NOTICE: "ldb_notion_oauth_notice",
+            CREDENTIAL_VAULT: "ldb_credential_vault",
             FILTER_ONLY_FIRST: "ldb_filter_only_first",
             FILTER_ONLY_OP: "ldb_filter_only_op",
             FILTER_RANGE_START: "ldb_filter_range_start",
@@ -544,16 +546,37 @@
     // ===========================================
     // 存储管理
     // ===========================================
+    var CredentialVault = null;
+
     const Storage = {
         _exportedTopicsCache: null,
 
-        get: (key, defaultValue = null) => {
+        getRaw: (key, defaultValue = null) => {
             const value = GM_getValue(key, defaultValue);
             return value;
         },
 
-        set: (key, value) => {
+        setRaw: (key, value) => {
             GM_setValue(key, value);
+        },
+
+        remove: (key) => {
+            if (typeof GM_deleteValue === "function") {
+                GM_deleteValue(key);
+                return;
+            }
+            GM_setValue(key, undefined);
+        },
+
+        get: (key, defaultValue = null) => {
+            if (CredentialVault?.isSensitiveKey?.(key)) {
+                return CredentialVault.get(key, defaultValue);
+            }
+            return Storage.getRaw(key, defaultValue);
+        },
+
+        set: (key, value) => {
+            Storage.setRaw(key, value);
         },
 
         getExportedTopics: () => {
@@ -561,7 +584,7 @@
                 return Storage._exportedTopicsCache;
             }
 
-            const data = GM_getValue(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, "{}");
+            const data = Storage.getRaw(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, "{}");
             try {
                 Storage._exportedTopicsCache = JSON.parse(data);
             } catch {
@@ -574,12 +597,438 @@
             const exported = Storage.getExportedTopics();
             exported[topicId] = Date.now();
             Storage._exportedTopicsCache = exported;
-            GM_setValue(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify(exported));
+            Storage.setRaw(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify(exported));
         },
 
         isTopicExported: (topicId) => {
             const exported = Storage.getExportedTopics();
             return !!exported[topicId];
+        },
+    };
+
+    CredentialVault = {
+        VERSION: 1,
+        SENSITIVE_KEYS: Object.freeze(new Set([
+            CONFIG.STORAGE_KEYS.NOTION_API_KEY,
+            CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET,
+            CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN,
+            CONFIG.STORAGE_KEYS.AI_API_KEY,
+            CONFIG.STORAGE_KEYS.GITHUB_TOKEN,
+            CONFIG.STORAGE_KEYS.OBS_API_KEY,
+        ])),
+        _sessionCache: Object.create(null),
+        _sessionPassphrase: "",
+        _unlocked: false,
+        _syncHandlers: [],
+
+        isSensitiveKey: (key) => CredentialVault.SENSITIVE_KEYS.has(key),
+
+        hasVault: () => !!CredentialVault._getVaultPayloadRaw(),
+
+        isUnlocked: () => CredentialVault._unlocked,
+
+        get: (key, defaultValue = "") => {
+            if (!CredentialVault.isSensitiveKey(key)) {
+                return Storage.getRaw(key, defaultValue);
+            }
+            if (Object.prototype.hasOwnProperty.call(CredentialVault._sessionCache, key)) {
+                return CredentialVault._sessionCache[key];
+            }
+            return Storage.getRaw(key, defaultValue);
+        },
+
+        getStatus: () => {
+            const legacyCount = [...CredentialVault.SENSITIVE_KEYS].reduce((count, key) => {
+                const value = String(Storage.getRaw(key, "") || "").trim();
+                return value ? count + 1 : count;
+            }, 0);
+            return {
+                hasVault: CredentialVault.hasVault(),
+                unlocked: CredentialVault.isUnlocked(),
+                legacyCount,
+                sensitiveCount: Object.keys(CredentialVault._sessionCache).filter((key) => {
+                    return CredentialVault.isSensitiveKey(key) && String(CredentialVault._sessionCache[key] || "").trim();
+                }).length,
+            };
+        },
+
+        getStatusText: () => {
+            const status = CredentialVault.getStatus();
+            if (status.hasVault && status.unlocked) {
+                return `凭证保险箱已解锁，当前会话中的敏感凭证会以加密形式保存。已加载 ${status.sensitiveCount} 项。`;
+            }
+            if (status.hasVault) {
+                return "凭证保险箱已锁定。解锁后才能读取或更新已加密保存的敏感凭证。";
+            }
+            if (status.legacyCount > 0) {
+                return `检测到 ${status.legacyCount} 项旧明文凭证。初始化保险箱后，后续会迁移为本地加密存储。`;
+            }
+            return "凭证保险箱尚未初始化。敏感凭证在初始化后会改为本地加密存储。";
+        },
+
+        hasPersistedValue: (key) => {
+            if (!CredentialVault.isSensitiveKey(key)) {
+                return !!String(Storage.getRaw(key, "") || "").trim();
+            }
+            if (Object.prototype.hasOwnProperty.call(CredentialVault._sessionCache, key)) {
+                return !!String(CredentialVault._sessionCache[key] || "").trim();
+            }
+            const rawValue = String(Storage.getRaw(key, "") || "").trim();
+            if (rawValue) return true;
+            const payload = Utils.safeJsonParse(CredentialVault._getVaultPayloadRaw(), null);
+            return Array.isArray(payload?.keys) && payload.keys.includes(key);
+        },
+
+        getFieldPlaceholder: (key, emptyPlaceholder = "") => {
+            if (!CredentialVault.hasPersistedValue(key)) return emptyPlaceholder;
+            if (CredentialVault.isUnlocked()) {
+                return "已保存在保险箱中，输入新值可更新";
+            }
+            if (CredentialVault.hasVault()) {
+                return "已保存在保险箱中，解锁后可更新";
+            }
+            return "已配置（输入新值可更新）";
+        },
+
+        syncSensitiveInput: (input, key, emptyPlaceholder = "") => {
+            if (!input || !CredentialVault.isSensitiveKey(key)) return;
+            if (document.activeElement !== input) {
+                input.value = "";
+            }
+            input.placeholder = CredentialVault.getFieldPlaceholder(key, emptyPlaceholder);
+        },
+
+        registerSyncHandler: (handler) => {
+            if (typeof handler !== "function") return;
+            CredentialVault._syncHandlers.push(handler);
+        },
+
+        syncRegisteredControls: () => {
+            CredentialVault._syncHandlers.forEach((handler) => {
+                try {
+                    handler();
+                } catch (error) {
+                    console.warn("[LD-Notion] 同步凭证保险箱状态失败", error);
+                }
+            });
+        },
+
+        attachControls: ({ root, selectors, notify, onAfterSync } = {}) => {
+            if (!root || !selectors) return;
+            const get = (name) => root.querySelector(selectors[name]);
+            const fields = {
+                statusEl: get("statusEl"),
+                unlockBtn: get("unlockBtn"),
+                lockBtn: get("lockBtn"),
+            };
+            if (!fields.statusEl || !fields.unlockBtn || !fields.lockBtn) {
+                return;
+            }
+
+            const sync = () => {
+                const status = CredentialVault.getStatus();
+                fields.statusEl.textContent = CredentialVault.getStatusText();
+                if (fields.statusEl.style) {
+                    fields.statusEl.style.color = status.unlocked ? "#34d399" : status.hasVault ? "#f59e0b" : "#94a3b8";
+                }
+                fields.unlockBtn.textContent = status.unlocked
+                    ? "已解锁"
+                    : status.hasVault
+                        ? "解锁保险箱"
+                        : "设置保险箱";
+                fields.unlockBtn.disabled = status.unlocked;
+                fields.lockBtn.disabled = !status.unlocked;
+                if (typeof onAfterSync === "function") {
+                    onAfterSync(status);
+                }
+            };
+
+            fields.unlockBtn.addEventListener("click", async () => {
+                try {
+                    const before = CredentialVault.hasVault();
+                    await CredentialVault.promptUnlock();
+                    if (typeof notify === "function") {
+                        notify(before ? "凭证保险箱已解锁" : "凭证保险箱已初始化并解锁", "success");
+                    }
+                } catch (error) {
+                    if (error?.message && typeof notify === "function") {
+                        notify(error.message, "error");
+                    }
+                } finally {
+                    sync();
+                }
+            });
+
+            fields.lockBtn.addEventListener("click", () => {
+                CredentialVault.lock();
+                if (typeof notify === "function") {
+                    notify("凭证保险箱已锁定", "info");
+                }
+                sync();
+            });
+
+            CredentialVault.registerSyncHandler(sync);
+            sync();
+        },
+
+        promptUnlock: async () => {
+            const promptFn = typeof window?.prompt === "function"
+                ? window.prompt.bind(window)
+                : (typeof prompt === "function" ? prompt : null);
+            if (!promptFn) {
+                throw new Error("当前环境不支持输入保险箱口令，请在浏览器页面中操作。");
+            }
+            if (CredentialVault.hasVault()) {
+                const passphrase = promptFn("输入本地凭证保险箱口令");
+                if (passphrase == null) throw new Error("已取消解锁凭证保险箱。");
+                return CredentialVault.unlock(passphrase, { initializeIfMissing: false, migrateLegacy: true });
+            }
+            const passphrase = promptFn("为本地凭证保险箱设置口令。口令不会离开当前浏览器，丢失后将无法解密已保存的新凭证。");
+            if (passphrase == null) throw new Error("已取消设置凭证保险箱。");
+            const confirmPassphrase = promptFn("请再次输入保险箱口令进行确认");
+            if (confirmPassphrase == null) throw new Error("已取消设置凭证保险箱。");
+            if (String(passphrase) !== String(confirmPassphrase)) {
+                throw new Error("两次输入的保险箱口令不一致。");
+            }
+            return CredentialVault.unlock(passphrase, { initializeIfMissing: true, migrateLegacy: true });
+        },
+
+        unlock: async (passphrase = "", { initializeIfMissing = true, migrateLegacy = true } = {}) => {
+            CredentialVault._ensureCryptoReady();
+            const normalizedPassphrase = String(passphrase || "");
+            if (!normalizedPassphrase.trim()) {
+                throw new Error("凭证保险箱口令不能为空。");
+            }
+
+            CredentialVault._sessionPassphrase = normalizedPassphrase;
+            CredentialVault._unlocked = true;
+
+            if (!CredentialVault.hasVault()) {
+                if (!initializeIfMissing) {
+                    CredentialVault.lock();
+                    throw new Error("凭证保险箱尚未初始化。");
+                }
+                CredentialVault._sessionCache = migrateLegacy
+                    ? CredentialVault._collectLegacyValues()
+                    : Object.create(null);
+                await CredentialVault._persistCurrentState({ removeLegacy: migrateLegacy });
+                CredentialVault.syncRegisteredControls();
+                return CredentialVault.getStatus();
+            }
+
+            const payload = CredentialVault._readVaultPayload();
+            const decrypted = await CredentialVault._decryptPayload(payload, normalizedPassphrase);
+            const parsed = Utils.safeJsonParse(decrypted, null);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                CredentialVault.lock();
+                throw new Error("凭证保险箱内容损坏，无法解析。");
+            }
+
+            CredentialVault._sessionCache = Object.create(null);
+            for (const key of CredentialVault.SENSITIVE_KEYS) {
+                const value = String(parsed[key] || "").trim();
+                if (value) {
+                    CredentialVault._sessionCache[key] = value;
+                }
+            }
+
+            if (migrateLegacy) {
+                const legacyValues = CredentialVault._collectLegacyValues();
+                let needsPersist = false;
+                for (const [key, value] of Object.entries(legacyValues)) {
+                    if (!CredentialVault._sessionCache[key] && value) {
+                        CredentialVault._sessionCache[key] = value;
+                        needsPersist = true;
+                    }
+                }
+                if (needsPersist) {
+                    await CredentialVault._persistCurrentState({ removeLegacy: true });
+                }
+            }
+
+            CredentialVault.syncRegisteredControls();
+            return CredentialVault.getStatus();
+        },
+
+        lock: () => {
+            CredentialVault._sessionCache = Object.create(null);
+            CredentialVault._sessionPassphrase = "";
+            CredentialVault._unlocked = false;
+            CredentialVault.syncRegisteredControls();
+        },
+
+        set: async (key, value) => {
+            if (!CredentialVault.isSensitiveKey(key)) {
+                Storage.setRaw(key, value);
+                return value;
+            }
+
+            const normalized = String(value || "").trim();
+            if (!normalized) {
+                delete CredentialVault._sessionCache[key];
+                if (!CredentialVault.hasVault()) {
+                    Storage.remove(key);
+                    CredentialVault.syncRegisteredControls();
+                    return "";
+                }
+                CredentialVault._ensureUnlocked("清除敏感凭证");
+                await CredentialVault._persistCurrentState({ removeLegacy: true });
+                Storage.remove(key);
+                CredentialVault.syncRegisteredControls();
+                return "";
+            }
+
+            if (!CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
+                throw new Error("请先设置并解锁凭证保险箱，再保存敏感凭证。");
+            }
+
+            CredentialVault._ensureUnlocked("保存敏感凭证");
+            CredentialVault._sessionCache[key] = normalized;
+            await CredentialVault._persistCurrentState({ removeLegacy: true });
+            Storage.remove(key);
+            CredentialVault.syncRegisteredControls();
+            return normalized;
+        },
+
+        clear: async (key) => {
+            return CredentialVault.set(key, "");
+        },
+
+        _ensureUnlocked: (actionLabel = "保存敏感凭证") => {
+            if (!CredentialVault.isUnlocked()) {
+                throw new Error(`${actionLabel} 前请先解锁凭证保险箱。`);
+            }
+        },
+
+        _ensureCryptoReady: () => {
+            if (!globalThis.crypto?.subtle || typeof TextEncoder === "undefined" || typeof TextDecoder === "undefined") {
+                throw new Error("当前环境不支持凭证保险箱所需的加密能力。");
+            }
+        },
+
+        _getVaultPayloadRaw: () => String(Storage.getRaw(CONFIG.STORAGE_KEYS.CREDENTIAL_VAULT, "") || "").trim(),
+
+        _readVaultPayload: () => {
+            const raw = CredentialVault._getVaultPayloadRaw();
+            const payload = Utils.safeJsonParse(raw, null);
+            if (!payload?.ciphertext || !payload?.iv || !payload?.salt) {
+                throw new Error("凭证保险箱内容不完整。");
+            }
+            return payload;
+        },
+
+        _collectLegacyValues: () => {
+            const legacyValues = Object.create(null);
+            CredentialVault.SENSITIVE_KEYS.forEach((key) => {
+                const value = String(Storage.getRaw(key, "") || "").trim();
+                if (value) {
+                    legacyValues[key] = value;
+                }
+            });
+            return legacyValues;
+        },
+
+        _serializeSessionCache: () => {
+            const payload = Object.create(null);
+            CredentialVault.SENSITIVE_KEYS.forEach((key) => {
+                const value = String(CredentialVault._sessionCache[key] || "").trim();
+                if (value) {
+                    payload[key] = value;
+                }
+            });
+            return payload;
+        },
+
+        _persistCurrentState: async ({ removeLegacy = false } = {}) => {
+            CredentialVault._ensureCryptoReady();
+            CredentialVault._ensureUnlocked("更新凭证保险箱");
+            const serialized = JSON.stringify(CredentialVault._serializeSessionCache());
+            const encoder = new TextEncoder();
+            const saltBytes = CredentialVault._randomBytes(16);
+            const ivBytes = CredentialVault._randomBytes(12);
+            const key = await CredentialVault._deriveKey(CredentialVault._sessionPassphrase, saltBytes);
+            const encryptedBuffer = await crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: ivBytes },
+                key,
+                encoder.encode(serialized)
+            );
+            Storage.setRaw(CONFIG.STORAGE_KEYS.CREDENTIAL_VAULT, JSON.stringify({
+                version: CredentialVault.VERSION,
+                keys: Object.keys(CredentialVault._serializeSessionCache()),
+                salt: CredentialVault._bytesToBase64(saltBytes),
+                iv: CredentialVault._bytesToBase64(ivBytes),
+                ciphertext: CredentialVault._bytesToBase64(new Uint8Array(encryptedBuffer)),
+                updatedAt: Date.now(),
+            }));
+            if (removeLegacy) {
+                CredentialVault.SENSITIVE_KEYS.forEach((keyName) => Storage.remove(keyName));
+            }
+        },
+
+        _decryptPayload: async (payload, passphrase) => {
+            CredentialVault._ensureCryptoReady();
+            const saltBytes = CredentialVault._base64ToBytes(payload.salt);
+            const ivBytes = CredentialVault._base64ToBytes(payload.iv);
+            const cipherBytes = CredentialVault._base64ToBytes(payload.ciphertext);
+            const key = await CredentialVault._deriveKey(passphrase, saltBytes);
+            try {
+                const decryptedBuffer = await crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv: ivBytes },
+                    key,
+                    cipherBytes
+                );
+                return new TextDecoder("utf-8").decode(decryptedBuffer);
+            } catch {
+                throw new Error("凭证保险箱口令错误，或本地加密数据已损坏。");
+            }
+        },
+
+        _deriveKey: async (passphrase, saltBytes) => {
+            const encoder = new TextEncoder();
+            const baseKey = await crypto.subtle.importKey(
+                "raw",
+                encoder.encode(String(passphrase || "")),
+                "PBKDF2",
+                false,
+                ["deriveKey"]
+            );
+            return crypto.subtle.deriveKey(
+                {
+                    name: "PBKDF2",
+                    salt: saltBytes,
+                    iterations: 200000,
+                    hash: "SHA-256",
+                },
+                baseKey,
+                { name: "AES-GCM", length: 256 },
+                false,
+                ["encrypt", "decrypt"]
+            );
+        },
+
+        _randomBytes: (length) => {
+            const bytes = new Uint8Array(length);
+            crypto.getRandomValues(bytes);
+            return bytes;
+        },
+
+        _bytesToBase64: (bytes) => {
+            if (typeof Buffer !== "undefined") {
+                return Buffer.from(bytes).toString("base64");
+            }
+            let binary = "";
+            bytes.forEach((byte) => {
+                binary += String.fromCharCode(byte);
+            });
+            return btoa(binary);
+        },
+
+        _base64ToBytes: (input) => {
+            if (typeof Buffer !== "undefined") {
+                return Uint8Array.from(Buffer.from(String(input || ""), "base64"));
+            }
+            const binary = atob(String(input || ""));
+            return Uint8Array.from(binary, (char) => char.charCodeAt(0));
         },
     };
 
@@ -737,12 +1186,15 @@
             ).trim(),
         }),
 
-        saveConfig: ({ clientId, clientSecret, redirectUri } = {}) => {
+        saveConfig: async ({ clientId, clientSecret, redirectUri } = {}) => {
             if (typeof clientId !== "undefined") {
                 Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, String(clientId || "").trim());
             }
             if (typeof clientSecret !== "undefined") {
-                Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, String(clientSecret || "").trim());
+                const normalizedClientSecret = String(clientSecret || "").trim();
+                if (normalizedClientSecret) {
+                    await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, normalizedClientSecret);
+                }
             }
             if (typeof redirectUri !== "undefined") {
                 Storage.set(
@@ -770,8 +1222,8 @@
 
         getRefreshToken: () => String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "") || "").trim(),
 
-        setRefreshToken: (refreshToken = "") => {
-            Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, String(refreshToken || "").trim());
+        setRefreshToken: async (refreshToken = "") => {
+            await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, String(refreshToken || "").trim());
         },
 
         getAccessToken: (liveValue = "") => {
@@ -780,9 +1232,9 @@
             return String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "") || "").trim();
         },
 
-        setManualApiKey: (apiKey = "") => {
+        setManualApiKey: async (apiKey = "") => {
             const normalized = String(apiKey || "").trim();
-            Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, normalized);
+            await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, normalized);
             NotionOAuth.setAuthMode("manual");
             NotionOAuth.syncApiKeyInputs(normalized);
             NotionOAuth.syncRegisteredControls();
@@ -806,6 +1258,18 @@
             const meta = NotionOAuth.getMeta();
             const accessToken = NotionOAuth.getAccessToken();
             const workspaceName = meta.workspaceName || meta.workspaceId || "";
+            const hasStoredClientSecret = CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET);
+            const hasStoredManualToken = CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
+            const hasStoredRefreshToken = CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN);
+
+            if (CredentialVault.hasVault() && !CredentialVault.isUnlocked() && (hasStoredManualToken || hasStoredClientSecret || hasStoredRefreshToken)) {
+                return {
+                    connected: false,
+                    color: "#f59e0b",
+                    text: "Notion 敏感凭证已保存在保险箱中。请先解锁保险箱，再使用已保存的 Token 或重新授权。",
+                    apiKeyPlaceholder: "解锁保险箱后可使用已保存配置",
+                };
+            }
 
             if (NotionOAuth.isOAuthConnected()) {
                 return {
@@ -818,8 +1282,8 @@
                 };
             }
 
-            if (config.clientId && config.clientSecret) {
-                if (accessToken && NotionOAuth.getAuthMode() === "manual") {
+            if (config.clientId && hasStoredClientSecret) {
+                if (hasStoredManualToken && NotionOAuth.getAuthMode() === "manual") {
                     return {
                         connected: false,
                         color: "#fbbf24",
@@ -891,8 +1355,7 @@
             return Utils.safeJsonParse(raw, null);
         },
 
-        syncApiKeyInputs: (apiKey = NotionOAuth.getAccessToken()) => {
-            const normalized = String(apiKey || "").trim();
+        syncApiKeyInputs: () => {
             const status = NotionOAuth.getStatus();
             document.querySelectorAll("#ldb-api-key, #ldb-notion-api-key").forEach((input) => {
                 if (!input) return;
@@ -900,18 +1363,17 @@
                     input.value = "";
                     input.placeholder = status.apiKeyPlaceholder;
                 } else {
-                    input.value = normalized;
-                    input.placeholder = "secret_xxx...";
+                    CredentialVault.syncSensitiveInput(input, CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_xxx...");
                 }
             });
 
             const genericInput = document.querySelector("#gclip-api-key-input");
             if (genericInput) {
+                genericInput.value = "";
                 if (NotionOAuth.isOAuthConnected()) {
-                    genericInput.value = "";
                     genericInput.placeholder = "已通过 OAuth 授权（如需覆盖，可手动输入）";
                 } else {
-                    genericInput.placeholder = "secret_...";
+                    genericInput.placeholder = CredentialVault.getFieldPlaceholder(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_...");
                 }
             }
         },
@@ -954,9 +1416,7 @@
                 if (document.activeElement !== fields.clientIdInput) {
                     fields.clientIdInput.value = config.clientId;
                 }
-                if (document.activeElement !== fields.clientSecretInput) {
-                    fields.clientSecretInput.value = config.clientSecret;
-                }
+                CredentialVault.syncSensitiveInput(fields.clientSecretInput, CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "Client Secret");
                 if (document.activeElement !== fields.redirectUriInput) {
                     fields.redirectUriInput.value = config.redirectUri || CONFIG.DEFAULTS.notionOauthRedirectUri;
                 }
@@ -967,11 +1427,13 @@
                 }
                 fields.authorizeBtn.textContent = status.connected ? "🔄 重新授权" : "🔐 一键授权";
                 fields.clearBtn.textContent = status.connected ? "断开并切回手动" : "清除本地授权";
-                fields.clearBtn.disabled = !status.connected && !NotionOAuth.getRefreshToken();
+                fields.clearBtn.disabled = !status.connected
+                    && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN)
+                    && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
             };
 
-            const saveFormConfig = () => {
-                NotionOAuth.saveConfig({
+            const saveFormConfig = async () => {
+                await NotionOAuth.saveConfig({
                     clientId: fields.clientIdInput.value.trim(),
                     clientSecret: fields.clientSecretInput.value.trim(),
                     redirectUri: fields.redirectUriInput.value.trim() || CONFIG.DEFAULTS.notionOauthRedirectUri,
@@ -979,15 +1441,21 @@
             };
 
             [fields.clientIdInput, fields.clientSecretInput, fields.redirectUriInput].forEach((input) => {
-                input.addEventListener("change", () => {
-                    saveFormConfig();
-                    sync();
+                input.addEventListener("change", async () => {
+                    try {
+                        await saveFormConfig();
+                        sync();
+                    } catch (error) {
+                        if (typeof notify === "function") {
+                            notify(error.message || String(error), "error");
+                        }
+                    }
                 });
             });
 
-            fields.authorizeBtn.addEventListener("click", () => {
+            fields.authorizeBtn.addEventListener("click", async () => {
                 try {
-                    saveFormConfig();
+                    await saveFormConfig();
                     NotionOAuth.startAuthorization();
                     if (typeof notify === "function") {
                         notify("已打开 Notion OAuth 授权页", "info");
@@ -1001,24 +1469,31 @@
                 }
             });
 
-            fields.clearBtn.addEventListener("click", () => {
-                NotionOAuth.clearConnection();
-                if (typeof notify === "function") {
-                    notify("已清除本地 OAuth 凭据，可继续手动填写 API Key；这不会撤销 Notion 后台授权。", "success");
+            fields.clearBtn.addEventListener("click", async () => {
+                try {
+                    await NotionOAuth.clearConnection();
+                    if (typeof notify === "function") {
+                        notify("已清除本地 OAuth 凭据，可继续手动填写 API Key；这不会撤销 Notion 后台授权。", "success");
+                    }
+                } catch (error) {
+                    if (typeof notify === "function") {
+                        notify(error.message || String(error), "error");
+                    }
                 }
                 sync();
             });
 
             NotionOAuth.registerSyncHandler(sync);
+            CredentialVault.registerSyncHandler(sync);
             sync();
         },
 
-        clearConnection: () => {
+        clearConnection: async () => {
             const shouldClearAccessToken = NotionOAuth.getAuthMode() === "oauth";
             if (shouldClearAccessToken) {
-                Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+                await CredentialVault.clear(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
             }
-            NotionOAuth.setRefreshToken("");
+            await NotionOAuth.setRefreshToken("");
             NotionOAuth.setMeta({});
             NotionOAuth.clearPendingState();
             NotionOAuth.setAuthMode("manual");
@@ -1029,7 +1504,12 @@
         startAuthorization: () => {
             const config = NotionOAuth.getConfig();
             if (!config.clientId) throw new Error("请先填写 Notion OAuth Client ID");
-            if (!config.clientSecret) throw new Error("请先填写 Notion OAuth Client Secret");
+            if (!config.clientSecret) {
+                if (CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
+                    throw new Error("Notion OAuth Client Secret 已保存在保险箱中，请先解锁凭证保险箱后再授权。");
+                }
+                throw new Error("请先填写 Notion OAuth Client Secret");
+            }
             if (!config.redirectUri) throw new Error("请先填写 Redirect URI");
 
             const state = Utils.randomToken("notion_oauth");
@@ -1078,12 +1558,12 @@
             });
         },
 
-        applyTokenResponse: (result = {}) => {
+        applyTokenResponse: async (result = {}) => {
             if (!result?.access_token) throw new Error("Notion OAuth 未返回 access_token");
 
-            Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, result.access_token);
+            await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, result.access_token);
             if (result.refresh_token) {
-                NotionOAuth.setRefreshToken(result.refresh_token);
+                await NotionOAuth.setRefreshToken(result.refresh_token);
             }
             NotionOAuth.setAuthMode("oauth");
             NotionOAuth.setMeta({
@@ -1102,14 +1582,24 @@
         refreshAccessToken: async () => {
             const refreshToken = NotionOAuth.getRefreshToken();
             const config = NotionOAuth.getConfig();
-            if (!refreshToken) throw new Error("当前没有可刷新的 Notion OAuth refresh_token");
-            if (!config.clientId || !config.clientSecret) throw new Error("缺少 Notion OAuth Client 配置，无法刷新令牌");
+            if (!refreshToken) {
+                if (CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
+                    throw new Error("Notion OAuth refresh token 已保存在保险箱中，请先解锁凭证保险箱后再刷新令牌。");
+                }
+                throw new Error("当前没有可刷新的 Notion OAuth refresh_token");
+            }
+            if (!config.clientId || !config.clientSecret) {
+                if (CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
+                    throw new Error("Notion OAuth Client Secret 已保存在保险箱中，请先解锁凭证保险箱后再刷新令牌。");
+                }
+                throw new Error("缺少 Notion OAuth Client 配置，无法刷新令牌");
+            }
 
             const result = await NotionOAuth.exchangeToken({
                 grant_type: "refresh_token",
                 refresh_token: refreshToken,
             });
-            NotionOAuth.applyTokenResponse(result);
+            await NotionOAuth.applyTokenResponse(result);
             return result.access_token;
         },
 
@@ -1144,7 +1634,7 @@
                     code,
                     redirect_uri: pending.redirectUri,
                 });
-                NotionOAuth.applyTokenResponse(result);
+                await NotionOAuth.applyTokenResponse(result);
                 const workspaceName = result.workspace_name || result.workspace_id || "";
                 NotionOAuth.pushNotice(
                     workspaceName
@@ -10503,13 +10993,26 @@ ${availableTools}
             note: "M2-P1 只收口 UI 事件到 command boundary；遗留 direct NotionAPI 写路径暂限定在工具执行器和导出 schema 初始化 helper 内，不允许继续从 UI 事件直接扩散。",
         }),
 
-        _persistStorageEntries: (entries = {}) => {
+        _persistStorageEntries: async (entries = {}) => {
             for (const [key, value] of Object.entries(entries)) {
-                Storage.set(key, value);
+                if (CredentialVault.isSensitiveKey(key)) {
+                    await CredentialVault.set(key, value);
+                } else {
+                    Storage.set(key, value);
+                }
             }
         },
 
-        _saveNotionSiteSettings: (payload = {}) => {
+        _persistProvidedSensitiveEntries: async (entries = {}) => {
+            for (const [key, value] of Object.entries(entries)) {
+                if (!CredentialVault.isSensitiveKey(key)) continue;
+                const normalized = String(value || "").trim();
+                if (!normalized) continue;
+                await CredentialVault.set(key, normalized);
+            }
+        },
+
+        _saveNotionSiteSettings: async (payload = {}) => {
             const {
                 liveApiKey = "",
                 clearManualApiKey = false,
@@ -10530,16 +11033,15 @@ ${availableTools}
             } = payload;
 
             if (liveApiKey) {
-                NotionOAuth.setManualApiKey(liveApiKey);
+                await NotionOAuth.setManualApiKey(liveApiKey);
             } else if (clearManualApiKey && NotionOAuth.getAuthMode() !== "oauth") {
-                NotionOAuth.setManualApiKey("");
+                await NotionOAuth.setManualApiKey("");
             }
 
             TargetState.setAITarget(aiTargetValue);
-            UICommandService._persistStorageEntries({
+            await UICommandService._persistStorageEntries({
                 [CONFIG.STORAGE_KEYS.AI_SERVICE]: aiService,
                 [CONFIG.STORAGE_KEYS.AI_MODEL]: aiModel,
-                [CONFIG.STORAGE_KEYS.AI_API_KEY]: aiApiKey,
                 [CONFIG.STORAGE_KEYS.AI_BASE_URL]: aiBaseUrl,
                 [CONFIG.STORAGE_KEYS.AI_CATEGORIES]: aiCategories,
                 [CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES]: parseInt(workspaceMaxPages, 10) || 0,
@@ -10548,6 +11050,9 @@ ${availableTools}
                 [CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE]: personaExpertise || CONFIG.DEFAULTS.agentPersonaExpertise,
                 [CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS]: personaInstructions,
                 [CONFIG.STORAGE_KEYS.GITHUB_USERNAME]: githubUsername,
+            });
+            await UICommandService._persistProvidedSensitiveEntries({
+                [CONFIG.STORAGE_KEYS.AI_API_KEY]: aiApiKey,
                 [CONFIG.STORAGE_KEYS.GITHUB_TOKEN]: githubToken,
             });
             GitHubAPI.setImportTypes(Array.isArray(githubImportTypes) && githubImportTypes.length > 0 ? githubImportTypes : ["stars"]);
@@ -10559,18 +11064,20 @@ ${availableTools}
             };
         },
 
-        _saveMainExportSessionSettings: (payload = {}) => {
+        _saveMainExportSessionSettings: async (payload = {}) => {
             const {
                 liveApiKey = "",
                 exportState = {},
                 storageValues = {},
+                sensitiveEntries = {},
             } = payload;
 
             if (liveApiKey) {
-                NotionOAuth.setManualApiKey(liveApiKey);
+                await NotionOAuth.setManualApiKey(liveApiKey);
             }
             TargetState.saveExportState(exportState);
-            UICommandService._persistStorageEntries(storageValues);
+            await UICommandService._persistStorageEntries(storageValues);
+            await UICommandService._persistProvidedSensitiveEntries(sensitiveEntries);
             return {
                 exportState: TargetState.getExportState(),
             };
@@ -10587,7 +11094,7 @@ ${availableTools}
             } = payload;
 
             if (liveApiKey) {
-                NotionOAuth.setManualApiKey(liveApiKey);
+                await NotionOAuth.setManualApiKey(liveApiKey);
             }
 
             TargetState.setExportTargetType(exportType);
@@ -10663,7 +11170,7 @@ ${availableTools}
 
             if (result.valid) {
                 if (liveApiKey) {
-                    NotionOAuth.setManualApiKey(liveApiKey);
+                    await NotionOAuth.setManualApiKey(liveApiKey);
                 }
                 TargetState.saveExportState({
                     targetType: exportTargetType,
@@ -10684,7 +11191,7 @@ ${availableTools}
             const result = await NotionAPI.setupDatabaseProperties(databaseId, apiKey);
             if (result.success) {
                 if (liveApiKey) {
-                    NotionOAuth.setManualApiKey(liveApiKey);
+                    await NotionOAuth.setManualApiKey(liveApiKey);
                 }
                 TargetState.setExportDatabaseId(databaseId);
             }
@@ -11557,7 +12064,7 @@ ${availableTools}
         // 检查配置是否足够
         canStart: () => {
             if (!Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, false)) return false;
-            const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            const apiKey = NotionOAuth.getAccessToken();
             if (!apiKey) return false;
             const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
             if (exportTargetType === "database") {
@@ -14429,7 +14936,12 @@ ${availableTools}
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-oauth-clear" style="padding: 6px 12px;">断开授权</button>
                             </div>
                             <div class="ldb-tip" id="ldb-notion-oauth-status" style="margin-top: 6px;"></div>
-                            <div class="ldb-tip">适用于 Notion 公开集成。纯前端模式下 Client Secret 会保存在本地浏览器存储中，仅建议个人自建集成使用。</div>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-unlock" style="padding: 6px 12px;">解锁保险箱</button>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-lock" style="padding: 6px 12px;">锁定</button>
+                            </div>
+                            <div class="ldb-tip" id="ldb-notion-vault-status" style="margin-top: 6px;"></div>
+                            <div class="ldb-tip">适用于 Notion 公开集成。敏感凭证会保存在本地加密保险箱中，仅在解锁后的当前会话内可用。</div>
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label">数据库 / 页面</label>
@@ -14656,6 +15168,9 @@ ${availableTools}
                         githubToken: panel.querySelector("#ldb-notion-github-token").value.trim(),
                         githubImportTypes: [...panel.querySelectorAll(".ldb-notion-github-type:checked")].map(cb => cb.value),
                     });
+                    NotionOAuth.syncApiKeyInputs();
+                    CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
+                    CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
                     NotionSiteUI.showStatus("设置已保存", "success");
                 } catch (error) {
                     NotionSiteUI.showStatus(`设置保存失败: ${error.message}`, "error");
@@ -14737,7 +15252,8 @@ ${availableTools}
 
             // 获取模型列表
             panel.querySelector("#ldb-notion-ai-fetch-models").onclick = async () => {
-                const aiApiKey = panel.querySelector("#ldb-notion-ai-api-key").value.trim();
+                const aiApiKey = panel.querySelector("#ldb-notion-ai-api-key").value.trim()
+                    || String(Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "") || "").trim();
                 const aiService = panel.querySelector("#ldb-notion-ai-service").value;
                 const aiBaseUrl = panel.querySelector("#ldb-notion-ai-base-url").value.trim();
                 const fetchBtn = panel.querySelector("#ldb-notion-ai-fetch-models");
@@ -14785,15 +15301,29 @@ ${availableTools}
                 },
                 notify: (message, type) => NotionSiteUI.showStatus(message, type),
             });
+            CredentialVault.attachControls({
+                root: panel,
+                selectors: {
+                    statusEl: "#ldb-notion-vault-status",
+                    unlockBtn: "#ldb-notion-vault-unlock",
+                    lockBtn: "#ldb-notion-vault-lock",
+                },
+                notify: (message, type) => NotionSiteUI.showStatus(message, type),
+                onAfterSync: () => {
+                    NotionOAuth.syncApiKeyInputs();
+                    CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
+                    CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
+                },
+            });
         },
 
         // 加载配置
         loadConfig: () => {
             const panel = NotionSiteUI.panel;
 
-            panel.querySelector("#ldb-notion-api-key").value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            panel.querySelector("#ldb-notion-api-key").value = "";
             panel.querySelector("#ldb-notion-ai-service").value = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
-            panel.querySelector("#ldb-notion-ai-api-key").value = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "");
+            panel.querySelector("#ldb-notion-ai-api-key").value = "";
             panel.querySelector("#ldb-notion-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, "");
             panel.querySelector("#ldb-notion-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
             panel.querySelector("#ldb-notion-workspace-max-pages").value = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages);
@@ -14806,7 +15336,7 @@ ${availableTools}
 
             // 加载 GitHub 设置
             panel.querySelector("#ldb-notion-github-username").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
-            panel.querySelector("#ldb-notion-github-token").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
+            panel.querySelector("#ldb-notion-github-token").value = "";
             // 加载 GitHub 导入类型
             const savedGHTypes = GitHubAPI.getImportTypes();
             panel.querySelectorAll(".ldb-notion-github-type").forEach(cb => {
@@ -14861,6 +15391,10 @@ ${availableTools}
                     Storage.remove(CONFIG.STORAGE_KEYS.NOTION_PANEL_POSITION);
                 }
             }
+
+            NotionOAuth.syncApiKeyInputs();
+            CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
+            CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
 
         },
 
@@ -15957,6 +16491,28 @@ ${availableTools}
             const panel = UI.panel;
             const refs = UI.refs || {};
             const body = panel.querySelector(".ldb-body");
+            const getInputValue = (input) => String(input?.value || "").trim();
+            const getSensitiveValue = (input, key, defaultValue = "") => {
+                const liveValue = getInputValue(input);
+                if (liveValue) return liveValue;
+                return String(Storage.get(key, defaultValue) || "").trim();
+            };
+            const persistSensitiveInput = async (input, key, { allowClear = true } = {}) => {
+                const value = getInputValue(input);
+                if (value) {
+                    await CredentialVault.set(key, value);
+                } else if (allowClear) {
+                    await CredentialVault.clear(key);
+                }
+                syncSensitiveInputs();
+                return value;
+            };
+            const syncSensitiveInputs = () => {
+                NotionOAuth.syncApiKeyInputs();
+                CredentialVault.syncSensitiveInput(refs.aiApiKeyInput, CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
+                CredentialVault.syncSensitiveInput(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
+                CredentialVault.syncSensitiveInput(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
+            };
 
             const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
             const hasBridgeMarker = BookmarkBridge.isExtensionAvailable();
@@ -16059,7 +16615,7 @@ ${availableTools}
             // Obsidian 测试连接
             refs.obsTestBtn.onclick = async () => {
                 const url = refs.obsApiUrlInput.value.trim();
-                const key = refs.obsApiKeyInput.value.trim();
+                const key = getSensitiveValue(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
                 if (!url || !key) {
                     refs.obsTestStatus.innerHTML = '<span style="color: #f87171;">请填写 API 地址和 Key</span>';
                     return;
@@ -16458,8 +17014,7 @@ ${availableTools}
                     if (UI.isActiveGitHubSource()) {
                         const username = refs.githubUsernameInput.value.trim()
                             || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
-                        const token = refs.githubTokenInput.value.trim()
-                            || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
+                        const token = getSensitiveValue(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
                         const types = GitHubAPI.getImportTypes();
 
                         if (!username && !token) {
@@ -16633,7 +17188,7 @@ ${availableTools}
                     rangeEnd: parseInt(refs.rangeEndInput.value) || 999999,
                     imgMode: refs.imgModeSelect.value,
                     concurrency: parseInt(refs.exportConcurrencySelect.value) || 1,
-                    aiApiKey: refs.aiApiKeyInput.value.trim(),
+                    aiApiKey: getSensitiveValue(refs.aiApiKeyInput, CONFIG.STORAGE_KEYS.AI_API_KEY, ""),
                     aiService: refs.aiServiceSelect.value,
                     aiModel: refs.aiModelSelect.value,
                     aiBaseUrl: refs.aiBaseUrlInput.value.trim(),
@@ -16641,7 +17196,7 @@ ${availableTools}
                         refs.aiCategoriesInput.value.trim() || ""
                     ),
                     githubUsername: refs.githubUsernameInput.value.trim(),
-                    token: refs.githubTokenInput.value.trim(),
+                    token: getSensitiveValue(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, ""),
                     imgFilter: refs.filterImgSelect.value,
                     filterUsers: refs.filterUsersInput.value.trim(),
                     filterInclude: refs.filterIncludeInput.value.trim(),
@@ -16671,6 +17226,10 @@ ${availableTools}
                         [CONFIG.STORAGE_KEYS.IMG_MODE]: settings.imgMode,
                         [CONFIG.STORAGE_KEYS.REQUEST_DELAY]: parseInt(refs.requestDelaySelect.value),
                         [CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY]: settings.concurrency,
+                    },
+                    sensitiveEntries: {
+                        [CONFIG.STORAGE_KEYS.AI_API_KEY]: getInputValue(refs.aiApiKeyInput),
+                        [CONFIG.STORAGE_KEYS.GITHUB_TOKEN]: getInputValue(refs.githubTokenInput),
                     },
                 });
 
@@ -16739,7 +17298,7 @@ ${availableTools}
             // 导出到 Obsidian
             refs.obsExportBtn.onclick = async () => {
                 const obsUrl = refs.obsApiUrlInput.value.trim();
-                const obsKey = refs.obsApiKeyInput.value.trim();
+                const obsKey = getSensitiveValue(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
                 const obsDir = refs.obsDirInput.value.trim() || "Linux.do";
                 const obsImgMode = refs.obsImgModeSelect.value;
                 const obsImgDir = refs.obsImgDirInput.value.trim() || "Linux.do/attachments";
@@ -16950,12 +17509,16 @@ ${availableTools}
             };
 
             // 输入框自动保存
-            refs.apiKeyInput.onchange = (e) => {
+            refs.apiKeyInput.onchange = async (e) => {
                 const value = e.target.value.trim();
-                if (value) {
-                    NotionOAuth.setManualApiKey(value);
-                } else if (NotionOAuth.getAuthMode() !== "oauth") {
-                    NotionOAuth.setManualApiKey("");
+                try {
+                    if (value) {
+                        await NotionOAuth.setManualApiKey(value);
+                    } else if (NotionOAuth.getAuthMode() !== "oauth") {
+                        await NotionOAuth.setManualApiKey("");
+                    }
+                } catch (error) {
+                    UI.showStatus(error.message || String(error), "error");
                 }
             };
             refs.databaseIdInput.onchange = (e) => {
@@ -17075,7 +17638,9 @@ ${availableTools}
 
             // 保存 AI 配置
             refs.aiApiKeyInput.onchange = (e) => {
-                Storage.set(CONFIG.STORAGE_KEYS.AI_API_KEY, e.target.value.trim());
+                persistSensitiveInput(e.target, CONFIG.STORAGE_KEYS.AI_API_KEY).catch((error) => {
+                    UI.showStatus(error.message || String(error), "error");
+                });
             };
             refs.aiBaseUrlInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.AI_BASE_URL, e.target.value.trim());
@@ -17116,14 +17681,18 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, e.target.value.trim());
             };
             refs.githubTokenInput.onchange = (e) => {
-                Storage.set(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, e.target.value.trim());
+                persistSensitiveInput(e.target, CONFIG.STORAGE_KEYS.GITHUB_TOKEN).catch((error) => {
+                    UI.showStatus(error.message || String(error), "error");
+                });
             };
             // Obsidian 设置变更保存
             refs.obsApiUrlInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.OBS_API_URL, e.target.value.trim());
             };
             refs.obsApiKeyInput.onchange = (e) => {
-                Storage.set(CONFIG.STORAGE_KEYS.OBS_API_KEY, e.target.value.trim());
+                persistSensitiveInput(e.target, CONFIG.STORAGE_KEYS.OBS_API_KEY).catch((error) => {
+                    UI.showStatus(error.message || String(error), "error");
+                });
             };
             refs.obsDirInput.onchange = (e) => {
                 Storage.set(CONFIG.STORAGE_KEYS.OBS_DIR, e.target.value.trim());
@@ -17177,7 +17746,7 @@ ${availableTools}
 
             // 获取模型列表
             refs.aiFetchModelsBtn.onclick = async () => {
-                const aiApiKey = refs.aiApiKeyInput.value.trim();
+                const aiApiKey = getSensitiveValue(refs.aiApiKeyInput, CONFIG.STORAGE_KEYS.AI_API_KEY, "");
                 const aiService = refs.aiServiceSelect.value;
                 const aiBaseUrl = refs.aiBaseUrlInput.value.trim();
                 const fetchBtn = refs.aiFetchModelsBtn
@@ -17216,7 +17785,7 @@ ${availableTools}
             refs.aiTestBtn.onclick = async () => {
                 const btn = refs.aiTestBtn
                 const statusSpan = refs.aiTestStatus
-                const aiApiKey = refs.aiApiKeyInput.value.trim();
+                const aiApiKey = getSensitiveValue(refs.aiApiKeyInput, CONFIG.STORAGE_KEYS.AI_API_KEY, "");
                 const aiService = refs.aiServiceSelect.value;
                 const aiModel = refs.aiModelSelect.value;
                 const aiBaseUrl = refs.aiBaseUrlInput.value.trim();
@@ -17324,6 +17893,19 @@ ${availableTools}
                 },
                 notify: (message, type) => UI.showStatus(message, type),
             });
+            CredentialVault.attachControls({
+                root: panel,
+                selectors: {
+                    statusEl: "#ldb-vault-status",
+                    unlockBtn: "#ldb-vault-unlock",
+                    lockBtn: "#ldb-vault-lock",
+                },
+                notify: (message, type) => UI.showStatus(message, type),
+                onAfterSync: () => {
+                    syncSensitiveInputs();
+                },
+            });
+            syncSensitiveInputs();
 
             // 拖拽
             UI.makeDraggable(panel, panel.querySelector(".ldb-header"));
@@ -17741,7 +18323,12 @@ ${availableTools}
                                     <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">断开授权</button>
                                 </div>
                                 <div class="ldb-tip" id="ldb-oauth-status" style="margin-top: 6px;"></div>
-                                <div class="ldb-tip">如果你使用 Notion 公开集成，请先把 Redirect URI 加到集成配置里，再点击一键授权。当前项目为纯前端运行，Client Secret 会保存在本地。</div>
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-vault-unlock">解锁保险箱</button>
+                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-vault-lock">锁定</button>
+                                </div>
+                                <div class="ldb-tip" id="ldb-vault-status" style="margin-top: 6px;"></div>
+                                <div class="ldb-tip">如果你使用 Notion 公开集成，请先把 Redirect URI 加到集成配置里，再点击一键授权。敏感凭证会保存在本地加密保险箱中。</div>
                             </div>
                             <div class="ldb-input-group">
                                 <label class="ldb-label">数据库 / 页面</label>
@@ -18200,7 +18787,7 @@ ${availableTools}
             const refs = UI.refs || {};
             const exportState = TargetState.getExportState();
 
-            refs.apiKeyInput.value = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            refs.apiKeyInput.value = "";
             refs.databaseIdInput.value = exportState.databaseId;
             refs.parentPageIdInput.value = exportState.parentPageId;
             refs.onlyFirstCheckbox.checked = Storage.get(CONFIG.STORAGE_KEYS.FILTER_ONLY_FIRST, CONFIG.DEFAULTS.onlyFirst);
@@ -18267,7 +18854,7 @@ ${availableTools}
                 }
             }
 
-            refs.aiApiKeyInput.value = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "");
+            refs.aiApiKeyInput.value = "";
             refs.aiBaseUrlInput.value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, CONFIG.DEFAULTS.aiBaseUrl);
             refs.aiCategoriesInput.value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
             refs.workspaceMaxPagesSelect.value = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages);
@@ -18281,7 +18868,7 @@ ${availableTools}
 
             // 加载 GitHub 设置
             refs.githubUsernameInput.value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
-            refs.githubTokenInput.value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
+            refs.githubTokenInput.value = "";
             // 加载 GitHub 导入类型
             const savedGHTypesMain = GitHubAPI.getImportTypes();
             refs.githubTypeCheckboxes.forEach(cb => {
@@ -18290,7 +18877,7 @@ ${availableTools}
 
             // 加载 Obsidian 设置
             refs.obsApiUrlInput.value = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_URL, CONFIG.DEFAULTS.obsApiUrl);
-            refs.obsApiKeyInput.value = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
+            refs.obsApiKeyInput.value = "";
             refs.obsDirInput.value = Storage.get(CONFIG.STORAGE_KEYS.OBS_DIR, CONFIG.DEFAULTS.obsDir);
             refs.obsImgModeSelect.value = Storage.get(CONFIG.STORAGE_KEYS.OBS_IMG_MODE, CONFIG.DEFAULTS.obsImgMode);
             refs.obsImgDirInput.value = Storage.get(CONFIG.STORAGE_KEYS.OBS_IMG_DIR, CONFIG.DEFAULTS.obsImgDir);
@@ -18397,6 +18984,10 @@ ${availableTools}
                 updateIntervalEl.value = String(CONFIG.DEFAULTS.updateCheckIntervalHours);
                 Storage.set(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG.DEFAULTS.updateCheckIntervalHours);
             }
+            NotionOAuth.syncApiKeyInputs();
+            CredentialVault.syncSensitiveInput(refs.aiApiKeyInput, CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
+            CredentialVault.syncSensitiveInput(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
+            CredentialVault.syncSensitiveInput(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
             UI.renderWorkspaceVisualSummary();
             UI.renderVisualSummary();
             UpdateChecker.renderLastStatus();
@@ -20068,7 +20659,7 @@ ${availableTools}
                         <div class="gclip-field">
                             <label>Notion API Key</label>
                             <div style="display:flex;align-items:center;gap:8px;">
-                                <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="${Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY) ? '已配置 (点击保存可更新)' : 'secret_...'}" value="" style="flex:1;font-size:12px;" autocomplete="off" />
+                                <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="${CredentialVault.getFieldPlaceholder(CONFIG.STORAGE_KEYS.NOTION_API_KEY, 'secret_...')}" value="" style="flex:1;font-size:12px;" autocomplete="off" />
                                 <button class="gclip-btn" id="gclip-save-api-key" style="padding:4px 12px;font-size:12px;">保存</button>
                             </div>
                         </div>
@@ -20082,7 +20673,12 @@ ${availableTools}
                                 <button class="gclip-btn gclip-btn-secondary" id="gclip-oauth-clear" style="padding:4px 12px;font-size:12px;">断开授权</button>
                             </div>
                             <div id="gclip-oauth-status" style="font-size:11px;color:var(--ldb-ui-muted);margin-top:6px;"></div>
-                            <div style="font-size:11px;color:var(--ldb-ui-muted);margin-top:4px;">公开 OAuth 适合个人自建集成；Client Secret 将保存在本地浏览器存储中。</div>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-unlock" style="padding:4px 12px;font-size:12px;">解锁保险箱</button>
+                                <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-lock" style="padding:4px 12px;font-size:12px;">锁定</button>
+                            </div>
+                            <div id="gclip-vault-status" style="font-size:11px;color:var(--ldb-ui-muted);margin-top:6px;"></div>
+                            <div style="font-size:11px;color:var(--ldb-ui-muted);margin-top:4px;">公开 OAuth 适合个人自建集成；敏感凭证会保存在本地加密保险箱中。</div>
                         </div>
                         <div class="gclip-field">
                             <label>导出目标类型</label>
@@ -20144,11 +20740,12 @@ ${availableTools}
             panel.querySelector("#gclip-target-label").textContent = exportType === "page" ? "父页面" : "数据库";
             panel.querySelector("#gclip-target-id").value = targetId;
 
-            const apiKeyForInit = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+            const apiKeyForInit = NotionOAuth.getAccessToken();
             GenericUI.loadTargetOptionsFromCache(apiKeyForInit);
             if (apiKeyForInit) {
                 GenericUI.refreshWorkspaceTargets(apiKeyForInit, true);
             }
+            NotionOAuth.syncApiKeyInputs();
             return panel;
         },
 
@@ -20292,7 +20889,7 @@ ${availableTools}
             panel.querySelector("#gclip-export-type").addEventListener("change", () => {
                 const isPage = panel.querySelector("#gclip-export-type").value === "page";
                 panel.querySelector("#gclip-target-label").textContent = isPage ? "父页面" : "数据库";
-                GenericUI.loadTargetOptionsFromCache(Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""));
+                GenericUI.loadTargetOptionsFromCache(NotionOAuth.getAccessToken(panel.querySelector("#gclip-api-key-input").value.trim()));
             });
 
             // 刷新工作区目标列表
@@ -20310,13 +20907,17 @@ ${availableTools}
             });
 
             // 保存 API Key（从面板内密码输入框读取，避免使用可被宿主页面拦截的 prompt()）
-            panel.querySelector("#gclip-save-api-key").addEventListener("click", () => {
+            panel.querySelector("#gclip-save-api-key").addEventListener("click", async () => {
                 const key = panel.querySelector("#gclip-api-key-input").value.trim();
                 if (key) {
-                    NotionOAuth.setManualApiKey(key);
-                    panel.querySelector("#gclip-api-key-input").value = "";
-                    panel.querySelector("#gclip-api-key-input").placeholder = "已配置 (点击保存可更新)";
-                    GenericUI.showStatus("API Key 已保存", "success");
+                    try {
+                        await NotionOAuth.setManualApiKey(key);
+                        panel.querySelector("#gclip-api-key-input").value = "";
+                        NotionOAuth.syncApiKeyInputs();
+                        GenericUI.showStatus("API Key 已保存", "success");
+                    } catch (error) {
+                        GenericUI.showStatus(`API Key 保存失败: ${error.message}`, "error");
+                    }
                 } else {
                     GenericUI.showStatus("请输入 API Key", "error");
                 }
@@ -20327,11 +20928,11 @@ ${availableTools}
                 // 仅当用户主动输入了新 key 时才更新（不从 DOM 预填，防止泄漏）
                 const liveKey = panel.querySelector("#gclip-api-key-input").value.trim();
                 if (liveKey) {
-                    NotionOAuth.setManualApiKey(liveKey);
+                    await NotionOAuth.setManualApiKey(liveKey);
                     panel.querySelector("#gclip-api-key-input").value = "";
-                    panel.querySelector("#gclip-api-key-input").placeholder = "已配置 (点击保存可更新)";
+                    NotionOAuth.syncApiKeyInputs();
                 }
-                const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
+                const apiKey = NotionOAuth.getAccessToken();
                 const exportType = panel.querySelector("#gclip-export-type").value;
                 const selectValue = panel.querySelector("#gclip-target-select")?.value || "";
                 const manualTargetId = panel.querySelector("#gclip-target-id").value.trim().replace(/-/g, "");
@@ -20378,6 +20979,19 @@ ${availableTools}
                 },
                 notify: (message, type) => GenericUI.showStatus(message, type),
             });
+            CredentialVault.attachControls({
+                root: panel,
+                selectors: {
+                    statusEl: "#gclip-vault-status",
+                    unlockBtn: "#gclip-vault-unlock",
+                    lockBtn: "#gclip-vault-lock",
+                },
+                notify: (message, type) => GenericUI.showStatus(message, type),
+                onAfterSync: () => {
+                    NotionOAuth.syncApiKeyInputs();
+                },
+            });
+            NotionOAuth.syncApiKeyInputs();
 
             // 显示设置（不在 DOM 中预填 API Key，防止第三方页面读取）
             panel.querySelector("#gclip-show-settings").addEventListener("click", () => {
@@ -20391,11 +21005,12 @@ ${availableTools}
 
                     panel.querySelector("#gclip-target-id").value = exportState.targetId;
 
-                    const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+                    const apiKey = NotionOAuth.getAccessToken();
                     GenericUI.loadTargetOptionsFromCache(apiKey);
                     if (apiKey) {
                         GenericUI.refreshWorkspaceTargets(apiKey, true);
                     }
+                    NotionOAuth.syncApiKeyInputs();
                     // API Key 不预填到 DOM，用户需手动输入或留空使用已保存配置
                 }
                 settings.style.display = showing ? "block" : "none";
@@ -20485,7 +21100,7 @@ ${availableTools}
             GenericUI.showStatus("正在提取页面内容...", "info");
 
             try {
-                const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+                const apiKey = NotionOAuth.getAccessToken();
                 const exportState = TargetState.getExportState();
                 const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
 

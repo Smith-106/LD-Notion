@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const { webcrypto } = require('crypto');
 const { extractUserscriptIifeBody } = require('../scripts/build-extension.js');
 
 // Load userscript
@@ -28,6 +29,7 @@ const sandbox = {
         clearTimeout: global.clearTimeout,
         matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
         requestIdleCallback: (cb) => cb(),
+        crypto: webcrypto,
     },
     document: {
         readyState: 'complete',
@@ -58,6 +60,7 @@ const sandbox = {
     FileReader: class { readAsArrayBuffer() {} },
     GM_getValue: storageMock.get,
     GM_setValue: storageMock.set,
+    GM_deleteValue: storageMock.remove,
     GM_xmlhttpRequest: () => {},
     GM_notification: () => {},
     GM_info: { scriptHandler: 'Node.js' },
@@ -72,6 +75,7 @@ const sandbox = {
     TextDecoder: TextDecoder,
     TextEncoder: TextEncoder,
     URL: URL,
+    crypto: webcrypto,
     fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
 };
 sandbox.global = sandbox;

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const { webcrypto } = require('crypto');
 const { extractUserscriptIifeBody } = require('../scripts/build-extension.js');
 
 // Extract the IIFE body from the userscript
@@ -20,7 +21,8 @@ const sandbox = {
         navigator: { userAgent: 'Node.js' },
         setTimeout: global.setTimeout,
         clearTimeout: global.clearTimeout,
-        matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} })
+        matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+        crypto: webcrypto,
     },
     document: {
         readyState: 'complete',
@@ -61,6 +63,7 @@ const sandbox = {
     },
     GM_getValue: () => {},
     GM_setValue: () => {},
+    GM_deleteValue: () => {},
     GM_xmlhttpRequest: () => {},
     GM_notification: () => {},
     GM_info: { scriptHandler: 'Node.js' },
@@ -75,6 +78,7 @@ const sandbox = {
     TextDecoder: TextDecoder,
     TextEncoder: TextEncoder,
     URL: URL,
+    crypto: webcrypto,
     fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
 };
 

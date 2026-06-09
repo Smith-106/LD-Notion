@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 const assert = require('assert');
 const { execFileSync } = require('child_process');
+const { webcrypto } = require('crypto');
 
 const userScriptPath = path.resolve(__dirname, '../LinuxDo-Bookmarks-to-Notion.user.js');
 const buildScriptPath = path.resolve(__dirname, '../scripts/build-extension.js');
@@ -128,6 +129,7 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
             removeEventListener: () => {},
             dispatchEvent: () => {},
             open: () => ({}),
+            prompt: () => '',
             location: locationObject,
             history: {
                 replaceState: (state, title, nextUrl) => {
@@ -138,7 +140,8 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
             navigator: { userAgent: 'Node.js' },
             setTimeout: global.setTimeout,
             clearTimeout: global.clearTimeout,
-            matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} })
+            matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+            crypto: webcrypto,
         },
         document: {
             title: 'Test',
@@ -185,6 +188,9 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
         GM_setValue: (key, value) => {
             store[key] = value;
         },
+        GM_deleteValue: (key) => {
+            delete store[key];
+        },
         GM_xmlhttpRequest: (options) => {
             requests.push(options);
             if (!requestHandler) {
@@ -207,6 +213,8 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
         TextDecoder,
         TextEncoder,
         URL,
+        crypto: webcrypto,
+        prompt: () => '',
         fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     };
 
@@ -215,7 +223,7 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
 
     const scriptRunner = new Function(
         ...Object.keys(sandbox),
-        `${coreCode}\nreturn { AIClassifier, AIService, CONFIG, AIAssistant, ChatState, ChatUI, DesignSystem, GenericExporter, GenericUI, GitHubAPI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, SiteDetector, TargetState, UI, UICommandService, UndoManager, WorkspaceService, main };`
+        `${coreCode}\nreturn { AIClassifier, AIService, CONFIG, AIAssistant, ChatState, ChatUI, CredentialVault, DesignSystem, GenericExporter, GenericUI, GitHubAPI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, SiteDetector, TargetState, UI, UICommandService, UndoManager, WorkspaceService, main };`
     );
 
     const exports = scriptRunner(...Object.values(sandbox));
@@ -354,6 +362,13 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
     }
 }
 
+async function unlockCredentialVault(harness, passphrase = 'test-passphrase') {
+    await harness.CredentialVault.unlock(passphrase, {
+        initializeIfMissing: true,
+        migrateLegacy: true
+    });
+}
+
 function createWorkspaceVisualizationFixture(harness) {
     const databases = [
         { id: 'db_linux', title: 'Linux 收藏' },
@@ -422,7 +437,8 @@ function createWorkspaceVisualizationFixture(harness) {
 
     await runTest('buildAuthorizeUrl: includes expected Notion OAuth query params', async () => {
         const harness = createHarness();
-        harness.NotionOAuth.saveConfig({
+        await unlockCredentialVault(harness);
+        await harness.NotionOAuth.saveConfig({
             clientId: 'client_123',
             clientSecret: 'secret_456',
             redirectUri: 'https://www.notion.so/'
@@ -474,7 +490,8 @@ function createWorkspaceVisualizationFixture(harness) {
     await runTest('exchangeToken: posts OAuth payload with Basic auth header', async () => {
         const harness = createHarness();
         let capturedRequest = null;
-        harness.NotionOAuth.saveConfig({
+        await unlockCredentialVault(harness);
+        await harness.NotionOAuth.saveConfig({
             clientId: 'client_123',
             clientSecret: 'secret_456',
             redirectUri: 'https://www.notion.so/'
@@ -509,12 +526,13 @@ function createWorkspaceVisualizationFixture(harness) {
 
     await runTest('refreshAccessToken: refreshes token and persists returned OAuth state', async () => {
         const harness = createHarness();
-        harness.NotionOAuth.saveConfig({
+        await unlockCredentialVault(harness);
+        await harness.NotionOAuth.saveConfig({
             clientId: 'client_123',
             clientSecret: 'secret_456',
             redirectUri: 'https://www.notion.so/'
         });
-        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN] = 'refresh_old';
+        await harness.NotionOAuth.setRefreshToken('refresh_old');
 
         harness.setRequestHandler((options) => {
             respondJson(options, 200, {
@@ -531,8 +549,8 @@ function createWorkspaceVisualizationFixture(harness) {
         const meta = JSON.parse(harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_OAUTH_META]);
 
         assert.strictEqual(accessToken, 'access_new');
-        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY], 'access_new');
-        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN], 'refresh_new');
+        assert.strictEqual(harness.NotionOAuth.getAccessToken(), 'access_new');
+        assert.strictEqual(harness.NotionOAuth.getRefreshToken(), 'refresh_new');
         assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE], 'oauth');
         assert.strictEqual(meta.workspaceName, 'Release Workspace');
     });
@@ -541,7 +559,8 @@ function createWorkspaceVisualizationFixture(harness) {
         const harness = createHarness({
             url: 'https://www.notion.so/?code=oauth_code&state=expected_state'
         });
-        harness.NotionOAuth.saveConfig({
+        await unlockCredentialVault(harness);
+        await harness.NotionOAuth.saveConfig({
             clientId: 'client_123',
             clientSecret: 'secret_456',
             redirectUri: 'https://www.notion.so/'
@@ -596,13 +615,14 @@ function createWorkspaceVisualizationFixture(harness) {
         const harness = createHarness();
         let pageRequests = 0;
 
-        harness.NotionOAuth.saveConfig({
+        await unlockCredentialVault(harness);
+        await harness.NotionOAuth.saveConfig({
             clientId: 'client_123',
             clientSecret: 'secret_456',
             redirectUri: 'https://www.notion.so/'
         });
-        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'expired_access';
-        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN] = 'refresh_old';
+        await harness.NotionOAuth.setManualApiKey('expired_access');
+        await harness.NotionOAuth.setRefreshToken('refresh_old');
         harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE] = 'oauth';
 
         harness.setRequestHandler((options) => {
@@ -635,7 +655,7 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(pageRequests, 2);
         assert.strictEqual(harness.requests[0].headers.Authorization, 'Bearer expired_access');
         assert.strictEqual(harness.requests[2].headers.Authorization, 'Bearer fresh_access');
-        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY], 'fresh_access');
+        assert.strictEqual(harness.NotionOAuth.getAccessToken(), 'fresh_access');
     });
 
     await runTest('NotionAPI.configureTransport: routes requests through the explicit transport seam', async () => {
@@ -676,12 +696,13 @@ function createWorkspaceVisualizationFixture(harness) {
         const harness = createHarness();
         let authorizationHeader = '';
 
-        harness.NotionOAuth.saveConfig({
+        await unlockCredentialVault(harness);
+        await harness.NotionOAuth.saveConfig({
             clientId: 'client_123',
             clientSecret: 'secret_456',
             redirectUri: 'https://www.notion.so/'
         });
-        harness.NotionOAuth.setManualApiKey('manual_api_key');
+        await harness.NotionOAuth.setManualApiKey('manual_api_key');
         harness.setRequestHandler((options) => {
             authorizationHeader = options.headers.Authorization;
             respondJson(options, 200, { ok: true });
@@ -1872,6 +1893,7 @@ function createWorkspaceVisualizationFixture(harness) {
         const harness = createHarness();
         let selectedValue = null;
         let importTypes = null;
+        await unlockCredentialVault(harness);
 
         harness.TargetState.setAITarget = (value) => {
             selectedValue = value;
@@ -1980,6 +2002,7 @@ function createWorkspaceVisualizationFixture(harness) {
     await runTest('UICommandService.execute: validate_export_target delegates validation and persists success state', async () => {
         const harness = createHarness();
         const savedStates = [];
+        await unlockCredentialVault(harness);
 
         harness.NotionAPI.validateConfig = async (apiKey, databaseId) => {
             assert.strictEqual(apiKey, 'manual_api_key');
@@ -2005,6 +2028,7 @@ function createWorkspaceVisualizationFixture(harness) {
     await runTest('UICommandService.execute: setup_export_database_properties delegates setup and persists export database on success', async () => {
         const harness = createHarness();
         let persistedDatabaseId = null;
+        await unlockCredentialVault(harness);
 
         harness.NotionAPI.setupDatabaseProperties = async (databaseId, apiKey) => {
             assert.strictEqual(databaseId, 'db1');
@@ -2029,6 +2053,7 @@ function createWorkspaceVisualizationFixture(harness) {
     await runTest('UICommandService.execute: save_command_boundary_settings generic-export-target keeps schema setup inside declared legacy boundary', async () => {
         const harness = createHarness();
         let setupCall = null;
+        await unlockCredentialVault(harness);
 
         harness.GenericExporter = harness.GenericExporter || {};
         harness.GenericExporter.setupDatabaseProperties = async (targetId, apiKey) => {
@@ -2144,6 +2169,7 @@ function createWorkspaceVisualizationFixture(harness) {
         let fetchCalls = 0;
 
         harness.NotionSiteUI.panel = panel;
+        harness.store[harness.CONFIG.STORAGE_KEYS.AI_API_KEY] = 'sk-test';
         harness.AIService.fetchModels = async () => {
             throw new Error('fetchModels should not be called directly from NotionSiteUI');
         };
@@ -2564,6 +2590,7 @@ function createWorkspaceVisualizationFixture(harness) {
 
         harness.UI.panel = panel;
         harness.UI.cacheRefs();
+        harness.store[harness.CONFIG.STORAGE_KEYS.AI_API_KEY] = 'sk-test';
         harness.AIService.fetchModels = async () => {
             throw new Error('fetchModels should not be called directly from UI AI model fetch');
         };
