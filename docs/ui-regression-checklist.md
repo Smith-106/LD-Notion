@@ -53,5 +53,6 @@
 - [ ] 扩展 Popup 可以正常打开，不出现空白页或脚本报错
 - [ ] Popup 中的快捷入口文案与当前稳定能力一致，不宣传内部或不稳定能力
 - [ ] 点击 Popup 中的来源/导入入口后，能把当前页面引导到对应宿主面或触发对应消息桥接
-- [ ] 在 Linux.do / Notion / 支持的页面上，content script 注入后不会出现明显的重复 UI、缺失样式或初始化失败
+- [ ] 在 Linux.do / Notion / GitHub / Zhihu / 任意通用网页上，content script 注入后不会出现明显的重复 UI、缺失样式或初始化失败
+- [ ] GitHub 页面能进入完整面板；Zhihu 与任意通用网页能出现右下角剪藏入口
 - [ ] 重新执行 `node scripts/build-extension.js` 后，扩展目录结构仍可被浏览器正常加载

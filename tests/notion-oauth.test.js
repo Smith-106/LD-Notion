@@ -106,6 +106,7 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
     const selectorAllMap = new Map();
     let currentHref = new URL(url).toString();
     let requestHandler = null;
+    let fetchHandler = null;
 
     const locationObject = {};
     ['href', 'hostname', 'pathname', 'protocol', 'origin', 'search', 'hash'].forEach((key) => {
@@ -215,7 +216,12 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
         URL,
         crypto: webcrypto,
         prompt: () => '',
-        fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+        fetch: (...args) => {
+            if (fetchHandler) {
+                return fetchHandler(...args);
+            }
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        }
     };
 
     sandbox.global = sandbox;
@@ -223,7 +229,7 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
 
     const scriptRunner = new Function(
         ...Object.keys(sandbox),
-        `${coreCode}\nreturn { AIClassifier, AIService, CONFIG, AIAssistant, ChatState, ChatUI, CredentialVault, DesignSystem, GenericExporter, GenericUI, GitHubAPI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, SiteDetector, TargetState, UI, UICommandService, UndoManager, WorkspaceService, main };`
+        `${coreCode}\nreturn { AIClassifier, AIService, AutoImporter, BookmarkAutoImporter, BookmarkExporter, CONFIG, AIAssistant, ChatState, ChatUI, ConfirmationDialog, CredentialVault, DesignSystem, Exporter, GenericExporter, GenericUI, GitHubAPI, GitHubAutoImporter, LinuxDoAPI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, OperationLog, SiteDetector, SyncState, TargetState, UI, UICommandService, UndoManager, UpdateChecker, WorkspaceService, main };`
     );
 
     const exports = scriptRunner(...Object.values(sandbox));
@@ -253,6 +259,9 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
         },
         setRequestHandler: (handler) => {
             requestHandler = handler;
+        },
+        setFetchHandler: (handler) => {
+            fetchHandler = handler;
         }
     };
 }
@@ -369,6 +378,15 @@ async function unlockCredentialVault(harness, passphrase = 'test-passphrase') {
     });
 }
 
+function readVaultPayload(harness) {
+    const raw = harness.store[harness.CONFIG.STORAGE_KEYS.CREDENTIAL_VAULT];
+    return raw ? JSON.parse(raw) : null;
+}
+
+function registerBookmarkBridgeMeta(harness) {
+    harness.registerSelector('meta[name="ld-notion-ext"][content="ready"]', createElementStub());
+}
+
 function createWorkspaceVisualizationFixture(harness) {
     const databases = [
         { id: 'db_linux', title: 'Linux 收藏' },
@@ -434,6 +452,92 @@ function createWorkspaceVisualizationFixture(harness) {
 
 (async () => {
     console.log('Running tests for NotionOAuth...\n');
+
+    await runTest('CredentialVault.unlock: migrates legacy plaintext credentials into encrypted vault and removes raw keys', async () => {
+        const harness = createHarness();
+        const apiKeyKey = harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY;
+        const clientSecretKey = harness.CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET;
+
+        harness.store[apiKeyKey] = 'legacy_manual_token';
+        harness.store[clientSecretKey] = 'legacy_client_secret';
+
+        const status = await harness.CredentialVault.unlock('vault-passphrase', {
+            initializeIfMissing: true,
+            migrateLegacy: true
+        });
+        const payload = readVaultPayload(harness);
+
+        assert.strictEqual(status.hasVault, true);
+        assert.strictEqual(status.unlocked, true);
+        assert.ok(payload && payload.ciphertext && payload.iv && payload.salt);
+        assert.ok(Array.isArray(payload.keys));
+        assert.ok(payload.keys.includes(apiKeyKey));
+        assert.ok(payload.keys.includes(clientSecretKey));
+        assert.strictEqual(harness.store[apiKeyKey], undefined);
+        assert.strictEqual(harness.store[clientSecretKey], undefined);
+        assert.strictEqual(harness.CredentialVault.get(apiKeyKey, ''), 'legacy_manual_token');
+        assert.strictEqual(harness.CredentialVault.get(clientSecretKey, ''), 'legacy_client_secret');
+        assert.ok(!JSON.stringify(payload).includes('legacy_manual_token'));
+        assert.ok(!JSON.stringify(payload).includes('legacy_client_secret'));
+
+        harness.CredentialVault.lock();
+        assert.strictEqual(harness.CredentialVault.isUnlocked(), false);
+        assert.strictEqual(harness.CredentialVault.get(apiKeyKey, ''), '');
+        assert.strictEqual(harness.CredentialVault.hasPersistedValue(apiKeyKey), true);
+
+        await harness.CredentialVault.unlock('vault-passphrase', {
+            initializeIfMissing: false,
+            migrateLegacy: true
+        });
+        assert.strictEqual(harness.CredentialVault.get(apiKeyKey, ''), 'legacy_manual_token');
+        assert.strictEqual(harness.CredentialVault.get(clientSecretKey, ''), 'legacy_client_secret');
+    });
+
+    await runTest('CredentialVault.set: persists sensitive values only inside the encrypted vault and clears them cleanly', async () => {
+        const harness = createHarness();
+        const githubTokenKey = harness.CONFIG.STORAGE_KEYS.GITHUB_TOKEN;
+
+        await unlockCredentialVault(harness, 'vault-passphrase');
+        await harness.CredentialVault.set(githubTokenKey, 'ghp_secret_value');
+
+        let payload = readVaultPayload(harness);
+        assert.ok(payload && Array.isArray(payload.keys) && payload.keys.includes(githubTokenKey));
+        assert.strictEqual(harness.store[githubTokenKey], undefined);
+        assert.ok(!JSON.stringify(payload).includes('ghp_secret_value'));
+
+        harness.CredentialVault.lock();
+        await harness.CredentialVault.unlock('vault-passphrase', {
+            initializeIfMissing: false,
+            migrateLegacy: true
+        });
+        assert.strictEqual(harness.CredentialVault.get(githubTokenKey, ''), 'ghp_secret_value');
+
+        await harness.CredentialVault.clear(githubTokenKey);
+        payload = readVaultPayload(harness);
+        assert.ok(payload && Array.isArray(payload.keys) && !payload.keys.includes(githubTokenKey));
+        assert.strictEqual(harness.CredentialVault.hasPersistedValue(githubTokenKey), false);
+        assert.strictEqual(harness.CredentialVault.get(githubTokenKey, ''), '');
+        assert.strictEqual(harness.store[githubTokenKey], undefined);
+    });
+
+    await runTest('NotionOAuth.getStatus: reports locked vault guidance when sensitive credentials are persisted but not unlocked', async () => {
+        const harness = createHarness();
+
+        await unlockCredentialVault(harness, 'vault-passphrase');
+        await harness.NotionOAuth.saveConfig({
+            clientId: 'client_123',
+            clientSecret: 'secret_456',
+            redirectUri: 'https://www.notion.so/'
+        });
+        await harness.NotionOAuth.setRefreshToken('refresh_locked');
+        harness.CredentialVault.lock();
+
+        const status = harness.NotionOAuth.getStatus();
+
+        assert.strictEqual(status.connected, false);
+        assert.strictEqual(status.apiKeyPlaceholder, '解锁保险箱后可使用已保存配置');
+        assert.ok(status.text.includes('敏感凭证已保存在保险箱中'));
+    });
 
     await runTest('buildAuthorizeUrl: includes expected Notion OAuth query params', async () => {
         const harness = createHarness();
@@ -1020,6 +1124,122 @@ function createWorkspaceVisualizationFixture(harness) {
         });
     });
 
+    await runTest('AIAssistant._buildBlockUpdatePayload: updates equation expression directly', async () => {
+        const harness = createHarness();
+
+        const payload = harness.AIAssistant._buildBlockUpdatePayload({
+            type: 'equation',
+            equation: {
+                expression: 'x^2'
+            }
+        }, 'E=mc^2');
+
+        assert.deepStrictEqual(payload, {
+            equation: {
+                expression: 'E=mc^2'
+            }
+        });
+    });
+
+    await runTest('AIAssistant._buildBlockUpdatePayload: updates bookmark url while preserving caption', async () => {
+        const harness = createHarness();
+
+        const payload = harness.AIAssistant._buildBlockUpdatePayload({
+            type: 'bookmark',
+            bookmark: {
+                url: 'https://old.example.com',
+                caption: [{ plain_text: 'old caption' }]
+            }
+        }, 'https://new.example.com');
+
+        assert.deepStrictEqual(payload, {
+            bookmark: {
+                url: 'https://new.example.com',
+                caption: [{ plain_text: 'old caption' }]
+            }
+        });
+    });
+
+    await runTest('AIAssistant._buildBlockUpdatePayload: rejects non-http bookmark targets with clear guidance', async () => {
+        const harness = createHarness();
+
+        assert.throws(() => harness.AIAssistant._buildBlockUpdatePayload({
+            type: 'bookmark',
+            bookmark: {
+                url: 'https://old.example.com'
+            }
+        }, 'mailto:test@example.com'), /bookmark 块仅支持更新为 http\/https URL/);
+    });
+
+    await runTest('AIAssistant._buildBlockUpdatePayload: updates embed url while preserving caption', async () => {
+        const harness = createHarness();
+
+        const payload = harness.AIAssistant._buildBlockUpdatePayload({
+            type: 'embed',
+            embed: {
+                url: 'https://old.example.com/embed',
+                caption: [{ plain_text: 'old caption' }]
+            }
+        }, 'https://new.example.com/embed');
+
+        assert.deepStrictEqual(payload, {
+            embed: {
+                url: 'https://new.example.com/embed',
+                caption: [{ plain_text: 'old caption' }]
+            }
+        });
+    });
+
+    await runTest('AIAssistant._buildBlockUpdatePayload: rejects non-http embed targets with clear guidance', async () => {
+        const harness = createHarness();
+
+        assert.throws(() => harness.AIAssistant._buildBlockUpdatePayload({
+            type: 'embed',
+            embed: {
+                url: 'https://old.example.com/embed'
+            }
+        }, 'not-a-url'), /embed 块仅支持更新为 http\/https URL/);
+    });
+
+    await runTest('AIAssistant._buildBlockUpdatePayload: updates template rich text', async () => {
+        const harness = createHarness();
+
+        const payload = harness.AIAssistant._buildBlockUpdatePayload({
+            type: 'template',
+            template: {
+                rich_text: [{ plain_text: 'old template' }]
+            }
+        }, 'new template');
+
+        assert.deepStrictEqual(payload, {
+            template: {
+                rich_text: [{ type: 'text', text: { content: 'new template' } }]
+            }
+        });
+    });
+
+    await runTest('AIAssistant._buildBlockUpdatePayload: reports explicit Notion API boundary for link_preview blocks', async () => {
+        const harness = createHarness();
+
+        assert.throws(() => harness.AIAssistant._buildBlockUpdatePayload({
+            type: 'link_preview',
+            link_preview: {
+                url: 'https://example.com'
+            }
+        }, 'https://new.example.com'), /link_preview 块是 Notion API 的只读返回类型/);
+    });
+
+    await runTest('AIAssistant._buildBlockUpdatePayload: reports explicit table_row boundary for single-content updates', async () => {
+        const harness = createHarness();
+
+        assert.throws(() => harness.AIAssistant._buildBlockUpdatePayload({
+            type: 'table_row',
+            table_row: {
+                cells: [[{ plain_text: 'old cell' }]]
+            }
+        }, 'new cell'), /table_row 块当前无法通过单一 content 参数安全更新单元格/);
+    });
+
     await runTest('AIAssistant.executeIntent: falls back to AGENT_TOOLS for create_comment reply by comment_id', async () => {
         const harness = createHarness();
         const calls = [];
@@ -1085,6 +1305,48 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(harness.AIAssistant.IntentDispatcher.canExecuteDirectly('create_comment'), true);
     });
 
+    await runTest('AIAssistant.IntentDispatcher: all mapped intent handlers resolve to implemented functions or explicit help seam', async () => {
+        const harness = createHarness();
+
+        for (const [intent, handlerName] of Object.entries(harness.AIAssistant._INTENT_HANDLER_MAP)) {
+            const executor = harness.AIAssistant.IntentDispatcher.resolveExecutor(intent);
+            assert.ok(executor, `missing executor for ${intent}`);
+
+            if (handlerName === 'getHelpMessage') {
+                assert.strictEqual(executor.source, 'intent');
+                continue;
+            }
+
+            assert.strictEqual(typeof harness.AIAssistant[handlerName], 'function', `${intent} -> ${handlerName} is not implemented`);
+        }
+    });
+
+    await runTest('AIAssistant.IntentDispatcher.execute: normalizes handler runtime failures into structured error results', async () => {
+        const harness = createHarness();
+        const originalHandler = harness.AIAssistant.handleSummarize;
+
+        harness.AIAssistant.handleSummarize = async () => {
+            throw new Error('summarize handler failed');
+        };
+
+        const result = await harness.AIAssistant.IntentDispatcher.execute({
+            intent: 'summarize',
+            params: { page_name: '项目计划' }
+        }, {
+            notionApiKey: 'manual_api_key',
+            aiApiKey: 'ai_key'
+        });
+
+        assertStructuredAssistantResult(result, {
+            source: 'intent',
+            name: 'summarize',
+            status: 'error',
+            textContains: ['错误: summarize handler failed']
+        });
+
+        harness.AIAssistant.handleSummarize = originalHandler;
+    });
+
     await runTest('AIAssistant._buildGuardContext: derives apiKey and default item name from page context', async () => {
         const harness = createHarness();
 
@@ -1121,6 +1383,55 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.deepStrictEqual(calls, [
             ['guard', 'updateDatabase', 'db_guard_1', 'db_guard_1', 'manual_api_key']
         ]);
+    });
+
+    await runTest('OperationGuard.execute: writes guard.denied audit event when permission is insufficient', async () => {
+        const harness = createHarness();
+        harness.store[harness.CONFIG.STORAGE_KEYS.PERMISSION_LEVEL] = 0;
+        harness.store[harness.CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG] = true;
+
+        await assert.rejects(
+            harness.OperationGuard.execute('appendBlocks', async () => ({ ok: true }), {
+                pageId: 'page_guard_denied_1',
+                itemName: '受限页面'
+            }),
+            /权限不足/
+        );
+
+        const logs = harness.OperationLog.getAll();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(logs[0].audit_event, 'guard.denied');
+        assert.strictEqual(logs[0].result.status, 'denied');
+        assert.strictEqual(logs[0].guard.decision, 'deny');
+        assert.strictEqual(logs[0].target.type, 'notion_page');
+        assert.ok(logs[0].target.id.includes('…'));
+    });
+
+    await runTest('OperationGuard.execute: records guard decision before successful write audit event', async () => {
+        const harness = createHarness();
+        harness.store[harness.CONFIG.STORAGE_KEYS.PERMISSION_LEVEL] = 1;
+        harness.store[harness.CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG] = true;
+
+        const result = await harness.OperationGuard.execute('appendBlocks', async () => ({ ok: true }), {
+            actor: 'ai',
+            source: 'ai-agent-loop',
+            pageId: 'page_guard_success_1',
+            itemName: '项目计划',
+            content: '新增执行摘要'
+        });
+
+        assert.deepStrictEqual(result, { ok: true });
+
+        const logs = harness.OperationLog.getAll();
+        assert.strictEqual(logs.length, 2);
+        assert.strictEqual(logs[0].audit_event, 'write.block.inserted');
+        assert.strictEqual(logs[0].actor, 'ai');
+        assert.strictEqual(logs[0].source, 'ai-agent-loop');
+        assert.strictEqual(logs[0].result.status, 'success');
+        assert.strictEqual(logs[0].payload.contentPreview, '新增执行摘要');
+        assert.strictEqual(logs[1].audit_event, 'guard.decision');
+        assert.strictEqual(logs[1].guard.decision, 'allow');
+        assert.strictEqual(logs[1].result.status, 'allow');
     });
 
     await runTest('AIAssistant.quickParseIntent: recognizes comment detail lookup', async () => {
@@ -1598,6 +1909,160 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(result.results[0].name, 'Alice');
     });
 
+    await runTest('NotionAPI.queryDatabase: sends filter, sorts, cursor and page_size together', async () => {
+        const harness = createHarness();
+        let capturedRequest = null;
+
+        harness.setRequestHandler((options) => {
+            capturedRequest = options;
+            respondJson(options, 200, {
+                results: [],
+                has_more: false,
+                next_cursor: null
+            });
+        });
+
+        const result = await harness.NotionAPI.queryDatabase(
+            'db_query_1',
+            { property: 'Name', title: { contains: 'Docker' } },
+            [{ timestamp: 'created_time', direction: 'descending' }],
+            'cursor_9',
+            'manual_api_key',
+            25
+        );
+
+        assert.strictEqual(capturedRequest.method, 'POST');
+        assert.strictEqual(capturedRequest.url, 'https://api.notion.com/v1/databases/db_query_1/query');
+        assert.strictEqual(capturedRequest.headers['Notion-Version'], harness.CONFIG.API.NOTION_VERSION);
+        assert.deepStrictEqual(JSON.parse(capturedRequest.data), {
+            filter: { property: 'Name', title: { contains: 'Docker' } },
+            sorts: [{ timestamp: 'created_time', direction: 'descending' }],
+            start_cursor: 'cursor_9',
+            page_size: 25
+        });
+        assert.deepStrictEqual(result, {
+            results: [],
+            has_more: false,
+            next_cursor: null
+        });
+    });
+
+    await runTest('NotionAPI.queryDatabase: treats legacy numeric fourth argument as page_size', async () => {
+        const harness = createHarness();
+        let capturedRequest = null;
+
+        harness.setRequestHandler((options) => {
+            capturedRequest = options;
+            respondJson(options, 200, {
+                results: [],
+                has_more: false,
+                next_cursor: null
+            });
+        });
+
+        await harness.NotionAPI.queryDatabase('db_query_legacy', null, null, 20, 'manual_api_key');
+
+        assert.strictEqual(capturedRequest.method, 'POST');
+        assert.strictEqual(capturedRequest.url, 'https://api.notion.com/v1/databases/db_query_legacy/query');
+        assert.deepStrictEqual(JSON.parse(capturedRequest.data), {
+            page_size: 20
+        });
+    });
+
+    await runTest('AIAssistant.handleBatchTranslate: requests the first 20 pages via page_size before translating', async () => {
+        const harness = createHarness();
+        let capturedArgs = null;
+        const writes = [];
+
+        harness.AIAssistant.checkConfig = () => ({ valid: true });
+        harness.OperationGuard.canExecute = () => true;
+        harness.ChatState.updateLastMessage = () => {};
+        harness.ConfirmationDialog.show = async () => true;
+        harness.NotionAPI.queryDatabase = async (...args) => {
+            capturedArgs = args;
+            return {
+                results: [{
+                    id: 'page_translate_1',
+                    archived: false,
+                    properties: {
+                        title: {
+                            title: [{ plain_text: 'Translate Me' }]
+                        }
+                    }
+                }]
+            };
+        };
+        harness.AIAssistant._extractPageContent = async () => '原文内容';
+        harness.AIService.requestChat = async () => 'Translated body';
+        harness.AIAssistant._textToBlocks = () => [];
+        harness.AIAssistant._executeGuardedPageWrite = async (...args) => {
+            writes.push(args);
+            return { ok: true };
+        };
+
+        const result = await harness.AIAssistant.handleBatchTranslate({
+            database_id: 'db_translate',
+            target_language: '英文'
+        }, {
+            notionApiKey: 'manual_api_key',
+            aiApiKey: 'ai_key'
+        });
+
+        assert.deepStrictEqual(capturedArgs, ['db_translate', null, null, null, 'manual_api_key', 20]);
+        assert.strictEqual(writes.length, 1);
+        assert.ok(String(result).includes('批量翻译完成'));
+    });
+
+    await runTest('AIAssistant.handleBatchAnalyze: passes the requested limit through queryDatabase page_size', async () => {
+        const harness = createHarness();
+        let capturedArgs = null;
+        const prompts = [];
+
+        harness.AIAssistant.checkConfig = () => ({ valid: true });
+        harness.ChatState.updateLastMessage = () => {};
+        harness.NotionAPI.queryDatabase = async (...args) => {
+            capturedArgs = args;
+            return {
+                results: [{
+                    id: 'page_analyze_1',
+                    archived: false,
+                    properties: {
+                        title: {
+                            title: [{ plain_text: 'Page A' }]
+                        }
+                    }
+                }, {
+                    id: 'page_analyze_2',
+                    archived: false,
+                    properties: {
+                        title: {
+                            title: [{ plain_text: 'Page B' }]
+                        }
+                    }
+                }]
+            };
+        };
+        harness.AIAssistant._extractPageContent = async (pageId) => `content:${pageId}`;
+        harness.AIService.requestChat = async (prompt) => {
+            prompts.push(prompt);
+            return 'analysis report';
+        };
+
+        const result = await harness.AIAssistant.handleBatchAnalyze({
+            database_id: 'db_analyze',
+            limit: 7,
+            analysis_prompt: '分析趋势'
+        }, {
+            notionApiKey: 'manual_api_key',
+            aiApiKey: 'ai_key'
+        });
+
+        assert.deepStrictEqual(capturedArgs, ['db_analyze', null, null, null, 'manual_api_key', 7]);
+        assert.ok(prompts[0].includes('分析要求：分析趋势'));
+        assert.ok(prompts[0].includes('content:page_analyze_1'));
+        assert.ok(String(result).includes('共分析 2 个页面'));
+    });
+
     await runTest('AIAssistant.AGENT_TOOLS.search_workspace: returns structured result output', async () => {
         const harness = createHarness();
 
@@ -1634,6 +2099,296 @@ function createWorkspaceVisualizationFixture(harness) {
                 '[页面] 项目计划 (ID: page123, URL: https://www.notion.so/page123)'
             ]
         });
+    });
+
+    await runTest('AIAssistant.AGENT_TOOLS.cross_source_search: filters GitHub source inside the active database', async () => {
+        const harness = createHarness();
+        let capturedBody = null;
+
+        harness.NotionAPI.request = async (method, url, body) => {
+            assert.strictEqual(method, 'POST');
+            assert.strictEqual(url, '/databases/db_cross_source/query');
+            capturedBody = body;
+            return {
+                results: [{
+                    object: 'page',
+                    id: 'page-cross-1',
+                    properties: {
+                        Name: { type: 'title', title: [{ plain_text: 'Repo Alpha' }] },
+                        来源: { rich_text: [{ text: { content: 'GitHub' } }] },
+                        来源类型: { rich_text: [{ text: { content: 'Repos' } }] },
+                        描述: { rich_text: [{ text: { content: 'Alpha repo toolkit' } }] },
+                        链接: { url: 'https://github.com/smith/repo-alpha' }
+                    }
+                }, {
+                    object: 'page',
+                    id: 'page-cross-2',
+                    properties: {
+                        Name: { type: 'title', title: [{ plain_text: 'Linux Thread' }] },
+                        来源: { rich_text: [{ text: { content: 'Linux.do' } }] },
+                        来源类型: { rich_text: [{ text: { content: 'Topics' } }] },
+                        描述: { rich_text: [{ text: { content: 'Forum notes' } }] },
+                        链接: { url: 'https://linux.do/t/123' }
+                    }
+                }]
+            };
+        };
+
+        const result = await harness.AIAssistant.AGENT_TOOLS.cross_source_search.execute({
+            query: 'repo',
+            source: 'github',
+            limit: 5
+        }, {
+            notionApiKey: 'manual_api_key',
+            notionDatabaseId: 'db_cross_source'
+        });
+
+        assert.deepStrictEqual(capturedBody, {
+            page_size: 5,
+            filter: {
+                property: '来源',
+                rich_text: { contains: 'GitHub' }
+            }
+        });
+        assertStructuredToolResult(result, {
+            name: 'cross_source_search',
+            title: '跨源搜索结果',
+            fields: [
+                { label: '总数', value: 1 },
+                { label: '来源', value: 'github' },
+                { label: '关键词', value: 'repo' }
+            ],
+            bullets: [
+                '[GitHub/Repos] Repo Alpha (https://github.com/smith/repo-alpha)'
+            ]
+        });
+    });
+
+    await runTest('AIAssistant.AGENT_TOOLS.recommend_similar: returns structured recommendations from AI-ranked candidates', async () => {
+        const harness = createHarness();
+        const refPage = {
+            object: 'page',
+            id: 'page-ref',
+            properties: {
+                Name: { type: 'title', title: [{ plain_text: 'Reference Doc' }] },
+                描述: { rich_text: [{ text: { content: 'Docker build pipeline' } }] },
+                标签: { multi_select: [{ name: 'docker' }, { name: 'ci' }] }
+            }
+        };
+        const candidateA = {
+            object: 'page',
+            id: 'page-a',
+            properties: {
+                Name: { type: 'title', title: [{ plain_text: 'Docker Thread' }] },
+                描述: { rich_text: [{ text: { content: 'Docker notes' } }] },
+                标签: { multi_select: [{ name: 'docker' }] },
+                来源: { rich_text: [{ text: { content: 'Linux.do' } }] },
+                链接: { url: 'https://linux.do/t/1' }
+            }
+        };
+        const candidateB = {
+            object: 'page',
+            id: 'page-b',
+            properties: {
+                Name: { type: 'title', title: [{ plain_text: 'Repo Beta' }] },
+                描述: { rich_text: [{ text: { content: 'CI helper repo' } }] },
+                标签: { multi_select: [{ name: 'ci' }] },
+                来源: { rich_text: [{ text: { content: 'GitHub' } }] },
+                链接: { url: 'https://github.com/smith/repo-beta' }
+            }
+        };
+
+        harness.NotionAPI.search = async (query, filter) => {
+            if (query === 'Reference Doc') {
+                return { results: [refPage], has_more: false };
+            }
+            if (query === '' && filter?.property === 'object') {
+                return { results: [{ id: 'db-rec-1' }, { id: 'db-rec-2' }], has_more: false };
+            }
+            throw new Error(`Unexpected search query: ${query}`);
+        };
+        harness.NotionAPI.request = async (method, url, body) => {
+            assert.strictEqual(method, 'POST');
+            assert.deepStrictEqual(body, { page_size: 50 });
+            if (url === '/databases/db-rec-1/query') {
+                return { results: [refPage, candidateA, candidateB] };
+            }
+            if (url === '/databases/db-rec-2/query') {
+                return { results: [] };
+            }
+            throw new Error(`Unexpected request URL: ${url}`);
+        };
+        harness.AIService.request = async () => '2,1';
+
+        const result = await harness.AIAssistant.AGENT_TOOLS.recommend_similar.execute({
+            page_name: 'Reference Doc'
+        }, {
+            notionApiKey: 'manual_api_key',
+            aiApiKey: 'ai_key'
+        });
+
+        assertStructuredToolResult(result, {
+            name: 'recommend_similar',
+            title: '相似内容推荐',
+            fields: [
+                { label: '参考页面', value: 'Reference Doc' },
+                { label: '推荐数', value: 2 }
+            ],
+            bullets: [
+                '[GitHub] Repo Beta (https://github.com/smith/repo-beta)',
+                '[Linux.do] Docker Thread (https://linux.do/t/1)'
+            ]
+        });
+    });
+
+    await runTest('AIAssistant.AGENT_TOOLS.recommend_similar: returns structured error when AI key is missing', async () => {
+        const harness = createHarness();
+
+        harness.NotionAPI.search = async (query) => {
+            if (query === 'Reference Doc') {
+                return {
+                    results: [{
+                        object: 'page',
+                        id: 'page-ref',
+                        properties: {
+                            Name: { type: 'title', title: [{ plain_text: 'Reference Doc' }] }
+                        }
+                    }],
+                    has_more: false
+                };
+            }
+            throw new Error(`Unexpected search query: ${query}`);
+        };
+
+        const result = await harness.AIAssistant.AGENT_TOOLS.recommend_similar.execute({
+            page_name: 'Reference Doc'
+        }, {
+            notionApiKey: 'manual_api_key'
+        });
+
+        assertStructuredToolResult(result, {
+            name: 'recommend_similar',
+            status: 'error',
+            textContains: ['AI API Key']
+        });
+    });
+
+    await runTest('AIAssistant.handleDeepResearch: workspace scope uses workspace search and returns scope summary', async () => {
+        const harness = createHarness();
+        const searchCalls = [];
+
+        harness.AIAssistant.checkConfig = () => ({ valid: true });
+        harness.AIService.requestChat = async (prompt) => {
+            if (String(prompt).includes('拆分为3-5个搜索关键词')) {
+                return 'Docker\nCompose';
+            }
+            return '# 研究报告: Docker\n## 摘要\n工作区报告';
+        };
+        harness.NotionAPI.search = async (query) => {
+            searchCalls.push(query);
+            return {
+                results: [{
+                    object: 'page',
+                    id: `page-${query.toLowerCase()}`,
+                    url: `https://www.notion.so/${query.toLowerCase()}`,
+                    properties: {
+                        Name: { type: 'title', title: [{ plain_text: `${query} 指南` }] }
+                    }
+                }],
+                has_more: false
+            };
+        };
+        harness.NotionAPI.queryDatabase = async () => {
+            throw new Error('workspace scope should not query database directly');
+        };
+        harness.AIAssistant._extractPageContent = async (pageId) => `content:${pageId}`;
+
+        const result = await harness.AIAssistant.handleDeepResearch({
+            research_topic: 'Docker',
+            scope: 'workspace'
+        }, {
+            notionApiKey: 'manual_api_key',
+            aiApiKey: 'ai_key',
+            notionDatabaseId: 'db_workspace'
+        });
+
+        assert.deepStrictEqual(searchCalls, ['Docker', 'Compose']);
+        assert.ok(String(result).includes('工作区报告'), String(result));
+        assert.ok(String(result).includes('范围：工作区'), String(result));
+        assert.ok(String(result).includes('Docker 指南'), String(result));
+    });
+
+    await runTest('AIAssistant.handleDeepResearch: database scope queries the effective database instead of workspace search', async () => {
+        const harness = createHarness();
+        const queryCalls = [];
+        let searchCallCount = 0;
+
+        harness.AIAssistant.checkConfig = () => ({ valid: true });
+        harness.AIService.requestChat = async (prompt) => {
+            if (String(prompt).includes('拆分为3-5个搜索关键词')) {
+                return 'Docker\nCI';
+            }
+            return '# 研究报告: Docker\n## 摘要\n数据库报告';
+        };
+        harness.TargetState.getEffectiveAIDatabaseId = () => 'db_target';
+        harness.NotionAPI.fetchDatabase = async () => ({
+            title: [{ plain_text: '知识库' }],
+            properties: {
+                Name: { type: 'title' },
+                描述: { type: 'rich_text' },
+                备注: { type: 'rich_text' }
+            }
+        });
+        harness.NotionAPI.search = async () => {
+            searchCallCount++;
+            return { results: [], has_more: false };
+        };
+        harness.NotionAPI.queryDatabase = async (...args) => {
+            queryCalls.push(args);
+            const keyword = queryCalls.length === 1 ? 'Docker' : 'CI';
+            return {
+                results: [{
+                    object: 'page',
+                    id: `page-${keyword.toLowerCase()}`,
+                    url: `https://www.notion.so/${keyword.toLowerCase()}`,
+                    properties: {
+                        Name: { type: 'title', title: [{ plain_text: `${keyword} 指南` }] },
+                        描述: { rich_text: [{ plain_text: `${keyword} 说明` }] }
+                    }
+                }],
+                has_more: false,
+                next_cursor: null
+            };
+        };
+        harness.AIAssistant._extractPageContent = async (pageId) => `content:${pageId}`;
+
+        const result = await harness.AIAssistant.handleDeepResearch({
+            research_topic: 'Docker',
+            scope: 'database'
+        }, {
+            notionApiKey: 'manual_api_key',
+            aiApiKey: 'ai_key',
+            notionDatabaseId: 'legacy_db'
+        });
+
+        assert.strictEqual(searchCallCount, 0);
+        assert.strictEqual(queryCalls.length, 2);
+        assert.deepStrictEqual(queryCalls[0], [
+            'db_target',
+            {
+                or: [
+                    { property: 'Name', title: { contains: 'Docker' } },
+                    { property: '描述', rich_text: { contains: 'Docker' } }
+                ]
+            },
+            null,
+            null,
+            'manual_api_key',
+            25
+        ]);
+        assert.ok(String(result).includes('数据库报告'), String(result));
+        assert.ok(String(result).includes('范围：数据库「知识库」'), String(result));
+        assert.ok(String(result).includes('Docker 指南'), String(result));
     });
 
     await runTest('AIAssistant.AGENT_TOOLS.fetch_page_blocks: returns structured block tree output', async () => {
@@ -2681,6 +3436,109 @@ function createWorkspaceVisualizationFixture(harness) {
         ]);
     });
 
+    await runTest('UI.getSelectedBookmarks: returns only selected items from current loaded bookmarks', async () => {
+        const harness = createHarness();
+        const linuxdoItem = { topic_id: 101, title: 'Post A' };
+        const githubItem = {
+            source: 'github',
+            sourceType: 'repos',
+            itemKey: 'smith/repo-a',
+            title: 'Repo A',
+            raw: { full_name: 'smith/repo-a' }
+        };
+        const unselectedItem = { topic_id: 202, title: 'Post B' };
+
+        harness.UI.bookmarks = [linuxdoItem, githubItem, unselectedItem];
+        harness.UI.selectedBookmarks = new Set(['101', 'gh:repos:smith/repo-a']);
+
+        const selected = harness.UI.getSelectedBookmarks();
+
+        assert.deepStrictEqual(selected, [linuxdoItem, githubItem]);
+    });
+
+    await runTest('UI.buildGitHubObsidianMarkdown: renders gist metadata and file list for Obsidian export', async () => {
+        const harness = createHarness();
+
+        const note = await harness.UI.buildGitHubObsidianMarkdown({
+            source: 'github',
+            sourceType: 'gists',
+            itemKey: 'gist-1',
+            title: 'Useful Snippet',
+            raw: {
+                id: 'gist-1',
+                html_url: 'https://gist.github.com/smith/gist-1',
+                description: 'Useful Snippet',
+                updated_at: '2026-06-03T08:00:00Z',
+                owner: { login: 'smith' },
+                files: {
+                    'demo.js': { language: 'JavaScript', size: 128 },
+                    'notes.md': { language: 'Markdown', size: 64 }
+                }
+            }
+        });
+
+        assert.strictEqual(note.title, 'Useful Snippet');
+        assert.strictEqual(note.fileName, 'Useful Snippet');
+        assert.strictEqual(note.url, 'https://gist.github.com/smith/gist-1');
+        assert.ok(note.markdown.includes('source: "GitHub"'), note.markdown);
+        assert.ok(note.markdown.includes('source_type: "Gists"'), note.markdown);
+        assert.ok(note.markdown.includes('gist_id: "gist-1"'), note.markdown);
+        assert.ok(note.markdown.includes('## 文件列表'), note.markdown);
+        assert.ok(note.markdown.includes('`demo.js`'), note.markdown);
+        assert.ok(note.markdown.includes('GitHub Gist'), note.markdown);
+    });
+
+    await runTest('UI.exportGitHubSelectedToObsidian: writes selected GitHub gist note and returns report-friendly success payload', async () => {
+        const harness = createHarness();
+        const writes = [];
+
+        harness.setRequestHandler((options) => {
+            if (options.method === 'PUT' && options.url.includes('/vault/')) {
+                writes.push({
+                    url: options.url,
+                    body: options.data,
+                    auth: options.headers?.Authorization
+                });
+                return respondJson(options, 201, {});
+            }
+            throw new Error(`Unexpected request: ${options.method} ${options.url}`);
+        });
+
+        const results = await harness.UI.exportGitHubSelectedToObsidian([{
+            source: 'github',
+            sourceType: 'gists',
+            itemKey: 'gist-1',
+            title: 'Useful Snippet',
+            raw: {
+                id: 'gist-1',
+                html_url: 'https://gist.github.com/smith/gist-1',
+                description: 'Useful Snippet',
+                updated_at: '2026-06-03T08:00:00Z',
+                owner: { login: 'smith' },
+                files: {
+                    'demo.js': { language: 'JavaScript', size: 128 }
+                }
+            }
+        }], {
+            obsUrl: 'https://127.0.0.1:27124',
+            obsKey: 'obs-key',
+            obsDir: 'GitHub Vault'
+        });
+
+        assert.strictEqual(writes.length, 1);
+        assert.ok(writes[0].url.includes('GitHub%20Vault%2FUseful%20Snippet.md'), writes[0].url);
+        assert.strictEqual(writes[0].auth, 'Bearer obs-key');
+        assert.ok(String(writes[0].body).includes('GitHub Gist'), String(writes[0].body));
+        assert.deepStrictEqual(results, {
+            success: [{
+                title: 'Useful Snippet',
+                url: 'https://gist.github.com/smith/gist-1'
+            }],
+            failed: [],
+            skipped: []
+        });
+    });
+
     await runTest('UI.buildWorkspaceVisualizationModel: aggregates workspace records into timeline, relationships and funnel summaries', async () => {
         const harness = createHarness();
         const { databases, records } = createWorkspaceVisualizationFixture(harness);
@@ -3218,6 +4076,51 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(String(result).includes('编辑版本已追加到页面'));
     });
 
+    await runTest('AIAssistant.handleEditContent: falls back to append-version when exact markdown replacement fails', async () => {
+        const harness = createHarness();
+        const calls = [];
+
+        harness.AIAssistant.checkConfig = () => ({ valid: true });
+        harness.AIAssistant._resolvePageId = async () => ({ id: 'page_edit_2', name: '项目计划' });
+        harness.AIAssistant._extractPageContent = async () => '原文内容';
+        harness.AIService.requestChat = async (prompt) => {
+            if (String(prompt).includes('只能返回 JSON')) {
+                return JSON.stringify({
+                    mode: 'update_content',
+                    content_updates: [{ old_str: '原文内容', new_str: '精确改写' }]
+                });
+            }
+            return '## 完整改写版本';
+        };
+        harness.NotionAPI.searchReplacePageMarkdown = async (pageId) => {
+            calls.push(['searchReplacePageMarkdown', pageId]);
+            throw new Error('old_str 未命中页面 Markdown');
+        };
+        harness.NotionAPI.appendPageMarkdown = async (pageId) => {
+            calls.push(['appendPageMarkdown', pageId]);
+            return { ok: true };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.pageId]);
+            return executor();
+        };
+
+        const result = await harness.AIAssistant.handleEditContent({
+            page_name: '项目计划',
+            content_prompt: '改得更简洁'
+        }, {
+            notionApiKey: 'manual_api_key',
+            aiApiKey: 'ai_key'
+        });
+
+        assert.deepStrictEqual(calls[0], ['guard', 'updatePageMarkdown', 'page_edit_2']);
+        assert.deepStrictEqual(calls[1], ['searchReplacePageMarkdown', 'page_edit_2']);
+        assert.deepStrictEqual(calls[2], ['guard', 'appendBlocks', 'page_edit_2']);
+        assert.deepStrictEqual(calls[3], ['appendPageMarkdown', 'page_edit_2']);
+        assert.ok(String(result).includes('编辑版本已追加到页面'));
+        assert.ok(String(result).includes('原位精确替换失败'));
+    });
+
     await runTest('AIClassifier.classifyPage: routes page classification writes through OperationGuard.execute', async () => {
         const harness = createHarness();
         const calls = [];
@@ -3363,6 +4266,7 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(gmShim.includes(GENERATED_SECTION_MARKERS.gmShimEnd));
         assert.ok(contentScript.includes('await _gmInitStorage();'));
         assert.ok(contentScript.includes('console.log("patched");'));
+        assert.ok(contentScript.includes('const LD_NOTION_ACTIVE_ROOT_SELECTOR = "[data-ldb-root], .ldb-panel, .ldb-notion-panel, .gclip-panel";'));
         assert.ok(popupHtml.includes('id="import-bookmarks"'));
         assert.ok(popupHtml.includes('<script src="popup.js"></script>'));
         assert.ok(popupScript.includes('LD_NOTION_IMPORT_BOOKMARKS'));
@@ -3387,6 +4291,11 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(!manifest.host_permissions.includes('http://*/*'));
         assert.ok(!boundedManifest.host_permissions.includes('https://*/*'));
         assert.ok(!boundedManifest.host_permissions.includes('http://*/*'));
+        assert.ok(manifest.content_scripts[0].matches.includes('https://github.com/*'));
+        assert.ok(manifest.content_scripts[0].matches.includes('https://www.zhihu.com/*'));
+        assert.ok(manifest.content_scripts[0].matches.includes('https://*/*'));
+        assert.ok(manifest.content_scripts[0].exclude_matches.includes('*://127.0.0.1/*'));
+        assert.ok(manifest.content_scripts[0].exclude_matches.includes('https://www.google.com/*'));
     });
 
     await runTest('scripts/build-extension.js: validates critical bridge assumptions before writing extension output', async () => {
@@ -3399,6 +4308,9 @@ function createWorkspaceVisualizationFixture(harness) {
         const contentScript = `
             ${GENERATED_SECTION_MARKERS.gmShimStart}
             ${GENERATED_SECTION_MARKERS.bookmarkEventBridgeStart}
+            const LD_NOTION_ACTIVE_ROOT_SELECTOR = "[data-ldb-root], .ldb-panel, .ldb-notion-panel, .gclip-panel";
+            function hasActiveLdNotionRoot() { return true; }
+            if (!hasActiveLdNotionRoot()) { throw new Error("未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。"); }
             window.addEventListener("ld-notion-request-bookmarks", () => {});
             window.addEventListener("ld-notion-search-bookmarks", () => {});
             ${GENERATED_SECTION_MARKERS.bookmarkEventBridgeEnd}
@@ -3513,7 +4425,9 @@ function createWorkspaceVisualizationFixture(harness) {
             assert.ok(contentScript.includes(GENERATED_SECTION_MARKERS.popupMessageBridgeEnd));
             assert.ok(contentScript.includes('LD-Notion Chrome Extension — Content Script'));
             assert.ok(contentScript.includes('await _gmInitStorage();'));
+            assert.ok(contentScript.includes('const LD_NOTION_ACTIVE_ROOT_SELECTOR = "[data-ldb-root], .ldb-panel, .ldb-notion-panel, .gclip-panel";'));
             assert.ok(contentScript.includes('chrome.bookmarks.getTree()'));
+            assert.ok(contentScript.includes('未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。'));
             assert.ok(contentScript.includes('return !!(typeof chrome !== "undefined" && chrome.bookmarks);'));
             assert.ok(!contentScript.includes('// ==UserScript=='));
             assert.ok(backgroundScript.includes('message.type !== "GM_xmlhttpRequest"'));
@@ -3523,8 +4437,313 @@ function createWorkspaceVisualizationFixture(harness) {
             assert.ok(popupScript.includes('LD_NOTION_IMPORT_BOOKMARKS'));
             assert.ok(popupScript.includes('LD_NOTION_IMPORT_GITHUB'));
             assert.ok(popupScript.includes('LD_NOTION_SET_BOOKMARK_SOURCE'));
+            assert.deepStrictEqual(manifest.content_scripts[0].matches, [
+                'https://linux.do/*',
+                'https://www.notion.so/*',
+                'https://notion.so/*',
+                'https://github.com/*',
+                'https://www.github.com/*',
+                'https://www.zhihu.com/*',
+                'https://zhuanlan.zhihu.com/*',
+                'http://*/*',
+                'https://*/*'
+            ]);
+            assert.deepStrictEqual(manifest.content_scripts[0].exclude_matches, [
+                'https://www.google.com/*',
+                'https://www.google.com.hk/*',
+                'https://www.baidu.com/*',
+                'https://www.bing.com/*',
+                'https://duckduckgo.com/*',
+                'https://mail.google.com/*',
+                'https://outlook.live.com/*',
+                '*://localhost/*',
+                '*://127.0.0.1/*'
+            ]);
         } finally {
             fs.rmSync(tempOutDir, { recursive: true, force: true });
+        }
+    });
+
+    await runTest('BookmarkAutoImporter.buildPageIndex: indexes tracked pages by bookmark id, url and page id', async () => {
+        const harness = createHarness();
+        const index = harness.BookmarkAutoImporter.buildPageIndex([
+            { pageId: 'page-1', bookmarkId: 'bm-1', url: 'https://example.com/a' },
+            { pageId: 'page-2', bookmarkId: '', url: 'https://example.com/b' }
+        ]);
+
+        assert.strictEqual(index.byBookmarkId.get('bm-1').pageId, 'page-1');
+        assert.strictEqual(index.byBookmarkId.has(''), false);
+        assert.strictEqual(index.byUrl.get('https://example.com/a').pageId, 'page-1');
+        assert.strictEqual(index.byUrl.get('https://example.com/b').pageId, 'page-2');
+        assert.strictEqual(index.byPageId.get('page-2').url, 'https://example.com/b');
+    });
+
+    await runTest('BookmarkAutoImporter.needsUpdate: detects missing page metadata and bookmark field drift', async () => {
+        const harness = createHarness();
+        const bookmark = {
+            id: 'bm-1',
+            title: 'Bookmark A',
+            url: 'https://example.com/a',
+            folderPath: 'Toolbar / Read',
+            dateAdded: '2026-06-01T10:00:00Z'
+        };
+        const snapshot = harness.BookmarkAutoImporter.buildSnapshotEntry(bookmark, 'page-1');
+        const pageMeta = {
+            pageId: 'page-1',
+            bookmarkId: 'bm-1',
+            url: 'https://example.com/a',
+            title: 'Bookmark A',
+            folderPath: 'Toolbar / Read',
+            dateAdded: '2026-06-01T10:00:00.000Z'
+        };
+
+        assert.strictEqual(harness.BookmarkAutoImporter.needsUpdate(bookmark, snapshot, pageMeta), false);
+        assert.strictEqual(harness.BookmarkAutoImporter.needsUpdate(bookmark, snapshot, null), true);
+        assert.strictEqual(harness.BookmarkAutoImporter.needsUpdate(bookmark, snapshot, { ...pageMeta, bookmarkId: 'other' }), true);
+        assert.strictEqual(
+            harness.BookmarkAutoImporter.needsUpdate(
+                { ...bookmark, title: 'Bookmark A Updated' },
+                snapshot,
+                pageMeta
+            ),
+            true
+        );
+        assert.strictEqual(
+            harness.BookmarkAutoImporter.needsUpdate(
+                { ...bookmark, folderPath: 'Toolbar / Archive' },
+                snapshot,
+                pageMeta
+            ),
+            true
+        );
+    });
+
+    await runTest('BookmarkAutoImporter.run: creates, updates, archives deleted bookmarks and preserves failed snapshot entries', async () => {
+        const harness = createHarness();
+        const createdPayloads = [];
+        const updatedPayloads = [];
+        const deletedPageIds = [];
+        const exportedUrls = [];
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID] = 'db-bookmarks';
+        harness.store[harness.CONFIG.STORAGE_KEYS.REQUEST_DELAY] = 0;
+        harness.NotionOAuth.getAccessToken = () => 'manual_api_key';
+        harness.BookmarkAutoImporter.minimumRunGapMs = 0;
+        harness.BookmarkAutoImporter.lastRunAt = 0;
+        harness.BookmarkAutoImporter.isRunning = false;
+        harness.Exporter.isExporting = false;
+        registerBookmarkBridgeMeta(harness);
+
+        const previousSnapshot = {
+            '2': {
+                id: '2',
+                title: 'Old title',
+                url: 'https://example.com/updated',
+                folderPath: 'Folder / Old',
+                dateAdded: '2026-06-02T10:00:00.000Z',
+                pageId: 'page-2'
+            },
+            '3': {
+                id: '3',
+                title: 'Removed bookmark',
+                url: 'https://example.com/deleted',
+                folderPath: 'Folder / Deleted',
+                dateAdded: '2026-06-01T09:00:00.000Z',
+                pageId: 'page-3'
+            },
+            '4': {
+                id: '4',
+                title: 'Failed snapshot',
+                url: 'https://example.com/failed',
+                folderPath: 'Folder / Failed',
+                dateAdded: '2026-05-31T08:00:00.000Z',
+                pageId: 'page-4'
+            }
+        };
+
+        harness.SyncState.updateBookmarkState({
+            snapshot: previousSnapshot,
+            lastSuccessAt: 0
+        });
+
+        harness.BookmarkAutoImporter.loadCurrentBookmarks = async () => ([
+            {
+                id: '1',
+                title: 'New bookmark',
+                url: 'https://example.com/new',
+                folderPath: 'Folder / New',
+                dateAdded: '2026-06-04T12:00:00Z'
+            },
+            {
+                id: '2',
+                title: 'Updated bookmark',
+                url: 'https://example.com/updated',
+                folderPath: 'Folder / Updated',
+                dateAdded: '2026-06-02T10:00:00Z'
+            },
+            {
+                id: '4',
+                title: 'Failed bookmark',
+                url: 'https://example.com/failed',
+                folderPath: 'Folder / Failed Updated',
+                dateAdded: '2026-05-31T08:00:00Z'
+            }
+        ]);
+        harness.BookmarkAutoImporter.fetchTrackedPages = async () => ([
+            {
+                pageId: 'page-2',
+                bookmarkId: '2',
+                url: 'https://example.com/updated',
+                title: 'Old title',
+                folderPath: 'Folder / Old',
+                dateAdded: '2026-06-02T10:00:00.000Z'
+            },
+            {
+                pageId: 'page-3',
+                bookmarkId: '3',
+                url: 'https://example.com/deleted',
+                title: 'Removed bookmark',
+                folderPath: 'Folder / Deleted',
+                dateAdded: '2026-06-01T09:00:00.000Z'
+            },
+            {
+                pageId: 'page-4',
+                bookmarkId: '4',
+                url: 'https://example.com/failed',
+                title: 'Failed snapshot',
+                folderPath: 'Folder / Failed',
+                dateAdded: '2026-05-31T08:00:00.000Z'
+            }
+        ]);
+        harness.BookmarkExporter.setupDatabaseProperties = async (databaseId, apiKey) => {
+            assert.strictEqual(databaseId, 'db-bookmarks');
+            assert.strictEqual(apiKey, 'manual_api_key');
+            return { success: true };
+        };
+        harness.BookmarkExporter.enrichBookmark = async (bookmark) => ({
+            ...bookmark,
+            generatedTitle: `GEN:${bookmark.title}`,
+            generatedSummary: '',
+            inferredTags: [],
+            inferredCategory: ''
+        });
+        harness.BookmarkExporter.markExported = (url) => {
+            exportedUrls.push(url);
+        };
+        harness.NotionAPI.request = async (method, endpoint, payload, apiKey) => {
+            createdPayloads.push({ method, endpoint, payload, apiKey });
+            return { id: 'page-1' };
+        };
+        harness.NotionAPI.updatePage = async (pageId, properties, apiKey) => {
+            updatedPayloads.push({ pageId, properties, apiKey });
+            if (pageId === 'page-4') {
+                throw new Error('update failed');
+            }
+            return { ok: true };
+        };
+        harness.NotionAPI.deletePage = async (pageId, apiKey) => {
+            deletedPageIds.push([pageId, apiKey]);
+            return { ok: true };
+        };
+
+        await harness.BookmarkAutoImporter.run();
+
+        assert.strictEqual(createdPayloads.length, 1);
+        assert.strictEqual(createdPayloads[0].method, 'POST');
+        assert.strictEqual(createdPayloads[0].endpoint, '/pages');
+        assert.strictEqual(createdPayloads[0].payload.parent.database_id, 'db-bookmarks');
+        assert.strictEqual(updatedPayloads.length, 2);
+        assert.strictEqual(updatedPayloads[0].pageId, 'page-2');
+        assert.strictEqual(updatedPayloads[0].apiKey, 'manual_api_key');
+        assert.ok(updatedPayloads[0].properties['标题'], JSON.stringify(updatedPayloads[0].properties));
+        assert.deepStrictEqual(deletedPageIds, [['page-3', 'manual_api_key']]);
+        assert.deepStrictEqual(exportedUrls, [
+            'https://example.com/new',
+            'https://example.com/updated'
+        ]);
+
+        const bookmarkState = harness.SyncState.getBookmarkState();
+        assert.deepStrictEqual(Object.keys(bookmarkState.snapshot).sort(), ['1', '2', '4']);
+        assert.strictEqual(bookmarkState.snapshot['1'].pageId, 'page-1');
+        assert.strictEqual(bookmarkState.snapshot['2'].title, 'Updated bookmark');
+        assert.deepStrictEqual(bookmarkState.snapshot['4'], previousSnapshot['4']);
+        assert.ok(!bookmarkState.snapshot['3']);
+        assert.ok(harness.notifications[0].text.includes('新增 1'), harness.notifications[0].text);
+        assert.ok(harness.notifications[0].text.includes('更新 1'), harness.notifications[0].text);
+        assert.ok(harness.notifications[0].text.includes('归档 1'), harness.notifications[0].text);
+        assert.ok(harness.notifications[0].text.includes('失败 1'), harness.notifications[0].text);
+    });
+
+    await runTest('main: initializes the expected surface on Linux.do, Notion, GitHub, Zhihu and generic pages', async () => {
+        const cases = [
+            {
+                site: 'linuxdo',
+                url: 'https://linux.do/u/test/activity/bookmarks',
+                detect: (harness) => harness.SiteDetector.SITES.LINUX_DO,
+                expected: ['ui', 'update', 'bookmark-auto']
+            },
+            {
+                site: 'notion',
+                url: 'https://www.notion.so/workspace/page',
+                detect: (harness) => harness.SiteDetector.SITES.NOTION,
+                expected: ['notion-ui', 'bookmark-auto']
+            },
+            {
+                site: 'github',
+                url: 'https://github.com/smith-106',
+                detect: (harness) => harness.SiteDetector.SITES.GITHUB,
+                expected: ['ui', 'update', 'github-auto', 'bookmark-auto']
+            },
+            {
+                site: 'zhihu',
+                url: 'https://www.zhihu.com/question/1',
+                detect: (harness) => harness.SiteDetector.SITES.ZHIHU,
+                expected: ['generic-ui']
+            },
+            {
+                site: 'generic',
+                url: 'https://example.com/article',
+                detect: (harness) => harness.SiteDetector.SITES.GENERIC,
+                expected: ['generic-ui']
+            }
+        ];
+
+        for (const testCase of cases) {
+            const harness = createHarness({ url: testCase.url });
+            const events = [];
+
+            harness.DesignSystem.initTheme = () => {};
+            harness.NotionOAuth.handleRedirectCallback = async () => false;
+            harness.NotionOAuth.syncApiKeyInputs = () => {};
+            harness.NotionOAuth.consumeNotice = () => null;
+            harness.SiteDetector.detect = () => testCase.detect(harness);
+            harness.UI.init = () => {
+                events.push('ui');
+            };
+            harness.NotionSiteUI.init = () => {
+                events.push('notion-ui');
+            };
+            harness.UpdateChecker.init = () => {
+                events.push('update');
+            };
+            harness.AutoImporter.init = () => {
+                events.push('auto');
+            };
+            harness.GitHubAutoImporter.init = () => {
+                events.push('github-auto');
+            };
+            harness.BookmarkAutoImporter.init = () => {
+                events.push('bookmark-auto');
+            };
+            harness.GenericUI.init = () => {
+                events.push('generic-ui');
+            };
+
+            harness.main();
+            await harness.flush();
+            await harness.flush();
+
+            assert.deepStrictEqual(events, testCase.expected, `${testCase.site}: ${JSON.stringify(events)}`);
         }
     });
 

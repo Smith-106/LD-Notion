@@ -38,7 +38,24 @@ const MANIFEST_SHARED_DEFAULTS = Object.freeze({
     contentScriptMatches: Object.freeze([
         "https://linux.do/*",
         "https://www.notion.so/*",
-        "https://notion.so/*"
+        "https://notion.so/*",
+        "https://github.com/*",
+        "https://www.github.com/*",
+        "https://www.zhihu.com/*",
+        "https://zhuanlan.zhihu.com/*",
+        "http://*/*",
+        "https://*/*"
+    ]),
+    contentScriptExcludeMatches: Object.freeze([
+        "https://www.google.com/*",
+        "https://www.google.com.hk/*",
+        "https://www.baidu.com/*",
+        "https://www.bing.com/*",
+        "https://duckduckgo.com/*",
+        "https://mail.google.com/*",
+        "https://outlook.live.com/*",
+        "*://localhost/*",
+        "*://127.0.0.1/*"
     ]),
     action: Object.freeze({
         default_popup: "popup.html",
@@ -365,6 +382,9 @@ function validatePatchedBuildAssumptions({ source, patchedBody, contentScript, b
         assertContains(contentScript, "chrome.runtime.onMessage.addListener", "content script popup 桥接监听");
         assertContains(contentScript, "window.addEventListener(\"ld-notion-request-bookmarks\"", "content script 书签请求桥接");
         assertContains(contentScript, "window.addEventListener(\"ld-notion-search-bookmarks\"", "content script 书签搜索桥接");
+        assertContains(contentScript, "const LD_NOTION_ACTIVE_ROOT_SELECTOR =", "content script LD-Notion 活动根选择器");
+        assertContains(contentScript, "if (!hasActiveLdNotionRoot())", "content script 活动根校验");
+        assertContains(contentScript, "未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。", "content script 非活动上下文拒绝文案");
     }
 
     if (typeof backgroundScript === "string") {
@@ -632,6 +652,7 @@ function buildManifest({ version, profile } = {}) {
         content_scripts: [
             {
                 matches: [...MANIFEST_SHARED_DEFAULTS.contentScriptMatches],
+                exclude_matches: [...MANIFEST_SHARED_DEFAULTS.contentScriptExcludeMatches],
                 js: ["content.js"],
                 run_at: "document_idle"
             }
@@ -739,35 +760,56 @@ if (typeof document !== "undefined" && document.head && !document.querySelector(
     document.head.appendChild(marker);
 }
 
+const LD_NOTION_ACTIVE_ROOT_SELECTOR = "[data-ldb-root], .ldb-panel, .ldb-notion-panel, .gclip-panel";
+
+function hasActiveLdNotionRoot() {
+    return typeof document !== "undefined" && !!document.querySelector(LD_NOTION_ACTIVE_ROOT_SELECTOR);
+}
+
+function dispatchBookmarkBridgeResponse(detail) {
+    window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", { detail }));
+}
+
+function rejectBookmarkBridgeRequest(requestId, error) {
+    if (!requestId) return;
+    dispatchBookmarkBridgeResponse({
+        requestId,
+        success: false,
+        error: error || "书签请求失败"
+    });
+}
+
 // 兼容 userscript 的 CustomEvent 书签桥接协议
 ${GENERATED_SECTION_MARKERS.bookmarkEventBridgeStart}
 window.addEventListener("ld-notion-request-bookmarks", async (event) => {
     const { requestId, folderId } = event.detail || {};
+    if (!requestId) return;
+    if (!hasActiveLdNotionRoot()) {
+        rejectBookmarkBridgeRequest(requestId, "未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。");
+        return;
+    }
     try {
         const data = folderId
             ? await chrome.bookmarks.getChildren(folderId)
             : await chrome.bookmarks.getTree();
-        window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
-            detail: { requestId, success: true, data }
-        }));
+        dispatchBookmarkBridgeResponse({ requestId, success: true, data });
     } catch (error) {
-        window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
-            detail: { requestId, success: false, error: error?.message || String(error) }
-        }));
+        rejectBookmarkBridgeRequest(requestId, error?.message || String(error));
     }
 });
 
 window.addEventListener("ld-notion-search-bookmarks", async (event) => {
     const { requestId, query } = event.detail || {};
+    if (!requestId) return;
+    if (!hasActiveLdNotionRoot()) {
+        rejectBookmarkBridgeRequest(requestId, "未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。");
+        return;
+    }
     try {
         const data = await chrome.bookmarks.search(query || "");
-        window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
-            detail: { requestId, success: true, data }
-        }));
+        dispatchBookmarkBridgeResponse({ requestId, success: true, data });
     } catch (error) {
-        window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
-            detail: { requestId, success: false, error: error?.message || String(error) }
-        }));
+        rejectBookmarkBridgeRequest(requestId, error?.message || String(error));
     }
 });
 ${GENERATED_SECTION_MARKERS.bookmarkEventBridgeEnd}

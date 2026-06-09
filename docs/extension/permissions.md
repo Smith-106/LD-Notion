@@ -11,15 +11,17 @@
 | GitHub 导入 | `api.github.com` host access | 读取 Stars、Repos、Forks、Gists |
 | AI 助手 | AI provider host access | 调用 OpenAI、Anthropic、Gemini 或自定义端点 |
 | 通用网页剪藏 | host page access | 读取当前页面标题、摘要和 DOM 线索 |
-| 本地配置 | extension storage / GM storage | 保存 token、目标库、面板位置和偏好 |
+| 本地配置与保险箱 | extension storage / GM storage | 保存非敏感配置，以及敏感凭证的加密保险箱 payload |
 
 ## Required vs optional
 
-当前本地解压扩展更偏发布便利，manifest 可能保留较宽 host permissions。文档上应明确：
+当前仓库有两条扩展交付链，权限边界需要分开理解：
 
-- 宽权限用于多来源剪藏和跨域 API 访问。
-- 更收敛的 `bounded_hosts` profile 用于开发 smoke 验证。
-- 如果未来进入浏览器商店分发，应考虑 optional permissions 降低初始信任成本。
+- `chrome-extension/manifest.json` 是书签桥接扩展，只声明 `bookmarks` 权限，并在所有 `http/https` 页面注入 content script。
+- 书签桥接扩展虽然注入范围较宽，但运行时只有在页面上存在活动中的 LD-Notion 根节点时，才会响应书签桥接请求。
+- `scripts/build-extension.js` 生成的 `chrome-extension-full/` 默认使用 `bounded_hosts` profile：跨域网络 `host_permissions` 只覆盖 Linux.do、Notion API、GitHub API、AI provider 与必要的 AWS 资源。
+- 为了保持与 userscript 一致的 GitHub / Zhihu / 通用网页入口，`chrome-extension-full/` 的 `content_scripts.matches` 仍覆盖这些页面，并通过 `exclude_matches` 排除搜索引擎、邮箱与本地开发地址。
+- 如果未来进入浏览器商店分发，应继续评估 optional permissions，以进一步降低初始信任成本。
 
 ## Trust boundaries
 
@@ -36,4 +38,5 @@ flowchart TD
 - Permissions SHOULD map to documented features。
 - Secrets MUST NOT be written into DOM。
 - Dangerous Notion writes MUST still pass OperationGuard, even if extension permissions allow network access。
-- `bounded_hosts` SHOULD be used as smoke profile, not necessarily as default release profile。
+- The bookmark-bridge extension MUST reject bridge requests outside an active LD-Notion panel context。
+- `bounded_hosts` SHOULD remain the default release profile for `chrome-extension-full` unless a narrower production profile replaces it。
