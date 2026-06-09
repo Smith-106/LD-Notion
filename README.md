@@ -81,7 +81,7 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 | 工作区检索与对象详情 | 「搜索关于 Docker 的内容」「查看这个 Notion 链接」「查看“知识库”数据库结构」 | 只读 |
 | 页面内容读取 | 「读取“项目计划”页面内容」「查看“项目计划”页面 Markdown」「查看“项目计划”页面块结构」 | 只读 |
 | 评论与协作信息 | 「查看“项目计划”页面评论」「查看 comment_xxx 这条评论」「列出当前工作区可见用户」 | 只读 |
-| 页面与块编辑 | 「在“项目计划”页面末尾插入一段说明」「在 block_xxx 后插入内容」「把 block_xxx 改成新文案」 | 标准 |
+| 页面与块编辑 | 「在“项目计划”页面末尾插入一段说明」「在 block_xxx 后插入内容」「把 block_xxx 改成新文案 / 公式 / URL」 | 标准 |
 | 页面元数据与整理 | 「给“项目计划”加封面」「把“项目计划”换成 🚀 图标」「锁定 / 归档 / 恢复页面」 | 标准 / 高级 |
 | 创建与批量处理 | 「创建页面」「批量创建页面」「批量更新页面」「自动分类未分类页面」「批量打标签」 | 标准 |
 | 跨源检索与导入 | 「在 Linux.do / GitHub / 书签里统一搜索」「导入 GitHub 收藏」「导入浏览器书签」 | 只读 / 标准 |
@@ -93,7 +93,7 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 
 - **页面 / 数据库对象**：「查看“项目计划”页面详情」「查看“知识库”数据库属性」
 - **页面 Markdown / 块 / 评论**：「读取“项目计划” Markdown」「查看“项目计划”页面评论」「查看 comment_xxx」
-- **页面 / 块写入**：「在“项目计划”页面插入“新增说明”」「把 block_xxx 改成“新的段落内容”」
+- **页面 / 块写入**：「在“项目计划”页面插入“新增说明”」「把 block_xxx 改成“新的段落内容”」「把 equation 块改成 E=mc^2」「把 bookmark/embed 块改成新的 URL」
 - **页面整理**：「把“项目计划”移到归档」「恢复“项目计划”」「把“项目计划”换成 🚀 图标」
 - **跨源检索与导入**：「在所有来源中搜索 Kubernetes」「导入我的 GitHub 收藏」「导入浏览器书签」
 - **AI 分析与生成**：「总结一下这个页面」「围绕远程办公做头脑风暴」「把整个数据库翻译成英文」
@@ -213,12 +213,14 @@ node scripts/build-extension.js
    - 推荐填 `https://www.notion.so/`
    - LD-Notion 的 userscript 和 `chrome-extension-full` 都能在这个地址接住回调
 3. 复制该公开集成的 `Client ID` 和 `Client Secret`
-4. 在 LD-Notion 面板里填写 `Client ID`、`Client Secret`、`Redirect URI`
-5. 点击 `🔐 一键授权`
-6. 完成 Notion 授权后，LD-Notion 会自动把 access token 写入本地配置，后续功能继续按原来的 API Key 流工作
+4. 先在 LD-Notion 面板里设置并解锁本地凭证保险箱
+5. 在 LD-Notion 面板里填写 `Client ID`、`Client Secret`、`Redirect URI`
+6. 点击 `🔐 一键授权`
+7. 完成 Notion 授权后，LD-Notion 会自动把 access token / refresh token 写入本地加密保险箱，后续功能继续按原来的 API Key 流工作
 
 注意：
-- 当前项目是纯前端运行，没有单独后端，因此 `Client Secret` 会保存在你的本地浏览器存储中
+- 当前项目是纯前端运行，没有单独后端，因此 `Client Secret`、手动 Token、OAuth token、AI API Key 等敏感凭证会保存在你的本地加密保险箱中
+- 保险箱需要你在本地设置口令；敏感凭证只有在当前会话解锁后才可直接使用
 - 这更适合个人自建公开集成，不建议把共享的生产级公开集成 secret 直接放进前端
 - 面板里的“断开授权”只会清除本地保存的 OAuth 凭据，不会撤销 Notion 后台已经批准的授权
 
@@ -356,15 +358,17 @@ A: 请检查：
   1. `npm test`
   2. `node --check LinuxDo-Bookmarks-to-Notion.user.js`
   3. `node scripts/validate-userscript-ui.js`
-  4. 如涉及扩展交付：`node scripts/build-extension.js`
-  5. 最后按 `docs/ui-regression-checklist.md` 做 Linux.do / Notion / 通用网页 / `chrome-extension-full` 手工 smoke
-- 一键交付验证：`npm run verify:delivery`
+  4. 如涉及书签桥接扩展：`npm run verify:bridge-extension`
+  5. 如涉及扩展交付：`node scripts/build-extension.js`
+  6. 最后按 `docs/ui-regression-checklist.md` 做 Linux.do / Notion / 通用网页 / `chrome-extension-full` 手工 smoke
+- 一键交付验证：`npm run verify:delivery`（包含 baseline、`bounded_hosts` smoke、bridge runtime smoke 与默认扩展构建）
 - `npm test`：运行 `tests/utils.test.js`、`tests/logic-modules.test.js` 和 `tests/notion-oauth.test.js`
 - Node 测试会直接读取并执行当前 `LinuxDo-Bookmarks-to-Notion.user.js` 的核心代码，并复用 `scripts/build-extension.js` 的提取/构建 seam，而不是维护一份单独的测试副本
-- 当前自动化验证重点覆盖：Utils 辅助函数、OAuth 回调与 refresh fallback、`TargetState`、`quickParseIntent` 正/反例、`assistant_result v1` 输出契约，以及 `scripts/build-extension.js` 的锚点、builder seam、manifest profile 与构建冒烟
+- 当前自动化验证重点覆盖：Utils 辅助函数、OAuth 回调与 refresh fallback、`TargetState`、`quickParseIntent` 正/反例、`assistant_result v1` 输出契约，以及 `scripts/build-extension.js` 的锚点、builder seam、manifest profile、bridge runtime 边界与构建冒烟
 - 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）
 - 构建扩展版：`node scripts/build-extension.js`（输出到 `chrome-extension-full/`）
 - 自动化收敛权限 smoke：`npm run verify:extension:bounded`（写入临时目录并自动清理）；默认 release / README 安装流程仍以默认 profile 为准
+- Bridge 扩展运行时 smoke：`npm run verify:bridge-extension`（验证 `chrome-extension/content-script.js` 只在存在活动 LD-Notion 面板时响应书签桥接请求）
 - UI 静态校验：`node scripts/validate-userscript-ui.js`（或 `python3 scripts/validate-userscript-ui.py`）
 - UI 手工回归：`docs/ui-regression-checklist.md`
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作

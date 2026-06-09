@@ -8,7 +8,9 @@
     "verify:baseline": "npm test && node --check LinuxDo-Bookmarks-to-Notion.user.js && node scripts/validate-userscript-ui.js",
     "build:extension": "node scripts/build-extension.js",
     "verify:extension:bounded": "node -e \"const fs=require('fs'); const os=require('os'); const path=require('path'); const { buildExtension } = require('./scripts/build-extension.js'); const outDir=fs.mkdtempSync(path.join(os.tmpdir(),'ld-notion-build-bounded-')); try { buildExtension({ manifestProfile: 'bounded_hosts', outDir }); } finally { fs.rmSync(outDir, { recursive: true, force: true }); }\"",
-    "verify:delivery": "npm run verify:baseline && npm run verify:extension:bounded && npm run build:extension",
+    "verify:bridge-extension": "node scripts/verify-bridge-extension.js",
+    "verify:extension:surfaces": "node scripts/verify-extension-surfaces.js",
+    "verify:delivery": "npm run verify:baseline && npm run verify:extension:bounded && npm run verify:bridge-extension && npm run verify:extension:surfaces && npm run build:extension",
     "docs:dev": "vitepress docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs"
@@ -17,6 +19,6 @@
   "author": "Smith-106",
   "license": "MIT",
   "devDependencies": {
-    "vitepress": "^1.6.4"
+    "vitepress": "^2.0.0-alpha.17"
   }
 }

@@ -43,6 +43,15 @@ flowchart TD
   Deploy --> Site[GitHub Pages project site]
 ```
 
+## Verification workflows
+
+- `.github/workflows/verify.yml`
+  - 触发：`pull_request`、推送到 `main`
+  - 作用：执行 `npm ci`、`npm run verify:delivery`、`npm run docs:build`
+- `.github/workflows/build-extension-release.yml`
+  - 触发：`release.published`、手动 `workflow_dispatch`
+  - 作用：先跑完整 `verify:delivery` 交付闸门，再打包 `chrome-extension-full` ZIP 并上传到 Release
+
 ## Local commands
 
 ```bash
@@ -55,6 +64,10 @@ npm --prefix LD-Notion run docs:build
 
 ```bash
 npm --prefix LD-Notion run docs:preview
+```
+
+```bash
+npm --prefix LD-Notion run verify:delivery
 ```
 
 ## Generated output
@@ -72,4 +85,5 @@ LD-Notion/docs/.vitepress/dist
 - GitHub Pages MUST use workflow deployment mode。
 - VitePress `base` MUST remain `/LD-Notion/` for project site deployment。
 - `docs/.vitepress/dist/` MUST stay ignored。
+- Pull requests and pushes to `main` SHOULD pass `verify:delivery` before they are considered releasable。
 - Deployment changes SHOULD be verified by checking the live homepage after Actions completes。

@@ -84,11 +84,11 @@ sandbox.self = sandbox;
 // Execute and extract modules
 const scriptRunner = new Function(
     ...Object.keys(sandbox),
-    coreCode + '\nreturn { CONFIG, TargetState, OperationGuard, Utils, MSG };'
+    coreCode + '\nreturn { CONFIG, OperationLog, TargetState, OperationGuard, Utils, MSG };'
 );
-const { CONFIG, TargetState, OperationGuard, Utils, MSG } = scriptRunner(...Object.values(sandbox));
+const { CONFIG, OperationLog, TargetState, OperationGuard, Utils, MSG } = scriptRunner(...Object.values(sandbox));
 
-if (!CONFIG || !TargetState || !OperationGuard) {
+if (!CONFIG || !OperationLog || !TargetState || !OperationGuard) {
     console.error('❌ Failed to load modules');
     process.exit(1);
 }
@@ -330,6 +330,52 @@ test('OperationGuard.isDangerous: deletePage and deleteBlock', () => {
     assert.strictEqual(OperationGuard.isDangerous('deleteBlock'), true);
     assert.strictEqual(OperationGuard.isDangerous('updatePage'), false);
     assert.strictEqual(OperationGuard.isDangerous('search'), false);
+});
+
+test('OperationLog.collectRedactionHints: detects secret-like fields and target ids', () => {
+    const hints = OperationLog.collectRedactionHints({
+        apiKey: 'secret_xxx',
+        notionToken: 'ntn_xxx',
+        pageId: 'abc123def456abc123def456abc123de',
+        description: 'safe text'
+    });
+
+    assert.ok(hints.includes('apiKey'));
+    assert.ok(hints.includes('token'));
+    assert.ok(hints.includes('target.id'));
+});
+
+test('OperationLog.normalizeAuditEntry: produces structured audit event fields', () => {
+    const entry = OperationLog.normalizeAuditEntry({
+        audit_event: 'guard.decision',
+        actor: 'ai',
+        source: 'ai-agent-loop',
+        operationName: 'appendBlocks',
+        operation: {
+            name: 'appendBlocks',
+            risk: 'standard',
+            trigger: 'user_requested_write'
+        },
+        context: {
+            itemName: '项目计划',
+            pageId: 'abc123def456abc123def456abc123de',
+            content: '新增 Docker 网络总结'
+        },
+        result: {
+            status: 'success'
+        },
+        startTime: 1,
+        endTime: 2
+    });
+
+    assert.strictEqual(entry.audit_event, 'guard.decision');
+    assert.strictEqual(entry.actor, 'ai');
+    assert.strictEqual(entry.source, 'ai-agent-loop');
+    assert.strictEqual(entry.operation.name, 'appendBlocks');
+    assert.strictEqual(entry.target.type, 'notion_page');
+    assert.ok(entry.target.id.includes('…'));
+    assert.strictEqual(entry.payload.contentPreview, '新增 Docker 网络总结');
+    assert.ok(entry.redaction.includes('target.id'));
 });
 
 // ============================================================
