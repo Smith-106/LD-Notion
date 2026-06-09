@@ -229,7 +229,7 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
 
     const scriptRunner = new Function(
         ...Object.keys(sandbox),
-        `${coreCode}\nreturn { AIClassifier, AIService, AutoImporter, BookmarkAutoImporter, BookmarkExporter, CONFIG, AIAssistant, ChatState, ChatUI, ConfirmationDialog, CredentialVault, DesignSystem, Exporter, GenericExporter, GenericUI, GitHubAPI, GitHubAutoImporter, LinuxDoAPI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, OperationLog, SiteDetector, SyncState, TargetState, UI, UICommandService, UndoManager, UpdateChecker, WorkspaceService, main };`
+        `${coreCode}\nreturn { AIClassifier, AIService, AutoImporter, BookmarkAutoImporter, BookmarkExporter, CONFIG, AIAssistant, ChatState, ChatUI, ConfirmationDialog, CredentialVault, DesignSystem, Exporter, GenericExporter, GenericUI, GitHubAPI, GitHubAutoImporter, LinuxDoAPI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, OperationLog, SiteDetector, Storage, SyncState, TargetState, UI, UICommandService, UndoManager, UpdateChecker, WorkspaceService, main };`
     );
 
     const exports = scriptRunner(...Object.values(sandbox));
@@ -3434,6 +3434,91 @@ function createWorkspaceVisualizationFixture(harness) {
             { key: '2026-06-02', label: '06/02', count: 1, exported: 0 },
             { key: '2026-06-01', label: '06/01', count: 1, exported: 1 }
         ]);
+    });
+
+    await runTest('Storage.unmarkTopicExported: removes a single Linux.do export marker without clearing the rest', async () => {
+        const harness = createHarness();
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS] = JSON.stringify({
+            101: 1710000000000,
+            202: 1710000001000
+        });
+
+        assert.strictEqual(harness.Storage.isTopicExported('101'), true);
+        assert.strictEqual(harness.Storage.isTopicExported('202'), true);
+        assert.strictEqual(harness.Storage.unmarkTopicExported('101'), true);
+        assert.strictEqual(harness.Storage.isTopicExported('101'), false);
+        assert.strictEqual(harness.Storage.isTopicExported('202'), true);
+        assert.deepStrictEqual(
+            JSON.parse(harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS]),
+            { 202: 1710000001000 }
+        );
+        assert.strictEqual(harness.Storage.unmarkTopicExported('404'), false);
+    });
+
+    await runTest('UI.requeueLinuxDoBookmark: re-enables a single exported Linux.do bookmark and keeps GitHub items untouched', async () => {
+        const harness = createHarness();
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS] = JSON.stringify({
+            101: 1710000000000
+        });
+        harness.store[harness.CONFIG.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE] = 'strict';
+        harness.UI.bookmarks = [
+            { topic_id: 101, title: 'Post A' },
+            {
+                source: 'github',
+                sourceType: 'repos',
+                itemKey: 'smith/repo-a',
+                title: 'Repo A',
+                raw: { full_name: 'smith/repo-a' }
+            }
+        ];
+        harness.UI.selectedBookmarks = new Set();
+        harness.UI.showStatus = (message, type) => {
+            harness.notifications.push({ message, type });
+        };
+
+        let renderCalls = 0;
+        harness.UI.renderBookmarkList = () => {
+            renderCalls += 1;
+        };
+
+        assert.strictEqual(harness.UI.requeueLinuxDoBookmark('101'), true);
+        assert.strictEqual(harness.Storage.isTopicExported('101'), false);
+        assert.deepStrictEqual(Array.from(harness.UI.selectedBookmarks), ['101']);
+        assert.strictEqual(harness.UI.totalUnexportedCount, 2);
+        assert.strictEqual(harness.UI.selectedUnexportedCount, 1);
+        assert.strictEqual(renderCalls, 1);
+        assert.deepStrictEqual(
+            harness.notifications.at(-1),
+            { message: '已移除该帖子的导出记录，请重新点击导出。', type: 'success' }
+        );
+
+        assert.strictEqual(harness.UI.requeueLinuxDoBookmark('gh:repos:smith/repo-a'), false);
+        assert.strictEqual(renderCalls, 1);
+    });
+
+    await runTest('UI.buildBookmarkItemHtml: shows re-export action only for exported Linux.do bookmarks', async () => {
+        const harness = createHarness();
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS] = JSON.stringify({
+            101: 1710000000000
+        });
+        harness.store[harness.CONFIG.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE] = 'strict';
+        harness.GitHubAPI.isExported = () => true;
+
+        const linuxdoHtml = harness.UI.buildBookmarkItemHtml({ topic_id: 101, title: 'Post A' }, false);
+        const githubHtml = harness.UI.buildBookmarkItemHtml({
+            source: 'github',
+            sourceType: 'repos',
+            itemKey: 'smith/repo-a',
+            title: 'Repo A',
+            raw: { full_name: 'smith/repo-a' }
+        }, true);
+
+        assert.ok(linuxdoHtml.includes('data-bookmark-action="reexport"'));
+        assert.ok(linuxdoHtml.includes('重新导出'));
+        assert.ok(!githubHtml.includes('data-bookmark-action="reexport"'));
     });
 
     await runTest('UI.getSelectedBookmarks: returns only selected items from current loaded bookmarks', async () => {

@@ -607,6 +607,18 @@
             Storage.setRaw(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify(exported));
         },
 
+        unmarkTopicExported: (topicId) => {
+            const exported = Storage.getExportedTopics();
+            if (!Object.prototype.hasOwnProperty.call(exported, topicId)) {
+                return false;
+            }
+
+            delete exported[topicId];
+            Storage._exportedTopicsCache = exported;
+            Storage.setRaw(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify(exported));
+            return true;
+        },
+
         isTopicExported: (topicId) => {
             const exported = Storage.getExportedTopics();
             return !!exported[topicId];
@@ -18318,6 +18330,18 @@ ${availableTools}
             if (!UI.bookmarkListBound) {
                 const bookmarkList = UI.refs.bookmarkList;
                 bookmarkList.addEventListener("click", (e) => {
+                    const reexportBtn = e.target.closest("[data-bookmark-action=\"reexport\"]");
+                    if (reexportBtn) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const item = reexportBtn.closest(".ldb-bookmark-item");
+                        const bookmarkKey = String(item?.dataset.topicId || "");
+                        if (bookmarkKey) {
+                            UI.requeueLinuxDoBookmark(bookmarkKey);
+                        }
+                        return;
+                    }
+
                     const item = e.target.closest(".ldb-bookmark-item");
                     if (!item) return;
                     if (e.target.tagName === "INPUT") return;
@@ -21805,12 +21829,16 @@ ${availableTools}
             const sourceTag = githubMode
                 ? `<span class="status" style="margin-right: 6px;">${(bookmark.sourceType || "stars").toUpperCase()}</span>`
                 : "";
+            const reexportAction = !githubMode && isExported
+                ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="移除该帖子的导出记录并重新加入待导出列表">重新导出</button>`
+                : "";
 
             return `
                 <div class="ldb-bookmark-item" data-topic-id="${bookmarkKey}">
                     <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
                     <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
                     ${sourceTag}${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
+                    ${reexportAction}
                 </div>
             `;
         },
@@ -21899,6 +21927,26 @@ ${availableTools}
                 selectAll.indeterminate = true;
             }
             UI.renderVisualSummary();
+        },
+
+        requeueLinuxDoBookmark: (bookmarkKey) => {
+            if (!bookmarkKey || bookmarkKey.startsWith("gh:")) return false;
+            if (!Utils.isLinuxDoDedupStrict()) {
+                UI.showStatus("当前为允许重复模式，无需重新导出；直接勾选并导出即可。", "info");
+                return false;
+            }
+
+            const removed = Storage.unmarkTopicExported(bookmarkKey);
+            if (!removed) {
+                UI.showStatus("该帖子当前不在已导出记录中。", "info");
+                return false;
+            }
+
+            UI.selectedBookmarks.add(bookmarkKey);
+            UI.recomputeExportStats();
+            UI.renderBookmarkList();
+            UI.showStatus("已移除该帖子的导出记录，请重新点击导出。", "success");
+            return true;
         },
 
         syncRenderedSelectionState: () => {
