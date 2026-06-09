@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.6.4`
+- 当前仓库源码版本：`v3.6.7`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -374,6 +374,20 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.6.7
+
+本次版本聚焦「工作区级可视化收口 + 生产交付闭环」，重点把全局时间线、来源关系图、导出漏斗和刷新路径补齐到可交付状态，并把凭证、写入守卫、独立扩展注入和交付门禁统一收口到同一条生产链路。
+
+- 新增：工作区级可视化闭环，补齐工作区视图刷新、全局时间线、来源关系图与导出漏斗等关键视图
+- 修复：写入守卫与交付门禁收口，统一 baseline、bounded-hosts、bridge runtime 与扩展表面校验
+- 修复：凭证保险箱、敏感配置链路与自动同步生产闭环，减少配置漂移与凭证误暴露风险
+- 修复：独立扩展站点注入与回归验证，收口扩展/脚本双形态在关键页面的运行一致性
+- 交付：文档站部署链路升级到新的 Pages / Node 24 运行栈，并补齐运行态验证
+- 已发布 Release：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.6.7>
+- 已上传扩展安装包：<https://github.com/Smith-106/LD-Notion/releases/download/v3.6.7/LD-Notion-chrome-extension-full-v3.6.7.zip>
+
+- Tag：`v3.6.7`
 
 ### v3.4.5
 

@@ -23,11 +23,11 @@
 - **方式 A：Tampermonkey 脚本版（推荐）**：更新方便，适合大多数人
 - **方式 B：Chrome 扩展独立版（进阶）**：不依赖 Tampermonkey，书签能力内置
 
-### 下载链接（仓库当前 v3.4.5 / 最近已发布 v3.4.3）
+### 下载链接（仓库当前 v3.6.7 / 最近已发布 v3.6.7）
 
 - 脚本安装：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装直链：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
-- 最近已发布扩展 ZIP 直链（v3.4.3）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.4.3/LD-Notion-chrome-extension-full-v3.4.3.zip>
+- 最近已发布扩展 ZIP 直链（v3.6.7）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.6.7/LD-Notion-chrome-extension-full-v3.6.7.zip>
 - 安装浏览器扩展（Release）：<https://github.com/Smith-106/LD-Notion/releases/latest>
 
 ### 方式 A：Tampermonkey 脚本版
@@ -475,6 +475,14 @@ GM_setValue("ldb_exported_topics", "{}")
 ---
 
 ## 更新日志
+
+### v3.6.7
+
+- 新增：工作区级可视化闭环，补齐工作区视图刷新、全局时间线、来源关系图与导出漏斗
+- 修复：写入守卫与交付门禁收口，统一 baseline、bounded-hosts、bridge runtime 与扩展表面校验
+- 修复：凭证保险箱、敏感配置链路与自动同步生产闭环，减少配置漂移与凭证暴露风险
+- 修复：独立扩展站点注入与关键页面回归验证，收口脚本版与扩展版的运行一致性
+- 交付：文档站部署链路升级到新的 Pages / Node 24 运行栈，并补齐运行态验证
 
 ### v3.4.5
 
