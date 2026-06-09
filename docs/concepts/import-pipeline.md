@@ -37,7 +37,7 @@ stateDiagram-v2
 | enriched | AI 或来源详情补全摘要、标签、分类、README、正文或上下文。 | AI 配置可用，且内容允许发送到外部 provider。 | enrich 失败降级到 previewed，不阻断基础导入。 |
 | previewed | 用户看到即将写入的 normalized content 和 destination payload。 | 用户可确认、取消或修改目标。 | 用户取消时进入 failed；内容不写入远端。 |
 | written | Notion 或 Obsidian 适配器执行创建、追加或保存。 | 目标 API 返回成功响应。 | API 错误、目标失效或网络失败时进入 failed。 |
-| audited | 导出记录、guard decision、目标 ID 和失败/成功状态写回本地存储。 | 审计信息可序列化并关联 source identity。 | 审计失败不应重复写入；应提示用户检查本地状态。 |
+| audited | 导出记录、guard decision、目标 ID 和失败/成功状态写回本地配置 / 审计存储。 | 审计信息可序列化并关联 source identity。 | 审计失败不应重复写入；应提示用户检查本地状态。 |
 
 ## Data Flow
 
@@ -98,7 +98,7 @@ stateDiagram-v2
 
 - 输入：写入结果、guard decision、source identity 和 routing decision。
 - 输出：本地导出记录与审计信息。
-- 失败时：提示用户检查本地存储状态。
+- 失败时：提示用户检查本地配置或审计状态。
 
 ## Related Reference
 

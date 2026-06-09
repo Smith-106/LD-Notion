@@ -35,15 +35,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
 
-      - name: Verify userscript/build smoke baseline
-        run: npm run verify:baseline
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Smoke bounded-host manifest profile
-        run: npm run verify:extension:bounded
-
-      - name: Build extension
-        run: npm run build:extension
+      - name: Verify delivery gate and build extension
+        run: npm run verify:delivery
 
       - name: Package extension zip
         run: |

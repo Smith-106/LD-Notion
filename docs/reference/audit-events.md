@@ -58,6 +58,7 @@ Audit Events 是 LD-Notion 的操作审计参考格式。它们记录用户或 A
 | `import.completed` | 导入流程写入完成。 | source、destination、successCount、failureCount | database/page id 脱敏。 | 导入完成报告。 |
 | `import.failed` | 导入在 captured、normalized、routed、guard_checked、written 任一步失败。 | source、state、reason | 不记录原始密钥或完整失败 payload。 | 排错提示和可重试信息。 |
 | `auth.failed` | OAuth 或 manual token 验证失败。 | authMode、statusCode、notionErrorCode | token、refresh token、Client Secret 必须脱敏。 | 重新授权或检查 Integration 提示。 |
+| `audit.enabled` | 用户开启审计日志。 | actor、previousState、newState | 不需要凭据字段。 | UI 显示审计已开启。 |
 | `audit.disabled` | 用户关闭审计日志。 | actor、previousState、newState | 不需要凭据字段。 | UI 显示审计已关闭。 |
 
 ## Payload guidelines

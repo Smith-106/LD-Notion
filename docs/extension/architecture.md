@@ -20,7 +20,7 @@ flowchart TB
     Content[content script]
     Background[background service worker]
     Popup[popup]
-    Storage[chrome.storage.local]
+    Storage[chrome.storage.local / vault payload]
   end
 
   subgraph External[External APIs]
@@ -51,7 +51,7 @@ flowchart TB
 | content script | 独立扩展的页面注入入口 |
 | background service worker | 跨域代理、扩展特权 API、消息中转 |
 | popup | 扩展工具栏入口和快速操作面 |
-| chrome.storage.local | 独立扩展形态下的本地配置存储 |
+| chrome.storage.local | 独立扩展形态下的非敏感配置存储，以及敏感凭证的加密保险箱 payload |
 | chrome.bookmarks | 书签导入能力 |
 
 ## Message boundary
@@ -76,4 +76,4 @@ sequenceDiagram
 - Content script SHOULD validate incoming page context before triggering privileged actions。
 - Background service worker SHOULD be treated as the privileged control plane。
 - Extension messages SHOULD have explicit `type` and payload shape。
-- Secrets MUST stay in extension or userscript storage, not in page DOM。
+- Secrets MUST stay in encrypted extension or userscript storage payloads, not in page DOM。

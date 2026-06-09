@@ -67,7 +67,7 @@ flowchart TD
 | Priority | Input signal | Condition | Route | Guard | Fallback |
 | --- | --- | --- | --- | --- | --- |
 | 1 | Notion OAuth token | access token 有效 | 使用 OAuth NotionTransport | 检查 workspace 与目标 access | 若 401，尝试刷新或提示重新授权。 |
-| 2 | refresh token | access token 过期且 refresh token 可用 | 刷新凭据后继续 | 检查 state 与本地存储一致性 | 刷新失败时进入 missing auth。 |
+| 2 | refresh token | access token 过期且 refresh token 可用 | 刷新凭据后继续 | 检查 state 与本地加密保险箱 / 配置存储一致性 | 刷新失败时进入 missing auth。 |
 | 3 | manual token | 用户配置 integration token | 使用 manual token 写入 | 标记为高级 fallback，需要目标显式授权 | 提示优先使用 OAuth。 |
 | 4 | 外部来源 token | GitHub 或 Obsidian token 可用 | 使用对应来源或目标 API | 检查 token 作用域 | 降级为公开页面或本地预览。 |
 | 5 | missing auth | 缺少必要凭据 | 阻止远程写入 | OperationGuard 返回 auth_required | 显示配置入口和待写入预览。 |

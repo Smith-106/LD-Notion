@@ -35,7 +35,7 @@ mindmap
     Auth Model
       Notion OAuth
       Manual Token
-      本地存储
+      本地加密保险箱
       失效处理
     Extension Architecture
       userscript
@@ -54,5 +54,5 @@ mindmap
 | [Import Pipeline](/concepts/import-pipeline) | 解释内容从捕获、标准化、守卫检查、增强、预览到写入和审计的状态流。 |
 | [OperationGuard](/concepts/operation-guard) | 解释写入动作前的权限、确认、审计和撤销边界。 |
 | [AI Agent Loop](/concepts/ai-agent-loop) | 解释 AI 助手如何 observe、plan、act，并再次观察结果。 |
-| [Auth Model](/concepts/auth-model) | 解释 Notion OAuth、manual token、本地存储和授权失败处理。 |
+| [Auth Model](/concepts/auth-model) | 解释 Notion OAuth、manual token、本地加密保险箱和授权失败处理。 |
 | [Extension Architecture](/concepts/extension-architecture) | 解释 userscript、Chrome 扩展、构建 seam、权限和部署边界。 |

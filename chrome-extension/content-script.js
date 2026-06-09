@@ -4,15 +4,46 @@
 (function () {
     "use strict";
 
+    const LD_NOTION_ACTIVE_ROOT_SELECTOR = "[data-ldb-root], .ldb-panel, .ldb-notion-panel, .gclip-panel";
+
+    function getBridgeHost() {
+        return document.head || document.documentElement;
+    }
+
+    function hasActiveLdNotionRoot() {
+        return !!document.querySelector(LD_NOTION_ACTIVE_ROOT_SELECTOR);
+    }
+
+    function dispatchBridgeResponse(detail) {
+        window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", { detail }));
+    }
+
+    function rejectBridgeRequest(requestId, error) {
+        if (!requestId) return;
+        dispatchBridgeResponse({
+            requestId,
+            success: false,
+            error: error || "书签请求失败"
+        });
+    }
+
     // 标记扩展已加载
     const marker = document.createElement("meta");
     marker.name = "ld-notion-ext";
     marker.content = "ready";
-    document.head.appendChild(marker);
+    const bridgeHost = getBridgeHost();
+    if (bridgeHost) {
+        bridgeHost.appendChild(marker);
+    }
 
     // 监听来自用户脚本的书签请求
     window.addEventListener("ld-notion-request-bookmarks", async (event) => {
         const { requestId, folderId } = event.detail || {};
+        if (!requestId) return;
+        if (!hasActiveLdNotionRoot()) {
+            rejectBridgeRequest(requestId, "未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。");
+            return;
+        }
 
         try {
             // 通过 Chrome API 获取书签树
@@ -28,29 +59,26 @@
             }
 
             // 发送结果回用户脚本
-            window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
-                detail: { requestId, success: true, data: result }
-            }));
+            dispatchBridgeResponse({ requestId, success: true, data: result });
         } catch (error) {
-            window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
-                detail: { requestId, success: false, error: error.message }
-            }));
+            rejectBridgeRequest(requestId, error?.message || String(error));
         }
     });
 
     // 搜索书签
     window.addEventListener("ld-notion-search-bookmarks", async (event) => {
         const { requestId, query } = event.detail || {};
+        if (!requestId) return;
+        if (!hasActiveLdNotionRoot()) {
+            rejectBridgeRequest(requestId, "未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。");
+            return;
+        }
 
         try {
             const results = await chrome.bookmarks.search(query || "");
-            window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
-                detail: { requestId, success: true, data: results }
-            }));
+            dispatchBridgeResponse({ requestId, success: true, data: results });
         } catch (error) {
-            window.dispatchEvent(new CustomEvent("ld-notion-bookmarks-data", {
-                detail: { requestId, success: false, error: error.message }
-            }));
+            rejectBridgeRequest(requestId, error?.message || String(error));
         }
     });
 })();
