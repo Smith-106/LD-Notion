@@ -354,6 +354,69 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
     }
 }
 
+function createWorkspaceVisualizationFixture(harness) {
+    const databases = [
+        { id: 'db_linux', title: 'Linux 收藏' },
+        { id: 'db_github', title: 'GitHub 收藏' },
+        { id: 'db_misc', title: 'Inbox' }
+    ];
+
+    const pages = [
+        {
+            id: 'page-linux',
+            parent: { type: 'database_id', database_id: 'db_linux' },
+            properties: {
+                标题: { type: 'title', title: [{ plain_text: 'Post A' }] },
+                收藏时间: { type: 'date', date: { start: '2026-06-03T10:00:00Z' } },
+                分类: { type: 'rich_text', rich_text: [{ plain_text: '论坛' }] },
+                帖子数: { type: 'number', number: 12 },
+                浏览数: { type: 'number', number: 200 },
+                点赞数: { type: 'number', number: 9 }
+            }
+        },
+        {
+            id: 'page-github',
+            parent: { type: 'database_id', database_id: 'db_github' },
+            properties: {
+                Name: { type: 'title', title: [{ plain_text: 'Repo A' }] },
+                来源: { type: 'rich_text', rich_text: [{ plain_text: 'GitHub' }] },
+                来源类型: { type: 'rich_text', rich_text: [{ plain_text: 'Repos' }] },
+                更新时间: { type: 'date', date: { start: '2026-06-02T12:00:00Z' } },
+                AI分类: { type: 'select', select: { name: '工具' } }
+            }
+        },
+        {
+            id: 'page-bookmark',
+            parent: { type: 'database_id', database_id: 'db_misc' },
+            properties: {
+                标题: { type: 'title', title: [{ plain_text: 'Bookmark A' }] },
+                书签路径: { type: 'rich_text', rich_text: [{ plain_text: 'Toolbar/Read' }] },
+                收藏时间: { type: 'date', date: { start: '2026-06-01T09:00:00Z' } },
+                分类: { type: 'rich_text', rich_text: [{ plain_text: '资料' }] }
+            }
+        },
+        {
+            id: 'page-generic',
+            parent: { type: 'workspace' },
+            properties: {
+                标题: { type: 'title', title: [{ plain_text: 'Article A' }] },
+                发布日期: { type: 'date', date: { start: '2026-05-31T08:00:00Z' } },
+                摘要: { type: 'rich_text', rich_text: [{ plain_text: 'Long read' }] }
+            }
+        },
+        {
+            id: 'page-unmarked',
+            parent: { type: 'database_id', database_id: 'db_misc' },
+            properties: {
+                标题: { type: 'title', title: [{ plain_text: 'Loose Note' }] }
+            }
+        }
+    ];
+
+    const records = pages.map((page) => harness.UI.extractWorkspaceVisualRecord(page, databases));
+    return { databases, pages, records };
+}
+
 (async () => {
     console.log('Running tests for NotionOAuth...\n');
 
@@ -2525,6 +2588,226 @@ function assertStableWelcomeMarkup(markup, { includesPlaceholder = false } = {})
         assert.deepStrictEqual(updates[0], { service: 'openai', models: ['gpt-4.1-mini', 'gpt-4o'] });
         assert.ok(harness.UI.refs.aiModelTip.textContent.includes('获取到 2 个可用模型'));
         assert.deepStrictEqual(harness.notifications.at(-1), { message: '成功获取 2 个模型', type: 'success' });
+    });
+
+    await runTest('UI.buildVisualizationModel: aggregates Linux.do and GitHub snapshots into source, status and timeline summaries', async () => {
+        const harness = createHarness();
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS] = JSON.stringify({
+            101: Date.now()
+        });
+        harness.store[harness.CONFIG.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE] = 'strict';
+        harness.GitHubAPI.isExported = (itemKey) => itemKey === 'smith/repo-b';
+        harness.GitHubAPI.isGistExported = (itemKey) => itemKey === 'gist-1';
+
+        harness.UI.selectedBookmarks = new Set([
+            '101',
+            'gh:repos:smith/repo-a'
+        ]);
+
+        harness.UI.updateVisualSnapshot('linuxdo', [
+            {
+                topic_id: 101,
+                title: 'Post A',
+                created_at: '2026-06-01T10:00:00Z'
+            }
+        ]);
+        harness.UI.updateVisualSnapshot('github', [
+            {
+                source: 'github',
+                sourceType: 'repos',
+                itemKey: 'smith/repo-a',
+                title: 'Repo A',
+                raw: {
+                    updated_at: '2026-06-02T12:00:00Z'
+                }
+            },
+            {
+                source: 'github',
+                sourceType: 'gists',
+                itemKey: 'gist-1',
+                title: 'Gist A',
+                raw: {
+                    created_at: '2026-06-03T08:00:00Z'
+                }
+            }
+        ]);
+
+        const model = harness.UI.buildVisualizationModel();
+        const sourceBreakdownMap = Object.fromEntries(model.sourceBreakdown.map((item) => [item.label, item]));
+        const typeBreakdownMap = Object.fromEntries(model.typeBreakdown.map((item) => [item.label, item]));
+
+        assert.strictEqual(model.total, 3);
+        assert.strictEqual(model.exported, 2);
+        assert.strictEqual(model.pending, 1);
+        assert.strictEqual(model.selected, 2);
+        assert.deepStrictEqual(model.loadedSources, ['Linux.do', 'GitHub']);
+        assert.deepStrictEqual(sourceBreakdownMap['GitHub'], { label: 'GitHub', count: 2, pct: 67 });
+        assert.deepStrictEqual(sourceBreakdownMap['Linux.do'], { label: 'Linux.do', count: 1, pct: 33 });
+        assert.strictEqual(typeBreakdownMap.Repos.count, 1);
+        assert.strictEqual(typeBreakdownMap.Gists.count, 1);
+        assert.strictEqual(model.typeBreakdown.length, 3);
+        assert.deepStrictEqual(model.timeline, [
+            { key: '2026-06-03', label: '06/03', count: 1, exported: 1 },
+            { key: '2026-06-02', label: '06/02', count: 1, exported: 0 },
+            { key: '2026-06-01', label: '06/01', count: 1, exported: 1 }
+        ]);
+    });
+
+    await runTest('UI.buildWorkspaceVisualizationModel: aggregates workspace records into timeline, relationships and funnel summaries', async () => {
+        const harness = createHarness();
+        const { databases, records } = createWorkspaceVisualizationFixture(harness);
+        const model = harness.UI.buildWorkspaceVisualizationModel({
+            databases,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        });
+        const sourceBreakdownMap = Object.fromEntries(model.sourceBreakdown.map((item) => [item.label, item]));
+        const relationshipMap = Object.fromEntries(model.relationships.map((item) => [item.label, item.count]));
+
+        assert.strictEqual(model.totalPages, 5);
+        assert.strictEqual(model.totalDatabases, 3);
+        assert.strictEqual(model.sourcedPages, 4);
+        assert.strictEqual(model.datedPages, 4);
+        assert.strictEqual(model.categorizedPages, 3);
+        assert.strictEqual(model.structuredPages, 3);
+        assert.strictEqual(model.missingSourcePages, 1);
+        assert.strictEqual(model.missingDatePages, 1);
+        assert.strictEqual(model.missingCategoryPages, 2);
+        assert.deepStrictEqual(model.funnel.map((item) => item.count), [5, 4, 4, 3, 3]);
+        assert.deepStrictEqual(model.timeline, [
+            { key: '2026-06-03', label: '06/03', count: 1 },
+            { key: '2026-06-02', label: '06/02', count: 1 },
+            { key: '2026-06-01', label: '06/01', count: 1 },
+            { key: '2026-05-31', label: '05/31', count: 1 }
+        ]);
+        assert.strictEqual(sourceBreakdownMap['Linux.do'].count, 1);
+        assert.strictEqual(sourceBreakdownMap['GitHub'].count, 1);
+        assert.strictEqual(sourceBreakdownMap['浏览器书签'].count, 1);
+        assert.strictEqual(sourceBreakdownMap['通用页面'].count, 1);
+        assert.strictEqual(sourceBreakdownMap['未标记'].count, 1);
+        assert.strictEqual(relationshipMap['Linux 收藏 → Linux.do'], 1);
+        assert.strictEqual(relationshipMap['GitHub 收藏 → GitHub'], 1);
+        assert.strictEqual(relationshipMap['Inbox → 浏览器书签'], 1);
+        assert.strictEqual(relationshipMap['Inbox → 未标记'], 1);
+        assert.strictEqual(relationshipMap['工作区页面 → 通用页面'], 1);
+    });
+
+    await runTest('UI.renderWorkspaceVisualSummary: renders workspace timeline, relationship graph and funnel cards', async () => {
+        const harness = createHarness();
+        const summaryContainer = createElementStub();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+
+        harness.UI.refs = {
+            viewWorkspaceSummary: summaryContainer
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+
+        harness.UI.renderWorkspaceVisualSummary();
+
+        assert.ok(summaryContainer.innerHTML.includes('已扫描页面'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('覆盖 3 个数据库'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('结构完整'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('全局时间线'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('来源关系图'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('导出漏斗'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('Linux 收藏 → Linux.do'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('Inbox → 浏览器书签'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('识别来源'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('未标记 1'), summaryContainer.innerHTML);
+        assert.ok(!summaryContainer.innerHTML.includes('[object Object]'), summaryContainer.innerHTML);
+    });
+
+    await runTest('UI.refreshWorkspaceVisualization: persists workspace snapshot, renders summary and updates status', async () => {
+        const harness = createHarness();
+        const summaryContainer = createElementStub();
+        const statusEl = createElementStub();
+        const refreshBtn = Object.assign(createElementStub(), { textContent: '刷新工作区视图' });
+        const maxPagesSelect = Object.assign(createElementStub(), { value: '50' });
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const workspaceUpdates = [];
+        const aiDbUpdates = [];
+        const persistedPayloads = [];
+
+        harness.UI.refs = {
+            viewWorkspaceSummary: summaryContainer,
+            viewWorkspaceStatus: statusEl,
+            viewRefreshWorkspaceBtn: refreshBtn,
+            workspaceMaxPagesSelect: maxPagesSelect,
+            apiKeyInput: Object.assign(createElementStub(), { value: 'manual_api_key' })
+        };
+
+        harness.WorkspaceService.refreshWorkspaceSnapshot = async (apiKey, options) => {
+            assert.strictEqual(apiKey, 'manual_api_key');
+            assert.strictEqual(refreshBtn.disabled, true);
+            assert.strictEqual(refreshBtn.textContent, '扫描中...');
+            options.onProgress({ phase: 'databases', loaded: databases.length });
+            assert.ok(statusEl.textContent.includes(`已加载 ${databases.length} 个数据库`), statusEl.textContent);
+            options.onWorkspaceData({
+                apiKeyHash: apiKey.slice(-8),
+                databases,
+                pages: [],
+                timestamp: 1
+            });
+            return {
+                databases,
+                workspaceData: {
+                    apiKeyHash: apiKey.slice(-8),
+                    databases,
+                    pages: [],
+                    timestamp: 2
+                }
+            };
+        };
+        harness.WorkspaceService.fetchWorkspacePageObjects = async (apiKey, options) => {
+            assert.strictEqual(apiKey, 'manual_api_key');
+            assert.strictEqual(options.maxPages, 50);
+            assert.strictEqual(options.phase, 'workspace_visual_pages');
+            options.onProgress({ loaded: pages.length });
+            assert.ok(statusEl.textContent.includes(`已扫描 ${pages.length} 个页面`), statusEl.textContent);
+            return pages;
+        };
+        harness.WorkspaceService.persistWorkspaceData = (apiKey, payload) => {
+            persistedPayloads.push({ apiKey, payload });
+            return {
+                apiKeyHash: apiKey.slice(-8),
+                databases: payload.databases,
+                pages: payload.pages,
+                timestamp: 3
+            };
+        };
+        harness.UI.updateWorkspaceSelect = (workspaceData) => {
+            workspaceUpdates.push(workspaceData);
+        };
+        harness.UI.updateAITargetDbOptions = (dbs) => {
+            aiDbUpdates.push(dbs);
+        };
+
+        const model = await harness.UI.refreshWorkspaceVisualization('manual_api_key');
+
+        assert.strictEqual(model.totalPages, 5);
+        assert.strictEqual(model.totalDatabases, 3);
+        assert.strictEqual(workspaceUpdates.length, 2);
+        assert.strictEqual(aiDbUpdates.length, 2);
+        assert.strictEqual(aiDbUpdates[0][0].id, 'db_linux');
+        assert.strictEqual(workspaceUpdates[1].pages.length, 5);
+        assert.strictEqual(persistedPayloads.length, 1);
+        assert.strictEqual(persistedPayloads[0].payload.pages[0].id, pages[0].id.replace(/-/g, ''));
+        assert.strictEqual(harness.UI.workspaceVisualSnapshot.records.length, records.length);
+        assert.ok(harness.UI.workspaceVisualSnapshot.scannedAt > 0);
+        assert.strictEqual(refreshBtn.disabled, false);
+        assert.strictEqual(refreshBtn.textContent, '刷新工作区视图');
+        assert.strictEqual(statusEl.dataset.tone, 'success');
+        assert.ok(statusEl.textContent.includes('已扫描 5 个页面，覆盖 3 个数据库。'), statusEl.textContent);
+        assert.ok(summaryContainer.innerHTML.includes('导出漏斗'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('Linux 收藏 → Linux.do'), summaryContainer.innerHTML);
     });
 
     await runTest('AIAssistant.AGENT_TOOLS.query_database: reuses legacy export database when AI target is missing', async () => {

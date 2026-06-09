@@ -10385,6 +10385,24 @@ ${availableTools}
             return finalWorkspace;
         },
 
+        fetchWorkspacePageObjects: async (apiKey, options = {}) => {
+            if (!apiKey) {
+                return [];
+            }
+
+            const maxPages = Number.isFinite(options.maxPages)
+                ? options.maxPages
+                : (parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages), 10) || 0);
+
+            return await WorkspaceService._requestSearchItems(
+                apiKey,
+                "page",
+                maxPages,
+                options.onProgress,
+                options.phase || "workspace_visual_pages"
+            );
+        },
+
         buildWorkspaceData: (apiKey, workspace = {}) => ({
             apiKeyHash: apiKey ? apiKey.slice(-8) : "",
             databases: Array.isArray(workspace.databases) ? workspace.databases : [],
@@ -15382,6 +15400,215 @@ ${availableTools}
                     text-align: right;
                 }
 
+                .ldb-view-header {
+                    margin-bottom: 10px;
+                    display: flex;
+                    align-items: flex-start;
+                    justify-content: space-between;
+                    gap: 12px;
+                }
+
+                .ldb-view-actions {
+                    display: flex;
+                    align-items: center;
+                    justify-content: flex-end;
+                    gap: 8px;
+                    flex-wrap: wrap;
+                }
+
+                .ldb-view-action-btn {
+                    padding: 6px 10px;
+                    font-size: 12px;
+                    white-space: nowrap;
+                }
+
+                .ldb-view-status {
+                    margin-bottom: 10px;
+                    font-size: 12px;
+                    color: var(--ldb-ui-muted);
+                }
+
+                .ldb-view-status[data-tone="success"] {
+                    color: var(--ldb-ui-success);
+                }
+
+                .ldb-view-status[data-tone="error"] {
+                    color: var(--ldb-ui-danger);
+                }
+
+                .ldb-view-summary {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 12px;
+                }
+
+                .ldb-view-subsection {
+                    margin-top: 14px;
+                    padding-top: 14px;
+                    border-top: 1px solid rgba(148, 163, 184, 0.18);
+                }
+
+                .ldb-view-section-title {
+                    margin-bottom: 8px;
+                    font-size: 12px;
+                    font-weight: 700;
+                    color: var(--ldb-ui-muted);
+                }
+
+                .ldb-view-grid {
+                    display: grid;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: 10px;
+                }
+
+                .ldb-view-card {
+                    border: 1px solid var(--ldb-ui-border);
+                    border-radius: 12px;
+                    padding: 12px;
+                    background: rgba(148, 163, 184, 0.08);
+                }
+
+                .ldb-view-card.full {
+                    grid-column: 1 / -1;
+                }
+
+                .ldb-view-card-title {
+                    font-size: 12px;
+                    font-weight: 700;
+                    color: var(--ldb-ui-muted);
+                    margin-bottom: 8px;
+                }
+
+                .ldb-view-metric-value {
+                    font-size: 22px;
+                    font-weight: 800;
+                    color: var(--ldb-ui-text);
+                    line-height: 1.1;
+                }
+
+                .ldb-view-metric-meta {
+                    margin-top: 6px;
+                    font-size: 12px;
+                    color: var(--ldb-ui-muted);
+                }
+
+                .ldb-view-bars,
+                .ldb-view-timeline {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 8px;
+                }
+
+                .ldb-view-bar-row {
+                    display: grid;
+                    grid-template-columns: minmax(0, 88px) 1fr auto;
+                    gap: 8px;
+                    align-items: center;
+                }
+
+                .ldb-view-bar-label,
+                .ldb-view-timeline-label {
+                    font-size: 12px;
+                    color: var(--ldb-ui-text);
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+
+                .ldb-view-bar-track {
+                    height: 8px;
+                    border-radius: 999px;
+                    overflow: hidden;
+                    background: rgba(148, 163, 184, 0.20);
+                }
+
+                .ldb-view-bar-fill {
+                    height: 100%;
+                    border-radius: 999px;
+                    background: linear-gradient(90deg, var(--ldb-ui-accent), var(--ldb-ui-accent-2));
+                }
+
+                .ldb-view-bar-value,
+                .ldb-view-timeline-value {
+                    font-size: 12px;
+                    color: var(--ldb-ui-muted);
+                    white-space: nowrap;
+                }
+
+                .ldb-view-timeline-item {
+                    display: grid;
+                    grid-template-columns: minmax(0, 72px) 1fr auto;
+                    gap: 8px;
+                    align-items: center;
+                }
+
+                .ldb-view-link-graph,
+                .ldb-view-funnel {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 8px;
+                }
+
+                .ldb-view-link-row,
+                .ldb-view-funnel-row {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr) auto;
+                    gap: 8px;
+                    align-items: center;
+                }
+
+                .ldb-view-link-path,
+                .ldb-view-funnel-label {
+                    font-size: 12px;
+                    color: var(--ldb-ui-text);
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+
+                .ldb-view-link-count,
+                .ldb-view-funnel-value {
+                    font-size: 12px;
+                    color: var(--ldb-ui-muted);
+                    white-space: nowrap;
+                }
+
+                .ldb-view-empty {
+                    border: 1px dashed rgba(148, 163, 184, 0.35);
+                    border-radius: 12px;
+                    padding: 18px 14px;
+                    background: rgba(148, 163, 184, 0.05);
+                }
+
+                .ldb-view-empty-title {
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: var(--ldb-ui-text);
+                    margin-bottom: 6px;
+                }
+
+                .ldb-view-empty-text {
+                    font-size: 12px;
+                    line-height: 1.5;
+                    color: var(--ldb-ui-muted);
+                }
+
+                .ldb-view-highlight {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 8px;
+                    margin-top: 8px;
+                }
+
+                .ldb-view-pill {
+                    padding: 4px 8px;
+                    border-radius: 999px;
+                    border: 1px solid rgba(148, 163, 184, 0.25);
+                    background: rgba(148, 163, 184, 0.08);
+                    font-size: 11px;
+                    color: var(--ldb-ui-muted);
+                }
+
                 .ldb-bookmark-list {
                     margin-top: 10px;
                     border: 1px solid var(--ldb-ui-border);
@@ -15660,6 +15887,12 @@ ${availableTools}
                     .ldb-mini-btn {
                         right: 12px;
                         bottom: 12px;
+                    }
+                    .ldb-view-grid {
+                        grid-template-columns: 1fr;
+                    }
+                    .ldb-view-card.full {
+                        grid-column: auto;
                     }
                 }
     `;
@@ -16116,6 +16349,7 @@ ${availableTools}
                     intervalEl.value = String(cfg.intervalDefault);
                     Storage.set(cfg.intervalKey, cfg.intervalDefault);
                 }
+                UI.renderVisualSummary();
             };
 
             // 收藏列表事件委托（避免每次重渲染重复绑定）
@@ -16210,6 +16444,7 @@ ${availableTools}
                     }
 
                     UI.bookmarks = bookmarks;
+                    UI.updateVisualSnapshot(UI.getActiveBookmarkSource(), bookmarks);
                     UI.selectedBookmarks = new Set(bookmarks.map(b => UI.getBookmarkKey(b)));
                     UI.recomputeExportStats();
                     UI.refs.bookmarkCount.textContent = bookmarks.length;
@@ -16727,6 +16962,23 @@ ${availableTools}
                 }
             };
 
+            if (refs.viewRefreshWorkspaceBtn) {
+                refs.viewRefreshWorkspaceBtn.onclick = async () => {
+                    const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
+                    if (!apiKey) {
+                        UI.showStatus(MSG.NO_NOTION_KEY, "error");
+                        UI.setWorkspaceVisualStatus(MSG.NO_NOTION_KEY, "error");
+                        return;
+                    }
+
+                    try {
+                        await UI.refreshWorkspaceVisualization(apiKey);
+                    } catch (error) {
+                        UI.showStatus(`工作区视图刷新失败：${error.message}`, "error");
+                    }
+                };
+            }
+
             // 从工作区选择页面/数据库
             refs.workspaceSelect.onchange = (e) => {
                 const selected = e.target.value;
@@ -17031,6 +17283,8 @@ ${availableTools}
         miniBtn: null,
         isMinimized: false,
         bookmarks: [],
+        visualSnapshots: { linuxdo: [], github: [] },
+        workspaceVisualSnapshot: { databases: [], pages: [], records: [], scannedAt: 0, maxPages: 0 },
         renderJobId: 0,
         selectedBookmarks: new Set(),
         selectedUnexportedCount: 0,
@@ -17059,6 +17313,11 @@ ${availableTools}
                 obsExportBtn: panel.querySelector("#ldb-obs-export"),
                 bookmarkListContainer: panel.querySelector("#ldb-bookmark-list-container"),
                 reportContainer: panel.querySelector("#ldb-report-container"),
+                viewSummary: panel.querySelector("#ldb-view-summary"),
+                viewSubtitle: panel.querySelector("#ldb-view-subtitle"),
+                viewWorkspaceSummary: panel.querySelector("#ldb-view-workspace-summary"),
+                viewWorkspaceStatus: panel.querySelector("#ldb-view-workspace-status"),
+                viewRefreshWorkspaceBtn: panel.querySelector("#ldb-view-refresh-workspace"),
                 autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
                 sourcePartitionsToggle: panel.querySelector("#ldb-source-partitions-toggle"),
                 sourcePartitionsContent: panel.querySelector("#ldb-source-partitions-content"),
@@ -17203,6 +17462,7 @@ ${availableTools}
                 </div>
                 <div class="ldb-tabs">
                     <button class="ldb-tab active" data-tab="bookmarks">📚 收藏</button>
+                    <button class="ldb-tab" data-tab="visuals">📊 视图</button>
                     <button class="ldb-tab" data-tab="ai">🤖 AI</button>
                     <button class="ldb-tab" data-tab="settings">⚙️ 设置</button>
                 </div>
@@ -17348,7 +17608,38 @@ ${availableTools}
                         <div id="ldb-report-container"></div>
                     </div>
 
-                    <!-- ============ Tab 2: AI 助手 ============ -->
+                    <!-- ============ Tab 2: 视图 ============ -->
+                    <div class="ldb-tab-content" data-tab-content="visuals">
+                        <div class="ldb-section">
+                            <div class="ldb-view-header">
+                                <div>
+                                    <div class="ldb-section-title" style="margin-bottom: 4px;">工作区视图</div>
+                                    <div class="ldb-tip" id="ldb-view-subtitle">刷新后会基于当前 Notion 工作区数据库生成全局时间线、来源关系图和导出漏斗；下方继续保留本轮已加载摘要。</div>
+                                </div>
+                                <div class="ldb-view-actions">
+                                    <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-refresh-workspace" type="button">刷新工作区视图</button>
+                                </div>
+                            </div>
+                            <div class="ldb-view-status" id="ldb-view-workspace-status">尚未刷新工作区视图。</div>
+                            <div class="ldb-view-summary" id="ldb-view-workspace-summary">
+                                <div class="ldb-view-empty">
+                                    <div class="ldb-view-empty-title">工作区总览还没有数据</div>
+                                    <div class="ldb-view-empty-text">点击上方按钮后，会扫描当前工作区数据库里的页面属性，生成全局时间线、来源关系图和导出漏斗。</div>
+                                </div>
+                            </div>
+                            <div class="ldb-view-subsection">
+                                <div class="ldb-view-section-title">本轮已加载摘要</div>
+                                <div class="ldb-view-summary" id="ldb-view-summary">
+                                    <div class="ldb-view-empty">
+                                        <div class="ldb-view-empty-title">视图还没有数据</div>
+                                        <div class="ldb-view-empty-text">先加载 Linux.do 或 GitHub 收藏，这里会展示来源分布、导出状态和时间线摘要。</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ============ Tab 3: AI 助手 ============ -->
                     <div class="ldb-tab-content" data-tab-content="ai">
                         <div class="ldb-section">
                             <!-- 对话区域 -->
@@ -17374,7 +17665,7 @@ ${availableTools}
                         </div>
                     </div>
 
-                    <!-- ============ Tab 3: 设置 ============ -->
+                    <!-- ============ Tab 4: 设置 ============ -->
                     <div class="ldb-tab-content" data-tab-content="settings">
                         <!-- Notion 配置 -->
                         <div class="ldb-section">
@@ -18052,6 +18343,8 @@ ${availableTools}
                 updateIntervalEl.value = String(CONFIG.DEFAULTS.updateCheckIntervalHours);
                 Storage.set(CONFIG.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG.DEFAULTS.updateCheckIntervalHours);
             }
+            UI.renderWorkspaceVisualSummary();
+            UI.renderVisualSummary();
             UpdateChecker.renderLastStatus();
         },
 
@@ -18382,6 +18675,718 @@ ${availableTools}
             };
         },
 
+        updateVisualSnapshot: (source, bookmarks) => {
+            const key = source === "github" ? "github" : "linuxdo";
+            UI.visualSnapshots[key] = Array.isArray(bookmarks) ? bookmarks.slice() : [];
+        },
+
+        getCombinedVisualBookmarks: () => {
+            return [
+                ...(Array.isArray(UI.visualSnapshots.linuxdo) ? UI.visualSnapshots.linuxdo : []),
+                ...(Array.isArray(UI.visualSnapshots.github) ? UI.visualSnapshots.github : []),
+            ];
+        },
+
+        getBookmarkVisualSourceLabel: (bookmark) => {
+            return bookmark?.source === "github" ? "GitHub" : "Linux.do";
+        },
+
+        getBookmarkVisualTypeLabel: (bookmark) => {
+            if (bookmark?.source === "github") {
+                const sourceTypeMap = {
+                    stars: "Stars",
+                    repos: "Repos",
+                    forks: "Forks",
+                    gists: "Gists",
+                };
+                return sourceTypeMap[bookmark.sourceType] || "GitHub";
+            }
+            return "帖子";
+        },
+
+        getBookmarkVisualDate: (bookmark) => {
+            const candidates = bookmark?.source === "github"
+                ? [
+                    bookmark?.raw?.updated_at,
+                    bookmark?.raw?.created_at,
+                    bookmark?.raw?.pushed_at,
+                    bookmark?.updated_at,
+                    bookmark?.created_at,
+                ]
+                : [
+                    bookmark?.created_at,
+                    bookmark?.bookmarked_at,
+                    bookmark?.updated_at,
+                ];
+
+            for (const candidate of candidates) {
+                if (!candidate) continue;
+                const date = new Date(candidate);
+                if (!Number.isNaN(date.getTime())) {
+                    return date;
+                }
+            }
+            return null;
+        },
+
+        getViewPct: (count, total) => (total > 0 ? Math.round((count / total) * 100) : 0),
+
+        buildViewDateBucket: (date) => ({
+            key: [
+                date.getFullYear(),
+                String(date.getMonth() + 1).padStart(2, "0"),
+                String(date.getDate()).padStart(2, "0"),
+            ].join("-"),
+            label: `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`,
+        }),
+
+        collectWorkspacePlainText: (items = []) => {
+            return Array.isArray(items)
+                ? items.map((item) => item?.plain_text || item?.text?.content || "").join("").trim()
+                : "";
+        },
+
+        getWorkspacePageProperty: (page, names = []) => {
+            const properties = page?.properties || {};
+            for (const name of names) {
+                if (name && Object.prototype.hasOwnProperty.call(properties, name)) {
+                    return properties[name];
+                }
+            }
+            return null;
+        },
+
+        getWorkspacePagePropertyText: (page, names = []) => {
+            const prop = UI.getWorkspacePageProperty(page, names);
+            if (!prop) return "";
+            switch (prop.type) {
+                case "title":
+                    return UI.collectWorkspacePlainText(prop.title);
+                case "rich_text":
+                    return UI.collectWorkspacePlainText(prop.rich_text);
+                case "select":
+                    return String(prop.select?.name || "").trim();
+                case "multi_select":
+                    return Array.isArray(prop.multi_select)
+                        ? prop.multi_select.map((item) => item?.name || "").filter(Boolean).join(", ")
+                        : "";
+                case "url":
+                    return String(prop.url || "").trim();
+                case "number":
+                    return prop.number === 0 || Number.isFinite(prop.number) ? String(prop.number) : "";
+                case "checkbox":
+                    return prop.checkbox ? "true" : "";
+                case "created_time":
+                    return String(prop.created_time || "").trim();
+                case "last_edited_time":
+                    return String(prop.last_edited_time || "").trim();
+                default:
+                    return "";
+            }
+        },
+
+        getWorkspacePagePropertyDateValue: (page, names = []) => {
+            const prop = UI.getWorkspacePageProperty(page, names);
+            if (!prop) return "";
+            if (prop.type === "date") return String(prop.date?.start || "").trim();
+            if (prop.type === "created_time") return String(prop.created_time || "").trim();
+            if (prop.type === "last_edited_time") return String(prop.last_edited_time || "").trim();
+            return "";
+        },
+
+        normalizeWorkspaceSourceLabel: (value) => {
+            const raw = String(value || "").trim();
+            if (!raw) return "";
+            const lower = raw.toLowerCase();
+            if (lower.includes("linux.do") || lower.includes("linuxdo")) return "Linux.do";
+            if (lower.includes("github") || ["repo", "repos", "star", "stars", "fork", "forks", "gist", "gists"].includes(lower)) return "GitHub";
+            if (lower.includes("bookmark") || lower.includes("书签")) return "浏览器书签";
+            if (lower.includes("generic") || lower.includes("通用页面")) return "通用页面";
+            if (lower.includes("unknown") || lower.includes("未标记")) return "未标记";
+            return raw;
+        },
+
+        normalizeWorkspaceSourceTypeLabel: (value, source = "") => {
+            const raw = String(value || "").trim();
+            if (!raw) {
+                if (source === "GitHub") return "GitHub";
+                if (source === "Linux.do") return "帖子";
+                if (source === "浏览器书签") return "书签";
+                return "";
+            }
+            const lower = raw.toLowerCase();
+            if (["star", "stars"].includes(lower)) return "Stars";
+            if (["repo", "repos"].includes(lower)) return "Repos";
+            if (["fork", "forks"].includes(lower)) return "Forks";
+            if (["gist", "gists"].includes(lower)) return "Gists";
+            if (lower.includes("bookmark") || lower.includes("书签")) return "书签";
+            if (lower.includes("post") || lower.includes("topic") || lower.includes("帖子")) return "帖子";
+            return raw;
+        },
+
+        getWorkspaceVisualDate: (pageOrRecord) => {
+            if (pageOrRecord?.date instanceof Date && pageOrRecord?.dateKey) {
+                return {
+                    date: pageOrRecord.date,
+                    key: pageOrRecord.dateKey,
+                    label: pageOrRecord.dateLabel || UI.buildViewDateBucket(pageOrRecord.date).label,
+                    field: pageOrRecord.dateField || "",
+                };
+            }
+
+            const candidates = [
+                { field: "收藏时间", value: UI.getWorkspacePagePropertyDateValue(pageOrRecord, ["收藏时间"]) },
+                { field: "更新时间", value: UI.getWorkspacePagePropertyDateValue(pageOrRecord, ["更新时间"]) },
+                { field: "发布日期", value: UI.getWorkspacePagePropertyDateValue(pageOrRecord, ["发布日期"]) },
+                { field: "created_time", value: String(pageOrRecord?.created_time || "").trim() },
+                { field: "last_edited_time", value: String(pageOrRecord?.last_edited_time || "").trim() },
+            ];
+
+            for (const candidate of candidates) {
+                if (!candidate.value) continue;
+                const date = new Date(candidate.value);
+                if (Number.isNaN(date.getTime())) continue;
+                const bucket = UI.buildViewDateBucket(date);
+                return {
+                    date,
+                    key: bucket.key,
+                    label: bucket.label,
+                    field: candidate.field,
+                };
+            }
+            return null;
+        },
+
+        inferWorkspaceVisualSource: (page, databases = []) => {
+            const explicitSource = UI.normalizeWorkspaceSourceLabel(UI.getWorkspacePagePropertyText(page, ["来源"]));
+            const explicitTypeRaw = UI.getWorkspacePagePropertyText(page, ["来源类型"]);
+            const properties = page?.properties || {};
+            const propertyNames = Object.keys(properties);
+            const parentDatabaseId = String(page?.parent?.database_id || "").replace(/-/g, "");
+            const parentDatabaseTitle = databases.find((db) => db.id === parentDatabaseId)?.title || "";
+            const hintText = [explicitSource, explicitTypeRaw, parentDatabaseTitle].join(" ").toLowerCase();
+            const hasProp = (...names) => names.some((name) => propertyNames.includes(name));
+
+            let source = explicitSource;
+            let sourceType = UI.normalizeWorkspaceSourceTypeLabel(explicitTypeRaw, explicitSource);
+
+            if (!source && sourceType) {
+                if (sourceType === "书签") source = "浏览器书签";
+                else if (["Stars", "Repos", "Forks", "Gists", "GitHub"].includes(sourceType)) source = "GitHub";
+                else if (sourceType === "帖子") source = "Linux.do";
+            }
+
+            if (!source && (hasProp("帖子数", "浏览数", "点赞数") || hintText.includes("linux.do") || hintText.includes("linuxdo"))) {
+                source = "Linux.do";
+                if (!sourceType) sourceType = "帖子";
+            }
+
+            if (!source && (hasProp("Stars", "语言", "更新时间") || hintText.includes("github"))) {
+                source = "GitHub";
+                if (!sourceType) sourceType = hasProp("Stars") ? "Repos" : "GitHub";
+            }
+
+            if (!source && (hasProp("书签路径") || hintText.includes("bookmark") || hintText.includes("书签"))) {
+                source = "浏览器书签";
+                if (!sourceType) sourceType = "书签";
+            }
+
+            if (!source && (hasProp("发布日期") || hasProp("摘要", "描述"))) {
+                source = explicitSource || "通用页面";
+            }
+
+            if (!source) source = explicitSource || "未标记";
+            if (!sourceType) sourceType = UI.normalizeWorkspaceSourceTypeLabel(explicitTypeRaw, source);
+
+            return { source, sourceType };
+        },
+
+        getWorkspaceVisualCategory: (pageOrRecord) => {
+            if (pageOrRecord?.category) return String(pageOrRecord.category).trim();
+            return String(
+                UI.getWorkspacePagePropertyText(pageOrRecord, ["AI分类"])
+                || UI.getWorkspacePagePropertyText(pageOrRecord, ["分类"])
+                || ""
+            ).trim();
+        },
+
+        getWorkspaceVisualParentLabel: (record) => {
+            if (record?.parentDatabaseTitle) return record.parentDatabaseTitle;
+            if (record?.parentType === "workspace") return "工作区页面";
+            if (record?.parentType === "page_id") return "子页面";
+            if (record?.parentType === "block_id") return "块内页面";
+            if (record?.parentType === "database_id") return "未命名数据库";
+            return "未归档页面";
+        },
+
+        mapWorkspacePageSummary: (page) => ({
+            id: page?.id?.replace(/-/g, "") || "",
+            title: Utils.getPageTitle(page),
+            type: "page",
+            url: page?.url || "",
+            parent: page?.parent?.type || "",
+            parentId: String(page?.parent?.database_id || page?.parent?.page_id || "").replace(/-/g, ""),
+        }),
+
+        extractWorkspaceVisualRecord: (page, databases = []) => {
+            const summary = UI.mapWorkspacePageSummary(page);
+            const dateInfo = UI.getWorkspaceVisualDate(page);
+            const category = UI.getWorkspaceVisualCategory(page);
+            const sourceInfo = UI.inferWorkspaceVisualSource(page, databases);
+            const hasSource = sourceInfo.source && sourceInfo.source !== "未标记";
+            const hasDate = !!dateInfo;
+            const hasCategory = !!category;
+
+            return {
+                id: summary.id,
+                title: summary.title,
+                url: summary.url,
+                parentType: summary.parent,
+                parentDatabaseId: summary.parent === "database_id" ? summary.parentId : "",
+                parentPageId: summary.parent === "page_id" ? summary.parentId : "",
+                parentDatabaseTitle: databases.find((db) => db.id === summary.parentId)?.title || "",
+                source: sourceInfo.source,
+                sourceType: sourceInfo.sourceType,
+                category,
+                date: dateInfo?.date || null,
+                dateKey: dateInfo?.key || "",
+                dateLabel: dateInfo?.label || "",
+                dateField: dateInfo?.field || "",
+                hasSource,
+                hasDate,
+                hasCategory,
+                isFullyStructured: hasSource && hasDate && hasCategory,
+            };
+        },
+
+        buildVisualizationModel: (bookmarks = UI.getCombinedVisualBookmarks()) => {
+            const items = Array.isArray(bookmarks) ? bookmarks : [];
+            const sourceCounts = new Map();
+            const typeCounts = new Map();
+            const timelineCounts = new Map();
+            let exported = 0;
+            let pending = 0;
+
+            items.forEach((bookmark) => {
+                const bookmarkKey = UI.getBookmarkKey(bookmark);
+                const isExported = UI.isBookmarkKeyExported(bookmarkKey);
+                if (isExported) {
+                    exported += 1;
+                } else {
+                    pending += 1;
+                }
+
+                const sourceLabel = UI.getBookmarkVisualSourceLabel(bookmark);
+                sourceCounts.set(sourceLabel, (sourceCounts.get(sourceLabel) || 0) + 1);
+
+                const typeLabel = UI.getBookmarkVisualTypeLabel(bookmark);
+                typeCounts.set(typeLabel, (typeCounts.get(typeLabel) || 0) + 1);
+
+                const dateInfo = UI.getBookmarkVisualDate(bookmark);
+                if (!dateInfo) return;
+                const bucket = UI.buildViewDateBucket(dateInfo);
+                const existing = timelineCounts.get(bucket.key) || {
+                    key: bucket.key,
+                    label: bucket.label,
+                    count: 0,
+                    exported: 0,
+                };
+                existing.count += 1;
+                if (isExported) existing.exported += 1;
+                timelineCounts.set(bucket.key, existing);
+            });
+
+            const total = items.length;
+            const toBreakdown = (map) => Array.from(map.entries())
+                .map(([label, count]) => ({
+                    label,
+                    count,
+                    pct: UI.getViewPct(count, total),
+                }))
+                .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+            const timeline = Array.from(timelineCounts.values())
+                .sort((a, b) => b.key.localeCompare(a.key))
+                .slice(0, 6);
+
+            const loadedSources = Object.entries(UI.visualSnapshots)
+                .filter(([, snapshot]) => Array.isArray(snapshot) && snapshot.length > 0)
+                .map(([source]) => source === "github" ? "GitHub" : "Linux.do");
+
+            return {
+                total,
+                exported,
+                pending,
+                selected: UI.selectedBookmarks?.size || 0,
+                loadedSources,
+                sourceBreakdown: toBreakdown(sourceCounts),
+                typeBreakdown: toBreakdown(typeCounts),
+                timeline,
+            };
+        },
+
+        buildWorkspaceVisualizationModel: (snapshot = UI.workspaceVisualSnapshot) => {
+            const databases = Array.isArray(snapshot?.databases) ? snapshot.databases : [];
+            const records = Array.isArray(snapshot?.records) ? snapshot.records : [];
+            const totalPages = records.length;
+            const sourceCounts = new Map();
+            const categoryCounts = new Map();
+            const timelineCounts = new Map();
+            const relationshipCounts = new Map();
+            const recognizedSources = new Set();
+            let sourcedPages = 0;
+            let datedPages = 0;
+            let categorizedPages = 0;
+            let structuredPages = 0;
+
+            records.forEach((record) => {
+                const sourceLabel = record?.source || "未标记";
+                sourceCounts.set(sourceLabel, (sourceCounts.get(sourceLabel) || 0) + 1);
+                if (record?.hasSource) {
+                    sourcedPages += 1;
+                    recognizedSources.add(sourceLabel);
+                }
+
+                if (record?.hasCategory) {
+                    const categoryLabel = record.category;
+                    categoryCounts.set(categoryLabel, (categoryCounts.get(categoryLabel) || 0) + 1);
+                    categorizedPages += 1;
+                }
+
+                if (record?.hasDate && record?.dateKey) {
+                    datedPages += 1;
+                    const existingTimeline = timelineCounts.get(record.dateKey) || {
+                        key: record.dateKey,
+                        label: record.dateLabel || record.dateKey,
+                        count: 0,
+                    };
+                    existingTimeline.count += 1;
+                    timelineCounts.set(record.dateKey, existingTimeline);
+                }
+
+                if (record?.isFullyStructured) {
+                    structuredPages += 1;
+                }
+
+                const parentLabel = UI.getWorkspaceVisualParentLabel(record);
+                const linkLabel = `${parentLabel} → ${sourceLabel}`;
+                const existingRelationship = relationshipCounts.get(linkLabel) || {
+                    label: linkLabel,
+                    parentLabel,
+                    sourceLabel,
+                    count: 0,
+                };
+                existingRelationship.count += 1;
+                relationshipCounts.set(linkLabel, existingRelationship);
+            });
+
+            const toBreakdown = (map) => Array.from(map.entries())
+                .map(([label, count]) => ({
+                    label,
+                    count,
+                    pct: UI.getViewPct(count, totalPages),
+                }))
+                .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+            const timeline = Array.from(timelineCounts.values())
+                .sort((a, b) => b.key.localeCompare(a.key))
+                .slice(0, 8);
+
+            const relationships = Array.from(relationshipCounts.values())
+                .map((item) => ({
+                    ...item,
+                    pct: UI.getViewPct(item.count, totalPages),
+                }))
+                .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+                .slice(0, 10);
+
+            const funnel = [
+                { label: "已扫描页面", count: totalPages, pct: UI.getViewPct(totalPages, totalPages) },
+                { label: "识别来源", count: sourcedPages, pct: UI.getViewPct(sourcedPages, totalPages) },
+                { label: "有时间字段", count: datedPages, pct: UI.getViewPct(datedPages, totalPages) },
+                { label: "已分类", count: categorizedPages, pct: UI.getViewPct(categorizedPages, totalPages) },
+                { label: "结构完整", count: structuredPages, pct: UI.getViewPct(structuredPages, totalPages) },
+            ];
+
+            return {
+                totalPages,
+                totalDatabases: databases.length,
+                scannedAt: Number(snapshot?.scannedAt || 0),
+                maxPages: Number(snapshot?.maxPages || 0),
+                recognizedSources: Array.from(recognizedSources).sort((a, b) => a.localeCompare(b)),
+                sourceBreakdown: toBreakdown(sourceCounts),
+                categoryBreakdown: toBreakdown(categoryCounts),
+                timeline,
+                relationships,
+                funnel,
+                sourcedPages,
+                datedPages,
+                categorizedPages,
+                structuredPages,
+                missingSourcePages: Math.max(0, totalPages - sourcedPages),
+                missingDatePages: Math.max(0, totalPages - datedPages),
+                missingCategoryPages: Math.max(0, totalPages - categorizedPages),
+            };
+        },
+
+        setWorkspaceVisualStatus: (message, tone = "") => {
+            const statusEl = UI.refs?.viewWorkspaceStatus;
+            if (!statusEl) return;
+            statusEl.textContent = message || "尚未刷新工作区视图。";
+            if (statusEl.dataset) {
+                if (tone) statusEl.dataset.tone = tone;
+                else delete statusEl.dataset.tone;
+            }
+        },
+
+        refreshWorkspaceVisualization: async (apiKey = NotionOAuth.getAccessToken(UI.refs?.apiKeyInput?.value.trim())) => {
+            if (!apiKey) {
+                UI.setWorkspaceVisualStatus(MSG.NO_NOTION_KEY, "error");
+                throw new Error(MSG.NO_NOTION_KEY);
+            }
+
+            const maxPages = parseInt(UI.refs?.workspaceMaxPagesSelect?.value, 10)
+                || parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages), 10)
+                || 0;
+            const refreshBtn = UI.refs?.viewRefreshWorkspaceBtn;
+
+            if (refreshBtn) {
+                refreshBtn.disabled = true;
+                refreshBtn.textContent = "扫描中...";
+            }
+
+            UI.setWorkspaceVisualStatus("正在扫描工作区数据库...", "");
+
+            try {
+                const { databases, workspaceData } = await WorkspaceService.refreshWorkspaceSnapshot(apiKey, {
+                    includePages: false,
+                    maxPages,
+                    onProgress: (progress) => {
+                        if (progress.phase === "databases") {
+                            UI.setWorkspaceVisualStatus(`正在扫描工作区数据库... 已加载 ${progress.loaded} 个数据库`, "");
+                        }
+                    },
+                    onWorkspaceData: (partialData) => {
+                        UI.updateWorkspaceSelect(partialData);
+                        UI.updateAITargetDbOptions(partialData.databases || []);
+                    },
+                });
+
+                UI.setWorkspaceVisualStatus("数据库已就绪，正在分析页面属性...", "");
+
+                const pageObjects = await WorkspaceService.fetchWorkspacePageObjects(apiKey, {
+                    maxPages,
+                    phase: "workspace_visual_pages",
+                    onProgress: (progress) => {
+                        UI.setWorkspaceVisualStatus(`正在分析页面属性... 已扫描 ${progress.loaded} 个页面`, "");
+                    },
+                });
+
+                const pages = pageObjects.map((page) => UI.mapWorkspacePageSummary(page)).filter((item) => item.id);
+                const records = pageObjects.map((page) => UI.extractWorkspaceVisualRecord(page, databases)).filter((item) => item.id);
+                const finalWorkspaceData = WorkspaceService.persistWorkspaceData(apiKey, {
+                    databases,
+                    pages,
+                });
+
+                UI.updateWorkspaceSelect(finalWorkspaceData);
+                UI.updateAITargetDbOptions(finalWorkspaceData.databases || []);
+                UI.workspaceVisualSnapshot = {
+                    databases,
+                    pages,
+                    records,
+                    scannedAt: Date.now(),
+                    maxPages,
+                };
+                UI.renderWorkspaceVisualSummary();
+
+                const model = UI.buildWorkspaceVisualizationModel();
+                UI.setWorkspaceVisualStatus(
+                    `已扫描 ${model.totalPages} 个页面，覆盖 ${model.totalDatabases} 个数据库。`,
+                    "success"
+                );
+                return model;
+            } catch (error) {
+                UI.setWorkspaceVisualStatus(`工作区视图刷新失败：${error.message}`, "error");
+                throw error;
+            } finally {
+                if (refreshBtn) {
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = "刷新工作区视图";
+                }
+            }
+        },
+
+        renderWorkspaceVisualSummary: () => {
+            const container = UI.refs?.viewWorkspaceSummary;
+            if (!container) return;
+
+            const model = UI.buildWorkspaceVisualizationModel();
+            if (!model.scannedAt) {
+                container.innerHTML = `
+                    <div class="ldb-view-empty">
+                        <div class="ldb-view-empty-title">工作区总览还没有数据</div>
+                        <div class="ldb-view-empty-text">点击上方按钮后，会扫描当前工作区数据库里的页面属性，生成全局时间线、来源关系图和导出漏斗。</div>
+                    </div>
+                `;
+                return;
+            }
+
+            if (model.totalPages === 0) {
+                container.innerHTML = `
+                    <div class="ldb-view-empty">
+                        <div class="ldb-view-empty-title">本次扫描没有可统计页面</div>
+                        <div class="ldb-view-empty-text">已完成工作区扫描，但当前范围内没有可用于聚合的页面属性。</div>
+                    </div>
+                `;
+                return;
+            }
+
+            const timelineMarkup = model.timeline.length > 0
+                ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
+                    <div class="ldb-view-timeline-item">
+                        <div class="ldb-view-timeline-label">${item.label}</div>
+                        <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, item.pct || UI.getViewPct(item.count, model.totalPages))}%;"></div></div>
+                        <div class="ldb-view-timeline-value">${item.count} 页</div>
+                    </div>
+                `).join("")}</div>`
+                : `<div class="ldb-view-empty-text">当前工作区页面里还没有可解析的时间字段。</div>`;
+
+            const relationshipMarkup = model.relationships.length > 0
+                ? `<div class="ldb-view-link-graph">${model.relationships.map((item) => `
+                    <div class="ldb-view-link-row">
+                        <div class="ldb-view-link-path">${Utils.escapeHtml(item.label)}</div>
+                        <div class="ldb-view-link-count">${item.count} 页 · ${item.pct}%</div>
+                    </div>
+                `).join("")}</div>`
+                : `<div class="ldb-view-empty-text">当前工作区页面里还没有可展示的来源关系。</div>`;
+
+            const funnelMarkup = model.funnel.length > 0
+                ? `<div class="ldb-view-funnel">${model.funnel.map((item) => `
+                    <div class="ldb-view-funnel-row">
+                        <div class="ldb-view-funnel-label">${Utils.escapeHtml(item.label)}</div>
+                        <div class="ldb-view-funnel-value">${item.count} 页 · ${item.pct}%</div>
+                    </div>
+                `).join("")}</div>`
+                : `<div class="ldb-view-empty-text">当前没有可展示的漏斗数据。</div>`;
+
+            const highlights = [
+                `未标记 ${model.missingSourcePages}`,
+                `缺时间 ${model.missingDatePages}`,
+                `未分类 ${model.missingCategoryPages}`,
+            ].map((text) => `<span class="ldb-view-pill">${Utils.escapeHtml(text)}</span>`).join("");
+
+            container.innerHTML = `
+                <div class="ldb-view-grid">
+                    <div class="ldb-view-card">
+                        <div class="ldb-view-card-title">已扫描页面</div>
+                        <div class="ldb-view-metric-value">${model.totalPages}</div>
+                        <div class="ldb-view-metric-meta">覆盖 ${model.totalDatabases} 个数据库</div>
+                    </div>
+                    <div class="ldb-view-card">
+                        <div class="ldb-view-card-title">结构完整</div>
+                        <div class="ldb-view-metric-value">${model.structuredPages}</div>
+                        <div class="ldb-view-metric-meta">来源、时间、分类三项齐备</div>
+                    </div>
+                    <div class="ldb-view-card full">
+                        <div class="ldb-view-card-title">全局时间线</div>
+                        ${timelineMarkup}
+                        ${highlights ? `<div class="ldb-view-highlight">${highlights}</div>` : ""}
+                    </div>
+                    <div class="ldb-view-card full">
+                        <div class="ldb-view-card-title">来源关系图</div>
+                        ${relationshipMarkup}
+                    </div>
+                    <div class="ldb-view-card full">
+                        <div class="ldb-view-card-title">导出漏斗</div>
+                        ${funnelMarkup}
+                    </div>
+                </div>
+            `;
+        },
+
+        renderVisualSummary: () => {
+            const container = UI.refs?.viewSummary;
+            if (!container) return;
+
+            const subtitle = UI.refs?.viewSubtitle;
+            const model = UI.buildVisualizationModel();
+
+            if (subtitle) {
+                subtitle.textContent = model.loadedSources.length > 0
+                    ? `这里继续展示本轮已加载的 ${model.loadedSources.join(" + ")} 列表摘要；工作区总览需要点击上方按钮单独刷新。`
+                    : "这里继续展示当前已加载的 Linux.do / GitHub 列表摘要，不会主动读取 Notion 工作区。";
+            }
+
+            if (model.total === 0) {
+                container.innerHTML = `
+                    <div class="ldb-view-empty">
+                        <div class="ldb-view-empty-title">视图还没有数据</div>
+                        <div class="ldb-view-empty-text">先加载 Linux.do 或 GitHub 收藏，这里会展示来源分布、导出状态和时间线摘要。</div>
+                    </div>
+                `;
+                return;
+            }
+
+            const renderBarRows = (rows) => rows.length > 0
+                ? `<div class="ldb-view-bars">${rows.map((row) => `
+                    <div class="ldb-view-bar-row">
+                        <div class="ldb-view-bar-label">${Utils.escapeHtml(row.label)}</div>
+                        <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, row.pct)}%;"></div></div>
+                        <div class="ldb-view-bar-value">${row.count} · ${row.pct}%</div>
+                    </div>
+                `).join("")}</div>`
+                : `<div class="ldb-view-empty-text">暂无可展示的数据。</div>`;
+
+            const statusRows = [
+                { label: "已导出", count: model.exported, pct: UI.getViewPct(model.exported, model.total) },
+                { label: "待导出", count: model.pending, pct: UI.getViewPct(model.pending, model.total) },
+                { label: "当前已选", count: model.selected, pct: UI.getViewPct(model.selected, model.total) },
+            ];
+
+            const timelineMarkup = model.timeline.length > 0
+                ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
+                    <div class="ldb-view-timeline-item">
+                        <div class="ldb-view-timeline-label">${item.label}</div>
+                        <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, UI.getViewPct(item.count, model.total))}%;"></div></div>
+                        <div class="ldb-view-timeline-value">${item.count} 项 / 已导出 ${item.exported}</div>
+                    </div>
+                `).join("")}</div>`
+                : `<div class="ldb-view-empty-text">当前数据里没有可解析的时间字段。</div>`;
+
+            const typeHighlights = model.typeBreakdown.slice(0, 4).map((item) => {
+                return `<span class="ldb-view-pill">${Utils.escapeHtml(item.label)} ${item.count}</span>`;
+            }).join("");
+
+            container.innerHTML = `
+                <div class="ldb-view-grid">
+                    <div class="ldb-view-card">
+                        <div class="ldb-view-card-title">已加载条目</div>
+                        <div class="ldb-view-metric-value">${model.total}</div>
+                        <div class="ldb-view-metric-meta">来自 ${Math.max(1, model.loadedSources.length)} 个已加载来源</div>
+                    </div>
+                    <div class="ldb-view-card">
+                        <div class="ldb-view-card-title">当前选择</div>
+                        <div class="ldb-view-metric-value">${model.selected}</div>
+                        <div class="ldb-view-metric-meta">用于当前面板的批量导出选择</div>
+                    </div>
+                    <div class="ldb-view-card full">
+                        <div class="ldb-view-card-title">来源分布</div>
+                        ${renderBarRows(model.sourceBreakdown)}
+                        ${typeHighlights ? `<div class="ldb-view-highlight">${typeHighlights}</div>` : ""}
+                    </div>
+                    <div class="ldb-view-card full">
+                        <div class="ldb-view-card-title">导出状态</div>
+                        ${renderBarRows(statusRows)}
+                    </div>
+                    <div class="ldb-view-card full">
+                        <div class="ldb-view-card-title">时间线</div>
+                        ${timelineMarkup}
+                    </div>
+                </div>
+            `;
+        },
+
         applyBookmarkSourceUI: (source) => {
             const refs = UI.refs || {};
             const isGitHub = source === "github";
@@ -18549,6 +19554,7 @@ ${availableTools}
             if (!UI.bookmarks || UI.bookmarks.length === 0) {
                 list.innerHTML = '<div style="padding: 12px; text-align: center; color: #666;">暂无收藏</div>';
                 UI.updateSelectCount();
+                UI.renderVisualSummary();
                 return;
             }
 
@@ -18574,6 +19580,7 @@ ${availableTools}
 
             appendChunk();
             UI.updateSelectCount();
+            UI.renderVisualSummary();
         },
 
         // 重算导出统计（在列表变更后调用）
@@ -18621,6 +19628,7 @@ ${availableTools}
                 selectAll.checked = false;
                 selectAll.indeterminate = true;
             }
+            UI.renderVisualSummary();
         },
 
         syncRenderedSelectionState: () => {
