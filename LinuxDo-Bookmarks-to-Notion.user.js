@@ -7123,7 +7123,11 @@ ${existingContent}`;
                         { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `🌐 ${lang}翻译` } }] } },
                         ...AIAssistant._textToBlocks(translated)
                     ];
-                    await NotionAPI.appendBlocks(page.id, blocks, settings.notionApiKey);
+                    await AIAssistant._executeGuardedPageWrite("appendBlocks", page,
+                        () => NotionAPI.appendBlocks(page.id, blocks, settings.notionApiKey),
+                        settings,
+                        { itemName: title }
+                    );
                     successCount++;
                 } catch {
                     failCount++;
@@ -7233,7 +7237,11 @@ ${content}`;
                 }
             }
 
-            const newDb = await NotionAPI.createDatabase(sourcePage.id, dbName, dbProperties, settings.notionApiKey);
+            const newDb = await AIAssistant._executeGuardedPageWrite("createDatabase", sourcePage,
+                () => NotionAPI.createDatabase(sourcePage.id, dbName, dbProperties, settings.notionApiKey),
+                settings,
+                { itemName: dbName }
+            );
 
             // 填充条目
             ChatState.updateLastMessage(`📝 正在填充 ${extractedData.entries.length} 个条目...`, "processing");
@@ -7262,7 +7270,12 @@ ${content}`;
                         }
                     }
 
-                    await NotionAPI.createPage(newDb.id, pageProperties, settings.notionApiKey);
+                    const entryName = String(entry[titleKey] || `条目 ${addedCount + 1}`).trim() || `条目 ${addedCount + 1}`;
+                    await AIAssistant._executeGuardedDatabaseWrite("createDatabasePage", newDb.id,
+                        () => NotionAPI.createPage(newDb.id, pageProperties, settings.notionApiKey),
+                        settings,
+                        { itemName: entryName }
+                    );
                     addedCount++;
                 } catch { /* skip failed entries */ }
             }
@@ -7358,7 +7371,12 @@ ${structure_prompt ? `补充要求：${structure_prompt}` : ""}
 
             let parentPage;
             if (parentPageId) {
-                parentPage = await NotionAPI.createPageInPage(parentPageId, parentProps, settings.notionApiKey);
+                parentPage = await AIAssistant._executeGuardedPageWrite("createDatabasePage",
+                    { id: parentPageId, name: parent_page_name || parentPageId },
+                    () => NotionAPI.createPageInPage(parentPageId, parentProps, settings.notionApiKey),
+                    settings,
+                    { itemName: plan.parent_title, pageId: parentPageId }
+                );
             } else {
                 // Notion API 不支持在工作区根目录创建页面，必须指定父页面
                 return `❌ 请指定父页面。Notion API 要求页面必须创建在某个父页面下。\n\n💡 示例：「在 xxx 页面下创建入职指南」`;
@@ -7366,7 +7384,11 @@ ${structure_prompt ? `补充要求：${structure_prompt}` : ""}
 
             // 写入父页面概览
             const overviewBlocks = AIAssistant._textToBlocks(`${plan.parent_summary || ""}\n\n## 📋 目录\n\n${plan.children.map((c, i) => `${i + 1}. ${c.icon || "📄"} **${c.title}** - ${c.description}`).join("\n")}`);
-            await NotionAPI.appendBlocks(parentPage.id, overviewBlocks, settings.notionApiKey);
+            await AIAssistant._executeGuardedPageWrite("appendBlocks", parentPage,
+                () => NotionAPI.appendBlocks(parentPage.id, overviewBlocks, settings.notionApiKey),
+                settings,
+                { itemName: plan.parent_title }
+            );
 
             // 创建子页面并生成内容
             let createdCount = 0;
@@ -7379,7 +7401,11 @@ ${structure_prompt ? `补充要求：${structure_prompt}` : ""}
                     const childProps = {
                         title: { title: [{ text: { content: `${child.icon || ""} ${child.title}`.trim() } }] }
                     };
-                    const childPage = await NotionAPI.createPageInPage(parentPage.id, childProps, settings.notionApiKey);
+                    const childPage = await AIAssistant._executeGuardedPageWrite("createDatabasePage", parentPage,
+                        () => NotionAPI.createPageInPage(parentPage.id, childProps, settings.notionApiKey),
+                        settings,
+                        { itemName: child.title }
+                    );
 
                     // 生成子页面内容
                     const contentPrompt = `为以下主题生成详细内容，使用 Markdown 格式。
@@ -7392,7 +7418,11 @@ ${structure_prompt ? `补充要求：${structure_prompt}` : ""}
 
                     const content = await AIService.requestChat(contentPrompt, settings, 2000);
                     const contentBlocks = AIAssistant._textToBlocks(content);
-                    await NotionAPI.appendBlocks(childPage.id, contentBlocks, settings.notionApiKey);
+                    await AIAssistant._executeGuardedPageWrite("appendBlocks", childPage,
+                        () => NotionAPI.appendBlocks(childPage.id, contentBlocks, settings.notionApiKey),
+                        settings,
+                        { itemName: child.title }
+                    );
                     createdCount++;
                 } catch { /* skip failed pages */ }
             }
@@ -7670,17 +7700,21 @@ ${contentParts.join("\n\n---\n\n")}`;
         const aiResponse = await AIService.requestChat(fullPrompt, settings, 3000);
 
         // 如果有目标页面，写入 Notion
-        if (targetPage) {
-            ChatState.updateLastMessage("正在写入页面...", "processing");
-            const contentBlocks = AIAssistant._textToBlocks(aiResponse);
-            const blocks = [
-                { type: "divider", divider: {} },
-                { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `${template.icon} ${template.name}` } }] } },
-                ...contentBlocks
-            ];
-            await NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
-            return `✅ **${template.icon} ${template.name}** 已生成并写入页面「${targetPage.name}」\n\n${aiResponse}`;
-        }
+            if (targetPage) {
+                ChatState.updateLastMessage("正在写入页面...", "processing");
+                const contentBlocks = AIAssistant._textToBlocks(aiResponse);
+                const blocks = [
+                    { type: "divider", divider: {} },
+                    { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `${template.icon} ${template.name}` } }] } },
+                    ...contentBlocks
+                ];
+                await AIAssistant._executeGuardedPageWrite("appendBlocks", targetPage,
+                    () => NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
+                    settings,
+                    { itemName: targetPage.name }
+                );
+                return `✅ **${template.icon} ${template.name}** 已生成并写入页面「${targetPage.name}」\n\n${aiResponse}`;
+            }
 
         return `${template.icon} **${template.name}**\n\n${aiResponse}\n\n💡 如需写入页面，请指定目标页面：「用${template.name}模板处理 xxx 页面」`;
     },
@@ -10815,19 +10849,29 @@ ${availableTools}
 
             let page;
             if (settings.exportTargetType === CONFIG.EXPORT_TARGET_TYPES.PAGE) {
-                page = await NotionAPI.createChildPage(
-                    settings.parentPageId,
-                    meta.title,
-                    blocks,
-                    settings.apiKey
+                page = await AIAssistant._executeGuardedPageWrite("createDatabasePage",
+                    { id: settings.parentPageId, name: meta.title },
+                    () => NotionAPI.createChildPage(
+                        settings.parentPageId,
+                        meta.title,
+                        blocks,
+                        settings.apiKey
+                    ),
+                    settings,
+                    { itemName: meta.title, pageId: settings.parentPageId }
                 );
             } else {
                 const properties = GenericExporter.buildProperties(meta);
-                page = await NotionAPI.createDatabasePage(
+                page = await AIAssistant._executeGuardedDatabaseWrite("createDatabasePage",
                     settings.databaseId,
-                    properties,
-                    blocks,
-                    settings.apiKey
+                    () => NotionAPI.createDatabasePage(
+                        settings.databaseId,
+                        properties,
+                        blocks,
+                        settings.apiKey
+                    ),
+                    settings,
+                    { itemName: meta.title }
                 );
             }
 
@@ -11343,20 +11387,30 @@ ${availableTools}
             // 根据导出目标类型创建页面
             if (settings.exportTargetType === CONFIG.EXPORT_TARGET_TYPES.PAGE) {
                 // 创建为子页面
-                page = await NotionAPI.createChildPage(
-                    settings.parentPageId,
-                    topic.title,
-                    blocks,
-                    settings.apiKey
+                page = await AIAssistant._executeGuardedPageWrite("createDatabasePage",
+                    { id: settings.parentPageId, name: topic.title },
+                    () => NotionAPI.createChildPage(
+                        settings.parentPageId,
+                        topic.title,
+                        blocks,
+                        settings.apiKey
+                    ),
+                    settings,
+                    { itemName: topic.title, pageId: settings.parentPageId }
                 );
             } else {
                 // 创建为数据库条目（默认行为）
                 const properties = Exporter.buildProperties(topic, bookmark);
-                page = await NotionAPI.createDatabasePage(
+                page = await AIAssistant._executeGuardedDatabaseWrite("createDatabasePage",
                     settings.databaseId,
-                    properties,
-                    blocks,
-                    settings.apiKey
+                    () => NotionAPI.createDatabasePage(
+                        settings.databaseId,
+                        properties,
+                        blocks,
+                        settings.apiKey
+                    ),
+                    settings,
+                    { itemName: topic.title }
                 );
             }
 

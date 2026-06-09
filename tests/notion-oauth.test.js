@@ -3353,11 +3353,11 @@ function createWorkspaceVisualizationFixture(harness) {
         const boundedManifest = buildManifest({ version: '9.9.9', profile: 'bounded_hosts' });
 
         assert.strictEqual(resolvedDefault.name, DEFAULT_MANIFEST_PROFILE);
-        assert.deepStrictEqual(resolvedDefault.config, MANIFEST_PROFILE_PRESETS.default);
+        assert.deepStrictEqual(resolvedDefault.config, MANIFEST_PROFILE_PRESETS.bounded_hosts);
         assert.strictEqual(resolvedBounded.name, 'bounded_hosts');
         assert.deepStrictEqual(resolvedBounded.config, MANIFEST_PROFILE_PRESETS.bounded_hosts);
-        assert.ok(manifest.host_permissions.includes('https://*/*'));
-        assert.ok(manifest.host_permissions.includes('http://*/*'));
+        assert.ok(!manifest.host_permissions.includes('https://*/*'));
+        assert.ok(!manifest.host_permissions.includes('http://*/*'));
         assert.ok(!boundedManifest.host_permissions.includes('https://*/*'));
         assert.ok(!boundedManifest.host_permissions.includes('http://*/*'));
     });

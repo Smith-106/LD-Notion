@@ -24,7 +24,7 @@ const GENERATED_SECTION_MARKERS = Object.freeze({
     popupMessageBridgeEnd: "// [LD-NOTION-BUILD:POPUP_MESSAGE_BRIDGE_END]",
 });
 
-const DEFAULT_MANIFEST_PROFILE = "default";
+const DEFAULT_MANIFEST_PROFILE = "bounded_hosts";
 
 const MANIFEST_SHARED_DEFAULTS = Object.freeze({
     name: "LD-Notion — Notion AI 助手 & 多源收藏管理",

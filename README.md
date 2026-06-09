@@ -6,13 +6,11 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前脚本 / 扩展核心版本：`v3.6.4`
-- 最近已发布版本：`v3.6.6`
+- 当前仓库源码版本：`v3.6.4`
+- 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装（直链）：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
-- 最近已发布扩展 ZIP 直链（v3.6.6）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.6.6/LD-Notion-chrome-extension-full-v3.6.6.zip>
-- 最近已发布 Release 页面（v3.6.6）：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.6.6>
 
 ## 文档站
 
@@ -171,8 +169,8 @@ node scripts/build-extension.js
 
 构建说明：
 
-- 默认 profile 仍然生成当前发布用的扩展形态，保留多源裁剪所需的广泛 `host_permissions`
-- 如需做更收敛的本地验证，可临时指定 `LD_NOTION_MANIFEST_PROFILE=bounded_hosts` 后再执行构建；这不是当前默认发布配置
+- 默认 profile 已切换为 `bounded_hosts`，优先生成收敛后的受限 `host_permissions` 扩展形态
+- 如需兼容旧的宽权限构建，可临时指定 `LD_NOTION_MANIFEST_PROFILE=default` 后再执行构建
 - 当前构建脚本已显式校验 userscript 主体锚点、`BookmarkBridge` 补丁区、GM shim / content script / popup / background / manifest 这些关键 seam，源码形状漂移会更早失败
 
 #### 2. 安装扩展
@@ -361,7 +359,7 @@ A: 请检查：
   4. 如涉及扩展交付：`node scripts/build-extension.js`
   5. 最后按 `docs/ui-regression-checklist.md` 做 Linux.do / Notion / 通用网页 / `chrome-extension-full` 手工 smoke
 - 一键交付验证：`npm run verify:delivery`
-- `npm test`：运行 `tests/utils.test.js` 和 `tests/notion-oauth.test.js`
+- `npm test`：运行 `tests/utils.test.js`、`tests/logic-modules.test.js` 和 `tests/notion-oauth.test.js`
 - Node 测试会直接读取并执行当前 `LinuxDo-Bookmarks-to-Notion.user.js` 的核心代码，并复用 `scripts/build-extension.js` 的提取/构建 seam，而不是维护一份单独的测试副本
 - 当前自动化验证重点覆盖：Utils 辅助函数、OAuth 回调与 refresh fallback、`TargetState`、`quickParseIntent` 正/反例、`assistant_result v1` 输出契约，以及 `scripts/build-extension.js` 的锚点、builder seam、manifest profile 与构建冒烟
 - 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）
@@ -391,9 +389,9 @@ A: 请检查：
 - 优化：userscript 主体与 `BookmarkBridge` 构建区增加显式 build anchors，扩展构建不再主要依赖 IIFE / 对象文本形状猜测
 - 优化：`scripts/build-extension.js` 为 `background.js`、`popup.html`、`popup.js`、GM shim、`content.js`、`manifest.json` 提供显式 builder seams
 - 优化：生成 content script 的关键注入区增加 section marker，构建校验从散落字符串检查升级为显式契约检查
-- 优化：manifest 生成策略拆成 profile/config seam，默认 release 仍保持当前宽权限形态，同时提供 `bounded_hosts` 作为可选收敛 smoke profile
+- 优化：manifest 生成策略拆成 profile/config seam，当前默认构建已切换到 `bounded_hosts`，旧的宽权限 `default` profile 仅保留给显式兼容构建
 - 新增：`npm run verify:baseline`、`npm run verify:extension:bounded`、`npm run build:extension`、`npm run verify:delivery`
-- 优化：发布 workflow 现在先跑 baseline，再跑 `bounded_hosts` smoke，最后才构建默认 release 扩展 ZIP
+- 优化：发布 workflow 现在先跑 baseline，再跑 `bounded_hosts` smoke，最后构建默认的受限权限扩展 ZIP
 - 文档：README / TUTORIAL / tests/README / UI 回归清单同步收口到新的构建与交付验证模型
 
 ### v3.4.3

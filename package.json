@@ -4,7 +4,7 @@
   "description": "LD-Notion Hub — AI 多源知识中枢",
   "main": "LinuxDo-Bookmarks-to-Notion.user.js",
   "scripts": {
-    "test": "node tests/utils.test.js && node tests/notion-oauth.test.js",
+    "test": "node tests/utils.test.js && node tests/logic-modules.test.js && node tests/notion-oauth.test.js",
     "verify:baseline": "npm test && node --check LinuxDo-Bookmarks-to-Notion.user.js && node scripts/validate-userscript-ui.js",
     "build:extension": "node scripts/build-extension.js",
     "verify:extension:bounded": "node -e \"const fs=require('fs'); const os=require('os'); const path=require('path'); const { buildExtension } = require('./scripts/build-extension.js'); const outDir=fs.mkdtempSync(path.join(os.tmpdir(),'ld-notion-build-bounded-')); try { buildExtension({ manifestProfile: 'bounded_hosts', outDir }); } finally { fs.rmSync(outDir, { recursive: true, force: true }); }\"",
