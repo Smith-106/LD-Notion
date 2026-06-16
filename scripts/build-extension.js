@@ -718,6 +718,17 @@ function buildGmShim() {
 // 我们使用一个内存缓存 + 异步回写的策略
 const _gmStorage = {};
 let _gmStorageReady = false;
+const _pendingWrites = {};
+let _writeFlushScheduled = false;
+
+function _flushPendingWrites() {
+    _writeFlushScheduled = false;
+    const batch = { ..._pendingWrites };
+    for (const k of Object.keys(_pendingWrites)) delete _pendingWrites[k];
+    if (Object.keys(batch).length > 0) {
+        chrome.storage.local.set(batch);
+    }
+}
 
 function _gmInitStorage() {
     return new Promise((resolve) => {
@@ -736,11 +747,20 @@ function GM_getValue(key, defaultValue) {
 
 function GM_setValue(key, value) {
     _gmStorage[key] = value;
-    chrome.storage.local.set({ [key]: value });
+    _pendingWrites[key] = value;
+    if (!_writeFlushScheduled) {
+        _writeFlushScheduled = true;
+        if (typeof queueMicrotask === "function") {
+            queueMicrotask(_flushPendingWrites);
+        } else {
+            setTimeout(_flushPendingWrites, 0);
+        }
+    }
 }
 
 function GM_deleteValue(key) {
     delete _gmStorage[key];
+    delete _pendingWrites[key];
     chrome.storage.local.remove(key);
 }
 

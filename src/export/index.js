@@ -8,6 +8,7 @@ const { NotionAPI, DOMToNotion, HTMLToMarkdown, ObsidianAPI, SiteDetector, EMOJI
 const { OperationGuard, UndoManager, OperationLog } = require("../security");
 const { BookmarkExporter } = require("../bridge");
 const { ZhihuAPI } = require("../extract");
+const { SyncLock } = require("../sync-lock");
 
 const GenericExporter = {
     resolveUnifiedSource: (meta = {}) => {
@@ -534,7 +535,7 @@ const LinuxDoAPI = {
 };
 
 const Exporter = {
-    isExporting: false, // 标记是否正在导出（用于与自动导入互斥）
+    isExporting: false, // 标记是否正在导出（用于与自动导入互斥）— 已迁移到 SyncLock
 
     // 筛选帖子
     filterPosts: (posts, topic, settings) => {
@@ -902,7 +903,7 @@ const Exporter = {
     exportBookmarks: async (bookmarks, settings, onProgress, startIndex = 0) => {
         const results = { success: [], failed: [], skipped: [] };
         Exporter.reset();
-        Exporter.isExporting = true;
+        SyncLock.isExporting = true;
         Exporter.currentIndex = startIndex;
         const concurrency = settings.concurrency || 1;
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
@@ -985,7 +986,7 @@ const Exporter = {
             }
         }
 
-        Exporter.isExporting = false;
+        SyncLock.isExporting = false;
         return results;
     },
 };

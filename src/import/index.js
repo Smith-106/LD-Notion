@@ -9,6 +9,7 @@ const { OperationGuard, UndoManager, OperationLog } = require("../security");
 const { GenericExtractor } = require("../extract");
 const { Exporter, LinuxDoAPI } = require("../export");
 const { SyncCoordinator } = require("../adapter/SyncCoordinator");
+const { SyncLock } = require("../sync-lock");
 
 const AutoImporter = {
     isRunning: false,
@@ -105,7 +106,7 @@ AutoImporter.run = async () => {
         return;
     }
     if (AutoImporter.isRunning) return;
-    if (Exporter.isExporting) return;
+    if (SyncLock.isExporting) return;
 
     const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
     if (!apiKey) {

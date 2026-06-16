@@ -7,7 +7,7 @@ const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
 const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper } = require("../api");
 const { OperationGuard, UndoManager, OperationLog } = require("../security");
 const { GenericExtractor, WorkspaceService } = require("../extract");
-const { Exporter, LinuxDoAPI } = require("../export");
+const { SyncLock } = require("../sync-lock");
 const { SyncCoordinator } = require("../adapter/SyncCoordinator");
 
 var __LD_NOTION_BUILD_BOOKMARK_BRIDGE_START__ = "[LD-NOTION-BUILD:BOOKMARK_BRIDGE_START]";
@@ -789,7 +789,7 @@ BookmarkAutoImporter.run = async () => {
         return;
     }
     if (BookmarkAutoImporter.isRunning) return;
-    if (Exporter.isExporting) return;
+    if (SyncLock.isExporting) return;
 
     const settings = BookmarkAutoImporter.buildSettings();
     if (!BookmarkBridge.isExtensionAvailable()) {
@@ -1435,7 +1435,7 @@ const RSSAutoImporter = {
             return;
         }
         if (RSSAutoImporter.isRunning) return;
-        if (Exporter.isExporting) return;
+        if (SyncLock.isExporting) return;
 
         const settings = RSSAutoImporter.buildSettings();
         const feedUrls = RSSAutoImporter.getFeedUrls();
