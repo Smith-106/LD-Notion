@@ -1,3 +1,4 @@
+"use strict";
 /**
  * LD-Notion 构建脚本
  * 从油猴脚本生成 Chrome 扩展版本
@@ -74,12 +75,11 @@ const MANIFEST_PROFILE_PRESETS = Object.freeze({
             "https://api.notion.com/*",
             "https://linux.do/*",
             "https://*.amazonaws.com/*",
+            "https://s3.amazonaws.com/*",
             "https://api.openai.com/*",
             "https://api.anthropic.com/*",
             "https://generativelanguage.googleapis.com/*",
-            "https://api.github.com/*",
-            "http://*/*",
-            "https://*/*"
+            "https://api.github.com/*"
         ]),
     }),
     bounded_hosts: Object.freeze({
@@ -87,6 +87,7 @@ const MANIFEST_PROFILE_PRESETS = Object.freeze({
             "https://api.notion.com/*",
             "https://linux.do/*",
             "https://*.amazonaws.com/*",
+            "https://s3.amazonaws.com/*",
             "https://api.openai.com/*",
             "https://api.anthropic.com/*",
             "https://generativelanguage.googleapis.com/*",
@@ -148,8 +149,9 @@ function indentBlock(content, indent) {
 }
 
 function replaceArrowMethodBlock(objectSource, methodName, replacement) {
+    // 匹配方法定义，兼容有逗号和无逗号（末尾方法）的情况
     const pattern = new RegExp(
-        `(^|\\n)(\\s*)${escapeRegExp(methodName)}:\\s*\\([^)]*\\)\\s*=>\\s*\\{[\\s\\S]*?\\n\\2\\},`,
+        `(^|\\n)(\\s*)${escapeRegExp(methodName)}:\\s*\\([^)]*\\)\\s*=>\\s*\\{[\\s\\S]*?\\n\\2\\},?`,
         "m"
     );
 
@@ -158,7 +160,14 @@ function replaceArrowMethodBlock(objectSource, methodName, replacement) {
     }
 
     return objectSource.replace(pattern, (match, prefix, indent) => {
-        return `${prefix}${indentBlock(replacement, indent)}`;
+        // 如果原始方法没有逗号（末尾方法），且替换内容有逗号，去掉替换的逗号
+        const trimmedMatch = match.trimEnd();
+        const hasComma = trimmedMatch.endsWith(",");
+        let finalReplacement = indentBlock(replacement, indent);
+        if (!hasComma && finalReplacement.trimEnd().endsWith(",")) {
+            finalReplacement = finalReplacement.replace(/,(\s*)$/, "$1");
+        }
+        return `${prefix}${finalReplacement}`;
     });
 }
 
@@ -252,7 +261,8 @@ function findAnchoredRegion(source, startMarker, endMarker, label) {
 }
 
 function locateBookmarkBridgeObject(iifeBody) {
-    const declaration = "const BookmarkBridge = {";
+    // 兼容原始格式 (const BookmarkBridge = {) 和 esbuild 打包格式 (var BookmarkBridge3 = {)
+    const declarationPattern = /\b(?:const|var|let)\s+BookmarkBridge\d*\s*=\s*\{/;
     const anchoredRegion = findAnchoredRegion(
         iifeBody,
         BUILD_ANCHORS.bookmarkBridgeStart,
@@ -262,11 +272,12 @@ function locateBookmarkBridgeObject(iifeBody) {
 
     if (anchoredRegion) {
         const anchoredBody = iifeBody.slice(anchoredRegion.start, anchoredRegion.end);
-        const relativeObjectStart = anchoredBody.indexOf(declaration);
-        if (relativeObjectStart === -1) {
+        const match = anchoredBody.match(declarationPattern);
+        if (!match) {
             throw new Error("BookmarkBridge 构建锚点内未找到对象定义");
         }
 
+        const relativeObjectStart = match.index;
         const objectStart = anchoredRegion.start + relativeObjectStart;
         const braceStart = iifeBody.indexOf("{", objectStart);
         const braceEnd = findMatchingBrace(iifeBody, braceStart);
@@ -278,11 +289,12 @@ function locateBookmarkBridgeObject(iifeBody) {
         return { objectStart, semicolonIndex };
     }
 
-    const objectStart = iifeBody.indexOf(declaration);
-    if (objectStart === -1) {
+    const match = iifeBody.match(declarationPattern);
+    if (!match) {
         throw new Error("未找到 BookmarkBridge 对象");
     }
 
+    const objectStart = match.index;
     const braceStart = iifeBody.indexOf("{", objectStart);
     const braceEnd = findMatchingBrace(iifeBody, braceStart);
     const semicolonIndex = iifeBody.indexOf(";", braceEnd);
@@ -360,7 +372,11 @@ function validatePatchedBuildAssumptions({ source, patchedBody, contentScript, b
         assertContains(source, BUILD_ANCHORS.userscriptBodyEnd, "userscript 主体结束锚点");
         assertContains(source, BUILD_ANCHORS.bookmarkBridgeStart, "BookmarkBridge 构建开始锚点");
         assertContains(source, BUILD_ANCHORS.bookmarkBridgeEnd, "BookmarkBridge 构建结束锚点");
-        assertContains(source, "const BookmarkBridge = {", "BookmarkBridge 对象定义");
+        // 兼容原始格式 (const BookmarkBridge = {) 和 esbuild 打包格式 (var BookmarkBridge3 = {)
+        const bookmarkBridgeMatch = source.match(/\b(?:const|var|let)\s+BookmarkBridge\d*\s*=\s*\{/);
+        if (!bookmarkBridgeMatch) {
+            throw new Error("BookmarkBridge 对象定义未找到");
+        }
     }
 
     if (typeof patchedBody === "string") {
@@ -425,10 +441,39 @@ function buildBackgroundScript() {
     return `// LD-Notion Chrome Extension — Background Service Worker
 // 代理 HTTP 请求以绕过 CORS 限制
 
+// 允许的域名白名单 (对应 manifest host_permissions)
+const ALLOWED_HOSTS = [
+    "api.notion.com", "linux.do", "*.linux.do",
+    "api.github.com", "github.com", "*.github.com",
+    "api.openai.com", "api.anthropic.com",
+    "generativelanguage.googleapis.com",
+    "*.amazonaws.com", "s3.amazonaws.com",
+    "zhihu.com", "*.zhihu.com",
+    "127.0.0.1", "localhost"
+];
+
+function isUrlAllowed(url) {
+    try {
+        const host = new URL(url).hostname;
+        return ALLOWED_HOSTS.some(pattern => {
+            if (pattern.startsWith("*.")) {
+                return host === pattern.slice(2) || host.endsWith(pattern.slice(1));
+            }
+            return host === pattern;
+        });
+    } catch { return false; }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type !== "GM_xmlhttpRequest") return false;
 
     const { method, url, headers, data } = message.payload;
+
+    // URL 白名单校验
+    if (!isUrlAllowed(url)) {
+        sendResponse({ success: false, error: "Domain not allowed: " + (new URL(url).hostname || url) });
+        return true;
+    }
 
     const fetchOptions = {
         method: method || "GET",
@@ -1044,8 +1089,10 @@ module.exports = {
 };
 
 if (require.main === module) {
+    // 支持 --src 参数指定源文件路径
+    const srcArg = process.argv.find((a, i) => i > 0 && process.argv[i - 1] === "--src");
     try {
-        buildExtension();
+        buildExtension({ src: srcArg || undefined });
     } catch (error) {
         console.error(`❌ ${error.message}`);
         process.exit(1);

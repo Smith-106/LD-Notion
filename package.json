@@ -1,16 +1,21 @@
 {
   "name": "ld-notion-hub",
   "version": "3.6.7",
+  "private": true,
   "description": "LD-Notion Hub — AI 多源知识中枢",
   "main": "LinuxDo-Bookmarks-to-Notion.user.js",
   "scripts": {
-    "test": "node tests/utils.test.js && node tests/logic-modules.test.js && node tests/notion-oauth.test.js",
+    "test": "npx vitest run",
+    "test:legacy": "node tests/utils.test.js && node tests/logic-modules.test.js && node tests/notion-oauth.test.js",
     "verify:baseline": "npm test && node --check LinuxDo-Bookmarks-to-Notion.user.js && node scripts/validate-userscript-ui.js",
-    "build:extension": "node scripts/build-extension.js",
+    "build:extension": "node scripts/build-extension.js --src dist/LinuxDo-Bookmarks-to-Notion.user.js",
     "verify:extension:bounded": "node -e \"const fs=require('fs'); const os=require('os'); const path=require('path'); const { buildExtension } = require('./scripts/build-extension.js'); const outDir=fs.mkdtempSync(path.join(os.tmpdir(),'ld-notion-build-bounded-')); try { buildExtension({ manifestProfile: 'bounded_hosts', outDir }); } finally { fs.rmSync(outDir, { recursive: true, force: true }); }\"",
     "verify:bridge-extension": "node scripts/verify-bridge-extension.js",
     "verify:extension:surfaces": "node scripts/verify-extension-surfaces.js",
-    "verify:delivery": "npm run verify:baseline && npm run verify:extension:bounded && npm run verify:bridge-extension && npm run verify:extension:surfaces && npm run build:extension",
+    "verify:equivalence": "node scripts/verify-bundle-equivalence.js",
+    "verify:delivery": "npm run verify:baseline && npm run verify:extension:bounded && npm run verify:bridge-extension && npm run verify:extension:surfaces && npm run verify:equivalence && npm run build:extension",
+    "build": "node build.js",
+    "verify:build": "node build.js && node --check dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q 'LD-NOTION-BUILD:USER_SCRIPT_BODY_START' dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q 'LD-NOTION-BUILD:BOOKMARK_BRIDGE_START' dist/LinuxDo-Bookmarks-to-Notion.user.js",
     "docs:dev": "vitepress docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs"
@@ -18,7 +23,10 @@
   "keywords": [],
   "author": "Smith-106",
   "license": "MIT",
+  "engines": { "node": ">=18.0.0" },
   "devDependencies": {
-    "vitepress": "^2.0.0-alpha.17"
+    "esbuild": "^0.28.1",
+    "vitepress": "^2.0.0-alpha.17",
+    "vitest": "^4.1.8"
   }
 }

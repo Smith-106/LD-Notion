@@ -2,20 +2,144 @@
   "version": "2.0",
   "project_name": "LD-Notion Hub",
   "status": "idle",
-  "current_milestone": null,
+  "current_milestone": "M1",
   "current_task_id": null,
-  "milestones": [],
-  "artifacts": [],
-  "last_updated": "2026-05-06T14:45:00+08:00",
+  "milestones": [
+    {
+      "id": "M1",
+      "title": "基础设施+核心功能升级",
+      "version": "v3.6.0",
+      "status": "active",
+      "phase_slugs": [
+        "01-arch-upgrade"
+      ],
+      "phases": [
+        {
+          "id": 1,
+          "slug": "01-arch-upgrade",
+          "title": "架构升级全量",
+          "status": "not_started",
+          "tasks": [
+            "TASK-001",
+            "TASK-002",
+            "TASK-003",
+            "TASK-004",
+            "TASK-005",
+            "TASK-006",
+            "TASK-007"
+          ],
+          "waves": [
+            "W1",
+            "W2",
+            "W3",
+            "W4",
+            "W5"
+          ]
+        }
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "ANL-001",
+      "type": "analyze",
+      "scope": "standalone",
+      "status": "completed",
+      "milestone": null,
+      "phase": null,
+      "path": "scratch/20260613-analyze-ldnotion",
+      "context_package": "scratch/20260613-analyze-ldnotion/context-package.json",
+      "harvested": true,
+      "created_at": "2026-06-13T00:00:00+08:00",
+      "completed_at": "2026-06-13T00:30:00+08:00"
+    },
+    {
+      "id": "BRN-001",
+      "type": "brainstorm",
+      "scope": "standalone",
+      "status": "completed",
+      "milestone": null,
+      "phase": null,
+      "path": "scratch/20260613-brainstorm-active-reqs",
+      "context_package": null,
+      "harvested": true,
+      "created_at": "2026-06-13T00:30:00+08:00",
+      "completed_at": "2026-06-13T00:50:00+08:00"
+    },
+    {
+      "id": "PLN-001",
+      "type": "plan",
+      "scope": "phase",
+      "status": "completed",
+      "milestone": "M1",
+      "phase": 1,
+      "path": "scratch/20260613-plan-ldnotion-upgrade",
+      "context_package": null,
+      "harvested": true,
+      "depends_on": "ANL-001",
+      "created_at": "2026-06-13T01:00:00+08:00",
+      "completed_at": "2026-06-14T14:30:00+08:00"
+    },
+    {
+      "id": "DBG-001",
+      "type": "debug",
+      "scope": "standalone",
+      "status": "completed",
+      "milestone": null,
+      "phase": null,
+      "path": "scratch/20260613-debug-risk-scan",
+      "context_package": null,
+      "harvested": true,
+      "created_at": "2026-06-13T01:10:00+08:00",
+      "completed_at": "2026-06-13T01:20:00+08:00"
+    },
+    {
+      "id": "REV-001",
+      "type": "review",
+      "milestone": "M1",
+      "phase": 1,
+      "scope": "phase",
+      "path": "scratch/20260616-review-P1-arch-upgrade",
+      "status": "completed",
+      "depends_on": "PLN-001",
+      "harvested": false,
+      "created_at": "2026-06-16T17:00:00+08:00",
+      "completed_at": "2026-06-16T17:30:00+08:00"
+    }
+  ],
+  "last_updated": "2026-06-16T17:30:00+08:00",
   "accumulated_context": {
     "key_decisions": [
       "v3.5.0: 文件处理系统全面升级（54种文件类型、去重上传、多分片、video/audio block）",
       "架构: 单文件 Userscript + Chrome Extension 双形态",
       "认证: 支持 Manual API Key + OAuth 双模式",
-      "AI: 多服务商（OpenAI/Anthropic/Gemini）统一接口"
+      "AI: 多服务商（OpenAI/Anthropic/Gemini）统一接口",
+      "分析: 构建系统升级优先于功能升级（2026-06-13）",
+      "安全: @connect白名单化+API Key加密立即执行（2026-06-13）"
     ],
     "blockers": [],
-    "deferred": []
+    "deferred": [
+      {
+        "title": "多源统一管理架构",
+        "status": "deferred",
+        "reason": "依赖模块拆分完成"
+      },
+      {
+        "title": "AI驱动知识整理",
+        "status": "deferred",
+        "reason": "依赖多源统一管理"
+      },
+      {
+        "title": "新知识源接入",
+        "status": "deferred",
+        "reason": "依赖SourceAdapter抽象层"
+      },
+      {
+        "title": "知识分享与协作",
+        "status": "deferred",
+        "reason": "最低优先级，远期规划"
+      }
+    ]
   },
   "transition_history": [],
   "milestone_history": []
