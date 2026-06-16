@@ -6,7 +6,6 @@ const { CredentialVault, NotionOAuth } = require("../auth");
 const { NotionAPI, SiteDetector, EMOJI_MAP, DOMToNotion } = require("../api");
 const { OperationGuard, OperationLog } = require("../security");
 const { GenericExtractor, WorkspaceService } = require("../extract");
-const { Exporter, LinuxDoAPI } = require("../export");
 const { UndoManager, ConfirmationDialog } = require("../security");
 
 const AIService = {
@@ -474,8 +473,8 @@ const AIService = {
         // 标准化 baseUrl：移除末尾的 / 和 /v1beta，避免重复路径
         const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1beta$/, "") : "";
         const url = normalizedBase
-            ? `${normalizedBase}/v1beta/models?key=${apiKey}`
-            : `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+            ? `${normalizedBase}/v1beta/models`
+            : `https://generativelanguage.googleapis.com/v1beta/models`;
 
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -483,6 +482,7 @@ const AIService = {
                 url: url,
                 headers: {
                     "Content-Type": "application/json",
+                    "x-goog-api-key": apiKey,
                 },
                 onload: (response) => {
                     try {
@@ -4727,10 +4727,10 @@ handleGitHubImport: async (params, settings, explanation) => {
     }
 
     const classify = params.classify || false;
-    const importTypes = GitHubAPI.getImportTypes();
+    const importTypes = (require("../import").GitHubAPI).getImportTypes();
 
     try {
-        const allResults = await GitHubExporter.exportAll({
+        const allResults = await (require("../import").GitHubExporter).exportAll({
             apiKey: settings.notionApiKey,
             databaseId,
             username,
@@ -4771,7 +4771,7 @@ handleGitHubImport: async (params, settings, explanation) => {
         if (classify && totalExported > 0 && settings.aiApiKey) {
             ChatState.updateLastMessage("🏷️ 正在进行 AI 分类...", "processing");
             try {
-                const classifyResult = await GitHubExporter.classifyRepos({
+                const classifyResult = await (require("../import").GitHubExporter).classifyRepos({
                     ...settings,
                     databaseId,
                 }, (msg, pct) => {
@@ -4799,15 +4799,15 @@ handleBookmarkImport: async (params, settings, explanation) => {
     if (!databaseId) {
         return "❌ 请先配置目标数据库 ID。";
     }
-    if (!BookmarkBridge.isExtensionAvailable()) {
-        const installUrl = InstallHelper.getBookmarkExtensionUrl();
+    if (!(require("../bridge").BookmarkBridge).isExtensionAvailable()) {
+        const installUrl = (require("../api").InstallHelper).getBookmarkExtensionUrl();
         return `❌ 未检测到 LD-Notion 书签桥接扩展。\n\n💡 请点击安装：${installUrl}\n\n手动安装步骤：\n1. 打开 chrome://extensions/\n2. 开启「开发者模式」\n3. 点击「加载已解压的扩展」\n4. 选择项目中的 chrome-extension 文件夹\n5. 刷新当前页面\n\n🔎 诊断建议：\n- 若你当前使用的是 chrome-extension-full 独立版，请关闭 userscript，避免双模式混用\n- 若你坚持 userscript 模式，请仅安装 chrome-extension（桥接版）`;
     }
 
     try {
         ChatState.updateLastMessage("📖 正在读取浏览器书签...", "processing");
-        const tree = await BookmarkBridge.getBookmarkTree();
-        const allBookmarks = BookmarkExporter.flattenTree(tree);
+        const tree = await (require("../bridge").BookmarkBridge).getBookmarkTree();
+        const allBookmarks = (require("../bridge").BookmarkExporter).flattenTree(tree);
 
         if (allBookmarks.length === 0) {
             return "📭 没有找到浏览器书签。";
@@ -4815,11 +4815,11 @@ handleBookmarkImport: async (params, settings, explanation) => {
 
         const dedupStrict = Utils.isBookmarkDedupStrict();
         const newCount = dedupStrict
-            ? allBookmarks.filter(b => !BookmarkExporter.isExported(b.url)).length
+            ? allBookmarks.filter(b => !(require("../bridge").BookmarkExporter).isExported(b.url)).length
             : allBookmarks.length;
         ChatState.updateLastMessage(`📖 找到 ${allBookmarks.length} 个书签 (${newCount} 个新书签)，正在导出...`, "processing");
 
-        const result = await BookmarkExporter.exportBookmarks({
+        const result = await (require("../bridge").BookmarkExporter).exportBookmarks({
             apiKey: settings.notionApiKey,
             databaseId,
             bookmarks: allBookmarks,
