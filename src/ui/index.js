@@ -5,13 +5,13 @@ const { CONFIG, MSG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState } = require("../storage");
 const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
-const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, ObsidianAPI, EMOJI_MAP, NotionTransport } = require("../api");
+const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, ObsidianAPI, EMOJI_MAP } = require("../api");
 const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = require("../security");
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
 const { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter } = require("../bridge");
-const { AIService, ChatState, AIAssistant, AIClassifier, AIWelcomeUI, ChatUI, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES } = require("../ai");
+const { AIService, ChatState, AIAssistant, AIClassifier, AIWelcomeUI, ChatUI } = require("../ai");
 
 const StyleManager = {
     injectOnce: (styleId, cssText) => {

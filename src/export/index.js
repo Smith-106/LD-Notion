@@ -535,7 +535,6 @@ const LinuxDoAPI = {
 };
 
 const Exporter = {
-    isExporting: false, // 标记是否正在导出（用于与自动导入互斥）— 已迁移到 SyncLock
 
     // 筛选帖子
     filterPosts: (posts, topic, settings) => {

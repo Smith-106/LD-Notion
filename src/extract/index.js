@@ -289,7 +289,6 @@ const WorkspaceService = {
                 url: page.url || "",
                 parent: page.parent?.type || "",
                 parentId: (page.parent?.database_id || page.parent?.page_id || "").replace(/-/g, ""),
-                parentId: (page.parent?.database_id || page.parent?.page_id || "").replace(/-/g, ""),
             })).filter(item => item.id);
 
             return { databases, pages };

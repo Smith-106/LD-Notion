@@ -14,7 +14,7 @@
 // @match        https://www.github.com/*
 // @match        https://www.zhihu.com/*
 // @match        https://zhuanlan.zhihu.com/*
-// @match        *://*/*
+// @include      /^https?://(?!(www\.google\.com|www\.google\.com\.hk|www\.baidu\.com|www\.bing\.com|duckduckgo\.com|mail\.google\.com|outlook\.live\.com|localhost|127\.0\.0\.1))/
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
 // @exclude      https://www.baidu.com/*
@@ -39,7 +39,8 @@
 // @connect      api.anthropic.com
 // @connect      generativelanguage.googleapis.com
 // @connect      api.github.com
-// @connect      *
+// @connect      zhihu.com
+// @connect      zhuanlan.zhihu.com
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -127,6 +128,10 @@
             GITHUB_AUTO_IMPORT_INTERVAL: "ldb_github_auto_import_interval",
             BOOKMARK_AUTO_IMPORT_ENABLED: "ldb_bookmark_auto_import_enabled",
             BOOKMARK_AUTO_IMPORT_INTERVAL: "ldb_bookmark_auto_import_interval",
+            RSS_FEED_URLS: "ldb_rss_feed_urls",
+            RSS_AUTO_IMPORT_ENABLED: "ldb_rss_auto_import_enabled",
+            RSS_AUTO_IMPORT_INTERVAL: "ldb_rss_auto_import_interval",
+            RSS_IMPORT_DEDUP_MODE: "ldb_rss_import_dedup_mode",
             BOOKMARK_SOURCE: "ldb_bookmark_source",
             LINUXDO_IMPORT_DEDUP_MODE: "ldb_linuxdo_import_dedup_mode",
             BOOKMARK_IMPORT_DEDUP_MODE: "ldb_bookmark_import_dedup_mode",
@@ -192,6 +197,10 @@
             githubAutoImportInterval: 5,
             bookmarkAutoImportEnabled: false,
             bookmarkAutoImportInterval: 5,
+            rssFeedUrls: "",
+            rssAutoImportEnabled: false,
+            rssAutoImportInterval: 5,
+            rssImportDedupMode: "strict",
             bookmarkSource: "linuxdo",
             linuxdoImportDedupMode: "strict",
             bookmarkImportDedupMode: "strict",
@@ -628,22 +637,48 @@
     const SyncState = {
         VERSION: 1,
         _cache: null,
+        OUTCOMES: Object.freeze(["idle", "running", "success", "partial", "error"]),
 
         _defaults: () => ({
             version: SyncState.VERSION,
             linuxdo: {
                 watermark: null,
                 lastSuccessAt: 0,
+                lastAttemptAt: 0,
+                lastOutcome: "idle",
+                lastError: "",
+                lastStats: {},
             },
             github: {
-                stars: { watermark: null, lastSuccessAt: 0 },
-                repos: { watermark: null, lastSuccessAt: 0 },
-                forks: { watermark: null, lastSuccessAt: 0 },
-                gists: { watermark: null, lastSuccessAt: 0 },
+                meta: {
+                    watermark: null,
+                    lastSuccessAt: 0,
+                    lastAttemptAt: 0,
+                    lastOutcome: "idle",
+                    lastError: "",
+                    lastStats: {},
+                },
+                stars: { watermark: null, lastSuccessAt: 0, lastAttemptAt: 0, lastOutcome: "idle", lastError: "", lastStats: {} },
+                repos: { watermark: null, lastSuccessAt: 0, lastAttemptAt: 0, lastOutcome: "idle", lastError: "", lastStats: {} },
+                forks: { watermark: null, lastSuccessAt: 0, lastAttemptAt: 0, lastOutcome: "idle", lastError: "", lastStats: {} },
+                gists: { watermark: null, lastSuccessAt: 0, lastAttemptAt: 0, lastOutcome: "idle", lastError: "", lastStats: {} },
             },
             bookmarks: {
                 watermark: null,
                 lastSuccessAt: 0,
+                lastAttemptAt: 0,
+                lastOutcome: "idle",
+                lastError: "",
+                lastStats: {},
+                snapshot: {},
+            },
+            rss: {
+                watermark: null,
+                lastSuccessAt: 0,
+                lastAttemptAt: 0,
+                lastOutcome: "idle",
+                lastError: "",
+                lastStats: {},
                 snapshot: {},
             },
         }),
@@ -667,6 +702,26 @@
             return { time, ids };
         },
 
+        normalizeSyncRecord: (record, { keepSnapshot = false } = {}) => {
+            const source = record && typeof record === "object" ? record : {};
+            const normalized = {
+                watermark: SyncState.normalizeWatermark(source.watermark),
+                lastSuccessAt: Number.isFinite(Number(source.lastSuccessAt)) ? Number(source.lastSuccessAt) : 0,
+                lastAttemptAt: Number.isFinite(Number(source.lastAttemptAt)) ? Number(source.lastAttemptAt) : 0,
+                lastOutcome: SyncState.OUTCOMES.includes(source.lastOutcome) ? source.lastOutcome : "idle",
+                lastError: String(source.lastError || ""),
+                lastStats: source.lastStats && typeof source.lastStats === "object"
+                    ? SyncState._clone(source.lastStats)
+                    : {},
+            };
+            if (keepSnapshot) {
+                normalized.snapshot = source.snapshot && typeof source.snapshot === "object"
+                    ? source.snapshot
+                    : {};
+            }
+            return normalized;
+        },
+
         _load: () => {
             if (SyncState._cache) return SyncState._cache;
 
@@ -684,27 +739,25 @@
             };
             state.linuxdo = {
                 ...defaults.linuxdo,
-                ...(state.linuxdo || {}),
-                watermark: SyncState.normalizeWatermark(state?.linuxdo?.watermark),
+                ...SyncState.normalizeSyncRecord(state.linuxdo),
             };
             state.github = {
                 ...defaults.github,
                 ...(state.github || {}),
             };
-            ["stars", "repos", "forks", "gists"].forEach((type) => {
+            ["meta", "stars", "repos", "forks", "gists"].forEach((type) => {
                 state.github[type] = {
                     ...defaults.github[type],
-                    ...(state.github?.[type] || {}),
-                    watermark: SyncState.normalizeWatermark(state.github?.[type]?.watermark),
+                    ...SyncState.normalizeSyncRecord(state.github?.[type]),
                 };
             });
             state.bookmarks = {
                 ...defaults.bookmarks,
-                ...(state.bookmarks || {}),
-                watermark: SyncState.normalizeWatermark(state?.bookmarks?.watermark),
-                snapshot: state?.bookmarks?.snapshot && typeof state.bookmarks.snapshot === "object"
-                    ? state.bookmarks.snapshot
-                    : {},
+                ...SyncState.normalizeSyncRecord(state.bookmarks, { keepSnapshot: true }),
+            };
+            state.rss = {
+                ...defaults.rss,
+                ...SyncState.normalizeSyncRecord(state.rss, { keepSnapshot: true }),
             };
             state.version = SyncState.VERSION;
 
@@ -810,34 +863,46 @@
 
         updateLinuxDoState: (patch = {}) => {
             const state = SyncState._load();
-            state.linuxdo = {
+            state.linuxdo = SyncState.normalizeSyncRecord({
                 ...state.linuxdo,
                 ...patch,
-                watermark: patch.watermark === undefined
-                    ? state.linuxdo.watermark
-                    : SyncState.normalizeWatermark(patch.watermark),
-            };
+                watermark: patch.watermark === undefined ? state.linuxdo.watermark : patch.watermark,
+            });
             SyncState._save(state);
             return SyncState._clone(state.linuxdo);
         },
 
         getGitHubState: (type) => {
             const state = SyncState._load();
-            return SyncState._clone(state.github?.[type] || { watermark: null, lastSuccessAt: 0 });
+            return SyncState._clone(state.github?.[type] || SyncState._defaults().github.stars);
+        },
+
+        getGitHubMeta: () => {
+            const state = SyncState._load();
+            return SyncState._clone(state.github?.meta || SyncState._defaults().github.meta);
+        },
+
+        updateGitHubMeta: (patch = {}) => {
+            const state = SyncState._load();
+            state.github.meta = SyncState.normalizeSyncRecord({
+                ...state.github.meta,
+                ...patch,
+                watermark: patch.watermark === undefined ? state.github.meta?.watermark : patch.watermark,
+            });
+            SyncState._save(state);
+            return SyncState._clone(state.github.meta);
         },
 
         updateGitHubState: (type, patch = {}) => {
             const state = SyncState._load();
             if (!state.github[type]) {
-                state.github[type] = { watermark: null, lastSuccessAt: 0 };
+                state.github[type] = SyncState._defaults().github.stars;
             }
-            state.github[type] = {
+            state.github[type] = SyncState.normalizeSyncRecord({
                 ...state.github[type],
                 ...patch,
-                watermark: patch.watermark === undefined
-                    ? state.github[type].watermark
-                    : SyncState.normalizeWatermark(patch.watermark),
-            };
+                watermark: patch.watermark === undefined ? state.github[type].watermark : patch.watermark,
+            });
             SyncState._save(state);
             return SyncState._clone(state.github[type]);
         },
@@ -846,18 +911,28 @@
 
         updateBookmarkState: (patch = {}) => {
             const state = SyncState._load();
-            state.bookmarks = {
+            state.bookmarks = SyncState.normalizeSyncRecord({
                 ...state.bookmarks,
                 ...patch,
-                watermark: patch.watermark === undefined
-                    ? state.bookmarks.watermark
-                    : SyncState.normalizeWatermark(patch.watermark),
-                snapshot: patch.snapshot === undefined
-                    ? state.bookmarks.snapshot
-                    : (patch.snapshot && typeof patch.snapshot === "object" ? patch.snapshot : {}),
-            };
+                watermark: patch.watermark === undefined ? state.bookmarks.watermark : patch.watermark,
+                snapshot: patch.snapshot === undefined ? state.bookmarks.snapshot : patch.snapshot,
+            }, { keepSnapshot: true });
             SyncState._save(state);
             return SyncState._clone(state.bookmarks);
+        },
+
+        getRssState: () => SyncState._clone(SyncState._load().rss),
+
+        updateRssState: (patch = {}) => {
+            const state = SyncState._load();
+            state.rss = SyncState.normalizeSyncRecord({
+                ...state.rss,
+                ...patch,
+                watermark: patch.watermark === undefined ? state.rss.watermark : patch.watermark,
+                snapshot: patch.snapshot === undefined ? state.rss.snapshot : patch.snapshot,
+            }, { keepSnapshot: true });
+            SyncState._save(state);
+            return SyncState._clone(state.rss);
         },
     };
 
@@ -11992,8 +12067,144 @@ ${availableTools}
     // 通用网页导出器
     // ===========================================
     const GenericExporter = {
+        resolveUnifiedSource: (meta = {}) => {
+            const explicitSource = GenericExporter.normalizeSourceLabel(meta.source || "");
+            if (explicitSource) return explicitSource;
+            const siteDerived = GenericExporter.normalizeSourceLabel(meta.siteName || "");
+            return siteDerived === "知乎" ? "知乎" : "通用页面";
+        },
+
+        normalizeSourceLabel: (value) => {
+            const raw = BookmarkExporter.normalizeText(String(value || "").trim(), 100);
+            if (!raw) return "";
+            const lower = raw.toLowerCase();
+            if (lower.includes("zhihu") || raw.includes("知乎")) return "知乎";
+            return raw;
+        },
+
+        normalizeSourceTypeLabel: (value, source = "") => {
+            const raw = BookmarkExporter.normalizeText(String(value || "").trim(), 40);
+            if (!raw) {
+                if (source === "知乎") return "网页";
+                return "网页";
+            }
+
+            const lower = raw.toLowerCase();
+            if (["answer", "回答"].includes(lower) || raw.includes("回答")) return "回答";
+            if (["question", "问题", "问答"].includes(lower) || raw.includes("问题") || raw.includes("问答")) return "问题";
+            if (["article", "column_article", "文章", "专栏文章"].includes(lower) || raw.includes("文章")) return "文章";
+            if (["web", "webpage", "web page", "page", "网页"].includes(lower) || raw.includes("网页")) return "网页";
+            return raw;
+        },
+
+        stripHtml: (html) => BookmarkExporter.normalizeText(
+            String(html || "")
+                .replace(/<script[\s\S]*?<\/script>/gi, " ")
+                .replace(/<style[\s\S]*?<\/style>/gi, " ")
+                .replace(/<[^>]+>/g, " ")
+                .replace(/\s+/g, " "),
+            500
+        ),
+
+        extractSummaryText: (meta = {}) => {
+            const chunks = [
+                meta.description,
+                meta.detail,
+                meta.html,
+                ...(Array.isArray(meta.answers) ? meta.answers.map((answer) => answer?.html || "") : []),
+            ];
+
+            for (const chunk of chunks) {
+                const text = GenericExporter.stripHtml(chunk);
+                if (text) return text;
+            }
+            return "";
+        },
+
+        inferTags: (meta = {}) => {
+            const tags = [];
+            const source = GenericExporter.normalizeSourceLabel(meta.source || meta.siteName || "");
+            const sourceType = GenericExporter.normalizeSourceTypeLabel(meta.sourceType || "", source);
+
+            try {
+                const host = new URL(meta.url || "").hostname.replace(/^www\./, "");
+                if (host) tags.push(host);
+            } catch {
+                // ignore invalid URL in tag inference
+            }
+
+            if (source) tags.push(source);
+            if (sourceType) tags.push(sourceType);
+            if (meta.siteName && meta.siteName !== source) {
+                tags.push(BookmarkExporter.normalizeText(meta.siteName, 60));
+            }
+
+            const uniq = [];
+            for (const tag of tags) {
+                const clean = BookmarkExporter.normalizeText(tag, 80);
+                if (!clean || uniq.includes(clean)) continue;
+                uniq.push(clean);
+                if (uniq.length >= 8) break;
+            }
+            return uniq;
+        },
+
+        enrichMeta: async (meta = {}, settings = {}) => {
+            const source = GenericExporter.resolveUnifiedSource(meta);
+            const siteName = BookmarkExporter.normalizeText(meta.siteName || "", 100) || source;
+            const sourceType = GenericExporter.normalizeSourceTypeLabel(meta.sourceType || "", source);
+            const description = GenericExporter.extractSummaryText(meta);
+
+            const enriched = {
+                ...meta,
+                title: BookmarkExporter.normalizeText(meta.title || "无标题", 200) || "无标题",
+                url: String(meta.url || location.href || "").trim(),
+                author: BookmarkExporter.normalizeText(meta.author || "", 100),
+                publishDate: BookmarkExporter.normalizeText(meta.publishDate || "", 40),
+                siteName,
+                source,
+                sourceType,
+                description,
+            };
+
+            const insight = {
+                title: enriched.title,
+                summary: enriched.description || "",
+                siteName: enriched.siteName || enriched.source || "",
+            };
+            const bookmarkLike = {
+                title: enriched.title,
+                url: enriched.url,
+                folderPath: `${enriched.source} ${enriched.sourceType}`.trim(),
+            };
+
+            let inferredCategory = BookmarkExporter.inferCategoryHeuristic(
+                bookmarkLike,
+                insight,
+                settings?.categories || []
+            );
+            const canUseAI = !!(
+                settings?.aiApiKey
+                && settings?.aiService
+                && Array.isArray(settings?.categories)
+                && settings.categories.length > 0
+            );
+            if (canUseAI) {
+                const aiCategory = await BookmarkExporter.generateAICategory(bookmarkLike, insight, settings);
+                if (aiCategory) inferredCategory = aiCategory;
+            }
+
+            return {
+                ...enriched,
+                inferredCategory,
+                inferredTags: GenericExporter.inferTags(enriched),
+            };
+        },
+
         // 构建通用网页的 Notion 属性
         buildProperties: (meta) => {
+            const source = GenericExporter.resolveUnifiedSource(meta);
+            const sourceType = GenericExporter.normalizeSourceTypeLabel(meta.sourceType || "", source);
             const props = {
                 "标题": {
                     title: [{ text: { content: meta.title || "无标题" } }]
@@ -12002,7 +12213,10 @@ ${availableTools}
                     url: meta.url
                 },
                 "来源": {
-                    rich_text: [{ text: { content: meta.siteName || "" } }]
+                    rich_text: [{ text: { content: source } }]
+                },
+                "来源类型": {
+                    rich_text: [{ text: { content: sourceType } }]
                 },
                 "作者": {
                     rich_text: [{ text: { content: meta.author || "" } }]
@@ -12014,6 +12228,21 @@ ${availableTools}
             if (meta.description) {
                 props["摘要"] = {
                     rich_text: [{ text: { content: meta.description.substring(0, 2000) } }]
+                };
+            }
+            if (meta.inferredCategory) {
+                props["分类"] = {
+                    rich_text: [{ text: { content: BookmarkExporter.normalizeText(meta.inferredCategory, 300) } }]
+                };
+            }
+            const tags = Array.isArray(meta.inferredTags) ? meta.inferredTags : [];
+            if (tags.length > 0) {
+                props["标签"] = {
+                    multi_select: tags
+                        .map((tag) => BookmarkExporter.normalizeText(tag, 100))
+                        .filter(Boolean)
+                        .map((name) => ({ name }))
+                        .slice(0, 8)
                 };
             }
             return props;
@@ -12030,8 +12259,16 @@ ${availableTools}
                     meta = {
                         title: content.title,
                         url: content.url,
+                        source: "知乎",
                         siteName: "知乎",
+                        sourceType: content.type === "answer"
+                            ? "回答"
+                            : (content.type === "question" ? "问题" : "文章"),
                         author: content.author,
+                        description: GenericExporter.extractSummaryText(content),
+                        detail: content.detail || "",
+                        html: content.html || "",
+                        answers: content.answers || [],
                     };
                     blocks = ZhihuAPI.htmlToBlocks(content.html || "");
                     // 问题详情
@@ -12076,6 +12313,8 @@ ${availableTools}
                 const contentEl = GenericExtractor.extractContent();
                 blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG.DEFAULTS.imgMode);
             }
+
+            meta = await GenericExporter.enrichMeta(meta, settings);
 
             // 确保有内容
             if (!blocks || blocks.length === 0) {
@@ -12136,9 +12375,12 @@ ${availableTools}
                 "标题": { typeName: "title", schema: { title: {} } },
                 "链接": { typeName: "url", schema: { url: {} } },
                 "来源": { typeName: "rich_text", schema: { rich_text: {} } },
+                "来源类型": { typeName: "rich_text", schema: { rich_text: {} } },
                 "作者": { typeName: "rich_text", schema: { rich_text: {} } },
                 "发布日期": { typeName: "date", schema: { date: {} } },
                 "摘要": { typeName: "rich_text", schema: { rich_text: {} } },
+                "分类": { typeName: "rich_text", schema: { rich_text: {} } },
+                "标签": { typeName: "multi_select", schema: { multi_select: { options: [] } } },
             };
 
             try {
@@ -12899,11 +13141,28 @@ ${availableTools}
             if (now - AutoImporter.lastRunAt < AutoImporter.minimumRunGapMs) return;
             AutoImporter.lastRunAt = now;
             AutoImporter.isRunning = true;
+            const attemptAt = Date.now();
             const exportBtn = document.querySelector("#ldb-export");
 
             try {
+                SyncState.updateLinuxDoState({
+                    lastAttemptAt: attemptAt,
+                    lastOutcome: "running",
+                    lastError: "",
+                    lastStats: {},
+                });
                 const username = Utils.getCurrentLinuxDoUsername();
-                if (!username) return;
+                if (!username) {
+                    const errorMessage = "无法获取当前 Linux.do 用户名";
+                    SyncState.updateLinuxDoState({
+                        lastAttemptAt: attemptAt,
+                        lastOutcome: "error",
+                        lastError: errorMessage,
+                        lastStats: {},
+                    });
+                    AutoImporter.updateStatus(`❌ ${errorMessage}`);
+                    return;
+                }
 
                 AutoImporter.updateStatus("🔄 正在检查新收藏...");
                 const syncState = SyncState.getLinuxDoState();
@@ -12916,12 +13175,22 @@ ${availableTools}
                 });
 
                 if (newBookmarks.length === 0) {
+                    const statePatch = {
+                        lastAttemptAt: attemptAt,
+                        lastSuccessAt: Date.now(),
+                        lastOutcome: "success",
+                        lastError: "",
+                        lastStats: {
+                            scanned: bookmarks.length,
+                            pending: 0,
+                            success: 0,
+                            failed: 0,
+                        },
+                    };
                     if (bookmarks.length > 0) {
-                        SyncState.updateLinuxDoState({
-                            watermark: AutoImporter.getWatermark(bookmarks),
-                            lastSuccessAt: Date.now(),
-                        });
+                        statePatch.watermark = AutoImporter.getWatermark(bookmarks);
                     }
+                    SyncState.updateLinuxDoState(statePatch);
                     AutoImporter.updateStatus(`✅ 没有新收藏 (${new Date().toLocaleTimeString()})`);
                     return;
                 }
@@ -12978,6 +13247,17 @@ ${availableTools}
                     try { UI.renderBookmarkList(); } catch {}
                 }
 
+                const statePatch = {
+                    lastAttemptAt: attemptAt,
+                    lastOutcome: failed > 0 ? "partial" : "success",
+                    lastError: "",
+                    lastStats: {
+                        scanned: bookmarks.length,
+                        pending: newBookmarks.length,
+                        success,
+                        failed,
+                    },
+                };
                 if (successfulBookmarks.length > 0) {
                     const successIds = new Set(successfulBookmarks.map((bookmark) => LinuxDoAPI.getBookmarkId(bookmark)));
                     const leadingSuccessfulBookmarks = SyncState.takeLeadingItems(
@@ -12985,12 +13265,11 @@ ${availableTools}
                         (bookmark) => successIds.has(LinuxDoAPI.getBookmarkId(bookmark))
                     );
                     if (leadingSuccessfulBookmarks.length > 0) {
-                        SyncState.updateLinuxDoState({
-                            watermark: AutoImporter.getWatermark(leadingSuccessfulBookmarks),
-                            lastSuccessAt: Date.now(),
-                        });
+                        statePatch.watermark = AutoImporter.getWatermark(leadingSuccessfulBookmarks);
                     }
+                    statePatch.lastSuccessAt = Date.now();
                 }
+                SyncState.updateLinuxDoState(statePatch);
 
                 const statusText = `✅ 自动导入完成: ${success} 个成功${failed > 0 ? `，${failed} 个失败` : ""} (${new Date().toLocaleTimeString()})`;
                 AutoImporter.updateStatus(statusText);
@@ -13047,6 +13326,191 @@ ${availableTools}
                 if (interval > 0) AutoImporter.startPolling(interval);
             }, 3000);
         },
+    };
+
+    AutoImporter.run = async () => {
+        if (document.hidden) {
+            AutoImporter.deferredWhileHidden = true;
+            return;
+        }
+        if (AutoImporter.isRunning) return;
+        if (Exporter.isExporting) return;
+
+        const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+        if (!apiKey) {
+            AutoImporter.updateStatus("请先配置 Notion API Key");
+            return;
+        }
+        const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
+        if (exportTargetType === "database" && !Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "")) {
+            AutoImporter.updateStatus("请先配置 Notion 数据库 ID");
+            return;
+        }
+        if (exportTargetType === "page" && !Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "")) {
+            AutoImporter.updateStatus("请先配置父页面 ID");
+            return;
+        }
+
+        const now = Date.now();
+        if (now - AutoImporter.lastRunAt < AutoImporter.minimumRunGapMs) return;
+        AutoImporter.lastRunAt = now;
+        AutoImporter.isRunning = true;
+        const attemptAt = Date.now();
+        const exportBtn = document.querySelector("#ldb-export");
+
+        try {
+            SyncState.updateLinuxDoState({
+                lastAttemptAt: attemptAt,
+                lastOutcome: "running",
+                lastError: "",
+                lastStats: {},
+            });
+
+            const username = Utils.getCurrentLinuxDoUsername();
+            if (!username) {
+                const errorMessage = "无法获取当前 Linux.do 用户名";
+                SyncState.updateLinuxDoState({
+                    lastAttemptAt: attemptAt,
+                    lastOutcome: "error",
+                    lastError: errorMessage,
+                    lastStats: {},
+                });
+                AutoImporter.updateStatus(`❌ ${errorMessage}`);
+                return;
+            }
+
+            AutoImporter.updateStatus("📧 正在检查新收藏...");
+            const syncState = SyncState.getLinuxDoState();
+            const bookmarks = await LinuxDoAPI.fetchBookmarksSince(username, syncState.watermark);
+            const newBookmarks = bookmarks.filter((bookmark) => {
+                const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
+                return !Storage.isTopicExported(topicId);
+            });
+
+            if (newBookmarks.length === 0) {
+                const statePatch = {
+                    lastAttemptAt: attemptAt,
+                    lastSuccessAt: Date.now(),
+                    lastOutcome: "success",
+                    lastError: "",
+                    lastStats: {
+                        scanned: bookmarks.length,
+                        pending: 0,
+                        success: 0,
+                        failed: 0,
+                    },
+                };
+                if (bookmarks.length > 0) {
+                    statePatch.watermark = AutoImporter.getWatermark(bookmarks);
+                }
+                SyncState.updateLinuxDoState(statePatch);
+                AutoImporter.updateStatus(`✅ 没有新收藏 (${new Date().toLocaleTimeString()})`);
+                return;
+            }
+
+            AutoImporter.updateStatus(`📬 发现 ${newBookmarks.length} 个新收藏，正在导入...`);
+
+            if (exportBtn) exportBtn.disabled = true;
+            const obsExportBtn = document.querySelector("#ldb-obs-export");
+            if (obsExportBtn) obsExportBtn.disabled = true;
+
+            const settings = AutoImporter.buildSettings();
+            const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+            const concurrency = settings.concurrency || 1;
+            let success = 0;
+            let failed = 0;
+            const successfulBookmarks = [];
+            let nextIndex = 0;
+
+            const worker = async () => {
+                while (true) {
+                    const i = nextIndex;
+                    if (i >= newBookmarks.length) return;
+                    nextIndex++;
+
+                    const bookmark = newBookmarks[i];
+                    const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
+                    const title = bookmark.title || bookmark.name || `帖子 ${topicId}`;
+                    AutoImporter.updateStatus(`📬 导入中 (${i + 1}/${newBookmarks.length}): ${title}`);
+
+                    try {
+                        await Exporter.exportTopic(bookmark, settings);
+                        success++;
+                        successfulBookmarks.push(bookmark);
+                    } catch (error) {
+                        console.error(`[LD-Notion] 自动导入失败: ${title}`, error);
+                        failed++;
+                    }
+
+                    if (delay > 0 && nextIndex < newBookmarks.length) {
+                        await Utils.sleep(delay);
+                    }
+                }
+            };
+
+            const workerCount = Math.min(concurrency, newBookmarks.length);
+            const workers = [];
+            for (let w = 0; w < workerCount; w++) {
+                workers.push(worker());
+                if (w < workerCount - 1) await Utils.sleep(100);
+            }
+            await Promise.all(workers);
+
+            if (typeof UI !== "undefined" && UI.renderBookmarkList) {
+                try { UI.renderBookmarkList(); } catch {}
+            }
+
+            const statePatch = {
+                lastAttemptAt: attemptAt,
+                lastOutcome: failed > 0 ? "partial" : "success",
+                lastError: "",
+                lastStats: {
+                    scanned: bookmarks.length,
+                    pending: newBookmarks.length,
+                    success,
+                    failed,
+                },
+            };
+            if (successfulBookmarks.length > 0) {
+                const successIds = new Set(successfulBookmarks.map((bookmark) => LinuxDoAPI.getBookmarkId(bookmark)));
+                const leadingSuccessfulBookmarks = SyncState.takeLeadingItems(
+                    newBookmarks,
+                    (bookmark) => successIds.has(LinuxDoAPI.getBookmarkId(bookmark))
+                );
+                if (leadingSuccessfulBookmarks.length > 0) {
+                    statePatch.watermark = AutoImporter.getWatermark(leadingSuccessfulBookmarks);
+                }
+                statePatch.lastSuccessAt = Date.now();
+            }
+            SyncState.updateLinuxDoState(statePatch);
+
+            AutoImporter.updateStatus(`✅ 自动导入完成: ${success} 个成功${failed > 0 ? `，${failed} 个失败` : ""} (${new Date().toLocaleTimeString()})`);
+
+            if (success > 0 && typeof GM_notification === "function") {
+                GM_notification({
+                    title: "自动导入完成",
+                    text: `成功导入 ${success} 个新收藏到 Notion`,
+                    timeout: 5000,
+                });
+            }
+        } catch (error) {
+            console.error("[LD-Notion] 自动导入出错:", error);
+            SyncState.updateLinuxDoState({
+                lastAttemptAt: attemptAt,
+                lastOutcome: "error",
+                lastError: error?.message || String(error),
+                lastStats: {},
+            });
+            AutoImporter.updateStatus(`❌ 自动导入出错: ${error.message}`);
+        } finally {
+            AutoImporter.isRunning = false;
+            if (exportBtn) exportBtn.disabled = false;
+            const obsExportBtn2 = document.querySelector("#ldb-obs-export");
+            if (obsExportBtn2) obsExportBtn2.disabled = false;
+            if (typeof UI !== "undefined" && typeof UI.renderSyncCenterSummary === "function") {
+                try { UI.renderSyncCenterSummary(); } catch {}
+            }
+        }
     };
 
     const UpdateChecker = {
@@ -13473,6 +13937,240 @@ ${availableTools}
     // ===========================================
     // GitHub API 模块
     // ===========================================
+    GitHubAutoImporter.run = async () => {
+        if (document.hidden) {
+            GitHubAutoImporter.deferredWhileHidden = true;
+            return;
+        }
+        if (GitHubAutoImporter.isRunning) return;
+
+        const settings = GitHubAutoImporter.buildSettings();
+        if (!settings.apiKey || !settings.databaseId) {
+            GitHubAutoImporter.updateStatus("请先配置 Notion API Key 和数据库 ID");
+            return;
+        }
+        if (!settings.username && !settings.token) {
+            GitHubAutoImporter.updateStatus("请先配置 GitHub 用户名或 Token");
+            return;
+        }
+
+        const now = Date.now();
+        if (now - GitHubAutoImporter.lastRunAt < GitHubAutoImporter.minimumRunGapMs) return;
+        GitHubAutoImporter.lastRunAt = now;
+        GitHubAutoImporter.isRunning = true;
+        const attemptAt = Date.now();
+
+        try {
+            GitHubAutoImporter.updateStatus("📧 正在检查 GitHub 新收藏...");
+
+            const types = GitHubAPI.getImportTypes();
+            SyncState.updateGitHubMeta({
+                lastAttemptAt: attemptAt,
+                lastOutcome: "running",
+                lastError: "",
+                lastStats: {
+                    enabledTypes: types.length,
+                    exported: 0,
+                    failed: 0,
+                    syncErrors: 0,
+                },
+            });
+
+            let successCount = 0;
+            let failedCount = 0;
+            let hasPending = false;
+            const syncErrors = [];
+
+            for (const type of types) {
+                const meta = GitHubAutoImporter.getTypeMeta(type);
+                const typeAttemptAt = Date.now();
+
+                try {
+                    SyncState.updateGitHubState(type, {
+                        lastAttemptAt: typeAttemptAt,
+                        lastOutcome: "running",
+                        lastError: "",
+                        lastStats: {},
+                    });
+                    GitHubAutoImporter.updateStatus(`📧 正在检查 GitHub ${meta.label}...`);
+
+                    const syncState = SyncState.getGitHubState(type);
+                    const items = await GitHubAutoImporter.fetchTypeItems(type, settings);
+                    const incrementalItems = SyncState.filterOrderedItems(
+                        items,
+                        syncState.watermark,
+                        meta.getTime,
+                        meta.getId
+                    );
+
+                    if (incrementalItems.length === 0) {
+                        SyncState.updateGitHubState(type, {
+                            lastAttemptAt: typeAttemptAt,
+                            lastSuccessAt: Date.now(),
+                            lastOutcome: "success",
+                            lastError: "",
+                            lastStats: {
+                                scanned: items.length,
+                                pending: 0,
+                                exported: 0,
+                                failed: 0,
+                            },
+                        });
+                        continue;
+                    }
+
+                    hasPending = true;
+                    const mappedItems = UI.mapGitHubItemsToBookmarks(incrementalItems, type)
+                        .filter((item) => !UI.isBookmarkExported(item));
+
+                    if (mappedItems.length === 0) {
+                        SyncState.updateGitHubState(type, {
+                            watermark: SyncState.buildWatermark(incrementalItems, meta.getTime, meta.getId),
+                            lastAttemptAt: typeAttemptAt,
+                            lastSuccessAt: Date.now(),
+                            lastOutcome: "success",
+                            lastError: "",
+                            lastStats: {
+                                scanned: items.length,
+                                pending: incrementalItems.length,
+                                exported: 0,
+                                failed: 0,
+                            },
+                        });
+                        continue;
+                    }
+
+                    const result = await UI.exportGitHubSelected(mappedItems, {
+                        apiKey: settings.apiKey,
+                        databaseId: settings.databaseId,
+                        token: settings.token,
+                    }, (current, total, title) => {
+                        GitHubAutoImporter.updateStatus(`📬 GitHub ${meta.label} 导入中 (${current}/${total}): ${title}`);
+                    });
+
+                    successCount += result.success.length;
+                    failedCount += result.failed.length;
+
+                    const successKeys = new Set(
+                        (result.success || []).map((entry) => String(entry.itemKey || "")).filter(Boolean)
+                    );
+                    const successfulItems = mappedItems
+                        .filter((item) => successKeys.has(String(item.itemKey || "")))
+                        .map((item) => item.raw);
+
+                    const typeStatePatch = {
+                        lastAttemptAt: typeAttemptAt,
+                        lastOutcome: result.failed.length > 0
+                            ? (result.success.length > 0 ? "partial" : "error")
+                            : "success",
+                        lastError: result.success.length === 0 && result.failed.length > 0
+                            ? `${meta.label} 导出失败 ${result.failed.length} 项`
+                            : "",
+                        lastStats: {
+                            scanned: items.length,
+                            pending: incrementalItems.length,
+                            exported: result.success.length,
+                            failed: result.failed.length,
+                        },
+                    };
+
+                    if (successfulItems.length > 0) {
+                        const successfulIds = new Set(successfulItems.map((item) => meta.getId(item)));
+                        const leadingSuccessfulItems = SyncState.takeLeadingItems(
+                            incrementalItems,
+                            (item) => {
+                                const itemKey = meta.getId(item);
+                                if (successfulIds.has(itemKey)) return true;
+                                const mapped = mappedItems.find((entry) => meta.getId(entry.raw) === itemKey);
+                                return !mapped;
+                            }
+                        );
+                        if (leadingSuccessfulItems.length > 0) {
+                            typeStatePatch.watermark = SyncState.buildWatermark(leadingSuccessfulItems, meta.getTime, meta.getId);
+                        }
+                        typeStatePatch.lastSuccessAt = Date.now();
+                    }
+
+                    SyncState.updateGitHubState(type, typeStatePatch);
+                } catch (error) {
+                    syncErrors.push(`${meta.label}: ${error.message}`);
+                    SyncState.updateGitHubState(type, {
+                        lastAttemptAt: typeAttemptAt,
+                        lastOutcome: "error",
+                        lastError: error?.message || String(error),
+                        lastStats: {},
+                    });
+                    console.error(`[LD-Notion] GitHub ${type} 自动导入失败:`, error);
+                }
+            }
+
+            if (!hasPending && syncErrors.length === 0) {
+                SyncState.updateGitHubMeta({
+                    lastAttemptAt: attemptAt,
+                    lastSuccessAt: Date.now(),
+                    lastOutcome: "success",
+                    lastError: "",
+                    lastStats: {
+                        enabledTypes: types.length,
+                        exported: 0,
+                        failed: 0,
+                        syncErrors: 0,
+                    },
+                });
+                GitHubAutoImporter.updateStatus(`✅ 没有新的 GitHub 收藏 (${new Date().toLocaleTimeString()})`);
+                return;
+            }
+
+            if (successCount === 0 && failedCount === 0 && syncErrors.length > 0) {
+                throw new Error(syncErrors[0]);
+            }
+
+            const metaStatePatch = {
+                lastAttemptAt: attemptAt,
+                lastOutcome: (syncErrors.length > 0 || failedCount > 0)
+                    ? (successCount > 0 ? "partial" : "error")
+                    : "success",
+                lastError: syncErrors.join("；"),
+                lastStats: {
+                    enabledTypes: types.length,
+                    exported: successCount,
+                    failed: failedCount,
+                    syncErrors: syncErrors.length,
+                },
+            };
+            if (metaStatePatch.lastOutcome === "success" || successCount > 0) {
+                metaStatePatch.lastSuccessAt = Date.now();
+            }
+            SyncState.updateGitHubMeta(metaStatePatch);
+
+            GitHubAutoImporter.updateStatus(
+                `✅ GitHub 自动导入完成: 成功 ${successCount} 项`
+                + `${failedCount > 0 ? `，失败 ${failedCount} 项` : ""}`
+                + `${syncErrors.length > 0 ? `，异常 ${syncErrors.length} 类` : ""}`
+                + ` (${new Date().toLocaleTimeString()})`
+            );
+        } catch (error) {
+            console.error("[LD-Notion] GitHub 自动导入出错:", error);
+            SyncState.updateGitHubMeta({
+                lastAttemptAt: attemptAt,
+                lastOutcome: "error",
+                lastError: error?.message || String(error),
+                lastStats: {
+                    enabledTypes: (GitHubAPI.getImportTypes() || []).length,
+                    exported: 0,
+                    failed: 0,
+                    syncErrors: 1,
+                },
+            });
+            GitHubAutoImporter.updateStatus(`❌ GitHub 自动导入出错: ${error.message}`);
+        } finally {
+            GitHubAutoImporter.isRunning = false;
+            if (typeof UI !== "undefined" && typeof UI.renderSyncCenterSummary === "function") {
+                try { UI.renderSyncCenterSummary(); } catch {}
+            }
+        }
+    };
+
     const GitHubAPI = {
         _readmeCache: {},
         _fetchPaginated: (url, token = "", label = "GitHub", options = {}) => {
@@ -15139,7 +15837,850 @@ ${availableTools}
         },
     };
 
+    BookmarkAutoImporter.run = async () => {
+        if (document.hidden) {
+            BookmarkAutoImporter.deferredWhileHidden = true;
+            return;
+        }
+        if (BookmarkAutoImporter.isRunning) return;
+        if (Exporter.isExporting) return;
+
+        const settings = BookmarkAutoImporter.buildSettings();
+        if (!BookmarkBridge.isExtensionAvailable()) {
+            BookmarkAutoImporter.updateStatus("请先安装并启用书签桥接扩展");
+            return;
+        }
+        if (settings.exportTargetType !== "database") {
+            BookmarkAutoImporter.updateStatus("浏览器书签自动同步仅支持导出到 Notion 数据库");
+            return;
+        }
+        if (!settings.apiKey || !settings.databaseId) {
+            BookmarkAutoImporter.updateStatus("请先配置 Notion API Key 和数据库 ID");
+            return;
+        }
+
+        const now = Date.now();
+        if (now - BookmarkAutoImporter.lastRunAt < BookmarkAutoImporter.minimumRunGapMs) return;
+        BookmarkAutoImporter.lastRunAt = now;
+        BookmarkAutoImporter.isRunning = true;
+        const attemptAt = Date.now();
+
+        try {
+            SyncState.updateBookmarkState({
+                lastAttemptAt: attemptAt,
+                lastOutcome: "running",
+                lastError: "",
+                lastStats: {},
+            });
+            BookmarkAutoImporter.updateStatus("📧 正在同步浏览器书签...");
+
+            const setupResult = await BookmarkExporter.setupDatabaseProperties(settings.databaseId, settings.apiKey);
+            if (!setupResult.success) {
+                throw new Error(`数据库配置失败: ${setupResult.error}`);
+            }
+
+            const previousState = SyncState.getBookmarkState();
+            const previousSnapshot = previousState?.snapshot && typeof previousState.snapshot === "object"
+                ? previousState.snapshot
+                : {};
+            const currentBookmarks = await BookmarkAutoImporter.loadCurrentBookmarks();
+            const currentMap = new Map(currentBookmarks.map((bookmark) => [String(bookmark.id), bookmark]));
+            const trackedPages = await BookmarkAutoImporter.fetchTrackedPages(settings.databaseId, settings.apiKey);
+            const index = BookmarkAutoImporter.buildPageIndex(trackedPages);
+            const nextSnapshot = {};
+            const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+            const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+
+            let created = 0;
+            let updated = 0;
+            let archived = 0;
+            let unchanged = 0;
+            let failed = 0;
+
+            for (let i = 0; i < currentBookmarks.length; i++) {
+                const bookmark = currentBookmarks[i];
+                const bookmarkId = String(bookmark.id);
+                const snapshotEntry = previousSnapshot[bookmarkId] || null;
+                let pageMeta = index.byBookmarkId.get(bookmarkId)
+                    || index.byUrl.get(bookmark.url)
+                    || (snapshotEntry?.pageId ? index.byPageId.get(snapshotEntry.pageId) : null);
+
+                try {
+                    if (!pageMeta) {
+                        BookmarkAutoImporter.updateStatus(`📄 正在新增书签 (${i + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                        const enriched = await BookmarkExporter.enrichBookmark(bookmark, settings, enrichContext);
+                        const page = await NotionAPI.request("POST", "/pages", {
+                            parent: { database_id: settings.databaseId },
+                            properties: BookmarkExporter.buildProperties(enriched),
+                        }, settings.apiKey);
+                        pageMeta = {
+                            pageId: String(page?.id || "").trim(),
+                            bookmarkId,
+                            url: bookmark.url,
+                            title: bookmark.title,
+                            folderPath: bookmark.folderPath,
+                            dateAdded: SyncState.normalizeTime(bookmark.dateAdded),
+                        };
+                        created++;
+                    } else if (BookmarkAutoImporter.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
+                        BookmarkAutoImporter.updateStatus(`📧 正在更新书签 (${i + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                        const properties = BookmarkAutoImporter.needsFullRefresh(bookmark, snapshotEntry, pageMeta)
+                            ? BookmarkExporter.buildProperties(await BookmarkExporter.enrichBookmark(bookmark, settings, enrichContext))
+                            : BookmarkAutoImporter.buildMinimalProperties(bookmark);
+                        await NotionAPI.updatePage(pageMeta.pageId, properties, settings.apiKey);
+                        updated++;
+                    } else {
+                        unchanged++;
+                    }
+
+                    const pageId = pageMeta?.pageId || snapshotEntry?.pageId || "";
+                    const syncedMeta = {
+                        pageId,
+                        bookmarkId,
+                        url: bookmark.url,
+                        title: bookmark.title,
+                        folderPath: bookmark.folderPath,
+                        dateAdded: SyncState.normalizeTime(bookmark.dateAdded),
+                    };
+                    if (pageId) index.byPageId.set(pageId, syncedMeta);
+                    index.byBookmarkId.set(bookmarkId, syncedMeta);
+                    if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
+                    BookmarkExporter.markExported(bookmark.url);
+                    nextSnapshot[bookmarkId] = BookmarkAutoImporter.buildSnapshotEntry(bookmark, pageId);
+                } catch (error) {
+                    console.error(`[LD-Notion] 浏览器书签自动同步失败: ${bookmark.title || bookmark.url}`, error);
+                    failed++;
+                    if (snapshotEntry) {
+                        nextSnapshot[bookmarkId] = snapshotEntry;
+                    }
+                }
+
+                if (delay > 0 && i < currentBookmarks.length - 1) {
+                    await Utils.sleep(delay);
+                }
+            }
+
+            const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
+            for (let i = 0; i < deletedIds.length; i++) {
+                const bookmarkId = deletedIds[i];
+                const snapshotEntry = previousSnapshot[bookmarkId];
+                const pageMeta = (snapshotEntry?.pageId ? index.byPageId.get(snapshotEntry.pageId) : null)
+                    || index.byBookmarkId.get(bookmarkId)
+                    || (snapshotEntry?.url ? index.byUrl.get(snapshotEntry.url) : null);
+
+                if (!pageMeta?.pageId) {
+                    archived++;
+                    continue;
+                }
+
+                try {
+                    const itemLabel = snapshotEntry?.title || snapshotEntry?.url || bookmarkId;
+                    BookmarkAutoImporter.updateStatus(`🗃️ 正在归档已删除书签 (${i + 1}/${deletedIds.length}): ${itemLabel}`);
+                    await NotionAPI.deletePage(pageMeta.pageId, settings.apiKey);
+                    archived++;
+                } catch (error) {
+                    console.error(`[LD-Notion] 浏览器书签归档失败: ${snapshotEntry?.title || snapshotEntry?.url || bookmarkId}`, error);
+                    failed++;
+                    nextSnapshot[bookmarkId] = snapshotEntry;
+                }
+
+                if (delay > 0 && i < deletedIds.length - 1) {
+                    await Utils.sleep(delay);
+                }
+            }
+
+            SyncState.updateBookmarkState({
+                snapshot: nextSnapshot,
+                watermark: SyncState.buildWatermark(currentBookmarks, (bookmark) => bookmark.dateAdded, (bookmark) => bookmark.id),
+                lastAttemptAt: attemptAt,
+                lastSuccessAt: (created + updated + archived) > 0
+                    ? Date.now()
+                    : (failed === 0 ? Date.now() : previousState.lastSuccessAt || 0),
+                lastOutcome: failed > 0 ? "partial" : "success",
+                lastError: "",
+                lastStats: {
+                    created,
+                    updated,
+                    archived,
+                    unchanged,
+                    failed,
+                },
+            });
+
+            if (created === 0 && updated === 0 && archived === 0 && failed === 0) {
+                BookmarkAutoImporter.updateStatus(`✅ 浏览器书签已同步，无新增变更 (${new Date().toLocaleTimeString()})`);
+                return;
+            }
+
+            BookmarkAutoImporter.updateStatus(
+                `✅ 浏览器书签自动同步完成: 新增 ${created}，更新 ${updated}，归档 ${archived}，无变更 ${unchanged}`
+                + `${failed > 0 ? `，失败 ${failed}` : ""}`
+                + ` (${new Date().toLocaleTimeString()})`
+            );
+
+            if ((created + updated + archived) > 0 && typeof GM_notification === "function") {
+                GM_notification({
+                    title: "浏览器书签自动同步完成",
+                    text: `新增 ${created}，更新 ${updated}，归档 ${archived}${failed > 0 ? `，失败 ${failed}` : ""}`,
+                    timeout: 5000,
+                });
+            }
+        } catch (error) {
+            console.error("[LD-Notion] 浏览器书签自动同步出错:", error);
+            SyncState.updateBookmarkState({
+                lastAttemptAt: attemptAt,
+                lastOutcome: "error",
+                lastError: error?.message || String(error),
+                lastStats: {},
+            });
+            BookmarkAutoImporter.updateStatus(`❌ 浏览器书签自动同步出错: ${error.message}`);
+        } finally {
+            BookmarkAutoImporter.isRunning = false;
+            if (typeof UI !== "undefined" && typeof UI.renderSyncCenterSummary === "function") {
+                try { UI.renderSyncCenterSummary(); } catch {}
+            }
+        }
+    };
     // 初始化书签桥接
+    const RSSAutoImporter = {
+        isRunning: false,
+        timerId: null,
+        deferredWhileHidden: false,
+        visibilityListenerBound: false,
+        lastRunAt: 0,
+        minimumRunGapMs: 60 * 1000,
+
+        updateStatus: (text) => {
+            const el = (UI.refs && UI.refs.rssAutoImportStatus) || document.querySelector("#ldb-rss-auto-import-status");
+            if (el) el.textContent = text;
+        },
+
+        buildSettings: () => ({
+            apiKey: NotionOAuth.getAccessToken(),
+            databaseId: Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
+            exportTargetType: Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType),
+            aiApiKey: Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, ""),
+            aiService: Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService),
+            aiModel: Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, ""),
+            aiBaseUrl: Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, ""),
+            categories: Utils.parseAICategories(
+                Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories)
+            ),
+        }),
+
+        getFeedUrls: (raw = Storage.get(CONFIG.STORAGE_KEYS.RSS_FEED_URLS, CONFIG.DEFAULTS.rssFeedUrls)) => {
+            const urls = String(raw || "")
+                .split(/[\n,，;；]/)
+                .map((item) => item.trim())
+                .filter(Boolean)
+                .filter((item) => /^https?:\/\//i.test(item));
+            return Array.from(new Set(urls));
+        },
+
+        getDedupMode: () => {
+            const mode = Storage.get(CONFIG.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE, CONFIG.DEFAULTS.rssImportDedupMode);
+            return mode === "allow_duplicates" ? "allow_duplicates" : "strict";
+        },
+
+        canStart: () => {
+            if (!Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return false;
+            const settings = RSSAutoImporter.buildSettings();
+            return settings.exportTargetType === "database"
+                && !!(settings.apiKey && settings.databaseId)
+                && RSSAutoImporter.getFeedUrls().length > 0;
+        },
+
+        ensureVisibilityListener: () => {
+            if (RSSAutoImporter.visibilityListenerBound) return;
+            document.addEventListener("visibilitychange", () => {
+                if (!document.hidden && RSSAutoImporter.deferredWhileHidden) {
+                    RSSAutoImporter.deferredWhileHidden = false;
+                    Utils.runWhenBrowserIdle(() => RSSAutoImporter.run());
+                }
+            });
+            RSSAutoImporter.visibilityListenerBound = true;
+        },
+
+        stopPolling: () => {
+            if (RSSAutoImporter.timerId) {
+                clearInterval(RSSAutoImporter.timerId);
+                RSSAutoImporter.timerId = null;
+            }
+        },
+
+        startPolling: (intervalMinutes) => {
+            RSSAutoImporter.stopPolling();
+            if (intervalMinutes > 0) {
+                RSSAutoImporter.timerId = setInterval(
+                    () => Utils.runWhenBrowserIdle(() => RSSAutoImporter.run()),
+                    intervalMinutes * 60 * 1000
+                );
+            }
+        },
+
+        escapeRegExp: (text) => String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+
+        decodeXmlEntities: (text) => String(text || "")
+            .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+            .replace(/&lt;/gi, "<")
+            .replace(/&gt;/gi, ">")
+            .replace(/&quot;/gi, "\"")
+            .replace(/&#39;|&apos;/gi, "'")
+            .replace(/&amp;/gi, "&"),
+
+        stripHtml: (text, maxLen = 1200) => BookmarkExporter.normalizeText(
+            RSSAutoImporter.decodeXmlEntities(String(text || "").replace(/<[^>]+>/g, " ")),
+            maxLen
+        ),
+
+        extractTagText: (block, names = []) => {
+            const source = String(block || "");
+            for (const name of (names || [])) {
+                const escaped = RSSAutoImporter.escapeRegExp(name);
+                const match = source.match(new RegExp(`<${escaped}\\b[^>]*>([\\s\\S]*?)<\\/${escaped}>`, "i"));
+                if (match?.[1]) {
+                    return RSSAutoImporter.decodeXmlEntities(match[1]).trim();
+                }
+            }
+            return "";
+        },
+
+        extractTagTexts: (block, names = []) => {
+            const source = String(block || "");
+            const values = [];
+            for (const name of (names || [])) {
+                const escaped = RSSAutoImporter.escapeRegExp(name);
+                const regex = new RegExp(`<${escaped}\\b[^>]*>([\\s\\S]*?)<\\/${escaped}>`, "gi");
+                let match = null;
+                while ((match = regex.exec(source))) {
+                    const value = RSSAutoImporter.decodeXmlEntities(match[1]).trim();
+                    if (value) values.push(value);
+                }
+            }
+            return values;
+        },
+
+        extractAtomCategoryTerms: (block) => {
+            const values = [];
+            const regex = /<category\b[^>]*term=["']([^"']+)["'][^>]*\/?>/gi;
+            let match = null;
+            while ((match = regex.exec(String(block || "")))) {
+                const value = RSSAutoImporter.decodeXmlEntities(match[1]).trim();
+                if (value) values.push(value);
+            }
+            return values;
+        },
+
+        extractLink: (block, isAtom = false) => {
+            const source = String(block || "");
+            if (isAtom) {
+                const alternateMatch = source.match(/<link\b[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["'][^>]*\/?>/i);
+                if (alternateMatch?.[1]) return RSSAutoImporter.decodeXmlEntities(alternateMatch[1]).trim();
+                const hrefMatch = source.match(/<link\b[^>]*href=["']([^"']+)["'][^>]*\/?>/i);
+                if (hrefMatch?.[1]) return RSSAutoImporter.decodeXmlEntities(hrefMatch[1]).trim();
+            }
+            return RSSAutoImporter.extractTagText(source, ["link"]);
+        },
+
+        normalizeItem: (item = {}) => {
+            const title = BookmarkExporter.normalizeText(item.title || item.url || "未命名 RSS 条目", 280) || "未命名 RSS 条目";
+            const url = String(item.url || "").trim();
+            const feedTitle = BookmarkExporter.normalizeText(item.feedTitle || "", 160);
+            const summary = BookmarkExporter.normalizeText(item.summary || "", 1900);
+            const tags = Array.isArray(item.tags)
+                ? Array.from(new Set(item.tags.map((tag) => BookmarkExporter.normalizeText(tag, 100)).filter(Boolean)))
+                : [];
+            const id = BookmarkExporter.normalizeText(
+                String(item.id || url || `${feedTitle || "feed"}::${title}`),
+                300
+            ) || url || `${feedTitle || "feed"}::${title}`;
+            return {
+                id,
+                title,
+                url,
+                summary,
+                tags,
+                feedTitle,
+                feedUrl: String(item.feedUrl || "").trim(),
+                publishedAt: SyncState.normalizeTime(item.publishedAt || ""),
+            };
+        },
+
+        buildItemKey: (item, dedupMode = RSSAutoImporter.getDedupMode()) => {
+            const normalized = RSSAutoImporter.normalizeItem(item);
+            if (dedupMode === "allow_duplicates") {
+                return `${normalized.feedUrl || "feed"}::${normalized.id}`;
+            }
+            return String(normalized.url || normalized.id || "").trim();
+        },
+
+        parseFeedXml: (xml, feedUrl = "") => {
+            const source = String(xml || "").trim();
+            if (!source) return { feedTitle: "", items: [] };
+
+            const isAtom = /<feed[\s>]/i.test(source) && !/<rss[\s>]/i.test(source);
+            const header = isAtom
+                ? source.split(/<entry\b/i)[0]
+                : (() => {
+                    const channelMatch = source.match(/<channel\b[^>]*>([\s\S]*?)(?:<item\b|<\/channel>)/i);
+                    return channelMatch?.[1] || source.split(/<item\b/i)[0];
+                })();
+            const feedTitle = RSSAutoImporter.stripHtml(
+                RSSAutoImporter.extractTagText(header, ["title"]),
+                160
+            );
+            const entryRegex = isAtom ? /<entry\b[^>]*>([\s\S]*?)<\/entry>/gi : /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
+            const items = [];
+            let match = null;
+
+            while ((match = entryRegex.exec(source))) {
+                const block = match[1];
+                const title = RSSAutoImporter.stripHtml(
+                    RSSAutoImporter.extractTagText(block, ["title"]),
+                    280
+                );
+                const url = RSSAutoImporter.extractLink(block, isAtom);
+                const itemId = RSSAutoImporter.extractTagText(
+                    block,
+                    isAtom ? ["id"] : ["guid"]
+                ) || url || title;
+                const publishedAt = RSSAutoImporter.extractTagText(
+                    block,
+                    isAtom ? ["published", "updated"] : ["pubDate", "dc:date", "published", "updated"]
+                );
+                const summary = RSSAutoImporter.stripHtml(
+                    RSSAutoImporter.extractTagText(
+                        block,
+                        isAtom ? ["summary", "content"] : ["description", "content:encoded"]
+                    ),
+                    1900
+                );
+                const tags = [
+                    ...RSSAutoImporter.extractTagTexts(block, ["category"]),
+                    ...(isAtom ? RSSAutoImporter.extractAtomCategoryTerms(block) : []),
+                ];
+                const normalized = RSSAutoImporter.normalizeItem({
+                    id: itemId,
+                    title,
+                    url,
+                    summary,
+                    tags,
+                    feedTitle,
+                    feedUrl,
+                    publishedAt,
+                });
+                if (!normalized.url || !normalized.id) continue;
+                items.push(normalized);
+            }
+
+            items.sort((a, b) => {
+                const aTime = Date.parse(a.publishedAt || "") || 0;
+                const bTime = Date.parse(b.publishedAt || "") || 0;
+                if (bTime !== aTime) return bTime - aTime;
+                return String(a.id).localeCompare(String(b.id));
+            });
+
+            return { feedTitle, items };
+        },
+
+        fetchFeed: (feedUrl) => {
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "GET",
+                    url: feedUrl,
+                    timeout: 15000,
+                    headers: {
+                        "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+                    },
+                    onload: (response) => {
+                        if (response.status < 200 || response.status >= 300) {
+                            reject(new Error(`HTTP ${response.status}`));
+                            return;
+                        }
+                        try {
+                            resolve(RSSAutoImporter.parseFeedXml(response.responseText || "", feedUrl));
+                        } catch (error) {
+                            reject(error);
+                        }
+                    },
+                    ontimeout: () => reject(new Error("RSS 拉取超时")),
+                    onerror: () => reject(new Error("RSS 拉取失败")),
+                });
+            });
+        },
+
+        fetchTrackedPages: async (databaseId, apiKey) => {
+            const filter = {
+                and: [
+                    { property: "来源", rich_text: { equals: "RSS" } },
+                    { property: "来源类型", rich_text: { equals: "Feed" } },
+                ],
+            };
+            const pages = [];
+            let cursor = null;
+            do {
+                const response = await NotionAPI.queryDatabase(databaseId, filter, null, cursor, apiKey);
+                pages.push(...(response?.results || []));
+                cursor = response?.has_more ? response.next_cursor : null;
+            } while (cursor);
+            return pages
+                .map((page) => ({
+                    pageId: String(page?.id || "").trim(),
+                    url: BookmarkAutoImporter.getPageUrl(page, "链接"),
+                    title: Utils.getPageTitle(page, "").trim(),
+                    summary: BookmarkAutoImporter.getPageRichText(page, "描述"),
+                    publishedAt: BookmarkAutoImporter.getPageDate(page, "收藏时间"),
+                    archived: !!page?.archived,
+                }))
+                .filter((page) => page.pageId && !page.archived);
+        },
+
+        buildPageIndex: (pages = []) => {
+            const byUrl = new Map();
+            const byPageId = new Map();
+            const byTitle = new Map();
+            for (const page of (pages || [])) {
+                if (page.pageId) byPageId.set(page.pageId, page);
+                if (page.url && !byUrl.has(page.url)) byUrl.set(page.url, page);
+                if (page.title && !byTitle.has(page.title)) byTitle.set(page.title, page);
+            }
+            return { byUrl, byPageId, byTitle };
+        },
+
+        buildSnapshotEntry: (item, pageId = "") => {
+            const normalized = RSSAutoImporter.normalizeItem(item);
+            return {
+                ...normalized,
+                pageId: String(pageId || "").trim(),
+                itemKey: RSSAutoImporter.buildItemKey(normalized),
+            };
+        },
+
+        buildProperties: (item) => {
+            const normalized = RSSAutoImporter.normalizeItem(item);
+            const inferredCategory = BookmarkExporter.normalizeText(item?.inferredCategory || "", 300);
+            const tags = Array.from(new Set([
+                ...(normalized.feedTitle ? [normalized.feedTitle] : []),
+                ...(Array.isArray(normalized.tags) ? normalized.tags : []),
+            ]));
+            const properties = {
+                "标题": {
+                    title: [{ text: { content: normalized.title } }]
+                },
+                "链接": {
+                    url: normalized.url
+                },
+                "来源": {
+                    rich_text: [{ text: { content: "RSS" } }]
+                },
+                "来源类型": {
+                    rich_text: [{ text: { content: "Feed" } }]
+                },
+            };
+            if (normalized.summary) {
+                properties["描述"] = {
+                    rich_text: [{ text: { content: normalized.summary } }]
+                };
+            }
+            if (normalized.publishedAt) {
+                properties["收藏时间"] = { date: { start: normalized.publishedAt } };
+            }
+            if (inferredCategory) {
+                properties["分类"] = {
+                    rich_text: [{ text: { content: inferredCategory } }]
+                };
+            }
+            if (tags.length > 0) {
+                properties["标签"] = {
+                    multi_select: tags
+                        .map((tag) => BookmarkExporter.normalizeText(tag, 100))
+                        .filter(Boolean)
+                        .slice(0, 8)
+                        .map((name) => ({ name }))
+                };
+            }
+            return properties;
+        },
+
+        enrichItem: async (item, settings, context = {}) => {
+            const normalized = RSSAutoImporter.normalizeItem(item);
+            const enriched = {
+                ...normalized,
+                inferredCategory: BookmarkExporter.inferCategoryHeuristic(
+                    { title: normalized.title, url: normalized.url, folderPath: normalized.feedTitle },
+                    { title: normalized.title, summary: normalized.summary },
+                    settings?.categories || []
+                ),
+            };
+
+            const canUseAI = !!(settings?.aiApiKey && settings?.aiService && Array.isArray(settings?.categories) && settings.categories.length > 0);
+            const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
+            if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
+                try {
+                    const aiCategory = await BookmarkExporter.generateAICategory(
+                        { title: normalized.title, url: normalized.url },
+                        { title: normalized.title, summary: normalized.summary },
+                        settings
+                    );
+                    if (aiCategory) {
+                        enriched.inferredCategory = aiCategory;
+                    }
+                    context.aiUsedCount = (context.aiUsedCount || 0) + 1;
+                } catch {
+                    // ignore AI enrichment failures for RSS
+                }
+            }
+
+            return enriched;
+        },
+
+        needsUpdate: (item, snapshotEntry, pageMeta) => {
+            if (!pageMeta) return true;
+            if (!snapshotEntry) return false;
+            if (String(pageMeta.url || "") !== String(item.url || "")) return true;
+            if (String(pageMeta.title || "") !== String(item.title || "")) return true;
+            if (String(pageMeta.summary || "") !== String(item.summary || "")) return true;
+            return SyncState.normalizeTime(pageMeta.publishedAt) !== SyncState.normalizeTime(item.publishedAt);
+        },
+
+        loadCurrentItems: async () => {
+            const feedUrls = RSSAutoImporter.getFeedUrls();
+            const dedupMode = RSSAutoImporter.getDedupMode();
+            const itemsByKey = new Map();
+
+            for (const feedUrl of feedUrls) {
+                const parsed = await RSSAutoImporter.fetchFeed(feedUrl);
+                for (const rawItem of (parsed.items || [])) {
+                    const normalized = RSSAutoImporter.normalizeItem({
+                        ...rawItem,
+                        feedTitle: rawItem.feedTitle || parsed.feedTitle || "",
+                        feedUrl,
+                    });
+                    const itemKey = RSSAutoImporter.buildItemKey(normalized, dedupMode);
+                    const existing = itemsByKey.get(itemKey);
+                    if (!existing) {
+                        itemsByKey.set(itemKey, { ...normalized, itemKey });
+                        continue;
+                    }
+                    const nextTime = Date.parse(normalized.publishedAt || "") || 0;
+                    const currentTime = Date.parse(existing.publishedAt || "") || 0;
+                    if (nextTime >= currentTime) {
+                        itemsByKey.set(itemKey, {
+                            ...existing,
+                            ...normalized,
+                            tags: Array.from(new Set([...(existing.tags || []), ...(normalized.tags || [])])),
+                            itemKey,
+                        });
+                    }
+                }
+            }
+
+            return {
+                feedCount: feedUrls.length,
+                items: Array.from(itemsByKey.values()).sort((a, b) => {
+                    const aTime = Date.parse(a.publishedAt || "") || 0;
+                    const bTime = Date.parse(b.publishedAt || "") || 0;
+                    if (bTime !== aTime) return bTime - aTime;
+                    return String(a.id).localeCompare(String(b.id));
+                }),
+            };
+        },
+
+        run: async () => {
+            if (document.hidden) {
+                RSSAutoImporter.deferredWhileHidden = true;
+                return;
+            }
+            if (RSSAutoImporter.isRunning) return;
+            if (Exporter.isExporting) return;
+
+            const settings = RSSAutoImporter.buildSettings();
+            const feedUrls = RSSAutoImporter.getFeedUrls();
+            if (settings.exportTargetType !== "database") {
+                RSSAutoImporter.updateStatus("RSS 自动同步仅支持导出到 Notion 数据库");
+                return;
+            }
+            if (!settings.apiKey || !settings.databaseId) {
+                RSSAutoImporter.updateStatus("请先配置 Notion API Key 和数据库 ID");
+                return;
+            }
+            if (feedUrls.length === 0) {
+                RSSAutoImporter.updateStatus("请先配置至少一个 RSS Feed URL");
+                return;
+            }
+
+            const now = Date.now();
+            if (now - RSSAutoImporter.lastRunAt < RSSAutoImporter.minimumRunGapMs) return;
+            RSSAutoImporter.lastRunAt = now;
+            RSSAutoImporter.isRunning = true;
+            const attemptAt = Date.now();
+
+            try {
+                SyncState.updateRssState({
+                    lastAttemptAt: attemptAt,
+                    lastOutcome: "running",
+                    lastError: "",
+                    lastStats: {},
+                });
+                RSSAutoImporter.updateStatus("正在同步 RSS Feed...");
+
+                const setupResult = await BookmarkExporter.setupDatabaseProperties(settings.databaseId, settings.apiKey);
+                if (!setupResult.success) {
+                    throw new Error(`数据库配置失败: ${setupResult.error}`);
+                }
+
+                const previousState = SyncState.getRssState();
+                const previousSnapshot = previousState?.snapshot && typeof previousState.snapshot === "object"
+                    ? previousState.snapshot
+                    : {};
+                const { items: currentItems, feedCount } = await RSSAutoImporter.loadCurrentItems();
+                const trackedPages = await RSSAutoImporter.fetchTrackedPages(settings.databaseId, settings.apiKey);
+                const index = RSSAutoImporter.buildPageIndex(trackedPages);
+                const nextSnapshot = {
+                    ...previousSnapshot,
+                };
+                const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+                const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+                const successfulKeys = new Set();
+
+                let created = 0;
+                let updated = 0;
+                let unchanged = 0;
+                let failed = 0;
+
+                for (let i = 0; i < currentItems.length; i++) {
+                    const item = currentItems[i];
+                    const snapshotEntry = previousSnapshot[item.itemKey] || null;
+                    let pageMeta = (item.url ? index.byUrl.get(item.url) : null)
+                        || (snapshotEntry?.pageId ? index.byPageId.get(snapshotEntry.pageId) : null)
+                        || (item.title ? index.byTitle.get(item.title) : null);
+
+                    try {
+                        if (!pageMeta) {
+                            RSSAutoImporter.updateStatus(`正在新增 RSS 条目 (${i + 1}/${currentItems.length}): ${item.title}`);
+                            const enriched = await RSSAutoImporter.enrichItem(item, settings, enrichContext);
+                            const page = await NotionAPI.request("POST", "/pages", {
+                                parent: { database_id: settings.databaseId },
+                                properties: RSSAutoImporter.buildProperties(enriched),
+                            }, settings.apiKey);
+                            pageMeta = {
+                                pageId: String(page?.id || "").trim(),
+                                url: item.url,
+                                title: item.title,
+                                summary: item.summary,
+                                publishedAt: item.publishedAt,
+                            };
+                            created++;
+                        } else if (RSSAutoImporter.needsUpdate(item, snapshotEntry, pageMeta)) {
+                            RSSAutoImporter.updateStatus(`正在更新 RSS 条目 (${i + 1}/${currentItems.length}): ${item.title}`);
+                            const enriched = await RSSAutoImporter.enrichItem(item, settings, enrichContext);
+                            await NotionAPI.updatePage(pageMeta.pageId, RSSAutoImporter.buildProperties(enriched), settings.apiKey);
+                            updated++;
+                        } else {
+                            unchanged++;
+                        }
+
+                        const pageId = pageMeta?.pageId || snapshotEntry?.pageId || "";
+                        const syncedMeta = {
+                            pageId,
+                            url: item.url,
+                            title: item.title,
+                            summary: item.summary,
+                            publishedAt: item.publishedAt,
+                        };
+                        if (pageId) index.byPageId.set(pageId, syncedMeta);
+                        if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
+                        if (syncedMeta.title) index.byTitle.set(syncedMeta.title, syncedMeta);
+                        nextSnapshot[item.itemKey] = RSSAutoImporter.buildSnapshotEntry(item, pageId);
+                        successfulKeys.add(item.itemKey);
+                    } catch (error) {
+                        console.error(`[LD-Notion] RSS 自动同步失败: ${item.title || item.url}`, error);
+                        failed++;
+                        if (snapshotEntry) {
+                            nextSnapshot[item.itemKey] = snapshotEntry;
+                        }
+                    }
+
+                    if (delay > 0 && i < currentItems.length - 1) {
+                        await Utils.sleep(delay);
+                    }
+                }
+
+                const statePatch = {
+                    snapshot: nextSnapshot,
+                    lastAttemptAt: attemptAt,
+                    lastOutcome: failed > 0 ? "partial" : "success",
+                    lastError: "",
+                    lastStats: {
+                        feeds: feedCount,
+                        scanned: currentItems.length,
+                        created,
+                        updated,
+                        unchanged,
+                        failed,
+                    },
+                };
+                if (currentItems.length === 0) {
+                    statePatch.lastSuccessAt = Date.now();
+                } else {
+                    const leadingSuccessfulItems = SyncState.takeLeadingItems(
+                        currentItems,
+                        (entry) => successfulKeys.has(entry.itemKey)
+                    );
+                    if (leadingSuccessfulItems.length > 0) {
+                        statePatch.watermark = SyncState.buildWatermark(
+                            leadingSuccessfulItems,
+                            (entry) => entry.publishedAt,
+                            (entry) => entry.id
+                        );
+                        statePatch.lastSuccessAt = Date.now();
+                    } else if (failed === 0) {
+                        statePatch.lastSuccessAt = Date.now();
+                    }
+                }
+                SyncState.updateRssState(statePatch);
+
+                if (created === 0 && updated === 0 && failed === 0) {
+                    RSSAutoImporter.updateStatus(`RSS 已同步，无新增变更 (${new Date().toLocaleTimeString()})`);
+                    return;
+                }
+
+                RSSAutoImporter.updateStatus(
+                    `RSS 自动同步完成：新增 ${created}，更新 ${updated}，无变更 ${unchanged}`
+                    + `${failed > 0 ? `，失败 ${failed}` : ""}`
+                    + ` (${new Date().toLocaleTimeString()})`
+                );
+            } catch (error) {
+                console.error("[LD-Notion] RSS 自动同步出错:", error);
+                SyncState.updateRssState({
+                    lastAttemptAt: attemptAt,
+                    lastOutcome: "error",
+                    lastError: error?.message || String(error),
+                    lastStats: {},
+                });
+                RSSAutoImporter.updateStatus(`RSS 自动同步出错: ${error.message}`);
+            } finally {
+                RSSAutoImporter.isRunning = false;
+                if (typeof UI !== "undefined" && typeof UI.renderSyncCenterSummary === "function") {
+                    try { UI.renderSyncCenterSummary(); } catch {}
+                }
+            }
+        },
+
+        init: () => {
+            if (!RSSAutoImporter.canStart()) return;
+            RSSAutoImporter.ensureVisibilityListener();
+            setTimeout(() => {
+                Utils.runWhenBrowserIdle(() => RSSAutoImporter.run());
+                const interval = Storage.get(
+                    CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL,
+                    CONFIG.DEFAULTS.rssAutoImportInterval
+                );
+                if (interval > 0) RSSAutoImporter.startPolling(interval);
+            }, 3000);
+        },
+    };
+
     BookmarkBridge.init();
 
     // 监听扩展 Popup 快捷操作（仅在 Chrome 扩展版中生效）
@@ -17517,6 +19058,20 @@ ${availableTools}
                     color: var(--ldb-ui-muted);
                 }
 
+                .ldb-view-report-preview {
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    font-size: 12px;
+                    line-height: 1.6;
+                    color: var(--ldb-ui-text);
+                    border-radius: 10px;
+                    border: 1px dashed rgba(148, 163, 184, 0.25);
+                    background: rgba(15, 23, 42, 0.04);
+                    padding: 12px;
+                    max-height: 280px;
+                    overflow: auto;
+                }
+
                 .ldb-bookmark-list {
                     margin-top: 10px;
                     border: 1px solid var(--ldb-ui-border);
@@ -18245,6 +19800,59 @@ ${availableTools}
                 if (interval > 0 && Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, false)) {
                     BookmarkAutoImporter.startPolling(interval);
                 }
+            };
+
+            refs.rssFeedUrlsInput.onchange = (e) => {
+                Storage.set(CONFIG.STORAGE_KEYS.RSS_FEED_URLS, e.target.value.trim());
+            };
+
+            refs.rssAutoImportEnabled.onchange = (e) => {
+                const enabled = !!e.target.checked;
+                Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, enabled);
+                refs.rssAutoImportOptions.style.display = enabled ? "block" : "none";
+
+                if (enabled) {
+                    const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
+                    const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
+                    if (!apiKey) {
+                        RSSAutoImporter.updateStatus("❌ 请先配置 Notion API Key");
+                        return;
+                    }
+                    if (exportTargetType !== "database") {
+                        RSSAutoImporter.updateStatus("❌ RSS 自动同步仅支持导出到 Notion 数据库");
+                        return;
+                    }
+                    if (!refs.databaseIdInput.value.trim()) {
+                        RSSAutoImporter.updateStatus("❌ 请先配置 Notion 数据库 ID");
+                        return;
+                    }
+                    if (RSSAutoImporter.getFeedUrls(refs.rssFeedUrlsInput.value).length === 0) {
+                        RSSAutoImporter.updateStatus("❌ 请先配置至少一个 RSS Feed URL");
+                        return;
+                    }
+
+                    const interval = parseInt(refs.rssAutoImportInterval.value, 10) || 0;
+                    Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, interval);
+                    RSSAutoImporter.run();
+                    if (interval > 0) RSSAutoImporter.startPolling(interval);
+                } else {
+                    RSSAutoImporter.stopPolling();
+                    RSSAutoImporter.updateStatus("");
+                }
+            };
+
+            refs.rssAutoImportInterval.onchange = (e) => {
+                const interval = parseInt(e.target.value, 10) || 0;
+                Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, interval);
+                RSSAutoImporter.stopPolling();
+                if (interval > 0 && Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) {
+                    RSSAutoImporter.startPolling(interval);
+                }
+            };
+
+            refs.rssDedupModeSelect.onchange = (e) => {
+                const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
+                Storage.set(CONFIG.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE, mode);
             };
 
             refs.linuxdoDedupModeSelect.onchange = (e) => {
@@ -19016,6 +20624,86 @@ ${availableTools}
                 };
             }
 
+            if (refs.viewGenerateWorkspaceInsightBtn) {
+                refs.viewGenerateWorkspaceInsightBtn.onclick = async () => {
+                    try {
+                        await UI.generateWorkspaceInsight();
+                    } catch (error) {
+                        UI.showStatus(`生成工作区洞察失败：${error.message}`, "error");
+                    }
+                };
+            }
+
+            if (refs.viewCopyWorkspaceReportBtn) {
+                refs.viewCopyWorkspaceReportBtn.onclick = async () => {
+                    try {
+                        await UI.copyWorkspaceInsightReport();
+                    } catch (error) {
+                        UI.showStatus(`复制工作区报告失败：${error.message}`, "error");
+                    }
+                };
+            }
+
+            if (refs.viewDownloadWorkspaceReportBtn) {
+                refs.viewDownloadWorkspaceReportBtn.onclick = async () => {
+                    try {
+                        await UI.downloadWorkspaceInsightReport();
+                    } catch (error) {
+                        UI.showStatus(`涓嬭浇宸ヤ綔鍖烘姤鍛婂け璐ワ細${error.message}`, "error");
+                    }
+                };
+            }
+
+            if (refs.viewDownloadWorkspacePackageBtn) {
+                refs.viewDownloadWorkspacePackageBtn.onclick = async () => {
+                    try {
+                        await UI.downloadWorkspaceCollaborationPackage();
+                    } catch (error) {
+                        UI.showStatus(`下载工作区协作包失败：${error.message}`, "error");
+                    }
+                };
+            }
+
+            if (refs.viewSaveWorkspacePackageBtn) {
+                refs.viewSaveWorkspacePackageBtn.onclick = async () => {
+                    try {
+                        await UI.saveWorkspaceCollaborationPackageToNotion();
+                    } catch (error) {
+                        UI.showStatus(`保存工作区协作包失败：${error.message}`, "error");
+                    }
+                };
+            }
+
+            if (refs.viewSaveWorkspaceReportBtn) {
+                refs.viewSaveWorkspaceReportBtn.onclick = async () => {
+                    try {
+                        await UI.saveWorkspaceInsightReportToNotion();
+                    } catch (error) {
+                        UI.showStatus(`保存工作区报告失败：${error.message}`, "error");
+                    }
+                };
+            }
+
+            if (refs.viewSaveWorkspaceCandidatesBtn) {
+                refs.viewSaveWorkspaceCandidatesBtn.onclick = async () => {
+                    try {
+                        await UI.saveWorkspaceConnectionCandidatesToNotion();
+                    } catch (error) {
+                        UI.showStatus(`保存统一候选失败：${error.message}`, "error");
+                    }
+                };
+            }
+
+            if (refs.viewSyncNowBtn) {
+                refs.viewSyncNowBtn.onclick = async () => {
+                    try {
+                        await UI.runUnifiedSyncNow();
+                    } catch (error) {
+                        UI.showStatus(`统一同步失败：${error.message}`, "error");
+                    }
+                };
+            }
+
             // 从工作区选择页面/数据库
             refs.workspaceSelect.onchange = (e) => {
                 const selected = e.target.value;
@@ -19341,6 +21029,9 @@ ${availableTools}
         bookmarks: [],
         visualSnapshots: { linuxdo: [], github: [] },
         workspaceVisualSnapshot: { databases: [], pages: [], records: [], scannedAt: 0, maxPages: 0 },
+        workspaceInsightMarkdown: "",
+        workspaceInsightSummary: "",
+        workspaceInsightUpdatedAt: 0,
         renderJobId: 0,
         selectedBookmarks: new Set(),
         selectedUnexportedCount: 0,
@@ -19374,7 +21065,22 @@ ${availableTools}
                 viewWorkspaceSummary: panel.querySelector("#ldb-view-workspace-summary"),
                 viewWorkspaceStatus: panel.querySelector("#ldb-view-workspace-status"),
                 viewRefreshWorkspaceBtn: panel.querySelector("#ldb-view-refresh-workspace"),
+                viewCopyWorkspaceReportBtn: panel.querySelector("#ldb-view-copy-workspace-report"),
+                viewDownloadWorkspaceReportBtn: panel.querySelector("#ldb-view-download-workspace-report"),
+                viewDownloadWorkspacePackageBtn: panel.querySelector("#ldb-view-download-workspace-package"),
+                viewSaveWorkspacePackageBtn: panel.querySelector("#ldb-view-save-workspace-package"),
+                viewSaveWorkspaceReportBtn: panel.querySelector("#ldb-view-save-workspace-report"),
+                viewSaveWorkspaceCandidatesBtn: panel.querySelector("#ldb-view-save-workspace-candidates"),
+                viewGenerateWorkspaceInsightBtn: panel.querySelector("#ldb-view-generate-insight"),
+                viewSyncSummary: panel.querySelector("#ldb-view-sync-summary"),
+                viewSyncNowBtn: panel.querySelector("#ldb-view-sync-now"),
                 autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
+                rssFeedUrlsInput: panel.querySelector("#ldb-rss-feed-urls"),
+                rssAutoImportEnabled: panel.querySelector("#ldb-rss-auto-import-enabled"),
+                rssAutoImportOptions: panel.querySelector("#ldb-rss-auto-import-options"),
+                rssAutoImportInterval: panel.querySelector("#ldb-rss-auto-import-interval"),
+                rssAutoImportStatus: panel.querySelector("#ldb-rss-auto-import-status"),
+                rssDedupModeSelect: panel.querySelector("#ldb-rss-dedup-mode"),
                 bookmarkAutoImportEnabled: panel.querySelector("#ldb-bookmark-auto-import-enabled"),
                 bookmarkAutoImportOptions: panel.querySelector("#ldb-bookmark-auto-import-options"),
                 bookmarkAutoImportInterval: panel.querySelector("#ldb-bookmark-auto-import-interval"),
@@ -19589,6 +21295,36 @@ ${availableTools}
                                     </div>
                                 </div>
                                 <div id="ldb-bookmark-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
+                                <div class="ldb-setting-row" class="ldb-mb-8">
+                                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                        <input type="checkbox" id="ldb-rss-auto-import-enabled">
+                                        <span>启用 RSS 自动同步</span>
+                                    </label>
+                                </div>
+                                <div id="ldb-rss-auto-import-options" style="display: none; margin-bottom: 8px;">
+                                    <div class="ldb-setting-row" style="margin-bottom: 8px;">
+                                        <label for="ldb-rss-feed-urls" style="display: block; margin-bottom: 6px;">RSS Feed URL</label>
+                                        <textarea id="ldb-rss-feed-urls" class="ldb-input" rows="3" placeholder="每行一个 RSS / Atom 地址，或用逗号分隔"></textarea>
+                                    </div>
+                                    <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                                        <label for="ldb-rss-auto-import-interval" style="white-space: nowrap;">RSS 同步间隔</label>
+                                        <select id="ldb-rss-auto-import-interval" class="ldb-input" class="ldb-flex-1">
+                                            <option value="0">仅页面加载时</option>
+                                            <option value="3">每 3 分钟</option>
+                                            <option value="5" selected>每 5 分钟</option>
+                                            <option value="10">每 10 分钟</option>
+                                            <option value="30">每 30 分钟</option>
+                                        </select>
+                                    </div>
+                                    <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                                        <label for="ldb-rss-dedup-mode" style="white-space: nowrap;">RSS 导入去重</label>
+                                        <select id="ldb-rss-dedup-mode" class="ldb-input" class="ldb-flex-1">
+                                            <option value="strict">按链接去重</option>
+                                            <option value="allow_duplicates">按 Feed + ID 保留重复</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div id="ldb-rss-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
                                 <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
                                     <label for="ldb-linuxdo-dedup-mode" style="white-space: nowrap;">Linux.do 导入去重</label>
                                     <select id="ldb-linuxdo-dedup-mode" class="ldb-input" class="ldb-flex-1">
@@ -19697,6 +21433,13 @@ ${availableTools}
                                 </div>
                                 <div class="ldb-view-actions">
                                     <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-refresh-workspace" type="button">刷新工作区视图</button>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-generate-insight" type="button">生成洞察</button>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-save-workspace-candidates" type="button">保存候选</button>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-save-workspace-package" type="button">保存协作包</button>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-save-workspace-report" type="button">保存到 Notion</button>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-copy-workspace-report" type="button">复制报告</button>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-download-workspace-report" type="button">下载报告</button>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-download-workspace-package" type="button">下载协作包</button>
                                 </div>
                             </div>
                             <div class="ldb-view-status" id="ldb-view-workspace-status">尚未刷新工作区视图。</div>
@@ -19704,6 +21447,23 @@ ${availableTools}
                                 <div class="ldb-view-empty">
                                     <div class="ldb-view-empty-title">工作区总览还没有数据</div>
                                     <div class="ldb-view-empty-text">点击上方按钮后，会扫描当前工作区数据库里的页面属性，生成全局时间线、来源关系图和导出漏斗。</div>
+                                </div>
+                            </div>
+                            <div class="ldb-view-subsection">
+                                <div class="ldb-view-header">
+                                    <div>
+                                        <div class="ldb-view-section-title">统一同步中心</div>
+                                        <div class="ldb-tip">统一查看 Linux.do、GitHub 与浏览器书签三条增量同步链的启用状态、增量基线和最近一次成功结果。</div>
+                                    </div>
+                                    <div class="ldb-view-actions">
+                                        <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-sync-now" type="button">立即同步全部</button>
+                                    </div>
+                                </div>
+                                <div class="ldb-view-summary" id="ldb-view-sync-summary">
+                                    <div class="ldb-view-empty">
+                                        <div class="ldb-view-empty-title">统一同步中心还没有摘要</div>
+                                        <div class="ldb-view-empty-text">启用任一自动同步来源后，这里会展示轮询策略、增量水位线和最近成功时间。</div>
+                                    </div>
                                 </div>
                             </div>
                             <div class="ldb-view-subsection">
@@ -20405,6 +22165,37 @@ ${availableTools}
                 Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.bookmarkAutoImportInterval);
             }
 
+            refs.rssFeedUrlsInput.value = Storage.get(
+                CONFIG.STORAGE_KEYS.RSS_FEED_URLS,
+                CONFIG.DEFAULTS.rssFeedUrls
+            );
+            const rssAutoImportEnabled = Storage.get(
+                CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED,
+                CONFIG.DEFAULTS.rssAutoImportEnabled
+            );
+            refs.rssAutoImportEnabled.checked = rssAutoImportEnabled;
+            refs.rssAutoImportOptions.style.display = rssAutoImportEnabled ? "block" : "none";
+            const rssAutoInterval = Storage.get(
+                CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL,
+                CONFIG.DEFAULTS.rssAutoImportInterval
+            );
+            const rssIntervalSelect = refs.rssAutoImportInterval;
+            rssIntervalSelect.value = String(rssAutoInterval);
+            if (rssIntervalSelect.selectedIndex === -1) {
+                rssIntervalSelect.value = String(CONFIG.DEFAULTS.rssAutoImportInterval);
+                Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.rssAutoImportInterval);
+            }
+            const rssDedupMode = Storage.get(
+                CONFIG.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE,
+                CONFIG.DEFAULTS.rssImportDedupMode
+            );
+            const rssDedupSelect = refs.rssDedupModeSelect;
+            rssDedupSelect.value = rssDedupMode;
+            if (rssDedupSelect.selectedIndex === -1) {
+                rssDedupSelect.value = CONFIG.DEFAULTS.rssImportDedupMode;
+                Storage.set(CONFIG.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE, CONFIG.DEFAULTS.rssImportDedupMode);
+            }
+
             const linuxdoDedupMode = Utils.getLinuxDoImportDedupMode();
             const linuxdoDedupSelect = refs.linuxdoDedupModeSelect
             linuxdoDedupSelect.value = linuxdoDedupMode;
@@ -20448,6 +22239,7 @@ ${availableTools}
             CredentialVault.syncSensitiveInput(refs.aiApiKeyInput, CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
             CredentialVault.syncSensitiveInput(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
             CredentialVault.syncSensitiveInput(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
+            UI.renderSyncCenterSummary();
             UI.renderWorkspaceVisualSummary();
             UI.renderVisualSummary();
             UpdateChecker.renderLastStatus();
@@ -20899,12 +22691,22 @@ ${availableTools}
             return "";
         },
 
+        getWorkspaceVisualSourceUrl: (pageOrRecord) => {
+            if (pageOrRecord?.sourceUrl) return String(pageOrRecord.sourceUrl || "").trim();
+            const explicitUrl = UI.getWorkspacePagePropertyText(pageOrRecord, ["链接", "URL", "网址", "链接地址"]);
+            if (explicitUrl) return explicitUrl;
+            return String(pageOrRecord?.url || "").trim();
+        },
+
         normalizeWorkspaceSourceLabel: (value) => {
             const raw = String(value || "").trim();
             if (!raw) return "";
             const lower = raw.toLowerCase();
             if (lower.includes("linux.do") || lower.includes("linuxdo")) return "Linux.do";
             if (lower.includes("github") || ["repo", "repos", "star", "stars", "fork", "forks", "gist", "gists"].includes(lower)) return "GitHub";
+            if (lower.includes("rss") || lower.includes("feed")) return "RSS";
+            if (lower.includes("candidate") || raw.includes("统一候选")) return "统一候选";
+            if (lower.includes("zhihu") || raw.includes("知乎")) return "知乎";
             if (lower.includes("bookmark") || lower.includes("书签")) return "浏览器书签";
             if (lower.includes("generic") || lower.includes("通用页面")) return "通用页面";
             if (lower.includes("unknown") || lower.includes("未标记")) return "未标记";
@@ -20916,7 +22718,9 @@ ${availableTools}
             if (!raw) {
                 if (source === "GitHub") return "GitHub";
                 if (source === "Linux.do") return "帖子";
+                if (source === "RSS") return "Feed";
                 if (source === "浏览器书签") return "书签";
+                if (source === "知乎") return "网页";
                 return "";
             }
             const lower = raw.toLowerCase();
@@ -20924,8 +22728,14 @@ ${availableTools}
             if (["repo", "repos"].includes(lower)) return "Repos";
             if (["fork", "forks"].includes(lower)) return "Forks";
             if (["gist", "gists"].includes(lower)) return "Gists";
+            if (lower.includes("rss") || lower.includes("feed")) return "Feed";
             if (lower.includes("bookmark") || lower.includes("书签")) return "书签";
             if (lower.includes("post") || lower.includes("topic") || lower.includes("帖子")) return "帖子";
+            if (lower.includes("candidate") || raw.includes("候选")) return "跨源关联候选";
+            if (["answer", "回答"].includes(lower) || raw.includes("回答")) return "回答";
+            if (["question", "问题", "问答"].includes(lower) || raw.includes("问题") || raw.includes("问答")) return "问题";
+            if (["article", "column_article", "文章", "专栏文章"].includes(lower) || raw.includes("文章")) return "文章";
+            if (["web", "webpage", "web page", "page", "网页"].includes(lower) || raw.includes("网页")) return "网页";
             return raw;
         },
 
@@ -20969,7 +22779,8 @@ ${availableTools}
             const propertyNames = Object.keys(properties);
             const parentDatabaseId = String(page?.parent?.database_id || "").replace(/-/g, "");
             const parentDatabaseTitle = databases.find((db) => db.id === parentDatabaseId)?.title || "";
-            const hintText = [explicitSource, explicitTypeRaw, parentDatabaseTitle].join(" ").toLowerCase();
+            const pageTitle = Utils.getPageTitle(page);
+            const hintText = [explicitSource, explicitTypeRaw, parentDatabaseTitle, pageTitle].join(" ").toLowerCase();
             const hasProp = (...names) => names.some((name) => propertyNames.includes(name));
 
             let source = explicitSource;
@@ -20978,7 +22789,9 @@ ${availableTools}
             if (!source && sourceType) {
                 if (sourceType === "书签") source = "浏览器书签";
                 else if (["Stars", "Repos", "Forks", "Gists", "GitHub"].includes(sourceType)) source = "GitHub";
+                else if (sourceType === "Feed") source = "RSS";
                 else if (sourceType === "帖子") source = "Linux.do";
+                else if (["回答", "问题", "文章", "网页"].includes(sourceType)) source = hintText.includes("zhihu") ? "知乎" : "通用页面";
             }
 
             if (!source && (hasProp("帖子数", "浏览数", "点赞数") || hintText.includes("linux.do") || hintText.includes("linuxdo"))) {
@@ -20996,8 +22809,29 @@ ${availableTools}
                 if (!sourceType) sourceType = "书签";
             }
 
+            if (!source && (hintText.includes("rss") || hintText.includes("feed"))) {
+                source = "RSS";
+                if (!sourceType) sourceType = "Feed";
+            }
+
+            if (!source && (hintText.includes("统一候选") || hintText.includes("candidate"))) {
+                source = "统一候选";
+                if (!sourceType) sourceType = "跨源关联候选";
+            }
+
+            if (!source && (hintText.includes("zhihu") || hasProp("作者", "发布日期", "摘要") && ["回答", "问题", "文章"].includes(sourceType))) {
+                source = "知乎";
+                if (!sourceType) sourceType = "网页";
+            }
+
             if (!source && (hasProp("发布日期") || hasProp("摘要", "描述"))) {
                 source = explicitSource || "通用页面";
+            }
+
+            if (source && !["Linux.do", "GitHub", "RSS", "浏览器书签", "知乎", "通用页面", "未标记"].includes(source)) {
+                if (["回答", "问题", "文章", "网页"].includes(sourceType)) {
+                    source = source === "知乎" ? "知乎" : "通用页面";
+                }
             }
 
             if (!source) source = explicitSource || "未标记";
@@ -21038,6 +22872,7 @@ ${availableTools}
             const dateInfo = UI.getWorkspaceVisualDate(page);
             const category = UI.getWorkspaceVisualCategory(page);
             const sourceInfo = UI.inferWorkspaceVisualSource(page, databases);
+            const sourceUrl = UI.getWorkspaceVisualSourceUrl(page);
             const hasSource = sourceInfo.source && sourceInfo.source !== "未标记";
             const hasDate = !!dateInfo;
             const hasCategory = !!category;
@@ -21045,7 +22880,9 @@ ${availableTools}
             return {
                 id: summary.id,
                 title: summary.title,
-                url: summary.url,
+                url: sourceUrl || summary.url,
+                sourceUrl,
+                notionUrl: summary.url,
                 parentType: summary.parent,
                 parentDatabaseId: summary.parent === "database_id" ? summary.parentId : "",
                 parentPageId: summary.parent === "page_id" ? summary.parentId : "",
@@ -21139,6 +22976,7 @@ ${availableTools}
             const timelineCounts = new Map();
             const relationshipCounts = new Map();
             const recognizedSources = new Set();
+            const duplicateGroups = new Map();
             let sourcedPages = 0;
             let datedPages = 0;
             let categorizedPages = 0;
@@ -21183,6 +23021,49 @@ ${availableTools}
                 };
                 existingRelationship.count += 1;
                 relationshipCounts.set(linkLabel, existingRelationship);
+
+                const duplicateKey = UI.normalizeWorkspaceInsightKey(record?.title);
+                if (duplicateKey) {
+                    const existingDuplicate = duplicateGroups.get(duplicateKey) || {
+                        key: duplicateKey,
+                        title: String(record?.title || "").trim() || "未命名页面",
+                        items: [],
+                        sources: new Set(),
+                    };
+                    existingDuplicate.items.push({
+                        id: record?.id || "",
+                        title: String(record?.title || "").trim() || "未命名页面",
+                        source: sourceLabel,
+                        parentLabel,
+                        url: record?.url || "",
+                    });
+                    if (record?.hasSource) existingDuplicate.sources.add(sourceLabel);
+                    duplicateGroups.set(duplicateKey, existingDuplicate);
+                }
+            });
+
+            const linkGroups = new Map();
+            records.forEach((record) => {
+                const linkKey = UI.normalizeWorkspaceInsightUrl(record?.url);
+                if (!linkKey) return;
+                const sourceLabel = record?.source || "未标记";
+                const parentLabel = UI.getWorkspaceVisualParentLabel(record);
+                const existingGroup = linkGroups.get(linkKey) || {
+                    key: linkKey,
+                    title: String(record?.title || "").trim() || String(record?.url || "").trim() || "未命名页面",
+                    url: String(record?.url || "").trim(),
+                    items: [],
+                    sources: new Set(),
+                };
+                existingGroup.items.push({
+                    id: record?.id || "",
+                    title: String(record?.title || "").trim() || "未命名页面",
+                    source: sourceLabel,
+                    parentLabel,
+                    url: record?.url || "",
+                });
+                if (record?.hasSource) existingGroup.sources.add(sourceLabel);
+                linkGroups.set(linkKey, existingGroup);
             });
 
             const toBreakdown = (map) => Array.from(map.entries())
@@ -21205,6 +23086,48 @@ ${availableTools}
                 .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
                 .slice(0, 10);
 
+            const duplicateCandidates = Array.from(duplicateGroups.values())
+                .filter((group) => group.items.length > 1)
+                .map((group) => {
+                    const sourceList = Array.from(group.sources).sort((a, b) => a.localeCompare(b));
+                    return {
+                        key: group.key,
+                        label: group.title,
+                        count: group.items.length,
+                        sourceCount: sourceList.length,
+                        sources: sourceList,
+                        items: group.items,
+                    };
+                })
+                .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+                .slice(0, 8);
+
+            const linkConnectionCandidates = Array.from(linkGroups.values())
+                .filter((group) => group.items.length > 1 && group.sources.size > 1)
+                .map((group) => ({
+                    key: `url:${group.key}`,
+                    label: `${group.title} · ${Array.from(group.sources).sort((a, b) => a.localeCompare(b)).join(" + ")}`,
+                    count: group.items.length,
+                    sources: Array.from(group.sources).sort((a, b) => a.localeCompare(b)),
+                    reason: "同链接跨源候选",
+                    items: group.items,
+                    url: group.url,
+                }));
+
+            const connectionCandidates = Array.from(new Map([
+                ...duplicateCandidates
+                    .filter((group) => group.sourceCount > 1)
+                    .map((group) => [group.key, {
+                        key: `title:${group.key}`,
+                        label: `${group.label} · ${group.sources.join(" + ")}`,
+                        count: group.count,
+                        sources: group.sources,
+                        reason: "同标题跨源候选",
+                        items: group.items,
+                    }]),
+                ...linkConnectionCandidates.map((group) => [group.key, group]),
+            ]).values()).slice(0, 8);
+
             const funnel = [
                 { label: "已扫描页面", count: totalPages, pct: UI.getViewPct(totalPages, totalPages) },
                 { label: "识别来源", count: sourcedPages, pct: UI.getViewPct(sourcedPages, totalPages) },
@@ -21223,6 +23146,8 @@ ${availableTools}
                 categoryBreakdown: toBreakdown(categoryCounts),
                 timeline,
                 relationships,
+                duplicateCandidates,
+                connectionCandidates,
                 funnel,
                 sourcedPages,
                 datedPages,
@@ -21232,6 +23157,1375 @@ ${availableTools}
                 missingDatePages: Math.max(0, totalPages - datedPages),
                 missingCategoryPages: Math.max(0, totalPages - categorizedPages),
             };
+        },
+
+        normalizeWorkspaceInsightKey: (value) => {
+            const raw = String(value || "")
+                .toLowerCase()
+                .replace(/[\s\u3000]+/g, " ")
+                .replace(/[^\p{L}\p{N}]+/gu, " ")
+                .trim();
+            if (!raw) return "";
+            return raw.replace(/\s+/g, " ");
+        },
+
+        normalizeWorkspaceInsightUrl: (value) => {
+            const raw = String(value || "").trim();
+            if (!raw) return "";
+            try {
+                const parsed = new URL(raw);
+                const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+                const search = parsed.search || "";
+                return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${pathname}${search}`;
+            } catch {
+                return raw
+                    .toLowerCase()
+                    .replace(/#.*$/, "")
+                    .replace(/\/+$/, "");
+            }
+        },
+
+        buildWorkspaceInsightFallbackSummary: (model) => {
+            const lines = [];
+            if (model.connectionCandidates.length > 0) {
+                lines.push(`- 检测到 ${model.connectionCandidates.length} 组跨源关联候选，优先适合作为统一知识条目的合并入口。`);
+            } else {
+                lines.push("- 当前还没有明显的跨源同标题或同链接候选，统一知识层更多依赖来源字段与分类字段补齐。");
+            }
+            if (model.missingSourcePages > 0 || model.missingDatePages > 0 || model.missingCategoryPages > 0) {
+                lines.push(`- 结构缺口仍然存在：未标记 ${model.missingSourcePages}，缺时间 ${model.missingDatePages}，未分类 ${model.missingCategoryPages}。`);
+            } else {
+                lines.push("- 当前扫描范围内的来源、时间和分类字段已经全部齐备。");
+            }
+            const topSource = model.sourceBreakdown[0];
+            if (topSource) {
+                lines.push(`- 当前工作区以「${topSource.label}」为主，占 ${topSource.pct}%（${topSource.count} 页）。`);
+            }
+            lines.push("- 下一步建议优先把关联候选收敛成统一条目，再对缺字段页面跑 AI 摘要与分类补齐。");
+            return lines.join("\n");
+        },
+
+        buildWorkspaceInsightMarkdown: (model = UI.buildWorkspaceVisualizationModel(), aiSummary = UI.workspaceInsightSummary || "") => {
+            if (!model?.scannedAt) {
+                return "# 工作区洞察报告\n\n尚未刷新工作区视图，暂无可分享的数据。";
+            }
+
+            const scannedAt = new Date(model.scannedAt).toLocaleString("zh-CN", { hour12: false });
+            const structuredPct = UI.getViewPct(model.structuredPages, model.totalPages);
+            const sourceLines = model.sourceBreakdown.length > 0
+                ? model.sourceBreakdown.map((item) => `- ${item.label}：${item.count} 页（${item.pct}%）`)
+                : ["- 暂无来源分布数据"];
+            const categoryLines = model.categoryBreakdown.length > 0
+                ? model.categoryBreakdown.slice(0, 8).map((item) => `- ${item.label}：${item.count} 页（${item.pct}%）`)
+                : ["- 暂无分类统计"];
+            const timelineLines = model.timeline.length > 0
+                ? model.timeline.map((item) => `- ${item.label}：${item.count} 页`)
+                : ["- 暂无时间线数据"];
+            const relationshipLines = model.relationships.length > 0
+                ? model.relationships.slice(0, 8).map((item) => `- ${item.label}：${item.count} 页（${item.pct}%）`)
+                : ["- 暂无来源关系数据"];
+            const funnelLines = model.funnel.length > 0
+                ? model.funnel.map((item) => `- ${item.label}：${item.count} 页（${item.pct}%）`)
+                : ["- 暂无漏斗数据"];
+            const duplicateLines = model.duplicateCandidates.length > 0
+                ? model.duplicateCandidates.map((item) => `- ${item.label}：${item.count} 页，来源 ${item.sources.join(" + ") || "未标记"}`)
+                : ["- 暂无同标题重复候选"];
+            const connectionLines = model.connectionCandidates.length > 0
+                ? model.connectionCandidates.map((item) => `- ${item.label}：${item.count} 页，原因：${item.reason}`)
+                : ["- 暂无跨源关联候选"];
+            const summaryBlock = String(aiSummary || "").trim() || UI.buildWorkspaceInsightFallbackSummary(model);
+
+            return [
+                "# 工作区洞察报告",
+                "",
+                `- 扫描时间：${scannedAt}`,
+                `- 页面总数：${model.totalPages}`,
+                `- 覆盖数据库：${model.totalDatabases}`,
+                `- 已识别来源：${model.sourcedPages}`,
+                `- 结构完整率：${structuredPct}%`,
+                "",
+                "## 洞察摘要",
+                summaryBlock,
+                "",
+                "## 导出漏斗",
+                ...funnelLines,
+                "",
+                "## 来源分布",
+                ...sourceLines,
+                "",
+                "## 分类分布",
+                ...categoryLines,
+                "",
+                "## 全局时间线",
+                ...timelineLines,
+                "",
+                "## 来源关系图",
+                ...relationshipLines,
+                "",
+                "## 重复候选",
+                ...duplicateLines,
+                "",
+                "## 跨源关联候选",
+                ...connectionLines,
+                "",
+                "## 待补齐缺口",
+                `- 未标记来源：${model.missingSourcePages}`,
+                `- 缺少时间字段：${model.missingDatePages}`,
+                `- 未完成分类：${model.missingCategoryPages}`,
+            ].join("\n");
+        },
+
+        buildWorkspaceConnectionCandidateActionLabel: (action) => {
+            const normalized = String(action || "").trim().toLowerCase();
+            if (normalized === "merge") return "合并整理";
+            if (normalized === "enrich") return "补充信息";
+            if (normalized === "archive") return "暂缓归档";
+            return "人工复核";
+        },
+
+        buildWorkspaceConnectionCandidateWorkflow: (candidate, aiDraft = null) => {
+            const normalized = String(aiDraft?.recommendedAction || "review").trim().toLowerCase();
+            const presets = {
+                merge: {
+                    actionLabel: "合并整理",
+                    actionNames: ["合并整理", "合并", "Merge"],
+                    statusLabel: "待处理",
+                    statusNames: ["待处理", "待合并", "待办", "未开始", "Not started", "Backlog", "Inbox", "To do"],
+                    defaultNextStep: "确认主条目后合并重复来源，并补充统一摘要。",
+                },
+                review: {
+                    actionLabel: "人工复核",
+                    actionNames: ["人工复核", "复核", "Review"],
+                    statusLabel: "待复核",
+                    statusNames: ["待复核", "待处理", "待办", "未开始", "Not started", "Backlog", "Inbox", "To do"],
+                    defaultNextStep: "人工确认这些来源是否属于同一知识条目。",
+                },
+                enrich: {
+                    actionLabel: "补充信息",
+                    actionNames: ["补充信息", "补充", "Enrich"],
+                    statusLabel: "待补充",
+                    statusNames: ["待补充", "待处理", "待办", "未开始", "Not started", "Backlog", "Inbox", "To do"],
+                    defaultNextStep: "先补充缺失来源上下文，再决定是否合并。",
+                },
+                archive: {
+                    actionLabel: "暂缓归档",
+                    actionNames: ["暂缓归档", "归档", "Archive"],
+                    statusLabel: "已搁置",
+                    statusNames: ["已搁置", "暂缓", "归档", "Not started", "Backlog"],
+                    defaultNextStep: "暂缓处理，保留候选以备后续复核。",
+                },
+            };
+
+            const preset = presets[normalized] || presets.review;
+            return {
+                recommendedAction: normalized || "review",
+                actionLabel: preset.actionLabel,
+                actionNames: preset.actionNames,
+                statusLabel: preset.statusLabel,
+                statusNames: preset.statusNames,
+                nextStep: String(aiDraft?.nextStep || preset.defaultNextStep).trim().slice(0, 200),
+                mergeReason: String(aiDraft?.mergeReason || `${candidate?.reason || "跨源候选"}，建议保留为统一知识条目的整理入口。`).trim().slice(0, 200),
+            };
+        },
+
+        buildWorkspaceConnectionCandidateAIPrompt: (candidate) => {
+            const items = Array.isArray(candidate?.items) ? candidate.items : [];
+            return [
+                "你是知识整理助手。请基于以下跨源关联候选，输出一个适合写回 Notion 的统一知识条目整理建议。",
+                "要求：",
+                "1. 只返回 JSON，不要包含任何额外说明。",
+                "2. canonicalTitle 使用中文，20 字以内，适合作为统一知识条目标题。",
+                "3. summary 使用中文，80 字以内，概括这些候选的共同主题与价值。",
+                "4. recommendedAction 只能是 merge、review、enrich、archive 之一。",
+                "5. nextStep 使用一句中文，给出下一步整理动作。",
+                "6. mergeReason 使用一句中文，说明为什么它们应该合并或关联。",
+                "7. tags 返回 1-5 个短标签。",
+                "",
+                "JSON Schema:",
+                "{\"canonicalTitle\":\"\",\"summary\":\"\",\"recommendedAction\":\"merge|review|enrich|archive\",\"nextStep\":\"\",\"mergeReason\":\"\",\"tags\":[\"\"]}",
+                "",
+                JSON.stringify({
+                    label: candidate?.label || "",
+                    reason: candidate?.reason || "",
+                    count: Number(candidate?.count || items.length || 0),
+                    sources: Array.isArray(candidate?.sources) ? candidate.sources : [],
+                    url: candidate?.url || "",
+                    items: items.map((item) => ({
+                        title: item?.title || "",
+                        source: item?.source || "",
+                        parentLabel: item?.parentLabel || "",
+                        url: item?.url || "",
+                    })),
+                }, null, 2),
+            ].join("\n");
+        },
+
+        buildWorkspaceConnectionCandidateAIDraft: async (candidate, settings) => {
+            if (!settings?.aiApiKey || !settings?.aiService) return null;
+
+            try {
+                const prompt = UI.buildWorkspaceConnectionCandidateAIPrompt(candidate);
+                const raw = String(await AIService.requestChat(prompt, settings, 700) || "").trim();
+                const jsonMatch = raw.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) {
+                    throw new Error("AI 未返回有效 JSON。");
+                }
+
+                const parsed = JSON.parse(jsonMatch[0]);
+                const canonicalTitle = String(parsed?.canonicalTitle || parsed?.title || "").trim();
+                const summary = String(parsed?.summary || "").trim();
+                const recommendedAction = String(parsed?.recommendedAction || "review").trim().toLowerCase();
+                const nextStep = String(parsed?.nextStep || "").trim();
+                const mergeReason = String(parsed?.mergeReason || "").trim();
+                const tags = Array.from(new Set(
+                    (Array.isArray(parsed?.tags) ? parsed.tags : [])
+                        .map((item) => String(item || "").trim())
+                        .filter(Boolean)
+                )).slice(0, 5);
+
+                return {
+                    canonicalTitle: canonicalTitle.slice(0, 80),
+                    summary: summary.slice(0, 200),
+                    recommendedAction,
+                    actionLabel: UI.buildWorkspaceConnectionCandidateActionLabel(recommendedAction),
+                    nextStep: nextStep.slice(0, 200),
+                    mergeReason: mergeReason.slice(0, 200),
+                    tags,
+                };
+            } catch (error) {
+                console.warn("[LD-Notion] 统一候选 AI 整理失败，已回退规则版：", error);
+                return null;
+            }
+        },
+
+        buildWorkspaceConnectionCandidateTitle: (candidate, index = 0, aiDraft = null) => {
+            const firstTitle = String(candidate?.items?.[0]?.title || "").trim();
+            const fallbackLabel = String(candidate?.label || "").trim();
+            const aiTitle = String(aiDraft?.canonicalTitle || "").trim();
+            const baseTitle = aiTitle || firstTitle || fallbackLabel || `候选 ${index + 1}`;
+            const reason = String(candidate?.reason || "").trim();
+            const fullTitle = reason ? `统一候选 · ${baseTitle} · ${reason}` : `统一候选 · ${baseTitle}`;
+            return fullTitle.slice(0, 200);
+        },
+
+        buildWorkspaceConnectionCandidateMarkdown: (candidate, savedAt = Date.now(), aiDraft = null) => {
+            const items = Array.isArray(candidate?.items) ? candidate.items : [];
+            const sourceList = Array.isArray(candidate?.sources) ? candidate.sources.filter(Boolean) : [];
+            const exportedAt = new Date(savedAt).toLocaleString("zh-CN", { hour12: false });
+            const workflow = UI.buildWorkspaceConnectionCandidateWorkflow(candidate, aiDraft);
+            const lines = [
+                "# 统一候选条目",
+                "",
+                `- 候选标签：${candidate?.label || "未命名候选"}`,
+                `- 原因：${candidate?.reason || "未标记"}`,
+                `- 来源组合：${sourceList.join(" + ") || "未标记"}`,
+                `- 候选数量：${items.length}`,
+                `- 导出时间：${exportedAt}`,
+            ];
+
+            if (candidate?.url) {
+                lines.push(`- 候选链接：${candidate.url}`);
+            }
+
+            if (candidate?.key) {
+                lines.push(`- 候选键：${candidate.key}`);
+            }
+
+            lines.push("", "## 处理状态");
+            lines.push(`- 当前状态：${workflow.statusLabel}`);
+            lines.push(`- 建议动作：${workflow.actionLabel}`);
+            lines.push(`- 下一步：${workflow.nextStep}`);
+            lines.push(`- 合并理由：${workflow.mergeReason}`);
+
+            if (aiDraft) {
+                lines.push("", "## AI 整理建议");
+                if (aiDraft.canonicalTitle) {
+                    lines.push(`- 统一标题：${aiDraft.canonicalTitle}`);
+                }
+                if (aiDraft.summary) {
+                    lines.push(`- 摘要：${aiDraft.summary}`);
+                }
+                if (Array.isArray(aiDraft.tags) && aiDraft.tags.length > 0) {
+                    lines.push(`- AI 标签：${aiDraft.tags.join(" / ")}`);
+                }
+            }
+
+            lines.push("", "## 候选条目明细");
+
+            if (items.length === 0) {
+                lines.push("- 当前候选没有可写入的条目明细。");
+            } else {
+                items.forEach((item, index) => {
+                    lines.push(`### 条目 ${index + 1}`);
+                    lines.push(`- 标题：${item?.title || "未命名页面"}`);
+                    lines.push(`- 来源：${item?.source || "未标记"}`);
+                    lines.push(`- 上级归属：${item?.parentLabel || "未标记"}`);
+                    lines.push(`- 页面 ID：${item?.id || ""}`);
+                    if (item?.url) {
+                        lines.push(`- URL：${item.url}`);
+                    }
+                    lines.push("");
+                });
+            }
+
+            return lines.join("\n").trim();
+        },
+
+        buildWorkspaceConnectionCandidateDatabaseProperties: (database, titlePropertyName, candidate, candidateTitle, aiDraft = null) => {
+            const databaseProperties = database?.properties || {};
+            const workflow = UI.buildWorkspaceConnectionCandidateWorkflow(candidate, aiDraft);
+            const properties = {
+                [titlePropertyName]: {
+                    title: [{ text: { content: String(candidateTitle || "统一候选").slice(0, 2000) } }]
+                }
+            };
+
+            const addTextProperty = (propertyName, value) => {
+                const property = databaseProperties[propertyName];
+                const text = String(value || "").trim();
+                if (!property || !text) return;
+
+                if (property.type === "rich_text") {
+                    properties[propertyName] = {
+                        rich_text: [{ text: { content: text.slice(0, 2000) } }]
+                    };
+                    return;
+                }
+
+                if (property.type === "select") {
+                    const options = Array.isArray(property.select?.options) ? property.select.options : [];
+                    if (options.some((option) => option?.name === text)) {
+                        properties[propertyName] = { select: { name: text } };
+                    }
+                    return;
+                }
+
+                if (property.type === "url" && /^https?:\/\//i.test(text)) {
+                    properties[propertyName] = { url: text };
+                }
+            };
+
+            const addChoiceProperty = (propertyName, preferredNames, fallbackText = "") => {
+                const property = databaseProperties[propertyName];
+                if (!property) return;
+
+                const names = Array.isArray(preferredNames)
+                    ? preferredNames.map((item) => String(item || "").trim()).filter(Boolean)
+                    : [];
+                const fallback = String(fallbackText || "").trim();
+
+                if (property.type === "status") {
+                    const options = Array.isArray(property.status?.options) ? property.status.options : [];
+                    const matched = names.find((name) => options.some((option) => option?.name === name));
+                    if (matched) {
+                        properties[propertyName] = { status: { name: matched } };
+                    }
+                    return;
+                }
+
+                if (property.type === "select") {
+                    const options = Array.isArray(property.select?.options) ? property.select.options : [];
+                    const matched = names.find((name) => options.some((option) => option?.name === name));
+                    if (matched) {
+                        properties[propertyName] = { select: { name: matched } };
+                    }
+                    return;
+                }
+
+                if (property.type === "rich_text") {
+                    const content = fallback || names[0] || "";
+                    if (content) {
+                        properties[propertyName] = {
+                            rich_text: [{ text: { content: content.slice(0, 2000) } }]
+                        };
+                    }
+                }
+            };
+
+            const addTagProperty = (propertyName, values) => {
+                const property = databaseProperties[propertyName];
+                const tags = Array.from(new Set((values || []).map((item) => String(item || "").trim()).filter(Boolean))).slice(0, 20);
+                if (!property || tags.length === 0) return;
+
+                if (property.type === "multi_select") {
+                    const options = Array.isArray(property.multi_select?.options) ? property.multi_select.options : [];
+                    const optionNames = new Set(options.map((option) => option?.name).filter(Boolean));
+                    const matchedTags = tags.filter((tag) => optionNames.has(tag));
+                    if (matchedTags.length > 0) {
+                        properties[propertyName] = {
+                            multi_select: matchedTags.map((tag) => ({ name: tag }))
+                        };
+                    }
+                    return;
+                }
+
+                if (property.type === "rich_text") {
+                    properties[propertyName] = {
+                        rich_text: [{ text: { content: tags.join(", ").slice(0, 2000) } }]
+                    };
+                }
+            };
+
+            const sourceList = Array.isArray(candidate?.sources) ? candidate.sources : [];
+            const aiTags = Array.isArray(aiDraft?.tags) ? aiDraft.tags : [];
+            const summaryText = String(aiDraft?.summary || `${candidate?.reason || "跨源候选"}：${sourceList.join(" + ") || "未标记"}`).trim();
+            addTextProperty("来源", "统一候选");
+            addTextProperty("来源类型", "跨源关联候选");
+            addTextProperty("分类", "统一候选");
+            addChoiceProperty("状态", workflow.statusNames, workflow.statusLabel);
+            addChoiceProperty("处理状态", workflow.statusNames, workflow.statusLabel);
+            addChoiceProperty("候选状态", workflow.statusNames, workflow.statusLabel);
+            addChoiceProperty("建议动作", workflow.actionNames, workflow.actionLabel);
+            addChoiceProperty("处理动作", workflow.actionNames, workflow.actionLabel);
+            addTagProperty("标签", ["候选", candidate?.reason, ...sourceList, ...aiTags]);
+            addTextProperty("链接", candidate?.url || "");
+            addTextProperty("描述", summaryText);
+            addTextProperty("摘要", summaryText);
+            addTextProperty("AI摘要", summaryText);
+            addTextProperty("下一步", workflow.nextStep);
+            addTextProperty("合并理由", workflow.mergeReason);
+            addTextProperty("统一标题", String(aiDraft?.canonicalTitle || "").trim());
+
+            return properties;
+        },
+
+        getWorkspaceConnectionCandidateSchemaDefinition: () => {
+            const statusOptions = [
+                "待处理",
+                "待复核",
+                "待补充",
+                "待合并",
+                "待办",
+                "未开始",
+                "已搁置",
+                "暂缓",
+                "归档",
+            ].map((name) => ({ name }));
+            const actionOptions = [
+                "合并整理",
+                "人工复核",
+                "补充信息",
+                "暂缓归档",
+                "合并",
+                "复核",
+                "补充",
+                "归档",
+            ].map((name) => ({ name }));
+
+            return {
+                "来源": { typeName: "rich_text", schema: { rich_text: {} } },
+                "来源类型": { typeName: "rich_text", schema: { rich_text: {} } },
+                "分类": { typeName: "rich_text", schema: { rich_text: {} } },
+                "标签": { typeName: "multi_select", schema: { multi_select: { options: [] } } },
+                "链接": { typeName: "url", schema: { url: {} } },
+                "描述": { typeName: "rich_text", schema: { rich_text: {} } },
+                "摘要": { typeName: "rich_text", schema: { rich_text: {} } },
+                "AI摘要": { typeName: "rich_text", schema: { rich_text: {} } },
+                "状态": { typeName: "select", schema: { select: { options: statusOptions } } },
+                "处理状态": { typeName: "select", schema: { select: { options: statusOptions } } },
+                "候选状态": { typeName: "select", schema: { select: { options: statusOptions } } },
+                "建议动作": { typeName: "select", schema: { select: { options: actionOptions } } },
+                "处理动作": { typeName: "select", schema: { select: { options: actionOptions } } },
+                "下一步": { typeName: "rich_text", schema: { rich_text: {} } },
+                "合并理由": { typeName: "rich_text", schema: { rich_text: {} } },
+                "统一标题": { typeName: "rich_text", schema: { rich_text: {} } },
+            };
+        },
+
+        ensureWorkspaceConnectionCandidateDatabaseSchema: async (databaseId, apiKey, database = null) => {
+            const currentDatabase = database || await NotionAPI.fetchDatabase(databaseId, apiKey);
+            const existingProps = currentDatabase?.properties || {};
+            const requiredProperties = UI.getWorkspaceConnectionCandidateSchemaDefinition();
+            const propsToAdd = {};
+            const typeConflicts = [];
+
+            for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
+                const existingProp = existingProps[name];
+                if (!existingProp) {
+                    propsToAdd[name] = schema;
+                    continue;
+                }
+                if (existingProp.type !== typeName) {
+                    typeConflicts.push({
+                        name,
+                        expected: typeName,
+                        actual: existingProp.type,
+                    });
+                }
+            }
+
+            if (typeConflicts.length > 0) {
+                const detail = typeConflicts
+                    .map((item) => `「${item.name}」期望 ${item.expected}，当前为 ${item.actual}`)
+                    .join("；");
+                throw new Error(`统一候选目标数据库属性类型不匹配：${detail}`);
+            }
+
+            if (Object.keys(propsToAdd).length === 0) {
+                return currentDatabase;
+            }
+
+            await AIAssistant._executeGuardedDatabaseWrite(
+                "updateDatabase",
+                databaseId,
+                () => NotionAPI.updateDatabase(databaseId, propsToAdd, apiKey),
+                apiKey,
+                {
+                    itemName: "统一候选 schema",
+                    databaseId,
+                    source: "ui",
+                    surface: "workspace-visualization",
+                    propertyNames: Object.keys(propsToAdd),
+                }
+            );
+
+            return {
+                ...currentDatabase,
+                properties: {
+                    ...existingProps,
+                    ...Object.fromEntries(
+                        Object.entries(requiredProperties)
+                            .filter(([name]) => propsToAdd[name])
+                            .map(([name, { typeName, schema }]) => ([
+                                name,
+                                { type: typeName, ...schema },
+                            ]))
+                    ),
+                },
+            };
+        },
+
+        formatSyncDateTime: (timestamp, emptyText = "未记录") => {
+            const numeric = Number(timestamp);
+            if (!Number.isFinite(numeric) || numeric <= 0) return emptyText;
+            return new Date(numeric).toLocaleString("zh-CN", { hour12: false });
+        },
+
+        formatSyncWatermarkLabel: (watermark, emptyText = "未建立") => {
+            if (!watermark?.time) return emptyText;
+            const timeLabel = new Date(watermark.time).toLocaleString("zh-CN", { hour12: false });
+            const boundaryCount = Array.isArray(watermark.ids) ? watermark.ids.length : 0;
+            return boundaryCount > 0 ? `${timeLabel} · ${boundaryCount} 个边界 ID` : timeLabel;
+        },
+
+        getSyncOutcomeMeta: (outcome) => {
+            const normalized = String(outcome || "idle");
+            if (normalized === "running") return { label: "同步中", tone: "running" };
+            if (normalized === "success") return { label: "正常", tone: "success" };
+            if (normalized === "partial") return { label: "部分成功", tone: "partial" };
+            if (normalized === "error") return { label: "失败", tone: "error" };
+            return { label: "待机", tone: "idle" };
+        },
+
+        buildSyncStatsText: (sourceKey, stats = {}) => {
+            if (!stats || typeof stats !== "object") return "暂无统计";
+            if (sourceKey === "linuxdo") {
+                if (!stats.scanned && !stats.pending && !stats.success && !stats.failed) return "暂无统计";
+                return `扫描 ${stats.scanned || 0}，待处理 ${stats.pending || 0}，成功 ${stats.success || 0}${stats.failed ? `，失败 ${stats.failed}` : ""}`;
+            }
+            if (sourceKey === "github") {
+                if (!stats.enabledTypes && !stats.exported && !stats.failed && !stats.syncErrors) return "暂无统计";
+                return `启用 ${stats.enabledTypes || 0} 类，成功 ${stats.exported || 0}${stats.failed ? `，失败 ${stats.failed}` : ""}${stats.syncErrors ? `，异常 ${stats.syncErrors}` : ""}`;
+            }
+            if (sourceKey === "bookmarks") {
+                if (!stats.created && !stats.updated && !stats.archived && !stats.failed && !stats.unchanged) return "暂无统计";
+                return `新增 ${stats.created || 0}，更新 ${stats.updated || 0}，归档 ${stats.archived || 0}，无变更 ${stats.unchanged || 0}${stats.failed ? `，失败 ${stats.failed}` : ""}`;
+            }
+            if (sourceKey === "rss") {
+                if (!stats.feeds && !stats.scanned && !stats.created && !stats.updated && !stats.failed && !stats.unchanged) return "暂无统计";
+                return `Feed ${stats.feeds || 0}，扫描 ${stats.scanned || 0}，新增 ${stats.created || 0}，更新 ${stats.updated || 0}，无变更 ${stats.unchanged || 0}${stats.failed ? `，失败 ${stats.failed}` : ""}`;
+            }
+            return "暂无统计";
+        },
+
+        buildUnifiedSyncModel: () => {
+            const githubTypeLabelMap = {
+                stars: "Stars",
+                repos: "Repos",
+                forks: "Forks",
+                gists: "Gists",
+            };
+            const linuxdoState = SyncState.getLinuxDoState();
+            const githubMeta = SyncState.getGitHubMeta();
+            const githubTypes = Array.from(new Set((GitHubAPI.getImportTypes() || []).filter(Boolean)));
+            const githubStates = githubTypes.map((type) => ({
+                type,
+                label: githubTypeLabelMap[type] || type,
+                state: SyncState.getGitHubState(type),
+            }));
+            const bookmarkState = SyncState.getBookmarkState();
+            const rssState = SyncState.getRssState();
+            const rssFeedCount = RSSAutoImporter.getFeedUrls().length;
+
+            const sourceRows = [
+                {
+                    key: "linuxdo",
+                    label: "Linux.do",
+                    enabled: !!Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.autoImportEnabled),
+                    intervalMinutes: parseInt(Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval), 10) || 0,
+                    outcome: linuxdoState.lastOutcome,
+                    lastSuccessAt: linuxdoState.lastSuccessAt || 0,
+                    lastAttemptAt: linuxdoState.lastAttemptAt || 0,
+                    lastError: linuxdoState.lastError || "",
+                    watermarkLabel: UI.formatSyncWatermarkLabel(linuxdoState.watermark),
+                    statsLabel: UI.buildSyncStatsText("linuxdo", linuxdoState.lastStats),
+                    scheduleLabel: "定时轮询导入 Linux.do 新收藏",
+                    detailLabel: "增量基线来自最近收藏时间 + 边界 ID",
+                },
+                {
+                    key: "github",
+                    label: "GitHub",
+                    enabled: !!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.githubAutoImportEnabled),
+                    intervalMinutes: parseInt(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.githubAutoImportInterval), 10) || 0,
+                    outcome: githubMeta.lastOutcome,
+                    lastSuccessAt: githubMeta.lastSuccessAt || 0,
+                    lastAttemptAt: githubMeta.lastAttemptAt || 0,
+                    lastError: githubMeta.lastError || "",
+                    watermarkLabel: githubStates.length > 0
+                        ? githubStates.map((item) => `${item.label}：${UI.formatSyncWatermarkLabel(item.state.watermark)}`).join("；")
+                        : "未选择导入类型",
+                    statsLabel: UI.buildSyncStatsText("github", githubMeta.lastStats),
+                    scheduleLabel: githubTypes.length > 0 ? `启用类型：${githubTypes.map((type) => githubTypeLabelMap[type] || type).join(" / ")}` : "未选择导入类型",
+                    detailLabel: "每种 GitHub 类型都维护独立增量基线",
+                },
+                {
+                    key: "bookmarks",
+                    label: "浏览器书签",
+                    enabled: !!Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.bookmarkAutoImportEnabled),
+                    intervalMinutes: parseInt(Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.bookmarkAutoImportInterval), 10) || 0,
+                    outcome: bookmarkState.lastOutcome,
+                    lastSuccessAt: bookmarkState.lastSuccessAt || 0,
+                    lastAttemptAt: bookmarkState.lastAttemptAt || 0,
+                    lastError: bookmarkState.lastError || "",
+                    watermarkLabel: UI.formatSyncWatermarkLabel(bookmarkState.watermark),
+                    statsLabel: UI.buildSyncStatsText("bookmarks", bookmarkState.lastStats),
+                    scheduleLabel: `跟踪 ${Object.keys(bookmarkState.snapshot || {}).length} 个已知书签映射`,
+                    detailLabel: "增量基线来自书签时间 + 当前快照映射",
+                },
+                {
+                    key: "rss",
+                    label: "RSS",
+                    enabled: !!Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.rssAutoImportEnabled),
+                    intervalMinutes: parseInt(Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.rssAutoImportInterval), 10) || 0,
+                    outcome: rssState.lastOutcome,
+                    lastSuccessAt: rssState.lastSuccessAt || 0,
+                    lastAttemptAt: rssState.lastAttemptAt || 0,
+                    lastError: rssState.lastError || "",
+                    watermarkLabel: UI.formatSyncWatermarkLabel(rssState.watermark),
+                    statsLabel: UI.buildSyncStatsText("rss", rssState.lastStats),
+                    scheduleLabel: rssFeedCount > 0 ? `监控 ${rssFeedCount} 个 Feed` : "未配置 Feed URL",
+                    detailLabel: "增量基线来自 Feed 发布时间 + 当前快照映射",
+                },
+            ].map((row) => {
+                const outcomeMeta = UI.getSyncOutcomeMeta(row.outcome);
+                const intervalLabel = row.enabled
+                    ? (row.intervalMinutes > 0 ? `${row.intervalMinutes} 分钟轮询` : "仅页面打开时补跑")
+                    : "未启用";
+                return {
+                    ...row,
+                    outcomeLabel: outcomeMeta.label,
+                    outcomeTone: outcomeMeta.tone,
+                    intervalLabel,
+                    lastSuccessLabel: UI.formatSyncDateTime(row.lastSuccessAt, "未成功同步"),
+                    lastAttemptLabel: UI.formatSyncDateTime(row.lastAttemptAt, "未尝试"),
+                };
+            });
+
+            const latestSuccessRow = sourceRows
+                .filter((row) => row.lastSuccessAt > 0)
+                .sort((a, b) => b.lastSuccessAt - a.lastSuccessAt)[0] || null;
+
+            return {
+                sourceRows,
+                enabledCount: sourceRows.filter((row) => row.enabled).length,
+                runningCount: sourceRows.filter((row) => row.outcome === "running").length,
+                issueCount: sourceRows.filter((row) => row.enabled && (row.outcome === "error" || row.outcome === "partial")).length,
+                latestSuccessSource: latestSuccessRow ? latestSuccessRow.label : "尚未建立",
+                latestSuccessLabel: latestSuccessRow ? latestSuccessRow.lastSuccessLabel : "暂无成功记录",
+            };
+        },
+
+        renderSyncCenterSummary: () => {
+            const container = UI.refs?.viewSyncSummary;
+            if (!container) return;
+
+            const model = UI.buildUnifiedSyncModel();
+            if (!model.sourceRows.length) {
+                container.innerHTML = `
+                    <div class="ldb-view-empty">
+                        <div class="ldb-view-empty-title">统一同步中心还没有来源</div>
+                        <div class="ldb-view-empty-text">启用自动同步后，这里会聚合展示各来源的轮询状态和增量基线。</div>
+                    </div>
+                `;
+                return;
+            }
+
+            const sourceCards = model.sourceRows.map((row) => {
+                const highlights = [
+                    `<span class="ldb-view-pill">${Utils.escapeHtml(row.intervalLabel)}</span>`,
+                    `<span class="ldb-view-pill">${Utils.escapeHtml(row.outcomeLabel)}</span>`,
+                ].join("");
+                const errorMarkup = row.lastError
+                    ? `<div class="ldb-view-empty-text" style="margin-top: 8px; color: #dc2626;">最近异常：${Utils.escapeHtml(row.lastError)}</div>`
+                    : "";
+                return `
+                    <div class="ldb-view-card">
+                        <div class="ldb-view-card-title">${Utils.escapeHtml(row.label)}</div>
+                        <div class="ldb-view-metric-value">${Utils.escapeHtml(row.outcomeLabel)}</div>
+                        <div class="ldb-view-metric-meta">${Utils.escapeHtml(row.scheduleLabel)}</div>
+                        <div class="ldb-view-highlight">${highlights}</div>
+                        <div class="ldb-view-link-graph">
+                            <div class="ldb-view-link-row">
+                                <div class="ldb-view-link-path">最近成功</div>
+                                <div class="ldb-view-link-count">${Utils.escapeHtml(row.lastSuccessLabel)}</div>
+                            </div>
+                            <div class="ldb-view-link-row">
+                                <div class="ldb-view-link-path">最近尝试</div>
+                                <div class="ldb-view-link-count">${Utils.escapeHtml(row.lastAttemptLabel)}</div>
+                            </div>
+                            <div class="ldb-view-link-row">
+                                <div class="ldb-view-link-path">增量基线</div>
+                                <div class="ldb-view-link-count">${Utils.escapeHtml(row.watermarkLabel)}</div>
+                            </div>
+                            <div class="ldb-view-link-row">
+                                <div class="ldb-view-link-path">最近统计</div>
+                                <div class="ldb-view-link-count">${Utils.escapeHtml(row.statsLabel)}</div>
+                            </div>
+                        </div>
+                        <div class="ldb-view-empty-text" style="margin-top: 8px;">${Utils.escapeHtml(row.detailLabel)}</div>
+                        ${errorMarkup}
+                    </div>
+                `;
+            }).join("");
+
+            container.innerHTML = `
+                <div class="ldb-view-grid">
+                    <div class="ldb-view-card">
+                        <div class="ldb-view-card-title">已启用来源</div>
+                        <div class="ldb-view-metric-value">${model.enabledCount}</div>
+                        <div class="ldb-view-metric-meta">共 ${model.sourceRows.length} 条多源同步链</div>
+                    </div>
+                    <div class="ldb-view-card">
+                        <div class="ldb-view-card-title">最近成功</div>
+                        <div class="ldb-view-metric-value">${Utils.escapeHtml(model.latestSuccessSource)}</div>
+                        <div class="ldb-view-metric-meta">${Utils.escapeHtml(model.latestSuccessLabel)}</div>
+                    </div>
+                    <div class="ldb-view-card">
+                        <div class="ldb-view-card-title">运行中 / 需关注</div>
+                        <div class="ldb-view-metric-value">${model.runningCount} / ${model.issueCount}</div>
+                        <div class="ldb-view-metric-meta">运行中来源 / 部分成功或失败来源</div>
+                    </div>
+                    ${sourceCards}
+                </div>
+            `;
+        },
+
+        runUnifiedSyncNow: async () => {
+            const refs = UI.refs || {};
+            const btn = refs.viewSyncNowBtn;
+            const tasks = [];
+
+            if (Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.autoImportEnabled)) {
+                tasks.push({ label: "Linux.do", run: () => AutoImporter.run() });
+            }
+            if (Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.githubAutoImportEnabled)) {
+                tasks.push({ label: "GitHub", run: () => GitHubAutoImporter.run() });
+            }
+            if (Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.bookmarkAutoImportEnabled)) {
+                tasks.push({ label: "浏览器书签", run: () => BookmarkAutoImporter.run() });
+            }
+            if (Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.rssAutoImportEnabled)) {
+                tasks.push({ label: "RSS", run: () => RSSAutoImporter.run() });
+            }
+
+            if (tasks.length === 0) {
+                throw new Error("至少先启用一个自动同步来源。");
+            }
+
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = "同步中...";
+            }
+
+            try {
+                for (const task of tasks) {
+                    await task.run();
+                }
+                UI.renderSyncCenterSummary();
+                const model = UI.buildUnifiedSyncModel();
+                UI.showStatus(
+                    `统一同步完成：已执行 ${tasks.map((task) => task.label).join("、")}，当前需关注来源 ${model.issueCount} 个。`,
+                    model.issueCount > 0 ? "error" : "success"
+                );
+                return model;
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = "立即同步全部";
+                }
+            }
+        },
+
+        buildWorkspaceCollaborationPackage: (
+            model = UI.buildWorkspaceVisualizationModel(),
+            syncModel = UI.buildUnifiedSyncModel()
+        ) => {
+            if (!model?.scannedAt) {
+                throw new Error("请先刷新工作区视图。");
+            }
+
+            const cloneJson = (value, fallback) => {
+                try {
+                    return JSON.parse(JSON.stringify(value));
+                } catch {
+                    return fallback;
+                }
+            };
+
+            const markdown = UI.workspaceInsightMarkdown || UI.buildWorkspaceInsightMarkdown(model, UI.workspaceInsightSummary || "");
+            const generatedAt = UI.workspaceInsightUpdatedAt || Date.now();
+            const summaryText = String(UI.workspaceInsightSummary || "").trim() || UI.buildWorkspaceInsightFallbackSummary(model);
+
+            return {
+                packageType: "ld-notion-workspace-collaboration",
+                packageVersion: 1,
+                generatedAt: new Date(generatedAt).toISOString(),
+                workspace: {
+                    scannedAt: new Date(Number(model.scannedAt || generatedAt)).toISOString(),
+                    maxPages: Number(model.maxPages || 0),
+                    totalPages: Number(model.totalPages || 0),
+                    totalDatabases: Number(model.totalDatabases || 0),
+                    sourcedPages: Number(model.sourcedPages || 0),
+                    datedPages: Number(model.datedPages || 0),
+                    categorizedPages: Number(model.categorizedPages || 0),
+                    structuredPages: Number(model.structuredPages || 0),
+                    missingSourcePages: Number(model.missingSourcePages || 0),
+                    missingDatePages: Number(model.missingDatePages || 0),
+                    missingCategoryPages: Number(model.missingCategoryPages || 0),
+                    recognizedSources: cloneJson(model.recognizedSources || [], []),
+                    sourceBreakdown: cloneJson(model.sourceBreakdown || [], []),
+                    categoryBreakdown: cloneJson(model.categoryBreakdown || [], []),
+                    timeline: cloneJson(model.timeline || [], []),
+                    relationships: cloneJson(model.relationships || [], []),
+                    funnel: cloneJson(model.funnel || [], []),
+                    duplicateCandidates: cloneJson(model.duplicateCandidates || [], []),
+                    connectionCandidates: cloneJson(model.connectionCandidates || [], []),
+                },
+                insight: {
+                    summary: summaryText,
+                    markdown,
+                    updatedAt: new Date(generatedAt).toISOString(),
+                },
+                syncCenter: {
+                    enabledCount: Number(syncModel?.enabledCount || 0),
+                    runningCount: Number(syncModel?.runningCount || 0),
+                    issueCount: Number(syncModel?.issueCount || 0),
+                    latestSuccessSource: String(syncModel?.latestSuccessSource || "尚未建立"),
+                    latestSuccessLabel: String(syncModel?.latestSuccessLabel || "暂无成功记录"),
+                    sourceRows: cloneJson(syncModel?.sourceRows || [], []),
+                },
+            };
+        },
+
+        buildWorkspaceCollaborationPackageMarkdown: (collabPackage = UI.buildWorkspaceCollaborationPackage()) => {
+            const candidateLines = Array.isArray(collabPackage?.workspace?.connectionCandidates) && collabPackage.workspace.connectionCandidates.length > 0
+                ? collabPackage.workspace.connectionCandidates.map((item) => `- ${item.label}：${item.count} 条，原因 ${item.reason}`)
+                : ["- 暂无跨源关联候选"];
+            const duplicateLines = Array.isArray(collabPackage?.workspace?.duplicateCandidates) && collabPackage.workspace.duplicateCandidates.length > 0
+                ? collabPackage.workspace.duplicateCandidates.map((item) => `- ${item.label}：${item.count} 条，来源 ${Array.isArray(item.sources) ? item.sources.join(" + ") : ""}`)
+                : ["- 暂无重复候选"];
+            const syncLines = Array.isArray(collabPackage?.syncCenter?.sourceRows) && collabPackage.syncCenter.sourceRows.length > 0
+                ? collabPackage.syncCenter.sourceRows.map((row) => `- ${row.label}：${row.outcomeLabel}，最近成功 ${row.lastSuccessLabel}，基线 ${row.watermarkLabel}`)
+                : ["- 暂无同步中心摘要"];
+            const payload = JSON.stringify(collabPackage, null, 2);
+
+            return [
+                "# 工作区协作包",
+                "",
+                `- 生成时间：${collabPackage?.generatedAt || ""}`,
+                `- 页面总数：${collabPackage?.workspace?.totalPages || 0}`,
+                `- 数据库总数：${collabPackage?.workspace?.totalDatabases || 0}`,
+                `- 已启用同步来源：${collabPackage?.syncCenter?.enabledCount || 0}`,
+                "",
+                "## 协作摘要",
+                collabPackage?.insight?.summary || "暂无协作摘要",
+                "",
+                "## 工作区洞察",
+                collabPackage?.insight?.markdown || "暂无洞察内容",
+                "",
+                "## 统一候选概览",
+                ...candidateLines,
+                "",
+                "## 重复候选概览",
+                ...duplicateLines,
+                "",
+                "## 同步中心摘要",
+                ...syncLines,
+                "",
+                "## 结构化协作包 JSON",
+                "```json",
+                payload,
+                "```",
+            ].join("\n");
+        },
+
+        copyWorkspaceInsightReport: async () => {
+            const model = UI.buildWorkspaceVisualizationModel();
+            if (!model?.scannedAt) {
+                throw new Error("请先刷新工作区视图。");
+            }
+
+            const markdown = UI.workspaceInsightMarkdown || UI.buildWorkspaceInsightMarkdown(model);
+            try {
+                if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(markdown);
+                } else {
+                    const textarea = document.createElement("textarea");
+                    textarea.value = markdown;
+                    textarea.setAttribute("readonly", "readonly");
+                    textarea.style.position = "fixed";
+                    textarea.style.opacity = "0";
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand("copy");
+                    textarea.remove();
+                }
+                UI.workspaceInsightMarkdown = markdown;
+                UI.workspaceInsightUpdatedAt = Date.now();
+                UI.showStatus("工作区洞察报告已复制。", "success");
+            } catch (error) {
+                throw new Error(error?.message || String(error));
+            }
+        },
+
+        downloadWorkspaceInsightReport: async () => {
+            const model = UI.buildWorkspaceVisualizationModel();
+            if (!model?.scannedAt) {
+                throw new Error("请先刷新工作区视图。");
+            }
+
+            const markdown = UI.workspaceInsightMarkdown || UI.buildWorkspaceInsightMarkdown(model);
+            const objectUrlApi = (typeof window !== "undefined" && window.URL && typeof window.URL.createObjectURL === "function")
+                ? window.URL
+                : (typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL : null);
+            if (!objectUrlApi) {
+                throw new Error("当前环境不支持报告下载。");
+            }
+
+            const stampSource = UI.workspaceInsightUpdatedAt || Date.now();
+            const stamp = new Date(stampSource).toISOString().replace(/[:.]/g, "-");
+            const filename = `ld-notion-workspace-insight-${stamp}.md`;
+            const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+            const href = objectUrlApi.createObjectURL(blob);
+
+            try {
+                const link = document.createElement("a");
+                link.href = href;
+                link.download = filename;
+                link.style.display = "none";
+                document.body.appendChild(link);
+                link.click();
+                if (typeof link.remove === "function") {
+                    link.remove();
+                }
+                UI.workspaceInsightMarkdown = markdown;
+                UI.workspaceInsightUpdatedAt = Date.now();
+                UI.showStatus("工作区洞察报告已开始下载。", "success");
+                return { filename, markdown };
+            } catch (error) {
+                throw new Error(error?.message || String(error));
+            } finally {
+                if (typeof objectUrlApi.revokeObjectURL === "function") {
+                    setTimeout(() => objectUrlApi.revokeObjectURL(href), 0);
+                }
+            }
+        },
+
+        downloadWorkspaceCollaborationPackage: async () => {
+            const model = UI.buildWorkspaceVisualizationModel();
+            const syncModel = UI.buildUnifiedSyncModel();
+            const collabPackage = UI.buildWorkspaceCollaborationPackage(model, syncModel);
+            const objectUrlApi = (typeof window !== "undefined" && window.URL && typeof window.URL.createObjectURL === "function")
+                ? window.URL
+                : (typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL : null);
+            if (!objectUrlApi) {
+                throw new Error("当前环境不支持协作包下载。");
+            }
+
+            const stampSource = UI.workspaceInsightUpdatedAt || Date.now();
+            const stamp = new Date(stampSource).toISOString().replace(/[:.]/g, "-");
+            const filename = `ld-notion-workspace-collaboration-${stamp}.json`;
+            const payload = JSON.stringify(collabPackage, null, 2);
+            const blob = new Blob([payload], { type: "application/json;charset=utf-8" });
+            const href = objectUrlApi.createObjectURL(blob);
+
+            try {
+                const link = document.createElement("a");
+                link.href = href;
+                link.download = filename;
+                link.style.display = "none";
+                document.body.appendChild(link);
+                link.click();
+                if (typeof link.remove === "function") {
+                    link.remove();
+                }
+                UI.workspaceInsightUpdatedAt = Date.now();
+                UI.showStatus("工作区协作包已开始下载。", "success");
+                return { filename, payload, collabPackage };
+            } catch (error) {
+                throw new Error(error?.message || String(error));
+            } finally {
+                if (typeof objectUrlApi.revokeObjectURL === "function") {
+                    setTimeout(() => objectUrlApi.revokeObjectURL(href), 0);
+                }
+            }
+        },
+
+        saveWorkspaceCollaborationPackageToNotion: async () => {
+            const model = UI.buildWorkspaceVisualizationModel();
+            if (!model?.scannedAt) {
+                throw new Error("请先刷新工作区视图。");
+            }
+
+            const apiKey = NotionOAuth.getAccessToken(UI.refs?.apiKeyInput?.value.trim());
+            if (!apiKey) {
+                throw new Error(MSG.NO_NOTION_KEY);
+            }
+
+            const exportState = TargetState.getExportState();
+            if (!exportState.targetId) {
+                throw new Error("请先配置导出目标（数据库或父页面）。");
+            }
+
+            const collabPackage = UI.buildWorkspaceCollaborationPackage(model, UI.buildUnifiedSyncModel());
+            const markdown = UI.buildWorkspaceCollaborationPackageMarkdown(collabPackage);
+            const packageTime = UI.workspaceInsightUpdatedAt || Date.now();
+            const packageTitle = `工作区协作包 ${new Date(packageTime).toLocaleString("zh-CN", { hour12: false })}`;
+            const contentBlocks = AIAssistant._textToBlocks(markdown);
+            let page = null;
+
+            if (exportState.targetType === CONFIG.EXPORT_TARGET_TYPES.PAGE) {
+                const parentPageId = exportState.parentPageId;
+                page = await AIAssistant._executeGuardedPageWrite(
+                    "createDatabasePage",
+                    { id: parentPageId, name: packageTitle },
+                    () => NotionAPI.createChildPage(parentPageId, packageTitle, contentBlocks, apiKey),
+                    apiKey,
+                    {
+                        itemName: packageTitle,
+                        pageId: parentPageId,
+                        source: "ui",
+                        surface: "workspace-visualization",
+                    }
+                );
+            } else {
+                const databaseId = exportState.databaseId;
+                const database = await NotionAPI.fetchDatabase(databaseId, apiKey);
+                const titlePropertyName = Object.entries(database.properties || {}).find(([_, prop]) => prop?.type === "title")?.[0] || null;
+                if (!titlePropertyName) {
+                    throw new Error("当前目标数据库缺少标题属性，无法保存协作包。");
+                }
+                const properties = {
+                    [titlePropertyName]: {
+                        title: [{ text: { content: packageTitle } }]
+                    }
+                };
+                page = await AIAssistant._executeGuardedDatabaseWrite(
+                    "createDatabasePage",
+                    databaseId,
+                    () => NotionAPI.createPageObject({ database_id: databaseId }, properties, contentBlocks, apiKey),
+                    apiKey,
+                    {
+                        itemName: packageTitle,
+                        databaseId,
+                        source: "ui",
+                        surface: "workspace-visualization",
+                    }
+                );
+            }
+
+            const pageId = Utils.extractNotionId(page?.id) || String(page?.id || "").replace(/-/g, "");
+            UI.workspaceInsightUpdatedAt = Date.now();
+            UI.setWorkspaceVisualStatus(
+                `工作区协作包已保存到 Notion（${exportState.targetType === CONFIG.EXPORT_TARGET_TYPES.PAGE ? "父页面" : "数据库"}）。`,
+                "success"
+            );
+            UI.showStatus("工作区协作包已保存到 Notion。", "success");
+            return {
+                pageId,
+                title: packageTitle,
+                targetId: exportState.targetId,
+                targetType: exportState.targetType,
+                markdown,
+                collabPackage,
+            };
+        },
+
+        saveWorkspaceInsightReportToNotion: async () => {
+            const model = UI.buildWorkspaceVisualizationModel();
+            if (!model?.scannedAt) {
+                throw new Error("请先刷新工作区视图。");
+            }
+
+            const apiKey = NotionOAuth.getAccessToken(UI.refs?.apiKeyInput?.value.trim());
+            if (!apiKey) {
+                throw new Error(MSG.NO_NOTION_KEY);
+            }
+
+            const exportState = TargetState.getExportState();
+            if (!exportState.targetId) {
+                throw new Error("请先配置导出目标（数据库或父页面）。");
+            }
+
+            const markdown = UI.workspaceInsightMarkdown || UI.buildWorkspaceInsightMarkdown(model);
+            const reportTime = UI.workspaceInsightUpdatedAt || Date.now();
+            const reportTitle = `工作区洞察报告 ${new Date(reportTime).toLocaleString("zh-CN", { hour12: false })}`;
+            const contentBlocks = AIAssistant._textToBlocks(markdown);
+            let page = null;
+
+            if (exportState.targetType === CONFIG.EXPORT_TARGET_TYPES.PAGE) {
+                const parentPageId = exportState.parentPageId;
+                page = await AIAssistant._executeGuardedPageWrite(
+                    "createDatabasePage",
+                    { id: parentPageId, name: reportTitle },
+                    () => NotionAPI.createChildPage(parentPageId, reportTitle, contentBlocks, apiKey),
+                    apiKey,
+                    {
+                        itemName: reportTitle,
+                        pageId: parentPageId,
+                        source: "ui",
+                        surface: "workspace-visualization",
+                    }
+                );
+            } else {
+                const databaseId = exportState.databaseId;
+                const database = await NotionAPI.fetchDatabase(databaseId, apiKey);
+                const titlePropertyName = Object.entries(database.properties || {}).find(([_, prop]) => prop?.type === "title")?.[0] || null;
+                if (!titlePropertyName) {
+                    throw new Error("当前目标数据库缺少标题属性，无法保存报告。");
+                }
+                const properties = {
+                    [titlePropertyName]: {
+                        title: [{ text: { content: reportTitle } }]
+                    }
+                };
+                page = await AIAssistant._executeGuardedDatabaseWrite(
+                    "createDatabasePage",
+                    databaseId,
+                    () => NotionAPI.createPageObject({ database_id: databaseId }, properties, contentBlocks, apiKey),
+                    apiKey,
+                    {
+                        itemName: reportTitle,
+                        databaseId,
+                        source: "ui",
+                        surface: "workspace-visualization",
+                    }
+                );
+            }
+
+            const pageId = Utils.extractNotionId(page?.id) || String(page?.id || "").replace(/-/g, "");
+            UI.workspaceInsightMarkdown = markdown;
+            UI.workspaceInsightUpdatedAt = Date.now();
+            UI.setWorkspaceVisualStatus(
+                `工作区洞察报告已保存到 Notion（${exportState.targetType === CONFIG.EXPORT_TARGET_TYPES.PAGE ? "父页面" : "数据库"}）。`,
+                "success"
+            );
+            UI.showStatus("工作区洞察报告已保存到 Notion。", "success");
+            return {
+                pageId,
+                title: reportTitle,
+                targetId: exportState.targetId,
+                targetType: exportState.targetType,
+                markdown,
+            };
+        },
+
+        saveWorkspaceConnectionCandidatesToNotion: async () => {
+            const model = UI.buildWorkspaceVisualizationModel();
+            if (!model?.scannedAt) {
+                throw new Error("请先刷新工作区视图。");
+            }
+            if (!Array.isArray(model.connectionCandidates) || model.connectionCandidates.length === 0) {
+                throw new Error("当前没有可保存的跨源关联候选。");
+            }
+
+            const apiKey = NotionOAuth.getAccessToken(UI.refs?.apiKeyInput?.value.trim());
+            if (!apiKey) {
+                throw new Error(MSG.NO_NOTION_KEY);
+            }
+
+            const exportState = TargetState.getExportState();
+            if (!exportState.targetId) {
+                throw new Error("请先配置导出目标（数据库或父页面）。");
+            }
+
+            const savedAt = Date.now();
+            const createdPages = [];
+            const failedCandidates = [];
+            const aiSettings = AIAssistant.getSettings();
+            let database = null;
+            let titlePropertyName = null;
+
+            if (exportState.targetType === CONFIG.EXPORT_TARGET_TYPES.DATABASE) {
+                database = await NotionAPI.fetchDatabase(exportState.databaseId, apiKey);
+                titlePropertyName = Object.entries(database.properties || {}).find(([_, prop]) => prop?.type === "title")?.[0] || null;
+                if (!titlePropertyName) {
+                    throw new Error("当前目标数据库缺少标题属性，无法保存统一候选。");
+                }
+                database = await UI.ensureWorkspaceConnectionCandidateDatabaseSchema(exportState.databaseId, apiKey, database);
+            }
+
+            for (let index = 0; index < model.connectionCandidates.length; index++) {
+                const candidate = model.connectionCandidates[index];
+                const aiDraft = await UI.buildWorkspaceConnectionCandidateAIDraft(candidate, aiSettings);
+                const candidateTitle = UI.buildWorkspaceConnectionCandidateTitle(candidate, index, aiDraft);
+                const markdown = UI.buildWorkspaceConnectionCandidateMarkdown(candidate, savedAt, aiDraft);
+                const contentBlocks = AIAssistant._textToBlocks(markdown);
+
+                try {
+                    let page = null;
+                    if (exportState.targetType === CONFIG.EXPORT_TARGET_TYPES.PAGE) {
+                        const parentPageId = exportState.parentPageId;
+                        page = await AIAssistant._executeGuardedPageWrite(
+                            "createDatabasePage",
+                            { id: parentPageId, name: candidateTitle },
+                            () => NotionAPI.createChildPage(parentPageId, candidateTitle, contentBlocks, apiKey),
+                            apiKey,
+                            {
+                                itemName: candidateTitle,
+                                pageId: parentPageId,
+                                source: "ui",
+                                surface: "workspace-visualization",
+                            }
+                        );
+                    } else {
+                        const properties = UI.buildWorkspaceConnectionCandidateDatabaseProperties(
+                            database,
+                            titlePropertyName,
+                            candidate,
+                            candidateTitle,
+                            aiDraft
+                        );
+                        page = await AIAssistant._executeGuardedDatabaseWrite(
+                            "createDatabasePage",
+                            exportState.databaseId,
+                            () => NotionAPI.createPageObject({ database_id: exportState.databaseId }, properties, contentBlocks, apiKey),
+                            apiKey,
+                            {
+                                itemName: candidateTitle,
+                                databaseId: exportState.databaseId,
+                                source: "ui",
+                                surface: "workspace-visualization",
+                            }
+                        );
+                    }
+
+                    createdPages.push({
+                        id: Utils.extractNotionId(page?.id) || String(page?.id || "").replace(/-/g, ""),
+                        title: candidateTitle,
+                        markdown,
+                        candidateKey: candidate?.key || "",
+                        aiDraft,
+                    });
+                } catch (error) {
+                    failedCandidates.push({
+                        title: candidateTitle,
+                        error: error?.message || String(error),
+                    });
+                }
+            }
+
+            if (createdPages.length === 0) {
+                throw new Error(failedCandidates[0]?.error || "保存统一候选失败。");
+            }
+
+            const targetLabel = exportState.targetType === CONFIG.EXPORT_TARGET_TYPES.PAGE ? "父页面" : "数据库";
+            const statusMessage = failedCandidates.length > 0
+                ? `统一候选已部分保存到 Notion（${targetLabel}）：成功 ${createdPages.length} 条，失败 ${failedCandidates.length} 条。`
+                : `统一候选已保存到 Notion（${targetLabel}）：共 ${createdPages.length} 条。`;
+            const tone = failedCandidates.length > 0 ? "error" : "success";
+
+            UI.setWorkspaceVisualStatus(statusMessage, tone);
+            UI.showStatus(statusMessage, tone);
+
+            return {
+                createdCount: createdPages.length,
+                failedCount: failedCandidates.length,
+                candidateCount: model.connectionCandidates.length,
+                targetId: exportState.targetId,
+                targetType: exportState.targetType,
+                pageIds: createdPages.map((page) => page.id),
+                pages: createdPages,
+                failures: failedCandidates,
+            };
+        },
+
+        generateWorkspaceInsight: async () => {
+            const model = UI.buildWorkspaceVisualizationModel();
+            if (!model?.scannedAt) {
+                throw new Error("请先刷新工作区视图。");
+            }
+
+            const btn = UI.refs?.viewGenerateWorkspaceInsightBtn;
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = "生成中...";
+            }
+
+            try {
+                let aiSummary = "";
+                const settings = AIAssistant.getSettings();
+                if (settings?.aiApiKey) {
+                    const prompt = [
+                        "你是知识工作区分析师。请基于以下工作区快照输出一段简洁的 Markdown 洞察摘要。",
+                        "要求：",
+                        "1. 只输出 4-6 条 bullet。",
+                        "2. 依次覆盖整体判断、结构缺口、跨源关联机会、下一步动作。",
+                        "3. 不要重复原始数字表格，重点做结论与建议。",
+                        "",
+                        JSON.stringify({
+                            totalPages: model.totalPages,
+                            totalDatabases: model.totalDatabases,
+                            sourceBreakdown: model.sourceBreakdown,
+                            categoryBreakdown: model.categoryBreakdown,
+                            funnel: model.funnel,
+                            duplicateCandidates: model.duplicateCandidates.map((item) => ({
+                                label: item.label,
+                                count: item.count,
+                                sources: item.sources,
+                            })),
+                            connectionCandidates: model.connectionCandidates.map((item) => ({
+                                label: item.label,
+                                count: item.count,
+                                reason: item.reason,
+                            })),
+                            missingSourcePages: model.missingSourcePages,
+                            missingDatePages: model.missingDatePages,
+                            missingCategoryPages: model.missingCategoryPages,
+                        }, null, 2),
+                    ].join("\n");
+                    aiSummary = String(await AIService.requestChat(prompt, settings, 900) || "").trim();
+                }
+
+                UI.workspaceInsightSummary = aiSummary;
+                UI.workspaceInsightMarkdown = UI.buildWorkspaceInsightMarkdown(model, aiSummary);
+                UI.workspaceInsightUpdatedAt = Date.now();
+                UI.renderWorkspaceVisualSummary();
+                UI.setWorkspaceVisualStatus("已生成工作区洞察报告，可直接复制分享。", "success");
+                return UI.workspaceInsightMarkdown;
+            } catch (error) {
+                UI.workspaceInsightSummary = "";
+                UI.workspaceInsightMarkdown = UI.buildWorkspaceInsightMarkdown(model, "");
+                UI.workspaceInsightUpdatedAt = Date.now();
+                UI.renderWorkspaceVisualSummary();
+                UI.setWorkspaceVisualStatus(`洞察生成失败，已回退为规则报告：${error.message}`, "error");
+                throw error;
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = "生成洞察";
+                }
+            }
         },
 
         setWorkspaceVisualStatus: (message, tone = "") => {
@@ -21303,6 +24597,9 @@ ${availableTools}
                     scannedAt: Date.now(),
                     maxPages,
                 };
+                UI.workspaceInsightSummary = "";
+                UI.workspaceInsightMarkdown = UI.buildWorkspaceInsightMarkdown(UI.buildWorkspaceVisualizationModel(UI.workspaceVisualSnapshot), "");
+                UI.workspaceInsightUpdatedAt = Date.now();
                 UI.renderWorkspaceVisualSummary();
 
                 const model = UI.buildWorkspaceVisualizationModel();
@@ -21380,6 +24677,27 @@ ${availableTools}
                 `缺时间 ${model.missingDatePages}`,
                 `未分类 ${model.missingCategoryPages}`,
             ].map((text) => `<span class="ldb-view-pill">${Utils.escapeHtml(text)}</span>`).join("");
+            const duplicateMarkup = model.duplicateCandidates.length > 0
+                ? `<div class="ldb-view-link-graph">${model.duplicateCandidates.map((item) => `
+                    <div class="ldb-view-link-row">
+                        <div class="ldb-view-link-path">${Utils.escapeHtml(item.label)}</div>
+                        <div class="ldb-view-link-count">${item.count} 页 · ${Utils.escapeHtml(item.sources.join(" + ") || "未标记")}</div>
+                    </div>
+                `).join("")}</div>`
+                : `<div class="ldb-view-empty-text">当前还没有识别到明显的同标题重复候选。</div>`;
+            const connectionMarkup = model.connectionCandidates.length > 0
+                ? `<div class="ldb-view-link-graph">${model.connectionCandidates.map((item) => `
+                    <div class="ldb-view-link-row">
+                        <div class="ldb-view-link-path">${Utils.escapeHtml(item.label)}</div>
+                        <div class="ldb-view-link-count">${item.count} 页 · ${Utils.escapeHtml(item.reason)}</div>
+                    </div>
+                `).join("")}</div>`
+                : `<div class="ldb-view-empty-text">当前还没有跨源关联候选，继续补齐来源字段后会更容易发现统一条目。</div>`;
+            const insightSummary = String(UI.workspaceInsightSummary || "").trim();
+            const reportPreview = Utils.escapeHtml(
+                UI.workspaceInsightMarkdown
+                || UI.buildWorkspaceInsightMarkdown(model, insightSummary)
+            );
 
             container.innerHTML = `
                 <div class="ldb-view-grid">
@@ -21405,6 +24723,22 @@ ${availableTools}
                     <div class="ldb-view-card full">
                         <div class="ldb-view-card-title">导出漏斗</div>
                         ${funnelMarkup}
+                    </div>
+                    <div class="ldb-view-card full">
+                        <div class="ldb-view-card-title">重复候选</div>
+                        ${duplicateMarkup}
+                    </div>
+                    <div class="ldb-view-card full">
+                        <div class="ldb-view-card-title">跨源关联候选</div>
+                        ${connectionMarkup}
+                    </div>
+                    <div class="ldb-view-card full">
+                        <div class="ldb-view-card-title">洞察摘要</div>
+                        <div class="ldb-view-empty-text">${ChatUI.safeMarkdown(insightSummary || UI.buildWorkspaceInsightFallbackSummary(model))}</div>
+                    </div>
+                    <div class="ldb-view-card full">
+                        <div class="ldb-view-card-title">Markdown 报告预览</div>
+                        <div class="ldb-view-report-preview">${reportPreview}</div>
                     </div>
                 </div>
             `;
@@ -22776,6 +26110,7 @@ ${availableTools}
                 const apiKey = NotionOAuth.getAccessToken();
                 const exportState = TargetState.getExportState();
                 const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
+                const aiSettings = AIAssistant.getSettings();
 
                 const settings = {
                     apiKey,
@@ -22783,6 +26118,11 @@ ${availableTools}
                     databaseId: exportState.databaseId,
                     parentPageId: exportState.parentPageId,
                     imgMode,
+                    aiApiKey: aiSettings?.aiApiKey || Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, ""),
+                    aiService: aiSettings?.aiService || Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService),
+                    aiModel: aiSettings?.aiModel || Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, ""),
+                    aiBaseUrl: aiSettings?.aiBaseUrl || Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, ""),
+                    categories: aiSettings?.categories || Utils.parseAICategories(Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories)),
                 };
 
                 GenericUI.showStatus("正在导出到 Notion...", "info");
@@ -22876,16 +26216,19 @@ ${availableTools}
                     Utils.runWhenBrowserIdle(() => AutoImporter.init());
                 }
                 Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
+                Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
             } else if (currentSite === SiteDetector.SITES.NOTION) {
                 // Notion 站点：初始化浮动 AI 助手
                 NotionSiteUI.init();
                 Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
+                Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
             } else if (currentSite === SiteDetector.SITES.GITHUB) {
                 // GitHub 站点：使用与 Linux.do 同步的完整面板
                 UI.init();
                 Utils.runWhenBrowserIdle(() => UpdateChecker.init());
                 Utils.runWhenBrowserIdle(() => GitHubAutoImporter.init());
                 Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
+                Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
             } else if (currentSite === SiteDetector.SITES.ZHIHU) {
                 // 知乎站点：使用剪藏模式（GenericUI 内含 Zhihu 检测逻辑）
                 GenericUI.init();

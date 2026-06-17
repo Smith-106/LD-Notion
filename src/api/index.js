@@ -1,7 +1,7 @@
 "use strict";
 
 // 依赖引入
-const { CONFIG, MSG, SUPPORTED_FILE_TYPES, SUPPORTED_IMAGE_TYPES, MULTI_PART_THRESHOLD, getMimeType, getFileCategory, isSupportedFileType } = require("../config");
+const { CONFIG, MSG, SUPPORTED_FILE_TYPES, MULTI_PART_THRESHOLD, getMimeType, getFileCategory, isSupportedFileType } = require("../config");
 const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { NotionOAuth } = require("../auth");
