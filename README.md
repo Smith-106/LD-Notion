@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.6.7`
+- 当前仓库源码版本：`v3.7.1`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -376,6 +376,19 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.7.1
+
+本次版本聚焦「工作区可视化性能收尾 + 发布链路闭环」，重点修复大工作区下可视化模型构建的线性查找与重复遍历问题，并完成 v3.7.0 之后的发布流程收口。
+
+- 优化：工作区可视化模型构建改用 `databasesMap.get` 替换 `databases.find`，将多次 `records.forEach` 合并为单次遍历，降低大工作区下的 CPU 开销
+- 优化：`refreshWorkspaceVisualization` 中 `pageObjects` 单次遍历同时生成 `pages` 与 `records`，减少重复映射
+- 修复：同步更新 `src/ui/index.js` 与根目录 `.user.js` 的工作区可视化实现
+- 交付：补充交付前构建报告、UAT 检查清单、上线检查表与回滚方案
+- 已发布 Release：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.1>
+- 已上传扩展安装包：<https://github.com/Smith-106/LD-Notion/releases/download/v3.7.1/ld-notion-extension-v3.7.1.zip>
+
+- Tag：`v3.7.1`
 
 ### v3.6.7
 
