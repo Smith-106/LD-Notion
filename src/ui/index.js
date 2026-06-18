@@ -6148,11 +6148,11 @@ const UI = {
         parentId: String(page?.parent?.database_id || page?.parent?.page_id || "").replace(/-/g, ""),
     }),
 
-    extractWorkspaceVisualRecord: (page, databases = []) => {
+    extractWorkspaceVisualRecord: (page, databasesMap = new Map()) => {
         const summary = UI.mapWorkspacePageSummary(page);
         const dateInfo = UI.getWorkspaceVisualDate(page);
         const category = UI.getWorkspaceVisualCategory(page);
-        const sourceInfo = UI.inferWorkspaceVisualSource(page, databases);
+        const sourceInfo = UI.inferWorkspaceVisualSource(page, Array.from(databasesMap.values()));
         const sourceUrl = UI.getWorkspaceVisualSourceUrl(page);
         const hasSource = sourceInfo.source && sourceInfo.source !== "未标记";
         const hasDate = !!dateInfo;
@@ -6167,7 +6167,7 @@ const UI = {
             parentType: summary.parent,
             parentDatabaseId: summary.parent === "database_id" ? summary.parentId : "",
             parentPageId: summary.parent === "page_id" ? summary.parentId : "",
-            parentDatabaseTitle: databases.find((db) => db.id === summary.parentId)?.title || "",
+            parentDatabaseTitle: databasesMap.get(summary.parentId)?.title || "",
             source: sourceInfo.source,
             sourceType: sourceInfo.sourceType,
             category,
@@ -6258,6 +6258,7 @@ const UI = {
         const relationshipCounts = new Map();
         const recognizedSources = new Set();
         const duplicateGroups = new Map();
+        const linkGroups = new Map();
         let sourcedPages = 0;
         let datedPages = 0;
         let categorizedPages = 0;
@@ -6321,30 +6322,26 @@ const UI = {
                 if (record?.hasSource) existingDuplicate.sources.add(sourceLabel);
                 duplicateGroups.set(duplicateKey, existingDuplicate);
             }
-        });
 
-        const linkGroups = new Map();
-        records.forEach((record) => {
             const linkKey = UI.normalizeWorkspaceInsightUrl(record?.url);
-            if (!linkKey) return;
-            const sourceLabel = record?.source || "未标记";
-            const parentLabel = UI.getWorkspaceVisualParentLabel(record);
-            const existingGroup = linkGroups.get(linkKey) || {
-                key: linkKey,
-                title: String(record?.title || "").trim() || String(record?.url || "").trim() || "未命名页面",
-                url: String(record?.url || "").trim(),
-                items: [],
-                sources: new Set(),
-            };
-            existingGroup.items.push({
-                id: record?.id || "",
-                title: String(record?.title || "").trim() || "未命名页面",
-                source: sourceLabel,
-                parentLabel,
-                url: record?.url || "",
-            });
-            if (record?.hasSource) existingGroup.sources.add(sourceLabel);
-            linkGroups.set(linkKey, existingGroup);
+            if (linkKey) {
+                const existingGroup = linkGroups.get(linkKey) || {
+                    key: linkKey,
+                    title: String(record?.title || "").trim() || String(record?.url || "").trim() || "未命名页面",
+                    url: String(record?.url || "").trim(),
+                    items: [],
+                    sources: new Set(),
+                };
+                existingGroup.items.push({
+                    id: record?.id || "",
+                    title: String(record?.title || "").trim() || "未命名页面",
+                    source: sourceLabel,
+                    parentLabel,
+                    url: record?.url || "",
+                });
+                if (record?.hasSource) existingGroup.sources.add(sourceLabel);
+                linkGroups.set(linkKey, existingGroup);
+            }
         });
 
         const toBreakdown = (map) => Array.from(map.entries())
@@ -7862,8 +7859,16 @@ const UI = {
                 },
             });
 
-            const pages = pageObjects.map((page) => UI.mapWorkspacePageSummary(page)).filter((item) => item.id);
-            const records = pageObjects.map((page) => UI.extractWorkspaceVisualRecord(page, databases)).filter((item) => item.id);
+            const databasesMap = new Map(databases.map((d) => [d.id, d]));
+            const pages = [];
+            const records = [];
+            pageObjects.forEach((page) => {
+                const summary = UI.mapWorkspacePageSummary(page);
+                if (summary.id) {
+                    pages.push(summary);
+                    records.push(UI.extractWorkspaceVisualRecord(page, databasesMap));
+                }
+            });
             const finalWorkspaceData = WorkspaceService.persistWorkspaceData(apiKey, {
                 databases,
                 pages,
