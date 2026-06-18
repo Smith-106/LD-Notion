@@ -1,5 +1,24 @@
 # 更新日志
 
+## [3.7.1] - 2026-06-18
+
+### 修复
+
+- 性能：优化工作区可视化模型构建，将 `databases.find` 改为 `databasesMap.get`，合并多次 `records.forEach` 为单次遍历，减少大工作区下的 CPU 开销
+- 代码质量：同步更新 `src/ui/index.js` 与根目录 `.user.js` 对应实现
+
+### 变更
+
+- `package.json`、`build.js` 与根目录 `.user.js` 的 `@version` 同步递增到 `3.7.1`
+
+### 验证
+
+- `npm test`：17 个测试文件、349 个用例全部通过
+- `npm run verify:delivery`：构建、扩展、等价性、UI 静态验证全部通过
+- `node --check LinuxDo-Bookmarks-to-Notion.user.js`：语法检查通过
+
+[3.7.1]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.1
+
 ## [3.7.0] - 2026-06-17
 
 ### 新增
