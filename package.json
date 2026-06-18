@@ -1,6 +1,6 @@
 {
   "name": "ld-notion-hub",
-  "version": "3.6.7",
+  "version": "3.7.0",
   "private": true,
   "description": "LD-Notion Hub — AI 多源知识中枢",
   "main": "LinuxDo-Bookmarks-to-Notion.user.js",
