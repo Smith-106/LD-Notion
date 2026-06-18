@@ -88,6 +88,7 @@ function main() {
             Utils.runWhenBrowserIdle(() => UpdateChecker.init());
             const isBookmarkPage = /\/u\/[^/]+\/activity\/bookmarks/.test(window.location.pathname);
             if (!isBookmarkPage) {
+                Utils.runWhenBrowserIdle(() => GenericUI.init());
                 Utils.runWhenBrowserIdle(() => AutoImporter.init());
             }
             Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());

@@ -252,6 +252,37 @@ const GenericExporter = {
                 const contentEl = GenericExtractor.extractContent();
                 blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG.DEFAULTS.imgMode);
             }
+        } else if (SiteDetector.detect() === SiteDetector.SITES.LINUX_DO) {
+            const topicMatch = window.location.pathname.match(/\/t\/([^/]+)/);
+            if (topicMatch) {
+                const topicId = topicMatch[1];
+                const { topic, posts } = await LinuxDoAPI.fetchAllPosts(topicId);
+                const filteredPosts = Exporter.filterPosts(posts, topic, settings);
+                meta = {
+                    title: topic.title || "无标题",
+                    url: topic.url || window.location.href,
+                    source: "Linux.do",
+                    siteName: "Linux.do",
+                    sourceType: "帖子",
+                    author: topic.opUsername || "",
+                    description: topic.title || "",
+                    detail: "",
+                    html: "",
+                    answers: filteredPosts.map((post) => ({
+                        author: post.name || post.username || "匿名",
+                        username: post.username || "",
+                        html: post.cooked || "",
+                        voteCount: post.like_count || 0,
+                        postNumber: post.post_number || 0,
+                        createdAt: post.created_at || "",
+                    })),
+                };
+                blocks = Exporter.buildContentBlocks(filteredPosts, topic, settings);
+            } else {
+                meta = GenericExtractor.extractMeta();
+                const contentEl = GenericExtractor.extractContent();
+                blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG.DEFAULTS.imgMode);
+            }
         } else {
             meta = GenericExtractor.extractMeta();
             const contentEl = GenericExtractor.extractContent();
@@ -374,6 +405,25 @@ const GenericExporter = {
 };
 
 const LinuxDoAPI = {
+    _getUsername: () => {
+        const path = window.location.pathname;
+        const match = path.match(/\/u\/([^/]+)/);
+        if (match) return match[1];
+        const meta = document.querySelector('meta[name="discourse-username"]');
+        if (meta?.content) return meta.content;
+        const userMenu = document.querySelector('.user-menu .username, .user-menu .d-label');
+        if (userMenu) {
+            const text = userMenu.textContent?.trim();
+            if (text) return text;
+        }
+        const avatar = document.querySelector('img.avatar');
+        if (avatar) {
+            const alt = avatar.getAttribute('alt');
+            if (alt) return alt;
+        }
+        return '';
+    },
+
     getRequestOpts: () => {
         const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
         const headers = { "x-requested-with": "XMLHttpRequest" };
