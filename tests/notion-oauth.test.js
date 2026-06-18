@@ -49,7 +49,9 @@ function createElementStub() {
         dispatchEvent: () => {},
         focus: () => {},
         blur: () => {},
+        select: () => {},
         click: () => {},
+        remove: () => {},
         classList: { add: () => {}, remove: () => {}, contains: () => false, toggle: () => {} },
         offsetHeight: 0,
         getBoundingClientRect: () => ({ top: 0, left: 0, width: 0, height: 0 })
@@ -168,6 +170,7 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
             querySelectorAll: (selector) => selectorAllMap.get(selector) || [],
             body: { appendChild: () => {} },
             head: { appendChild: () => {} },
+            execCommand: () => true,
             location: locationObject
         },
         Node: {
@@ -229,7 +232,7 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
 
     const scriptRunner = new Function(
         ...Object.keys(sandbox),
-        `${coreCode}\nreturn { AIClassifier, AIService, AutoImporter, BookmarkAutoImporter, BookmarkExporter, CONFIG, AIAssistant, ChatState, ChatUI, ConfirmationDialog, CredentialVault, DesignSystem, Exporter, GenericExporter, GenericUI, GitHubAPI, GitHubAutoImporter, LinuxDoAPI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, OperationLog, SiteDetector, Storage, SyncState, TargetState, UI, UICommandService, UndoManager, UpdateChecker, WorkspaceService, main };`
+        `${coreCode}\nreturn { AIClassifier, AIService, AutoImporter, BookmarkAutoImporter, BookmarkExporter, CONFIG, AIAssistant, ChatState, ChatUI, ConfirmationDialog, CredentialVault, DesignSystem, Exporter, GenericExporter, GenericUI, GitHubAPI, GitHubAutoImporter, LinuxDoAPI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, OperationLog, RSSAutoImporter, SiteDetector, Storage, SyncState, TargetState, UI, UICommandService, UndoManager, UpdateChecker, WorkspaceService, main };`
     );
 
     const exports = scriptRunner(...Object.values(sandbox));
@@ -257,6 +260,9 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
         registerSelectorAll: (selector, elements) => {
             selectorAllMap.set(selector, elements);
         },
+        window: sandbox.window,
+        navigator: sandbox.navigator,
+        document: sandbox.document,
         setRequestHandler: (handler) => {
             requestHandler = handler;
         },
@@ -412,6 +418,7 @@ function createWorkspaceVisualizationFixture(harness) {
             parent: { type: 'database_id', database_id: 'db_github' },
             properties: {
                 Name: { type: 'title', title: [{ plain_text: 'Repo A' }] },
+                链接: { type: 'url', url: 'https://example.com/repo-a' },
                 来源: { type: 'rich_text', rich_text: [{ plain_text: 'GitHub' }] },
                 来源类型: { type: 'rich_text', rich_text: [{ plain_text: 'Repos' }] },
                 更新时间: { type: 'date', date: { start: '2026-06-02T12:00:00Z' } },
@@ -422,10 +429,24 @@ function createWorkspaceVisualizationFixture(harness) {
             id: 'page-bookmark',
             parent: { type: 'database_id', database_id: 'db_misc' },
             properties: {
-                标题: { type: 'title', title: [{ plain_text: 'Bookmark A' }] },
+                标题: { type: 'title', title: [{ plain_text: 'Repo A' }] },
+                链接: { type: 'url', url: 'https://example.com/repo-a' },
                 书签路径: { type: 'rich_text', rich_text: [{ plain_text: 'Toolbar/Read' }] },
                 收藏时间: { type: 'date', date: { start: '2026-06-01T09:00:00Z' } },
                 分类: { type: 'rich_text', rich_text: [{ plain_text: '资料' }] }
+            }
+        },
+        {
+            id: 'page-rss',
+            parent: { type: 'database_id', database_id: 'db_misc' },
+            properties: {
+                标题: { type: 'title', title: [{ plain_text: 'Repo A' }] },
+                链接: { type: 'url', url: 'https://example.com/repo-a' },
+                来源: { type: 'rich_text', rich_text: [{ plain_text: 'RSS' }] },
+                来源类型: { type: 'rich_text', rich_text: [{ plain_text: 'Feed' }] },
+                收藏时间: { type: 'date', date: { start: '2026-06-01T12:00:00Z' } },
+                分类: { type: 'rich_text', rich_text: [{ plain_text: '资讯' }] },
+                标签: { type: 'multi_select', multi_select: [{ name: 'Example Feed' }, { name: 'AI' }] }
             }
         },
         {
@@ -433,8 +454,26 @@ function createWorkspaceVisualizationFixture(harness) {
             parent: { type: 'workspace' },
             properties: {
                 标题: { type: 'title', title: [{ plain_text: 'Article A' }] },
+                来源: { type: 'rich_text', rich_text: [{ plain_text: '通用页面' }] },
+                来源类型: { type: 'rich_text', rich_text: [{ plain_text: '网页' }] },
                 发布日期: { type: 'date', date: { start: '2026-05-31T08:00:00Z' } },
-                摘要: { type: 'rich_text', rich_text: [{ plain_text: 'Long read' }] }
+                摘要: { type: 'rich_text', rich_text: [{ plain_text: 'Long read' }] },
+                分类: { type: 'rich_text', rich_text: [{ plain_text: '资源' }] }
+            }
+        },
+        {
+            id: 'page-zhihu',
+            parent: { type: 'database_id', database_id: 'db_misc' },
+            properties: {
+                标题: { type: 'title', title: [{ plain_text: 'Zhihu AI Answer' }] },
+                链接: { type: 'url', url: 'https://www.zhihu.com/question/1/answer/2' },
+                来源: { type: 'rich_text', rich_text: [{ plain_text: '知乎' }] },
+                来源类型: { type: 'rich_text', rich_text: [{ plain_text: '回答' }] },
+                作者: { type: 'rich_text', rich_text: [{ plain_text: 'Alice' }] },
+                发布日期: { type: 'date', date: { start: '2026-05-30T08:00:00Z' } },
+                分类: { type: 'rich_text', rich_text: [{ plain_text: '问答' }] },
+                标签: { type: 'multi_select', multi_select: [{ name: '知乎' }, { name: '回答' }] },
+                摘要: { type: 'rich_text', rich_text: [{ plain_text: '关于 AI 的回答' }] }
             }
         },
         {
@@ -3157,6 +3196,93 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(saveSettingsBtn.onclick.toString().includes('save_command_boundary_settings'));
     });
 
+    await runTest('GenericExporter.buildProperties: writes source type, category and tags for zhihu and generic pages', async () => {
+        const harness = createHarness();
+
+        const zhihuProps = harness.GenericExporter.buildProperties({
+            title: 'Zhihu AI Answer',
+            url: 'https://www.zhihu.com/question/1/answer/2',
+            source: '知乎',
+            sourceType: '回答',
+            siteName: '知乎',
+            author: 'Alice',
+            publishDate: '2026-05-30',
+            description: '关于 AI 的回答',
+            inferredCategory: '问答',
+            inferredTags: ['知乎', '回答', 'www.zhihu.com']
+        });
+        const genericProps = harness.GenericExporter.buildProperties({
+            title: 'Article A',
+            url: 'https://example.com/article',
+            siteName: 'example.com',
+            sourceType: '网页',
+            author: 'Bob',
+            publishDate: '2026-05-31',
+            description: 'Long read',
+            inferredCategory: '资源',
+            inferredTags: ['example.com', '网页']
+        });
+
+        assert.strictEqual(zhihuProps['来源'].rich_text[0].text.content, '知乎');
+        assert.strictEqual(zhihuProps['来源类型'].rich_text[0].text.content, '回答');
+        assert.strictEqual(zhihuProps['分类'].rich_text[0].text.content, '问答');
+        assert.deepStrictEqual(zhihuProps['标签'].multi_select.map((item) => item.name), ['知乎', '回答', 'www.zhihu.com']);
+
+        assert.strictEqual(genericProps['来源'].rich_text[0].text.content, '通用页面');
+        assert.strictEqual(genericProps['来源类型'].rich_text[0].text.content, '网页');
+        assert.strictEqual(genericProps['分类'].rich_text[0].text.content, '资源');
+        assert.deepStrictEqual(genericProps['标签'].multi_select.map((item) => item.name), ['example.com', '网页']);
+    });
+
+    await runTest('GenericUI.doExport: forwards AI settings into generic export pipeline', async () => {
+        const harness = createHarness();
+        const exportBtn = Object.assign(createElementStub(), { textContent: '导出当前页面' });
+        const floatBtn = createElementStub();
+        const statuses = [];
+        let capturedSettings = null;
+
+        harness.GenericUI.panel = createPanelStub({
+            '#gclip-export': exportBtn
+        });
+        harness.GenericUI.floatBtn = floatBtn;
+        harness.GenericUI.showStatus = (message, type) => {
+            statuses.push({ message, type });
+        };
+        harness.NotionOAuth.getAccessToken = () => 'manual_api_key';
+        harness.TargetState.saveExportState({
+            targetType: harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE,
+            databaseId: 'db_generic',
+            parentPageId: ''
+        });
+        harness.AIAssistant.getSettings = () => ({
+            aiApiKey: 'sk-test',
+            aiService: 'openai',
+            aiModel: 'gpt-4o-mini',
+            aiBaseUrl: 'https://example.ai',
+            categories: ['技术', '资源', '问答']
+        });
+        harness.GenericExporter.exportCurrentPage = async (settings) => {
+            capturedSettings = settings;
+            return {
+                page: { id: 'page1' },
+                meta: { title: 'Article A' }
+            };
+        };
+
+        await harness.GenericUI.doExport();
+
+        assert.strictEqual(capturedSettings.apiKey, 'manual_api_key');
+        assert.strictEqual(capturedSettings.databaseId, 'db_generic');
+        assert.strictEqual(capturedSettings.aiApiKey, 'sk-test');
+        assert.strictEqual(capturedSettings.aiService, 'openai');
+        assert.strictEqual(capturedSettings.aiModel, 'gpt-4o-mini');
+        assert.strictEqual(capturedSettings.aiBaseUrl, 'https://example.ai');
+        assert.deepStrictEqual(capturedSettings.categories, ['技术', '资源', '问答']);
+        assert.strictEqual(exportBtn.textContent, '导出当前页面');
+        assert.strictEqual(exportBtn.disabled, false);
+        assert.strictEqual(statuses.at(-1).type, 'success');
+    });
+
     await runTest('UI.bindEvents: workspace picker selecting a database switches exporter back from page mode', async () => {
         const harness = createHarness();
         const oldDb = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -3636,32 +3762,43 @@ function createWorkspaceVisualizationFixture(harness) {
         const sourceBreakdownMap = Object.fromEntries(model.sourceBreakdown.map((item) => [item.label, item]));
         const relationshipMap = Object.fromEntries(model.relationships.map((item) => [item.label, item.count]));
 
-        assert.strictEqual(model.totalPages, 5);
+        assert.strictEqual(model.totalPages, 7);
         assert.strictEqual(model.totalDatabases, 3);
-        assert.strictEqual(model.sourcedPages, 4);
-        assert.strictEqual(model.datedPages, 4);
-        assert.strictEqual(model.categorizedPages, 3);
-        assert.strictEqual(model.structuredPages, 3);
+        assert.strictEqual(model.sourcedPages, 6);
+        assert.strictEqual(model.datedPages, 6);
+        assert.strictEqual(model.categorizedPages, 6);
+        assert.strictEqual(model.structuredPages, 6);
         assert.strictEqual(model.missingSourcePages, 1);
         assert.strictEqual(model.missingDatePages, 1);
-        assert.strictEqual(model.missingCategoryPages, 2);
-        assert.deepStrictEqual(model.funnel.map((item) => item.count), [5, 4, 4, 3, 3]);
+        assert.strictEqual(model.missingCategoryPages, 1);
+        assert.deepStrictEqual(model.funnel.map((item) => item.count), [7, 6, 6, 6, 6]);
         assert.deepStrictEqual(model.timeline, [
             { key: '2026-06-03', label: '06/03', count: 1 },
             { key: '2026-06-02', label: '06/02', count: 1 },
-            { key: '2026-06-01', label: '06/01', count: 1 },
-            { key: '2026-05-31', label: '05/31', count: 1 }
+            { key: '2026-06-01', label: '06/01', count: 2 },
+            { key: '2026-05-31', label: '05/31', count: 1 },
+            { key: '2026-05-30', label: '05/30', count: 1 }
         ]);
         assert.strictEqual(sourceBreakdownMap['Linux.do'].count, 1);
         assert.strictEqual(sourceBreakdownMap['GitHub'].count, 1);
         assert.strictEqual(sourceBreakdownMap['浏览器书签'].count, 1);
+        assert.strictEqual(sourceBreakdownMap['RSS'].count, 1);
         assert.strictEqual(sourceBreakdownMap['通用页面'].count, 1);
+        assert.strictEqual(sourceBreakdownMap['知乎'].count, 1);
         assert.strictEqual(sourceBreakdownMap['未标记'].count, 1);
         assert.strictEqual(relationshipMap['Linux 收藏 → Linux.do'], 1);
         assert.strictEqual(relationshipMap['GitHub 收藏 → GitHub'], 1);
         assert.strictEqual(relationshipMap['Inbox → 浏览器书签'], 1);
+        assert.strictEqual(relationshipMap['Inbox → RSS'], 1);
+        assert.strictEqual(relationshipMap['Inbox → 知乎'], 1);
         assert.strictEqual(relationshipMap['Inbox → 未标记'], 1);
         assert.strictEqual(relationshipMap['工作区页面 → 通用页面'], 1);
+        assert.strictEqual(model.duplicateCandidates.length, 1);
+        assert.strictEqual(model.duplicateCandidates[0].label, 'Repo A');
+        assert.deepStrictEqual([...model.duplicateCandidates[0].sources].sort(), ['GitHub', 'RSS', '浏览器书签'].sort());
+        assert.strictEqual(model.connectionCandidates.length, 2);
+        assert.ok(model.connectionCandidates.some((item) => item.reason === '同标题跨源候选' && item.label.includes('Repo A')));
+        assert.ok(model.connectionCandidates.some((item) => item.reason === '同链接跨源候选' && item.label.includes('Repo A')));
     });
 
     await runTest('UI.renderWorkspaceVisualSummary: renders workspace timeline, relationship graph and funnel cards', async () => {
@@ -3690,8 +3827,15 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(summaryContainer.innerHTML.includes('导出漏斗'), summaryContainer.innerHTML);
         assert.ok(summaryContainer.innerHTML.includes('Linux 收藏 → Linux.do'), summaryContainer.innerHTML);
         assert.ok(summaryContainer.innerHTML.includes('Inbox → 浏览器书签'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('Inbox → RSS'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('Inbox → 知乎'), summaryContainer.innerHTML);
         assert.ok(summaryContainer.innerHTML.includes('识别来源'), summaryContainer.innerHTML);
         assert.ok(summaryContainer.innerHTML.includes('未标记 1'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('重复候选'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('跨源关联候选'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('Markdown 报告预览'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('同链接跨源候选'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('Repo A'), summaryContainer.innerHTML);
         assert.ok(!summaryContainer.innerHTML.includes('[object Object]'), summaryContainer.innerHTML);
     });
 
@@ -3762,12 +3906,12 @@ function createWorkspaceVisualizationFixture(harness) {
 
         const model = await harness.UI.refreshWorkspaceVisualization('manual_api_key');
 
-        assert.strictEqual(model.totalPages, 5);
+        assert.strictEqual(model.totalPages, 7);
         assert.strictEqual(model.totalDatabases, 3);
         assert.strictEqual(workspaceUpdates.length, 2);
         assert.strictEqual(aiDbUpdates.length, 2);
         assert.strictEqual(aiDbUpdates[0][0].id, 'db_linux');
-        assert.strictEqual(workspaceUpdates[1].pages.length, 5);
+        assert.strictEqual(workspaceUpdates[1].pages.length, 7);
         assert.strictEqual(persistedPayloads.length, 1);
         assert.strictEqual(persistedPayloads[0].payload.pages[0].id, pages[0].id.replace(/-/g, ''));
         assert.strictEqual(harness.UI.workspaceVisualSnapshot.records.length, records.length);
@@ -3775,9 +3919,871 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(refreshBtn.disabled, false);
         assert.strictEqual(refreshBtn.textContent, '刷新工作区视图');
         assert.strictEqual(statusEl.dataset.tone, 'success');
-        assert.ok(statusEl.textContent.includes('已扫描 5 个页面，覆盖 3 个数据库。'), statusEl.textContent);
+        assert.ok(statusEl.textContent.includes('已扫描 7 个页面，覆盖 3 个数据库。'), statusEl.textContent);
         assert.ok(summaryContainer.innerHTML.includes('导出漏斗'), summaryContainer.innerHTML);
         assert.ok(summaryContainer.innerHTML.includes('Linux 收藏 → Linux.do'), summaryContainer.innerHTML);
+        assert.ok(String(harness.UI.workspaceInsightMarkdown).includes('# 工作区洞察报告'));
+        assert.ok(String(harness.UI.workspaceInsightMarkdown).includes('## 跨源关联候选'));
+    });
+
+    await runTest('UI.buildWorkspaceInsightMarkdown: includes duplicates, connections and fallback summary', async () => {
+        const harness = createHarness();
+        const { databases, records } = createWorkspaceVisualizationFixture(harness);
+        const model = harness.UI.buildWorkspaceVisualizationModel({
+            databases,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        });
+
+        const markdown = harness.UI.buildWorkspaceInsightMarkdown(model, '');
+
+        assert.ok(markdown.includes('# 工作区洞察报告'), markdown);
+        assert.ok(markdown.includes('## 重复候选'), markdown);
+        assert.ok(markdown.includes('## 跨源关联候选'), markdown);
+        assert.ok(markdown.includes('Repo A：3 页，来源 '), markdown);
+        assert.ok(markdown.includes('GitHub'), markdown);
+        assert.ok(markdown.includes('RSS'), markdown);
+        assert.ok(markdown.includes('浏览器书签'), markdown);
+        assert.ok(markdown.includes('同链接跨源候选'), markdown);
+        assert.ok(markdown.includes('未标记来源：1'), markdown);
+    });
+
+    await runTest('UI.copyWorkspaceInsightReport: copies generated markdown to clipboard', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const writes = [];
+        const statusMessages = [];
+
+        harness.navigator.clipboard = {
+            writeText: async (text) => {
+                writes.push(text);
+            }
+        };
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+        harness.UI.workspaceInsightMarkdown = harness.UI.buildWorkspaceInsightMarkdown(
+            harness.UI.buildWorkspaceVisualizationModel(harness.UI.workspaceVisualSnapshot),
+            ''
+        );
+
+        await harness.UI.copyWorkspaceInsightReport();
+
+        assert.strictEqual(writes.length, 1);
+        assert.ok(writes[0].includes('# 工作区洞察报告'), writes[0]);
+        assert.strictEqual(statusMessages[0].type, 'success');
+    });
+
+    await runTest('UI.downloadWorkspaceInsightReport: downloads generated markdown report', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const statusMessages = [];
+        const createdUrls = [];
+        const revokedUrls = [];
+        const clickedLinks = [];
+
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+        harness.UI.workspaceInsightMarkdown = harness.UI.buildWorkspaceInsightMarkdown(
+            harness.UI.buildWorkspaceVisualizationModel(harness.UI.workspaceVisualSnapshot),
+            ''
+        );
+        harness.window.URL = {
+            createObjectURL: (blob) => {
+                createdUrls.push(blob);
+                return 'blob:test-report';
+            },
+            revokeObjectURL: (url) => {
+                revokedUrls.push(url);
+            }
+        };
+        harness.document.createElement = (tag) => {
+            const element = createElementStub();
+            if (tag === 'a') {
+                element.click = () => {
+                    clickedLinks.push({
+                        href: element.href,
+                        download: element.download
+                    });
+                };
+            }
+            return element;
+        };
+
+        const result = await harness.UI.downloadWorkspaceInsightReport();
+        await harness.flush();
+
+        assert.strictEqual(createdUrls.length, 1);
+        assert.strictEqual(clickedLinks.length, 1);
+        assert.strictEqual(clickedLinks[0].href, 'blob:test-report');
+        assert.ok(clickedLinks[0].download.startsWith('ld-notion-workspace-insight-'), clickedLinks[0].download);
+        assert.ok(clickedLinks[0].download.endsWith('.md'), clickedLinks[0].download);
+        assert.deepStrictEqual(revokedUrls, ['blob:test-report']);
+        assert.ok(result.filename.endsWith('.md'), result.filename);
+        assert.ok(result.markdown.includes('# 工作区洞察报告'), result.markdown);
+        assert.strictEqual(statusMessages[0].type, 'success');
+    });
+
+    await runTest('UI.buildWorkspaceCollaborationPackage: includes insight, connection candidates and sync summary', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL] = 5;
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL] = 10;
+        harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL] = 30;
+        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL] = 15;
+        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_FEED_URLS] = 'https://example.com/feed.xml';
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
+
+        harness.SyncState.updateLinuxDoState({
+            lastSuccessAt: 100,
+            lastAttemptAt: 90,
+            lastOutcome: 'success',
+            lastStats: { scanned: 4, pending: 1, success: 1, failed: 0 }
+        });
+        harness.SyncState.updateGitHubMeta({
+            lastSuccessAt: 200,
+            lastAttemptAt: 190,
+            lastOutcome: 'partial',
+            lastStats: { enabledTypes: 2, exported: 1, failed: 1, syncErrors: 0 }
+        });
+        harness.SyncState.updateGitHubState('stars', {
+            watermark: { time: '2026-06-02T09:00:00Z', ids: ['smith/repo-a'] },
+            lastSuccessAt: 200,
+            lastAttemptAt: 190,
+            lastOutcome: 'partial',
+            lastStats: { scanned: 2, pending: 2, exported: 1, failed: 1 }
+        });
+        harness.SyncState.updateGitHubState('gists', {
+            watermark: { time: '2026-06-01T09:00:00Z', ids: ['gist-1'] },
+            lastSuccessAt: 180,
+            lastAttemptAt: 170,
+            lastOutcome: 'success',
+            lastStats: { scanned: 0, pending: 0, exported: 0, failed: 0 }
+        });
+        harness.SyncState.updateBookmarkState({
+            lastSuccessAt: 300,
+            lastAttemptAt: 290,
+            lastOutcome: 'error',
+            lastError: 'bridge lost',
+            lastStats: { created: 1, updated: 1, archived: 0, unchanged: 0, failed: 1 },
+            snapshot: { 'bm-1': { pageId: 'page-1' } }
+        });
+        harness.SyncState.updateRssState({
+            lastSuccessAt: 250,
+            lastAttemptAt: 240,
+            lastOutcome: 'success',
+            lastStats: { feeds: 1, scanned: 3, created: 1, updated: 1, unchanged: 1, failed: 0 },
+            snapshot: { 'item-1': { pageId: 'page-rss-1' } }
+        });
+
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+        const model = harness.UI.buildWorkspaceVisualizationModel(harness.UI.workspaceVisualSnapshot);
+        harness.UI.workspaceInsightSummary = 'AI 判断：Repo A 适合先合并为统一条目。';
+        harness.UI.workspaceInsightMarkdown = harness.UI.buildWorkspaceInsightMarkdown(model, harness.UI.workspaceInsightSummary);
+        harness.UI.workspaceInsightUpdatedAt = Date.UTC(2026, 5, 10, 12, 0, 0);
+
+        const collabPackage = harness.UI.buildWorkspaceCollaborationPackage();
+
+        assert.strictEqual(collabPackage.packageType, 'ld-notion-workspace-collaboration');
+        assert.strictEqual(collabPackage.packageVersion, 1);
+        assert.strictEqual(collabPackage.workspace.totalPages, 7);
+        assert.strictEqual(collabPackage.workspace.connectionCandidates.length, 2);
+        assert.strictEqual(collabPackage.workspace.duplicateCandidates[0].label, 'Repo A');
+        assert.ok(collabPackage.insight.summary.includes('Repo A'), collabPackage.insight.summary);
+        assert.ok(collabPackage.insight.markdown.includes('# 工作区洞察报告'), collabPackage.insight.markdown);
+        assert.strictEqual(collabPackage.syncCenter.enabledCount, 4);
+        assert.strictEqual(collabPackage.syncCenter.issueCount, 2);
+        assert.ok(collabPackage.syncCenter.sourceRows.some((row) => row.key === 'rss'));
+    });
+
+    await runTest('UI.downloadWorkspaceCollaborationPackage: downloads structured collaboration package', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const statusMessages = [];
+        const createdUrls = [];
+        const revokedUrls = [];
+        const clickedLinks = [];
+
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+        const model = harness.UI.buildWorkspaceVisualizationModel(harness.UI.workspaceVisualSnapshot);
+        harness.UI.workspaceInsightSummary = 'AI 判断：Repo A 适合先合并为统一条目。';
+        harness.UI.workspaceInsightMarkdown = harness.UI.buildWorkspaceInsightMarkdown(model, harness.UI.workspaceInsightSummary);
+        harness.UI.workspaceInsightUpdatedAt = Date.UTC(2026, 5, 10, 12, 0, 0);
+        harness.window.URL = {
+            createObjectURL: (blob) => {
+                createdUrls.push(blob);
+                return 'blob:test-collab-package';
+            },
+            revokeObjectURL: (url) => {
+                revokedUrls.push(url);
+            }
+        };
+        harness.document.createElement = (tag) => {
+            const element = createElementStub();
+            if (tag === 'a') {
+                element.click = () => {
+                    clickedLinks.push({
+                        href: element.href,
+                        download: element.download
+                    });
+                };
+            }
+            return element;
+        };
+
+        const result = await harness.UI.downloadWorkspaceCollaborationPackage();
+        await harness.flush();
+
+        assert.strictEqual(createdUrls.length, 1);
+        assert.strictEqual(clickedLinks.length, 1);
+        assert.strictEqual(clickedLinks[0].href, 'blob:test-collab-package');
+        assert.ok(clickedLinks[0].download.startsWith('ld-notion-workspace-collaboration-'), clickedLinks[0].download);
+        assert.ok(clickedLinks[0].download.endsWith('.json'), clickedLinks[0].download);
+        assert.deepStrictEqual(revokedUrls, ['blob:test-collab-package']);
+        assert.ok(result.filename.endsWith('.json'), result.filename);
+        assert.ok(result.payload.includes('"packageType": "ld-notion-workspace-collaboration"'), result.payload);
+        assert.ok(result.payload.includes('"connectionCandidates"'), result.payload);
+        assert.ok(result.payload.includes('"syncCenter"'), result.payload);
+        assert.strictEqual(result.collabPackage.workspace.totalPages, 7);
+        assert.strictEqual(statusMessages[0].type, 'success');
+    });
+
+    await runTest('UI.saveWorkspaceCollaborationPackageToNotion: saves collaboration package into database target', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const statusMessages = [];
+        const calls = [];
+        const databaseId = '99999999999999999999999999999999';
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
+        harness.TargetState.saveExportState({
+            targetType: harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE,
+            databaseId,
+            parentPageId: ''
+        });
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.UI.refs = {
+            viewWorkspaceStatus: createElementStub()
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+        const model = harness.UI.buildWorkspaceVisualizationModel(harness.UI.workspaceVisualSnapshot);
+        harness.UI.workspaceInsightSummary = 'AI 判断：Repo A 适合先合并为统一条目。';
+        harness.UI.workspaceInsightMarkdown = harness.UI.buildWorkspaceInsightMarkdown(model, harness.UI.workspaceInsightSummary);
+        harness.UI.workspaceInsightUpdatedAt = Date.UTC(2026, 5, 10, 12, 0, 0);
+        harness.NotionAPI.fetchDatabase = async (capturedId, apiKey) => {
+            calls.push(['fetchDatabase', capturedId, apiKey]);
+            return {
+                properties: {
+                    Name: { type: 'title' }
+                }
+            };
+        };
+        harness.NotionAPI.createPageObject = async (parent, properties, children, apiKey) => {
+            calls.push([
+                'createPageObject',
+                parent.database_id,
+                Object.keys(properties)[0],
+                properties.Name.title[0].text.content,
+                children.length,
+                apiKey,
+                JSON.stringify(children)
+            ]);
+            return { id: '33333333333333333333333333333333' };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.databaseId, context.itemName]);
+            return executor();
+        };
+
+        const result = await harness.UI.saveWorkspaceCollaborationPackageToNotion();
+
+        assert.deepStrictEqual(calls[0], ['fetchDatabase', databaseId, 'manual_api_key']);
+        assert.deepStrictEqual(calls[1].slice(0, 3), ['guard', 'createDatabasePage', databaseId]);
+        assert.deepStrictEqual(calls[2].slice(0, 3), ['createPageObject', databaseId, 'Name']);
+        assert.ok(calls[2][3].startsWith('工作区协作包 '), calls[2][3]);
+        assert.ok(calls[2][4] > 0, calls[2][4]);
+        assert.strictEqual(calls[2][5], 'manual_api_key');
+        assert.ok(calls[2][6].includes('工作区协作包'), calls[2][6]);
+        assert.ok(calls[2][6].includes('结构化协作包 JSON'), calls[2][6]);
+        assert.ok(calls[2][6].includes('Repo A'), calls[2][6]);
+        assert.strictEqual(result.pageId, '33333333333333333333333333333333');
+        assert.strictEqual(result.targetType, harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE);
+        assert.strictEqual(result.targetId, databaseId);
+        assert.ok(result.markdown.includes('# 工作区协作包'), result.markdown);
+        assert.strictEqual(result.collabPackage.packageType, 'ld-notion-workspace-collaboration');
+        assert.strictEqual(statusMessages[0].type, 'success');
+        assert.ok(harness.UI.refs.viewWorkspaceStatus.textContent.includes('协作包已保存到 Notion'), harness.UI.refs.viewWorkspaceStatus.textContent);
+    });
+
+    await runTest('UI.saveWorkspaceCollaborationPackageToNotion: saves collaboration package into parent page target', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const statusMessages = [];
+        const calls = [];
+        const parentPageId = '88888888888888888888888888888888';
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
+        harness.TargetState.saveExportState({
+            targetType: harness.CONFIG.EXPORT_TARGET_TYPES.PAGE,
+            databaseId: '',
+            parentPageId
+        });
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.UI.refs = {
+            viewWorkspaceStatus: createElementStub()
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+        const model = harness.UI.buildWorkspaceVisualizationModel(harness.UI.workspaceVisualSnapshot);
+        harness.UI.workspaceInsightSummary = 'AI 判断：Repo A 适合先合并为统一条目。';
+        harness.UI.workspaceInsightMarkdown = harness.UI.buildWorkspaceInsightMarkdown(model, harness.UI.workspaceInsightSummary);
+        harness.UI.workspaceInsightUpdatedAt = Date.UTC(2026, 5, 10, 12, 0, 0);
+        harness.NotionAPI.createChildPage = async (capturedParentPageId, title, children, apiKey) => {
+            calls.push(['createChildPage', capturedParentPageId, title, children.length, apiKey, JSON.stringify(children)]);
+            return { id: '44444444444444444444444444444444' };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.pageId, context.itemName]);
+            return executor();
+        };
+
+        const result = await harness.UI.saveWorkspaceCollaborationPackageToNotion();
+
+        assert.deepStrictEqual(calls[0].slice(0, 3), ['guard', 'createDatabasePage', parentPageId]);
+        assert.deepStrictEqual(calls[1].slice(0, 2), ['createChildPage', parentPageId]);
+        assert.ok(calls[1][2].startsWith('工作区协作包 '), calls[1][2]);
+        assert.ok(calls[1][3] > 0, calls[1][3]);
+        assert.strictEqual(calls[1][4], 'manual_api_key');
+        assert.ok(calls[1][5].includes('结构化协作包 JSON'), calls[1][5]);
+        assert.strictEqual(result.pageId, '44444444444444444444444444444444');
+        assert.strictEqual(result.targetType, harness.CONFIG.EXPORT_TARGET_TYPES.PAGE);
+        assert.strictEqual(result.targetId, parentPageId);
+        assert.strictEqual(statusMessages[0].type, 'success');
+        assert.ok(harness.UI.refs.viewWorkspaceStatus.textContent.includes('协作包已保存到 Notion'), harness.UI.refs.viewWorkspaceStatus.textContent);
+    });
+
+    await runTest('UI.saveWorkspaceInsightReportToNotion: saves report into database target', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const statusMessages = [];
+        const calls = [];
+        const databaseId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
+        harness.TargetState.saveExportState({
+            targetType: harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE,
+            databaseId,
+            parentPageId: ''
+        });
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.UI.refs = {
+            viewWorkspaceStatus: createElementStub()
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+        harness.UI.workspaceInsightMarkdown = harness.UI.buildWorkspaceInsightMarkdown(
+            harness.UI.buildWorkspaceVisualizationModel(harness.UI.workspaceVisualSnapshot),
+            ''
+        );
+        harness.NotionAPI.fetchDatabase = async (capturedId, apiKey) => {
+            calls.push(['fetchDatabase', capturedId, apiKey]);
+            return {
+                properties: {
+                    Name: { type: 'title' }
+                }
+            };
+        };
+        harness.NotionAPI.createPageObject = async (parent, properties, children, apiKey) => {
+            calls.push([
+                'createPageObject',
+                parent.database_id,
+                Object.keys(properties)[0],
+                properties.Name.title[0].text.content,
+                children.length,
+                apiKey
+            ]);
+            return { id: '11111111111111111111111111111111' };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.databaseId, context.itemName]);
+            return executor();
+        };
+
+        const result = await harness.UI.saveWorkspaceInsightReportToNotion();
+
+        assert.deepStrictEqual(calls[0], ['fetchDatabase', databaseId, 'manual_api_key']);
+        assert.deepStrictEqual(calls[1].slice(0, 3), ['guard', 'createDatabasePage', databaseId]);
+        assert.deepStrictEqual(calls[2].slice(0, 3), ['createPageObject', databaseId, 'Name']);
+        assert.ok(calls[2][3].startsWith('工作区洞察报告 '), calls[2][3]);
+        assert.ok(calls[2][4] > 0, calls[2][4]);
+        assert.strictEqual(calls[2][5], 'manual_api_key');
+        assert.strictEqual(result.pageId, '11111111111111111111111111111111');
+        assert.strictEqual(result.targetType, harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE);
+        assert.strictEqual(result.targetId, databaseId);
+        assert.ok(result.markdown.includes('# 工作区洞察报告'), result.markdown);
+        assert.strictEqual(statusMessages[0].type, 'success');
+        assert.ok(harness.UI.refs.viewWorkspaceStatus.textContent.includes('已保存到 Notion'), harness.UI.refs.viewWorkspaceStatus.textContent);
+    });
+
+    await runTest('UI.saveWorkspaceInsightReportToNotion: saves report into parent page target', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const statusMessages = [];
+        const calls = [];
+        const parentPageId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
+        harness.TargetState.saveExportState({
+            targetType: harness.CONFIG.EXPORT_TARGET_TYPES.PAGE,
+            databaseId: '',
+            parentPageId
+        });
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.UI.refs = {
+            viewWorkspaceStatus: createElementStub()
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+        harness.UI.workspaceInsightMarkdown = harness.UI.buildWorkspaceInsightMarkdown(
+            harness.UI.buildWorkspaceVisualizationModel(harness.UI.workspaceVisualSnapshot),
+            ''
+        );
+        harness.NotionAPI.createChildPage = async (capturedParentPageId, title, children, apiKey) => {
+            calls.push(['createChildPage', capturedParentPageId, title, children.length, apiKey]);
+            return { id: '22222222222222222222222222222222' };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.pageId, context.itemName]);
+            return executor();
+        };
+
+        const result = await harness.UI.saveWorkspaceInsightReportToNotion();
+
+        assert.deepStrictEqual(calls[0].slice(0, 3), ['guard', 'createDatabasePage', parentPageId]);
+        assert.deepStrictEqual(calls[1].slice(0, 2), ['createChildPage', parentPageId]);
+        assert.ok(calls[1][2].startsWith('工作区洞察报告 '), calls[1][2]);
+        assert.ok(calls[1][3] > 0, calls[1][3]);
+        assert.strictEqual(calls[1][4], 'manual_api_key');
+        assert.strictEqual(result.pageId, '22222222222222222222222222222222');
+        assert.strictEqual(result.targetType, harness.CONFIG.EXPORT_TARGET_TYPES.PAGE);
+        assert.strictEqual(result.targetId, parentPageId);
+        assert.strictEqual(statusMessages[0].type, 'success');
+        assert.ok(harness.UI.refs.viewWorkspaceStatus.textContent.includes('已保存到 Notion'), harness.UI.refs.viewWorkspaceStatus.textContent);
+    });
+
+    await runTest('UI.saveWorkspaceConnectionCandidatesToNotion: saves candidate pages into database target', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const statusMessages = [];
+        const calls = [];
+        const databaseId = 'cccccccccccccccccccccccccccccccc';
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
+        harness.TargetState.saveExportState({
+            targetType: harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE,
+            databaseId,
+            parentPageId: ''
+        });
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.UI.refs = {
+            viewWorkspaceStatus: createElementStub()
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+
+        const model = harness.UI.buildWorkspaceVisualizationModel(harness.UI.workspaceVisualSnapshot);
+        assert.strictEqual(model.connectionCandidates.length, 2);
+
+        harness.NotionAPI.fetchDatabase = async (capturedId, apiKey) => {
+            calls.push(['fetchDatabase', capturedId, apiKey]);
+            return {
+                properties: {
+                    Name: { type: 'title' },
+                    来源: { type: 'rich_text' },
+                    来源类型: { type: 'rich_text' },
+                    分类: { type: 'rich_text' },
+                    标签: {
+                        type: 'multi_select',
+                        multi_select: {
+                            options: [
+                                { name: '候选' },
+                                { name: '同标题跨源候选' },
+                                { name: '同链接跨源候选' },
+                                { name: 'GitHub' },
+                                { name: '浏览器书签' },
+                                { name: 'RSS' }
+                            ]
+                        }
+                    }
+                }
+            };
+        };
+        harness.NotionAPI.updateDatabase = async (capturedId, properties, apiKey) => {
+            calls.push(['updateDatabase', capturedId, properties, apiKey]);
+            return { id: capturedId };
+        };
+        harness.NotionAPI.createPageObject = async (parent, properties, children, apiKey) => {
+            calls.push(['createPageObject', parent, properties, children, apiKey]);
+            return { id: `candidate-page-${calls.length}` };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.databaseId, context.itemName]);
+            return executor();
+        };
+
+        const result = await harness.UI.saveWorkspaceConnectionCandidatesToNotion();
+        const guardCalls = calls.filter((item) => item[0] === 'guard');
+        const schemaGuardCalls = guardCalls.filter((item) => item[1] === 'updateDatabase');
+        const createGuardCalls = guardCalls.filter((item) => item[1] === 'createDatabasePage');
+        const updateDatabaseCalls = calls.filter((item) => item[0] === 'updateDatabase');
+        const createCalls = calls.filter((item) => item[0] === 'createPageObject');
+        const firstCreate = createCalls[0];
+        const firstProperties = firstCreate[2];
+        const firstChildrenJson = JSON.stringify(firstCreate[3]);
+        const schemaPayload = updateDatabaseCalls[0][2];
+
+        assert.deepStrictEqual(calls[0], ['fetchDatabase', databaseId, 'manual_api_key']);
+        assert.strictEqual(schemaGuardCalls.length, 1);
+        assert.strictEqual(createGuardCalls.length, model.connectionCandidates.length);
+        assert.strictEqual(updateDatabaseCalls.length, 1);
+        assert.ok(schemaPayload['状态']);
+        assert.ok(schemaPayload['处理状态']);
+        assert.ok(schemaPayload['候选状态']);
+        assert.ok(schemaPayload['建议动作']);
+        assert.ok(schemaPayload['处理动作']);
+        assert.ok(schemaPayload['下一步']);
+        assert.ok(schemaPayload['合并理由']);
+        assert.ok(schemaPayload['统一标题']);
+        assert.strictEqual(createCalls.length, model.connectionCandidates.length);
+        assert.strictEqual(firstCreate[1].database_id, databaseId);
+        assert.ok(firstProperties.Name.title[0].text.content.startsWith('统一候选 · Repo A'), firstProperties.Name.title[0].text.content);
+        assert.strictEqual(firstProperties.来源.rich_text[0].text.content, '统一候选');
+        assert.strictEqual(firstProperties.来源类型.rich_text[0].text.content, '跨源关联候选');
+        assert.strictEqual(firstProperties.分类.rich_text[0].text.content, '统一候选');
+        assert.strictEqual(firstProperties.状态.select.name, '待复核');
+        assert.strictEqual(firstProperties.建议动作.select.name, '人工复核');
+        assert.strictEqual(firstProperties.下一步.rich_text[0].text.content, '人工确认这些来源是否属于同一知识条目。');
+        assert.strictEqual(firstProperties.合并理由.rich_text[0].text.content, '同标题跨源候选，建议保留为统一知识条目的整理入口。');
+        assert.ok(firstProperties.标签.multi_select.some((item) => item.name === '候选'));
+        assert.ok(firstProperties.标签.multi_select.some((item) => item.name === 'GitHub'));
+        assert.ok(firstChildrenJson.includes('处理状态'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('待复核'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('人工复核'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('人工确认这些来源是否属于同一知识条目。'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('候选条目明细'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('Repo A'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('同标题跨源候选') || firstChildrenJson.includes('同链接跨源候选'), firstChildrenJson);
+        assert.strictEqual(firstCreate[4], 'manual_api_key');
+        assert.strictEqual(result.createdCount, model.connectionCandidates.length);
+        assert.strictEqual(result.failedCount, 0);
+        assert.strictEqual(result.candidateCount, model.connectionCandidates.length);
+        assert.strictEqual(result.targetType, harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE);
+        assert.strictEqual(result.targetId, databaseId);
+        assert.strictEqual(result.pageIds.length, model.connectionCandidates.length);
+        assert.strictEqual(statusMessages[0].type, 'success');
+        assert.ok(harness.UI.refs.viewWorkspaceStatus.textContent.includes('统一候选已保存到 Notion'), harness.UI.refs.viewWorkspaceStatus.textContent);
+    });
+
+    await runTest('UI.saveWorkspaceConnectionCandidatesToNotion: enriches candidate pages with AI draft when available', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const statusMessages = [];
+        const calls = [];
+        const aiPrompts = [];
+        const databaseId = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
+        harness.TargetState.saveExportState({
+            targetType: harness.CONFIG.EXPORT_TARGET_TYPES.DATABASE,
+            databaseId,
+            parentPageId: ''
+        });
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.UI.refs = {
+            viewWorkspaceStatus: createElementStub()
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+        harness.AIAssistant.getSettings = () => ({
+            notionApiKey: 'manual_api_key',
+            notionDatabaseId: databaseId,
+            aiApiKey: 'sk-test',
+            aiService: 'openai',
+            aiModel: 'gpt-4o-mini',
+            aiBaseUrl: ''
+        });
+        harness.AIService.requestChat = async (prompt) => {
+            aiPrompts.push(prompt);
+            return '```json\n{"canonicalTitle":"Repo A 统一条目","summary":"围绕 Repo A 的跨源资料集合。","recommendedAction":"merge","nextStep":"先保留 GitHub 页面，再补充书签上下文。","mergeReason":"这些条目指向同一主题和同一链接。","tags":["知识归并","统一条目"]}\n```';
+        };
+        harness.NotionAPI.fetchDatabase = async () => ({
+            properties: {
+                Name: { type: 'title' },
+                来源: { type: 'rich_text' },
+                来源类型: { type: 'rich_text' },
+                分类: { type: 'rich_text' },
+                描述: { type: 'rich_text' },
+                摘要: { type: 'rich_text' },
+                AI摘要: { type: 'rich_text' },
+                状态: {
+                    type: 'select',
+                    select: {
+                        options: [{ name: '待处理' }, { name: '待复核' }, { name: '待补充' }, { name: '已搁置' }]
+                    }
+                },
+                建议动作: {
+                    type: 'select',
+                    select: {
+                        options: [{ name: '合并整理' }, { name: '人工复核' }, { name: '补充信息' }, { name: '暂缓归档' }]
+                    }
+                },
+                下一步: { type: 'rich_text' },
+                合并理由: { type: 'rich_text' },
+                统一标题: { type: 'rich_text' },
+                标签: {
+                    type: 'multi_select',
+                    multi_select: {
+                        options: [
+                            { name: '候选' },
+                            { name: '同标题跨源候选' },
+                            { name: '同链接跨源候选' },
+                            { name: 'GitHub' },
+                            { name: '浏览器书签' },
+                            { name: 'RSS' },
+                            { name: '知识归并' },
+                            { name: '统一条目' }
+                        ]
+                    }
+                }
+            }
+        });
+        harness.NotionAPI.updateDatabase = async (capturedId, properties, apiKey) => {
+            calls.push(['updateDatabase', capturedId, properties, apiKey]);
+            return { id: capturedId };
+        };
+        harness.NotionAPI.createPageObject = async (parent, properties, children, apiKey) => {
+            calls.push(['createPageObject', parent, properties, children, apiKey]);
+            return { id: `candidate-ai-page-${calls.length}` };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.databaseId, context.itemName]);
+            return executor();
+        };
+
+        const result = await harness.UI.saveWorkspaceConnectionCandidatesToNotion();
+        const createCalls = calls.filter((item) => item[0] === 'createPageObject');
+        const updateDatabaseCalls = calls.filter((item) => item[0] === 'updateDatabase');
+        const firstCreate = createCalls[0];
+        const firstProperties = firstCreate[2];
+        const firstChildrenJson = JSON.stringify(firstCreate[3]);
+
+        assert.strictEqual(aiPrompts.length, 2);
+        assert.strictEqual(updateDatabaseCalls.length, 1);
+        assert.ok(aiPrompts[0].includes('canonicalTitle'), aiPrompts[0]);
+        assert.ok(firstProperties.Name.title[0].text.content.includes('Repo A 统一条目'), firstProperties.Name.title[0].text.content);
+        assert.strictEqual(firstProperties.描述.rich_text[0].text.content, '围绕 Repo A 的跨源资料集合。');
+        assert.strictEqual(firstProperties.摘要.rich_text[0].text.content, '围绕 Repo A 的跨源资料集合。');
+        assert.strictEqual(firstProperties.AI摘要.rich_text[0].text.content, '围绕 Repo A 的跨源资料集合。');
+        assert.strictEqual(firstProperties.状态.select.name, '待处理');
+        assert.strictEqual(firstProperties.建议动作.select.name, '合并整理');
+        assert.strictEqual(firstProperties.下一步.rich_text[0].text.content, '先保留 GitHub 页面，再补充书签上下文。');
+        assert.strictEqual(firstProperties.合并理由.rich_text[0].text.content, '这些条目指向同一主题和同一链接。');
+        assert.strictEqual(firstProperties.统一标题.rich_text[0].text.content, 'Repo A 统一条目');
+        assert.ok(firstProperties.标签.multi_select.some((item) => item.name === '知识归并'));
+        assert.ok(firstProperties.标签.multi_select.some((item) => item.name === '统一条目'));
+        assert.ok(firstChildrenJson.includes('处理状态'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('待处理'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('AI 整理建议'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('统一标题'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('合并整理'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('围绕 Repo A 的跨源资料集合。'), firstChildrenJson);
+        assert.strictEqual(result.pages[0].aiDraft.canonicalTitle, 'Repo A 统一条目');
+        assert.strictEqual(result.pages[0].aiDraft.actionLabel, '合并整理');
+        assert.strictEqual(statusMessages[0].type, 'success');
+    });
+
+    await runTest('UI.saveWorkspaceConnectionCandidatesToNotion: saves candidate pages into parent page target', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const statusMessages = [];
+        const calls = [];
+        const parentPageId = 'dddddddddddddddddddddddddddddddd';
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
+        harness.TargetState.saveExportState({
+            targetType: harness.CONFIG.EXPORT_TARGET_TYPES.PAGE,
+            databaseId: '',
+            parentPageId
+        });
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.UI.refs = {
+            viewWorkspaceStatus: createElementStub()
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+
+        const model = harness.UI.buildWorkspaceVisualizationModel(harness.UI.workspaceVisualSnapshot);
+        let createdIndex = 0;
+        harness.NotionAPI.createChildPage = async (capturedParentPageId, title, children, apiKey) => {
+            createdIndex += 1;
+            calls.push(['createChildPage', capturedParentPageId, title, children, apiKey]);
+            return { id: `child-page-${createdIndex}` };
+        };
+        harness.OperationGuard.execute = async (operation, executor, context) => {
+            calls.push(['guard', operation, context.pageId, context.itemName]);
+            return executor();
+        };
+
+        const result = await harness.UI.saveWorkspaceConnectionCandidatesToNotion();
+        const guardCalls = calls.filter((item) => item[0] === 'guard');
+        const createCalls = calls.filter((item) => item[0] === 'createChildPage');
+        const firstCreate = createCalls[0];
+        const firstChildrenJson = JSON.stringify(firstCreate[3]);
+
+        assert.strictEqual(guardCalls.length, model.connectionCandidates.length);
+        assert.strictEqual(createCalls.length, model.connectionCandidates.length);
+        assert.strictEqual(firstCreate[1], parentPageId);
+        assert.ok(firstCreate[2].startsWith('统一候选 · Repo A'), firstCreate[2]);
+        assert.ok(firstChildrenJson.includes('来源组合'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('GitHub'), firstChildrenJson);
+        assert.ok(firstChildrenJson.includes('浏览器书签') || firstChildrenJson.includes('RSS'), firstChildrenJson);
+        assert.strictEqual(firstCreate[4], 'manual_api_key');
+        assert.strictEqual(result.createdCount, model.connectionCandidates.length);
+        assert.strictEqual(result.failedCount, 0);
+        assert.strictEqual(result.targetType, harness.CONFIG.EXPORT_TARGET_TYPES.PAGE);
+        assert.strictEqual(result.targetId, parentPageId);
+        assert.deepStrictEqual(result.pageIds, ['childpage1', 'childpage2']);
+        assert.strictEqual(statusMessages[0].type, 'success');
+        assert.ok(harness.UI.refs.viewWorkspaceStatus.textContent.includes('统一候选已保存到 Notion'), harness.UI.refs.viewWorkspaceStatus.textContent);
+    });
+
+    await runTest('UI.generateWorkspaceInsight: uses AI summary when AI key is available', async () => {
+        const harness = createHarness();
+        const { databases, pages, records } = createWorkspaceVisualizationFixture(harness);
+        const summaryContainer = createElementStub();
+        const statusMessages = [];
+
+        harness.UI.refs = {
+            viewWorkspaceSummary: summaryContainer,
+            viewGenerateWorkspaceInsightBtn: Object.assign(createElementStub(), { textContent: '生成洞察' }),
+            viewWorkspaceStatus: createElementStub()
+        };
+        harness.UI.workspaceVisualSnapshot = {
+            databases,
+            pages,
+            records,
+            scannedAt: 1,
+            maxPages: 50
+        };
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.AIService.requestChat = async (prompt) => {
+            assert.ok(prompt.includes('"duplicateCandidates"'), prompt);
+            return '- AI 判断：Repo A 是优先合并候选。\n- 建议先补齐缺失来源。';
+        };
+        harness.AIAssistant.getSettings = () => ({
+            notionApiKey: 'manual_api_key',
+            notionDatabaseId: 'db_linux',
+            aiApiKey: 'sk-test',
+            aiService: 'openai',
+            aiModel: 'gpt-4o-mini',
+            aiBaseUrl: ''
+        });
+
+        const markdown = await harness.UI.generateWorkspaceInsight();
+
+        assert.ok(markdown.includes('AI 判断：Repo A 是优先合并候选。'), markdown);
+        assert.ok(summaryContainer.innerHTML.includes('洞察摘要'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('Repo A'), summaryContainer.innerHTML);
+        assert.strictEqual(harness.UI.refs.viewGenerateWorkspaceInsightBtn.disabled, false);
+        assert.strictEqual(harness.UI.refs.viewGenerateWorkspaceInsightBtn.textContent, '生成洞察');
     });
 
     await runTest('AIAssistant.AGENT_TOOLS.query_database: reuses legacy export database when AI target is missing', async () => {
@@ -4753,10 +5759,530 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(bookmarkState.snapshot['2'].title, 'Updated bookmark');
         assert.deepStrictEqual(bookmarkState.snapshot['4'], previousSnapshot['4']);
         assert.ok(!bookmarkState.snapshot['3']);
+        assert.ok(bookmarkState.lastAttemptAt > 0);
+        assert.ok(bookmarkState.lastSuccessAt > 0);
+        assert.strictEqual(bookmarkState.lastOutcome, 'partial');
+        assert.strictEqual(bookmarkState.lastStats.created, 1);
+        assert.strictEqual(bookmarkState.lastStats.updated, 1);
+        assert.strictEqual(bookmarkState.lastStats.archived, 1);
+        assert.strictEqual(bookmarkState.lastStats.failed, 1);
         assert.ok(harness.notifications[0].text.includes('新增 1'), harness.notifications[0].text);
         assert.ok(harness.notifications[0].text.includes('更新 1'), harness.notifications[0].text);
         assert.ok(harness.notifications[0].text.includes('归档 1'), harness.notifications[0].text);
         assert.ok(harness.notifications[0].text.includes('失败 1'), harness.notifications[0].text);
+    });
+
+    await runTest('AutoImporter.run: writes unified sync state on partial success', async () => {
+        const harness = createHarness({ url: 'https://linux.do/u/test/activity/bookmarks' });
+        const exportedTopicIds = [];
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID] = 'db-linuxdo';
+        harness.store[harness.CONFIG.STORAGE_KEYS.REQUEST_DELAY] = 0;
+        harness.AutoImporter.minimumRunGapMs = 0;
+        harness.AutoImporter.lastRunAt = 0;
+        harness.AutoImporter.isRunning = false;
+        harness.Exporter.isExporting = false;
+        harness.LinuxDoAPI.fetchBookmarksSince = async (username, watermark) => {
+            assert.strictEqual(username, 'test');
+            assert.strictEqual(watermark, null);
+            return [
+                { topic_id: 101, title: 'Post A', created_at: '2026-06-04T09:00:00Z' },
+                { topic_id: 102, title: 'Post B', created_at: '2026-06-03T09:00:00Z' }
+            ];
+        };
+        harness.Exporter.exportTopic = async (bookmark) => {
+            exportedTopicIds.push(String(bookmark.topic_id));
+            if (bookmark.topic_id === 102) throw new Error('export failed');
+            return { ok: true };
+        };
+        harness.UI.renderBookmarkList = () => {};
+
+        await harness.AutoImporter.run();
+
+        const linuxdoState = harness.SyncState.getLinuxDoState();
+        assert.deepStrictEqual(exportedTopicIds, ['101', '102']);
+        assert.ok(linuxdoState.lastAttemptAt > 0);
+        assert.ok(linuxdoState.lastSuccessAt > 0);
+        assert.strictEqual(linuxdoState.lastOutcome, 'partial');
+        assert.strictEqual(linuxdoState.lastError, '');
+        assert.strictEqual(linuxdoState.lastStats.scanned, 2);
+        assert.strictEqual(linuxdoState.lastStats.pending, 2);
+        assert.strictEqual(linuxdoState.lastStats.success, 1);
+        assert.strictEqual(linuxdoState.lastStats.failed, 1);
+        assert.strictEqual(harness.AutoImporter.isRunning, false);
+    });
+
+    await runTest('GitHubAutoImporter.run: writes per-type state and github meta', async () => {
+        const harness = createHarness();
+        const exportedBatches = [];
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID] = 'db-github';
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_USERNAME] = 'smith';
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
+        harness.GitHubAutoImporter.minimumRunGapMs = 0;
+        harness.GitHubAutoImporter.lastRunAt = 0;
+        harness.GitHubAutoImporter.isRunning = false;
+        harness.GitHubAutoImporter.fetchTypeItems = async (type) => {
+            if (type === 'stars') {
+                return [
+                    { full_name: 'smith/repo-a', updated_at: '2026-06-04T10:00:00Z' },
+                    { full_name: 'smith/repo-b', updated_at: '2026-06-03T10:00:00Z' }
+                ];
+            }
+            if (type === 'gists') return [];
+            return [];
+        };
+        harness.UI.mapGitHubItemsToBookmarks = (items, type) => items.map((item) => ({
+            source: 'github',
+            sourceType: type,
+            itemKey: type === 'gists' ? item.id : item.full_name,
+            title: item.full_name || item.description || item.id,
+            raw: item
+        }));
+        harness.UI.isBookmarkExported = () => false;
+        harness.UI.exportGitHubSelected = async (items, settings, onProgress) => {
+            exportedBatches.push(items.map((item) => item.itemKey));
+            assert.strictEqual(settings.apiKey, 'manual_api_key');
+            assert.strictEqual(settings.databaseId, 'db-github');
+            assert.strictEqual(settings.token, '');
+            onProgress(1, items.length, items[0].title);
+            return {
+                success: [{ itemKey: 'smith/repo-a' }],
+                failed: [{ itemKey: 'smith/repo-b', title: 'smith/repo-b' }],
+                skipped: []
+            };
+        };
+
+        await harness.GitHubAutoImporter.run();
+
+        const githubMeta = harness.SyncState.getGitHubMeta();
+        const starsState = harness.SyncState.getGitHubState('stars');
+        const gistsState = harness.SyncState.getGitHubState('gists');
+
+        assert.deepStrictEqual(exportedBatches, [['smith/repo-a', 'smith/repo-b']]);
+        assert.ok(githubMeta.lastAttemptAt > 0);
+        assert.ok(githubMeta.lastSuccessAt > 0);
+        assert.strictEqual(githubMeta.lastOutcome, 'partial');
+        assert.strictEqual(githubMeta.lastStats.enabledTypes, 2);
+        assert.strictEqual(githubMeta.lastStats.exported, 1);
+        assert.strictEqual(githubMeta.lastStats.failed, 1);
+        assert.strictEqual(githubMeta.lastStats.syncErrors, 0);
+        assert.ok(starsState.lastAttemptAt > 0);
+        assert.ok(starsState.lastSuccessAt > 0);
+        assert.strictEqual(starsState.lastOutcome, 'partial');
+        assert.strictEqual(starsState.lastStats.scanned, 2);
+        assert.strictEqual(starsState.lastStats.pending, 2);
+        assert.strictEqual(starsState.lastStats.exported, 1);
+        assert.strictEqual(starsState.lastStats.failed, 1);
+        assert.ok(gistsState.lastAttemptAt > 0);
+        assert.ok(gistsState.lastSuccessAt > 0);
+        assert.strictEqual(gistsState.lastOutcome, 'success');
+        assert.strictEqual(gistsState.lastStats.scanned, 0);
+        assert.strictEqual(gistsState.lastStats.pending, 0);
+        assert.strictEqual(gistsState.lastStats.exported, 0);
+        assert.strictEqual(gistsState.lastStats.failed, 0);
+    });
+
+    await runTest('RSSAutoImporter.parseFeedXml: parses rss feed items', async () => {
+        const harness = createHarness();
+        const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Example Feed</title>
+    <item>
+      <title>New Article</title>
+      <link>https://example.com/new</link>
+      <guid>item-1</guid>
+      <pubDate>Wed, 05 Jun 2026 10:00:00 GMT</pubDate>
+      <description><![CDATA[<p>Hello <strong>world</strong></p>]]></description>
+      <category>AI</category>
+    </item>
+    <item>
+      <title>Older Article</title>
+      <link>https://example.com/old</link>
+      <guid>item-2</guid>
+      <pubDate>Tue, 04 Jun 2026 10:00:00 GMT</pubDate>
+      <description>Tips &amp; tricks</description>
+    </item>
+  </channel>
+</rss>`;
+
+        const parsed = harness.RSSAutoImporter.parseFeedXml(xml, 'https://example.com/feed.xml');
+
+        assert.strictEqual(parsed.feedTitle, 'Example Feed');
+        assert.strictEqual(parsed.items.length, 2);
+        assert.strictEqual(parsed.items[0].title, 'New Article');
+        assert.strictEqual(parsed.items[0].url, 'https://example.com/new');
+        assert.strictEqual(parsed.items[0].feedUrl, 'https://example.com/feed.xml');
+        assert.strictEqual(parsed.items[0].summary, 'Hello world');
+        assert.deepStrictEqual(parsed.items[0].tags, ['AI']);
+        assert.strictEqual(parsed.items[1].title, 'Older Article');
+        assert.strictEqual(parsed.items[1].summary, 'Tips & tricks');
+    });
+
+    await runTest('RSSAutoImporter.run: writes rss sync state on partial success', async () => {
+        const harness = createHarness();
+        const createdPayloads = [];
+        const updatedPayloads = [];
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID] = 'db-rss';
+        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_FEED_URLS] = 'https://example.com/feed.xml';
+        harness.store[harness.CONFIG.STORAGE_KEYS.REQUEST_DELAY] = 0;
+        harness.NotionOAuth.getAccessToken = () => 'manual_api_key';
+        harness.RSSAutoImporter.minimumRunGapMs = 0;
+        harness.RSSAutoImporter.lastRunAt = 0;
+        harness.RSSAutoImporter.isRunning = false;
+        harness.Exporter.isExporting = false;
+        harness.UI.renderSyncCenterSummary = () => {};
+
+        harness.SyncState.updateRssState({
+            snapshot: {
+                'item-2': {
+                    itemKey: 'item-2',
+                    id: 'item-2',
+                    title: 'Updated RSS',
+                    url: 'https://example.com/updated',
+                    summary: 'old summary',
+                    feedTitle: 'Example Feed',
+                    feedUrl: 'https://example.com/feed.xml',
+                    publishedAt: '2026-06-03T10:00:00.000Z',
+                    pageId: 'page-2'
+                },
+                'item-3': {
+                    itemKey: 'item-3',
+                    id: 'item-3',
+                    title: 'Broken RSS',
+                    url: 'https://example.com/broken',
+                    summary: 'old broken summary',
+                    feedTitle: 'Example Feed',
+                    feedUrl: 'https://example.com/feed.xml',
+                    publishedAt: '2026-06-02T10:00:00.000Z',
+                    pageId: 'page-3'
+                }
+            }
+        });
+
+        harness.BookmarkExporter.setupDatabaseProperties = async (databaseId, apiKey) => {
+            assert.strictEqual(databaseId, 'db-rss');
+            assert.strictEqual(apiKey, 'manual_api_key');
+            return { success: true };
+        };
+        harness.RSSAutoImporter.loadCurrentItems = async () => ({
+            feedCount: 1,
+            items: [
+                {
+                    itemKey: 'item-1',
+                    id: 'item-1',
+                    title: 'New RSS',
+                    url: 'https://example.com/new',
+                    summary: 'new summary',
+                    tags: ['AI'],
+                    feedTitle: 'Example Feed',
+                    feedUrl: 'https://example.com/feed.xml',
+                    publishedAt: '2026-06-04T10:00:00Z'
+                },
+                {
+                    itemKey: 'item-2',
+                    id: 'item-2',
+                    title: 'Updated RSS',
+                    url: 'https://example.com/updated',
+                    summary: 'fresh summary',
+                    tags: ['Update'],
+                    feedTitle: 'Example Feed',
+                    feedUrl: 'https://example.com/feed.xml',
+                    publishedAt: '2026-06-03T10:00:00Z'
+                },
+                {
+                    itemKey: 'item-3',
+                    id: 'item-3',
+                    title: 'Broken RSS',
+                    url: 'https://example.com/broken',
+                    summary: 'broken summary',
+                    tags: [],
+                    feedTitle: 'Example Feed',
+                    feedUrl: 'https://example.com/feed.xml',
+                    publishedAt: '2026-06-02T10:00:00Z'
+                }
+            ]
+        });
+        harness.RSSAutoImporter.fetchTrackedPages = async () => ([
+            {
+                pageId: 'page-2',
+                url: 'https://example.com/updated',
+                title: 'Updated RSS',
+                summary: 'old summary',
+                publishedAt: '2026-06-03T10:00:00.000Z'
+            },
+            {
+                pageId: 'page-3',
+                url: 'https://example.com/broken',
+                title: 'Broken RSS',
+                summary: 'old broken summary',
+                publishedAt: '2026-06-02T10:00:00.000Z'
+            }
+        ]);
+        harness.NotionAPI.request = async (method, endpoint, payload, apiKey) => {
+            createdPayloads.push({ method, endpoint, payload, apiKey });
+            return { id: 'page-1' };
+        };
+        harness.NotionAPI.updatePage = async (pageId, properties, apiKey) => {
+            updatedPayloads.push({ pageId, properties, apiKey });
+            if (pageId === 'page-3') {
+                throw new Error('rss update failed');
+            }
+            return { ok: true };
+        };
+
+        await harness.RSSAutoImporter.run();
+
+        const rssState = harness.SyncState.getRssState();
+        assert.strictEqual(createdPayloads.length, 1);
+        assert.strictEqual(createdPayloads[0].method, 'POST');
+        assert.strictEqual(createdPayloads[0].endpoint, '/pages');
+        assert.strictEqual(createdPayloads[0].payload.parent.database_id, 'db-rss');
+        assert.strictEqual(createdPayloads[0].payload.properties.分类.rich_text[0].text.content, '其他');
+        assert.deepStrictEqual(
+            createdPayloads[0].payload.properties.标签.multi_select.map((item) => item.name),
+            ['Example Feed', 'AI']
+        );
+        assert.strictEqual(updatedPayloads.length, 2);
+        assert.strictEqual(updatedPayloads[0].pageId, 'page-2');
+        assert.strictEqual(updatedPayloads[0].apiKey, 'manual_api_key');
+        assert.strictEqual(updatedPayloads[0].properties.分类.rich_text[0].text.content, '其他');
+        assert.ok(rssState.lastAttemptAt > 0);
+        assert.ok(rssState.lastSuccessAt > 0);
+        assert.strictEqual(rssState.lastOutcome, 'partial');
+        assert.strictEqual(rssState.lastStats.feeds, 1);
+        assert.strictEqual(rssState.lastStats.scanned, 3);
+        assert.strictEqual(rssState.lastStats.created, 1);
+        assert.strictEqual(rssState.lastStats.updated, 1);
+        assert.strictEqual(rssState.lastStats.failed, 1);
+        assert.deepStrictEqual(Object.keys(rssState.snapshot).sort(), ['item-1', 'item-2', 'item-3']);
+        assert.strictEqual(rssState.snapshot['item-1'].pageId, 'page-1');
+        assert.strictEqual(rssState.snapshot['item-2'].pageId, 'page-2');
+        assert.strictEqual(rssState.snapshot['item-3'].pageId, 'page-3');
+        assert.strictEqual(harness.RSSAutoImporter.isRunning, false);
+    });
+
+    await runTest('UI.buildUnifiedSyncModel: aggregates linuxdo, github, bookmark and rss sync states', async () => {
+        const harness = createHarness();
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL] = 5;
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL] = 10;
+        harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL] = 30;
+        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL] = 15;
+        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_FEED_URLS] = 'https://example.com/feed.xml';
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
+
+        harness.SyncState.updateLinuxDoState({
+            watermark: { time: '2026-06-03T09:00:00Z', ids: ['101'] },
+            lastSuccessAt: 100,
+            lastAttemptAt: 90,
+            lastOutcome: 'success',
+            lastStats: { scanned: 4, pending: 1, success: 1, failed: 0 }
+        });
+        harness.SyncState.updateGitHubMeta({
+            lastSuccessAt: 200,
+            lastAttemptAt: 190,
+            lastOutcome: 'partial',
+            lastStats: { enabledTypes: 2, exported: 1, failed: 1, syncErrors: 0 }
+        });
+        harness.SyncState.updateGitHubState('stars', {
+            watermark: { time: '2026-06-02T09:00:00Z', ids: ['smith/repo-a'] },
+            lastSuccessAt: 200,
+            lastAttemptAt: 190,
+            lastOutcome: 'partial',
+            lastStats: { scanned: 2, pending: 2, exported: 1, failed: 1 }
+        });
+        harness.SyncState.updateGitHubState('gists', {
+            watermark: { time: '2026-06-01T09:00:00Z', ids: ['gist-1'] },
+            lastSuccessAt: 180,
+            lastAttemptAt: 170,
+            lastOutcome: 'success',
+            lastStats: { scanned: 0, pending: 0, exported: 0, failed: 0 }
+        });
+        harness.SyncState.updateBookmarkState({
+            watermark: { time: '2026-06-04T09:00:00Z', ids: ['bm-1'] },
+            lastSuccessAt: 300,
+            lastAttemptAt: 290,
+            lastOutcome: 'error',
+            lastError: 'bridge lost',
+            lastStats: { created: 1, updated: 1, archived: 0, unchanged: 0, failed: 1 },
+            snapshot: { 'bm-1': { pageId: 'page-1' } }
+        });
+        harness.SyncState.updateRssState({
+            watermark: { time: '2026-06-04T12:00:00Z', ids: ['item-1'] },
+            lastSuccessAt: 250,
+            lastAttemptAt: 240,
+            lastOutcome: 'success',
+            lastStats: { feeds: 1, scanned: 3, created: 1, updated: 1, unchanged: 1, failed: 0 },
+            snapshot: { 'item-1': { pageId: 'page-rss-1' } }
+        });
+
+        const model = harness.UI.buildUnifiedSyncModel();
+        const rowsByKey = Object.fromEntries(model.sourceRows.map((row) => [row.key, row]));
+
+        assert.strictEqual(model.sourceRows.length, 4);
+        assert.strictEqual(model.enabledCount, 4);
+        assert.strictEqual(model.runningCount, 0);
+        assert.strictEqual(model.issueCount, 2);
+        assert.strictEqual(model.latestSuccessSource, rowsByKey.bookmarks.label);
+        assert.strictEqual(rowsByKey.linuxdo.outcome, 'success');
+        assert.strictEqual(rowsByKey.github.outcome, 'partial');
+        assert.strictEqual(rowsByKey.bookmarks.outcome, 'error');
+        assert.strictEqual(rowsByKey.rss.outcome, 'success');
+        assert.ok(rowsByKey.github.watermarkLabel.includes('Stars'), rowsByKey.github.watermarkLabel);
+        assert.ok(rowsByKey.github.watermarkLabel.includes('Gists'), rowsByKey.github.watermarkLabel);
+        assert.strictEqual(rowsByKey.bookmarks.lastError, 'bridge lost');
+        assert.strictEqual(rowsByKey.bookmarks.enabled, true);
+        assert.strictEqual(rowsByKey.rss.enabled, true);
+        assert.ok(rowsByKey.rss.statsLabel.includes('Feed 1'), rowsByKey.rss.statsLabel);
+    });
+
+    await runTest('UI.renderSyncCenterSummary: renders unified sync cards', async () => {
+        const harness = createHarness();
+        const summaryContainer = createElementStub();
+
+        harness.UI.refs = {
+            viewSyncSummary: summaryContainer
+        };
+        harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL] = 5;
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL] = 10;
+        harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL] = 30;
+        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL] = 15;
+        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_FEED_URLS] = 'https://example.com/feed.xml';
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
+
+        harness.SyncState.updateLinuxDoState({
+            lastSuccessAt: 100,
+            lastAttemptAt: 90,
+            lastOutcome: 'success',
+            lastStats: { scanned: 4, pending: 1, success: 1, failed: 0 }
+        });
+        harness.SyncState.updateGitHubMeta({
+            lastSuccessAt: 200,
+            lastAttemptAt: 190,
+            lastOutcome: 'partial',
+            lastStats: { enabledTypes: 2, exported: 1, failed: 1, syncErrors: 0 }
+        });
+        harness.SyncState.updateGitHubState('stars', {
+            watermark: { time: '2026-06-02T09:00:00Z', ids: ['smith/repo-a'] },
+            lastSuccessAt: 200,
+            lastAttemptAt: 190,
+            lastOutcome: 'partial',
+            lastStats: { scanned: 2, pending: 2, exported: 1, failed: 1 }
+        });
+        harness.SyncState.updateGitHubState('gists', {
+            watermark: { time: '2026-06-01T09:00:00Z', ids: ['gist-1'] },
+            lastSuccessAt: 180,
+            lastAttemptAt: 170,
+            lastOutcome: 'success',
+            lastStats: { scanned: 0, pending: 0, exported: 0, failed: 0 }
+        });
+        harness.SyncState.updateBookmarkState({
+            lastSuccessAt: 300,
+            lastAttemptAt: 290,
+            lastOutcome: 'error',
+            lastError: 'bridge lost',
+            lastStats: { created: 1, updated: 1, archived: 0, unchanged: 0, failed: 1 },
+            snapshot: { 'bm-1': { pageId: 'page-1' } }
+        });
+        harness.SyncState.updateRssState({
+            lastSuccessAt: 250,
+            lastAttemptAt: 240,
+            lastOutcome: 'success',
+            lastStats: { feeds: 1, scanned: 3, created: 1, updated: 1, unchanged: 1, failed: 0 },
+            snapshot: { 'item-1': { pageId: 'page-rss-1' } }
+        });
+
+        harness.UI.renderSyncCenterSummary();
+
+        assert.ok(summaryContainer.innerHTML.includes('Linux.do'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('GitHub'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('RSS'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('Stars'), summaryContainer.innerHTML);
+        assert.ok(summaryContainer.innerHTML.includes('bridge lost'), summaryContainer.innerHTML);
+        assert.ok(!summaryContainer.innerHTML.includes('[object Object]'), summaryContainer.innerHTML);
+    });
+
+    await runTest('UI.runUnifiedSyncNow: runs enabled sync sources and refreshes summary', async () => {
+        const harness = createHarness();
+        const summaryContainer = createElementStub();
+        const syncNowBtn = Object.assign(createElementStub(), { textContent: '立即同步全部' });
+        const calls = [];
+        const statusMessages = [];
+
+        harness.UI.refs = {
+            viewSyncSummary: summaryContainer,
+            viewSyncNowBtn: syncNowBtn
+        };
+        harness.UI.showStatus = (message, type) => {
+            statusMessages.push({ message, type });
+        };
+        harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL] = 5;
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL] = 10;
+        harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED] = true;
+        harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL] = 30;
+        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars']);
+
+        harness.AutoImporter.run = async () => {
+            calls.push('linuxdo');
+            harness.SyncState.updateLinuxDoState({
+                lastAttemptAt: 10,
+                lastSuccessAt: 11,
+                lastOutcome: 'success',
+                lastStats: { scanned: 1, pending: 1, success: 1, failed: 0 }
+            });
+        };
+        harness.GitHubAutoImporter.run = async () => {
+            calls.push('github');
+            harness.SyncState.updateGitHubMeta({
+                lastAttemptAt: 20,
+                lastSuccessAt: 21,
+                lastOutcome: 'partial',
+                lastStats: { enabledTypes: 1, exported: 1, failed: 0, syncErrors: 1 }
+            });
+            harness.SyncState.updateGitHubState('stars', {
+                lastAttemptAt: 20,
+                lastSuccessAt: 21,
+                lastOutcome: 'success',
+                lastStats: { scanned: 1, pending: 1, exported: 1, failed: 0 }
+            });
+        };
+        harness.BookmarkAutoImporter.run = async () => {
+            calls.push('bookmarks');
+            harness.SyncState.updateBookmarkState({
+                lastAttemptAt: 30,
+                lastSuccessAt: 31,
+                lastOutcome: 'success',
+                lastStats: { created: 1, updated: 0, archived: 0, unchanged: 0, failed: 0 },
+                snapshot: { 'bm-1': { pageId: 'page-1' } }
+            });
+        };
+
+        const model = await harness.UI.runUnifiedSyncNow();
+
+        assert.deepStrictEqual(calls, ['linuxdo', 'github', 'bookmarks']);
+        assert.strictEqual(syncNowBtn.disabled, false);
+        assert.strictEqual(syncNowBtn.textContent, '立即同步全部');
+        assert.strictEqual(model.enabledCount, 3);
+        assert.strictEqual(model.issueCount, 1);
+        assert.ok(summaryContainer.innerHTML.includes('GitHub'), summaryContainer.innerHTML);
+        assert.strictEqual(statusMessages.at(-1).type, 'error');
+        assert.ok(statusMessages.at(-1).message.includes('Linux.do'), statusMessages.at(-1).message);
+        assert.ok(statusMessages.at(-1).message.includes('GitHub'), statusMessages.at(-1).message);
     });
 
     await runTest('main: initializes the expected surface on Linux.do, Notion, GitHub, Zhihu and generic pages', async () => {

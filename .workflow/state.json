@@ -105,9 +105,22 @@
       "harvested": false,
       "created_at": "2026-06-16T17:00:00+08:00",
       "completed_at": "2026-06-16T17:30:00+08:00"
+    },
+    {
+      "id": "TST-001",
+      "type": "test",
+      "milestone": "M1",
+      "phase": 1,
+      "scope": "phase",
+      "path": "scratch/20260617-test-coverage",
+      "status": "completed",
+      "depends_on": "REV-001",
+      "harvested": false,
+      "created_at": "2026-06-17T03:00:00+08:00",
+      "completed_at": "2026-06-17T12:41:00+08:00"
     }
   ],
-  "last_updated": "2026-06-16T17:30:00+08:00",
+  "last_updated": "2026-06-17T12:41:00+08:00",
   "accumulated_context": {
     "key_decisions": [
       "v3.5.0: 文件处理系统全面升级（54种文件类型、去重上传、多分片、video/audio block）",
