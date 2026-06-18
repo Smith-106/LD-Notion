@@ -4,6 +4,7 @@ const { CONFIG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState } = require("../storage");
 const { GitHubAPI } = require("./GitHubAPI");
+const { NotionAPI } = require("../api");
 
 const GitHubAutoImporter = {
     isRunning: false,
@@ -24,6 +25,7 @@ const GitHubAutoImporter = {
     },
 
     updateStatus: (text) => {
+        if (typeof UI === "undefined" || !UI) return;
         const el = (UI.refs && UI.refs.autoImportStatus) || document.querySelector("#ldb-auto-import-status");
         if (el) el.textContent = text;
     },
@@ -206,8 +208,22 @@ GitHubAutoImporter.run = async () => {
                 }
 
                 hasPending = true;
-                const mappedItems = UI.mapGitHubItemsToBookmarks(incrementalItems, type)
-                    .filter((item) => !UI.isBookmarkExported(item));
+                let mappedItems;
+                if (typeof UI !== "undefined" && UI && typeof UI.mapGitHubItemsToBookmarks === "function") {
+                    mappedItems = UI.mapGitHubItemsToBookmarks(incrementalItems, type)
+                        .filter((item) => typeof UI !== "undefined" && UI && typeof UI.isBookmarkExported === "function" ? !UI.isBookmarkExported(item) : true);
+                } else {
+                    mappedItems = incrementalItems.map((item) => ({
+                        itemKey: meta.getId(item),
+                        raw: item,
+                        title: item.full_name || item.name || "",
+                        url: item.html_url || "",
+                        description: item.description || "",
+                        tags: item.language ? [`lang:${item.language}`] : [],
+                        source: "github",
+                        sourceType: type,
+                    }));
+                }
 
                 if (mappedItems.length === 0) {
                     SyncState.updateGitHubState(type, {
@@ -226,13 +242,53 @@ GitHubAutoImporter.run = async () => {
                     continue;
                 }
 
-                const result = await UI.exportGitHubSelected(mappedItems, {
-                    apiKey: settings.apiKey,
-                    databaseId: settings.databaseId,
-                    token: settings.token,
-                }, (current, total, title) => {
-                    GitHubAutoImporter.updateStatus(`📬 GitHub ${meta.label} 导入中 (${current}/${total}): ${title}`);
-                });
+                let result;
+                if (typeof UI !== "undefined" && UI && typeof UI.exportGitHubSelected === "function") {
+                    result = await UI.exportGitHubSelected(mappedItems, {
+                        apiKey: settings.apiKey,
+                        databaseId: settings.databaseId,
+                        token: settings.token,
+                    }, (current, total, title) => {
+                        GitHubAutoImporter.updateStatus(`📬 GitHub ${meta.label} 导入中 (${current}/${total}): ${title}`);
+                    });
+                } else {
+                    // 无 UI 降级路径：直接调用 GitHubExporter 导出
+                    const { GitHubExporter } = require("./GitHubExporter");
+                    const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+                    let success = 0, failed = 0;
+                    const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+                    for (let i = 0; i < mappedItems.length; i++) {
+                        const item = mappedItems[i];
+                        try {
+                            const raw = item.raw || item;
+                            const enriched = await GitHubExporter.enrichRepo(raw, settings, enrichContext);
+                            const buildFn = type === "gists"
+                                ? GitHubExporter.buildGistProperties
+                                : (r) => GitHubExporter.buildRepoProperties(r, meta.label);
+                            const properties = buildFn(enriched);
+                            for (const k of Object.keys(properties)) {
+                                if (properties[k] === undefined) delete properties[k];
+                            }
+                            await NotionAPI.request("POST", "/pages", {
+                                parent: { database_id: settings.databaseId },
+                                properties,
+                            }, settings.apiKey);
+                            if (type === "gists") {
+                                GitHubAPI.markGistExported(meta.getId(raw));
+                            } else {
+                                GitHubAPI.markExported(meta.getId(raw));
+                            }
+                            success++;
+                        } catch (e) {
+                            console.warn(`[GitHubAutoImporter] 导出失败: ${item.itemKey || meta.getId(item.raw || item)}`, e);
+                            failed++;
+                        }
+                        if (i < mappedItems.length - 1) {
+                            await new Promise(r => setTimeout(r, delay));
+                        }
+                    }
+                    result = { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
+                }
 
                 successCount += result.success.length;
                 failedCount += result.failed.length;

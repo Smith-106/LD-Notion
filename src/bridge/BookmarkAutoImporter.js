@@ -257,7 +257,10 @@ BookmarkAutoImporter.run = async () => {
         BookmarkAutoImporter.updateStatus("📧 正在同步浏览器书签...");
 
         // 使用 SyncCoordinator 获取增量同步概要 (统一状态管理)
-        await SyncCoordinator.sync("bookmarks");
+        const syncResult = await SyncCoordinator.sync("bookmark");
+        if (syncResult.error) {
+            throw new Error(syncResult.error);
+        }
 
         const setupResult = await BookmarkExporter.setupDatabaseProperties(settings.databaseId, settings.apiKey);
         if (!setupResult.success) {
@@ -282,8 +285,21 @@ BookmarkAutoImporter.run = async () => {
         let unchanged = 0;
         let failed = 0;
 
-        for (let i = 0; i < currentBookmarks.length; i++) {
-            const bookmark = currentBookmarks[i];
+        // 分批并发处理（每批 3 个，避免 Notion API 速率限制）
+        const CONCURRENCY = 3;
+        const processInBatches = async (items, processor) => {
+            for (let i = 0; i < items.length; i += CONCURRENCY) {
+                const batch = items.slice(i, i + CONCURRENCY);
+                const results = await Promise.allSettled(batch.map((item) => processor(item, i + batch.indexOf(item))));
+                for (const result of results) {
+                    if (result.status === "rejected") {
+                        console.error("[LD-Notion] 批量处理失败:", result.reason);
+                    }
+                }
+            }
+        };
+
+        const processBookmark = async (bookmark, index) => {
             const bookmarkId = String(bookmark.id);
             const snapshotEntry = previousSnapshot[bookmarkId] || null;
             let pageMeta = index.byBookmarkId.get(bookmarkId)
@@ -292,7 +308,7 @@ BookmarkAutoImporter.run = async () => {
 
             try {
                 if (!pageMeta) {
-                    BookmarkAutoImporter.updateStatus(`📄 正在新增书签 (${i + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                    BookmarkAutoImporter.updateStatus(`📄 正在新增书签 (${index + 1}/${currentBookmarks.length}): ${bookmark.title}`);
                     const enriched = await BookmarkExporter.enrichBookmark(bookmark, settings, enrichContext);
                     const page = await NotionAPI.request("POST", "/pages", {
                         parent: { database_id: settings.databaseId },
@@ -308,7 +324,7 @@ BookmarkAutoImporter.run = async () => {
                     };
                     created++;
                 } else if (BookmarkAutoImporter.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
-                    BookmarkAutoImporter.updateStatus(`📧 正在更新书签 (${i + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                    BookmarkAutoImporter.updateStatus(`📧 正在更新书签 (${index + 1}/${currentBookmarks.length}): ${bookmark.title}`);
                     const properties = BookmarkAutoImporter.needsFullRefresh(bookmark, snapshotEntry, pageMeta)
                         ? BookmarkExporter.buildProperties(await BookmarkExporter.enrichBookmark(bookmark, settings, enrichContext))
                         : BookmarkAutoImporter.buildMinimalProperties(bookmark);
@@ -340,14 +356,16 @@ BookmarkAutoImporter.run = async () => {
                 }
             }
 
-            if (delay > 0 && i < currentBookmarks.length - 1) {
+            if (delay > 0 && index < currentBookmarks.length - 1) {
                 await Utils.sleep(delay);
             }
-        }
+        };
+
+        await processInBatches(currentBookmarks, processBookmark);
 
         const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
-        for (let i = 0; i < deletedIds.length; i++) {
-            const bookmarkId = deletedIds[i];
+
+        const processDeleted = async (bookmarkId, index) => {
             const snapshotEntry = previousSnapshot[bookmarkId];
             const pageMeta = (snapshotEntry?.pageId ? index.byPageId.get(snapshotEntry.pageId) : null)
                 || index.byBookmarkId.get(bookmarkId)
@@ -355,12 +373,12 @@ BookmarkAutoImporter.run = async () => {
 
             if (!pageMeta?.pageId) {
                 archived++;
-                continue;
+                return;
             }
 
             try {
                 const itemLabel = snapshotEntry?.title || snapshotEntry?.url || bookmarkId;
-                BookmarkAutoImporter.updateStatus(`🗃️ 正在归档已删除书签 (${i + 1}/${deletedIds.length}): ${itemLabel}`);
+                BookmarkAutoImporter.updateStatus(`🗃️ 正在归档已删除书签 (${index + 1}/${deletedIds.length}): ${itemLabel}`);
                 await NotionAPI.deletePage(pageMeta.pageId, settings.apiKey);
                 archived++;
             } catch (error) {
@@ -369,10 +387,12 @@ BookmarkAutoImporter.run = async () => {
                 nextSnapshot[bookmarkId] = snapshotEntry;
             }
 
-            if (delay > 0 && i < deletedIds.length - 1) {
+            if (delay > 0 && index < deletedIds.length - 1) {
                 await Utils.sleep(delay);
             }
-        }
+        };
+
+        await processInBatches(deletedIds, (id, idx) => processDeleted(id, idx));
 
         SyncState.updateBookmarkState({
             snapshot: nextSnapshot,

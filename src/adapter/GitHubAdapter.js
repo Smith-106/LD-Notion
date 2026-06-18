@@ -3,6 +3,8 @@
 const { SourceAdapter } = require("./SourceAdapter");
 const { GitHubAPI } = require("../import");
 const { SyncState } = require("../storage");
+const { CONFIG } = require("../config");
+const { Storage } = require("../storage");
 
 /**
  * GitHubAdapter — 支持 stars/repos/forks/gists 四种子类型
@@ -63,8 +65,8 @@ function createGitHubAdapter(subType) {
         },
 
         async _fetchByType() {
-            const username = GitHubAPI._getUsername ? GitHubAPI._getUsername() : "";
-            const token = "";
+            const username = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
+            const token = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
             if (subType === "stars") return GitHubAPI.fetchStarredRepos(username, token);
             if (subType === "repos") return GitHubAPI.fetchUserRepos(username, token);
             if (subType === "forks") return GitHubAPI.fetchForkedRepos(username, token);
