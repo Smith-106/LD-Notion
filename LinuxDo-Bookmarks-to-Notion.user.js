@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.7.0
+// @version      3.7.1
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -22867,11 +22867,11 @@ ${availableTools}
             parentId: String(page?.parent?.database_id || page?.parent?.page_id || "").replace(/-/g, ""),
         }),
 
-        extractWorkspaceVisualRecord: (page, databases = []) => {
+        extractWorkspaceVisualRecord: (page, databasesMap = new Map()) => {
             const summary = UI.mapWorkspacePageSummary(page);
             const dateInfo = UI.getWorkspaceVisualDate(page);
             const category = UI.getWorkspaceVisualCategory(page);
-            const sourceInfo = UI.inferWorkspaceVisualSource(page, databases);
+            const sourceInfo = UI.inferWorkspaceVisualSource(page, Array.from(databasesMap.values()));
             const sourceUrl = UI.getWorkspaceVisualSourceUrl(page);
             const hasSource = sourceInfo.source && sourceInfo.source !== "未标记";
             const hasDate = !!dateInfo;
@@ -22886,7 +22886,7 @@ ${availableTools}
                 parentType: summary.parent,
                 parentDatabaseId: summary.parent === "database_id" ? summary.parentId : "",
                 parentPageId: summary.parent === "page_id" ? summary.parentId : "",
-                parentDatabaseTitle: databases.find((db) => db.id === summary.parentId)?.title || "",
+                parentDatabaseTitle: databasesMap.get(summary.parentId)?.title || "",
                 source: sourceInfo.source,
                 sourceType: sourceInfo.sourceType,
                 category,
@@ -22976,7 +22976,7 @@ ${availableTools}
             const timelineCounts = new Map();
             const relationshipCounts = new Map();
             const recognizedSources = new Set();
-            const duplicateGroups = new Map();
+            const linkGroups = new Map();
             let sourcedPages = 0;
             let datedPages = 0;
             let categorizedPages = 0;
@@ -23040,30 +23040,26 @@ ${availableTools}
                     if (record?.hasSource) existingDuplicate.sources.add(sourceLabel);
                     duplicateGroups.set(duplicateKey, existingDuplicate);
                 }
-            });
 
-            const linkGroups = new Map();
-            records.forEach((record) => {
                 const linkKey = UI.normalizeWorkspaceInsightUrl(record?.url);
-                if (!linkKey) return;
-                const sourceLabel = record?.source || "未标记";
-                const parentLabel = UI.getWorkspaceVisualParentLabel(record);
-                const existingGroup = linkGroups.get(linkKey) || {
-                    key: linkKey,
-                    title: String(record?.title || "").trim() || String(record?.url || "").trim() || "未命名页面",
-                    url: String(record?.url || "").trim(),
-                    items: [],
-                    sources: new Set(),
-                };
-                existingGroup.items.push({
-                    id: record?.id || "",
-                    title: String(record?.title || "").trim() || "未命名页面",
-                    source: sourceLabel,
-                    parentLabel,
-                    url: record?.url || "",
-                });
-                if (record?.hasSource) existingGroup.sources.add(sourceLabel);
-                linkGroups.set(linkKey, existingGroup);
+                if (linkKey) {
+                    const existingGroup = linkGroups.get(linkKey) || {
+                        key: linkKey,
+                        title: String(record?.title || "").trim() || String(record?.url || "").trim() || "未命名页面",
+                        url: String(record?.url || "").trim(),
+                        items: [],
+                        sources: new Set(),
+                    };
+                    existingGroup.items.push({
+                        id: record?.id || "",
+                        title: String(record?.title || "").trim() || "未命名页面",
+                        source: sourceLabel,
+                        parentLabel,
+                        url: record?.url || "",
+                    });
+                    if (record?.hasSource) existingGroup.sources.add(sourceLabel);
+                    linkGroups.set(linkKey, existingGroup);
+                }
             });
 
             const toBreakdown = (map) => Array.from(map.entries())
@@ -24581,8 +24577,16 @@ ${availableTools}
                     },
                 });
 
-                const pages = pageObjects.map((page) => UI.mapWorkspacePageSummary(page)).filter((item) => item.id);
-                const records = pageObjects.map((page) => UI.extractWorkspaceVisualRecord(page, databases)).filter((item) => item.id);
+                const databasesMap = new Map(databases.map((d) => [d.id, d]));
+                const pages = [];
+                const records = [];
+                pageObjects.forEach((page) => {
+                    const summary = UI.mapWorkspacePageSummary(page);
+                    if (summary.id) {
+                        pages.push(summary);
+                        records.push(UI.extractWorkspaceVisualRecord(page, databasesMap));
+                    }
+                });
                 const finalWorkspaceData = WorkspaceService.persistWorkspaceData(apiKey, {
                     databases,
                     pages,
