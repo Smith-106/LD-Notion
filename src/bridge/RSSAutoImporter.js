@@ -488,7 +488,10 @@ const RSSAutoImporter = {
             RSSAutoImporter.updateStatus("正在同步 RSS Feed...");
 
             // 使用 SyncCoordinator 获取增量同步概要 (统一状态管理)
-            await SyncCoordinator.sync("rss");
+            const syncResult = await SyncCoordinator.sync("rss");
+            if (syncResult.error) {
+                throw new Error(syncResult.error);
+            }
 
             const setupResult = await BookmarkExporter.setupDatabaseProperties(settings.databaseId, settings.apiKey);
             if (!setupResult.success) {
@@ -499,7 +502,16 @@ const RSSAutoImporter = {
             const previousSnapshot = previousState?.snapshot && typeof previousState.snapshot === "object"
                 ? previousState.snapshot
                 : {};
-            const { items: currentItems, feedCount } = await RSSAutoImporter.loadCurrentItems();
+
+            // 优先使用 SyncCoordinator 返回的增量条目，降级时回退到 loadCurrentItems
+            let currentItems = syncResult.newItems || [];
+            let feedCount = RSSAutoImporter.getFeedUrls().length;
+            if (currentItems.length === 0) {
+                const fallback = await RSSAutoImporter.loadCurrentItems();
+                currentItems = fallback.items || [];
+                feedCount = fallback.feedCount || feedCount;
+            }
+
             const trackedPages = await RSSAutoImporter.fetchTrackedPages(settings.databaseId, settings.apiKey);
             const index = RSSAutoImporter.buildPageIndex(trackedPages);
             const nextSnapshot = {
