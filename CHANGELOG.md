@@ -1,0 +1,28 @@
+# 更新日志
+
+## [3.7.0] - 2026-06-17
+
+### 新增
+
+- 扩展测试覆盖率：新增 263 个用例，覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、RSS/Atom 解析、GitHub/书签/通用导出等 17 个模块，总计 349/349 用例通过，收敛判定 PASS，置信度 0.85
+- 交付前 13 维度检查：覆盖需求、测试有效性、回归、代码质量、异常处理、安全、性能、兼容性、数据迁移、部署、监控/日志、回滚、文档/交接
+
+### 修复
+
+- 安全：收紧 Userscript 权限域，将 `@match *://*/*` 与 `@connect *` 替换为显式域名与 `@include` 正则白名单，降低横向请求风险
+- 架构：完成 P1 架构升级，消除 SyncState V1/V2 双写，引入 V1→V2 facade 迁移与 SyncLock 解决 `export`↔`bridge` 循环依赖
+- 性能：修复 PERF-004，`DedupStore` 批量模式改为 `queueMicrotask` 防抖写入，减少 GM_setValue IPC 次数
+- 代码质量：拆分 god module，修复 COR-008/COR-012/SEC-006 遗漏项；删除 dead code (`src/ui/SyncSettings.js`)，清理未使用导入与重复对象键
+
+### 变更
+
+- `package.json`、`build.js` 与根目录 `.user.js` 的 `@version` 同步递增到 `3.7.0`
+- `package-lock.json` 同步更新 `esbuild@^0.28.1` 与 `vitest@^4.1.8`
+
+### 验证
+
+- `npm test`：17 个测试文件、349 个用例全部通过
+- `node build.js`：零警告构建
+- `node --check LinuxDo-Bookmarks-to-Notion.user.js`：语法检查通过
+
+[3.7.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.0
