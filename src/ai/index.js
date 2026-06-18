@@ -5913,7 +5913,7 @@ compound 格式（仅当 intent 为 compound 时使用）：
 
         try {
             const response = await AIService.requestChat(
-                `${systemPrompt}\n\n用户指令：${userMessage}`,
+                `${systemPrompt}\n\n<user_input>\n${userMessage}\n</user_input>`,
                 settings,
                 800
             );
@@ -6277,9 +6277,21 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
         if (!response) return null;
         const trimmed = response.trim();
         // 尝试直接解析整个响应为 JSON
+        let parsed = null;
         try {
-            const parsed = JSON.parse(trimmed);
+            parsed = JSON.parse(trimmed);
             if (parsed.tool && typeof parsed.tool === "string") {
+                // 白名单校验：tool 必须在 AI_AGENT_TOOLS 中定义
+                const toolDef = AI_AGENT_TOOLS[parsed.tool];
+                if (!toolDef) {
+                    console.warn(`[LD-Notion] _tryParseToolCall: 拒绝未知工具 "${parsed.tool}"`);
+                    return null;
+                }
+                // 参数类型校验：args 必须是对象
+                if (parsed.args !== undefined && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
+                    console.warn(`[LD-Notion] _tryParseToolCall: 工具 "${parsed.tool}" 的参数类型无效`);
+                    return null;
+                }
                 return parsed;
             }
         } catch {}
@@ -6287,8 +6299,19 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
         const jsonMatch = trimmed.match(/\{[\s\S]*"tool"\s*:\s*"[\s\S]*\}/);
         if (jsonMatch) {
             try {
-                const parsed = JSON.parse(jsonMatch[0]);
+                parsed = JSON.parse(jsonMatch[0]);
                 if (parsed.tool && typeof parsed.tool === "string") {
+                    // 白名单校验：tool 必须在 AI_AGENT_TOOLS 中定义
+                    const toolDef = AI_AGENT_TOOLS[parsed.tool];
+                    if (!toolDef) {
+                        console.warn(`[LD-Notion] _tryParseToolCall: 拒绝未知工具 "${parsed.tool}"`);
+                        return null;
+                    }
+                    // 参数类型校验：args 必须是对象
+                    if (parsed.args !== undefined && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
+                        console.warn(`[LD-Notion] _tryParseToolCall: 工具 "${parsed.tool}" 的参数类型无效`);
+                        return null;
+                    }
                     return parsed;
                 }
             } catch {}
@@ -6336,7 +6359,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
         };
 
         const personaBlock = persona.instructions
-            ? `\n个性化指令：${persona.instructions}`
+            ? `\n个性化指令：${String(persona.instructions).slice(0, 500).replace(/<system|ignore previous|ignore all previous|disregard|you are now|new instructions/gi, "[已过滤]")}`
             : "";
 
         const systemPrompt = `你是${persona.name}，一个专注于${persona.expertise}的助手。语气风格：${persona.tone}。${personaBlock}
@@ -6359,7 +6382,7 @@ ${availableTools}
 7. 参数值必须是具体的值，不要用占位符`;
 
         // 2. Agent 循环
-        const messages = [{ role: "user", content: userMessage }];
+        const messages = [{ role: "user", content: `<user_input>\n${userMessage}\n</user_input>` }];
         let iteration = 0;
 
         while (iteration < maxIterations) {
@@ -6410,14 +6433,41 @@ ${availableTools}
                     { source: "tool", name: toolCall.tool, status: "error" }
                 );
             } else {
-                try {
-                    result = await tool.execute(toolCall.args || {}, settings);
-                } catch (e) {
-                    result = AIAssistant._normalizeExecutionResult(`错误: ${e.message}`, {
-                        source: "tool",
-                        name: toolCall.tool,
-                        status: "error",
-                    });
+                // Level >= 1 的写入操作需要用户确认
+                if (tool.level >= 1) {
+                    try {
+                        result = await OperationGuard.execute(toolCall.tool, async () => {
+                            return await tool.execute(toolCall.args || {}, settings);
+                        }, {
+                            source: "ai-agent-loop",
+                            actor: "ai",
+                            itemName: toolCall.tool,
+                            trigger: "ai_tool_execution",
+                        });
+                    } catch (guardError) {
+                        if (guardError.message === "操作已取消") {
+                            result = AIAssistant._normalizeExecutionResult(
+                                `错误: 用户取消了 "${toolCall.tool}" 操作的执行`,
+                                { source: "tool", name: toolCall.tool, status: "cancelled" }
+                            );
+                        } else {
+                            result = AIAssistant._normalizeExecutionResult(`错误: ${guardError.message}`, {
+                                source: "tool",
+                                name: toolCall.tool,
+                                status: "error",
+                            });
+                        }
+                    }
+                } else {
+                    try {
+                        result = await tool.execute(toolCall.args || {}, settings);
+                    } catch (e) {
+                        result = AIAssistant._normalizeExecutionResult(`错误: ${e.message}`, {
+                            source: "tool",
+                            name: toolCall.tool,
+                            status: "error",
+                        });
+                    }
                 }
             }
 
