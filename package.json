@@ -13,7 +13,7 @@
     "verify:bridge-extension": "node scripts/verify-bridge-extension.js",
     "verify:extension:surfaces": "node scripts/verify-extension-surfaces.js",
     "verify:equivalence": "node scripts/verify-bundle-equivalence.js",
-    "verify:delivery": "npm run verify:baseline && npm run verify:extension:bounded && npm run verify:bridge-extension && npm run verify:extension:surfaces && npm run verify:equivalence && npm run build:extension",
+    "verify:delivery": "npm run verify:baseline && npm run build && npm run verify:extension:bounded && npm run verify:bridge-extension && npm run verify:extension:surfaces && npm run verify:equivalence && npm run build:extension",
     "build": "node build.js",
     "verify:build": "node build.js && node --check dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q 'LD-NOTION-BUILD:USER_SCRIPT_BODY_START' dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q 'LD-NOTION-BUILD:BOOKMARK_BRIDGE_START' dist/LinuxDo-Bookmarks-to-Notion.user.js",
     "docs:dev": "vitepress docs",
