@@ -46,6 +46,32 @@ flowchart TD
 - 非敏感配置仍保存在浏览器本地存储中，例如目标数据库 ID、面板位置、来源偏好和 OAuth 的 `Client ID` / `Redirect URI`。
 - 「断开授权」只清除本地 access token / refresh token，不会撤销 Notion 后台已经批准的授权，也不会自动删除你保留的 OAuth 基础配置。
 
+## v3.7.0 安全加固
+
+v3.7.0 对用户脚本权限域和 AI 输入链路做了系统性加固：
+
+### Userscript 权限域收窄
+
+- `@match` 从 `*://*/*` 替换为 6 个显式站点模式（linux.do、notion.so、github.com、zhihu.com）。
+- `@connect` 从 `*` 替换为 9 个显式域名白名单（api.notion.com、linux.do、s3.amazonaws.com、api.openai.com、api.anthropic.com、generativelanguage.googleapis.com、api.github.com、zhihu.com）。
+- 新增 `@include` 正则白名单 + `@exclude` 排除搜索引擎/邮箱/localhost，提供纵深防御。
+- 这阻止了用户脚本向任意域名发起网络请求（如攻击者控制的 exfil 端点）。
+
+### AI Prompt Injection 多层防御
+
+- **XML 标签隔离**：AI 分类 prompt 将用户内容包裹在 `<user_content>` XML 标签中，与系统指令分离，降低 prompt injection 风险。
+- **ChatUI 输出净化**：`escapeHtml` 使用浏览器原生 `textContent→innerHTML` 转义；`safeMarkdown` 先转义全部 HTML，再选择性恢复安全 Markdown 格式（粗体、换行），防止注入 HTML/JS 在聊天 UI 中渲染。
+- **UI 全局 escapeHtml**：所有用户可控文本（数据库名、页面标题、错误消息、书签标题、标签、文件名等）在插入 HTML 前统一经过 `Utils.escapeHtml` 转义，覆盖 50+ 处拼接点。
+
+### OperationGuard setLevel 验证
+
+`setLevel` 方法现在强制校验输入值必须为 0-3 的整数，拒绝 `NaN`、`Infinity`、负数或超范围值，防止无效权限级别绕过权限系统。
+
+### 已知待办
+
+- **Extension SSRF 白名单严格匹配**：当前 background service worker 的 URL 白名单使用简单字符串匹配，可被 `evil.amazonaws.com.attacker.com` 绕过。应改用 URL 构造函数解析 hostname 后精确匹配，并限制协议为 https、端口为默认端口。
+- **Extension CredentialVault 移植**：Chrome Extension 版本中 API key 通过 `chrome.storage.local` 明文存储，CredentialVault AES-256-GCM 加密机制尚未移植到 Extension 侧。
+
 ## 推荐安全实践
 
 - 日常使用保持「标准」权限。

@@ -37,6 +37,15 @@ mindmap
       Manual Token
       本地加密保险箱
       失效处理
+    Prompt Injection Defense
+      XML 标签隔离
+      输出净化
+      UI 全局转义
+    SyncState V1/V2
+      V2 扁平结构
+      V1 facade 代理
+      自动迁移
+      写入优化
     Extension Architecture
       userscript
       content script
@@ -55,4 +64,6 @@ mindmap
 | [OperationGuard](/concepts/operation-guard) | 解释写入动作前的权限、确认、审计和撤销边界。 |
 | [AI Agent Loop](/concepts/ai-agent-loop) | 解释 AI 助手如何 observe、plan、act，并再次观察结果。 |
 | [Auth Model](/concepts/auth-model) | 解释 Notion OAuth、manual token、本地加密保险箱和授权失败处理。 |
+| [Prompt Injection Defense](/concepts/prompt-injection-defense) | 解释 AI 输入隔离、输出净化和 UI 全局转义的多层防御体系。 |
+| [SyncState V1/V2 迁移](/concepts/syncstate-migration) | 解释 SyncState 从嵌套 V1 到扁平 V2 的迁移、facade 代理和写入优化。 |
 | [Extension Architecture](/concepts/extension-architecture) | 解释 userscript、Chrome 扩展、构建 seam、权限和部署边界。 |

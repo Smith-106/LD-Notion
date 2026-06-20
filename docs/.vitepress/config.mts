@@ -40,7 +40,9 @@ export default defineConfig({
           { text: 'Import Pipeline', link: '/concepts/import-pipeline' },
           { text: 'OperationGuard', link: '/concepts/operation-guard' },
           { text: 'AI Agent Loop', link: '/concepts/ai-agent-loop' },
-          { text: 'Auth Model', link: '/concepts/auth-model' }
+          { text: 'Auth Model', link: '/concepts/auth-model' },
+          { text: 'Prompt Injection Defense', link: '/concepts/prompt-injection-defense' },
+          { text: 'SyncState V1/V2 迁移', link: '/concepts/syncstate-migration' }
         ]
       },
       {

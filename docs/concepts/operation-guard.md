@@ -80,6 +80,29 @@ flowchart TD
 | 用户要求 override | 只能通过提升权限等级和完成确认实现；不能跳过 Guard。 |
 | 可撤销性 | 只对明确支持恢复的动作提供撤销提示；永久删除块不承诺可撤销。 |
 
+## setLevel 验证
+
+`setLevel` 方法强制校验输入值必须为 0-3 的整数，拒绝 `NaN`、`Infinity`、负数或超范围值。这防止了无效权限级别绕过权限系统。
+
+```javascript
+setLevel: (level) => {
+    if (!Number.isFinite(level) || !Number.isInteger(level) || level < 0 || level > 3) {
+        throw new Error(`无效的权限级别: ${level}，应为 0-3 的整数`);
+    }
+    Storage.set(CONFIG.STORAGE_KEYS.PERMISSION_LEVEL, level);
+},
+```
+
+## AI prompt injection 防御
+
+AI 触发的写入操作除了经过 OperationGuard 权限检查外，还受到 prompt injection 多层防御保护：
+
+1. **输入隔离**：用户内容包裹在 `<user_content>` XML 标签中，与系统指令分离。
+2. **输出净化**：`escapeHtml` + `safeMarkdown` 确保聊天 UI 不会渲染注入的 HTML/JS。
+3. **UI 全局转义**：所有用户可控文本在插入 HTML 前统一经过 `Utils.escapeHtml`。
+
+详见 [Prompt Injection Defense](/concepts/prompt-injection-defense)。
+
 ## Audit contract
 
 每次受控写入都应生成 audit event，至少包含 actor、source、operation、target、decision、result 和 redaction 信息。Token、OAuth Client Secret、AI API Key、GitHub Token 与 Obsidian API Key 必须被脱敏。

@@ -77,3 +77,17 @@ sequenceDiagram
 - Background service worker SHOULD be treated as the privileged control plane。
 - Extension messages SHOULD have explicit `type` and payload shape。
 - Secrets MUST stay in encrypted extension or userscript storage payloads, not in page DOM。
+
+## 已知安全待办
+
+### SSRF 白名单严格匹配
+
+当前 background service worker 的 URL 白名单使用简单字符串匹配，可被 `evil.amazonaws.com.attacker.com` 绕过。攻击路径：恶意网站 → content script → `chrome.runtime.sendMessage` → background worker → `fetch(evil URL)` → SSRF。
+
+应改用 URL 构造函数解析 hostname 后精确匹配，并限制协议为 https、端口为默认端口。
+
+### CredentialVault 移植
+
+Chrome Extension 版本中 API key 通过 `chrome.storage.local` 明文存储，CredentialVault AES-256-GCM 加密机制尚未移植到 Extension 侧。popup.js 和 content.js 中敏感键直接读取，攻击者可通过 DevTools 获取。
+
+应将 CredentialVault 的 AES-256-GCM 加密逻辑移植到 Extension service worker 中，popup/content 通过 `chrome.runtime.sendMessage` 获取加密值。
