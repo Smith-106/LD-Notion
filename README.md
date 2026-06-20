@@ -23,7 +23,7 @@
 - **原理机制**：[Concepts / 机制地图](https://smith-106.github.io/LD-Notion/concepts/)
 - **路由规则**：[Routing Rules](https://smith-106.github.io/LD-Notion/concepts/routing-rules)
 - **导入流水线**：[Import Pipeline](https://smith-106.github.io/LD-Notion/concepts/import-pipeline)
-- **安全边界**：[OperationGuard](https://smith-106.github.io/LD-Notion/concepts/operation-guard) 与 [Auth Model](https://smith-106.github.io/LD-Notion/concepts/auth-model)
+- **安全边界**：[OperationGuard](https://smith-106.github.io/LD-Notion/concepts/operation-guard)、[Auth Model](https://smith-106.github.io/LD-Notion/concepts/auth-model) 与 [Prompt Injection Defense](https://smith-106.github.io/LD-Notion/concepts/prompt-injection-defense)
 - **扩展与部署**：[Chrome Extension Architecture](https://smith-106.github.io/LD-Notion/extension/architecture) 与 [Deployment](https://smith-106.github.io/LD-Notion/reference/deployment)
 
 ## 四大核心能力
@@ -118,6 +118,10 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 - **操作守卫**：用户触发与 AI 触发的写入操作统一经过 `OperationGuard` 守卫层（权限检查 / 审计记录；危险操作额外确认）
 - **审计日志**：记录操作历史，支持查看和清除
 - **撤销支持**：危险操作提供 5 秒撤销窗口；常规写入默认记录审计，不承诺统一可撤销
+- **权限域收窄**（v3.7.0）：`@match` 从 `*://*/*` 收窄为 6 个显式站点，`@connect` 从 `*` 收窄为 9 个显式域名白名单，阻止向任意域名发起请求
+- **Prompt Injection 防御**（v3.7.0）：AI 输入用 XML 标签隔离用户内容与系统指令，输出经 `escapeHtml` + `safeMarkdown` 净化，UI 全局 50+ 处拼接点统一转义
+- **凭证保险箱**：敏感凭证（Notion Token、OAuth Secret、AI API Key、GitHub Token 等）使用 AES-256-GCM 加密存储，PBKDF2 200K 迭代派生密钥，会话内解锁后可用
+- **setLevel 验证**（v3.7.0）：权限等级设置强制校验 0-3 整数，拒绝 NaN/Infinity/超范围值
 
 ## 安装
 
@@ -353,6 +357,9 @@ A: 请检查：
 - 自动处理 API 速率限制 (429 响应自动重试)
 - AI 助手使用 ReAct Agent Loop 架构，支持多轮推理和工具调用
 - 跨源工具支持 Linux.do / GitHub / 浏览器书签统一搜索和推荐
+- SyncState V1/V2 迁移（v3.7.0）：消除双写，V1 facade 代理 V2，自动迁移幂等安全
+- DedupStore 批量优化（v3.7.0）：`beginBatch/endBatch` 减少同步循环 IPC，`queueMicrotask` 合并写入
+- 模块化源码（`src/`）经 esbuild 打包为单文件 `.user.js`（1.2MB），同时生成 Chrome Extension 变体
 
 ## 开发与验证
 
@@ -364,7 +371,7 @@ A: 请检查：
   5. 如涉及扩展交付：`node scripts/build-extension.js`
   6. 最后按 `docs/ui-regression-checklist.md` 做 Linux.do / Notion / 通用网页 / `chrome-extension-full` 手工 smoke
 - 一键交付验证：`npm run verify:delivery`（包含 baseline、`bounded_hosts` smoke、bridge runtime smoke 与默认扩展构建）
-- `npm test`：运行 `tests/utils.test.js`、`tests/logic-modules.test.js` 和 `tests/notion-oauth.test.js`
+- `npm test`：17 个测试文件、349 个用例，覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、RSS/Atom 解析、GitHub/书签/通用导出等模块
 - Node 测试会直接读取并执行当前 `LinuxDo-Bookmarks-to-Notion.user.js` 的核心代码，并复用 `scripts/build-extension.js` 的提取/构建 seam，而不是维护一份单独的测试副本
 - 当前自动化验证重点覆盖：Utils 辅助函数、OAuth 回调与 refresh fallback、`TargetState`、`quickParseIntent` 正/反例、`assistant_result v1` 输出契约，以及 `scripts/build-extension.js` 的锚点、builder seam、manifest profile、bridge runtime 边界与构建冒烟
 - 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）
@@ -389,6 +396,23 @@ A: 请检查：
 - 已上传扩展安装包：<https://github.com/Smith-106/LD-Notion/releases/download/v3.7.1/ld-notion-extension-v3.7.1.zip>
 
 - Tag：`v3.7.1`
+
+### v3.7.0
+
+本次版本聚焦「架构升级 + 安全加固 + 测试扩展」，核心目标是消除 SyncState 双写、收紧权限域、扩展测试覆盖。
+
+- 安全：`@match` 从 `*://*/*` 收窄为 6 个显式站点，`@connect` 从 `*` 收窄为 9 个显式域名白名单
+- 安全：AI prompt injection 多层防御——XML 标签隔离 + `escapeHtml`/`safeMarkdown` 输出净化 + UI 全局 50+ 处转义
+- 安全：`OperationGuard.setLevel` 强制校验 0-3 整数，拒绝无效权限级别
+- 架构：完成 SyncState V1/V2 迁移，V1 改为 V2 facade 代理，消除双写，自动迁移幂等安全
+- 架构：`SyncStateV2._save` 使用 `queueMicrotask` 合并写入，减少 IPC 开销
+- 架构：`DedupStore` 批量模式 `beginBatch/endBatch`，同步循环中减少数百次 IPC
+- 架构：拆分 god module，修复 COR-008/COR-012/SEC-006 遗漏项；删除 dead code，清理未使用导入与重复对象键
+- 测试：新增 263 个用例，覆盖 17 个模块，总计 349/349 通过
+- 交付：13 维度交付前检查，覆盖需求/测试/安全/性能/兼容性/部署等
+- 已发布 Release：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.0>
+
+- Tag：`v3.7.0`
 
 ### v3.6.7
 
@@ -601,8 +625,6 @@ A: 请检查：
 
 ### v1.0.0
 - 初始版本发布
-
-## 致谢
 
 ## 致谢
 
