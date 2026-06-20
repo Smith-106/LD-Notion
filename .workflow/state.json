@@ -39,175 +39,30 @@
       ]
     }
   ],
-  "artifacts": [
-    {
-      "id": "ANL-001",
-      "type": "analyze",
-      "scope": "standalone",
-      "status": "completed",
-      "milestone": null,
-      "phase": null,
-      "path": "scratch/20260613-analyze-ldnotion",
-      "context_package": "scratch/20260613-analyze-ldnotion/context-package.json",
-      "harvested": true,
-      "created_at": "2026-06-13T00:00:00+08:00",
-      "completed_at": "2026-06-13T00:30:00+08:00"
-    },
-    {
-      "id": "BRN-001",
-      "type": "brainstorm",
-      "scope": "standalone",
-      "status": "completed",
-      "milestone": null,
-      "phase": null,
-      "path": "scratch/20260613-brainstorm-active-reqs",
-      "context_package": null,
-      "harvested": true,
-      "created_at": "2026-06-13T00:30:00+08:00",
-      "completed_at": "2026-06-13T00:50:00+08:00"
-    },
-    {
-      "id": "PLN-001",
-      "type": "plan",
-      "scope": "phase",
-      "status": "completed",
-      "milestone": "M1",
-      "phase": 1,
-      "path": "scratch/20260613-plan-ldnotion-upgrade",
-      "context_package": null,
-      "harvested": true,
-      "depends_on": "ANL-001",
-      "created_at": "2026-06-13T01:00:00+08:00",
-      "completed_at": "2026-06-14T14:30:00+08:00"
-    },
-    {
-      "id": "DBG-001",
-      "type": "debug",
-      "scope": "standalone",
-      "status": "completed",
-      "milestone": null,
-      "phase": null,
-      "path": "scratch/20260613-debug-risk-scan",
-      "context_package": null,
-      "harvested": true,
-      "created_at": "2026-06-13T01:10:00+08:00",
-      "completed_at": "2026-06-13T01:20:00+08:00"
-    },
-    {
-      "id": "REV-001",
-      "type": "review",
-      "milestone": "M1",
-      "phase": 1,
-      "scope": "phase",
-      "path": "scratch/20260616-review-P1-arch-upgrade",
-      "status": "completed",
-      "depends_on": "PLN-001",
-      "harvested": false,
-      "created_at": "2026-06-16T17:00:00+08:00",
-      "completed_at": "2026-06-16T17:30:00+08:00"
-    },
-    {
-      "id": "TST-001",
-      "type": "test",
-      "milestone": "M1",
-      "phase": 1,
-      "scope": "phase",
-      "path": "scratch/20260617-test-coverage",
-      "status": "completed",
-      "depends_on": "REV-001",
-      "harvested": false,
-      "created_at": "2026-06-17T03:00:00+08:00",
-      "completed_at": "2026-06-17T12:41:00+08:00"
-    },
-    {
-      "id": "AUD-001",
-      "type": "audit",
-      "milestone": "M1",
-      "phase": 1,
-      "scope": "milestone",
-      "path": "scratch/20260618-milestone-audit-M1",
-      "status": "completed",
-      "depends_on": "TST-001",
-      "harvested": false,
-      "created_at": "2026-06-18T12:30:00+08:00",
-      "completed_at": "2026-06-18T12:30:00+08:00"
-    },
-    {
-      "id": "REV-002",
-      "type": "review",
-      "milestone": "M1",
-      "phase": 1,
-      "scope": "phase",
-      "path": "scratch/20260618-review-P1-pre-delivery",
-      "status": "completed",
-      "depends_on": "AUD-001",
-      "harvested": false,
-      "created_at": "2026-06-18T12:45:00+08:00",
-      "completed_at": "2026-06-18T12:45:00+08:00"
-    },
-    {
-      "id": "TST-002",
-      "type": "test",
-      "milestone": "M1",
-      "phase": 1,
-      "scope": "phase",
-      "path": "scratch/20260618-auto-test-P1-pre-delivery",
-      "status": "completed",
-      "depends_on": "REV-002",
-      "harvested": false,
-      "created_at": "2026-06-18T12:50:00+08:00",
-      "completed_at": "2026-06-18T12:50:00+08:00"
-    },
-    {
-      "id": "TST-003",
-      "type": "test",
-      "milestone": "M1",
-      "phase": 1,
-      "scope": "phase",
-      "path": "scratch/20260618-test-P1-pre-delivery",
-      "status": "completed",
-      "depends_on": "TST-002",
-      "harvested": false,
-      "created_at": "2026-06-18T12:55:00+08:00",
-      "completed_at": "2026-06-18T12:55:00+08:00"
-    },
-    {
-      "id": "DBG-002",
-      "type": "debug",
-      "milestone": "M1",
-      "phase": 1,
-      "scope": "phase",
-      "path": "scratch/20260618-test-P1-pre-delivery/.debug",
-      "status": "completed",
-      "depends_on": "TST-003",
-      "harvested": false,
-      "created_at": "2026-06-18T13:45:00+08:00",
-      "completed_at": "2026-06-18T13:55:00+08:00"
-    },
-    {
-      "id": "PLN-002",
-      "type": "plan",
-      "milestone": "M1",
-      "phase": 1,
-      "scope": "phase",
-      "path": "scratch/20260618-plan-P1-gaps-fix",
-      "status": "completed",
-      "depends_on": "DBG-002",
-      "harvested": false,
-      "created_at": "2026-06-18T14:00:00+08:00",
-      "completed_at": "2026-06-18T14:05:00+08:00"
-    }
+  "artifacts": [],
+  "artifact_archive": [
+    {"id":"ANL-001","type":"analyze","milestone":null,"path":"scratch/20260613-analyze-ldnotion","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-analyze-ANL-001","summary":"Codebase analysis — 18 fragments → 5 spec, 6 wiki, 7 issue"},
+    {"id":"BRN-001","type":"brainstorm","milestone":null,"path":"scratch/20260613-brainstorm-active-reqs","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-brainstorm-BRN-001","summary":"Active requirements brainstorm — 6 fragments → 3 spec, 3 wiki"},
+    {"id":"PLN-001","type":"plan","milestone":"M1","path":"scratch/20260613-plan-ldnotion-upgrade","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-plan-PLN-001","summary":"P1 upgrade plan — merged into existing issues"},
+    {"id":"DBG-001","type":"debug","milestone":null,"path":"scratch/20260613-debug-risk-scan","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-debug-DBG-001","summary":"Risk scan — 5 fragments → 3 issue, 2 wiki"},
+    {"id":"REV-001","type":"review","milestone":"M1","path":"scratch/20260616-review-P1-arch-upgrade","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-review-REV-001","summary":"P1 deep review 99 findings (8C+24H+56M+11L) — all fixed F1-F29"},
+    {"id":"TST-001","type":"test","milestone":"M1","path":"scratch/20260617-test-coverage","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-test-TST-001","summary":"Test coverage 349/349 pass, 263 new tests, delivery-check 4.5/10"},
+    {"id":"AUD-001","type":"audit","milestone":"M1","path":"scratch/20260618-milestone-audit-M1","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-audit-AUD-001","summary":"M1 milestone audit — conditional PASS, 9 legacy items"},
+    {"id":"REV-002","type":"review","milestone":"M1","path":"scratch/20260618-review-P1-pre-delivery","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-review-REV-002","summary":"P1 pre-delivery review 79 findings (6C+30H+32M+11L), 6 UAT gaps fixed"},
+    {"id":"TST-002","type":"test","milestone":"M1","path":"scratch/20260618-auto-test-P1-pre-delivery","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-test-TST-002","summary":"Auto-test 349/349 pass, 12 scenarios L1"},
+    {"id":"TST-003","type":"test","milestone":"M1","path":"scratch/20260618-test-P1-pre-delivery","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-test-TST-003","summary":"UAT 4 pass / 6 pending (diagnosed+fixed via DBG-002→VRF-001)"},
+    {"id":"DBG-002","type":"debug","milestone":"M1","path":"scratch/20260618-test-P1-pre-delivery/.debug","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-debug-DBG-002","summary":"6 clusters diagnosed: 8 critical + 6 high root causes"},
+    {"id":"PLN-002","type":"plan","milestone":"M1","path":"scratch/20260618-plan-P1-gaps-fix","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-plan-PLN-002","summary":"Gap fix plan 6 tasks in 2 waves, confidence 0.95"},
+    {"id":"EXC-001","type":"execute","milestone":"M1","path":"scratch/20260618-plan-P1-gaps-fix","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-execute-EXC-001","summary":"Executed 6 gap-fix tasks, all verified"},
+    {"id":"VRF-001","type":"verify","milestone":"M1","path":"scratch/20260618-plan-P1-gaps-fix/verification.json","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-verify-VRF-001","summary":"Verification passed: 24 must-haves, coverage=1.0, 349/349 tests"}
   ],
-  "last_updated": "2026-06-18T12:55:00+08:00",
+  "last_updated": "2026-06-20T12:00:00+08:00",
+  "last_pruned": "2026-06-20T12:00:00+08:00",
   "accumulated_context": {
     "key_decisions": [
       "v3.5.0: 文件处理系统全面升级（54种文件类型、去重上传、多分片、video/audio block）",
-      "架构: 单文件 Userscript + Chrome Extension 双形态",
       "认证: 支持 Manual API Key + OAuth 双模式",
-      "AI: 多服务商（OpenAI/Anthropic/Gemini）统一接口",
-      "分析: 构建系统升级优先于功能升级（2026-06-13）",
-      "安全: @connect白名单化+API Key加密立即执行（2026-06-13）",
-      "M1 完成: critical/high 评审问题清零，v3.7.0 已发布并 push（2026-06-18）"
+      "AI: 多服务商（OpenAI/Anthropic/Gemini）统一接口"
     ],
     "blockers": [],
     "deferred": [
@@ -231,6 +86,12 @@
         "status": "deferred",
         "reason": "最低优先级，远期规划"
       }
+    ],
+    "pruned_log": [
+      {"field": "key_decisions", "pruned": "架构: 单文件 Userscript + Chrome Extension 双形态", "reason": "deduplicated to spec: 单文件输出不变(Locked) + 纯客户端架构(Locked)", "pruned_at": "2026-06-20T12:00:00+08:00"},
+      {"field": "key_decisions", "pruned": "分析: 构建系统升级优先于功能升级（2026-06-13）", "reason": "deduplicated to spec: 构建系统升级优先于功能升级", "pruned_at": "2026-06-20T12:00:00+08:00"},
+      {"field": "key_decisions", "pruned": "安全: @connect白名单化+API Key加密立即执行（2026-06-13）", "reason": "deduplicated to spec: 安全加固立即执行", "pruned_at": "2026-06-20T12:00:00+08:00"},
+      {"field": "key_decisions", "pruned": "M1 完成: critical/high 评审问题清零，v3.7.0 已发布并 push（2026-06-18）", "reason": "deduplicated to spec: M1 条件性 PASS 关闭", "pruned_at": "2026-06-20T12:00:00+08:00"}
     ]
   },
   "transition_history": [],
