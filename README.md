@@ -384,6 +384,36 @@ A: 请检查：
 
 ## 更新日志
 
+### v3.7.2
+
+本次版本聚焦「UI 安全加固 + 可访问性 + 交互体验」，通过 UI Odyssey 全维度审查修复 10 项 Critical、29 项 High 发现，涵盖 XSS 防御、可访问性合规、交互状态完善和响应式布局。
+
+- 安全：`showStatus` 两处 innerHTML 注入加 `Utils.escapeHtml()` 防 XSS
+- 安全：Obsidian 测试状态 innerHTML 加 `escapeHtml` 防 error.message 注入
+- 安全：导出按钮加 `disabled` 防重入，避免并发操作导致数据异常
+- 安全：`showProgress` 除零防护 `total > 0`，避免 NaN 渲染
+- 修复：`showStatus` 定时器冲突——连续调用时 `clearTimeout` 旧定时器，防止新消息被提前清除
+- 修复：导出报告失败项截断 20 条 + 错误文本 120 字符，防止 DOM 爆炸
+- 修复：27 处重复 `class=""` 属性合并为单一 class，恢复丢失的间距/布局样式
+- 修复：`.ldb-report-*` 7 个 CSS 类缺失定义已补全
+- 修复：`@keyframes ldb-spin` + `.ldb-spin` CSS 缺失导致加载旋转 emoji 静止
+- 可访问性：6 个折叠区域加 `aria-expanded` / `aria-controls` / `role="button"` / `tabindex="0"` + 键盘 Enter/Space 支持
+- 可访问性：Tab 面板加 `role="tablist"` / `role="tab"` / `role="tabpanel"` + `aria-selected`
+- 可访问性：popup 状态点加 `aria-label`，链接加 `rel="noopener noreferrer"`
+- 可访问性：`prefers-reduced-motion` 选择器扩展覆盖所有动画元素
+- 交互：所有 `.ldb-btn` / `.gclip-btn` 变体加 `:hover` / `:active` / `:disabled` + `transition`
+- 交互：`.ldb-toggle-section` 加 `:hover` / `:active` + `cursor: pointer` + `transition`
+- 交互：`.ldb-chat-chip` / `.ldb-notion-float-btn` 加 `:active` 按下反馈
+- 交互：`.ldb-progress-fill` 加 `transition: width 0.3s ease` 进度条动画
+- 响应式：三面板（`.ldb-panel` / `.ldb-notion-panel` / `.gclip-panel`）加 `max-width: calc(100vw - 32px)` 防窄屏溢出
+- 设计 Token：新增 `--ldb-ui-badge-teal` / `--ldb-ui-badge-blue` 替代硬编码颜色，支持暗色主题
+- 设计 Token：`.ldb-text-success` / `.ldb-text-danger` / `.ldb-text-info` / `.ldb-text-muted` 工具类
+- 设计 Token：16+ 处硬编码颜色 `#4ade80` / `#f87171` / `#60a5fa` / `#666` / `#888` / `#dc2626` / `#0f766e` / `#1d4ed8` 替换为 CSS 变量引用
+- Popup 优化：`:active` 按下反馈 + `:focus-visible` 聚焦环 + `:disabled` 禁用态 + `prefers-reduced-motion`
+
+- 已发布 Release：<https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.2>
+- Tag：`v3.7.2`
+
 ### v3.7.1
 
 本次版本聚焦「工作区可视化性能收尾 + 发布链路闭环」，重点修复大工作区下可视化模型构建的线性查找与重复遍历问题，并完成 v3.7.0 之后的发布流程收口。
