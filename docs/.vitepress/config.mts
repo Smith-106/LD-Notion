@@ -42,7 +42,8 @@ export default defineConfig({
           { text: 'AI Agent Loop', link: '/concepts/ai-agent-loop' },
           { text: 'Auth Model', link: '/concepts/auth-model' },
           { text: 'Prompt Injection Defense', link: '/concepts/prompt-injection-defense' },
-          { text: 'SyncState V1/V2 迁移', link: '/concepts/syncstate-migration' }
+          { text: 'SyncState V1/V2 迁移', link: '/concepts/syncstate-migration' },
+          { text: 'UI 设计系统', link: '/concepts/design-system' }
         ]
       },
       {

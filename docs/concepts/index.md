@@ -53,6 +53,12 @@ mindmap
       popup
       storage
       remote APIs
+    UI Design System
+      design tokens
+      theme switching
+      interaction states
+      accessibility
+      responsive layout
 ```
 
 ## 机制页用途
@@ -67,3 +73,4 @@ mindmap
 | [Prompt Injection Defense](/concepts/prompt-injection-defense) | 解释 AI 输入隔离、输出净化和 UI 全局转义的多层防御体系。 |
 | [SyncState V1/V2 迁移](/concepts/syncstate-migration) | 解释 SyncState 从嵌套 V1 到扁平 V2 的迁移、facade 代理和写入优化。 |
 | [Extension Architecture](/concepts/extension-architecture) | 解释 userscript、Chrome 扩展、构建 seam、权限和部署边界。 |
+| [UI 设计系统](/concepts/design-system) | 解释设计 token、主题切换、交互状态、可访问性和响应式布局规范。 |

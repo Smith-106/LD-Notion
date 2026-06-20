@@ -72,6 +72,31 @@ v3.7.0 对用户脚本权限域和 AI 输入链路做了系统性加固：
 - **Extension SSRF 白名单严格匹配**：当前 background service worker 的 URL 白名单使用简单字符串匹配，可被 `evil.amazonaws.com.attacker.com` 绕过。应改用 URL 构造函数解析 hostname 后精确匹配，并限制协议为 https、端口为默认端口。
 - **Extension CredentialVault 移植**：Chrome Extension 版本中 API key 通过 `chrome.storage.local` 明文存储，CredentialVault AES-256-GCM 加密机制尚未移植到 Extension 侧。
 
+## v3.7.2 UI 安全加固
+
+v3.7.2 通过 UI Odyssey 全维度审查修复了 UI 层面的安全问题：
+
+### innerHTML 注入防护
+
+- `NotionSiteUI.showStatus` 和 `UI.showStatus` 两处状态显示函数通过 `innerHTML` 渲染消息内容，此前直接插入 `message` 和 `type` 参数，存在 XSS 风险。
+- 现在两处均使用 `Utils.escapeHtml(message)` 和 `Utils.escapeHtml(type)` 对动态内容转义后再插入。
+- `GenericUI.showStatus` 使用 `textContent` 赋值，天然免疫 XSS，无需修改。
+- Obsidian 测试连接状态的 `innerHTML` 中 `result.error` 和 `e.message` 也已加 `escapeHtml`。
+
+### 导出操作防重入
+
+- `exportBtn.onclick` 和 `obsExportBtn.onclick` 入口处检查 `disabled` 状态，操作中设 `disabled = true`，`finally` 中恢复 `disabled = false`，防止并发点击导致重复导出。
+
+### 除零与 DOM 爆炸防护
+
+- `showProgress` 中 `current / total` 除法增加 `total > 0` 前置检查，避免 `total = 0` 时产生 `NaN`。
+- 导出报告失败项截断为最多 20 条，错误文本截断为 120 字符，防止大量失败项导致 DOM 爆炸。
+
+### 状态定时器冲突修复
+
+- `showStatus` 连续调用时，旧定时器可能在新消息显示期间触发 `container.innerHTML = ""`，导致新消息被提前清除。
+- 现在每次调用前先 `clearTimeout(container._statusTimer)`，确保只有最新的定时器生效。
+
 ## 推荐安全实践
 
 - 日常使用保持「标准」权限。
