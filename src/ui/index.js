@@ -124,6 +124,9 @@ const DesignSystem = {
             --ldb-ui-warning: #d97706;
             --ldb-ui-danger: #dc2626;
 
+            --ldb-ui-badge-teal: #0f766e;
+            --ldb-ui-badge-blue: #1d4ed8;
+
             --ldb-ui-focus-ring: rgba(37, 99, 235, 0.35);
             --ldb-ui-backdrop: rgba(2, 6, 23, 0.35);
 
@@ -158,6 +161,9 @@ const DesignSystem = {
             --ldb-ui-accent: #60a5fa;
             --ldb-ui-accent-2: #c4b5fd;
 
+            --ldb-ui-badge-teal: #2dd4bf;
+            --ldb-ui-badge-blue: #93c5fd;
+
             --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
             --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
         }
@@ -181,6 +187,9 @@ const DesignSystem = {
 
                 --ldb-ui-accent: #60a5fa;
                 --ldb-ui-accent-2: #c4b5fd;
+
+                --ldb-ui-badge-teal: #2dd4bf;
+                --ldb-ui-badge-blue: #93c5fd;
 
                 --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
                 --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
@@ -333,6 +342,19 @@ const DesignSystem = {
             cursor: pointer;
             user-select: none;
             font-weight: 650;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+        }
+
+        .ldb-btn:hover,
+        .gclip-btn:hover {
+            filter: brightness(1.08);
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.18);
+        }
+
+        .ldb-btn:active,
+        .gclip-btn:active {
+            transform: scale(0.97);
+            filter: brightness(0.96);
         }
 
         .ldb-btn:disabled,
@@ -347,18 +369,64 @@ const DesignSystem = {
             background: rgba(148, 163, 184, 0.12);
             color: var(--ldb-ui-text);
             font-weight: 600;
+            transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+        }
+
+        .ldb-btn-secondary:hover,
+        .gclip-btn-secondary:hover {
+            background: rgba(148, 163, 184, 0.18);
+        }
+
+        .ldb-btn-secondary:active,
+        .gclip-btn-secondary:active {
+            background: rgba(148, 163, 184, 0.22);
+            transform: scale(0.97);
+        }
+
+        .ldb-btn-secondary:disabled,
+        .gclip-btn-secondary:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
         }
 
         .ldb-btn-warning {
             border: 1px solid rgba(217, 119, 6, 0.35);
             background: linear-gradient(135deg, #f59e0b 0%, var(--ldb-ui-warning) 100%);
             color: #fff;
+            transition: filter 0.15s ease, transform 0.15s ease;
+        }
+
+        .ldb-btn-warning:hover {
+            filter: brightness(1.08);
+        }
+
+        .ldb-btn-warning:active {
+            transform: scale(0.97);
+        }
+
+        .ldb-btn-warning:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
         }
 
         .ldb-btn-danger {
             border: 1px solid rgba(220, 38, 38, 0.35);
             background: linear-gradient(135deg, #ef4444 0%, var(--ldb-ui-danger) 100%);
             color: #fff;
+            transition: filter 0.15s ease, transform 0.15s ease;
+        }
+
+        .ldb-btn-danger:hover {
+            filter: brightness(1.08);
+        }
+
+        .ldb-btn-danger:active {
+            transform: scale(0.97);
+        }
+
+        .ldb-btn-danger:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
         }
 
         .ldb-section-title {
@@ -375,6 +443,10 @@ const DesignSystem = {
         .ldb-flex-gap { display: flex; gap: 8px; }
         .ldb-nowrap-badge { padding: 6px 12px; white-space: nowrap; }
         .ldb-hint { font-size: 12px; color: var(--ldb-ui-muted); }
+        .ldb-text-success { color: var(--ldb-ui-success); }
+        .ldb-text-danger { color: var(--ldb-ui-danger); }
+        .ldb-text-info { color: var(--ldb-ui-accent); }
+        .ldb-text-muted { color: var(--ldb-ui-muted); }
         .ldb-section-divider { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ldb-ui-border); }
         .ldb-flex-center-gap { display: flex; align-items: center; gap: 8px; }
 
@@ -474,7 +546,22 @@ const DesignSystem = {
             .gclip-panel *,
             .ldb-notion-float-btn,
             .ldb-mini-btn,
-            .gclip-float-btn {
+            .gclip-float-btn,
+            .ldb-spin,
+            .ldb-btn,
+            .ldb-btn-secondary,
+            .ldb-btn-warning,
+            .ldb-btn-danger,
+            .gclip-btn,
+            .gclip-btn-secondary,
+            .ldb-chat-chip,
+            .ldb-source-option,
+            .ldb-tab,
+            .ldb-toggle-slider,
+            .ldb-toggle-slider::before,
+            .ldb-progress-fill,
+            .ldb-status,
+            .ldb-status-close {
                 transition: none !important;
                 animation: none !important;
                 scroll-behavior: auto !important;
@@ -576,12 +663,19 @@ const DesignSystem = {
             color: var(--ldb-ui-text);
             font-size: 12px;
             cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
         }
 
         .ldb-panel .ldb-chat-chip:hover,
         .ldb-notion-panel .ldb-chat-chip:hover {
             background: rgba(37, 99, 235, 0.16);
             border-color: rgba(37, 99, 235, 0.28);
+        }
+
+        .ldb-panel .ldb-chat-chip:active,
+        .ldb-notion-panel .ldb-chat-chip:active {
+            transform: scale(0.96);
+            background: rgba(37, 99, 235, 0.22);
         }
 
         .ldb-panel .ldb-chat-message,
@@ -662,6 +756,16 @@ const DesignSystem = {
         @keyframes ldb-typing {
             0%, 80%, 100% { transform: translateY(0); opacity: 0.6; }
             40% { transform: translateY(-3px); opacity: 1; }
+        }
+
+        @keyframes ldb-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .ldb-spin {
+            display: inline-block;
+            animation: ldb-spin 0.8s linear infinite;
         }
 
         .ldb-panel .ldb-chat-input-container,
@@ -897,6 +1001,10 @@ const NotionSiteUI = {
                 box-shadow: var(--ldb-ui-shadow);
             }
 
+            .ldb-notion-float-btn:active {
+                transform: translateY(0) scale(0.97);
+            }
+
             .ldb-notion-float-btn.dragging {
                 transform: none;
                 opacity: 0.85;
@@ -908,6 +1016,7 @@ const NotionSiteUI = {
                 right: 24px;
                 bottom: 96px;
                 width: 380px;
+                max-width: calc(100vw - 32px);
                 max-height: 70vh;
                 z-index: 2147483646;
                 overflow: hidden;
@@ -1066,7 +1175,7 @@ const NotionSiteUI = {
                     <span id="ldb-notion-settings-arrow">▶</span>
                 </div>
                 <div class="ldb-notion-toggle-content collapsed" id="ldb-notion-settings-content">
-                    <div class="ldb-input-group" class="ldb-mt-12">
+                    <div class="ldb-input-group ldb-mt-12">
                         <label class="ldb-label">Notion API Key</label>
                         <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx...">
                     </div>
@@ -1140,7 +1249,7 @@ const NotionSiteUI = {
                     <div class="ldb-section-divider">
                         <span class="ldb-hint">🤖 Agent 个性化</span>
                     </div>
-                    <div class="ldb-input-group" class="ldb-mt-8">
+                    <div class="ldb-input-group ldb-mt-8">
                         <label class="ldb-label">助手名字</label>
                         <input type="text" class="ldb-input" id="ldb-notion-persona-name" placeholder="AI 助手">
                     </div>
@@ -1165,7 +1274,7 @@ const NotionSiteUI = {
                     <div class="ldb-section-divider">
                         <span class="ldb-hint">🐙 GitHub 收藏导入</span>
                     </div>
-                    <div class="ldb-input-group" class="ldb-mt-8">
+                    <div class="ldb-input-group ldb-mt-8">
                         <label class="ldb-label">GitHub 用户名</label>
                         <input type="text" class="ldb-input" id="ldb-notion-github-username" placeholder="your-username">
                     </div>
@@ -1354,17 +1463,17 @@ const NotionSiteUI = {
 
                         if (meta.phase === "databases") {
                             workspaceTip.textContent = `✅ 已加载 ${workspaceData.databases.length} 个数据库，可先选择目标；页面列表继续加载中...`;
-                            workspaceTip.style.color = "#34d399";
+                            workspaceTip.style.color = "var(--ldb-ui-success)";
                         }
                     },
                 });
 
                 NotionSiteUI.updateAITargetDbOptions(workspaceData.databases, workspaceData.pages);
                 workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面`;
-                workspaceTip.style.color = "#34d399";
+                workspaceTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
                 workspaceTip.textContent = `❌ ${error.message}`;
-                workspaceTip.style.color = "#f87171";
+                workspaceTip.style.color = "var(--ldb-ui-danger)";
             } finally {
                 refreshBtn.disabled = false;
                 refreshBtn.innerHTML = "🔄";
@@ -1420,10 +1529,10 @@ const NotionSiteUI = {
                 });
                 NotionSiteUI.updateAIModelOptions(aiService, models, true);
                 modelTip.textContent = `✅ 获取到 ${models.length} 个可用模型`;
-                modelTip.style.color = "#34d399";
+                modelTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
                 modelTip.textContent = `❌ ${error.message}`;
-                modelTip.style.color = "#f87171";
+                modelTip.style.color = "var(--ldb-ui-danger)";
             } finally {
                 fetchBtn.disabled = false;
                 fetchBtn.innerHTML = "🔄 获取";
@@ -1491,9 +1600,9 @@ const NotionSiteUI = {
         const bmStatus = panel.querySelector("#ldb-notion-bookmark-status");
         if (bmStatus) {
             if (BookmarkBridge.isExtensionAvailable()) {
-                bmStatus.innerHTML = '<span style="color: #4ade80;">✅ 扩展已安装</span> — 在 AI 对话中输入「导入书签」即可';
+                bmStatus.innerHTML = '<span style="color: var(--ldb-ui-success);">✅ 扩展已安装</span> — 在 AI 对话中输入「导入书签」即可';
             } else {
-                bmStatus.innerHTML = `<span style="color: #f87171;">❌ 扩展未安装</span> — ${InstallHelper.renderInstallLink("一键安装浏览器扩展")}`;
+                bmStatus.innerHTML = `<span style="color: var(--ldb-ui-danger);">❌ 扩展未安装</span> — ${InstallHelper.renderInstallLink("一键安装浏览器扩展")}`;
             }
         }
 
@@ -1720,9 +1829,13 @@ const NotionSiteUI = {
     // 显示状态
     showStatus: (message, type = "info") => {
         const container = NotionSiteUI.panel.querySelector("#ldb-notion-status-container");
+
+        // 清除上一个定时器，避免新消息被旧定时器提前清除
+        if (container._statusTimer) clearTimeout(container._statusTimer);
+
         container.innerHTML = `
-            <div class="ldb-status ${type}">
-                ${message}
+            <div class="ldb-status ${Utils.escapeHtml(type)}">
+                ${Utils.escapeHtml(message)}
                 <button class="ldb-status-close" title="关闭">×</button>
             </div>
         `;
@@ -1735,7 +1848,7 @@ const NotionSiteUI = {
 
         // 错误消息延长显示时间（10秒），其他类型3秒
         const timeout = type === "error" ? 10000 : 3000;
-        setTimeout(() => {
+        container._statusTimer = setTimeout(() => {
             container.innerHTML = "";
         }, timeout);
     },
@@ -1847,6 +1960,7 @@ const UI_CSS = `
                 top: 80px;
                 right: 20px;
                 width: 380px;
+                max-width: calc(100vw - 32px);
                 max-height: 90vh;
                 z-index: 2147483640;
                 display: flex;
@@ -1885,13 +1999,13 @@ const UI_CSS = `
             }
 
             .ldb-runtime-badge.mode-userscript {
-                color: #0f766e;
+                color: var(--ldb-ui-badge-teal);
                 border-color: rgba(13, 148, 136, 0.35);
                 background: rgba(20, 184, 166, 0.14);
             }
 
             .ldb-runtime-badge.mode-extension {
-                color: #1d4ed8;
+                color: var(--ldb-ui-badge-blue);
                 border-color: rgba(37, 99, 235, 0.35);
                 background: rgba(59, 130, 246, 0.14);
             }
@@ -1994,6 +2108,16 @@ const UI_CSS = `
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: 12px;
                 background: rgba(148, 163, 184, 0.08);
+                cursor: pointer;
+                transition: background 0.15s ease;
+            }
+
+            .ldb-toggle-section:hover {
+                background: rgba(148, 163, 184, 0.14);
+            }
+
+            .ldb-toggle-section:active {
+                background: rgba(148, 163, 184, 0.20);
             }
 
             .ldb-source-option-group {
@@ -2096,6 +2220,7 @@ const UI_CSS = `
                 height: 100%;
                 background: linear-gradient(90deg, var(--ldb-ui-accent), var(--ldb-ui-accent-2));
                 border-radius: 999px;
+                transition: width 0.3s ease;
             }
 
             .ldb-progress-text {
@@ -2105,6 +2230,51 @@ const UI_CSS = `
                 display: flex;
                 justify-content: space-between;
                 gap: 10px;
+            }
+
+            .ldb-report {
+                margin-top: 12px;
+            }
+            .ldb-report-title {
+                font-size: 14px;
+                font-weight: 600;
+                margin-bottom: 10px;
+            }
+            .ldb-report-section {
+                margin-bottom: 8px;
+            }
+            .ldb-report-section-title {
+                font-size: 13px;
+                font-weight: 500;
+                margin-bottom: 6px;
+            }
+            .ldb-report-item {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 6px 8px;
+                font-size: 12px;
+                border-radius: 6px;
+                margin-bottom: 3px;
+            }
+            .ldb-report-item.success {
+                background: rgba(22, 163, 74, 0.06);
+            }
+            .ldb-report-item.failed {
+                background: rgba(220, 38, 38, 0.06);
+            }
+            .ldb-report-item a {
+                color: var(--ldb-ui-accent);
+                text-decoration: none;
+            }
+            .ldb-report-item a:hover {
+                text-decoration: underline;
+            }
+            .ldb-report-error {
+                font-size: 11px;
+                color: var(--ldb-ui-danger);
+                padding: 2px 8px 6px 28px;
+                opacity: 0.8;
             }
 
             .ldb-bookmarks-info {
@@ -2721,8 +2891,12 @@ const UIEvents = {
             tab.onclick = () => {
                 const tabName = tab.getAttribute("data-tab");
                 // 更新 tab 按钮状态
-                refs.tabs.forEach(t => t.classList.remove("active"));
+                refs.tabs.forEach(t => {
+                    t.classList.remove("active");
+                    t.setAttribute("aria-selected", "false");
+                });
                 tab.classList.add("active");
+                tab.setAttribute("aria-selected", "true");
                 // 更新 tab 内容显示
                 refs.tabContents.forEach(c => c.classList.remove("active"));
                 const content = panel.querySelector(`[data-tab-content="${tabName}"]`);
@@ -2743,6 +2917,7 @@ const UIEvents = {
             const arrow = refs.filterArrow
             content.classList.toggle("collapsed");
             arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            refs.filterToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
         };
 
         // 折叠 AI 设置
@@ -2751,6 +2926,7 @@ const UIEvents = {
             const arrow = refs.aiSettingsArrow
             content.classList.toggle("collapsed");
             arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            refs.aiSettingsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
         };
 
         // 折叠 GitHub 设置
@@ -2759,6 +2935,7 @@ const UIEvents = {
             const arrow = refs.githubSettingsArrow
             content.classList.toggle("collapsed");
             arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            refs.githubSettingsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
         };
 
         // 折叠 Obsidian 设置
@@ -2767,6 +2944,7 @@ const UIEvents = {
             const arrow = refs.obsSettingsArrow;
             content.classList.toggle("collapsed");
             arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            refs.obsSettingsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
         };
 
         // Obsidian 测试连接
@@ -2774,19 +2952,19 @@ const UIEvents = {
             const url = refs.obsApiUrlInput.value.trim();
             const key = getSensitiveValue(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
             if (!url || !key) {
-                refs.obsTestStatus.innerHTML = '<span style="color: #f87171;">请填写 API 地址和 Key</span>';
+                refs.obsTestStatus.innerHTML = '<span style="color: var(--ldb-ui-danger);">请填写 API 地址和 Key</span>';
                 return;
             }
-            refs.obsTestStatus.innerHTML = '<span style="color: #60a5fa;">连接中...</span>';
+            refs.obsTestStatus.innerHTML = '<span style="color: var(--ldb-ui-accent);">连接中...</span>';
             try {
                 const result = await ObsidianAPI.testConnection(url, key);
                 if (result.ok) {
-                    refs.obsTestStatus.innerHTML = '<span style="color: #4ade80;">✅ 连接成功</span>';
+                    refs.obsTestStatus.innerHTML = '<span style="color: var(--ldb-ui-success);">✅ 连接成功</span>';
                 } else {
-                    refs.obsTestStatus.innerHTML = `<span style="color: #f87171;">❌ ${result.error}</span>`;
+                    refs.obsTestStatus.innerHTML = `<span style="color: var(--ldb-ui-danger);">❌ ${Utils.escapeHtml(result.error)}</span>`;
                 }
             } catch (e) {
-                refs.obsTestStatus.innerHTML = `<span style="color: #f87171;">❌ ${e.message}</span>`;
+                refs.obsTestStatus.innerHTML = `<span style="color: var(--ldb-ui-danger);">❌ ${Utils.escapeHtml(e.message)}</span>`;
             }
         };
 
@@ -2795,6 +2973,7 @@ const UIEvents = {
             const arrow = refs.sourceSettingsArrow
             content.classList.toggle("collapsed");
             arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            refs.sourceSettingsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
         };
 
         refs.sourcePartitionsToggle.onclick = () => {
@@ -2802,7 +2981,21 @@ const UIEvents = {
             const arrow = refs.sourcePartitionsArrow
             content.classList.toggle("collapsed");
             arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            refs.sourcePartitionsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
         };
+
+        // 折叠区域键盘支持（Enter/Space 触发 click）
+        [refs.filterToggle, refs.aiSettingsToggle, refs.githubSettingsToggle,
+         refs.obsSettingsToggle, refs.sourceSettingsToggle, refs.sourcePartitionsToggle
+        ].forEach(el => {
+            if (!el) return;
+            el.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    el.click();
+                }
+            });
+        });
 
         refs.sourceSelectLinuxdo.onclick = () => {
             UI.switchBookmarkSource("linuxdo");
@@ -2914,16 +3107,16 @@ const UIEvents = {
 
                 if (result.valid) {
                     statusSpan.textContent = "✅ 验证成功";
-                    statusSpan.style.color = "#34d399";
+                    statusSpan.style.color = "var(--ldb-ui-success)";
                 }
 
                 if (!result.valid) {
                     statusSpan.textContent = `❌ ${result.error}`;
-                    statusSpan.style.color = "#f87171";
+                    statusSpan.style.color = "var(--ldb-ui-danger)";
                 }
             } catch (error) {
                 statusSpan.textContent = `❌ ${error.message}`;
-                statusSpan.style.color = "#f87171";
+                statusSpan.style.color = "var(--ldb-ui-danger)";
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = "验证配置";
@@ -2963,14 +3156,14 @@ const UIEvents = {
                 });
                 if (result.success) {
                     statusSpan.textContent = `✅ ${result.message}`;
-                    statusSpan.style.color = "#34d399";
+                    statusSpan.style.color = "var(--ldb-ui-success)";
                 } else {
                     statusSpan.textContent = `❌ ${result.error}`;
-                    statusSpan.style.color = "#f87171";
+                    statusSpan.style.color = "var(--ldb-ui-danger)";
                 }
             } catch (error) {
                 statusSpan.textContent = `❌ ${error.message}`;
-                statusSpan.style.color = "#f87171";
+                statusSpan.style.color = "var(--ldb-ui-danger)";
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = "自动设置数据库";
@@ -3406,6 +3599,8 @@ const UIEvents = {
 
         // 开始导出
         refs.exportBtn.onclick = async () => {
+            // 防重入：导出进行中时忽略重复点击
+            if (refs.exportBtn.disabled) return;
             const liveApiKey = refs.apiKeyInput.value.trim();
             const apiKey = NotionOAuth.getAccessToken(liveApiKey);
             const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
@@ -3500,6 +3695,7 @@ const UIEvents = {
             });
 
             // 显示控制按钮，隐藏导出按钮
+            refs.exportBtn.disabled = true;
             refs.exportBtns.style.display = "none";
             refs.controlBtns.style.display = "flex";
             refs.pauseBtn.innerHTML = "⏸️ 暂停";
@@ -3555,6 +3751,7 @@ const UIEvents = {
                 UI.showStatus(`导出出错: ${error.message}`, "error");
             } finally {
                 // 恢复按钮状态
+                refs.exportBtn.disabled = false;
                 refs.exportBtns.style.display = "flex";
                 refs.controlBtns.style.display = "none";
                 Exporter.reset();
@@ -3563,6 +3760,7 @@ const UIEvents = {
 
         // 导出到 Obsidian
         refs.obsExportBtn.onclick = async () => {
+            if (refs.obsExportBtn.disabled) return;
             const obsUrl = refs.obsApiUrlInput.value.trim();
             const obsKey = getSensitiveValue(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
             const obsDir = refs.obsDirInput.value.trim() || "Linux.do";
@@ -3580,6 +3778,7 @@ const UIEvents = {
                 return;
             }
 
+            refs.obsExportBtn.disabled = true;
             refs.exportBtns.style.display = "none";
             refs.controlBtns.style.display = "flex";
             UI.refs.reportContainer.innerHTML = "";
@@ -3743,6 +3942,7 @@ const UIEvents = {
             } catch (error) {
                 UI.showStatus(`Obsidian 导出出错: ${error.message}`, "error");
             } finally {
+                refs.obsExportBtn.disabled = false;
                 refs.exportBtns.style.display = "flex";
                 refs.controlBtns.style.display = "none";
                 Exporter.reset();
@@ -3873,16 +4073,16 @@ const UIEvents = {
 
                         if (meta.phase === "databases") {
                             workspaceTip.textContent = `✅ 已加载 ${workspaceData.databases.length} 个数据库，可先选择目标；页面列表继续加载中...`;
-                            workspaceTip.style.color = "#34d399";
+                            workspaceTip.style.color = "var(--ldb-ui-success)";
                         }
                     },
                 });
                 UI.updateWorkspaceSelect(workspaceData);
                 workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面`;
-                workspaceTip.style.color = "#34d399";
+                workspaceTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
                 workspaceTip.textContent = `❌ ${error.message}`;
-                workspaceTip.style.color = "#f87171";
+                workspaceTip.style.color = "var(--ldb-ui-danger)";
             } finally {
                 refreshBtn.disabled = false;
                 refreshBtn.innerHTML = "🔄";
@@ -4159,11 +4359,11 @@ const UIEvents = {
                 });
                 UI.updateAIModelOptions(aiService, models, true); // 保留当前选择
                 modelTip.textContent = `✅ 获取到 ${models.length} 个可用模型`;
-                modelTip.style.color = "#34d399";
+                modelTip.style.color = "var(--ldb-ui-success)";
                 UI.showStatus(`成功获取 ${models.length} 个模型`, "success");
             } catch (error) {
                 modelTip.textContent = `❌ ${error.message}`;
-                modelTip.style.color = "#f87171";
+                modelTip.style.color = "var(--ldb-ui-danger)";
                 UI.showStatus(`获取模型失败: ${error.message}`, "error");
             } finally {
                 fetchBtn.disabled = false;
@@ -4198,10 +4398,10 @@ const UIEvents = {
                     { aiService, aiApiKey, aiModel, aiBaseUrl }
                 );
                 statusSpan.textContent = `✅ ${response}`;
-                statusSpan.style.color = "#34d399";
+                statusSpan.style.color = "var(--ldb-ui-success)";
             } catch (error) {
                 statusSpan.textContent = `❌ ${error.message}`;
-                statusSpan.style.color = "#f87171";
+                statusSpan.style.color = "var(--ldb-ui-danger)";
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = "🧪 测试";
@@ -4507,15 +4707,15 @@ const UI = {
                     <button class="ldb-header-btn" id="ldb-close" title="关闭">×</button>
                 </div>
             </div>
-            <div class="ldb-tabs">
-                <button class="ldb-tab active" data-tab="bookmarks">📚 收藏</button>
-                <button class="ldb-tab" data-tab="visuals">📊 视图</button>
-                <button class="ldb-tab" data-tab="ai">🤖 AI</button>
-                <button class="ldb-tab" data-tab="settings">⚙️ 设置</button>
+            <div class="ldb-tabs" role="tablist">
+                <button class="ldb-tab active" data-tab="bookmarks" role="tab" aria-selected="true" aria-controls="ldb-tab-bookmarks">📚 收藏</button>
+                <button class="ldb-tab" data-tab="visuals" role="tab" aria-selected="false" aria-controls="ldb-tab-visuals">📊 视图</button>
+                <button class="ldb-tab" data-tab="ai" role="tab" aria-selected="false" aria-controls="ldb-tab-ai">🤖 AI</button>
+                <button class="ldb-tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="ldb-tab-settings">⚙️ 设置</button>
             </div>
             <div class="ldb-body">
                 <!-- ============ Tab 1: 收藏 ============ -->
-                <div class="ldb-tab-content active" data-tab-content="bookmarks">
+                <div class="ldb-tab-content active" data-tab-content="bookmarks" role="tabpanel" id="ldb-tab-bookmarks">
                     <!-- 收藏信息 -->
                     <div class="ldb-section">
                         <div class="ldb-bookmarks-info">
@@ -4523,32 +4723,32 @@ const UI = {
                             <div class="ldb-bookmarks-label" id="ldb-bookmarks-label">已加载收藏数量</div>
                         </div>
 
-                        <div class="ldb-toggle-section" id="ldb-source-partitions-toggle" style="margin-top: 10px; margin-bottom: 8px;">
+                        <div class="ldb-toggle-section" id="ldb-source-partitions-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-source-partitions-content" style="margin-top: 10px; margin-bottom: 8px;">
                             <span>收藏来源分区</span>
                             <span class="ldb-arrow" id="ldb-source-partitions-arrow">▶</span>
                         </div>
-                        <div class="ldb-toggle-content collapsed" id="ldb-source-partitions-content" class="ldb-mb-8">
+                        <div class="ldb-toggle-content collapsed ldb-mb-8" id="ldb-source-partitions-content">
                             <div class="ldb-source-option-group">
                                 <button class="ldb-source-option" id="ldb-source-select-linuxdo" type="button">Linux.do 收藏分区</button>
                                 <button class="ldb-source-option" id="ldb-source-select-github" type="button">GitHub 收藏分区</button>
                             </div>
                         </div>
 
-                        <div class="ldb-toggle-section" id="ldb-source-settings-toggle" class="ldb-mb-8">
+                        <div class="ldb-toggle-section ldb-mb-8" id="ldb-source-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-source-settings-content">
                             <span>来源自动化设置</span>
                             <span class="ldb-arrow" id="ldb-source-settings-arrow">▶</span>
                         </div>
-                        <div class="ldb-toggle-content collapsed" id="ldb-source-settings-content" class="ldb-mb-8">
-                            <div class="ldb-setting-row" class="ldb-mb-8">
+                        <div class="ldb-toggle-content collapsed ldb-mb-8" id="ldb-source-settings-content">
+                            <div class="ldb-setting-row ldb-mb-8">
                                 <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
                                     <input type="checkbox" id="ldb-auto-import-enabled">
                                     <span id="ldb-auto-import-label">启用自动导入新收藏</span>
                                 </label>
                             </div>
                             <div id="ldb-auto-import-options" style="display: none; margin-bottom: 8px;">
-                                <div class="ldb-setting-row" class="ldb-flex-center-gap">
+                                <div class="ldb-setting-row ldb-flex-center-gap">
                                     <label id="ldb-auto-import-interval-label" style="white-space: nowrap;">轮询间隔</label>
-                                    <select id="ldb-auto-import-interval" class="ldb-input" class="ldb-flex-1">
+                                    <select id="ldb-auto-import-interval" class="ldb-input ldb-flex-1">
                                         <option value="0">仅页面加载时</option>
                                         <option value="3">每 3 分钟</option>
                                         <option value="5" selected>每 5 分钟</option>
@@ -4557,16 +4757,16 @@ const UI = {
                                     </select>
                                 </div>
                             </div>
-                            <div class="ldb-setting-row" class="ldb-mb-8">
+                            <div class="ldb-setting-row ldb-mb-8">
                                 <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
                                     <input type="checkbox" id="ldb-bookmark-auto-import-enabled">
                                     <span>启用浏览器书签自动同步</span>
                                 </label>
                             </div>
                             <div id="ldb-bookmark-auto-import-options" style="display: none; margin-bottom: 8px;">
-                                <div class="ldb-setting-row" class="ldb-flex-center-gap">
+                                <div class="ldb-setting-row ldb-flex-center-gap">
                                     <label for="ldb-bookmark-auto-import-interval" style="white-space: nowrap;">书签同步间隔</label>
-                                    <select id="ldb-bookmark-auto-import-interval" class="ldb-input" class="ldb-flex-1">
+                                    <select id="ldb-bookmark-auto-import-interval" class="ldb-input ldb-flex-1">
                                         <option value="0">仅页面加载时</option>
                                         <option value="3">每 3 分钟</option>
                                         <option value="5" selected>每 5 分钟</option>
@@ -4575,8 +4775,8 @@ const UI = {
                                     </select>
                                 </div>
                             </div>
-                            <div id="ldb-bookmark-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
-                            <div class="ldb-setting-row" class="ldb-mb-8">
+                            <div id="ldb-bookmark-auto-import-status" style="font-size: 12px; color: var(--ldb-ui-muted); margin-bottom: 8px;"></div>
+                            <div class="ldb-setting-row ldb-mb-8">
                                 <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
                                     <input type="checkbox" id="ldb-rss-auto-import-enabled">
                                     <span>启用 RSS 自动同步</span>
@@ -4587,9 +4787,9 @@ const UI = {
                                     <label for="ldb-rss-feed-urls" style="display: block; margin-bottom: 6px;">RSS Feed URL</label>
                                     <textarea id="ldb-rss-feed-urls" class="ldb-input" rows="3" placeholder="每行一个 RSS / Atom 地址，或用逗号分隔"></textarea>
                                 </div>
-                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                                <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                     <label for="ldb-rss-auto-import-interval" style="white-space: nowrap;">RSS 同步间隔</label>
-                                    <select id="ldb-rss-auto-import-interval" class="ldb-input" class="ldb-flex-1">
+                                    <select id="ldb-rss-auto-import-interval" class="ldb-input ldb-flex-1">
                                         <option value="0">仅页面加载时</option>
                                         <option value="3">每 3 分钟</option>
                                         <option value="5" selected>每 5 分钟</option>
@@ -4597,45 +4797,45 @@ const UI = {
                                         <option value="30">每 30 分钟</option>
                                     </select>
                                 </div>
-                                <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                                <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                     <label for="ldb-rss-dedup-mode" style="white-space: nowrap;">RSS 导入去重</label>
-                                    <select id="ldb-rss-dedup-mode" class="ldb-input" class="ldb-flex-1">
+                                    <select id="ldb-rss-dedup-mode" class="ldb-input ldb-flex-1">
                                         <option value="strict">按链接去重</option>
                                         <option value="allow_duplicates">按 Feed + ID 保留重复</option>
                                     </select>
                                 </div>
                             </div>
-                            <div id="ldb-rss-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
-                            <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                            <div id="ldb-rss-auto-import-status" style="font-size: 12px; color: var(--ldb-ui-muted); margin-bottom: 8px;"></div>
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <label for="ldb-linuxdo-dedup-mode" style="white-space: nowrap;">Linux.do 导入去重</label>
-                                <select id="ldb-linuxdo-dedup-mode" class="ldb-input" class="ldb-flex-1">
+                                <select id="ldb-linuxdo-dedup-mode" class="ldb-input ldb-flex-1">
                                     <option value="strict">自动去重</option>
                                     <option value="allow_duplicates">允许重复（手动勾选）</option>
                                 </select>
                             </div>
-                            <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <label for="ldb-bookmark-dedup-mode" style="white-space: nowrap;">书签导入去重</label>
-                                <select id="ldb-bookmark-dedup-mode" class="ldb-input" class="ldb-flex-1">
+                                <select id="ldb-bookmark-dedup-mode" class="ldb-input ldb-flex-1">
                                     <option value="strict">自动去重</option>
                                     <option value="allow_duplicates">允许重复（手动勾选）</option>
                                 </select>
                             </div>
-                            <div class="ldb-setting-row" class="ldb-mb-8">
+                            <div class="ldb-setting-row ldb-mb-8">
                                 <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
                                     <input type="checkbox" id="ldb-ai-category-auto-dedup" checked>
                                     <span>分类列表自动去重</span>
                                 </label>
                             </div>
-                            <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <label for="ldb-cross-source-mode" style="white-space: nowrap;">跨源存储模式</label>
-                                <select id="ldb-cross-source-mode" class="ldb-input" class="ldb-flex-1">
+                                <select id="ldb-cross-source-mode" class="ldb-input ldb-flex-1">
                                     <option value="separate">分库（各来源独立数据库）</option>
                                     <option value="unified">统一库（所有来源同一数据库）</option>
                                 </select>
                             </div>
-                            <div id="ldb-auto-import-status" style="font-size: 12px; color: #666; margin-bottom: 8px;"></div>
+                            <div id="ldb-auto-import-status" style="font-size: 12px; color: var(--ldb-ui-muted); margin-bottom: 8px;"></div>
 
-                            <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-update-check-btn" style="padding: 6px 10px;">检查更新</button>
                                 <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0;">
                                     <input type="checkbox" id="ldb-update-auto-enabled">
@@ -4643,16 +4843,16 @@ const UI = {
                                 </label>
                             </div>
                             <div id="ldb-update-auto-options" style="display: none; margin-bottom: 8px;">
-                                <div class="ldb-setting-row" class="ldb-flex-center-gap">
+                                <div class="ldb-setting-row ldb-flex-center-gap">
                                     <label for="ldb-update-interval-hours" style="white-space: nowrap;">检查间隔</label>
-                                    <select id="ldb-update-interval-hours" class="ldb-input" class="ldb-flex-1">
+                                    <select id="ldb-update-interval-hours" class="ldb-input ldb-flex-1">
                                         <option value="24">每 24 小时</option>
                                         <option value="72">每 72 小时</option>
                                         <option value="168">每 168 小时</option>
                                     </select>
                                 </div>
                             </div>
-                            <div id="ldb-update-check-status" style="font-size: 12px; color: #666; margin-bottom: 4px;"></div>
+                            <div id="ldb-update-check-status" style="font-size: 12px; color: var(--ldb-ui-muted); margin-bottom: 4px;"></div>
                         </div>
 
                         <div class="ldb-btn-group" style="margin-bottom: 12px;">
@@ -4705,7 +4905,7 @@ const UI = {
                 </div>
 
                 <!-- ============ Tab 2: 视图 ============ -->
-                <div class="ldb-tab-content" data-tab-content="visuals">
+                <div class="ldb-tab-content" data-tab-content="visuals" role="tabpanel" id="ldb-tab-visuals">
                     <div class="ldb-section">
                         <div class="ldb-view-header">
                             <div>
@@ -4760,7 +4960,7 @@ const UI = {
                 </div>
 
                 <!-- ============ Tab 3: AI 助手 ============ -->
-                <div class="ldb-tab-content" data-tab-content="ai">
+                <div class="ldb-tab-content" data-tab-content="ai" role="tabpanel" id="ldb-tab-ai">
                     <div class="ldb-section">
                         <!-- 对话区域 -->
                         <div class="ldb-chat-container" id="ldb-chat-messages">
@@ -4786,7 +4986,7 @@ const UI = {
                 </div>
 
                 <!-- ============ Tab 4: 设置 ============ -->
-                <div class="ldb-tab-content" data-tab-content="settings">
+                <div class="ldb-tab-content" data-tab-content="settings" role="tabpanel" id="ldb-tab-settings">
                     <!-- Notion 配置 -->
                     <div class="ldb-section">
                         <div class="ldb-section-title">Notion 配置</div>
@@ -4834,7 +5034,7 @@ const UI = {
                         <!-- 导出目标类型选择 -->
                         <div class="ldb-input-group">
                             <label class="ldb-label">导出目标</label>
-                            <div class="ldb-checkbox-group" class="ldb-mb-8">
+                            <div class="ldb-checkbox-group ldb-mb-8">
                                 <label class="ldb-checkbox-item">
                                     <input type="radio" name="ldb-export-target" id="ldb-export-target-database" value="database" checked>
                                     <span>数据库（推荐）</span>
@@ -4865,7 +5065,7 @@ const UI = {
                         </div>
 
                         <!-- 权限设置 -->
-                        <div class="ldb-permission-panel" class="ldb-mt-12">
+                        <div class="ldb-permission-panel ldb-mt-12">
                             <div class="ldb-permission-row">
                                 <span class="ldb-permission-label">权限级别</span>
                                 <select class="ldb-permission-select" id="ldb-permission-level">
@@ -4896,12 +5096,12 @@ const UI = {
 
                     <!-- 筛选设置 -->
                     <div class="ldb-section">
-                        <div class="ldb-toggle-section" id="ldb-filter-toggle">
+                        <div class="ldb-toggle-section" id="ldb-filter-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-filter-content">
                             <span class="ldb-section-title" style="margin-bottom: 0;">筛选设置</span>
                             <span id="ldb-filter-arrow">▶</span>
                         </div>
                         <div class="ldb-toggle-content collapsed" id="ldb-filter-content">
-                            <div class="ldb-input-group" class="ldb-mt-12">
+                            <div class="ldb-input-group ldb-mt-12">
                                 <div class="ldb-checkbox-group">
                                     <label class="ldb-checkbox-item">
                                         <input type="checkbox" id="ldb-only-first">
@@ -4987,12 +5187,12 @@ const UI = {
 
                     <!-- AI 设置 -->
                     <div class="ldb-section">
-                        <div class="ldb-toggle-section" id="ldb-ai-settings-toggle">
+                        <div class="ldb-toggle-section" id="ldb-ai-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-ai-settings-content">
                             <span class="ldb-section-title" style="margin-bottom: 0;">AI 设置</span>
                             <span id="ldb-ai-settings-arrow">▶</span>
                         </div>
                         <div class="ldb-toggle-content collapsed" id="ldb-ai-settings-content">
-                            <div class="ldb-input-group" class="ldb-mt-12">
+                            <div class="ldb-input-group ldb-mt-12">
                                 <label class="ldb-label">AI 服务</label>
                                 <select class="ldb-select" id="ldb-ai-service">
                                     <option value="openai">OpenAI</option>
@@ -5044,7 +5244,7 @@ const UI = {
                                 </select>
                                 <div class="ldb-tip">刷新工作区列表时每类的最大分页数</div>
                             </div>
-                            <div class="ldb-btn-group" class="ldb-flex-center-gap">
+                            <div class="ldb-btn-group ldb-flex-center-gap">
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-test">测试连接</button>
                                 <span id="ldb-ai-test-status" style="font-size: 12px;"></span>
                             </div>
@@ -5054,7 +5254,7 @@ const UI = {
                                 <span class="ldb-hint">📋 AI 输出模板</span>
                             </div>
                             <div id="ldb-template-list" style="margin-bottom: 8px;"></div>
-                            <div class="ldb-setting-row" class="ldb-flex-center-gap ldb-mb-8">
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <input type="text" class="ldb-input" id="ldb-template-name" placeholder="模板名称" style="width: 80px;">
                                 <input type="text" class="ldb-input" id="ldb-template-icon" placeholder="图标" style="width: 50px;">
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-template-add" style="padding: 4px 8px; font-size: 12px;">添加</button>
@@ -5068,7 +5268,7 @@ const UI = {
                             <div class="ldb-section-divider">
                                 <span class="ldb-hint">🤖 Agent 个性化</span>
                             </div>
-                            <div class="ldb-input-group" class="ldb-mt-8">
+                            <div class="ldb-input-group ldb-mt-8">
                                 <label class="ldb-label">助手名字</label>
                                 <input type="text" class="ldb-input" id="ldb-agent-persona-name" placeholder="AI 助手">
                             </div>
@@ -5109,7 +5309,7 @@ const UI = {
 
                     <!-- GitHub 收藏导入设置 -->
                     <div class="ldb-section">
-                        <div class="ldb-toggle-section" id="ldb-github-settings-toggle">
+                        <div class="ldb-toggle-section" id="ldb-github-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-github-settings-content">
                             <span class="ldb-section-title" style="margin-bottom: 0;">🐙 GitHub 导入</span>
                             <span id="ldb-github-settings-arrow">▶</span>
                         </div>
@@ -5119,7 +5319,7 @@ const UI = {
                             </button>
                         </div>
                         <div class="ldb-toggle-content collapsed" id="ldb-github-settings-content">
-                            <div class="ldb-input-group" class="ldb-mt-12">
+                            <div class="ldb-input-group ldb-mt-12">
                                 <label class="ldb-label">GitHub 用户名</label>
                                 <input type="text" class="ldb-input" id="ldb-github-username" placeholder="your-username">
                             </div>
@@ -5152,12 +5352,12 @@ const UI = {
 
                     <!-- Obsidian 导出设置 -->
                     <div class="ldb-section">
-                        <div class="ldb-toggle-section" id="ldb-obs-settings-toggle">
+                        <div class="ldb-toggle-section" id="ldb-obs-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-obs-settings-content">
                             <span class="ldb-section-title" style="margin-bottom: 0;">📝 Obsidian 导出</span>
                             <span id="ldb-obs-settings-arrow">▶</span>
                         </div>
                         <div class="ldb-toggle-content collapsed" id="ldb-obs-settings-content">
-                            <div class="ldb-input-group" class="ldb-mt-12">
+                            <div class="ldb-input-group ldb-mt-12">
                                 <label class="ldb-label">API 地址</label>
                                 <input type="text" class="ldb-input" id="ldb-obs-api-url" placeholder="https://127.0.0.1:27124">
                             </div>
@@ -5375,12 +5575,12 @@ const UI = {
             if (BookmarkBridge.isExtensionAvailable()) {
                 const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
                 if (isUserscriptMode) {
-                    bmStatusMain.innerHTML = '<span style="color: #4ade80;">✅ 桥接已就绪（Userscript 模式）</span> — 可用「📖 导入浏览器书签」按钮';
+                    bmStatusMain.innerHTML = '<span style="color: var(--ldb-ui-success);">✅ 桥接已就绪（Userscript 模式）</span> — 可用「📖 导入浏览器书签」按钮';
                 } else {
-                    bmStatusMain.innerHTML = '<span style="color: #4ade80;">✅ 书签能力已就绪（Extension 模式）</span> — 可用「📖 导入浏览器书签」按钮';
+                    bmStatusMain.innerHTML = '<span style="color: var(--ldb-ui-success);">✅ 书签能力已就绪（Extension 模式）</span> — 可用「📖 导入浏览器书签」按钮';
                 }
             } else {
-                bmStatusMain.innerHTML = `<span style="color: #f87171;">❌ 扩展未安装</span> — ${InstallHelper.renderInstallLink("一键安装浏览器扩展")}`;
+                bmStatusMain.innerHTML = `<span style="color: var(--ldb-ui-danger);">❌ 扩展未安装</span> — ${InstallHelper.renderInstallLink("一键安装浏览器扩展")}`;
             }
         }
         UI.renderSelfCheckResult();
@@ -5683,9 +5883,13 @@ const UI = {
     // 显示状态
     showStatus: (message, type = "info") => {
         const container = UI.refs.statusContainer
+
+        // 清除上一个定时器，避免新消息被旧定时器提前清除
+        if (container._statusTimer) clearTimeout(container._statusTimer);
+
         container.innerHTML = `
-            <div class="ldb-status ${type}">
-                ${message}
+            <div class="ldb-status ${Utils.escapeHtml(type)}">
+                ${Utils.escapeHtml(message)}
                 <button class="ldb-status-close" title="关闭">×</button>
             </div>
         `;
@@ -5698,7 +5902,7 @@ const UI = {
 
         // 错误消息延长显示时间（10秒），其他类型3秒
         const timeout = type === "error" ? 10000 : 3000;
-        setTimeout(() => {
+        container._statusTimer = setTimeout(() => {
             container.innerHTML = "";
         }, timeout);
     },
@@ -5706,7 +5910,7 @@ const UI = {
     // 显示进度
     showProgress: (current, total, message) => {
         const container = UI.refs.statusContainer
-        const percent = Math.round((current / total) * 100);
+        const percent = total > 0 ? Math.round((current / total) * 100) : 0;
 
         container.innerHTML = `
             <div class="ldb-progress">
@@ -5715,7 +5919,7 @@ const UI = {
                 </div>
                 <div class="ldb-progress-text">
                     ${current}/${total} (${percent}%)<br>
-                    <small>${message}</small>
+                    <small>${Utils.escapeHtml(message)}</small>
                 </div>
             </div>
         `;
@@ -7144,7 +7348,7 @@ const UI = {
                 `<span class="ldb-view-pill">${Utils.escapeHtml(row.outcomeLabel)}</span>`,
             ].join("");
             const errorMarkup = row.lastError
-                ? `<div class="ldb-view-empty-text" style="margin-top: 8px; color: #dc2626;">最近异常：${Utils.escapeHtml(row.lastError)}</div>`
+                ? `<div class="ldb-view-empty-text" style="margin-top: 8px; color: var(--ldb-ui-danger);">最近异常：${Utils.escapeHtml(row.lastError)}</div>`
                 : "";
             return `
                 <div class="ldb-view-card">
@@ -8470,7 +8674,7 @@ const UI = {
         UI.renderJobId += 1;
         const renderJobId = UI.renderJobId;
         if (!UI.bookmarks || UI.bookmarks.length === 0) {
-            list.innerHTML = '<div style="padding: 12px; text-align: center; color: #666;">暂无收藏</div>';
+            list.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--ldb-ui-muted);">暂无收藏</div>';
             UI.updateSelectCount();
             UI.renderVisualSummary();
             return;
@@ -8608,20 +8812,23 @@ const UI = {
         if (failed.length > 0) {
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">❌ 失败 (${failed.length})</div>`;
-            failed.forEach(item => {
+            failed.slice(0, 20).forEach(item => {
                 html += `<div class="ldb-report-item failed">
                     <span>✗</span>
                     <span>${Utils.escapeHtml(Utils.truncateText(item.title, 35))}</span>
                 </div>`;
-                html += `<div class="ldb-report-error">${Utils.escapeHtml(item.error)}</div>`;
+                html += `<div class="ldb-report-error">${Utils.escapeHtml(Utils.truncateText(item.error, 120))}</div>`;
             });
+            if (failed.length > 20) {
+                html += `<div class="ldb-report-item failed"><span>...</span> 还有 ${failed.length - 20} 个失败项</div>`;
+            }
             html += '</div>';
         }
 
         if (skipped && skipped.length > 0) {
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">⏭️ 已跳过 (${skipped.length})</div>`;
-            html += `<div class="ldb-report-item" style="color: #888;">
+            html += `<div class="ldb-report-item" style="color: var(--ldb-ui-muted);">
                 <span>由于取消操作，${skipped.length} 个收藏未导出</span>
             </div>`;
             html += '</div>';
@@ -8804,6 +9011,7 @@ const GenericUI = {
                 bottom: 84px;
                 right: 24px;
                 width: 320px;
+                max-width: calc(100vw - 32px);
                 z-index: 2147483646;
                 display: none;
                 overflow: hidden;
