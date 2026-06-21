@@ -2,7 +2,7 @@
 
 const { InstallHelper } = require("../api");
 
-var __LD_NOTION_BUILD_BOOKMARK_BRIDGE_START__ = "[LD-NOTION-BUILD:BOOKMARK_BRIDGE_START]";
+const __LD_NOTION_BUILD_BOOKMARK_BRIDGE_START__ = "[LD-NOTION-BUILD:BOOKMARK_BRIDGE_START]";
 const BookmarkBridge = {
     _requestId: 0,
     _pendingRequests: {},
@@ -68,7 +68,7 @@ const BookmarkBridge = {
         });
     },
 };
-var __LD_NOTION_BUILD_BOOKMARK_BRIDGE_END__ = "[LD-NOTION-BUILD:BOOKMARK_BRIDGE_END]";
+const __LD_NOTION_BUILD_BOOKMARK_BRIDGE_END__ = "[LD-NOTION-BUILD:BOOKMARK_BRIDGE_END]";
 
 const { BookmarkExporter } = require("./BookmarkExporter");
 const { BookmarkAutoImporter } = require("./BookmarkAutoImporter");

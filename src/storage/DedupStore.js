@@ -101,6 +101,7 @@ const DedupStore = {
         if (this._batchCache && this._batchSourceType === sourceType) {
             this._batchCache.set = {};
             this._batchCache.dirty = true;
+            return;
         }
         globalThis.GM_deleteValue(this._keyFor(sourceType));
     },

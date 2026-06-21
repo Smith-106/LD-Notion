@@ -805,9 +805,10 @@ const UndoManager = {
 
     // 隐藏撤销提示
     hideToast: () => {
+        if (UndoManager._hideTimeout) clearTimeout(UndoManager._hideTimeout);
         if (UndoManager.toastElement) {
             UndoManager.toastElement.classList.remove("visible");
-            setTimeout(() => {
+            UndoManager._hideTimeout = setTimeout(() => {
                 if (UndoManager.toastElement) {
                     UndoManager.toastElement.remove();
                     UndoManager.toastElement = null;

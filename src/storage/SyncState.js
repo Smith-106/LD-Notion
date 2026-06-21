@@ -250,6 +250,7 @@ const SyncStateV2 = {
         let latestTime = "";
         let latestMs = -Infinity;
         const ids = [];
+        const idSet = new Set();
 
         items.forEach((item) => {
             const time = this.normalizeTime(getTime(item));
@@ -261,11 +262,13 @@ const SyncStateV2 = {
                 latestMs = timeMs;
                 latestTime = time;
                 ids.length = 0;
-                if (id) ids.push(id);
+                idSet.clear();
+                if (id) { ids.push(id); idSet.add(id); }
                 return;
             }
-            if (timeMs === latestMs && id && !ids.includes(id)) {
+            if (timeMs === latestMs && id && !idSet.has(id)) {
                 ids.push(id);
+                idSet.add(id);
             }
         });
 

@@ -493,7 +493,7 @@ const DOMToNotion = {
                 });
 
                 if (rows.length > 0) {
-                    const tableWidth = Math.max(...rows.map(r => r.length));
+                    const tableWidth = Math.max(1, ...rows.map(r => r.length));
                     blocks.push({
                         type: "table",
                         table: {
@@ -1440,8 +1440,10 @@ const ObsidianAPI = {
                 url: `${apiUrl}/vault/`,
                 headers: { Authorization: `Bearer ${apiKey}` },
                 responseType: "json",
+                timeout: 10000,
                 onload: (r) => resolve(r),
                 onerror: (e) => reject(e),
+                ontimeout: () => reject(new Error("Obsidian API 请求超时")),
             });
         });
         if (resp.status === 200 || resp.status === 204) return { ok: true };
@@ -1458,8 +1460,10 @@ const ObsidianAPI = {
                     "Content-Type": "text/markdown",
                 },
                 data: content,
+                timeout: 30000,
                 onload: (r) => resolve(r),
                 onerror: (e) => reject(e),
+                ontimeout: () => reject(new Error("Obsidian API 请求超时")),
             });
         });
         if (resp.status === 200 || resp.status === 204 || resp.status === 201) {
@@ -1478,8 +1482,10 @@ const ObsidianAPI = {
                     "Content-Type": contentType || "application/octet-stream",
                 },
                 data: blob,
+                timeout: 60000,
                 onload: (r) => resolve(r),
                 onerror: (e) => reject(e),
+                ontimeout: () => reject(new Error("Obsidian API 请求超时")),
             });
         });
         if (resp.status === 200 || resp.status === 204 || resp.status === 201) {

@@ -299,7 +299,7 @@ BookmarkAutoImporter.run = async () => {
             }
         };
 
-        const processBookmark = async (bookmark, index) => {
+        const processBookmark = async (bookmark, itemIndex) => {
             const bookmarkId = String(bookmark.id);
             const snapshotEntry = previousSnapshot[bookmarkId] || null;
             let pageMeta = index.byBookmarkId.get(bookmarkId)
@@ -308,7 +308,7 @@ BookmarkAutoImporter.run = async () => {
 
             try {
                 if (!pageMeta) {
-                    BookmarkAutoImporter.updateStatus(`📄 正在新增书签 (${index + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                    BookmarkAutoImporter.updateStatus(`📄 正在新增书签 (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
                     const enriched = await BookmarkExporter.enrichBookmark(bookmark, settings, enrichContext);
                     const page = await NotionAPI.request("POST", "/pages", {
                         parent: { database_id: settings.databaseId },
@@ -324,7 +324,7 @@ BookmarkAutoImporter.run = async () => {
                     };
                     created++;
                 } else if (BookmarkAutoImporter.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
-                    BookmarkAutoImporter.updateStatus(`📧 正在更新书签 (${index + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                    BookmarkAutoImporter.updateStatus(`📧 正在更新书签 (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
                     const properties = BookmarkAutoImporter.needsFullRefresh(bookmark, snapshotEntry, pageMeta)
                         ? BookmarkExporter.buildProperties(await BookmarkExporter.enrichBookmark(bookmark, settings, enrichContext))
                         : BookmarkAutoImporter.buildMinimalProperties(bookmark);
@@ -365,7 +365,7 @@ BookmarkAutoImporter.run = async () => {
 
         const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
 
-        const processDeleted = async (bookmarkId, index) => {
+        const processDeleted = async (bookmarkId, itemIndex) => {
             const snapshotEntry = previousSnapshot[bookmarkId];
             const pageMeta = (snapshotEntry?.pageId ? index.byPageId.get(snapshotEntry.pageId) : null)
                 || index.byBookmarkId.get(bookmarkId)
@@ -378,7 +378,7 @@ BookmarkAutoImporter.run = async () => {
 
             try {
                 const itemLabel = snapshotEntry?.title || snapshotEntry?.url || bookmarkId;
-                BookmarkAutoImporter.updateStatus(`🗃️ 正在归档已删除书签 (${index + 1}/${deletedIds.length}): ${itemLabel}`);
+                BookmarkAutoImporter.updateStatus(`🗃️ 正在归档已删除书签 (${itemIndex + 1}/${deletedIds.length}): ${itemLabel}`);
                 await NotionAPI.deletePage(pageMeta.pageId, settings.apiKey);
                 archived++;
             } catch (error) {
