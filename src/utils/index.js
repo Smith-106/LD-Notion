@@ -132,9 +132,7 @@ const Utils = {
         if (typeof crypto !== "undefined" && crypto.getRandomValues) {
             crypto.getRandomValues(bytes);
         } else {
-            for (let i = 0; i < bytes.length; i++) {
-                bytes[i] = Math.floor(Math.random() * 256);
-            }
+            throw new Error("crypto.getRandomValues 不可用，无法生成安全随机 token");
         }
         const value = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
         return prefix ? `${prefix}_${value}` : value;

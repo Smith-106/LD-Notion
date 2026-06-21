@@ -372,7 +372,7 @@ const WorkspaceService = {
     },
 
     buildWorkspaceData: (apiKey, workspace = {}) => ({
-        apiKeyHash: apiKey ? apiKey.slice(-8) : "",
+        apiKeyHash: apiKey ? (() => { let h = 0; for (const c of apiKey) h = ((h << 5) - h + c.charCodeAt(0)) | 0; return Math.abs(h).toString(36); })() : "",
         databases: Array.isArray(workspace.databases) ? workspace.databases : [],
         pages: Array.isArray(workspace.pages) ? workspace.pages : [],
         timestamp: Date.now(),

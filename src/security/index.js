@@ -324,7 +324,12 @@ const OperationLog = {
     },
 
     createEventId: () => {
-        return `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const bytes = new Uint8Array(4);
+        if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+            crypto.getRandomValues(bytes);
+        }
+        const randomPart = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+        return `evt_${Date.now().toString(36)}_${randomPart}`;
     },
 
     appendRedaction: (list, label) => {
