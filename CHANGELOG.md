@@ -1,5 +1,34 @@
 # 更新日志
 
+## [3.7.2] - 2026-06-20
+
+### 修复
+
+- 安全：`showStatus` 两处 `innerHTML` 注入加 `Utils.escapeHtml` 防 XSS
+- 安全：Obsidian 测试状态 `innerHTML` 加 `escapeHtml`
+- 健壮性：`showProgress` `total=0` 时 percent 归零而非 NaN（除零防护）
+- 健壮性：`showStatus` 加 `clearTimeout` 防新消息被旧定时器清除
+- 防重入：`exportBtn`/`obsExportBtn` 加 `disabled` 防双击
+- DOM 爆炸：失败项截断 20 条 + 错误文本截断 120 字符
+- CSS：27 处双 `class=""` 合并为单一 class 属性
+- CSS：添加 `.ldb-report-*` 7 个缺失类定义
+- 响应式：三面板加 `max-width: calc(100vw - 32px)`
+- Token：添加 `--ldb-ui-badge-teal/blue` 替代硬编码色值
+- 可访问性：6 个 `toggle-section` 加 `aria-expanded`/`aria-controls`/`role`/`tabindex`/keyboard
+- 可访问性：tab 面板加 `role=tablist/tab/tabpanel` + `aria-selected`
+
+### 变更
+
+- `package.json`、`build.js` 与根目录 `.user.js` 的 `@version` 同步递增到 `3.7.2`
+
+### 验证
+
+- `npm test`：17 个测试文件、349 个用例全部通过
+- `node build.js`：零警告构建
+- 10/10 critical findings 已修复
+
+[3.7.2]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.2
+
 ## [3.7.1] - 2026-06-18
 
 ### 修复
