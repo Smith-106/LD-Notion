@@ -449,6 +449,165 @@ const RSSAutoImporter = {
         };
     },
 
+    // 初始化同步上下文：增量同步 + 数据库配置 + 索引构建（MNT-002 提取自 run）
+    _initSyncContext: async (settings, attemptAt) => {
+        SyncState.updateRssState({
+            lastAttemptAt: attemptAt,
+            lastOutcome: "running",
+            lastError: "",
+            lastStats: {},
+        });
+        RSSAutoImporter.updateStatus("正在同步 RSS Feed...");
+
+        const syncResult = await SyncCoordinator.sync("rss");
+        if (syncResult.error) {
+            throw new Error(syncResult.error);
+        }
+
+        const setupResult = await BookmarkExporter.setupDatabaseProperties(settings.databaseId, settings.apiKey);
+        if (!setupResult.success) {
+            throw new Error(`数据库配置失败: ${setupResult.error}`);
+        }
+
+        const previousState = SyncState.getRssState();
+        const previousSnapshot = previousState?.snapshot && typeof previousState.snapshot === "object"
+            ? previousState.snapshot
+            : {};
+
+        let currentItems = syncResult.newItems || [];
+        let feedCount = RSSAutoImporter.getFeedUrls().length;
+        if (currentItems.length === 0) {
+            const fallback = await RSSAutoImporter.loadCurrentItems();
+            currentItems = fallback.items || [];
+            feedCount = fallback.feedCount || feedCount;
+        }
+
+        const trackedPages = await RSSAutoImporter.fetchTrackedPages(settings.databaseId, settings.apiKey);
+        const index = RSSAutoImporter.buildPageIndex(trackedPages);
+
+        return {
+            syncResult,
+            previousSnapshot,
+            currentItems,
+            feedCount,
+            index,
+            nextSnapshot: { ...previousSnapshot },
+            delay: Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay),
+            enrichContext: { aiUsedCount: 0, aiMaxItems: 20 },
+        };
+    },
+
+    // 同步单条 RSS 条目（MNT-002 提取自 run 循环体）
+    _syncSingleRssItem: async (item, ctx) => {
+        const { settings, index, previousSnapshot, nextSnapshot, enrichContext, total } = ctx;
+        const snapshotEntry = previousSnapshot[item.itemKey] || null;
+        let pageMeta = (item.url ? index.byUrl.get(item.url) : null)
+            || (snapshotEntry?.pageId ? index.byPageId.get(snapshotEntry.pageId) : null)
+            || (item.title ? index.byTitle.get(item.title) : null);
+
+        let result = { created: 0, updated: 0, unchanged: 0, failed: 0, itemKey: item.itemKey };
+
+        try {
+            if (!pageMeta) {
+                RSSAutoImporter.updateStatus(`正在新增 RSS 条目 (${ctx.position}/${total}): ${item.title}`);
+                const enriched = await RSSAutoImporter.enrichItem(item, settings, enrichContext);
+                const page = await NotionAPI.request("POST", "/pages", {
+                    parent: { database_id: settings.databaseId },
+                    properties: RSSAutoImporter.buildProperties(enriched),
+                }, settings.apiKey);
+                pageMeta = {
+                    pageId: String(page?.id || "").trim(),
+                    url: item.url,
+                    title: item.title,
+                    summary: item.summary,
+                    publishedAt: item.publishedAt,
+                };
+                result.created = 1;
+            } else if (RSSAutoImporter.needsUpdate(item, snapshotEntry, pageMeta)) {
+                RSSAutoImporter.updateStatus(`正在更新 RSS 条目 (${ctx.position}/${total}): ${item.title}`);
+                const enriched = await RSSAutoImporter.enrichItem(item, settings, enrichContext);
+                await NotionAPI.updatePage(pageMeta.pageId, RSSAutoImporter.buildProperties(enriched), settings.apiKey);
+                result.updated = 1;
+            } else {
+                result.unchanged = 1;
+            }
+
+            const pageId = pageMeta?.pageId || snapshotEntry?.pageId || "";
+            const syncedMeta = {
+                pageId,
+                url: item.url,
+                title: item.title,
+                summary: item.summary,
+                publishedAt: item.publishedAt,
+            };
+            if (pageId) index.byPageId.set(pageId, syncedMeta);
+            if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
+            if (syncedMeta.title) index.byTitle.set(syncedMeta.title, syncedMeta);
+            nextSnapshot[item.itemKey] = RSSAutoImporter.buildSnapshotEntry(item, pageId);
+            result.success = true;
+            return result;
+        } catch (error) {
+            console.error(`[LD-Notion] RSS 自动同步失败: ${item.title || item.url}`, error);
+            result.failed = 1;
+            if (snapshotEntry) {
+                nextSnapshot[item.itemKey] = snapshotEntry;
+            }
+            result.success = false;
+            return result;
+        }
+    },
+
+    // 汇总 RSS 同步状态与 watermark（MNT-002 提取自 run）
+    _aggregateRssState: (ctx, stats, successfulKeys, attemptAt) => {
+        const { currentItems, feedCount, nextSnapshot } = ctx;
+        const { created, updated, unchanged, failed } = stats;
+
+        const statePatch = {
+            snapshot: nextSnapshot,
+            lastAttemptAt: attemptAt,
+            lastOutcome: failed > 0 ? "partial" : "success",
+            lastError: "",
+            lastStats: {
+                feeds: feedCount,
+                scanned: currentItems.length,
+                created,
+                updated,
+                unchanged,
+                failed,
+            },
+        };
+        if (currentItems.length === 0) {
+            statePatch.lastSuccessAt = Date.now();
+        } else {
+            const leadingSuccessfulItems = SyncState.takeLeadingItems(
+                currentItems,
+                (entry) => successfulKeys.has(entry.itemKey)
+            );
+            if (leadingSuccessfulItems.length > 0) {
+                statePatch.watermark = SyncState.buildWatermark(
+                    leadingSuccessfulItems,
+                    (entry) => entry.publishedAt,
+                    (entry) => entry.id
+                );
+                statePatch.lastSuccessAt = Date.now();
+            } else if (failed === 0) {
+                statePatch.lastSuccessAt = Date.now();
+            }
+        }
+        SyncState.updateRssState(statePatch);
+
+        if (created === 0 && updated === 0 && failed === 0) {
+            RSSAutoImporter.updateStatus(`RSS 已同步，无新增变更 (${new Date().toLocaleTimeString()})`);
+            return;
+        }
+
+        RSSAutoImporter.updateStatus(
+            `RSS 自动同步完成：新增 ${created}，更新 ${updated}，无变更 ${unchanged}`
+            + `${failed > 0 ? `，失败 ${failed}` : ""}`
+            + ` (${new Date().toLocaleTimeString()})`
+        );
+    },
+
     run: async () => {
         if (document.hidden) {
             RSSAutoImporter.deferredWhileHidden = true;
@@ -479,155 +638,33 @@ const RSSAutoImporter = {
         const attemptAt = Date.now();
 
         try {
-            SyncState.updateRssState({
-                lastAttemptAt: attemptAt,
-                lastOutcome: "running",
-                lastError: "",
-                lastStats: {},
-            });
-            RSSAutoImporter.updateStatus("正在同步 RSS Feed...");
+            const ctx = await RSSAutoImporter._initSyncContext(settings, attemptAt);
 
-            // 使用 SyncCoordinator 获取增量同步概要 (统一状态管理)
-            const syncResult = await SyncCoordinator.sync("rss");
-            if (syncResult.error) {
-                throw new Error(syncResult.error);
-            }
-
-            const setupResult = await BookmarkExporter.setupDatabaseProperties(settings.databaseId, settings.apiKey);
-            if (!setupResult.success) {
-                throw new Error(`数据库配置失败: ${setupResult.error}`);
-            }
-
-            const previousState = SyncState.getRssState();
-            const previousSnapshot = previousState?.snapshot && typeof previousState.snapshot === "object"
-                ? previousState.snapshot
-                : {};
-
-            // 优先使用 SyncCoordinator 返回的增量条目，降级时回退到 loadCurrentItems
-            let currentItems = syncResult.newItems || [];
-            let feedCount = RSSAutoImporter.getFeedUrls().length;
-            if (currentItems.length === 0) {
-                const fallback = await RSSAutoImporter.loadCurrentItems();
-                currentItems = fallback.items || [];
-                feedCount = fallback.feedCount || feedCount;
-            }
-
-            const trackedPages = await RSSAutoImporter.fetchTrackedPages(settings.databaseId, settings.apiKey);
-            const index = RSSAutoImporter.buildPageIndex(trackedPages);
-            const nextSnapshot = {
-                ...previousSnapshot,
-            };
-            const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
-            const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+            const stats = { created: 0, updated: 0, unchanged: 0, failed: 0 };
             const successfulKeys = new Set();
 
-            let created = 0;
-            let updated = 0;
-            let unchanged = 0;
-            let failed = 0;
+            for (let i = 0; i < ctx.currentItems.length; i++) {
+                const r = await RSSAutoImporter._syncSingleRssItem(ctx.currentItems[i], {
+                    settings,
+                    index: ctx.index,
+                    previousSnapshot: ctx.previousSnapshot,
+                    nextSnapshot: ctx.nextSnapshot,
+                    enrichContext: ctx.enrichContext,
+                    position: i + 1,
+                    total: ctx.currentItems.length,
+                });
+                stats.created += r.created;
+                stats.updated += r.updated;
+                stats.unchanged += r.unchanged;
+                stats.failed += r.failed;
+                if (r.success) successfulKeys.add(r.itemKey);
 
-            for (let i = 0; i < currentItems.length; i++) {
-                const item = currentItems[i];
-                const snapshotEntry = previousSnapshot[item.itemKey] || null;
-                let pageMeta = (item.url ? index.byUrl.get(item.url) : null)
-                    || (snapshotEntry?.pageId ? index.byPageId.get(snapshotEntry.pageId) : null)
-                    || (item.title ? index.byTitle.get(item.title) : null);
-
-                try {
-                    if (!pageMeta) {
-                        RSSAutoImporter.updateStatus(`正在新增 RSS 条目 (${i + 1}/${currentItems.length}): ${item.title}`);
-                        const enriched = await RSSAutoImporter.enrichItem(item, settings, enrichContext);
-                        const page = await NotionAPI.request("POST", "/pages", {
-                            parent: { database_id: settings.databaseId },
-                            properties: RSSAutoImporter.buildProperties(enriched),
-                        }, settings.apiKey);
-                        pageMeta = {
-                            pageId: String(page?.id || "").trim(),
-                            url: item.url,
-                            title: item.title,
-                            summary: item.summary,
-                            publishedAt: item.publishedAt,
-                        };
-                        created++;
-                    } else if (RSSAutoImporter.needsUpdate(item, snapshotEntry, pageMeta)) {
-                        RSSAutoImporter.updateStatus(`正在更新 RSS 条目 (${i + 1}/${currentItems.length}): ${item.title}`);
-                        const enriched = await RSSAutoImporter.enrichItem(item, settings, enrichContext);
-                        await NotionAPI.updatePage(pageMeta.pageId, RSSAutoImporter.buildProperties(enriched), settings.apiKey);
-                        updated++;
-                    } else {
-                        unchanged++;
-                    }
-
-                    const pageId = pageMeta?.pageId || snapshotEntry?.pageId || "";
-                    const syncedMeta = {
-                        pageId,
-                        url: item.url,
-                        title: item.title,
-                        summary: item.summary,
-                        publishedAt: item.publishedAt,
-                    };
-                    if (pageId) index.byPageId.set(pageId, syncedMeta);
-                    if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
-                    if (syncedMeta.title) index.byTitle.set(syncedMeta.title, syncedMeta);
-                    nextSnapshot[item.itemKey] = RSSAutoImporter.buildSnapshotEntry(item, pageId);
-                    successfulKeys.add(item.itemKey);
-                } catch (error) {
-                    console.error(`[LD-Notion] RSS 自动同步失败: ${item.title || item.url}`, error);
-                    failed++;
-                    if (snapshotEntry) {
-                        nextSnapshot[item.itemKey] = snapshotEntry;
-                    }
-                }
-
-                if (delay > 0 && i < currentItems.length - 1) {
-                    await Utils.sleep(delay);
+                if (ctx.delay > 0 && i < ctx.currentItems.length - 1) {
+                    await Utils.sleep(ctx.delay);
                 }
             }
 
-            const statePatch = {
-                snapshot: nextSnapshot,
-                lastAttemptAt: attemptAt,
-                lastOutcome: failed > 0 ? "partial" : "success",
-                lastError: "",
-                lastStats: {
-                    feeds: feedCount,
-                    scanned: currentItems.length,
-                    created,
-                    updated,
-                    unchanged,
-                    failed,
-                },
-            };
-            if (currentItems.length === 0) {
-                statePatch.lastSuccessAt = Date.now();
-            } else {
-                const leadingSuccessfulItems = SyncState.takeLeadingItems(
-                    currentItems,
-                    (entry) => successfulKeys.has(entry.itemKey)
-                );
-                if (leadingSuccessfulItems.length > 0) {
-                    statePatch.watermark = SyncState.buildWatermark(
-                        leadingSuccessfulItems,
-                        (entry) => entry.publishedAt,
-                        (entry) => entry.id
-                    );
-                    statePatch.lastSuccessAt = Date.now();
-                } else if (failed === 0) {
-                    statePatch.lastSuccessAt = Date.now();
-                }
-            }
-            SyncState.updateRssState(statePatch);
-
-            if (created === 0 && updated === 0 && failed === 0) {
-                RSSAutoImporter.updateStatus(`RSS 已同步，无新增变更 (${new Date().toLocaleTimeString()})`);
-                return;
-            }
-
-            RSSAutoImporter.updateStatus(
-                `RSS 自动同步完成：新增 ${created}，更新 ${updated}，无变更 ${unchanged}`
-                + `${failed > 0 ? `，失败 ${failed}` : ""}`
-                + ` (${new Date().toLocaleTimeString()})`
-            );
+            RSSAutoImporter._aggregateRssState(ctx, stats, successfulKeys, attemptAt);
         } catch (error) {
             console.error("[LD-Notion] RSS 自动同步出错:", error);
             SyncState.updateRssState({
