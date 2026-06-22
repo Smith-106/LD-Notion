@@ -197,9 +197,9 @@ AutoImporter.run = async () => {
 
         const worker = async () => {
             while (true) {
-                const i = nextIndex;
+                // 原子取任务：先 increment 再 await，避免并发重复取索引
+                const i = nextIndex++;
                 if (i >= newBookmarks.length) return;
-                nextIndex++;
 
                 const bookmark = newBookmarks[i];
                 const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);

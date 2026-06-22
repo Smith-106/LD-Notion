@@ -5,6 +5,7 @@ const { CONFIG, MSG, SUPPORTED_FILE_TYPES, MULTI_PART_THRESHOLD, getMimeType, ge
 const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { NotionOAuth } = require("../auth");
+const { UrlValidator } = require("../security");
 
 const SiteDetector = {
     SITES: {
@@ -1434,6 +1435,9 @@ const NotionAPI = {
 
 const ObsidianAPI = {
     testConnection: async (apiUrl, apiKey) => {
+        if (!UrlValidator.validateObsidianUrl(apiUrl)) {
+            return { ok: false, error: "Obsidian API URL 安全校验失败：仅允许本地地址 (127.0.0.1/localhost)" };
+        }
         const resp = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "GET",
@@ -1451,6 +1455,9 @@ const ObsidianAPI = {
     },
 
     writeNote: async (apiUrl, apiKey, path, content) => {
+        if (!UrlValidator.validateObsidianUrl(apiUrl)) {
+            return { ok: false, error: "Obsidian API URL 安全校验失败：仅允许本地地址 (127.0.0.1/localhost)" };
+        }
         const resp = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "PUT",
@@ -1473,6 +1480,9 @@ const ObsidianAPI = {
     },
 
     writeImage: async (apiUrl, apiKey, path, blob, contentType) => {
+        if (!UrlValidator.validateObsidianUrl(apiUrl)) {
+            return { ok: false, error: "Obsidian API URL 安全校验失败：仅允许本地地址 (127.0.0.1/localhost)" };
+        }
         const resp = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "PUT",

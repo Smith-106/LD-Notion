@@ -970,10 +970,9 @@ const Exporter = {
                 }
                 if (Exporter.isCancelled) return;
 
-                // 取任务
-                const i = nextIndex;
+                // 取任务（原子：先 increment 再 await，避免并发重复取索引）
+                const i = nextIndex++;
                 if (i >= bookmarks.length) return;
-                nextIndex++;
 
                 const bookmark = bookmarks[i];
                 const topicId = bookmark.topic_id || bookmark.bookmarkable_id;

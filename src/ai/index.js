@@ -7,8 +7,20 @@ const { NotionAPI, SiteDetector, EMOJI_MAP, DOMToNotion } = require("../api");
 const { OperationGuard, OperationLog } = require("../security");
 const { GenericExtractor, WorkspaceService } = require("../extract");
 const { UndoManager, ConfirmationDialog } = require("../security");
+const { UrlValidator } = require("../security");
 
 const AIService = {
+    // 标准化 + 安全校验 baseUrl，返回 null 表示非法（调用方应 reject）
+    // versionPath: "v1" 或 "v1beta"
+    _normalizeBaseUrl: (baseUrl, versionPath) => {
+        const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(new RegExp(`/${versionPath}$`), "") : "";
+        if (!normalizedBase) return "";
+        if (!UrlValidator.validateAiBaseUrl(normalizedBase)) {
+            throw new Error(`AI baseUrl 安全校验失败：${normalizedBase} 不在白名单或非 HTTPS`);
+        }
+        return normalizedBase;
+    },
+
     // 服务商配置
     PROVIDERS: {
         openai: {
@@ -71,7 +83,7 @@ const AIService = {
     // OpenAI API 请求
     requestOpenAI: (prompt, model, apiKey, baseUrl) => {
         // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
-        const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1$/, "") : "";
+        const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1");
         const url = normalizedBase
             ? `${normalizedBase}/v1/chat/completions`
             : "https://api.openai.com/v1/chat/completions";
@@ -112,7 +124,7 @@ const AIService = {
     // Claude API 请求
     requestClaude: (prompt, model, apiKey, baseUrl) => {
         // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
-        const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1$/, "") : "";
+        const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1");
         const url = normalizedBase
             ? `${normalizedBase}/v1/messages`
             : "https://api.anthropic.com/v1/messages";
@@ -153,7 +165,7 @@ const AIService = {
     // Gemini API 请求
     requestGemini: (prompt, model, apiKey, baseUrl) => {
         // 标准化 baseUrl：移除末尾的 / 和 /v1beta，避免重复路径
-        const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1beta$/, "") : "";
+        const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1beta");
         const url = normalizedBase
             ? `${normalizedBase}/v1beta/models/${model}:generateContent`
             : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
@@ -237,7 +249,7 @@ const AIService = {
     // OpenAI 对话请求
     requestOpenAIChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
         // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
-        const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1$/, "") : "";
+        const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1");
         const url = normalizedBase
             ? `${normalizedBase}/v1/chat/completions`
             : "https://api.openai.com/v1/chat/completions";
@@ -278,7 +290,7 @@ const AIService = {
     // Claude 对话请求
     requestClaudeChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
         // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
-        const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1$/, "") : "";
+        const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1");
         const url = normalizedBase
             ? `${normalizedBase}/v1/messages`
             : "https://api.anthropic.com/v1/messages";
@@ -319,7 +331,7 @@ const AIService = {
     // Gemini 对话请求
     requestGeminiChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
         // 标准化 baseUrl：移除末尾的 / 和 /v1beta，避免重复路径
-        const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1beta$/, "") : "";
+        const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1beta");
         const url = normalizedBase
             ? `${normalizedBase}/v1beta/models/${model}:generateContent`
             : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
@@ -423,7 +435,7 @@ const AIService = {
     // 获取 OpenAI 模型列表
     fetchOpenAIModels: (apiKey, baseUrl) => {
         // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
-        const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1$/, "") : "";
+        const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1");
         const url = normalizedBase
             ? `${normalizedBase}/v1/models`
             : "https://api.openai.com/v1/models";
@@ -471,7 +483,7 @@ const AIService = {
     // 获取 Gemini 模型列表
     fetchGeminiModels: (apiKey, baseUrl) => {
         // 标准化 baseUrl：移除末尾的 / 和 /v1beta，避免重复路径
-        const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/v1beta$/, "") : "";
+        const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1beta");
         const url = normalizedBase
             ? `${normalizedBase}/v1beta/models`
             : `https://generativelanguage.googleapis.com/v1beta/models`;
