@@ -11,13 +11,23 @@ const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
 
-const { StyleManager } = require("./style-manager");
-const { DesignSystem } = require("./design-system");
-const { PanelResize } = require("./panel-resize");
-const { NotionSiteUI } = require("./notion-site-ui");
-const { UI_CSS } = require("./styles");
-const { UIEvents } = require("./events");
-const { UI } = require("./main-ui");
-const { GenericUI } = require("./generic-ui");
+const StyleManager = {
+    injectOnce: (styleId, cssText) => {
+        if (!styleId || !cssText) return null;
+        const root = document.head || document.documentElement;
+        if (!root) return null;
 
-module.exports = { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI, GenericUI };
+        const existing = document.getElementById(styleId);
+        if (existing) return existing;
+
+        const style = document.createElement("style");
+        style.id = styleId;
+        style.setAttribute("data-ldb-style", styleId);
+        style.textContent = cssText;
+        root.appendChild(style);
+        return style;
+    },
+};
+;
+
+module.exports = { StyleManager };
