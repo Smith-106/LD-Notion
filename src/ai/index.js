@@ -9,6 +9,9 @@ const { GenericExtractor, WorkspaceService } = require("../extract");
 const { UndoManager, ConfirmationDialog } = require("../security");
 const { UrlValidator } = require("../security");
 
+// ═══════════════════════════════════════════════════════
+// 🤖 AI Service — LLM 客户端（OpenAI / Claude / Gemini）
+// ═══════════════════════════════════════════════════════
 const AIService = {
     // 标准化 + 安全校验 baseUrl，返回 null 表示非法（调用方应 reject）
     // versionPath: "v1" 或 "v1beta"
@@ -530,6 +533,9 @@ const AIService = {
         });
     },
 };
+// ═══════════════════════════════════════════════════════
+// 💬 Chat State — 对话状态管理
+// ═══════════════════════════════════════════════════════
 const ChatState = {
     messages: [],
     isProcessing: false,
@@ -588,6 +594,9 @@ const ChatState = {
     },
 };
 
+// ═══════════════════════════════════════════════════════
+// 🎯 Intent Patterns & Rules — 意图分类规则
+// ═══════════════════════════════════════════════════════
 const QUICK_INTENT_PATTERNS = Object.freeze({
     blockId: /\bblock[_:-]?([A-Za-z0-9-]{6,})\b/i,
     commentId: /\bcomment[_:-]?([A-Za-z0-9-]{3,})\b/i,
@@ -881,6 +890,9 @@ const QUICK_INTENT_RULES = Object.freeze([
 // ===========================================
 // AI Agent 工具定义
 // ===========================================
+// ═══════════════════════════════════════════════════════
+// 🔧 Agent Tools — AI Agent 工具定义
+// ═══════════════════════════════════════════════════════
 const AI_AGENT_TOOLS = {
     // === 读取工具 (Level 0) ===
     search_workspace: {
@@ -2542,6 +2554,9 @@ ${schemaDesc ? schemaDesc + "\n" : ""}用户需求: ${description}
 // ===========================================
 // AI Handlers — 意图执行处理器
 // ===========================================
+// ═══════════════════════════════════════════════════════
+// 📨 AI Handlers — 消息处理与工具调度
+// ═══════════════════════════════════════════════════════
 const AIHandlers = {
 handleQuery: async (params, settings, explanation) => {
     // 检查数据库 ID 配置
@@ -4936,6 +4951,9 @@ handleTemplateOutput: async (params, settings, explanation) => {
     return `${template.icon} **${template.name}**\n\n${aiResponse}\n\n💡 如需写入页面，请指定目标页面：「用${template.name}模板处理 xxx 页面」`;
 },
 };
+// ═══════════════════════════════════════════════════════
+// 🧠 AI Assistant — 对话协调与流程控制
+// ═══════════════════════════════════════════════════════
 const AIAssistant = {
     // 意图类型
     INTENTS: {
@@ -6563,6 +6581,9 @@ AIAssistant.IntentDispatcher = Object.freeze({
 });
 
 // ===========================================
+// ═══════════════════════════════════════════════════════
+// 🎨 Chat UI — 欢迎界面 / 对话 UI / 意图分类器
+// ═══════════════════════════════════════════════════════
 const AI_WELCOME_ENTRY_POINTS = Object.freeze({
     subtitle: "稳定支持：数据库 / 页面检索、跨源搜索、批量分类、GitHub / 书签导入、页面摘要；更多能力看「帮助」",
     inputPlaceholder: "输入指令，如「列出所有数据库」或「导入GitHub收藏」...",
