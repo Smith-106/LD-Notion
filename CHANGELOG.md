@@ -1,5 +1,53 @@
 # 更新日志
 
+## [3.7.3] - 2026-06-22
+
+### 修复
+
+- 并发：`Exporter.exportBookmarks` 和 `AutoImporter.run` 的并发 worker `nextIndex` 改为 `++nextIndex` 原子操作，消除 race condition（COR-001/COR-002）
+- 正确性：`BookmarkAutoImporter.processBookmark`/`processDeleted` 参数名 `index` shadow 外层页索引对象，重命名为 `itemIndex`（COR-015/COR-016）
+- 正确性：`DedupStore.clearSeen` 在 batch 模式下无条件执行 `GM_deleteValue`，加 `return` 跳过（COR-003）
+- 正确性：`DOMToNotion` 表格空行 `Math.max()` 返回 `-Infinity`，加 `Math.max(1, ...)` 下限（COR-018）
+- 正确性：`ObsidianAPI` 三个方法缺少 `timeout`/`ontimeout`，请求挂起（COR-019）
+- 最佳实践：`UndoManager.hideToast` 未清理旧 `setTimeout`，新 toast 被误删（BP-015）
+- 最佳实践：`bridge/index.js` 用 `var` 声明构建标记，改为 `const`（BP-003）
+- 最佳实践：`SyncState.buildWatermark` 用 `Array.includes` O(n²) 改为 `Set.has` O(1)（BP-012）
+
+### 安全
+
+- **API key 泄露防护**：新增 `UrlValidator` 工具
+  - AI 请求 `baseUrl` 白名单校验（`api.openai.com`/`api.anthropic.com`/`generativelanguage.googleapis.com`）或 HTTPS 非内网域名
+  - Obsidian API URL 仅允许本地地址（`127.0.0.1`/`localhost`/`::1`）
+  - `_isPrivateHost` 拦截 `10.x`/`172.16-31.x`/`192.168.x`/`169.254.x` 私有网段（SEC-001/SEC-002）
+- OAuth state token `Math.random()` 回退改为抛出错误，强制使用 `crypto.getRandomValues`（SEC-005）
+- `OperationLog` event ID 从 `Math.random()` 改为 `crypto.getRandomValues`（SEC-015）
+- `apiKeyHash` 从直接截取后 8 位改为 djb2 hash，避免部分暴露 API key（SEC-011）
+
+### 重构
+
+- **UI 模块拆分**：`src/ui/index.js`（~9700 行）拆分为 8 个独立模块 + re-export 入口
+  - `ui/style-manager.js` / `ui/design-system.js` / `ui/panel-resize.js`
+  - `ui/notion-site-ui.js` / `ui/styles.js` / `ui/events.js`
+  - `ui/main-ui.js` / `ui/generic-ui.js`
+- **超长方法拆分**：
+  - `GitHubAutoImporter.run`（287 行 → 50 行）拆为 5 个私有方法（MNT-001）
+  - `RSSAutoImporter.run`（195 行 → 60 行）拆为 3 个私有方法（MNT-002）
+  - `DOMToNotion.cookedToBlocks`（290 行 → 90 行）拆为 13 个元素处理器（MNT-003）
+- **AI 模块分区**：`src/ai/index.js`（~7000 行）添加 7 个分区注释，因深度交叉依赖暂无法物理拆分
+
+### 变更
+
+- `package.json`、`build.js` 与根目录 `.user.js` 的 `@version` 同步递增到 `3.7.3`
+- `AIService` 8 处 baseUrl 标准化合并为 `_normalizeBaseUrl`，内置 URL 安全校验
+
+### 验证
+
+- `npm test`：17 个测试文件、349 个用例全部通过
+- `node build.js`：零警告构建
+- 代码质量审查 85 个 findings，15 个已修复（2 critical, 5 high, 6 medium, 2 low）
+
+[3.7.3]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.3
+
 ## [3.7.2] - 2026-06-20
 
 ### 修复

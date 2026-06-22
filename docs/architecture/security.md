@@ -72,6 +72,22 @@ v3.7.0 对用户脚本权限域和 AI 输入链路做了系统性加固：
 - **Extension SSRF 白名单严格匹配**：当前 background service worker 的 URL 白名单使用简单字符串匹配，可被 `evil.amazonaws.com.attacker.com` 绕过。应改用 URL 构造函数解析 hostname 后精确匹配，并限制协议为 https、端口为默认端口。
 - **Extension CredentialVault 移植**：Chrome Extension 版本中 API key 通过 `chrome.storage.local` 明文存储，CredentialVault AES-256-GCM 加密机制尚未移植到 Extension 侧。
 
+## v3.7.3 安全加固
+
+v3.7.3 针对 API key 泄露和弱随机数做了专项修复：
+
+### API Key 泄露防护
+
+- **AI 请求 baseUrl 校验**：`AIService._normalizeBaseUrl` 内置 `UrlValidator.validateAiBaseUrl`，仅允许白名单域名（`api.openai.com`、`api.anthropic.com`、`generativelanguage.googleapis.com`）或 HTTPS 非内网域名，阻止攻击者通过自定义 `baseUrl` 将 `Authorization` 头重定向到恶意服务器（SEC-001）。
+- **Obsidian API URL 本地限制**：`ObsidianAPI` 三个方法入口调用 `UrlValidator.validateObsidianUrl`，仅允许 `127.0.0.1`/`localhost`/`::1`，阻止篡改存储值后的 API key 泄露（SEC-002）。
+- **私有网段拦截**：`UrlValidator._isPrivateHost` 拦截 `10.x`/`172.16-31.x`/`192.168.x`/`169.254.x` 私有 IP 和 link-local 地址，防止 SSRF。
+
+### 弱随机数消除
+
+- **OAuth state token**：`Utils.randomToken` 移除 `Math.random()` 回退，在 `crypto.getRandomValues` 不可用时抛出错误（SEC-005）。
+- **审计日志 event ID**：`OperationLog.createEventId` 从 `Math.random()` 改为 `crypto.getRandomValues`（SEC-015）。
+- **API key hash**：`WorkspaceService.buildWorkspaceData` 的 `apiKeyHash` 从直接截取后 8 位改为 djb2 hash，避免部分暴露 API key（SEC-011）。
+
 ## v3.7.2 UI 安全加固
 
 v3.7.2 通过 UI Odyssey 全维度审查修复了 UI 层面的安全问题：

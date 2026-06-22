@@ -59,6 +59,11 @@ mindmap
       interaction states
       accessibility
       responsive layout
+    Module Architecture
+      UI module split (8 files)
+      AI module sections (7 sections)
+      UrlValidator (API key exfil protection)
+      AutoImporter method decomposition
 ```
 
 ## 机制页用途
