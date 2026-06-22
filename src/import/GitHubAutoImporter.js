@@ -125,6 +125,241 @@ const GitHubAutoImporter = {
 // ===========================================
 // GitHub API 模块
 // ===========================================
+
+// 将 GitHub item 映射为统一 bookmark 结构（MNT-001 提取自 run）
+GitHubAutoImporter._mapItemsToBookmarks = (incrementalItems, type, meta) => {
+    if (typeof UI !== "undefined" && UI && typeof UI.mapGitHubItemsToBookmarks === "function") {
+        return UI.mapGitHubItemsToBookmarks(incrementalItems, type)
+            .filter((item) => typeof UI !== "undefined" && UI && typeof UI.isBookmarkExported === "function" ? !UI.isBookmarkExported(item) : true);
+    }
+    return incrementalItems.map((item) => ({
+        itemKey: meta.getId(item),
+        raw: item,
+        title: item.full_name || item.name || "",
+        url: item.html_url || "",
+        description: item.description || "",
+        tags: item.language ? [`lang:${item.language}`] : [],
+        source: "github",
+        sourceType: type,
+    }));
+};
+
+// 无 UI 降级路径：直接调用 GitHubExporter 导出（MNT-001 提取自 run）
+GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, settings) => {
+    const { GitHubExporter } = require("./GitHubExporter");
+    const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+    let success = 0, failed = 0;
+    const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+    for (let i = 0; i < mappedItems.length; i++) {
+        const item = mappedItems[i];
+        try {
+            const raw = item.raw || item;
+            const enriched = await GitHubExporter.enrichRepo(raw, settings, enrichContext);
+            const buildFn = type === "gists"
+                ? GitHubExporter.buildGistProperties
+                : (r) => GitHubExporter.buildRepoProperties(r, meta.label);
+            const properties = buildFn(enriched);
+            for (const k of Object.keys(properties)) {
+                if (properties[k] === undefined) delete properties[k];
+            }
+            await NotionAPI.request("POST", "/pages", {
+                parent: { database_id: settings.databaseId },
+                properties,
+            }, settings.apiKey);
+            if (type === "gists") {
+                GitHubAPI.markGistExported(meta.getId(raw));
+            } else {
+                GitHubAPI.markExported(meta.getId(raw));
+            }
+            success++;
+        } catch (e) {
+            console.warn(`[GitHubAutoImporter] 导出失败: ${item.itemKey || meta.getId(item.raw || item)}`, e);
+            failed++;
+        }
+        if (i < mappedItems.length - 1) {
+            await new Promise(r => setTimeout(r, delay));
+        }
+    }
+    return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
+};
+
+// 导出映射后的 items（优先 UI，降级 GitHubExporter）（MNT-001 提取自 run）
+GitHubAutoImporter._exportMappedItems = async (mappedItems, type, meta, settings) => {
+    if (typeof UI !== "undefined" && UI && typeof UI.exportGitHubSelected === "function") {
+        return await UI.exportGitHubSelected(mappedItems, {
+            apiKey: settings.apiKey,
+            databaseId: settings.databaseId,
+            token: settings.token,
+        }, (current, total, title) => {
+            GitHubAutoImporter.updateStatus(`📬 GitHub ${meta.label} 导入中 (${current}/${total}): ${title}`);
+        });
+    }
+    return await GitHubAutoImporter._exportViaGitHubExporter(mappedItems, type, meta, settings);
+};
+
+// 汇总单类型同步结果与 watermark（MNT-001 提取自 run 的循环体）
+GitHubAutoImporter._syncSingleType = async (type, settings, attemptAt) => {
+    const meta = GitHubAutoImporter.getTypeMeta(type);
+    const typeAttemptAt = Date.now();
+
+    try {
+        SyncState.updateGitHubState(type, {
+            lastAttemptAt: typeAttemptAt,
+            lastOutcome: "running",
+            lastError: "",
+            lastStats: {},
+        });
+        GitHubAutoImporter.updateStatus(`📧 正在检查 GitHub ${meta.label}...`);
+
+        const syncState = SyncState.getGitHubState(type);
+        const items = await GitHubAutoImporter.fetchTypeItems(type, settings);
+        const incrementalItems = SyncState.filterOrderedItems(
+            items,
+            syncState.watermark,
+            meta.getTime,
+            meta.getId
+        );
+
+        if (incrementalItems.length === 0) {
+            SyncState.updateGitHubState(type, {
+                lastAttemptAt: typeAttemptAt,
+                lastSuccessAt: Date.now(),
+                lastOutcome: "success",
+                lastError: "",
+                lastStats: {
+                    scanned: items.length,
+                    pending: 0,
+                    exported: 0,
+                    failed: 0,
+                },
+            });
+            return { pending: false, success: 0, failed: 0 };
+        }
+
+        const mappedItems = GitHubAutoImporter._mapItemsToBookmarks(incrementalItems, type, meta);
+
+        if (mappedItems.length === 0) {
+            SyncState.updateGitHubState(type, {
+                watermark: SyncState.buildWatermark(incrementalItems, meta.getTime, meta.getId),
+                lastAttemptAt: typeAttemptAt,
+                lastSuccessAt: Date.now(),
+                lastOutcome: "success",
+                lastError: "",
+                lastStats: {
+                    scanned: items.length,
+                    pending: incrementalItems.length,
+                    exported: 0,
+                    failed: 0,
+                },
+            });
+            return { pending: true, success: 0, failed: 0 };
+        }
+
+        const result = await GitHubAutoImporter._exportMappedItems(mappedItems, type, meta, settings);
+
+        const successKeys = new Set(
+            (result.success || []).map((entry) => String(entry.itemKey || "")).filter(Boolean)
+        );
+        const successfulItems = mappedItems
+            .filter((item) => successKeys.has(String(item.itemKey || "")))
+            .map((item) => item.raw);
+
+        const typeStatePatch = {
+            lastAttemptAt: typeAttemptAt,
+            lastOutcome: result.failed.length > 0
+                ? (result.success.length > 0 ? "partial" : "error")
+                : "success",
+            lastError: result.success.length === 0 && result.failed.length > 0
+                ? `${meta.label} 导出失败 ${result.failed.length} 项`
+                : "",
+            lastStats: {
+                scanned: items.length,
+                pending: incrementalItems.length,
+                exported: result.success.length,
+                failed: result.failed.length,
+            },
+        };
+
+        if (successfulItems.length > 0) {
+            const successfulIds = new Set(successfulItems.map((item) => meta.getId(item)));
+            const leadingSuccessfulItems = SyncState.takeLeadingItems(
+                incrementalItems,
+                (item) => {
+                    const itemKey = meta.getId(item);
+                    if (successfulIds.has(itemKey)) return true;
+                    const mapped = mappedItems.find((entry) => meta.getId(entry.raw) === itemKey);
+                    return !mapped;
+                }
+            );
+            if (leadingSuccessfulItems.length > 0) {
+                typeStatePatch.watermark = SyncState.buildWatermark(leadingSuccessfulItems, meta.getTime, meta.getId);
+            }
+            typeStatePatch.lastSuccessAt = Date.now();
+        }
+
+        SyncState.updateGitHubState(type, typeStatePatch);
+        return { pending: true, success: result.success.length, failed: result.failed.length };
+    } catch (error) {
+        SyncState.updateGitHubState(type, {
+            lastAttemptAt: typeAttemptAt,
+            lastOutcome: "error",
+            lastError: error?.message || String(error),
+            lastStats: {},
+        });
+        console.error(`[LD-Notion] GitHub ${type} 自动导入失败:`, error);
+        return { pending: false, success: 0, failed: 0, syncError: `${meta.label}: ${error.message}` };
+    }
+};
+
+// 汇总元状态并展示完成提示（MNT-001 提取自 run）
+GitHubAutoImporter._aggregateMetaState = (types, successCount, failedCount, syncErrors, attemptAt) => {
+    if (!syncErrors.length && successCount === 0 && failedCount === 0) {
+        SyncState.updateGitHubMeta({
+            lastAttemptAt: attemptAt,
+            lastSuccessAt: Date.now(),
+            lastOutcome: "success",
+            lastError: "",
+            lastStats: {
+                enabledTypes: types.length,
+                exported: 0,
+                failed: 0,
+                syncErrors: 0,
+            },
+        });
+        GitHubAutoImporter.updateStatus(`✅ 没有新的 GitHub 收藏 (${new Date().toLocaleTimeString()})`);
+        return;
+    }
+
+    if (successCount === 0 && failedCount === 0 && syncErrors.length > 0) {
+        throw new Error(syncErrors[0]);
+    }
+
+    const metaStatePatch = {
+        lastAttemptAt: attemptAt,
+        lastOutcome: (syncErrors.length > 0 || failedCount > 0)
+            ? (successCount > 0 ? "partial" : "error")
+            : "success",
+        lastError: syncErrors.join("；"),
+        lastStats: {
+            enabledTypes: types.length,
+            exported: successCount,
+            failed: failedCount,
+            syncErrors: syncErrors.length,
+        },
+    };
+    if (metaStatePatch.lastOutcome === "success" || successCount > 0) {
+        metaStatePatch.lastSuccessAt = Date.now();
+    }
+    SyncState.updateGitHubMeta(metaStatePatch);
+
+    GitHubAutoImporter.updateStatus(
+        `✅ GitHub 自动导入完成: 成功 ${successCount} 项`
+        + `${failedCount > 0 ? `，失败 ${failedCount} 项` : ""}`
+        + `${syncErrors.length > 0 ? `，异常 ${syncErrors.length} 类` : ""}`
+        + ` (${new Date().toLocaleTimeString()})`
+    );
+};
+
 GitHubAutoImporter.run = async () => {
     if (document.hidden) {
         GitHubAutoImporter.deferredWhileHidden = true;
@@ -166,231 +401,22 @@ GitHubAutoImporter.run = async () => {
 
         let successCount = 0;
         let failedCount = 0;
-        let hasPending = false;
         const syncErrors = [];
 
         for (const type of types) {
-            const meta = GitHubAutoImporter.getTypeMeta(type);
-            const typeAttemptAt = Date.now();
-
-            try {
-                SyncState.updateGitHubState(type, {
-                    lastAttemptAt: typeAttemptAt,
-                    lastOutcome: "running",
-                    lastError: "",
-                    lastStats: {},
-                });
-                GitHubAutoImporter.updateStatus(`📧 正在检查 GitHub ${meta.label}...`);
-
-                const syncState = SyncState.getGitHubState(type);
-                const items = await GitHubAutoImporter.fetchTypeItems(type, settings);
-                const incrementalItems = SyncState.filterOrderedItems(
-                    items,
-                    syncState.watermark,
-                    meta.getTime,
-                    meta.getId
-                );
-
-                if (incrementalItems.length === 0) {
-                    SyncState.updateGitHubState(type, {
-                        lastAttemptAt: typeAttemptAt,
-                        lastSuccessAt: Date.now(),
-                        lastOutcome: "success",
-                        lastError: "",
-                        lastStats: {
-                            scanned: items.length,
-                            pending: 0,
-                            exported: 0,
-                            failed: 0,
-                        },
-                    });
-                    continue;
-                }
-
-                hasPending = true;
-                let mappedItems;
-                if (typeof UI !== "undefined" && UI && typeof UI.mapGitHubItemsToBookmarks === "function") {
-                    mappedItems = UI.mapGitHubItemsToBookmarks(incrementalItems, type)
-                        .filter((item) => typeof UI !== "undefined" && UI && typeof UI.isBookmarkExported === "function" ? !UI.isBookmarkExported(item) : true);
-                } else {
-                    mappedItems = incrementalItems.map((item) => ({
-                        itemKey: meta.getId(item),
-                        raw: item,
-                        title: item.full_name || item.name || "",
-                        url: item.html_url || "",
-                        description: item.description || "",
-                        tags: item.language ? [`lang:${item.language}`] : [],
-                        source: "github",
-                        sourceType: type,
-                    }));
-                }
-
-                if (mappedItems.length === 0) {
-                    SyncState.updateGitHubState(type, {
-                        watermark: SyncState.buildWatermark(incrementalItems, meta.getTime, meta.getId),
-                        lastAttemptAt: typeAttemptAt,
-                        lastSuccessAt: Date.now(),
-                        lastOutcome: "success",
-                        lastError: "",
-                        lastStats: {
-                            scanned: items.length,
-                            pending: incrementalItems.length,
-                            exported: 0,
-                            failed: 0,
-                        },
-                    });
-                    continue;
-                }
-
-                let result;
-                if (typeof UI !== "undefined" && UI && typeof UI.exportGitHubSelected === "function") {
-                    result = await UI.exportGitHubSelected(mappedItems, {
-                        apiKey: settings.apiKey,
-                        databaseId: settings.databaseId,
-                        token: settings.token,
-                    }, (current, total, title) => {
-                        GitHubAutoImporter.updateStatus(`📬 GitHub ${meta.label} 导入中 (${current}/${total}): ${title}`);
-                    });
-                } else {
-                    // 无 UI 降级路径：直接调用 GitHubExporter 导出
-                    const { GitHubExporter } = require("./GitHubExporter");
-                    const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
-                    let success = 0, failed = 0;
-                    const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-                    for (let i = 0; i < mappedItems.length; i++) {
-                        const item = mappedItems[i];
-                        try {
-                            const raw = item.raw || item;
-                            const enriched = await GitHubExporter.enrichRepo(raw, settings, enrichContext);
-                            const buildFn = type === "gists"
-                                ? GitHubExporter.buildGistProperties
-                                : (r) => GitHubExporter.buildRepoProperties(r, meta.label);
-                            const properties = buildFn(enriched);
-                            for (const k of Object.keys(properties)) {
-                                if (properties[k] === undefined) delete properties[k];
-                            }
-                            await NotionAPI.request("POST", "/pages", {
-                                parent: { database_id: settings.databaseId },
-                                properties,
-                            }, settings.apiKey);
-                            if (type === "gists") {
-                                GitHubAPI.markGistExported(meta.getId(raw));
-                            } else {
-                                GitHubAPI.markExported(meta.getId(raw));
-                            }
-                            success++;
-                        } catch (e) {
-                            console.warn(`[GitHubAutoImporter] 导出失败: ${item.itemKey || meta.getId(item.raw || item)}`, e);
-                            failed++;
-                        }
-                        if (i < mappedItems.length - 1) {
-                            await new Promise(r => setTimeout(r, delay));
-                        }
-                    }
-                    result = { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
-                }
-
-                successCount += result.success.length;
-                failedCount += result.failed.length;
-
-                const successKeys = new Set(
-                    (result.success || []).map((entry) => String(entry.itemKey || "")).filter(Boolean)
-                );
-                const successfulItems = mappedItems
-                    .filter((item) => successKeys.has(String(item.itemKey || "")))
-                    .map((item) => item.raw);
-
-                const typeStatePatch = {
-                    lastAttemptAt: typeAttemptAt,
-                    lastOutcome: result.failed.length > 0
-                        ? (result.success.length > 0 ? "partial" : "error")
-                        : "success",
-                    lastError: result.success.length === 0 && result.failed.length > 0
-                        ? `${meta.label} 导出失败 ${result.failed.length} 项`
-                        : "",
-                    lastStats: {
-                        scanned: items.length,
-                        pending: incrementalItems.length,
-                        exported: result.success.length,
-                        failed: result.failed.length,
-                    },
-                };
-
-                if (successfulItems.length > 0) {
-                    const successfulIds = new Set(successfulItems.map((item) => meta.getId(item)));
-                    const leadingSuccessfulItems = SyncState.takeLeadingItems(
-                        incrementalItems,
-                        (item) => {
-                            const itemKey = meta.getId(item);
-                            if (successfulIds.has(itemKey)) return true;
-                            const mapped = mappedItems.find((entry) => meta.getId(entry.raw) === itemKey);
-                            return !mapped;
-                        }
-                    );
-                    if (leadingSuccessfulItems.length > 0) {
-                        typeStatePatch.watermark = SyncState.buildWatermark(leadingSuccessfulItems, meta.getTime, meta.getId);
-                    }
-                    typeStatePatch.lastSuccessAt = Date.now();
-                }
-
-                SyncState.updateGitHubState(type, typeStatePatch);
-            } catch (error) {
-                syncErrors.push(`${meta.label}: ${error.message}`);
-                SyncState.updateGitHubState(type, {
-                    lastAttemptAt: typeAttemptAt,
-                    lastOutcome: "error",
-                    lastError: error?.message || String(error),
-                    lastStats: {},
-                });
-                console.error(`[LD-Notion] GitHub ${type} 自动导入失败:`, error);
-            }
+            const r = await GitHubAutoImporter._syncSingleType(type, settings, attemptAt);
+            successCount += r.success;
+            failedCount += r.failed;
+            if (r.syncError) syncErrors.push(r.syncError);
         }
 
+        const hasPending = successCount > 0 || failedCount > 0;
         if (!hasPending && syncErrors.length === 0) {
-            SyncState.updateGitHubMeta({
-                lastAttemptAt: attemptAt,
-                lastSuccessAt: Date.now(),
-                lastOutcome: "success",
-                lastError: "",
-                lastStats: {
-                    enabledTypes: types.length,
-                    exported: 0,
-                    failed: 0,
-                    syncErrors: 0,
-                },
-            });
-            GitHubAutoImporter.updateStatus(`✅ 没有新的 GitHub 收藏 (${new Date().toLocaleTimeString()})`);
+            GitHubAutoImporter._aggregateMetaState(types, 0, 0, [], attemptAt);
             return;
         }
 
-        if (successCount === 0 && failedCount === 0 && syncErrors.length > 0) {
-            throw new Error(syncErrors[0]);
-        }
-
-        const metaStatePatch = {
-            lastAttemptAt: attemptAt,
-            lastOutcome: (syncErrors.length > 0 || failedCount > 0)
-                ? (successCount > 0 ? "partial" : "error")
-                : "success",
-            lastError: syncErrors.join("；"),
-            lastStats: {
-                enabledTypes: types.length,
-                exported: successCount,
-                failed: failedCount,
-                syncErrors: syncErrors.length,
-            },
-        };
-        if (metaStatePatch.lastOutcome === "success" || successCount > 0) {
-            metaStatePatch.lastSuccessAt = Date.now();
-        }
-        SyncState.updateGitHubMeta(metaStatePatch);
-
-        GitHubAutoImporter.updateStatus(
-            `✅ GitHub 自动导入完成: 成功 ${successCount} 项`
-            + `${failedCount > 0 ? `，失败 ${failedCount} 项` : ""}`
-            + `${syncErrors.length > 0 ? `，异常 ${syncErrors.length} 类` : ""}`
-            + ` (${new Date().toLocaleTimeString()})`
-        );
+        GitHubAutoImporter._aggregateMetaState(types, successCount, failedCount, syncErrors, attemptAt);
     } catch (error) {
         console.error("[LD-Notion] GitHub 自动导入出错:", error);
         SyncState.updateGitHubMeta({
