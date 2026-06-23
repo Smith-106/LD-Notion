@@ -7,7 +7,7 @@ const { NotionAPI, SiteDetector, EMOJI_MAP, DOMToNotion } = require("../api");
 const { OperationGuard, OperationLog } = require("../security");
 const { GenericExtractor, WorkspaceService } = require("../extract");
 const { UndoManager, ConfirmationDialog } = require("../security");
-const { UrlValidator } = require("../security");
+const { UrlValidator } = require("../security/UrlValidator");
 
 // ═══════════════════════════════════════════════════════
 // 🤖 AI Service — LLM 客户端（OpenAI / Claude / Gemini）
@@ -392,7 +392,8 @@ const AIService = {
         try {
             const parsed = JSON.parse(raw);
             return parsed && typeof parsed === "object" ? parsed : {};
-        } catch {
+        } catch (error) {
+            console.warn("[LD-Notion] 获取模型缓存 JSON 解析失败:", error);
             return {};
         }
     },
@@ -580,7 +581,8 @@ const ChatState = {
         try {
             const data = Storage.get(CONFIG.STORAGE_KEYS.CHAT_HISTORY, "[]");
             ChatState.messages = JSON.parse(data);
-        } catch {
+        } catch (error) {
+            console.warn("[LD-Notion] 聊天历史加载失败:", error);
             ChatState.messages = [];
         }
     },
@@ -1017,7 +1019,8 @@ const AI_AGENT_TOOLS = {
                 try {
                     const block = await NotionAPI.fetchBlock(rootId, settings.notionApiKey);
                     targetName = block.type || rootId;
-                } catch {
+                } catch (error) {
+                    console.warn("[LD-Notion] 获取块类型失败:", error);
                     targetName = rootId;
                 }
             }
@@ -1107,7 +1110,8 @@ const AI_AGENT_TOOLS = {
                         response = await NotionAPI.queryDatabase(dbId, filter,
                             pageCount === 0 ? [{ property: "收藏时间", direction: "descending" }] : null,
                             cursor, settings.notionApiKey);
-                    } catch {
+                    } catch (error) {
+                        console.warn("[LD-Notion] 按收藏时间排序查询失败，回退到创建时间排序:", error);
                         response = await NotionAPI.queryDatabase(dbId, filter,
                             [{ timestamp: "created_time", direction: "descending" }],
                             cursor, settings.notionApiKey);
@@ -1125,7 +1129,10 @@ const AI_AGENT_TOOLS = {
             if (aiTargetState.mode === "all") {
                 // 遍历所有工作区数据库
                 let cached;
-                try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch { cached = {}; }
+                try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch (error) {
+                    console.warn("[LD-Notion] 工作区页面缓存解析失败:", error);
+                    cached = {};
+                }
                 const databases = cached.databases || [];
                 if (databases.length === 0) return "错误: 请先在 AI 设置中点击「🔄」刷新数据库列表。";
 
@@ -1140,7 +1147,9 @@ const AI_AGENT_TOOLS = {
                         const pages = await queryOneDb(db.id);
                         pages.forEach(p => { p._sourceDb = db.title; });
                         allPages.push(...pages);
-                    } catch {} // 跳过无权限的数据库
+                    } catch (error) {
+                        console.warn("[LD-Notion] 数据库查询失败，跳过无权限数据库:", error);
+                    } // 跳过无权限的数据库
                 }
             } else {
                 const dbId = TargetState.getEffectiveAIDatabaseId({
@@ -1455,7 +1464,10 @@ const AI_AGENT_TOOLS = {
                 try {
                     const response = await NotionAPI.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
                     return response.results || [];
-                } catch { return []; }
+                } catch (error) {
+                    console.warn("[LD-Notion] 数据库查询失败:", error);
+                    return [];
+                }
             };
 
             let results = [];
@@ -1522,7 +1534,10 @@ const AI_AGENT_TOOLS = {
                 try {
                     const response = await NotionAPI.request("POST", `/databases/${dbId}/query`, { page_size: 100 }, settings.notionApiKey);
                     return response.results || [];
-                } catch { return []; }
+                } catch (error) {
+                    console.warn("[LD-Notion] 数据库查询失败:", error);
+                    return [];
+                }
             };
 
             let allPages = [];
@@ -1582,7 +1597,10 @@ const AI_AGENT_TOOLS = {
             if (page_id) {
                 try {
                     refPage = await NotionAPI.request("GET", `/pages/${page_id}`, null, settings.notionApiKey);
-                } catch { /* page may not exist or be inaccessible */ }
+                } catch (error) {
+                    console.warn("[LD-Notion] 参考页面获取失败:", error);
+                    /* page may not exist or be inaccessible */
+                }
             }
             if (!refPage && page_name) {
                 const searchResult = await NotionAPI.search(page_name, null, settings.notionApiKey);
@@ -1609,7 +1627,10 @@ const AI_AGENT_TOOLS = {
                 try {
                     const res = await NotionAPI.request("POST", `/databases/${db.id}/query`, { page_size: 50 }, settings.notionApiKey);
                     candidates.push(...(res.results || []));
-                } catch { /* database may not be queryable */ }
+                } catch (error) {
+                    console.warn("[LD-Notion] 数据库查询失败:", error);
+                    /* database may not be queryable */
+                }
             }
 
             // 排除自身
@@ -1692,7 +1713,10 @@ ${candidateList}
                 try {
                     const response = await NotionAPI.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
                     return response.results || [];
-                } catch { return []; }
+                } catch (error) {
+                    console.warn("[LD-Notion] 数据库查询失败:", error);
+                    return [];
+                }
             };
 
             let pages = [];
@@ -1777,7 +1801,8 @@ ${candidateList}
                 async () => {
                     try {
                         await NotionAPI.appendPageMarkdown(page.id, content, settings.notionApiKey);
-                    } catch {
+                    } catch (error) {
+                        console.warn("[LD-Notion] Markdown 追加失败，回退到块追加:", error);
                         const blocks = AIAssistant._textToBlocks(content);
                         await NotionAPI.appendBlocks(page.id, blocks, settings.notionApiKey);
                     }
@@ -2103,7 +2128,8 @@ ${candidateList}
                         settings
                     );
                     success++;
-                } catch {
+                } catch (error) {
+                    console.warn("[LD-Notion] 页面创建失败:", error);
                     failed++;
                 }
 
@@ -2265,7 +2291,8 @@ ${candidateList}
                 try {
                     await AIClassifier.classifyPage(toClassify[i], settings);
                     success++;
-                } catch {
+                } catch (error) {
+                    console.warn("[LD-Notion] 页面分类失败:", error);
                     failed++;
                 }
                 if (i < toClassify.length - 1) await Utils.sleep(delay);
@@ -2341,7 +2368,8 @@ ${candidateList}
                         settings
                     );
                     success++;
-                } catch {
+                } catch (error) {
+                    console.warn("[LD-Notion] 页面删除失败:", error);
                     failed++;
                 }
 
@@ -2384,7 +2412,8 @@ ${candidateList}
                         settings
                     );
                     success++;
-                } catch {
+                } catch (error) {
+                    console.warn("[LD-Notion] 页面恢复失败:", error);
                     failed++;
                 }
 
@@ -2472,7 +2501,10 @@ ${candidateList}
                         .map(([name, prop]) => `${name}(${prop.type})`)
                         .join(", ");
                     schemaDesc = `数据库属性: ${props}`;
-                } catch { schemaDesc = ""; }
+                } catch (error) {
+                    console.warn("[LD-Notion] 数据库属性获取失败:", error);
+                    schemaDesc = "";
+                }
             }
 
             const prompt = `你是 Notion 公式专家。根据以下信息生成 Notion 公式。
@@ -3522,7 +3554,8 @@ _extractPageContent: async (pageId, apiKey, maxChars = 4000) => {
         if (markdown) {
             return markdown.slice(0, maxChars);
         }
-    } catch {
+    } catch (error) {
+        console.warn("[LD-Notion] Markdown API 不可用，回退到 blocks 提取:", error);
         // Markdown API 不可用时回退到 blocks 提取
     }
 
@@ -3571,7 +3604,8 @@ handleWriteContent: async (params, settings, explanation) => {
                     async () => {
                         try {
                             await NotionAPI.appendPageMarkdown(targetPage.id, aiResponse, settings.notionApiKey);
-                        } catch {
+                        } catch (error) {
+                            console.warn("[LD-Notion] Markdown 追加失败，回退到块追加:", error);
                             const blocks = AIAssistant._textToBlocks(aiResponse);
                             await NotionAPI.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
                         }
@@ -3652,7 +3686,9 @@ ${content_prompt}`;
         if (jsonMatch) {
             try {
                 editPlan = JSON.parse(jsonMatch[0]);
-            } catch {}
+            } catch (error) {
+                console.warn("[LD-Notion] 编辑计划 JSON 解析失败:", error);
+            }
         }
 
         let exactUpdateError = null;
@@ -3691,7 +3727,8 @@ ${content_prompt}`;
             async () => {
                 try {
                     await NotionAPI.appendPageMarkdown(targetPage.id, versionMarkdown, settings.notionApiKey);
-                } catch {
+                } catch (error) {
+                    console.warn("[LD-Notion] Markdown 追加失败，回退到块追加:", error);
                     const contentBlocks = AIAssistant._textToBlocks(aiResponse);
                     const blocks = [
                         { type: "divider", divider: {} },
@@ -3875,7 +3912,10 @@ handleAIAutofill: async (params, settings, explanation) => {
                     try {
                         const content = await AIAssistant._extractPageContent(page.id, settings.notionApiKey, 2000);
                         inputText = content || title;
-                    } catch { inputText = title; }
+                    } catch (error) {
+                        console.warn("[LD-Notion] 页面内容提取失败:", error);
+                        inputText = title;
+                    }
                 }
 
                 const aiResult = await AIService.requestChat(
@@ -3958,7 +3998,8 @@ handleAsk: async (params, settings, explanation) => {
             try {
                 const content = await AIAssistant._extractPageContent(item.id, settings.notionApiKey, 2000);
                 contextParts.push(`[${i + 1}] ${title}:\n${content || "（无文本内容）"}`);
-            } catch {
+            } catch (error) {
+                console.warn(`[LD-Notion] 页面内容提取失败: ${title}`, error);
                 contextParts.push(`[${i + 1}] ${title}:\n（无法读取内容）`);
             }
         }
@@ -4117,7 +4158,8 @@ handleDeepResearch: async (params, settings, explanation) => {
             try {
                 const content = await AIAssistant._extractPageContent(page.id, settings.notionApiKey, 3000);
                 contentParts.push(`[${i + 1}] ${title}:\n${content || "（无文本内容）"}`);
-            } catch {
+            } catch (error) {
+                console.warn(`[LD-Notion] 页面内容提取失败: ${title}`, error);
                 contentParts.push(`[${i + 1}] ${title}:\n（无法读取内容）`);
             }
             if (i < maxPages - 1) await Utils.sleep(delay);
@@ -4361,7 +4403,8 @@ handleBatchTranslate: async (params, settings, explanation) => {
                     { itemName: title }
                 );
                 successCount++;
-            } catch {
+            } catch (error) {
+                console.warn(`[LD-Notion] 页面创建失败: ${title}`, error);
                 failCount++;
             }
         }
@@ -4434,7 +4477,8 @@ ${content}`;
         let extractedData;
         try {
             extractedData = JSON.parse(jsonMatch[0]);
-        } catch {
+        } catch (error) {
+            console.warn("[LD-Notion] AI 提取数据 JSON 解析失败:", error);
             return `❌ AI 提取的数据格式无效。请换一种方式描述提取要求。`;
         }
 
@@ -4509,7 +4553,10 @@ ${content}`;
                     { itemName: entryName }
                 );
                 addedCount++;
-            } catch { /* skip failed entries */ }
+            } catch (error) {
+                console.warn(`[LD-Notion] 条目创建失败: ${entryName}`, error);
+                /* skip failed entries */
+            }
         }
 
         return `📊 **数据库创建完成**\n\n- 数据库: ${dbName}\n- 来源: ${sourcePage.name}\n- 属性: ${extractedData.properties.map(p => p.name).join(", ")}\n- 条目: ${addedCount}/${extractedData.entries.length}\n\n💡 数据库已创建在源页面下方。`;
@@ -4569,7 +4616,8 @@ ${structure_prompt ? `补充要求：${structure_prompt}` : ""}
         let plan;
         try {
             plan = JSON.parse(jsonMatch[0]);
-        } catch {
+        } catch (error) {
+            console.warn("[LD-Notion] AI 生成结构 JSON 解析失败:", error);
             return `❌ AI 生成的结构无效。请换一种方式描述。`;
         }
 
@@ -4656,7 +4704,10 @@ ${structure_prompt ? `补充要求：${structure_prompt}` : ""}
                     { itemName: child.title }
                 );
                 createdCount++;
-            } catch { /* skip failed pages */ }
+            } catch (error) {
+                console.warn(`[LD-Notion] 子页面创建失败: ${child.title}`, error);
+                /* skip failed pages */
+            }
         }
 
         return `📑 **多页面内容生成完成**\n\n- 父页面: ${plan.parent_title}\n- 子页面: ${createdCount}/${plan.children.length} 创建成功\n\n💡 所有页面已创建并填充内容。`;
@@ -4888,7 +4939,8 @@ handleTemplateOutput: async (params, settings, explanation) => {
     let templates;
     try {
         templates = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.AI_TEMPLATES, CONFIG.DEFAULTS.aiTemplates));
-    } catch {
+    } catch (error) {
+        console.warn("[LD-Notion] AI 模板加载失败，使用默认模板:", error);
         templates = JSON.parse(CONFIG.DEFAULTS.aiTemplates);
     }
 
@@ -5328,7 +5380,8 @@ const AIAssistant = {
                     );
                 }
                 success++;
-            } catch {
+            } catch (error) {
+                console.warn("[LD-Notion] 页面元数据更新失败:", error);
                 failed++;
             }
 
@@ -5518,7 +5571,8 @@ const AIAssistant = {
                         name: Utils.getPageTitle(page, parsedId),
                         raw: page,
                     });
-                } catch {
+                } catch (error) {
+                    console.warn(`[LD-Notion] 页面获取失败: ${parsedId}`, error);
                     targets.push({
                         id: parsedId,
                         name: parsedId,
@@ -5723,7 +5777,8 @@ const AIAssistant = {
                 if (adapter.isActive()) {
                     return { name, adapter };
                 }
-            } catch {
+            } catch (error) {
+                console.warn(`[LD-Notion] 设置适配器异常: ${name}`, error);
                 // 适配器异常时回退到默认设置
             }
         }
@@ -6210,7 +6265,8 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
             let plan;
             try {
                 plan = JSON.parse(jsonMatch[0]);
-            } catch {
+            } catch (error) {
+                console.warn("[LD-Notion] Agent 计划 JSON 解析失败:", error);
                 return "❌ Agent 生成的计划格式无效。请尝试换一种方式描述任务。";
             }
 
@@ -6324,7 +6380,9 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
                 }
                 return parsed;
             }
-        } catch {}
+        } catch (error) {
+            console.warn("[LD-Notion] 工具调用解析失败:", error);
+        }
         // 尝试提取嵌入的 JSON
         const jsonMatch = trimmed.match(/\{[\s\S]*"tool"\s*:\s*"[\s\S]*\}/);
         if (jsonMatch) {
@@ -6344,7 +6402,9 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
                     }
                     return parsed;
                 }
-            } catch {}
+            } catch (error) {
+                console.warn("[LD-Notion] 工具调用解析失败:", error);
+            }
         }
         return null;
     },
@@ -6363,17 +6423,26 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
         let dbInfo;
         if (aiTargetState.mode === "all") {
             let cached;
-            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch { cached = {}; }
+            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch (error) {
+                console.warn("[LD-Notion] 工作区页面缓存解析失败:", error);
+                cached = {};
+            }
             const dbCount = cached.databases?.length || 0;
             dbInfo = `查询模式: 所有工作区数据库 (${dbCount} 个)`;
         } else if (aiTargetState.mode === "database") {
             let cached;
-            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch { cached = {}; }
+            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch (error) {
+                console.warn("[LD-Notion] 工作区页面缓存解析失败:", error);
+                cached = {};
+            }
             const dbName = cached.databases?.find(d => d.id === aiTargetState.databaseId)?.title || aiTargetState.databaseId;
             dbInfo = `已配置的数据库: ${dbName} (ID: ${aiTargetState.databaseId})`;
         } else if (aiTargetState.mode === "page") {
             let cached;
-            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch { cached = {}; }
+            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch (error) {
+                console.warn("[LD-Notion] 工作区页面缓存解析失败:", error);
+                cached = {};
+            }
             const pageName = cached.pages?.find(p => p.id === aiTargetState.pageId)?.title || aiTargetState.pageId;
             dbInfo = `当前 AI 目标页面: ${pageName} (ID: ${aiTargetState.pageId})`;
         } else {
