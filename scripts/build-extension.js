@@ -454,7 +454,13 @@ const ALLOWED_HOSTS = [
 
 function isUrlAllowed(url) {
     try {
-        const host = new URL(url).hostname;
+        const parsed = new URL(url);
+        const host = parsed.hostname;
+        const isLocal = host === "127.0.0.1" || host === "localhost";
+        if (!isLocal) {
+            if (parsed.protocol !== "https:") return false;
+            if (parsed.port && parsed.port !== "443") return false;
+        }
         return ALLOWED_HOSTS.some(pattern => {
             if (pattern.startsWith("*.")) {
                 return host === pattern.slice(2) || host.endsWith(pattern.slice(1));

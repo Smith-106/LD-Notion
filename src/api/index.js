@@ -5,7 +5,7 @@ const { CONFIG, MSG, SUPPORTED_FILE_TYPES, MULTI_PART_THRESHOLD, getMimeType, ge
 const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { NotionOAuth } = require("../auth");
-const { UrlValidator } = require("../security");
+const { UrlValidator } = require("../security/UrlValidator");
 
 const SiteDetector = {
     SITES: {
@@ -910,7 +910,13 @@ const NotionAPI = {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => {
-                const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+                const bytes = new Uint8Array(8);
+                if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                    crypto.getRandomValues(bytes);
+                } else {
+                    throw new Error("crypto.getRandomValues 不可用，无法生成 multipart boundary");
+                }
+                const boundary = '----WebKitFormBoundary' + Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
                 const uint8Array = new Uint8Array(reader.result);
 
                 const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`;

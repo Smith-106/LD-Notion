@@ -1027,6 +1027,7 @@ const UI = {
         // 验证并加载 AI 模型（优先使用缓存的模型列表）
         const savedModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, "");
         const modelSelect = refs.aiModelSelect
+        const provider = AIService.PROVIDERS[aiService];
 
         const validModels = AIService.getAvailableModels(aiService);
         UI.updateAIModelOptions(aiService, validModels.length > 0 ? validModels : undefined);

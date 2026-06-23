@@ -609,9 +609,9 @@ const Exporter = {
 
             // 文本内容检查（关键词 + 最少字数）
             if (includeKws.length || excludeKws.length || minLen > 0) {
-                const textEl = document.createElement("div");
-                textEl.innerHTML = post.cooked || "";
-                const plainText = (textEl.textContent || "").trim();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(post.cooked || "", "text/html");
+                const plainText = (doc.body.textContent || "").trim();
 
                 if (minLen > 0 && plainText.length < minLen) return false;
                 if (includeKws.length && !includeKws.some(k => plainText.toLowerCase().includes(k))) return false;
@@ -957,8 +957,9 @@ const Exporter = {
         const concurrency = settings.concurrency || 1;
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
 
-        // 共享队列索引
-        let nextIndex = startIndex;
+        // 显式任务队列，避免共享 nextIndex++ 的非原子更新风险
+        const remaining = [];
+        for (let i = startIndex; i < bookmarks.length; i++) remaining.push(i);
         let completedCount = 0;
 
         const worker = async () => {
@@ -970,9 +971,9 @@ const Exporter = {
                 }
                 if (Exporter.isCancelled) return;
 
-                // 取任务（原子：先 increment 再 await，避免并发重复取索引）
-                const i = nextIndex++;
-                if (i >= bookmarks.length) return;
+                // 取任务（shift 在单线程事件循环下是原子的）
+                const i = remaining.shift();
+                if (i === undefined) return;
 
                 const bookmark = bookmarks[i];
                 const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
@@ -1007,7 +1008,7 @@ const Exporter = {
                 Exporter.currentIndex = completedCount + startIndex;
 
                 // 请求间隔
-                if (delay > 0 && nextIndex < bookmarks.length && !Exporter.isCancelled) {
+                if (delay > 0 && remaining.length > 0 && !Exporter.isCancelled) {
                     await Utils.sleep(delay);
                 }
             }
@@ -1024,8 +1025,8 @@ const Exporter = {
         await Promise.all(workers);
 
         // 取消时收集剩余为 skipped
-        if (Exporter.isCancelled && nextIndex < bookmarks.length) {
-            for (let i = nextIndex; i < bookmarks.length; i++) {
+        if (Exporter.isCancelled && remaining.length > 0) {
+            for (const i of remaining) {
                 const b = bookmarks[i];
                 results.skipped.push({
                     topicId: b.topic_id || b.bookmarkable_id,

@@ -1061,7 +1061,13 @@ const UIEvents = {
                                 for (const img of imgDownloads) {
                                     try {
                                         const ext = img.url.split(".").pop().split("?")[0] || "png";
-                                        const safeName = `img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+                                        const nameBytes = new Uint8Array(4);
+                                        if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                                            crypto.getRandomValues(nameBytes);
+                                        } else {
+                                            throw new Error("crypto.getRandomValues 不可用，无法生成 Obsidian 图片文件名");
+                                        }
+                                        const safeName = `img-${Date.now()}-${Array.from(nameBytes, b => b.toString(16).padStart(2, "0")).join("")}.${ext}`;
                                         const imgPath = `${obsImgDir}/${safeName}`;
                                         const blob = await new Promise((resolve, reject) => {
                                             GM_xmlhttpRequest({

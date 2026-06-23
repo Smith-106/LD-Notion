@@ -69,7 +69,8 @@ const BookmarkExporter = {
             }
             const httpEquivMatch = head.match(/<meta[^>]+http-equiv\s*=\s*["']content-type["'][^>]*content\s*=\s*["'][^"']*charset\s*=\s*([^\s"';>]+)/i);
             return BookmarkExporter.normalizeCharset(httpEquivMatch?.[1] || "");
-        } catch {
+        } catch (error) {
+            console.warn("[LD-Notion] 字符集检测失败:", error);
             return "";
         }
     },
@@ -101,7 +102,8 @@ const BookmarkExporter = {
                 if (!decoded) continue;
                 if (!firstDecoded) firstDecoded = decoded;
                 if (!decoded.includes("�")) return decoded;
-            } catch {
+            } catch (error) {
+                console.warn("[LD-Notion] 尝试字符集解码失败:", error);
                 // ignore and continue trying next charset
             }
         }
@@ -203,7 +205,8 @@ const BookmarkExporter = {
                 title: BookmarkExporter.normalizeText(data.title || "", 120),
                 summary: BookmarkExporter.normalizeText(data.summary || "", 180),
             };
-        } catch {
+        } catch (error) {
+            console.warn("[LD-Notion] 页面洞察 JSON 解析失败:", error);
             return null;
         }
     },
@@ -243,7 +246,8 @@ const BookmarkExporter = {
         const host = (() => {
             try {
                 return new URL(bookmark.url).hostname.replace(/^www\./, "");
-            } catch {
+            } catch (error) {
+                console.warn("[LD-Notion] 书签 URL 解析失败:", error);
                 return "";
             }
         })();
@@ -280,7 +284,8 @@ const BookmarkExporter = {
                 categories,
                 settings
             );
-        } catch {
+        } catch (error) {
+            console.warn("[LD-Notion] AI 分类失败:", error);
             return "";
         }
     },
@@ -323,7 +328,8 @@ const BookmarkExporter = {
                 context.aiUsedCount = (context.aiUsedCount || 0) + 1;
             }
             enriched.inferredCategory = inferredCategory;
-        } catch {
+        } catch (error) {
+            console.warn("[LD-Notion] 书签增强失败，使用 fallback:", error);
             enriched.generatedTitle = fallbackTitle;
             enriched.generatedSummary = "";
             enriched.inferredCategory = BookmarkExporter.inferCategoryHeuristic(bookmark, { title: "", summary: "" }, settings?.categories || []);
@@ -434,7 +440,10 @@ const BookmarkExporter = {
     // 获取已导出的书签集合
     getExported: () => {
         try { return JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}")); }
-        catch { return {}; }
+        catch (error) {
+            console.warn("[LD-Notion] 已导出书签集合解析失败:", error);
+            return {};
+        }
     },
 
     markExported: (bookmarkUrl) => {

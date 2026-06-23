@@ -39,7 +39,10 @@
       ]
     }
   ],
-  "artifacts": [],
+  "artifacts": [
+    {"id":"PLN-003","type":"plan","milestone":"M1","phase":1,"scope":"standalone","path":"scratch/20260624-plan-fix-potential-issues","status":"completed","depends_on":null,"harvested":false,"created_at":"2026-06-24T04:15:00+08:00","completed_at":"2026-06-24T04:15:00+08:00","summary":"Fix 7 potential issues found in v3.7.3 post-release scan: XSS, SSRF, Math.random, circular dependency, race condition, provider scope, empty catch blocks"},
+    {"id":"EXC-002","type":"execute","milestone":"M1","phase":1,"scope":"standalone","path":"scratch/20260624-plan-fix-potential-issues","status":"completed","depends_on":"PLN-003","harvested":false,"created_at":"2026-06-24T04:45:00+08:00","completed_at":"2026-06-24T04:45:00+08:00","summary":"Executed 5 tasks across 3 waves: UrlValidator extraction, XSS+SSRF fixes, Math.random replacement, race condition fix, empty catch logging"}
+  ],
   "artifact_archive": [
     {"id":"ANL-001","type":"analyze","milestone":null,"path":"scratch/20260613-analyze-ldnotion","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-analyze-ANL-001","summary":"Codebase analysis — 18 fragments → 5 spec, 6 wiki, 7 issue"},
     {"id":"BRN-001","type":"brainstorm","milestone":null,"path":"scratch/20260613-brainstorm-active-reqs","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-brainstorm-BRN-001","summary":"Active requirements brainstorm — 6 fragments → 3 spec, 3 wiki"},
