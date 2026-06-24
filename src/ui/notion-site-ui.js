@@ -116,6 +116,7 @@ const NotionSiteUI = {
         btn.setAttribute("data-ldb-root", "");
         btn.innerHTML = "🤖";
         btn.title = "AI 助手";
+        btn.setAttribute("aria-label", "打开 AI 助手面板");
 
         // 拖拽状态
         let isDragging = false;
@@ -189,8 +190,8 @@ const NotionSiteUI = {
             <div class="ldb-notion-header">
                 <h3>🤖 AI 助手</h3>
                 <div class="ldb-notion-header-btns">
-                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="切换主题" style="width:26px;height:26px;border-radius:var(--ldb-ui-radius-xs);font-size:var(--ldb-ui-font-size-md);">🌙</button>
-                    <button class="ldb-notion-header-btn" id="ldb-notion-close" title="关闭">×</button>
+                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="切换主题" aria-label="切换主题" style="width:26px;height:26px;border-radius:var(--ldb-ui-radius-xs);font-size:var(--ldb-ui-font-size-md);">🌙</button>
+                    <button class="ldb-notion-header-btn" id="ldb-notion-close" title="关闭" aria-label="关闭 AI 助手面板">×</button>
                 </div>
             </div>
             <div class="ldb-notion-body">
@@ -251,7 +252,7 @@ const NotionSiteUI = {
                                 <option value="">默认（跟随导出数据库）</option>
                                 <option value="__all__">所有工作区数据库</option>
                             </select>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-refresh-workspace" class="ldb-nowrap-badge" title="刷新工作区列表">🔄</button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-refresh-workspace" class="ldb-nowrap-badge" title="刷新工作区列表" aria-label="刷新工作区列表">🔄</button>
                         </div>
                         <div class="ldb-tip" id="ldb-notion-workspace-tip"></div>
                     </div>
@@ -648,9 +649,9 @@ const NotionSiteUI = {
         const bmStatus = panel.querySelector("#ldb-notion-bookmark-status");
         if (bmStatus) {
             if (BookmarkBridge.isExtensionAvailable()) {
-                bmStatus.innerHTML = '<span style="color: var(--ldb-ui-success);">✅ 扩展已安装</span> — 在 AI 对话中输入「导入书签」即可';
+                bmStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--success">✅ 扩展已安装</span> — 在 AI 对话中输入「导入书签」即可';
             } else {
-                bmStatus.innerHTML = `<span style="color: var(--ldb-ui-danger);">❌ 扩展未安装</span> — ${InstallHelper.renderInstallLink("一键安装浏览器扩展")}`;
+                bmStatus.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">❌ 扩展未安装</span> — ${InstallHelper.renderInstallLink("一键安装浏览器扩展")}`;
             }
         }
 
@@ -884,7 +885,7 @@ const NotionSiteUI = {
         container.innerHTML = `
             <div class="ldb-status ${Utils.escapeHtml(type)}">
                 ${Utils.escapeHtml(message)}
-                <button class="ldb-status-close" title="关闭">×</button>
+                <button class="ldb-status-close" title="关闭" aria-label="关闭状态提示">×</button>
             </div>
         `;
 

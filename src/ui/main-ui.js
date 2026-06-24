@@ -210,9 +210,9 @@ const UI = {
             <div class="ldb-header">
                 <h3>📚 LD-Notion <span class="ldb-runtime-badge" id="ldb-runtime-badge">检测中...</span></h3>
                 <div class="ldb-header-btns">
-                    <button class="ldb-theme-btn" id="ldb-theme-toggle" title="切换主题">🌙</button>
-                    <button class="ldb-header-btn" id="ldb-minimize" title="最小化">−</button>
-                    <button class="ldb-header-btn" id="ldb-close" title="关闭">×</button>
+                    <button class="ldb-theme-btn" id="ldb-theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
+                    <button class="ldb-header-btn" id="ldb-minimize" title="最小化" aria-label="最小化面板">−</button>
+                    <button class="ldb-header-btn" id="ldb-close" title="关闭" aria-label="关闭面板">×</button>
                 </div>
             </div>
             <div class="ldb-tabs" role="tablist">
@@ -406,7 +406,7 @@ const UI = {
                     </div>
 
                     <!-- 状态显示 -->
-                    <div id="ldb-status-container"></div>
+                    <div id="ldb-status-container" aria-live="polite"></div>
 
                     <!-- 导出报告 -->
                     <div id="ldb-report-container"></div>
@@ -528,7 +528,7 @@ const UI = {
                                 <select class="ldb-select" id="ldb-workspace-select" class="ldb-flex-1">
                                     <option value="">-- 从工作区选择 --</option>
                                 </select>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-refresh-workspace" class="ldb-nowrap-badge" title="刷新工作区页面列表">🔄</button>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-refresh-workspace" class="ldb-nowrap-badge" title="刷新工作区页面列表" aria-label="刷新工作区页面列表">🔄</button>
                             </div>
                             <div class="ldb-input-group" id="ldb-manual-db-wrap" style="display: none; margin-top: var(--ldb-ui-spacing-md);">
                                 <input type="text" class="ldb-input" id="ldb-database-id" placeholder="手动输入 32 位数据库 ID（高级）" class="ldb-flex-1">
@@ -892,7 +892,7 @@ const UI = {
                             </div>
                             <div style="margin-top: var(--ldb-ui-spacing-md);">
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-obs-test-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">🔗 测试连接</button>
-                                <span id="ldb-obs-test-status" style="font-size: var(--ldb-ui-font-size-sm); margin-left: var(--ldb-ui-spacing-md);"></span>
+                                <span id="ldb-obs-test-status" aria-live="polite" style="font-size: var(--ldb-ui-font-size-sm); margin-left: var(--ldb-ui-spacing-md);"></span>
                             </div>
                         </div>
                     </div>
@@ -1084,12 +1084,12 @@ const UI = {
             if (BookmarkBridge.isExtensionAvailable()) {
                 const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
                 if (isUserscriptMode) {
-                    bmStatusMain.innerHTML = '<span style="color: var(--ldb-ui-success);">✅ 桥接已就绪（Userscript 模式）</span> — 可用「📖 导入浏览器书签」按钮';
+                    bmStatusMain.innerHTML = '<span class="ldb-status-text ldb-status-text--success">✅ 桥接已就绪（Userscript 模式）</span> — 可用「📖 导入浏览器书签」按钮';
                 } else {
-                    bmStatusMain.innerHTML = '<span style="color: var(--ldb-ui-success);">✅ 书签能力已就绪（Extension 模式）</span> — 可用「📖 导入浏览器书签」按钮';
+                    bmStatusMain.innerHTML = '<span class="ldb-status-text ldb-status-text--success">✅ 书签能力已就绪（Extension 模式）</span> — 可用「📖 导入浏览器书签」按钮';
                 }
             } else {
-                bmStatusMain.innerHTML = `<span style="color: var(--ldb-ui-danger);">❌ 扩展未安装</span> — ${InstallHelper.renderInstallLink("一键安装浏览器扩展")}`;
+                bmStatusMain.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">❌ 扩展未安装</span> — ${InstallHelper.renderInstallLink("一键安装浏览器扩展")}`;
             }
         }
         UI.renderSelfCheckResult();
@@ -1399,7 +1399,7 @@ const UI = {
         container.innerHTML = `
             <div class="ldb-status ${Utils.escapeHtml(type)}">
                 ${Utils.escapeHtml(message)}
-                <button class="ldb-status-close" title="关闭">×</button>
+                <button class="ldb-status-close" title="关闭" aria-label="关闭状态提示">×</button>
             </div>
         `;
 

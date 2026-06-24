@@ -137,9 +137,12 @@ const DesignSystem = {
             --ldb-ui-z-index-overlay: 2147483646;
             --ldb-ui-z-index-float: 2147483647;
 
-            --ldb-ui-warning-bright: #f59e0b;
+            --ldb-ui-warning-bright: var(--ldb-ui-warning-bright);
             --ldb-ui-success-bright: #10b981;
-            --ldb-ui-danger-bright: #ef4444;
+            --ldb-ui-danger-bright: var(--ldb-ui-danger-bright);
+
+            --ldb-ui-disabled-opacity: var(--ldb-ui-disabled-opacity);
+            --ldb-ui-disabled-cursor: var(--ldb-ui-disabled-cursor);
 
             font-family: var(--ldb-ui-font);
             -webkit-font-smoothing: antialiased;
@@ -347,7 +350,7 @@ const DesignSystem = {
         .gclip-btn {
             border: 1px solid rgba(37, 99, 235, 0.35);
             background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
-            color: #fff;
+            color: var(--ldb-ui-white);
             border-radius: 12px;
             padding: 8px 12px;
             cursor: pointer;
@@ -370,8 +373,8 @@ const DesignSystem = {
 
         .ldb-btn:disabled,
         .gclip-btn:disabled {
-            opacity: 0.65;
-            cursor: not-allowed;
+            opacity: var(--ldb-ui-disabled-opacity);
+            cursor: var(--ldb-ui-disabled-cursor);
         }
 
         .ldb-btn-secondary,
@@ -396,14 +399,14 @@ const DesignSystem = {
 
         .ldb-btn-secondary:disabled,
         .gclip-btn-secondary:disabled {
-            opacity: 0.65;
-            cursor: not-allowed;
+            opacity: var(--ldb-ui-disabled-opacity);
+            cursor: var(--ldb-ui-disabled-cursor);
         }
 
         .ldb-btn-warning {
             border: 1px solid rgba(217, 119, 6, 0.35);
-            background: linear-gradient(135deg, #f59e0b 0%, var(--ldb-ui-warning) 100%);
-            color: #fff;
+            background: linear-gradient(135deg, var(--ldb-ui-warning-bright) 0%, var(--ldb-ui-warning) 100%);
+            color: var(--ldb-ui-white);
             transition: filter 0.15s ease, transform 0.15s ease;
         }
 
@@ -416,14 +419,14 @@ const DesignSystem = {
         }
 
         .ldb-btn-warning:disabled {
-            opacity: 0.65;
-            cursor: not-allowed;
+            opacity: var(--ldb-ui-disabled-opacity);
+            cursor: var(--ldb-ui-disabled-cursor);
         }
 
         .ldb-btn-danger {
             border: 1px solid rgba(220, 38, 38, 0.35);
-            background: linear-gradient(135deg, #ef4444 0%, var(--ldb-ui-danger) 100%);
-            color: #fff;
+            background: linear-gradient(135deg, var(--ldb-ui-danger-bright) 0%, var(--ldb-ui-danger) 100%);
+            color: var(--ldb-ui-white);
             transition: filter 0.15s ease, transform 0.15s ease;
         }
 
@@ -436,8 +439,8 @@ const DesignSystem = {
         }
 
         .ldb-btn-danger:disabled {
-            opacity: 0.65;
-            cursor: not-allowed;
+            opacity: var(--ldb-ui-disabled-opacity);
+            cursor: var(--ldb-ui-disabled-cursor);
         }
 
         .ldb-section-title {
@@ -530,6 +533,16 @@ const DesignSystem = {
             border-color: rgba(37, 99, 235, 0.30);
             background: rgba(37, 99, 235, 0.10);
         }
+
+        /* 就地状态文本 — 替代内联 color 样式，用于测试按钮旁等持久状态显示 */
+        .ldb-status-text {
+            font-weight: 500;
+        }
+        .ldb-status-text--danger { color: var(--ldb-ui-danger); }
+        .ldb-status-text--success { color: var(--ldb-ui-success); }
+        .ldb-status-text--warning { color: var(--ldb-ui-warning); }
+        .ldb-status-text--accent { color: var(--ldb-ui-accent); }
+        .ldb-status-text--muted { color: var(--ldb-ui-muted); }
 
         .ldb-status-close {
             width: 26px;
@@ -720,7 +733,7 @@ const DesignSystem = {
         .ldb-panel .ldb-chat-bubble.user,
         .ldb-notion-panel .ldb-chat-bubble.user {
             background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
-            color: #fff;
+            color: var(--ldb-ui-white);
             border-bottom-right-radius: 6px;
         }
 
@@ -802,15 +815,15 @@ const DesignSystem = {
             border-radius: 10px;
             border: 1px solid rgba(37, 99, 235, 0.35);
             background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
-            color: #fff;
+            color: var(--ldb-ui-white);
             cursor: pointer;
             user-select: none;
         }
 
         .ldb-panel .ldb-chat-send-btn:disabled,
         .ldb-notion-panel .ldb-chat-send-btn:disabled {
-            opacity: 0.65;
-            cursor: not-allowed;
+            opacity: var(--ldb-ui-disabled-opacity);
+            cursor: var(--ldb-ui-disabled-cursor);
         }
 
         .ldb-panel .ldb-chat-actions,

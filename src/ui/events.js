@@ -150,19 +150,19 @@ const UIEvents = {
             const url = refs.obsApiUrlInput.value.trim();
             const key = getSensitiveValue(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
             if (!url || !key) {
-                refs.obsTestStatus.innerHTML = '<span style="color: var(--ldb-ui-danger);">请填写 API 地址和 Key</span>';
+                refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--danger">请填写 API 地址和 Key</span>';
                 return;
             }
-            refs.obsTestStatus.innerHTML = '<span style="color: var(--ldb-ui-accent);">连接中...</span>';
+            refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--accent">连接中...</span>';
             try {
                 const result = await ObsidianAPI.testConnection(url, key);
                 if (result.ok) {
-                    refs.obsTestStatus.innerHTML = '<span style="color: var(--ldb-ui-success);">✅ 连接成功</span>';
+                    refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--success">✅ 连接成功</span>';
                 } else {
-                    refs.obsTestStatus.innerHTML = `<span style="color: var(--ldb-ui-danger);">❌ ${Utils.escapeHtml(result.error)}</span>`;
+                    refs.obsTestStatus.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">❌ ${Utils.escapeHtml(result.error)}</span>`;
                 }
             } catch (e) {
-                refs.obsTestStatus.innerHTML = `<span style="color: var(--ldb-ui-danger);">❌ ${Utils.escapeHtml(e.message)}</span>`;
+                refs.obsTestStatus.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">❌ ${Utils.escapeHtml(e.message)}</span>`;
             }
         };
 

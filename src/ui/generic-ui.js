@@ -174,6 +174,7 @@ const GenericUI = {
         btn.setAttribute("data-ldb-root", "");
         btn.innerHTML = "📎";
         btn.title = "导出到 Notion";
+        btn.setAttribute("aria-label", "导出到 Notion");
         btn.addEventListener("click", () => {
             if (GenericUI.isExporting) return;
             GenericUI.togglePanel();
@@ -204,7 +205,7 @@ const GenericUI = {
         panel.innerHTML = `
             <div class="gclip-panel-header">
                 <span>📎 导出到 Notion</span>
-                <button class="close-btn" id="gclip-close">✕</button>
+                <button class="close-btn" id="gclip-close" aria-label="关闭导出面板">✕</button>
             </div>
             <div class="gclip-panel-body">
                 <div class="gclip-preview">
