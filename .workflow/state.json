@@ -44,7 +44,7 @@
     {"id":"EXC-002","type":"execute","milestone":"M1","phase":1,"scope":"standalone","path":"scratch/20260624-plan-fix-potential-issues","status":"completed","depends_on":"PLN-003","harvested":false,"created_at":"2026-06-24T04:45:00+08:00","completed_at":"2026-06-24T04:45:00+08:00","summary":"Executed 5 tasks across 3 waves: UrlValidator extraction, XSS+SSRF fixes, Math.random replacement, race condition fix, empty catch logging"},
     {"id":"ANL-002","type":"analyze","milestone":"M1","phase":1,"scope":"standalone","path":"scratch/20260624-analyze-optimize-ui-ux-consistency","status":"completed","depends_on":null,"harvested":false,"created_at":"2026-06-24T12:40:00+08:00","completed_at":"2026-06-24T12:40:00+08:00","summary":"Scope analysis for UI/UX and frontend/backend consistency optimization; UI/UX redesign remains out of scope per roadmap"},
     {"id":"PLN-004","type":"plan","milestone":"M1","phase":1,"scope":"standalone","path":"scratch/20260624-plan-optimize-ui-ux-consistency","status":"completed","depends_on":"ANL-002","harvested":false,"created_at":"2026-06-24T12:45:00+08:00","completed_at":"2026-06-24T12:45:00+08:00","summary":"UI/UX and frontend/backend consistency optimization plan — 5 tasks across 3 waves: CSS token unification, interaction state + accessibility, error handling + form validation, data contract alignment, state management"},
-    {"id":"EXC-003","type":"execute","milestone":"M1","phase":1,"scope":"standalone","path":"scratch/20260624-plan-optimize-ui-ux-consistency","status":"in_progress","depends_on":"PLN-004","harvested":false,"created_at":"2026-06-24T12:50:00+08:00","completed_at":null,"summary":"Executing UI/UX and frontend/backend consistency optimization plan — 5 tasks across 3 waves"}
+    {"id":"EXC-003","type":"execute","milestone":"M1","phase":1,"scope":"standalone","path":"scratch/20260624-plan-optimize-ui-ux-consistency","status":"completed","depends_on":"PLN-004","harvested":false,"created_at":"2026-06-24T12:50:00+08:00","completed_at":"2026-06-24T23:00:00+08:00","summary":"Executed UI/UX and frontend/backend consistency optimization — 5 tasks across 3 waves: TASK-001 CSS token unification (325 replacements), TASK-002 interaction state + accessibility (disabled tokenization + 12 aria-label + 2 aria-live), TASK-003 error display unification (10 inline-color → semantic classes), TASK-004/005 verified already-satisfied (data contract + state management). 349/349 tests pass throughout."}
   ],
   "artifact_archive": [
     {"id":"ANL-001","type":"analyze","milestone":null,"path":"scratch/20260613-analyze-ldnotion","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-analyze-ANL-001","summary":"Codebase analysis — 18 fragments → 5 spec, 6 wiki, 7 issue"},
@@ -62,7 +62,7 @@
     {"id":"EXC-001","type":"execute","milestone":"M1","path":"scratch/20260618-plan-P1-gaps-fix","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-execute-EXC-001","summary":"Executed 6 gap-fix tasks, all verified"},
     {"id":"VRF-001","type":"verify","milestone":"M1","path":"scratch/20260618-plan-P1-gaps-fix/verification.json","graduated_at":"2026-06-20T12:00:00+08:00","knowhow_ref":"graduated-verify-VRF-001","summary":"Verification passed: 24 must-haves, coverage=1.0, 349/349 tests"}
   ],
-  "last_updated": "2026-06-24T12:45:00+08:00",
+  "last_updated": "2026-06-24T23:00:00+08:00",
   "last_pruned": "2026-06-20T12:00:00+08:00",
   "accumulated_context": {
     "key_decisions": [
