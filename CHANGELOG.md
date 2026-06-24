@@ -1,5 +1,28 @@
 # 更新日志
 
+## [3.7.4] - 2026-06-24
+
+### 修复
+
+- **循环依赖消除**：将 `UrlValidator` 从 `src/security/index.js` 提取到独立模块 `src/security/UrlValidator.js`，消除 `src/api/index.js` ↔ `src/security/index.js` circular dependency，测试输出中相关警告消失
+- **XSS 防护**：`src/export/index.js` 的 `post.cooked` 文本提取改用 `DOMParser` 解析后读取 `textContent`，避免直接 `innerHTML` 赋值不可信 HTML
+- **Extension SSRF 加固**：background service worker 的 URL 白名单校验增加协议检查，非本地地址必须使用 `https:` 协议和默认 443 端口
+- **弱随机数消除**：`src/api/index.js` 的 multipart boundary 和 `src/ui/events.js` 的 Obsidian 图片文件名均改用 `crypto.getRandomValues` 生成
+- **并发安全**：`Exporter.exportBookmarks` 的 worker 调度改用显式任务队列 `remaining.shift()`，替代共享 `nextIndex++`
+- **变量作用域修复**：`src/ui/main-ui.js` 补充声明 `const provider = AIService.PROVIDERS[aiService]`，避免使用未声明变量
+- **空 catch 块补日志**：`src/bridge/BookmarkExporter.js` 和 `src/ai/index.js` 中的空 catch 块统一添加 `console.warn` 日志，保留原有回退行为
+
+### 变更
+
+- `package.json`、`build.js` 与根目录 `.user.js` 的 `@version` 同步递增到 `3.7.4`
+
+### 验证
+
+- `npm test`：17 个测试文件、349 个用例全部通过
+- `node build.js`：零警告构建
+
+[3.7.4]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.4
+
 ## [3.7.3] - 2026-06-22
 
 ### 修复

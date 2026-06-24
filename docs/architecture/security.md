@@ -69,8 +69,25 @@ v3.7.0 对用户脚本权限域和 AI 输入链路做了系统性加固：
 
 ### 已知待办
 
-- **Extension SSRF 白名单严格匹配**：当前 background service worker 的 URL 白名单使用简单字符串匹配，可被 `evil.amazonaws.com.attacker.com` 绕过。应改用 URL 构造函数解析 hostname 后精确匹配，并限制协议为 https、端口为默认端口。
+- ~~**Extension SSRF 白名单严格匹配**：当前 background service worker 的 URL 白名单使用简单字符串匹配，可被 `evil.amazonaws.com.attacker.com` 绕过。应改用 URL 构造函数解析 hostname 后精确匹配，并限制协议为 https、端口为默认端口。~~（已在 v3.7.4 修复）
 - **Extension CredentialVault 移植**：Chrome Extension 版本中 API key 通过 `chrome.storage.local` 明文存储，CredentialVault AES-256-GCM 加密机制尚未移植到 Extension 侧。
+
+## v3.7.4 安全加固
+
+v3.7.4 在 v3.7.3 基础上进一步收紧 URL 安全与输入处理：
+
+### URL 安全与 SSRF
+
+- **Extension background worker 协议限制**：`isUrlAllowed` 现在解析 URL 后，对非本地地址强制校验 `parsed.protocol === "https:"` 且端口为默认 443，防止通过 `http://allowed-host.evil.com` 或自定义端口绕过白名单。
+- **循环依赖消除**：`UrlValidator` 提取到 `src/security/UrlValidator.js` 独立模块，消除 `src/api/index.js` 与 `src/security/index.js` 之间的 circular dependency，降低模块加载阶段的安全工具不可用风险。
+
+### 输入净化
+
+- **`post.cooked` 不再直接 `innerHTML`**：`src/export/index.js` 的帖子文本提取改用 `DOMParser.parseFromString(..., "text/html")` 后读取 `textContent`，避免不可信 HTML 在解析阶段执行脚本。
+
+### 弱随机数
+
+- **`Math.random()` 剩余两处清除**：`src/api/index.js` 的 multipart boundary 和 `src/ui/events.js` 的 Obsidian 图片文件名统一改用 `crypto.getRandomValues` 生成随机 hex 字符串。
 
 ## v3.7.3 安全加固
 
