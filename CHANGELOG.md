@@ -1,5 +1,33 @@
 # 更新日志
 
+## [3.7.5] - 2026-06-24
+
+### 新增
+
+- **UI 设计 Token 体系完善**：`src/ui/design-system.js` 新增 28 个 CSS 变量 token，覆盖 spacing（3xs~3xl）、font-size（xs~2xl）、z-index（panel/panel-top/overlay/float）、radius（2xs/md/pill）、white、bright（warning/success/danger）、disabled（opacity/cursor）系列，建立完整的主题无关 token 层级
+- **就地状态文本语义类**：新增 `.ldb-status-text` 及修饰符（`--danger/--success/--warning/--accent/--muted`），替代内联 `color` 样式，用于测试按钮旁等持久状态显示
+- **可访问性补全**：12 处图标按钮（主题切换、最小化、关闭、刷新、浮动按钮）补全 `aria-label`；2 处状态容器（`#ldb-status-container`、`#ldb-obs-test-status`）补全 `aria-live="polite"`
+
+### 变更
+
+- **CSS 硬编码消除**：4 个 UI 文件（styles/main-ui/generic-ui/notion-site-ui）共 325 处硬编码值收敛为 `var(--ldb-ui-*)` 引用（hex 颜色 9、border-radius 30、spacing 201、font-size 74、z-index 6、rgba focus-ring 5），视觉数值 1:1 保留
+- **disabled 样式 token 化**：`design-system.js` 中 5 处 `opacity: 0.65` 与 5 处 `cursor: not-allowed` 字面量替换为 `var(--ldb-ui-disabled-opacity)` / `var(--ldb-ui-disabled-cursor)`
+- **错误展示统一**：10 处 `innerHTML` 内联 `color` 状态文本（events.js 的 `obsTestStatus`、main-ui.js 与 notion-site-ui.js 的 `bmStatus`）收敛为 `.ldb-status-text` 语义类，保留就地持久显示语义
+- `package.json`、`build.js` 与根目录 `.user.js` 的 `@version` 同步递增到 `3.7.5`
+
+### 验证
+
+- `npm test`：17 个测试文件、349 个用例全部通过
+- `node build.js`：零警告构建，单文件产物 1263.2 KB
+- 收敛 grep：hex/border-radius/font-size/opacity/innerHTML+color/DEFAULTS-snake_case 均为 0
+
+### 说明
+
+- 本次为 UI/UX 一致性优化（非改版），严格遵守路线图锁定约束：单文件 Userscript 输出不变、纯客户端架构、向后兼容
+- TASK-004（数据契约对齐）与 TASK-005（状态管理）经核验现有代码已实质满足，未引入 `normalizeValue` 与 `state-manager.js`，避免过度工程
+
+[3.7.5]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.5
+
 ## [3.7.4] - 2026-06-24
 
 ### 修复
