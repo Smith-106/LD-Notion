@@ -231,7 +231,7 @@ const UI = {
                             <div class="ldb-bookmarks-label" id="ldb-bookmarks-label">已加载收藏数量</div>
                         </div>
 
-                        <div class="ldb-toggle-section" id="ldb-source-partitions-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-source-partitions-content" style="margin-top: 10px; margin-bottom: 8px;">
+                        <div class="ldb-toggle-section" id="ldb-source-partitions-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-source-partitions-content" style="margin-top: var(--ldb-ui-spacing-lg); margin-bottom: var(--ldb-ui-spacing-md);">
                             <span>收藏来源分区</span>
                             <span class="ldb-arrow" id="ldb-source-partitions-arrow">▶</span>
                         </div>
@@ -248,12 +248,12 @@ const UI = {
                         </div>
                         <div class="ldb-toggle-content collapsed ldb-mb-8" id="ldb-source-settings-content">
                             <div class="ldb-setting-row ldb-mb-8">
-                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
                                     <input type="checkbox" id="ldb-auto-import-enabled">
                                     <span id="ldb-auto-import-label">启用自动导入新收藏</span>
                                 </label>
                             </div>
-                            <div id="ldb-auto-import-options" style="display: none; margin-bottom: 8px;">
+                            <div id="ldb-auto-import-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
                                 <div class="ldb-setting-row ldb-flex-center-gap">
                                     <label id="ldb-auto-import-interval-label" style="white-space: nowrap;">轮询间隔</label>
                                     <select id="ldb-auto-import-interval" class="ldb-input ldb-flex-1">
@@ -266,12 +266,12 @@ const UI = {
                                 </div>
                             </div>
                             <div class="ldb-setting-row ldb-mb-8">
-                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
                                     <input type="checkbox" id="ldb-bookmark-auto-import-enabled">
                                     <span>启用浏览器书签自动同步</span>
                                 </label>
                             </div>
-                            <div id="ldb-bookmark-auto-import-options" style="display: none; margin-bottom: 8px;">
+                            <div id="ldb-bookmark-auto-import-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
                                 <div class="ldb-setting-row ldb-flex-center-gap">
                                     <label for="ldb-bookmark-auto-import-interval" style="white-space: nowrap;">书签同步间隔</label>
                                     <select id="ldb-bookmark-auto-import-interval" class="ldb-input ldb-flex-1">
@@ -283,16 +283,16 @@ const UI = {
                                     </select>
                                 </div>
                             </div>
-                            <div id="ldb-bookmark-auto-import-status" style="font-size: 12px; color: var(--ldb-ui-muted); margin-bottom: 8px;"></div>
+                            <div id="ldb-bookmark-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
                             <div class="ldb-setting-row ldb-mb-8">
-                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
                                     <input type="checkbox" id="ldb-rss-auto-import-enabled">
                                     <span>启用 RSS 自动同步</span>
                                 </label>
                             </div>
-                            <div id="ldb-rss-auto-import-options" style="display: none; margin-bottom: 8px;">
-                                <div class="ldb-setting-row" style="margin-bottom: 8px;">
-                                    <label for="ldb-rss-feed-urls" style="display: block; margin-bottom: 6px;">RSS Feed URL</label>
+                            <div id="ldb-rss-auto-import-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
+                                <div class="ldb-setting-row" style="margin-bottom: var(--ldb-ui-spacing-md);">
+                                    <label for="ldb-rss-feed-urls" style="display: block; margin-bottom: var(--ldb-ui-spacing-sm);">RSS Feed URL</label>
                                     <textarea id="ldb-rss-feed-urls" class="ldb-input" rows="3" placeholder="每行一个 RSS / Atom 地址，或用逗号分隔"></textarea>
                                 </div>
                                 <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
@@ -313,7 +313,7 @@ const UI = {
                                     </select>
                                 </div>
                             </div>
-                            <div id="ldb-rss-auto-import-status" style="font-size: 12px; color: var(--ldb-ui-muted); margin-bottom: 8px;"></div>
+                            <div id="ldb-rss-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
                             <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <label for="ldb-linuxdo-dedup-mode" style="white-space: nowrap;">Linux.do 导入去重</label>
                                 <select id="ldb-linuxdo-dedup-mode" class="ldb-input ldb-flex-1">
@@ -329,7 +329,7 @@ const UI = {
                                 </select>
                             </div>
                             <div class="ldb-setting-row ldb-mb-8">
-                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
                                     <input type="checkbox" id="ldb-ai-category-auto-dedup" checked>
                                     <span>分类列表自动去重</span>
                                 </label>
@@ -341,16 +341,16 @@ const UI = {
                                     <option value="unified">统一库（所有来源同一数据库）</option>
                                 </select>
                             </div>
-                            <div id="ldb-auto-import-status" style="font-size: 12px; color: var(--ldb-ui-muted); margin-bottom: 8px;"></div>
+                            <div id="ldb-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
 
                             <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-update-check-btn" style="padding: 6px 10px;">检查更新</button>
-                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0;">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-update-check-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);">检查更新</button>
+                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer; margin: 0;">
                                     <input type="checkbox" id="ldb-update-auto-enabled">
                                     <span>自动检查更新</span>
                                 </label>
                             </div>
-                            <div id="ldb-update-auto-options" style="display: none; margin-bottom: 8px;">
+                            <div id="ldb-update-auto-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
                                 <div class="ldb-setting-row ldb-flex-center-gap">
                                     <label for="ldb-update-interval-hours" style="white-space: nowrap;">检查间隔</label>
                                     <select id="ldb-update-interval-hours" class="ldb-input ldb-flex-1">
@@ -360,10 +360,10 @@ const UI = {
                                     </select>
                                 </div>
                             </div>
-                            <div id="ldb-update-check-status" style="font-size: 12px; color: var(--ldb-ui-muted); margin-bottom: 4px;"></div>
+                            <div id="ldb-update-check-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-xs);"></div>
                         </div>
 
-                        <div class="ldb-btn-group" style="margin-bottom: 12px;">
+                        <div class="ldb-btn-group" style="margin-bottom: var(--ldb-ui-spacing-xl);">
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-load-bookmarks">
                                 🔄 加载收藏列表
                             </button>
@@ -417,7 +417,7 @@ const UI = {
                     <div class="ldb-section">
                         <div class="ldb-view-header">
                             <div>
-                                <div class="ldb-section-title" style="margin-bottom: 4px;">工作区视图</div>
+                                <div class="ldb-section-title" style="margin-bottom: var(--ldb-ui-spacing-xs);">工作区视图</div>
                                 <div class="ldb-tip" id="ldb-view-subtitle">刷新后会基于当前 Notion 工作区数据库生成全局时间线、来源关系图和导出漏斗；下方继续保留本轮已加载摘要。</div>
                             </div>
                             <div class="ldb-view-actions">
@@ -510,16 +510,16 @@ const UI = {
                             <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID">
                             <input type="password" class="ldb-input" id="ldb-oauth-client-secret" placeholder="Client Secret" class="ldb-mt-8">
                             <input type="text" class="ldb-input" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" class="ldb-mt-8">
-                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
+                            <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
                                 <button class="ldb-btn ldb-btn-primary" id="ldb-oauth-authorize">🔐 一键授权</button>
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">断开授权</button>
                             </div>
-                            <div class="ldb-tip" id="ldb-oauth-status" style="margin-top: 6px;"></div>
-                            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
+                            <div class="ldb-tip" id="ldb-oauth-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
+                            <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-vault-unlock">解锁保险箱</button>
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-vault-lock">锁定</button>
                             </div>
-                            <div class="ldb-tip" id="ldb-vault-status" style="margin-top: 6px;"></div>
+                            <div class="ldb-tip" id="ldb-vault-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
                             <div class="ldb-tip">如果你使用 Notion 公开集成，请先把 Redirect URI 加到集成配置里，再点击一键授权。敏感凭证会保存在本地加密保险箱中。</div>
                         </div>
                         <div class="ldb-input-group">
@@ -530,10 +530,10 @@ const UI = {
                                 </select>
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-refresh-workspace" class="ldb-nowrap-badge" title="刷新工作区页面列表">🔄</button>
                             </div>
-                            <div class="ldb-input-group" id="ldb-manual-db-wrap" style="display: none; margin-top: 8px;">
+                            <div class="ldb-input-group" id="ldb-manual-db-wrap" style="display: none; margin-top: var(--ldb-ui-spacing-md);">
                                 <input type="text" class="ldb-input" id="ldb-database-id" placeholder="手动输入 32 位数据库 ID（高级）" class="ldb-flex-1">
                             </div>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-toggle-manual-db" style="margin-top: 6px; padding: 4px 10px; font-size: 12px;">高级：手动输入数据库 ID</button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-toggle-manual-db" style="margin-top: var(--ldb-ui-spacing-sm); padding: var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">高级：手动输入数据库 ID</button>
                             <div class="ldb-tip" id="ldb-workspace-tip">
                                 优先从工作区列表选择，无法加载时再手动输入
                             </div>
@@ -566,10 +566,10 @@ const UI = {
                             </div>
                         </div>
 
-                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <div style="display: flex; gap: var(--ldb-ui-spacing-md); align-items: center; flex-wrap: wrap;">
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-validate-config">验证配置</button>
                             <button class="ldb-btn ldb-btn-primary" id="ldb-setup-database" title="自动在数据库中创建所需属性">自动设置数据库</button>
-                            <span id="ldb-config-status" style="font-size: 12px; margin-left: 4px;"></span>
+                            <span id="ldb-config-status" style="font-size: var(--ldb-ui-font-size-sm); margin-left: var(--ldb-ui-spacing-xs);"></span>
                         </div>
 
                         <!-- 权限设置 -->
@@ -754,20 +754,20 @@ const UI = {
                             </div>
                             <div class="ldb-btn-group ldb-flex-center-gap">
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-test">测试连接</button>
-                                <span id="ldb-ai-test-status" style="font-size: 12px;"></span>
+                                <span id="ldb-ai-test-status" style="font-size: var(--ldb-ui-font-size-sm);"></span>
                             </div>
 
                             <!-- AI 输出模板管理 -->
                             <div class="ldb-section-divider">
                                 <span class="ldb-hint">📋 AI 输出模板</span>
                             </div>
-                            <div id="ldb-template-list" style="margin-bottom: 8px;"></div>
+                            <div id="ldb-template-list" style="margin-bottom: var(--ldb-ui-spacing-md);"></div>
                             <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <input type="text" class="ldb-input" id="ldb-template-name" placeholder="模板名称" style="width: 80px;">
                                 <input type="text" class="ldb-input" id="ldb-template-icon" placeholder="图标" style="width: 50px;">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-template-add" style="padding: 4px 8px; font-size: 12px;">添加</button>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-template-add" style="padding: var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-md); font-size: var(--ldb-ui-font-size-sm);">添加</button>
                             </div>
-                            <div class="ldb-input-group" style="margin-bottom: 4px;">
+                            <div class="ldb-input-group" style="margin-bottom: var(--ldb-ui-spacing-xs);">
                                 <textarea class="ldb-input" id="ldb-template-prompt" rows="2" placeholder="模板 prompt，用于 AI 生成内容" style="resize: vertical;"></textarea>
                             </div>
                             <div class="ldb-tip">添加后可在 AI 对话中使用「用xx模板总结xxx页面」</div>
@@ -821,8 +821,8 @@ const UI = {
                             <span class="ldb-section-title" style="margin-bottom: 0;">🐙 GitHub 导入</span>
                             <span id="ldb-github-settings-arrow">▶</span>
                         </div>
-                        <div style="margin-top: 8px; margin-bottom: 6px;">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-open-github-settings" style="padding: 6px 10px; font-size: 12px;">
+                        <div style="margin-top: var(--ldb-ui-spacing-md); margin-bottom: var(--ldb-ui-spacing-sm);">
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-open-github-settings" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">
                                 🎯 一键定位 GitHub Token
                             </button>
                         </div>
@@ -838,7 +838,7 @@ const UI = {
                             </div>
                             <div class="ldb-input-group">
                                 <label class="ldb-label">导入类型</label>
-                                <div class="ldb-checkbox-group" style="margin-top: 4px;">
+                                <div class="ldb-checkbox-group" style="margin-top: var(--ldb-ui-spacing-xs);">
                                     <label class="ldb-checkbox-item">
                                         <input type="checkbox" class="ldb-github-type" value="stars" checked> ⭐ Stars
                                     </label>
@@ -890,9 +890,9 @@ const UI = {
                                 <input type="text" class="ldb-input" id="ldb-obs-img-dir" placeholder="Linux.do/attachments">
                                 <div class="ldb-tip">仅"保存图片并引用"模式有效</div>
                             </div>
-                            <div style="margin-top: 8px;">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-obs-test-btn" style="padding: 6px 10px; font-size: 12px;">🔗 测试连接</button>
-                                <span id="ldb-obs-test-status" style="font-size: 12px; margin-left: 8px;"></span>
+                            <div style="margin-top: var(--ldb-ui-spacing-md);">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-obs-test-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">🔗 测试连接</button>
+                                <span id="ldb-obs-test-status" style="font-size: var(--ldb-ui-font-size-sm); margin-left: var(--ldb-ui-spacing-md);"></span>
                             </div>
                         </div>
                     </div>
@@ -901,18 +901,18 @@ const UI = {
 
                     <!-- 浏览器书签导入 -->
                     <div class="ldb-section">
-                        <div style="font-size: 13px; font-weight: 700; color: var(--ldb-ui-text);">📖 浏览器书签</div>
-                        <div id="ldb-bookmark-ext-status" style="font-size: 11px; margin-top: 4px; color: var(--ldb-ui-muted);"></div>
+                        <div style="font-size: var(--ldb-ui-font-size-md); font-weight: 700; color: var(--ldb-ui-text);">📖 浏览器书签</div>
+                        <div id="ldb-bookmark-ext-status" style="font-size: var(--ldb-ui-font-size-xs); margin-top: var(--ldb-ui-spacing-xs); color: var(--ldb-ui-muted);"></div>
                     </div>
 
                     <div class="ldb-divider"></div>
 
                     <!-- 运行自检 -->
                     <div class="ldb-section">
-                        <div style="font-size: 13px; font-weight: 700; color: var(--ldb-ui-text);">🩺 运行自检</div>
-                        <div class="ldb-btn-group" style="margin-top: 8px; margin-bottom: 8px;">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-self-check-btn" style="padding: 6px 10px; font-size: 12px;">执行自检</button>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-copy-diagnostics-btn" style="padding: 6px 10px; font-size: 12px;">复制诊断信息</button>
+                        <div style="font-size: var(--ldb-ui-font-size-md); font-weight: 700; color: var(--ldb-ui-text);">🩺 运行自检</div>
+                        <div class="ldb-btn-group" style="margin-top: var(--ldb-ui-spacing-md); margin-bottom: var(--ldb-ui-spacing-md);">
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-self-check-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">执行自检</button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-copy-diagnostics-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">复制诊断信息</button>
                         </div>
                         <div id="ldb-self-check-result" class="ldb-hint"></div>
                     </div>
@@ -2857,7 +2857,7 @@ const UI = {
                 `<span class="ldb-view-pill">${Utils.escapeHtml(row.outcomeLabel)}</span>`,
             ].join("");
             const errorMarkup = row.lastError
-                ? `<div class="ldb-view-empty-text" style="margin-top: 8px; color: var(--ldb-ui-danger);">最近异常：${Utils.escapeHtml(row.lastError)}</div>`
+                ? `<div class="ldb-view-empty-text" style="margin-top: var(--ldb-ui-spacing-md); color: var(--ldb-ui-danger);">最近异常：${Utils.escapeHtml(row.lastError)}</div>`
                 : "";
             return `
                 <div class="ldb-view-card">
@@ -2883,7 +2883,7 @@ const UI = {
                             <div class="ldb-view-link-count">${Utils.escapeHtml(row.statsLabel)}</div>
                         </div>
                     </div>
-                    <div class="ldb-view-empty-text" style="margin-top: 8px;">${Utils.escapeHtml(row.detailLabel)}</div>
+                    <div class="ldb-view-empty-text" style="margin-top: var(--ldb-ui-spacing-md);">${Utils.escapeHtml(row.detailLabel)}</div>
                     ${errorMarkup}
                 </div>
             `;
@@ -4160,7 +4160,7 @@ const UI = {
         const isExported = UI.isBookmarkKeyExported(bookmarkKey);
         const isSelected = UI.selectedBookmarks?.has(bookmarkKey);
         const sourceTag = githubMode
-            ? `<span class="status" style="margin-right: 6px;">${(bookmark.sourceType || "stars").toUpperCase()}</span>`
+            ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${(bookmark.sourceType || "stars").toUpperCase()}</span>`
             : "";
         const reexportAction = !githubMode && isExported
             ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="移除该帖子的导出记录并重新加入待导出列表">重新导出</button>`
@@ -4183,7 +4183,7 @@ const UI = {
         UI.renderJobId += 1;
         const renderJobId = UI.renderJobId;
         if (!UI.bookmarks || UI.bookmarks.length === 0) {
-            list.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--ldb-ui-muted);">暂无收藏</div>';
+            list.innerHTML = '<div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">暂无收藏</div>';
             UI.updateSelectCount();
             UI.renderVisualSummary();
             return;

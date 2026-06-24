@@ -27,17 +27,17 @@ const GenericUI = {
                 right: 24px;
                 width: 48px;
                 height: 48px;
-                border-radius: 999px;
+                border-radius: var(--ldb-ui-radius-pill);
                 background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
-                color: #fff;
-                border: 1px solid rgba(37, 99, 235, 0.35);
+                color: var(--ldb-ui-white);
+                border: 1px solid var(--ldb-ui-focus-ring);
                 cursor: pointer;
                 box-shadow: var(--ldb-ui-shadow-sm);
-                z-index: 2147483647;
+                z-index: var(--ldb-ui-z-index-float);
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                font-size: 22px;
+                font-size: var(--ldb-ui-font-size-2xl);
                 transition: transform 0.18s ease, box-shadow 0.18s ease;
                 user-select: none;
             }
@@ -48,18 +48,18 @@ const GenericUI = {
             }
 
             .gclip-float-btn.exporting {
-                background: linear-gradient(135deg, #f59e0b, var(--ldb-ui-warning));
+                background: linear-gradient(135deg, var(--ldb-ui-warning-bright), var(--ldb-ui-warning));
                 border-color: rgba(217, 119, 6, 0.35);
                 animation: gclip-pulse 1.2s infinite;
             }
 
             .gclip-float-btn.success {
-                background: linear-gradient(135deg, #10b981, var(--ldb-ui-success));
+                background: linear-gradient(135deg, var(--ldb-ui-success-bright), var(--ldb-ui-success));
                 border-color: rgba(22, 163, 74, 0.35);
             }
 
             .gclip-float-btn.error {
-                background: linear-gradient(135deg, #ef4444, var(--ldb-ui-danger));
+                background: linear-gradient(135deg, var(--ldb-ui-danger-bright), var(--ldb-ui-danger));
                 border-color: rgba(220, 38, 38, 0.35);
             }
 
@@ -74,7 +74,7 @@ const GenericUI = {
                 right: 24px;
                 width: 320px;
                 max-width: calc(100vw - 32px);
-                z-index: 2147483646;
+                z-index: var(--ldb-ui-z-index-overlay);
                 display: none;
                 overflow: hidden;
                 transform: translateY(12px);
@@ -90,13 +90,13 @@ const GenericUI = {
 
             .gclip-panel-header {
                 background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
-                color: #fff;
+                color: var(--ldb-ui-white);
             }
 
             .gclip-panel-header .close-btn {
                 border-color: rgba(255, 255, 255, 0.22);
                 background: rgba(255, 255, 255, 0.14);
-                color: #fff;
+                color: var(--ldb-ui-white);
             }
 
             .gclip-panel-header .close-btn:hover {
@@ -105,31 +105,31 @@ const GenericUI = {
 
             .gclip-preview {
                 border: 1px solid var(--ldb-ui-border);
-                border-radius: 12px;
-                padding: 10px 12px;
+                border-radius: var(--ldb-ui-radius-md);
+                padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
                 background: rgba(148, 163, 184, 0.08);
-                margin-bottom: 12px;
+                margin-bottom: var(--ldb-ui-spacing-xl);
             }
 
             .gclip-preview .title {
-                font-size: 13px;
+                font-size: var(--ldb-ui-font-size-md);
                 font-weight: 700;
                 line-height: 1.45;
                 color: var(--ldb-ui-text);
             }
 
             .gclip-preview .meta {
-                margin-top: 4px;
-                font-size: 12px;
+                margin-top: var(--ldb-ui-spacing-xs);
+                font-size: var(--ldb-ui-font-size-sm);
                 color: var(--ldb-ui-muted);
             }
 
             .gclip-status {
-                margin-top: 10px;
-                padding: 10px 12px;
-                border-radius: 12px;
+                margin-top: var(--ldb-ui-spacing-lg);
+                padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
+                border-radius: var(--ldb-ui-radius-md);
                 border: 1px solid var(--ldb-ui-border);
-                font-size: 12px;
+                font-size: var(--ldb-ui-font-size-sm);
                 display: none;
             }
 
@@ -219,27 +219,27 @@ const GenericUI = {
                 <div id="gclip-settings" style="display: ${isConfigured ? 'none' : 'block'};">
                     <div class="gclip-field">
                         <label>Notion API Key</label>
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="${CredentialVault.getFieldPlaceholder(CONFIG.STORAGE_KEYS.NOTION_API_KEY, 'secret_...')}" value="" style="flex:1;font-size:12px;" autocomplete="off" />
-                            <button class="gclip-btn" id="gclip-save-api-key" style="padding:4px 12px;font-size:12px;">保存</button>
+                        <div style="display:flex;align-items:center;gap:var(--ldb-ui-spacing-md);">
+                            <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="${CredentialVault.getFieldPlaceholder(CONFIG.STORAGE_KEYS.NOTION_API_KEY, 'secret_...')}" value="" style="flex:1;font-size:var(--ldb-ui-font-size-sm);" autocomplete="off" />
+                            <button class="gclip-btn" id="gclip-save-api-key" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">保存</button>
                         </div>
                     </div>
                     <div class="gclip-field">
                         <label>Notion OAuth（公开集成）</label>
                         <input type="text" id="gclip-oauth-client-id" class="gclip-input" placeholder="Client ID">
-                        <input type="password" id="gclip-oauth-client-secret" class="gclip-input" placeholder="Client Secret" style="margin-top:8px;">
-                        <input type="text" id="gclip-oauth-redirect-uri" class="gclip-input" placeholder="Redirect URI" style="margin-top:8px;">
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                            <button class="gclip-btn gclip-btn-primary" id="gclip-oauth-authorize" style="padding:4px 12px;font-size:12px;">🔐 一键授权</button>
-                            <button class="gclip-btn gclip-btn-secondary" id="gclip-oauth-clear" style="padding:4px 12px;font-size:12px;">断开授权</button>
+                        <input type="password" id="gclip-oauth-client-secret" class="gclip-input" placeholder="Client Secret" style="margin-top:var(--ldb-ui-spacing-md);">
+                        <input type="text" id="gclip-oauth-redirect-uri" class="gclip-input" placeholder="Redirect URI" style="margin-top:var(--ldb-ui-spacing-md);">
+                        <div style="display:flex;gap:var(--ldb-ui-spacing-md);flex-wrap:wrap;margin-top:var(--ldb-ui-spacing-md);">
+                            <button class="gclip-btn gclip-btn-primary" id="gclip-oauth-authorize" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">🔐 一键授权</button>
+                            <button class="gclip-btn gclip-btn-secondary" id="gclip-oauth-clear" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">断开授权</button>
                         </div>
-                        <div id="gclip-oauth-status" style="font-size:11px;color:var(--ldb-ui-muted);margin-top:6px;"></div>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                            <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-unlock" style="padding:4px 12px;font-size:12px;">解锁保险箱</button>
-                            <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-lock" style="padding:4px 12px;font-size:12px;">锁定</button>
+                        <div id="gclip-oauth-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);"></div>
+                        <div style="display:flex;gap:var(--ldb-ui-spacing-md);flex-wrap:wrap;margin-top:var(--ldb-ui-spacing-md);">
+                            <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-unlock" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">解锁保险箱</button>
+                            <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-lock" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">锁定</button>
                         </div>
-                        <div id="gclip-vault-status" style="font-size:11px;color:var(--ldb-ui-muted);margin-top:6px;"></div>
-                        <div style="font-size:11px;color:var(--ldb-ui-muted);margin-top:4px;">公开 OAuth 适合个人自建集成；敏感凭证会保存在本地加密保险箱中。</div>
+                        <div id="gclip-vault-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);"></div>
+                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">公开 OAuth 适合个人自建集成；敏感凭证会保存在本地加密保险箱中。</div>
                     </div>
                     <div class="gclip-field">
                         <label>导出目标类型</label>
@@ -250,20 +250,20 @@ const GenericUI = {
                     </div>
                     <div class="gclip-field">
                         <label id="gclip-target-label">${exportType === "page" ? "父页面" : "数据库"}</label>
-                        <div style="display:flex;align-items:center;gap:8px;">
+                        <div style="display:flex;align-items:center;gap:var(--ldb-ui-spacing-md);">
                             <select id="gclip-target-select" class="gclip-input" style="flex:1;">
                                 <option value="">未选择</option>
                             </select>
-                            <button class="gclip-btn" id="gclip-refresh-workspace" style="padding:4px 12px;font-size:12px;white-space:nowrap;">刷新</button>
+                            <button class="gclip-btn" id="gclip-refresh-workspace" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);white-space:nowrap;">刷新</button>
                         </div>
-                        <div id="gclip-target-tip" style="font-size:11px;color:var(--ldb-ui-muted);margin-top:4px;">优先从工作区列表选择，失败时可手动输入 ID</div>
+                        <div id="gclip-target-tip" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">优先从工作区列表选择，失败时可手动输入 ID</div>
                     </div>
                     <div class="gclip-field" id="gclip-manual-target-wrap" style="display:none;">
                         <label>手动输入 ID（高级）</label>
                         <input type="text" id="gclip-target-id" value="" placeholder="32位ID">
                     </div>
-                    <div class="gclip-field" style="margin-top:-4px;">
-                        <button class="gclip-btn gclip-btn-secondary" id="gclip-toggle-manual-target" style="padding:4px 10px;font-size:12px;">高级：手动输入 ID</button>
+                    <div class="gclip-field" style="margin-top:-var(--ldb-ui-spacing-xs);">
+                        <button class="gclip-btn gclip-btn-secondary" id="gclip-toggle-manual-target" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-lg);font-size:var(--ldb-ui-font-size-sm);">高级：手动输入 ID</button>
                     </div>
                     <div class="gclip-field">
                         <label>图片处理</label>

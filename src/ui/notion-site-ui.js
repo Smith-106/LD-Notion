@@ -29,14 +29,14 @@ const NotionSiteUI = {
                 bottom: 24px;
                 width: 52px;
                 height: 52px;
-                border-radius: 999px;
-                border: 1px solid rgba(37, 99, 235, 0.35);
+                border-radius: var(--ldb-ui-radius-pill);
+                border: 1px solid var(--ldb-ui-focus-ring);
                 background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
-                color: #fff;
-                font-size: 22px;
+                color: var(--ldb-ui-white);
+                font-size: var(--ldb-ui-font-size-2xl);
                 cursor: pointer;
                 box-shadow: var(--ldb-ui-shadow-sm);
-                z-index: 2147483647;
+                z-index: var(--ldb-ui-z-index-float);
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -66,7 +66,7 @@ const NotionSiteUI = {
                 width: 380px;
                 max-width: calc(100vw - 32px);
                 max-height: 70vh;
-                z-index: 2147483646;
+                z-index: var(--ldb-ui-z-index-overlay);
                 overflow: hidden;
                 display: none;
             }
@@ -77,7 +77,7 @@ const NotionSiteUI = {
 
             .ldb-notion-header-btns {
                 display: flex;
-                gap: 8px;
+                gap: var(--ldb-ui-spacing-md);
             }
 
             .ldb-notion-body {
@@ -91,9 +91,9 @@ const NotionSiteUI = {
                 align-items: center;
                 cursor: pointer;
                 user-select: none;
-                margin-top: 10px;
-                padding: 8px 10px;
-                border-radius: 10px;
+                margin-top: var(--ldb-ui-spacing-lg);
+                padding: var(--ldb-ui-spacing-md) var(--ldb-ui-spacing-lg);
+                border-radius: var(--ldb-ui-radius-sm);
                 border: 1px solid var(--ldb-ui-border);
                 background: rgba(148, 163, 184, 0.10);
                 color: var(--ldb-ui-text);
@@ -104,7 +104,7 @@ const NotionSiteUI = {
             }
 
             #ldb-notion-status-container {
-                margin-top: 12px;
+                margin-top: var(--ldb-ui-spacing-xl);
             }
         `);
     },
@@ -189,7 +189,7 @@ const NotionSiteUI = {
             <div class="ldb-notion-header">
                 <h3>🤖 AI 助手</h3>
                 <div class="ldb-notion-header-btns">
-                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="切换主题" style="width:26px;height:26px;border-radius:8px;font-size:13px;">🌙</button>
+                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="切换主题" style="width:26px;height:26px;border-radius:var(--ldb-ui-radius-xs);font-size:var(--ldb-ui-font-size-md);">🌙</button>
                     <button class="ldb-notion-header-btn" id="ldb-notion-close" title="关闭">×</button>
                 </div>
             </div>
@@ -232,16 +232,16 @@ const NotionSiteUI = {
                         <input type="text" class="ldb-input" id="ldb-notion-oauth-client-id" placeholder="Client ID">
                         <input type="password" class="ldb-input" id="ldb-notion-oauth-client-secret" placeholder="Client Secret" class="ldb-mt-8">
                         <input type="text" class="ldb-input" id="ldb-notion-oauth-redirect-uri" placeholder="Redirect URI" class="ldb-mt-8">
-                        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
-                            <button class="ldb-btn ldb-btn-primary" id="ldb-notion-oauth-authorize" style="padding: 6px 12px;">🔐 一键授权</button>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-oauth-clear" style="padding: 6px 12px;">断开授权</button>
+                        <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
+                            <button class="ldb-btn ldb-btn-primary" id="ldb-notion-oauth-authorize" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">🔐 一键授权</button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-oauth-clear" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">断开授权</button>
                         </div>
-                        <div class="ldb-tip" id="ldb-notion-oauth-status" style="margin-top: 6px;"></div>
-                        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-unlock" style="padding: 6px 12px;">解锁保险箱</button>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-lock" style="padding: 6px 12px;">锁定</button>
+                        <div class="ldb-tip" id="ldb-notion-oauth-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
+                        <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-unlock" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">解锁保险箱</button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-lock" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">锁定</button>
                         </div>
-                        <div class="ldb-tip" id="ldb-notion-vault-status" style="margin-top: 6px;"></div>
+                        <div class="ldb-tip" id="ldb-notion-vault-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
                         <div class="ldb-tip">适用于 Notion 公开集成。敏感凭证会保存在本地加密保险箱中，仅在解锁后的当前会话内可用。</div>
                     </div>
                     <div class="ldb-input-group">
@@ -333,7 +333,7 @@ const NotionSiteUI = {
                     </div>
                     <div class="ldb-input-group">
                         <label class="ldb-label">导入类型</label>
-                        <div class="ldb-checkbox-group" style="margin-top: 4px;">
+                        <div class="ldb-checkbox-group" style="margin-top: var(--ldb-ui-spacing-xs);">
                             <label class="ldb-checkbox-item">
                                 <input type="checkbox" class="ldb-notion-github-type" value="stars" checked> ⭐ Stars
                             </label>
@@ -350,7 +350,7 @@ const NotionSiteUI = {
                     </div>
                     <div class="ldb-section-divider">
                         <span class="ldb-hint">📖 浏览器书签导入</span>
-                        <div id="ldb-notion-bookmark-status" style="font-size: 11px; margin-top: 4px;"></div>
+                        <div id="ldb-notion-bookmark-status" style="font-size: var(--ldb-ui-font-size-xs); margin-top: var(--ldb-ui-spacing-xs);"></div>
                     </div>
                     <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-save-settings">💾 保存设置</button>
                 </div>

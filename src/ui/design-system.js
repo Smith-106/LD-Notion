@@ -110,6 +110,37 @@ const DesignSystem = {
             --ldb-ui-focus-ring: rgba(37, 99, 235, 0.35);
             --ldb-ui-backdrop: rgba(2, 6, 23, 0.35);
 
+            --ldb-ui-white: #fff;
+
+            --ldb-ui-radius-2xs: 6px;
+            --ldb-ui-radius-md: 12px;
+            --ldb-ui-radius-pill: 999px;
+
+            --ldb-ui-spacing-3xs: 2px;
+            --ldb-ui-spacing-xs: 4px;
+            --ldb-ui-spacing-sm: 6px;
+            --ldb-ui-spacing-md: 8px;
+            --ldb-ui-spacing-lg: 10px;
+            --ldb-ui-spacing-xl: 12px;
+            --ldb-ui-spacing-2xl: 14px;
+            --ldb-ui-spacing-3xl: 18px;
+
+            --ldb-ui-font-size-xs: 11px;
+            --ldb-ui-font-size-sm: 12px;
+            --ldb-ui-font-size-md: 13px;
+            --ldb-ui-font-size-lg: 14px;
+            --ldb-ui-font-size-xl: 20px;
+            --ldb-ui-font-size-2xl: 22px;
+
+            --ldb-ui-z-index-panel: 2147483640;
+            --ldb-ui-z-index-panel-top: 2147483641;
+            --ldb-ui-z-index-overlay: 2147483646;
+            --ldb-ui-z-index-float: 2147483647;
+
+            --ldb-ui-warning-bright: #f59e0b;
+            --ldb-ui-success-bright: #10b981;
+            --ldb-ui-danger-bright: #ef4444;
+
             font-family: var(--ldb-ui-font);
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
