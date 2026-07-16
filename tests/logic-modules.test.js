@@ -3,6 +3,7 @@ const path = require('path');
 const assert = require('assert');
 const { webcrypto } = require('crypto');
 const { extractUserscriptIifeBody } = require('../scripts/build-extension.js');
+const { loadBundle } = require('./legacy-harness.js');
 
 // Load userscript
 const userScriptPath = path.resolve(__dirname, '../LinuxDo-Bookmarks-to-Notion.user.js');
@@ -81,12 +82,8 @@ const sandbox = {
 sandbox.global = sandbox;
 sandbox.self = sandbox;
 
-// Execute and extract modules
-const scriptRunner = new Function(
-    ...Object.keys(sandbox),
-    coreCode + '\nreturn { CONFIG, OperationLog, TargetState, OperationGuard, Utils, MSG };'
-);
-const { CONFIG, OperationLog, TargetState, OperationGuard, Utils, MSG } = scriptRunner(...Object.values(sandbox));
+// Execute and extract modules via shared harness (工厂方案，对 esbuild 重命名免疫)
+const { CONFIG, OperationLog, TargetState, OperationGuard, Utils, MSG } = loadBundle(sandbox);
 
 if (!CONFIG || !OperationLog || !TargetState || !OperationGuard) {
     console.error('❌ Failed to load modules');

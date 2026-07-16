@@ -3,8 +3,9 @@ const path = require('path');
 const assert = require('assert');
 const { webcrypto } = require('crypto');
 const { extractUserscriptIifeBody } = require('../scripts/build-extension.js');
+const { loadBundle } = require('./legacy-harness.js');
 
-// Extract the IIFE body from the userscript
+// Extract the IIFE body from the userscript (保留供构建产物断言复用)
 const userScriptPath = path.resolve(__dirname, '../LinuxDo-Bookmarks-to-Notion.user.js');
 let userScriptContent = fs.readFileSync(userScriptPath, 'utf8');
 
@@ -88,8 +89,7 @@ sandbox.self = sandbox;
 
 // Create a function to run the script and return the Utils object
 // We add a return statement to get the Utils object
-const scriptRunner = new Function(...Object.keys(sandbox), coreCode + '\nreturn Utils;');
-const Utils = scriptRunner(...Object.values(sandbox));
+const { Utils } = loadBundle(sandbox);
 
 if (!Utils) {
     console.error('❌ Utils not found after script execution');

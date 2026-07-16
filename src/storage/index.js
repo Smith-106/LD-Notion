@@ -120,8 +120,10 @@ const SyncState = {
 
 module.exports = { Storage, SyncState };
 
-// CredentialVault will be set from auth module
-Object.defineProperty(module.exports, 'CredentialVault', {
+// CredentialVault will be set from auth module（main.js 通过 Storage.CredentialVault = CredentialVault 注入）。
+// setter 必须定义在 Storage 主对象上（而非 module.exports），这样 main.js 的直接赋值才能触发
+// setter 更新内部 _credentialVault 私有变量，Storage.get 对 sensitive key 的透明解密转发才会生效。
+Object.defineProperty(Storage, 'CredentialVault', {
     get: () => _credentialVault,
     set: (v) => { _credentialVault = v; },
     enumerable: true,

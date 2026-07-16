@@ -10,6 +10,7 @@ const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = requir
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
+const { StyleManager } = require("./style-manager");
 
 const DesignSystem = {
     STYLE_IDS: {

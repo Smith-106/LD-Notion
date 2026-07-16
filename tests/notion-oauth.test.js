@@ -28,6 +28,7 @@ const {
 const userScriptContent = fs.readFileSync(userScriptPath, 'utf8');
 const wrappedCoreCode = extractUserscriptIifeBody(userScriptContent);
 const coreCode = wrappedCoreCode.replace(/\n\s*main\(\);\s*$/, '\n');
+const { loadBundle } = require('./legacy-harness.js');
 
 function createElementStub() {
     const element = {
@@ -230,12 +231,8 @@ function createHarness({ url = 'https://localhost/', readyState = 'complete' } =
     sandbox.global = sandbox;
     sandbox.self = sandbox;
 
-    const scriptRunner = new Function(
-        ...Object.keys(sandbox),
-        `${coreCode}\nreturn { AIClassifier, AIService, AutoImporter, BookmarkAutoImporter, BookmarkExporter, CONFIG, AIAssistant, ChatState, ChatUI, ConfirmationDialog, CredentialVault, DesignSystem, Exporter, GenericExporter, GenericUI, GitHubAPI, GitHubAutoImporter, LinuxDoAPI, NotionAPI, NotionOAuth, NotionSiteUI, OperationGuard, OperationLog, RSSAutoImporter, SiteDetector, Storage, SyncState, TargetState, UI, UICommandService, UndoManager, UpdateChecker, WorkspaceService, main };`
-    );
-
-    const exports = scriptRunner(...Object.values(sandbox));
+    // 通过共享 harness 加载模块（工厂方案，对 esbuild 重命名免疫）。
+    const exports = loadBundle(sandbox);
 
     return {
         ...exports,
@@ -485,7 +482,10 @@ function createWorkspaceVisualizationFixture(harness) {
         }
     ];
 
-    const records = pages.map((page) => harness.UI.extractWorkspaceVisualRecord(page, databases));
+    // 生产调用方 (src/ui/main-ui.js) 以 new Map(databases.map(d => [d.id, d]))
+    // 构建 Map 后传入 extractWorkspaceVisualRecord；fixture 须对齐该契约。
+    const databasesMap = new Map(databases.map((d) => [d.id, d]));
+    const records = pages.map((page) => harness.UI.extractWorkspaceVisualRecord(page, databasesMap));
     return { databases, pages, records };
 }
 

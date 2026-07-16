@@ -53,13 +53,17 @@ const Utils = {
 
     extractQuotedText: (value) => {
         const raw = String(value || "");
-        const match = raw.match(/["""]([^""""]+)["""]/);
+        // 字符集须包含三种引号: ASCII " (U+0022)、中文左双引号 “ (U+201C)、中文右双引号 ” (U+201D)。
+        // 直接写字面量在编辑器中难以区分且易被规范化为同一码点，故用 Unicode 转义显式表达。
+        const QUOTE_CHARS = "[\\u0022\\u201C\\u201D]";
+        const match = raw.match(new RegExp(QUOTE_CHARS + "([^" + QUOTE_CHARS.slice(1) + "+)" + QUOTE_CHARS));
         return match ? match[1].trim() : "";
     },
 
     extractQuotedTexts: (value) => {
         const raw = String(value || "");
-        const matches = [...raw.matchAll(/["""]([^""""]+)["""]/g)];
+        const QUOTE_CHARS = "[\\u0022\\u201C\\u201D]";
+        const matches = [...raw.matchAll(new RegExp(QUOTE_CHARS + "([^" + QUOTE_CHARS.slice(1) + "+)" + QUOTE_CHARS, "g"))];
         return matches.map(match => String(match[1] || "").trim()).filter(Boolean);
     },
 

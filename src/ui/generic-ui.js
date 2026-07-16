@@ -10,6 +10,10 @@ const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = requir
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
+const { StyleManager } = require("./style-manager");
+const { DesignSystem } = require("./design-system");
+const { PanelResize } = require("./panel-resize");
+const { UI_CSS } = require("./styles");
 
 const GenericUI = {
     panel: null,

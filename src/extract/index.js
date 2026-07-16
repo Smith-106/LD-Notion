@@ -687,4 +687,4 @@ const UICommandService = Object.freeze({
     },
 });
 
-module.exports = { ZhihuAPI, GenericExtractor, WorkspaceService };
+module.exports = { ZhihuAPI, GenericExtractor, WorkspaceService, UICommandService };

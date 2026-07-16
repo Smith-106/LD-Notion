@@ -5,7 +5,7 @@
   "description": "LD-Notion Hub — AI 多源知识中枢",
   "main": "LinuxDo-Bookmarks-to-Notion.user.js",
   "scripts": {
-    "test": "npx vitest run",
+    "test": "npx vitest run && npm run test:legacy",
     "test:legacy": "node tests/utils.test.js && node tests/logic-modules.test.js && node tests/notion-oauth.test.js",
     "verify:baseline": "npm test && node --check LinuxDo-Bookmarks-to-Notion.user.js && node scripts/validate-userscript-ui.js",
     "build:extension": "node scripts/build-extension.js --src dist/LinuxDo-Bookmarks-to-Notion.user.js",
