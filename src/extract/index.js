@@ -4,7 +4,7 @@ const { CONFIG, MSG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { NotionAPI, DOMToNotion, HTMLToMarkdown, InstallHelper } = require("../api");
-const { NotionOAuth } = require("../auth");
+const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
 const { OperationGuard } = require("../security");
 
 const ZhihuAPI = {
@@ -372,7 +372,7 @@ const WorkspaceService = {
     },
 
     buildWorkspaceData: (apiKey, workspace = {}) => ({
-        apiKeyHash: apiKey ? (() => { let h = 0; for (const c of apiKey) h = ((h << 5) - h + c.charCodeAt(0)) | 0; return Math.abs(h).toString(36); })() : "",
+        apiKeyHash: apiKey ? apiKey.slice(-8) : "",
         databases: Array.isArray(workspace.databases) ? workspace.databases : [],
         pages: Array.isArray(workspace.pages) ? workspace.pages : [],
         timestamp: Date.now(),
@@ -499,7 +499,7 @@ const UICommandService = Object.freeze({
             [CONFIG.STORAGE_KEYS.AI_API_KEY]: aiApiKey,
             [CONFIG.STORAGE_KEYS.GITHUB_TOKEN]: githubToken,
         });
-        GitHubAPI.setImportTypes(Array.isArray(githubImportTypes) && githubImportTypes.length > 0 ? githubImportTypes : ["stars"]);
+        (require("../import").GitHubAPI).setImportTypes(Array.isArray(githubImportTypes) && githubImportTypes.length > 0 ? githubImportTypes : ["stars"]);
 
         return {
             aiTargetState: TargetState.getDisplayAITargetState(),
@@ -553,7 +553,7 @@ const UICommandService = Object.freeze({
         let setupResult = null;
         if (autoSetupDatabaseProperties) {
             // M2-P1 明确保留的 legacy direct NotionAPI 写路径：导出目标 schema 初始化仍复用现有 helper。
-            setupResult = await GenericExporter.setupDatabaseProperties(targetId, apiKey);
+            setupResult = await (require("../export").GenericExporter).setupDatabaseProperties(targetId, apiKey);
         }
         return { exportState: TargetState.getExportState(), setupResult };
     },
@@ -660,7 +660,7 @@ const UICommandService = Object.freeze({
             case "fetch_ai_models": {
                 const aiApiKey = String(payload.aiApiKey || "").trim();
                 if (!aiApiKey) throw new Error(payload.missingApiKeyMessage || MSG.NO_AI_KEY);
-                return await AIService.fetchModelsSnapshot(payload.aiService, aiApiKey, payload.aiBaseUrl || "");
+                return await (require("../ai").AIService).fetchModelsSnapshot(payload.aiService, aiApiKey, payload.aiBaseUrl || "");
             }
             case "save_command_boundary_settings":
                 switch (payload.scope) {

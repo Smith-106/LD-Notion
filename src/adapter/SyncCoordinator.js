@@ -4,6 +4,17 @@ const { AdapterRegistry } = require("./AdapterRegistry");
 const { SyncStateV2 } = require("../storage/SyncState");
 const { DedupStore } = require("../storage/DedupStore");
 
+// 适配器注册标志。adapter/index.js 在模块加载时向 AdapterRegistry 注册所有内置适配器，
+// 但 SyncCoordinator → adapter/index → BookmarkAdapter → bridge → BookmarkAutoImporter → SyncCoordinator
+// 构成循环依赖，顶部 require 会让 BookmarkAdapter 在 bridge 部分加载时拿到空的 BookmarkBridge。
+// 改为首次 sync 调用时延迟 require（此时整张模块图已加载完成，注册安全）。
+let _adaptersRegistered = false;
+function ensureAdaptersRegistered() {
+    if (_adaptersRegistered) return;
+    _adaptersRegistered = true;
+    require("./index");
+}
+
 /**
  * SyncCoordinator — 统一的多源增量同步协调器
  * 串联 Adapter + DedupStore + SyncStateV2
@@ -31,6 +42,7 @@ const SyncCoordinator = {
      * @returns {Promise<{newItems: NormalizedItem[], skippedCount: number, watermark: Object|null, error?: string}>}
      */
     async sync(sourceType, options = {}) {
+        ensureAdaptersRegistered();
         const adapter = this._getRegistry().getAdapter(sourceType);
         if (!adapter) {
             return { newItems: [], skippedCount: 0, watermark: null, error: `未注册适配器: ${sourceType}` };

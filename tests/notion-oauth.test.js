@@ -388,6 +388,11 @@ function readVaultPayload(harness) {
 
 function registerBookmarkBridgeMeta(harness) {
     harness.registerSelector('meta[name="ld-notion-ext"][content="ready"]', createElementStub());
+    // SyncCoordinator.sync('bookmark') 内部经 BookmarkAdapter 调 BookmarkBridge.getBookmarkTree()
+    // 拉取真实书签树。测试环境无配套扩展，真实实现会 dispatch 事件等待响应直至超时，
+    // 使 run 的外层 catch 吞掉超时错误而跳过 currentBookmarks 处理。此处 mock 空树，
+    // 让 sync 返回 newItems=0（无 error），run 得以继续基于 loadCurrentBookmarks mock 处理。
+    harness.BookmarkBridge.getBookmarkTree = async () => ({ children: [] });
 }
 
 function createWorkspaceVisualizationFixture(harness) {
@@ -2945,7 +2950,9 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.NotionSiteUI.panel = panel;
 
         harness.NotionSiteUI.bindEvents();
-        assert.ok(panel.querySelector('#ldb-notion-ai-target-db').onchange.toString().includes('UICommandService.execute("select_ai_target"'));
+        // 断言 onchange/onclick 委托到 UICommandService（通过稳定的运行时命令字面量，
+        // 避免依赖 esbuild 可能重命名的标识符名）
+        assert.ok(panel.querySelector('#ldb-notion-ai-target-db').onchange.toString().includes('select_ai_target'));
         assert.ok(panel.querySelector('#ldb-notion-save-settings').onclick.toString().includes('save_command_boundary_settings'));
     });
 
@@ -3192,7 +3199,8 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.GenericUI.panel = panel;
         harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
         harness.GenericUI.bindEvents();
-        assert.ok(harness.GenericUI.refreshWorkspaceTargets.toString().includes('UICommandService.execute("refresh_workspace_targets"'));
+        // 通过稳定的运行时命令字面量断言委托，避免依赖 esbuild 可能重命名的标识符名
+        assert.ok(harness.GenericUI.refreshWorkspaceTargets.toString().includes('refresh_workspace_targets'));
         assert.ok(saveSettingsBtn.onclick.toString().includes('save_command_boundary_settings'));
     });
 
@@ -5325,7 +5333,8 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(!iifeBody.includes(BUILD_ANCHORS.userscriptBodyEnd));
         assert.ok(iifeBody.includes(BUILD_ANCHORS.bookmarkBridgeStart));
         assert.ok(iifeBody.includes(BUILD_ANCHORS.bookmarkBridgeEnd));
-        assert.ok(iifeBody.includes('const BookmarkBridge = {'));
+        // 兼容原始格式 (const BookmarkBridge = {) 和 esbuild 打包格式 (var BookmarkBridge3 = {)
+        assert.ok(/\b(?:const|var|let)\s+BookmarkBridge\d*\s*=\s*\{/.test(iifeBody));
         assert.ok(!iifeBody.includes('// ==UserScript=='));
         assert.deepStrictEqual(patched.patchedMethods, [
             'isExtensionAvailable',
@@ -5426,7 +5435,7 @@ function createWorkspaceVisualizationFixture(harness) {
 
         assert.throws(() => {
             validatePatchedBuildAssumptions({
-                source: userScriptContent.replace('const BookmarkBridge = {', 'const BookmarkBridgeMissing = {'),
+                source: userScriptContent.replace(/\b(?:const|var|let)\s+BookmarkBridge\d*\s*=\s*\{/, 'const BookmarkBridgeMissing = {'),
                 patchedBody: patched.code
             });
         }, /BookmarkBridge 对象定义/);
@@ -5748,7 +5757,9 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(updatedPayloads[0].apiKey, 'manual_api_key');
         assert.ok(updatedPayloads[0].properties['标题'], JSON.stringify(updatedPayloads[0].properties));
         assert.deepStrictEqual(deletedPageIds, [['page-3', 'manual_api_key']]);
-        assert.deepStrictEqual(exportedUrls, [
+        // processInBatches 并发处理（CONCURRENCY=3），markExported 调用顺序非确定；
+        // 用集合比较而非有序数组断言，避免对并发完成顺序的脆弱依赖。
+        assert.deepStrictEqual([...exportedUrls].sort(), [
             'https://example.com/new',
             'https://example.com/updated'
         ]);

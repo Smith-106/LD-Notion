@@ -21,9 +21,12 @@ function countOccurrences(haystack, needle) {
 }
 
 function extractMethodBody(source, objectName, methodName) {
-    const anchor = `const ${objectName} = {`;
-    const start = source.indexOf(anchor);
-    if (start === -1) return null;
+    // esbuild 合并多模块时会为重名对象字面量加数字后缀（如 UI3、NotionSiteUI2），
+    // 且统一输出 var。用正则兼容 const|var|let + 可选数字后缀，避免对标识符名脆弱。
+    const anchorRe = new RegExp(`\\b(?:const|var|let)\\s+${objectName}\\d*\\s*=\\s*\\{`);
+    const anchorMatch = source.match(anchorRe);
+    if (!anchorMatch) return null;
+    const start = anchorMatch.index;
     const sub = source.slice(start);
 
     const re = new RegExp(
@@ -33,6 +36,15 @@ function extractMethodBody(source, objectName, methodName) {
     const m = sub.match(re);
     if (!m) return null;
     return m[1];
+}
+
+// esbuild 会为重名顶层标识符加数字后缀（DesignSystem2、StyleManager2 等），
+// 方法体内容检查需兼容后缀：把 "DesignSystem.ensureBase()" 当作
+// "DesignSystem<数字?>.ensureBase()" 来匹配。
+function hasCall(body, ident, restLiteral) {
+    const restEsc = restLiteral.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp("\\b" + ident + "\\d*\\b" + restEsc);
+    return re.test(body);
 }
 
 function run() {
@@ -67,15 +79,15 @@ function run() {
     if (notionInject) {
         expect(
             "NotionSiteUI.injectStyles 未调用 DesignSystem.ensureBase()",
-            notionInject.includes("DesignSystem.ensureBase();")
+            hasCall(notionInject, "DesignSystem", ".ensureBase()")
         );
         expect(
             "NotionSiteUI.injectStyles 未调用 DesignSystem.ensureChat()",
-            notionInject.includes("DesignSystem.ensureChat();")
+            hasCall(notionInject, "DesignSystem", ".ensureChat()")
         );
         expect(
             "NotionSiteUI.injectStyles 未使用 StyleManager.injectOnce(DesignSystem.STYLE_IDS.NOTION)",
-            notionInject.includes("StyleManager.injectOnce(DesignSystem.STYLE_IDS.NOTION")
+            hasCall(notionInject, "StyleManager", ".injectOnce(") && hasCall(notionInject, "DesignSystem", ".STYLE_IDS.NOTION")
         );
         expect(
             "NotionSiteUI.injectStyles 仍在使用 document.createElement(\"style\")（应改为 StyleManager）",
@@ -88,15 +100,15 @@ function run() {
     if (uiInject) {
         expect(
             "UI.injectStyles 未调用 DesignSystem.ensureBase()",
-            uiInject.includes("DesignSystem.ensureBase();")
+            hasCall(uiInject, "DesignSystem", ".ensureBase()")
         );
         expect(
             "UI.injectStyles 未调用 DesignSystem.ensureChat()",
-            uiInject.includes("DesignSystem.ensureChat();")
+            hasCall(uiInject, "DesignSystem", ".ensureChat()")
         );
         expect(
             "UI.injectStyles 未使用 StyleManager.injectOnce(DesignSystem.STYLE_IDS.LINUX_DO)",
-            uiInject.includes("StyleManager.injectOnce(DesignSystem.STYLE_IDS.LINUX_DO")
+            hasCall(uiInject, "StyleManager", ".injectOnce(") && hasCall(uiInject, "DesignSystem", ".STYLE_IDS.LINUX_DO")
         );
         expect(
             "UI.injectStyles 仍在使用 document.createElement(\"style\")（应改为 StyleManager）",
@@ -109,11 +121,11 @@ function run() {
     if (genericInject) {
         expect(
             "GenericUI.injectStyles 未调用 DesignSystem.ensureBase()",
-            genericInject.includes("DesignSystem.ensureBase();")
+            hasCall(genericInject, "DesignSystem", ".ensureBase()")
         );
         expect(
             "GenericUI.injectStyles 未使用 StyleManager.injectOnce(DesignSystem.STYLE_IDS.GENERIC)",
-            genericInject.includes("StyleManager.injectOnce(DesignSystem.STYLE_IDS.GENERIC")
+            hasCall(genericInject, "StyleManager", ".injectOnce(") && hasCall(genericInject, "DesignSystem", ".STYLE_IDS.GENERIC")
         );
         expect(
             "GenericUI.injectStyles 仍在使用 document.createElement(\"style\")（应改为 StyleManager）",

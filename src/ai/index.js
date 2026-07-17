@@ -2,7 +2,7 @@
 const { CONFIG, MSG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState } = require("../storage");
-const { CredentialVault, NotionOAuth } = require("../auth");
+const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
 const { NotionAPI, SiteDetector, EMOJI_MAP, DOMToNotion } = require("../api");
 const { OperationGuard, OperationLog } = require("../security");
 const { GenericExtractor, WorkspaceService } = require("../extract");
@@ -5739,6 +5739,8 @@ const AIAssistant = {
     _SETTINGS_ADAPTERS: {},
 
     _getDefaultSettings: () => {
+        // UI 由 ui 模块定义；ai↔ui 互引用构成循环依赖，运行时延迟 require
+        const UI = require("../ui").UI;
         const panel = UI.panel;
         const refs = UI.refs || {};
         const exportState = TargetState.getExportState();

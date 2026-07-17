@@ -10,6 +10,12 @@ const { SyncCoordinator } = require("../adapter/SyncCoordinator");
 
 const { BookmarkExporter } = require("./BookmarkExporter");
 
+// UI 由 ui 模块定义；bridge↔ui 互引用构成循环依赖，顶部 require 会让 ui 加载时拿不到
+// bridge 的导出。改用运行时延迟 require：方法执行时整张模块图已加载完成，可安全取 UI。
+const _resolveUI = () => {
+    try { return require("../ui").UI; } catch { return undefined; }
+};
+
 const BookmarkAutoImporter = {
     isRunning: false,
     timerId: null,
@@ -19,7 +25,9 @@ const BookmarkAutoImporter = {
     minimumRunGapMs: 60 * 1000,
 
     updateStatus: (text) => {
-        const el = (UI.refs && UI.refs.bookmarkAutoImportStatus) || document.querySelector("#ldb-bookmark-auto-import-status");
+        const UI = _resolveUI();
+        const refs = UI ? UI.refs : null;
+        const el = (refs && refs.bookmarkAutoImportStatus) || document.querySelector("#ldb-bookmark-auto-import-status");
         if (el) el.textContent = text;
     },
 
@@ -441,7 +449,8 @@ BookmarkAutoImporter.run = async () => {
         BookmarkAutoImporter.updateStatus(`❌ 浏览器书签自动同步出错: ${error.message}`);
     } finally {
         BookmarkAutoImporter.isRunning = false;
-        if (typeof UI !== "undefined" && typeof UI.renderSyncCenterSummary === "function") {
+        const UI = _resolveUI();
+        if (UI && typeof UI.renderSyncCenterSummary === "function") {
             try { UI.renderSyncCenterSummary(); } catch {}
         }
     }

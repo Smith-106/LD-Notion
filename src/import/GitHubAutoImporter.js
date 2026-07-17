@@ -6,6 +6,14 @@ const { Storage, SyncState } = require("../storage");
 const { GitHubAPI } = require("./GitHubAPI");
 const { NotionAPI } = require("../api");
 
+// UI 由 ui 模块定义；import↔ui 互引用构成循环依赖，顶部 require 会让 ui 加载时拿不到
+// import 的导出。改用运行时延迟 require：方法执行时整张模块图已加载完成，可安全取 UI。
+// 此前 GitHubAutoImporter 用 `typeof UI` 防护裸引用，在生产 bundle 里 UI 永远 undefined，
+// 导致 UI 导出路径（exportGitHubSelected / mapGitHubItemsToBookmarks）始终走降级分支。
+const _resolveUI = () => {
+    try { return require("../ui").UI; } catch { return undefined; }
+};
+
 const GitHubAutoImporter = {
     isRunning: false,
     timerId: null,
@@ -128,9 +136,10 @@ const GitHubAutoImporter = {
 
 // 将 GitHub item 映射为统一 bookmark 结构（MNT-001 提取自 run）
 GitHubAutoImporter._mapItemsToBookmarks = (incrementalItems, type, meta) => {
-    if (typeof UI !== "undefined" && UI && typeof UI.mapGitHubItemsToBookmarks === "function") {
+    const UI = _resolveUI();
+    if (UI && typeof UI.mapGitHubItemsToBookmarks === "function") {
         return UI.mapGitHubItemsToBookmarks(incrementalItems, type)
-            .filter((item) => typeof UI !== "undefined" && UI && typeof UI.isBookmarkExported === "function" ? !UI.isBookmarkExported(item) : true);
+            .filter((item) => UI && typeof UI.isBookmarkExported === "function" ? !UI.isBookmarkExported(item) : true);
     }
     return incrementalItems.map((item) => ({
         itemKey: meta.getId(item),
@@ -185,7 +194,8 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
 
 // 导出映射后的 items（优先 UI，降级 GitHubExporter）（MNT-001 提取自 run）
 GitHubAutoImporter._exportMappedItems = async (mappedItems, type, meta, settings) => {
-    if (typeof UI !== "undefined" && UI && typeof UI.exportGitHubSelected === "function") {
+    const UI = _resolveUI();
+    if (UI && typeof UI.exportGitHubSelected === "function") {
         return await UI.exportGitHubSelected(mappedItems, {
             apiKey: settings.apiKey,
             databaseId: settings.databaseId,
@@ -433,7 +443,8 @@ GitHubAutoImporter.run = async () => {
         GitHubAutoImporter.updateStatus(`❌ GitHub 自动导入出错: ${error.message}`);
     } finally {
         GitHubAutoImporter.isRunning = false;
-        if (typeof UI !== "undefined" && typeof UI.renderSyncCenterSummary === "function") {
+        const UI = _resolveUI();
+        if (UI && typeof UI.renderSyncCenterSummary === "function") {
             try { UI.renderSyncCenterSummary(); } catch {}
         }
     }

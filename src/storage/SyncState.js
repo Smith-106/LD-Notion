@@ -3,8 +3,8 @@
 const { CONFIG } = require("../config");
 
 // 直接使用 GM_* API 打破与 storage/index.js 的循环依赖
-const _getRaw = (key, defaultVal) => globalThis.GM_getValue(key, defaultVal);
-const _setRaw = (key, val) => globalThis.GM_setValue(key, val);
+const _getRaw = (key, defaultVal) => GM_getValue(key, defaultVal);
+const _setRaw = (key, val) => GM_setValue(key, val);
 
 /**
  * SyncState V2 — 统一的每源同步状态管理

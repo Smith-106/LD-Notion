@@ -12,6 +12,12 @@ const { GitHubAutoImporter } = require("./GitHubAutoImporter");
 const { GitHubAPI } = require("./GitHubAPI");
 const { GitHubExporter } = require("./GitHubExporter");
 
+// UI 由 ui 模块定义；import↔ui 互引用构成循环依赖，顶部 require 会让 ui 加载时拿不到
+// import 的导出。改用运行时延迟 require：方法执行时整张模块图已加载完成，可安全取 UI。
+const _resolveUI = () => {
+    try { return require("../ui").UI; } catch { return undefined; }
+};
+
 const AutoImporter = {
     isRunning: false,
     timerId: null,
@@ -57,7 +63,9 @@ const AutoImporter = {
 
     // 更新状态栏
     updateStatus: (text) => {
-        const el = (UI.refs && UI.refs.autoImportStatus) || document.querySelector("#ldb-auto-import-status");
+        const UI = _resolveUI();
+        const refs = UI ? UI.refs : null;
+        const el = (refs && refs.autoImportStatus) || document.querySelector("#ldb-auto-import-status");
         if (el) el.textContent = text;
     },
 
@@ -229,8 +237,9 @@ AutoImporter.run = async () => {
         }
         await Promise.all(workers);
 
-        if (typeof UI !== "undefined" && UI.renderBookmarkList) {
-            try { UI.renderBookmarkList(); } catch {}
+        const uiRef = _resolveUI();
+        if (uiRef && uiRef.renderBookmarkList) {
+            try { uiRef.renderBookmarkList(); } catch {}
         }
 
         const statePatch = {
@@ -280,8 +289,9 @@ AutoImporter.run = async () => {
         if (exportBtn) exportBtn.disabled = false;
         const obsExportBtn2 = document.querySelector("#ldb-obs-export");
         if (obsExportBtn2) obsExportBtn2.disabled = false;
-        if (typeof UI !== "undefined" && typeof UI.renderSyncCenterSummary === "function") {
-            try { UI.renderSyncCenterSummary(); } catch {}
+        const uiFinally = _resolveUI();
+        if (uiFinally && typeof uiFinally.renderSyncCenterSummary === "function") {
+            try { uiFinally.renderSyncCenterSummary(); } catch {}
         }
     }
 };

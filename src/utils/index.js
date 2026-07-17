@@ -1,6 +1,7 @@
 "use strict";
 
 const { CONFIG } = require("../config");
+const { Storage } = require("../storage");
 
 // ===========================================
 // 工具函数

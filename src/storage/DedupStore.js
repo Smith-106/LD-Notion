@@ -13,7 +13,7 @@ const DedupStore = {
     },
 
     _loadSet(sourceType) {
-        const raw = globalThis.GM_getValue(this._keyFor(sourceType), "{}");
+        const raw = GM_getValue(this._keyFor(sourceType), "{}");
         try {
             return JSON.parse(raw);
         } catch {
@@ -22,7 +22,7 @@ const DedupStore = {
     },
 
     _saveSet(sourceType, set) {
-        globalThis.GM_setValue(this._keyFor(sourceType), JSON.stringify(set));
+        GM_setValue(this._keyFor(sourceType), JSON.stringify(set));
     },
 
     // --- batch 模式: 减少 IPC 调用 ---
@@ -103,7 +103,7 @@ const DedupStore = {
             this._batchCache.dirty = true;
             return;
         }
-        globalThis.GM_deleteValue(this._keyFor(sourceType));
+        GM_deleteValue(this._keyFor(sourceType));
     },
 };
 

@@ -7,13 +7,19 @@ const { Storage, SyncState } = require("../storage");
 const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
 const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, ObsidianAPI, EMOJI_MAP } = require("../api");
 const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = require("../security");
-const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
+const { ZhihuAPI, GenericExtractor, WorkspaceService, UICommandService } = require("../extract");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
+const { BookmarkBridge, BookmarkAutoImporter, RSSAutoImporter } = require("../bridge");
+const { AIService, ChatUI } = require("../ai");
 const { DesignSystem } = require("./design-system");
 
 const UIEvents = {
     bindEvents: () => {
+        // UI 对象由 main-ui 定义；events↔main-ui 互引用构成循环依赖，
+        // 顶部 import 会让 main-ui 加载时拿不到 UIEvents。改在 bindEvents 运行时
+        // 延迟 require（此时 main-ui 已加载完成），为整个 bindEvents 闭包链提供 UI。
+        const UI = require("./main-ui").UI;
         const panel = UI.panel;
         const refs = UI.refs || {};
         const body = panel.querySelector(".ldb-body");
