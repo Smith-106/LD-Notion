@@ -1,5 +1,26 @@
 # 更新日志
 
+## [3.7.6] - 2026-07-18
+
+### 重构
+
+- **UICommandService 分层迁移**：将 UI 命令分发协调器从 `src/extract/index.js` 迁至独立 `src/coordination/UICommandService.js`，extract 层回归数据抽取职责，仅导出 `ZhihuAPI`/`GenericExtractor`/`WorkspaceService`。消除 extract 层承担 UI 命令分发（`select_ai_target`/`refresh_workspace_targets`/`fetch_ai_models`/`save_command_boundary_settings` 等）的分层违规，及 extract → import/export/ai 的多向耦合（ISS-20260718-008）
+- **adapter 结构性循环消除**：`BookmarkAdapter`/`RSSAdapter` 不再顶部 `require("../bridge")`，改由 `src/adapter/index.js` 注册时注入 `_bridgeAccessor` lazy accessor，运行时解析 bridge 模块。消除 `adapter/index → BookmarkAdapter → bridge → BookmarkAutoImporter → SyncCoordinator → adapter/index` 加载期循环（ISS-20260718-007）
+
+### 说明
+
+- 本次为模块边界整理（纯 refactor），无运行时行为变化，严格遵守锁定约束：单文件 Userscript 输出不变、纯客户端架构、向后兼容
+- 源码层 extract 不再导出 UICommandService（验证通过）；产物层 esbuild 为 coordination 生成独立 `require_UICommandService` 工厂
+- `tests/legacy-harness.js` 的 `FACTORY_NAMES` 列表补充 `require_UICommandService`，使 legacy 测试经 harness 仍能取到 UICommandService
+- adapter 契约测试未注入 `_bridgeAccessor` 时走 fallback 顶层 require，保持向后兼容
+
+### 验证
+
+- `npm run verify:baseline`：17 个测试文件、350 个用例全部通过，legacy 全绿，logic 40/0
+- `node build.js`：零警告构建，单文件产物，关键锚点校验通过
+
+[3.7.6]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.6
+
 ## [3.7.5] - 2026-06-24
 
 ### 新增

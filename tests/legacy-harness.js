@@ -33,7 +33,7 @@ const FACTORY_NAMES = [
     'require_events', 'require_export', 'require_extract', 'require_generic_ui',
     'require_import', 'require_main_ui', 'require_notion_site_ui', 'require_panel_resize',
     'require_security', 'require_storage', 'require_style_manager', 'require_styles',
-    'require_sync_lock', 'require_ui', 'require_utils'
+    'require_sync_lock', 'require_ui', 'require_UICommandService', 'require_utils'
 ];
 
 // 已知会被测试引用但未通过 require_* 工厂导出的 entry 符号（main.js 顶层定义）。

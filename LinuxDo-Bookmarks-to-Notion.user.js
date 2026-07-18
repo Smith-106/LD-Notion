@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.7.5
+// @version      3.7.6
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -3793,6 +3793,369 @@ ${quoted}
     }
   });
 
+  // src/extract/index.js
+  var require_extract = __commonJS({
+    "src/extract/index.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, HTMLToMarkdown: HTMLToMarkdown2, InstallHelper: InstallHelper2 } = require_api();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { OperationGuard: OperationGuard2 } = require_security();
+      var ZhihuAPI2 = {
+        detectPage: () => {
+          const url = location.href;
+          if (/zhihu\.com\/question\/\d+\/answer\/\d+/.test(url)) return "answer";
+          if (/zhihu\.com\/question\/\d+/.test(url)) return "question";
+          if (/zhihu\.com\/p\/\d+/.test(url)) return "article";
+          if (/zhihu\.com\/column\/[^/]+\/p\/\d+/.test(url)) return "column_article";
+          return null;
+        },
+        extractContent: () => {
+          const pageType = ZhihuAPI2.detectPage();
+          if (!pageType) return null;
+          if (pageType === "answer") return ZhihuAPI2._extractAnswer();
+          if (pageType === "question") return ZhihuAPI2._extractQuestion();
+          if (pageType === "article" || pageType === "column_article") return ZhihuAPI2._extractArticle();
+          return null;
+        },
+        _extractAnswer: () => {
+          var _a, _b;
+          const answerEl = document.querySelector(".AnswerItem .RichContent-inner") || document.querySelector(".Post-RichTextContainer");
+          if (!answerEl) return null;
+          const questionEl = document.querySelector(".QuestionHeader-title");
+          const authorEl = document.querySelector(".AuthorInfo-name .UserLink-link");
+          const voteEl = document.querySelector(".VoteButton--up") || document.querySelector(".TopstoryNumber");
+          return {
+            type: "answer",
+            title: ((_a = questionEl == null ? void 0 : questionEl.textContent) == null ? void 0 : _a.trim()) || "\u77E5\u4E4E\u56DE\u7B54",
+            author: ((_b = authorEl == null ? void 0 : authorEl.textContent) == null ? void 0 : _b.trim()) || "\u533F\u540D",
+            url: location.href,
+            html: answerEl.innerHTML,
+            voteCount: ZhihuAPI2._parseVoteCount(voteEl == null ? void 0 : voteEl.textContent)
+          };
+        },
+        _extractQuestion: () => {
+          const questionEl = document.querySelector(".QuestionHeader-title");
+          if (!questionEl) return null;
+          const detailEl = document.querySelector(".QuestionHeader-detail");
+          const answerEls = document.querySelectorAll(".AnswerItem");
+          const answers = Array.from(answerEls).slice(0, 20).map((el, i) => {
+            var _a;
+            const contentEl = el.querySelector(".RichContent-inner");
+            const authorEl = el.querySelector(".AuthorInfo-name .UserLink-link");
+            const voteEl = el.querySelector(".VoteButton--up");
+            return {
+              index: i,
+              author: ((_a = authorEl == null ? void 0 : authorEl.textContent) == null ? void 0 : _a.trim()) || "\u533F\u540D",
+              html: (contentEl == null ? void 0 : contentEl.innerHTML) || "",
+              voteCount: ZhihuAPI2._parseVoteCount(voteEl == null ? void 0 : voteEl.textContent)
+            };
+          });
+          return {
+            type: "question",
+            title: questionEl.textContent.trim(),
+            url: location.href,
+            detail: (detailEl == null ? void 0 : detailEl.innerHTML) || "",
+            answers
+          };
+        },
+        _extractArticle: () => {
+          var _a, _b;
+          const articleEl = document.querySelector(".Post-RichTextContainer") || document.querySelector(".RichText");
+          if (!articleEl) return null;
+          const titleEl = document.querySelector(".Post-Title") || document.querySelector(".ArticleHeader-title");
+          const authorEl = document.querySelector(".AuthorInfo-name .UserLink-link");
+          return {
+            type: "article",
+            title: ((_a = titleEl == null ? void 0 : titleEl.textContent) == null ? void 0 : _a.trim()) || "\u77E5\u4E4E\u6587\u7AE0",
+            author: ((_b = authorEl == null ? void 0 : authorEl.textContent) == null ? void 0 : _b.trim()) || "\u672A\u77E5",
+            url: location.href,
+            html: articleEl.innerHTML
+          };
+        },
+        _parseVoteCount: (text) => {
+          if (!text) return 0;
+          const match = text.match(/(\d[\d,]*)/);
+          return match ? parseInt(match[1].replace(/,/g, ""), 10) : 0;
+        },
+        htmlToBlocks: (html) => {
+          return DOMToNotion2.cookedToBlocks(html);
+        }
+      };
+      var GenericExtractor2 = {
+        // 提取页面元数据
+        extractMeta: () => {
+          var _a, _b, _c, _d, _e;
+          const getMeta = (name) => {
+            const el = document.querySelector(
+              `meta[property="${name}"], meta[name="${name}"]`
+            );
+            return (el == null ? void 0 : el.getAttribute("content")) || "";
+          };
+          const title = getMeta("og:title") || document.title || ((_b = (_a = document.querySelector("h1")) == null ? void 0 : _a.textContent) == null ? void 0 : _b.trim()) || "\u65E0\u6807\u9898";
+          const author = getMeta("author") || getMeta("article:author") || ((_d = (_c = document.querySelector('[rel="author"], .author, .byline, [itemprop="author"]')) == null ? void 0 : _c.textContent) == null ? void 0 : _d.trim()) || "";
+          const rawDate = getMeta("article:published_time") || getMeta("datePublished") || ((_e = document.querySelector("time[datetime]")) == null ? void 0 : _e.getAttribute("datetime")) || getMeta("date") || "";
+          let publishDate = "";
+          if (rawDate) {
+            const d = new Date(rawDate);
+            if (!isNaN(d.getTime())) publishDate = d.toISOString().split("T")[0];
+          }
+          const siteName = getMeta("og:site_name") || window.location.hostname.replace(/^www\./, "");
+          const description = getMeta("og:description") || getMeta("description") || "";
+          return {
+            title: title.substring(0, 200),
+            url: window.location.href,
+            author: author.substring(0, 100),
+            publishDate,
+            siteName: siteName.substring(0, 100),
+            description: description.substring(0, 500)
+          };
+        },
+        // 智能提取正文内容 DOM 节点
+        extractContent: () => {
+          const article = document.querySelector("article");
+          if (article) return article;
+          const main2 = document.querySelector('[role="main"], main');
+          if (main2) return main2;
+          const selectors = [
+            ".post-content",
+            ".article-content",
+            ".entry-content",
+            ".content",
+            ".post-body",
+            ".article-body",
+            "#content",
+            "#article",
+            "#post-content",
+            ".markdown-body",
+            ".prose",
+            ".rich-text"
+          ];
+          for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el && el.textContent.trim().length > 200) return el;
+          }
+          const candidates = document.querySelectorAll("div, section");
+          let best = null;
+          let bestScore = 0;
+          for (const el of candidates) {
+            const tag = el.tagName.toLowerCase();
+            const id = (el.id || "").toLowerCase();
+            const cls = (el.className || "").toLowerCase();
+            const skip = /(nav|sidebar|footer|header|menu|comment|widget|ad|banner)/;
+            if (skip.test(id) || skip.test(cls) || skip.test(tag)) continue;
+            const text = el.textContent || "";
+            const pCount = el.querySelectorAll("p").length;
+            const score = text.length * 0.3 + pCount * 100;
+            if (score > bestScore) {
+              bestScore = score;
+              best = el;
+            }
+          }
+          if (best && best.textContent.trim().length > 100) return best;
+          const clone = document.body.cloneNode(true);
+          clone.querySelectorAll('[class*="gclip-"], [class*="ldb-"], [id*="ldb-"]').forEach((el) => el.remove());
+          return clone;
+        },
+        // 将提取的 DOM 转为 Notion blocks（复用 DOMToNotion）
+        toNotionBlocks: (contentEl, imgMode) => {
+          return DOMToNotion2.cookedToBlocks(contentEl.innerHTML, imgMode);
+        }
+      };
+      var WorkspaceService2 = {
+        _inflightRequests: /* @__PURE__ */ new Map(),
+        _requestSearchItems: async (apiKey, objectType, maxPages = 0, onProgress = null, phase = "") => {
+          let results = [];
+          let cursor = void 0;
+          let pageCount = 0;
+          do {
+            const response = await NotionAPI2.search("", { property: "object", value: objectType }, apiKey, cursor);
+            const batch = response.results || [];
+            results = results.concat(batch);
+            cursor = response.has_more ? response.next_cursor : void 0;
+            pageCount++;
+            if (onProgress) {
+              onProgress({
+                phase,
+                loaded: results.length,
+                hasMore: !!cursor,
+                pageCount
+              });
+            }
+          } while (cursor && (maxPages === 0 || pageCount < maxPages));
+          return results;
+        },
+        fetchWorkspace: async (apiKey, options = {}) => {
+          if (!apiKey) {
+            return { databases: [], pages: [] };
+          }
+          const includePages = options.includePages !== false;
+          const maxPages = Number.isFinite(options.maxPages) ? options.maxPages : parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
+          const requestKey = `${Utils2.apiKeyHash(apiKey)}:${maxPages}:${includePages ? "all" : "db"}`;
+          if (WorkspaceService2._inflightRequests.has(requestKey)) {
+            return WorkspaceService2._inflightRequests.get(requestKey);
+          }
+          const requestPromise = (async () => {
+            const dbResults = await WorkspaceService2._requestSearchItems(
+              apiKey,
+              "database",
+              maxPages,
+              options.onProgress,
+              "databases"
+            );
+            const databases = dbResults.map((db) => {
+              var _a, _b, _c;
+              return {
+                id: ((_a = db.id) == null ? void 0 : _a.replace(/-/g, "")) || "",
+                title: ((_c = (_b = db.title) == null ? void 0 : _b[0]) == null ? void 0 : _c.plain_text) || "\u65E0\u6807\u9898\u6570\u636E\u5E93",
+                type: "database",
+                url: db.url || ""
+              };
+            }).filter((item) => item.id);
+            if (!includePages) {
+              return { databases, pages: [] };
+            }
+            const pageResults = await WorkspaceService2._requestSearchItems(
+              apiKey,
+              "page",
+              maxPages,
+              options.onProgress,
+              "pages"
+            );
+            const pages = pageResults.map((page) => {
+              var _a, _b, _c, _d;
+              return {
+                id: ((_a = page.id) == null ? void 0 : _a.replace(/-/g, "")) || "",
+                title: Utils2.getPageTitle(page),
+                type: "page",
+                url: page.url || "",
+                parent: ((_b = page.parent) == null ? void 0 : _b.type) || "",
+                parentId: (((_c = page.parent) == null ? void 0 : _c.database_id) || ((_d = page.parent) == null ? void 0 : _d.page_id) || "").replace(/-/g, "")
+              };
+            }).filter((item) => item.id);
+            return { databases, pages };
+          })();
+          WorkspaceService2._inflightRequests.set(requestKey, requestPromise);
+          try {
+            return await requestPromise;
+          } finally {
+            WorkspaceService2._inflightRequests.delete(requestKey);
+          }
+        },
+        fetchWorkspaceStaged: async (apiKey, options = {}) => {
+          var _a, _b;
+          if (!apiKey) {
+            return { databases: [], pages: [] };
+          }
+          const includePages = options.includePages !== false;
+          const maxPages = Number.isFinite(options.maxPages) ? options.maxPages : parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
+          const databasesRaw = await WorkspaceService2._requestSearchItems(
+            apiKey,
+            "database",
+            maxPages,
+            options.onProgress,
+            "databases"
+          );
+          const databases = databasesRaw.map((db) => {
+            var _a2, _b2, _c;
+            return {
+              id: ((_a2 = db.id) == null ? void 0 : _a2.replace(/-/g, "")) || "",
+              title: ((_c = (_b2 = db.title) == null ? void 0 : _b2[0]) == null ? void 0 : _c.plain_text) || "\u65E0\u6807\u9898\u6570\u636E\u5E93",
+              type: "database",
+              url: db.url || ""
+            };
+          }).filter((item) => item.id);
+          (_a = options.onPhaseComplete) == null ? void 0 : _a.call(options, "databases", { databases, pages: [] });
+          if (!includePages) {
+            return { databases, pages: [] };
+          }
+          const pagesRaw = await WorkspaceService2._requestSearchItems(
+            apiKey,
+            "page",
+            maxPages,
+            options.onProgress,
+            "pages"
+          );
+          const pages = pagesRaw.map((page) => {
+            var _a2, _b2, _c, _d;
+            return {
+              id: ((_a2 = page.id) == null ? void 0 : _a2.replace(/-/g, "")) || "",
+              title: Utils2.getPageTitle(page),
+              type: "page",
+              url: page.url || "",
+              parent: ((_b2 = page.parent) == null ? void 0 : _b2.type) || "",
+              parentId: (((_c = page.parent) == null ? void 0 : _c.database_id) || ((_d = page.parent) == null ? void 0 : _d.page_id) || "").replace(/-/g, "")
+            };
+          }).filter((item) => item.id);
+          const finalWorkspace = { databases, pages };
+          (_b = options.onPhaseComplete) == null ? void 0 : _b.call(options, "pages", finalWorkspace);
+          return finalWorkspace;
+        },
+        fetchWorkspacePageObjects: async (apiKey, options = {}) => {
+          if (!apiKey) {
+            return [];
+          }
+          const maxPages = Number.isFinite(options.maxPages) ? options.maxPages : parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
+          return await WorkspaceService2._requestSearchItems(
+            apiKey,
+            "page",
+            maxPages,
+            options.onProgress,
+            options.phase || "workspace_visual_pages"
+          );
+        },
+        buildWorkspaceData: (apiKey, workspace = {}) => ({
+          apiKeyHash: apiKey ? Utils2.apiKeyHash(apiKey) : "",
+          databases: Array.isArray(workspace.databases) ? workspace.databases : [],
+          pages: Array.isArray(workspace.pages) ? workspace.pages : [],
+          timestamp: Date.now()
+        }),
+        persistWorkspaceData: (apiKey, workspace = {}) => {
+          const workspaceData = WorkspaceService2.buildWorkspaceData(apiKey, workspace);
+          Storage2.set(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
+          return workspaceData;
+        },
+        // 统一工作区刷新边界，负责后端读取、缓存持久化与 staged 回调。
+        refreshWorkspaceSnapshot: async (apiKey, options = {}) => {
+          var _a;
+          if (!apiKey) {
+            return { databases: [], pages: [], workspaceData: WorkspaceService2.buildWorkspaceData("", {}) };
+          }
+          const includePages = options.includePages !== false;
+          const notifyWorkspaceData = typeof options.onWorkspaceData === "function" ? options.onWorkspaceData : null;
+          let finalPhaseHandled = false;
+          let lastWorkspaceData = null;
+          const workspace = await WorkspaceService2.fetchWorkspaceStaged(apiKey, {
+            includePages,
+            maxPages: options.maxPages,
+            onProgress: options.onProgress,
+            onPhaseComplete: (phase, partialWorkspace) => {
+              var _a2;
+              lastWorkspaceData = WorkspaceService2.persistWorkspaceData(apiKey, partialWorkspace);
+              finalPhaseHandled = phase === "pages" || !includePages && phase === "databases";
+              notifyWorkspaceData == null ? void 0 : notifyWorkspaceData(lastWorkspaceData, { phase, isFinal: finalPhaseHandled });
+              (_a2 = options.onPhaseComplete) == null ? void 0 : _a2.call(options, phase, partialWorkspace, lastWorkspaceData);
+            }
+          });
+          if (!finalPhaseHandled) {
+            lastWorkspaceData = WorkspaceService2.persistWorkspaceData(apiKey, workspace);
+            const finalPhase = includePages ? "pages" : "databases";
+            notifyWorkspaceData == null ? void 0 : notifyWorkspaceData(lastWorkspaceData, { phase: finalPhase, isFinal: true });
+            (_a = options.onPhaseComplete) == null ? void 0 : _a.call(options, finalPhase, workspace, lastWorkspaceData);
+          }
+          return {
+            databases: workspace.databases || [],
+            pages: workspace.pages || [],
+            workspaceData: lastWorkspaceData || WorkspaceService2.buildWorkspaceData(apiKey, workspace)
+          };
+        }
+      };
+      module.exports = { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 };
+    }
+  });
+
   // src/bridge/BookmarkExporter.js
   var require_BookmarkExporter = __commonJS({
     "src/bridge/BookmarkExporter.js"(exports, module) {
@@ -4514,387 +4877,371 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     }
   });
 
-  // src/adapter/GitHubAdapter.js
-  var require_GitHubAdapter = __commonJS({
-    "src/adapter/GitHubAdapter.js"(exports, module) {
+  // src/import/UpdateChecker.js
+  var require_UpdateChecker = __commonJS({
+    "src/import/UpdateChecker.js"(exports, module) {
       "use strict";
-      var { SourceAdapter } = require_SourceAdapter();
-      var { GitHubAPI: GitHubAPI2 } = require_import();
-      var { SyncState: SyncState2 } = require_storage();
       var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
-      function createGitHubAdapter(subType) {
-        const adapter = Object.assign(Object.create(SourceAdapter), {
-          sourceType: `github-${subType}`,
-          subType,
-          async fetchIncremental(watermark) {
-            const rawItems = await this._fetchByType();
-            if (watermark && watermark.time) {
-              return SyncState2.filterOrderedItems(
-                rawItems,
-                watermark,
-                this._getTime.bind(this),
-                this._getId.bind(this)
-              ).map((item) => this.normalize(item));
-            }
-            return rawItems.map((item) => this.normalize(item));
-          },
-          async fetchAll() {
-            const rawItems = await this._fetchByType();
-            return rawItems.map((item) => this.normalize(item));
-          },
-          normalize(raw) {
-            return {
-              source: "github",
-              id: String(raw.full_name || raw.id || ""),
-              title: raw.full_name || raw.description || "",
-              content: raw.description || "",
-              url: raw.html_url || "",
-              author: raw.owner && raw.owner.login || "",
-              tags: raw.language ? [`lang:${raw.language}`] : [],
-              createdAt: raw.starred_at || raw.pushed_at || raw.updated_at || raw.created_at || "",
-              raw
-            };
-          },
-          getDedupKey(item) {
-            return `github:${subType}:${item.id}`;
-          },
-          _getTime(raw) {
-            if (subType === "stars") return raw.starred_at || "";
-            if (subType === "repos") return raw.pushed_at || raw.updated_at || "";
-            if (subType === "forks") return raw.pushed_at || raw.updated_at || "";
-            if (subType === "gists") return raw.updated_at || raw.created_at || "";
-            return "";
-          },
-          _getId(raw) {
-            return String(raw.full_name || raw.id || "");
-          },
-          async _fetchByType() {
-            const username = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
-            const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
-            if (subType === "stars") return GitHubAPI2.fetchStarredRepos(username, token);
-            if (subType === "repos") return GitHubAPI2.fetchUserRepos(username, token);
-            if (subType === "forks") return GitHubAPI2.fetchForkedRepos(username, token);
-            if (subType === "gists") return GitHubAPI2.fetchUserGists(username, token);
-            return [];
-          }
-        });
-        return adapter;
-      }
-      module.exports = { createGitHubAdapter };
-    }
-  });
-
-  // src/adapter/BookmarkAdapter.js
-  var require_BookmarkAdapter = __commonJS({
-    "src/adapter/BookmarkAdapter.js"(exports, module) {
-      "use strict";
-      var { SourceAdapter } = require_SourceAdapter();
-      var { BookmarkBridge: BookmarkBridge3, BookmarkExporter: BookmarkExporter2 } = require_bridge();
-      var BookmarkAdapter = Object.assign(Object.create(SourceAdapter), {
-        sourceType: "bookmark",
-        async fetchIncremental(watermark) {
-          return this._fetchAndFilter(watermark);
-        },
-        async fetchAll() {
-          return this._fetchAndFilter(null);
-        },
-        normalize(raw) {
-          return {
-            source: "bookmark",
-            id: String(raw.id || ""),
-            title: raw.title || "",
-            content: "",
-            url: raw.url || "",
-            author: "",
-            tags: [],
-            createdAt: raw.dateAdded ? new Date(raw.dateAdded / 1e3).toISOString() : "",
-            raw
-          };
-        },
-        getDedupKey(item) {
-          return `bookmark:${item.id}`;
-        },
-        async _fetchAndFilter(watermark) {
-          if (!BookmarkBridge3.isExtensionAvailable()) return [];
-          const tree = await BookmarkBridge3.getBookmarkTree();
-          const flat = BookmarkBridge3.flattenTree ? BookmarkBridge3.flattenTree(tree) : this._flattenTree(tree);
-          const items = flat.filter((b) => b.url && BookmarkExporter2 && BookmarkExporter2.isHttpUrl ? BookmarkExporter2.isHttpUrl(b.url) : /^https?:/.test(b.url || "")).map((b) => this.normalize(b));
-          if (watermark && watermark.time) {
-            return items.filter((item) => item.createdAt > watermark.time);
-          }
-          return items;
-        },
-        _flattenTree(nodes, parentPath) {
-          const result = [];
-          if (!Array.isArray(nodes)) return result;
-          for (const node of nodes) {
-            if (node.url) {
-              result.push({ ...node, folderPath: parentPath || "" });
-            }
-            if (node.children) {
-              result.push(...this._flattenTree(node.children, (parentPath ? parentPath + "/" : "") + (node.title || "")));
-            }
-          }
-          return result;
+      var _resolveUI = () => {
+        try {
+          return require_ui().UI;
+        } catch {
+          return void 0;
         }
-      });
-      module.exports = { BookmarkAdapter };
-    }
-  });
-
-  // src/adapter/RSSAdapter.js
-  var require_RSSAdapter = __commonJS({
-    "src/adapter/RSSAdapter.js"(exports, module) {
-      "use strict";
-      var { SourceAdapter } = require_SourceAdapter();
-      var { RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var RSSAdapter = Object.assign(Object.create(SourceAdapter), {
-        sourceType: "rss",
-        async fetchIncremental(watermark) {
-          return this._fetchItems(watermark);
+      };
+      var UpdateChecker2 = {
+        timerId: null,
+        isChecking: false,
+        shouldCheckNow: (intervalHours) => {
+          const intervalMs = (parseInt(intervalHours, 10) || 0) * 60 * 60 * 1e3;
+          if (intervalMs <= 0) return true;
+          const lastCheckAt = parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, 0), 10) || 0;
+          return !lastCheckAt || Date.now() - lastCheckAt >= intervalMs;
         },
-        async fetchAll() {
-          return this._fetchItems(null);
-        },
-        normalize(raw) {
-          return {
-            source: "rss",
-            id: raw.guid || raw.link || "",
-            title: raw.title || "",
-            content: raw.content || raw.summary || "",
-            url: raw.link || "",
-            author: raw.creator || raw.author || "",
-            tags: raw.categories || [],
-            createdAt: raw.pubDate || raw.isoDate || "",
-            raw
-          };
-        },
-        getDedupKey(item) {
-          return `rss:${item.id}`;
-        },
-        async _fetchItems(watermark) {
+        getCurrentVersion: () => {
           var _a;
-          if (!RSSAutoImporter2 || typeof RSSAutoImporter2.getFeedUrls !== "function") return [];
-          const feedUrls = RSSAutoImporter2.getFeedUrls();
-          const allItems = [];
-          const results = await Promise.allSettled(
-            feedUrls.map((feedUrl) => RSSAutoImporter2.fetchFeed(feedUrl))
-          );
-          for (const result of results) {
-            if (result.status === "fulfilled" && Array.isArray((_a = result.value) == null ? void 0 : _a.items)) {
-              allItems.push(...result.value.items);
-            }
+          if (typeof GM_info !== "undefined" && ((_a = GM_info == null ? void 0 : GM_info.script) == null ? void 0 : _a.version)) {
+            return GM_info.script.version;
           }
-          const normalized = allItems.map((item) => this.normalize(item));
-          if (watermark && watermark.time) {
-            return normalized.filter((item) => {
-              const itemTime = item.createdAt;
-              if (!itemTime) return true;
-              return itemTime > watermark.time;
-            });
+          return "3.4.5";
+        },
+        compareVersions: (a, b) => {
+          const parse = (v) => String(v || "0").replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);
+          const va = parse(a);
+          const vb = parse(b);
+          const len = Math.max(va.length, vb.length);
+          for (let i = 0; i < len; i++) {
+            const na = va[i] || 0;
+            const nb = vb[i] || 0;
+            if (na > nb) return 1;
+            if (na < nb) return -1;
           }
-          return normalized;
-        }
-      });
-      module.exports = { RSSAdapter };
-    }
-  });
-
-  // src/adapter/ZhihuAdapter.js
-  var require_ZhihuAdapter = __commonJS({
-    "src/adapter/ZhihuAdapter.js"(exports, module) {
-      "use strict";
-      var { SourceAdapter } = require_SourceAdapter();
-      var { ZhihuAPI: ZhihuAPI2 } = require_extract();
-      var ZhihuAdapter = Object.assign(Object.create(SourceAdapter), {
-        sourceType: "zhihu",
-        async fetchIncremental(watermark) {
-          return this._extractFromPage();
+          return 0;
         },
-        async fetchAll() {
-          return this._extractFromPage();
-        },
-        normalize(raw) {
-          return {
-            source: "zhihu",
-            id: raw.url || (typeof window !== "undefined" ? window.location.href : ""),
-            title: raw.title || "",
-            content: raw.html || "",
-            url: raw.url || (typeof window !== "undefined" ? window.location.href : ""),
-            author: raw.author || "",
-            tags: raw.tags || [],
-            createdAt: raw.publishDate || "",
-            raw
-          };
-        },
-        getDedupKey(item) {
-          return `zhihu:${item.id}`;
-        },
-        _extractFromPage() {
-          if (!ZhihuAPI2 || typeof ZhihuAPI2.detectPage !== "function") return [];
-          const pageType = ZhihuAPI2.detectPage();
-          if (!pageType) return [];
-          const content = ZhihuAPI2.extractContent();
-          if (!content) return [];
-          return [this.normalize(content)];
-        }
-      });
-      module.exports = { ZhihuAdapter };
-    }
-  });
-
-  // src/adapter/GenericAdapter.js
-  var require_GenericAdapter = __commonJS({
-    "src/adapter/GenericAdapter.js"(exports, module) {
-      "use strict";
-      var { SourceAdapter } = require_SourceAdapter();
-      var { GenericExtractor: GenericExtractor2 } = require_extract();
-      var GenericAdapter = Object.assign(Object.create(SourceAdapter), {
-        sourceType: "generic",
-        async fetchIncremental(watermark) {
-          return this._extractFromPage();
-        },
-        async fetchAll() {
-          return this._extractFromPage();
-        },
-        normalize(raw) {
-          return {
-            source: "generic",
-            id: raw.url || "",
-            title: raw.title || "",
-            content: raw.description || "",
-            url: raw.url || "",
-            author: raw.author || "",
-            tags: [],
-            createdAt: raw.publishDate || "",
-            raw
-          };
-        },
-        getDedupKey(item) {
-          return `generic:${item.url}`;
-        },
-        _extractFromPage() {
-          if (!GenericExtractor2 || typeof GenericExtractor2.extractMeta !== "function") return [];
-          const meta = GenericExtractor2.extractMeta();
-          if (!meta || !meta.url) return [];
-          return [this.normalize(meta)];
-        }
-      });
-      module.exports = { GenericAdapter };
-    }
-  });
-
-  // src/adapter/index.js
-  var require_adapter = __commonJS({
-    "src/adapter/index.js"(exports, module) {
-      "use strict";
-      var { SourceAdapter } = require_SourceAdapter();
-      var { AdapterRegistry } = require_AdapterRegistry();
-      var { LinuxDoAdapter } = require_LinuxDoAdapter();
-      var { createGitHubAdapter } = require_GitHubAdapter();
-      var { BookmarkAdapter } = require_BookmarkAdapter();
-      var { RSSAdapter } = require_RSSAdapter();
-      var { ZhihuAdapter } = require_ZhihuAdapter();
-      var { GenericAdapter } = require_GenericAdapter();
-      AdapterRegistry.register(LinuxDoAdapter);
-      AdapterRegistry.register(createGitHubAdapter("stars"));
-      AdapterRegistry.register(createGitHubAdapter("repos"));
-      AdapterRegistry.register(createGitHubAdapter("forks"));
-      AdapterRegistry.register(createGitHubAdapter("gists"));
-      AdapterRegistry.register(BookmarkAdapter);
-      AdapterRegistry.register(RSSAdapter);
-      AdapterRegistry.register(ZhihuAdapter);
-      AdapterRegistry.register(GenericAdapter);
-      module.exports = { SourceAdapter, AdapterRegistry };
-    }
-  });
-
-  // src/adapter/SyncCoordinator.js
-  var require_SyncCoordinator = __commonJS({
-    "src/adapter/SyncCoordinator.js"(exports, module) {
-      "use strict";
-      var { AdapterRegistry } = require_AdapterRegistry();
-      var { SyncStateV2 } = require_SyncState();
-      var { DedupStore } = require_DedupStore();
-      var _adaptersRegistered = false;
-      function ensureAdaptersRegistered() {
-        if (_adaptersRegistered) return;
-        _adaptersRegistered = true;
-        require_adapter();
-      }
-      var SyncCoordinator = {
-        _registryOverride: null,
-        /**
-         * 覆盖默认注册表 (测试用)
-         * @param {Object|null} registry
-         */
-        setRegistry(registry) {
-          this._registryOverride = registry;
-        },
-        _getRegistry() {
-          return this._registryOverride || AdapterRegistry;
-        },
-        /**
-         * 执行一次增量同步
-         * @param {string} sourceType - 适配器注册类型
-         * @param {Object} [options]
-         * @param {boolean} [options.fullSync=false] - 强制全量拉取
-         * @returns {Promise<{newItems: NormalizedItem[], skippedCount: number, watermark: Object|null, error?: string}>}
-         */
-        async sync(sourceType, options = {}) {
-          ensureAdaptersRegistered();
-          const adapter = this._getRegistry().getAdapter(sourceType);
-          if (!adapter) {
-            return { newItems: [], skippedCount: 0, watermark: null, error: `\u672A\u6CE8\u518C\u9002\u914D\u5668: ${sourceType}` };
-          }
-          SyncStateV2.updateSourceState(sourceType, {
-            lastAttemptAt: Date.now(),
-            lastOutcome: "running",
-            lastError: ""
-          });
-          try {
-            const currentState = SyncStateV2.getSourceState(sourceType);
-            const rawItems = options.fullSync ? await adapter.fetchAll() : await adapter.fetchIncremental(currentState.watermark);
-            DedupStore.beginBatch(sourceType);
-            const newItems = [];
-            let skippedCount = 0;
-            try {
-              for (const item of rawItems) {
-                const dedupKey = adapter.getDedupKey(item);
-                if (DedupStore.isDuplicate(sourceType, dedupKey)) {
-                  skippedCount++;
-                  continue;
+        fetchLatestVersion: () => {
+          return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+              method: "GET",
+              url: "https://api.github.com/repos/Smith-106/LD-Notion/releases/latest",
+              headers: {
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "LD-Notion-UserScript"
+              },
+              timeout: 15e3,
+              onload: (response) => {
+                if (response.status !== 200) {
+                  reject(new Error(`\u66F4\u65B0\u68C0\u67E5\u5931\u8D25: HTTP ${response.status}`));
+                  return;
                 }
-                newItems.push(item);
-                DedupStore.markSeen(sourceType, dedupKey);
-              }
-            } finally {
-              DedupStore.endBatch();
+                try {
+                  const data = JSON.parse(response.responseText || "{}");
+                  const version = String(data.tag_name || data.name || "").replace(/^v/i, "").trim();
+                  if (!version) {
+                    reject(new Error("\u672A\u83B7\u53D6\u5230\u7248\u672C\u53F7"));
+                    return;
+                  }
+                  resolve(version);
+                } catch {
+                  reject(new Error("\u89E3\u6790\u66F4\u65B0\u4FE1\u606F\u5931\u8D25"));
+                }
+              },
+              ontimeout: () => reject(new Error("\u66F4\u65B0\u68C0\u67E5\u8D85\u65F6")),
+              onerror: () => reject(new Error("\u7F51\u7EDC\u9519\u8BEF\uFF0C\u65E0\u6CD5\u68C0\u67E5\u66F4\u65B0"))
+            });
+          });
+        },
+        saveResult: (result) => {
+          const checkedAt = Date.now();
+          Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, checkedAt);
+          Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_RESULT, JSON.stringify({ ...result, checkedAt }));
+          if (result.latestVersion) {
+            Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_SEEN_VERSION, result.latestVersion);
+          }
+        },
+        updateStatusText: (text) => {
+          const UI2 = _resolveUI();
+          const el = UI2 && UI2.refs && UI2.refs.updateCheckStatus || document.querySelector("#ldb-update-check-status");
+          if (el) el.textContent = text;
+        },
+        renderLastStatus: () => {
+          const raw = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_RESULT, "");
+          if (!raw) {
+            UpdateChecker2.updateStatusText("\u5C1A\u672A\u68C0\u67E5\u66F4\u65B0");
+            return;
+          }
+          try {
+            const result = JSON.parse(raw);
+            const checkedAtText = result.checkedAt ? new Date(result.checkedAt).toLocaleString("zh-CN") : "\u672A\u77E5\u65F6\u95F4";
+            const latestText = result.latestVersion ? `\uFF0C\u6700\u65B0 v${result.latestVersion}` : "";
+            if (result.status === "update-available") {
+              UpdateChecker2.updateStatusText(`\u53D1\u73B0\u65B0\u7248\u672C\uFF08\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}${latestText}\uFF09`);
+            } else if (result.status === "up-to-date") {
+              UpdateChecker2.updateStatusText(`\u5DF2\u662F\u6700\u65B0\uFF08\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}${latestText}\uFF09`);
+            } else if (result.status === "error") {
+              UpdateChecker2.updateStatusText(`\u4E0A\u6B21\u68C0\u67E5\u5931\u8D25\uFF1A${result.message || "\u672A\u77E5\u9519\u8BEF"}`);
+            } else {
+              UpdateChecker2.updateStatusText(`\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}`);
             }
-            const newWatermark = SyncStateV2.buildWatermark(
-              newItems,
-              (item) => adapter.getItemTime(item),
-              (item) => adapter.getItemId(item)
-            );
-            SyncStateV2.updateSourceState(sourceType, {
-              lastSuccessAt: Date.now(),
-              lastOutcome: "success",
-              lastStats: { newCount: newItems.length, skippedCount },
-              watermark: newWatermark || currentState.watermark
-            });
-            return { newItems, skippedCount, watermark: newWatermark };
+          } catch {
+            UpdateChecker2.updateStatusText("\u66F4\u65B0\u72B6\u6001\u8BFB\u53D6\u5931\u8D25");
+          }
+        },
+        check: async ({ manual = false } = {}) => {
+          if (UpdateChecker2.isChecking) return;
+          UpdateChecker2.isChecking = true;
+          const UI2 = _resolveUI();
+          if (manual && UI2) {
+            UI2.showStatus("\u6B63\u5728\u68C0\u67E5\u66F4\u65B0...", "info");
+          }
+          try {
+            const currentVersion = UpdateChecker2.getCurrentVersion();
+            const latestVersion = await UpdateChecker2.fetchLatestVersion();
+            const cmp = UpdateChecker2.compareVersions(latestVersion, currentVersion);
+            if (cmp > 0) {
+              const message = `\u53D1\u73B0\u65B0\u7248\u672C v${latestVersion}\uFF08\u5F53\u524D v${currentVersion}\uFF09\u3002\u811A\u672C\u53EF\u76F4\u63A5\u66F4\u65B0\uFF1BZIP/\u89E3\u538B\u6269\u5C55\u9700\u624B\u52A8\u91CD\u65B0\u5B89\u88C5\u6216\u5728\u6269\u5C55\u9875\u91CD\u65B0\u52A0\u8F7D\u3002`;
+              UpdateChecker2.saveResult({
+                status: "update-available",
+                latestVersion,
+                currentVersion,
+                message
+              });
+              UpdateChecker2.renderLastStatus();
+              if (manual && UI2) UI2.showStatus(message, "info");
+            } else {
+              const message = `\u5F53\u524D\u5DF2\u662F\u6700\u65B0\u7248\u672C v${currentVersion}`;
+              UpdateChecker2.saveResult({
+                status: "up-to-date",
+                latestVersion,
+                currentVersion,
+                message
+              });
+              UpdateChecker2.renderLastStatus();
+              if (manual && UI2) UI2.showStatus(message, "success");
+            }
           } catch (error) {
-            SyncStateV2.updateSourceState(sourceType, {
-              lastOutcome: "error",
-              lastError: error.message || String(error)
-            });
-            SyncStateV2.forceFlush();
-            return { newItems: [], skippedCount: 0, watermark: null, error: error.message || String(error) };
+            const message = (error == null ? void 0 : error.message) || "\u66F4\u65B0\u68C0\u67E5\u5931\u8D25";
+            UpdateChecker2.saveResult({ status: "error", message });
+            UpdateChecker2.renderLastStatus();
+            if (manual && UI2) UI2.showStatus(message, "error");
+          } finally {
+            UpdateChecker2.isChecking = false;
+          }
+        },
+        startPolling: (hours) => {
+          UpdateChecker2.stopPolling();
+          const intervalHours = parseInt(hours, 10) || 0;
+          if (intervalHours > 0) {
+            UpdateChecker2.timerId = setInterval(() => {
+              Utils2.runWhenBrowserIdle(() => UpdateChecker2.check({ manual: false }));
+            }, intervalHours * 60 * 60 * 1e3);
+          }
+        },
+        stopPolling: () => {
+          if (UpdateChecker2.timerId) {
+            clearInterval(UpdateChecker2.timerId);
+            UpdateChecker2.timerId = null;
+          }
+        },
+        init: () => {
+          const enabled = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG2.DEFAULTS.updateAutoCheckEnabled);
+          const intervalHours = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG2.DEFAULTS.updateCheckIntervalHours);
+          UpdateChecker2.stopPolling();
+          UpdateChecker2.renderLastStatus();
+          if (enabled) {
+            if (UpdateChecker2.shouldCheckNow(intervalHours)) {
+              Utils2.runWhenBrowserIdle(() => UpdateChecker2.check({ manual: false }));
+            }
+            UpdateChecker2.startPolling(intervalHours);
           }
         }
       };
-      module.exports = { SyncCoordinator };
+      module.exports = { UpdateChecker: UpdateChecker2 };
+    }
+  });
+
+  // src/import/GitHubAPI.js
+  var require_GitHubAPI = __commonJS({
+    "src/import/GitHubAPI.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var GitHubAPI2 = {
+        _readmeCache: {},
+        _fetchPaginated: (url, token = "", label = "GitHub", options = {}) => {
+          return new Promise((resolve, reject) => {
+            const allItems = [];
+            let page = 1;
+            const perPage = 100;
+            const fetchPage = () => {
+              const separator = url.includes("?") ? "&" : "?";
+              const pagedUrl = `${url}${separator}per_page=${perPage}&page=${page}`;
+              const headers = {
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "LD-Notion-UserScript"
+              };
+              if (token) headers["Authorization"] = `Bearer ${token}`;
+              if (options.headers && typeof options.headers === "object") {
+                Object.assign(headers, options.headers);
+              }
+              GM_xmlhttpRequest({
+                method: "GET",
+                url: pagedUrl,
+                headers,
+                onload: (response) => {
+                  if (response.status === 200) {
+                    try {
+                      const items = JSON.parse(response.responseText);
+                      if (items.length === 0) return resolve(allItems);
+                      allItems.push(...items);
+                      if (items.length < perPage) return resolve(allItems);
+                      page++;
+                      setTimeout(fetchPage, 300);
+                    } catch (e) {
+                      reject(new Error(`\u89E3\u6790 ${label} \u54CD\u5E94\u5931\u8D25`));
+                    }
+                  } else if (response.status === 403) {
+                    reject(new Error(`${label} API \u901F\u7387\u9650\u5236\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u6216\u914D\u7F6E Token`));
+                  } else if (response.status === 404) {
+                    reject(new Error(`${label} \u8D44\u6E90\u4E0D\u5B58\u5728`));
+                  } else {
+                    reject(new Error(`${label} API \u9519\u8BEF: ${response.status}`));
+                  }
+                },
+                onerror: () => reject(new Error(`\u7F51\u7EDC\u9519\u8BEF\uFF0C\u65E0\u6CD5\u8FDE\u63A5 ${label}`)),
+                timeout: 3e4,
+                ontimeout: () => reject(new Error("GitHub API \u8BF7\u6C42\u8D85\u65F6"))
+              });
+            };
+            fetchPage();
+          });
+        },
+        // 获取用户 starred repos（带分页）
+        fetchStarredRepos: async (username, token = "") => {
+          const url = token ? `https://api.github.com/user/starred?sort=created&direction=desc` : `https://api.github.com/users/${encodeURIComponent(username)}/starred?sort=created&direction=desc`;
+          const items = await GitHubAPI2._fetchPaginated(url, token, "GitHub Stars", {
+            headers: {
+              "Accept": "application/vnd.github.star+json, application/vnd.github+json"
+            }
+          });
+          return items.map((item) => {
+            if ((item == null ? void 0 : item.repo) && (item == null ? void 0 : item.starred_at)) {
+              return {
+                ...item.repo,
+                starred_at: item.starred_at
+              };
+            }
+            return item;
+          });
+        },
+        // 获取用户自己的仓库
+        fetchUserRepos: (username, token = "") => {
+          const url = token ? `https://api.github.com/user/repos?type=owner&sort=updated` : `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated`;
+          return GitHubAPI2._fetchPaginated(url, token, "GitHub Repos");
+        },
+        // 获取用户 fork 的仓库
+        fetchForkedRepos: async (username, token = "") => {
+          const allRepos = await GitHubAPI2.fetchUserRepos(username, token);
+          return allRepos.filter((r) => r.fork);
+        },
+        // 获取用户的 Gists
+        fetchUserGists: (username, token = "") => {
+          const url = token ? `https://api.github.com/gists` : `https://api.github.com/users/${encodeURIComponent(username)}/gists`;
+          return GitHubAPI2._fetchPaginated(url, token, "GitHub Gists");
+        },
+        // 获取已导出的 repo 集合
+        getExported: () => {
+          try {
+            return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}"));
+          } catch {
+            return {};
+          }
+        },
+        // 获取已导出的 gist 集合
+        getExportedGists: () => {
+          try {
+            return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}"));
+          } catch {
+            return {};
+          }
+        },
+        markExported: (repoFullName) => {
+          const exported = GitHubAPI2.getExported();
+          exported[repoFullName] = Date.now();
+          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(exported));
+        },
+        markGistExported: (gistId) => {
+          const exported = GitHubAPI2.getExportedGists();
+          exported[gistId] = Date.now();
+          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(exported));
+        },
+        isExported: (repoFullName) => {
+          return !!GitHubAPI2.getExported()[repoFullName];
+        },
+        isGistExported: (gistId) => {
+          return !!GitHubAPI2.getExportedGists()[gistId];
+        },
+        // 获取启用的导入类型
+        getImportTypes: () => {
+          try {
+            return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_IMPORT_TYPES, CONFIG2.DEFAULTS.githubImportTypes));
+          } catch {
+            return ["stars"];
+          }
+        },
+        setImportTypes: (types) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_IMPORT_TYPES, JSON.stringify(types));
+        },
+        fetchRepoReadme: (repoFullName, token = "") => {
+          if (!repoFullName) return Promise.resolve("");
+          const cacheKey = `${repoFullName}::${token ? "auth" : "anon"}`;
+          if (Object.prototype.hasOwnProperty.call(GitHubAPI2._readmeCache, cacheKey)) {
+            return Promise.resolve(GitHubAPI2._readmeCache[cacheKey]);
+          }
+          return new Promise((resolve, reject) => {
+            const headers = {
+              "Accept": "application/vnd.github.v3+json",
+              "User-Agent": "LD-Notion-UserScript"
+            };
+            if (token) headers["Authorization"] = `Bearer ${token}`;
+            GM_xmlhttpRequest({
+              method: "GET",
+              url: `https://api.github.com/repos/${repoFullName}/readme`,
+              headers,
+              onload: (response) => {
+                if (response.status === 200) {
+                  try {
+                    const data = JSON.parse(response.responseText || "{}");
+                    const decoded = Utils2.base64DecodeUnicode(data.content || "");
+                    const text = String(decoded || "").replace(/\r\n/g, "\n");
+                    GitHubAPI2._readmeCache[cacheKey] = text;
+                    resolve(text);
+                    return;
+                  } catch {
+                    GitHubAPI2._readmeCache[cacheKey] = "";
+                    resolve("");
+                    return;
+                  }
+                }
+                GitHubAPI2._readmeCache[cacheKey] = "";
+                resolve("");
+              },
+              onerror: () => {
+                GitHubAPI2._readmeCache[cacheKey] = "";
+                resolve("");
+              },
+              timeout: 15e3,
+              ontimeout: () => {
+                GitHubAPI2._readmeCache[cacheKey] = "";
+                resolve("");
+              }
+            });
+          });
+        }
+      };
+      module.exports = { GitHubAPI: GitHubAPI2 };
     }
   });
 
@@ -5070,6 +5417,1557 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         }
       };
       module.exports = { SyncScheduler };
+    }
+  });
+
+  // src/import/GitHubExporter.js
+  var require_GitHubExporter = __commonJS({
+    "src/import/GitHubExporter.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
+      var { AIService: AIService2 } = require_ai();
+      var GitHubExporter2 = {
+        normalizeText: (text, maxLen = 280) => {
+          if (!text) return "";
+          const normalized = String(text).replace(/\s+/g, " ").trim();
+          return normalized.substring(0, maxLen);
+        },
+        composeTitleWithPrefix: (prefix, candidate, maxLen = 180) => {
+          const safePrefix = GitHubExporter2.normalizeText(prefix, maxLen);
+          const safeCandidate = GitHubExporter2.normalizeText(candidate, maxLen);
+          if (!safePrefix) return safeCandidate || "\u65E0\u6807\u9898";
+          if (!safeCandidate || safeCandidate === safePrefix) return safePrefix;
+          if (safeCandidate.startsWith(`${safePrefix} - `) || safeCandidate.startsWith(`${safePrefix} \xB7 `)) {
+            return safeCandidate.substring(0, maxLen);
+          }
+          return `${safePrefix} \xB7 ${safeCandidate}`.substring(0, maxLen);
+        },
+        extractReadmeInsight: (readmeText = "") => {
+          const text = String(readmeText || "").replace(/\r\n/g, "\n");
+          if (!text) return { title: "", summary: "" };
+          const headingMatch = text.match(/^#{1,3}\s+(.+)$/m);
+          const title = GitHubExporter2.normalizeText((headingMatch == null ? void 0 : headingMatch[1]) || "", 120);
+          const lines = text.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#") && !line.startsWith("```"));
+          const summary = GitHubExporter2.normalizeText(lines.slice(0, 8).join(" "), 320);
+          return { title, summary };
+        },
+        inferRepoCategoryHeuristic: (repo, insight, categories = []) => {
+          const available = (categories || []).map((c) => String(c || "").trim()).filter(Boolean);
+          if (available.length === 0) return "";
+          const text = `${repo.full_name || ""} ${repo.name || ""} ${repo.description || ""} ${(repo.topics || []).join(" ")} ${repo.language || ""} ${insight.title || ""} ${insight.summary || ""}`.toLowerCase();
+          for (const cat of available) {
+            if (text.includes(cat.toLowerCase())) return cat;
+          }
+          const rules = [
+            { keys: ["llm", "openai", "anthropic", "prompt", "rag", "ai", "agent"], hints: ["ai", "\u4EBA\u5DE5\u667A\u80FD"] },
+            { keys: ["react", "vue", "next", "svelte", "frontend", "ui", "css", "tailwind"], hints: ["\u524D\u7AEF", "ui"] },
+            { keys: ["node", "express", "fastapi", "backend", "server", "api", "spring"], hints: ["\u540E\u7AEF", "\u670D\u52A1\u7AEF", "api"] },
+            { keys: ["devops", "docker", "kubernetes", "k8s", "terraform", "ci", "cd"], hints: ["\u8FD0\u7EF4", "devops"] },
+            { keys: ["docs", "guide", "tutorial", "awesome", "resource", "\u5B66\u4E60", "\u6559\u7A0B"], hints: ["\u6587\u6863", "\u8D44\u6E90", "\u5B66\u4E60"] }
+          ];
+          for (const rule of rules) {
+            if (!rule.keys.some((k) => text.includes(k))) continue;
+            const matched = available.find((cat) => rule.hints.some((h) => cat.toLowerCase().includes(h.toLowerCase())));
+            if (matched) return matched;
+          }
+          const fallback = available.find((cat) => cat.includes("\u5176\u4ED6"));
+          return fallback || available[available.length - 1];
+        },
+        inferRepoTags: (repo, insight) => {
+          const tags = [];
+          const pushTag = (value) => {
+            const clean = GitHubExporter2.normalizeText(value, 80);
+            if (!clean) return;
+            if (tags.includes(clean)) return;
+            tags.push(clean);
+          };
+          (repo.topics || []).forEach(pushTag);
+          pushTag(repo.language || "");
+          const owner = String(repo.full_name || "").split("/")[0] || "";
+          pushTag(owner);
+          const lowerText = `${insight.title || ""} ${insight.summary || ""}`.toLowerCase();
+          const keywordTags = ["ai", "llm", "rag", "agent", "react", "vue", "nextjs", "nodejs", "python", "rust", "go", "docker", "kubernetes", "notion", "github", "automation"];
+          keywordTags.forEach((kw) => {
+            if (lowerText.includes(kw)) pushTag(kw);
+          });
+          return tags.slice(0, 20);
+        },
+        generateAIRepoCategory: async (repo, insight, settings) => {
+          const categories = Array.isArray(settings == null ? void 0 : settings.categories) ? settings.categories.filter(Boolean) : [];
+          if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService) || categories.length === 0) return "";
+          try {
+            return await AIService2.classify(
+              `${repo.full_name || repo.name || ""} ${insight.title || ""}`,
+              `${repo.description || ""}
+${insight.summary || ""}`,
+              categories,
+              settings
+            );
+          } catch {
+            return "";
+          }
+        },
+        enrichRepo: async (repo, settings, context = {}) => {
+          const enriched = { ...repo };
+          const prefix = GitHubExporter2.normalizeText(repo.full_name || repo.name || "", 120) || "\u65E0\u6807\u9898";
+          let insight = { title: "", summary: "" };
+          try {
+            const readme = await GitHubAPI2.fetchRepoReadme(repo.full_name, (settings == null ? void 0 : settings.token) || "");
+            insight = GitHubExporter2.extractReadmeInsight(readme);
+          } catch {
+            insight = { title: "", summary: "" };
+          }
+          const defaultSuffix = insight.title || GitHubExporter2.normalizeText(repo.description || "", 80);
+          enriched.generatedTitle = GitHubExporter2.composeTitleWithPrefix(prefix, defaultSuffix, 180);
+          let inferredCategory = GitHubExporter2.inferRepoCategoryHeuristic(repo, insight, (settings == null ? void 0 : settings.categories) || []);
+          const canUseAI = !!((settings == null ? void 0 : settings.aiApiKey) && (settings == null ? void 0 : settings.aiService));
+          const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
+          if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
+            const aiCategory = await GitHubExporter2.generateAIRepoCategory(repo, insight, settings);
+            if (aiCategory) inferredCategory = aiCategory;
+            context.aiUsedCount = (context.aiUsedCount || 0) + 1;
+          }
+          enriched.inferredCategory = inferredCategory;
+          enriched.inferredTags = GitHubExporter2.inferRepoTags(repo, insight);
+          enriched.readmeSummary = GitHubExporter2.normalizeText(insight.summary || "", 1e3);
+          return enriched;
+        },
+        // 构建 Notion 数据库属性 (repos/stars/forks)
+        buildRepoProperties: (repo, sourceType = "Star") => {
+          const titlePrefix = GitHubExporter2.normalizeText(repo.full_name || repo.name || "\u65E0\u6807\u9898", 120) || "\u65E0\u6807\u9898";
+          const titleContent = GitHubExporter2.composeTitleWithPrefix(titlePrefix, repo.generatedTitle || "", 2e3);
+          const summaryText = GitHubExporter2.normalizeText(repo.readmeSummary || "", 1600);
+          const descCandidate = GitHubExporter2.normalizeText(repo.description || "", 1200);
+          const description = [descCandidate, summaryText].filter(Boolean).join("\n\n").substring(0, 2e3);
+          const props = {
+            "\u6807\u9898": {
+              title: [{ text: { content: titleContent } }]
+            },
+            "\u94FE\u63A5": {
+              url: repo.html_url
+            },
+            "\u63CF\u8FF0": {
+              rich_text: [{ text: { content: description } }]
+            },
+            "\u8BED\u8A00": {
+              rich_text: [{ text: { content: repo.language || "" } }]
+            },
+            "Stars": {
+              number: repo.stargazers_count || 0
+            },
+            "\u6765\u6E90": {
+              rich_text: [{ text: { content: "GitHub" } }]
+            },
+            "\u6765\u6E90\u7C7B\u578B": {
+              rich_text: [{ text: { content: sourceType } }]
+            }
+          };
+          const topicTags = Array.isArray(repo.topics) ? repo.topics.slice(0, 20) : [];
+          const inferredTags = Array.isArray(repo.inferredTags) ? repo.inferredTags : [];
+          const mergedTags = [];
+          [...topicTags, ...inferredTags].forEach((tag) => {
+            const clean = GitHubExporter2.normalizeText(tag, 100);
+            if (!clean) return;
+            if (mergedTags.includes(clean)) return;
+            mergedTags.push(clean);
+          });
+          if (mergedTags.length > 0) {
+            props["\u6807\u7B7E"] = {
+              multi_select: mergedTags.slice(0, 20).map((t) => ({ name: t }))
+            };
+          }
+          if (repo.inferredCategory) {
+            props["\u5206\u7C7B"] = {
+              rich_text: [{ text: { content: GitHubExporter2.normalizeText(repo.inferredCategory, 300) } }]
+            };
+          }
+          if (repo.pushed_at) {
+            props["\u66F4\u65B0\u65F6\u95F4"] = { date: { start: repo.pushed_at } };
+          }
+          return props;
+        },
+        // 构建 Gist 属性
+        buildGistProperties: (gist) => {
+          var _a, _b;
+          const files = Object.keys(gist.files || {});
+          const title = gist.description || files[0] || "\u65E0\u6807\u9898 Gist";
+          const language = ((_b = (_a = gist.files) == null ? void 0 : _a[files[0]]) == null ? void 0 : _b.language) || "";
+          return {
+            "\u6807\u9898": {
+              title: [{ text: { content: title.substring(0, 2e3) } }]
+            },
+            "\u94FE\u63A5": {
+              url: gist.html_url
+            },
+            "\u63CF\u8FF0": {
+              rich_text: [{ text: { content: `\u6587\u4EF6: ${files.join(", ")}`.substring(0, 2e3) } }]
+            },
+            "\u8BED\u8A00": {
+              rich_text: [{ text: { content: language } }]
+            },
+            "Stars": {
+              number: 0
+            },
+            "\u6765\u6E90": {
+              rich_text: [{ text: { content: "GitHub" } }]
+            },
+            "\u6765\u6E90\u7C7B\u578B": {
+              rich_text: [{ text: { content: "Gist" } }]
+            },
+            "\u66F4\u65B0\u65F6\u95F4": gist.updated_at ? { date: { start: gist.updated_at } } : void 0
+          };
+        },
+        // 向后兼容：原 buildProperties 映射到 buildRepoProperties
+        buildProperties: (repo) => GitHubExporter2.buildRepoProperties(repo, "Star"),
+        // 配置数据库属性结构
+        setupDatabaseProperties: async (databaseId, apiKey) => {
+          const requiredProperties = {
+            "\u6807\u9898": { typeName: "title", schema: { title: {} } },
+            "\u94FE\u63A5": { typeName: "url", schema: { url: {} } },
+            "\u63CF\u8FF0": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u8BED\u8A00": { typeName: "rich_text", schema: { rich_text: {} } },
+            "Stars": { typeName: "number", schema: { number: { format: "number" } } },
+            "\u6807\u7B7E": { typeName: "multi_select", schema: { multi_select: { options: [] } } },
+            "\u6765\u6E90": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u6765\u6E90\u7C7B\u578B": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u66F4\u65B0\u65F6\u95F4": { typeName: "date", schema: { date: {} } },
+            "\u5206\u7C7B": { typeName: "rich_text", schema: { rich_text: {} } }
+          };
+          try {
+            const database = await NotionAPI2.request("GET", `/databases/${databaseId}`, null, apiKey);
+            const existingProps = database.properties || {};
+            const propsToAdd = {};
+            const propsToUpdate = {};
+            const typeConflicts = [];
+            for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
+              const existingProp = existingProps[name];
+              if (!existingProp) {
+                if (typeName === "title") {
+                  const existingTitle = Object.entries(existingProps).find(([_, prop]) => prop.type === "title");
+                  if (existingTitle && existingTitle[0] !== name) {
+                    propsToUpdate[existingTitle[0]] = { name };
+                  }
+                } else {
+                  propsToAdd[name] = schema;
+                }
+              } else if (existingProp.type !== typeName) {
+                typeConflicts.push({ name, expected: typeName, actual: existingProp.type });
+              }
+            }
+            if (typeConflicts.length > 0) {
+              const details = typeConflicts.map((c) => `"${c.name}": \u671F\u671B ${c.expected}\uFF0C\u5B9E\u9645 ${c.actual}`).join("; ");
+              return { success: false, error: `\u5C5E\u6027\u7C7B\u578B\u4E0D\u5339\u914D: ${details}\u3002\u8BF7\u624B\u52A8\u4FEE\u6539\u8FD9\u4E9B\u5C5E\u6027\u7684\u7C7B\u578B\u3002` };
+            }
+            const allChanges = { ...propsToAdd, ...propsToUpdate };
+            if (Object.keys(allChanges).length > 0) {
+              await NotionAPI2.request("PATCH", `/databases/${databaseId}`, {
+                properties: allChanges
+              }, apiKey);
+            }
+            return { success: true, added: Object.keys(propsToAdd), renamed: Object.keys(propsToUpdate) };
+          } catch (error) {
+            return { success: false, error: error.message };
+          }
+        },
+        // 通用导出方法
+        _exportItems: async (items, settings, sourceType, buildFn, isExportedFn, markExportedFn, getKeyFn, onProgress) => {
+          const { apiKey, databaseId } = settings;
+          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+          const newItems = items.filter((item) => !isExportedFn(getKeyFn(item)));
+          if (newItems.length === 0) {
+            return { total: items.length, exported: 0, failed: 0, message: `\u6CA1\u6709\u65B0\u7684 ${sourceType} \u9700\u8981\u5BFC\u51FA` };
+          }
+          let success = 0, failed = 0;
+          const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+          for (let i = 0; i < newItems.length; i++) {
+            const item = newItems[i];
+            const key = getKeyFn(item);
+            const pct = Math.round(10 + i / newItems.length * 85);
+            if (onProgress) onProgress(`\u6B63\u5728\u5BFC\u51FA ${sourceType} (${i + 1}/${newItems.length}): ${key}`, pct);
+            try {
+              const enriched = sourceType === "Gist" ? item : await GitHubExporter2.enrichRepo(item, settings, enrichContext);
+              const properties = buildFn(enriched);
+              for (const k of Object.keys(properties)) {
+                if (properties[k] === void 0) delete properties[k];
+              }
+              await NotionAPI2.request("POST", "/pages", {
+                parent: { database_id: databaseId },
+                properties
+              }, apiKey);
+              markExportedFn(key);
+              success++;
+            } catch (e) {
+              console.warn(`[GitHubExporter] \u5BFC\u51FA\u5931\u8D25: ${key}`, e);
+              failed++;
+            }
+            if (i < newItems.length - 1) {
+              await new Promise((r) => setTimeout(r, delay));
+            }
+          }
+          return { total: items.length, exported: success, failed, newCount: newItems.length };
+        },
+        // 导出 stars 到 Notion
+        exportStars: async (settings, onProgress) => {
+          const { apiKey, databaseId, username, token } = settings;
+          if (!apiKey || !databaseId || !username) {
+            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
+          }
+          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
+          const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+          if (!setupResult.success) {
+            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+          }
+          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Stars...", 5);
+          const repos = await GitHubAPI2.fetchStarredRepos(username, token);
+          return GitHubExporter2._exportItems(
+            repos,
+            settings,
+            "Star",
+            (r) => GitHubExporter2.buildRepoProperties(r, "Star"),
+            GitHubAPI2.isExported,
+            GitHubAPI2.markExported,
+            (r) => r.full_name,
+            onProgress
+          );
+        },
+        // 导出用户仓库到 Notion
+        exportRepos: async (settings, onProgress) => {
+          const { apiKey, databaseId, username, token } = settings;
+          if (!apiKey || !databaseId || !username) {
+            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
+          }
+          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
+          await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Repos...", 5);
+          const repos = await GitHubAPI2.fetchUserRepos(username, token);
+          const ownRepos = repos.filter((r) => !r.fork);
+          return GitHubExporter2._exportItems(
+            ownRepos,
+            settings,
+            "Repo",
+            (r) => GitHubExporter2.buildRepoProperties(r, "Repo"),
+            GitHubAPI2.isExported,
+            GitHubAPI2.markExported,
+            (r) => r.full_name,
+            onProgress
+          );
+        },
+        // 导出 fork 的仓库到 Notion
+        exportForks: async (settings, onProgress) => {
+          const { apiKey, databaseId, username, token } = settings;
+          if (!apiKey || !databaseId || !username) {
+            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
+          }
+          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
+          await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Forks...", 5);
+          const forks = await GitHubAPI2.fetchForkedRepos(username, token);
+          return GitHubExporter2._exportItems(
+            forks,
+            settings,
+            "Fork",
+            (r) => GitHubExporter2.buildRepoProperties(r, "Fork"),
+            GitHubAPI2.isExported,
+            GitHubAPI2.markExported,
+            (r) => r.full_name,
+            onProgress
+          );
+        },
+        // 导出 Gists 到 Notion
+        exportGists: async (settings, onProgress) => {
+          const { apiKey, databaseId, username, token } = settings;
+          if (!apiKey || !databaseId || !username) {
+            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
+          }
+          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
+          await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Gists...", 5);
+          const gists = await GitHubAPI2.fetchUserGists(username, token);
+          return GitHubExporter2._exportItems(
+            gists,
+            settings,
+            "Gist",
+            GitHubExporter2.buildGistProperties,
+            GitHubAPI2.isGistExported,
+            GitHubAPI2.markGistExported,
+            (g) => g.id,
+            onProgress
+          );
+        },
+        // 按用户选择的类型批量导出
+        exportAll: async (settings, onProgress) => {
+          const types = GitHubAPI2.getImportTypes();
+          const results = {};
+          const totalTypes = types.length;
+          let typeIndex = 0;
+          for (const type of types) {
+            const typeProgress = (msg, pct) => {
+              const overallPct = Math.round(typeIndex / totalTypes * 100 + pct / totalTypes);
+              if (onProgress) onProgress(`[${type}] ${msg}`, overallPct);
+            };
+            try {
+              switch (type) {
+                case "stars":
+                  results.stars = await GitHubExporter2.exportStars(settings, typeProgress);
+                  break;
+                case "repos":
+                  results.repos = await GitHubExporter2.exportRepos(settings, typeProgress);
+                  break;
+                case "forks":
+                  results.forks = await GitHubExporter2.exportForks(settings, typeProgress);
+                  break;
+                case "gists":
+                  results.gists = await GitHubExporter2.exportGists(settings, typeProgress);
+                  break;
+              }
+            } catch (e) {
+              results[type] = { error: e.message };
+            }
+            typeIndex++;
+          }
+          return results;
+        },
+        // AI 分类已导出的 GitHub repos
+        classifyRepos: async (settings, onProgress) => {
+          var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
+          const { apiKey, databaseId, aiApiKey, aiService, aiModel, aiBaseUrl, categories } = settings;
+          if (!apiKey || !databaseId) throw new Error("\u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93");
+          if (!aiApiKey) throw new Error("\u8BF7\u5148\u914D\u7F6E AI API Key");
+          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6\u5F85\u5206\u7C7B\u7684\u4ED3\u5E93...", 0);
+          const response = await NotionAPI2.request("POST", `/databases/${databaseId}/query`, {
+            filter: {
+              or: [
+                { property: "\u5206\u7C7B", rich_text: { is_empty: true } },
+                { property: "\u5206\u7C7B", rich_text: { equals: "" } }
+              ]
+            },
+            page_size: 100
+          }, apiKey);
+          const pages = response.results || [];
+          if (pages.length === 0) {
+            return { classified: 0, message: "\u6CA1\u6709\u5F85\u5206\u7C7B\u7684\u4ED3\u5E93" };
+          }
+          let classified = 0;
+          for (let i = 0; i < pages.length; i++) {
+            const page = pages[i];
+            const pct = Math.round(i / pages.length * 100);
+            const title = ((_e = (_d = (_c = (_b = (_a = page.properties) == null ? void 0 : _a["\u6807\u9898"]) == null ? void 0 : _b.title) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) || "";
+            const desc = ((_j = (_i = (_h = (_g = (_f = page.properties) == null ? void 0 : _f["\u63CF\u8FF0"]) == null ? void 0 : _g.rich_text) == null ? void 0 : _h[0]) == null ? void 0 : _i.text) == null ? void 0 : _j.content) || "";
+            const lang = ((_o = (_n = (_m = (_l = (_k = page.properties) == null ? void 0 : _k["\u8BED\u8A00"]) == null ? void 0 : _l.rich_text) == null ? void 0 : _m[0]) == null ? void 0 : _n.text) == null ? void 0 : _o.content) || "";
+            const tags = (((_q = (_p = page.properties) == null ? void 0 : _p["\u6807\u7B7E"]) == null ? void 0 : _q.multi_select) || []).map((t) => t.name).join(", ");
+            if (onProgress) onProgress(`\u6B63\u5728\u5206\u7C7B (${i + 1}/${pages.length}): ${title}`, pct);
+            try {
+              const prompt2 = `\u8BF7\u6839\u636E\u4EE5\u4E0B GitHub \u4ED3\u5E93\u4FE1\u606F\uFF0C\u4ECE\u8FD9\u4E9B\u5206\u7C7B\u4E2D\u9009\u62E9\u6700\u5408\u9002\u7684\u4E00\u4E2A: [${categories.join(", ")}]
+
+\u4ED3\u5E93\u540D: ${title}
+\u63CF\u8FF0: ${desc}
+\u8BED\u8A00: ${lang}
+\u6807\u7B7E: ${tags}
+
+\u53EA\u56DE\u590D\u5206\u7C7B\u540D\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\u3002`;
+              const category = await AIService2.request(prompt2, {
+                aiService,
+                aiApiKey,
+                aiModel,
+                aiBaseUrl
+              });
+              const matched = categories.find((c) => category.trim().includes(c)) || category.trim();
+              await NotionAPI2.request("PATCH", `/pages/${page.id}`, {
+                properties: {
+                  "\u5206\u7C7B": { rich_text: [{ text: { content: matched } }] }
+                }
+              }, apiKey);
+              classified++;
+            } catch (e) {
+              console.warn(`[GitHubExporter] \u5206\u7C7B\u5931\u8D25: ${title}`, e);
+            }
+            await new Promise((r) => setTimeout(r, 500));
+          }
+          return { classified, total: pages.length };
+        }
+      };
+      module.exports = { GitHubExporter: GitHubExporter2 };
+    }
+  });
+
+  // src/import/GitHubAutoImporter.js
+  var require_GitHubAutoImporter = __commonJS({
+    "src/import/GitHubAutoImporter.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
+      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var _resolveUI = () => {
+        try {
+          return require_ui().UI;
+        } catch {
+          return void 0;
+        }
+      };
+      var GitHubAutoImporter2 = {
+        isRunning: false,
+        timerId: null,
+        deferredWhileHidden: false,
+        visibilityListenerBound: false,
+        lastRunAt: 0,
+        minimumRunGapMs: 60 * 1e3,
+        canStart: () => {
+          if (!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return false;
+          const username = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
+          const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
+          if (!username && !token) return false;
+          const apiKey = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "");
+          const databaseId = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+          return !!(apiKey && databaseId);
+        },
+        updateStatus: (text) => {
+          const UI2 = _resolveUI();
+          if (!UI2) return;
+          const el = UI2.refs && UI2.refs.autoImportStatus || document.querySelector("#ldb-auto-import-status");
+          if (el) el.textContent = text;
+        },
+        buildSettings: () => {
+          return {
+            apiKey: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, ""),
+            databaseId: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
+            username: Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, ""),
+            token: Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "")
+          };
+        },
+        getTypeMeta: (type) => {
+          const metaMap = {
+            stars: {
+              label: "Stars",
+              getTime: (item) => (item == null ? void 0 : item.starred_at) || (item == null ? void 0 : item.created_at) || (item == null ? void 0 : item.updated_at) || "",
+              getId: (item) => String((item == null ? void 0 : item.full_name) || (item == null ? void 0 : item.name) || "")
+            },
+            repos: {
+              label: "Repos",
+              getTime: (item) => (item == null ? void 0 : item.pushed_at) || (item == null ? void 0 : item.updated_at) || (item == null ? void 0 : item.created_at) || "",
+              getId: (item) => String((item == null ? void 0 : item.full_name) || (item == null ? void 0 : item.name) || "")
+            },
+            forks: {
+              label: "Forks",
+              getTime: (item) => (item == null ? void 0 : item.pushed_at) || (item == null ? void 0 : item.updated_at) || (item == null ? void 0 : item.created_at) || "",
+              getId: (item) => String((item == null ? void 0 : item.full_name) || (item == null ? void 0 : item.name) || "")
+            },
+            gists: {
+              label: "Gists",
+              getTime: (item) => (item == null ? void 0 : item.updated_at) || (item == null ? void 0 : item.created_at) || "",
+              getId: (item) => String((item == null ? void 0 : item.id) || "")
+            }
+          };
+          return metaMap[type] || metaMap.stars;
+        },
+        fetchTypeItems: async (type, settings) => {
+          if (type === "stars") {
+            return await GitHubAPI2.fetchStarredRepos(settings.username, settings.token);
+          }
+          if (type === "repos") {
+            const repos = await GitHubAPI2.fetchUserRepos(settings.username, settings.token);
+            return repos.filter((repo) => !repo.fork);
+          }
+          if (type === "forks") {
+            return await GitHubAPI2.fetchForkedRepos(settings.username, settings.token);
+          }
+          if (type === "gists") {
+            return await GitHubAPI2.fetchUserGists(settings.username, settings.token);
+          }
+          return [];
+        },
+        ensureVisibilityListener: () => {
+          if (GitHubAutoImporter2.visibilityListenerBound) return;
+          document.addEventListener("visibilitychange", () => {
+            if (!document.hidden && GitHubAutoImporter2.deferredWhileHidden) {
+              GitHubAutoImporter2.deferredWhileHidden = false;
+              Utils2.runWhenBrowserIdle(() => GitHubAutoImporter2.run());
+            }
+          });
+          GitHubAutoImporter2.visibilityListenerBound = true;
+        },
+        startPolling: (intervalMinutes) => {
+          const { SyncScheduler } = require_SyncScheduler();
+          const types = GitHubAPI2.getImportTypes();
+          for (const type of types) {
+            SyncScheduler.start(`github-${type}`);
+          }
+        },
+        stopPolling: () => {
+          const { SyncScheduler } = require_SyncScheduler();
+          const types = GitHubAPI2.getImportTypes();
+          for (const type of types) {
+            SyncScheduler.stop(`github-${type}`);
+          }
+        },
+        init: () => {
+          if (!GitHubAutoImporter2.canStart()) return;
+          GitHubAutoImporter2.ensureVisibilityListener();
+          setTimeout(() => {
+            Utils2.runWhenBrowserIdle(() => GitHubAutoImporter2.run());
+            const interval = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.githubAutoImportInterval);
+            if (interval > 0) GitHubAutoImporter2.startPolling(interval);
+          }, 3e3);
+        }
+      };
+      GitHubAutoImporter2._mapItemsToBookmarks = (incrementalItems, type, meta) => {
+        const UI2 = _resolveUI();
+        if (UI2 && typeof UI2.mapGitHubItemsToBookmarks === "function") {
+          return UI2.mapGitHubItemsToBookmarks(incrementalItems, type).filter((item) => UI2 && typeof UI2.isBookmarkExported === "function" ? !UI2.isBookmarkExported(item) : true);
+        }
+        return incrementalItems.map((item) => ({
+          itemKey: meta.getId(item),
+          raw: item,
+          title: item.full_name || item.name || "",
+          url: item.html_url || "",
+          description: item.description || "",
+          tags: item.language ? [`lang:${item.language}`] : [],
+          source: "github",
+          sourceType: type
+        }));
+      };
+      GitHubAutoImporter2._exportViaGitHubExporter = async (mappedItems, type, meta, settings) => {
+        const { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
+        const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+        let success = 0, failed = 0;
+        const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+        for (let i = 0; i < mappedItems.length; i++) {
+          const item = mappedItems[i];
+          try {
+            const raw = item.raw || item;
+            const enriched = await GitHubExporter2.enrichRepo(raw, settings, enrichContext);
+            const buildFn = type === "gists" ? GitHubExporter2.buildGistProperties : (r) => GitHubExporter2.buildRepoProperties(r, meta.label);
+            const properties = buildFn(enriched);
+            for (const k of Object.keys(properties)) {
+              if (properties[k] === void 0) delete properties[k];
+            }
+            await NotionAPI2.request("POST", "/pages", {
+              parent: { database_id: settings.databaseId },
+              properties
+            }, settings.apiKey);
+            if (type === "gists") {
+              GitHubAPI2.markGistExported(meta.getId(raw));
+            } else {
+              GitHubAPI2.markExported(meta.getId(raw));
+            }
+            success++;
+          } catch (e) {
+            console.warn(`[GitHubAutoImporter] \u5BFC\u51FA\u5931\u8D25: ${item.itemKey || meta.getId(item.raw || item)}`, e);
+            failed++;
+          }
+          if (i < mappedItems.length - 1) {
+            await new Promise((r) => setTimeout(r, delay));
+          }
+        }
+        return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
+      };
+      GitHubAutoImporter2._exportMappedItems = async (mappedItems, type, meta, settings) => {
+        const UI2 = _resolveUI();
+        if (UI2 && typeof UI2.exportGitHubSelected === "function") {
+          return await UI2.exportGitHubSelected(mappedItems, {
+            apiKey: settings.apiKey,
+            databaseId: settings.databaseId,
+            token: settings.token
+          }, (current, total, title) => {
+            GitHubAutoImporter2.updateStatus(`\u{1F4EC} GitHub ${meta.label} \u5BFC\u5165\u4E2D (${current}/${total}): ${title}`);
+          });
+        }
+        return await GitHubAutoImporter2._exportViaGitHubExporter(mappedItems, type, meta, settings);
+      };
+      GitHubAutoImporter2._syncSingleType = async (type, settings, attemptAt) => {
+        const meta = GitHubAutoImporter2.getTypeMeta(type);
+        const typeAttemptAt = Date.now();
+        try {
+          SyncState2.updateGitHubState(type, {
+            lastAttemptAt: typeAttemptAt,
+            lastOutcome: "running",
+            lastError: "",
+            lastStats: {}
+          });
+          GitHubAutoImporter2.updateStatus(`\u{1F4E7} \u6B63\u5728\u68C0\u67E5 GitHub ${meta.label}...`);
+          const syncState = SyncState2.getGitHubState(type);
+          const items = await GitHubAutoImporter2.fetchTypeItems(type, settings);
+          const incrementalItems = SyncState2.filterOrderedItems(
+            items,
+            syncState.watermark,
+            meta.getTime,
+            meta.getId
+          );
+          if (incrementalItems.length === 0) {
+            SyncState2.updateGitHubState(type, {
+              lastAttemptAt: typeAttemptAt,
+              lastSuccessAt: Date.now(),
+              lastOutcome: "success",
+              lastError: "",
+              lastStats: {
+                scanned: items.length,
+                pending: 0,
+                exported: 0,
+                failed: 0
+              }
+            });
+            return { pending: false, success: 0, failed: 0 };
+          }
+          const mappedItems = GitHubAutoImporter2._mapItemsToBookmarks(incrementalItems, type, meta);
+          if (mappedItems.length === 0) {
+            SyncState2.updateGitHubState(type, {
+              watermark: SyncState2.buildWatermark(incrementalItems, meta.getTime, meta.getId),
+              lastAttemptAt: typeAttemptAt,
+              lastSuccessAt: Date.now(),
+              lastOutcome: "success",
+              lastError: "",
+              lastStats: {
+                scanned: items.length,
+                pending: incrementalItems.length,
+                exported: 0,
+                failed: 0
+              }
+            });
+            return { pending: true, success: 0, failed: 0 };
+          }
+          const result = await GitHubAutoImporter2._exportMappedItems(mappedItems, type, meta, settings);
+          const successKeys = new Set(
+            (result.success || []).map((entry) => String(entry.itemKey || "")).filter(Boolean)
+          );
+          const successfulItems = mappedItems.filter((item) => successKeys.has(String(item.itemKey || ""))).map((item) => item.raw);
+          const typeStatePatch = {
+            lastAttemptAt: typeAttemptAt,
+            lastOutcome: result.failed.length > 0 ? result.success.length > 0 ? "partial" : "error" : "success",
+            lastError: result.success.length === 0 && result.failed.length > 0 ? `${meta.label} \u5BFC\u51FA\u5931\u8D25 ${result.failed.length} \u9879` : "",
+            lastStats: {
+              scanned: items.length,
+              pending: incrementalItems.length,
+              exported: result.success.length,
+              failed: result.failed.length
+            }
+          };
+          if (successfulItems.length > 0) {
+            const successfulIds = new Set(successfulItems.map((item) => meta.getId(item)));
+            const leadingSuccessfulItems = SyncState2.takeLeadingItems(
+              incrementalItems,
+              (item) => {
+                const itemKey = meta.getId(item);
+                if (successfulIds.has(itemKey)) return true;
+                const mapped = mappedItems.find((entry) => meta.getId(entry.raw) === itemKey);
+                return !mapped;
+              }
+            );
+            if (leadingSuccessfulItems.length > 0) {
+              typeStatePatch.watermark = SyncState2.buildWatermark(leadingSuccessfulItems, meta.getTime, meta.getId);
+            }
+            typeStatePatch.lastSuccessAt = Date.now();
+          }
+          SyncState2.updateGitHubState(type, typeStatePatch);
+          return { pending: true, success: result.success.length, failed: result.failed.length };
+        } catch (error) {
+          SyncState2.updateGitHubState(type, {
+            lastAttemptAt: typeAttemptAt,
+            lastOutcome: "error",
+            lastError: (error == null ? void 0 : error.message) || String(error),
+            lastStats: {}
+          });
+          console.error(`[LD-Notion] GitHub ${type} \u81EA\u52A8\u5BFC\u5165\u5931\u8D25:`, error);
+          return { pending: false, success: 0, failed: 0, syncError: `${meta.label}: ${error.message}` };
+        }
+      };
+      GitHubAutoImporter2._aggregateMetaState = (types, successCount, failedCount, syncErrors, attemptAt) => {
+        if (!syncErrors.length && successCount === 0 && failedCount === 0) {
+          SyncState2.updateGitHubMeta({
+            lastAttemptAt: attemptAt,
+            lastSuccessAt: Date.now(),
+            lastOutcome: "success",
+            lastError: "",
+            lastStats: {
+              enabledTypes: types.length,
+              exported: 0,
+              failed: 0,
+              syncErrors: 0
+            }
+          });
+          GitHubAutoImporter2.updateStatus(`\u2705 \u6CA1\u6709\u65B0\u7684 GitHub \u6536\u85CF (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
+          return;
+        }
+        if (successCount === 0 && failedCount === 0 && syncErrors.length > 0) {
+          throw new Error(syncErrors[0]);
+        }
+        const metaStatePatch = {
+          lastAttemptAt: attemptAt,
+          lastOutcome: syncErrors.length > 0 || failedCount > 0 ? successCount > 0 ? "partial" : "error" : "success",
+          lastError: syncErrors.join("\uFF1B"),
+          lastStats: {
+            enabledTypes: types.length,
+            exported: successCount,
+            failed: failedCount,
+            syncErrors: syncErrors.length
+          }
+        };
+        if (metaStatePatch.lastOutcome === "success" || successCount > 0) {
+          metaStatePatch.lastSuccessAt = Date.now();
+        }
+        SyncState2.updateGitHubMeta(metaStatePatch);
+        GitHubAutoImporter2.updateStatus(
+          `\u2705 GitHub \u81EA\u52A8\u5BFC\u5165\u5B8C\u6210: \u6210\u529F ${successCount} \u9879${failedCount > 0 ? `\uFF0C\u5931\u8D25 ${failedCount} \u9879` : ""}${syncErrors.length > 0 ? `\uFF0C\u5F02\u5E38 ${syncErrors.length} \u7C7B` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
+        );
+      };
+      GitHubAutoImporter2.run = async () => {
+        if (document.hidden) {
+          GitHubAutoImporter2.deferredWhileHidden = true;
+          return;
+        }
+        if (GitHubAutoImporter2.isRunning) return;
+        const settings = GitHubAutoImporter2.buildSettings();
+        if (!settings.apiKey || !settings.databaseId) {
+          GitHubAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
+          return;
+        }
+        if (!settings.username && !settings.token) {
+          GitHubAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u6216 Token");
+          return;
+        }
+        const now = Date.now();
+        if (now - GitHubAutoImporter2.lastRunAt < GitHubAutoImporter2.minimumRunGapMs) return;
+        GitHubAutoImporter2.lastRunAt = now;
+        GitHubAutoImporter2.isRunning = true;
+        const attemptAt = Date.now();
+        try {
+          GitHubAutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u68C0\u67E5 GitHub \u65B0\u6536\u85CF...");
+          const types = GitHubAPI2.getImportTypes();
+          SyncState2.updateGitHubMeta({
+            lastAttemptAt: attemptAt,
+            lastOutcome: "running",
+            lastError: "",
+            lastStats: {
+              enabledTypes: types.length,
+              exported: 0,
+              failed: 0,
+              syncErrors: 0
+            }
+          });
+          let successCount = 0;
+          let failedCount = 0;
+          const syncErrors = [];
+          for (const type of types) {
+            const r = await GitHubAutoImporter2._syncSingleType(type, settings, attemptAt);
+            successCount += r.success;
+            failedCount += r.failed;
+            if (r.syncError) syncErrors.push(r.syncError);
+          }
+          const hasPending = successCount > 0 || failedCount > 0;
+          if (!hasPending && syncErrors.length === 0) {
+            GitHubAutoImporter2._aggregateMetaState(types, 0, 0, [], attemptAt);
+            return;
+          }
+          GitHubAutoImporter2._aggregateMetaState(types, successCount, failedCount, syncErrors, attemptAt);
+        } catch (error) {
+          console.error("[LD-Notion] GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519:", error);
+          SyncState2.updateGitHubMeta({
+            lastAttemptAt: attemptAt,
+            lastOutcome: "error",
+            lastError: (error == null ? void 0 : error.message) || String(error),
+            lastStats: {
+              enabledTypes: (GitHubAPI2.getImportTypes() || []).length,
+              exported: 0,
+              failed: 0,
+              syncErrors: 1
+            }
+          });
+          GitHubAutoImporter2.updateStatus(`\u274C GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
+        } finally {
+          GitHubAutoImporter2.isRunning = false;
+          const UI2 = _resolveUI();
+          if (UI2 && typeof UI2.renderSyncCenterSummary === "function") {
+            try {
+              UI2.renderSyncCenterSummary();
+            } catch {
+            }
+          }
+        }
+      };
+      module.exports = { GitHubAutoImporter: GitHubAutoImporter2 };
+    }
+  });
+
+  // src/import/index.js
+  var require_import = __commonJS({
+    "src/import/index.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
+      var { NotionOAuth: NotionOAuth2 } = require_auth();
+      var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2 } = require_export();
+      var { SyncLock } = require_sync_lock();
+      var { UpdateChecker: UpdateChecker2 } = require_UpdateChecker();
+      var { GitHubAutoImporter: GitHubAutoImporter2 } = require_GitHubAutoImporter();
+      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
+      var { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
+      var _resolveUI = () => {
+        try {
+          return require_ui().UI;
+        } catch {
+          return void 0;
+        }
+      };
+      var AutoImporter2 = {
+        isRunning: false,
+        timerId: null,
+        deferredWhileHidden: false,
+        visibilityListenerBound: false,
+        lastRunAt: 0,
+        minimumRunGapMs: 60 * 1e3,
+        // 从 Storage 读取导出设置（不依赖 UI DOM）
+        buildSettings: () => {
+          const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
+          return {
+            apiKey: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, ""),
+            databaseId: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
+            parentPageId: Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, ""),
+            exportTargetType,
+            onlyFirst: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_ONLY_FIRST, false),
+            onlyOp: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_ONLY_OP, false),
+            rangeStart: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_RANGE_START, 1),
+            rangeEnd: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_RANGE_END, 999999),
+            imgFilter: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_IMG, CONFIG2.DEFAULTS.imgFilter),
+            filterUsers: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_USERS, CONFIG2.DEFAULTS.filterUsers),
+            filterInclude: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_INCLUDE, CONFIG2.DEFAULTS.filterInclude),
+            filterExclude: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_EXCLUDE, CONFIG2.DEFAULTS.filterExclude),
+            filterMinLen: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_MINLEN, CONFIG2.DEFAULTS.filterMinLen),
+            imgMode: Storage2.get(CONFIG2.STORAGE_KEYS.IMG_MODE, CONFIG2.DEFAULTS.imgMode),
+            concurrency: Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG2.DEFAULTS.exportConcurrency)
+          };
+        },
+        // 检查配置是否足够
+        canStart: () => {
+          if (!Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED, false)) return false;
+          const apiKey = NotionOAuth2.getAccessToken();
+          if (!apiKey) return false;
+          const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
+          if (exportTargetType === "database") {
+            return !!Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+          } else {
+            return !!Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, "");
+          }
+        },
+        // 更新状态栏
+        updateStatus: (text) => {
+          const UI2 = _resolveUI();
+          const refs = UI2 ? UI2.refs : null;
+          const el = refs && refs.autoImportStatus || document.querySelector("#ldb-auto-import-status");
+          if (el) el.textContent = text;
+        },
+        getWatermark: (bookmarks = []) => SyncState2.buildWatermark(
+          bookmarks,
+          LinuxDoAPI2.getBookmarkSyncTime,
+          LinuxDoAPI2.getBookmarkId
+        ),
+        startPolling: (intervalMinutes) => {
+          const { SyncScheduler } = require_SyncScheduler();
+          SyncScheduler.start("linuxdo");
+        },
+        ensureVisibilityListener: () => {
+          if (AutoImporter2.visibilityListenerBound) return;
+          document.addEventListener("visibilitychange", () => {
+            if (!document.hidden && AutoImporter2.deferredWhileHidden) {
+              AutoImporter2.deferredWhileHidden = false;
+              Utils2.runWhenBrowserIdle(() => AutoImporter2.run());
+            }
+          });
+          AutoImporter2.visibilityListenerBound = true;
+        },
+        stopPolling: () => {
+          const { SyncScheduler } = require_SyncScheduler();
+          SyncScheduler.stop("linuxdo");
+        },
+        init: () => {
+          if (!AutoImporter2.canStart()) return;
+          AutoImporter2.ensureVisibilityListener();
+          setTimeout(() => {
+            Utils2.runWhenBrowserIdle(() => AutoImporter2.run());
+            const interval = Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.autoImportInterval);
+            if (interval > 0) AutoImporter2.startPolling(interval);
+          }, 3e3);
+        }
+      };
+      AutoImporter2.run = async () => {
+        if (document.hidden) {
+          AutoImporter2.deferredWhileHidden = true;
+          return;
+        }
+        if (AutoImporter2.isRunning) return;
+        if (SyncLock.isExporting) return;
+        const apiKey = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "");
+        if (!apiKey) {
+          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key");
+          return;
+        }
+        const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
+        if (exportTargetType === "database" && !Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "")) {
+          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID");
+          return;
+        }
+        if (exportTargetType === "page" && !Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, "")) {
+          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID");
+          return;
+        }
+        const now = Date.now();
+        if (now - AutoImporter2.lastRunAt < AutoImporter2.minimumRunGapMs) return;
+        AutoImporter2.lastRunAt = now;
+        AutoImporter2.isRunning = true;
+        const attemptAt = Date.now();
+        const exportBtn = document.querySelector("#ldb-export");
+        try {
+          SyncState2.updateLinuxDoState({
+            lastAttemptAt: attemptAt,
+            lastOutcome: "running",
+            lastError: "",
+            lastStats: {}
+          });
+          const username = Utils2.getCurrentLinuxDoUsername();
+          if (!username) {
+            const errorMessage = "\u65E0\u6CD5\u83B7\u53D6\u5F53\u524D Linux.do \u7528\u6237\u540D";
+            SyncState2.updateLinuxDoState({
+              lastAttemptAt: attemptAt,
+              lastOutcome: "error",
+              lastError: errorMessage,
+              lastStats: {}
+            });
+            AutoImporter2.updateStatus(`\u274C ${errorMessage}`);
+            return;
+          }
+          AutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u68C0\u67E5\u65B0\u6536\u85CF...");
+          const syncState = SyncState2.getLinuxDoState();
+          const bookmarks = await LinuxDoAPI2.fetchBookmarksSince(username, syncState.watermark);
+          const newBookmarks = bookmarks.filter((bookmark) => {
+            const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
+            return !Storage2.isTopicExported(topicId);
+          });
+          if (newBookmarks.length === 0) {
+            const statePatch2 = {
+              lastAttemptAt: attemptAt,
+              lastSuccessAt: Date.now(),
+              lastOutcome: "success",
+              lastError: "",
+              lastStats: {
+                scanned: bookmarks.length,
+                pending: 0,
+                success: 0,
+                failed: 0
+              }
+            };
+            if (bookmarks.length > 0) {
+              statePatch2.watermark = AutoImporter2.getWatermark(bookmarks);
+            }
+            SyncState2.updateLinuxDoState(statePatch2);
+            AutoImporter2.updateStatus(`\u2705 \u6CA1\u6709\u65B0\u6536\u85CF (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
+            return;
+          }
+          AutoImporter2.updateStatus(`\u{1F4EC} \u53D1\u73B0 ${newBookmarks.length} \u4E2A\u65B0\u6536\u85CF\uFF0C\u6B63\u5728\u5BFC\u5165...`);
+          if (exportBtn) exportBtn.disabled = true;
+          const obsExportBtn = document.querySelector("#ldb-obs-export");
+          if (obsExportBtn) obsExportBtn.disabled = true;
+          const settings = AutoImporter2.buildSettings();
+          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+          const concurrency = settings.concurrency || 1;
+          let success = 0;
+          let failed = 0;
+          const successfulBookmarks = [];
+          let nextIndex = 0;
+          const worker = async () => {
+            while (true) {
+              const i = nextIndex++;
+              if (i >= newBookmarks.length) return;
+              const bookmark = newBookmarks[i];
+              const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
+              const title = bookmark.title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
+              AutoImporter2.updateStatus(`\u{1F4EC} \u5BFC\u5165\u4E2D (${i + 1}/${newBookmarks.length}): ${title}`);
+              try {
+                await Exporter2.exportTopic(bookmark, settings);
+                success++;
+                successfulBookmarks.push(bookmark);
+              } catch (error) {
+                console.error(`[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u5931\u8D25: ${title}`, error);
+                failed++;
+              }
+              if (delay > 0 && nextIndex < newBookmarks.length) {
+                await Utils2.sleep(delay);
+              }
+            }
+          };
+          const workerCount = Math.min(concurrency, newBookmarks.length);
+          const workers = [];
+          for (let w = 0; w < workerCount; w++) {
+            workers.push(worker());
+            if (w < workerCount - 1) await Utils2.sleep(100);
+          }
+          await Promise.all(workers);
+          const uiRef = _resolveUI();
+          if (uiRef && uiRef.renderBookmarkList) {
+            try {
+              uiRef.renderBookmarkList();
+            } catch {
+            }
+          }
+          const statePatch = {
+            lastAttemptAt: attemptAt,
+            lastOutcome: failed > 0 ? "partial" : "success",
+            lastError: "",
+            lastStats: {
+              scanned: bookmarks.length,
+              pending: newBookmarks.length,
+              success,
+              failed
+            }
+          };
+          if (successfulBookmarks.length > 0) {
+            const successIds = new Set(successfulBookmarks.map((bookmark) => LinuxDoAPI2.getBookmarkId(bookmark)));
+            const leadingSuccessfulBookmarks = SyncState2.takeLeadingItems(
+              newBookmarks,
+              (bookmark) => successIds.has(LinuxDoAPI2.getBookmarkId(bookmark))
+            );
+            if (leadingSuccessfulBookmarks.length > 0) {
+              statePatch.watermark = AutoImporter2.getWatermark(leadingSuccessfulBookmarks);
+            }
+            statePatch.lastSuccessAt = Date.now();
+          }
+          SyncState2.updateLinuxDoState(statePatch);
+          AutoImporter2.updateStatus(`\u2705 \u81EA\u52A8\u5BFC\u5165\u5B8C\u6210: ${success} \u4E2A\u6210\u529F${failed > 0 ? `\uFF0C${failed} \u4E2A\u5931\u8D25` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
+          if (success > 0 && typeof GM_notification === "function") {
+            GM_notification({
+              title: "\u81EA\u52A8\u5BFC\u5165\u5B8C\u6210",
+              text: `\u6210\u529F\u5BFC\u5165 ${success} \u4E2A\u65B0\u6536\u85CF\u5230 Notion`,
+              timeout: 5e3
+            });
+          }
+        } catch (error) {
+          console.error("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u51FA\u9519:", error);
+          SyncState2.updateLinuxDoState({
+            lastAttemptAt: attemptAt,
+            lastOutcome: "error",
+            lastError: (error == null ? void 0 : error.message) || String(error),
+            lastStats: {}
+          });
+          AutoImporter2.updateStatus(`\u274C \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
+        } finally {
+          AutoImporter2.isRunning = false;
+          if (exportBtn) exportBtn.disabled = false;
+          const obsExportBtn2 = document.querySelector("#ldb-obs-export");
+          if (obsExportBtn2) obsExportBtn2.disabled = false;
+          const uiFinally = _resolveUI();
+          if (uiFinally && typeof uiFinally.renderSyncCenterSummary === "function") {
+            try {
+              uiFinally.renderSyncCenterSummary();
+            } catch {
+            }
+          }
+        }
+      };
+      module.exports = { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 };
+    }
+  });
+
+  // src/adapter/GitHubAdapter.js
+  var require_GitHubAdapter = __commonJS({
+    "src/adapter/GitHubAdapter.js"(exports, module) {
+      "use strict";
+      var { SourceAdapter } = require_SourceAdapter();
+      var { GitHubAPI: GitHubAPI2 } = require_import();
+      var { SyncState: SyncState2 } = require_storage();
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Storage: Storage2 } = require_storage();
+      function createGitHubAdapter(subType) {
+        const adapter = Object.assign(Object.create(SourceAdapter), {
+          sourceType: `github-${subType}`,
+          subType,
+          async fetchIncremental(watermark) {
+            const rawItems = await this._fetchByType();
+            if (watermark && watermark.time) {
+              return SyncState2.filterOrderedItems(
+                rawItems,
+                watermark,
+                this._getTime.bind(this),
+                this._getId.bind(this)
+              ).map((item) => this.normalize(item));
+            }
+            return rawItems.map((item) => this.normalize(item));
+          },
+          async fetchAll() {
+            const rawItems = await this._fetchByType();
+            return rawItems.map((item) => this.normalize(item));
+          },
+          normalize(raw) {
+            return {
+              source: "github",
+              id: String(raw.full_name || raw.id || ""),
+              title: raw.full_name || raw.description || "",
+              content: raw.description || "",
+              url: raw.html_url || "",
+              author: raw.owner && raw.owner.login || "",
+              tags: raw.language ? [`lang:${raw.language}`] : [],
+              createdAt: raw.starred_at || raw.pushed_at || raw.updated_at || raw.created_at || "",
+              raw
+            };
+          },
+          getDedupKey(item) {
+            return `github:${subType}:${item.id}`;
+          },
+          _getTime(raw) {
+            if (subType === "stars") return raw.starred_at || "";
+            if (subType === "repos") return raw.pushed_at || raw.updated_at || "";
+            if (subType === "forks") return raw.pushed_at || raw.updated_at || "";
+            if (subType === "gists") return raw.updated_at || raw.created_at || "";
+            return "";
+          },
+          _getId(raw) {
+            return String(raw.full_name || raw.id || "");
+          },
+          async _fetchByType() {
+            const username = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
+            const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
+            if (subType === "stars") return GitHubAPI2.fetchStarredRepos(username, token);
+            if (subType === "repos") return GitHubAPI2.fetchUserRepos(username, token);
+            if (subType === "forks") return GitHubAPI2.fetchForkedRepos(username, token);
+            if (subType === "gists") return GitHubAPI2.fetchUserGists(username, token);
+            return [];
+          }
+        });
+        return adapter;
+      }
+      module.exports = { createGitHubAdapter };
+    }
+  });
+
+  // src/adapter/BookmarkAdapter.js
+  var require_BookmarkAdapter = __commonJS({
+    "src/adapter/BookmarkAdapter.js"(exports, module) {
+      "use strict";
+      var { SourceAdapter } = require_SourceAdapter();
+      var BookmarkAdapter = Object.assign(Object.create(SourceAdapter), {
+        sourceType: "bookmark",
+        // 注入的 lazy bridge accessor；adapter/index.js 注册时设置。
+        _bridgeAccessor: null,
+        // 运行时解析 bridge 模块（BookmarkBridge + BookmarkExporter）。
+        _getBridge() {
+          if (this._bridgeAccessor) return this._bridgeAccessor() || {};
+          return require_bridge();
+        },
+        async fetchIncremental(watermark) {
+          return this._fetchAndFilter(watermark);
+        },
+        async fetchAll() {
+          return this._fetchAndFilter(null);
+        },
+        normalize(raw) {
+          return {
+            source: "bookmark",
+            id: String(raw.id || ""),
+            title: raw.title || "",
+            content: "",
+            url: raw.url || "",
+            author: "",
+            tags: [],
+            createdAt: raw.dateAdded ? new Date(raw.dateAdded / 1e3).toISOString() : "",
+            raw
+          };
+        },
+        getDedupKey(item) {
+          return `bookmark:${item.id}`;
+        },
+        async _fetchAndFilter(watermark) {
+          const { BookmarkBridge: BookmarkBridge3, BookmarkExporter: BookmarkExporter2 } = this._getBridge();
+          if (!BookmarkBridge3 || !BookmarkBridge3.isExtensionAvailable()) return [];
+          const tree = await BookmarkBridge3.getBookmarkTree();
+          const flat = BookmarkBridge3.flattenTree ? BookmarkBridge3.flattenTree(tree) : this._flattenTree(tree);
+          const items = flat.filter((b) => b.url && BookmarkExporter2 && BookmarkExporter2.isHttpUrl ? BookmarkExporter2.isHttpUrl(b.url) : /^https?:/.test(b.url || "")).map((b) => this.normalize(b));
+          if (watermark && watermark.time) {
+            return items.filter((item) => item.createdAt > watermark.time);
+          }
+          return items;
+        },
+        _flattenTree(nodes, parentPath) {
+          const result = [];
+          if (!Array.isArray(nodes)) return result;
+          for (const node of nodes) {
+            if (node.url) {
+              result.push({ ...node, folderPath: parentPath || "" });
+            }
+            if (node.children) {
+              result.push(...this._flattenTree(node.children, (parentPath ? parentPath + "/" : "") + (node.title || "")));
+            }
+          }
+          return result;
+        }
+      });
+      module.exports = { BookmarkAdapter };
+    }
+  });
+
+  // src/adapter/RSSAdapter.js
+  var require_RSSAdapter = __commonJS({
+    "src/adapter/RSSAdapter.js"(exports, module) {
+      "use strict";
+      var { SourceAdapter } = require_SourceAdapter();
+      var RSSAdapter = Object.assign(Object.create(SourceAdapter), {
+        sourceType: "rss",
+        // 注入的 lazy bridge accessor；adapter/index.js 注册时设置。
+        _bridgeAccessor: null,
+        // 运行时解析 bridge 模块（RSSAutoImporter）。
+        _getBridge() {
+          if (this._bridgeAccessor) return this._bridgeAccessor() || {};
+          return require_bridge();
+        },
+        async fetchIncremental(watermark) {
+          return this._fetchItems(watermark);
+        },
+        async fetchAll() {
+          return this._fetchItems(null);
+        },
+        normalize(raw) {
+          return {
+            source: "rss",
+            id: raw.guid || raw.link || "",
+            title: raw.title || "",
+            content: raw.content || raw.summary || "",
+            url: raw.link || "",
+            author: raw.creator || raw.author || "",
+            tags: raw.categories || [],
+            createdAt: raw.pubDate || raw.isoDate || "",
+            raw
+          };
+        },
+        getDedupKey(item) {
+          return `rss:${item.id}`;
+        },
+        async _fetchItems(watermark) {
+          var _a;
+          const { RSSAutoImporter: RSSAutoImporter2 } = this._getBridge();
+          if (!RSSAutoImporter2 || typeof RSSAutoImporter2.getFeedUrls !== "function") return [];
+          const feedUrls = RSSAutoImporter2.getFeedUrls();
+          const allItems = [];
+          const results = await Promise.allSettled(
+            feedUrls.map((feedUrl) => RSSAutoImporter2.fetchFeed(feedUrl))
+          );
+          for (const result of results) {
+            if (result.status === "fulfilled" && Array.isArray((_a = result.value) == null ? void 0 : _a.items)) {
+              allItems.push(...result.value.items);
+            }
+          }
+          const normalized = allItems.map((item) => this.normalize(item));
+          if (watermark && watermark.time) {
+            return normalized.filter((item) => {
+              const itemTime = item.createdAt;
+              if (!itemTime) return true;
+              return itemTime > watermark.time;
+            });
+          }
+          return normalized;
+        }
+      });
+      module.exports = { RSSAdapter };
+    }
+  });
+
+  // src/adapter/ZhihuAdapter.js
+  var require_ZhihuAdapter = __commonJS({
+    "src/adapter/ZhihuAdapter.js"(exports, module) {
+      "use strict";
+      var { SourceAdapter } = require_SourceAdapter();
+      var { ZhihuAPI: ZhihuAPI2 } = require_extract();
+      var ZhihuAdapter = Object.assign(Object.create(SourceAdapter), {
+        sourceType: "zhihu",
+        async fetchIncremental(watermark) {
+          return this._extractFromPage();
+        },
+        async fetchAll() {
+          return this._extractFromPage();
+        },
+        normalize(raw) {
+          return {
+            source: "zhihu",
+            id: raw.url || (typeof window !== "undefined" ? window.location.href : ""),
+            title: raw.title || "",
+            content: raw.html || "",
+            url: raw.url || (typeof window !== "undefined" ? window.location.href : ""),
+            author: raw.author || "",
+            tags: raw.tags || [],
+            createdAt: raw.publishDate || "",
+            raw
+          };
+        },
+        getDedupKey(item) {
+          return `zhihu:${item.id}`;
+        },
+        _extractFromPage() {
+          if (!ZhihuAPI2 || typeof ZhihuAPI2.detectPage !== "function") return [];
+          const pageType = ZhihuAPI2.detectPage();
+          if (!pageType) return [];
+          const content = ZhihuAPI2.extractContent();
+          if (!content) return [];
+          return [this.normalize(content)];
+        }
+      });
+      module.exports = { ZhihuAdapter };
+    }
+  });
+
+  // src/adapter/GenericAdapter.js
+  var require_GenericAdapter = __commonJS({
+    "src/adapter/GenericAdapter.js"(exports, module) {
+      "use strict";
+      var { SourceAdapter } = require_SourceAdapter();
+      var { GenericExtractor: GenericExtractor2 } = require_extract();
+      var GenericAdapter = Object.assign(Object.create(SourceAdapter), {
+        sourceType: "generic",
+        async fetchIncremental(watermark) {
+          return this._extractFromPage();
+        },
+        async fetchAll() {
+          return this._extractFromPage();
+        },
+        normalize(raw) {
+          return {
+            source: "generic",
+            id: raw.url || "",
+            title: raw.title || "",
+            content: raw.description || "",
+            url: raw.url || "",
+            author: raw.author || "",
+            tags: [],
+            createdAt: raw.publishDate || "",
+            raw
+          };
+        },
+        getDedupKey(item) {
+          return `generic:${item.url}`;
+        },
+        _extractFromPage() {
+          if (!GenericExtractor2 || typeof GenericExtractor2.extractMeta !== "function") return [];
+          const meta = GenericExtractor2.extractMeta();
+          if (!meta || !meta.url) return [];
+          return [this.normalize(meta)];
+        }
+      });
+      module.exports = { GenericAdapter };
+    }
+  });
+
+  // src/adapter/index.js
+  var require_adapter = __commonJS({
+    "src/adapter/index.js"(exports, module) {
+      "use strict";
+      var { SourceAdapter } = require_SourceAdapter();
+      var { AdapterRegistry } = require_AdapterRegistry();
+      var { LinuxDoAdapter } = require_LinuxDoAdapter();
+      var { createGitHubAdapter } = require_GitHubAdapter();
+      var { BookmarkAdapter } = require_BookmarkAdapter();
+      var { RSSAdapter } = require_RSSAdapter();
+      var { ZhihuAdapter } = require_ZhihuAdapter();
+      var { GenericAdapter } = require_GenericAdapter();
+      var lazyBridge = () => require_bridge();
+      Object.assign(BookmarkAdapter, { _bridgeAccessor: lazyBridge });
+      Object.assign(RSSAdapter, { _bridgeAccessor: lazyBridge });
+      AdapterRegistry.register(LinuxDoAdapter);
+      AdapterRegistry.register(createGitHubAdapter("stars"));
+      AdapterRegistry.register(createGitHubAdapter("repos"));
+      AdapterRegistry.register(createGitHubAdapter("forks"));
+      AdapterRegistry.register(createGitHubAdapter("gists"));
+      AdapterRegistry.register(BookmarkAdapter);
+      AdapterRegistry.register(RSSAdapter);
+      AdapterRegistry.register(ZhihuAdapter);
+      AdapterRegistry.register(GenericAdapter);
+      module.exports = { SourceAdapter, AdapterRegistry };
+    }
+  });
+
+  // src/adapter/SyncCoordinator.js
+  var require_SyncCoordinator = __commonJS({
+    "src/adapter/SyncCoordinator.js"(exports, module) {
+      "use strict";
+      var { AdapterRegistry } = require_AdapterRegistry();
+      var { SyncStateV2 } = require_SyncState();
+      var { DedupStore } = require_DedupStore();
+      var _adaptersRegistered = false;
+      function ensureAdaptersRegistered() {
+        if (_adaptersRegistered) return;
+        _adaptersRegistered = true;
+        require_adapter();
+      }
+      var SyncCoordinator = {
+        _registryOverride: null,
+        /**
+         * 覆盖默认注册表 (测试用)
+         * @param {Object|null} registry
+         */
+        setRegistry(registry) {
+          this._registryOverride = registry;
+        },
+        _getRegistry() {
+          return this._registryOverride || AdapterRegistry;
+        },
+        /**
+         * 执行一次增量同步
+         * @param {string} sourceType - 适配器注册类型
+         * @param {Object} [options]
+         * @param {boolean} [options.fullSync=false] - 强制全量拉取
+         * @returns {Promise<{newItems: NormalizedItem[], skippedCount: number, watermark: Object|null, error?: string}>}
+         */
+        async sync(sourceType, options = {}) {
+          ensureAdaptersRegistered();
+          const adapter = this._getRegistry().getAdapter(sourceType);
+          if (!adapter) {
+            return { newItems: [], skippedCount: 0, watermark: null, error: `\u672A\u6CE8\u518C\u9002\u914D\u5668: ${sourceType}` };
+          }
+          SyncStateV2.updateSourceState(sourceType, {
+            lastAttemptAt: Date.now(),
+            lastOutcome: "running",
+            lastError: ""
+          });
+          try {
+            const currentState = SyncStateV2.getSourceState(sourceType);
+            const rawItems = options.fullSync ? await adapter.fetchAll() : await adapter.fetchIncremental(currentState.watermark);
+            DedupStore.beginBatch(sourceType);
+            const newItems = [];
+            let skippedCount = 0;
+            try {
+              for (const item of rawItems) {
+                const dedupKey = adapter.getDedupKey(item);
+                if (DedupStore.isDuplicate(sourceType, dedupKey)) {
+                  skippedCount++;
+                  continue;
+                }
+                newItems.push(item);
+                DedupStore.markSeen(sourceType, dedupKey);
+              }
+            } finally {
+              DedupStore.endBatch();
+            }
+            const newWatermark = SyncStateV2.buildWatermark(
+              newItems,
+              (item) => adapter.getItemTime(item),
+              (item) => adapter.getItemId(item)
+            );
+            SyncStateV2.updateSourceState(sourceType, {
+              lastSuccessAt: Date.now(),
+              lastOutcome: "success",
+              lastStats: { newCount: newItems.length, skippedCount },
+              watermark: newWatermark || currentState.watermark
+            });
+            return { newItems, skippedCount, watermark: newWatermark };
+          } catch (error) {
+            SyncStateV2.updateSourceState(sourceType, {
+              lastOutcome: "error",
+              lastError: error.message || String(error)
+            });
+            SyncStateV2.forceFlush();
+            return { newItems: [], skippedCount: 0, watermark: null, error: error.message || String(error) };
+          }
+        }
+      };
+      module.exports = { SyncCoordinator };
     }
   });
 
@@ -7075,2123 +8973,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     }
   });
 
-  // src/import/UpdateChecker.js
-  var require_UpdateChecker = __commonJS({
-    "src/import/UpdateChecker.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var _resolveUI = () => {
-        try {
-          return require_ui().UI;
-        } catch {
-          return void 0;
-        }
-      };
-      var UpdateChecker2 = {
-        timerId: null,
-        isChecking: false,
-        shouldCheckNow: (intervalHours) => {
-          const intervalMs = (parseInt(intervalHours, 10) || 0) * 60 * 60 * 1e3;
-          if (intervalMs <= 0) return true;
-          const lastCheckAt = parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, 0), 10) || 0;
-          return !lastCheckAt || Date.now() - lastCheckAt >= intervalMs;
-        },
-        getCurrentVersion: () => {
-          var _a;
-          if (typeof GM_info !== "undefined" && ((_a = GM_info == null ? void 0 : GM_info.script) == null ? void 0 : _a.version)) {
-            return GM_info.script.version;
-          }
-          return "3.4.5";
-        },
-        compareVersions: (a, b) => {
-          const parse = (v) => String(v || "0").replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);
-          const va = parse(a);
-          const vb = parse(b);
-          const len = Math.max(va.length, vb.length);
-          for (let i = 0; i < len; i++) {
-            const na = va[i] || 0;
-            const nb = vb[i] || 0;
-            if (na > nb) return 1;
-            if (na < nb) return -1;
-          }
-          return 0;
-        },
-        fetchLatestVersion: () => {
-          return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "GET",
-              url: "https://api.github.com/repos/Smith-106/LD-Notion/releases/latest",
-              headers: {
-                "Accept": "application/vnd.github+json",
-                "User-Agent": "LD-Notion-UserScript"
-              },
-              timeout: 15e3,
-              onload: (response) => {
-                if (response.status !== 200) {
-                  reject(new Error(`\u66F4\u65B0\u68C0\u67E5\u5931\u8D25: HTTP ${response.status}`));
-                  return;
-                }
-                try {
-                  const data = JSON.parse(response.responseText || "{}");
-                  const version = String(data.tag_name || data.name || "").replace(/^v/i, "").trim();
-                  if (!version) {
-                    reject(new Error("\u672A\u83B7\u53D6\u5230\u7248\u672C\u53F7"));
-                    return;
-                  }
-                  resolve(version);
-                } catch {
-                  reject(new Error("\u89E3\u6790\u66F4\u65B0\u4FE1\u606F\u5931\u8D25"));
-                }
-              },
-              ontimeout: () => reject(new Error("\u66F4\u65B0\u68C0\u67E5\u8D85\u65F6")),
-              onerror: () => reject(new Error("\u7F51\u7EDC\u9519\u8BEF\uFF0C\u65E0\u6CD5\u68C0\u67E5\u66F4\u65B0"))
-            });
-          });
-        },
-        saveResult: (result) => {
-          const checkedAt = Date.now();
-          Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, checkedAt);
-          Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_RESULT, JSON.stringify({ ...result, checkedAt }));
-          if (result.latestVersion) {
-            Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_SEEN_VERSION, result.latestVersion);
-          }
-        },
-        updateStatusText: (text) => {
-          const UI2 = _resolveUI();
-          const el = UI2 && UI2.refs && UI2.refs.updateCheckStatus || document.querySelector("#ldb-update-check-status");
-          if (el) el.textContent = text;
-        },
-        renderLastStatus: () => {
-          const raw = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_RESULT, "");
-          if (!raw) {
-            UpdateChecker2.updateStatusText("\u5C1A\u672A\u68C0\u67E5\u66F4\u65B0");
-            return;
-          }
-          try {
-            const result = JSON.parse(raw);
-            const checkedAtText = result.checkedAt ? new Date(result.checkedAt).toLocaleString("zh-CN") : "\u672A\u77E5\u65F6\u95F4";
-            const latestText = result.latestVersion ? `\uFF0C\u6700\u65B0 v${result.latestVersion}` : "";
-            if (result.status === "update-available") {
-              UpdateChecker2.updateStatusText(`\u53D1\u73B0\u65B0\u7248\u672C\uFF08\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}${latestText}\uFF09`);
-            } else if (result.status === "up-to-date") {
-              UpdateChecker2.updateStatusText(`\u5DF2\u662F\u6700\u65B0\uFF08\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}${latestText}\uFF09`);
-            } else if (result.status === "error") {
-              UpdateChecker2.updateStatusText(`\u4E0A\u6B21\u68C0\u67E5\u5931\u8D25\uFF1A${result.message || "\u672A\u77E5\u9519\u8BEF"}`);
-            } else {
-              UpdateChecker2.updateStatusText(`\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}`);
-            }
-          } catch {
-            UpdateChecker2.updateStatusText("\u66F4\u65B0\u72B6\u6001\u8BFB\u53D6\u5931\u8D25");
-          }
-        },
-        check: async ({ manual = false } = {}) => {
-          if (UpdateChecker2.isChecking) return;
-          UpdateChecker2.isChecking = true;
-          const UI2 = _resolveUI();
-          if (manual && UI2) {
-            UI2.showStatus("\u6B63\u5728\u68C0\u67E5\u66F4\u65B0...", "info");
-          }
-          try {
-            const currentVersion = UpdateChecker2.getCurrentVersion();
-            const latestVersion = await UpdateChecker2.fetchLatestVersion();
-            const cmp = UpdateChecker2.compareVersions(latestVersion, currentVersion);
-            if (cmp > 0) {
-              const message = `\u53D1\u73B0\u65B0\u7248\u672C v${latestVersion}\uFF08\u5F53\u524D v${currentVersion}\uFF09\u3002\u811A\u672C\u53EF\u76F4\u63A5\u66F4\u65B0\uFF1BZIP/\u89E3\u538B\u6269\u5C55\u9700\u624B\u52A8\u91CD\u65B0\u5B89\u88C5\u6216\u5728\u6269\u5C55\u9875\u91CD\u65B0\u52A0\u8F7D\u3002`;
-              UpdateChecker2.saveResult({
-                status: "update-available",
-                latestVersion,
-                currentVersion,
-                message
-              });
-              UpdateChecker2.renderLastStatus();
-              if (manual && UI2) UI2.showStatus(message, "info");
-            } else {
-              const message = `\u5F53\u524D\u5DF2\u662F\u6700\u65B0\u7248\u672C v${currentVersion}`;
-              UpdateChecker2.saveResult({
-                status: "up-to-date",
-                latestVersion,
-                currentVersion,
-                message
-              });
-              UpdateChecker2.renderLastStatus();
-              if (manual && UI2) UI2.showStatus(message, "success");
-            }
-          } catch (error) {
-            const message = (error == null ? void 0 : error.message) || "\u66F4\u65B0\u68C0\u67E5\u5931\u8D25";
-            UpdateChecker2.saveResult({ status: "error", message });
-            UpdateChecker2.renderLastStatus();
-            if (manual && UI2) UI2.showStatus(message, "error");
-          } finally {
-            UpdateChecker2.isChecking = false;
-          }
-        },
-        startPolling: (hours) => {
-          UpdateChecker2.stopPolling();
-          const intervalHours = parseInt(hours, 10) || 0;
-          if (intervalHours > 0) {
-            UpdateChecker2.timerId = setInterval(() => {
-              Utils2.runWhenBrowserIdle(() => UpdateChecker2.check({ manual: false }));
-            }, intervalHours * 60 * 60 * 1e3);
-          }
-        },
-        stopPolling: () => {
-          if (UpdateChecker2.timerId) {
-            clearInterval(UpdateChecker2.timerId);
-            UpdateChecker2.timerId = null;
-          }
-        },
-        init: () => {
-          const enabled = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG2.DEFAULTS.updateAutoCheckEnabled);
-          const intervalHours = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG2.DEFAULTS.updateCheckIntervalHours);
-          UpdateChecker2.stopPolling();
-          UpdateChecker2.renderLastStatus();
-          if (enabled) {
-            if (UpdateChecker2.shouldCheckNow(intervalHours)) {
-              Utils2.runWhenBrowserIdle(() => UpdateChecker2.check({ manual: false }));
-            }
-            UpdateChecker2.startPolling(intervalHours);
-          }
-        }
-      };
-      module.exports = { UpdateChecker: UpdateChecker2 };
-    }
-  });
-
-  // src/import/GitHubAPI.js
-  var require_GitHubAPI = __commonJS({
-    "src/import/GitHubAPI.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var GitHubAPI2 = {
-        _readmeCache: {},
-        _fetchPaginated: (url, token = "", label = "GitHub", options = {}) => {
-          return new Promise((resolve, reject) => {
-            const allItems = [];
-            let page = 1;
-            const perPage = 100;
-            const fetchPage = () => {
-              const separator = url.includes("?") ? "&" : "?";
-              const pagedUrl = `${url}${separator}per_page=${perPage}&page=${page}`;
-              const headers = {
-                "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "LD-Notion-UserScript"
-              };
-              if (token) headers["Authorization"] = `Bearer ${token}`;
-              if (options.headers && typeof options.headers === "object") {
-                Object.assign(headers, options.headers);
-              }
-              GM_xmlhttpRequest({
-                method: "GET",
-                url: pagedUrl,
-                headers,
-                onload: (response) => {
-                  if (response.status === 200) {
-                    try {
-                      const items = JSON.parse(response.responseText);
-                      if (items.length === 0) return resolve(allItems);
-                      allItems.push(...items);
-                      if (items.length < perPage) return resolve(allItems);
-                      page++;
-                      setTimeout(fetchPage, 300);
-                    } catch (e) {
-                      reject(new Error(`\u89E3\u6790 ${label} \u54CD\u5E94\u5931\u8D25`));
-                    }
-                  } else if (response.status === 403) {
-                    reject(new Error(`${label} API \u901F\u7387\u9650\u5236\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u6216\u914D\u7F6E Token`));
-                  } else if (response.status === 404) {
-                    reject(new Error(`${label} \u8D44\u6E90\u4E0D\u5B58\u5728`));
-                  } else {
-                    reject(new Error(`${label} API \u9519\u8BEF: ${response.status}`));
-                  }
-                },
-                onerror: () => reject(new Error(`\u7F51\u7EDC\u9519\u8BEF\uFF0C\u65E0\u6CD5\u8FDE\u63A5 ${label}`)),
-                timeout: 3e4,
-                ontimeout: () => reject(new Error("GitHub API \u8BF7\u6C42\u8D85\u65F6"))
-              });
-            };
-            fetchPage();
-          });
-        },
-        // 获取用户 starred repos（带分页）
-        fetchStarredRepos: async (username, token = "") => {
-          const url = token ? `https://api.github.com/user/starred?sort=created&direction=desc` : `https://api.github.com/users/${encodeURIComponent(username)}/starred?sort=created&direction=desc`;
-          const items = await GitHubAPI2._fetchPaginated(url, token, "GitHub Stars", {
-            headers: {
-              "Accept": "application/vnd.github.star+json, application/vnd.github+json"
-            }
-          });
-          return items.map((item) => {
-            if ((item == null ? void 0 : item.repo) && (item == null ? void 0 : item.starred_at)) {
-              return {
-                ...item.repo,
-                starred_at: item.starred_at
-              };
-            }
-            return item;
-          });
-        },
-        // 获取用户自己的仓库
-        fetchUserRepos: (username, token = "") => {
-          const url = token ? `https://api.github.com/user/repos?type=owner&sort=updated` : `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated`;
-          return GitHubAPI2._fetchPaginated(url, token, "GitHub Repos");
-        },
-        // 获取用户 fork 的仓库
-        fetchForkedRepos: async (username, token = "") => {
-          const allRepos = await GitHubAPI2.fetchUserRepos(username, token);
-          return allRepos.filter((r) => r.fork);
-        },
-        // 获取用户的 Gists
-        fetchUserGists: (username, token = "") => {
-          const url = token ? `https://api.github.com/gists` : `https://api.github.com/users/${encodeURIComponent(username)}/gists`;
-          return GitHubAPI2._fetchPaginated(url, token, "GitHub Gists");
-        },
-        // 获取已导出的 repo 集合
-        getExported: () => {
-          try {
-            return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}"));
-          } catch {
-            return {};
-          }
-        },
-        // 获取已导出的 gist 集合
-        getExportedGists: () => {
-          try {
-            return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}"));
-          } catch {
-            return {};
-          }
-        },
-        markExported: (repoFullName) => {
-          const exported = GitHubAPI2.getExported();
-          exported[repoFullName] = Date.now();
-          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(exported));
-        },
-        markGistExported: (gistId) => {
-          const exported = GitHubAPI2.getExportedGists();
-          exported[gistId] = Date.now();
-          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(exported));
-        },
-        isExported: (repoFullName) => {
-          return !!GitHubAPI2.getExported()[repoFullName];
-        },
-        isGistExported: (gistId) => {
-          return !!GitHubAPI2.getExportedGists()[gistId];
-        },
-        // 获取启用的导入类型
-        getImportTypes: () => {
-          try {
-            return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_IMPORT_TYPES, CONFIG2.DEFAULTS.githubImportTypes));
-          } catch {
-            return ["stars"];
-          }
-        },
-        setImportTypes: (types) => {
-          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_IMPORT_TYPES, JSON.stringify(types));
-        },
-        fetchRepoReadme: (repoFullName, token = "") => {
-          if (!repoFullName) return Promise.resolve("");
-          const cacheKey = `${repoFullName}::${token ? "auth" : "anon"}`;
-          if (Object.prototype.hasOwnProperty.call(GitHubAPI2._readmeCache, cacheKey)) {
-            return Promise.resolve(GitHubAPI2._readmeCache[cacheKey]);
-          }
-          return new Promise((resolve, reject) => {
-            const headers = {
-              "Accept": "application/vnd.github.v3+json",
-              "User-Agent": "LD-Notion-UserScript"
-            };
-            if (token) headers["Authorization"] = `Bearer ${token}`;
-            GM_xmlhttpRequest({
-              method: "GET",
-              url: `https://api.github.com/repos/${repoFullName}/readme`,
-              headers,
-              onload: (response) => {
-                if (response.status === 200) {
-                  try {
-                    const data = JSON.parse(response.responseText || "{}");
-                    const decoded = Utils2.base64DecodeUnicode(data.content || "");
-                    const text = String(decoded || "").replace(/\r\n/g, "\n");
-                    GitHubAPI2._readmeCache[cacheKey] = text;
-                    resolve(text);
-                    return;
-                  } catch {
-                    GitHubAPI2._readmeCache[cacheKey] = "";
-                    resolve("");
-                    return;
-                  }
-                }
-                GitHubAPI2._readmeCache[cacheKey] = "";
-                resolve("");
-              },
-              onerror: () => {
-                GitHubAPI2._readmeCache[cacheKey] = "";
-                resolve("");
-              },
-              timeout: 15e3,
-              ontimeout: () => {
-                GitHubAPI2._readmeCache[cacheKey] = "";
-                resolve("");
-              }
-            });
-          });
-        }
-      };
-      module.exports = { GitHubAPI: GitHubAPI2 };
-    }
-  });
-
-  // src/import/GitHubExporter.js
-  var require_GitHubExporter = __commonJS({
-    "src/import/GitHubExporter.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var { NotionAPI: NotionAPI2 } = require_api();
-      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
-      var { AIService: AIService2 } = require_ai();
-      var GitHubExporter2 = {
-        normalizeText: (text, maxLen = 280) => {
-          if (!text) return "";
-          const normalized = String(text).replace(/\s+/g, " ").trim();
-          return normalized.substring(0, maxLen);
-        },
-        composeTitleWithPrefix: (prefix, candidate, maxLen = 180) => {
-          const safePrefix = GitHubExporter2.normalizeText(prefix, maxLen);
-          const safeCandidate = GitHubExporter2.normalizeText(candidate, maxLen);
-          if (!safePrefix) return safeCandidate || "\u65E0\u6807\u9898";
-          if (!safeCandidate || safeCandidate === safePrefix) return safePrefix;
-          if (safeCandidate.startsWith(`${safePrefix} - `) || safeCandidate.startsWith(`${safePrefix} \xB7 `)) {
-            return safeCandidate.substring(0, maxLen);
-          }
-          return `${safePrefix} \xB7 ${safeCandidate}`.substring(0, maxLen);
-        },
-        extractReadmeInsight: (readmeText = "") => {
-          const text = String(readmeText || "").replace(/\r\n/g, "\n");
-          if (!text) return { title: "", summary: "" };
-          const headingMatch = text.match(/^#{1,3}\s+(.+)$/m);
-          const title = GitHubExporter2.normalizeText((headingMatch == null ? void 0 : headingMatch[1]) || "", 120);
-          const lines = text.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#") && !line.startsWith("```"));
-          const summary = GitHubExporter2.normalizeText(lines.slice(0, 8).join(" "), 320);
-          return { title, summary };
-        },
-        inferRepoCategoryHeuristic: (repo, insight, categories = []) => {
-          const available = (categories || []).map((c) => String(c || "").trim()).filter(Boolean);
-          if (available.length === 0) return "";
-          const text = `${repo.full_name || ""} ${repo.name || ""} ${repo.description || ""} ${(repo.topics || []).join(" ")} ${repo.language || ""} ${insight.title || ""} ${insight.summary || ""}`.toLowerCase();
-          for (const cat of available) {
-            if (text.includes(cat.toLowerCase())) return cat;
-          }
-          const rules = [
-            { keys: ["llm", "openai", "anthropic", "prompt", "rag", "ai", "agent"], hints: ["ai", "\u4EBA\u5DE5\u667A\u80FD"] },
-            { keys: ["react", "vue", "next", "svelte", "frontend", "ui", "css", "tailwind"], hints: ["\u524D\u7AEF", "ui"] },
-            { keys: ["node", "express", "fastapi", "backend", "server", "api", "spring"], hints: ["\u540E\u7AEF", "\u670D\u52A1\u7AEF", "api"] },
-            { keys: ["devops", "docker", "kubernetes", "k8s", "terraform", "ci", "cd"], hints: ["\u8FD0\u7EF4", "devops"] },
-            { keys: ["docs", "guide", "tutorial", "awesome", "resource", "\u5B66\u4E60", "\u6559\u7A0B"], hints: ["\u6587\u6863", "\u8D44\u6E90", "\u5B66\u4E60"] }
-          ];
-          for (const rule of rules) {
-            if (!rule.keys.some((k) => text.includes(k))) continue;
-            const matched = available.find((cat) => rule.hints.some((h) => cat.toLowerCase().includes(h.toLowerCase())));
-            if (matched) return matched;
-          }
-          const fallback = available.find((cat) => cat.includes("\u5176\u4ED6"));
-          return fallback || available[available.length - 1];
-        },
-        inferRepoTags: (repo, insight) => {
-          const tags = [];
-          const pushTag = (value) => {
-            const clean = GitHubExporter2.normalizeText(value, 80);
-            if (!clean) return;
-            if (tags.includes(clean)) return;
-            tags.push(clean);
-          };
-          (repo.topics || []).forEach(pushTag);
-          pushTag(repo.language || "");
-          const owner = String(repo.full_name || "").split("/")[0] || "";
-          pushTag(owner);
-          const lowerText = `${insight.title || ""} ${insight.summary || ""}`.toLowerCase();
-          const keywordTags = ["ai", "llm", "rag", "agent", "react", "vue", "nextjs", "nodejs", "python", "rust", "go", "docker", "kubernetes", "notion", "github", "automation"];
-          keywordTags.forEach((kw) => {
-            if (lowerText.includes(kw)) pushTag(kw);
-          });
-          return tags.slice(0, 20);
-        },
-        generateAIRepoCategory: async (repo, insight, settings) => {
-          const categories = Array.isArray(settings == null ? void 0 : settings.categories) ? settings.categories.filter(Boolean) : [];
-          if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService) || categories.length === 0) return "";
-          try {
-            return await AIService2.classify(
-              `${repo.full_name || repo.name || ""} ${insight.title || ""}`,
-              `${repo.description || ""}
-${insight.summary || ""}`,
-              categories,
-              settings
-            );
-          } catch {
-            return "";
-          }
-        },
-        enrichRepo: async (repo, settings, context = {}) => {
-          const enriched = { ...repo };
-          const prefix = GitHubExporter2.normalizeText(repo.full_name || repo.name || "", 120) || "\u65E0\u6807\u9898";
-          let insight = { title: "", summary: "" };
-          try {
-            const readme = await GitHubAPI2.fetchRepoReadme(repo.full_name, (settings == null ? void 0 : settings.token) || "");
-            insight = GitHubExporter2.extractReadmeInsight(readme);
-          } catch {
-            insight = { title: "", summary: "" };
-          }
-          const defaultSuffix = insight.title || GitHubExporter2.normalizeText(repo.description || "", 80);
-          enriched.generatedTitle = GitHubExporter2.composeTitleWithPrefix(prefix, defaultSuffix, 180);
-          let inferredCategory = GitHubExporter2.inferRepoCategoryHeuristic(repo, insight, (settings == null ? void 0 : settings.categories) || []);
-          const canUseAI = !!((settings == null ? void 0 : settings.aiApiKey) && (settings == null ? void 0 : settings.aiService));
-          const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
-          if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
-            const aiCategory = await GitHubExporter2.generateAIRepoCategory(repo, insight, settings);
-            if (aiCategory) inferredCategory = aiCategory;
-            context.aiUsedCount = (context.aiUsedCount || 0) + 1;
-          }
-          enriched.inferredCategory = inferredCategory;
-          enriched.inferredTags = GitHubExporter2.inferRepoTags(repo, insight);
-          enriched.readmeSummary = GitHubExporter2.normalizeText(insight.summary || "", 1e3);
-          return enriched;
-        },
-        // 构建 Notion 数据库属性 (repos/stars/forks)
-        buildRepoProperties: (repo, sourceType = "Star") => {
-          const titlePrefix = GitHubExporter2.normalizeText(repo.full_name || repo.name || "\u65E0\u6807\u9898", 120) || "\u65E0\u6807\u9898";
-          const titleContent = GitHubExporter2.composeTitleWithPrefix(titlePrefix, repo.generatedTitle || "", 2e3);
-          const summaryText = GitHubExporter2.normalizeText(repo.readmeSummary || "", 1600);
-          const descCandidate = GitHubExporter2.normalizeText(repo.description || "", 1200);
-          const description = [descCandidate, summaryText].filter(Boolean).join("\n\n").substring(0, 2e3);
-          const props = {
-            "\u6807\u9898": {
-              title: [{ text: { content: titleContent } }]
-            },
-            "\u94FE\u63A5": {
-              url: repo.html_url
-            },
-            "\u63CF\u8FF0": {
-              rich_text: [{ text: { content: description } }]
-            },
-            "\u8BED\u8A00": {
-              rich_text: [{ text: { content: repo.language || "" } }]
-            },
-            "Stars": {
-              number: repo.stargazers_count || 0
-            },
-            "\u6765\u6E90": {
-              rich_text: [{ text: { content: "GitHub" } }]
-            },
-            "\u6765\u6E90\u7C7B\u578B": {
-              rich_text: [{ text: { content: sourceType } }]
-            }
-          };
-          const topicTags = Array.isArray(repo.topics) ? repo.topics.slice(0, 20) : [];
-          const inferredTags = Array.isArray(repo.inferredTags) ? repo.inferredTags : [];
-          const mergedTags = [];
-          [...topicTags, ...inferredTags].forEach((tag) => {
-            const clean = GitHubExporter2.normalizeText(tag, 100);
-            if (!clean) return;
-            if (mergedTags.includes(clean)) return;
-            mergedTags.push(clean);
-          });
-          if (mergedTags.length > 0) {
-            props["\u6807\u7B7E"] = {
-              multi_select: mergedTags.slice(0, 20).map((t) => ({ name: t }))
-            };
-          }
-          if (repo.inferredCategory) {
-            props["\u5206\u7C7B"] = {
-              rich_text: [{ text: { content: GitHubExporter2.normalizeText(repo.inferredCategory, 300) } }]
-            };
-          }
-          if (repo.pushed_at) {
-            props["\u66F4\u65B0\u65F6\u95F4"] = { date: { start: repo.pushed_at } };
-          }
-          return props;
-        },
-        // 构建 Gist 属性
-        buildGistProperties: (gist) => {
-          var _a, _b;
-          const files = Object.keys(gist.files || {});
-          const title = gist.description || files[0] || "\u65E0\u6807\u9898 Gist";
-          const language = ((_b = (_a = gist.files) == null ? void 0 : _a[files[0]]) == null ? void 0 : _b.language) || "";
-          return {
-            "\u6807\u9898": {
-              title: [{ text: { content: title.substring(0, 2e3) } }]
-            },
-            "\u94FE\u63A5": {
-              url: gist.html_url
-            },
-            "\u63CF\u8FF0": {
-              rich_text: [{ text: { content: `\u6587\u4EF6: ${files.join(", ")}`.substring(0, 2e3) } }]
-            },
-            "\u8BED\u8A00": {
-              rich_text: [{ text: { content: language } }]
-            },
-            "Stars": {
-              number: 0
-            },
-            "\u6765\u6E90": {
-              rich_text: [{ text: { content: "GitHub" } }]
-            },
-            "\u6765\u6E90\u7C7B\u578B": {
-              rich_text: [{ text: { content: "Gist" } }]
-            },
-            "\u66F4\u65B0\u65F6\u95F4": gist.updated_at ? { date: { start: gist.updated_at } } : void 0
-          };
-        },
-        // 向后兼容：原 buildProperties 映射到 buildRepoProperties
-        buildProperties: (repo) => GitHubExporter2.buildRepoProperties(repo, "Star"),
-        // 配置数据库属性结构
-        setupDatabaseProperties: async (databaseId, apiKey) => {
-          const requiredProperties = {
-            "\u6807\u9898": { typeName: "title", schema: { title: {} } },
-            "\u94FE\u63A5": { typeName: "url", schema: { url: {} } },
-            "\u63CF\u8FF0": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u8BED\u8A00": { typeName: "rich_text", schema: { rich_text: {} } },
-            "Stars": { typeName: "number", schema: { number: { format: "number" } } },
-            "\u6807\u7B7E": { typeName: "multi_select", schema: { multi_select: { options: [] } } },
-            "\u6765\u6E90": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u6765\u6E90\u7C7B\u578B": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u66F4\u65B0\u65F6\u95F4": { typeName: "date", schema: { date: {} } },
-            "\u5206\u7C7B": { typeName: "rich_text", schema: { rich_text: {} } }
-          };
-          try {
-            const database = await NotionAPI2.request("GET", `/databases/${databaseId}`, null, apiKey);
-            const existingProps = database.properties || {};
-            const propsToAdd = {};
-            const propsToUpdate = {};
-            const typeConflicts = [];
-            for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
-              const existingProp = existingProps[name];
-              if (!existingProp) {
-                if (typeName === "title") {
-                  const existingTitle = Object.entries(existingProps).find(([_, prop]) => prop.type === "title");
-                  if (existingTitle && existingTitle[0] !== name) {
-                    propsToUpdate[existingTitle[0]] = { name };
-                  }
-                } else {
-                  propsToAdd[name] = schema;
-                }
-              } else if (existingProp.type !== typeName) {
-                typeConflicts.push({ name, expected: typeName, actual: existingProp.type });
-              }
-            }
-            if (typeConflicts.length > 0) {
-              const details = typeConflicts.map((c) => `"${c.name}": \u671F\u671B ${c.expected}\uFF0C\u5B9E\u9645 ${c.actual}`).join("; ");
-              return { success: false, error: `\u5C5E\u6027\u7C7B\u578B\u4E0D\u5339\u914D: ${details}\u3002\u8BF7\u624B\u52A8\u4FEE\u6539\u8FD9\u4E9B\u5C5E\u6027\u7684\u7C7B\u578B\u3002` };
-            }
-            const allChanges = { ...propsToAdd, ...propsToUpdate };
-            if (Object.keys(allChanges).length > 0) {
-              await NotionAPI2.request("PATCH", `/databases/${databaseId}`, {
-                properties: allChanges
-              }, apiKey);
-            }
-            return { success: true, added: Object.keys(propsToAdd), renamed: Object.keys(propsToUpdate) };
-          } catch (error) {
-            return { success: false, error: error.message };
-          }
-        },
-        // 通用导出方法
-        _exportItems: async (items, settings, sourceType, buildFn, isExportedFn, markExportedFn, getKeyFn, onProgress) => {
-          const { apiKey, databaseId } = settings;
-          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-          const newItems = items.filter((item) => !isExportedFn(getKeyFn(item)));
-          if (newItems.length === 0) {
-            return { total: items.length, exported: 0, failed: 0, message: `\u6CA1\u6709\u65B0\u7684 ${sourceType} \u9700\u8981\u5BFC\u51FA` };
-          }
-          let success = 0, failed = 0;
-          const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-          for (let i = 0; i < newItems.length; i++) {
-            const item = newItems[i];
-            const key = getKeyFn(item);
-            const pct = Math.round(10 + i / newItems.length * 85);
-            if (onProgress) onProgress(`\u6B63\u5728\u5BFC\u51FA ${sourceType} (${i + 1}/${newItems.length}): ${key}`, pct);
-            try {
-              const enriched = sourceType === "Gist" ? item : await GitHubExporter2.enrichRepo(item, settings, enrichContext);
-              const properties = buildFn(enriched);
-              for (const k of Object.keys(properties)) {
-                if (properties[k] === void 0) delete properties[k];
-              }
-              await NotionAPI2.request("POST", "/pages", {
-                parent: { database_id: databaseId },
-                properties
-              }, apiKey);
-              markExportedFn(key);
-              success++;
-            } catch (e) {
-              console.warn(`[GitHubExporter] \u5BFC\u51FA\u5931\u8D25: ${key}`, e);
-              failed++;
-            }
-            if (i < newItems.length - 1) {
-              await new Promise((r) => setTimeout(r, delay));
-            }
-          }
-          return { total: items.length, exported: success, failed, newCount: newItems.length };
-        },
-        // 导出 stars 到 Notion
-        exportStars: async (settings, onProgress) => {
-          const { apiKey, databaseId, username, token } = settings;
-          if (!apiKey || !databaseId || !username) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
-          if (!setupResult.success) {
-            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Stars...", 5);
-          const repos = await GitHubAPI2.fetchStarredRepos(username, token);
-          return GitHubExporter2._exportItems(
-            repos,
-            settings,
-            "Star",
-            (r) => GitHubExporter2.buildRepoProperties(r, "Star"),
-            GitHubAPI2.isExported,
-            GitHubAPI2.markExported,
-            (r) => r.full_name,
-            onProgress
-          );
-        },
-        // 导出用户仓库到 Notion
-        exportRepos: async (settings, onProgress) => {
-          const { apiKey, databaseId, username, token } = settings;
-          if (!apiKey || !databaseId || !username) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
-          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Repos...", 5);
-          const repos = await GitHubAPI2.fetchUserRepos(username, token);
-          const ownRepos = repos.filter((r) => !r.fork);
-          return GitHubExporter2._exportItems(
-            ownRepos,
-            settings,
-            "Repo",
-            (r) => GitHubExporter2.buildRepoProperties(r, "Repo"),
-            GitHubAPI2.isExported,
-            GitHubAPI2.markExported,
-            (r) => r.full_name,
-            onProgress
-          );
-        },
-        // 导出 fork 的仓库到 Notion
-        exportForks: async (settings, onProgress) => {
-          const { apiKey, databaseId, username, token } = settings;
-          if (!apiKey || !databaseId || !username) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
-          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Forks...", 5);
-          const forks = await GitHubAPI2.fetchForkedRepos(username, token);
-          return GitHubExporter2._exportItems(
-            forks,
-            settings,
-            "Fork",
-            (r) => GitHubExporter2.buildRepoProperties(r, "Fork"),
-            GitHubAPI2.isExported,
-            GitHubAPI2.markExported,
-            (r) => r.full_name,
-            onProgress
-          );
-        },
-        // 导出 Gists 到 Notion
-        exportGists: async (settings, onProgress) => {
-          const { apiKey, databaseId, username, token } = settings;
-          if (!apiKey || !databaseId || !username) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
-          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Gists...", 5);
-          const gists = await GitHubAPI2.fetchUserGists(username, token);
-          return GitHubExporter2._exportItems(
-            gists,
-            settings,
-            "Gist",
-            GitHubExporter2.buildGistProperties,
-            GitHubAPI2.isGistExported,
-            GitHubAPI2.markGistExported,
-            (g) => g.id,
-            onProgress
-          );
-        },
-        // 按用户选择的类型批量导出
-        exportAll: async (settings, onProgress) => {
-          const types = GitHubAPI2.getImportTypes();
-          const results = {};
-          const totalTypes = types.length;
-          let typeIndex = 0;
-          for (const type of types) {
-            const typeProgress = (msg, pct) => {
-              const overallPct = Math.round(typeIndex / totalTypes * 100 + pct / totalTypes);
-              if (onProgress) onProgress(`[${type}] ${msg}`, overallPct);
-            };
-            try {
-              switch (type) {
-                case "stars":
-                  results.stars = await GitHubExporter2.exportStars(settings, typeProgress);
-                  break;
-                case "repos":
-                  results.repos = await GitHubExporter2.exportRepos(settings, typeProgress);
-                  break;
-                case "forks":
-                  results.forks = await GitHubExporter2.exportForks(settings, typeProgress);
-                  break;
-                case "gists":
-                  results.gists = await GitHubExporter2.exportGists(settings, typeProgress);
-                  break;
-              }
-            } catch (e) {
-              results[type] = { error: e.message };
-            }
-            typeIndex++;
-          }
-          return results;
-        },
-        // AI 分类已导出的 GitHub repos
-        classifyRepos: async (settings, onProgress) => {
-          var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
-          const { apiKey, databaseId, aiApiKey, aiService, aiModel, aiBaseUrl, categories } = settings;
-          if (!apiKey || !databaseId) throw new Error("\u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93");
-          if (!aiApiKey) throw new Error("\u8BF7\u5148\u914D\u7F6E AI API Key");
-          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6\u5F85\u5206\u7C7B\u7684\u4ED3\u5E93...", 0);
-          const response = await NotionAPI2.request("POST", `/databases/${databaseId}/query`, {
-            filter: {
-              or: [
-                { property: "\u5206\u7C7B", rich_text: { is_empty: true } },
-                { property: "\u5206\u7C7B", rich_text: { equals: "" } }
-              ]
-            },
-            page_size: 100
-          }, apiKey);
-          const pages = response.results || [];
-          if (pages.length === 0) {
-            return { classified: 0, message: "\u6CA1\u6709\u5F85\u5206\u7C7B\u7684\u4ED3\u5E93" };
-          }
-          let classified = 0;
-          for (let i = 0; i < pages.length; i++) {
-            const page = pages[i];
-            const pct = Math.round(i / pages.length * 100);
-            const title = ((_e = (_d = (_c = (_b = (_a = page.properties) == null ? void 0 : _a["\u6807\u9898"]) == null ? void 0 : _b.title) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) || "";
-            const desc = ((_j = (_i = (_h = (_g = (_f = page.properties) == null ? void 0 : _f["\u63CF\u8FF0"]) == null ? void 0 : _g.rich_text) == null ? void 0 : _h[0]) == null ? void 0 : _i.text) == null ? void 0 : _j.content) || "";
-            const lang = ((_o = (_n = (_m = (_l = (_k = page.properties) == null ? void 0 : _k["\u8BED\u8A00"]) == null ? void 0 : _l.rich_text) == null ? void 0 : _m[0]) == null ? void 0 : _n.text) == null ? void 0 : _o.content) || "";
-            const tags = (((_q = (_p = page.properties) == null ? void 0 : _p["\u6807\u7B7E"]) == null ? void 0 : _q.multi_select) || []).map((t) => t.name).join(", ");
-            if (onProgress) onProgress(`\u6B63\u5728\u5206\u7C7B (${i + 1}/${pages.length}): ${title}`, pct);
-            try {
-              const prompt2 = `\u8BF7\u6839\u636E\u4EE5\u4E0B GitHub \u4ED3\u5E93\u4FE1\u606F\uFF0C\u4ECE\u8FD9\u4E9B\u5206\u7C7B\u4E2D\u9009\u62E9\u6700\u5408\u9002\u7684\u4E00\u4E2A: [${categories.join(", ")}]
-
-\u4ED3\u5E93\u540D: ${title}
-\u63CF\u8FF0: ${desc}
-\u8BED\u8A00: ${lang}
-\u6807\u7B7E: ${tags}
-
-\u53EA\u56DE\u590D\u5206\u7C7B\u540D\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\u3002`;
-              const category = await AIService2.request(prompt2, {
-                aiService,
-                aiApiKey,
-                aiModel,
-                aiBaseUrl
-              });
-              const matched = categories.find((c) => category.trim().includes(c)) || category.trim();
-              await NotionAPI2.request("PATCH", `/pages/${page.id}`, {
-                properties: {
-                  "\u5206\u7C7B": { rich_text: [{ text: { content: matched } }] }
-                }
-              }, apiKey);
-              classified++;
-            } catch (e) {
-              console.warn(`[GitHubExporter] \u5206\u7C7B\u5931\u8D25: ${title}`, e);
-            }
-            await new Promise((r) => setTimeout(r, 500));
-          }
-          return { classified, total: pages.length };
-        }
-      };
-      module.exports = { GitHubExporter: GitHubExporter2 };
-    }
-  });
-
-  // src/import/GitHubAutoImporter.js
-  var require_GitHubAutoImporter = __commonJS({
-    "src/import/GitHubAutoImporter.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
-      var { NotionAPI: NotionAPI2 } = require_api();
-      var _resolveUI = () => {
-        try {
-          return require_ui().UI;
-        } catch {
-          return void 0;
-        }
-      };
-      var GitHubAutoImporter2 = {
-        isRunning: false,
-        timerId: null,
-        deferredWhileHidden: false,
-        visibilityListenerBound: false,
-        lastRunAt: 0,
-        minimumRunGapMs: 60 * 1e3,
-        canStart: () => {
-          if (!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return false;
-          const username = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
-          const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
-          if (!username && !token) return false;
-          const apiKey = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "");
-          const databaseId = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "");
-          return !!(apiKey && databaseId);
-        },
-        updateStatus: (text) => {
-          const UI2 = _resolveUI();
-          if (!UI2) return;
-          const el = UI2.refs && UI2.refs.autoImportStatus || document.querySelector("#ldb-auto-import-status");
-          if (el) el.textContent = text;
-        },
-        buildSettings: () => {
-          return {
-            apiKey: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, ""),
-            databaseId: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
-            username: Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, ""),
-            token: Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "")
-          };
-        },
-        getTypeMeta: (type) => {
-          const metaMap = {
-            stars: {
-              label: "Stars",
-              getTime: (item) => (item == null ? void 0 : item.starred_at) || (item == null ? void 0 : item.created_at) || (item == null ? void 0 : item.updated_at) || "",
-              getId: (item) => String((item == null ? void 0 : item.full_name) || (item == null ? void 0 : item.name) || "")
-            },
-            repos: {
-              label: "Repos",
-              getTime: (item) => (item == null ? void 0 : item.pushed_at) || (item == null ? void 0 : item.updated_at) || (item == null ? void 0 : item.created_at) || "",
-              getId: (item) => String((item == null ? void 0 : item.full_name) || (item == null ? void 0 : item.name) || "")
-            },
-            forks: {
-              label: "Forks",
-              getTime: (item) => (item == null ? void 0 : item.pushed_at) || (item == null ? void 0 : item.updated_at) || (item == null ? void 0 : item.created_at) || "",
-              getId: (item) => String((item == null ? void 0 : item.full_name) || (item == null ? void 0 : item.name) || "")
-            },
-            gists: {
-              label: "Gists",
-              getTime: (item) => (item == null ? void 0 : item.updated_at) || (item == null ? void 0 : item.created_at) || "",
-              getId: (item) => String((item == null ? void 0 : item.id) || "")
-            }
-          };
-          return metaMap[type] || metaMap.stars;
-        },
-        fetchTypeItems: async (type, settings) => {
-          if (type === "stars") {
-            return await GitHubAPI2.fetchStarredRepos(settings.username, settings.token);
-          }
-          if (type === "repos") {
-            const repos = await GitHubAPI2.fetchUserRepos(settings.username, settings.token);
-            return repos.filter((repo) => !repo.fork);
-          }
-          if (type === "forks") {
-            return await GitHubAPI2.fetchForkedRepos(settings.username, settings.token);
-          }
-          if (type === "gists") {
-            return await GitHubAPI2.fetchUserGists(settings.username, settings.token);
-          }
-          return [];
-        },
-        ensureVisibilityListener: () => {
-          if (GitHubAutoImporter2.visibilityListenerBound) return;
-          document.addEventListener("visibilitychange", () => {
-            if (!document.hidden && GitHubAutoImporter2.deferredWhileHidden) {
-              GitHubAutoImporter2.deferredWhileHidden = false;
-              Utils2.runWhenBrowserIdle(() => GitHubAutoImporter2.run());
-            }
-          });
-          GitHubAutoImporter2.visibilityListenerBound = true;
-        },
-        startPolling: (intervalMinutes) => {
-          const { SyncScheduler } = require_SyncScheduler();
-          const types = GitHubAPI2.getImportTypes();
-          for (const type of types) {
-            SyncScheduler.start(`github-${type}`);
-          }
-        },
-        stopPolling: () => {
-          const { SyncScheduler } = require_SyncScheduler();
-          const types = GitHubAPI2.getImportTypes();
-          for (const type of types) {
-            SyncScheduler.stop(`github-${type}`);
-          }
-        },
-        init: () => {
-          if (!GitHubAutoImporter2.canStart()) return;
-          GitHubAutoImporter2.ensureVisibilityListener();
-          setTimeout(() => {
-            Utils2.runWhenBrowserIdle(() => GitHubAutoImporter2.run());
-            const interval = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.githubAutoImportInterval);
-            if (interval > 0) GitHubAutoImporter2.startPolling(interval);
-          }, 3e3);
-        }
-      };
-      GitHubAutoImporter2._mapItemsToBookmarks = (incrementalItems, type, meta) => {
-        const UI2 = _resolveUI();
-        if (UI2 && typeof UI2.mapGitHubItemsToBookmarks === "function") {
-          return UI2.mapGitHubItemsToBookmarks(incrementalItems, type).filter((item) => UI2 && typeof UI2.isBookmarkExported === "function" ? !UI2.isBookmarkExported(item) : true);
-        }
-        return incrementalItems.map((item) => ({
-          itemKey: meta.getId(item),
-          raw: item,
-          title: item.full_name || item.name || "",
-          url: item.html_url || "",
-          description: item.description || "",
-          tags: item.language ? [`lang:${item.language}`] : [],
-          source: "github",
-          sourceType: type
-        }));
-      };
-      GitHubAutoImporter2._exportViaGitHubExporter = async (mappedItems, type, meta, settings) => {
-        const { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
-        const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-        let success = 0, failed = 0;
-        const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-        for (let i = 0; i < mappedItems.length; i++) {
-          const item = mappedItems[i];
-          try {
-            const raw = item.raw || item;
-            const enriched = await GitHubExporter2.enrichRepo(raw, settings, enrichContext);
-            const buildFn = type === "gists" ? GitHubExporter2.buildGistProperties : (r) => GitHubExporter2.buildRepoProperties(r, meta.label);
-            const properties = buildFn(enriched);
-            for (const k of Object.keys(properties)) {
-              if (properties[k] === void 0) delete properties[k];
-            }
-            await NotionAPI2.request("POST", "/pages", {
-              parent: { database_id: settings.databaseId },
-              properties
-            }, settings.apiKey);
-            if (type === "gists") {
-              GitHubAPI2.markGistExported(meta.getId(raw));
-            } else {
-              GitHubAPI2.markExported(meta.getId(raw));
-            }
-            success++;
-          } catch (e) {
-            console.warn(`[GitHubAutoImporter] \u5BFC\u51FA\u5931\u8D25: ${item.itemKey || meta.getId(item.raw || item)}`, e);
-            failed++;
-          }
-          if (i < mappedItems.length - 1) {
-            await new Promise((r) => setTimeout(r, delay));
-          }
-        }
-        return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
-      };
-      GitHubAutoImporter2._exportMappedItems = async (mappedItems, type, meta, settings) => {
-        const UI2 = _resolveUI();
-        if (UI2 && typeof UI2.exportGitHubSelected === "function") {
-          return await UI2.exportGitHubSelected(mappedItems, {
-            apiKey: settings.apiKey,
-            databaseId: settings.databaseId,
-            token: settings.token
-          }, (current, total, title) => {
-            GitHubAutoImporter2.updateStatus(`\u{1F4EC} GitHub ${meta.label} \u5BFC\u5165\u4E2D (${current}/${total}): ${title}`);
-          });
-        }
-        return await GitHubAutoImporter2._exportViaGitHubExporter(mappedItems, type, meta, settings);
-      };
-      GitHubAutoImporter2._syncSingleType = async (type, settings, attemptAt) => {
-        const meta = GitHubAutoImporter2.getTypeMeta(type);
-        const typeAttemptAt = Date.now();
-        try {
-          SyncState2.updateGitHubState(type, {
-            lastAttemptAt: typeAttemptAt,
-            lastOutcome: "running",
-            lastError: "",
-            lastStats: {}
-          });
-          GitHubAutoImporter2.updateStatus(`\u{1F4E7} \u6B63\u5728\u68C0\u67E5 GitHub ${meta.label}...`);
-          const syncState = SyncState2.getGitHubState(type);
-          const items = await GitHubAutoImporter2.fetchTypeItems(type, settings);
-          const incrementalItems = SyncState2.filterOrderedItems(
-            items,
-            syncState.watermark,
-            meta.getTime,
-            meta.getId
-          );
-          if (incrementalItems.length === 0) {
-            SyncState2.updateGitHubState(type, {
-              lastAttemptAt: typeAttemptAt,
-              lastSuccessAt: Date.now(),
-              lastOutcome: "success",
-              lastError: "",
-              lastStats: {
-                scanned: items.length,
-                pending: 0,
-                exported: 0,
-                failed: 0
-              }
-            });
-            return { pending: false, success: 0, failed: 0 };
-          }
-          const mappedItems = GitHubAutoImporter2._mapItemsToBookmarks(incrementalItems, type, meta);
-          if (mappedItems.length === 0) {
-            SyncState2.updateGitHubState(type, {
-              watermark: SyncState2.buildWatermark(incrementalItems, meta.getTime, meta.getId),
-              lastAttemptAt: typeAttemptAt,
-              lastSuccessAt: Date.now(),
-              lastOutcome: "success",
-              lastError: "",
-              lastStats: {
-                scanned: items.length,
-                pending: incrementalItems.length,
-                exported: 0,
-                failed: 0
-              }
-            });
-            return { pending: true, success: 0, failed: 0 };
-          }
-          const result = await GitHubAutoImporter2._exportMappedItems(mappedItems, type, meta, settings);
-          const successKeys = new Set(
-            (result.success || []).map((entry) => String(entry.itemKey || "")).filter(Boolean)
-          );
-          const successfulItems = mappedItems.filter((item) => successKeys.has(String(item.itemKey || ""))).map((item) => item.raw);
-          const typeStatePatch = {
-            lastAttemptAt: typeAttemptAt,
-            lastOutcome: result.failed.length > 0 ? result.success.length > 0 ? "partial" : "error" : "success",
-            lastError: result.success.length === 0 && result.failed.length > 0 ? `${meta.label} \u5BFC\u51FA\u5931\u8D25 ${result.failed.length} \u9879` : "",
-            lastStats: {
-              scanned: items.length,
-              pending: incrementalItems.length,
-              exported: result.success.length,
-              failed: result.failed.length
-            }
-          };
-          if (successfulItems.length > 0) {
-            const successfulIds = new Set(successfulItems.map((item) => meta.getId(item)));
-            const leadingSuccessfulItems = SyncState2.takeLeadingItems(
-              incrementalItems,
-              (item) => {
-                const itemKey = meta.getId(item);
-                if (successfulIds.has(itemKey)) return true;
-                const mapped = mappedItems.find((entry) => meta.getId(entry.raw) === itemKey);
-                return !mapped;
-              }
-            );
-            if (leadingSuccessfulItems.length > 0) {
-              typeStatePatch.watermark = SyncState2.buildWatermark(leadingSuccessfulItems, meta.getTime, meta.getId);
-            }
-            typeStatePatch.lastSuccessAt = Date.now();
-          }
-          SyncState2.updateGitHubState(type, typeStatePatch);
-          return { pending: true, success: result.success.length, failed: result.failed.length };
-        } catch (error) {
-          SyncState2.updateGitHubState(type, {
-            lastAttemptAt: typeAttemptAt,
-            lastOutcome: "error",
-            lastError: (error == null ? void 0 : error.message) || String(error),
-            lastStats: {}
-          });
-          console.error(`[LD-Notion] GitHub ${type} \u81EA\u52A8\u5BFC\u5165\u5931\u8D25:`, error);
-          return { pending: false, success: 0, failed: 0, syncError: `${meta.label}: ${error.message}` };
-        }
-      };
-      GitHubAutoImporter2._aggregateMetaState = (types, successCount, failedCount, syncErrors, attemptAt) => {
-        if (!syncErrors.length && successCount === 0 && failedCount === 0) {
-          SyncState2.updateGitHubMeta({
-            lastAttemptAt: attemptAt,
-            lastSuccessAt: Date.now(),
-            lastOutcome: "success",
-            lastError: "",
-            lastStats: {
-              enabledTypes: types.length,
-              exported: 0,
-              failed: 0,
-              syncErrors: 0
-            }
-          });
-          GitHubAutoImporter2.updateStatus(`\u2705 \u6CA1\u6709\u65B0\u7684 GitHub \u6536\u85CF (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
-          return;
-        }
-        if (successCount === 0 && failedCount === 0 && syncErrors.length > 0) {
-          throw new Error(syncErrors[0]);
-        }
-        const metaStatePatch = {
-          lastAttemptAt: attemptAt,
-          lastOutcome: syncErrors.length > 0 || failedCount > 0 ? successCount > 0 ? "partial" : "error" : "success",
-          lastError: syncErrors.join("\uFF1B"),
-          lastStats: {
-            enabledTypes: types.length,
-            exported: successCount,
-            failed: failedCount,
-            syncErrors: syncErrors.length
-          }
-        };
-        if (metaStatePatch.lastOutcome === "success" || successCount > 0) {
-          metaStatePatch.lastSuccessAt = Date.now();
-        }
-        SyncState2.updateGitHubMeta(metaStatePatch);
-        GitHubAutoImporter2.updateStatus(
-          `\u2705 GitHub \u81EA\u52A8\u5BFC\u5165\u5B8C\u6210: \u6210\u529F ${successCount} \u9879${failedCount > 0 ? `\uFF0C\u5931\u8D25 ${failedCount} \u9879` : ""}${syncErrors.length > 0 ? `\uFF0C\u5F02\u5E38 ${syncErrors.length} \u7C7B` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
-        );
-      };
-      GitHubAutoImporter2.run = async () => {
-        if (document.hidden) {
-          GitHubAutoImporter2.deferredWhileHidden = true;
-          return;
-        }
-        if (GitHubAutoImporter2.isRunning) return;
-        const settings = GitHubAutoImporter2.buildSettings();
-        if (!settings.apiKey || !settings.databaseId) {
-          GitHubAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
-          return;
-        }
-        if (!settings.username && !settings.token) {
-          GitHubAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u6216 Token");
-          return;
-        }
-        const now = Date.now();
-        if (now - GitHubAutoImporter2.lastRunAt < GitHubAutoImporter2.minimumRunGapMs) return;
-        GitHubAutoImporter2.lastRunAt = now;
-        GitHubAutoImporter2.isRunning = true;
-        const attemptAt = Date.now();
-        try {
-          GitHubAutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u68C0\u67E5 GitHub \u65B0\u6536\u85CF...");
-          const types = GitHubAPI2.getImportTypes();
-          SyncState2.updateGitHubMeta({
-            lastAttemptAt: attemptAt,
-            lastOutcome: "running",
-            lastError: "",
-            lastStats: {
-              enabledTypes: types.length,
-              exported: 0,
-              failed: 0,
-              syncErrors: 0
-            }
-          });
-          let successCount = 0;
-          let failedCount = 0;
-          const syncErrors = [];
-          for (const type of types) {
-            const r = await GitHubAutoImporter2._syncSingleType(type, settings, attemptAt);
-            successCount += r.success;
-            failedCount += r.failed;
-            if (r.syncError) syncErrors.push(r.syncError);
-          }
-          const hasPending = successCount > 0 || failedCount > 0;
-          if (!hasPending && syncErrors.length === 0) {
-            GitHubAutoImporter2._aggregateMetaState(types, 0, 0, [], attemptAt);
-            return;
-          }
-          GitHubAutoImporter2._aggregateMetaState(types, successCount, failedCount, syncErrors, attemptAt);
-        } catch (error) {
-          console.error("[LD-Notion] GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519:", error);
-          SyncState2.updateGitHubMeta({
-            lastAttemptAt: attemptAt,
-            lastOutcome: "error",
-            lastError: (error == null ? void 0 : error.message) || String(error),
-            lastStats: {
-              enabledTypes: (GitHubAPI2.getImportTypes() || []).length,
-              exported: 0,
-              failed: 0,
-              syncErrors: 1
-            }
-          });
-          GitHubAutoImporter2.updateStatus(`\u274C GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
-        } finally {
-          GitHubAutoImporter2.isRunning = false;
-          const UI2 = _resolveUI();
-          if (UI2 && typeof UI2.renderSyncCenterSummary === "function") {
-            try {
-              UI2.renderSyncCenterSummary();
-            } catch {
-            }
-          }
-        }
-      };
-      module.exports = { GitHubAutoImporter: GitHubAutoImporter2 };
-    }
-  });
-
-  // src/import/index.js
-  var require_import = __commonJS({
-    "src/import/index.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { NotionOAuth: NotionOAuth2 } = require_auth();
-      var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2 } = require_export();
-      var { SyncLock } = require_sync_lock();
-      var { UpdateChecker: UpdateChecker2 } = require_UpdateChecker();
-      var { GitHubAutoImporter: GitHubAutoImporter2 } = require_GitHubAutoImporter();
-      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
-      var { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
-      var _resolveUI = () => {
-        try {
-          return require_ui().UI;
-        } catch {
-          return void 0;
-        }
-      };
-      var AutoImporter2 = {
-        isRunning: false,
-        timerId: null,
-        deferredWhileHidden: false,
-        visibilityListenerBound: false,
-        lastRunAt: 0,
-        minimumRunGapMs: 60 * 1e3,
-        // 从 Storage 读取导出设置（不依赖 UI DOM）
-        buildSettings: () => {
-          const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
-          return {
-            apiKey: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, ""),
-            databaseId: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
-            parentPageId: Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, ""),
-            exportTargetType,
-            onlyFirst: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_ONLY_FIRST, false),
-            onlyOp: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_ONLY_OP, false),
-            rangeStart: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_RANGE_START, 1),
-            rangeEnd: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_RANGE_END, 999999),
-            imgFilter: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_IMG, CONFIG2.DEFAULTS.imgFilter),
-            filterUsers: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_USERS, CONFIG2.DEFAULTS.filterUsers),
-            filterInclude: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_INCLUDE, CONFIG2.DEFAULTS.filterInclude),
-            filterExclude: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_EXCLUDE, CONFIG2.DEFAULTS.filterExclude),
-            filterMinLen: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_MINLEN, CONFIG2.DEFAULTS.filterMinLen),
-            imgMode: Storage2.get(CONFIG2.STORAGE_KEYS.IMG_MODE, CONFIG2.DEFAULTS.imgMode),
-            concurrency: Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG2.DEFAULTS.exportConcurrency)
-          };
-        },
-        // 检查配置是否足够
-        canStart: () => {
-          if (!Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED, false)) return false;
-          const apiKey = NotionOAuth2.getAccessToken();
-          if (!apiKey) return false;
-          const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
-          if (exportTargetType === "database") {
-            return !!Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "");
-          } else {
-            return !!Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, "");
-          }
-        },
-        // 更新状态栏
-        updateStatus: (text) => {
-          const UI2 = _resolveUI();
-          const refs = UI2 ? UI2.refs : null;
-          const el = refs && refs.autoImportStatus || document.querySelector("#ldb-auto-import-status");
-          if (el) el.textContent = text;
-        },
-        getWatermark: (bookmarks = []) => SyncState2.buildWatermark(
-          bookmarks,
-          LinuxDoAPI2.getBookmarkSyncTime,
-          LinuxDoAPI2.getBookmarkId
-        ),
-        startPolling: (intervalMinutes) => {
-          const { SyncScheduler } = require_SyncScheduler();
-          SyncScheduler.start("linuxdo");
-        },
-        ensureVisibilityListener: () => {
-          if (AutoImporter2.visibilityListenerBound) return;
-          document.addEventListener("visibilitychange", () => {
-            if (!document.hidden && AutoImporter2.deferredWhileHidden) {
-              AutoImporter2.deferredWhileHidden = false;
-              Utils2.runWhenBrowserIdle(() => AutoImporter2.run());
-            }
-          });
-          AutoImporter2.visibilityListenerBound = true;
-        },
-        stopPolling: () => {
-          const { SyncScheduler } = require_SyncScheduler();
-          SyncScheduler.stop("linuxdo");
-        },
-        init: () => {
-          if (!AutoImporter2.canStart()) return;
-          AutoImporter2.ensureVisibilityListener();
-          setTimeout(() => {
-            Utils2.runWhenBrowserIdle(() => AutoImporter2.run());
-            const interval = Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.autoImportInterval);
-            if (interval > 0) AutoImporter2.startPolling(interval);
-          }, 3e3);
-        }
-      };
-      AutoImporter2.run = async () => {
-        if (document.hidden) {
-          AutoImporter2.deferredWhileHidden = true;
-          return;
-        }
-        if (AutoImporter2.isRunning) return;
-        if (SyncLock.isExporting) return;
-        const apiKey = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "");
-        if (!apiKey) {
-          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key");
-          return;
-        }
-        const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
-        if (exportTargetType === "database" && !Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "")) {
-          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID");
-          return;
-        }
-        if (exportTargetType === "page" && !Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, "")) {
-          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID");
-          return;
-        }
-        const now = Date.now();
-        if (now - AutoImporter2.lastRunAt < AutoImporter2.minimumRunGapMs) return;
-        AutoImporter2.lastRunAt = now;
-        AutoImporter2.isRunning = true;
-        const attemptAt = Date.now();
-        const exportBtn = document.querySelector("#ldb-export");
-        try {
-          SyncState2.updateLinuxDoState({
-            lastAttemptAt: attemptAt,
-            lastOutcome: "running",
-            lastError: "",
-            lastStats: {}
-          });
-          const username = Utils2.getCurrentLinuxDoUsername();
-          if (!username) {
-            const errorMessage = "\u65E0\u6CD5\u83B7\u53D6\u5F53\u524D Linux.do \u7528\u6237\u540D";
-            SyncState2.updateLinuxDoState({
-              lastAttemptAt: attemptAt,
-              lastOutcome: "error",
-              lastError: errorMessage,
-              lastStats: {}
-            });
-            AutoImporter2.updateStatus(`\u274C ${errorMessage}`);
-            return;
-          }
-          AutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u68C0\u67E5\u65B0\u6536\u85CF...");
-          const syncState = SyncState2.getLinuxDoState();
-          const bookmarks = await LinuxDoAPI2.fetchBookmarksSince(username, syncState.watermark);
-          const newBookmarks = bookmarks.filter((bookmark) => {
-            const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
-            return !Storage2.isTopicExported(topicId);
-          });
-          if (newBookmarks.length === 0) {
-            const statePatch2 = {
-              lastAttemptAt: attemptAt,
-              lastSuccessAt: Date.now(),
-              lastOutcome: "success",
-              lastError: "",
-              lastStats: {
-                scanned: bookmarks.length,
-                pending: 0,
-                success: 0,
-                failed: 0
-              }
-            };
-            if (bookmarks.length > 0) {
-              statePatch2.watermark = AutoImporter2.getWatermark(bookmarks);
-            }
-            SyncState2.updateLinuxDoState(statePatch2);
-            AutoImporter2.updateStatus(`\u2705 \u6CA1\u6709\u65B0\u6536\u85CF (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
-            return;
-          }
-          AutoImporter2.updateStatus(`\u{1F4EC} \u53D1\u73B0 ${newBookmarks.length} \u4E2A\u65B0\u6536\u85CF\uFF0C\u6B63\u5728\u5BFC\u5165...`);
-          if (exportBtn) exportBtn.disabled = true;
-          const obsExportBtn = document.querySelector("#ldb-obs-export");
-          if (obsExportBtn) obsExportBtn.disabled = true;
-          const settings = AutoImporter2.buildSettings();
-          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-          const concurrency = settings.concurrency || 1;
-          let success = 0;
-          let failed = 0;
-          const successfulBookmarks = [];
-          let nextIndex = 0;
-          const worker = async () => {
-            while (true) {
-              const i = nextIndex++;
-              if (i >= newBookmarks.length) return;
-              const bookmark = newBookmarks[i];
-              const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
-              const title = bookmark.title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
-              AutoImporter2.updateStatus(`\u{1F4EC} \u5BFC\u5165\u4E2D (${i + 1}/${newBookmarks.length}): ${title}`);
-              try {
-                await Exporter2.exportTopic(bookmark, settings);
-                success++;
-                successfulBookmarks.push(bookmark);
-              } catch (error) {
-                console.error(`[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u5931\u8D25: ${title}`, error);
-                failed++;
-              }
-              if (delay > 0 && nextIndex < newBookmarks.length) {
-                await Utils2.sleep(delay);
-              }
-            }
-          };
-          const workerCount = Math.min(concurrency, newBookmarks.length);
-          const workers = [];
-          for (let w = 0; w < workerCount; w++) {
-            workers.push(worker());
-            if (w < workerCount - 1) await Utils2.sleep(100);
-          }
-          await Promise.all(workers);
-          const uiRef = _resolveUI();
-          if (uiRef && uiRef.renderBookmarkList) {
-            try {
-              uiRef.renderBookmarkList();
-            } catch {
-            }
-          }
-          const statePatch = {
-            lastAttemptAt: attemptAt,
-            lastOutcome: failed > 0 ? "partial" : "success",
-            lastError: "",
-            lastStats: {
-              scanned: bookmarks.length,
-              pending: newBookmarks.length,
-              success,
-              failed
-            }
-          };
-          if (successfulBookmarks.length > 0) {
-            const successIds = new Set(successfulBookmarks.map((bookmark) => LinuxDoAPI2.getBookmarkId(bookmark)));
-            const leadingSuccessfulBookmarks = SyncState2.takeLeadingItems(
-              newBookmarks,
-              (bookmark) => successIds.has(LinuxDoAPI2.getBookmarkId(bookmark))
-            );
-            if (leadingSuccessfulBookmarks.length > 0) {
-              statePatch.watermark = AutoImporter2.getWatermark(leadingSuccessfulBookmarks);
-            }
-            statePatch.lastSuccessAt = Date.now();
-          }
-          SyncState2.updateLinuxDoState(statePatch);
-          AutoImporter2.updateStatus(`\u2705 \u81EA\u52A8\u5BFC\u5165\u5B8C\u6210: ${success} \u4E2A\u6210\u529F${failed > 0 ? `\uFF0C${failed} \u4E2A\u5931\u8D25` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
-          if (success > 0 && typeof GM_notification === "function") {
-            GM_notification({
-              title: "\u81EA\u52A8\u5BFC\u5165\u5B8C\u6210",
-              text: `\u6210\u529F\u5BFC\u5165 ${success} \u4E2A\u65B0\u6536\u85CF\u5230 Notion`,
-              timeout: 5e3
-            });
-          }
-        } catch (error) {
-          console.error("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u51FA\u9519:", error);
-          SyncState2.updateLinuxDoState({
-            lastAttemptAt: attemptAt,
-            lastOutcome: "error",
-            lastError: (error == null ? void 0 : error.message) || String(error),
-            lastStats: {}
-          });
-          AutoImporter2.updateStatus(`\u274C \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
-        } finally {
-          AutoImporter2.isRunning = false;
-          if (exportBtn) exportBtn.disabled = false;
-          const obsExportBtn2 = document.querySelector("#ldb-obs-export");
-          if (obsExportBtn2) obsExportBtn2.disabled = false;
-          const uiFinally = _resolveUI();
-          if (uiFinally && typeof uiFinally.renderSyncCenterSummary === "function") {
-            try {
-              uiFinally.renderSyncCenterSummary();
-            } catch {
-            }
-          }
-        }
-      };
-      module.exports = { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 };
-    }
-  });
-
-  // src/extract/index.js
-  var require_extract = __commonJS({
-    "src/extract/index.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, HTMLToMarkdown: HTMLToMarkdown2, InstallHelper: InstallHelper2 } = require_api();
-      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
-      var { OperationGuard: OperationGuard2 } = require_security();
-      var ZhihuAPI2 = {
-        detectPage: () => {
-          const url = location.href;
-          if (/zhihu\.com\/question\/\d+\/answer\/\d+/.test(url)) return "answer";
-          if (/zhihu\.com\/question\/\d+/.test(url)) return "question";
-          if (/zhihu\.com\/p\/\d+/.test(url)) return "article";
-          if (/zhihu\.com\/column\/[^/]+\/p\/\d+/.test(url)) return "column_article";
-          return null;
-        },
-        extractContent: () => {
-          const pageType = ZhihuAPI2.detectPage();
-          if (!pageType) return null;
-          if (pageType === "answer") return ZhihuAPI2._extractAnswer();
-          if (pageType === "question") return ZhihuAPI2._extractQuestion();
-          if (pageType === "article" || pageType === "column_article") return ZhihuAPI2._extractArticle();
-          return null;
-        },
-        _extractAnswer: () => {
-          var _a, _b;
-          const answerEl = document.querySelector(".AnswerItem .RichContent-inner") || document.querySelector(".Post-RichTextContainer");
-          if (!answerEl) return null;
-          const questionEl = document.querySelector(".QuestionHeader-title");
-          const authorEl = document.querySelector(".AuthorInfo-name .UserLink-link");
-          const voteEl = document.querySelector(".VoteButton--up") || document.querySelector(".TopstoryNumber");
-          return {
-            type: "answer",
-            title: ((_a = questionEl == null ? void 0 : questionEl.textContent) == null ? void 0 : _a.trim()) || "\u77E5\u4E4E\u56DE\u7B54",
-            author: ((_b = authorEl == null ? void 0 : authorEl.textContent) == null ? void 0 : _b.trim()) || "\u533F\u540D",
-            url: location.href,
-            html: answerEl.innerHTML,
-            voteCount: ZhihuAPI2._parseVoteCount(voteEl == null ? void 0 : voteEl.textContent)
-          };
-        },
-        _extractQuestion: () => {
-          const questionEl = document.querySelector(".QuestionHeader-title");
-          if (!questionEl) return null;
-          const detailEl = document.querySelector(".QuestionHeader-detail");
-          const answerEls = document.querySelectorAll(".AnswerItem");
-          const answers = Array.from(answerEls).slice(0, 20).map((el, i) => {
-            var _a;
-            const contentEl = el.querySelector(".RichContent-inner");
-            const authorEl = el.querySelector(".AuthorInfo-name .UserLink-link");
-            const voteEl = el.querySelector(".VoteButton--up");
-            return {
-              index: i,
-              author: ((_a = authorEl == null ? void 0 : authorEl.textContent) == null ? void 0 : _a.trim()) || "\u533F\u540D",
-              html: (contentEl == null ? void 0 : contentEl.innerHTML) || "",
-              voteCount: ZhihuAPI2._parseVoteCount(voteEl == null ? void 0 : voteEl.textContent)
-            };
-          });
-          return {
-            type: "question",
-            title: questionEl.textContent.trim(),
-            url: location.href,
-            detail: (detailEl == null ? void 0 : detailEl.innerHTML) || "",
-            answers
-          };
-        },
-        _extractArticle: () => {
-          var _a, _b;
-          const articleEl = document.querySelector(".Post-RichTextContainer") || document.querySelector(".RichText");
-          if (!articleEl) return null;
-          const titleEl = document.querySelector(".Post-Title") || document.querySelector(".ArticleHeader-title");
-          const authorEl = document.querySelector(".AuthorInfo-name .UserLink-link");
-          return {
-            type: "article",
-            title: ((_a = titleEl == null ? void 0 : titleEl.textContent) == null ? void 0 : _a.trim()) || "\u77E5\u4E4E\u6587\u7AE0",
-            author: ((_b = authorEl == null ? void 0 : authorEl.textContent) == null ? void 0 : _b.trim()) || "\u672A\u77E5",
-            url: location.href,
-            html: articleEl.innerHTML
-          };
-        },
-        _parseVoteCount: (text) => {
-          if (!text) return 0;
-          const match = text.match(/(\d[\d,]*)/);
-          return match ? parseInt(match[1].replace(/,/g, ""), 10) : 0;
-        },
-        htmlToBlocks: (html) => {
-          return DOMToNotion2.cookedToBlocks(html);
-        }
-      };
-      var GenericExtractor2 = {
-        // 提取页面元数据
-        extractMeta: () => {
-          var _a, _b, _c, _d, _e;
-          const getMeta = (name) => {
-            const el = document.querySelector(
-              `meta[property="${name}"], meta[name="${name}"]`
-            );
-            return (el == null ? void 0 : el.getAttribute("content")) || "";
-          };
-          const title = getMeta("og:title") || document.title || ((_b = (_a = document.querySelector("h1")) == null ? void 0 : _a.textContent) == null ? void 0 : _b.trim()) || "\u65E0\u6807\u9898";
-          const author = getMeta("author") || getMeta("article:author") || ((_d = (_c = document.querySelector('[rel="author"], .author, .byline, [itemprop="author"]')) == null ? void 0 : _c.textContent) == null ? void 0 : _d.trim()) || "";
-          const rawDate = getMeta("article:published_time") || getMeta("datePublished") || ((_e = document.querySelector("time[datetime]")) == null ? void 0 : _e.getAttribute("datetime")) || getMeta("date") || "";
-          let publishDate = "";
-          if (rawDate) {
-            const d = new Date(rawDate);
-            if (!isNaN(d.getTime())) publishDate = d.toISOString().split("T")[0];
-          }
-          const siteName = getMeta("og:site_name") || window.location.hostname.replace(/^www\./, "");
-          const description = getMeta("og:description") || getMeta("description") || "";
-          return {
-            title: title.substring(0, 200),
-            url: window.location.href,
-            author: author.substring(0, 100),
-            publishDate,
-            siteName: siteName.substring(0, 100),
-            description: description.substring(0, 500)
-          };
-        },
-        // 智能提取正文内容 DOM 节点
-        extractContent: () => {
-          const article = document.querySelector("article");
-          if (article) return article;
-          const main2 = document.querySelector('[role="main"], main');
-          if (main2) return main2;
-          const selectors = [
-            ".post-content",
-            ".article-content",
-            ".entry-content",
-            ".content",
-            ".post-body",
-            ".article-body",
-            "#content",
-            "#article",
-            "#post-content",
-            ".markdown-body",
-            ".prose",
-            ".rich-text"
-          ];
-          for (const sel of selectors) {
-            const el = document.querySelector(sel);
-            if (el && el.textContent.trim().length > 200) return el;
-          }
-          const candidates = document.querySelectorAll("div, section");
-          let best = null;
-          let bestScore = 0;
-          for (const el of candidates) {
-            const tag = el.tagName.toLowerCase();
-            const id = (el.id || "").toLowerCase();
-            const cls = (el.className || "").toLowerCase();
-            const skip = /(nav|sidebar|footer|header|menu|comment|widget|ad|banner)/;
-            if (skip.test(id) || skip.test(cls) || skip.test(tag)) continue;
-            const text = el.textContent || "";
-            const pCount = el.querySelectorAll("p").length;
-            const score = text.length * 0.3 + pCount * 100;
-            if (score > bestScore) {
-              bestScore = score;
-              best = el;
-            }
-          }
-          if (best && best.textContent.trim().length > 100) return best;
-          const clone = document.body.cloneNode(true);
-          clone.querySelectorAll('[class*="gclip-"], [class*="ldb-"], [id*="ldb-"]').forEach((el) => el.remove());
-          return clone;
-        },
-        // 将提取的 DOM 转为 Notion blocks（复用 DOMToNotion）
-        toNotionBlocks: (contentEl, imgMode) => {
-          return DOMToNotion2.cookedToBlocks(contentEl.innerHTML, imgMode);
-        }
-      };
-      var WorkspaceService2 = {
-        _inflightRequests: /* @__PURE__ */ new Map(),
-        _requestSearchItems: async (apiKey, objectType, maxPages = 0, onProgress = null, phase = "") => {
-          let results = [];
-          let cursor = void 0;
-          let pageCount = 0;
-          do {
-            const response = await NotionAPI2.search("", { property: "object", value: objectType }, apiKey, cursor);
-            const batch = response.results || [];
-            results = results.concat(batch);
-            cursor = response.has_more ? response.next_cursor : void 0;
-            pageCount++;
-            if (onProgress) {
-              onProgress({
-                phase,
-                loaded: results.length,
-                hasMore: !!cursor,
-                pageCount
-              });
-            }
-          } while (cursor && (maxPages === 0 || pageCount < maxPages));
-          return results;
-        },
-        fetchWorkspace: async (apiKey, options = {}) => {
-          if (!apiKey) {
-            return { databases: [], pages: [] };
-          }
-          const includePages = options.includePages !== false;
-          const maxPages = Number.isFinite(options.maxPages) ? options.maxPages : parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
-          const requestKey = `${Utils2.apiKeyHash(apiKey)}:${maxPages}:${includePages ? "all" : "db"}`;
-          if (WorkspaceService2._inflightRequests.has(requestKey)) {
-            return WorkspaceService2._inflightRequests.get(requestKey);
-          }
-          const requestPromise = (async () => {
-            const dbResults = await WorkspaceService2._requestSearchItems(
-              apiKey,
-              "database",
-              maxPages,
-              options.onProgress,
-              "databases"
-            );
-            const databases = dbResults.map((db) => {
-              var _a, _b, _c;
-              return {
-                id: ((_a = db.id) == null ? void 0 : _a.replace(/-/g, "")) || "",
-                title: ((_c = (_b = db.title) == null ? void 0 : _b[0]) == null ? void 0 : _c.plain_text) || "\u65E0\u6807\u9898\u6570\u636E\u5E93",
-                type: "database",
-                url: db.url || ""
-              };
-            }).filter((item) => item.id);
-            if (!includePages) {
-              return { databases, pages: [] };
-            }
-            const pageResults = await WorkspaceService2._requestSearchItems(
-              apiKey,
-              "page",
-              maxPages,
-              options.onProgress,
-              "pages"
-            );
-            const pages = pageResults.map((page) => {
-              var _a, _b, _c, _d;
-              return {
-                id: ((_a = page.id) == null ? void 0 : _a.replace(/-/g, "")) || "",
-                title: Utils2.getPageTitle(page),
-                type: "page",
-                url: page.url || "",
-                parent: ((_b = page.parent) == null ? void 0 : _b.type) || "",
-                parentId: (((_c = page.parent) == null ? void 0 : _c.database_id) || ((_d = page.parent) == null ? void 0 : _d.page_id) || "").replace(/-/g, "")
-              };
-            }).filter((item) => item.id);
-            return { databases, pages };
-          })();
-          WorkspaceService2._inflightRequests.set(requestKey, requestPromise);
-          try {
-            return await requestPromise;
-          } finally {
-            WorkspaceService2._inflightRequests.delete(requestKey);
-          }
-        },
-        fetchWorkspaceStaged: async (apiKey, options = {}) => {
-          var _a, _b;
-          if (!apiKey) {
-            return { databases: [], pages: [] };
-          }
-          const includePages = options.includePages !== false;
-          const maxPages = Number.isFinite(options.maxPages) ? options.maxPages : parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
-          const databasesRaw = await WorkspaceService2._requestSearchItems(
-            apiKey,
-            "database",
-            maxPages,
-            options.onProgress,
-            "databases"
-          );
-          const databases = databasesRaw.map((db) => {
-            var _a2, _b2, _c;
-            return {
-              id: ((_a2 = db.id) == null ? void 0 : _a2.replace(/-/g, "")) || "",
-              title: ((_c = (_b2 = db.title) == null ? void 0 : _b2[0]) == null ? void 0 : _c.plain_text) || "\u65E0\u6807\u9898\u6570\u636E\u5E93",
-              type: "database",
-              url: db.url || ""
-            };
-          }).filter((item) => item.id);
-          (_a = options.onPhaseComplete) == null ? void 0 : _a.call(options, "databases", { databases, pages: [] });
-          if (!includePages) {
-            return { databases, pages: [] };
-          }
-          const pagesRaw = await WorkspaceService2._requestSearchItems(
-            apiKey,
-            "page",
-            maxPages,
-            options.onProgress,
-            "pages"
-          );
-          const pages = pagesRaw.map((page) => {
-            var _a2, _b2, _c, _d;
-            return {
-              id: ((_a2 = page.id) == null ? void 0 : _a2.replace(/-/g, "")) || "",
-              title: Utils2.getPageTitle(page),
-              type: "page",
-              url: page.url || "",
-              parent: ((_b2 = page.parent) == null ? void 0 : _b2.type) || "",
-              parentId: (((_c = page.parent) == null ? void 0 : _c.database_id) || ((_d = page.parent) == null ? void 0 : _d.page_id) || "").replace(/-/g, "")
-            };
-          }).filter((item) => item.id);
-          const finalWorkspace = { databases, pages };
-          (_b = options.onPhaseComplete) == null ? void 0 : _b.call(options, "pages", finalWorkspace);
-          return finalWorkspace;
-        },
-        fetchWorkspacePageObjects: async (apiKey, options = {}) => {
-          if (!apiKey) {
-            return [];
-          }
-          const maxPages = Number.isFinite(options.maxPages) ? options.maxPages : parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
-          return await WorkspaceService2._requestSearchItems(
-            apiKey,
-            "page",
-            maxPages,
-            options.onProgress,
-            options.phase || "workspace_visual_pages"
-          );
-        },
-        buildWorkspaceData: (apiKey, workspace = {}) => ({
-          apiKeyHash: apiKey ? Utils2.apiKeyHash(apiKey) : "",
-          databases: Array.isArray(workspace.databases) ? workspace.databases : [],
-          pages: Array.isArray(workspace.pages) ? workspace.pages : [],
-          timestamp: Date.now()
-        }),
-        persistWorkspaceData: (apiKey, workspace = {}) => {
-          const workspaceData = WorkspaceService2.buildWorkspaceData(apiKey, workspace);
-          Storage2.set(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, JSON.stringify(workspaceData));
-          return workspaceData;
-        },
-        // 统一工作区刷新边界，负责后端读取、缓存持久化与 staged 回调。
-        refreshWorkspaceSnapshot: async (apiKey, options = {}) => {
-          var _a;
-          if (!apiKey) {
-            return { databases: [], pages: [], workspaceData: WorkspaceService2.buildWorkspaceData("", {}) };
-          }
-          const includePages = options.includePages !== false;
-          const notifyWorkspaceData = typeof options.onWorkspaceData === "function" ? options.onWorkspaceData : null;
-          let finalPhaseHandled = false;
-          let lastWorkspaceData = null;
-          const workspace = await WorkspaceService2.fetchWorkspaceStaged(apiKey, {
-            includePages,
-            maxPages: options.maxPages,
-            onProgress: options.onProgress,
-            onPhaseComplete: (phase, partialWorkspace) => {
-              var _a2;
-              lastWorkspaceData = WorkspaceService2.persistWorkspaceData(apiKey, partialWorkspace);
-              finalPhaseHandled = phase === "pages" || !includePages && phase === "databases";
-              notifyWorkspaceData == null ? void 0 : notifyWorkspaceData(lastWorkspaceData, { phase, isFinal: finalPhaseHandled });
-              (_a2 = options.onPhaseComplete) == null ? void 0 : _a2.call(options, phase, partialWorkspace, lastWorkspaceData);
-            }
-          });
-          if (!finalPhaseHandled) {
-            lastWorkspaceData = WorkspaceService2.persistWorkspaceData(apiKey, workspace);
-            const finalPhase = includePages ? "pages" : "databases";
-            notifyWorkspaceData == null ? void 0 : notifyWorkspaceData(lastWorkspaceData, { phase: finalPhase, isFinal: true });
-            (_a = options.onPhaseComplete) == null ? void 0 : _a.call(options, finalPhase, workspace, lastWorkspaceData);
-          }
-          return {
-            databases: workspace.databases || [],
-            pages: workspace.pages || [],
-            workspaceData: lastWorkspaceData || WorkspaceService2.buildWorkspaceData(apiKey, workspace)
-          };
-        }
-      };
-      var UICommandService = Object.freeze({
-        LEGACY_DIRECT_NOTION_WRITE_BOUNDARY: Object.freeze({
-          allowedSources: Object.freeze([
-            "AIAssistant.AGENT_TOOLS.*",
-            "AIAssistant.handleTranslateContent / handleEditContent / handleAIAutofill",
-            "AIClassifier.*",
-            "GenericExporter.setupDatabaseProperties",
-            "GitHubExporter.setupDatabaseProperties",
-            "BookmarkExporter.setupDatabaseProperties"
-          ]),
-          note: "M2-P1 \u53EA\u6536\u53E3 UI \u4E8B\u4EF6\u5230 command boundary\uFF1B\u9057\u7559 direct NotionAPI \u5199\u8DEF\u5F84\u6682\u9650\u5B9A\u5728\u5DE5\u5177\u6267\u884C\u5668\u548C\u5BFC\u51FA schema \u521D\u59CB\u5316 helper \u5185\uFF0C\u4E0D\u5141\u8BB8\u7EE7\u7EED\u4ECE UI \u4E8B\u4EF6\u76F4\u63A5\u6269\u6563\u3002"
-        }),
-        _persistStorageEntries: async (entries = {}) => {
-          for (const [key, value] of Object.entries(entries)) {
-            if (CredentialVault2.isSensitiveKey(key)) {
-              await CredentialVault2.set(key, value);
-            } else {
-              Storage2.set(key, value);
-            }
-          }
-        },
-        _persistProvidedSensitiveEntries: async (entries = {}) => {
-          for (const [key, value] of Object.entries(entries)) {
-            if (!CredentialVault2.isSensitiveKey(key)) continue;
-            const normalized = String(value || "").trim();
-            if (!normalized) continue;
-            await CredentialVault2.set(key, normalized);
-          }
-        },
-        _saveNotionSiteSettings: async (payload = {}) => {
-          const {
-            liveApiKey = "",
-            clearManualApiKey = false,
-            aiTargetValue = "",
-            aiService = CONFIG2.DEFAULTS.aiService,
-            aiModel = "",
-            aiApiKey = "",
-            aiBaseUrl = "",
-            aiCategories = CONFIG2.DEFAULTS.aiCategories,
-            workspaceMaxPages = 0,
-            personaName = CONFIG2.DEFAULTS.agentPersonaName,
-            personaTone = CONFIG2.DEFAULTS.agentPersonaTone,
-            personaExpertise = CONFIG2.DEFAULTS.agentPersonaExpertise,
-            personaInstructions = "",
-            githubUsername = "",
-            githubToken = "",
-            githubImportTypes = ["stars"]
-          } = payload;
-          if (liveApiKey) {
-            await NotionOAuth2.setManualApiKey(liveApiKey);
-          } else if (clearManualApiKey && NotionOAuth2.getAuthMode() !== "oauth") {
-            await NotionOAuth2.setManualApiKey("");
-          }
-          TargetState2.setAITarget(aiTargetValue);
-          await UICommandService._persistStorageEntries({
-            [CONFIG2.STORAGE_KEYS.AI_SERVICE]: aiService,
-            [CONFIG2.STORAGE_KEYS.AI_MODEL]: aiModel,
-            [CONFIG2.STORAGE_KEYS.AI_BASE_URL]: aiBaseUrl,
-            [CONFIG2.STORAGE_KEYS.AI_CATEGORIES]: aiCategories,
-            [CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES]: parseInt(workspaceMaxPages, 10) || 0,
-            [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_NAME]: personaName || CONFIG2.DEFAULTS.agentPersonaName,
-            [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_TONE]: personaTone,
-            [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE]: personaExpertise || CONFIG2.DEFAULTS.agentPersonaExpertise,
-            [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS]: personaInstructions,
-            [CONFIG2.STORAGE_KEYS.GITHUB_USERNAME]: githubUsername
-          });
-          await UICommandService._persistProvidedSensitiveEntries({
-            [CONFIG2.STORAGE_KEYS.AI_API_KEY]: aiApiKey,
-            [CONFIG2.STORAGE_KEYS.GITHUB_TOKEN]: githubToken
-          });
-          require_import().GitHubAPI.setImportTypes(Array.isArray(githubImportTypes) && githubImportTypes.length > 0 ? githubImportTypes : ["stars"]);
-          return {
-            aiTargetState: TargetState2.getDisplayAITargetState(),
-            aiService,
-            aiModel
-          };
-        },
-        _saveMainExportSessionSettings: async (payload = {}) => {
-          const {
-            liveApiKey = "",
-            exportState = {},
-            storageValues = {},
-            sensitiveEntries = {}
-          } = payload;
-          if (liveApiKey) {
-            await NotionOAuth2.setManualApiKey(liveApiKey);
-          }
-          TargetState2.saveExportState(exportState);
-          await UICommandService._persistStorageEntries(storageValues);
-          await UICommandService._persistProvidedSensitiveEntries(sensitiveEntries);
-          return {
-            exportState: TargetState2.getExportState()
-          };
-        },
-        _saveGenericExportTargetSettings: async (payload = {}) => {
-          const {
-            liveApiKey = "",
-            exportType,
-            targetId = "",
-            imgMode,
-            autoSetupDatabaseProperties = false,
-            apiKey = ""
-          } = payload;
-          if (liveApiKey) {
-            await NotionOAuth2.setManualApiKey(liveApiKey);
-          }
-          TargetState2.setExportTargetType(exportType);
-          Storage2.set(CONFIG2.STORAGE_KEYS.IMG_MODE, imgMode);
-          if (exportType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
-            TargetState2.setExportPageId(targetId);
-            return { exportState: TargetState2.getExportState(), setupResult: null };
-          }
-          TargetState2.setExportDatabaseId(targetId);
-          let setupResult = null;
-          if (autoSetupDatabaseProperties) {
-            setupResult = await require_export().GenericExporter.setupDatabaseProperties(targetId, apiKey);
-          }
-          return { exportState: TargetState2.getExportState(), setupResult };
-        },
-        _applyWorkspaceSelection: (payload = {}) => {
-          const selectedValue = String(payload.selectedValue || "").trim();
-          if (!selectedValue) {
-            return { selectedType: "", selectedId: "", exportState: TargetState2.getExportState() };
-          }
-          const [selectedType, selectedId] = selectedValue.split(":");
-          if (selectedType === "database") {
-            TargetState2.saveExportState({
-              targetType: CONFIG2.EXPORT_TARGET_TYPES.DATABASE,
-              databaseId: selectedId,
-              parentPageId: ""
-            });
-          } else if (selectedType === "page") {
-            TargetState2.saveExportState({
-              targetType: CONFIG2.EXPORT_TARGET_TYPES.PAGE,
-              parentPageId: selectedId
-            });
-          }
-          return {
-            selectedType,
-            selectedId,
-            exportState: TargetState2.getExportState()
-          };
-        },
-        _setExportTargetState: (payload = {}) => {
-          const {
-            targetType,
-            databaseId,
-            parentPageId
-          } = payload;
-          TargetState2.saveExportState({
-            targetType,
-            databaseId,
-            parentPageId
-          });
-          return { exportState: TargetState2.getExportState() };
-        },
-        _validateExportTarget: async (payload = {}) => {
-          const {
-            apiKey = "",
-            liveApiKey = "",
-            exportTargetType = CONFIG2.EXPORT_TARGET_TYPES.DATABASE,
-            databaseId = "",
-            parentPageId = ""
-          } = payload;
-          const result = exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.DATABASE ? await NotionAPI2.validateConfig(apiKey, databaseId) : await NotionAPI2.validatePage(parentPageId, apiKey);
-          if (result.valid) {
-            if (liveApiKey) {
-              await NotionOAuth2.setManualApiKey(liveApiKey);
-            }
-            TargetState2.saveExportState({
-              targetType: exportTargetType,
-              databaseId: exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.DATABASE ? databaseId : void 0,
-              parentPageId: exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? parentPageId : void 0
-            });
-          }
-          return result;
-        },
-        _setupExportDatabaseProperties: async (payload = {}) => {
-          const {
-            apiKey = "",
-            liveApiKey = "",
-            databaseId = ""
-          } = payload;
-          const result = await NotionAPI2.setupDatabaseProperties(databaseId, apiKey);
-          if (result.success) {
-            if (liveApiKey) {
-              await NotionOAuth2.setManualApiKey(liveApiKey);
-            }
-            TargetState2.setExportDatabaseId(databaseId);
-          }
-          return result;
-        },
-        execute: async (command, payload = {}) => {
-          switch (command) {
-            case "select_ai_target":
-              return TargetState2.setAITarget(payload.targetValue || "");
-            case "refresh_workspace_targets": {
-              const apiKey = String(payload.apiKey || "").trim();
-              if (!apiKey) throw new Error(payload.missingApiKeyMessage || MSG2.NO_NOTION_KEY);
-              return await WorkspaceService2.refreshWorkspaceSnapshot(apiKey, {
-                includePages: payload.includePages !== false,
-                maxPages: payload.maxPages,
-                onProgress: payload.onProgress,
-                onWorkspaceData: payload.onWorkspaceData,
-                onPhaseComplete: payload.onPhaseComplete
-              });
-            }
-            case "fetch_ai_models": {
-              const aiApiKey = String(payload.aiApiKey || "").trim();
-              if (!aiApiKey) throw new Error(payload.missingApiKeyMessage || MSG2.NO_AI_KEY);
-              return await require_ai().AIService.fetchModelsSnapshot(payload.aiService, aiApiKey, payload.aiBaseUrl || "");
-            }
-            case "save_command_boundary_settings":
-              switch (payload.scope) {
-                case "notion-site":
-                  return UICommandService._saveNotionSiteSettings(payload);
-                case "main-export-session":
-                  return UICommandService._saveMainExportSessionSettings(payload);
-                case "generic-export-target":
-                  return await UICommandService._saveGenericExportTargetSettings(payload);
-                default:
-                  throw new Error(`\u672A\u77E5\u7684 settings scope: ${payload.scope || ""}`);
-              }
-            case "apply_workspace_selection":
-              return UICommandService._applyWorkspaceSelection(payload);
-            case "set_export_target_state":
-              return UICommandService._setExportTargetState(payload);
-            case "validate_export_target":
-              return await UICommandService._validateExportTarget(payload);
-            case "setup_export_database_properties":
-              return await UICommandService._setupExportDatabaseProperties(payload);
-            default:
-              throw new Error(`\u672A\u77E5\u7684 command: ${command}`);
-          }
-        }
-      });
-      module.exports = { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2, UICommandService };
-    }
-  });
-
   // src/ui/style-manager.js
   var require_style_manager = __commonJS({
     "src/ui/style-manager.js"(exports, module) {
@@ -10213,6 +9994,255 @@ ${insight.summary || ""}`,
     }
   });
 
+  // src/coordination/UICommandService.js
+  var require_UICommandService = __commonJS({
+    "src/coordination/UICommandService.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
+      var { Storage: Storage2 } = require_storage();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { WorkspaceService: WorkspaceService2 } = require_extract();
+      var UICommandService = Object.freeze({
+        LEGACY_DIRECT_NOTION_WRITE_BOUNDARY: Object.freeze({
+          allowedSources: Object.freeze([
+            "AIAssistant.AGENT_TOOLS.*",
+            "AIAssistant.handleTranslateContent / handleEditContent / handleAIAutofill",
+            "AIClassifier.*",
+            "GenericExporter.setupDatabaseProperties",
+            "GitHubExporter.setupDatabaseProperties",
+            "BookmarkExporter.setupDatabaseProperties"
+          ]),
+          note: "M2-P1 \u53EA\u6536\u53E3 UI \u4E8B\u4EF6\u5230 command boundary\uFF1B\u9057\u7559 direct NotionAPI \u5199\u8DEF\u5F84\u6682\u9650\u5B9A\u5728\u5DE5\u5177\u6267\u884C\u5668\u548C\u5BFC\u51FA schema \u521D\u59CB\u5316 helper \u5185\uFF0C\u4E0D\u5141\u8BB8\u7EE7\u7EED\u4ECE UI \u4E8B\u4EF6\u76F4\u63A5\u6269\u6563\u3002"
+        }),
+        _persistStorageEntries: async (entries = {}) => {
+          for (const [key, value] of Object.entries(entries)) {
+            if (CredentialVault2.isSensitiveKey(key)) {
+              await CredentialVault2.set(key, value);
+            } else {
+              Storage2.set(key, value);
+            }
+          }
+        },
+        _persistProvidedSensitiveEntries: async (entries = {}) => {
+          for (const [key, value] of Object.entries(entries)) {
+            if (!CredentialVault2.isSensitiveKey(key)) continue;
+            const normalized = String(value || "").trim();
+            if (!normalized) continue;
+            await CredentialVault2.set(key, normalized);
+          }
+        },
+        _saveNotionSiteSettings: async (payload = {}) => {
+          const {
+            liveApiKey = "",
+            clearManualApiKey = false,
+            aiTargetValue = "",
+            aiService = CONFIG2.DEFAULTS.aiService,
+            aiModel = "",
+            aiApiKey = "",
+            aiBaseUrl = "",
+            aiCategories = CONFIG2.DEFAULTS.aiCategories,
+            workspaceMaxPages = 0,
+            personaName = CONFIG2.DEFAULTS.agentPersonaName,
+            personaTone = CONFIG2.DEFAULTS.agentPersonaTone,
+            personaExpertise = CONFIG2.DEFAULTS.agentPersonaExpertise,
+            personaInstructions = "",
+            githubUsername = "",
+            githubToken = "",
+            githubImportTypes = ["stars"]
+          } = payload;
+          if (liveApiKey) {
+            await NotionOAuth2.setManualApiKey(liveApiKey);
+          } else if (clearManualApiKey && NotionOAuth2.getAuthMode() !== "oauth") {
+            await NotionOAuth2.setManualApiKey("");
+          }
+          TargetState2.setAITarget(aiTargetValue);
+          await UICommandService._persistStorageEntries({
+            [CONFIG2.STORAGE_KEYS.AI_SERVICE]: aiService,
+            [CONFIG2.STORAGE_KEYS.AI_MODEL]: aiModel,
+            [CONFIG2.STORAGE_KEYS.AI_BASE_URL]: aiBaseUrl,
+            [CONFIG2.STORAGE_KEYS.AI_CATEGORIES]: aiCategories,
+            [CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES]: parseInt(workspaceMaxPages, 10) || 0,
+            [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_NAME]: personaName || CONFIG2.DEFAULTS.agentPersonaName,
+            [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_TONE]: personaTone,
+            [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE]: personaExpertise || CONFIG2.DEFAULTS.agentPersonaExpertise,
+            [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS]: personaInstructions,
+            [CONFIG2.STORAGE_KEYS.GITHUB_USERNAME]: githubUsername
+          });
+          await UICommandService._persistProvidedSensitiveEntries({
+            [CONFIG2.STORAGE_KEYS.AI_API_KEY]: aiApiKey,
+            [CONFIG2.STORAGE_KEYS.GITHUB_TOKEN]: githubToken
+          });
+          require_import().GitHubAPI.setImportTypes(Array.isArray(githubImportTypes) && githubImportTypes.length > 0 ? githubImportTypes : ["stars"]);
+          return {
+            aiTargetState: TargetState2.getDisplayAITargetState(),
+            aiService,
+            aiModel
+          };
+        },
+        _saveMainExportSessionSettings: async (payload = {}) => {
+          const {
+            liveApiKey = "",
+            exportState = {},
+            storageValues = {},
+            sensitiveEntries = {}
+          } = payload;
+          if (liveApiKey) {
+            await NotionOAuth2.setManualApiKey(liveApiKey);
+          }
+          TargetState2.saveExportState(exportState);
+          await UICommandService._persistStorageEntries(storageValues);
+          await UICommandService._persistProvidedSensitiveEntries(sensitiveEntries);
+          return {
+            exportState: TargetState2.getExportState()
+          };
+        },
+        _saveGenericExportTargetSettings: async (payload = {}) => {
+          const {
+            liveApiKey = "",
+            exportType,
+            targetId = "",
+            imgMode,
+            autoSetupDatabaseProperties = false,
+            apiKey = ""
+          } = payload;
+          if (liveApiKey) {
+            await NotionOAuth2.setManualApiKey(liveApiKey);
+          }
+          TargetState2.setExportTargetType(exportType);
+          Storage2.set(CONFIG2.STORAGE_KEYS.IMG_MODE, imgMode);
+          if (exportType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
+            TargetState2.setExportPageId(targetId);
+            return { exportState: TargetState2.getExportState(), setupResult: null };
+          }
+          TargetState2.setExportDatabaseId(targetId);
+          let setupResult = null;
+          if (autoSetupDatabaseProperties) {
+            setupResult = await require_export().GenericExporter.setupDatabaseProperties(targetId, apiKey);
+          }
+          return { exportState: TargetState2.getExportState(), setupResult };
+        },
+        _applyWorkspaceSelection: (payload = {}) => {
+          const selectedValue = String(payload.selectedValue || "").trim();
+          if (!selectedValue) {
+            return { selectedType: "", selectedId: "", exportState: TargetState2.getExportState() };
+          }
+          const [selectedType, selectedId] = selectedValue.split(":");
+          if (selectedType === "database") {
+            TargetState2.saveExportState({
+              targetType: CONFIG2.EXPORT_TARGET_TYPES.DATABASE,
+              databaseId: selectedId,
+              parentPageId: ""
+            });
+          } else if (selectedType === "page") {
+            TargetState2.saveExportState({
+              targetType: CONFIG2.EXPORT_TARGET_TYPES.PAGE,
+              parentPageId: selectedId
+            });
+          }
+          return {
+            selectedType,
+            selectedId,
+            exportState: TargetState2.getExportState()
+          };
+        },
+        _setExportTargetState: (payload = {}) => {
+          const {
+            targetType,
+            databaseId,
+            parentPageId
+          } = payload;
+          TargetState2.saveExportState({
+            targetType,
+            databaseId,
+            parentPageId
+          });
+          return { exportState: TargetState2.getExportState() };
+        },
+        _validateExportTarget: async (payload = {}) => {
+          const {
+            apiKey = "",
+            liveApiKey = "",
+            exportTargetType = CONFIG2.EXPORT_TARGET_TYPES.DATABASE,
+            databaseId = "",
+            parentPageId = ""
+          } = payload;
+          const result = exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.DATABASE ? await NotionAPI2.validateConfig(apiKey, databaseId) : await NotionAPI2.validatePage(parentPageId, apiKey);
+          if (result.valid) {
+            if (liveApiKey) {
+              await NotionOAuth2.setManualApiKey(liveApiKey);
+            }
+            TargetState2.saveExportState({
+              targetType: exportTargetType,
+              databaseId: exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.DATABASE ? databaseId : void 0,
+              parentPageId: exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? parentPageId : void 0
+            });
+          }
+          return result;
+        },
+        _setupExportDatabaseProperties: async (payload = {}) => {
+          const {
+            apiKey = "",
+            liveApiKey = "",
+            databaseId = ""
+          } = payload;
+          const result = await NotionAPI2.setupDatabaseProperties(databaseId, apiKey);
+          if (result.success) {
+            if (liveApiKey) {
+              await NotionOAuth2.setManualApiKey(liveApiKey);
+            }
+            TargetState2.setExportDatabaseId(databaseId);
+          }
+          return result;
+        },
+        execute: async (command, payload = {}) => {
+          switch (command) {
+            case "select_ai_target":
+              return TargetState2.setAITarget(payload.targetValue || "");
+            case "refresh_workspace_targets": {
+              const apiKey = String(payload.apiKey || "").trim();
+              if (!apiKey) throw new Error(payload.missingApiKeyMessage || MSG2.NO_NOTION_KEY);
+              return await WorkspaceService2.refreshWorkspaceSnapshot(apiKey, {
+                includePages: payload.includePages !== false,
+                maxPages: payload.maxPages,
+                onProgress: payload.onProgress,
+                onWorkspaceData: payload.onWorkspaceData,
+                onPhaseComplete: payload.onPhaseComplete
+              });
+            }
+            case "fetch_ai_models": {
+              const aiApiKey = String(payload.aiApiKey || "").trim();
+              if (!aiApiKey) throw new Error(payload.missingApiKeyMessage || MSG2.NO_AI_KEY);
+              return await require_ai().AIService.fetchModelsSnapshot(payload.aiService, aiApiKey, payload.aiBaseUrl || "");
+            }
+            case "save_command_boundary_settings":
+              switch (payload.scope) {
+                case "notion-site":
+                  return UICommandService._saveNotionSiteSettings(payload);
+                case "main-export-session":
+                  return UICommandService._saveMainExportSessionSettings(payload);
+                case "generic-export-target":
+                  return await UICommandService._saveGenericExportTargetSettings(payload);
+                default:
+                  throw new Error(`\u672A\u77E5\u7684 settings scope: ${payload.scope || ""}`);
+              }
+            case "apply_workspace_selection":
+              return UICommandService._applyWorkspaceSelection(payload);
+            case "set_export_target_state":
+              return UICommandService._setExportTargetState(payload);
+            case "validate_export_target":
+              return await UICommandService._validateExportTarget(payload);
+            case "setup_export_database_properties":
+              return await UICommandService._setupExportDatabaseProperties(payload);
+            default:
+              throw new Error(`\u672A\u77E5\u7684 command: ${command}`);
+          }
+        }
+      });
+      module.exports = { UICommandService };
+    }
+  });
+
   // src/ui/styles.js
   var require_styles = __commonJS({
     "src/ui/styles.js"(exports, module) {
@@ -11098,7 +11128,8 @@ ${insight.summary || ""}`,
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2, UICommandService } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
+      var { UICommandService } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { StyleManager: StyleManager2 } = require_style_manager();
@@ -16046,7 +16077,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2, UICommandService } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
+      var { UICommandService } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge3, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
@@ -17531,7 +17563,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2, UICommandService } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
+      var { UICommandService } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { AIAssistant: AIAssistant2 } = require_ai();
