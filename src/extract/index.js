@@ -250,7 +250,7 @@ const WorkspaceService = {
         const maxPages = Number.isFinite(options.maxPages)
             ? options.maxPages
             : (parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages), 10) || 0);
-        const requestKey = `${apiKey.slice(-8)}:${maxPages}:${includePages ? "all" : "db"}`;
+        const requestKey = `${Utils.apiKeyHash(apiKey)}:${maxPages}:${includePages ? "all" : "db"}`;
 
         if (WorkspaceService._inflightRequests.has(requestKey)) {
             return WorkspaceService._inflightRequests.get(requestKey);
@@ -372,7 +372,7 @@ const WorkspaceService = {
     },
 
     buildWorkspaceData: (apiKey, workspace = {}) => ({
-        apiKeyHash: apiKey ? apiKey.slice(-8) : "",
+        apiKeyHash: apiKey ? Utils.apiKeyHash(apiKey) : "",
         databases: Array.isArray(workspace.databases) ? workspace.databases : [],
         pages: Array.isArray(workspace.pages) ? workspace.pages : [],
         timestamp: Date.now(),

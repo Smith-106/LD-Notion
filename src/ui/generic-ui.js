@@ -424,7 +424,7 @@ const GenericUI = {
         const raw = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
         try {
             const wsData = JSON.parse(raw);
-            const keyHash = apiKey ? apiKey.slice(-8) : "";
+            const keyHash = apiKey ? Utils.apiKeyHash(apiKey) : "";
             const cacheValid = !apiKey || !wsData.apiKeyHash || wsData.apiKeyHash === keyHash;
             if (cacheValid) {
                 databases = wsData.databases || [];

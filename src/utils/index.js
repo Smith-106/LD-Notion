@@ -6,6 +6,13 @@ const { Storage } = require("../storage");
 // ===========================================
 // 工具函数
 // ===========================================
+// 三种引号字符集（ASCII " U+0022、中文左/右双引号 U+201C/U+201D）。
+// 用 Unicode 转义显式表达（编辑器中难以区分且易被规范化为同一码点）。
+// 提升到模块级常量，避免每次调用 new RegExp 分配。
+const QUOTE_CHARS = "[\\u0022\\u201C\\u201D]";
+const QUOTE_RE = new RegExp(QUOTE_CHARS + "([^" + QUOTE_CHARS.slice(1) + "+)" + QUOTE_CHARS);
+const QUOTE_RE_G = new RegExp(QUOTE_RE.source, "g");
+
 const Utils = {
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
 
@@ -52,19 +59,23 @@ const Utils = {
         return genericMatch ? genericMatch[0].toLowerCase() : "";
     },
 
+    // 非可逆的 API Key 指纹：仅供缓存失效比较（apiKeyHash 持久化到 GM 存储，
+    // 不可用 slice(-8) 等明文子串——会泄露密钥材料，CWE-312）。
+    // 32 位哈希 + base36 已足够做相等性比较，且无法逆推原 key。
+    apiKeyHash: (apiKey) => {
+        if (!apiKey) return "";
+        let h = 0;
+        for (const c of String(apiKey)) h = ((h << 5) - h + c.charCodeAt(0)) | 0;
+        return Math.abs(h).toString(36);
+    },
+
     extractQuotedText: (value) => {
-        const raw = String(value || "");
-        // 字符集须包含三种引号: ASCII " (U+0022)、中文左双引号 “ (U+201C)、中文右双引号 ” (U+201D)。
-        // 直接写字面量在编辑器中难以区分且易被规范化为同一码点，故用 Unicode 转义显式表达。
-        const QUOTE_CHARS = "[\\u0022\\u201C\\u201D]";
-        const match = raw.match(new RegExp(QUOTE_CHARS + "([^" + QUOTE_CHARS.slice(1) + "+)" + QUOTE_CHARS));
+        const match = String(value || "").match(QUOTE_RE);
         return match ? match[1].trim() : "";
     },
 
     extractQuotedTexts: (value) => {
-        const raw = String(value || "");
-        const QUOTE_CHARS = "[\\u0022\\u201C\\u201D]";
-        const matches = [...raw.matchAll(new RegExp(QUOTE_CHARS + "([^" + QUOTE_CHARS.slice(1) + "+)" + QUOTE_CHARS, "g"))];
+        const matches = [...String(value || "").matchAll(QUOTE_RE_G)];
         return matches.map(match => String(match[1] || "").trim()).filter(Boolean);
     },
 

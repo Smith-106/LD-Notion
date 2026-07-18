@@ -33,7 +33,8 @@ const GitHubAutoImporter = {
     },
 
     updateStatus: (text) => {
-        if (typeof UI === "undefined" || !UI) return;
+        const UI = _resolveUI();
+        if (!UI) return;
         const el = (UI.refs && UI.refs.autoImportStatus) || document.querySelector("#ldb-auto-import-status");
         if (el) el.textContent = text;
     },

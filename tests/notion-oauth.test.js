@@ -5,6 +5,11 @@ const assert = require('assert');
 const { execFileSync } = require('child_process');
 const { webcrypto } = require('crypto');
 
+// apiKeyHash 断言须用与生产同一的非可逆哈希实现（src/utils/index.js apiKeyHash），
+// 不能硬编码 slice(-8) 明文子串（CWE-312，已在 fix 分支消除）。
+const { Utils } = require('../src/utils');
+const apiKeyHashOf = (apiKey) => Utils.apiKeyHash(apiKey);
+
 const userScriptPath = path.resolve(__dirname, '../LinuxDo-Bookmarks-to-Notion.user.js');
 const buildScriptPath = path.resolve(__dirname, '../scripts/build-extension.js');
 const {
@@ -2649,7 +2654,7 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.deepStrictEqual(updates.map(({ meta }) => meta.isFinal), [false, true]);
         assert.strictEqual(updates[0].workspaceData.databases.length, 1);
         assert.strictEqual(updates[1].workspaceData.pages.length, 1);
-        assert.strictEqual(cachedWorkspace.apiKeyHash, 'manual_api_key'.slice(-8));
+        assert.strictEqual(cachedWorkspace.apiKeyHash, apiKeyHashOf("manual_api_key"));
         assert.strictEqual(cachedWorkspace.pages[0].id, 'page1');
         assert.strictEqual(result.workspaceData.pages[0].title, '项目计划');
     });
@@ -2896,7 +2901,7 @@ function createWorkspaceVisualizationFixture(harness) {
             assert.strictEqual(apiKey, 'manual_api_key');
             options.onProgress({ phase: 'databases', loaded: 1 });
             options.onWorkspaceData({
-                apiKeyHash: 'manual_api_key'.slice(-8),
+                apiKeyHash: apiKeyHashOf("manual_api_key"),
                 databases: [{ id: 'db1', title: '知识库' }],
                 pages: [],
                 timestamp: 1
@@ -2905,7 +2910,7 @@ function createWorkspaceVisualizationFixture(harness) {
                 databases: [{ id: 'db1', title: '知识库' }],
                 pages: [{ id: 'page1', title: '项目计划' }],
                 workspaceData: {
-                    apiKeyHash: 'manual_api_key'.slice(-8),
+                    apiKeyHash: apiKeyHashOf("manual_api_key"),
                     databases: [{ id: 'db1', title: '知识库' }],
                     pages: [{ id: 'page1', title: '项目计划' }],
                     timestamp: 2
@@ -3147,7 +3152,7 @@ function createWorkspaceVisualizationFixture(harness) {
             assert.strictEqual(apiKey, 'manual_api_key');
             options.onProgress({ phase: 'databases', loaded: 1 });
             options.onWorkspaceData({
-                apiKeyHash: 'manual_api_key'.slice(-8),
+                apiKeyHash: apiKeyHashOf("manual_api_key"),
                 databases: [{ id: 'db1', title: '知识库' }],
                 pages: [],
                 timestamp: 1
@@ -3156,7 +3161,7 @@ function createWorkspaceVisualizationFixture(harness) {
                 databases: [{ id: 'db1', title: '知识库' }],
                 pages: [{ id: 'page1', title: '项目计划', parent: 'workspace' }],
                 workspaceData: {
-                    apiKeyHash: 'manual_api_key'.slice(-8),
+                    apiKeyHash: apiKeyHashOf("manual_api_key"),
                     databases: [{ id: 'db1', title: '知识库' }],
                     pages: [{ id: 'page1', title: '项目计划', parent: 'workspace' }],
                     timestamp: 2
@@ -3348,7 +3353,7 @@ function createWorkspaceVisualizationFixture(harness) {
             assert.strictEqual(apiKey, 'manual_api_key');
             options.onProgress({ phase: 'databases', loaded: 1 });
             options.onWorkspaceData({
-                apiKeyHash: 'manual_api_key'.slice(-8),
+                apiKeyHash: apiKeyHashOf("manual_api_key"),
                 databases: [{ id: 'db1', title: '知识库' }],
                 pages: [],
                 timestamp: 1
@@ -3357,7 +3362,7 @@ function createWorkspaceVisualizationFixture(harness) {
                 databases: [{ id: 'db1', title: '知识库' }],
                 pages: [{ id: 'page1', title: '项目计划' }],
                 workspaceData: {
-                    apiKeyHash: 'manual_api_key'.slice(-8),
+                    apiKeyHash: apiKeyHashOf("manual_api_key"),
                     databases: [{ id: 'db1', title: '知识库' }],
                     pages: [{ id: 'page1', title: '项目计划' }],
                     timestamp: 2
@@ -3432,7 +3437,7 @@ function createWorkspaceVisualizationFixture(harness) {
             assert.strictEqual(apiKey, 'manual_api_key');
             assert.strictEqual(options.includePages, false);
             options.onWorkspaceData({
-                apiKeyHash: 'manual_api_key'.slice(-8),
+                apiKeyHash: apiKeyHashOf("manual_api_key"),
                 databases: [{ id: 'db1', title: '知识库' }],
                 pages: [],
                 timestamp: 1
@@ -3441,7 +3446,7 @@ function createWorkspaceVisualizationFixture(harness) {
                 databases: [{ id: 'db1', title: '知识库' }],
                 pages: [],
                 workspaceData: {
-                    apiKeyHash: 'manual_api_key'.slice(-8),
+                    apiKeyHash: apiKeyHashOf("manual_api_key"),
                     databases: [{ id: 'db1', title: '知识库' }],
                     pages: [],
                     timestamp: 1
@@ -3873,7 +3878,7 @@ function createWorkspaceVisualizationFixture(harness) {
             options.onProgress({ phase: 'databases', loaded: databases.length });
             assert.ok(statusEl.textContent.includes(`已加载 ${databases.length} 个数据库`), statusEl.textContent);
             options.onWorkspaceData({
-                apiKeyHash: apiKey.slice(-8),
+                apiKeyHash: apiKeyHashOf(apiKey),
                 databases,
                 pages: [],
                 timestamp: 1
@@ -3881,7 +3886,7 @@ function createWorkspaceVisualizationFixture(harness) {
             return {
                 databases,
                 workspaceData: {
-                    apiKeyHash: apiKey.slice(-8),
+                    apiKeyHash: apiKeyHashOf(apiKey),
                     databases,
                     pages: [],
                     timestamp: 2
@@ -3899,7 +3904,7 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.WorkspaceService.persistWorkspaceData = (apiKey, payload) => {
             persistedPayloads.push({ apiKey, payload });
             return {
-                apiKeyHash: apiKey.slice(-8),
+                apiKeyHash: apiKeyHashOf(apiKey),
                 databases: payload.databases,
                 pages: payload.pages,
                 timestamp: 3

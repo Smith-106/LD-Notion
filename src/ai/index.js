@@ -1136,8 +1136,8 @@ const AI_AGENT_TOOLS = {
                 const databases = cached.databases || [];
                 if (databases.length === 0) return "错误: 请先在 AI 设置中点击「🔄」刷新数据库列表。";
 
-                // 校验缓存的 API Key 是否匹配当前配置
-                const currentKeyHash = settings.notionApiKey ? settings.notionApiKey.slice(-8) : "";
+                // 校验缓存的 API Key 是否匹配当前配置（非可逆哈希，不泄露密钥）
+                const currentKeyHash = settings.notionApiKey ? Utils.apiKeyHash(settings.notionApiKey) : "";
                 if (cached.apiKeyHash && cached.apiKeyHash !== currentKeyHash) {
                     return "错误: 数据库列表缓存与当前 API Key 不匹配，请重新点击「🔄」刷新。";
                 }

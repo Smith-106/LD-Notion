@@ -1118,7 +1118,7 @@ const UI = {
         try {
             const workspaceData = JSON.parse(cachedWorkspace);
             const currentApiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
-            const currentKeyHash = currentApiKey ? currentApiKey.slice(-8) : "";
+            const currentKeyHash = currentApiKey ? Utils.apiKeyHash(currentApiKey) : "";
             // 仅当 API Key 匹配时才显示缓存
             if (workspaceData.apiKeyHash === currentKeyHash &&
                 (workspaceData.databases?.length > 0 || workspaceData.pages?.length > 0)) {

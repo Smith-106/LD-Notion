@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { CredentialVault } from "../src/auth/index.js";
 import { CONFIG } from "../src/config/index.js";
+import { Storage } from "../src/storage/index.js";
 
 describe("CredentialVault", () => {
     describe("SENSITIVE_KEYS", () => {
@@ -85,6 +86,32 @@ describe("CredentialVault", () => {
 
             const value = CredentialVault.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "default");
             expect(value).toBe("default");
+        });
+    });
+
+    // 回归：Storage.CredentialVault setter 必须定义在 Storage 对象上（而非 module.exports），
+    // 否则 main.js 的 `Storage.CredentialVault = vault` 赋值只创建普通 own 属性，
+    // 不触发 setter 更新 _credentialVault，Storage.get 对敏感 key 的解密转发静默失效。
+    // (fix/legacy-test-infrastructure 分支 storage/index.js:127 修复)
+    describe("Storage.CredentialVault injection", () => {
+        afterEach(() => {
+            Storage.CredentialVault = null;
+        });
+
+        it("Storage.get routes sensitive keys through the injected vault after assignment", async () => {
+            await CredentialVault.unlock("injection-pass");
+            await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_via_vault");
+
+            // 注入前：Storage.get(sensitiveKey) 走 getRaw，返回 GM 原始（非解密）值或默认
+            Storage.CredentialVault = null;
+            const beforeInject = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "fallback");
+
+            // 注入：必须触发 setter，更新内部 _credentialVault
+            Storage.CredentialVault = CredentialVault;
+            const afterInject = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "fallback");
+
+            expect(beforeInject).toBe("fallback");
+            expect(afterInject).toBe("secret_via_vault");
         });
     });
 });

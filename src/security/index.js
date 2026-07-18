@@ -5,6 +5,15 @@ const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { NotionAPI } = require("../api");
 
+// UI 由 ui 模块定义；security↔ui 互引用构成循环依赖（ui 多模块顶层 require security），
+// 顶部 require 会让 ui 加载时拿不到 security 的导出。改用运行时延迟 require：
+// 方法执行时整张模块图已加载完成，可安全取 UI。
+// 此前用 `typeof UI` 防护裸引用，在生产 bundle 里 UI 永远 undefined，
+// 导致 UI.updateLogPanel 永不触发、操作日志面板不自动刷新。
+const _resolveUI = () => {
+    try { return require("../ui").UI; } catch { return undefined; }
+};
+
 const OperationGuard = {
     _getPermissionName: (level) => {
         return CONFIG.PERMISSION_NAMES[level] || `level_${level}`;
@@ -497,7 +506,8 @@ const OperationLog = {
         Storage.set(CONFIG.STORAGE_KEYS.OPERATION_LOG, JSON.stringify(logs));
 
         // 触发UI更新
-        if (typeof UI !== "undefined" && UI.updateLogPanel) {
+        const UI = _resolveUI();
+        if (UI && UI.updateLogPanel) {
             UI.updateLogPanel();
         }
 
@@ -507,7 +517,8 @@ const OperationLog = {
     // 清空日志
     clear: () => {
         Storage.set(CONFIG.STORAGE_KEYS.OPERATION_LOG, "[]");
-        if (typeof UI !== "undefined" && UI.updateLogPanel) {
+        const UI = _resolveUI();
+        if (UI && UI.updateLogPanel) {
             UI.updateLogPanel();
         }
     },
