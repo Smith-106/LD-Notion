@@ -1,10 +1,25 @@
 "use strict";
 
 const { SourceAdapter } = require("./SourceAdapter");
-const { RSSAutoImporter } = require("../bridge");
 
+// 不再顶部 require("../bridge")。adapter/index → RSSAdapter → bridge →
+// RSSAutoImporter → SyncCoordinator → adapter/index 构成结构性循环，
+// 顶部 require 会让 RSSAdapter 在 bridge 部分加载时拿到空的 RSSAutoImporter。
+// 改由 adapter/index.js 注册时注入 lazy bridge accessor（运行时整张模块图已加载）。
+// _bridgeAccessor 未注入时（如契约测试只取对象不注册）走 fallback 顶层 require，
+// 保证向后兼容。
 const RSSAdapter = Object.assign(Object.create(SourceAdapter), {
     sourceType: "rss",
+
+    // 注入的 lazy bridge accessor；adapter/index.js 注册时设置。
+    _bridgeAccessor: null,
+
+    // 运行时解析 bridge 模块（RSSAutoImporter）。
+    _getBridge() {
+        if (this._bridgeAccessor) return this._bridgeAccessor() || {};
+        // fallback：未注入时顶层 require（此时整张模块图已加载，安全）。
+        return require("../bridge");
+    },
 
     async fetchIncremental(watermark) {
         return this._fetchItems(watermark);
@@ -33,6 +48,7 @@ const RSSAdapter = Object.assign(Object.create(SourceAdapter), {
     },
 
     async _fetchItems(watermark) {
+        const { RSSAutoImporter } = this._getBridge();
         if (!RSSAutoImporter || typeof RSSAutoImporter.getFeedUrls !== "function") return [];
         const feedUrls = RSSAutoImporter.getFeedUrls();
         const allItems = [];
