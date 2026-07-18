@@ -49,11 +49,14 @@
 
 ## Tech Stack
 
-- **Language**: JavaScript (ES2020+)
-- **Runtime**: Tampermonkey/Greasemonkey (Userscript) + Chrome Extension (Manifest V3)
-- **Build**: Node.js (build-extension.js)
-- **Test**: Node.js + Vitest (单元测试)
-- **APIs**: Notion API, Discourse API, GitHub API, OpenAI/Anthropic/Gemini AI APIs
+- **Language**: JavaScript (ES2020+), Node.js >=18
+- **Runtime**: Tampermonkey/Greasemonkey (Userscript ~26K lines) + Chrome Extension (Manifest V3, bounded + full)
+- **Build**: esbuild (build.js bundles src/ modules → single .user.js); scripts/build-extension.js (extension packaging)
+- **Test**: Vitest 4.x (349 tests, tests/ + tests/setup.js); legacy node tests (utils/logic-modules/notion-oauth)
+- **Docs**: VitePress 2.x (docs/)
+- **Verification**: verify:* suite (baseline, build, extension bounded/bridge/surfaces, bundle equivalence, delivery)
+- **APIs**: Notion API (+ File Upload API, 54 file types), Discourse API, GitHub API v3, OpenAI/Anthropic/Gemini AI APIs, Obsidian Local REST API
+- **Security**: @connect whitelist, GM_xmlhttpRequest, crypto.getRandomValues, UrlValidator (SSRF), CredentialVault (API key encryption)
 
 ## Key Decisions
 
@@ -72,4 +75,4 @@
 - 开源贡献者（MIT 协议）
 
 ---
-*Last updated: 2026-05-06 after initialization*
+*Last updated: 2026-07-15 (Tech Stack refreshed by codebase-rebuild)*
