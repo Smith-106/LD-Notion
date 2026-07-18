@@ -4,6 +4,7 @@ const { CONFIG, MSG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { NotionAPI } = require("../api");
+const { CredentialVault } = require("../auth");
 
 // UI 由 ui 模块定义；security↔ui 互引用构成循环依赖（ui 多模块顶层 require security），
 // 顶部 require 会让 ui 加载时拿不到 security 的导出。改用运行时延迟 require：
@@ -466,7 +467,7 @@ const OperationLog = {
         if (!entry || typeof entry !== "object") return entry;
         const redacted = { ...entry };
         const context = redacted.context || {};
-        const sensitiveKeys = (typeof CredentialVault !== "undefined" && CredentialVault.SENSITIVE_KEYS)
+        const sensitiveKeys = (CredentialVault && CredentialVault.SENSITIVE_KEYS)
             ? CredentialVault.SENSITIVE_KEYS
             : new Set();
         for (const key of sensitiveKeys) {
@@ -805,11 +806,12 @@ const UndoManager = {
 
         // 绑定撤销按钮
         toast.querySelector("#ldb-undo-action").onclick = async () => {
+            const UI = _resolveUI();
             const success = await UndoManager.execute();
             if (success) {
-                UI.showStatus("撤销成功", "success");
+                if (UI) UI.showStatus("撤销成功", "success");
             } else {
-                UI.showStatus("撤销失败，请手动检查 Notion 中的变更", "error");
+                if (UI) UI.showStatus("撤销失败，请手动检查 Notion 中的变更", "error");
             }
         };
 

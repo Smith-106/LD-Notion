@@ -1108,7 +1108,7 @@
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var CredentialVault3 = {
+      var CredentialVault2 = {
         VERSION: 1,
         SENSITIVE_KEYS: Object.freeze(/* @__PURE__ */ new Set([
           CONFIG2.STORAGE_KEYS.NOTION_API_KEY,
@@ -1124,34 +1124,34 @@
         _sessionPassphrase: "",
         _unlocked: false,
         _syncHandlers: [],
-        isSensitiveKey: (key) => CredentialVault3.SENSITIVE_KEYS.has(key),
-        hasVault: () => !!CredentialVault3._getVaultPayloadRaw(),
-        isUnlocked: () => CredentialVault3._unlocked,
+        isSensitiveKey: (key) => CredentialVault2.SENSITIVE_KEYS.has(key),
+        hasVault: () => !!CredentialVault2._getVaultPayloadRaw(),
+        isUnlocked: () => CredentialVault2._unlocked,
         get: (key, defaultValue = "") => {
-          if (!CredentialVault3.isSensitiveKey(key)) {
+          if (!CredentialVault2.isSensitiveKey(key)) {
             return Storage2.getRaw(key, defaultValue);
           }
-          if (Object.prototype.hasOwnProperty.call(CredentialVault3._sessionCache, key)) {
-            return CredentialVault3._sessionCache[key];
+          if (Object.prototype.hasOwnProperty.call(CredentialVault2._sessionCache, key)) {
+            return CredentialVault2._sessionCache[key];
           }
           return Storage2.getRaw(key, defaultValue);
         },
         getStatus: () => {
-          const legacyCount = [...CredentialVault3.SENSITIVE_KEYS].reduce((count, key) => {
+          const legacyCount = [...CredentialVault2.SENSITIVE_KEYS].reduce((count, key) => {
             const value = String(Storage2.getRaw(key, "") || "").trim();
             return value ? count + 1 : count;
           }, 0);
           return {
-            hasVault: CredentialVault3.hasVault(),
-            unlocked: CredentialVault3.isUnlocked(),
+            hasVault: CredentialVault2.hasVault(),
+            unlocked: CredentialVault2.isUnlocked(),
             legacyCount,
-            sensitiveCount: Object.keys(CredentialVault3._sessionCache).filter((key) => {
-              return CredentialVault3.isSensitiveKey(key) && String(CredentialVault3._sessionCache[key] || "").trim();
+            sensitiveCount: Object.keys(CredentialVault2._sessionCache).filter((key) => {
+              return CredentialVault2.isSensitiveKey(key) && String(CredentialVault2._sessionCache[key] || "").trim();
             }).length
           };
         },
         getStatusText: () => {
-          const status = CredentialVault3.getStatus();
+          const status = CredentialVault2.getStatus();
           if (status.hasVault && status.unlocked) {
             return `\u51ED\u8BC1\u4FDD\u9669\u7BB1\u5DF2\u89E3\u9501\uFF0C\u5F53\u524D\u4F1A\u8BDD\u4E2D\u7684\u654F\u611F\u51ED\u8BC1\u4F1A\u4EE5\u52A0\u5BC6\u5F62\u5F0F\u4FDD\u5B58\u3002\u5DF2\u52A0\u8F7D ${status.sensitiveCount} \u9879\u3002`;
           }
@@ -1164,40 +1164,40 @@
           return "\u51ED\u8BC1\u4FDD\u9669\u7BB1\u5C1A\u672A\u521D\u59CB\u5316\u3002\u654F\u611F\u51ED\u8BC1\u5728\u521D\u59CB\u5316\u540E\u4F1A\u6539\u4E3A\u672C\u5730\u52A0\u5BC6\u5B58\u50A8\u3002";
         },
         hasPersistedValue: (key) => {
-          if (!CredentialVault3.isSensitiveKey(key)) {
+          if (!CredentialVault2.isSensitiveKey(key)) {
             return !!String(Storage2.getRaw(key, "") || "").trim();
           }
-          if (Object.prototype.hasOwnProperty.call(CredentialVault3._sessionCache, key)) {
-            return !!String(CredentialVault3._sessionCache[key] || "").trim();
+          if (Object.prototype.hasOwnProperty.call(CredentialVault2._sessionCache, key)) {
+            return !!String(CredentialVault2._sessionCache[key] || "").trim();
           }
           const rawValue = String(Storage2.getRaw(key, "") || "").trim();
           if (rawValue) return true;
-          const payload = Utils2.safeJsonParse(CredentialVault3._getVaultPayloadRaw(), null);
+          const payload = Utils2.safeJsonParse(CredentialVault2._getVaultPayloadRaw(), null);
           return Array.isArray(payload == null ? void 0 : payload.keys) && payload.keys.includes(key);
         },
         getFieldPlaceholder: (key, emptyPlaceholder = "") => {
-          if (!CredentialVault3.hasPersistedValue(key)) return emptyPlaceholder;
-          if (CredentialVault3.isUnlocked()) {
+          if (!CredentialVault2.hasPersistedValue(key)) return emptyPlaceholder;
+          if (CredentialVault2.isUnlocked()) {
             return "\u5DF2\u4FDD\u5B58\u5728\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u8F93\u5165\u65B0\u503C\u53EF\u66F4\u65B0";
           }
-          if (CredentialVault3.hasVault()) {
+          if (CredentialVault2.hasVault()) {
             return "\u5DF2\u4FDD\u5B58\u5728\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u89E3\u9501\u540E\u53EF\u66F4\u65B0";
           }
           return "\u5DF2\u914D\u7F6E\uFF08\u8F93\u5165\u65B0\u503C\u53EF\u66F4\u65B0\uFF09";
         },
         syncSensitiveInput: (input, key, emptyPlaceholder = "") => {
-          if (!input || !CredentialVault3.isSensitiveKey(key)) return;
+          if (!input || !CredentialVault2.isSensitiveKey(key)) return;
           if (document.activeElement !== input) {
             input.value = "";
           }
-          input.placeholder = CredentialVault3.getFieldPlaceholder(key, emptyPlaceholder);
+          input.placeholder = CredentialVault2.getFieldPlaceholder(key, emptyPlaceholder);
         },
         registerSyncHandler: (handler) => {
           if (typeof handler !== "function") return;
-          CredentialVault3._syncHandlers.push(handler);
+          CredentialVault2._syncHandlers.push(handler);
         },
         syncRegisteredControls: () => {
-          CredentialVault3._syncHandlers.forEach((handler) => {
+          CredentialVault2._syncHandlers.forEach((handler) => {
             try {
               handler();
             } catch (error) {
@@ -1217,8 +1217,8 @@
             return;
           }
           const sync = () => {
-            const status = CredentialVault3.getStatus();
-            fields.statusEl.textContent = CredentialVault3.getStatusText();
+            const status = CredentialVault2.getStatus();
+            fields.statusEl.textContent = CredentialVault2.getStatusText();
             if (fields.statusEl.style) {
               fields.statusEl.style.color = status.unlocked ? "#34d399" : status.hasVault ? "#f59e0b" : "#94a3b8";
             }
@@ -1231,8 +1231,8 @@
           };
           fields.unlockBtn.addEventListener("click", async () => {
             try {
-              const before = CredentialVault3.hasVault();
-              await CredentialVault3.promptUnlock();
+              const before = CredentialVault2.hasVault();
+              await CredentialVault2.promptUnlock();
               if (typeof notify === "function") {
                 notify(before ? "\u51ED\u8BC1\u4FDD\u9669\u7BB1\u5DF2\u89E3\u9501" : "\u51ED\u8BC1\u4FDD\u9669\u7BB1\u5DF2\u521D\u59CB\u5316\u5E76\u89E3\u9501", "success");
               }
@@ -1245,13 +1245,13 @@
             }
           });
           fields.lockBtn.addEventListener("click", () => {
-            CredentialVault3.lock();
+            CredentialVault2.lock();
             if (typeof notify === "function") {
               notify("\u51ED\u8BC1\u4FDD\u9669\u7BB1\u5DF2\u9501\u5B9A", "info");
             }
             sync();
           });
-          CredentialVault3.registerSyncHandler(sync);
+          CredentialVault2.registerSyncHandler(sync);
           sync();
         },
         promptUnlock: async () => {
@@ -1259,10 +1259,10 @@
           if (!promptFn) {
             throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u8F93\u5165\u4FDD\u9669\u7BB1\u53E3\u4EE4\uFF0C\u8BF7\u5728\u6D4F\u89C8\u5668\u9875\u9762\u4E2D\u64CD\u4F5C\u3002");
           }
-          if (CredentialVault3.hasVault()) {
+          if (CredentialVault2.hasVault()) {
             const passphrase2 = promptFn("\u8F93\u5165\u672C\u5730\u51ED\u8BC1\u4FDD\u9669\u7BB1\u53E3\u4EE4");
             if (passphrase2 == null) throw new Error("\u5DF2\u53D6\u6D88\u89E3\u9501\u51ED\u8BC1\u4FDD\u9669\u7BB1\u3002");
-            return CredentialVault3.unlock(passphrase2, { initializeIfMissing: false, migrateLegacy: true });
+            return CredentialVault2.unlock(passphrase2, { initializeIfMissing: false, migrateLegacy: true });
           }
           const passphrase = promptFn("\u4E3A\u672C\u5730\u51ED\u8BC1\u4FDD\u9669\u7BB1\u8BBE\u7F6E\u53E3\u4EE4\u3002\u53E3\u4EE4\u4E0D\u4F1A\u79BB\u5F00\u5F53\u524D\u6D4F\u89C8\u5668\uFF0C\u4E22\u5931\u540E\u5C06\u65E0\u6CD5\u89E3\u5BC6\u5DF2\u4FDD\u5B58\u7684\u65B0\u51ED\u8BC1\u3002");
           if (passphrase == null) throw new Error("\u5DF2\u53D6\u6D88\u8BBE\u7F6E\u51ED\u8BC1\u4FDD\u9669\u7BB1\u3002");
@@ -1271,102 +1271,102 @@
           if (String(passphrase) !== String(confirmPassphrase)) {
             throw new Error("\u4E24\u6B21\u8F93\u5165\u7684\u4FDD\u9669\u7BB1\u53E3\u4EE4\u4E0D\u4E00\u81F4\u3002");
           }
-          return CredentialVault3.unlock(passphrase, { initializeIfMissing: true, migrateLegacy: true });
+          return CredentialVault2.unlock(passphrase, { initializeIfMissing: true, migrateLegacy: true });
         },
         unlock: async (passphrase = "", { initializeIfMissing = true, migrateLegacy = true } = {}) => {
-          CredentialVault3._ensureCryptoReady();
+          CredentialVault2._ensureCryptoReady();
           const normalizedPassphrase = String(passphrase || "");
           if (!normalizedPassphrase.trim()) {
             throw new Error("\u51ED\u8BC1\u4FDD\u9669\u7BB1\u53E3\u4EE4\u4E0D\u80FD\u4E3A\u7A7A\u3002");
           }
-          CredentialVault3._sessionPassphrase = normalizedPassphrase;
-          CredentialVault3._unlocked = true;
-          if (!CredentialVault3.hasVault()) {
+          CredentialVault2._sessionPassphrase = normalizedPassphrase;
+          CredentialVault2._unlocked = true;
+          if (!CredentialVault2.hasVault()) {
             if (!initializeIfMissing) {
-              CredentialVault3.lock();
+              CredentialVault2.lock();
               throw new Error("\u51ED\u8BC1\u4FDD\u9669\u7BB1\u5C1A\u672A\u521D\u59CB\u5316\u3002");
             }
-            CredentialVault3._sessionCache = migrateLegacy ? CredentialVault3._collectLegacyValues() : /* @__PURE__ */ Object.create(null);
-            await CredentialVault3._persistCurrentState({ removeLegacy: migrateLegacy });
-            CredentialVault3.syncRegisteredControls();
-            return CredentialVault3.getStatus();
+            CredentialVault2._sessionCache = migrateLegacy ? CredentialVault2._collectLegacyValues() : /* @__PURE__ */ Object.create(null);
+            await CredentialVault2._persistCurrentState({ removeLegacy: migrateLegacy });
+            CredentialVault2.syncRegisteredControls();
+            return CredentialVault2.getStatus();
           }
-          const payload = CredentialVault3._readVaultPayload();
+          const payload = CredentialVault2._readVaultPayload();
           let decrypted;
           try {
-            decrypted = await CredentialVault3._decryptPayload(payload, normalizedPassphrase);
+            decrypted = await CredentialVault2._decryptPayload(payload, normalizedPassphrase);
           } catch {
-            CredentialVault3.lock();
+            CredentialVault2.lock();
             throw new Error("\u51ED\u8BC1\u4FDD\u9669\u7BB1\u53E3\u4EE4\u9519\u8BEF\uFF0C\u6216\u672C\u5730\u52A0\u5BC6\u6570\u636E\u5DF2\u635F\u574F\u3002");
           }
           const parsed = Utils2.safeJsonParse(decrypted, null);
           if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-            CredentialVault3.lock();
+            CredentialVault2.lock();
             throw new Error("\u51ED\u8BC1\u4FDD\u9669\u7BB1\u5185\u5BB9\u635F\u574F\uFF0C\u65E0\u6CD5\u89E3\u6790\u3002");
           }
-          CredentialVault3._sessionCache = /* @__PURE__ */ Object.create(null);
-          for (const key of CredentialVault3.SENSITIVE_KEYS) {
+          CredentialVault2._sessionCache = /* @__PURE__ */ Object.create(null);
+          for (const key of CredentialVault2.SENSITIVE_KEYS) {
             const value = String(parsed[key] || "").trim();
             if (value) {
-              CredentialVault3._sessionCache[key] = value;
+              CredentialVault2._sessionCache[key] = value;
             }
           }
           if (migrateLegacy) {
-            const legacyValues = CredentialVault3._collectLegacyValues();
+            const legacyValues = CredentialVault2._collectLegacyValues();
             let needsPersist = false;
             for (const [key, value] of Object.entries(legacyValues)) {
-              if (!CredentialVault3._sessionCache[key] && value) {
-                CredentialVault3._sessionCache[key] = value;
+              if (!CredentialVault2._sessionCache[key] && value) {
+                CredentialVault2._sessionCache[key] = value;
                 needsPersist = true;
               }
             }
             if (needsPersist) {
-              await CredentialVault3._persistCurrentState({ removeLegacy: true });
+              await CredentialVault2._persistCurrentState({ removeLegacy: true });
             }
           }
-          CredentialVault3.syncRegisteredControls();
-          return CredentialVault3.getStatus();
+          CredentialVault2.syncRegisteredControls();
+          return CredentialVault2.getStatus();
         },
         lock: () => {
-          CredentialVault3._sessionCache = /* @__PURE__ */ Object.create(null);
-          CredentialVault3._sessionPassphrase = "";
-          CredentialVault3._unlocked = false;
-          CredentialVault3.syncRegisteredControls();
+          CredentialVault2._sessionCache = /* @__PURE__ */ Object.create(null);
+          CredentialVault2._sessionPassphrase = "";
+          CredentialVault2._unlocked = false;
+          CredentialVault2.syncRegisteredControls();
         },
         set: async (key, value) => {
-          if (!CredentialVault3.isSensitiveKey(key)) {
+          if (!CredentialVault2.isSensitiveKey(key)) {
             Storage2.setRaw(key, value);
             return value;
           }
           const normalized = String(value || "").trim();
           if (!normalized) {
-            delete CredentialVault3._sessionCache[key];
-            if (!CredentialVault3.hasVault()) {
+            delete CredentialVault2._sessionCache[key];
+            if (!CredentialVault2.hasVault()) {
               Storage2.remove(key);
-              CredentialVault3.syncRegisteredControls();
+              CredentialVault2.syncRegisteredControls();
               return "";
             }
-            CredentialVault3._ensureUnlocked("\u6E05\u9664\u654F\u611F\u51ED\u8BC1");
-            await CredentialVault3._persistCurrentState({ removeLegacy: true });
+            CredentialVault2._ensureUnlocked("\u6E05\u9664\u654F\u611F\u51ED\u8BC1");
+            await CredentialVault2._persistCurrentState({ removeLegacy: true });
             Storage2.remove(key);
-            CredentialVault3.syncRegisteredControls();
+            CredentialVault2.syncRegisteredControls();
             return "";
           }
-          if (!CredentialVault3.hasVault() && !CredentialVault3.isUnlocked()) {
+          if (!CredentialVault2.hasVault() && !CredentialVault2.isUnlocked()) {
             throw new Error("\u8BF7\u5148\u8BBE\u7F6E\u5E76\u89E3\u9501\u51ED\u8BC1\u4FDD\u9669\u7BB1\uFF0C\u518D\u4FDD\u5B58\u654F\u611F\u51ED\u8BC1\u3002");
           }
-          CredentialVault3._ensureUnlocked("\u4FDD\u5B58\u654F\u611F\u51ED\u8BC1");
-          CredentialVault3._sessionCache[key] = normalized;
-          await CredentialVault3._persistCurrentState({ removeLegacy: true });
+          CredentialVault2._ensureUnlocked("\u4FDD\u5B58\u654F\u611F\u51ED\u8BC1");
+          CredentialVault2._sessionCache[key] = normalized;
+          await CredentialVault2._persistCurrentState({ removeLegacy: true });
           Storage2.remove(key);
-          CredentialVault3.syncRegisteredControls();
+          CredentialVault2.syncRegisteredControls();
           return normalized;
         },
         clear: async (key) => {
-          return CredentialVault3.set(key, "");
+          return CredentialVault2.set(key, "");
         },
         _ensureUnlocked: (actionLabel = "\u4FDD\u5B58\u654F\u611F\u51ED\u8BC1") => {
-          if (!CredentialVault3.isUnlocked()) {
+          if (!CredentialVault2.isUnlocked()) {
             throw new Error(`${actionLabel} \u524D\u8BF7\u5148\u89E3\u9501\u51ED\u8BC1\u4FDD\u9669\u7BB1\u3002`);
           }
         },
@@ -1378,7 +1378,7 @@
         },
         _getVaultPayloadRaw: () => String(Storage2.getRaw(CONFIG2.STORAGE_KEYS.CREDENTIAL_VAULT, "") || "").trim(),
         _readVaultPayload: () => {
-          const raw = CredentialVault3._getVaultPayloadRaw();
+          const raw = CredentialVault2._getVaultPayloadRaw();
           const payload = Utils2.safeJsonParse(raw, null);
           if (!(payload == null ? void 0 : payload.ciphertext) || !(payload == null ? void 0 : payload.iv) || !(payload == null ? void 0 : payload.salt)) {
             throw new Error("\u51ED\u8BC1\u4FDD\u9669\u7BB1\u5185\u5BB9\u4E0D\u5B8C\u6574\u3002");
@@ -1387,7 +1387,7 @@
         },
         _collectLegacyValues: () => {
           const legacyValues = /* @__PURE__ */ Object.create(null);
-          CredentialVault3.SENSITIVE_KEYS.forEach((key) => {
+          CredentialVault2.SENSITIVE_KEYS.forEach((key) => {
             const value = String(Storage2.getRaw(key, "") || "").trim();
             if (value) {
               legacyValues[key] = value;
@@ -1397,8 +1397,8 @@
         },
         _serializeSessionCache: () => {
           const payload = /* @__PURE__ */ Object.create(null);
-          CredentialVault3.SENSITIVE_KEYS.forEach((key) => {
-            const value = String(CredentialVault3._sessionCache[key] || "").trim();
+          CredentialVault2.SENSITIVE_KEYS.forEach((key) => {
+            const value = String(CredentialVault2._sessionCache[key] || "").trim();
             if (value) {
               payload[key] = value;
             }
@@ -1406,36 +1406,36 @@
           return payload;
         },
         _persistCurrentState: async ({ removeLegacy = false } = {}) => {
-          CredentialVault3._ensureCryptoReady();
-          CredentialVault3._ensureUnlocked("\u66F4\u65B0\u51ED\u8BC1\u4FDD\u9669\u7BB1");
-          const serialized = JSON.stringify(CredentialVault3._serializeSessionCache());
+          CredentialVault2._ensureCryptoReady();
+          CredentialVault2._ensureUnlocked("\u66F4\u65B0\u51ED\u8BC1\u4FDD\u9669\u7BB1");
+          const serialized = JSON.stringify(CredentialVault2._serializeSessionCache());
           const encoder = new TextEncoder();
-          const saltBytes = CredentialVault3._randomBytes(16);
-          const ivBytes = CredentialVault3._randomBytes(12);
-          const key = await CredentialVault3._deriveKey(CredentialVault3._sessionPassphrase, saltBytes);
+          const saltBytes = CredentialVault2._randomBytes(16);
+          const ivBytes = CredentialVault2._randomBytes(12);
+          const key = await CredentialVault2._deriveKey(CredentialVault2._sessionPassphrase, saltBytes);
           const encryptedBuffer = await crypto.subtle.encrypt(
             { name: "AES-GCM", iv: ivBytes },
             key,
             encoder.encode(serialized)
           );
           Storage2.setRaw(CONFIG2.STORAGE_KEYS.CREDENTIAL_VAULT, JSON.stringify({
-            version: CredentialVault3.VERSION,
-            keys: Object.keys(CredentialVault3._serializeSessionCache()),
-            salt: CredentialVault3._bytesToBase64(saltBytes),
-            iv: CredentialVault3._bytesToBase64(ivBytes),
-            ciphertext: CredentialVault3._bytesToBase64(new Uint8Array(encryptedBuffer)),
+            version: CredentialVault2.VERSION,
+            keys: Object.keys(CredentialVault2._serializeSessionCache()),
+            salt: CredentialVault2._bytesToBase64(saltBytes),
+            iv: CredentialVault2._bytesToBase64(ivBytes),
+            ciphertext: CredentialVault2._bytesToBase64(new Uint8Array(encryptedBuffer)),
             updatedAt: Date.now()
           }));
           if (removeLegacy) {
-            CredentialVault3.SENSITIVE_KEYS.forEach((keyName) => Storage2.remove(keyName));
+            CredentialVault2.SENSITIVE_KEYS.forEach((keyName) => Storage2.remove(keyName));
           }
         },
         _decryptPayload: async (payload, passphrase) => {
-          CredentialVault3._ensureCryptoReady();
-          const saltBytes = CredentialVault3._base64ToBytes(payload.salt);
-          const ivBytes = CredentialVault3._base64ToBytes(payload.iv);
-          const cipherBytes = CredentialVault3._base64ToBytes(payload.ciphertext);
-          const key = await CredentialVault3._deriveKey(passphrase, saltBytes);
+          CredentialVault2._ensureCryptoReady();
+          const saltBytes = CredentialVault2._base64ToBytes(payload.salt);
+          const ivBytes = CredentialVault2._base64ToBytes(payload.iv);
+          const cipherBytes = CredentialVault2._base64ToBytes(payload.ciphertext);
+          const key = await CredentialVault2._deriveKey(passphrase, saltBytes);
           try {
             const decryptedBuffer = await crypto.subtle.decrypt(
               { name: "AES-GCM", iv: ivBytes },
@@ -1623,7 +1623,7 @@
           if (typeof clientSecret !== "undefined") {
             const normalizedClientSecret = String(clientSecret || "").trim();
             if (normalizedClientSecret) {
-              await CredentialVault3.set(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, normalizedClientSecret);
+              await CredentialVault2.set(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, normalizedClientSecret);
             }
           }
           if (typeof redirectUri !== "undefined") {
@@ -1646,7 +1646,7 @@
         },
         getRefreshToken: () => String(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "") || "").trim(),
         setRefreshToken: async (refreshToken = "") => {
-          await CredentialVault3.set(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, String(refreshToken || "").trim());
+          await CredentialVault2.set(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, String(refreshToken || "").trim());
         },
         getAccessToken: (liveValue = "") => {
           const manualValue = String(liveValue || "").trim();
@@ -1655,7 +1655,7 @@
         },
         setManualApiKey: async (apiKey = "") => {
           const normalized = String(apiKey || "").trim();
-          await CredentialVault3.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, normalized);
+          await CredentialVault2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, normalized);
           NotionOAuth2.setAuthMode("manual");
           NotionOAuth2.syncApiKeyInputs(normalized);
           NotionOAuth2.syncRegisteredControls();
@@ -1675,10 +1675,10 @@
           const meta = NotionOAuth2.getMeta();
           const accessToken = NotionOAuth2.getAccessToken();
           const workspaceName = meta.workspaceName || meta.workspaceId || "";
-          const hasStoredClientSecret = CredentialVault3.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET);
-          const hasStoredManualToken = CredentialVault3.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
-          const hasStoredRefreshToken = CredentialVault3.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN);
-          if (CredentialVault3.hasVault() && !CredentialVault3.isUnlocked() && (hasStoredManualToken || hasStoredClientSecret || hasStoredRefreshToken)) {
+          const hasStoredClientSecret = CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET);
+          const hasStoredManualToken = CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
+          const hasStoredRefreshToken = CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN);
+          if (CredentialVault2.hasVault() && !CredentialVault2.isUnlocked() && (hasStoredManualToken || hasStoredClientSecret || hasStoredRefreshToken)) {
             return {
               connected: false,
               color: "#f59e0b",
@@ -1767,7 +1767,7 @@
               input.value = "";
               input.placeholder = status.apiKeyPlaceholder;
             } else {
-              CredentialVault3.syncSensitiveInput(input, CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "secret_xxx...");
+              CredentialVault2.syncSensitiveInput(input, CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "secret_xxx...");
             }
           });
           const genericInput = document.querySelector("#gclip-api-key-input");
@@ -1776,7 +1776,7 @@
             if (NotionOAuth2.isOAuthConnected()) {
               genericInput.placeholder = "\u5DF2\u901A\u8FC7 OAuth \u6388\u6743\uFF08\u5982\u9700\u8986\u76D6\uFF0C\u53EF\u624B\u52A8\u8F93\u5165\uFF09";
             } else {
-              genericInput.placeholder = CredentialVault3.getFieldPlaceholder(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "secret_...");
+              genericInput.placeholder = CredentialVault2.getFieldPlaceholder(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "secret_...");
             }
           }
         },
@@ -1813,7 +1813,7 @@
             if (document.activeElement !== fields.clientIdInput) {
               fields.clientIdInput.value = config.clientId;
             }
-            CredentialVault3.syncSensitiveInput(fields.clientSecretInput, CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "Client Secret");
+            CredentialVault2.syncSensitiveInput(fields.clientSecretInput, CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "Client Secret");
             if (document.activeElement !== fields.redirectUriInput) {
               fields.redirectUriInput.value = config.redirectUri || CONFIG2.DEFAULTS.notionOauthRedirectUri;
             }
@@ -1823,7 +1823,7 @@
             }
             fields.authorizeBtn.textContent = status.connected ? "\u{1F504} \u91CD\u65B0\u6388\u6743" : "\u{1F510} \u4E00\u952E\u6388\u6743";
             fields.clearBtn.textContent = status.connected ? "\u65AD\u5F00\u5E76\u5207\u56DE\u624B\u52A8" : "\u6E05\u9664\u672C\u5730\u6388\u6743";
-            fields.clearBtn.disabled = !status.connected && !CredentialVault3.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && !CredentialVault3.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
+            fields.clearBtn.disabled = !status.connected && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
           };
           const saveFormConfig = async () => {
             await NotionOAuth2.saveConfig({
@@ -1873,13 +1873,13 @@
             sync();
           });
           NotionOAuth2.registerSyncHandler(sync);
-          CredentialVault3.registerSyncHandler(sync);
+          CredentialVault2.registerSyncHandler(sync);
           sync();
         },
         clearConnection: async () => {
           const shouldClearAccessToken = NotionOAuth2.getAuthMode() === "oauth";
           if (shouldClearAccessToken) {
-            await CredentialVault3.clear(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
+            await CredentialVault2.clear(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
           }
           await NotionOAuth2.setRefreshToken("");
           NotionOAuth2.setMeta({});
@@ -1892,7 +1892,7 @@
           const config = NotionOAuth2.getConfig();
           if (!config.clientId) throw new Error("\u8BF7\u5148\u586B\u5199 Notion OAuth Client ID");
           if (!config.clientSecret) {
-            if (CredentialVault3.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault3.hasVault() && !CredentialVault3.isUnlocked()) {
+            if (CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault2.hasVault() && !CredentialVault2.isUnlocked()) {
               throw new Error("Notion OAuth Client Secret \u5DF2\u4FDD\u5B58\u5728\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u8BF7\u5148\u89E3\u9501\u51ED\u8BC1\u4FDD\u9669\u7BB1\u540E\u518D\u6388\u6743\u3002");
             }
             throw new Error("\u8BF7\u5148\u586B\u5199 Notion OAuth Client Secret");
@@ -1943,7 +1943,7 @@
         applyTokenResponse: async (result = {}) => {
           var _a;
           if (!(result == null ? void 0 : result.access_token)) throw new Error("Notion OAuth \u672A\u8FD4\u56DE access_token");
-          await CredentialVault3.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, result.access_token);
+          await CredentialVault2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, result.access_token);
           if (result.refresh_token) {
             await NotionOAuth2.setRefreshToken(result.refresh_token);
           }
@@ -1964,13 +1964,13 @@
           const refreshToken = NotionOAuth2.getRefreshToken();
           const config = NotionOAuth2.getConfig();
           if (!refreshToken) {
-            if (CredentialVault3.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && CredentialVault3.hasVault() && !CredentialVault3.isUnlocked()) {
+            if (CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && CredentialVault2.hasVault() && !CredentialVault2.isUnlocked()) {
               throw new Error("Notion OAuth refresh token \u5DF2\u4FDD\u5B58\u5728\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u8BF7\u5148\u89E3\u9501\u51ED\u8BC1\u4FDD\u9669\u7BB1\u540E\u518D\u5237\u65B0\u4EE4\u724C\u3002");
             }
             throw new Error("\u5F53\u524D\u6CA1\u6709\u53EF\u5237\u65B0\u7684 Notion OAuth refresh_token");
           }
           if (!config.clientId || !config.clientSecret) {
-            if (CredentialVault3.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault3.hasVault() && !CredentialVault3.isUnlocked()) {
+            if (CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault2.hasVault() && !CredentialVault2.isUnlocked()) {
               throw new Error("Notion OAuth Client Secret \u5DF2\u4FDD\u5B58\u5728\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u8BF7\u5148\u89E3\u9501\u51ED\u8BC1\u4FDD\u9669\u7BB1\u540E\u518D\u5237\u65B0\u4EE4\u724C\u3002");
             }
             throw new Error("\u7F3A\u5C11 Notion OAuth Client \u914D\u7F6E\uFF0C\u65E0\u6CD5\u5237\u65B0\u4EE4\u724C");
@@ -2023,7 +2023,7 @@
           return true;
         }
       };
-      module.exports = { CredentialVault: CredentialVault3, TargetState: TargetState2, NotionOAuth: NotionOAuth2 };
+      module.exports = { CredentialVault: CredentialVault2, TargetState: TargetState2, NotionOAuth: NotionOAuth2 };
     }
   });
 
@@ -3801,8 +3801,8 @@ ${quoted}
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2 } = require_api();
-      var { AIService: AIService3 } = require_ai();
-      var BookmarkExporter3 = {
+      var { AIService: AIService2 } = require_ai();
+      var BookmarkExporter2 = {
         _pageInsightCache: {},
         // 展平书签树为列表，记录文件夹路径
         flattenTree: (nodes, parentPath = "") => {
@@ -3819,7 +3819,7 @@ ${quoted}
               });
             }
             if (node.children) {
-              result.push(...BookmarkExporter3.flattenTree(node.children, currentPath));
+              result.push(...BookmarkExporter2.flattenTree(node.children, currentPath));
             }
           }
           return result;
@@ -3843,7 +3843,7 @@ ${quoted}
           const headers = String(responseHeaders || "");
           if (!headers) return "";
           const match = headers.match(/content-type\s*:\s*[^\r\n]*charset\s*=\s*([^\s;"']+)/i);
-          return BookmarkExporter3.normalizeCharset((match == null ? void 0 : match[1]) || "");
+          return BookmarkExporter2.normalizeCharset((match == null ? void 0 : match[1]) || "");
         },
         extractCharsetFromHtmlHead: (bytes) => {
           if (!(bytes instanceof Uint8Array) || bytes.length === 0) return "";
@@ -3851,10 +3851,10 @@ ${quoted}
             const head = new TextDecoder("latin1").decode(bytes.slice(0, 4096));
             const charsetMatch = head.match(/<meta[^>]+charset\s*=\s*["']?([^\s"'>/]+)/i);
             if (charsetMatch == null ? void 0 : charsetMatch[1]) {
-              return BookmarkExporter3.normalizeCharset(charsetMatch[1]);
+              return BookmarkExporter2.normalizeCharset(charsetMatch[1]);
             }
             const httpEquivMatch = head.match(/<meta[^>]+http-equiv\s*=\s*["']content-type["'][^>]*content\s*=\s*["'][^"']*charset\s*=\s*([^\s"';>]+)/i);
-            return BookmarkExporter3.normalizeCharset((httpEquivMatch == null ? void 0 : httpEquivMatch[1]) || "");
+            return BookmarkExporter2.normalizeCharset((httpEquivMatch == null ? void 0 : httpEquivMatch[1]) || "");
           } catch (error) {
             console.warn("[LD-Notion] \u5B57\u7B26\u96C6\u68C0\u6D4B\u5931\u8D25:", error);
             return "";
@@ -3868,15 +3868,15 @@ ${quoted}
         },
         decodeHtmlFromResponse: (response) => {
           const fallbackText = String((response == null ? void 0 : response.responseText) || "");
-          const bytes = BookmarkExporter3.getResponseBytes(response);
+          const bytes = BookmarkExporter2.getResponseBytes(response);
           if (!bytes || bytes.length === 0) return fallbackText;
-          const headerCharset = BookmarkExporter3.extractCharsetFromHeaders((response == null ? void 0 : response.responseHeaders) || "");
-          const htmlCharset = BookmarkExporter3.extractCharsetFromHtmlHead(bytes);
+          const headerCharset = BookmarkExporter2.extractCharsetFromHeaders((response == null ? void 0 : response.responseHeaders) || "");
+          const htmlCharset = BookmarkExporter2.extractCharsetFromHtmlHead(bytes);
           const candidates = [headerCharset, htmlCharset, "utf-8", "gb18030", "big5", "shift_jis"];
           const tried = /* @__PURE__ */ new Set();
           let firstDecoded = "";
           for (const candidate of candidates) {
-            const charset = BookmarkExporter3.normalizeCharset(candidate);
+            const charset = BookmarkExporter2.normalizeCharset(candidate);
             if (!charset || tried.has(charset)) continue;
             tried.add(charset);
             try {
@@ -3891,8 +3891,8 @@ ${quoted}
           return firstDecoded || fallbackText;
         },
         composeTitleWithPrefix: (prefix, candidate, maxLen = 180) => {
-          const safePrefix = BookmarkExporter3.normalizeText(prefix, maxLen);
-          const safeCandidate = BookmarkExporter3.normalizeText(candidate, maxLen);
+          const safePrefix = BookmarkExporter2.normalizeText(prefix, maxLen);
+          const safeCandidate = BookmarkExporter2.normalizeText(candidate, maxLen);
           if (!safePrefix) return safeCandidate || "\u65E0\u6807\u9898\u4E66\u7B7E";
           if (!safeCandidate || safeCandidate === safePrefix) return safePrefix;
           if (safeCandidate.startsWith(`${safePrefix} - `) || safeCandidate.startsWith(`${safePrefix} \xB7 `)) {
@@ -3909,25 +3909,25 @@ ${quoted}
             return (el == null ? void 0 : el.getAttribute("content")) || "";
           };
           doc.querySelectorAll("script, style, noscript, template").forEach((node) => node.remove());
-          const title = BookmarkExporter3.normalizeText(
+          const title = BookmarkExporter2.normalizeText(
             meta("og:title") || ((_a = doc.querySelector("title")) == null ? void 0 : _a.textContent) || ((_b = doc.querySelector("h1")) == null ? void 0 : _b.textContent) || meta("twitter:title") || "",
             180
           );
-          const description = BookmarkExporter3.normalizeText(
+          const description = BookmarkExporter2.normalizeText(
             meta("og:description") || meta("description") || meta("twitter:description") || "",
             260
           );
-          const bodyText = BookmarkExporter3.normalizeText(((_c = doc.body) == null ? void 0 : _c.textContent) || "", 600);
+          const bodyText = BookmarkExporter2.normalizeText(((_c = doc.body) == null ? void 0 : _c.textContent) || "", 600);
           const summary = description || bodyText;
           return {
             title,
             summary,
-            siteName: BookmarkExporter3.normalizeText(meta("og:site_name") || "", 80),
+            siteName: BookmarkExporter2.normalizeText(meta("og:site_name") || "", 80),
             sourceUrl: url
           };
         },
         fetchPageInsight: (url) => {
-          const cached = BookmarkExporter3._pageInsightCache[url];
+          const cached = BookmarkExporter2._pageInsightCache[url];
           if (cached) return Promise.resolve(cached);
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -3944,9 +3944,9 @@ ${quoted}
                   return;
                 }
                 try {
-                  const html = BookmarkExporter3.decodeHtmlFromResponse(response);
-                  const insight = BookmarkExporter3.extractPageInsightFromHtml(html, url);
-                  BookmarkExporter3._pageInsightCache[url] = insight;
+                  const html = BookmarkExporter2.decodeHtmlFromResponse(response);
+                  const insight = BookmarkExporter2.extractPageInsightFromHtml(html, url);
+                  BookmarkExporter2._pageInsightCache[url] = insight;
                   resolve(insight);
                 } catch (e) {
                   reject(e);
@@ -3972,13 +3972,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
 \u9875\u9762\u6807\u9898\uFF1A${insight.title || ""}
 \u9875\u9762\u6458\u8981\uFF1A${insight.summary || ""}`;
           try {
-            const response = await AIService3.requestChat(prompt2, settings, 220);
+            const response = await AIService2.requestChat(prompt2, settings, 220);
             const jsonMatch = response.match(/\{[\s\S]*\}/);
             if (!jsonMatch) return null;
             const data = JSON.parse(jsonMatch[0]);
             return {
-              title: BookmarkExporter3.normalizeText(data.title || "", 120),
-              summary: BookmarkExporter3.normalizeText(data.summary || "", 180)
+              title: BookmarkExporter2.normalizeText(data.title || "", 120),
+              summary: BookmarkExporter2.normalizeText(data.summary || "", 180)
             };
           } catch (error) {
             console.warn("[LD-Notion] \u9875\u9762\u6D1E\u5BDF JSON \u89E3\u6790\u5931\u8D25:", error);
@@ -4021,15 +4021,15 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           })();
           if (host) tags.push(host);
           if (bookmark.folderPath) {
-            const firstFolder = BookmarkExporter3.normalizeText(String(bookmark.folderPath).split("/")[0] || "", 40);
+            const firstFolder = BookmarkExporter2.normalizeText(String(bookmark.folderPath).split("/")[0] || "", 40);
             if (firstFolder) tags.push(firstFolder);
           }
           if (insight.siteName) {
-            tags.push(BookmarkExporter3.normalizeText(insight.siteName, 40));
+            tags.push(BookmarkExporter2.normalizeText(insight.siteName, 40));
           }
           const uniq = [];
           for (const t of tags) {
-            const clean = BookmarkExporter3.normalizeText(t, 80);
+            const clean = BookmarkExporter2.normalizeText(t, 80);
             if (!clean) continue;
             if (uniq.includes(clean)) continue;
             uniq.push(clean);
@@ -4041,7 +4041,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const categories = Array.isArray(settings == null ? void 0 : settings.categories) ? settings.categories.filter(Boolean) : [];
           if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService) || categories.length === 0) return "";
           try {
-            return await AIService3.classify(
+            return await AIService2.classify(
               insight.title || bookmark.title || "",
               insight.summary || "",
               categories,
@@ -4054,32 +4054,32 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         enrichBookmark: async (bookmark, settings, context = {}) => {
           const enriched = { ...bookmark };
-          const prefix = BookmarkExporter3.normalizeText(bookmark.title || "\u65E0\u6807\u9898\u4E66\u7B7E", 120) || "\u65E0\u6807\u9898\u4E66\u7B7E";
-          const fallbackTitle = BookmarkExporter3.composeTitleWithPrefix(prefix, "", 180);
-          if (!BookmarkExporter3.isHttpUrl(bookmark.url)) {
+          const prefix = BookmarkExporter2.normalizeText(bookmark.title || "\u65E0\u6807\u9898\u4E66\u7B7E", 120) || "\u65E0\u6807\u9898\u4E66\u7B7E";
+          const fallbackTitle = BookmarkExporter2.composeTitleWithPrefix(prefix, "", 180);
+          if (!BookmarkExporter2.isHttpUrl(bookmark.url)) {
             enriched.generatedTitle = fallbackTitle;
             enriched.generatedSummary = "\u975E\u7F51\u9875\u94FE\u63A5\uFF0C\u8DF3\u8FC7\u9875\u9762\u6458\u8981";
-            enriched.inferredCategory = BookmarkExporter3.inferCategoryHeuristic(bookmark, { title: "", summary: "" }, (settings == null ? void 0 : settings.categories) || []);
-            enriched.inferredTags = BookmarkExporter3.inferTags(bookmark, { siteName: "" });
+            enriched.inferredCategory = BookmarkExporter2.inferCategoryHeuristic(bookmark, { title: "", summary: "" }, (settings == null ? void 0 : settings.categories) || []);
+            enriched.inferredTags = BookmarkExporter2.inferTags(bookmark, { siteName: "" });
             return enriched;
           }
           try {
-            const insight = await BookmarkExporter3.fetchPageInsight(bookmark.url);
-            enriched.generatedTitle = BookmarkExporter3.composeTitleWithPrefix(prefix, insight.title || "", 180);
+            const insight = await BookmarkExporter2.fetchPageInsight(bookmark.url);
+            enriched.generatedTitle = BookmarkExporter2.composeTitleWithPrefix(prefix, insight.title || "", 180);
             enriched.generatedSummary = insight.summary || "";
-            let inferredCategory = BookmarkExporter3.inferCategoryHeuristic(bookmark, insight, (settings == null ? void 0 : settings.categories) || []);
-            enriched.inferredTags = BookmarkExporter3.inferTags(bookmark, insight);
+            let inferredCategory = BookmarkExporter2.inferCategoryHeuristic(bookmark, insight, (settings == null ? void 0 : settings.categories) || []);
+            enriched.inferredTags = BookmarkExporter2.inferTags(bookmark, insight);
             const canUseAI = !!((settings == null ? void 0 : settings.aiApiKey) && (settings == null ? void 0 : settings.aiService));
             const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
             if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
-              const aiResult = await BookmarkExporter3.generateAISummary(bookmark, insight, settings);
+              const aiResult = await BookmarkExporter2.generateAISummary(bookmark, insight, settings);
               if (aiResult == null ? void 0 : aiResult.title) {
-                enriched.generatedTitle = BookmarkExporter3.composeTitleWithPrefix(prefix, aiResult.title, 180);
+                enriched.generatedTitle = BookmarkExporter2.composeTitleWithPrefix(prefix, aiResult.title, 180);
               }
               if (aiResult == null ? void 0 : aiResult.summary) {
                 enriched.generatedSummary = aiResult.summary;
               }
-              const aiCategory = await BookmarkExporter3.generateAICategory(bookmark, insight, settings);
+              const aiCategory = await BookmarkExporter2.generateAICategory(bookmark, insight, settings);
               if (aiCategory) {
                 inferredCategory = aiCategory;
               }
@@ -4090,16 +4090,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             console.warn("[LD-Notion] \u4E66\u7B7E\u589E\u5F3A\u5931\u8D25\uFF0C\u4F7F\u7528 fallback:", error);
             enriched.generatedTitle = fallbackTitle;
             enriched.generatedSummary = "";
-            enriched.inferredCategory = BookmarkExporter3.inferCategoryHeuristic(bookmark, { title: "", summary: "" }, (settings == null ? void 0 : settings.categories) || []);
-            enriched.inferredTags = BookmarkExporter3.inferTags(bookmark, { siteName: "" });
+            enriched.inferredCategory = BookmarkExporter2.inferCategoryHeuristic(bookmark, { title: "", summary: "" }, (settings == null ? void 0 : settings.categories) || []);
+            enriched.inferredTags = BookmarkExporter2.inferTags(bookmark, { siteName: "" });
           }
           return enriched;
         },
         // 构建 Notion 属性
         buildProperties: (bookmark) => {
-          const title = BookmarkExporter3.normalizeText(bookmark.generatedTitle || bookmark.title || "\u65E0\u6807\u9898\u4E66\u7B7E", 2e3) || "\u65E0\u6807\u9898\u4E66\u7B7E";
-          const summary = BookmarkExporter3.normalizeText(bookmark.generatedSummary || "", 1900);
-          const bookmarkId = BookmarkExporter3.normalizeText(String(bookmark.id || ""), 200);
+          const title = BookmarkExporter2.normalizeText(bookmark.generatedTitle || bookmark.title || "\u65E0\u6807\u9898\u4E66\u7B7E", 2e3) || "\u65E0\u6807\u9898\u4E66\u7B7E";
+          const summary = BookmarkExporter2.normalizeText(bookmark.generatedSummary || "", 1900);
+          const bookmarkId = BookmarkExporter2.normalizeText(String(bookmark.id || ""), 200);
           const props = {
             "\u6807\u9898": {
               title: [{ text: { content: title } }]
@@ -4125,13 +4125,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           if (bookmark.inferredCategory) {
             props["\u5206\u7C7B"] = {
-              rich_text: [{ text: { content: BookmarkExporter3.normalizeText(bookmark.inferredCategory, 300) } }]
+              rich_text: [{ text: { content: BookmarkExporter2.normalizeText(bookmark.inferredCategory, 300) } }]
             };
           }
           const tags = Array.isArray(bookmark.inferredTags) ? bookmark.inferredTags : [];
           if (tags.length > 0) {
             props["\u6807\u7B7E"] = {
-              multi_select: tags.map((tag) => BookmarkExporter3.normalizeText(tag, 100)).filter(Boolean).map((name) => ({ name })).slice(0, 8)
+              multi_select: tags.map((tag) => BookmarkExporter2.normalizeText(tag, 100)).filter(Boolean).map((name) => ({ name })).slice(0, 8)
             };
           }
           if (bookmark.dateAdded) {
@@ -4192,12 +4192,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
         },
         markExported: (bookmarkUrl) => {
-          const exported = BookmarkExporter3.getExported();
+          const exported = BookmarkExporter2.getExported();
           exported[bookmarkUrl] = Date.now();
           Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(exported));
         },
         isExported: (bookmarkUrl) => {
-          return !!BookmarkExporter3.getExported()[bookmarkUrl];
+          return !!BookmarkExporter2.getExported()[bookmarkUrl];
         },
         // 导出书签到 Notion
         exportBookmarks: async (settings, onProgress) => {
@@ -4206,12 +4206,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             throw new Error("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93");
           }
           if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          const setupResult = await BookmarkExporter3.setupDatabaseProperties(databaseId, apiKey);
+          const setupResult = await BookmarkExporter2.setupDatabaseProperties(databaseId, apiKey);
           if (!setupResult.success) {
             throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
           }
           const dedupStrict = Utils2.isBookmarkDedupStrict();
-          const newBookmarks = dedupStrict ? bookmarks.filter((b) => !BookmarkExporter3.isExported(b.url)) : bookmarks.slice();
+          const newBookmarks = dedupStrict ? bookmarks.filter((b) => !BookmarkExporter2.isExported(b.url)) : bookmarks.slice();
           if (newBookmarks.length === 0) {
             return { total: bookmarks.length, exported: 0, message: "\u6CA1\u6709\u65B0\u7684\u4E66\u7B7E\u9700\u8981\u5BFC\u51FA" };
           }
@@ -4223,13 +4223,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             const pct = Math.round(5 + i / newBookmarks.length * 90);
             if (onProgress) onProgress(`\u6B63\u5728\u5BFC\u51FA (${i + 1}/${newBookmarks.length}): ${bm.title}`, pct);
             try {
-              const enriched = await BookmarkExporter3.enrichBookmark(bm, settings, enrichContext);
-              const properties = BookmarkExporter3.buildProperties(enriched);
+              const enriched = await BookmarkExporter2.enrichBookmark(bm, settings, enrichContext);
+              const properties = BookmarkExporter2.buildProperties(enriched);
               await NotionAPI2.request("POST", "/pages", {
                 parent: { database_id: databaseId },
                 properties
               }, apiKey);
-              BookmarkExporter3.markExported(bm.url);
+              BookmarkExporter2.markExported(bm.url);
               success++;
             } catch (e) {
               console.warn(`[BookmarkExporter] \u5BFC\u51FA\u5931\u8D25: ${bm.url}`, e);
@@ -4242,7 +4242,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return { total: bookmarks.length, exported: success, failed, newCount: newBookmarks.length };
         }
       };
-      module.exports = { BookmarkExporter: BookmarkExporter3 };
+      module.exports = { BookmarkExporter: BookmarkExporter2 };
     }
   });
 
@@ -4590,7 +4590,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     "src/adapter/BookmarkAdapter.js"(exports, module) {
       "use strict";
       var { SourceAdapter } = require_SourceAdapter();
-      var { BookmarkBridge: BookmarkBridge3 } = require_bridge();
+      var { BookmarkBridge: BookmarkBridge3, BookmarkExporter: BookmarkExporter2 } = require_bridge();
       var BookmarkAdapter = Object.assign(Object.create(SourceAdapter), {
         sourceType: "bookmark",
         async fetchIncremental(watermark) {
@@ -4619,7 +4619,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (!BookmarkBridge3.isExtensionAvailable()) return [];
           const tree = await BookmarkBridge3.getBookmarkTree();
           const flat = BookmarkBridge3.flattenTree ? BookmarkBridge3.flattenTree(tree) : this._flattenTree(tree);
-          const items = flat.filter((b) => b.url && BookmarkExporter && BookmarkExporter.isHttpUrl ? BookmarkExporter.isHttpUrl(b.url) : /^https?:/.test(b.url || "")).map((b) => this.normalize(b));
+          const items = flat.filter((b) => b.url && BookmarkExporter2 && BookmarkExporter2.isHttpUrl ? BookmarkExporter2.isHttpUrl(b.url) : /^https?:/.test(b.url || "")).map((b) => this.normalize(b));
           if (watermark && watermark.time) {
             return items.filter((item) => item.createdAt > watermark.time);
           }
@@ -4749,7 +4749,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     "src/adapter/GenericAdapter.js"(exports, module) {
       "use strict";
       var { SourceAdapter } = require_SourceAdapter();
-      var { GenericExtractor: GenericExtractor3 } = require_extract();
+      var { GenericExtractor: GenericExtractor2 } = require_extract();
       var GenericAdapter = Object.assign(Object.create(SourceAdapter), {
         sourceType: "generic",
         async fetchIncremental(watermark) {
@@ -4775,8 +4775,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return `generic:${item.url}`;
         },
         _extractFromPage() {
-          if (!GenericExtractor3 || typeof GenericExtractor3.extractMeta !== "function") return [];
-          const meta = GenericExtractor3.extractMeta();
+          if (!GenericExtractor2 || typeof GenericExtractor2.extractMeta !== "function") return [];
+          const meta = GenericExtractor2.extractMeta();
           if (!meta || !meta.url) return [];
           return [this.normalize(meta)];
         }
@@ -5084,7 +5084,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { NotionAPI: NotionAPI2 } = require_api();
       var { SyncLock } = require_sync_lock();
       var { SyncCoordinator } = require_SyncCoordinator();
-      var { BookmarkExporter: BookmarkExporter3 } = require_BookmarkExporter();
+      var { BookmarkExporter: BookmarkExporter2 } = require_BookmarkExporter();
       var _resolveUI = () => {
         try {
           return require_ui().UI;
@@ -5100,8 +5100,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         lastRunAt: 0,
         minimumRunGapMs: 60 * 1e3,
         updateStatus: (text) => {
-          const UI3 = _resolveUI();
-          const refs = UI3 ? UI3.refs : null;
+          const UI2 = _resolveUI();
+          const refs = UI2 ? UI2.refs : null;
           const el = refs && refs.bookmarkAutoImportStatus || document.querySelector("#ldb-bookmark-auto-import-status");
           if (el) el.textContent = text;
         },
@@ -5221,8 +5221,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         buildMinimalProperties: (bookmark) => {
           const normalized = BookmarkAutoImporter2.normalizeBookmark(bookmark);
-          const title = BookmarkExporter3.normalizeText(normalized.title || "\u65E0\u6807\u9898\u4E66\u7B7E", 2e3) || "\u65E0\u6807\u9898\u4E66\u7B7E";
-          const bookmarkId = BookmarkExporter3.normalizeText(normalized.id, 200);
+          const title = BookmarkExporter2.normalizeText(normalized.title || "\u65E0\u6807\u9898\u4E66\u7B7E", 2e3) || "\u65E0\u6807\u9898\u4E66\u7B7E";
+          const bookmarkId = BookmarkExporter2.normalizeText(normalized.id, 200);
           const properties = {
             "\u6807\u9898": {
               title: [{ text: { content: title } }]
@@ -5264,7 +5264,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         loadCurrentBookmarks: async () => {
           const tree = await require_bridge().BookmarkBridge.getBookmarkTree();
-          const flattened = BookmarkExporter3.flattenTree(tree);
+          const flattened = BookmarkExporter2.flattenTree(tree);
           const unique = /* @__PURE__ */ new Map();
           for (const rawBookmark of flattened || []) {
             const normalized = BookmarkAutoImporter2.normalizeBookmark(rawBookmark);
@@ -5327,7 +5327,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (syncResult.error) {
             throw new Error(syncResult.error);
           }
-          const setupResult = await BookmarkExporter3.setupDatabaseProperties(settings.databaseId, settings.apiKey);
+          const setupResult = await BookmarkExporter2.setupDatabaseProperties(settings.databaseId, settings.apiKey);
           if (!setupResult.success) {
             throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
           }
@@ -5364,10 +5364,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             try {
               if (!pageMeta) {
                 BookmarkAutoImporter2.updateStatus(`\u{1F4C4} \u6B63\u5728\u65B0\u589E\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
-                const enriched = await BookmarkExporter3.enrichBookmark(bookmark, settings, enrichContext);
+                const enriched = await BookmarkExporter2.enrichBookmark(bookmark, settings, enrichContext);
                 const page = await NotionAPI2.request("POST", "/pages", {
                   parent: { database_id: settings.databaseId },
-                  properties: BookmarkExporter3.buildProperties(enriched)
+                  properties: BookmarkExporter2.buildProperties(enriched)
                 }, settings.apiKey);
                 pageMeta = {
                   pageId: String((page == null ? void 0 : page.id) || "").trim(),
@@ -5380,7 +5380,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 created++;
               } else if (BookmarkAutoImporter2.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
                 BookmarkAutoImporter2.updateStatus(`\u{1F4E7} \u6B63\u5728\u66F4\u65B0\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
-                const properties = BookmarkAutoImporter2.needsFullRefresh(bookmark, snapshotEntry, pageMeta) ? BookmarkExporter3.buildProperties(await BookmarkExporter3.enrichBookmark(bookmark, settings, enrichContext)) : BookmarkAutoImporter2.buildMinimalProperties(bookmark);
+                const properties = BookmarkAutoImporter2.needsFullRefresh(bookmark, snapshotEntry, pageMeta) ? BookmarkExporter2.buildProperties(await BookmarkExporter2.enrichBookmark(bookmark, settings, enrichContext)) : BookmarkAutoImporter2.buildMinimalProperties(bookmark);
                 await NotionAPI2.updatePage(pageMeta.pageId, properties, settings.apiKey);
                 updated++;
               } else {
@@ -5398,7 +5398,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               if (pageId) index.byPageId.set(pageId, syncedMeta);
               index.byBookmarkId.set(bookmarkId, syncedMeta);
               if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
-              BookmarkExporter3.markExported(bookmark.url);
+              BookmarkExporter2.markExported(bookmark.url);
               nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageId);
             } catch (error) {
               console.error(`[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5931\u8D25: ${bookmark.title || bookmark.url}`, error);
@@ -5475,10 +5475,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           BookmarkAutoImporter2.updateStatus(`\u274C \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u51FA\u9519: ${error.message}`);
         } finally {
           BookmarkAutoImporter2.isRunning = false;
-          const UI3 = _resolveUI();
-          if (UI3 && typeof UI3.renderSyncCenterSummary === "function") {
+          const UI2 = _resolveUI();
+          if (UI2 && typeof UI2.renderSyncCenterSummary === "function") {
             try {
-              UI3.renderSyncCenterSummary();
+              UI2.renderSyncCenterSummary();
             } catch {
             }
           }
@@ -5499,7 +5499,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { NotionAPI: NotionAPI2 } = require_api();
       var { SyncLock } = require_sync_lock();
       var { SyncCoordinator } = require_SyncCoordinator();
-      var { BookmarkExporter: BookmarkExporter3 } = require_BookmarkExporter();
+      var { BookmarkExporter: BookmarkExporter2 } = require_BookmarkExporter();
       var { BookmarkAutoImporter: BookmarkAutoImporter2 } = require_BookmarkAutoImporter();
       var _resolveUI = () => {
         try {
@@ -5516,8 +5516,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         lastRunAt: 0,
         minimumRunGapMs: 60 * 1e3,
         updateStatus: (text) => {
-          const UI3 = _resolveUI();
-          const refs = UI3 ? UI3.refs : null;
+          const UI2 = _resolveUI();
+          const refs = UI2 ? UI2.refs : null;
           const el = refs && refs.rssAutoImportStatus || document.querySelector("#ldb-rss-auto-import-status");
           if (el) el.textContent = text;
         },
@@ -5566,7 +5566,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         escapeRegExp: (text) => String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
         decodeXmlEntities: (text) => String(text || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&amp;/gi, "&"),
-        stripHtml: (text, maxLen = 1200) => BookmarkExporter3.normalizeText(
+        stripHtml: (text, maxLen = 1200) => BookmarkExporter2.normalizeText(
           RSSAutoImporter2.decodeXmlEntities(String(text || "").replace(/<[^>]+>/g, " ")),
           maxLen
         ),
@@ -5616,12 +5616,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return RSSAutoImporter2.extractTagText(source, ["link"]);
         },
         normalizeItem: (item = {}) => {
-          const title = BookmarkExporter3.normalizeText(item.title || item.url || "\u672A\u547D\u540D RSS \u6761\u76EE", 280) || "\u672A\u547D\u540D RSS \u6761\u76EE";
+          const title = BookmarkExporter2.normalizeText(item.title || item.url || "\u672A\u547D\u540D RSS \u6761\u76EE", 280) || "\u672A\u547D\u540D RSS \u6761\u76EE";
           const url = String(item.url || "").trim();
-          const feedTitle = BookmarkExporter3.normalizeText(item.feedTitle || "", 160);
-          const summary = BookmarkExporter3.normalizeText(item.summary || "", 1900);
-          const tags = Array.isArray(item.tags) ? Array.from(new Set(item.tags.map((tag) => BookmarkExporter3.normalizeText(tag, 100)).filter(Boolean))) : [];
-          const id = BookmarkExporter3.normalizeText(
+          const feedTitle = BookmarkExporter2.normalizeText(item.feedTitle || "", 160);
+          const summary = BookmarkExporter2.normalizeText(item.summary || "", 1900);
+          const tags = Array.isArray(item.tags) ? Array.from(new Set(item.tags.map((tag) => BookmarkExporter2.normalizeText(tag, 100)).filter(Boolean))) : [];
+          const id = BookmarkExporter2.normalizeText(
             String(item.id || url || `${feedTitle || "feed"}::${title}`),
             300
           ) || url || `${feedTitle || "feed"}::${title}`;
@@ -5774,7 +5774,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         buildProperties: (item) => {
           const normalized = RSSAutoImporter2.normalizeItem(item);
-          const inferredCategory = BookmarkExporter3.normalizeText((item == null ? void 0 : item.inferredCategory) || "", 300);
+          const inferredCategory = BookmarkExporter2.normalizeText((item == null ? void 0 : item.inferredCategory) || "", 300);
           const tags = Array.from(/* @__PURE__ */ new Set([
             ...normalized.feedTitle ? [normalized.feedTitle] : [],
             ...Array.isArray(normalized.tags) ? normalized.tags : []
@@ -5808,7 +5808,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           if (tags.length > 0) {
             properties["\u6807\u7B7E"] = {
-              multi_select: tags.map((tag) => BookmarkExporter3.normalizeText(tag, 100)).filter(Boolean).slice(0, 8).map((name) => ({ name }))
+              multi_select: tags.map((tag) => BookmarkExporter2.normalizeText(tag, 100)).filter(Boolean).slice(0, 8).map((name) => ({ name }))
             };
           }
           return properties;
@@ -5817,7 +5817,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const normalized = RSSAutoImporter2.normalizeItem(item);
           const enriched = {
             ...normalized,
-            inferredCategory: BookmarkExporter3.inferCategoryHeuristic(
+            inferredCategory: BookmarkExporter2.inferCategoryHeuristic(
               { title: normalized.title, url: normalized.url, folderPath: normalized.feedTitle },
               { title: normalized.title, summary: normalized.summary },
               (settings == null ? void 0 : settings.categories) || []
@@ -5827,7 +5827,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
           if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
             try {
-              const aiCategory = await BookmarkExporter3.generateAICategory(
+              const aiCategory = await BookmarkExporter2.generateAICategory(
                 { title: normalized.title, url: normalized.url },
                 { title: normalized.title, summary: normalized.summary },
                 settings
@@ -5902,7 +5902,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (syncResult.error) {
             throw new Error(syncResult.error);
           }
-          const setupResult = await BookmarkExporter3.setupDatabaseProperties(settings.databaseId, settings.apiKey);
+          const setupResult = await BookmarkExporter2.setupDatabaseProperties(settings.databaseId, settings.apiKey);
           if (!setupResult.success) {
             throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
           }
@@ -6088,10 +6088,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             RSSAutoImporter2.updateStatus(`RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519: ${error.message}`);
           } finally {
             RSSAutoImporter2.isRunning = false;
-            const UI3 = _resolveUI();
-            if (UI3 && typeof UI3.renderSyncCenterSummary === "function") {
+            const UI2 = _resolveUI();
+            if (UI2 && typeof UI2.renderSyncCenterSummary === "function") {
               try {
-                UI3.renderSyncCenterSummary();
+                UI2.renderSyncCenterSummary();
               } catch {
               }
             }
@@ -6175,10 +6175,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         }
       };
       // [LD-NOTION-BUILD:BOOKMARK_BRIDGE_END]
-      var { BookmarkExporter: BookmarkExporter3 } = require_BookmarkExporter();
+      var { BookmarkExporter: BookmarkExporter2 } = require_BookmarkExporter();
       var { BookmarkAutoImporter: BookmarkAutoImporter2 } = require_BookmarkAutoImporter();
       var { RSSAutoImporter: RSSAutoImporter2 } = require_RSSAutoImporter();
-      module.exports = { BookmarkBridge: BookmarkBridge3, BookmarkExporter: BookmarkExporter3, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 };
+      module.exports = { BookmarkBridge: BookmarkBridge3, BookmarkExporter: BookmarkExporter2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 };
     }
   });
 
@@ -6189,11 +6189,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { CONFIG: CONFIG2, MSG: MSG2, getFileCategory: getFileCategory2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, SiteDetector: SiteDetector2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2 } = require_security();
-      var { BookmarkExporter: BookmarkExporter3 } = require_bridge();
-      var { ZhihuAPI: ZhihuAPI2 } = require_extract();
+      var { BookmarkExporter: BookmarkExporter2 } = require_bridge();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2 } = require_extract();
+      var { AIAssistant: AIAssistant2 } = require_ai();
       var { SyncLock } = require_sync_lock();
       var GenericExporter2 = {
         resolveUnifiedSource: (meta = {}) => {
@@ -6203,14 +6204,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return siteDerived === "\u77E5\u4E4E" ? "\u77E5\u4E4E" : "\u901A\u7528\u9875\u9762";
         },
         normalizeSourceLabel: (value) => {
-          const raw = BookmarkExporter3.normalizeText(String(value || "").trim(), 100);
+          const raw = BookmarkExporter2.normalizeText(String(value || "").trim(), 100);
           if (!raw) return "";
           const lower = raw.toLowerCase();
           if (lower.includes("zhihu") || raw.includes("\u77E5\u4E4E")) return "\u77E5\u4E4E";
           return raw;
         },
         normalizeSourceTypeLabel: (value, source = "") => {
-          const raw = BookmarkExporter3.normalizeText(String(value || "").trim(), 40);
+          const raw = BookmarkExporter2.normalizeText(String(value || "").trim(), 40);
           if (!raw) {
             if (source === "\u77E5\u4E4E") return "\u7F51\u9875";
             return "\u7F51\u9875";
@@ -6222,7 +6223,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (["web", "webpage", "web page", "page", "\u7F51\u9875"].includes(lower) || raw.includes("\u7F51\u9875")) return "\u7F51\u9875";
           return raw;
         },
-        stripHtml: (html) => BookmarkExporter3.normalizeText(
+        stripHtml: (html) => BookmarkExporter2.normalizeText(
           String(html || "").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " "),
           500
         ),
@@ -6251,11 +6252,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (source) tags.push(source);
           if (sourceType) tags.push(sourceType);
           if (meta.siteName && meta.siteName !== source) {
-            tags.push(BookmarkExporter3.normalizeText(meta.siteName, 60));
+            tags.push(BookmarkExporter2.normalizeText(meta.siteName, 60));
           }
           const uniq = [];
           for (const tag of tags) {
-            const clean = BookmarkExporter3.normalizeText(tag, 80);
+            const clean = BookmarkExporter2.normalizeText(tag, 80);
             if (!clean || uniq.includes(clean)) continue;
             uniq.push(clean);
             if (uniq.length >= 8) break;
@@ -6264,15 +6265,15 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         enrichMeta: async (meta = {}, settings = {}) => {
           const source = GenericExporter2.resolveUnifiedSource(meta);
-          const siteName = BookmarkExporter3.normalizeText(meta.siteName || "", 100) || source;
+          const siteName = BookmarkExporter2.normalizeText(meta.siteName || "", 100) || source;
           const sourceType = GenericExporter2.normalizeSourceTypeLabel(meta.sourceType || "", source);
           const description = GenericExporter2.extractSummaryText(meta);
           const enriched = {
             ...meta,
-            title: BookmarkExporter3.normalizeText(meta.title || "\u65E0\u6807\u9898", 200) || "\u65E0\u6807\u9898",
+            title: BookmarkExporter2.normalizeText(meta.title || "\u65E0\u6807\u9898", 200) || "\u65E0\u6807\u9898",
             url: String(meta.url || location.href || "").trim(),
-            author: BookmarkExporter3.normalizeText(meta.author || "", 100),
-            publishDate: BookmarkExporter3.normalizeText(meta.publishDate || "", 40),
+            author: BookmarkExporter2.normalizeText(meta.author || "", 100),
+            publishDate: BookmarkExporter2.normalizeText(meta.publishDate || "", 40),
             siteName,
             source,
             sourceType,
@@ -6288,14 +6289,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             url: enriched.url,
             folderPath: `${enriched.source} ${enriched.sourceType}`.trim()
           };
-          let inferredCategory = BookmarkExporter3.inferCategoryHeuristic(
+          let inferredCategory = BookmarkExporter2.inferCategoryHeuristic(
             bookmarkLike,
             insight,
             (settings == null ? void 0 : settings.categories) || []
           );
           const canUseAI = !!((settings == null ? void 0 : settings.aiApiKey) && (settings == null ? void 0 : settings.aiService) && Array.isArray(settings == null ? void 0 : settings.categories) && settings.categories.length > 0);
           if (canUseAI) {
-            const aiCategory = await BookmarkExporter3.generateAICategory(bookmarkLike, insight, settings);
+            const aiCategory = await BookmarkExporter2.generateAICategory(bookmarkLike, insight, settings);
             if (aiCategory) inferredCategory = aiCategory;
           }
           return {
@@ -6335,13 +6336,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           if (meta.inferredCategory) {
             props["\u5206\u7C7B"] = {
-              rich_text: [{ text: { content: BookmarkExporter3.normalizeText(meta.inferredCategory, 300) } }]
+              rich_text: [{ text: { content: BookmarkExporter2.normalizeText(meta.inferredCategory, 300) } }]
             };
           }
           const tags = Array.isArray(meta.inferredTags) ? meta.inferredTags : [];
           if (tags.length > 0) {
             props["\u6807\u7B7E"] = {
-              multi_select: tags.map((tag) => BookmarkExporter3.normalizeText(tag, 100)).filter(Boolean).map((name) => ({ name })).slice(0, 8)
+              multi_select: tags.map((tag) => BookmarkExporter2.normalizeText(tag, 100)).filter(Boolean).map((name) => ({ name })).slice(0, 8)
             };
           }
           return props;
@@ -6396,9 +6397,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 }
               }
             } else {
-              meta = GenericExtractor.extractMeta();
-              const contentEl = GenericExtractor.extractContent();
-              blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
+              meta = GenericExtractor2.extractMeta();
+              const contentEl = GenericExtractor2.extractContent();
+              blocks = GenericExtractor2.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
             }
           } else if (SiteDetector2.detect() === SiteDetector2.SITES.LINUX_DO) {
             const topicMatch = window.location.pathname.match(/\/t\/([^/]+)/);
@@ -6427,14 +6428,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               };
               blocks = Exporter2.buildContentBlocks(filteredPosts, topic, settings);
             } else {
-              meta = GenericExtractor.extractMeta();
-              const contentEl = GenericExtractor.extractContent();
-              blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
+              meta = GenericExtractor2.extractMeta();
+              const contentEl = GenericExtractor2.extractContent();
+              blocks = GenericExtractor2.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
             }
           } else {
-            meta = GenericExtractor.extractMeta();
-            const contentEl = GenericExtractor.extractContent();
-            blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
+            meta = GenericExtractor2.extractMeta();
+            const contentEl = GenericExtractor2.extractContent();
+            blocks = GenericExtractor2.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
           }
           meta = await GenericExporter2.enrichMeta(meta, settings);
           if (!blocks || blocks.length === 0) {
@@ -6455,7 +6456,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           let page;
           if (settings.exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
-            page = await AIAssistant._executeGuardedPageWrite(
+            page = await AIAssistant2._executeGuardedPageWrite(
               "createDatabasePage",
               { id: settings.parentPageId, name: meta.title },
               () => NotionAPI2.createChildPage(
@@ -6469,7 +6470,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             );
           } else {
             const properties = GenericExporter2.buildProperties(meta);
-            page = await AIAssistant._executeGuardedDatabaseWrite(
+            page = await AIAssistant2._executeGuardedDatabaseWrite(
               "createDatabasePage",
               settings.databaseId,
               () => NotionAPI2.createDatabasePage(
@@ -6949,7 +6950,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           onProgress == null ? void 0 : onProgress({ stage: "create", message: "\u521B\u5EFA Notion \u9875\u9762..." });
           let page;
           if (settings.exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
-            page = await AIAssistant._executeGuardedPageWrite(
+            page = await AIAssistant2._executeGuardedPageWrite(
               "createDatabasePage",
               { id: settings.parentPageId, name: topic.title },
               () => NotionAPI2.createChildPage(
@@ -6963,7 +6964,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             );
           } else {
             const properties = Exporter2.buildProperties(topic, bookmark);
-            page = await AIAssistant._executeGuardedDatabaseWrite(
+            page = await AIAssistant2._executeGuardedDatabaseWrite(
               "createDatabasePage",
               settings.databaseId,
               () => NotionAPI2.createDatabasePage(
@@ -7081,6 +7082,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { CONFIG: CONFIG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
+      var _resolveUI = () => {
+        try {
+          return require_ui().UI;
+        } catch {
+          return void 0;
+        }
+      };
       var UpdateChecker2 = {
         timerId: null,
         isChecking: false,
@@ -7151,7 +7159,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
         },
         updateStatusText: (text) => {
-          const el = UI.refs && UI.refs.updateCheckStatus || document.querySelector("#ldb-update-check-status");
+          const UI2 = _resolveUI();
+          const el = UI2 && UI2.refs && UI2.refs.updateCheckStatus || document.querySelector("#ldb-update-check-status");
           if (el) el.textContent = text;
         },
         renderLastStatus: () => {
@@ -7180,8 +7189,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         check: async ({ manual = false } = {}) => {
           if (UpdateChecker2.isChecking) return;
           UpdateChecker2.isChecking = true;
-          if (manual) {
-            UI.showStatus("\u6B63\u5728\u68C0\u67E5\u66F4\u65B0...", "info");
+          const UI2 = _resolveUI();
+          if (manual && UI2) {
+            UI2.showStatus("\u6B63\u5728\u68C0\u67E5\u66F4\u65B0...", "info");
           }
           try {
             const currentVersion = UpdateChecker2.getCurrentVersion();
@@ -7196,7 +7206,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 message
               });
               UpdateChecker2.renderLastStatus();
-              if (manual) UI.showStatus(message, "info");
+              if (manual && UI2) UI2.showStatus(message, "info");
             } else {
               const message = `\u5F53\u524D\u5DF2\u662F\u6700\u65B0\u7248\u672C v${currentVersion}`;
               UpdateChecker2.saveResult({
@@ -7206,13 +7216,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 message
               });
               UpdateChecker2.renderLastStatus();
-              if (manual) UI.showStatus(message, "success");
+              if (manual && UI2) UI2.showStatus(message, "success");
             }
           } catch (error) {
             const message = (error == null ? void 0 : error.message) || "\u66F4\u65B0\u68C0\u67E5\u5931\u8D25";
             UpdateChecker2.saveResult({ status: "error", message });
             UpdateChecker2.renderLastStatus();
-            if (manual) UI.showStatus(message, "error");
+            if (manual && UI2) UI2.showStatus(message, "error");
           } finally {
             UpdateChecker2.isChecking = false;
           }
@@ -7442,6 +7452,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
+      var { AIService: AIService2 } = require_ai();
       var GitHubExporter2 = {
         normalizeText: (text, maxLen = 280) => {
           if (!text) return "";
@@ -7512,7 +7523,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const categories = Array.isArray(settings == null ? void 0 : settings.categories) ? settings.categories.filter(Boolean) : [];
           if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService) || categories.length === 0) return "";
           try {
-            return await AIService.classify(
+            return await AIService2.classify(
               `${repo.full_name || repo.name || ""} ${insight.title || ""}`,
               `${repo.description || ""}
 ${insight.summary || ""}`,
@@ -7881,7 +7892,7 @@ ${insight.summary || ""}`,
 \u6807\u7B7E: ${tags}
 
 \u53EA\u56DE\u590D\u5206\u7C7B\u540D\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\u3002`;
-              const category = await AIService.request(prompt2, {
+              const category = await AIService2.request(prompt2, {
                 aiService,
                 aiApiKey,
                 aiModel,
@@ -7939,9 +7950,9 @@ ${insight.summary || ""}`,
           return !!(apiKey && databaseId);
         },
         updateStatus: (text) => {
-          const UI3 = _resolveUI();
-          if (!UI3) return;
-          const el = UI3.refs && UI3.refs.autoImportStatus || document.querySelector("#ldb-auto-import-status");
+          const UI2 = _resolveUI();
+          if (!UI2) return;
+          const el = UI2.refs && UI2.refs.autoImportStatus || document.querySelector("#ldb-auto-import-status");
           if (el) el.textContent = text;
         },
         buildSettings: () => {
@@ -8028,9 +8039,9 @@ ${insight.summary || ""}`,
         }
       };
       GitHubAutoImporter2._mapItemsToBookmarks = (incrementalItems, type, meta) => {
-        const UI3 = _resolveUI();
-        if (UI3 && typeof UI3.mapGitHubItemsToBookmarks === "function") {
-          return UI3.mapGitHubItemsToBookmarks(incrementalItems, type).filter((item) => UI3 && typeof UI3.isBookmarkExported === "function" ? !UI3.isBookmarkExported(item) : true);
+        const UI2 = _resolveUI();
+        if (UI2 && typeof UI2.mapGitHubItemsToBookmarks === "function") {
+          return UI2.mapGitHubItemsToBookmarks(incrementalItems, type).filter((item) => UI2 && typeof UI2.isBookmarkExported === "function" ? !UI2.isBookmarkExported(item) : true);
         }
         return incrementalItems.map((item) => ({
           itemKey: meta.getId(item),
@@ -8079,9 +8090,9 @@ ${insight.summary || ""}`,
         return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
       };
       GitHubAutoImporter2._exportMappedItems = async (mappedItems, type, meta, settings) => {
-        const UI3 = _resolveUI();
-        if (UI3 && typeof UI3.exportGitHubSelected === "function") {
-          return await UI3.exportGitHubSelected(mappedItems, {
+        const UI2 = _resolveUI();
+        if (UI2 && typeof UI2.exportGitHubSelected === "function") {
+          return await UI2.exportGitHubSelected(mappedItems, {
             apiKey: settings.apiKey,
             databaseId: settings.databaseId,
             token: settings.token
@@ -8291,10 +8302,10 @@ ${insight.summary || ""}`,
           GitHubAutoImporter2.updateStatus(`\u274C GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
         } finally {
           GitHubAutoImporter2.isRunning = false;
-          const UI3 = _resolveUI();
-          if (UI3 && typeof UI3.renderSyncCenterSummary === "function") {
+          const UI2 = _resolveUI();
+          if (UI2 && typeof UI2.renderSyncCenterSummary === "function") {
             try {
-              UI3.renderSyncCenterSummary();
+              UI2.renderSyncCenterSummary();
             } catch {
             }
           }
@@ -8367,8 +8378,8 @@ ${insight.summary || ""}`,
         },
         // 更新状态栏
         updateStatus: (text) => {
-          const UI3 = _resolveUI();
-          const refs = UI3 ? UI3.refs : null;
+          const UI2 = _resolveUI();
+          const refs = UI2 ? UI2.refs : null;
           const el = refs && refs.autoImportStatus || document.querySelector("#ldb-auto-import-status");
           if (el) el.textContent = text;
         },
@@ -8590,7 +8601,7 @@ ${insight.summary || ""}`,
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, HTMLToMarkdown: HTMLToMarkdown2, InstallHelper: InstallHelper2 } = require_api();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { OperationGuard: OperationGuard2 } = require_security();
       var ZhihuAPI2 = {
         detectPage: () => {
@@ -8673,7 +8684,7 @@ ${insight.summary || ""}`,
           return DOMToNotion2.cookedToBlocks(html);
         }
       };
-      var GenericExtractor3 = {
+      var GenericExtractor2 = {
         // 提取页面元数据
         extractMeta: () => {
           var _a, _b, _c, _d, _e;
@@ -8955,8 +8966,8 @@ ${insight.summary || ""}`,
         }),
         _persistStorageEntries: async (entries = {}) => {
           for (const [key, value] of Object.entries(entries)) {
-            if (CredentialVault3.isSensitiveKey(key)) {
-              await CredentialVault3.set(key, value);
+            if (CredentialVault2.isSensitiveKey(key)) {
+              await CredentialVault2.set(key, value);
             } else {
               Storage2.set(key, value);
             }
@@ -8964,10 +8975,10 @@ ${insight.summary || ""}`,
         },
         _persistProvidedSensitiveEntries: async (entries = {}) => {
           for (const [key, value] of Object.entries(entries)) {
-            if (!CredentialVault3.isSensitiveKey(key)) continue;
+            if (!CredentialVault2.isSensitiveKey(key)) continue;
             const normalized = String(value || "").trim();
             if (!normalized) continue;
-            await CredentialVault3.set(key, normalized);
+            await CredentialVault2.set(key, normalized);
           }
         },
         _saveNotionSiteSettings: async (payload = {}) => {
@@ -9177,7 +9188,7 @@ ${insight.summary || ""}`,
           }
         }
       });
-      module.exports = { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor3, WorkspaceService: WorkspaceService2, UICommandService };
+      module.exports = { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2, UICommandService };
     }
   });
 
@@ -9188,10 +9199,10 @@ ${insight.summary || ""}`,
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor3, WorkspaceService: WorkspaceService2 } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var StyleManager2 = {
@@ -9221,10 +9232,10 @@ ${insight.summary || ""}`,
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor3, WorkspaceService: WorkspaceService2 } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { StyleManager: StyleManager2 } = require_style_manager();
@@ -10088,10 +10099,10 @@ ${insight.summary || ""}`,
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor3, WorkspaceService: WorkspaceService2 } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var PanelResize2 = {
@@ -10209,10 +10220,10 @@ ${insight.summary || ""}`,
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor3, WorkspaceService: WorkspaceService2 } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var UI_CSS2 = `
@@ -11084,14 +11095,14 @@ ${insight.summary || ""}`,
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor3, WorkspaceService: WorkspaceService2, UICommandService } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2, UICommandService } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { StyleManager: StyleManager2 } = require_style_manager();
-      var { AIAssistant: AIAssistant3, AIService: AIService3, AIWelcomeUI: AIWelcomeUI2, ChatState: ChatState2, ChatUI: ChatUI2 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatState: ChatState2, ChatUI: ChatUI2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
       var { UI_CSS: UI_CSS2 } = require_styles();
@@ -11526,8 +11537,8 @@ ${insight.summary || ""}`,
                 githubImportTypes: [...panel.querySelectorAll(".ldb-notion-github-type:checked")].map((cb) => cb.value)
               });
               NotionOAuth2.syncApiKeyInputs();
-              CredentialVault3.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
-              CredentialVault3.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
+              CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
+              CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
               NotionSiteUI2.showStatus("\u8BBE\u7F6E\u5DF2\u4FDD\u5B58", "success");
             } catch (error) {
               NotionSiteUI2.showStatus(`\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25: ${error.message}`, "error");
@@ -11582,9 +11593,9 @@ ${insight.summary || ""}`,
           panel.querySelector("#ldb-notion-ai-service").onchange = (e) => {
             const newService = e.target.value;
             Storage2.set(CONFIG2.STORAGE_KEYS.AI_SERVICE, newService);
-            const availableModels = AIService3.getAvailableModels(newService);
+            const availableModels = AIService2.getAvailableModels(newService);
             NotionSiteUI2.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : void 0);
-            const provider = AIService3.PROVIDERS[newService];
+            const provider = AIService2.PROVIDERS[newService];
             if (provider == null ? void 0 : provider.defaultModel) {
               Storage2.set(CONFIG2.STORAGE_KEYS.AI_MODEL, provider.defaultModel);
             }
@@ -11635,7 +11646,7 @@ ${insight.summary || ""}`,
             },
             notify: (message, type) => NotionSiteUI2.showStatus(message, type)
           });
-          CredentialVault3.attachControls({
+          CredentialVault2.attachControls({
             root: panel,
             selectors: {
               statusEl: "#ldb-notion-vault-status",
@@ -11645,8 +11656,8 @@ ${insight.summary || ""}`,
             notify: (message, type) => NotionSiteUI2.showStatus(message, type),
             onAfterSync: () => {
               NotionOAuth2.syncApiKeyInputs();
-              CredentialVault3.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
-              CredentialVault3.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
+              CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
+              CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
             }
           });
         },
@@ -11690,7 +11701,7 @@ ${insight.summary || ""}`,
           }
           NotionSiteUI2.updateAITargetDbOptions(cachedDatabases, cachedPages);
           const aiService = Storage2.get(CONFIG2.STORAGE_KEYS.AI_SERVICE, CONFIG2.DEFAULTS.aiService);
-          const notionSiteModels = AIService3.getAvailableModels(aiService);
+          const notionSiteModels = AIService2.getAvailableModels(aiService);
           NotionSiteUI2.updateAIModelOptions(aiService, notionSiteModels.length > 0 ? notionSiteModels : void 0);
           const savedModel = Storage2.get(CONFIG2.STORAGE_KEYS.AI_MODEL, "");
           if (savedModel) {
@@ -11712,8 +11723,8 @@ ${insight.summary || ""}`,
             }
           }
           NotionOAuth2.syncApiKeyInputs();
-          CredentialVault3.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
-          CredentialVault3.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
+          CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
+          CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
         },
         getAITargetDefaultOptionLabel: (databases = []) => {
           const effectiveState = TargetState2.getEffectiveAITargetState();
@@ -11847,7 +11858,7 @@ ${insight.summary || ""}`,
         // 更新 AI 模型选项
         updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
           const modelSelect = NotionSiteUI2.panel.querySelector("#ldb-notion-ai-model");
-          const provider = AIService3.PROVIDERS[service];
+          const provider = AIService2.PROVIDERS[service];
           if (!provider || !modelSelect) return;
           const models = customModels || provider.models;
           const defaultModel = provider.defaultModel;
@@ -11919,7 +11930,7 @@ ${insight.summary || ""}`,
             }
             const aiService = ((_a = notionPanel.querySelector("#ldb-notion-ai-service")) == null ? void 0 : _a.value) || Storage2.get(CONFIG2.STORAGE_KEYS.AI_SERVICE, CONFIG2.DEFAULTS.aiService);
             const selectedModel = ((_b = notionPanel.querySelector("#ldb-notion-ai-model")) == null ? void 0 : _b.value) || Storage2.get(CONFIG2.STORAGE_KEYS.AI_MODEL, "");
-            const provider = AIService3.PROVIDERS[aiService];
+            const provider = AIService2.PROVIDERS[aiService];
             const aiModel = selectedModel || (provider == null ? void 0 : provider.defaultModel) || "";
             return {
               notionApiKey: NotionOAuth2.getAccessToken((_c = notionPanel.querySelector("#ldb-notion-api-key")) == null ? void 0 : _c.value.trim()),
@@ -11939,7 +11950,7 @@ ${insight.summary || ""}`,
         }),
         // 初始化 AI 助手模块（复用 AIAssistant）
         initAIAssistant: () => {
-          AIAssistant3.registerSettingsAdapter("notion-site", NotionSiteUI2.createAIAssistantSettingsAdapter());
+          AIAssistant2.registerSettingsAdapter("notion-site", NotionSiteUI2.createAIAssistantSettingsAdapter());
         },
         // 初始化
         init: () => {
@@ -11979,20 +11990,20 @@ ${insight.summary || ""}`,
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor3, WorkspaceService: WorkspaceService2 } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge3, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIAssistant: AIAssistant3, AIService: AIService3, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2 } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
       var { UI_CSS: UI_CSS2 } = require_styles();
       var { UIEvents: UIEvents2 } = require_events();
-      var UI3 = {
+      var UI2 = {
         panel: null,
         miniBtn: null,
         isMinimized: false,
@@ -12010,12 +12021,12 @@ ${insight.summary || ""}`,
         refs: null,
         // 缓存高频节点引用
         cacheRefs: () => {
-          const panel = UI3.panel;
+          const panel = UI2.panel;
           if (!panel) {
-            UI3.refs = null;
+            UI2.refs = null;
             return;
           }
-          UI3.refs = {
+          UI2.refs = {
             statusContainer: panel.querySelector("#ldb-status-container"),
             bookmarkList: panel.querySelector("#ldb-bookmark-list"),
             selectCount: panel.querySelector("#ldb-select-count"),
@@ -12916,10 +12927,10 @@ ${insight.summary || ""}`,
             </div>
         `;
           document.body.appendChild(panel);
-          UI3.panel = panel;
-          UI3.cacheRefs();
-          UI3.bindEvents();
-          UI3.loadConfig();
+          UI2.panel = panel;
+          UI2.cacheRefs();
+          UI2.bindEvents();
+          UI2.loadConfig();
         },
         // 创建最小化按钮
         createMiniButton: () => {
@@ -12930,7 +12941,7 @@ ${insight.summary || ""}`,
           btn.title = "\u6253\u5F00\u6536\u85CF\u5BFC\u51FA\u5DE5\u5177";
           btn.style.display = "none";
           btn.onclick = () => {
-            UI3.panel.style.display = "block";
+            UI2.panel.style.display = "block";
             btn.style.display = "none";
             Storage2.set(CONFIG2.STORAGE_KEYS.PANEL_MINIMIZED, false);
           };
@@ -12942,8 +12953,8 @@ ${insight.summary || ""}`,
         // 加载配置
         loadConfig: () => {
           var _a, _b;
-          const panel = UI3.panel;
-          const refs = UI3.refs || {};
+          const panel = UI2.panel;
+          const refs = UI2.refs || {};
           const exportState = TargetState2.getExportState();
           refs.apiKeyInput.value = "";
           refs.databaseIdInput.value = exportState.databaseId;
@@ -12983,9 +12994,9 @@ ${insight.summary || ""}`,
           refs.aiServiceSelect.value = aiService;
           const savedModel = Storage2.get(CONFIG2.STORAGE_KEYS.AI_MODEL, "");
           const modelSelect = refs.aiModelSelect;
-          const provider = AIService3.PROVIDERS[aiService];
-          const validModels = AIService3.getAvailableModels(aiService);
-          UI3.updateAIModelOptions(aiService, validModels.length > 0 ? validModels : void 0);
+          const provider = AIService2.PROVIDERS[aiService];
+          const validModels = AIService2.getAvailableModels(aiService);
+          UI2.updateAIModelOptions(aiService, validModels.length > 0 ? validModels : void 0);
           if (savedModel) {
             const optionExists = Array.from(modelSelect.options).some((opt) => opt.value === savedModel);
             if (optionExists || validModels.includes(savedModel)) {
@@ -13017,8 +13028,8 @@ ${insight.summary || ""}`,
           refs.obsDirInput.value = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_DIR, CONFIG2.DEFAULTS.obsDir);
           refs.obsImgModeSelect.value = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_IMG_MODE, CONFIG2.DEFAULTS.obsImgMode);
           refs.obsImgDirInput.value = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_IMG_DIR, CONFIG2.DEFAULTS.obsImgDir);
-          const source = UI3.getActiveBookmarkSource();
-          UI3.applyBookmarkSourceUI(source);
+          const source = UI2.getActiveBookmarkSource();
+          UI2.applyBookmarkSourceUI(source);
           const bmStatusMain = refs.bookmarkExtStatus;
           if (bmStatusMain) {
             if (BookmarkBridge3.isExtensionAvailable()) {
@@ -13032,30 +13043,30 @@ ${insight.summary || ""}`,
               bmStatusMain.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">\u274C \u6269\u5C55\u672A\u5B89\u88C5</span> \u2014 ${InstallHelper2.renderInstallLink("\u4E00\u952E\u5B89\u88C5\u6D4F\u89C8\u5668\u6269\u5C55")}`;
             }
           }
-          UI3.renderSelfCheckResult();
+          UI2.renderSelfCheckResult();
           const cachedWorkspaceForDb = Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
           try {
             const wsData = JSON.parse(cachedWorkspaceForDb);
-            UI3.updateAITargetDbOptions(wsData.databases || []);
+            UI2.updateAITargetDbOptions(wsData.databases || []);
           } catch {
-            UI3.updateAITargetDbOptions([]);
+            UI2.updateAITargetDbOptions([]);
           }
-          UI3.updateLogPanel();
+          UI2.updateLogPanel();
           const cachedWorkspace = Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
           try {
             const workspaceData = JSON.parse(cachedWorkspace);
             const currentApiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
             const currentKeyHash = currentApiKey ? Utils2.apiKeyHash(currentApiKey) : "";
             if (workspaceData.apiKeyHash === currentKeyHash && (((_a = workspaceData.databases) == null ? void 0 : _a.length) > 0 || ((_b = workspaceData.pages) == null ? void 0 : _b.length) > 0)) {
-              UI3.updateWorkspaceSelect(workspaceData);
+              UI2.updateWorkspaceSelect(workspaceData);
             }
           } catch {
           }
           const savedSource = Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG2.DEFAULTS.bookmarkSource);
           const resolvedSource = savedSource === "github" ? "github" : "linuxdo";
           Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, resolvedSource);
-          UI3.applyBookmarkSourceUI(resolvedSource);
-          const autoConfig = UI3.getAutoImportConfigBySource();
+          UI2.applyBookmarkSourceUI(resolvedSource);
+          const autoConfig = UI2.getAutoImportConfigBySource();
           const autoImportEnabled = Storage2.get(autoConfig.enabledKey, autoConfig.enabledDefault);
           refs.autoImportEnabled.checked = autoImportEnabled;
           refs.autoImportOptions.style.display = autoImportEnabled ? "block" : "none";
@@ -13148,23 +13159,23 @@ ${insight.summary || ""}`,
             Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG2.DEFAULTS.updateCheckIntervalHours);
           }
           NotionOAuth2.syncApiKeyInputs();
-          CredentialVault3.syncSensitiveInput(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
-          CredentialVault3.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
-          CredentialVault3.syncSensitiveInput(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
-          UI3.renderSyncCenterSummary();
-          UI3.renderWorkspaceVisualSummary();
-          UI3.renderVisualSummary();
+          CredentialVault2.syncSensitiveInput(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
+          CredentialVault2.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
+          CredentialVault2.syncSensitiveInput(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
+          UI2.renderSyncCenterSummary();
+          UI2.renderWorkspaceVisualSummary();
+          UI2.renderVisualSummary();
           UpdateChecker2.renderLastStatus();
         },
         renderSelfCheckResult: () => {
-          const panel = UI3.panel;
+          const panel = UI2.panel;
           if (!panel) return;
-          const refs = UI3.refs || {};
+          const refs = UI2.refs || {};
           const resultEl = refs.selfCheckResult;
           if (!resultEl) return;
           const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
           const hasBridgeMarker = BookmarkBridge3.isExtensionAvailable();
-          const bookmarkSource = UI3.getActiveBookmarkSource();
+          const bookmarkSource = UI2.getActiveBookmarkSource();
           const hasGitHubUsername = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
           const hasGitHubToken = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "").trim();
           const checks = [
@@ -13220,7 +13231,7 @@ ${insight.summary || ""}`,
           var _a;
           const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
           const hasBridgeMarker = BookmarkBridge3.isExtensionAvailable();
-          const bookmarkSource = UI3.getActiveBookmarkSource();
+          const bookmarkSource = UI2.getActiveBookmarkSource();
           const hasGitHubUsername = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
           const hasGitHubToken = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "").trim();
           const activeTab = Storage2.get(CONFIG2.STORAGE_KEYS.ACTIVE_TAB, CONFIG2.DEFAULTS.activeTab);
@@ -13228,7 +13239,7 @@ ${insight.summary || ""}`,
           const updateLastSeenVersion = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_SEEN_VERSION, "");
           const updateLastCheckAt = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, "");
           const modeConflictTipShown = Storage2.get(CONFIG2.STORAGE_KEYS.MODE_CONFLICT_TIP_SHOWN, false);
-          const autoCfg = UI3.getAutoImportConfigBySource();
+          const autoCfg = UI2.getAutoImportConfigBySource();
           const autoImportEnabled = Storage2.get(autoCfg.enabledKey, autoCfg.enabledDefault);
           const autoImportInterval = Storage2.get(autoCfg.intervalKey, autoCfg.intervalDefault);
           const issues = [];
@@ -13257,7 +13268,7 @@ ${insight.summary || ""}`,
             `bridge=${hasBridgeMarker ? "ready" : "missing"}`,
             `source=${bookmarkSource}`,
             `active_tab=${activeTab}`,
-            `bookmark_count=${Array.isArray(UI3.bookmarks) ? UI3.bookmarks.length : 0}`,
+            `bookmark_count=${Array.isArray(UI2.bookmarks) ? UI2.bookmarks.length : 0}`,
             "",
             "[config]",
             `github_username=${hasGitHubUsername ? "set" : "unset"}`,
@@ -13293,14 +13304,14 @@ ${insight.summary || ""}`,
               document.execCommand("copy");
               textarea.remove();
             }
-            UI3.showStatus("\u8BCA\u65AD\u4FE1\u606F\u5DF2\u590D\u5236\uFF08v2\uFF09", "success");
+            UI2.showStatus("\u8BCA\u65AD\u4FE1\u606F\u5DF2\u590D\u5236\uFF08v2\uFF09", "success");
           } catch (error) {
-            UI3.showStatus(`\u590D\u5236\u5931\u8D25: ${error.message || error}`, "error");
+            UI2.showStatus(`\u590D\u5236\u5931\u8D25: ${error.message || error}`, "error");
           }
         },
         // 显示状态
         showStatus: (message, type = "info") => {
-          const container = UI3.refs.statusContainer;
+          const container = UI2.refs.statusContainer;
           if (container._statusTimer) clearTimeout(container._statusTimer);
           container.innerHTML = `
             <div class="ldb-status ${Utils2.escapeHtml(type)}">
@@ -13321,7 +13332,7 @@ ${insight.summary || ""}`,
         },
         // 显示进度
         showProgress: (current, total, message) => {
-          const container = UI3.refs.statusContainer;
+          const container = UI2.refs.statusContainer;
           const percent = total > 0 ? Math.round(current / total * 100) : 0;
           container.innerHTML = `
             <div class="ldb-progress">
@@ -13337,13 +13348,13 @@ ${insight.summary || ""}`,
         },
         // 隐藏进度
         hideProgress: () => {
-          UI3.refs.statusContainer.innerHTML = "";
+          UI2.refs.statusContainer.innerHTML = "";
         },
         // 更新 AI 模型选项
         updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
-          const refs = UI3.refs || {};
+          const refs = UI2.refs || {};
           const modelSelect = refs.aiModelSelect;
-          const provider = AIService3.PROVIDERS[service];
+          const provider = AIService2.PROVIDERS[service];
           if (!provider || !modelSelect) return;
           const models = customModels || provider.models;
           const defaultModel = provider.defaultModel;
@@ -13356,7 +13367,7 @@ ${insight.summary || ""}`,
         },
         // 更新工作区选择下拉框
         updateWorkspaceSelect: (workspaceData) => {
-          const refs = UI3.refs || {};
+          const refs = UI2.refs || {};
           const select = refs.workspaceSelect;
           if (!select) return;
           const { databases = [], pages = [] } = workspaceData;
@@ -13394,7 +13405,7 @@ ${insight.summary || ""}`,
         },
         // 更新 AI 查询目标数据库下拉框
         updateAITargetDbOptions: (databases) => {
-          const refs = UI3.refs || {};
+          const refs = UI2.refs || {};
           const select = refs.aiTargetDbSelect;
           if (!select) return;
           const savedValue = TargetState2.getDisplayAITargetState().value;
@@ -13423,9 +13434,9 @@ ${insight.summary || ""}`,
           const source = Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG2.DEFAULTS.bookmarkSource);
           return source === "github" ? "github" : "linuxdo";
         },
-        isActiveGitHubSource: () => UI3.getActiveBookmarkSource() === "github",
+        isActiveGitHubSource: () => UI2.getActiveBookmarkSource() === "github",
         getAutoImportConfigBySource: () => {
-          const isGitHub = UI3.isActiveGitHubSource();
+          const isGitHub = UI2.isActiveGitHubSource();
           return {
             isGitHub,
             enabledKey: isGitHub ? CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED : CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED,
@@ -13436,12 +13447,12 @@ ${insight.summary || ""}`,
         },
         updateVisualSnapshot: (source, bookmarks) => {
           const key = source === "github" ? "github" : "linuxdo";
-          UI3.visualSnapshots[key] = Array.isArray(bookmarks) ? bookmarks.slice() : [];
+          UI2.visualSnapshots[key] = Array.isArray(bookmarks) ? bookmarks.slice() : [];
         },
         getCombinedVisualBookmarks: () => {
           return [
-            ...Array.isArray(UI3.visualSnapshots.linuxdo) ? UI3.visualSnapshots.linuxdo : [],
-            ...Array.isArray(UI3.visualSnapshots.github) ? UI3.visualSnapshots.github : []
+            ...Array.isArray(UI2.visualSnapshots.linuxdo) ? UI2.visualSnapshots.linuxdo : [],
+            ...Array.isArray(UI2.visualSnapshots.github) ? UI2.visualSnapshots.github : []
           ];
         },
         getBookmarkVisualSourceLabel: (bookmark) => {
@@ -13507,13 +13518,13 @@ ${insight.summary || ""}`,
         },
         getWorkspacePagePropertyText: (page, names = []) => {
           var _a;
-          const prop = UI3.getWorkspacePageProperty(page, names);
+          const prop = UI2.getWorkspacePageProperty(page, names);
           if (!prop) return "";
           switch (prop.type) {
             case "title":
-              return UI3.collectWorkspacePlainText(prop.title);
+              return UI2.collectWorkspacePlainText(prop.title);
             case "rich_text":
-              return UI3.collectWorkspacePlainText(prop.rich_text);
+              return UI2.collectWorkspacePlainText(prop.rich_text);
             case "select":
               return String(((_a = prop.select) == null ? void 0 : _a.name) || "").trim();
             case "multi_select":
@@ -13534,7 +13545,7 @@ ${insight.summary || ""}`,
         },
         getWorkspacePagePropertyDateValue: (page, names = []) => {
           var _a;
-          const prop = UI3.getWorkspacePageProperty(page, names);
+          const prop = UI2.getWorkspacePageProperty(page, names);
           if (!prop) return "";
           if (prop.type === "date") return String(((_a = prop.date) == null ? void 0 : _a.start) || "").trim();
           if (prop.type === "created_time") return String(prop.created_time || "").trim();
@@ -13543,7 +13554,7 @@ ${insight.summary || ""}`,
         },
         getWorkspaceVisualSourceUrl: (pageOrRecord) => {
           if (pageOrRecord == null ? void 0 : pageOrRecord.sourceUrl) return String(pageOrRecord.sourceUrl || "").trim();
-          const explicitUrl = UI3.getWorkspacePagePropertyText(pageOrRecord, ["\u94FE\u63A5", "URL", "\u7F51\u5740", "\u94FE\u63A5\u5730\u5740"]);
+          const explicitUrl = UI2.getWorkspacePagePropertyText(pageOrRecord, ["\u94FE\u63A5", "URL", "\u7F51\u5740", "\u94FE\u63A5\u5730\u5740"]);
           if (explicitUrl) return explicitUrl;
           return String((pageOrRecord == null ? void 0 : pageOrRecord.url) || "").trim();
         },
@@ -13591,14 +13602,14 @@ ${insight.summary || ""}`,
             return {
               date: pageOrRecord.date,
               key: pageOrRecord.dateKey,
-              label: pageOrRecord.dateLabel || UI3.buildViewDateBucket(pageOrRecord.date).label,
+              label: pageOrRecord.dateLabel || UI2.buildViewDateBucket(pageOrRecord.date).label,
               field: pageOrRecord.dateField || ""
             };
           }
           const candidates = [
-            { field: "\u6536\u85CF\u65F6\u95F4", value: UI3.getWorkspacePagePropertyDateValue(pageOrRecord, ["\u6536\u85CF\u65F6\u95F4"]) },
-            { field: "\u66F4\u65B0\u65F6\u95F4", value: UI3.getWorkspacePagePropertyDateValue(pageOrRecord, ["\u66F4\u65B0\u65F6\u95F4"]) },
-            { field: "\u53D1\u5E03\u65E5\u671F", value: UI3.getWorkspacePagePropertyDateValue(pageOrRecord, ["\u53D1\u5E03\u65E5\u671F"]) },
+            { field: "\u6536\u85CF\u65F6\u95F4", value: UI2.getWorkspacePagePropertyDateValue(pageOrRecord, ["\u6536\u85CF\u65F6\u95F4"]) },
+            { field: "\u66F4\u65B0\u65F6\u95F4", value: UI2.getWorkspacePagePropertyDateValue(pageOrRecord, ["\u66F4\u65B0\u65F6\u95F4"]) },
+            { field: "\u53D1\u5E03\u65E5\u671F", value: UI2.getWorkspacePagePropertyDateValue(pageOrRecord, ["\u53D1\u5E03\u65E5\u671F"]) },
             { field: "created_time", value: String((pageOrRecord == null ? void 0 : pageOrRecord.created_time) || "").trim() },
             { field: "last_edited_time", value: String((pageOrRecord == null ? void 0 : pageOrRecord.last_edited_time) || "").trim() }
           ];
@@ -13606,7 +13617,7 @@ ${insight.summary || ""}`,
             if (!candidate.value) continue;
             const date = new Date(candidate.value);
             if (Number.isNaN(date.getTime())) continue;
-            const bucket = UI3.buildViewDateBucket(date);
+            const bucket = UI2.buildViewDateBucket(date);
             return {
               date,
               key: bucket.key,
@@ -13618,8 +13629,8 @@ ${insight.summary || ""}`,
         },
         inferWorkspaceVisualSource: (page, databases = []) => {
           var _a, _b;
-          const explicitSource = UI3.normalizeWorkspaceSourceLabel(UI3.getWorkspacePagePropertyText(page, ["\u6765\u6E90"]));
-          const explicitTypeRaw = UI3.getWorkspacePagePropertyText(page, ["\u6765\u6E90\u7C7B\u578B"]);
+          const explicitSource = UI2.normalizeWorkspaceSourceLabel(UI2.getWorkspacePagePropertyText(page, ["\u6765\u6E90"]));
+          const explicitTypeRaw = UI2.getWorkspacePagePropertyText(page, ["\u6765\u6E90\u7C7B\u578B"]);
           const properties = (page == null ? void 0 : page.properties) || {};
           const propertyNames = Object.keys(properties);
           const parentDatabaseId = String(((_a = page == null ? void 0 : page.parent) == null ? void 0 : _a.database_id) || "").replace(/-/g, "");
@@ -13628,7 +13639,7 @@ ${insight.summary || ""}`,
           const hintText = [explicitSource, explicitTypeRaw, parentDatabaseTitle, pageTitle].join(" ").toLowerCase();
           const hasProp = (...names) => names.some((name) => propertyNames.includes(name));
           let source = explicitSource;
-          let sourceType = UI3.normalizeWorkspaceSourceTypeLabel(explicitTypeRaw, explicitSource);
+          let sourceType = UI2.normalizeWorkspaceSourceTypeLabel(explicitTypeRaw, explicitSource);
           if (!source && sourceType) {
             if (sourceType === "\u4E66\u7B7E") source = "\u6D4F\u89C8\u5668\u4E66\u7B7E";
             else if (["Stars", "Repos", "Forks", "Gists", "GitHub"].includes(sourceType)) source = "GitHub";
@@ -13669,13 +13680,13 @@ ${insight.summary || ""}`,
             }
           }
           if (!source) source = explicitSource || "\u672A\u6807\u8BB0";
-          if (!sourceType) sourceType = UI3.normalizeWorkspaceSourceTypeLabel(explicitTypeRaw, source);
+          if (!sourceType) sourceType = UI2.normalizeWorkspaceSourceTypeLabel(explicitTypeRaw, source);
           return { source, sourceType };
         },
         getWorkspaceVisualCategory: (pageOrRecord) => {
           if (pageOrRecord == null ? void 0 : pageOrRecord.category) return String(pageOrRecord.category).trim();
           return String(
-            UI3.getWorkspacePagePropertyText(pageOrRecord, ["AI\u5206\u7C7B"]) || UI3.getWorkspacePagePropertyText(pageOrRecord, ["\u5206\u7C7B"]) || ""
+            UI2.getWorkspacePagePropertyText(pageOrRecord, ["AI\u5206\u7C7B"]) || UI2.getWorkspacePagePropertyText(pageOrRecord, ["\u5206\u7C7B"]) || ""
           ).trim();
         },
         getWorkspaceVisualParentLabel: (record) => {
@@ -13699,11 +13710,11 @@ ${insight.summary || ""}`,
         },
         extractWorkspaceVisualRecord: (page, databasesMap = /* @__PURE__ */ new Map()) => {
           var _a;
-          const summary = UI3.mapWorkspacePageSummary(page);
-          const dateInfo = UI3.getWorkspaceVisualDate(page);
-          const category = UI3.getWorkspaceVisualCategory(page);
-          const sourceInfo = UI3.inferWorkspaceVisualSource(page, Array.from(databasesMap.values()));
-          const sourceUrl = UI3.getWorkspaceVisualSourceUrl(page);
+          const summary = UI2.mapWorkspacePageSummary(page);
+          const dateInfo = UI2.getWorkspaceVisualDate(page);
+          const category = UI2.getWorkspaceVisualCategory(page);
+          const sourceInfo = UI2.inferWorkspaceVisualSource(page, Array.from(databasesMap.values()));
+          const sourceUrl = UI2.getWorkspaceVisualSourceUrl(page);
           const hasSource = sourceInfo.source && sourceInfo.source !== "\u672A\u6807\u8BB0";
           const hasDate = !!dateInfo;
           const hasCategory = !!category;
@@ -13730,7 +13741,7 @@ ${insight.summary || ""}`,
             isFullyStructured: hasSource && hasDate && hasCategory
           };
         },
-        buildVisualizationModel: (bookmarks = UI3.getCombinedVisualBookmarks()) => {
+        buildVisualizationModel: (bookmarks = UI2.getCombinedVisualBookmarks()) => {
           var _a;
           const items = Array.isArray(bookmarks) ? bookmarks : [];
           const sourceCounts = /* @__PURE__ */ new Map();
@@ -13739,20 +13750,20 @@ ${insight.summary || ""}`,
           let exported = 0;
           let pending = 0;
           items.forEach((bookmark) => {
-            const bookmarkKey = UI3.getBookmarkKey(bookmark);
-            const isExported = UI3.isBookmarkKeyExported(bookmarkKey);
+            const bookmarkKey = UI2.getBookmarkKey(bookmark);
+            const isExported = UI2.isBookmarkKeyExported(bookmarkKey);
             if (isExported) {
               exported += 1;
             } else {
               pending += 1;
             }
-            const sourceLabel = UI3.getBookmarkVisualSourceLabel(bookmark);
+            const sourceLabel = UI2.getBookmarkVisualSourceLabel(bookmark);
             sourceCounts.set(sourceLabel, (sourceCounts.get(sourceLabel) || 0) + 1);
-            const typeLabel = UI3.getBookmarkVisualTypeLabel(bookmark);
+            const typeLabel = UI2.getBookmarkVisualTypeLabel(bookmark);
             typeCounts.set(typeLabel, (typeCounts.get(typeLabel) || 0) + 1);
-            const dateInfo = UI3.getBookmarkVisualDate(bookmark);
+            const dateInfo = UI2.getBookmarkVisualDate(bookmark);
             if (!dateInfo) return;
-            const bucket = UI3.buildViewDateBucket(dateInfo);
+            const bucket = UI2.buildViewDateBucket(dateInfo);
             const existing = timelineCounts.get(bucket.key) || {
               key: bucket.key,
               label: bucket.label,
@@ -13767,22 +13778,22 @@ ${insight.summary || ""}`,
           const toBreakdown = (map) => Array.from(map.entries()).map(([label, count]) => ({
             label,
             count,
-            pct: UI3.getViewPct(count, total)
+            pct: UI2.getViewPct(count, total)
           })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
           const timeline = Array.from(timelineCounts.values()).sort((a, b) => b.key.localeCompare(a.key)).slice(0, 6);
-          const loadedSources = Object.entries(UI3.visualSnapshots).filter(([, snapshot]) => Array.isArray(snapshot) && snapshot.length > 0).map(([source]) => source === "github" ? "GitHub" : "Linux.do");
+          const loadedSources = Object.entries(UI2.visualSnapshots).filter(([, snapshot]) => Array.isArray(snapshot) && snapshot.length > 0).map(([source]) => source === "github" ? "GitHub" : "Linux.do");
           return {
             total,
             exported,
             pending,
-            selected: ((_a = UI3.selectedBookmarks) == null ? void 0 : _a.size) || 0,
+            selected: ((_a = UI2.selectedBookmarks) == null ? void 0 : _a.size) || 0,
             loadedSources,
             sourceBreakdown: toBreakdown(sourceCounts),
             typeBreakdown: toBreakdown(typeCounts),
             timeline
           };
         },
-        buildWorkspaceVisualizationModel: (snapshot = UI3.workspaceVisualSnapshot) => {
+        buildWorkspaceVisualizationModel: (snapshot = UI2.workspaceVisualSnapshot) => {
           const databases = Array.isArray(snapshot == null ? void 0 : snapshot.databases) ? snapshot.databases : [];
           const records = Array.isArray(snapshot == null ? void 0 : snapshot.records) ? snapshot.records : [];
           const totalPages = records.length;
@@ -13822,7 +13833,7 @@ ${insight.summary || ""}`,
             if (record == null ? void 0 : record.isFullyStructured) {
               structuredPages += 1;
             }
-            const parentLabel = UI3.getWorkspaceVisualParentLabel(record);
+            const parentLabel = UI2.getWorkspaceVisualParentLabel(record);
             const linkLabel = `${parentLabel} \u2192 ${sourceLabel}`;
             const existingRelationship = relationshipCounts.get(linkLabel) || {
               label: linkLabel,
@@ -13832,7 +13843,7 @@ ${insight.summary || ""}`,
             };
             existingRelationship.count += 1;
             relationshipCounts.set(linkLabel, existingRelationship);
-            const duplicateKey = UI3.normalizeWorkspaceInsightKey(record == null ? void 0 : record.title);
+            const duplicateKey = UI2.normalizeWorkspaceInsightKey(record == null ? void 0 : record.title);
             if (duplicateKey) {
               const existingDuplicate = duplicateGroups.get(duplicateKey) || {
                 key: duplicateKey,
@@ -13850,7 +13861,7 @@ ${insight.summary || ""}`,
               if (record == null ? void 0 : record.hasSource) existingDuplicate.sources.add(sourceLabel);
               duplicateGroups.set(duplicateKey, existingDuplicate);
             }
-            const linkKey = UI3.normalizeWorkspaceInsightUrl(record == null ? void 0 : record.url);
+            const linkKey = UI2.normalizeWorkspaceInsightUrl(record == null ? void 0 : record.url);
             if (linkKey) {
               const existingGroup = linkGroups.get(linkKey) || {
                 key: linkKey,
@@ -13873,12 +13884,12 @@ ${insight.summary || ""}`,
           const toBreakdown = (map) => Array.from(map.entries()).map(([label, count]) => ({
             label,
             count,
-            pct: UI3.getViewPct(count, totalPages)
+            pct: UI2.getViewPct(count, totalPages)
           })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
           const timeline = Array.from(timelineCounts.values()).sort((a, b) => b.key.localeCompare(a.key)).slice(0, 8);
           const relationships = Array.from(relationshipCounts.values()).map((item) => ({
             ...item,
-            pct: UI3.getViewPct(item.count, totalPages)
+            pct: UI2.getViewPct(item.count, totalPages)
           })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).slice(0, 10);
           const duplicateCandidates = Array.from(duplicateGroups.values()).filter((group) => group.items.length > 1).map((group) => {
             const sourceList = Array.from(group.sources).sort((a, b) => a.localeCompare(b));
@@ -13912,11 +13923,11 @@ ${insight.summary || ""}`,
             ...linkConnectionCandidates.map((group) => [group.key, group])
           ]).values()).slice(0, 8);
           const funnel = [
-            { label: "\u5DF2\u626B\u63CF\u9875\u9762", count: totalPages, pct: UI3.getViewPct(totalPages, totalPages) },
-            { label: "\u8BC6\u522B\u6765\u6E90", count: sourcedPages, pct: UI3.getViewPct(sourcedPages, totalPages) },
-            { label: "\u6709\u65F6\u95F4\u5B57\u6BB5", count: datedPages, pct: UI3.getViewPct(datedPages, totalPages) },
-            { label: "\u5DF2\u5206\u7C7B", count: categorizedPages, pct: UI3.getViewPct(categorizedPages, totalPages) },
-            { label: "\u7ED3\u6784\u5B8C\u6574", count: structuredPages, pct: UI3.getViewPct(structuredPages, totalPages) }
+            { label: "\u5DF2\u626B\u63CF\u9875\u9762", count: totalPages, pct: UI2.getViewPct(totalPages, totalPages) },
+            { label: "\u8BC6\u522B\u6765\u6E90", count: sourcedPages, pct: UI2.getViewPct(sourcedPages, totalPages) },
+            { label: "\u6709\u65F6\u95F4\u5B57\u6BB5", count: datedPages, pct: UI2.getViewPct(datedPages, totalPages) },
+            { label: "\u5DF2\u5206\u7C7B", count: categorizedPages, pct: UI2.getViewPct(categorizedPages, totalPages) },
+            { label: "\u7ED3\u6784\u5B8C\u6574", count: structuredPages, pct: UI2.getViewPct(structuredPages, totalPages) }
           ];
           return {
             totalPages,
@@ -13976,12 +13987,12 @@ ${insight.summary || ""}`,
           lines.push("- \u4E0B\u4E00\u6B65\u5EFA\u8BAE\u4F18\u5148\u628A\u5173\u8054\u5019\u9009\u6536\u655B\u6210\u7EDF\u4E00\u6761\u76EE\uFF0C\u518D\u5BF9\u7F3A\u5B57\u6BB5\u9875\u9762\u8DD1 AI \u6458\u8981\u4E0E\u5206\u7C7B\u8865\u9F50\u3002");
           return lines.join("\n");
         },
-        buildWorkspaceInsightMarkdown: (model = UI3.buildWorkspaceVisualizationModel(), aiSummary = UI3.workspaceInsightSummary || "") => {
+        buildWorkspaceInsightMarkdown: (model = UI2.buildWorkspaceVisualizationModel(), aiSummary = UI2.workspaceInsightSummary || "") => {
           if (!(model == null ? void 0 : model.scannedAt)) {
             return "# \u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\n\n\u5C1A\u672A\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\uFF0C\u6682\u65E0\u53EF\u5206\u4EAB\u7684\u6570\u636E\u3002";
           }
           const scannedAt = new Date(model.scannedAt).toLocaleString("zh-CN", { hour12: false });
-          const structuredPct = UI3.getViewPct(model.structuredPages, model.totalPages);
+          const structuredPct = UI2.getViewPct(model.structuredPages, model.totalPages);
           const sourceLines = model.sourceBreakdown.length > 0 ? model.sourceBreakdown.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF08${item.pct}%\uFF09`) : ["- \u6682\u65E0\u6765\u6E90\u5206\u5E03\u6570\u636E"];
           const categoryLines = model.categoryBreakdown.length > 0 ? model.categoryBreakdown.slice(0, 8).map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF08${item.pct}%\uFF09`) : ["- \u6682\u65E0\u5206\u7C7B\u7EDF\u8BA1"];
           const timelineLines = model.timeline.length > 0 ? model.timeline.map((item) => `- ${item.label}\uFF1A${item.count} \u9875`) : ["- \u6682\u65E0\u65F6\u95F4\u7EBF\u6570\u636E"];
@@ -13989,7 +14000,7 @@ ${insight.summary || ""}`,
           const funnelLines = model.funnel.length > 0 ? model.funnel.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF08${item.pct}%\uFF09`) : ["- \u6682\u65E0\u6F0F\u6597\u6570\u636E"];
           const duplicateLines = model.duplicateCandidates.length > 0 ? model.duplicateCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF0C\u6765\u6E90 ${item.sources.join(" + ") || "\u672A\u6807\u8BB0"}`) : ["- \u6682\u65E0\u540C\u6807\u9898\u91CD\u590D\u5019\u9009"];
           const connectionLines = model.connectionCandidates.length > 0 ? model.connectionCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF0C\u539F\u56E0\uFF1A${item.reason}`) : ["- \u6682\u65E0\u8DE8\u6E90\u5173\u8054\u5019\u9009"];
-          const summaryBlock = String(aiSummary || "").trim() || UI3.buildWorkspaceInsightFallbackSummary(model);
+          const summaryBlock = String(aiSummary || "").trim() || UI2.buildWorkspaceInsightFallbackSummary(model);
           return [
             "# \u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A",
             "",
@@ -14113,8 +14124,8 @@ ${insight.summary || ""}`,
         buildWorkspaceConnectionCandidateAIDraft: async (candidate, settings) => {
           if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService)) return null;
           try {
-            const prompt2 = UI3.buildWorkspaceConnectionCandidateAIPrompt(candidate);
-            const raw = String(await AIService3.requestChat(prompt2, settings, 700) || "").trim();
+            const prompt2 = UI2.buildWorkspaceConnectionCandidateAIPrompt(candidate);
+            const raw = String(await AIService2.requestChat(prompt2, settings, 700) || "").trim();
             const jsonMatch = raw.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
               throw new Error("AI \u672A\u8FD4\u56DE\u6709\u6548 JSON\u3002");
@@ -14132,7 +14143,7 @@ ${insight.summary || ""}`,
               canonicalTitle: canonicalTitle.slice(0, 80),
               summary: summary.slice(0, 200),
               recommendedAction,
-              actionLabel: UI3.buildWorkspaceConnectionCandidateActionLabel(recommendedAction),
+              actionLabel: UI2.buildWorkspaceConnectionCandidateActionLabel(recommendedAction),
               nextStep: nextStep.slice(0, 200),
               mergeReason: mergeReason.slice(0, 200),
               tags
@@ -14156,7 +14167,7 @@ ${insight.summary || ""}`,
           const items = Array.isArray(candidate == null ? void 0 : candidate.items) ? candidate.items : [];
           const sourceList = Array.isArray(candidate == null ? void 0 : candidate.sources) ? candidate.sources.filter(Boolean) : [];
           const exportedAt = new Date(savedAt).toLocaleString("zh-CN", { hour12: false });
-          const workflow = UI3.buildWorkspaceConnectionCandidateWorkflow(candidate, aiDraft);
+          const workflow = UI2.buildWorkspaceConnectionCandidateWorkflow(candidate, aiDraft);
           const lines = [
             "# \u7EDF\u4E00\u5019\u9009\u6761\u76EE",
             "",
@@ -14209,7 +14220,7 @@ ${insight.summary || ""}`,
         },
         buildWorkspaceConnectionCandidateDatabaseProperties: (database, titlePropertyName, candidate, candidateTitle, aiDraft = null) => {
           const databaseProperties = (database == null ? void 0 : database.properties) || {};
-          const workflow = UI3.buildWorkspaceConnectionCandidateWorkflow(candidate, aiDraft);
+          const workflow = UI2.buildWorkspaceConnectionCandidateWorkflow(candidate, aiDraft);
           const properties = {
             [titlePropertyName]: {
               title: [{ text: { content: String(candidateTitle || "\u7EDF\u4E00\u5019\u9009").slice(0, 2e3) } }]
@@ -14355,7 +14366,7 @@ ${insight.summary || ""}`,
         ensureWorkspaceConnectionCandidateDatabaseSchema: async (databaseId, apiKey, database = null) => {
           const currentDatabase = database || await NotionAPI2.fetchDatabase(databaseId, apiKey);
           const existingProps = (currentDatabase == null ? void 0 : currentDatabase.properties) || {};
-          const requiredProperties = UI3.getWorkspaceConnectionCandidateSchemaDefinition();
+          const requiredProperties = UI2.getWorkspaceConnectionCandidateSchemaDefinition();
           const propsToAdd = {};
           const typeConflicts = [];
           for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
@@ -14379,7 +14390,7 @@ ${insight.summary || ""}`,
           if (Object.keys(propsToAdd).length === 0) {
             return currentDatabase;
           }
-          await AIAssistant3._executeGuardedDatabaseWrite(
+          await AIAssistant2._executeGuardedDatabaseWrite(
             "updateDatabase",
             databaseId,
             () => NotionAPI2.updateDatabase(databaseId, propsToAdd, apiKey),
@@ -14472,8 +14483,8 @@ ${insight.summary || ""}`,
               lastSuccessAt: linuxdoState.lastSuccessAt || 0,
               lastAttemptAt: linuxdoState.lastAttemptAt || 0,
               lastError: linuxdoState.lastError || "",
-              watermarkLabel: UI3.formatSyncWatermarkLabel(linuxdoState.watermark),
-              statsLabel: UI3.buildSyncStatsText("linuxdo", linuxdoState.lastStats),
+              watermarkLabel: UI2.formatSyncWatermarkLabel(linuxdoState.watermark),
+              statsLabel: UI2.buildSyncStatsText("linuxdo", linuxdoState.lastStats),
               scheduleLabel: "\u5B9A\u65F6\u8F6E\u8BE2\u5BFC\u5165 Linux.do \u65B0\u6536\u85CF",
               detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA\u6700\u8FD1\u6536\u85CF\u65F6\u95F4 + \u8FB9\u754C ID"
             },
@@ -14486,8 +14497,8 @@ ${insight.summary || ""}`,
               lastSuccessAt: githubMeta.lastSuccessAt || 0,
               lastAttemptAt: githubMeta.lastAttemptAt || 0,
               lastError: githubMeta.lastError || "",
-              watermarkLabel: githubStates.length > 0 ? githubStates.map((item) => `${item.label}\uFF1A${UI3.formatSyncWatermarkLabel(item.state.watermark)}`).join("\uFF1B") : "\u672A\u9009\u62E9\u5BFC\u5165\u7C7B\u578B",
-              statsLabel: UI3.buildSyncStatsText("github", githubMeta.lastStats),
+              watermarkLabel: githubStates.length > 0 ? githubStates.map((item) => `${item.label}\uFF1A${UI2.formatSyncWatermarkLabel(item.state.watermark)}`).join("\uFF1B") : "\u672A\u9009\u62E9\u5BFC\u5165\u7C7B\u578B",
+              statsLabel: UI2.buildSyncStatsText("github", githubMeta.lastStats),
               scheduleLabel: githubTypes.length > 0 ? `\u542F\u7528\u7C7B\u578B\uFF1A${githubTypes.map((type) => githubTypeLabelMap[type] || type).join(" / ")}` : "\u672A\u9009\u62E9\u5BFC\u5165\u7C7B\u578B",
               detailLabel: "\u6BCF\u79CD GitHub \u7C7B\u578B\u90FD\u7EF4\u62A4\u72EC\u7ACB\u589E\u91CF\u57FA\u7EBF"
             },
@@ -14500,8 +14511,8 @@ ${insight.summary || ""}`,
               lastSuccessAt: bookmarkState.lastSuccessAt || 0,
               lastAttemptAt: bookmarkState.lastAttemptAt || 0,
               lastError: bookmarkState.lastError || "",
-              watermarkLabel: UI3.formatSyncWatermarkLabel(bookmarkState.watermark),
-              statsLabel: UI3.buildSyncStatsText("bookmarks", bookmarkState.lastStats),
+              watermarkLabel: UI2.formatSyncWatermarkLabel(bookmarkState.watermark),
+              statsLabel: UI2.buildSyncStatsText("bookmarks", bookmarkState.lastStats),
               scheduleLabel: `\u8DDF\u8E2A ${Object.keys(bookmarkState.snapshot || {}).length} \u4E2A\u5DF2\u77E5\u4E66\u7B7E\u6620\u5C04`,
               detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA\u4E66\u7B7E\u65F6\u95F4 + \u5F53\u524D\u5FEB\u7167\u6620\u5C04"
             },
@@ -14514,21 +14525,21 @@ ${insight.summary || ""}`,
               lastSuccessAt: rssState.lastSuccessAt || 0,
               lastAttemptAt: rssState.lastAttemptAt || 0,
               lastError: rssState.lastError || "",
-              watermarkLabel: UI3.formatSyncWatermarkLabel(rssState.watermark),
-              statsLabel: UI3.buildSyncStatsText("rss", rssState.lastStats),
+              watermarkLabel: UI2.formatSyncWatermarkLabel(rssState.watermark),
+              statsLabel: UI2.buildSyncStatsText("rss", rssState.lastStats),
               scheduleLabel: rssFeedCount > 0 ? `\u76D1\u63A7 ${rssFeedCount} \u4E2A Feed` : "\u672A\u914D\u7F6E Feed URL",
               detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA Feed \u53D1\u5E03\u65F6\u95F4 + \u5F53\u524D\u5FEB\u7167\u6620\u5C04"
             }
           ].map((row) => {
-            const outcomeMeta = UI3.getSyncOutcomeMeta(row.outcome);
+            const outcomeMeta = UI2.getSyncOutcomeMeta(row.outcome);
             const intervalLabel = row.enabled ? row.intervalMinutes > 0 ? `${row.intervalMinutes} \u5206\u949F\u8F6E\u8BE2` : "\u4EC5\u9875\u9762\u6253\u5F00\u65F6\u8865\u8DD1" : "\u672A\u542F\u7528";
             return {
               ...row,
               outcomeLabel: outcomeMeta.label,
               outcomeTone: outcomeMeta.tone,
               intervalLabel,
-              lastSuccessLabel: UI3.formatSyncDateTime(row.lastSuccessAt, "\u672A\u6210\u529F\u540C\u6B65"),
-              lastAttemptLabel: UI3.formatSyncDateTime(row.lastAttemptAt, "\u672A\u5C1D\u8BD5")
+              lastSuccessLabel: UI2.formatSyncDateTime(row.lastSuccessAt, "\u672A\u6210\u529F\u540C\u6B65"),
+              lastAttemptLabel: UI2.formatSyncDateTime(row.lastAttemptAt, "\u672A\u5C1D\u8BD5")
             };
           });
           const latestSuccessRow = sourceRows.filter((row) => row.lastSuccessAt > 0).sort((a, b) => b.lastSuccessAt - a.lastSuccessAt)[0] || null;
@@ -14543,9 +14554,9 @@ ${insight.summary || ""}`,
         },
         renderSyncCenterSummary: () => {
           var _a;
-          const container = (_a = UI3.refs) == null ? void 0 : _a.viewSyncSummary;
+          const container = (_a = UI2.refs) == null ? void 0 : _a.viewSyncSummary;
           if (!container) return;
-          const model = UI3.buildUnifiedSyncModel();
+          const model = UI2.buildUnifiedSyncModel();
           if (!model.sourceRows.length) {
             container.innerHTML = `
                 <div class="ldb-view-empty">
@@ -14612,7 +14623,7 @@ ${insight.summary || ""}`,
         `;
         },
         runUnifiedSyncNow: async () => {
-          const refs = UI3.refs || {};
+          const refs = UI2.refs || {};
           const btn = refs.viewSyncNowBtn;
           const tasks = [];
           if (Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.autoImportEnabled)) {
@@ -14638,9 +14649,9 @@ ${insight.summary || ""}`,
             for (const task of tasks) {
               await task.run();
             }
-            UI3.renderSyncCenterSummary();
-            const model = UI3.buildUnifiedSyncModel();
-            UI3.showStatus(
+            UI2.renderSyncCenterSummary();
+            const model = UI2.buildUnifiedSyncModel();
+            UI2.showStatus(
               `\u7EDF\u4E00\u540C\u6B65\u5B8C\u6210\uFF1A\u5DF2\u6267\u884C ${tasks.map((task) => task.label).join("\u3001")}\uFF0C\u5F53\u524D\u9700\u5173\u6CE8\u6765\u6E90 ${model.issueCount} \u4E2A\u3002`,
               model.issueCount > 0 ? "error" : "success"
             );
@@ -14652,7 +14663,7 @@ ${insight.summary || ""}`,
             }
           }
         },
-        buildWorkspaceCollaborationPackage: (model = UI3.buildWorkspaceVisualizationModel(), syncModel = UI3.buildUnifiedSyncModel()) => {
+        buildWorkspaceCollaborationPackage: (model = UI2.buildWorkspaceVisualizationModel(), syncModel = UI2.buildUnifiedSyncModel()) => {
           if (!(model == null ? void 0 : model.scannedAt)) {
             throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
           }
@@ -14663,9 +14674,9 @@ ${insight.summary || ""}`,
               return fallback;
             }
           };
-          const markdown = UI3.workspaceInsightMarkdown || UI3.buildWorkspaceInsightMarkdown(model, UI3.workspaceInsightSummary || "");
-          const generatedAt = UI3.workspaceInsightUpdatedAt || Date.now();
-          const summaryText = String(UI3.workspaceInsightSummary || "").trim() || UI3.buildWorkspaceInsightFallbackSummary(model);
+          const markdown = UI2.workspaceInsightMarkdown || UI2.buildWorkspaceInsightMarkdown(model, UI2.workspaceInsightSummary || "");
+          const generatedAt = UI2.workspaceInsightUpdatedAt || Date.now();
+          const summaryText = String(UI2.workspaceInsightSummary || "").trim() || UI2.buildWorkspaceInsightFallbackSummary(model);
           return {
             packageType: "ld-notion-workspace-collaboration",
             packageVersion: 1,
@@ -14706,7 +14717,7 @@ ${insight.summary || ""}`,
             }
           };
         },
-        buildWorkspaceCollaborationPackageMarkdown: (collabPackage = UI3.buildWorkspaceCollaborationPackage()) => {
+        buildWorkspaceCollaborationPackageMarkdown: (collabPackage = UI2.buildWorkspaceCollaborationPackage()) => {
           var _a, _b, _c, _d, _e, _f, _g, _h;
           const candidateLines = Array.isArray((_a = collabPackage == null ? void 0 : collabPackage.workspace) == null ? void 0 : _a.connectionCandidates) && collabPackage.workspace.connectionCandidates.length > 0 ? collabPackage.workspace.connectionCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u6761\uFF0C\u539F\u56E0 ${item.reason}`) : ["- \u6682\u65E0\u8DE8\u6E90\u5173\u8054\u5019\u9009"];
           const duplicateLines = Array.isArray((_b = collabPackage == null ? void 0 : collabPackage.workspace) == null ? void 0 : _b.duplicateCandidates) && collabPackage.workspace.duplicateCandidates.length > 0 ? collabPackage.workspace.duplicateCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u6761\uFF0C\u6765\u6E90 ${Array.isArray(item.sources) ? item.sources.join(" + ") : ""}`) : ["- \u6682\u65E0\u91CD\u590D\u5019\u9009"];
@@ -14743,11 +14754,11 @@ ${insight.summary || ""}`,
         },
         copyWorkspaceInsightReport: async () => {
           var _a;
-          const model = UI3.buildWorkspaceVisualizationModel();
+          const model = UI2.buildWorkspaceVisualizationModel();
           if (!(model == null ? void 0 : model.scannedAt)) {
             throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
           }
-          const markdown = UI3.workspaceInsightMarkdown || UI3.buildWorkspaceInsightMarkdown(model);
+          const markdown = UI2.workspaceInsightMarkdown || UI2.buildWorkspaceInsightMarkdown(model);
           try {
             if ((_a = navigator.clipboard) == null ? void 0 : _a.writeText) {
               await navigator.clipboard.writeText(markdown);
@@ -14762,24 +14773,24 @@ ${insight.summary || ""}`,
               document.execCommand("copy");
               textarea.remove();
             }
-            UI3.workspaceInsightMarkdown = markdown;
-            UI3.workspaceInsightUpdatedAt = Date.now();
-            UI3.showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u590D\u5236\u3002", "success");
+            UI2.workspaceInsightMarkdown = markdown;
+            UI2.workspaceInsightUpdatedAt = Date.now();
+            UI2.showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u590D\u5236\u3002", "success");
           } catch (error) {
             throw new Error((error == null ? void 0 : error.message) || String(error));
           }
         },
         downloadWorkspaceInsightReport: async () => {
-          const model = UI3.buildWorkspaceVisualizationModel();
+          const model = UI2.buildWorkspaceVisualizationModel();
           if (!(model == null ? void 0 : model.scannedAt)) {
             throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
           }
-          const markdown = UI3.workspaceInsightMarkdown || UI3.buildWorkspaceInsightMarkdown(model);
+          const markdown = UI2.workspaceInsightMarkdown || UI2.buildWorkspaceInsightMarkdown(model);
           const objectUrlApi = typeof window !== "undefined" && window.URL && typeof window.URL.createObjectURL === "function" ? window.URL : typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL : null;
           if (!objectUrlApi) {
             throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u62A5\u544A\u4E0B\u8F7D\u3002");
           }
-          const stampSource = UI3.workspaceInsightUpdatedAt || Date.now();
+          const stampSource = UI2.workspaceInsightUpdatedAt || Date.now();
           const stamp = new Date(stampSource).toISOString().replace(/[:.]/g, "-");
           const filename = `ld-notion-workspace-insight-${stamp}.md`;
           const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
@@ -14794,9 +14805,9 @@ ${insight.summary || ""}`,
             if (typeof link.remove === "function") {
               link.remove();
             }
-            UI3.workspaceInsightMarkdown = markdown;
-            UI3.workspaceInsightUpdatedAt = Date.now();
-            UI3.showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u5F00\u59CB\u4E0B\u8F7D\u3002", "success");
+            UI2.workspaceInsightMarkdown = markdown;
+            UI2.workspaceInsightUpdatedAt = Date.now();
+            UI2.showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u5F00\u59CB\u4E0B\u8F7D\u3002", "success");
             return { filename, markdown };
           } catch (error) {
             throw new Error((error == null ? void 0 : error.message) || String(error));
@@ -14807,14 +14818,14 @@ ${insight.summary || ""}`,
           }
         },
         downloadWorkspaceCollaborationPackage: async () => {
-          const model = UI3.buildWorkspaceVisualizationModel();
-          const syncModel = UI3.buildUnifiedSyncModel();
-          const collabPackage = UI3.buildWorkspaceCollaborationPackage(model, syncModel);
+          const model = UI2.buildWorkspaceVisualizationModel();
+          const syncModel = UI2.buildUnifiedSyncModel();
+          const collabPackage = UI2.buildWorkspaceCollaborationPackage(model, syncModel);
           const objectUrlApi = typeof window !== "undefined" && window.URL && typeof window.URL.createObjectURL === "function" ? window.URL : typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL : null;
           if (!objectUrlApi) {
             throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u534F\u4F5C\u5305\u4E0B\u8F7D\u3002");
           }
-          const stampSource = UI3.workspaceInsightUpdatedAt || Date.now();
+          const stampSource = UI2.workspaceInsightUpdatedAt || Date.now();
           const stamp = new Date(stampSource).toISOString().replace(/[:.]/g, "-");
           const filename = `ld-notion-workspace-collaboration-${stamp}.json`;
           const payload = JSON.stringify(collabPackage, null, 2);
@@ -14830,8 +14841,8 @@ ${insight.summary || ""}`,
             if (typeof link.remove === "function") {
               link.remove();
             }
-            UI3.workspaceInsightUpdatedAt = Date.now();
-            UI3.showStatus("\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5DF2\u5F00\u59CB\u4E0B\u8F7D\u3002", "success");
+            UI2.workspaceInsightUpdatedAt = Date.now();
+            UI2.showStatus("\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5DF2\u5F00\u59CB\u4E0B\u8F7D\u3002", "success");
             return { filename, payload, collabPackage };
           } catch (error) {
             throw new Error((error == null ? void 0 : error.message) || String(error));
@@ -14843,11 +14854,11 @@ ${insight.summary || ""}`,
         },
         saveWorkspaceCollaborationPackageToNotion: async () => {
           var _a, _b, _c;
-          const model = UI3.buildWorkspaceVisualizationModel();
+          const model = UI2.buildWorkspaceVisualizationModel();
           if (!(model == null ? void 0 : model.scannedAt)) {
             throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
           }
-          const apiKey = NotionOAuth2.getAccessToken((_b = (_a = UI3.refs) == null ? void 0 : _a.apiKeyInput) == null ? void 0 : _b.value.trim());
+          const apiKey = NotionOAuth2.getAccessToken((_b = (_a = UI2.refs) == null ? void 0 : _a.apiKeyInput) == null ? void 0 : _b.value.trim());
           if (!apiKey) {
             throw new Error(MSG2.NO_NOTION_KEY);
           }
@@ -14855,15 +14866,15 @@ ${insight.summary || ""}`,
           if (!exportState.targetId) {
             throw new Error("\u8BF7\u5148\u914D\u7F6E\u5BFC\u51FA\u76EE\u6807\uFF08\u6570\u636E\u5E93\u6216\u7236\u9875\u9762\uFF09\u3002");
           }
-          const collabPackage = UI3.buildWorkspaceCollaborationPackage(model, UI3.buildUnifiedSyncModel());
-          const markdown = UI3.buildWorkspaceCollaborationPackageMarkdown(collabPackage);
-          const packageTime = UI3.workspaceInsightUpdatedAt || Date.now();
+          const collabPackage = UI2.buildWorkspaceCollaborationPackage(model, UI2.buildUnifiedSyncModel());
+          const markdown = UI2.buildWorkspaceCollaborationPackageMarkdown(collabPackage);
+          const packageTime = UI2.workspaceInsightUpdatedAt || Date.now();
           const packageTitle = `\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305 ${new Date(packageTime).toLocaleString("zh-CN", { hour12: false })}`;
-          const contentBlocks = AIAssistant3._textToBlocks(markdown);
+          const contentBlocks = AIAssistant2._textToBlocks(markdown);
           let page = null;
           if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
             const parentPageId = exportState.parentPageId;
-            page = await AIAssistant3._executeGuardedPageWrite(
+            page = await AIAssistant2._executeGuardedPageWrite(
               "createDatabasePage",
               { id: parentPageId, name: packageTitle },
               () => NotionAPI2.createChildPage(parentPageId, packageTitle, contentBlocks, apiKey),
@@ -14887,7 +14898,7 @@ ${insight.summary || ""}`,
                 title: [{ text: { content: packageTitle } }]
               }
             };
-            page = await AIAssistant3._executeGuardedDatabaseWrite(
+            page = await AIAssistant2._executeGuardedDatabaseWrite(
               "createDatabasePage",
               databaseId,
               () => NotionAPI2.createPageObject({ database_id: databaseId }, properties, contentBlocks, apiKey),
@@ -14901,12 +14912,12 @@ ${insight.summary || ""}`,
             );
           }
           const pageId = Utils2.extractNotionId(page == null ? void 0 : page.id) || String((page == null ? void 0 : page.id) || "").replace(/-/g, "");
-          UI3.workspaceInsightUpdatedAt = Date.now();
-          UI3.setWorkspaceVisualStatus(
+          UI2.workspaceInsightUpdatedAt = Date.now();
+          UI2.setWorkspaceVisualStatus(
             `\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5DF2\u4FDD\u5B58\u5230 Notion\uFF08${exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93"}\uFF09\u3002`,
             "success"
           );
-          UI3.showStatus("\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5DF2\u4FDD\u5B58\u5230 Notion\u3002", "success");
+          UI2.showStatus("\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5DF2\u4FDD\u5B58\u5230 Notion\u3002", "success");
           return {
             pageId,
             title: packageTitle,
@@ -14918,11 +14929,11 @@ ${insight.summary || ""}`,
         },
         saveWorkspaceInsightReportToNotion: async () => {
           var _a, _b, _c;
-          const model = UI3.buildWorkspaceVisualizationModel();
+          const model = UI2.buildWorkspaceVisualizationModel();
           if (!(model == null ? void 0 : model.scannedAt)) {
             throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
           }
-          const apiKey = NotionOAuth2.getAccessToken((_b = (_a = UI3.refs) == null ? void 0 : _a.apiKeyInput) == null ? void 0 : _b.value.trim());
+          const apiKey = NotionOAuth2.getAccessToken((_b = (_a = UI2.refs) == null ? void 0 : _a.apiKeyInput) == null ? void 0 : _b.value.trim());
           if (!apiKey) {
             throw new Error(MSG2.NO_NOTION_KEY);
           }
@@ -14930,14 +14941,14 @@ ${insight.summary || ""}`,
           if (!exportState.targetId) {
             throw new Error("\u8BF7\u5148\u914D\u7F6E\u5BFC\u51FA\u76EE\u6807\uFF08\u6570\u636E\u5E93\u6216\u7236\u9875\u9762\uFF09\u3002");
           }
-          const markdown = UI3.workspaceInsightMarkdown || UI3.buildWorkspaceInsightMarkdown(model);
-          const reportTime = UI3.workspaceInsightUpdatedAt || Date.now();
+          const markdown = UI2.workspaceInsightMarkdown || UI2.buildWorkspaceInsightMarkdown(model);
+          const reportTime = UI2.workspaceInsightUpdatedAt || Date.now();
           const reportTitle = `\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A ${new Date(reportTime).toLocaleString("zh-CN", { hour12: false })}`;
-          const contentBlocks = AIAssistant3._textToBlocks(markdown);
+          const contentBlocks = AIAssistant2._textToBlocks(markdown);
           let page = null;
           if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
             const parentPageId = exportState.parentPageId;
-            page = await AIAssistant3._executeGuardedPageWrite(
+            page = await AIAssistant2._executeGuardedPageWrite(
               "createDatabasePage",
               { id: parentPageId, name: reportTitle },
               () => NotionAPI2.createChildPage(parentPageId, reportTitle, contentBlocks, apiKey),
@@ -14961,7 +14972,7 @@ ${insight.summary || ""}`,
                 title: [{ text: { content: reportTitle } }]
               }
             };
-            page = await AIAssistant3._executeGuardedDatabaseWrite(
+            page = await AIAssistant2._executeGuardedDatabaseWrite(
               "createDatabasePage",
               databaseId,
               () => NotionAPI2.createPageObject({ database_id: databaseId }, properties, contentBlocks, apiKey),
@@ -14975,13 +14986,13 @@ ${insight.summary || ""}`,
             );
           }
           const pageId = Utils2.extractNotionId(page == null ? void 0 : page.id) || String((page == null ? void 0 : page.id) || "").replace(/-/g, "");
-          UI3.workspaceInsightMarkdown = markdown;
-          UI3.workspaceInsightUpdatedAt = Date.now();
-          UI3.setWorkspaceVisualStatus(
+          UI2.workspaceInsightMarkdown = markdown;
+          UI2.workspaceInsightUpdatedAt = Date.now();
+          UI2.setWorkspaceVisualStatus(
             `\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u4FDD\u5B58\u5230 Notion\uFF08${exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93"}\uFF09\u3002`,
             "success"
           );
-          UI3.showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u4FDD\u5B58\u5230 Notion\u3002", "success");
+          UI2.showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u4FDD\u5B58\u5230 Notion\u3002", "success");
           return {
             pageId,
             title: reportTitle,
@@ -14992,14 +15003,14 @@ ${insight.summary || ""}`,
         },
         saveWorkspaceConnectionCandidatesToNotion: async () => {
           var _a, _b, _c, _d;
-          const model = UI3.buildWorkspaceVisualizationModel();
+          const model = UI2.buildWorkspaceVisualizationModel();
           if (!(model == null ? void 0 : model.scannedAt)) {
             throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
           }
           if (!Array.isArray(model.connectionCandidates) || model.connectionCandidates.length === 0) {
             throw new Error("\u5F53\u524D\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u8DE8\u6E90\u5173\u8054\u5019\u9009\u3002");
           }
-          const apiKey = NotionOAuth2.getAccessToken((_b = (_a = UI3.refs) == null ? void 0 : _a.apiKeyInput) == null ? void 0 : _b.value.trim());
+          const apiKey = NotionOAuth2.getAccessToken((_b = (_a = UI2.refs) == null ? void 0 : _a.apiKeyInput) == null ? void 0 : _b.value.trim());
           if (!apiKey) {
             throw new Error(MSG2.NO_NOTION_KEY);
           }
@@ -15010,7 +15021,7 @@ ${insight.summary || ""}`,
           const savedAt = Date.now();
           const createdPages = [];
           const failedCandidates = [];
-          const aiSettings = AIAssistant3.getSettings();
+          const aiSettings = AIAssistant2.getSettings();
           let database = null;
           let titlePropertyName = null;
           if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.DATABASE) {
@@ -15019,19 +15030,19 @@ ${insight.summary || ""}`,
             if (!titlePropertyName) {
               throw new Error("\u5F53\u524D\u76EE\u6807\u6570\u636E\u5E93\u7F3A\u5C11\u6807\u9898\u5C5E\u6027\uFF0C\u65E0\u6CD5\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u3002");
             }
-            database = await UI3.ensureWorkspaceConnectionCandidateDatabaseSchema(exportState.databaseId, apiKey, database);
+            database = await UI2.ensureWorkspaceConnectionCandidateDatabaseSchema(exportState.databaseId, apiKey, database);
           }
           for (let index = 0; index < model.connectionCandidates.length; index++) {
             const candidate = model.connectionCandidates[index];
-            const aiDraft = await UI3.buildWorkspaceConnectionCandidateAIDraft(candidate, aiSettings);
-            const candidateTitle = UI3.buildWorkspaceConnectionCandidateTitle(candidate, index, aiDraft);
-            const markdown = UI3.buildWorkspaceConnectionCandidateMarkdown(candidate, savedAt, aiDraft);
-            const contentBlocks = AIAssistant3._textToBlocks(markdown);
+            const aiDraft = await UI2.buildWorkspaceConnectionCandidateAIDraft(candidate, aiSettings);
+            const candidateTitle = UI2.buildWorkspaceConnectionCandidateTitle(candidate, index, aiDraft);
+            const markdown = UI2.buildWorkspaceConnectionCandidateMarkdown(candidate, savedAt, aiDraft);
+            const contentBlocks = AIAssistant2._textToBlocks(markdown);
             try {
               let page = null;
               if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
                 const parentPageId = exportState.parentPageId;
-                page = await AIAssistant3._executeGuardedPageWrite(
+                page = await AIAssistant2._executeGuardedPageWrite(
                   "createDatabasePage",
                   { id: parentPageId, name: candidateTitle },
                   () => NotionAPI2.createChildPage(parentPageId, candidateTitle, contentBlocks, apiKey),
@@ -15044,14 +15055,14 @@ ${insight.summary || ""}`,
                   }
                 );
               } else {
-                const properties = UI3.buildWorkspaceConnectionCandidateDatabaseProperties(
+                const properties = UI2.buildWorkspaceConnectionCandidateDatabaseProperties(
                   database,
                   titlePropertyName,
                   candidate,
                   candidateTitle,
                   aiDraft
                 );
-                page = await AIAssistant3._executeGuardedDatabaseWrite(
+                page = await AIAssistant2._executeGuardedDatabaseWrite(
                   "createDatabasePage",
                   exportState.databaseId,
                   () => NotionAPI2.createPageObject({ database_id: exportState.databaseId }, properties, contentBlocks, apiKey),
@@ -15084,8 +15095,8 @@ ${insight.summary || ""}`,
           const targetLabel = exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93";
           const statusMessage = failedCandidates.length > 0 ? `\u7EDF\u4E00\u5019\u9009\u5DF2\u90E8\u5206\u4FDD\u5B58\u5230 Notion\uFF08${targetLabel}\uFF09\uFF1A\u6210\u529F ${createdPages.length} \u6761\uFF0C\u5931\u8D25 ${failedCandidates.length} \u6761\u3002` : `\u7EDF\u4E00\u5019\u9009\u5DF2\u4FDD\u5B58\u5230 Notion\uFF08${targetLabel}\uFF09\uFF1A\u5171 ${createdPages.length} \u6761\u3002`;
           const tone = failedCandidates.length > 0 ? "error" : "success";
-          UI3.setWorkspaceVisualStatus(statusMessage, tone);
-          UI3.showStatus(statusMessage, tone);
+          UI2.setWorkspaceVisualStatus(statusMessage, tone);
+          UI2.showStatus(statusMessage, tone);
           return {
             createdCount: createdPages.length,
             failedCount: failedCandidates.length,
@@ -15099,18 +15110,18 @@ ${insight.summary || ""}`,
         },
         generateWorkspaceInsight: async () => {
           var _a;
-          const model = UI3.buildWorkspaceVisualizationModel();
+          const model = UI2.buildWorkspaceVisualizationModel();
           if (!(model == null ? void 0 : model.scannedAt)) {
             throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
           }
-          const btn = (_a = UI3.refs) == null ? void 0 : _a.viewGenerateWorkspaceInsightBtn;
+          const btn = (_a = UI2.refs) == null ? void 0 : _a.viewGenerateWorkspaceInsightBtn;
           if (btn) {
             btn.disabled = true;
             btn.textContent = "\u751F\u6210\u4E2D...";
           }
           try {
             let aiSummary = "";
-            const settings = AIAssistant3.getSettings();
+            const settings = AIAssistant2.getSettings();
             if (settings == null ? void 0 : settings.aiApiKey) {
               const prompt2 = [
                 "\u4F60\u662F\u77E5\u8BC6\u5DE5\u4F5C\u533A\u5206\u6790\u5E08\u3002\u8BF7\u57FA\u4E8E\u4EE5\u4E0B\u5DE5\u4F5C\u533A\u5FEB\u7167\u8F93\u51FA\u4E00\u6BB5\u7B80\u6D01\u7684 Markdown \u6D1E\u5BDF\u6458\u8981\u3002",
@@ -15140,20 +15151,20 @@ ${insight.summary || ""}`,
                   missingCategoryPages: model.missingCategoryPages
                 }, null, 2)
               ].join("\n");
-              aiSummary = String(await AIService3.requestChat(prompt2, settings, 900) || "").trim();
+              aiSummary = String(await AIService2.requestChat(prompt2, settings, 900) || "").trim();
             }
-            UI3.workspaceInsightSummary = aiSummary;
-            UI3.workspaceInsightMarkdown = UI3.buildWorkspaceInsightMarkdown(model, aiSummary);
-            UI3.workspaceInsightUpdatedAt = Date.now();
-            UI3.renderWorkspaceVisualSummary();
-            UI3.setWorkspaceVisualStatus("\u5DF2\u751F\u6210\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\uFF0C\u53EF\u76F4\u63A5\u590D\u5236\u5206\u4EAB\u3002", "success");
-            return UI3.workspaceInsightMarkdown;
+            UI2.workspaceInsightSummary = aiSummary;
+            UI2.workspaceInsightMarkdown = UI2.buildWorkspaceInsightMarkdown(model, aiSummary);
+            UI2.workspaceInsightUpdatedAt = Date.now();
+            UI2.renderWorkspaceVisualSummary();
+            UI2.setWorkspaceVisualStatus("\u5DF2\u751F\u6210\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\uFF0C\u53EF\u76F4\u63A5\u590D\u5236\u5206\u4EAB\u3002", "success");
+            return UI2.workspaceInsightMarkdown;
           } catch (error) {
-            UI3.workspaceInsightSummary = "";
-            UI3.workspaceInsightMarkdown = UI3.buildWorkspaceInsightMarkdown(model, "");
-            UI3.workspaceInsightUpdatedAt = Date.now();
-            UI3.renderWorkspaceVisualSummary();
-            UI3.setWorkspaceVisualStatus(`\u6D1E\u5BDF\u751F\u6210\u5931\u8D25\uFF0C\u5DF2\u56DE\u9000\u4E3A\u89C4\u5219\u62A5\u544A\uFF1A${error.message}`, "error");
+            UI2.workspaceInsightSummary = "";
+            UI2.workspaceInsightMarkdown = UI2.buildWorkspaceInsightMarkdown(model, "");
+            UI2.workspaceInsightUpdatedAt = Date.now();
+            UI2.renderWorkspaceVisualSummary();
+            UI2.setWorkspaceVisualStatus(`\u6D1E\u5BDF\u751F\u6210\u5931\u8D25\uFF0C\u5DF2\u56DE\u9000\u4E3A\u89C4\u5219\u62A5\u544A\uFF1A${error.message}`, "error");
             throw error;
           } finally {
             if (btn) {
@@ -15164,7 +15175,7 @@ ${insight.summary || ""}`,
         },
         setWorkspaceVisualStatus: (message, tone = "") => {
           var _a;
-          const statusEl = (_a = UI3.refs) == null ? void 0 : _a.viewWorkspaceStatus;
+          const statusEl = (_a = UI2.refs) == null ? void 0 : _a.viewWorkspaceStatus;
           if (!statusEl) return;
           statusEl.textContent = message || "\u5C1A\u672A\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002";
           if (statusEl.dataset) {
@@ -15172,76 +15183,76 @@ ${insight.summary || ""}`,
             else delete statusEl.dataset.tone;
           }
         },
-        refreshWorkspaceVisualization: async (apiKey = NotionOAuth2.getAccessToken(((_b) => (_b = ((_a) => (_a = UI3.refs) == null ? void 0 : _a.apiKeyInput)()) == null ? void 0 : _b.value.trim())())) => {
+        refreshWorkspaceVisualization: async (apiKey = NotionOAuth2.getAccessToken(((_b) => (_b = ((_a) => (_a = UI2.refs) == null ? void 0 : _a.apiKeyInput)()) == null ? void 0 : _b.value.trim())())) => {
           var _a2, _b2, _c;
           if (!apiKey) {
-            UI3.setWorkspaceVisualStatus(MSG2.NO_NOTION_KEY, "error");
+            UI2.setWorkspaceVisualStatus(MSG2.NO_NOTION_KEY, "error");
             throw new Error(MSG2.NO_NOTION_KEY);
           }
-          const maxPages = parseInt((_b2 = (_a2 = UI3.refs) == null ? void 0 : _a2.workspaceMaxPagesSelect) == null ? void 0 : _b2.value, 10) || parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
-          const refreshBtn = (_c = UI3.refs) == null ? void 0 : _c.viewRefreshWorkspaceBtn;
+          const maxPages = parseInt((_b2 = (_a2 = UI2.refs) == null ? void 0 : _a2.workspaceMaxPagesSelect) == null ? void 0 : _b2.value, 10) || parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
+          const refreshBtn = (_c = UI2.refs) == null ? void 0 : _c.viewRefreshWorkspaceBtn;
           if (refreshBtn) {
             refreshBtn.disabled = true;
             refreshBtn.textContent = "\u626B\u63CF\u4E2D...";
           }
-          UI3.setWorkspaceVisualStatus("\u6B63\u5728\u626B\u63CF\u5DE5\u4F5C\u533A\u6570\u636E\u5E93...", "");
+          UI2.setWorkspaceVisualStatus("\u6B63\u5728\u626B\u63CF\u5DE5\u4F5C\u533A\u6570\u636E\u5E93...", "");
           try {
             const { databases, workspaceData } = await WorkspaceService2.refreshWorkspaceSnapshot(apiKey, {
               includePages: false,
               maxPages,
               onProgress: (progress) => {
                 if (progress.phase === "databases") {
-                  UI3.setWorkspaceVisualStatus(`\u6B63\u5728\u626B\u63CF\u5DE5\u4F5C\u533A\u6570\u636E\u5E93... \u5DF2\u52A0\u8F7D ${progress.loaded} \u4E2A\u6570\u636E\u5E93`, "");
+                  UI2.setWorkspaceVisualStatus(`\u6B63\u5728\u626B\u63CF\u5DE5\u4F5C\u533A\u6570\u636E\u5E93... \u5DF2\u52A0\u8F7D ${progress.loaded} \u4E2A\u6570\u636E\u5E93`, "");
                 }
               },
               onWorkspaceData: (partialData) => {
-                UI3.updateWorkspaceSelect(partialData);
-                UI3.updateAITargetDbOptions(partialData.databases || []);
+                UI2.updateWorkspaceSelect(partialData);
+                UI2.updateAITargetDbOptions(partialData.databases || []);
               }
             });
-            UI3.setWorkspaceVisualStatus("\u6570\u636E\u5E93\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u5206\u6790\u9875\u9762\u5C5E\u6027...", "");
+            UI2.setWorkspaceVisualStatus("\u6570\u636E\u5E93\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u5206\u6790\u9875\u9762\u5C5E\u6027...", "");
             const pageObjects = await WorkspaceService2.fetchWorkspacePageObjects(apiKey, {
               maxPages,
               phase: "workspace_visual_pages",
               onProgress: (progress) => {
-                UI3.setWorkspaceVisualStatus(`\u6B63\u5728\u5206\u6790\u9875\u9762\u5C5E\u6027... \u5DF2\u626B\u63CF ${progress.loaded} \u4E2A\u9875\u9762`, "");
+                UI2.setWorkspaceVisualStatus(`\u6B63\u5728\u5206\u6790\u9875\u9762\u5C5E\u6027... \u5DF2\u626B\u63CF ${progress.loaded} \u4E2A\u9875\u9762`, "");
               }
             });
             const databasesMap = new Map(databases.map((d) => [d.id, d]));
             const pages = [];
             const records = [];
             pageObjects.forEach((page) => {
-              const summary = UI3.mapWorkspacePageSummary(page);
+              const summary = UI2.mapWorkspacePageSummary(page);
               if (summary.id) {
                 pages.push(summary);
-                records.push(UI3.extractWorkspaceVisualRecord(page, databasesMap));
+                records.push(UI2.extractWorkspaceVisualRecord(page, databasesMap));
               }
             });
             const finalWorkspaceData = WorkspaceService2.persistWorkspaceData(apiKey, {
               databases,
               pages
             });
-            UI3.updateWorkspaceSelect(finalWorkspaceData);
-            UI3.updateAITargetDbOptions(finalWorkspaceData.databases || []);
-            UI3.workspaceVisualSnapshot = {
+            UI2.updateWorkspaceSelect(finalWorkspaceData);
+            UI2.updateAITargetDbOptions(finalWorkspaceData.databases || []);
+            UI2.workspaceVisualSnapshot = {
               databases,
               pages,
               records,
               scannedAt: Date.now(),
               maxPages
             };
-            UI3.workspaceInsightSummary = "";
-            UI3.workspaceInsightMarkdown = UI3.buildWorkspaceInsightMarkdown(UI3.buildWorkspaceVisualizationModel(UI3.workspaceVisualSnapshot), "");
-            UI3.workspaceInsightUpdatedAt = Date.now();
-            UI3.renderWorkspaceVisualSummary();
-            const model = UI3.buildWorkspaceVisualizationModel();
-            UI3.setWorkspaceVisualStatus(
+            UI2.workspaceInsightSummary = "";
+            UI2.workspaceInsightMarkdown = UI2.buildWorkspaceInsightMarkdown(UI2.buildWorkspaceVisualizationModel(UI2.workspaceVisualSnapshot), "");
+            UI2.workspaceInsightUpdatedAt = Date.now();
+            UI2.renderWorkspaceVisualSummary();
+            const model = UI2.buildWorkspaceVisualizationModel();
+            UI2.setWorkspaceVisualStatus(
               `\u5DF2\u626B\u63CF ${model.totalPages} \u4E2A\u9875\u9762\uFF0C\u8986\u76D6 ${model.totalDatabases} \u4E2A\u6570\u636E\u5E93\u3002`,
               "success"
             );
             return model;
           } catch (error) {
-            UI3.setWorkspaceVisualStatus(`\u5DE5\u4F5C\u533A\u89C6\u56FE\u5237\u65B0\u5931\u8D25\uFF1A${error.message}`, "error");
+            UI2.setWorkspaceVisualStatus(`\u5DE5\u4F5C\u533A\u89C6\u56FE\u5237\u65B0\u5931\u8D25\uFF1A${error.message}`, "error");
             throw error;
           } finally {
             if (refreshBtn) {
@@ -15252,9 +15263,9 @@ ${insight.summary || ""}`,
         },
         renderWorkspaceVisualSummary: () => {
           var _a;
-          const container = (_a = UI3.refs) == null ? void 0 : _a.viewWorkspaceSummary;
+          const container = (_a = UI2.refs) == null ? void 0 : _a.viewWorkspaceSummary;
           if (!container) return;
-          const model = UI3.buildWorkspaceVisualizationModel();
+          const model = UI2.buildWorkspaceVisualizationModel();
           if (!model.scannedAt) {
             container.innerHTML = `
                 <div class="ldb-view-empty">
@@ -15276,7 +15287,7 @@ ${insight.summary || ""}`,
           const timelineMarkup = model.timeline.length > 0 ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
                 <div class="ldb-view-timeline-item">
                     <div class="ldb-view-timeline-label">${item.label}</div>
-                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, item.pct || UI3.getViewPct(item.count, model.totalPages))}%;"></div></div>
+                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, item.pct || UI2.getViewPct(item.count, model.totalPages))}%;"></div></div>
                     <div class="ldb-view-timeline-value">${item.count} \u9875</div>
                 </div>
             `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u5DE5\u4F5C\u533A\u9875\u9762\u91CC\u8FD8\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u65F6\u95F4\u5B57\u6BB5\u3002</div>`;
@@ -15309,9 +15320,9 @@ ${insight.summary || ""}`,
                     <div class="ldb-view-link-count">${item.count} \u9875 \xB7 ${Utils2.escapeHtml(item.reason)}</div>
                 </div>
             `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u8FD8\u6CA1\u6709\u8DE8\u6E90\u5173\u8054\u5019\u9009\uFF0C\u7EE7\u7EED\u8865\u9F50\u6765\u6E90\u5B57\u6BB5\u540E\u4F1A\u66F4\u5BB9\u6613\u53D1\u73B0\u7EDF\u4E00\u6761\u76EE\u3002</div>`;
-          const insightSummary = String(UI3.workspaceInsightSummary || "").trim();
+          const insightSummary = String(UI2.workspaceInsightSummary || "").trim();
           const reportPreview = Utils2.escapeHtml(
-            UI3.workspaceInsightMarkdown || UI3.buildWorkspaceInsightMarkdown(model, insightSummary)
+            UI2.workspaceInsightMarkdown || UI2.buildWorkspaceInsightMarkdown(model, insightSummary)
           );
           container.innerHTML = `
             <div class="ldb-view-grid">
@@ -15348,7 +15359,7 @@ ${insight.summary || ""}`,
                 </div>
                 <div class="ldb-view-card full">
                     <div class="ldb-view-card-title">\u6D1E\u5BDF\u6458\u8981</div>
-                    <div class="ldb-view-empty-text">${ChatUI2.safeMarkdown(insightSummary || UI3.buildWorkspaceInsightFallbackSummary(model))}</div>
+                    <div class="ldb-view-empty-text">${ChatUI2.safeMarkdown(insightSummary || UI2.buildWorkspaceInsightFallbackSummary(model))}</div>
                 </div>
                 <div class="ldb-view-card full">
                     <div class="ldb-view-card-title">Markdown \u62A5\u544A\u9884\u89C8</div>
@@ -15359,10 +15370,10 @@ ${insight.summary || ""}`,
         },
         renderVisualSummary: () => {
           var _a, _b;
-          const container = (_a = UI3.refs) == null ? void 0 : _a.viewSummary;
+          const container = (_a = UI2.refs) == null ? void 0 : _a.viewSummary;
           if (!container) return;
-          const subtitle = (_b = UI3.refs) == null ? void 0 : _b.viewSubtitle;
-          const model = UI3.buildVisualizationModel();
+          const subtitle = (_b = UI2.refs) == null ? void 0 : _b.viewSubtitle;
+          const model = UI2.buildVisualizationModel();
           if (subtitle) {
             subtitle.textContent = model.loadedSources.length > 0 ? `\u8FD9\u91CC\u7EE7\u7EED\u5C55\u793A\u672C\u8F6E\u5DF2\u52A0\u8F7D\u7684 ${model.loadedSources.join(" + ")} \u5217\u8868\u6458\u8981\uFF1B\u5DE5\u4F5C\u533A\u603B\u89C8\u9700\u8981\u70B9\u51FB\u4E0A\u65B9\u6309\u94AE\u5355\u72EC\u5237\u65B0\u3002` : "\u8FD9\u91CC\u7EE7\u7EED\u5C55\u793A\u5F53\u524D\u5DF2\u52A0\u8F7D\u7684 Linux.do / GitHub \u5217\u8868\u6458\u8981\uFF0C\u4E0D\u4F1A\u4E3B\u52A8\u8BFB\u53D6 Notion \u5DE5\u4F5C\u533A\u3002";
           }
@@ -15383,14 +15394,14 @@ ${insight.summary || ""}`,
                 </div>
             `).join("")}</div>` : `<div class="ldb-view-empty-text">\u6682\u65E0\u53EF\u5C55\u793A\u7684\u6570\u636E\u3002</div>`;
           const statusRows = [
-            { label: "\u5DF2\u5BFC\u51FA", count: model.exported, pct: UI3.getViewPct(model.exported, model.total) },
-            { label: "\u5F85\u5BFC\u51FA", count: model.pending, pct: UI3.getViewPct(model.pending, model.total) },
-            { label: "\u5F53\u524D\u5DF2\u9009", count: model.selected, pct: UI3.getViewPct(model.selected, model.total) }
+            { label: "\u5DF2\u5BFC\u51FA", count: model.exported, pct: UI2.getViewPct(model.exported, model.total) },
+            { label: "\u5F85\u5BFC\u51FA", count: model.pending, pct: UI2.getViewPct(model.pending, model.total) },
+            { label: "\u5F53\u524D\u5DF2\u9009", count: model.selected, pct: UI2.getViewPct(model.selected, model.total) }
           ];
           const timelineMarkup = model.timeline.length > 0 ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
                 <div class="ldb-view-timeline-item">
                     <div class="ldb-view-timeline-label">${item.label}</div>
-                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, UI3.getViewPct(item.count, model.total))}%;"></div></div>
+                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, UI2.getViewPct(item.count, model.total))}%;"></div></div>
                     <div class="ldb-view-timeline-value">${item.count} \u9879 / \u5DF2\u5BFC\u51FA ${item.exported}</div>
                 </div>
             `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u6570\u636E\u91CC\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u65F6\u95F4\u5B57\u6BB5\u3002</div>`;
@@ -15427,7 +15438,7 @@ ${insight.summary || ""}`,
         },
         applyBookmarkSourceUI: (source) => {
           var _a;
-          const refs = UI3.refs || {};
+          const refs = UI2.refs || {};
           const isGitHub = source === "github";
           if (refs.bookmarksLabel) {
             refs.bookmarksLabel.textContent = "\u5DF2\u52A0\u8F7D\u6536\u85CF\u6570\u91CF";
@@ -15444,7 +15455,7 @@ ${insight.summary || ""}`,
           if (refs.sourceSelectGithub) {
             refs.sourceSelectGithub.classList.toggle("active", isGitHub);
           }
-          const autoStatus = refs.autoImportStatus || ((_a = UI3.panel) == null ? void 0 : _a.querySelector("#ldb-auto-import-status"));
+          const autoStatus = refs.autoImportStatus || ((_a = UI2.panel) == null ? void 0 : _a.querySelector("#ldb-auto-import-status"));
           if (autoStatus && autoStatus.textContent && !autoStatus.textContent.includes("\u26A0\uFE0F")) {
             autoStatus.textContent = "";
           }
@@ -15471,14 +15482,14 @@ ${insight.summary || ""}`,
           return GitHubAPI2.isExported(itemKey);
         },
         isBookmarkExported: (bookmark) => {
-          return UI3.isBookmarkKeyExported(UI3.getBookmarkKey(bookmark));
+          return UI2.isBookmarkKeyExported(UI2.getBookmarkKey(bookmark));
         },
         getSelectedBookmarks: () => {
-          if (!Array.isArray(UI3.bookmarks) || UI3.bookmarks.length === 0) return [];
-          return UI3.bookmarks.filter((bookmark) => {
+          if (!Array.isArray(UI2.bookmarks) || UI2.bookmarks.length === 0) return [];
+          return UI2.bookmarks.filter((bookmark) => {
             var _a;
-            const bookmarkKey = UI3.getBookmarkKey(bookmark);
-            return (_a = UI3.selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
+            const bookmarkKey = UI2.getBookmarkKey(bookmark);
+            return (_a = UI2.selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
           });
         },
         sanitizeObsidianFileName: (name, fallback = "untitled") => {
@@ -15563,7 +15574,7 @@ ${bookmark.description}
             }
             return {
               title: title2,
-              fileName: UI3.sanitizeObsidianFileName(title2, `gist-${bookmark.id || "untitled"}`),
+              fileName: UI2.sanitizeObsidianFileName(title2, `gist-${bookmark.id || "untitled"}`),
               markdown: md2,
               url: meta2.url
             };
@@ -15629,7 +15640,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }
           return {
             title,
-            fileName: UI3.sanitizeObsidianFileName(enriched.full_name || title, "github-repo"),
+            fileName: UI2.sanitizeObsidianFileName(enriched.full_name || title, "github-repo"),
             markdown: md,
             url: meta.url
           };
@@ -15655,7 +15666,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             const item = selectedItems[i];
             onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
             try {
-              const note = await UI3.buildGitHubObsidianMarkdown(item, settings);
+              const note = await UI2.buildGitHubObsidianMarkdown(item, settings);
               const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
               if (!noteResult.ok) throw new Error(noteResult.error);
               success.push({
@@ -15760,12 +15771,12 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         },
         buildBookmarkItemHtml: (bookmark, githubMode = false) => {
           var _a;
-          const bookmarkKey = UI3.getBookmarkKey(bookmark);
+          const bookmarkKey = UI2.getBookmarkKey(bookmark);
           const title = bookmark.title || bookmark.name || `\u5E16\u5B50 ${bookmarkKey}`;
           const escapedTitle = Utils2.escapeHtml(title);
           const escapedTruncatedTitle = Utils2.escapeHtml(Utils2.truncateText(title, 35));
-          const isExported = UI3.isBookmarkKeyExported(bookmarkKey);
-          const isSelected = (_a = UI3.selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
+          const isExported = UI2.isBookmarkKeyExported(bookmarkKey);
+          const isSelected = (_a = UI2.selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
           const sourceTag = githubMode ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${(bookmark.sourceType || "stars").toUpperCase()}</span>` : "";
           const reexportAction = !githubMode && isExported ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868">\u91CD\u65B0\u5BFC\u51FA</button>` : "";
           return `
@@ -15779,24 +15790,24 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         },
         // 渲染收藏列表
         renderBookmarkList: () => {
-          const list = UI3.refs.bookmarkList;
-          UI3.recomputeExportStats();
-          UI3.renderJobId += 1;
-          const renderJobId = UI3.renderJobId;
-          if (!UI3.bookmarks || UI3.bookmarks.length === 0) {
+          const list = UI2.refs.bookmarkList;
+          UI2.recomputeExportStats();
+          UI2.renderJobId += 1;
+          const renderJobId = UI2.renderJobId;
+          if (!UI2.bookmarks || UI2.bookmarks.length === 0) {
             list.innerHTML = '<div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">\u6682\u65E0\u6536\u85CF</div>';
-            UI3.updateSelectCount();
-            UI3.renderVisualSummary();
+            UI2.updateSelectCount();
+            UI2.renderVisualSummary();
             return;
           }
-          const githubMode = UI3.isActiveGitHubSource();
-          const bookmarks = UI3.bookmarks.slice();
+          const githubMode = UI2.isActiveGitHubSource();
+          const bookmarks = UI2.bookmarks.slice();
           const chunkSize = bookmarks.length > 150 ? 80 : bookmarks.length;
           let cursor = 0;
           list.innerHTML = "";
           const appendChunk = () => {
-            if (UI3.renderJobId !== renderJobId) return;
-            const chunk = bookmarks.slice(cursor, cursor + chunkSize).map((bookmark) => UI3.buildBookmarkItemHtml(bookmark, githubMode)).join("");
+            if (UI2.renderJobId !== renderJobId) return;
+            const chunk = bookmarks.slice(cursor, cursor + chunkSize).map((bookmark) => UI2.buildBookmarkItemHtml(bookmark, githubMode)).join("");
             list.insertAdjacentHTML("beforeend", chunk);
             cursor += chunkSize;
             if (cursor < bookmarks.length) {
@@ -15808,71 +15819,71 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             }
           };
           appendChunk();
-          UI3.updateSelectCount();
-          UI3.renderVisualSummary();
+          UI2.updateSelectCount();
+          UI2.renderVisualSummary();
         },
         // 重算导出统计（在列表变更后调用）
         recomputeExportStats: () => {
-          if (!UI3.bookmarks || UI3.bookmarks.length === 0) {
-            UI3.totalUnexportedCount = 0;
-            UI3.selectedUnexportedCount = 0;
+          if (!UI2.bookmarks || UI2.bookmarks.length === 0) {
+            UI2.totalUnexportedCount = 0;
+            UI2.selectedUnexportedCount = 0;
             return;
           }
           let totalUnexported = 0;
           let selectedUnexported = 0;
-          UI3.bookmarks.forEach((b) => {
+          UI2.bookmarks.forEach((b) => {
             var _a;
-            const bookmarkKey = UI3.getBookmarkKey(b);
-            const isUnexported = !UI3.isBookmarkKeyExported(bookmarkKey);
+            const bookmarkKey = UI2.getBookmarkKey(b);
+            const isUnexported = !UI2.isBookmarkKeyExported(bookmarkKey);
             if (isUnexported) {
               totalUnexported++;
-              if ((_a = UI3.selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey)) {
+              if ((_a = UI2.selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey)) {
                 selectedUnexported++;
               }
             }
           });
-          UI3.totalUnexportedCount = totalUnexported;
-          UI3.selectedUnexportedCount = selectedUnexported;
+          UI2.totalUnexportedCount = totalUnexported;
+          UI2.selectedUnexportedCount = selectedUnexported;
         },
         // 更新选中数量
         updateSelectCount: () => {
           var _a;
-          const count = ((_a = UI3.selectedBookmarks) == null ? void 0 : _a.size) || 0;
-          const pendingCount = UI3.selectedUnexportedCount || 0;
-          UI3.refs.selectCount.textContent = `\u5DF2\u9009 ${count} \u4E2A\uFF0C\u5F85\u5BFC\u51FA ${Math.max(0, pendingCount)} \u4E2A`;
-          const selectAll = UI3.refs.selectAll;
+          const count = ((_a = UI2.selectedBookmarks) == null ? void 0 : _a.size) || 0;
+          const pendingCount = UI2.selectedUnexportedCount || 0;
+          UI2.refs.selectCount.textContent = `\u5DF2\u9009 ${count} \u4E2A\uFF0C\u5F85\u5BFC\u51FA ${Math.max(0, pendingCount)} \u4E2A`;
+          const selectAll = UI2.refs.selectAll;
           if (count === 0) {
             selectAll.checked = false;
             selectAll.indeterminate = false;
-          } else if (UI3.totalUnexportedCount > 0 && pendingCount === UI3.totalUnexportedCount) {
+          } else if (UI2.totalUnexportedCount > 0 && pendingCount === UI2.totalUnexportedCount) {
             selectAll.checked = true;
             selectAll.indeterminate = false;
           } else {
             selectAll.checked = false;
             selectAll.indeterminate = true;
           }
-          UI3.renderVisualSummary();
+          UI2.renderVisualSummary();
         },
         requeueLinuxDoBookmark: (bookmarkKey) => {
           if (!bookmarkKey || bookmarkKey.startsWith("gh:")) return false;
           if (!Utils2.isLinuxDoDedupStrict()) {
-            UI3.showStatus("\u5F53\u524D\u4E3A\u5141\u8BB8\u91CD\u590D\u6A21\u5F0F\uFF0C\u65E0\u9700\u91CD\u65B0\u5BFC\u51FA\uFF1B\u76F4\u63A5\u52FE\u9009\u5E76\u5BFC\u51FA\u5373\u53EF\u3002", "info");
+            UI2.showStatus("\u5F53\u524D\u4E3A\u5141\u8BB8\u91CD\u590D\u6A21\u5F0F\uFF0C\u65E0\u9700\u91CD\u65B0\u5BFC\u51FA\uFF1B\u76F4\u63A5\u52FE\u9009\u5E76\u5BFC\u51FA\u5373\u53EF\u3002", "info");
             return false;
           }
           const removed = Storage2.unmarkTopicExported(bookmarkKey);
           if (!removed) {
-            UI3.showStatus("\u8BE5\u5E16\u5B50\u5F53\u524D\u4E0D\u5728\u5DF2\u5BFC\u51FA\u8BB0\u5F55\u4E2D\u3002", "info");
+            UI2.showStatus("\u8BE5\u5E16\u5B50\u5F53\u524D\u4E0D\u5728\u5DF2\u5BFC\u51FA\u8BB0\u5F55\u4E2D\u3002", "info");
             return false;
           }
-          UI3.selectedBookmarks.add(bookmarkKey);
-          UI3.recomputeExportStats();
-          UI3.renderBookmarkList();
-          UI3.showStatus("\u5DF2\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u8BF7\u91CD\u65B0\u70B9\u51FB\u5BFC\u51FA\u3002", "success");
+          UI2.selectedBookmarks.add(bookmarkKey);
+          UI2.recomputeExportStats();
+          UI2.renderBookmarkList();
+          UI2.showStatus("\u5DF2\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u8BF7\u91CD\u65B0\u70B9\u51FB\u5BFC\u51FA\u3002", "success");
           return true;
         },
         syncRenderedSelectionState: () => {
           var _a;
-          const list = UI3.refs && UI3.refs.bookmarkList || ((_a = UI3.panel) == null ? void 0 : _a.querySelector("#ldb-bookmark-list"));
+          const list = UI2.refs && UI2.refs.bookmarkList || ((_a = UI2.panel) == null ? void 0 : _a.querySelector("#ldb-bookmark-list"));
           if (!list) return;
           list.querySelectorAll(".ldb-bookmark-item").forEach((item) => {
             var _a2;
@@ -15880,12 +15891,12 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             if (!checkbox || checkbox.disabled) return;
             const bookmarkKey = String(item.dataset.topicId || "");
             if (!bookmarkKey) return;
-            checkbox.checked = ((_a2 = UI3.selectedBookmarks) == null ? void 0 : _a2.has(bookmarkKey)) || false;
+            checkbox.checked = ((_a2 = UI2.selectedBookmarks) == null ? void 0 : _a2.has(bookmarkKey)) || false;
           });
         },
         // 显示导出报告
         showReport: (results) => {
-          const container = UI3.refs.reportContainer;
+          const container = UI2.refs.reportContainer;
           const { success, failed, skipped } = results;
           let html = '<div class="ldb-report">';
           html += '<div class="ldb-report-title">\u{1F4CA} \u5BFC\u51FA\u62A5\u544A</div>';
@@ -15931,9 +15942,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         },
         // 更新操作日志面板
         updateLogPanel: () => {
-          if (!UI3.panel) return;
-          const listContainer = UI3.panel.querySelector("#ldb-log-list");
-          const countBadge = UI3.panel.querySelector("#ldb-log-count");
+          if (!UI2.panel) return;
+          const listContainer = UI2.panel.querySelector("#ldb-log-list");
+          const countBadge = UI2.panel.querySelector("#ldb-log-count");
           if (!listContainer || !countBadge) return;
           const logs = OperationLog2.getRecent(20);
           countBadge.textContent = logs.length;
@@ -15993,35 +16004,35 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         },
         // 初始化
         init: () => {
-          UI3.injectStyles();
-          UI3.createPanel();
-          UI3.miniBtn = UI3.createMiniButton();
-          PanelResize2.makeResizable(UI3.panel, {
+          UI2.injectStyles();
+          UI2.createPanel();
+          UI2.miniBtn = UI2.createMiniButton();
+          PanelResize2.makeResizable(UI2.panel, {
             edges: ["l", "t", "b", "tl", "bl"],
             storageKey: CONFIG2.STORAGE_KEYS.PANEL_SIZE_MAIN,
             minWidth: 300,
             minHeight: 300
           });
           if (Storage2.get(CONFIG2.STORAGE_KEYS.PANEL_MINIMIZED, false)) {
-            UI3.panel.style.display = "none";
-            UI3.miniBtn.style.display = "flex";
+            UI2.panel.style.display = "none";
+            UI2.miniBtn.style.display = "flex";
           }
-          UI3.maybePromptBookmarkExtensionInstall();
+          UI2.maybePromptBookmarkExtensionInstall();
         },
         destroy: () => {
           var _a, _b, _c;
-          (_a = UI3._abortController) == null ? void 0 : _a.abort();
-          UI3._abortController = null;
-          (_b = UI3.panel) == null ? void 0 : _b.remove();
-          UI3.panel = null;
-          (_c = UI3.miniBtn) == null ? void 0 : _c.remove();
-          UI3.miniBtn = null;
-          UI3.refs = null;
-          UI3.isMinimized = true;
+          (_a = UI2._abortController) == null ? void 0 : _a.abort();
+          UI2._abortController = null;
+          (_b = UI2.panel) == null ? void 0 : _b.remove();
+          UI2.panel = null;
+          (_c = UI2.miniBtn) == null ? void 0 : _c.remove();
+          UI2.miniBtn = null;
+          UI2.refs = null;
+          UI2.isMinimized = true;
         }
       };
       ;
-      module.exports = { UI: UI3 };
+      module.exports = { UI: UI2 };
     }
   });
 
@@ -16032,20 +16043,20 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor3, WorkspaceService: WorkspaceService2, UICommandService } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2, UICommandService } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge3, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIService: AIService3, ChatUI: ChatUI2 } = require_ai();
+      var { AIService: AIService2, ChatUI: ChatUI2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var UIEvents2 = {
         bindEvents: () => {
-          const UI3 = require_main_ui().UI;
-          const panel = UI3.panel;
-          const refs = UI3.refs || {};
+          const UI2 = require_main_ui().UI;
+          const panel = UI2.panel;
+          const refs = UI2.refs || {};
           const body = panel.querySelector(".ldb-body");
           const getInputValue = (input) => String((input == null ? void 0 : input.value) || "").trim();
           const getSensitiveValue = (input, key, defaultValue = "") => {
@@ -16056,18 +16067,18 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const persistSensitiveInput = async (input, key, { allowClear = true } = {}) => {
             const value = getInputValue(input);
             if (value) {
-              await CredentialVault3.set(key, value);
+              await CredentialVault2.set(key, value);
             } else if (allowClear) {
-              await CredentialVault3.clear(key);
+              await CredentialVault2.clear(key);
             }
             syncSensitiveInputs();
             return value;
           };
           const syncSensitiveInputs = () => {
             NotionOAuth2.syncApiKeyInputs();
-            CredentialVault3.syncSensitiveInput(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
-            CredentialVault3.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
-            CredentialVault3.syncSensitiveInput(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
+            CredentialVault2.syncSensitiveInput(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
+            CredentialVault2.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
+            CredentialVault2.syncSensitiveInput(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
           };
           const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
           const hasBridgeMarker = BookmarkBridge3.isExtensionAvailable();
@@ -16079,7 +16090,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }
           if (isUserscriptMode && hasBridgeMarker && !Storage2.get(CONFIG2.STORAGE_KEYS.MODE_CONFLICT_TIP_SHOWN, false)) {
             Storage2.set(CONFIG2.STORAGE_KEYS.MODE_CONFLICT_TIP_SHOWN, true);
-            UI3.showStatus("\u68C0\u6D4B\u5230\u6865\u63A5\u6269\u5C55\u5DF2\u6CE8\u5165\u3002\u82E5\u4F60\u4E5F\u5B89\u88C5\u4E86\u72EC\u7ACB\u7248 chrome-extension-full\uFF0C\u8BF7\u5173\u95ED\u5176\u4E00\u4EE5\u907F\u514D\u6A21\u5F0F\u6DF7\u7528\u3002", "info");
+            UI2.showStatus("\u68C0\u6D4B\u5230\u6865\u63A5\u6269\u5C55\u5DF2\u6CE8\u5165\u3002\u82E5\u4F60\u4E5F\u5B89\u88C5\u4E86\u72EC\u7ACB\u7248 chrome-extension-full\uFF0C\u8BF7\u5173\u95ED\u5176\u4E00\u4EE5\u907F\u514D\u6A21\u5F0F\u6DF7\u7528\u3002", "info");
           }
           panel.addEventListener("wheel", (e) => {
             if (!body) return;
@@ -16093,12 +16104,12 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }, { passive: false });
           refs.minimizeBtn.onclick = () => {
             panel.style.display = "none";
-            UI3.miniBtn.style.display = "flex";
+            UI2.miniBtn.style.display = "flex";
             Storage2.set(CONFIG2.STORAGE_KEYS.PANEL_MINIMIZED, true);
           };
           refs.closeBtn.onclick = () => {
             panel.remove();
-            UI3.miniBtn.remove();
+            UI2.miniBtn.remove();
           };
           refs.themeToggleBtn.onclick = () => {
             DesignSystem2.toggleTheme();
@@ -16199,10 +16210,10 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             });
           });
           refs.sourceSelectLinuxdo.onclick = () => {
-            UI3.switchBookmarkSource("linuxdo");
+            UI2.switchBookmarkSource("linuxdo");
           };
           refs.sourceSelectGithub.onclick = () => {
-            UI3.switchBookmarkSource("github");
+            UI2.switchBookmarkSource("github");
           };
           refs.openGithubSettingsBtn.onclick = () => {
             const settingsTab = panel.querySelector('.ldb-tab[data-tab="settings"]');
@@ -16220,14 +16231,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               tokenInput.scrollIntoView({ block: "center", behavior: "smooth" });
               tokenInput.focus();
             }
-            UI3.showStatus("\u5DF2\u5B9A\u4F4D\u5230 GitHub Token \u8BBE\u7F6E", "info");
+            UI2.showStatus("\u5DF2\u5B9A\u4F4D\u5230 GitHub Token \u8BBE\u7F6E", "info");
           };
           refs.selfCheckBtn.onclick = () => {
-            UI3.renderSelfCheckResult();
-            UI3.showStatus("\u81EA\u68C0\u5DF2\u5B8C\u6210", "info");
+            UI2.renderSelfCheckResult();
+            UI2.showStatus("\u81EA\u68C0\u5DF2\u5B8C\u6210", "info");
           };
           refs.copyDiagBtn.onclick = async () => {
-            await UI3.copyDiagnostics();
+            await UI2.copyDiagnostics();
           };
           const handleExportTargetChange = (e) => {
             const targetType = e.target.value;
@@ -16264,15 +16275,15 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             statusSpan.textContent = "";
             statusSpan.style.color = "";
             if (!apiKey) {
-              UI3.showStatus("\u8BF7\u586B\u5199 API Key", "error");
+              UI2.showStatus("\u8BF7\u586B\u5199 API Key", "error");
               return;
             }
             if (exportTargetType === "database" && !databaseId) {
-              UI3.showStatus("\u8BF7\u586B\u5199\u6570\u636E\u5E93 ID", "error");
+              UI2.showStatus("\u8BF7\u586B\u5199\u6570\u636E\u5E93 ID", "error");
               return;
             }
             if (exportTargetType === "page" && !parentPageId) {
-              UI3.showStatus("\u8BF7\u586B\u5199\u7236\u9875\u9762 ID", "error");
+              UI2.showStatus("\u8BF7\u586B\u5199\u7236\u9875\u9762 ID", "error");
               return;
             }
             btn.disabled = true;
@@ -16309,11 +16320,11 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             statusSpan.textContent = "";
             statusSpan.style.color = "";
             if (!apiKey) {
-              UI3.showStatus("\u8BF7\u5148\u586B\u5199 API Key", "error");
+              UI2.showStatus("\u8BF7\u5148\u586B\u5199 API Key", "error");
               return;
             }
             if (!databaseId) {
-              UI3.showStatus("\u8BF7\u5148\u586B\u5199\u6570\u636E\u5E93 ID", "error");
+              UI2.showStatus("\u8BF7\u5148\u586B\u5199\u6570\u636E\u5E93 ID", "error");
               return;
             }
             const btn = refs.setupDatabaseBtn;
@@ -16342,7 +16353,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           };
           refs.autoImportEnabled.onchange = (e) => {
             const enabled = e.target.checked;
-            const cfg = UI3.getAutoImportConfigBySource();
+            const cfg = UI2.getAutoImportConfigBySource();
             Storage2.set(cfg.enabledKey, enabled);
             refs.autoImportOptions.style.display = enabled ? "block" : "none";
             if (enabled) {
@@ -16383,7 +16394,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           };
           refs.autoImportInterval.onchange = (e) => {
             const interval = parseInt(e.target.value) || 0;
-            const cfg = UI3.getAutoImportConfigBySource();
+            const cfg = UI2.getAutoImportConfigBySource();
             Storage2.set(cfg.intervalKey, interval);
             if (cfg.isGitHub) {
               GitHubAutoImporter2.stopPolling();
@@ -16487,8 +16498,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           refs.linuxdoDedupModeSelect.onchange = (e) => {
             const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
             Storage2.set(CONFIG2.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE, mode);
-            UI3.recomputeExportStats();
-            UI3.renderBookmarkList();
+            UI2.recomputeExportStats();
+            UI2.renderBookmarkList();
           };
           refs.bookmarkDedupModeSelect.onchange = (e) => {
             const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
@@ -16525,20 +16536,20 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               UpdateChecker2.startPolling(hours);
             }
           };
-          UI3.switchBookmarkSource = (source) => {
+          UI2.switchBookmarkSource = (source) => {
             const resolvedSource = source === "github" ? "github" : "linuxdo";
             Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, resolvedSource);
-            UI3.applyBookmarkSourceUI(resolvedSource);
-            UI3.renderSelfCheckResult();
-            UI3.bookmarks = [];
-            UI3.selectedBookmarks = /* @__PURE__ */ new Set();
-            UI3.recomputeExportStats();
-            UI3.refs.bookmarkCount.textContent = "-";
-            UI3.refs.exportBtn.disabled = true;
-            UI3.refs.obsExportBtn.disabled = true;
-            UI3.refs.bookmarkListContainer.style.display = "none";
-            UI3.renderBookmarkList();
-            const cfg = UI3.getAutoImportConfigBySource();
+            UI2.applyBookmarkSourceUI(resolvedSource);
+            UI2.renderSelfCheckResult();
+            UI2.bookmarks = [];
+            UI2.selectedBookmarks = /* @__PURE__ */ new Set();
+            UI2.recomputeExportStats();
+            UI2.refs.bookmarkCount.textContent = "-";
+            UI2.refs.exportBtn.disabled = true;
+            UI2.refs.obsExportBtn.disabled = true;
+            UI2.refs.bookmarkListContainer.style.display = "none";
+            UI2.renderBookmarkList();
+            const cfg = UI2.getAutoImportConfigBySource();
             const autoImportEnabled = Storage2.get(cfg.enabledKey, cfg.enabledDefault);
             const autoImportEnabledEl = refs.autoImportEnabled;
             const autoImportOptionsEl = refs.autoImportOptions;
@@ -16550,10 +16561,10 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               intervalEl.value = String(cfg.intervalDefault);
               Storage2.set(cfg.intervalKey, cfg.intervalDefault);
             }
-            UI3.renderVisualSummary();
+            UI2.renderVisualSummary();
           };
-          if (!UI3.bookmarkListBound) {
-            const bookmarkList = UI3.refs.bookmarkList;
+          if (!UI2.bookmarkListBound) {
+            const bookmarkList = UI2.refs.bookmarkList;
             bookmarkList.addEventListener("click", (e) => {
               const reexportBtn = e.target.closest('[data-bookmark-action="reexport"]');
               if (reexportBtn) {
@@ -16562,7 +16573,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 const item2 = reexportBtn.closest(".ldb-bookmark-item");
                 const bookmarkKey = String((item2 == null ? void 0 : item2.dataset.topicId) || "");
                 if (bookmarkKey) {
-                  UI3.requeueLinuxDoBookmark(bookmarkKey);
+                  UI2.requeueLinuxDoBookmark(bookmarkKey);
                 }
                 return;
               }
@@ -16581,17 +16592,17 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               if (!item) return;
               const bookmarkKey = String(item.dataset.topicId || "");
               if (!bookmarkKey) return;
-              const isUnexported = !UI3.isBookmarkKeyExported(bookmarkKey);
+              const isUnexported = !UI2.isBookmarkKeyExported(bookmarkKey);
               if (checkbox.checked) {
-                UI3.selectedBookmarks.add(bookmarkKey);
-                if (isUnexported) UI3.selectedUnexportedCount++;
+                UI2.selectedBookmarks.add(bookmarkKey);
+                if (isUnexported) UI2.selectedUnexportedCount++;
               } else {
-                UI3.selectedBookmarks.delete(bookmarkKey);
-                if (isUnexported) UI3.selectedUnexportedCount = Math.max(0, UI3.selectedUnexportedCount - 1);
+                UI2.selectedBookmarks.delete(bookmarkKey);
+                if (isUnexported) UI2.selectedUnexportedCount = Math.max(0, UI2.selectedUnexportedCount - 1);
               }
-              UI3.updateSelectCount();
+              UI2.updateSelectCount();
             });
-            UI3.bookmarkListBound = true;
+            UI2.bookmarkListBound = true;
           }
           refs.loadBookmarksBtn.onclick = async () => {
             const btn = refs.loadBookmarksBtn;
@@ -16599,56 +16610,56 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             btn.innerHTML = '<span class="ldb-spin">\u{1F504}</span> \u52A0\u8F7D\u4E2D...';
             try {
               let bookmarks = [];
-              if (UI3.isActiveGitHubSource()) {
+              if (UI2.isActiveGitHubSource()) {
                 const username = refs.githubUsernameInput.value.trim() || Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
                 const token = getSensitiveValue(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
                 const types = GitHubAPI2.getImportTypes();
                 if (!username && !token) {
-                  UI3.showStatus("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u586B\u5199 GitHub \u7528\u6237\u540D\uFF08\u6216\u914D\u7F6E Token\uFF09", "error");
+                  UI2.showStatus("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u586B\u5199 GitHub \u7528\u6237\u540D\uFF08\u6216\u914D\u7F6E Token\uFF09", "error");
                   return;
                 }
                 const allItems = [];
                 for (const type of types) {
                   if (type === "stars") {
                     const items = await GitHubAPI2.fetchStarredRepos(username, token);
-                    allItems.push(...UI3.mapGitHubItemsToBookmarks(items, "stars"));
+                    allItems.push(...UI2.mapGitHubItemsToBookmarks(items, "stars"));
                   } else if (type === "repos") {
                     const items = await GitHubAPI2.fetchUserRepos(username, token);
                     const ownRepos = items.filter((r) => !r.fork);
-                    allItems.push(...UI3.mapGitHubItemsToBookmarks(ownRepos, "repos"));
+                    allItems.push(...UI2.mapGitHubItemsToBookmarks(ownRepos, "repos"));
                   } else if (type === "forks") {
                     const items = await GitHubAPI2.fetchForkedRepos(username, token);
-                    allItems.push(...UI3.mapGitHubItemsToBookmarks(items, "forks"));
+                    allItems.push(...UI2.mapGitHubItemsToBookmarks(items, "forks"));
                   } else if (type === "gists") {
                     const items = await GitHubAPI2.fetchUserGists(username, token);
-                    allItems.push(...UI3.mapGitHubItemsToBookmarks(items, "gists"));
+                    allItems.push(...UI2.mapGitHubItemsToBookmarks(items, "gists"));
                   }
-                  UI3.refs.bookmarkCount.textContent = allItems.length;
+                  UI2.refs.bookmarkCount.textContent = allItems.length;
                 }
                 bookmarks = allItems;
               } else {
                 const username = Utils2.getCurrentLinuxDoUsername();
                 if (!username) {
-                  UI3.showStatus("\u65E0\u6CD5\u83B7\u53D6\u5F53\u524D Linux.do \u7528\u6237\u540D\uFF0C\u8BF7\u5148\u767B\u5F55\u540E\u91CD\u8BD5", "error");
+                  UI2.showStatus("\u65E0\u6CD5\u83B7\u53D6\u5F53\u524D Linux.do \u7528\u6237\u540D\uFF0C\u8BF7\u5148\u767B\u5F55\u540E\u91CD\u8BD5", "error");
                   return;
                 }
                 bookmarks = await LinuxDoAPI2.fetchAllBookmarks(username, (count) => {
-                  UI3.refs.bookmarkCount.textContent = count;
+                  UI2.refs.bookmarkCount.textContent = count;
                 });
               }
-              UI3.bookmarks = bookmarks;
-              UI3.updateVisualSnapshot(UI3.getActiveBookmarkSource(), bookmarks);
-              UI3.selectedBookmarks = new Set(bookmarks.map((b) => UI3.getBookmarkKey(b)));
-              UI3.recomputeExportStats();
-              UI3.refs.bookmarkCount.textContent = bookmarks.length;
-              UI3.refs.exportBtn.disabled = false;
-              UI3.refs.obsExportBtn.disabled = false;
-              UI3.renderBookmarkList();
-              UI3.refs.bookmarkListContainer.style.display = "block";
-              const sourceText = UI3.isActiveGitHubSource() ? "GitHub \u6536\u85CF" : "Linux.do \u6536\u85CF";
-              UI3.showStatus(`\u6210\u529F\u52A0\u8F7D ${bookmarks.length} \u4E2A${sourceText}`, "success");
+              UI2.bookmarks = bookmarks;
+              UI2.updateVisualSnapshot(UI2.getActiveBookmarkSource(), bookmarks);
+              UI2.selectedBookmarks = new Set(bookmarks.map((b) => UI2.getBookmarkKey(b)));
+              UI2.recomputeExportStats();
+              UI2.refs.bookmarkCount.textContent = bookmarks.length;
+              UI2.refs.exportBtn.disabled = false;
+              UI2.refs.obsExportBtn.disabled = false;
+              UI2.renderBookmarkList();
+              UI2.refs.bookmarkListContainer.style.display = "block";
+              const sourceText = UI2.isActiveGitHubSource() ? "GitHub \u6536\u85CF" : "Linux.do \u6536\u85CF";
+              UI2.showStatus(`\u6210\u529F\u52A0\u8F7D ${bookmarks.length} \u4E2A${sourceText}`, "success");
             } catch (error) {
-              UI3.showStatus(`\u52A0\u8F7D\u5931\u8D25: ${error.message}`, "error");
+              UI2.showStatus(`\u52A0\u8F7D\u5931\u8D25: ${error.message}`, "error");
             } finally {
               btn.disabled = false;
               btn.innerHTML = "\u{1F504} \u52A0\u8F7D\u6536\u85CF\u5217\u8868";
@@ -16656,9 +16667,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           };
           refs.importBrowserBookmarksBtn.onclick = async () => {
             const btn = refs.importBrowserBookmarksBtn;
-            const source = UI3.getActiveBookmarkSource();
+            const source = UI2.getActiveBookmarkSource();
             if (source !== "linuxdo") {
-              UI3.switchBookmarkSource("linuxdo");
+              UI2.switchBookmarkSource("linuxdo");
               const toggle = refs.sourceSettingsToggle;
               const content = refs.sourceSettingsContent;
               if (toggle && (content == null ? void 0 : content.classList.contains("collapsed"))) {
@@ -16673,7 +16684,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 chatInput.value = "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E";
                 ChatUI2.sendMessage();
               } else {
-                UI3.showStatus("AI \u9762\u677F\u672A\u5C31\u7EEA\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5", "error");
+                UI2.showStatus("AI \u9762\u677F\u672A\u5C31\u7EEA\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5", "error");
               }
             } finally {
               btn.disabled = false;
@@ -16683,13 +16694,13 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           refs.selectAll.onchange = (e) => {
             const checked = e.target.checked;
             if (checked) {
-              UI3.selectedBookmarks = new Set(UI3.bookmarks.map((b) => UI3.getBookmarkKey(b)));
+              UI2.selectedBookmarks = new Set(UI2.bookmarks.map((b) => UI2.getBookmarkKey(b)));
             } else {
-              UI3.selectedBookmarks = /* @__PURE__ */ new Set();
+              UI2.selectedBookmarks = /* @__PURE__ */ new Set();
             }
-            UI3.recomputeExportStats();
-            UI3.syncRenderedSelectionState();
-            UI3.updateSelectCount();
+            UI2.recomputeExportStats();
+            UI2.syncRenderedSelectionState();
+            UI2.updateSelectCount();
           };
           refs.pauseBtn.onclick = () => {
             const pauseBtn = refs.pauseBtn;
@@ -16719,27 +16730,27 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             const databaseId = refs.databaseIdInput.value.trim();
             const parentPageId = refs.parentPageIdInput.value.trim();
             if (!apiKey) {
-              UI3.showStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key", "error");
+              UI2.showStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key", "error");
               return;
             }
             if (exportTargetType === "database" && !databaseId) {
-              UI3.showStatus("\u8BF7\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID", "error");
+              UI2.showStatus("\u8BF7\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID", "error");
               return;
             }
             if (exportTargetType === "page" && !parentPageId) {
-              UI3.showStatus("\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID", "error");
+              UI2.showStatus("\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID", "error");
               return;
             }
-            if (!UI3.bookmarks || UI3.bookmarks.length === 0) {
-              UI3.showStatus("\u8BF7\u5148\u52A0\u8F7D\u6536\u85CF\u5217\u8868", "error");
+            if (!UI2.bookmarks || UI2.bookmarks.length === 0) {
+              UI2.showStatus("\u8BF7\u5148\u52A0\u8F7D\u6536\u85CF\u5217\u8868", "error");
               return;
             }
-            const toExport = UI3.bookmarks.filter((b) => {
-              const bookmarkKey = UI3.getBookmarkKey(b);
-              return UI3.selectedBookmarks.has(bookmarkKey) && !UI3.isBookmarkKeyExported(bookmarkKey);
+            const toExport = UI2.bookmarks.filter((b) => {
+              const bookmarkKey = UI2.getBookmarkKey(b);
+              return UI2.selectedBookmarks.has(bookmarkKey) && !UI2.isBookmarkKeyExported(bookmarkKey);
             });
             if (toExport.length === 0) {
-              UI3.showStatus("\u6CA1\u6709\u53EF\u5BFC\u51FA\u7684\u6536\u85CF\uFF08\u53EF\u80FD\u90FD\u5DF2\u5BFC\u51FA\u8FC7\u6216\u672A\u9009\u4E2D\uFF09", "info");
+              UI2.showStatus("\u6CA1\u6709\u53EF\u5BFC\u51FA\u7684\u6536\u85CF\uFF08\u53EF\u80FD\u90FD\u5DF2\u5BFC\u51FA\u8FC7\u6216\u672A\u9009\u4E2D\uFF09", "info");
               return;
             }
             const settings = {
@@ -16801,17 +16812,17 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             refs.pauseBtn.innerHTML = "\u23F8\uFE0F \u6682\u505C";
             refs.pauseBtn.classList.add("ldb-btn-warning");
             refs.pauseBtn.classList.remove("ldb-btn-primary");
-            UI3.refs.reportContainer.innerHTML = "";
+            UI2.refs.reportContainer.innerHTML = "";
             try {
               let results;
-              if (UI3.isActiveGitHubSource()) {
-                results = await UI3.exportGitHubSelected(toExport, settings, (current, total, title) => {
-                  UI3.showProgress(current, total, `${title}
+              if (UI2.isActiveGitHubSource()) {
+                results = await UI2.exportGitHubSelected(toExport, settings, (current, total, title) => {
+                  UI2.showProgress(current, total, `${title}
 \u5BFC\u51FA\u4E2D`);
                 });
               } else {
                 results = await Exporter2.exportBookmarks(toExport, settings, (progress) => {
-                  UI3.showProgress(
+                  UI2.showProgress(
                     progress.current,
                     progress.total,
                     `${progress.title}
@@ -16819,16 +16830,16 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                   );
                 });
               }
-              UI3.hideProgress();
-              UI3.showReport(results);
-              UI3.renderBookmarkList();
+              UI2.hideProgress();
+              UI2.showReport(results);
+              UI2.renderBookmarkList();
               const successCount = results.success.length;
               const failCount = results.failed.length;
               const skippedCount = ((_a = results.skipped) == null ? void 0 : _a.length) || 0;
               let statusMsg = `\u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${successCount} \u4E2A`;
               if (failCount > 0) statusMsg += `\uFF0C\u5931\u8D25 ${failCount} \u4E2A`;
               if (skippedCount > 0) statusMsg += `\uFF0C\u8DF3\u8FC7 ${skippedCount} \u4E2A`;
-              UI3.showStatus(statusMsg, failCount > successCount ? "error" : "success");
+              UI2.showStatus(statusMsg, failCount > successCount ? "error" : "success");
               if (typeof GM_notification === "function") {
                 GM_notification({
                   title: "\u5BFC\u51FA\u5B8C\u6210",
@@ -16837,7 +16848,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 });
               }
             } catch (error) {
-              UI3.showStatus(`\u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
+              UI2.showStatus(`\u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
             } finally {
               refs.exportBtn.disabled = false;
               refs.exportBtns.style.display = "flex";
@@ -16853,22 +16864,22 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const obsImgMode = refs.obsImgModeSelect.value;
             const obsImgDir = refs.obsImgDirInput.value.trim() || "Linux.do/attachments";
             if (!obsUrl || !obsKey) {
-              UI3.showStatus("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E Obsidian API \u5730\u5740\u548C Key", "error");
+              UI2.showStatus("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E Obsidian API \u5730\u5740\u548C Key", "error");
               return;
             }
-            const selected = UI3.getSelectedBookmarks();
+            const selected = UI2.getSelectedBookmarks();
             if (selected.length === 0) {
-              UI3.showStatus("\u8BF7\u5148\u9009\u62E9\u8981\u5BFC\u51FA\u7684\u5E16\u5B50", "error");
+              UI2.showStatus("\u8BF7\u5148\u9009\u62E9\u8981\u5BFC\u51FA\u7684\u5E16\u5B50", "error");
               return;
             }
             refs.obsExportBtn.disabled = true;
             refs.exportBtns.style.display = "none";
             refs.controlBtns.style.display = "flex";
-            UI3.refs.reportContainer.innerHTML = "";
+            UI2.refs.reportContainer.innerHTML = "";
             const results = { success: [], failed: [], skipped: [] };
             try {
-              if (UI3.isActiveGitHubSource()) {
-                const githubResults = await UI3.exportGitHubSelectedToObsidian(selected, {
+              if (UI2.isActiveGitHubSource()) {
+                const githubResults = await UI2.exportGitHubSelectedToObsidian(selected, {
                   obsUrl,
                   obsKey,
                   obsDir,
@@ -16879,7 +16890,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                   categories: Utils2.parseAICategories(refs.aiCategoriesInput.value.trim() || ""),
                   token: getSensitiveValue(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "")
                 }, (current, total, title) => {
-                  UI3.showProgress(current, total, `${title}
+                  UI2.showProgress(current, total, `${title}
 \u5BFC\u51FA\u5230 Obsidian...`);
                 });
                 results.success.push(...githubResults.success);
@@ -16895,7 +16906,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                   if (Exporter2.isCancelled) break;
                   const bookmark = selected[i];
                   const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
-                  UI3.showProgress(i + 1, selected.length, "\u5BFC\u51FA\u5E16\u5B50\u5230 Obsidian...");
+                  UI2.showProgress(i + 1, selected.length, "\u5BFC\u51FA\u5E16\u5B50\u5230 Obsidian...");
                   try {
                     const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
                     const filteredPosts = Exporter2.filterPosts(posts, topic, {
@@ -16999,7 +17010,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                         }
                       }
                     }
-                    const fileName = UI3.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
+                    const fileName = UI2.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
                     const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
                     if (!noteResult.ok) throw new Error(noteResult.error);
                     results.success.push({
@@ -17017,13 +17028,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                   }
                 }
               }
-              UI3.hideProgress();
-              UI3.showReport(results);
-              UI3.renderBookmarkList();
+              UI2.hideProgress();
+              UI2.showReport(results);
+              UI2.renderBookmarkList();
               const msg = `Obsidian \u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${results.success.length} \u4E2A${results.failed.length ? `\uFF0C\u5931\u8D25 ${results.failed.length} \u4E2A` : ""}`;
-              UI3.showStatus(msg, results.failed.length > 0 ? "warning" : "success");
+              UI2.showStatus(msg, results.failed.length > 0 ? "warning" : "success");
             } catch (error) {
-              UI3.showStatus(`Obsidian \u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
+              UI2.showStatus(`Obsidian \u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
             } finally {
               refs.obsExportBtn.disabled = false;
               refs.exportBtns.style.display = "flex";
@@ -17034,7 +17045,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           refs.permissionLevelSelect.onchange = (e) => {
             const level = parseInt(e.target.value);
             OperationGuard2.setLevel(level);
-            UI3.showStatus(`\u6743\u9650\u7EA7\u522B\u5DF2\u8BBE\u7F6E\u4E3A: ${CONFIG2.PERMISSION_NAMES[level]}`, "success");
+            UI2.showStatus(`\u6743\u9650\u7EA7\u522B\u5DF2\u8BBE\u7F6E\u4E3A: ${CONFIG2.PERMISSION_NAMES[level]}`, "success");
           };
           refs.requireConfirmCheckbox.onchange = (e) => {
             Storage2.set(CONFIG2.STORAGE_KEYS.REQUIRE_CONFIRM, e.target.checked);
@@ -17081,13 +17092,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             content.classList.toggle("collapsed");
             arrow.textContent = content.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
             if (!content.classList.contains("collapsed")) {
-              UI3.updateLogPanel();
+              UI2.updateLogPanel();
             }
           };
           refs.logClearBtn.onclick = () => {
             if (confirm("\u786E\u5B9A\u8981\u6E05\u9664\u6240\u6709\u64CD\u4F5C\u65E5\u5FD7\u5417\uFF1F")) {
               OperationLog2.clear();
-              UI3.showStatus("\u65E5\u5FD7\u5DF2\u6E05\u9664", "success");
+              UI2.showStatus("\u65E5\u5FD7\u5DF2\u6E05\u9664", "success");
             }
           };
           refs.apiKeyInput.onchange = async (e) => {
@@ -17099,7 +17110,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 await NotionOAuth2.setManualApiKey("");
               }
             } catch (error) {
-              UI3.showStatus(error.message || String(error), "error");
+              UI2.showStatus(error.message || String(error), "error");
             }
           };
           refs.databaseIdInput.onchange = (e) => {
@@ -17115,7 +17126,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const refreshBtn = refs.refreshWorkspaceBtn;
             const workspaceTip = refs.workspaceTip;
             if (!apiKey) {
-              UI3.showStatus(MSG2.NO_NOTION_KEY, "error");
+              UI2.showStatus(MSG2.NO_NOTION_KEY, "error");
               return;
             }
             refreshBtn.disabled = true;
@@ -17133,14 +17144,14 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                   }
                 },
                 onWorkspaceData: (workspaceData2, meta) => {
-                  UI3.updateWorkspaceSelect(workspaceData2);
+                  UI2.updateWorkspaceSelect(workspaceData2);
                   if (meta.phase === "databases") {
                     workspaceTip.textContent = `\u2705 \u5DF2\u52A0\u8F7D ${workspaceData2.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C\u53EF\u5148\u9009\u62E9\u76EE\u6807\uFF1B\u9875\u9762\u5217\u8868\u7EE7\u7EED\u52A0\u8F7D\u4E2D...`;
                     workspaceTip.style.color = "var(--ldb-ui-success)";
                   }
                 }
               });
-              UI3.updateWorkspaceSelect(workspaceData);
+              UI2.updateWorkspaceSelect(workspaceData);
               workspaceTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.length} \u4E2A\u9875\u9762`;
               workspaceTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
@@ -17155,86 +17166,86 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             refs.viewRefreshWorkspaceBtn.onclick = async () => {
               const apiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
               if (!apiKey) {
-                UI3.showStatus(MSG2.NO_NOTION_KEY, "error");
-                UI3.setWorkspaceVisualStatus(MSG2.NO_NOTION_KEY, "error");
+                UI2.showStatus(MSG2.NO_NOTION_KEY, "error");
+                UI2.setWorkspaceVisualStatus(MSG2.NO_NOTION_KEY, "error");
                 return;
               }
               try {
-                await UI3.refreshWorkspaceVisualization(apiKey);
+                await UI2.refreshWorkspaceVisualization(apiKey);
               } catch (error) {
-                UI3.showStatus(`\u5DE5\u4F5C\u533A\u89C6\u56FE\u5237\u65B0\u5931\u8D25\uFF1A${error.message}`, "error");
+                UI2.showStatus(`\u5DE5\u4F5C\u533A\u89C6\u56FE\u5237\u65B0\u5931\u8D25\uFF1A${error.message}`, "error");
               }
             };
           }
           if (refs.viewGenerateWorkspaceInsightBtn) {
             refs.viewGenerateWorkspaceInsightBtn.onclick = async () => {
               try {
-                await UI3.generateWorkspaceInsight();
+                await UI2.generateWorkspaceInsight();
               } catch (error) {
-                UI3.showStatus(`\u751F\u6210\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u5931\u8D25\uFF1A${error.message}`, "error");
+                UI2.showStatus(`\u751F\u6210\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u5931\u8D25\uFF1A${error.message}`, "error");
               }
             };
           }
           if (refs.viewCopyWorkspaceReportBtn) {
             refs.viewCopyWorkspaceReportBtn.onclick = async () => {
               try {
-                await UI3.copyWorkspaceInsightReport();
+                await UI2.copyWorkspaceInsightReport();
               } catch (error) {
-                UI3.showStatus(`\u590D\u5236\u5DE5\u4F5C\u533A\u62A5\u544A\u5931\u8D25\uFF1A${error.message}`, "error");
+                UI2.showStatus(`\u590D\u5236\u5DE5\u4F5C\u533A\u62A5\u544A\u5931\u8D25\uFF1A${error.message}`, "error");
               }
             };
           }
           if (refs.viewDownloadWorkspaceReportBtn) {
             refs.viewDownloadWorkspaceReportBtn.onclick = async () => {
               try {
-                await UI3.downloadWorkspaceInsightReport();
+                await UI2.downloadWorkspaceInsightReport();
               } catch (error) {
-                UI3.showStatus(`\u6D93\u5B2D\u6D47\u5BB8\u30E4\u7D94\u9356\u70D8\u59E4\u935B\u5A42\u3051\u7490\u30EF\u7D30${error.message}`, "error");
+                UI2.showStatus(`\u6D93\u5B2D\u6D47\u5BB8\u30E4\u7D94\u9356\u70D8\u59E4\u935B\u5A42\u3051\u7490\u30EF\u7D30${error.message}`, "error");
               }
             };
           }
           if (refs.viewDownloadWorkspacePackageBtn) {
             refs.viewDownloadWorkspacePackageBtn.onclick = async () => {
               try {
-                await UI3.downloadWorkspaceCollaborationPackage();
+                await UI2.downloadWorkspaceCollaborationPackage();
               } catch (error) {
-                UI3.showStatus(`\u4E0B\u8F7D\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5931\u8D25\uFF1A${error.message}`, "error");
+                UI2.showStatus(`\u4E0B\u8F7D\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5931\u8D25\uFF1A${error.message}`, "error");
               }
             };
           }
           if (refs.viewSaveWorkspacePackageBtn) {
             refs.viewSaveWorkspacePackageBtn.onclick = async () => {
               try {
-                await UI3.saveWorkspaceCollaborationPackageToNotion();
+                await UI2.saveWorkspaceCollaborationPackageToNotion();
               } catch (error) {
-                UI3.showStatus(`\u4FDD\u5B58\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5931\u8D25\uFF1A${error.message}`, "error");
+                UI2.showStatus(`\u4FDD\u5B58\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5931\u8D25\uFF1A${error.message}`, "error");
               }
             };
           }
           if (refs.viewSaveWorkspaceReportBtn) {
             refs.viewSaveWorkspaceReportBtn.onclick = async () => {
               try {
-                await UI3.saveWorkspaceInsightReportToNotion();
+                await UI2.saveWorkspaceInsightReportToNotion();
               } catch (error) {
-                UI3.showStatus(`\u4FDD\u5B58\u5DE5\u4F5C\u533A\u62A5\u544A\u5931\u8D25\uFF1A${error.message}`, "error");
+                UI2.showStatus(`\u4FDD\u5B58\u5DE5\u4F5C\u533A\u62A5\u544A\u5931\u8D25\uFF1A${error.message}`, "error");
               }
             };
           }
           if (refs.viewSaveWorkspaceCandidatesBtn) {
             refs.viewSaveWorkspaceCandidatesBtn.onclick = async () => {
               try {
-                await UI3.saveWorkspaceConnectionCandidatesToNotion();
+                await UI2.saveWorkspaceConnectionCandidatesToNotion();
               } catch (error) {
-                UI3.showStatus(`\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u5931\u8D25\uFF1A${error.message}`, "error");
+                UI2.showStatus(`\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u5931\u8D25\uFF1A${error.message}`, "error");
               }
             };
           }
           if (refs.viewSyncNowBtn) {
             refs.viewSyncNowBtn.onclick = async () => {
               try {
-                await UI3.runUnifiedSyncNow();
+                await UI2.runUnifiedSyncNow();
               } catch (error) {
-                UI3.showStatus(`\u7EDF\u4E00\u540C\u6B65\u5931\u8D25\uFF1A${error.message}`, "error");
+                UI2.showStatus(`\u7EDF\u4E00\u540C\u6B65\u5931\u8D25\uFF1A${error.message}`, "error");
               }
             };
           }
@@ -17247,7 +17258,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 refs.exportTargetDatabaseRadio.checked = true;
                 handleExportTargetChange({ target: { value: CONFIG2.EXPORT_TARGET_TYPES.DATABASE } });
                 void UICommandService.execute("apply_workspace_selection", { selectedValue: `database:${id}` });
-                UI3.showStatus("\u5DF2\u9009\u62E9\u6570\u636E\u5E93\uFF0C\u81EA\u52A8\u5207\u6362\u4E3A\u6570\u636E\u5E93\u5BFC\u51FA\u6A21\u5F0F", "info");
+                UI2.showStatus("\u5DF2\u9009\u62E9\u6570\u636E\u5E93\uFF0C\u81EA\u52A8\u5207\u6362\u4E3A\u6570\u636E\u5E93\u5BFC\u51FA\u6A21\u5F0F", "info");
               } else if (type === "page") {
                 refs.parentPageIdInput.value = id;
                 refs.exportTargetPageRadio.checked = true;
@@ -17255,20 +17266,20 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 refs.manualDbWrap.style.display = "none";
                 refs.exportTargetTip.textContent = "\u5BFC\u51FA\u4E3A\u5B50\u9875\u9762\uFF0C\u5305\u542B\u5B8C\u6574\u5185\u5BB9";
                 void UICommandService.execute("apply_workspace_selection", { selectedValue: `page:${id}` });
-                UI3.showStatus("\u5DF2\u9009\u62E9\u9875\u9762\uFF0C\u81EA\u52A8\u5207\u6362\u4E3A\u9875\u9762\u5BFC\u51FA\u6A21\u5F0F", "info");
+                UI2.showStatus("\u5DF2\u9009\u62E9\u9875\u9762\uFF0C\u81EA\u52A8\u5207\u6362\u4E3A\u9875\u9762\u5BFC\u51FA\u6A21\u5F0F", "info");
               }
             }
           };
           ChatUI2.init();
           refs.aiServiceSelect.onchange = (e) => {
             const newService = e.target.value;
-            const availableModels = AIService3.getAvailableModels(newService);
-            UI3.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : void 0);
+            const availableModels = AIService2.getAvailableModels(newService);
+            UI2.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : void 0);
             Storage2.set(CONFIG2.STORAGE_KEYS.AI_SERVICE, newService);
           };
           refs.aiApiKeyInput.onchange = (e) => {
             persistSensitiveInput(e.target, CONFIG2.STORAGE_KEYS.AI_API_KEY).catch((error) => {
-              UI3.showStatus(error.message || String(error), "error");
+              UI2.showStatus(error.message || String(error), "error");
             });
           };
           refs.aiBaseUrlInput.onchange = (e) => {
@@ -17306,7 +17317,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           };
           refs.githubTokenInput.onchange = (e) => {
             persistSensitiveInput(e.target, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN).catch((error) => {
-              UI3.showStatus(error.message || String(error), "error");
+              UI2.showStatus(error.message || String(error), "error");
             });
           };
           refs.obsApiUrlInput.onchange = (e) => {
@@ -17314,7 +17325,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           };
           refs.obsApiKeyInput.onchange = (e) => {
             persistSensitiveInput(e.target, CONFIG2.STORAGE_KEYS.OBS_API_KEY).catch((error) => {
-              UI3.showStatus(error.message || String(error), "error");
+              UI2.showStatus(error.message || String(error), "error");
             });
           };
           refs.obsDirInput.onchange = (e) => {
@@ -17337,7 +17348,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const apiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
             const refreshBtn = refs.aiRefreshDbsBtn;
             if (!apiKey) {
-              UI3.showStatus(MSG2.NO_NOTION_KEY, "error");
+              UI2.showStatus(MSG2.NO_NOTION_KEY, "error");
               return;
             }
             refreshBtn.disabled = true;
@@ -17347,13 +17358,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 apiKey,
                 includePages: false,
                 onWorkspaceData: (workspaceData2) => {
-                  UI3.updateAITargetDbOptions(workspaceData2.databases);
+                  UI2.updateAITargetDbOptions(workspaceData2.databases);
                 }
               });
-              UI3.updateAITargetDbOptions(workspaceData.databases);
-              UI3.showStatus(`\u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93`, "success");
+              UI2.updateAITargetDbOptions(workspaceData.databases);
+              UI2.showStatus(`\u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93`, "success");
             } catch (error) {
-              UI3.showStatus(`\u83B7\u53D6\u6570\u636E\u5E93\u5217\u8868\u5931\u8D25: ${error.message}`, "error");
+              UI2.showStatus(`\u83B7\u53D6\u6570\u636E\u5E93\u5217\u8868\u5931\u8D25: ${error.message}`, "error");
             } finally {
               refreshBtn.disabled = false;
               refreshBtn.innerHTML = "\u{1F504}";
@@ -17366,7 +17377,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const fetchBtn = refs.aiFetchModelsBtn;
             const modelTip = refs.aiModelTip;
             if (!aiApiKey) {
-              UI3.showStatus(MSG2.NO_AI_KEY, "error");
+              UI2.showStatus(MSG2.NO_AI_KEY, "error");
               return;
             }
             fetchBtn.disabled = true;
@@ -17378,14 +17389,14 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 aiApiKey,
                 aiBaseUrl
               });
-              UI3.updateAIModelOptions(aiService, models, true);
+              UI2.updateAIModelOptions(aiService, models, true);
               modelTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${models.length} \u4E2A\u53EF\u7528\u6A21\u578B`;
               modelTip.style.color = "var(--ldb-ui-success)";
-              UI3.showStatus(`\u6210\u529F\u83B7\u53D6 ${models.length} \u4E2A\u6A21\u578B`, "success");
+              UI2.showStatus(`\u6210\u529F\u83B7\u53D6 ${models.length} \u4E2A\u6A21\u578B`, "success");
             } catch (error) {
               modelTip.textContent = `\u274C ${error.message}`;
               modelTip.style.color = "var(--ldb-ui-danger)";
-              UI3.showStatus(`\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${error.message}`, "error");
+              UI2.showStatus(`\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${error.message}`, "error");
             } finally {
               fetchBtn.disabled = false;
               fetchBtn.innerHTML = "\u{1F504} \u83B7\u53D6";
@@ -17401,13 +17412,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             statusSpan.textContent = "";
             statusSpan.style.color = "";
             if (!aiApiKey) {
-              UI3.showStatus(MSG2.NO_AI_KEY, "error");
+              UI2.showStatus(MSG2.NO_AI_KEY, "error");
               return;
             }
             btn.disabled = true;
             btn.innerHTML = '<span class="ldb-spin">\u{1F504}</span> \u6D4B\u8BD5\u4E2D...';
             try {
-              const response = await AIService3.request(
+              const response = await AIService2.request(
                 "\u8BF7\u56DE\u590D\uFF1A\u8FDE\u63A5\u6210\u529F",
                 { aiService, aiApiKey, aiModel, aiBaseUrl }
               );
@@ -17421,20 +17432,20 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               btn.innerHTML = "\u{1F9EA} \u6D4B\u8BD5";
             }
           };
-          UI3._loadTemplates = () => {
+          UI2._loadTemplates = () => {
             try {
               return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, CONFIG2.DEFAULTS.aiTemplates));
             } catch {
               return JSON.parse(CONFIG2.DEFAULTS.aiTemplates);
             }
           };
-          UI3._saveTemplates = (templates) => {
+          UI2._saveTemplates = (templates) => {
             Storage2.set(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, JSON.stringify(templates));
           };
-          UI3.renderTemplateList = () => {
+          UI2.renderTemplateList = () => {
             const list = refs.templateList;
             if (!list) return;
-            const templates = UI3._loadTemplates();
+            const templates = UI2._loadTemplates();
             if (templates.length === 0) {
               list.innerHTML = '<div class="ldb-tip">\u6682\u65E0\u6A21\u677F\uFF0C\u8BF7\u6DFB\u52A0</div>';
               return;
@@ -17451,11 +17462,11 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             list.querySelectorAll("[data-template-delete]").forEach((btn) => {
               btn.onclick = () => {
                 const idx = parseInt(btn.dataset.templateDelete);
-                const ts = UI3._loadTemplates();
+                const ts = UI2._loadTemplates();
                 ts.splice(idx, 1);
-                UI3._saveTemplates(ts);
-                UI3.renderTemplateList();
-                UI3.showStatus("\u6A21\u677F\u5DF2\u5220\u9664", "success");
+                UI2._saveTemplates(ts);
+                UI2.renderTemplateList();
+                UI2.showStatus("\u6A21\u677F\u5DF2\u5220\u9664", "success");
               };
             });
           };
@@ -17464,19 +17475,19 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const icon = refs.templateIconInput.value.trim() || "\u{1F4DD}";
             const prompt2 = refs.templatePromptInput.value.trim();
             if (!name || !prompt2) {
-              UI3.showStatus("\u8BF7\u586B\u5199\u6A21\u677F\u540D\u79F0\u548C prompt", "error");
+              UI2.showStatus("\u8BF7\u586B\u5199\u6A21\u677F\u540D\u79F0\u548C prompt", "error");
               return;
             }
-            const templates = UI3._loadTemplates();
+            const templates = UI2._loadTemplates();
             templates.push({ name, icon, prompt: prompt2 });
-            UI3._saveTemplates(templates);
+            UI2._saveTemplates(templates);
             refs.templateNameInput.value = "";
             refs.templateIconInput.value = "";
             refs.templatePromptInput.value = "";
-            UI3.renderTemplateList();
-            UI3.showStatus(`\u6A21\u677F\u300C${name}\u300D\u5DF2\u6DFB\u52A0`, "success");
+            UI2.renderTemplateList();
+            UI2.showStatus(`\u6A21\u677F\u300C${name}\u300D\u5DF2\u6DFB\u52A0`, "success");
           };
-          UI3.renderTemplateList();
+          UI2.renderTemplateList();
           NotionOAuth2.attachControls({
             root: panel,
             selectors: {
@@ -17487,22 +17498,22 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               clearBtn: "#ldb-oauth-clear",
               statusEl: "#ldb-oauth-status"
             },
-            notify: (message, type) => UI3.showStatus(message, type)
+            notify: (message, type) => UI2.showStatus(message, type)
           });
-          CredentialVault3.attachControls({
+          CredentialVault2.attachControls({
             root: panel,
             selectors: {
               statusEl: "#ldb-vault-status",
               unlockBtn: "#ldb-vault-unlock",
               lockBtn: "#ldb-vault-lock"
             },
-            notify: (message, type) => UI3.showStatus(message, type),
+            notify: (message, type) => UI2.showStatus(message, type),
             onAfterSync: () => {
               syncSensitiveInputs();
             }
           });
           syncSensitiveInputs();
-          UI3.makeDraggable(panel, panel.querySelector(".ldb-header"));
+          UI2.makeDraggable(panel, panel.querySelector(".ldb-header"));
         }
       };
       ;
@@ -17517,13 +17528,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor3, WorkspaceService: WorkspaceService2, UICommandService } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2, UICommandService } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
-      var { AIAssistant: AIAssistant3 } = require_ai();
+      var { AIAssistant: AIAssistant2 } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -17709,7 +17720,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           const parentPageId = exportState.parentPageId;
           const exportType = exportState.targetType;
           const imgMode = Storage2.get(CONFIG2.STORAGE_KEYS.IMG_MODE, CONFIG2.DEFAULTS.imgMode);
-          const meta = GenericExtractor3.extractMeta();
+          const meta = GenericExtractor2.extractMeta();
           const targetId = exportType === "page" ? parentPageId : dbId;
           const isConfigured = !!(apiKey && targetId);
           panel.innerHTML = `
@@ -17731,7 +17742,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                     <div class="gclip-field">
                         <label>Notion API Key</label>
                         <div style="display:flex;align-items:center;gap:var(--ldb-ui-spacing-md);">
-                            <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="${CredentialVault3.getFieldPlaceholder(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "secret_...")}" value="" style="flex:1;font-size:var(--ldb-ui-font-size-sm);" autocomplete="off" />
+                            <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="${CredentialVault2.getFieldPlaceholder(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "secret_...")}" value="" style="flex:1;font-size:var(--ldb-ui-font-size-sm);" autocomplete="off" />
                             <button class="gclip-btn" id="gclip-save-api-key" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">\u4FDD\u5B58</button>
                         </div>
                     </div>
@@ -18009,7 +18020,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             },
             notify: (message, type) => GenericUI2.showStatus(message, type)
           });
-          CredentialVault3.attachControls({
+          CredentialVault2.attachControls({
             root: panel,
             selectors: {
               statusEl: "#gclip-vault-status",
@@ -18121,7 +18132,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const apiKey = NotionOAuth2.getAccessToken();
             const exportState = TargetState2.getExportState();
             const imgMode = Storage2.get(CONFIG2.STORAGE_KEYS.IMG_MODE, CONFIG2.DEFAULTS.imgMode);
-            const aiSettings = AIAssistant3.getSettings();
+            const aiSettings = AIAssistant2.getSettings();
             const settings = {
               apiKey,
               exportTargetType: exportState.targetType,
@@ -18204,10 +18215,10 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor3, WorkspaceService: WorkspaceService2 } = require_extract();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { StyleManager: StyleManager2 } = require_style_manager();
@@ -18216,9 +18227,9 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { NotionSiteUI: NotionSiteUI2 } = require_notion_site_ui();
       var { UI_CSS: UI_CSS2 } = require_styles();
       var { UIEvents: UIEvents2 } = require_events();
-      var { UI: UI3 } = require_main_ui();
+      var { UI: UI2 } = require_main_ui();
       var { GenericUI: GenericUI2 } = require_generic_ui();
-      module.exports = { StyleManager: StyleManager2, DesignSystem: DesignSystem2, PanelResize: PanelResize2, NotionSiteUI: NotionSiteUI2, UI_CSS: UI_CSS2, UIEvents: UIEvents2, UI: UI3, GenericUI: GenericUI2 };
+      module.exports = { StyleManager: StyleManager2, DesignSystem: DesignSystem2, PanelResize: PanelResize2, NotionSiteUI: NotionSiteUI2, UI_CSS: UI_CSS2, UIEvents: UIEvents2, UI: UI2, GenericUI: GenericUI2 };
     }
   });
 
@@ -18230,6 +18241,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2 } = require_api();
+      var { CredentialVault: CredentialVault2 } = require_auth();
       var _resolveUI = () => {
         try {
           return require_ui().UI;
@@ -18640,7 +18652,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           if (!entry || typeof entry !== "object") return entry;
           const redacted = { ...entry };
           const context = redacted.context || {};
-          const sensitiveKeys = typeof CredentialVault !== "undefined" && CredentialVault.SENSITIVE_KEYS ? CredentialVault.SENSITIVE_KEYS : /* @__PURE__ */ new Set();
+          const sensitiveKeys = CredentialVault2 && CredentialVault2.SENSITIVE_KEYS ? CredentialVault2.SENSITIVE_KEYS : /* @__PURE__ */ new Set();
           for (const key of sensitiveKeys) {
             if (Object.prototype.hasOwnProperty.call(context, key)) {
               context[key] = "***REDACTED***";
@@ -18669,18 +18681,18 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             logs.length = CONFIG2.API.MAX_LOG_ENTRIES;
           }
           Storage2.set(CONFIG2.STORAGE_KEYS.OPERATION_LOG, JSON.stringify(logs));
-          const UI3 = _resolveUI();
-          if (UI3 && UI3.updateLogPanel) {
-            UI3.updateLogPanel();
+          const UI2 = _resolveUI();
+          if (UI2 && UI2.updateLogPanel) {
+            UI2.updateLogPanel();
           }
           return logEntry;
         },
         // 清空日志
         clear: () => {
           Storage2.set(CONFIG2.STORAGE_KEYS.OPERATION_LOG, "[]");
-          const UI3 = _resolveUI();
-          if (UI3 && UI3.updateLogPanel) {
-            UI3.updateLogPanel();
+          const UI2 = _resolveUI();
+          if (UI2 && UI2.updateLogPanel) {
+            UI2.updateLogPanel();
           }
         },
         // 获取最近N条日志
@@ -18921,11 +18933,12 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           document.body.appendChild(toast);
           UndoManager2.toastElement = toast;
           toast.querySelector("#ldb-undo-action").onclick = async () => {
+            const UI2 = _resolveUI();
             const success = await UndoManager2.execute();
             if (success) {
-              UI.showStatus("\u64A4\u9500\u6210\u529F", "success");
+              if (UI2) UI2.showStatus("\u64A4\u9500\u6210\u529F", "success");
             } else {
-              UI.showStatus("\u64A4\u9500\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u68C0\u67E5 Notion \u4E2D\u7684\u53D8\u66F4", "error");
+              if (UI2) UI2.showStatus("\u64A4\u9500\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u68C0\u67E5 Notion \u4E2D\u7684\u53D8\u66F4", "error");
             }
           };
           requestAnimationFrame(() => {
@@ -18967,13 +18980,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault3, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, SiteDetector: SiteDetector2, EMOJI_MAP: EMOJI_MAP2, DOMToNotion: DOMToNotion2 } = require_api();
       var { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
-      var { GenericExtractor: GenericExtractor3, WorkspaceService: WorkspaceService2 } = require_extract();
+      var { GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UndoManager: UndoManager2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { UrlValidator } = require_UrlValidator();
-      var AIService3 = {
+      var AIService2 = {
         // 标准化 + 安全校验 baseUrl，返回 null 表示非法（调用方应 reject）
         // versionPath: "v1" 或 "v1beta"
         _normalizeBaseUrl: (baseUrl, versionPath) => {
@@ -19018,27 +19031,27 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
 </user_content>
 
 \u5206\u7C7B\uFF1A`;
-          const response = await AIService3.request(prompt2, settings);
-          return AIService3.matchCategory(response, categories);
+          const response = await AIService2.request(prompt2, settings);
+          return AIService2.matchCategory(response, categories);
         },
         // 发送请求（根据不同服务商格式化）
         request: async (prompt2, settings) => {
           const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
-          const provider = AIService3.PROVIDERS[aiService];
+          const provider = AIService2.PROVIDERS[aiService];
           if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
           const model = aiModel || provider.defaultModel;
           if (aiService === "openai") {
-            return await AIService3.requestOpenAI(prompt2, model, aiApiKey, aiBaseUrl);
+            return await AIService2.requestOpenAI(prompt2, model, aiApiKey, aiBaseUrl);
           } else if (aiService === "claude") {
-            return await AIService3.requestClaude(prompt2, model, aiApiKey, aiBaseUrl);
+            return await AIService2.requestClaude(prompt2, model, aiApiKey, aiBaseUrl);
           } else if (aiService === "gemini") {
-            return await AIService3.requestGemini(prompt2, model, aiApiKey, aiBaseUrl);
+            return await AIService2.requestGemini(prompt2, model, aiApiKey, aiBaseUrl);
           }
           throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
         },
         // OpenAI API 请求
         requestOpenAI: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -19075,7 +19088,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         },
         // Claude API 请求
         requestClaude: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -19112,7 +19125,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         },
         // Gemini API 请求
         requestGemini: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1beta");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
           const url = normalizedBase ? `${normalizedBase}/v1beta/models/${model}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -19167,21 +19180,21 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         // 对话式请求（支持更长输出）
         requestChat: async (prompt2, settings, maxTokens = 1e3) => {
           const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
-          const provider = AIService3.PROVIDERS[aiService];
+          const provider = AIService2.PROVIDERS[aiService];
           if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
           const model = aiModel || provider.defaultModel;
           if (aiService === "openai") {
-            return await AIService3.requestOpenAIChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+            return await AIService2.requestOpenAIChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
           } else if (aiService === "claude") {
-            return await AIService3.requestClaudeChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+            return await AIService2.requestClaudeChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
           } else if (aiService === "gemini") {
-            return await AIService3.requestGeminiChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+            return await AIService2.requestGeminiChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
           }
           throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
         },
         // OpenAI 对话请求
         requestOpenAIChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -19218,7 +19231,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         },
         // Claude 对话请求
         requestClaudeChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -19255,7 +19268,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         },
         // Gemini 对话请求
         requestGeminiChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1beta");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
           const url = normalizedBase ? `${normalizedBase}/v1beta/models/${model}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -19308,7 +19321,7 @@ ${systemPrompt}
 `;
             }
           }
-          return await AIService3.requestChat(prompt2, settings, maxTokens);
+          return await AIService2.requestChat(prompt2, settings, maxTokens);
         },
         // 获取可用模型列表
         getFetchedModelsCache: () => {
@@ -19323,41 +19336,41 @@ ${systemPrompt}
         },
         getCachedModels: (service) => {
           var _a;
-          const cache = AIService3.getFetchedModelsCache();
+          const cache = AIService2.getFetchedModelsCache();
           return Array.isArray((_a = cache[service]) == null ? void 0 : _a.models) ? cache[service].models : [];
         },
         getAvailableModels: (service) => {
           var _a;
-          const cachedModels = AIService3.getCachedModels(service);
+          const cachedModels = AIService2.getCachedModels(service);
           if (cachedModels.length > 0) return cachedModels;
-          return ((_a = AIService3.PROVIDERS[service]) == null ? void 0 : _a.models) || [];
+          return ((_a = AIService2.PROVIDERS[service]) == null ? void 0 : _a.models) || [];
         },
         persistFetchedModels: (service, models) => {
           const normalizedModels = Array.isArray(models) ? models : [];
-          const cache = AIService3.getFetchedModelsCache();
+          const cache = AIService2.getFetchedModelsCache();
           const snapshot = { models: normalizedModels, timestamp: Date.now() };
           cache[service] = snapshot;
           Storage2.set(CONFIG2.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(cache));
           return snapshot;
         },
         fetchModelsSnapshot: async (service, apiKey, baseUrl) => {
-          const models = await AIService3.fetchModels(service, apiKey, baseUrl);
-          const snapshot = AIService3.persistFetchedModels(service, models);
+          const models = await AIService2.fetchModels(service, apiKey, baseUrl);
+          const snapshot = AIService2.persistFetchedModels(service, models);
           return { models: snapshot.models, timestamp: snapshot.timestamp };
         },
         fetchModels: async (service, apiKey, baseUrl) => {
           if (service === "openai") {
-            return await AIService3.fetchOpenAIModels(apiKey, baseUrl);
+            return await AIService2.fetchOpenAIModels(apiKey, baseUrl);
           } else if (service === "claude") {
-            return AIService3.PROVIDERS.claude.models;
+            return AIService2.PROVIDERS.claude.models;
           } else if (service === "gemini") {
-            return await AIService3.fetchGeminiModels(apiKey, baseUrl);
+            return await AIService2.fetchGeminiModels(apiKey, baseUrl);
           }
           throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${service}`);
         },
         // 获取 OpenAI 模型列表
         fetchOpenAIModels: (apiKey, baseUrl) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/models` : "https://api.openai.com/v1/models";
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -19380,7 +19393,7 @@ ${systemPrompt}
                       if (bIdx !== -1) return 1;
                       return a.localeCompare(b);
                     });
-                    resolve(chatModels.length > 0 ? chatModels : AIService3.PROVIDERS.openai.models);
+                    resolve(chatModels.length > 0 ? chatModels : AIService2.PROVIDERS.openai.models);
                   } else {
                     reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${response.status}`));
                   }
@@ -19396,7 +19409,7 @@ ${systemPrompt}
         },
         // 获取 Gemini 模型列表
         fetchGeminiModels: (apiKey, baseUrl) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1beta");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
           const url = normalizedBase ? `${normalizedBase}/v1beta/models` : `https://generativelanguage.googleapis.com/v1beta/models`;
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -19423,7 +19436,7 @@ ${systemPrompt}
                       if (bIdx !== -1) return 1;
                       return a.localeCompare(b);
                     });
-                    resolve(models.length > 0 ? models : AIService3.PROVIDERS.gemini.models);
+                    resolve(models.length > 0 ? models : AIService2.PROVIDERS.gemini.models);
                   } else {
                     reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${response.status}`));
                   }
@@ -19816,7 +19829,7 @@ ${systemPrompt}
                 lines.push(`[\u9875\u9762] ${title} (ID: ${id}, URL: ${url})`);
               }
             }
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u5DE5\u4F5C\u533A\u641C\u7D22\u7ED3\u679C",
               fields: [
                 { label: "\u603B\u6570", value: results.length },
@@ -19836,13 +19849,13 @@ ${systemPrompt}
             const { reference, type } = args;
             if (!reference) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B reference\u3002";
             if (type === "database") {
-              const resolved2 = await AIAssistant3._resolveDatabaseId(reference, null, settings.notionApiKey);
+              const resolved2 = await AIAssistant2._resolveDatabaseId(reference, null, settings.notionApiKey);
               if (resolved2 == null ? void 0 : resolved2.error) return `\u9519\u8BEF: ${resolved2.error}`;
               if (!resolved2) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${reference}\u300D\u3002`;
               const database = await NotionAPI2.fetchDatabase(resolved2.id, settings.notionApiKey);
               const title2 = ((_a = database.title) == null ? void 0 : _a.map((t) => t.plain_text).join("")) || resolved2.name || "\u672A\u547D\u540D\u6570\u636E\u5E93";
               const propertyNames = Object.keys(database.properties || {});
-              return AIAssistant3._formatToolResult({
+              return AIAssistant2._formatToolResult({
                 title: "Notion \u5BF9\u8C61\u8BE6\u60C5",
                 fields: [
                   { label: "\u5BF9\u8C61\u7C7B\u578B", value: "database" },
@@ -19854,7 +19867,7 @@ ${systemPrompt}
                 ]
               });
             }
-            const resolved = await AIAssistant3._resolvePageId(reference, null, settings.notionApiKey);
+            const resolved = await AIAssistant2._resolvePageId(reference, null, settings.notionApiKey);
             if (resolved == null ? void 0 : resolved.error) return `\u9519\u8BEF: ${resolved.error}`;
             if (!resolved) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${reference}\u300D\u3002`;
             const page = await NotionAPI2.fetchPage(resolved.id, settings.notionApiKey);
@@ -19862,7 +19875,7 @@ ${systemPrompt}
             const parentType = ((_c = page.parent) == null ? void 0 : _c.type) || "-";
             const iconText = ((_d = page.icon) == null ? void 0 : _d.emoji) || ((_f = (_e = page.icon) == null ? void 0 : _e.external) == null ? void 0 : _f.url) || "-";
             const coverText = ((_h = (_g = page.cover) == null ? void 0 : _g.external) == null ? void 0 : _h.url) || "-";
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "Notion \u5BF9\u8C61\u8BE6\u60C5",
               fields: [
                 { label: "\u5BF9\u8C61\u7C7B\u578B", value: "page" },
@@ -19886,7 +19899,7 @@ ${systemPrompt}
             let rootId = block_id;
             let targetName = block_id || "";
             if (!rootId) {
-              const page = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+              const page = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
               if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
               if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
               rootId = page.id;
@@ -19902,17 +19915,17 @@ ${systemPrompt}
             }
             const depth = Math.max(1, Math.min(Number(max_depth) || 2, 5));
             const maxNodes = Math.max(1, Math.min(Number(limit) || 50, 200));
-            const blocks = await AIAssistant3._collectBlockTree(rootId, settings.notionApiKey, maxNodes, depth);
+            const blocks = await AIAssistant2._collectBlockTree(rootId, settings.notionApiKey, maxNodes, depth);
             if (blocks.length === 0) {
               return `\u9875\u9762\u6216\u5757\u300C${targetName}\u300D\u6CA1\u6709\u53EF\u8BFB\u53D6\u7684\u5B50\u5757\u3002`;
             }
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u5757\u7ED3\u6784",
               fields: [
                 { label: "\u76EE\u6807", value: targetName },
                 { label: "\u5757\u6570", value: blocks.length }
               ],
-              bullets: blocks.map((block) => AIAssistant3._formatBlockSummary(block, block._depth || 0).replace(/^- /, ""))
+              bullets: blocks.map((block) => AIAssistant2._formatBlockSummary(block, block._depth || 0).replace(/^- /, ""))
             });
           }
         },
@@ -19928,7 +19941,7 @@ ${systemPrompt}
             const text = (comment.rich_text || []).map((rt) => rt.plain_text || "").join("").trim() || "(\u7A7A\u8BC4\u8BBA)";
             const author = ((_a = comment.created_by) == null ? void 0 : _a.name) || ((_c = (_b = comment.created_by) == null ? void 0 : _b.person) == null ? void 0 : _c.email) || ((_d = comment.created_by) == null ? void 0 : _d.id) || "\u672A\u77E5\u7528\u6237";
             const discussionId = ((_e = comment.discussion_id) == null ? void 0 : _e.replace(/-/g, "")) || "";
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u8BC4\u8BBA\u8BE6\u60C5",
               fields: [
                 { label: "\u8BC4\u8BBAID", value: ((_f = comment.id) == null ? void 0 : _f.replace(/-/g, "")) || comment_id },
@@ -20051,7 +20064,7 @@ ${systemPrompt}
               const sourceDb = page._sourceDb ? ` [\u6765\u6E90: ${page._sourceDb}]` : "";
               return `${i + 1}. ${title}${author ? ` (\u4F5C\u8005: ${author})` : ""}${sourceDb} [ID: ${id}]`;
             });
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u6570\u636E\u5E93\u67E5\u8BE2\u7ED3\u679C",
               fields: [
                 { label: "\u603B\u6570", value: total },
@@ -20069,11 +20082,11 @@ ${systemPrompt}
           execute: async (args, settings) => {
             const { page_name, page_id } = args;
             if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
-            const page = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const page = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
             if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            const content = await AIAssistant3._extractPageContent(page.id, settings.notionApiKey, 4e3);
-            return content.trim() ? AIAssistant3._formatToolResult({
+            const content = await AIAssistant2._extractPageContent(page.id, settings.notionApiKey, 4e3);
+            return content.trim() ? AIAssistant2._formatToolResult({
               title: "\u9875\u9762\u5185\u5BB9",
               fields: [
                 { label: "\u76EE\u6807", value: page.name }
@@ -20089,13 +20102,13 @@ ${systemPrompt}
           execute: async (args, settings) => {
             const { page_name, page_id } = args;
             if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
-            const page = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const page = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
             if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
             try {
               const response = await NotionAPI2.fetchPageMarkdown(page.id, settings.notionApiKey);
               const markdown = String(response.markdown || "").trim();
-              return markdown ? AIAssistant3._formatToolResult({
+              return markdown ? AIAssistant2._formatToolResult({
                 title: "\u9875\u9762 Markdown",
                 fields: [
                   { label: "\u76EE\u6807", value: page.name },
@@ -20104,11 +20117,11 @@ ${systemPrompt}
                 bullets: markdown.length > 2e3 ? [`\u5185\u5BB9\u8FC7\u957F\uFF0C\u5DF2\u622A\u65AD\u663E\u793A\u524D 2000 \u5B57\u7B26`, markdown.slice(0, 2e3)] : markdown.split("\n").filter(Boolean)
               }) : `\u9875\u9762\u300C${page.name}\u300D\u5F53\u524D\u6CA1\u6709 Markdown \u5185\u5BB9\u3002`;
             } catch (error) {
-              const fallback = await AIAssistant3._extractPageContent(page.id, settings.notionApiKey, 6e3);
+              const fallback = await AIAssistant2._extractPageContent(page.id, settings.notionApiKey, 6e3);
               if (!fallback.trim()) {
                 return `\u9875\u9762\u300C${page.name}\u300D\u6CA1\u6709\u53EF\u8BFB\u53D6\u7684\u5185\u5BB9\u3002`;
               }
-              return AIAssistant3._formatToolResult({
+              return AIAssistant2._formatToolResult({
                 title: "\u9875\u9762 Markdown",
                 fields: [
                   { label: "\u76EE\u6807", value: page.name },
@@ -20133,7 +20146,7 @@ ${systemPrompt}
               dbName = "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93";
             }
             if (!dbId && dbName) {
-              const resolved = await AIAssistant3._resolveDatabaseId(dbName, null, settings.notionApiKey);
+              const resolved = await AIAssistant2._resolveDatabaseId(dbName, null, settings.notionApiKey);
               if (resolved == null ? void 0 : resolved.error) return `\u9519\u8BEF: ${resolved.error}`;
               if (!resolved) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${dbName}\u300D\u3002`;
               dbId = resolved.id;
@@ -20152,7 +20165,7 @@ ${systemPrompt}
               }
               bullets.push(`${name}: ${prop.type}${extra}`);
             }
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u6570\u636E\u5E93\u7ED3\u6784",
               fields: [
                 { label: "\u6807\u9898", value: title },
@@ -20171,7 +20184,7 @@ ${systemPrompt}
             let blockId = block_id;
             let targetName = block_id || "";
             if (!blockId) {
-              const page = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+              const page = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
               if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
               if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
               blockId = page.id;
@@ -20189,8 +20202,8 @@ ${systemPrompt}
             if (comments.length === 0) {
               return `\u9875\u9762\u6216\u5757\u300C${targetName || blockId}\u300D\u76EE\u524D\u6CA1\u6709\u672A\u89E3\u51B3\u8BC4\u8BBA\u3002`;
             }
-            const shown = comments.slice(0, safeLimit).map(AIAssistant3._formatCommentSummary);
-            return AIAssistant3._formatToolResult({
+            const shown = comments.slice(0, safeLimit).map(AIAssistant2._formatCommentSummary);
+            return AIAssistant2._formatToolResult({
               title: "\u8BC4\u8BBA\u5217\u8868",
               fields: [
                 { label: "\u76EE\u6807", value: targetName || blockId },
@@ -20208,7 +20221,7 @@ ${systemPrompt}
           execute: async (args, settings) => {
             const { limit = 20, query = "" } = args;
             const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 50));
-            let users = await AIAssistant3._collectWorkspaceUsers(settings.notionApiKey, safeLimit);
+            let users = await AIAssistant2._collectWorkspaceUsers(settings.notionApiKey, safeLimit);
             const keyword = String(query || "").trim().toLowerCase();
             if (keyword) {
               users = users.filter((user) => {
@@ -20221,13 +20234,13 @@ ${systemPrompt}
             if (users.length === 0) {
               return keyword ? `\u6CA1\u6709\u627E\u5230\u540D\u79F0\u6216\u90AE\u7BB1\u5305\u542B\u300C${query}\u300D\u7684\u7528\u6237\u3002` : "\u5F53\u524D\u5DE5\u4F5C\u533A\u6CA1\u6709\u53EF\u89C1\u7528\u6237\u3002";
             }
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u5DE5\u4F5C\u533A\u7528\u6237\u5217\u8868",
               fields: [
                 { label: "\u4EBA\u6570", value: users.length },
                 { label: "\u7B5B\u9009", value: keyword || "-" }
               ],
-              bullets: users.map(AIAssistant3._formatUserSummary)
+              bullets: users.map(AIAssistant2._formatUserSummary)
             });
           }
         },
@@ -20237,10 +20250,10 @@ ${systemPrompt}
           level: 0,
           execute: async (args, settings) => {
             const user = await NotionAPI2.getSelf(settings.notionApiKey);
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u5F53\u524D\u8EAB\u4EFD",
               fields: [
-                { label: "\u7528\u6237", value: AIAssistant3._formatUserSummary(user) }
+                { label: "\u7528\u6237", value: AIAssistant2._formatUserSummary(user) }
               ]
             });
           }
@@ -20253,16 +20266,16 @@ ${systemPrompt}
             var _a, _b, _c, _d;
             const { user_id, query } = args;
             if (!user_id && !query) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B user_id \u6216 query\u3002";
-            const user = await AIAssistant3._resolveUserIdentity(user_id, query, settings.notionApiKey);
+            const user = await AIAssistant2._resolveUserIdentity(user_id, query, settings.notionApiKey);
             if (!user) {
               return `\u6CA1\u6709\u627E\u5230\u7528\u6237\u300C${query || user_id}\u300D\u3002`;
             }
             const details = [
-              { label: "\u7528\u6237", value: AIAssistant3._formatUserSummary(user) },
+              { label: "\u7528\u6237", value: AIAssistant2._formatUserSummary(user) },
               { label: "bot \u6240\u6709\u8005\u7C7B\u578B", value: ((_b = (_a = user.bot) == null ? void 0 : _a.owner) == null ? void 0 : _b.type) || "-" },
               { label: "workspace", value: ((_d = (_c = user.bot) == null ? void 0 : _c.owner) == null ? void 0 : _d.workspace_name) || "-" }
             ];
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u5DE5\u4F5C\u533A\u7528\u6237\u8BE6\u60C5",
               fields: details
             });
@@ -20333,7 +20346,7 @@ ${systemPrompt}
               const url = ((_l = (_k = page.properties) == null ? void 0 : _k["\u94FE\u63A5"]) == null ? void 0 : _l.url) || "";
               return `[${src}${srcType ? "/" + srcType : ""}] ${title}${url ? ` (${url})` : ""}`;
             });
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u8DE8\u6E90\u641C\u7D22\u7ED3\u679C",
               fields: [
                 { label: "\u603B\u6570", value: results.length },
@@ -20391,7 +20404,7 @@ ${systemPrompt}
             for (const [cat, count] of topCats) {
               bullets.push(`\u5206\u7C7B ${cat}: ${count} \u6761`);
             }
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u8DE8\u6E90\u6570\u636E\u7EDF\u8BA1",
               fields: [
                 { label: "\u603B\u6570", value: allPages.length },
@@ -20462,7 +20475,7 @@ ${candidateList}
 
 \u8BF7\u4ECE\u5019\u9009\u5217\u8868\u4E2D\u9009\u51FA\u6700\u76F8\u4F3C\u7684 5 \u4E2A\uFF08\u6309\u76F8\u4F3C\u5EA6\u6392\u5E8F\uFF09\uFF0C\u53EA\u56DE\u590D\u7F16\u53F7\uFF0C\u7528\u9017\u53F7\u5206\u9694\u3002`;
             try {
-              const aiResult = await AIService3.request(prompt2, settings);
+              const aiResult = await AIService2.request(prompt2, settings);
               const indices = ((_h = aiResult.match(/\d+/g)) == null ? void 0 : _h.map((n) => parseInt(n) - 1).filter((i) => i >= 0 && i < candidates.length)) || [];
               if (indices.length === 0) {
                 return "AI \u672A\u80FD\u8BC6\u522B\u76F8\u4F3C\u5185\u5BB9\u3002";
@@ -20475,7 +20488,7 @@ ${candidateList}
                 const url = ((_o = (_n = p.properties) == null ? void 0 : _n["\u94FE\u63A5"]) == null ? void 0 : _o.url) || "";
                 bullets.push(`[${src}] ${t}${url ? ` (${url})` : ""}`);
               }
-              return AIAssistant3._formatToolResult({
+              return AIAssistant2._formatToolResult({
                 title: "\u76F8\u4F3C\u5185\u5BB9\u63A8\u8350",
                 fields: [
                   { label: "\u53C2\u8003\u9875\u9762", value: refTitle },
@@ -20550,10 +20563,10 @@ ${candidateList}
                 const prompt2 = `\u4E3A\u4EE5\u4E0B\u5185\u5BB9\u751F\u6210 ${tag_count} \u4E2A\u7B80\u77ED\u6807\u7B7E\uFF08\u6BCF\u4E2A\u6807\u7B7E 2-4 \u4E2A\u5B57\uFF09\uFF0C\u7528\u9017\u53F7\u5206\u9694\uFF0C\u53EA\u56DE\u590D\u6807\u7B7E\uFF1A
 \u6807\u9898: ${title}
 \u63CF\u8FF0: ${desc}`;
-                const result = await AIService3.request(prompt2, settings);
+                const result = await AIService2.request(prompt2, settings);
                 const tags = result.split(/[,，]/).map((t) => t.trim()).filter((t) => t.length > 0 && t.length <= 20).slice(0, tag_count);
                 if (tags.length > 0) {
-                  await AIAssistant3._executeGuardedPageWrite(
+                  await AIAssistant2._executeGuardedPageWrite(
                     "updatePage",
                     { id: page.id, name: title || page.id },
                     () => NotionAPI2.request("PATCH", `/pages/${page.id}`, {
@@ -20582,10 +20595,10 @@ ${candidateList}
             const { page_name, page_id, content } = args;
             if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
             if (!content) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B\u8981\u8FFD\u52A0\u7684 content\u3002";
-            const page = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const page = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
             if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            await AIAssistant3._executeGuardedPageWrite(
+            await AIAssistant2._executeGuardedPageWrite(
               "appendBlocks",
               page,
               async () => {
@@ -20593,13 +20606,13 @@ ${candidateList}
                   await NotionAPI2.appendPageMarkdown(page.id, content, settings.notionApiKey);
                 } catch (error) {
                   console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
-                  const blocks = AIAssistant3._textToBlocks(content);
+                  const blocks = AIAssistant2._textToBlocks(content);
                   await NotionAPI2.appendBlocks(page.id, blocks, settings.notionApiKey);
                 }
               },
               settings
             );
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u9875\u9762\u5185\u5BB9\u8FFD\u52A0\u5B8C\u6210",
               fields: [
                 { label: "\u76EE\u6807", value: page.name },
@@ -20618,13 +20631,13 @@ ${candidateList}
             let parentId = block_id;
             let targetName = block_id || "";
             if (!parentId) {
-              const page = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+              const page = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
               if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
               if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
               parentId = page.id;
               targetName = page.name;
             }
-            const blocks = AIAssistant3._textToBlocks(String(content));
+            const blocks = AIAssistant2._textToBlocks(String(content));
             if (blocks.length === 0) return "\u9519\u8BEF: \u672A\u80FD\u4ECE content \u751F\u6210\u6709\u6548\u5757\u3002";
             const options = {};
             if (insert_position === "after_block") {
@@ -20633,13 +20646,13 @@ ${candidateList}
             } else if (insert_position !== "end") {
               return "\u9519\u8BEF: insert_position \u4EC5\u652F\u6301 end \u6216 after_block\u3002";
             }
-            await AIAssistant3._executeGuardedWrite(
+            await AIAssistant2._executeGuardedWrite(
               "appendBlocks",
               () => NotionAPI2.appendBlockChildren(parentId, blocks, settings.notionApiKey, options),
               { itemName: targetName || parentId, pageId: parentId },
               settings
             );
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u5757\u63D2\u5165\u5B8C\u6210",
               fields: [
                 { label: "\u76EE\u6807", value: targetName || parentId },
@@ -20657,16 +20670,16 @@ ${candidateList}
             const { page_name, page_id, updates } = args;
             if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
             if (!Array.isArray(updates) || updates.length === 0) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B updates \u6570\u7EC4\u3002";
-            const page = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const page = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
             if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            await AIAssistant3._executeGuardedPageWrite(
+            await AIAssistant2._executeGuardedPageWrite(
               "updatePageMarkdown",
               page,
               () => NotionAPI2.searchReplacePageMarkdown(page.id, updates, settings.notionApiKey),
               settings
             );
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "Markdown \u7CBE\u786E\u66FF\u6362\u5B8C\u6210",
               fields: [
                 { label: "\u76EE\u6807", value: page.name },
@@ -20683,16 +20696,16 @@ ${candidateList}
             const { page_name, page_id, new_markdown } = args;
             if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
             if (!new_markdown) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B new_markdown\u3002";
-            const page = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const page = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
             if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            await AIAssistant3._executeGuardedPageWrite(
+            await AIAssistant2._executeGuardedPageWrite(
               "replacePageMarkdown",
               page,
               () => NotionAPI2.replacePageMarkdown(page.id, new_markdown, settings.notionApiKey, true),
               settings
             );
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "Markdown \u6574\u9875\u66FF\u6362\u5B8C\u6210",
               fields: [
                 { label: "\u76EE\u6807", value: page.name },
@@ -20724,12 +20737,12 @@ ${candidateList}
             let page = null;
             let targetName = block_id || resolvedDiscussionId || comment_id || "";
             if (!block_id && !resolvedDiscussionId) {
-              page = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+              page = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
               if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
               if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
               targetName = page.name;
             }
-            const result = await AIAssistant3._executeGuardedWrite(
+            const result = await AIAssistant2._executeGuardedWrite(
               "createComment",
               () => NotionAPI2.createComment({
                 pageId: page == null ? void 0 : page.id,
@@ -20741,7 +20754,7 @@ ${candidateList}
               settings
             );
             const newCommentId = ((_a = result.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u8BC4\u8BBA\u5DF2\u521B\u5EFA",
               fields: [
                 { label: "\u76EE\u6807", value: targetName || "\u8BC4\u8BBA\u76EE\u6807" },
@@ -20778,7 +20791,7 @@ ${candidateList}
                 updateProps[property] = { rich_text: [{ type: "text", text: { content: String(value) } }] };
                 break;
             }
-            await AIAssistant3._executeGuardedPageWrite(
+            await AIAssistant2._executeGuardedPageWrite(
               "updatePage",
               { id: page_id.replace(/-/g, ""), name: page_id },
               () => NotionAPI2.updatePage(page_id.replace(/-/g, ""), updateProps, settings.notionApiKey),
@@ -20799,14 +20812,14 @@ ${candidateList}
             let parentDesc = "";
             let dbId = database_id;
             if (dbId || database_name) {
-              const resolved = await AIAssistant3._resolveDatabaseId(database_name, null, settings.notionApiKey);
+              const resolved = await AIAssistant2._resolveDatabaseId(database_name, null, settings.notionApiKey);
               const targetDb = dbId ? { id: Utils2.extractNotionId(dbId) || String(dbId).replace(/-/g, ""), name: database_name || dbId } : resolved;
               if (!dbId && (resolved == null ? void 0 : resolved.error)) return `\u9519\u8BEF: ${resolved.error}`;
               if (!targetDb) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${database_name || database_id}\u300D\u3002`;
               parent = { database_id: targetDb.id };
               parentDesc = `\u6570\u636E\u5E93\u300C${targetDb.name}\u300D`;
             } else if (parent_page_id || parent_page_name) {
-              const targetPage = await AIAssistant3._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
+              const targetPage = await AIAssistant2._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
               if (targetPage == null ? void 0 : targetPage.error) return `\u9519\u8BEF: ${targetPage.error}`;
               if (!targetPage) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u7236\u9875\u9762\u300C${parent_page_name || parent_page_id}\u300D\u3002`;
               parent = { page_id: targetPage.id };
@@ -20816,23 +20829,23 @@ ${candidateList}
               parentDesc = "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93";
             }
             if (!parent) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B database_name/database_id \u6216 parent_page_name/parent_page_id\uFF0C\u6216\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
-            const properties = AIAssistant3._normalizeNotionProperties(args.properties);
+            const properties = AIAssistant2._normalizeNotionProperties(args.properties);
             if (parent.database_id) {
               properties["\u6807\u9898"] = { title: [{ text: { content: title } }] };
             } else {
               properties.title = { title: [{ text: { content: title } }] };
             }
-            const children = content ? AIAssistant3._textToBlocks(String(content)) : [];
-            const icon = AIAssistant3._buildPageIconPayload(args);
-            const cover = AIAssistant3._buildPageCoverPayload(args);
-            const page = await AIAssistant3._executeGuardedWrite(
+            const children = content ? AIAssistant2._textToBlocks(String(content)) : [];
+            const icon = AIAssistant2._buildPageIconPayload(args);
+            const cover = AIAssistant2._buildPageCoverPayload(args);
+            const page = await AIAssistant2._executeGuardedWrite(
               "createDatabasePage",
               () => NotionAPI2.createPageObject(parent, properties, children, settings.notionApiKey, { icon, cover }),
               { itemName: title },
               settings
             );
             const newId = ((_a = page.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u9875\u9762\u521B\u5EFA\u5B8C\u6210",
               fields: [
                 { label: "\u6807\u9898", value: title },
@@ -20851,12 +20864,12 @@ ${candidateList}
             if (pages.length === 0) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B pages \u6570\u7EC4\u3002";
             let parent = null;
             if (args.database_id || args.database_name) {
-              const targetDb = args.database_id ? { id: Utils2.extractNotionId(args.database_id) || String(args.database_id).replace(/-/g, ""), name: args.database_name || args.database_id } : await AIAssistant3._resolveDatabaseId(args.database_name, null, settings.notionApiKey);
+              const targetDb = args.database_id ? { id: Utils2.extractNotionId(args.database_id) || String(args.database_id).replace(/-/g, ""), name: args.database_name || args.database_id } : await AIAssistant2._resolveDatabaseId(args.database_name, null, settings.notionApiKey);
               if (targetDb == null ? void 0 : targetDb.error) return `\u9519\u8BEF: ${targetDb.error}`;
               if (!targetDb) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${args.database_name || args.database_id}\u300D\u3002`;
               parent = { database_id: targetDb.id };
             } else if (args.parent_page_id || args.parent_page_name) {
-              const targetPage = await AIAssistant3._resolvePageId(args.parent_page_name, args.parent_page_id, settings.notionApiKey);
+              const targetPage = await AIAssistant2._resolvePageId(args.parent_page_name, args.parent_page_id, settings.notionApiKey);
               if (targetPage == null ? void 0 : targetPage.error) return `\u9519\u8BEF: ${targetPage.error}`;
               if (!targetPage) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u7236\u9875\u9762\u300C${args.parent_page_name || args.parent_page_id}\u300D\u3002`;
               parent = { page_id: targetPage.id };
@@ -20875,16 +20888,16 @@ ${candidateList}
                 continue;
               }
               try {
-                const properties = AIAssistant3._normalizeNotionProperties(item.properties);
+                const properties = AIAssistant2._normalizeNotionProperties(item.properties);
                 if (parent.database_id) {
                   properties["\u6807\u9898"] = { title: [{ text: { content: title } }] };
                 } else {
                   properties.title = { title: [{ text: { content: title } }] };
                 }
-                const children = item.content ? AIAssistant3._textToBlocks(String(item.content)) : [];
-                const icon = AIAssistant3._buildPageIconPayload(item);
-                const cover = AIAssistant3._buildPageCoverPayload(item);
-                await AIAssistant3._executeGuardedWrite(
+                const children = item.content ? AIAssistant2._textToBlocks(String(item.content)) : [];
+                const icon = AIAssistant2._buildPageIconPayload(item);
+                const cover = AIAssistant2._buildPageCoverPayload(item);
+                await AIAssistant2._executeGuardedWrite(
                   "createDatabasePage",
                   () => NotionAPI2.createPageObject(parent, properties, children, settings.notionApiKey, { icon, cover }),
                   { itemName: title },
@@ -20899,7 +20912,7 @@ ${candidateList}
                 await Utils2.sleep(delay);
               }
             }
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u6279\u91CF\u9875\u9762\u521B\u5EFA\u5B8C\u6210",
               fields: [
                 { label: "\u6210\u529F", value: success },
@@ -20916,25 +20929,25 @@ ${candidateList}
           execute: async (args, settings) => {
             const { page_name, page_id, is_locked } = args;
             if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
-            const page = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const page = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
             if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
             const payload = {};
-            const icon = AIAssistant3._buildPageIconPayload(args);
-            const cover = AIAssistant3._buildPageCoverPayload(args);
+            const icon = AIAssistant2._buildPageIconPayload(args);
+            const cover = AIAssistant2._buildPageCoverPayload(args);
             if (icon !== void 0) payload.icon = icon;
             if (cover !== void 0) payload.cover = cover;
             if (typeof is_locked === "boolean") payload.is_locked = is_locked;
             if (Object.keys(payload).length === 0) {
               return "\u9519\u8BEF: \u8BF7\u81F3\u5C11\u63D0\u4F9B\u4E00\u4E2A\u53EF\u66F4\u65B0\u5B57\u6BB5\uFF0C\u5982 icon_emoji\u3001icon_url\u3001cover_url\u3001clear_icon\u3001clear_cover\u3001is_locked\u3002";
             }
-            await AIAssistant3._executeGuardedPageWrite(
+            await AIAssistant2._executeGuardedPageWrite(
               "updatePage",
               page,
               () => NotionAPI2.updatePageMeta(page.id, payload, settings.notionApiKey),
               settings
             );
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u9875\u9762\u5143\u6570\u636E\u66F4\u65B0\u5B8C\u6210",
               fields: [
                 { label: "\u76EE\u6807", value: page.name },
@@ -20948,7 +20961,7 @@ ${candidateList}
           params: "page_name/page_id/page_ids, property/value/type(\u5C5E\u6027), updates(\u5C5E\u6027\u5BF9\u8C61), icon_emoji/icon_url/cover_url/clear_icon/clear_cover/is_locked",
           level: 1,
           execute: async (args, settings) => {
-            const targets = await AIAssistant3._resolvePageTargets(args, settings);
+            const targets = await AIAssistant2._resolvePageTargets(args, settings);
             if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
             if (!targets || targets.length === 0) {
               return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u66F4\u65B0\u7684\u9875\u9762\u3002";
@@ -20956,11 +20969,11 @@ ${candidateList}
             if (targets.length > 1) {
               return "\u9519\u8BEF: update_page \u4EC5\u652F\u6301\u5355\u9875\u9762\uFF0C\u8BF7\u6539\u7528 batch_update_pages\u3002";
             }
-            const result = await AIAssistant3._applyPageUpdatesToTargets(targets, args, settings);
+            const result = await AIAssistant2._applyPageUpdatesToTargets(targets, args, settings);
             if (result.failed > 0) {
               return `\u66F4\u65B0\u9875\u9762\u300C${targets[0].name}\u300D\u5931\u8D25\u3002`;
             }
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u9875\u9762\u66F4\u65B0\u5B8C\u6210",
               fields: [
                 { label: "\u76EE\u6807", value: targets[0].name },
@@ -20975,13 +20988,13 @@ ${candidateList}
           params: "page_ids(\u53EF\u9009), page_title(\u53EF\u9009), database_name/database_id(\u53EF\u9009), property/value/type(\u5C5E\u6027\u66F4\u65B0), updates(\u5C5E\u6027\u5BF9\u8C61), icon_emoji/icon_url/cover_url/clear_icon/clear_cover/is_locked(\u5143\u6570\u636E), limit(\u9ED8\u8BA420)",
           level: 1,
           execute: async (args, settings) => {
-            const targets = await AIAssistant3._resolvePageTargets(args, settings);
+            const targets = await AIAssistant2._resolvePageTargets(args, settings);
             if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
             if (!targets || targets.length === 0) {
               return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u66F4\u65B0\u7684\u9875\u9762\u3002\u8BF7\u63D0\u4F9B page_id/page_name/page_ids\uFF0C\u6216\u63D0\u4F9B database_name/database_id + page_title\u3002";
             }
-            const { success, failed } = await AIAssistant3._applyPageUpdatesToTargets(targets, args, settings);
-            return AIAssistant3._formatToolResult({
+            const { success, failed } = await AIAssistant2._applyPageUpdatesToTargets(targets, args, settings);
+            return AIAssistant2._formatToolResult({
               title: "\u6279\u91CF\u9875\u9762\u66F4\u65B0\u5B8C\u6210",
               fields: [
                 { label: "\u6210\u529F", value: success },
@@ -21000,14 +21013,14 @@ ${candidateList}
             if (!block_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B block_id\u3002";
             if (content === void 0 || content === null) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B content\u3002";
             const block = await NotionAPI2.fetchBlock(block_id, settings.notionApiKey);
-            const payload = AIAssistant3._buildBlockUpdatePayload(block, content, { checked, color });
-            await AIAssistant3._executeGuardedWrite(
+            const payload = AIAssistant2._buildBlockUpdatePayload(block, content, { checked, color });
+            await AIAssistant2._executeGuardedWrite(
               "updateBlock",
               () => NotionAPI2.updateBlock(block_id.replace(/-/g, ""), payload, settings.notionApiKey),
               { itemName: String(block_id).replace(/-/g, "") },
               settings
             );
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u5757\u5185\u5BB9\u66F4\u65B0\u5B8C\u6210",
               fields: [
                 { label: "\u5757ID", value: String(block_id).replace(/-/g, "") },
@@ -21057,10 +21070,10 @@ ${candidateList}
           execute: async (args, settings) => {
             const { page_id, target_database_name, target_database_id } = args;
             if (!page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_id\u3002";
-            const target = await AIAssistant3._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+            const target = await AIAssistant2._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
             if (target == null ? void 0 : target.error) return `\u9519\u8BEF: ${target.error}`;
             if (!target) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002`;
-            await AIAssistant3._executeGuardedPageWrite(
+            await AIAssistant2._executeGuardedPageWrite(
               "movePage",
               { id: page_id.replace(/-/g, ""), name: page_id },
               () => NotionAPI2.movePage(page_id.replace(/-/g, ""), target.id, "database", settings.notionApiKey),
@@ -21076,10 +21089,10 @@ ${candidateList}
           execute: async (args, settings) => {
             const { page_id, target_database_name, target_database_id } = args;
             if (!page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_id\u3002";
-            const target = await AIAssistant3._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+            const target = await AIAssistant2._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
             if (target == null ? void 0 : target.error) return `\u9519\u8BEF: ${target.error}`;
             if (!target) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002`;
-            await AIAssistant3._executeGuardedPageWrite(
+            await AIAssistant2._executeGuardedPageWrite(
               "duplicatePage",
               { id: page_id.replace(/-/g, ""), name: page_id },
               () => NotionAPI2.duplicatePage(page_id.replace(/-/g, ""), target.id, "database", settings.notionApiKey),
@@ -21093,7 +21106,7 @@ ${candidateList}
           params: "page_id/page_name/page_ids(\u53EF\u9009), page_title + database_name/database_id(\u6279\u91CF\u5F52\u6863,\u53EF\u9009), limit(\u9ED8\u8BA420)",
           level: 2,
           execute: async (args, settings) => {
-            const targets = await AIAssistant3._resolvePageTargets(args, settings);
+            const targets = await AIAssistant2._resolvePageTargets(args, settings);
             if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
             if (!targets || targets.length === 0) {
               return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u5F52\u6863\u7684\u9875\u9762\u3002";
@@ -21104,7 +21117,7 @@ ${candidateList}
             for (let i = 0; i < targets.length; i++) {
               const target = targets[i];
               try {
-                await AIAssistant3._executeGuardedPageWrite(
+                await AIAssistant2._executeGuardedPageWrite(
                   "deletePage",
                   target,
                   () => NotionAPI2.deletePage(target.id, settings.notionApiKey),
@@ -21119,7 +21132,7 @@ ${candidateList}
                 await Utils2.sleep(delay);
               }
             }
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u9875\u9762\u5F52\u6863\u5B8C\u6210",
               fields: [
                 { label: "\u6210\u529F", value: success },
@@ -21134,7 +21147,7 @@ ${candidateList}
           params: "page_id/page_name/page_ids(\u53EF\u9009), page_title + database_name/database_id(\u6279\u91CF\u6062\u590D,\u53EF\u9009), limit(\u9ED8\u8BA420)",
           level: 2,
           execute: async (args, settings) => {
-            const targets = await AIAssistant3._resolvePageTargets(args, settings);
+            const targets = await AIAssistant2._resolvePageTargets(args, settings);
             if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
             if (!targets || targets.length === 0) {
               return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u6062\u590D\u7684\u9875\u9762\u3002";
@@ -21145,7 +21158,7 @@ ${candidateList}
             for (let i = 0; i < targets.length; i++) {
               const target = targets[i];
               try {
-                await AIAssistant3._executeGuardedPageWrite(
+                await AIAssistant2._executeGuardedPageWrite(
                   "restorePage",
                   target,
                   () => NotionAPI2.restorePage(target.id, settings.notionApiKey),
@@ -21160,7 +21173,7 @@ ${candidateList}
                 await Utils2.sleep(delay);
               }
             }
-            return AIAssistant3._formatToolResult({
+            return AIAssistant2._formatToolResult({
               title: "\u9875\u9762\u6062\u590D\u5B8C\u6210",
               fields: [
                 { label: "\u6210\u529F", value: success },
@@ -21180,7 +21193,7 @@ ${candidateList}
             if (!name) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B name\uFF08\u6570\u636E\u5E93\u540D\u79F0\uFF09\u3002";
             let parentPage = null;
             if (parent_page_id || parent_page_name) {
-              parentPage = await AIAssistant3._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
+              parentPage = await AIAssistant2._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
               if (parentPage == null ? void 0 : parentPage.error) return `\u9519\u8BEF: ${parentPage.error}`;
               if (!parentPage) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u7236\u9875\u9762\u300C${parent_page_name || parent_page_id}\u300D\u3002`;
             } else {
@@ -21199,7 +21212,7 @@ ${candidateList}
               "\u6807\u7B7E": { multi_select: { options: [] } },
               "\u4F5C\u8005": { rich_text: {} }
             };
-            const result = await AIAssistant3._executeGuardedWrite(
+            const result = await AIAssistant2._executeGuardedWrite(
               "createDatabase",
               () => NotionAPI2.createDatabase(parentPage.id, name, properties, settings.notionApiKey),
               { itemName: name },
@@ -21215,7 +21228,7 @@ ${candidateList}
           params: "research_topic(\u7814\u7A76\u4E3B\u9898), scope(\u8303\u56F4:workspace/database,\u9ED8\u8BA4workspace)",
           level: 0,
           execute: async (args, settings) => {
-            return await AIAssistant3.handleDeepResearch(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+            return await AIAssistant2.handleDeepResearch(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
           }
         },
         // === 公式编写辅助 (Level 1) ===
@@ -21248,7 +21261,7 @@ ${schemaDesc ? schemaDesc + "\n" : ""}\u7528\u6237\u9700\u6C42: ${description}
 \u793A\u4F8B: <\u516C\u5F0F\u8FD4\u56DE\u503C\u793A\u4F8B>
 
 \u6CE8\u610F\uFF1A\u4F7F\u7528 Notion \u7684\u516C\u5F0F\u8BED\u6CD5\uFF08prop(), if(), contains() \u7B49\u51FD\u6570\uFF09\u3002`;
-            const result = await AIService3.requestChat(prompt2, settings, 500);
+            const result = await AIService2.requestChat(prompt2, settings, 500);
             let response = `\u{1F4D0} **Notion \u516C\u5F0F\u751F\u6210**
 
 ${result}`;
@@ -21265,7 +21278,7 @@ ${result}`;
           params: "page_name/page_id(\u76EE\u6807\u9875\u9762), style(\u6458\u8981\u98CE\u683C:brief/detailed/bullet,\u9ED8\u8BA4brief)",
           level: 0,
           execute: async (args, settings) => {
-            return await AIAssistant3.handleSummarize(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+            return await AIAssistant2.handleSummarize(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
           }
         },
         brainstorm_ideas: {
@@ -21273,7 +21286,7 @@ ${result}`;
           params: "topic(\u4E3B\u9898), count(\u751F\u6210\u6570\u91CF,\u9ED8\u8BA410), style(\u98CE\u683C:practical/creative/wild,\u9ED8\u8BA4practical)",
           level: 0,
           execute: async (args, settings) => {
-            return await AIAssistant3.handleBrainstorm(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+            return await AIAssistant2.handleBrainstorm(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
           }
         },
         proofread_content: {
@@ -21281,7 +21294,7 @@ ${result}`;
           params: "page_name/page_id(\u76EE\u6807\u9875\u9762)",
           level: 0,
           execute: async (args, settings) => {
-            return await AIAssistant3.handleProofread(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+            return await AIAssistant2.handleProofread(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
           }
         },
         batch_translate_database: {
@@ -21289,7 +21302,7 @@ ${result}`;
           params: "database_name/database_id(\u76EE\u6807\u6570\u636E\u5E93), target_language(\u76EE\u6807\u8BED\u8A00,\u5982\u82F1\u6587/\u65E5\u6587)",
           level: 1,
           execute: async (args, settings) => {
-            return await AIAssistant3.handleBatchTranslate(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+            return await AIAssistant2.handleBatchTranslate(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
           }
         },
         extract_to_database: {
@@ -21297,7 +21310,7 @@ ${result}`;
           params: "page_name/page_id(\u6E90\u9875\u9762), database_name(\u65B0\u6570\u636E\u5E93\u540D\u79F0), extraction_prompt(\u63D0\u53D6\u8981\u6C42\u63CF\u8FF0)",
           level: 2,
           execute: async (args, settings) => {
-            return await AIAssistant3.handleExtractToDatabase(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+            return await AIAssistant2.handleExtractToDatabase(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
           }
         },
         generate_structured_pages: {
@@ -21305,7 +21318,7 @@ ${result}`;
           params: "topic(\u4E3B\u9898), structure_prompt(\u7ED3\u6784\u63CF\u8FF0), parent_page_name/parent_page_id(\u7236\u9875\u9762,\u53EF\u9009)",
           level: 2,
           execute: async (args, settings) => {
-            return await AIAssistant3.handleGeneratePages(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+            return await AIAssistant2.handleGeneratePages(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
           }
         },
         batch_analyze_pages: {
@@ -21313,7 +21326,7 @@ ${result}`;
           params: "database_name/database_id(\u76EE\u6807\u6570\u636E\u5E93), analysis_prompt(\u5206\u6790\u8981\u6C42), limit(\u5206\u6790\u9875\u6570,\u9ED8\u8BA410)",
           level: 0,
           execute: async (args, settings) => {
-            return await AIAssistant3.handleBatchAnalyze(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+            return await AIAssistant2.handleBatchAnalyze(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
           }
         }
       };
@@ -21645,14 +21658,14 @@ ${result}`;
           }
         },
         handleUpdate: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("updatePage")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u66F4\u65B0\u9875\u9762\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
           }
           ChatState2.updateLastMessage("\u6B63\u5728\u5B9A\u4F4D\u76EE\u6807\u9875\u9762...", "processing");
           try {
-            const targets = await AIAssistant3._resolvePageTargets({
+            const targets = await AIAssistant2._resolvePageTargets({
               ...params,
               page_name: params.page_name || params.keyword
             }, settings);
@@ -21665,7 +21678,7 @@ ${result}`;
               const names = targets.map((t) => `\u300C${t.name}\u300D`).join("\u3001");
               return `\u274C \u627E\u5230\u591A\u4E2A\u9875\u9762\uFF1A${names}\u3002\u8BF7\u63D0\u4F9B\u66F4\u7CBE\u786E\u7684 page_name \u6216\u76F4\u63A5\u63D0\u4F9B page_id\u3002`;
             }
-            const { success, failed } = await AIAssistant3._applyPageUpdatesToTargets(targets, params, settings);
+            const { success, failed } = await AIAssistant2._applyPageUpdatesToTargets(targets, params, settings);
             if (!batchMode && success === 1 && failed === 0) {
               return `\u2705 \u5DF2\u66F4\u65B0\u9875\u9762\u300C${targets[0].name}\u300D\u3002`;
             }
@@ -21727,7 +21740,7 @@ ${result}`;
           return allPages;
         },
         handleMove: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("movePage")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u79FB\u52A8\u9875\u9762\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
@@ -21735,7 +21748,7 @@ ${result}`;
           const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
           ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u6570\u636E\u5E93\u4FE1\u606F...", "processing");
           try {
-            let source = await AIAssistant3._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
+            let source = await AIAssistant2._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
             if (source == null ? void 0 : source.error) return `\u274C \u6E90\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${source.error}`;
             if (!source && settings.notionDatabaseId) {
               source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93" };
@@ -21743,7 +21756,7 @@ ${result}`;
             if (!source) {
               return "\u274C \u65E0\u6CD5\u786E\u5B9A\u6E90\u6570\u636E\u5E93\u3002\u8BF7\u6307\u5B9A\u6E90\u6570\u636E\u5E93\u540D\u79F0\uFF0C\u6216\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002";
             }
-            const target = await AIAssistant3._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+            const target = await AIAssistant2._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
             if (target == null ? void 0 : target.error) return `\u274C \u76EE\u6807\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${target.error}`;
             if (!target) {
               return `\u274C \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002
@@ -21754,7 +21767,7 @@ ${result}`;
               return "\u274C \u6E90\u6570\u636E\u5E93\u548C\u76EE\u6807\u6570\u636E\u5E93\u76F8\u540C\uFF0C\u65E0\u9700\u79FB\u52A8\u3002";
             }
             ChatState2.updateLastMessage(`\u6B63\u5728\u4ECE\u300C${source.name}\u300D\u83B7\u53D6\u9875\u9762...`, "processing");
-            const pages = await AIAssistant3._fetchSourcePages(source.id, settings.notionApiKey, page_title);
+            const pages = await AIAssistant2._fetchSourcePages(source.id, settings.notionApiKey, page_title);
             if (pages.length === 0) {
               return page_title ? `\u{1F4ED} \u5728\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u6807\u9898\u5305\u542B\u300C${page_title}\u300D\u7684\u9875\u9762\u3002` : `\u{1F4ED}\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u9875\u9762\u3002`;
             }
@@ -21771,7 +21784,7 @@ ${result}`;
                 "processing"
               );
               try {
-                await AIAssistant3._executeGuardedPageWrite(
+                await AIAssistant2._executeGuardedPageWrite(
                   "movePage",
                   { id: page.id, name: title },
                   () => NotionAPI2.movePage(page.id, target.id, "database", settings.notionApiKey),
@@ -21805,7 +21818,7 @@ ${result}`;
           }
         },
         handleCopy: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("duplicatePage")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u590D\u5236\u9875\u9762\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
@@ -21813,7 +21826,7 @@ ${result}`;
           const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
           ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u6570\u636E\u5E93\u4FE1\u606F...", "processing");
           try {
-            let source = await AIAssistant3._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
+            let source = await AIAssistant2._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
             if (source == null ? void 0 : source.error) return `\u274C \u6E90\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${source.error}`;
             if (!source && settings.notionDatabaseId) {
               source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93" };
@@ -21821,7 +21834,7 @@ ${result}`;
             if (!source) {
               return "\u274C \u65E0\u6CD5\u786E\u5B9A\u6E90\u6570\u636E\u5E93\u3002\u8BF7\u6307\u5B9A\u6E90\u6570\u636E\u5E93\u540D\u79F0\uFF0C\u6216\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002";
             }
-            const target = await AIAssistant3._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+            const target = await AIAssistant2._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
             if (target == null ? void 0 : target.error) return `\u274C \u76EE\u6807\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${target.error}`;
             if (!target) {
               return `\u274C \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002
@@ -21832,7 +21845,7 @@ ${result}`;
               return "\u274C \u6E90\u6570\u636E\u5E93\u548C\u76EE\u6807\u6570\u636E\u5E93\u76F8\u540C\uFF0C\u65E0\u9700\u590D\u5236\u3002";
             }
             ChatState2.updateLastMessage(`\u6B63\u5728\u4ECE\u300C${source.name}\u300D\u83B7\u53D6\u9875\u9762...`, "processing");
-            const pages = await AIAssistant3._fetchSourcePages(source.id, settings.notionApiKey, page_title);
+            const pages = await AIAssistant2._fetchSourcePages(source.id, settings.notionApiKey, page_title);
             if (pages.length === 0) {
               return page_title ? `\u{1F4ED} \u5728\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u6807\u9898\u5305\u542B\u300C${page_title}\u300D\u7684\u9875\u9762\u3002` : `\u{1F4ED}\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u9875\u9762\u3002`;
             }
@@ -21849,7 +21862,7 @@ ${result}`;
                 "processing"
               );
               try {
-                await AIAssistant3._executeGuardedPageWrite(
+                await AIAssistant2._executeGuardedPageWrite(
                   "duplicatePage",
                   { id: page.id, name: title },
                   () => NotionAPI2.duplicatePage(page.id, target.id, "database", settings.notionApiKey),
@@ -21906,9 +21919,9 @@ ${result}`;
               "processing"
             );
             try {
-              const stepResult = await AIAssistant3.executeIntent(step, settings);
-              const normalizedStepResult = AIAssistant3._normalizeExecutionResult(stepResult);
-              if (AIAssistant3._isErrorResult(normalizedStepResult)) {
+              const stepResult = await AIAssistant2.executeIntent(step, settings);
+              const normalizedStepResult = AIAssistant2._normalizeExecutionResult(stepResult);
+              if (AIAssistant2._isErrorResult(normalizedStepResult)) {
                 results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
                 aborted = true;
                 break;
@@ -21919,7 +21932,7 @@ ${result}`;
                 index: i + 1,
                 explanation: step.explanation,
                 success: false,
-                result: AIAssistant3._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
+                result: AIAssistant2._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
               });
               aborted = true;
               break;
@@ -21950,14 +21963,14 @@ ${result}`;
           for (const r of results) {
             report += `
 **\u6B65\u9AA4 ${r.index}**: ${r.explanation}
-${AIAssistant3._resultToText(r.result)}
+${AIAssistant2._resultToText(r.result)}
 `;
           }
           return report;
         },
         handleCreateDatabase: async (params, settings, explanation) => {
           var _a;
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("createDatabase")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u521B\u5EFA\u6570\u636E\u5E93\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
@@ -21970,7 +21983,7 @@ ${AIAssistant3._resultToText(r.result)}
           try {
             let parentPage = null;
             if (parent_page_id || parent_page_name) {
-              parentPage = await AIAssistant3._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
+              parentPage = await AIAssistant2._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
               if (parentPage == null ? void 0 : parentPage.error) return `\u274C \u7236\u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${parentPage.error}`;
               if (!parentPage) {
                 return `\u274C \u627E\u4E0D\u5230\u540D\u4E3A\u300C${parent_page_name}\u300D\u7684\u9875\u9762\u3002
@@ -22006,7 +22019,7 @@ ${AIAssistant3._resultToText(r.result)}
               "\u6D4F\u89C8\u6570": { number: { format: "number" } },
               "\u70B9\u8D5E\u6570": { number: { format: "number" } }
             };
-            const result = await AIAssistant3._executeGuardedWrite(
+            const result = await AIAssistant2._executeGuardedWrite(
               "createDatabase",
               () => NotionAPI2.createDatabase(parentPage.id, database_name, properties, settings.notionApiKey),
               { itemName: database_name },
@@ -22273,7 +22286,7 @@ ${AIAssistant3._resultToText(r.result)}
           return AIClassifier2.extractText(allBlocks).slice(0, maxChars);
         },
         handleWriteContent: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("appendBlocks")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u751F\u6210\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
@@ -22287,7 +22300,7 @@ ${AIAssistant3._resultToText(r.result)}
           }
           ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
           try {
-            const targetPage = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
             if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002
 
@@ -22296,10 +22309,10 @@ ${AIAssistant3._resultToText(r.result)}
             const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u751F\u6210\u52A9\u624B\u3002\u6839\u636E\u7528\u6237\u8981\u6C42\u751F\u6210\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u3002
 
 \u7528\u6237\u8981\u6C42\uFF1A${content_prompt}`;
-            const aiResponse = await AIService3.requestChat(prompt2, settings, 2e3);
+            const aiResponse = await AIService2.requestChat(prompt2, settings, 2e3);
             ChatState2.updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
             try {
-              await AIAssistant3._executeGuardedPageWrite(
+              await AIAssistant2._executeGuardedPageWrite(
                 "appendBlocks",
                 targetPage,
                 async () => {
@@ -22307,7 +22320,7 @@ ${AIAssistant3._resultToText(r.result)}
                     await NotionAPI2.appendPageMarkdown(targetPage.id, aiResponse, settings.notionApiKey);
                   } catch (error) {
                     console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
-                    const blocks = AIAssistant3._textToBlocks(aiResponse);
+                    const blocks = AIAssistant2._textToBlocks(aiResponse);
                     await NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
                   }
                 },
@@ -22327,7 +22340,7 @@ ${AIAssistant3._resultToText(r.result)}
           }
         },
         handleEditContent: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("appendBlocks")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u7F16\u8F91\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
@@ -22341,11 +22354,11 @@ ${AIAssistant3._resultToText(r.result)}
           }
           ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
           try {
-            const targetPage = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
             if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
             ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AIAssistant3._extractPageContent(targetPage.id, settings.notionApiKey);
+            const existingContent = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey);
             if (!existingContent.trim()) {
               return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u7F16\u8F91\u7684\u5185\u5BB9\u3002`;
             }
@@ -22376,7 +22389,7 @@ ${existingContent}
 
 \u7F16\u8F91\u6307\u4EE4\uFF1A
 ${content_prompt}`;
-            const editPlanRaw = await AIService3.requestChat(editPlanPrompt, settings, 2200);
+            const editPlanRaw = await AIService2.requestChat(editPlanPrompt, settings, 2200);
             const jsonMatch = editPlanRaw.match(/\{[\s\S]*\}/);
             let editPlan = null;
             if (jsonMatch) {
@@ -22390,7 +22403,7 @@ ${content_prompt}`;
             if ((editPlan == null ? void 0 : editPlan.mode) === "update_content" && Array.isArray(editPlan.content_updates) && editPlan.content_updates.length > 0) {
               ChatState2.updateLastMessage("\u6B63\u5728\u6267\u884C\u539F\u4F4D\u7CBE\u786E\u7F16\u8F91...", "processing");
               try {
-                await AIAssistant3._executeGuardedPageWrite(
+                await AIAssistant2._executeGuardedPageWrite(
                   "updatePageMarkdown",
                   targetPage,
                   () => NotionAPI2.searchReplacePageMarkdown(
@@ -22419,7 +22432,7 @@ ${content_prompt}`;
 ${existingContent}
 
 \u7F16\u8F91\u6307\u4EE4\uFF1A${content_prompt}`;
-              aiResponse = await AIService3.requestChat(prompt2, settings, 2e3);
+              aiResponse = await AIService2.requestChat(prompt2, settings, 2e3);
             }
             ChatState2.updateLastMessage("\u6B63\u5728\u5199\u5165\u7F16\u8F91\u7248\u672C...", "processing");
             const versionMarkdown = `---
@@ -22427,7 +22440,7 @@ ${existingContent}
 ## \u270F\uFE0F AI \u7F16\u8F91\u7248\u672C
 
 ${aiResponse}`;
-            await AIAssistant3._executeGuardedPageWrite(
+            await AIAssistant2._executeGuardedPageWrite(
               "appendBlocks",
               targetPage,
               async () => {
@@ -22435,7 +22448,7 @@ ${aiResponse}`;
                   await NotionAPI2.appendPageMarkdown(targetPage.id, versionMarkdown, settings.notionApiKey);
                 } catch (error) {
                   console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
-                  const contentBlocks = AIAssistant3._textToBlocks(aiResponse);
+                  const contentBlocks = AIAssistant2._textToBlocks(aiResponse);
                   const blocks = [
                     { type: "divider", divider: {} },
                     { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: "\u270F\uFE0F AI \u7F16\u8F91\u7248\u672C" } }] } },
@@ -22458,7 +22471,7 @@ ${aiResponse}`;
           }
         },
         handleTranslateContent: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("appendBlocks")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u7FFB\u8BD1\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
@@ -22470,11 +22483,11 @@ ${aiResponse}`;
           }
           ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
           try {
-            const targetPage = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
             if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
             ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AIAssistant3._extractPageContent(targetPage.id, settings.notionApiKey);
+            const existingContent = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey);
             if (!existingContent.trim()) {
               return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u5185\u5BB9\u3002`;
             }
@@ -22483,15 +22496,15 @@ ${aiResponse}`;
 
 \u539F\u6587\uFF1A
 ${existingContent}`;
-            const aiResponse = await AIService3.requestChat(prompt2, settings, 2e3);
+            const aiResponse = await AIService2.requestChat(prompt2, settings, 2e3);
             ChatState2.updateLastMessage("\u6B63\u5728\u5199\u5165\u7FFB\u8BD1\u7248\u672C...", "processing");
-            const contentBlocks = AIAssistant3._textToBlocks(aiResponse);
+            const contentBlocks = AIAssistant2._textToBlocks(aiResponse);
             const blocks = [
               { type: "divider", divider: {} },
               { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `\u{1F310} AI \u7FFB\u8BD1\uFF08${lang}\uFF09` } }] } },
               ...contentBlocks
             ];
-            await AIAssistant3._executeGuardedPageWrite(
+            await AIAssistant2._executeGuardedPageWrite(
               "appendBlocks",
               targetPage,
               () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
@@ -22518,7 +22531,7 @@ ${existingContent}`;
           } else {
             propDef[propertyName] = { rich_text: {} };
           }
-          await AIAssistant3._executeGuardedDatabaseWrite(
+          await AIAssistant2._executeGuardedDatabaseWrite(
             "updateDatabase",
             databaseId,
             () => NotionAPI2.updateDatabase(databaseId, propDef, apiKey),
@@ -22529,7 +22542,7 @@ ${existingContent}`;
           if (!OperationGuard2.canExecute("updatePage")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1AAI \u5C5E\u6027\u586B\u5145\u9700\u8981\u300C\u6807\u51C6\u300D\u53CA\u4EE5\u4E0A\u6743\u9650\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u63D0\u5347\u6743\u9650\u7EA7\u522B\u3002";
           }
-          const configCheck = AIAssistant3.checkConfig(settings, true);
+          const configCheck = AIAssistant2.checkConfig(settings, true);
           if (!configCheck.valid) return configCheck.error;
           const { autofill_type, property_name } = params;
           if (!autofill_type) {
@@ -22562,7 +22575,7 @@ ${existingContent}`;
           }
           ChatState2.updateLastMessage(`\u6B63\u5728\u51C6\u5907 AI \u5C5E\u6027\u586B\u5145\uFF08${propName}\uFF09...`, "processing");
           try {
-            await AIAssistant3._ensureAIProperty(settings.notionDatabaseId, propName, propType, settings.notionApiKey);
+            await AIAssistant2._ensureAIProperty(settings.notionDatabaseId, propName, propType, settings.notionApiKey);
             ChatState2.updateLastMessage("\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...", "processing");
             const allPages = [];
             let cursor = null;
@@ -22600,14 +22613,14 @@ ${existingContent}`;
                 let inputText = title;
                 if (autofill_type !== "translation") {
                   try {
-                    const content = await AIAssistant3._extractPageContent(page.id, settings.notionApiKey, 2e3);
+                    const content = await AIAssistant2._extractPageContent(page.id, settings.notionApiKey, 2e3);
                     inputText = content || title;
                   } catch (error) {
                     console.warn("[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25:", error);
                     inputText = title;
                   }
                 }
-                const aiResult = await AIService3.requestChat(
+                const aiResult = await AIService2.requestChat(
                   aiPromptTemplate + inputText,
                   settings,
                   500
@@ -22620,7 +22633,7 @@ ${existingContent}`;
                   const trimmed = aiResult.slice(0, 2e3);
                   updateProps[propName] = { rich_text: [{ type: "text", text: { content: trimmed } }] };
                 }
-                await AIAssistant3._executeGuardedPageWrite(
+                await AIAssistant2._executeGuardedPageWrite(
                   "updatePage",
                   { id: page.id, name: title },
                   () => NotionAPI2.request("PATCH", `/pages/${page.id}`, { properties: updateProps }, settings.notionApiKey),
@@ -22656,7 +22669,7 @@ ${existingContent}`;
           }
         },
         handleAsk: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           const { question, keyword } = params;
           const searchTerm = question || keyword;
@@ -22679,7 +22692,7 @@ ${existingContent}`;
               const url = item.url || "";
               sourceList.push({ title, url });
               try {
-                const content = await AIAssistant3._extractPageContent(item.id, settings.notionApiKey, 2e3);
+                const content = await AIAssistant2._extractPageContent(item.id, settings.notionApiKey, 2e3);
                 contextParts.push(`[${i + 1}] ${title}:
 ${content || "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09"}`);
               } catch (error) {
@@ -22697,7 +22710,7 @@ ${contextParts.join("\n\n")}
 
 --- \u7528\u6237\u95EE\u9898 ---
 ${searchTerm}`;
-            const aiAnswer = await AIService3.requestChat(ragPrompt, settings, 2e3);
+            const aiAnswer = await AIService2.requestChat(ragPrompt, settings, 2e3);
             let sourceText = "\n\n\u{1F4DA} **\u4FE1\u606F\u6765\u6E90**\uFF1A\n";
             sourceList.forEach((s, i) => {
               sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
@@ -22710,7 +22723,7 @@ ${searchTerm}`;
         },
         handleDeepResearch: async (params, settings, explanation) => {
           var _a;
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           const { research_topic, scope = "workspace" } = params;
           if (!research_topic) {
@@ -22720,7 +22733,7 @@ ${searchTerm}`;
             ChatState2.updateLastMessage("\u{1F52C} \u6B63\u5728\u62C6\u89E3\u7814\u7A76\u4E3B\u9898...", "processing");
             const keywordsPrompt = `\u5C06\u4EE5\u4E0B\u7814\u7A76\u4E3B\u9898\u62C6\u5206\u4E3A3-5\u4E2A\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u6BCF\u884C\u4E00\u4E2A\u5173\u952E\u8BCD\uFF0C\u53EA\u8FD4\u56DE\u5173\u952E\u8BCD\uFF1A
 ${research_topic}`;
-            const keywordsRaw = await AIService3.requestChat(keywordsPrompt, settings, 200);
+            const keywordsRaw = await AIService2.requestChat(keywordsPrompt, settings, 200);
             const keywords = keywordsRaw.split("\n").map((k) => k.trim().replace(/^[-•\d.]+\s*/, "")).filter(Boolean).slice(0, 5);
             if (keywords.length === 0) keywords.push(research_topic);
             ChatState2.updateLastMessage(`\u{1F50D} \u641C\u7D22\u4E2D... (${keywords.length} \u4E2A\u5173\u952E\u8BCD: ${keywords.join(", ")})`, "processing");
@@ -22814,7 +22827,7 @@ ${research_topic}`;
               const url = page.url || "";
               sourceList.push({ title, url });
               try {
-                const content = await AIAssistant3._extractPageContent(page.id, settings.notionApiKey, 3e3);
+                const content = await AIAssistant2._extractPageContent(page.id, settings.notionApiKey, 3e3);
                 contentParts.push(`[${i + 1}] ${title}:
 ${content || "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09"}`);
               } catch (error) {
@@ -22842,7 +22855,7 @@ ${content || "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09"}`);
 
 --- \u53C2\u8003\u5185\u5BB9 ---
 ${contentParts.join("\n\n---\n\n")}`;
-            const report = await AIService3.requestChat(reportPrompt, settings, 4e3);
+            const report = await AIService2.requestChat(reportPrompt, settings, 4e3);
             let sourceText = "\n\n\u{1F4DA} **\u5206\u6790\u57FA\u7840**\uFF1A\n";
             sourceList.forEach((s, i) => {
               sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
@@ -22858,7 +22871,7 @@ ${summary}`;
           }
         },
         handleSummarize: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           const { page_name, page_id, summary_style } = params;
           const style = summary_style || "brief";
@@ -22867,11 +22880,11 @@ ${summary}`;
           }
           ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
           try {
-            const targetPage = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
             if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
             ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AIAssistant3._extractPageContent(targetPage.id, settings.notionApiKey, 6e3);
+            const existingContent = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey, 6e3);
             if (!existingContent.trim()) {
               return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u603B\u7ED3\u7684\u5185\u5BB9\u3002`;
             }
@@ -22887,7 +22900,7 @@ ${summary}`;
 
 \u4EE5\u4E0B\u662F\u9700\u8981\u603B\u7ED3\u7684\u5185\u5BB9\uFF1A
 ${existingContent}`;
-            const aiResponse = await AIService3.requestChat(prompt2, settings, 2e3);
+            const aiResponse = await AIService2.requestChat(prompt2, settings, 2e3);
             return `\u{1F4DD} **\u9875\u9762\u6458\u8981\uFF1A${targetPage.name}**
 
 ${aiResponse}
@@ -22899,7 +22912,7 @@ ${aiResponse}
           }
         },
         handleBrainstorm: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           const { brainstorm_topic, page_name, page_id } = params;
           const count = Math.min(Math.max(parseInt(params.brainstorm_count) || 10, 3), 30);
@@ -22910,9 +22923,9 @@ ${aiResponse}
           let pageContext = "";
           if (page_name || page_id) {
             ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9\u4F5C\u4E3A\u53C2\u8003...", "processing");
-            const targetPage = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (targetPage) {
-              pageContext = await AIAssistant3._extractPageContent(targetPage.id, settings.notionApiKey, 3e3);
+              pageContext = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey, 3e3);
             }
           }
           ChatState2.updateLastMessage("\u{1F4A1} \u6B63\u5728\u5934\u8111\u98CE\u66B4...", "processing");
@@ -22928,7 +22941,7 @@ ${pageContext}` : "";
 - \u6BCF\u4E2A\u60F3\u6CD5\u5305\u542B\u7B80\u77ED\u6807\u9898\u548C\u4E00\u53E5\u8BDD\u8BF4\u660E
 - \u4ECE\u5B9E\u7528\u5230\u5927\u80C6\u521B\u65B0\uFF0C\u7531\u8FD1\u53CA\u8FDC\u6392\u5217
 - \u4F7F\u7528 Markdown \u7F16\u53F7\u5217\u8868\u683C\u5F0F\u8F93\u51FA${contextBlock}`;
-            const aiResponse = await AIService3.requestChat(prompt2, settings, 2e3);
+            const aiResponse = await AIService2.requestChat(prompt2, settings, 2e3);
             return `\u{1F4A1} **\u5934\u8111\u98CE\u66B4\uFF1A${topic}**
 
 ${aiResponse}
@@ -22940,7 +22953,7 @@ ${aiResponse}
           }
         },
         handleProofread: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           const { page_name, page_id } = params;
           if (!page_name && !page_id) {
@@ -22948,11 +22961,11 @@ ${aiResponse}
           }
           ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
           try {
-            const targetPage = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
             if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
             ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AIAssistant3._extractPageContent(targetPage.id, settings.notionApiKey);
+            const existingContent = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey);
             if (!existingContent.trim()) {
               return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u6821\u5BF9\u7684\u5185\u5BB9\u3002`;
             }
@@ -22969,7 +22982,7 @@ ${aiResponse}
 
 \u4EE5\u4E0B\u662F\u9700\u8981\u6821\u5BF9\u7684\u5185\u5BB9\uFF1A
 ${existingContent}`;
-            const aiResponse = await AIService3.requestChat(prompt2, settings, 3e3);
+            const aiResponse = await AIService2.requestChat(prompt2, settings, 3e3);
             return `\u2705 **\u6821\u5BF9\u7ED3\u679C\uFF1A${targetPage.name}**
 
 ${aiResponse}`;
@@ -22978,7 +22991,7 @@ ${aiResponse}`;
           }
         },
         handleBatchTranslate: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("appendBlocks")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6279\u91CF\u7FFB\u8BD1\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
@@ -23018,7 +23031,7 @@ ${aiResponse}`;
               const title = Utils2.getPageTitle(page);
               ChatState2.updateLastMessage(`\u{1F310} \u7FFB\u8BD1\u4E2D (${i + 1}/${pages.length}): ${title}...`, "processing");
               try {
-                const content = await AIAssistant3._extractPageContent(page.id, settings.notionApiKey, 4e3);
+                const content = await AIAssistant2._extractPageContent(page.id, settings.notionApiKey, 4e3);
                 if (!content.trim()) {
                   failCount++;
                   continue;
@@ -23027,13 +23040,13 @@ ${aiResponse}`;
 
 \u539F\u6587\uFF1A
 ${content}`;
-                const translated = await AIService3.requestChat(prompt2, settings, 2e3);
+                const translated = await AIService2.requestChat(prompt2, settings, 2e3);
                 const blocks = [
                   { type: "divider", divider: {} },
                   { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `\u{1F310} ${lang}\u7FFB\u8BD1` } }] } },
-                  ...AIAssistant3._textToBlocks(translated)
+                  ...AIAssistant2._textToBlocks(translated)
                 ];
-                await AIAssistant3._executeGuardedPageWrite(
+                await AIAssistant2._executeGuardedPageWrite(
                   "appendBlocks",
                   page,
                   () => NotionAPI2.appendBlocks(page.id, blocks, settings.notionApiKey),
@@ -23059,7 +23072,7 @@ ${content}`;
           }
         },
         handleExtractToDatabase: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("createDatabase")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u521B\u5EFA\u6570\u636E\u5E93\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002";
@@ -23070,10 +23083,10 @@ ${content}`;
           }
           ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u6E90\u9875\u9762...", "processing");
           try {
-            const sourcePage = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const sourcePage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (sourcePage == null ? void 0 : sourcePage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${sourcePage.error}`;
             if (!sourcePage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            const content = await AIAssistant3._extractPageContent(sourcePage.id, settings.notionApiKey, 6e3);
+            const content = await AIAssistant2._extractPageContent(sourcePage.id, settings.notionApiKey, 6e3);
             if (!content.trim()) {
               return `\u274C \u9875\u9762\u300C${sourcePage.name}\u300D\u6CA1\u6709\u53EF\u63D0\u53D6\u7684\u5185\u5BB9\u3002`;
             }
@@ -23100,7 +23113,7 @@ ${content}`;
 
 \u9875\u9762\u5185\u5BB9\uFF1A
 ${content}`;
-            const aiResponse = await AIService3.requestChat(analyzePrompt, settings, 3e3);
+            const aiResponse = await AIService2.requestChat(analyzePrompt, settings, 3e3);
             const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
               return `\u274C AI \u65E0\u6CD5\u4ECE\u9875\u9762\u5185\u5BB9\u4E2D\u63D0\u53D6\u7ED3\u6784\u5316\u6570\u636E\u3002\u8BF7\u5C1D\u8BD5\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u63D0\u53D6\u8981\u6C42\u3002`;
@@ -23139,7 +23152,7 @@ ${content}`;
                 dbProperties[prop.name] = { rich_text: {} };
               }
             }
-            const newDb = await AIAssistant3._executeGuardedPageWrite(
+            const newDb = await AIAssistant2._executeGuardedPageWrite(
               "createDatabase",
               sourcePage,
               () => NotionAPI2.createDatabase(sourcePage.id, dbName, dbProperties, settings.notionApiKey),
@@ -23169,7 +23182,7 @@ ${content}`;
                   }
                 }
                 const entryName2 = String(entry[titleKey] || `\u6761\u76EE ${addedCount + 1}`).trim() || `\u6761\u76EE ${addedCount + 1}`;
-                await AIAssistant3._executeGuardedDatabaseWrite(
+                await AIAssistant2._executeGuardedDatabaseWrite(
                   "createDatabasePage",
                   newDb.id,
                   () => NotionAPI2.createPage(newDb.id, pageProperties, settings.notionApiKey),
@@ -23194,7 +23207,7 @@ ${content}`;
           }
         },
         handleGeneratePages: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("createDatabase")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u591A\u9875\u9762\u751F\u6210\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002";
@@ -23228,7 +23241,7 @@ ${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
 - \u5B50\u9875\u9762\u6570\u91CF\u63A7\u5236\u5728 3-8 \u4E2A
 - \u6BCF\u4E2A\u5B50\u9875\u9762\u5E94\u6709\u660E\u786E\u7684\u4E3B\u9898\u548C\u8FB9\u754C
 - \u7236\u9875\u9762\u4F5C\u4E3A\u76EE\u5F55/\u6982\u89C8\u9875`;
-            const planResponse = await AIService3.requestChat(planPrompt, settings, 1500);
+            const planResponse = await AIService2.requestChat(planPrompt, settings, 1500);
             const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
               return `\u274C AI \u65E0\u6CD5\u89C4\u5212\u9875\u9762\u7ED3\u6784\u3002\u8BF7\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u9700\u6C42\u3002`;
@@ -23258,7 +23271,7 @@ ${pageList}
             if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u3002";
             let parentPageId = parent_page_id;
             if (!parentPageId && parent_page_name) {
-              const parentPage2 = await AIAssistant3._resolvePageId(parent_page_name, null, settings.notionApiKey);
+              const parentPage2 = await AIAssistant2._resolvePageId(parent_page_name, null, settings.notionApiKey);
               if (parentPage2) parentPageId = parentPage2.id;
             }
             ChatState2.updateLastMessage(`\u{1F4C1} \u6B63\u5728\u521B\u5EFA\u7236\u9875\u9762: ${plan.parent_title}...`, "processing");
@@ -23267,7 +23280,7 @@ ${pageList}
             };
             let parentPage;
             if (parentPageId) {
-              parentPage = await AIAssistant3._executeGuardedPageWrite(
+              parentPage = await AIAssistant2._executeGuardedPageWrite(
                 "createDatabasePage",
                 { id: parentPageId, name: parent_page_name || parentPageId },
                 () => NotionAPI2.createPageInPage(parentPageId, parentProps, settings.notionApiKey),
@@ -23279,12 +23292,12 @@ ${pageList}
 
 \u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u4E0B\u521B\u5EFA\u5165\u804C\u6307\u5357\u300D`;
             }
-            const overviewBlocks = AIAssistant3._textToBlocks(`${plan.parent_summary || ""}
+            const overviewBlocks = AIAssistant2._textToBlocks(`${plan.parent_summary || ""}
 
 ## \u{1F4CB} \u76EE\u5F55
 
 ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}** - ${c.description}`).join("\n")}`);
-            await AIAssistant3._executeGuardedPageWrite(
+            await AIAssistant2._executeGuardedPageWrite(
               "appendBlocks",
               parentPage,
               () => NotionAPI2.appendBlocks(parentPage.id, overviewBlocks, settings.notionApiKey),
@@ -23299,7 +23312,7 @@ ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}**
                 const childProps = {
                   title: { title: [{ text: { content: `${child.icon || ""} ${child.title}`.trim() } }] }
                 };
-                const childPage = await AIAssistant3._executeGuardedPageWrite(
+                const childPage = await AIAssistant2._executeGuardedPageWrite(
                   "createDatabasePage",
                   parentPage,
                   () => NotionAPI2.createPageInPage(parentPage.id, childProps, settings.notionApiKey),
@@ -23313,9 +23326,9 @@ ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}**
 \u4E0A\u4E0B\u6587\uFF1A\u8FD9\u662F\u300C${plan.parent_title}\u300D\u7684\u5B50\u9875\u9762
 
 \u8BF7\u751F\u6210\u5B9E\u7528\u3001\u5177\u4F53\u7684\u5185\u5BB9\uFF0C\u5305\u542B\u5408\u9002\u7684\u6807\u9898\u5C42\u7EA7\u548C\u7ED3\u6784\u5316\u4FE1\u606F\u3002`;
-                const content = await AIService3.requestChat(contentPrompt, settings, 2e3);
-                const contentBlocks = AIAssistant3._textToBlocks(content);
-                await AIAssistant3._executeGuardedPageWrite(
+                const content = await AIService2.requestChat(contentPrompt, settings, 2e3);
+                const contentBlocks = AIAssistant2._textToBlocks(content);
+                await AIAssistant2._executeGuardedPageWrite(
                   "appendBlocks",
                   childPage,
                   () => NotionAPI2.appendBlocks(childPage.id, contentBlocks, settings.notionApiKey),
@@ -23338,7 +23351,7 @@ ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}**
           }
         },
         handleBatchAnalyze: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           const { database_name, database_id, analysis_prompt } = params;
           const limit = Math.min(Math.max(parseInt(params.limit) || 10, 1), 20);
@@ -23368,7 +23381,7 @@ ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}**
               const page = pages[i];
               const title = Utils2.getPageTitle(page);
               ChatState2.updateLastMessage(`\u{1F50E} \u63D0\u53D6\u4E2D (${i + 1}/${pages.length}): ${title}...`, "processing");
-              const content = await AIAssistant3._extractPageContent(page.id, settings.notionApiKey, 2e3);
+              const content = await AIAssistant2._extractPageContent(page.id, settings.notionApiKey, 2e3);
               contentParts.push(`## ${title}
 ${content || "\uFF08\u65E0\u5185\u5BB9\uFF09"}`);
             }
@@ -23388,7 +23401,7 @@ ${content || "\uFF08\u65E0\u5185\u5BB9\uFF09"}`);
 --- \u4EE5\u4E0B\u662F ${pages.length} \u4E2A\u9875\u9762\u7684\u5185\u5BB9 ---
 
 ${contentParts.join("\n\n---\n\n")}`;
-            const report = await AIService3.requestChat(prompt2, settings, 4e3);
+            const report = await AIService2.requestChat(prompt2, settings, 4e3);
             return `\u{1F4CA} **\u6279\u91CF\u5206\u6790\u62A5\u544A**
 
 ${report}
@@ -23548,7 +23561,7 @@ ${report}
           }
         },
         handleTemplateOutput: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("appendBlocks")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6A21\u677F\u8F93\u51FA\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
@@ -23582,10 +23595,10 @@ ${list}
           let targetPage = null;
           if (page_name || page_id) {
             ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            targetPage = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
             if (targetPage) {
-              pageContext = await AIAssistant3._extractPageContent(targetPage.id, settings.notionApiKey, 4e3);
+              pageContext = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey, 4e3);
             }
           }
           ChatState2.updateLastMessage(`${template.icon} \u6B63\u5728\u4F7F\u7528\u300C${template.name}\u300D\u6A21\u677F\u751F\u6210...`, "processing");
@@ -23599,16 +23612,16 @@ ${pageContext}` : "";
           const fullPrompt = `${template.prompt}${contextBlock}${customBlock}
 
 \u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002`;
-          const aiResponse = await AIService3.requestChat(fullPrompt, settings, 3e3);
+          const aiResponse = await AIService2.requestChat(fullPrompt, settings, 3e3);
           if (targetPage) {
             ChatState2.updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
-            const contentBlocks = AIAssistant3._textToBlocks(aiResponse);
+            const contentBlocks = AIAssistant2._textToBlocks(aiResponse);
             const blocks = [
               { type: "divider", divider: {} },
               { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `${template.icon} ${template.name}` } }] } },
               ...contentBlocks
             ];
-            await AIAssistant3._executeGuardedPageWrite(
+            await AIAssistant2._executeGuardedPageWrite(
               "appendBlocks",
               targetPage,
               () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
@@ -23626,7 +23639,7 @@ ${aiResponse}
 \u{1F4A1} \u5982\u9700\u5199\u5165\u9875\u9762\uFF0C\u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\uFF1A\u300C\u7528${template.name}\u6A21\u677F\u5904\u7406 xxx \u9875\u9762\u300D`;
         }
       };
-      var AIAssistant3 = {
+      var AIAssistant2 = {
         // 意图类型
         INTENTS: {
           QUERY: "query",
@@ -23713,7 +23726,7 @@ ${aiResponse}
           }
           const keyword = String(query || "").trim().toLowerCase();
           if (!keyword) return null;
-          const users = await AIAssistant3._collectWorkspaceUsers(apiKey, limit);
+          const users = await AIAssistant2._collectWorkspaceUsers(apiKey, limit);
           let partial = null;
           for (const user of users) {
             const name = String(user.name || "").trim().toLowerCase();
@@ -23760,7 +23773,7 @@ ${aiResponse}
           const normalizedFields = Array.isArray(fields) ? fields.map(({ label, value }) => ({ label: String(label || ""), value })) : [];
           const normalizedBullets = Array.isArray(bullets) ? bullets.map((item) => String(item)) : [];
           const normalizedSummary = String(summary || "").trim();
-          const finalText = String(text || "").trim() || AIAssistant3._buildStructuredResultText({
+          const finalText = String(text || "").trim() || AIAssistant2._buildStructuredResultText({
             title,
             summary: normalizedSummary,
             fields: normalizedFields,
@@ -23780,15 +23793,15 @@ ${aiResponse}
           };
         },
         _formatToolResult: ({ status = "success", ...payload } = {}) => {
-          return AIAssistant3._createStructuredResult({
+          return AIAssistant2._createStructuredResult({
             ...payload,
             status,
             source: "tool"
           });
         },
         _normalizeExecutionResult: (result, { source = "intent", name = "", status } = {}) => {
-          if (AIAssistant3._isStructuredResult(result)) {
-            return AIAssistant3._createStructuredResult({
+          if (AIAssistant2._isStructuredResult(result)) {
+            return AIAssistant2._createStructuredResult({
               ...result,
               source: result.source || source,
               name: result.name || name,
@@ -23796,19 +23809,19 @@ ${aiResponse}
             });
           }
           const text = String(result ?? "").trim();
-          return AIAssistant3._createStructuredResult({
-            status: status || AIAssistant3._inferStructuredResultStatus(text),
+          return AIAssistant2._createStructuredResult({
+            status: status || AIAssistant2._inferStructuredResultStatus(text),
             source,
             name,
             summary: text,
             text
           });
         },
-        _resultToText: (result) => AIAssistant3._normalizeExecutionResult(result).text,
+        _resultToText: (result) => AIAssistant2._normalizeExecutionResult(result).text,
         _resultToAgentPayload: (result) => {
-          return JSON.stringify(AIAssistant3._normalizeExecutionResult(result), null, 2);
+          return JSON.stringify(AIAssistant2._normalizeExecutionResult(result), null, 2);
         },
-        _isErrorResult: (result) => AIAssistant3._normalizeExecutionResult(result).status === "error",
+        _isErrorResult: (result) => AIAssistant2._normalizeExecutionResult(result).status === "error",
         _buildPageIconPayload: (args = {}) => {
           const iconEmoji = String(args.icon_emoji || "").trim();
           const iconUrl = String(args.icon_url || "").trim();
@@ -23876,8 +23889,8 @@ ${aiResponse}
         },
         _buildPageMetaPayload: (args = {}) => {
           const payload = {};
-          const icon = AIAssistant3._buildPageIconPayload(args);
-          const cover = AIAssistant3._buildPageCoverPayload(args);
+          const icon = AIAssistant2._buildPageIconPayload(args);
+          const cover = AIAssistant2._buildPageCoverPayload(args);
           if (icon !== void 0) payload.icon = icon;
           if (cover !== void 0) payload.cover = cover;
           if (typeof args.is_locked === "boolean") payload.is_locked = args.is_locked;
@@ -23886,15 +23899,15 @@ ${aiResponse}
         _buildPageUpdatePayloads: (params = {}) => {
           const propertyUpdates = {};
           if (params.updates && typeof params.updates === "object") {
-            Object.assign(propertyUpdates, AIAssistant3._normalizeNotionProperties(params.updates));
+            Object.assign(propertyUpdates, AIAssistant2._normalizeNotionProperties(params.updates));
           }
           if (params.property) {
             if (params.value === void 0 || params.value === null) {
               return { error: "\u66F4\u65B0\u5C5E\u6027\u65F6\u5FC5\u987B\u63D0\u4F9B value\u3002" };
             }
-            propertyUpdates[params.property] = AIAssistant3._buildPropertyValuePayload(params.value, params.type || "text");
+            propertyUpdates[params.property] = AIAssistant2._buildPropertyValuePayload(params.value, params.type || "text");
           }
-          const metaPayload = AIAssistant3._buildPageMetaPayload(params);
+          const metaPayload = AIAssistant2._buildPageMetaPayload(params);
           if (Object.keys(propertyUpdates).length === 0 && Object.keys(metaPayload).length === 0) {
             return { error: "\u8BF7\u63D0\u4F9B\u53EF\u66F4\u65B0\u5185\u5BB9\u3002\u53EF\u66F4\u65B0\u5C5E\u6027\uFF0C\u6216\u4F20\u5165 icon_emoji/icon_url/cover_url/is_locked \u7B49\u5143\u6570\u636E\u3002" };
           }
@@ -23914,7 +23927,7 @@ ${aiResponse}
         },
         _buildGuardContext: (context = {}, settingsOrApiKey) => {
           const guardContext = { ...context };
-          const apiKey = AIAssistant3._resolveGuardApiKey(settingsOrApiKey, guardContext.apiKey);
+          const apiKey = AIAssistant2._resolveGuardApiKey(settingsOrApiKey, guardContext.apiKey);
           if (apiKey) {
             guardContext.apiKey = apiKey;
           }
@@ -23927,13 +23940,13 @@ ${aiResponse}
           return await OperationGuard2.execute(
             operation,
             executor,
-            AIAssistant3._buildGuardContext(context, settingsOrApiKey)
+            AIAssistant2._buildGuardContext(context, settingsOrApiKey)
           );
         },
         _executeGuardedPageWrite: async (operation, target, executor, settingsOrApiKey, context = {}) => {
           const pageId = context.pageId || (target == null ? void 0 : target.id) || "";
           const itemName = context.itemName || (target == null ? void 0 : target.name) || (target == null ? void 0 : target.id) || pageId || "\u672A\u77E5\u9875\u9762";
-          return await AIAssistant3._executeGuardedWrite(
+          return await AIAssistant2._executeGuardedWrite(
             operation,
             executor,
             { ...context, itemName, pageId },
@@ -23941,7 +23954,7 @@ ${aiResponse}
           );
         },
         _executeGuardedDatabaseWrite: async (operation, databaseId, executor, settingsOrApiKey, context = {}) => {
-          return await AIAssistant3._executeGuardedWrite(
+          return await AIAssistant2._executeGuardedWrite(
             operation,
             executor,
             {
@@ -23953,7 +23966,7 @@ ${aiResponse}
           );
         },
         _applyPageUpdatesToTargets: async (targets, params, settings) => {
-          const built = AIAssistant3._buildPageUpdatePayloads(params);
+          const built = AIAssistant2._buildPageUpdatePayloads(params);
           if (built.error) {
             throw new Error(built.error);
           }
@@ -23965,7 +23978,7 @@ ${aiResponse}
             const target = targets[i];
             try {
               if (Object.keys(propertyUpdates).length > 0) {
-                await AIAssistant3._executeGuardedPageWrite(
+                await AIAssistant2._executeGuardedPageWrite(
                   "updatePage",
                   target,
                   () => NotionAPI2.updatePage(target.id, propertyUpdates, settings.notionApiKey),
@@ -23973,7 +23986,7 @@ ${aiResponse}
                 );
               }
               if (Object.keys(metaPayload).length > 0) {
-                await AIAssistant3._executeGuardedPageWrite(
+                await AIAssistant2._executeGuardedPageWrite(
                   "updatePage",
                   target,
                   () => NotionAPI2.updatePageMeta(target.id, metaPayload, settings.notionApiKey),
@@ -24013,7 +24026,7 @@ ${aiResponse}
           var _a;
           const id = ((_a = block.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
           const type = block.type || "unknown";
-          const text = AIAssistant3._extractBlockPlainText(block).replace(/\s+/g, " ").trim();
+          const text = AIAssistant2._extractBlockPlainText(block).replace(/\s+/g, " ").trim();
           const indent = "  ".repeat(depth);
           return `${indent}- [${type}] ${text || "(\u65E0\u6587\u672C\u5185\u5BB9)"}${block.has_children ? " [+children]" : ""}${id ? ` (id: ${id})` : ""}`;
         },
@@ -24172,20 +24185,20 @@ ${aiResponse}
             return targets;
           }
           if (page_id || page_name) {
-            const resolved = await AIAssistant3._resolvePageId(page_name, page_id, settings.notionApiKey);
+            const resolved = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
             if (resolved == null ? void 0 : resolved.error) return resolved;
             if (!resolved) return null;
             return [{ id: resolved.id, name: resolved.name }];
           }
           let source = null;
           if (database_id || database_name) {
-            source = await AIAssistant3._resolveDatabaseId(database_name, database_id, settings.notionApiKey);
+            source = await AIAssistant2._resolveDatabaseId(database_name, database_id, settings.notionApiKey);
             if (source == null ? void 0 : source.error) return source;
           } else if (settings.notionDatabaseId) {
             source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93" };
           }
           if (!source) return null;
-          const pages = await AIAssistant3._fetchSourcePages(source.id, settings.notionApiKey, page_title);
+          const pages = await AIAssistant2._fetchSourcePages(source.id, settings.notionApiKey, page_title);
           return pages.slice(0, safeLimit).map((page) => {
             var _a;
             return {
@@ -24258,7 +24271,7 @@ ${aiResponse}
           return true;
         },
         quickParseIntent: (userMessage) => {
-          return AIAssistant3.IntentMatcher.parse(userMessage);
+          return AIAssistant2.IntentMatcher.parse(userMessage);
         },
         // ===========================================
         // Agent 工具注册表
@@ -24319,9 +24332,9 @@ ${aiResponse}
         _SETTINGS_ADAPTERS: {},
         _getDefaultSettings: () => {
           var _a, _b, _c, _d, _e, _f, _g;
-          const UI3 = require_ui().UI;
-          const panel = UI3.panel;
-          const refs = UI3.refs || {};
+          const UI2 = require_ui().UI;
+          const panel = UI2.panel;
+          const refs = UI2.refs || {};
           const exportState = TargetState2.getExportState();
           return {
             notionApiKey: NotionOAuth2.getAccessToken((_a = refs.apiKeyInput || (panel == null ? void 0 : panel.querySelector("#ldb-api-key"))) == null ? void 0 : _a.value.trim()),
@@ -24339,17 +24352,17 @@ ${aiResponse}
           if (!name || !adapter || typeof adapter.getSettings !== "function") {
             throw new Error("\u8BBE\u7F6E\u9002\u914D\u5668\u5FC5\u987B\u63D0\u4F9B\u540D\u79F0\u548C getSettings \u65B9\u6CD5");
           }
-          AIAssistant3._SETTINGS_ADAPTERS[name] = {
+          AIAssistant2._SETTINGS_ADAPTERS[name] = {
             isActive: typeof adapter.isActive === "function" ? adapter.isActive : () => true,
             getSettings: adapter.getSettings
           };
-          return AIAssistant3._SETTINGS_ADAPTERS[name];
+          return AIAssistant2._SETTINGS_ADAPTERS[name];
         },
         unregisterSettingsAdapter: (name) => {
-          delete AIAssistant3._SETTINGS_ADAPTERS[name];
+          delete AIAssistant2._SETTINGS_ADAPTERS[name];
         },
         getActiveSettingsAdapter: () => {
-          for (const [name, adapter] of Object.entries(AIAssistant3._SETTINGS_ADAPTERS)) {
+          for (const [name, adapter] of Object.entries(AIAssistant2._SETTINGS_ADAPTERS)) {
             try {
               if (adapter.isActive()) {
                 return { name, adapter };
@@ -24362,16 +24375,16 @@ ${aiResponse}
         },
         // 获取 AI 设置
         getSettings: () => {
-          const activeAdapter = AIAssistant3.getActiveSettingsAdapter();
+          const activeAdapter = AIAssistant2.getActiveSettingsAdapter();
           if (activeAdapter) {
             const adaptedSettings = activeAdapter.adapter.getSettings({
-              getDefaultSettings: AIAssistant3._getDefaultSettings
+              getDefaultSettings: AIAssistant2._getDefaultSettings
             });
             if (adaptedSettings) {
               return adaptedSettings;
             }
           }
-          return AIAssistant3._getDefaultSettings();
+          return AIAssistant2._getDefaultSettings();
         },
         // 检查配置是否完整
         checkConfig: (settings, requireDatabase = true) => {
@@ -24569,7 +24582,7 @@ compound \u683C\u5F0F\uFF08\u4EC5\u5F53 intent \u4E3A compound \u65F6\u4F7F\u752
   "explanation": "\u6574\u4F53\u610F\u56FE\u8BF4\u660E"
 }`;
           try {
-            const response = await AIService3.requestChat(
+            const response = await AIService2.requestChat(
               `${systemPrompt}
 
 <user_input>
@@ -24624,19 +24637,19 @@ ${userMessage}
           help: true
         },
         _resolveIntentExecutor: (intent) => {
-          const handlerName = AIAssistant3._INTENT_HANDLER_MAP[intent];
+          const handlerName = AIAssistant2._INTENT_HANDLER_MAP[intent];
           if (handlerName) {
             return {
               source: "intent",
               name: intent,
               execute: async (intentResult, settings) => {
                 if (intent === "compound") {
-                  return await AIAssistant3.handleCompound(intentResult, settings);
+                  return await AIAssistant2.handleCompound(intentResult, settings);
                 }
                 if (handlerName === "getHelpMessage") {
-                  return AIAssistant3.getHelpMessage();
+                  return AIAssistant2.getHelpMessage();
                 }
-                const handler = AIAssistant3[handlerName];
+                const handler = AIAssistant2[handlerName];
                 if (typeof handler !== "function") {
                   throw new Error(`\u672A\u5B9E\u73B0\u7684\u610F\u56FE\u5904\u7406\u5668: ${handlerName}`);
                 }
@@ -24644,7 +24657,7 @@ ${userMessage}
               }
             };
           }
-          const tool = AIAssistant3.AGENT_TOOLS[intent];
+          const tool = AIAssistant2.AGENT_TOOLS[intent];
           if (tool) {
             return {
               source: "tool",
@@ -24655,15 +24668,15 @@ ${userMessage}
           return null;
         },
         _canExecuteParsedIntentDirectly: (intent) => {
-          if (!AIAssistant3._resolveIntentExecutor(intent)) return false;
-          return !AIAssistant3._INTENTS_REQUIRING_AGENT_LOOP[intent];
+          if (!AIAssistant2._resolveIntentExecutor(intent)) return false;
+          return !AIAssistant2._INTENTS_REQUIRING_AGENT_LOOP[intent];
         },
         // 处理用户消息
         handleMessage: async (userMessage) => {
-          const settings = AIAssistant3.getSettings();
+          const settings = AIAssistant2.getSettings();
           const helpKeywords = ["\u5E2E\u52A9", "help", "\u4F60\u80FD\u505A\u4EC0\u4E48", "\u600E\u4E48\u7528", "\u4F7F\u7528\u8BF4\u660E"];
           if (helpKeywords.some((k) => userMessage.includes(k))) {
-            return AIAssistant3.getHelpMessage();
+            return AIAssistant2.getHelpMessage();
           }
           const greetings = ["\u4F60\u597D", "\u60A8\u597D", "hello", "hi", "hey", "\u55E8", "\u65E9\u4E0A\u597D", "\u4E0B\u5348\u597D", "\u665A\u4E0A\u597D"];
           if (greetings.some((g) => userMessage.toLowerCase().trim() === g || userMessage.trim() === g)) {
@@ -24672,25 +24685,25 @@ ${userMessage}
 
 \u8F93\u5165\u300C\u5E2E\u52A9\u300D\u67E5\u770B\u6211\u80FD\u505A\u4EC0\u4E48\uFF0C\u6216\u8005\u76F4\u63A5\u544A\u8BC9\u6211\u4F60\u60F3\u6267\u884C\u7684\u64CD\u4F5C\u3002`;
           }
-          const basicConfigCheck = AIAssistant3.checkConfig(settings, false);
+          const basicConfigCheck = AIAssistant2.checkConfig(settings, false);
           if (!basicConfigCheck.valid) {
             return basicConfigCheck.error;
           }
-          const quickIntent = AIAssistant3.quickParseIntent(userMessage);
+          const quickIntent = AIAssistant2.quickParseIntent(userMessage);
           if (quickIntent) {
-            return await AIAssistant3.executeIntent(quickIntent, settings);
+            return await AIAssistant2.executeIntent(quickIntent, settings);
           }
           ChatState2.updateLastMessage("\u{1F916} \u6B63\u5728\u7406\u89E3\u4F60\u7684\u9700\u6C42...", "processing");
-          const intentResult = await AIAssistant3.parseIntent(userMessage, settings);
-          if (AIAssistant3.IntentDispatcher.canExecuteDirectly(intentResult.intent)) {
-            return await AIAssistant3.executeIntent(intentResult, settings);
+          const intentResult = await AIAssistant2.parseIntent(userMessage, settings);
+          if (AIAssistant2.IntentDispatcher.canExecuteDirectly(intentResult.intent)) {
+            return await AIAssistant2.executeIntent(intentResult, settings);
           }
           ChatState2.updateLastMessage("\u{1F916} \u6B63\u5728\u601D\u8003...", "processing");
-          return await AIAssistant3.runAgentLoop(userMessage, settings);
+          return await AIAssistant2.runAgentLoop(userMessage, settings);
         },
         // 执行意图
         executeIntent: async (intentResult, settings) => {
-          return await AIAssistant3.IntentDispatcher.execute(intentResult, settings);
+          return await AIAssistant2.IntentDispatcher.execute(intentResult, settings);
         },
         // 处理查询
         // 处理搜索
@@ -24726,7 +24739,7 @@ ${userMessage}
         // ======= AI 输出模板 =======
         // ======= Agent 自主代理 =======
         handleAgentTask: async (params, settings, explanation) => {
-          const configCheck = AIAssistant3.checkConfig(settings, false);
+          const configCheck = AIAssistant2.checkConfig(settings, false);
           if (!configCheck.valid) return configCheck.error;
           if (!OperationGuard2.canExecute("agentTask")) {
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1AAgent \u81EA\u4E3B\u4EE3\u7406\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
@@ -24752,7 +24765,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
 }
 
 \u7528\u6237\u4EFB\u52A1\uFF1A${task_description}`;
-            const planResponse = await AIService3.requestChat(planPrompt, settings, 1500);
+            const planResponse = await AIService2.requestChat(planPrompt, settings, 1500);
             const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
               return "\u274C Agent \u65E0\u6CD5\u751F\u6210\u6709\u6548\u7684\u6267\u884C\u8BA1\u5212\u3002\u8BF7\u5C1D\u8BD5\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u4EFB\u52A1\u3002";
@@ -24796,9 +24809,9 @@ ${plan.explanation || ""}
                 "processing"
               );
               try {
-                const stepResult = await AIAssistant3.executeIntent(step, settings);
-                const normalizedStepResult = AIAssistant3._normalizeExecutionResult(stepResult);
-                if (AIAssistant3._isErrorResult(normalizedStepResult)) {
+                const stepResult = await AIAssistant2.executeIntent(step, settings);
+                const normalizedStepResult = AIAssistant2._normalizeExecutionResult(stepResult);
+                if (AIAssistant2._isErrorResult(normalizedStepResult)) {
                   results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
                   aborted = true;
                   break;
@@ -24809,7 +24822,7 @@ ${plan.explanation || ""}
                   index: i + 1,
                   explanation: step.explanation,
                   success: false,
-                  result: AIAssistant3._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
+                  result: AIAssistant2._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
                 });
                 aborted = true;
                 break;
@@ -24840,7 +24853,7 @@ ${plan.explanation || ""}
             for (const r of results) {
               report += `
 **\u6B65\u9AA4 ${r.index}**: ${r.explanation}
-${AIAssistant3._resultToText(r.result)}
+${AIAssistant2._resultToText(r.result)}
 `;
             }
             return report;
@@ -24897,7 +24910,7 @@ ${AIAssistant3._resultToText(r.result)}
         runAgentLoop: async (userMessage, settings, maxIterations = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG2.DEFAULTS.agentMaxIterations)) => {
           var _a, _b, _c, _d, _e;
           const permLevel = OperationGuard2.getLevel();
-          const availableTools = Object.entries(AIAssistant3.AGENT_TOOLS).filter(([_, tool]) => tool.level <= permLevel).map(([name, tool]) => `- ${name}: ${tool.description} | \u53C2\u6570: ${tool.params}`).join("\n");
+          const availableTools = Object.entries(AIAssistant2.AGENT_TOOLS).filter(([_, tool]) => tool.level <= permLevel).map(([name, tool]) => `- ${name}: ${tool.description} | \u53C2\u6570: ${tool.params}`).join("\n");
           const aiTargetState = TargetState2.getDisplayAITargetState();
           let dbInfo;
           if (aiTargetState.mode === "all") {
@@ -24971,7 +24984,7 @@ ${userMessage}
             );
             let response;
             try {
-              response = await AIService3.requestAgentChat(
+              response = await AIService2.requestAgentChat(
                 systemPrompt,
                 messages,
                 settings,
@@ -24980,7 +24993,7 @@ ${userMessage}
             } catch (error) {
               return `\u274C AI \u8C03\u7528\u5931\u8D25: ${error.message}`;
             }
-            const toolCall = AIAssistant3._tryParseToolCall(response);
+            const toolCall = AIAssistant2._tryParseToolCall(response);
             if (!toolCall) {
               return response;
             }
@@ -24991,15 +25004,15 @@ ${userMessage}
               `\u{1F916} \u6B63\u5728\u6267\u884C: ${toolCall.tool}...${thoughtText}`,
               "processing"
             );
-            const tool = AIAssistant3.AGENT_TOOLS[toolCall.tool];
+            const tool = AIAssistant2.AGENT_TOOLS[toolCall.tool];
             let result;
             if (!tool) {
-              result = AIAssistant3._normalizeExecutionResult(
-                `\u9519\u8BEF: \u672A\u77E5\u5DE5\u5177 "${toolCall.tool}"\u3002\u53EF\u7528\u5DE5\u5177: ${Object.keys(AIAssistant3.AGENT_TOOLS).filter((name) => AIAssistant3.AGENT_TOOLS[name].level <= permLevel).join(", ")}`,
+              result = AIAssistant2._normalizeExecutionResult(
+                `\u9519\u8BEF: \u672A\u77E5\u5DE5\u5177 "${toolCall.tool}"\u3002\u53EF\u7528\u5DE5\u5177: ${Object.keys(AIAssistant2.AGENT_TOOLS).filter((name) => AIAssistant2.AGENT_TOOLS[name].level <= permLevel).join(", ")}`,
                 { source: "tool", name: toolCall.tool, status: "error" }
               );
             } else if (tool.level > permLevel) {
-              result = AIAssistant3._normalizeExecutionResult(
+              result = AIAssistant2._normalizeExecutionResult(
                 `\u9519\u8BEF: \u6743\u9650\u4E0D\u8DB3\uFF0C"${toolCall.tool}" \u9700\u8981\u300C${CONFIG2.PERMISSION_NAMES[tool.level]}\u300D\u6743\u9650\uFF0C\u5F53\u524D\u4E3A\u300C${CONFIG2.PERMISSION_NAMES[permLevel]}\u300D`,
                 { source: "tool", name: toolCall.tool, status: "error" }
               );
@@ -25016,12 +25029,12 @@ ${userMessage}
                   });
                 } catch (guardError) {
                   if (guardError.message === "\u64CD\u4F5C\u5DF2\u53D6\u6D88") {
-                    result = AIAssistant3._normalizeExecutionResult(
+                    result = AIAssistant2._normalizeExecutionResult(
                       `\u9519\u8BEF: \u7528\u6237\u53D6\u6D88\u4E86 "${toolCall.tool}" \u64CD\u4F5C\u7684\u6267\u884C`,
                       { source: "tool", name: toolCall.tool, status: "cancelled" }
                     );
                   } else {
-                    result = AIAssistant3._normalizeExecutionResult(`\u9519\u8BEF: ${guardError.message}`, {
+                    result = AIAssistant2._normalizeExecutionResult(`\u9519\u8BEF: ${guardError.message}`, {
                       source: "tool",
                       name: toolCall.tool,
                       status: "error"
@@ -25032,7 +25045,7 @@ ${userMessage}
                 try {
                   result = await tool.execute(toolCall.args || {}, settings);
                 } catch (e) {
-                  result = AIAssistant3._normalizeExecutionResult(`\u9519\u8BEF: ${e.message}`, {
+                  result = AIAssistant2._normalizeExecutionResult(`\u9519\u8BEF: ${e.message}`, {
                     source: "tool",
                     name: toolCall.tool,
                     status: "error"
@@ -25041,20 +25054,20 @@ ${userMessage}
               }
             }
             messages.push({ role: "user", content: `[\u5DE5\u5177\u7ED3\u679C] ${toolCall.tool}:
-${AIAssistant3._resultToAgentPayload(result)}` });
+${AIAssistant2._resultToAgentPayload(result)}` });
           }
           return "\u{1F916} Agent \u8FBE\u5230\u6700\u5927\u6267\u884C\u6B65\u6570\uFF0C\u5DF2\u505C\u6B62\u3002\u5982\u679C\u4EFB\u52A1\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u7EE7\u7EED\u63CF\u8FF0\u4F60\u7684\u9700\u6C42\u3002";
         }
       };
-      Object.assign(AIAssistant3, AIHandlers2);
-      Object.entries(AIAssistant3.AGENT_TOOLS).forEach(([name, tool]) => {
+      Object.assign(AIAssistant2, AIHandlers2);
+      Object.entries(AIAssistant2.AGENT_TOOLS).forEach(([name, tool]) => {
         const execute = tool.execute;
         tool.execute = async (args, settings) => {
           try {
             const rawResult = await execute(args, settings);
-            return AIAssistant3._normalizeExecutionResult(rawResult, { source: "tool", name });
+            return AIAssistant2._normalizeExecutionResult(rawResult, { source: "tool", name });
           } catch (error) {
-            return AIAssistant3._normalizeExecutionResult(`\u9519\u8BEF: ${error.message}`, {
+            return AIAssistant2._normalizeExecutionResult(`\u9519\u8BEF: ${error.message}`, {
               source: "tool",
               name,
               status: "error"
@@ -25062,15 +25075,15 @@ ${AIAssistant3._resultToAgentPayload(result)}` });
           }
         };
       });
-      AIAssistant3.IntentMatcher = Object.freeze({
+      AIAssistant2.IntentMatcher = Object.freeze({
         patterns: QUICK_INTENT_PATTERNS2,
         getRules: () => QUICK_INTENT_RULES2.slice(),
-        buildContext: (userMessage) => AIAssistant3._buildQuickIntentContext(userMessage),
-        matchesRule: (rule, ctx) => AIAssistant3._matchesQuickIntentRule(rule, ctx),
+        buildContext: (userMessage) => AIAssistant2._buildQuickIntentContext(userMessage),
+        matchesRule: (rule, ctx) => AIAssistant2._matchesQuickIntentRule(rule, ctx),
         parse: (userMessage) => {
-          const ctx = AIAssistant3._buildQuickIntentContext(userMessage);
+          const ctx = AIAssistant2._buildQuickIntentContext(userMessage);
           if (!ctx) return null;
-          const matchedRules = QUICK_INTENT_RULES2.filter((rule) => AIAssistant3._matchesQuickIntentRule(rule, ctx)).sort((a, b) => b.priority - a.priority);
+          const matchedRules = QUICK_INTENT_RULES2.filter((rule) => AIAssistant2._matchesQuickIntentRule(rule, ctx)).sort((a, b) => b.priority - a.priority);
           if (matchedRules.length === 0) return null;
           const [topRule] = matchedRules;
           const hasPriorityConflict = matchedRules.some((rule, index) => index > 0 && rule.priority === topRule.priority && rule.intent !== topRule.intent);
@@ -25078,14 +25091,14 @@ ${AIAssistant3._resultToAgentPayload(result)}` });
           return topRule.buildResult(ctx);
         }
       });
-      AIAssistant3.IntentDispatcher = Object.freeze({
-        resolveExecutor: (intent) => AIAssistant3._resolveIntentExecutor(intent),
-        canExecuteDirectly: (intent) => AIAssistant3._canExecuteParsedIntentDirectly(intent),
+      AIAssistant2.IntentDispatcher = Object.freeze({
+        resolveExecutor: (intent) => AIAssistant2._resolveIntentExecutor(intent),
+        canExecuteDirectly: (intent) => AIAssistant2._canExecuteParsedIntentDirectly(intent),
         execute: async (intentResult, settings) => {
           const { intent } = intentResult;
-          const executor = AIAssistant3.IntentDispatcher.resolveExecutor(intent);
+          const executor = AIAssistant2.IntentDispatcher.resolveExecutor(intent);
           if (!executor) {
-            return AIAssistant3._normalizeExecutionResult(
+            return AIAssistant2._normalizeExecutionResult(
               `\u62B1\u6B49\uFF0C\u6211\u6CA1\u6709\u5B8C\u5168\u7406\u89E3\u4F60\u7684\u6307\u4EE4\u3002
 
 ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.explanation}` : ""}
@@ -25096,12 +25109,12 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           }
           try {
             const rawResult = await executor.execute(intentResult, settings);
-            return AIAssistant3._normalizeExecutionResult(rawResult, {
+            return AIAssistant2._normalizeExecutionResult(rawResult, {
               source: executor.source,
               name: executor.name
             });
           } catch (error) {
-            return AIAssistant3._normalizeExecutionResult(`\u9519\u8BEF: ${error.message}`, {
+            return AIAssistant2._normalizeExecutionResult(`\u9519\u8BEF: ${error.message}`, {
               source: executor.source,
               name: executor.name,
               status: "error"
@@ -25173,7 +25186,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           container.innerHTML = ChatState2.messages.map((msg) => {
             const isUser = msg.role === "user";
             const statusClass = msg.status === "processing" ? "processing" : msg.status === "error" ? "error" : "";
-            const content = msg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI2.safeMarkdown(AIAssistant3._resultToText(msg.content));
+            const content = msg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI2.safeMarkdown(AIAssistant2._resultToText(msg.content));
             return `
                 <div class="ldb-chat-message ${isUser ? "user" : "assistant"}">
                     <div class="ldb-chat-bubble ${isUser ? "user" : "assistant"} ${statusClass}">
@@ -25199,7 +25212,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           ChatState2.isProcessing = true;
           ChatState2.addMessage("assistant", "\u601D\u8003\u4E2D...", "processing");
           try {
-            const response = await AIAssistant3.handleMessage(message);
+            const response = await AIAssistant2.handleMessage(message);
             ChatState2.updateLastMessage(response, "complete");
           } catch (error) {
             console.error("[LD-Notion] AI \u5904\u7406\u5931\u8D25:", error);
@@ -25344,13 +25357,13 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           const title = AIClassifier2.getPageTitle(page);
           const blocks = await AIClassifier2.fetchPageBlocks(page.id, settings.notionApiKey);
           const content = AIClassifier2.extractText(blocks);
-          const category = await AIService3.classify(
+          const category = await AIService2.classify(
             title,
             content,
             settings.categories,
             settings
           );
-          await AIAssistant3._executeGuardedPageWrite(
+          await AIAssistant2._executeGuardedPageWrite(
             "updatePage",
             { id: page.id, name: title },
             () => NotionAPI2.updatePage(page.id, {
@@ -25409,7 +25422,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
                 ...existingOptions,
                 ...newOptions.map((name) => ({ name }))
               ];
-              await AIAssistant3._executeGuardedDatabaseWrite(
+              await AIAssistant2._executeGuardedDatabaseWrite(
                 "updateDatabase",
                 notionDatabaseId,
                 () => NotionAPI2.updateDatabase(notionDatabaseId, {
@@ -25423,7 +25436,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
             return;
           }
           const options = categories.map((name) => ({ name }));
-          await AIAssistant3._executeGuardedDatabaseWrite(
+          await AIAssistant2._executeGuardedDatabaseWrite(
             "updateDatabase",
             notionDatabaseId,
             () => NotionAPI2.updateDatabase(notionDatabaseId, {
@@ -25449,7 +25462,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           AIClassifier2.isCancelled = false;
         }
       };
-      module.exports = { AIService: AIService3, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant3, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier2 };
+      module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier2 };
     }
   });
 
@@ -25457,16 +25470,16 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { CONFIG, SUPPORTED_FILE_TYPES, EXT_TO_MIME, FILE_TYPE_CATEGORY, SUPPORTED_IMAGE_TYPES, MULTI_PART_THRESHOLD, isSupportedFileType, getMimeType: getMimeType2, getFileCategory, MSG } = require_config();
   var { Utils } = require_utils();
   var { Storage, SyncState } = require_storage();
-  var { CredentialVault: CredentialVault2, TargetState, NotionOAuth } = require_auth();
+  var { CredentialVault, TargetState, NotionOAuth } = require_auth();
   var { SiteDetector, InstallHelper, EMOJI_MAP, NOTION_LANGUAGES, normalizeLanguage, DOMToNotion, NotionTransport, NotionAPI, ObsidianAPI, HTMLToMarkdown } = require_api();
-  var { AIService: AIService2, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant: AIAssistant2, AIWelcomeUI, ChatUI, AIClassifier } = require_ai();
+  var { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier } = require_ai();
   var { OperationGuard, OperationLog, ConfirmationDialog, UndoManager } = require_security();
-  var { ZhihuAPI, GenericExtractor: GenericExtractor2, WorkspaceService } = require_extract();
+  var { ZhihuAPI, GenericExtractor, WorkspaceService } = require_extract();
   var { GenericExporter, LinuxDoAPI, Exporter } = require_export();
   var { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require_import();
-  var { BookmarkBridge: BookmarkBridge2, BookmarkExporter: BookmarkExporter2, BookmarkAutoImporter, RSSAutoImporter } = require_bridge();
-  var { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI: UI2, GenericUI } = require_ui();
-  Storage.CredentialVault = CredentialVault2;
+  var { BookmarkBridge: BookmarkBridge2, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter } = require_bridge();
+  var { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI, GenericUI } = require_ui();
+  Storage.CredentialVault = CredentialVault;
   BookmarkBridge2.init();
   window.addEventListener("ld-notion-popup-action", (event) => {
     var _a;
@@ -25474,15 +25487,15 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
     if (action === "set-bookmark-source") {
       const source = ((_a = event.detail) == null ? void 0 : _a.source) === "github" ? "github" : "linuxdo";
       Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, source);
-      if (typeof UI2 !== "undefined" && UI2.panel && UI2.refs) {
-        if (typeof UI2.switchBookmarkSource === "function") {
-          UI2.switchBookmarkSource(source);
+      if (typeof UI !== "undefined" && UI.panel && UI.refs) {
+        if (typeof UI.switchBookmarkSource === "function") {
+          UI.switchBookmarkSource(source);
         } else {
-          UI2.applyBookmarkSourceUI(source);
+          UI.applyBookmarkSourceUI(source);
         }
-        const sourceToggle = UI2.refs.sourceSettingsToggle;
-        const sourceContent = UI2.refs.sourceSettingsContent;
-        const sourceArrow = UI2.refs.sourceSettingsArrow;
+        const sourceToggle = UI.refs.sourceSettingsToggle;
+        const sourceContent = UI.refs.sourceSettingsContent;
+        const sourceArrow = UI.refs.sourceSettingsArrow;
         if (sourceToggle && (sourceContent == null ? void 0 : sourceContent.classList.contains("collapsed"))) {
           sourceToggle.click();
         } else if (sourceContent && sourceArrow) {
@@ -25511,7 +25524,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       NotionOAuth.syncApiKeyInputs();
       const currentSite = SiteDetector.detect();
       if (currentSite === SiteDetector.SITES.LINUX_DO) {
-        UI2.init();
+        UI.init();
         Utils.runWhenBrowserIdle(() => UpdateChecker.init());
         const isBookmarkPage = /\/u\/[^/]+\/activity\/bookmarks/.test(window.location.pathname);
         if (!isBookmarkPage) {
@@ -25525,7 +25538,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
         Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
       } else if (currentSite === SiteDetector.SITES.GITHUB) {
-        UI2.init();
+        UI.init();
         Utils.runWhenBrowserIdle(() => UpdateChecker.init());
         Utils.runWhenBrowserIdle(() => GitHubAutoImporter.init());
         Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
@@ -25541,8 +25554,8 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           NotionSiteUI.showStatus(notice.message, notice.type || "info");
         } else if (currentSite === SiteDetector.SITES.GENERIC && typeof GenericUI.showStatus === "function") {
           GenericUI.showStatus(notice.message, notice.type || "info");
-        } else if (typeof UI2.showStatus === "function") {
-          UI2.showStatus(notice.message, notice.type || "info");
+        } else if (typeof UI.showStatus === "function") {
+          UI.showStatus(notice.message, notice.type || "info");
         }
       }
     };

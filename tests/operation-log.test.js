@@ -86,14 +86,16 @@ describe("AT-007: OperationLog 纯函数", () => {
             expect(OperationLog.redactSensitiveFields(42)).toBe(42);
         });
 
-        it("becomes no-op when CredentialVault is undefined", () => {
+        it("redacts via module-level CredentialVault even if globalThis is cleared (regression: CWE-532)", () => {
+            // 修复前 security 用 typeof CredentialVault 裸引用全局，delete globalThis.CredentialVault
+            // 会让脱敏静默 no-op（敏感值泄露进操作日志）。修复后 CredentialVault 为顶部 require 的
+            // 模块级硬依赖，不受 globalThis 污染影响，脱敏恒生效。
             delete globalThis.CredentialVault;
             const entry = {
                 context: { "ldb_notion_api_key": "secret-key" },
             };
             const result = OperationLog.redactSensitiveFields(entry);
-            // No SENSITIVE_KEYS available, so nothing gets redacted
-            expect(result.context["ldb_notion_api_key"]).toBe("secret-key");
+            expect(result.context["ldb_notion_api_key"]).toBe("***REDACTED***");
         });
     });
 

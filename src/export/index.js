@@ -7,7 +7,8 @@ const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
 const { NotionAPI, DOMToNotion, HTMLToMarkdown, ObsidianAPI, SiteDetector, EMOJI_MAP } = require("../api");
 const { OperationGuard, UndoManager, OperationLog } = require("../security");
 const { BookmarkExporter } = require("../bridge");
-const { ZhihuAPI } = require("../extract");
+const { ZhihuAPI, GenericExtractor } = require("../extract");
+const { AIAssistant } = require("../ai");
 const { SyncLock } = require("../sync-lock");
 
 const GenericExporter = {

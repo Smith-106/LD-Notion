@@ -5,6 +5,7 @@ const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { NotionAPI } = require("../api");
 const { GitHubAPI } = require("./GitHubAPI");
+const { AIService } = require("../ai");
 
 const GitHubExporter = {
     normalizeText: (text, maxLen = 280) => {

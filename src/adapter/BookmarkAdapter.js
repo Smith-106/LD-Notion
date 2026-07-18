@@ -1,7 +1,7 @@
 "use strict";
 
 const { SourceAdapter } = require("./SourceAdapter");
-const { BookmarkBridge } = require("../bridge");
+const { BookmarkBridge, BookmarkExporter } = require("../bridge");
 
 const BookmarkAdapter = Object.assign(Object.create(SourceAdapter), {
     sourceType: "bookmark",
