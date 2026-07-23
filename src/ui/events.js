@@ -1642,7 +1642,7 @@ const UIEvents = {
                 return;
             }
             list.innerHTML = templates.map((t, i) => {
-                const icon = t.icon || "📝";
+                const icon = Utils.escapeHtml(t.icon || "📝");
                 const name = Utils.escapeHtml(t.name || "未命名");
                 const prompt = Utils.escapeHtml((t.prompt || "").substring(0, 50));
                 return `<div class="ldb-setting-row" style="justify-content: space-between; padding: 4px 0;">

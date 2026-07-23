@@ -877,7 +877,9 @@ const NotionSiteUI = {
             const isSelected = shouldPreserve
                 ? model === currentValue
                 : model === defaultModel;
-            return `<option value="${model}" ${isSelected ? 'selected' : ''}>${model}</option>`;
+            // model 来自 AI /models 响应（用户可配自定义 baseUrl），须转义防 CWE-79
+            const safeModel = Utils.escapeHtml(model);
+            return `<option value="${safeModel}" ${isSelected ? 'selected' : ''}>${safeModel}</option>`;
         }).join("");
     },
 

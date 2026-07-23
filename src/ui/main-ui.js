@@ -1465,7 +1465,10 @@ const UI = {
             const isSelected = shouldPreserve
                 ? model === currentValue
                 : model === defaultModel;
-            return `<option value="${model}" ${isSelected ? 'selected' : ''}>${model}</option>`;
+            // model 来自 AI /models 响应（用户可配自定义 baseUrl 指向攻击者端点），
+            // 须转义 value 属性与文本，防 CWE-79 注入
+            const safeModel = Utils.escapeHtml(model);
+            return `<option value="${safeModel}" ${isSelected ? 'selected' : ''}>${safeModel}</option>`;
         }).join("");
     },
 

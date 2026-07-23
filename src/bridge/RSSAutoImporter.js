@@ -281,6 +281,23 @@ const RSSAutoImporter = {
         });
     },
 
+    // 带重试的 fetchFeed：RSS feed 公网稳定性差，单次抖动不应阻断整次同步。
+    // 最多重试 2 次（共 3 次尝试），指数退避 1s/2s。
+    fetchFeedWithRetry: async (feedUrl, retries = 2) => {
+        let lastError;
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                return await RSSAutoImporter.fetchFeed(feedUrl);
+            } catch (error) {
+                lastError = error;
+                if (attempt < retries) {
+                    await Utils.sleep(1000 * Math.pow(2, attempt));
+                }
+            }
+        }
+        throw lastError;
+    },
+
     fetchTrackedPages: async (databaseId, apiKey) => {
         const filter = {
             and: [
@@ -421,7 +438,14 @@ const RSSAutoImporter = {
         const itemsByKey = new Map();
 
         for (const feedUrl of feedUrls) {
-            const parsed = await RSSAutoImporter.fetchFeed(feedUrl);
+            // 单 feed 失败不应阻断整次 RSS 同步（优雅降级）：重试用尽后 catch 记录并 continue。
+            let parsed;
+            try {
+                parsed = await RSSAutoImporter.fetchFeedWithRetry(feedUrl);
+            } catch (error) {
+                console.error(`[LD-Notion] RSS feed 拉取失败（已重试），跳过: ${feedUrl}`, error);
+                continue;
+            }
             for (const rawItem of (parsed.items || [])) {
                 const normalized = RSSAutoImporter.normalizeItem({
                     ...rawItem,

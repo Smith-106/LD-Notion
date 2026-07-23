@@ -583,7 +583,7 @@ const ConfirmationDialog = {
                             <div class="ldb-confirm-input-group">
                                 <label>请输入名称确认:</label>
                                 <input type="text" class="ldb-confirm-input" placeholder="${escapeHtml(itemName)}" id="ldb-confirm-name-input">
-                                <div class="ldb-confirm-hint">请输入 "${itemName}" 以确认操作</div>
+                                <div class="ldb-confirm-hint">请输入 "${escapeHtml(itemName)}" 以确认操作</div>
                             </div>
                         ` : ""}
                     </div>

@@ -173,11 +173,17 @@ const Utils = {
     },
 
     // HTML 转义，防止 XSS 攻击
+    // 纯字符串替换，行为与 document.createElement('div')+textContent+innerHTML
+    // 完全一致：转义 & < > " 四个字符，不转义 '（HTML textContent 语义）。
+    // 避免每次调用创建一次性 DOM 节点——escapeHtml 在批量渲染热路径
+    // （renderBookmarkList/updateLogPanel 等）被调用 60+ 处，DOM 节点创建放大 GC。
     escapeHtml: (text) => {
         if (!text) return "";
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return String(text)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
     },
 
     // 从 Notion 页面对象提取标题

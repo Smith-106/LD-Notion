@@ -1,15 +1,6 @@
 "use strict";
 
-// 依赖引入
-const { CONFIG, MSG } = require("../config");
-const { Utils } = require("../utils");
-const { Storage, SyncState } = require("../storage");
-const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
-const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, ObsidianAPI, EMOJI_MAP } = require("../api");
-const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = require("../security");
-const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
-const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
-const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
+const { Storage } = require("../storage");
 
 const PanelResize = {
     _stylesInjected: false,

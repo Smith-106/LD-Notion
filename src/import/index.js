@@ -201,13 +201,14 @@ AutoImporter.run = async () => {
         let success = 0;
         let failed = 0;
         const successfulBookmarks = [];
-        let nextIndex = 0;
+        // 显式任务队列 shift（项目并发安全锁定约束：不可用共享 nextIndex++）。
+        // 与 export/index.js:976 对齐，单线程事件循环下 shift 原子取任务。
+        const remaining = Array.from({ length: newBookmarks.length }, (_, k) => k);
 
         const worker = async () => {
             while (true) {
-                // 原子取任务：先 increment 再 await，避免并发重复取索引
-                const i = nextIndex++;
-                if (i >= newBookmarks.length) return;
+                const i = remaining.shift();
+                if (i === undefined) return;
 
                 const bookmark = newBookmarks[i];
                 const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
@@ -223,7 +224,7 @@ AutoImporter.run = async () => {
                     failed++;
                 }
 
-                if (delay > 0 && nextIndex < newBookmarks.length) {
+                if (delay > 0 && remaining.length > 0) {
                     await Utils.sleep(delay);
                 }
             }

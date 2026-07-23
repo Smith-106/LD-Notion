@@ -54,7 +54,7 @@ const BookmarkAdapter = Object.assign(Object.create(SourceAdapter), {
         // 扁平化书签树
         const flat = BookmarkBridge.flattenTree ? BookmarkBridge.flattenTree(tree) : this._flattenTree(tree);
         const items = flat
-            .filter((b) => b.url && BookmarkExporter && BookmarkExporter.isHttpUrl ? BookmarkExporter.isHttpUrl(b.url) : /^https?:/.test(b.url || ""))
+            .filter((b) => b.url && BookmarkExporter && BookmarkExporter.isHttpUrl ? BookmarkExporter.isHttpUrl(b.url) : /^https?:\/\//i.test(b.url || ""))
             .map((b) => this.normalize(b));
         if (watermark && watermark.time) {
             return items.filter((item) => item.createdAt > watermark.time);

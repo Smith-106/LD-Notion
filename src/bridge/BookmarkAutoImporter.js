@@ -282,7 +282,10 @@ BookmarkAutoImporter.run = async () => {
         const currentBookmarks = await BookmarkAutoImporter.loadCurrentBookmarks();
         const currentMap = new Map(currentBookmarks.map((bookmark) => [String(bookmark.id), bookmark]));
         const trackedPages = await BookmarkAutoImporter.fetchTrackedPages(settings.databaseId, settings.apiKey);
-        const index = BookmarkAutoImporter.buildPageIndex(trackedPages);
+        // pageIndex 是页面对象索引（byBookmarkId/byUrl/byPageId），非遍历序号。
+        // 此前命名 index 与 processBookmark/processDeleted 的 itemIndex 参数混淆，
+        // 导致 delay 条件 `index < length-1` 引用对象（NaN）恒 false、REQUEST_DELAY 失效（ISS 修正）。
+        const pageIndex = BookmarkAutoImporter.buildPageIndex(trackedPages);
         const nextSnapshot = {};
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
@@ -310,9 +313,9 @@ BookmarkAutoImporter.run = async () => {
         const processBookmark = async (bookmark, itemIndex) => {
             const bookmarkId = String(bookmark.id);
             const snapshotEntry = previousSnapshot[bookmarkId] || null;
-            let pageMeta = index.byBookmarkId.get(bookmarkId)
-                || index.byUrl.get(bookmark.url)
-                || (snapshotEntry?.pageId ? index.byPageId.get(snapshotEntry.pageId) : null);
+            let pageMeta = pageIndex.byBookmarkId.get(bookmarkId)
+                || pageIndex.byUrl.get(bookmark.url)
+                || (snapshotEntry?.pageId ? pageIndex.byPageId.get(snapshotEntry.pageId) : null);
 
             try {
                 if (!pageMeta) {
@@ -351,9 +354,9 @@ BookmarkAutoImporter.run = async () => {
                     folderPath: bookmark.folderPath,
                     dateAdded: SyncState.normalizeTime(bookmark.dateAdded),
                 };
-                if (pageId) index.byPageId.set(pageId, syncedMeta);
-                index.byBookmarkId.set(bookmarkId, syncedMeta);
-                if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
+                if (pageId) pageIndex.byPageId.set(pageId, syncedMeta);
+                pageIndex.byBookmarkId.set(bookmarkId, syncedMeta);
+                if (syncedMeta.url) pageIndex.byUrl.set(syncedMeta.url, syncedMeta);
                 BookmarkExporter.markExported(bookmark.url);
                 nextSnapshot[bookmarkId] = BookmarkAutoImporter.buildSnapshotEntry(bookmark, pageId);
             } catch (error) {
@@ -364,7 +367,7 @@ BookmarkAutoImporter.run = async () => {
                 }
             }
 
-            if (delay > 0 && index < currentBookmarks.length - 1) {
+            if (delay > 0 && itemIndex < currentBookmarks.length - 1) {
                 await Utils.sleep(delay);
             }
         };
@@ -375,9 +378,9 @@ BookmarkAutoImporter.run = async () => {
 
         const processDeleted = async (bookmarkId, itemIndex) => {
             const snapshotEntry = previousSnapshot[bookmarkId];
-            const pageMeta = (snapshotEntry?.pageId ? index.byPageId.get(snapshotEntry.pageId) : null)
-                || index.byBookmarkId.get(bookmarkId)
-                || (snapshotEntry?.url ? index.byUrl.get(snapshotEntry.url) : null);
+            const pageMeta = (snapshotEntry?.pageId ? pageIndex.byPageId.get(snapshotEntry.pageId) : null)
+                || pageIndex.byBookmarkId.get(bookmarkId)
+                || (snapshotEntry?.url ? pageIndex.byUrl.get(snapshotEntry.url) : null);
 
             if (!pageMeta?.pageId) {
                 archived++;
@@ -387,6 +390,26 @@ BookmarkAutoImporter.run = async () => {
             try {
                 const itemLabel = snapshotEntry?.title || snapshotEntry?.url || bookmarkId;
                 BookmarkAutoImporter.updateStatus(`🗃️ 正在归档已删除书签 (${itemIndex + 1}/${deletedIds.length}): ${itemLabel}`);
+                // deletePage 是 level 2 危险操作（DANGEROUS_OPERATIONS），自动同步循环不可绕过
+                // OperationGuard 裸调 NotionAPI.deletePage（CWE-862/639 授权绕过）。
+                // 此处不调用 OperationGuard.execute（会弹 ConfirmationDialog 阻塞批量循环），
+                // 但必须过 canExecute 权限闸门：权限不足则跳过归档并记审计，绝不裸调。
+                // lazy require 避免加载期环（security→api，运行时整张图已加载）。
+                const { OperationGuard, OperationLog } = require("../security");
+                if (!OperationGuard.canExecute("deletePage")) {
+                    OperationLog.add({
+                        audit_event: "guard.denied",
+                        actor: "system",
+                        source: "bookmark-auto-sync",
+                        guard: { operation: "deletePage", decision: "deny", reason: "权限不足：自动归档需 level≥2" },
+                        operationName: "deletePage",
+                        status: "denied",
+                        context: { pageId: pageMeta.pageId, bookmarkId, itemName: itemLabel },
+                    });
+                    failed++;
+                    nextSnapshot[bookmarkId] = snapshotEntry;
+                    return;
+                }
                 await NotionAPI.deletePage(pageMeta.pageId, settings.apiKey);
                 archived++;
             } catch (error) {
@@ -395,7 +418,7 @@ BookmarkAutoImporter.run = async () => {
                 nextSnapshot[bookmarkId] = snapshotEntry;
             }
 
-            if (delay > 0 && index < deletedIds.length - 1) {
+            if (delay > 0 && itemIndex < deletedIds.length - 1) {
                 await Utils.sleep(delay);
             }
         };

@@ -49,9 +49,26 @@ const GitHubAPI = {
                             reject(new Error(`${label} API 错误: ${response.status}`));
                         }
                     },
-                    onerror: () => reject(new Error(`网络错误，无法连接 ${label}`)),
+                    onerror: () => {
+                        // 网络抖动下若已拉到部分页，partial resolve 保留已拉数据
+                        // （否则整次 reject 丢弃前 N 页，下次从旧 watermark 重拉全部，放大流量）。
+                        // 调用方经 markExported 标记已处理项，partial 不会导致重复导入。
+                        if (allItems.length > 0) {
+                            console.warn(`[LD-Notion] ${label} 分页拉取网络错误，保留已拉 ${allItems.length} 项（partial）`);
+                            resolve(allItems);
+                        } else {
+                            reject(new Error(`网络错误，无法连接 ${label}`));
+                        }
+                    },
                     timeout: 30000,
-                    ontimeout: () => reject(new Error("GitHub API 请求超时")),
+                    ontimeout: () => {
+                        if (allItems.length > 0) {
+                            console.warn(`[LD-Notion] ${label} 分页拉取超时，保留已拉 ${allItems.length} 项（partial）`);
+                            resolve(allItems);
+                        } else {
+                            reject(new Error("GitHub API 请求超时"));
+                        }
+                    },
                 });
             };
 

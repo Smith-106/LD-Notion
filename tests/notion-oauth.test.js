@@ -5632,6 +5632,9 @@ function createWorkspaceVisualizationFixture(harness) {
 
         harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID] = 'db-bookmarks';
         harness.store[harness.CONFIG.STORAGE_KEYS.REQUEST_DELAY] = 0;
+        // 归档已删除书签 = deletePage（level 2 危险操作，ISS improve 修复 CWE-862/639 后
+        // 自动同步需经 OperationGuard.canExecute 闸门）。测试设 level=2 验证正常归档路径。
+        harness.store[harness.CONFIG.STORAGE_KEYS.PERMISSION_LEVEL] = 2;
         harness.NotionOAuth.getAccessToken = () => 'manual_api_key';
         harness.BookmarkAutoImporter.minimumRunGapMs = 0;
         harness.BookmarkAutoImporter.lastRunAt = 0;
@@ -5786,6 +5789,45 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(harness.notifications[0].text.includes('更新 1'), harness.notifications[0].text);
         assert.ok(harness.notifications[0].text.includes('归档 1'), harness.notifications[0].text);
         assert.ok(harness.notifications[0].text.includes('失败 1'), harness.notifications[0].text);
+    });
+
+    await runTest('BookmarkAutoImporter.run: 权限不足时跳过归档不裸调 deletePage (CWE-862/639 回归)', async () => {
+        const harness = createHarness();
+        const deletedPageIds = [];
+
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID] = 'db-bookmarks';
+        harness.store[harness.CONFIG.STORAGE_KEYS.REQUEST_DELAY] = 0;
+        // 权限 level=1 < deletePage 所需 level=2，自动归档应被 OperationGuard 闸门拒绝
+        harness.store[harness.CONFIG.STORAGE_KEYS.PERMISSION_LEVEL] = 1;
+        harness.NotionOAuth.getAccessToken = () => 'manual_api_key';
+        harness.BookmarkAutoImporter.minimumRunGapMs = 0;
+        harness.BookmarkAutoImporter.lastRunAt = 0;
+        harness.BookmarkAutoImporter.isRunning = false;
+        harness.Exporter.isExporting = false;
+        registerBookmarkBridgeMeta(harness);
+
+        const previousSnapshot = {
+            '2': { id: '2', title: 'Old', url: 'https://example.com/old', pageId: 'page-2' },
+        };
+        harness.SyncState.updateBookmarkState({
+            snapshot: previousSnapshot,
+            lastSuccessAt: 0
+        });
+
+        // 当前书签树不含 id=2，触发归档分支
+        harness.BookmarkAutoImporter.loadCurrentBookmarks = async () => [];
+        harness.NotionAPI.deletePage = async (pageId, apiKey) => {
+            deletedPageIds.push([pageId, apiKey]);
+            return { ok: true };
+        };
+
+        await harness.BookmarkAutoImporter.run();
+
+        // 权限不足：deletePage 不应被裸调（CWE-862/639 修复后经 canExecute 闸门拒绝）
+        assert.deepStrictEqual(deletedPageIds, []);
+        // 失败被计入 stats（归档被拒视为失败，保留 snapshot）
+        const bookmarkState = harness.SyncState.getBookmarkState();
+        assert.ok(bookmarkState.snapshot['2'], '权限不足时 snapshot 应保留以便下次重试');
     });
 
     await runTest('AutoImporter.run: writes unified sync state on partial success', async () => {

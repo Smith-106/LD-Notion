@@ -124,3 +124,33 @@ describe("AdapterRegistry", () => {
         expect(AdapterRegistry.getAdapter("nonexistent")).toBeNull();
     });
 });
+
+// ISS-20260718-007 回归保护：adapter/index.js 注册时注入 lazy _bridgeAccessor，
+// 消除 adapter→bridge 加载期循环。契约测试此前直接 import BookmarkAdapter
+// （_bridgeAccessor 未注入，走 fallback 顶层 require），注入主路径零覆盖。
+// 注意：vitest/esbuild 把 ESM named import 固定为加载时快照，顶部 import 的
+// BookmarkAdapter 看不到后续 Object.assign 注入；改用 require 取同一 CJS 实例。
+const { BookmarkAdapter: BookmarkAdapterCjs } = require("../src/adapter/BookmarkAdapter.js");
+describe("ISS-007 lazy bridge accessor injection", () => {
+    it("adapter/index.js 注入 _bridgeAccessor 后 _getBridge 返回 bridge 模块", async () => {
+        // require adapter/index 触发注册 + 注入（_bridgeAccessor = () => require("../bridge")）
+        require("../src/adapter/index.js");
+        expect(typeof BookmarkAdapterCjs._bridgeAccessor).toBe("function");
+        const bridge = BookmarkAdapterCjs._getBridge();
+        expect(bridge).toBeTruthy();
+        expect(typeof bridge.BookmarkBridge).toBe("object");
+        expect(typeof bridge.BookmarkExporter).toBe("object");
+    });
+
+    it("BookmarkAdapter._bridgeAccessor 未注入时走 fallback 顶层 require（向后兼容）", () => {
+        const saved = BookmarkAdapterCjs._bridgeAccessor;
+        BookmarkAdapterCjs._bridgeAccessor = null;
+        try {
+            const bridge = BookmarkAdapterCjs._getBridge();
+            expect(bridge).toBeTruthy();
+            expect(typeof bridge.BookmarkExporter).toBe("object");
+        } finally {
+            BookmarkAdapterCjs._bridgeAccessor = saved;
+        }
+    });
+});
