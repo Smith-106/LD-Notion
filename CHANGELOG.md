@@ -1,5 +1,41 @@
 # 更新日志
 
+## [3.7.7] - 2026-07-23
+
+### 修复（odyssey-improve 全项目 6 维度审计）
+
+**安全**:
+- **XSS 渲染未转义 (CWE-79)**：4 处 innerHTML 拼接补 escapeHtml — main-ui/notion-site-ui 的 AI 模型 option value+文本、events 模板 icon、security 确认对话框 hint itemName（同块 placeholder 已转义，hint 行遗漏）
+- **删页绕 OperationGuard (CWE-862/639)**：BookmarkAutoImporter 自动同步归档已删除书签时直连 `NotionAPI.deletePage` 绕过 Guard（deletePage level 2）。改为 `OperationGuard.canExecute` 权限闸门，权限不足跳过归档并记 `guard.denied` 审计，不裸调
+
+**可靠**:
+- **节流失效**：BookmarkAutoImporter `processInBatches` 延迟条件引用外层页面对象 `index`（非遍历 `itemIndex`），`对象<数字→NaN→恒 false` 致 REQUEST_DELAY 永不生效，高书签量打 Notion API 触发 429。改名 `pageIndex` + 用 `itemIndex`
+- **并发取任务**：`import/index.js` worker `nextIndex++` 改 `remaining.shift()`，对齐 export 层显式任务队列（并发安全锁定约束跟进）
+- **RSS 单 feed 阻断**：RSSAutoImporter 新增 `fetchFeedWithRetry`（2 次指数退避重试），`loadCurrentItems` 单 feed 失败 catch continue，不再因单 feed 抖动阻断整次 RSS 同步
+- **GitHub 分页数据丢失**：`_fetchPaginated` onerror/ontimeout 时若已拉到部分页则 partial resolve 保留已拉数据（否则整次 reject 丢弃前 N 页，下次从旧 watermark 重拉全部放大流量）
+
+**性能**:
+- **escapeHtml 热路径**：改纯字符串替换（`& < > "` 转义，保持 `!text` falsy 语义与 `textContent+innerHTML` 一致），消除每次调用创建一次性 DOM 节点；60 处批量渲染调用放大 GC
+
+**可维护**:
+- **死导入清理**：ui 层 5 文件（style-manager/index/styles/design-system/panel-resize）整段复制未用的 extract/export/import 导入块清理（~45 行死导入，ISS-008 同类遗留）
+- **isHttpUrl 语义分歧**：BookmarkAdapter fallback 正则 `/^https?:/.test` 对齐主实现 `/^https?:\/\//i`（缺 `//` 与 `i` 标志）
+- **ISS-007 注入路径测试**：adapter-contract 补 lazy bridge accessor 注入主路径测试（此前契约测试只 import adapter 对象不 import 注册器，注入主路径零覆盖，仅 fallback 被测）
+
+### 说明
+
+- 本次为纯质量加固（odyssey-improve 6 维度审计 high+medium 修复），无新功能、无运行时行为变化（除安全/可靠修复的设计行为对齐），严格遵守锁定约束：单文件 Userscript 输出不变、纯客户端架构、向后兼容
+- `notion-oauth.test.js` BookmarkAutoImporter.run 测试设 `PERMISSION_LEVEL=2`（归档=deletePage level 2 新安全语义），新增权限不足跳过归档回归测试（CWE-862/639）
+- deferred 2 issue：ISS-20260723-009（AI 输出 schema 校验层 CWE-94）、ISS-20260723-010（ai/index.js 7090 行巨石拆分 + LinuxDoAPI 迁回 extract）
+- reliability agent 报 `markExported` 丢失更新经核实为误判（JS 单线程同步读改写无 await 间隔即无竞态），已记 safe 并持久化判据 spec S-20260723-iebd
+
+### 验证
+
+- `npm run verify:baseline`：17 个测试文件、352 个用例全部通过（+2 ISS-007 注入 + CWE-862 回归），legacy 全绿，logic 40/0
+- `node build.js`：零警告构建，单文件产物 1279.4 KB（-2.3 KB），关键锚点校验通过
+
+[3.7.7]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.7
+
 ## [3.7.6] - 2026-07-18
 
 ### 重构
