@@ -39,6 +39,23 @@ const UrlValidator = {
         return UrlValidator.LOCAL_HOSTS.has(parsed.hostname);
     },
 
+    // 校验 AI 返回的页面外部 URL（icon/cover external.url）。
+    // 与 validateAiBaseUrl 语义不同：这是 Notion 页面属性的外部资源 URL，
+    // Notion 服务端会抓取 external.url → SSRF 触发点。必须限定 http(s) 协议
+    // （拒 javascript:/data:/file:）且拒绝内网/私有/链路本地地址（防云元数据 169.254.169.254 等）。
+    // 复用 _isPrivateHost 保持 URL 安全原语单一来源（ISS-20260723-009 CWE-94）。
+    validatePageExternalUrl: (url) => {
+        if (!url) return false;
+        let parsed;
+        try {
+            parsed = new URL(url);
+        } catch {
+            return false;
+        }
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+        return !UrlValidator._isPrivateHost(parsed.hostname);
+    },
+
     // 判断是否为私有/内网主机
     _isPrivateHost: (hostname) => {
         if (UrlValidator.LOCAL_HOSTS.has(hostname)) return true;

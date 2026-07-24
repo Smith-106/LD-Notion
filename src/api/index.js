@@ -153,12 +153,20 @@ const normalizeLanguage = (lang) => {
 const DOMToNotion = {
     // ===== cookedToBlocks 各元素处理器（MNT-003 提取，保持 if 顺序与逻辑等价）=====
 
+    // 过滤导入页面（帖子 HTML）中的外部 URL：复用 UrlValidator.validatePageExternalUrl
+    // 拒绝内网/私有/链路本地（169.254 云元数据 SSRF 防御）与非 http(s) 协议。
+    // 与 src/ai/schema.js 的 AISchema.validatePageExternalUrl 同原语（ISS-20260723-009 CWE-94 sibling）。
+    _safeExternalUrl: (full) => {
+        if (!full || !UrlValidator.validatePageExternalUrl(full)) return "";
+        return full;
+    },
+
     // 图片容器 lightbox-wrapper / image-wrapper
     _cookLightbox: (el, blocks, imgMode) => {
         const img = el.querySelector("img");
         if (!img) return;
         const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
-        const full = Utils.absoluteUrl(src);
+        const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
         if (full && !src.includes("/images/emoji/")) {
             if (imgMode === "skip") return;
             blocks.push({
@@ -175,7 +183,7 @@ const DOMToNotion = {
     _cookAttachment: (el, blocks, imgMode) => {
         const href = el.getAttribute("href") || "";
         const fileName = el.textContent?.trim() || "attachment";
-        const full = Utils.absoluteUrl(href);
+        const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(href));
         if (full && imgMode !== "skip") {
             blocks.push({
                 type: "file",
@@ -196,7 +204,7 @@ const DOMToNotion = {
     _cookVideo: (el, blocks, imgMode) => {
         const source = el.querySelector("source");
         const src = el.getAttribute("src") || source?.getAttribute("src") || "";
-        const full = Utils.absoluteUrl(src);
+        const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
         if (full && imgMode !== "skip") {
             const ext = (full.split(".").pop() || "").split("?")[0].toLowerCase();
             if (isSupportedFileType(ext)) {
@@ -220,7 +228,7 @@ const DOMToNotion = {
     _cookAudio: (el, blocks, imgMode) => {
         const source = el.querySelector("source");
         const src = el.getAttribute("src") || source?.getAttribute("src") || "";
-        const full = Utils.absoluteUrl(src);
+        const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
         if (full && imgMode !== "skip") {
             blocks.push({
                 type: "audio",
@@ -263,7 +271,7 @@ const DOMToNotion = {
         }
         el.querySelectorAll("img").forEach((img) => {
             const src = img.getAttribute("src") || "";
-            const full = Utils.absoluteUrl(src);
+            const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
             if (full && !src.includes("/images/emoji/")) {
                 if (imgMode !== "skip") {
                     blocks.push({
@@ -279,7 +287,7 @@ const DOMToNotion = {
         el.querySelectorAll("a.attachment").forEach((a) => {
             const href = a.getAttribute("href") || "";
             const fileName = a.textContent?.trim() || "attachment";
-            const full = Utils.absoluteUrl(href);
+            const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(href));
             if (full && imgMode !== "skip") {
                 blocks.push({
                     type: "file",
@@ -396,7 +404,7 @@ const DOMToNotion = {
     // 独立图片 img
     _cookImage: (el, blocks, imgMode) => {
         const src = el.getAttribute("src") || "";
-        const full = Utils.absoluteUrl(src);
+        const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
         if (full && !src.includes("/images/emoji/")) {
             if (imgMode !== "skip") {
                 blocks.push({

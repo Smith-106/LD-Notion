@@ -8,6 +8,7 @@ const { OperationGuard, OperationLog } = require("../security");
 const { GenericExtractor, WorkspaceService } = require("../extract");
 const { UndoManager, ConfirmationDialog } = require("../security");
 const { UrlValidator } = require("../security/UrlValidator");
+const { AISchema } = require("./schema");
 
 // ═══════════════════════════════════════════════════════
 // 🤖 AI Service — LLM 客户端（OpenAI / Claude / Gemini）
@@ -3692,7 +3693,18 @@ ${content_prompt}`;
         }
 
         let exactUpdateError = null;
-        if (editPlan?.mode === "update_content" && Array.isArray(editPlan.content_updates) && editPlan.content_updates.length > 0) {
+        let inPlaceSkippedReason = null;
+        // content_updates 结构校验（ISS-20260723-009 L2）：mode=update_content 但 content_updates
+        // 非数组/空/项缺 find/replace 时，记录降级原因让用户知晓，而非静默跳到 fallback。
+        const hasValidContentUpdates = editPlan?.mode === "update_content"
+            && Array.isArray(editPlan.content_updates)
+            && editPlan.content_updates.length > 0
+            && editPlan.content_updates.every((u) => u && typeof u.old_str === "string" && typeof u.new_str === "string");
+        if (editPlan?.mode === "update_content" && !hasValidContentUpdates) {
+            inPlaceSkippedReason = "原位编辑结构校验失败（content_updates 缺失或无效）";
+            console.warn("[LD-Notion] editPlan content_updates 结构无效，降级为全文追加:", inPlaceSkippedReason);
+        }
+        if (hasValidContentUpdates) {
             ChatState.updateLastMessage("正在执行原位精确编辑...", "processing");
 
             try {
@@ -3743,7 +3755,9 @@ ${content_prompt}`;
 
         const fallbackReason = exactUpdateError?.message
             ? `\n\n💡 原位精确替换失败：${exactUpdateError.message}；已自动追加完整编辑版本，原内容保留。`
-            : "\n\n💡 本次未执行原位替换，已将完整编辑版本追加到页面末尾（原内容保留）。";
+            : inPlaceSkippedReason
+                ? `\n\n💡 ${inPlaceSkippedReason}；已将完整编辑版本追加到页面末尾（原内容保留）。`
+                : "\n\n💡 本次未执行原位替换，已将完整编辑版本追加到页面末尾（原内容保留）。";
 
         return `✅ **编辑版本已追加到页面**\n\n- 目标页面: ${targetPage.name}\n- 编辑指令: ${content_prompt}${fallbackReason}`;
     } catch (error) {
@@ -4469,22 +4483,30 @@ ${content}`;
 
         const aiResponse = await AIService.requestChat(analyzePrompt, settings, 3000);
 
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            return `❌ AI 无法从页面内容中提取结构化数据。请尝试更具体地描述提取要求。`;
+        // 经 schema 层统一解析入口（正则提取+JSON.parse+结构校验），消除重复三段式
+        // 并校验 properties/entries 为数组（ISS-20260723-009 M3：非数组不再被外层 catch 吞成模糊错误）
+        const parsedResult = AISchema.parseAIJson("extractToDatabase", aiResponse);
+        if (!parsedResult.ok) {
+            return `❌ ${parsedResult.reason}`;
         }
+        const extractedData = parsedResult.value;
 
-        let extractedData;
-        try {
-            extractedData = JSON.parse(jsonMatch[0]);
-        } catch (error) {
-            console.warn("[LD-Notion] AI 提取数据 JSON 解析失败:", error);
-            return `❌ AI 提取的数据格式无效。请换一种方式描述提取要求。`;
+        // 属性名/类型经 schema 校验（M1）：非法名/类型跳过该属性 + 警告，不静默走 rich_text 兜底
+        const validProps = extractedData.properties.filter((prop) => {
+            const nameOk = AISchema.validatePropertyName(prop.name);
+            const typeOk = AISchema.validatePropertyType(prop.type);
+            if (!nameOk || !typeOk.valid) {
+                console.warn(`[LD-Notion] AI 返回的属性已跳过（name=${prop.name}, type=${prop.type}）`);
+                return false;
+            }
+            prop.name = nameOk;
+            prop.type = typeOk.type;
+            return true;
+        });
+        if (validProps.length === 0) {
+            return `❌ AI 返回的属性均无效，无法创建数据库。`;
         }
-
-        if (!extractedData.properties || !extractedData.entries || extractedData.entries.length === 0) {
-            return `❌ 未能从页面中提取到有效条目。`;
-        }
+        extractedData.properties = validProps;
 
         // 确认操作
         const confirmed = await ConfirmationDialog.show({
@@ -4523,6 +4545,7 @@ ${content}`;
         ChatState.updateLastMessage(`📝 正在填充 ${extractedData.entries.length} 个条目...`, "processing");
 
         let addedCount = 0;
+        let failedCount = 0;
         const titleProp = extractedData.properties.find(p => p.type === "title");
         const titleKey = titleProp ? titleProp.name : extractedData.properties[0].name;
 
@@ -4532,18 +4555,8 @@ ${content}`;
                 for (const prop of extractedData.properties) {
                     const val = entry[prop.name];
                     if (val === undefined || val === null) continue;
-
-                    if (prop.type === "title") {
-                        pageProperties[prop.name] = { title: [{ text: { content: String(val) } }] };
-                    } else if (prop.type === "select") {
-                        pageProperties[prop.name] = { select: { name: String(val) } };
-                    } else if (prop.type === "number") {
-                        pageProperties[prop.name] = { number: Number(val) || 0 };
-                    } else if (prop.type === "checkbox") {
-                        pageProperties[prop.name] = { checkbox: Boolean(val) };
-                    } else {
-                        pageProperties[prop.name] = { rich_text: [{ text: { content: String(val).slice(0, 2000) } }] };
-                    }
+                    // 经 _buildPropertyValuePayload（内含 schema 校验+截断，ISS-20260723-009 M1）
+                    pageProperties[prop.name] = AIAssistant._buildPropertyValuePayload(val, prop.type);
                 }
 
                 const entryName = String(entry[titleKey] || `条目 ${addedCount + 1}`).trim() || `条目 ${addedCount + 1}`;
@@ -4554,12 +4567,14 @@ ${content}`;
                 );
                 addedCount++;
             } catch (error) {
-                console.warn(`[LD-Notion] 条目创建失败: ${entryName}`, error);
+                failedCount++;
+                console.warn(`[LD-Notion] 条目创建失败 (#${failedCount}):`, error.message);
                 /* skip failed entries */
             }
         }
 
-        return `📊 **数据库创建完成**\n\n- 数据库: ${dbName}\n- 来源: ${sourcePage.name}\n- 属性: ${extractedData.properties.map(p => p.name).join(", ")}\n- 条目: ${addedCount}/${extractedData.entries.length}\n\n💡 数据库已创建在源页面下方。`;
+        const failedLine = failedCount > 0 ? `\n- 失败: ${failedCount}（见控制台警告）` : "";
+        return `📊 **数据库创建完成**\n\n- 数据库: ${dbName}\n- 来源: ${sourcePage.name}\n- 属性: ${extractedData.properties.map(p => p.name).join(", ")}\n- 条目: ${addedCount}/${extractedData.entries.length}${failedLine}\n\n💡 数据库已创建在源页面下方。`;
     } catch (error) {
         return `❌ 提取失败: ${error.message}`;
     }
@@ -5186,37 +5201,59 @@ const AIAssistant = {
     _isErrorResult: (result) => AIAssistant._normalizeExecutionResult(result).status === "error",
 
     _buildPageIconPayload: (args = {}) => {
-        const iconEmoji = String(args.icon_emoji || "").trim();
-        const iconUrl = String(args.icon_url || "").trim();
+        const iconEmoji = AISchema.validateEmoji(args.icon_emoji || "");
+        const iconUrlRaw = String(args.icon_url || "").trim();
         const clearIcon = !!args.clear_icon;
 
         if (clearIcon) return null;
         if (iconEmoji) return { type: "emoji", emoji: iconEmoji };
-        if (iconUrl) return { type: "external", external: { url: iconUrl } };
+        // icon_url 来自 AI 输出（prompt injection 面），必须经 schema 校验：
+        // 限定 http(s) + 拒内网/169.254（防 Notion 服务端抓取 SSRF，ISS-20260723-009 H1）。
+        // 校验失败跳过该字段（icon 非必需，页面仍可创建），返回 undefined。
+        if (iconUrlRaw) {
+            if (!AISchema.validatePageExternalUrl(iconUrlRaw)) {
+                console.warn("[LD-Notion] AI 返回的 icon_url 未通过安全校验，已跳过:", iconUrlRaw.slice(0, 80));
+                return undefined;
+            }
+            return { type: "external", external: { url: iconUrlRaw } };
+        }
         return undefined;
     },
 
     _buildPageCoverPayload: (args = {}) => {
-        const coverUrl = String(args.cover_url || "").trim();
+        const coverUrlRaw = String(args.cover_url || "").trim();
         const clearCover = !!args.clear_cover;
 
         if (clearCover) return null;
-        if (coverUrl) return { type: "external", external: { url: coverUrl } };
+        // cover_url 同 icon_url，经 schema 校验防 SSRF。校验失败跳过。
+        if (coverUrlRaw) {
+            if (!AISchema.validatePageExternalUrl(coverUrlRaw)) {
+                console.warn("[LD-Notion] AI 返回的 cover_url 未通过安全校验，已跳过:", coverUrlRaw.slice(0, 80));
+                return undefined;
+            }
+            return { type: "external", external: { url: coverUrlRaw } };
+        }
         return undefined;
     },
 
     _normalizeNotionProperties: (rawProperties = {}) => {
         const properties = {};
-        for (const [key, value] of Object.entries(rawProperties || {})) {
+        for (const [rawKey, value] of Object.entries(rawProperties || {})) {
+            // key 来自 AI 输出，经 schema 校验（白名单+截断+拒 Notion 保留名），ISS-20260723-009 M1
+            const key = AISchema.validatePropertyName(rawKey);
             if (!key || value === undefined) continue;
 
             if (value && typeof value === "object" && !Array.isArray(value)) {
-                properties[key] = value;
+                // 对象值经白名单清洗：仅允许 title/rich_text/number/select 等，
+                // 拒 relation/people/files/created_by/created_time 等系统/关联字段（M2）
+                const cleaned = AISchema.sanitizeObjectValue(value);
+                if (cleaned) properties[key] = cleaned;
                 continue;
             }
 
             if (Array.isArray(value)) {
-                const options = value.map(v => String(v || "").trim()).filter(Boolean).map(name => ({ name }));
+                const options = value.map(v => String(v || "").trim()).filter(Boolean)
+                    .map((v) => v.slice(0, 100)).map(name => ({ name }));
                 if (options.length > 0) {
                     properties[key] = { multi_select: options };
                 }
@@ -5224,6 +5261,8 @@ const AIAssistant = {
             }
 
             if (typeof value === "number") {
+                // 拒 Infinity/NaN/超大数（M2: Number('Infinity')→Infinity 无 isFinite 闸门）
+                if (!isFinite(value) || Math.abs(value) > 1e15) continue;
                 properties[key] = { number: value };
                 continue;
             }
@@ -5234,7 +5273,7 @@ const AIAssistant = {
             }
 
             properties[key] = {
-                rich_text: [{ type: "text", text: { content: String(value) } }]
+                rich_text: [{ type: "text", text: { content: String(value).slice(0, 2000) } }]
             };
         }
 
@@ -5242,27 +5281,26 @@ const AIAssistant = {
     },
 
     _buildPropertyValuePayload: (value, type = "text") => {
+        // 经 schema 校验+截断（ISS-20260723-009 M1）：title/rich_text ≤2000、select ≤100、
+        // number isFinite+有限范围、date ISO8601。校验返回 null 则回退 rich_text 兜底。
+        const v = AISchema.validatePropertyValue(value, type);
         switch (type) {
             case "title":
-                return { title: [{ type: "text", text: { content: String(value) } }] };
+                return { title: [{ type: "text", text: { content: v !== null ? String(v) : "" } }] };
             case "select":
-                return { select: { name: String(value) } };
-            case "multi_select":
-                return {
-                    multi_select: String(value)
-                        .split(/[,，]/)
-                        .map(t => t.trim())
-                        .filter(Boolean)
-                        .map(name => ({ name }))
-                };
+                return { select: { name: v !== null ? String(v) : "" } };
+            case "multi_select": {
+                const arr = Array.isArray(v) ? v : (v !== null ? [String(v)] : []);
+                return { multi_select: arr.map(name => ({ name })) };
+            }
             case "number":
-                return { number: Number(value) };
+                return { number: v !== null ? v : 0 };
             case "date":
-                return { date: { start: String(value) } };
+                return { date: { start: v !== null ? String(v) : "" } };
             case "checkbox":
                 return { checkbox: !!value };
             default:
-                return { rich_text: [{ type: "text", text: { content: String(value) } }] };
+                return { rich_text: [{ type: "text", text: { content: String(value).slice(0, 2000) } }] };
         }
     },
 
@@ -6008,7 +6046,20 @@ compound 格式（仅当 intent 为 compound 时使用）：
             // 尝试提取 JSON
             const jsonMatch = response.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
-                return JSON.parse(jsonMatch[0]);
+                const parsed = JSON.parse(jsonMatch[0]);
+                // intent 白名单校验（ISS-20260723-009 L1）：未知 intent 降级为 unknown，
+                // 避免 _resolveIntentExecutor 抛模糊错误。compound steps 加上限防 AI 注入超长循环。
+                if (!AIAssistant._resolveIntentExecutor(parsed.intent)) {
+                    return { intent: "unknown", explanation: `未识别的意图: ${parsed.intent}` };
+                }
+                if (parsed.intent === "compound") {
+                    const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
+                    if (steps.length > 20) {
+                        console.warn(`[LD-Notion] compound steps 超上限（${steps.length}），截断为 20`);
+                        parsed.steps = steps.slice(0, 20);
+                    }
+                }
+                return parsed;
             }
             return { intent: "unknown", explanation: "无法解析响应" };
         } catch (error) {

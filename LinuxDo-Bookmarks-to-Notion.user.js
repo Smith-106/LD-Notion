@@ -2066,6 +2066,22 @@
           }
           return UrlValidator.LOCAL_HOSTS.has(parsed.hostname);
         },
+        // 校验 AI 返回的页面外部 URL（icon/cover external.url）。
+        // 与 validateAiBaseUrl 语义不同：这是 Notion 页面属性的外部资源 URL，
+        // Notion 服务端会抓取 external.url → SSRF 触发点。必须限定 http(s) 协议
+        // （拒 javascript:/data:/file:）且拒绝内网/私有/链路本地地址（防云元数据 169.254.169.254 等）。
+        // 复用 _isPrivateHost 保持 URL 安全原语单一来源（ISS-20260723-009 CWE-94）。
+        validatePageExternalUrl: (url) => {
+          if (!url) return false;
+          let parsed;
+          try {
+            parsed = new URL(url);
+          } catch {
+            return false;
+          }
+          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+          return !UrlValidator._isPrivateHost(parsed.hostname);
+        },
         // 判断是否为私有/内网主机
         _isPrivateHost: (hostname) => {
           if (UrlValidator.LOCAL_HOSTS.has(hostname)) return true;
@@ -2400,12 +2416,19 @@
       };
       var DOMToNotion2 = {
         // ===== cookedToBlocks 各元素处理器（MNT-003 提取，保持 if 顺序与逻辑等价）=====
+        // 过滤导入页面（帖子 HTML）中的外部 URL：复用 UrlValidator.validatePageExternalUrl
+        // 拒绝内网/私有/链路本地（169.254 云元数据 SSRF 防御）与非 http(s) 协议。
+        // 与 src/ai/schema.js 的 AISchema.validatePageExternalUrl 同原语（ISS-20260723-009 CWE-94 sibling）。
+        _safeExternalUrl: (full) => {
+          if (!full || !UrlValidator.validatePageExternalUrl(full)) return "";
+          return full;
+        },
         // 图片容器 lightbox-wrapper / image-wrapper
         _cookLightbox: (el, blocks, imgMode) => {
           const img = el.querySelector("img");
           if (!img) return;
           const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
-          const full = Utils2.absoluteUrl(src);
+          const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
           if (full && !src.includes("/images/emoji/")) {
             if (imgMode === "skip") return;
             blocks.push({
@@ -2422,7 +2445,7 @@
           var _a;
           const href = el.getAttribute("href") || "";
           const fileName = ((_a = el.textContent) == null ? void 0 : _a.trim()) || "attachment";
-          const full = Utils2.absoluteUrl(href);
+          const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(href));
           if (full && imgMode !== "skip") {
             blocks.push({
               type: "file",
@@ -2442,7 +2465,7 @@
         _cookVideo: (el, blocks, imgMode) => {
           const source = el.querySelector("source");
           const src = el.getAttribute("src") || (source == null ? void 0 : source.getAttribute("src")) || "";
-          const full = Utils2.absoluteUrl(src);
+          const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
           if (full && imgMode !== "skip") {
             const ext = (full.split(".").pop() || "").split("?")[0].toLowerCase();
             if (isSupportedFileType2(ext)) {
@@ -2465,7 +2488,7 @@
         _cookAudio: (el, blocks, imgMode) => {
           const source = el.querySelector("source");
           const src = el.getAttribute("src") || (source == null ? void 0 : source.getAttribute("src")) || "";
-          const full = Utils2.absoluteUrl(src);
+          const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
           if (full && imgMode !== "skip") {
             blocks.push({
               type: "audio",
@@ -2503,7 +2526,7 @@
           }
           el.querySelectorAll("img").forEach((img) => {
             const src = img.getAttribute("src") || "";
-            const full = Utils2.absoluteUrl(src);
+            const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
             if (full && !src.includes("/images/emoji/")) {
               if (imgMode !== "skip") {
                 blocks.push({
@@ -2520,7 +2543,7 @@
             var _a;
             const href = a.getAttribute("href") || "";
             const fileName = ((_a = a.textContent) == null ? void 0 : _a.trim()) || "attachment";
-            const full = Utils2.absoluteUrl(href);
+            const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(href));
             if (full && imgMode !== "skip") {
               blocks.push({
                 type: "file",
@@ -2627,7 +2650,7 @@
         // 独立图片 img
         _cookImage: (el, blocks, imgMode) => {
           const src = el.getAttribute("src") || "";
-          const full = Utils2.absoluteUrl(src);
+          const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
           if (full && !src.includes("/images/emoji/")) {
             if (imgMode !== "skip") {
               blocks.push({
@@ -19019,6 +19042,173 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
     }
   });
 
+  // src/ai/schema.js
+  var require_schema = __commonJS({
+    "src/ai/schema.js"(exports, module) {
+      "use strict";
+      var { UrlValidator } = require_UrlValidator();
+      var AISchema = {
+        // 长度上限
+        MAX_PROP_NAME: 64,
+        MAX_TITLE: 2e3,
+        MAX_RICH_TEXT: 2e3,
+        MAX_SELECT_NAME: 100,
+        MAX_EMOJI: 32,
+        MAX_NUMBER: 1e15,
+        // 属性名白名单：中英数字 + 下划线/连字符/空格
+        PROP_NAME_RE: /^[一-龥a-zA-Z0-9 _\-]+$/,
+        // Notion 保留/系统属性名（不可作 AI 生成的自定义属性，避免与系统字段冲突）
+        NOTION_RESERVED_NAMES: /* @__PURE__ */ new Set([
+          "title",
+          "created_time",
+          "last_edited_time",
+          "created_by",
+          "last_edited_by",
+          "url",
+          "path",
+          "Name"
+        ]),
+        // 合法属性类型白名单
+        ALLOWED_PROPERTY_TYPES: /* @__PURE__ */ new Set([
+          "title",
+          "rich_text",
+          "number",
+          "select",
+          "multi_select",
+          "checkbox",
+          "date",
+          "url",
+          "email",
+          "phone_number",
+          "status"
+        ]),
+        // _normalizeNotionProperties 对象值允许的 Notion 属性类型键（拒 relation/people/files 等系统字段）
+        ALLOWED_OBJECT_VALUE_TYPES: /* @__PURE__ */ new Set([
+          "title",
+          "rich_text",
+          "number",
+          "select",
+          "multi_select",
+          "checkbox",
+          "date",
+          "url",
+          "email",
+          "phone_number",
+          "status"
+        ]),
+        // ISO 8601 日期正则（简化：YYYY-MM-DD 或带时间）
+        ISO_DATE_RE: /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/,
+        // 校验 AI 返回的页面外部 URL（icon/cover）。转发 UrlValidator.validatePageExternalUrl。
+        validatePageExternalUrl: (url) => {
+          return UrlValidator.validatePageExternalUrl(url);
+        },
+        // 校验属性名：白名单 + 截断 + 拒 Notion 保留名。返回规范化名或 ""（非法）。
+        validatePropertyName: (name) => {
+          let n = String(name || "").trim();
+          if (!n) return "";
+          if (n.length > AISchema.MAX_PROP_NAME) n = n.slice(0, AISchema.MAX_PROP_NAME);
+          if (!AISchema.PROP_NAME_RE.test(n)) return "";
+          if (AISchema.NOTION_RESERVED_NAMES.has(n)) return "";
+          return n;
+        },
+        // 校验属性类型。返回 { valid, type } 或 { valid: false }。
+        validatePropertyType: (type) => {
+          const t = String(type || "").trim();
+          if (AISchema.ALLOWED_PROPERTY_TYPES.has(t)) return { valid: true, type: t };
+          return { valid: false };
+        },
+        // 校验属性值（按 type）。返回规范化值或 null（非法/应跳过）。
+        validatePropertyValue: (val, type) => {
+          if (val === void 0 || val === null) return null;
+          switch (type) {
+            case "title":
+            case "rich_text":
+              return String(val).slice(0, type === "title" ? AISchema.MAX_TITLE : AISchema.MAX_RICH_TEXT);
+            case "select":
+            case "status":
+              return String(val).trim().slice(0, AISchema.MAX_SELECT_NAME);
+            case "multi_select": {
+              const arr = Array.isArray(val) ? val : [val];
+              return arr.map((v) => String(v || "").trim()).filter(Boolean).map((v) => v.slice(0, AISchema.MAX_SELECT_NAME));
+            }
+            case "number": {
+              const n = Number(val);
+              if (!isFinite(n) || Math.abs(n) > AISchema.MAX_NUMBER) return null;
+              return n;
+            }
+            case "checkbox":
+              return Boolean(val);
+            case "date":
+              return AISchema.ISO_DATE_RE.test(String(val).trim()) ? String(val).trim() : null;
+            case "url":
+            case "email":
+            case "phone_number":
+              return String(val).trim().slice(0, AISchema.MAX_RICH_TEXT);
+            default:
+              return String(val).slice(0, AISchema.MAX_RICH_TEXT);
+          }
+        },
+        // 校验 emoji（icon）。长度 + 拒控制字符。
+        validateEmoji: (emoji) => {
+          const e = String(emoji || "").trim();
+          if (!e) return "";
+          if (e.length > AISchema.MAX_EMOJI) return e.slice(0, AISchema.MAX_EMOJI);
+          if (/[\x00-\x1f\x7f]/.test(e)) return "";
+          return e;
+        },
+        // 规范化 _normalizeNotionProperties 的对象值：仅允许 ALLOWED_OBJECT_VALUE_TYPES 顶层键，
+        // 拒 relation/people/files/created_by/created_time/last_edited_time 等系统/关联字段。
+        // 返回清洗后的对象或 null（应跳过）。
+        sanitizeObjectValue: (value) => {
+          if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+          const cleaned = {};
+          let hasValid = false;
+          for (const key of Object.keys(value)) {
+            if (AISchema.ALLOWED_OBJECT_VALUE_TYPES.has(key)) {
+              cleaned[key] = value[key];
+              hasValid = true;
+            }
+          }
+          return hasValid ? cleaned : null;
+        },
+        // 校验 extractToDatabase 结构：properties/entries 均为 Array、properties[i].name/type 非空 string。
+        // 返回 { ok: true } 或 { ok: false, reason }。
+        validateExtractToDatabaseSchema: (data) => {
+          if (!data || typeof data !== "object") return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u6570\u636E\u4E0D\u662F\u5BF9\u8C61" };
+          if (!Array.isArray(data.properties)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684 properties \u4E0D\u662F\u6570\u7EC4" };
+          if (!Array.isArray(data.entries)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684 entries \u4E0D\u662F\u6570\u7EC4" };
+          if (data.entries.length === 0) return { ok: false, reason: "\u672A\u80FD\u4ECE\u9875\u9762\u4E2D\u63D0\u53D6\u5230\u6709\u6548\u6761\u76EE" };
+          for (const prop of data.properties) {
+            if (!prop || typeof prop.name !== "string" || !prop.name.trim() || typeof prop.type !== "string" || !prop.type.trim()) {
+              return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u5C5E\u6027\u7ED3\u6784\u65E0\u6548\uFF08name/type \u7F3A\u5931\uFF09" };
+            }
+          }
+          return { ok: true };
+        },
+        // 统一 AI JSON 解析入口：正则提取 + JSON.parse + 按 name 路由校验。
+        // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"}。
+        // 返回 { ok: true, value } 或 { ok: false, reason }。
+        parseAIJson: (name, rawText) => {
+          if (!rawText) return { ok: false, reason: "AI \u54CD\u5E94\u4E3A\u7A7A" };
+          const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) return { ok: false, reason: "AI \u54CD\u5E94\u4E2D\u672A\u627E\u5230 JSON" };
+          let parsed;
+          try {
+            parsed = JSON.parse(jsonMatch[0]);
+          } catch (error) {
+            return { ok: false, reason: `AI \u8FD4\u56DE\u7684 JSON \u683C\u5F0F\u65E0\u6548: ${error.message}` };
+          }
+          if (name === "extractToDatabase") {
+            const r = AISchema.validateExtractToDatabaseSchema(parsed);
+            if (!r.ok) return r;
+          }
+          return { ok: true, value: parsed };
+        }
+      };
+      module.exports = { AISchema };
+    }
+  });
+
   // src/ai/index.js
   var require_ai = __commonJS({
     "src/ai/index.js"(exports, module) {
@@ -19032,6 +19222,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UndoManager: UndoManager2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { UrlValidator } = require_UrlValidator();
+      var { AISchema } = require_schema();
       var AIService2 = {
         // 标准化 + 安全校验 baseUrl，返回 null 表示非法（调用方应 reject）
         // versionPath: "v1" 或 "v1beta"
@@ -22446,7 +22637,13 @@ ${content_prompt}`;
               }
             }
             let exactUpdateError = null;
-            if ((editPlan == null ? void 0 : editPlan.mode) === "update_content" && Array.isArray(editPlan.content_updates) && editPlan.content_updates.length > 0) {
+            let inPlaceSkippedReason = null;
+            const hasValidContentUpdates = (editPlan == null ? void 0 : editPlan.mode) === "update_content" && Array.isArray(editPlan.content_updates) && editPlan.content_updates.length > 0 && editPlan.content_updates.every((u) => u && typeof u.old_str === "string" && typeof u.new_str === "string");
+            if ((editPlan == null ? void 0 : editPlan.mode) === "update_content" && !hasValidContentUpdates) {
+              inPlaceSkippedReason = "\u539F\u4F4D\u7F16\u8F91\u7ED3\u6784\u6821\u9A8C\u5931\u8D25\uFF08content_updates \u7F3A\u5931\u6216\u65E0\u6548\uFF09";
+              console.warn("[LD-Notion] editPlan content_updates \u7ED3\u6784\u65E0\u6548\uFF0C\u964D\u7EA7\u4E3A\u5168\u6587\u8FFD\u52A0:", inPlaceSkippedReason);
+            }
+            if (hasValidContentUpdates) {
               ChatState2.updateLastMessage("\u6B63\u5728\u6267\u884C\u539F\u4F4D\u7CBE\u786E\u7F16\u8F91...", "processing");
               try {
                 await AIAssistant2._executeGuardedPageWrite(
@@ -22507,7 +22704,9 @@ ${aiResponse}`;
             );
             const fallbackReason = (exactUpdateError == null ? void 0 : exactUpdateError.message) ? `
 
-\u{1F4A1} \u539F\u4F4D\u7CBE\u786E\u66FF\u6362\u5931\u8D25\uFF1A${exactUpdateError.message}\uFF1B\u5DF2\u81EA\u52A8\u8FFD\u52A0\u5B8C\u6574\u7F16\u8F91\u7248\u672C\uFF0C\u539F\u5185\u5BB9\u4FDD\u7559\u3002` : "\n\n\u{1F4A1} \u672C\u6B21\u672A\u6267\u884C\u539F\u4F4D\u66FF\u6362\uFF0C\u5DF2\u5C06\u5B8C\u6574\u7F16\u8F91\u7248\u672C\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002";
+\u{1F4A1} \u539F\u4F4D\u7CBE\u786E\u66FF\u6362\u5931\u8D25\uFF1A${exactUpdateError.message}\uFF1B\u5DF2\u81EA\u52A8\u8FFD\u52A0\u5B8C\u6574\u7F16\u8F91\u7248\u672C\uFF0C\u539F\u5185\u5BB9\u4FDD\u7559\u3002` : inPlaceSkippedReason ? `
+
+\u{1F4A1} ${inPlaceSkippedReason}\uFF1B\u5DF2\u5C06\u5B8C\u6574\u7F16\u8F91\u7248\u672C\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002` : "\n\n\u{1F4A1} \u672C\u6B21\u672A\u6267\u884C\u539F\u4F4D\u66FF\u6362\uFF0C\u5DF2\u5C06\u5B8C\u6574\u7F16\u8F91\u7248\u672C\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002";
             return `\u2705 **\u7F16\u8F91\u7248\u672C\u5DF2\u8FFD\u52A0\u5230\u9875\u9762**
 
 - \u76EE\u6807\u9875\u9762: ${targetPage.name}
@@ -23160,20 +23359,26 @@ ${content}`;
 \u9875\u9762\u5185\u5BB9\uFF1A
 ${content}`;
             const aiResponse = await AIService2.requestChat(analyzePrompt, settings, 3e3);
-            const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-              return `\u274C AI \u65E0\u6CD5\u4ECE\u9875\u9762\u5185\u5BB9\u4E2D\u63D0\u53D6\u7ED3\u6784\u5316\u6570\u636E\u3002\u8BF7\u5C1D\u8BD5\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u63D0\u53D6\u8981\u6C42\u3002`;
+            const parsedResult = AISchema.parseAIJson("extractToDatabase", aiResponse);
+            if (!parsedResult.ok) {
+              return `\u274C ${parsedResult.reason}`;
             }
-            let extractedData;
-            try {
-              extractedData = JSON.parse(jsonMatch[0]);
-            } catch (error) {
-              console.warn("[LD-Notion] AI \u63D0\u53D6\u6570\u636E JSON \u89E3\u6790\u5931\u8D25:", error);
-              return `\u274C AI \u63D0\u53D6\u7684\u6570\u636E\u683C\u5F0F\u65E0\u6548\u3002\u8BF7\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u63D0\u53D6\u8981\u6C42\u3002`;
+            const extractedData = parsedResult.value;
+            const validProps = extractedData.properties.filter((prop) => {
+              const nameOk = AISchema.validatePropertyName(prop.name);
+              const typeOk = AISchema.validatePropertyType(prop.type);
+              if (!nameOk || !typeOk.valid) {
+                console.warn(`[LD-Notion] AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5DF2\u8DF3\u8FC7\uFF08name=${prop.name}, type=${prop.type}\uFF09`);
+                return false;
+              }
+              prop.name = nameOk;
+              prop.type = typeOk.type;
+              return true;
+            });
+            if (validProps.length === 0) {
+              return `\u274C AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5747\u65E0\u6548\uFF0C\u65E0\u6CD5\u521B\u5EFA\u6570\u636E\u5E93\u3002`;
             }
-            if (!extractedData.properties || !extractedData.entries || extractedData.entries.length === 0) {
-              return `\u274C \u672A\u80FD\u4ECE\u9875\u9762\u4E2D\u63D0\u53D6\u5230\u6709\u6548\u6761\u76EE\u3002`;
-            }
+            extractedData.properties = validProps;
             const confirmed = await ConfirmationDialog2.show({
               title: "\u{1F4CA} \u521B\u5EFA\u6570\u636E\u5E93\u786E\u8BA4",
               message: `\u5C06\u4ECE\u300C${sourcePage.name}\u300D\u63D0\u53D6 ${extractedData.entries.length} \u4E2A\u6761\u76EE\u3002
@@ -23207,6 +23412,7 @@ ${content}`;
             );
             ChatState2.updateLastMessage(`\u{1F4DD} \u6B63\u5728\u586B\u5145 ${extractedData.entries.length} \u4E2A\u6761\u76EE...`, "processing");
             let addedCount = 0;
+            let failedCount = 0;
             const titleProp = extractedData.properties.find((p) => p.type === "title");
             const titleKey = titleProp ? titleProp.name : extractedData.properties[0].name;
             for (const entry of extractedData.entries) {
@@ -23215,37 +23421,30 @@ ${content}`;
                 for (const prop of extractedData.properties) {
                   const val = entry[prop.name];
                   if (val === void 0 || val === null) continue;
-                  if (prop.type === "title") {
-                    pageProperties[prop.name] = { title: [{ text: { content: String(val) } }] };
-                  } else if (prop.type === "select") {
-                    pageProperties[prop.name] = { select: { name: String(val) } };
-                  } else if (prop.type === "number") {
-                    pageProperties[prop.name] = { number: Number(val) || 0 };
-                  } else if (prop.type === "checkbox") {
-                    pageProperties[prop.name] = { checkbox: Boolean(val) };
-                  } else {
-                    pageProperties[prop.name] = { rich_text: [{ text: { content: String(val).slice(0, 2e3) } }] };
-                  }
+                  pageProperties[prop.name] = AIAssistant2._buildPropertyValuePayload(val, prop.type);
                 }
-                const entryName2 = String(entry[titleKey] || `\u6761\u76EE ${addedCount + 1}`).trim() || `\u6761\u76EE ${addedCount + 1}`;
+                const entryName = String(entry[titleKey] || `\u6761\u76EE ${addedCount + 1}`).trim() || `\u6761\u76EE ${addedCount + 1}`;
                 await AIAssistant2._executeGuardedDatabaseWrite(
                   "createDatabasePage",
                   newDb.id,
                   () => NotionAPI2.createPage(newDb.id, pageProperties, settings.notionApiKey),
                   settings,
-                  { itemName: entryName2 }
+                  { itemName: entryName }
                 );
                 addedCount++;
               } catch (error) {
-                console.warn(`[LD-Notion] \u6761\u76EE\u521B\u5EFA\u5931\u8D25: ${entryName}`, error);
+                failedCount++;
+                console.warn(`[LD-Notion] \u6761\u76EE\u521B\u5EFA\u5931\u8D25 (#${failedCount}):`, error.message);
               }
             }
+            const failedLine = failedCount > 0 ? `
+- \u5931\u8D25: ${failedCount}\uFF08\u89C1\u63A7\u5236\u53F0\u8B66\u544A\uFF09` : "";
             return `\u{1F4CA} **\u6570\u636E\u5E93\u521B\u5EFA\u5B8C\u6210**
 
 - \u6570\u636E\u5E93: ${dbName}
 - \u6765\u6E90: ${sourcePage.name}
 - \u5C5E\u6027: ${extractedData.properties.map((p) => p.name).join(", ")}
-- \u6761\u76EE: ${addedCount}/${extractedData.entries.length}
+- \u6761\u76EE: ${addedCount}/${extractedData.entries.length}${failedLine}
 
 \u{1F4A1} \u6570\u636E\u5E93\u5DF2\u521B\u5EFA\u5728\u6E90\u9875\u9762\u4E0B\u65B9\u3002`;
           } catch (error) {
@@ -23869,37 +24068,52 @@ ${aiResponse}
         },
         _isErrorResult: (result) => AIAssistant2._normalizeExecutionResult(result).status === "error",
         _buildPageIconPayload: (args = {}) => {
-          const iconEmoji = String(args.icon_emoji || "").trim();
-          const iconUrl = String(args.icon_url || "").trim();
+          const iconEmoji = AISchema.validateEmoji(args.icon_emoji || "");
+          const iconUrlRaw = String(args.icon_url || "").trim();
           const clearIcon = !!args.clear_icon;
           if (clearIcon) return null;
           if (iconEmoji) return { type: "emoji", emoji: iconEmoji };
-          if (iconUrl) return { type: "external", external: { url: iconUrl } };
+          if (iconUrlRaw) {
+            if (!AISchema.validatePageExternalUrl(iconUrlRaw)) {
+              console.warn("[LD-Notion] AI \u8FD4\u56DE\u7684 icon_url \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C\uFF0C\u5DF2\u8DF3\u8FC7:", iconUrlRaw.slice(0, 80));
+              return void 0;
+            }
+            return { type: "external", external: { url: iconUrlRaw } };
+          }
           return void 0;
         },
         _buildPageCoverPayload: (args = {}) => {
-          const coverUrl = String(args.cover_url || "").trim();
+          const coverUrlRaw = String(args.cover_url || "").trim();
           const clearCover = !!args.clear_cover;
           if (clearCover) return null;
-          if (coverUrl) return { type: "external", external: { url: coverUrl } };
+          if (coverUrlRaw) {
+            if (!AISchema.validatePageExternalUrl(coverUrlRaw)) {
+              console.warn("[LD-Notion] AI \u8FD4\u56DE\u7684 cover_url \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C\uFF0C\u5DF2\u8DF3\u8FC7:", coverUrlRaw.slice(0, 80));
+              return void 0;
+            }
+            return { type: "external", external: { url: coverUrlRaw } };
+          }
           return void 0;
         },
         _normalizeNotionProperties: (rawProperties = {}) => {
           const properties = {};
-          for (const [key, value] of Object.entries(rawProperties || {})) {
+          for (const [rawKey, value] of Object.entries(rawProperties || {})) {
+            const key = AISchema.validatePropertyName(rawKey);
             if (!key || value === void 0) continue;
             if (value && typeof value === "object" && !Array.isArray(value)) {
-              properties[key] = value;
+              const cleaned = AISchema.sanitizeObjectValue(value);
+              if (cleaned) properties[key] = cleaned;
               continue;
             }
             if (Array.isArray(value)) {
-              const options = value.map((v) => String(v || "").trim()).filter(Boolean).map((name) => ({ name }));
+              const options = value.map((v) => String(v || "").trim()).filter(Boolean).map((v) => v.slice(0, 100)).map((name) => ({ name }));
               if (options.length > 0) {
                 properties[key] = { multi_select: options };
               }
               continue;
             }
             if (typeof value === "number") {
+              if (!isFinite(value) || Math.abs(value) > 1e15) continue;
               properties[key] = { number: value };
               continue;
             }
@@ -23908,29 +24122,30 @@ ${aiResponse}
               continue;
             }
             properties[key] = {
-              rich_text: [{ type: "text", text: { content: String(value) } }]
+              rich_text: [{ type: "text", text: { content: String(value).slice(0, 2e3) } }]
             };
           }
           return properties;
         },
         _buildPropertyValuePayload: (value, type = "text") => {
+          const v = AISchema.validatePropertyValue(value, type);
           switch (type) {
             case "title":
-              return { title: [{ type: "text", text: { content: String(value) } }] };
+              return { title: [{ type: "text", text: { content: v !== null ? String(v) : "" } }] };
             case "select":
-              return { select: { name: String(value) } };
-            case "multi_select":
-              return {
-                multi_select: String(value).split(/[,，]/).map((t) => t.trim()).filter(Boolean).map((name) => ({ name }))
-              };
+              return { select: { name: v !== null ? String(v) : "" } };
+            case "multi_select": {
+              const arr = Array.isArray(v) ? v : v !== null ? [String(v)] : [];
+              return { multi_select: arr.map((name) => ({ name })) };
+            }
             case "number":
-              return { number: Number(value) };
+              return { number: v !== null ? v : 0 };
             case "date":
-              return { date: { start: String(value) } };
+              return { date: { start: v !== null ? String(v) : "" } };
             case "checkbox":
               return { checkbox: !!value };
             default:
-              return { rich_text: [{ type: "text", text: { content: String(value) } }] };
+              return { rich_text: [{ type: "text", text: { content: String(value).slice(0, 2e3) } }] };
           }
         },
         _buildPageMetaPayload: (args = {}) => {
@@ -24639,7 +24854,18 @@ ${userMessage}
             );
             const jsonMatch = response.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
-              return JSON.parse(jsonMatch[0]);
+              const parsed = JSON.parse(jsonMatch[0]);
+              if (!AIAssistant2._resolveIntentExecutor(parsed.intent)) {
+                return { intent: "unknown", explanation: `\u672A\u8BC6\u522B\u7684\u610F\u56FE: ${parsed.intent}` };
+              }
+              if (parsed.intent === "compound") {
+                const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
+                if (steps.length > 20) {
+                  console.warn(`[LD-Notion] compound steps \u8D85\u4E0A\u9650\uFF08${steps.length}\uFF09\uFF0C\u622A\u65AD\u4E3A 20`);
+                  parsed.steps = steps.slice(0, 20);
+                }
+              }
+              return parsed;
             }
             return { intent: "unknown", explanation: "\u65E0\u6CD5\u89E3\u6790\u54CD\u5E94" };
           } catch (error) {
