@@ -1,5 +1,44 @@
 # 更新日志
 
+## [3.7.8] - 2026-07-24
+
+### 新增（安全加固 — ISS-20260723-009, CWE-94/918）
+
+**AI 输出 schema 校验层** — AI 返回的属性名/值/URL 直接写入 Notion，prompt injection 可经 AI 输出写入恶意 URL 或异常属性，本次统一校验：
+
+- **新增 `src/ai/schema.js`（AISchema 校验层）**：
+  - `validatePageExternalUrl`（转发 UrlValidator，SSRF 防御）
+  - `validatePropertyName`（白名单 [中英数字+下划线/连字符/空格] + 截断 ≤64 + 拒 Notion 保留名 title/created_time/last_edited_time/created_by/last_edited_by/url/path/Name）
+  - `validatePropertyType`（类型白名单，拒 relation/people/files 等系统关联字段）
+  - `validatePropertyValue`（title/rich_text ≤2000、select ≤100、number isFinite+|v|<1e15、date ISO8601、checkbox Boolean）
+  - `validateEmoji`（≤32 + 拒控制字符）
+  - `sanitizeObjectValue`（对象值白名单，拒 relation/people/created_by/created_time/last_edited_time 等系统字段）
+  - `validateExtractToDatabaseSchema`（properties/entries 需 Array，非数组返明确 reason，不再 TypeError 被吞）
+  - `parseAIJson`（统一入口：正则提取 + JSON.parse + 按 name 路由校验，消除 7 消费点重复 `jsonMatch+JSON.parse+try-catch` 三段式，为 ai/index.js 拆分 ISS-010 预留接缝）
+
+- **`src/security/UrlValidator.js` 新增 `validatePageExternalUrl`**：http(s) 协议（拒 javascript:/data:/file:）+ `_isPrivateHost` 拒 10.x/172.16-31/192.168/169.254/127/localhost。防 Notion 服务端抓取 external.url 触发云元数据 SSRF（169.254.169.254）
+
+- **`src/ai/index.js` 7 消费点接入**：`_buildPageIconPayload`/`_buildPageCoverPayload`（icon/cover URL + emoji 校验，非法跳过字段）；`_normalizeNotionProperties`（属性名 + 对象值白名单 + number isFinite + rich_text 截断）；`_buildPropertyValuePayload`（按 type 校验值）；`handleExtractToDatabase`（parseAIJson 统一入口 + 属性名/类型校验 + failedCount 回显）；`parseIntent`（intent 白名单 + compound steps 上限 20）；`handleEditContent`（content_updates old_str/new_str 结构校验，非法进 fallbackReason）
+
+### 修复（sibling — S_GENERALIZE 发现，cross-phase loop）
+
+**DOMToNotion SSRF sibling（CWE-918）**：`src/api/index.js` 的 `DOMToNotion` 7 处 external.url 消费点（`_cookLightbox`/`_cookAttachment`/`_cookVideo`/`_cookAudio`/`_cookImage`/`_cookParagraph` 内 img+attachment）把 `full = Utils.absoluteUrl(帖子 HTML 的 src/href)` 直写 Notion `external.url`。帖子作者可写 `<img src="http://169.254.169.254/...">`，导入时 Notion 服务端抓取触发 SSRF/云元数据。来源与 AI 输出不同（帖子 HTML vs AI 输出）但同漏洞模式同触发点。加 `_safeExternalUrl` helper（复用 `validatePageExternalUrl`），7 处全部接入，合法外网 CDN 图片/附件不受影响（`_isPrivateHost` 只拒内网）
+
+### 说明
+
+- 本次为纯安全加固（AI 输出 schema 校验 + DOMToNotion SSRF sibling），无新功能、无运行时行为变化（除安全校验的设计行为对齐：AI 输出 URL/属性非法时跳过该字段不中断流程，导入帖子含内网图时该图静默跳过）
+- 严格遵守锁定约束：单文件 Userscript 输出不变、纯客户端架构、向后兼容
+- 新增 `tests/ai-schema.test.js` 32 契约用例（SSRF 防御 + 属性名 + 类型 + 值 + emoji + 对象值 + 结构 + parseAIJson）
+- ISS-20260723-009 完成；ISS-20260723-010（ai/index.js 7090 行巨石拆分 + LinuxDoAPI 迁回 extract）deferred，parseAIJson 已为其预留接缝
+- S_GENERALIZE 首轮 grep `external:{url}` 漏报 `_cookImage`（L412），二轮全量 grep `Utils.absoluteUrl` 补获第 7 处 + `serializeRichText` link（L476，归 safe：写 rich_text.link.url 非 Notion 服务端抓取点）
+
+### 验证
+
+- `npm run verify:baseline`：18 个测试文件、384 个用例全部通过（+32 ai-schema 契约），legacy 全绿，EXIT=0 零回归
+- `node build.js`：零警告构建，单文件产物 1290.5 KB（+11.1 KB），关键锚点校验通过
+
+[3.7.8]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.7.8
+
 ## [3.7.7] - 2026-07-23
 
 ### 修复（odyssey-improve 全项目 6 维度审计）
