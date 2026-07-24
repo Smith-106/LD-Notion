@@ -92,6 +92,8 @@ flowchart TB
 | 书签桥接扩展 | `chrome-extension/` |
 | 独立扩展构建 | `scripts/build-extension.js` 输出 `chrome-extension-full/` |
 | 协调层（UI 命令分发） | `src/coordination/UICommandService.js` |
+| AI 输出 schema 校验 | `src/ai/schema.js`（`AISchema`，校验 AI 返回的 URL/属性名/值/结构） |
+| URL 安全原语 | `src/security/UrlValidator.js`（`validateAiBaseUrl`/`validateObsidianUrl`/`validatePageExternalUrl`） |
 | 多源适配器注册表 | `src/adapter/`（`AdapterRegistry` + 各 `*Adapter`，bridge 经 lazy accessor 注入） |
 | 自动化测试 | `tests/` |
 | UI 手工回归 | `docs/ui-regression-checklist.md` |

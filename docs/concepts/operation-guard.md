@@ -54,7 +54,7 @@ flowchart TD
 | Property update | `updatePage`、`updateDatabase` | 标准 | No | `write.property.updated` | 提示提升到标准权限。 |
 | AI agent task | `agentTask` | 高级 | When write is planned | `agent.tool.requested`、`guard.decision` | 降级为只读建议或操作草案。 |
 | Move / duplicate | `movePage`、`duplicatePage` | 高级 | Yes for broad changes | `page.moved`、`page.duplicated` | 要求确认或拆分为小批次。 |
-| Archive / restore | `deletePage`、`restorePage` | 高级 | Yes | `page.archived`、`page.restored` | 用户取消时不写入。 |
+| Archive / restore | `deletePage`、`restorePage` | 高级 | Yes | `page.archived`、`page.restored` | 用户取消时不写入。自动同步归档（`BookmarkAutoImporter`）同样经 `canExecute` 闸门，权限不足时跳过并记 `guard.denied`，不裸调 API（v3.7.7，CWE-862/639）。 |
 | Permanent block delete | `deleteBlock` | 高级 | Yes, stricter prompt | `block.deleted` | 取消或拒绝；不承诺可撤销。 |
 | Unknown operation | 未登记工具或动作 | N/A | N/A | `guard.denied` | 默认拒绝。 |
 

@@ -72,6 +72,49 @@ v3.7.0 对用户脚本权限域和 AI 输入链路做了系统性加固：
 - ~~**Extension SSRF 白名单严格匹配**：当前 background service worker 的 URL 白名单使用简单字符串匹配，可被 `evil.amazonaws.com.attacker.com` 绕过。应改用 URL 构造函数解析 hostname 后精确匹配，并限制协议为 https、端口为默认端口。~~（已在 v3.7.4 修复）
 - **Extension CredentialVault 移植**：Chrome Extension 版本中 API key 通过 `chrome.storage.local` 明文存储，CredentialVault AES-256-GCM 加密机制尚未移植到 Extension 侧。
 
+## v3.7.8 安全加固
+
+v3.7.8（ISS-20260723-009，CWE-94/918）针对 AI 输出经 prompt injection 写入恶意 URL 或异常属性的问题，新增统一的 AI 输出 schema 校验层，并顺带修复了导入页面 HTML 的 SSRF sibling。
+
+### AI 输出 schema 校验层
+
+新增 `src/ai/schema.js`（`AISchema`），统一校验 AI 返回并直接写入 Notion 的内容：
+
+- **`validatePageExternalUrl`**：转发 `UrlValidator.validatePageExternalUrl`，校验 AI 返回的 icon/cover external.url。
+- **`validatePropertyName`**：属性名白名单（中英数字 + 下划线/连字符/空格）+ 截断 ≤64 + 拒 Notion 保留名（`title`/`created_time`/`last_edited_time`/`created_by`/`last_edited_by`/`url`/`path`/`Name`）。
+- **`validatePropertyType`**：类型白名单，拒 `relation`/`people`/`files` 等系统关联字段。
+- **`validatePropertyValue`**：title/rich_text ≤2000、select ≤100、number `isFinite`+`|v|<1e15`、date ISO8601、checkbox Boolean。
+- **`validateEmoji`**：≤32 + 拒控制字符。
+- **`sanitizeObjectValue`**：对象值白名单，拒 `relation`/`people`/`created_by`/`created_time`/`last_edited_time` 等系统字段，防 schema 污染。
+- **`validateExtractToDatabaseSchema`**：`properties`/`entries` 需为数组，非数组返回明确 reason，不再让 `TypeError` 被吞。
+- **`parseAIJson`**：统一入口（正则提取 + `JSON.parse` + 按 name 路由校验），消除 7 消费点重复的 `jsonMatch+JSON.parse+try-catch` 三段式，并为 `ai/index.js` 拆分（ISS-010）预留接缝。
+
+`src/ai/index.js` 7 个消费点接入：icon/cover URL、属性名/类型/值、对象值白名单、`handleExtractToDatabase`（含失败条目计数回显）、`parseIntent`（intent 白名单 + compound steps 上限 20）、`handleEditContent`（`content_updates` 的 `old_str`/`new_str` 结构校验）。
+
+### UrlValidator 补充原语
+
+`src/security/UrlValidator.js` 新增 `validatePageExternalUrl`：限定 http(s) 协议（拒 `javascript:`/`data:`/`file:`）+ `_isPrivateHost` 拒内网/私有/链路本地（`10.x`/`172.16-31.x`/`192.168.x`/`169.254.x`/`127`/`localhost`）。防 Notion 服务端抓取 external.url 触发云元数据 SSRF（`169.254.169.254`）。
+
+### DOMToNotion SSRF sibling（CWE-918）
+
+`src/api/index.js` 的 `DOMToNotion` 有 7 处 external.url 消费点（`_cookLightbox`/`_cookAttachment`/`_cookVideo`/`_cookAudio`/`_cookImage`/`_cookParagraph` 内 img + attachment），把 `Utils.absoluteUrl(帖子 HTML 的 src/href)` 直写 Notion `external.url`。帖子作者可写 `<img src="http://169.254.169.254/...">`，导入时 Notion 服务端抓取触发 SSRF。来源与 AI 输出不同（帖子 HTML vs AI 输出）但同漏洞模式同触发点。新增 `_safeExternalUrl` helper（复用 `validatePageExternalUrl`）全部接入，合法外网 CDN 图片/附件不受影响（`_isPrivateHost` 只拒内网）。
+
+## v3.7.7 安全加固
+
+v3.7.7（odyssey-improve 6 维度审计）修复了 UI XSS 与自动同步归档绕过权限闸门两类问题。
+
+### XSS 渲染未转义（CWE-79）
+
+4 处 `innerHTML` 拼接补 `escapeHtml`：
+
+- `main-ui.js` / `notion-site-ui.js` 的 AI 模型 `<option>` 的 value 与文本。
+- `events.js` 模板中的 icon。
+- `security/index.js` 确认对话框 hint 中的 `itemName`（同块 placeholder 已转义，hint 行遗漏）。
+
+### 自动同步归档绕过 OperationGuard（CWE-862/639）
+
+`BookmarkAutoImporter` 自动同步归档已删除书签时直连 `NotionAPI.deletePage` 绕过 `OperationGuard`（deletePage level 2）。改为 `OperationGuard.canExecute` 权限闸门，权限不足时跳过归档并记 `guard.denied` 审计，不裸调。详见 [OperationGuard](/concepts/operation-guard)。
+
 ## v3.7.4 安全加固
 
 v3.7.4 在 v3.7.3 基础上进一步收紧 URL 安全与输入处理：
