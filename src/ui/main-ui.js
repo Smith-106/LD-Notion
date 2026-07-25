@@ -1418,6 +1418,8 @@ const UI = {
 
         // 错误消息延长显示时间（10秒），其他类型3秒
         const timeout = type === "error" ? 10000 : 3000;
+        // 清旧定时器，防高频调用堆叠致状态栏被过期定时器意外清空（L1 reliability）
+        if (container._statusTimer) clearTimeout(container._statusTimer);
         container._statusTimer = setTimeout(() => {
             container.innerHTML = "";
         }, timeout);
@@ -4128,7 +4130,15 @@ const UI = {
                 for (const key of Object.keys(properties)) {
                     if (properties[key] === undefined) delete properties[key];
                 }
-                await NotionAPI.request("POST", "/pages", {
+                // createDatabasePage 是 level 1 写操作，用户触发的手动选导出不可裸调 NotionAPI（ISS-20260724-011 SEC-007）。
+                // canExecute 非阻塞闸门 + GitHubExporter._auditExport 三态审计（与 _exportItems 路径对称）。
+                if (!OperationGuard.canExecute("createDatabasePage")) {
+                    GitHubExporter._auditExport("createDatabasePage", "denied",
+                        { itemKey: item.itemKey, sourceType, itemName: item.title || item.itemKey, reason: "权限不足：手动导出建页需 level≥1" });
+                    failed.push({ title: item.title, error: "权限不足（需 level≥1）", itemKey: item.itemKey, sourceType });
+                    continue;
+                }
+                const page = await NotionAPI.request("POST", "/pages", {
                     parent: { database_id: databaseId },
                     properties,
                 }, apiKey);
@@ -4138,6 +4148,8 @@ const UI = {
                 } else {
                     GitHubAPI.markExported(item.itemKey);
                 }
+                GitHubExporter._auditExport("createDatabasePage", "success",
+                    { pageId: String(page?.id || ""), itemKey: item.itemKey, sourceType, databaseId });
                 success.push({
                     title: item.title,
                     url: bookmark?.html_url || "https://github.com",
@@ -4146,6 +4158,8 @@ const UI = {
                 });
             } catch (error) {
                 console.warn(`[UI] GitHub 手动导出失败: ${item.itemKey}`, error);
+                GitHubExporter._auditExport("createDatabasePage", "failed",
+                    { itemKey: item.itemKey, sourceType, reason: String(error?.message || error) });
                 failed.push({
                     title: item.title,
                     error: error.message,

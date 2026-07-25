@@ -8,6 +8,28 @@ const { AIService } = require("../ai");
 
 const BookmarkExporter = {
     _pageInsightCache: {},
+    // 已导出书签映射缓存（H5：消除循环内逐条 JSON.parse+stringify 的 O(N²)）。
+    // getExported 命中缓存返对象引用，markExported 就地 mutate 缓存 + 单次 stringify 写回。
+    _exportedCache: null,
+
+    // 用户触发导出的写入审计（ISS-20260724-011，CWE-862/778）。与 BookmarkAutoImporter._auditAutoSync
+    // 同模式但信任边界不同：用户主动触发（actor="user"）而非系统自动同步（actor="system"）。
+    // canExecute 非阻塞闸门管权限，审计管可观测性——谁在何时建/改了哪些页面可事后追溯。
+    _auditExport: (operation, status, context = {}) => {
+        try {
+            const { OperationLog } = require("../security");
+            OperationLog.add({
+                audit_event: OperationLog.inferAuditEvent(operation, status),
+                actor: "user",
+                source: "bookmark-export",
+                operationName: operation,
+                status,
+                context,
+            });
+        } catch (e) {
+            console.warn("[LD-Notion] 书签导出审计写入失败:", e);
+        }
+    },
 
     // 展平书签树为列表，记录文件夹路径
     flattenTree: (nodes, parentPath = "") => {
@@ -426,9 +448,20 @@ const BookmarkExporter = {
 
             const allChanges = { ...propsToAdd, ...propsToUpdate };
             if (Object.keys(allChanges).length > 0) {
+                // updateDatabase 是 level 1 写操作（schema 变更），用户触发的导出前置不可裸调（ISS-20260724-011）。
+                // 自动同步路径调用 setup 时夹在 _auditAutoSync 的 system 审计范围内（间接可观测），
+                // 此处补 user 审计 + canExecute 闸门覆盖用户触发导出路径的可观测性缺口。
+                const { OperationGuard } = require("../security");
+                if (!OperationGuard.canExecute("updateDatabase")) {
+                    BookmarkExporter._auditExport("updateDatabase", "denied",
+                        { databaseId, reason: "权限不足：导出配置数据库结构需 level≥1", changes: Object.keys(allChanges) });
+                    return { success: false, error: "权限不足：无法修改数据库结构（需 level≥1）" };
+                }
                 await NotionAPI.request("PATCH", `/databases/${databaseId}`, {
                     properties: allChanges,
                 }, apiKey);
+                BookmarkExporter._auditExport("updateDatabase", "success",
+                    { databaseId, added: Object.keys(propsToAdd), renamed: Object.keys(propsToUpdate) });
             }
 
             return { success: true, added: Object.keys(propsToAdd) };
@@ -439,11 +472,13 @@ const BookmarkExporter = {
 
     // 获取已导出的书签集合
     getExported: () => {
-        try { return JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}")); }
+        if (BookmarkExporter._exportedCache) return BookmarkExporter._exportedCache;
+        try { BookmarkExporter._exportedCache = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}")); }
         catch (error) {
             console.warn("[LD-Notion] 已导出书签集合解析失败:", error);
-            return {};
+            BookmarkExporter._exportedCache = {};
         }
+        return BookmarkExporter._exportedCache;
     },
 
     markExported: (bookmarkUrl) => {
@@ -491,19 +526,32 @@ const BookmarkExporter = {
             try {
                 const enriched = await BookmarkExporter.enrichBookmark(bm, settings, enrichContext);
                 const properties = BookmarkExporter.buildProperties(enriched);
-                await NotionAPI.request("POST", "/pages", {
+                // createDatabasePage 是 level 1 写操作，用户触发的批量导出不可裸调 NotionAPI（ISS-20260724-011）。
+                // canExecute 非阻塞（只查 permissionLevel），权限不足跳过并记审计，与自动同步 C1 模式对称。
+                const { OperationGuard } = require("../security");
+                if (!OperationGuard.canExecute("createDatabasePage")) {
+                    BookmarkExporter._auditExport("createDatabasePage", "denied",
+                        { bookmarkUrl: bm.url, itemName: bm.title, reason: "权限不足：导出建页需 level≥1" });
+                    failed++;
+                    continue;
+                }
+                const page = await NotionAPI.request("POST", "/pages", {
                     parent: { database_id: databaseId },
                     properties,
                 }, apiKey);
                 BookmarkExporter.markExported(bm.url);
+                BookmarkExporter._auditExport("createDatabasePage", "success",
+                    { pageId: String(page?.id || ""), bookmarkUrl: bm.url, itemName: bm.title, databaseId });
                 success++;
             } catch (e) {
                 console.warn(`[BookmarkExporter] 导出失败: ${bm.url}`, e);
+                BookmarkExporter._auditExport("createDatabasePage", "failed",
+                    { bookmarkUrl: bm.url, itemName: bm.title, reason: String(e?.message || e) });
                 failed++;
             }
 
             if (i < newBookmarks.length - 1) {
-                await new Promise(r => setTimeout(r, delay));
+                await Utils.sleep(delay);
             }
         }
 

@@ -985,7 +985,8 @@
             const discourseUser = (_c = (_b = (_a = window.Discourse) == null ? void 0 : _a.User) == null ? void 0 : _b.current) == null ? void 0 : _c.call(_b);
             username = ((discourseUser == null ? void 0 : discourseUser.username) || "").trim();
             if (username) return username;
-          } catch {
+          } catch (e) {
+            console.warn("[LD-Notion] Discourse \u7528\u6237\u540D\u63A2\u6D4B\u5931\u8D25:", e);
           }
           return "";
         },
@@ -2502,9 +2503,20 @@
         // iframe 嵌入，返回 true 表示已处理（视频 src），false 表示未匹配需 fallthrough
         _cookIframe: (el, blocks) => {
           const src = el.getAttribute("src") || "";
-          if (src && (src.includes("youtube.com") || src.includes("youtu.be") || src.includes("vimeo.com") || src.includes("bilibili.com") || src.includes("player."))) {
-            blocks.push({ type: "embed", embed: { url: src } });
-            return true;
+          if (!src) return false;
+          let host = "";
+          try {
+            host = new URL(Utils2.absoluteUrl(src)).hostname;
+          } catch {
+            return false;
+          }
+          const isAllowedEmbedHost = host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtu.be" || host.endsWith(".youtu.be") || host === "vimeo.com" || host.endsWith(".vimeo.com") || host === "bilibili.com" || host.endsWith(".bilibili.com");
+          if (isAllowedEmbedHost || host.includes("player.")) {
+            const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
+            if (full) {
+              blocks.push({ type: "embed", embed: { url: full } });
+              return true;
+            }
           }
           return false;
         },
@@ -3052,7 +3064,8 @@
           try {
             const user = await NotionAPI2.request("GET", "/users/me", null, apiKey);
             return ((_b = (_a = user == null ? void 0 : user.bot) == null ? void 0 : _a.workspace_limits) == null ? void 0 : _b.max_file_upload_size_in_bytes) || 5 * 1024 * 1024;
-          } catch {
+          } catch (e) {
+            console.warn("[LD-Notion] \u83B7\u53D6\u5DE5\u4F5C\u533A\u6587\u4EF6\u5927\u5C0F\u9650\u5236\u5931\u8D25\uFF0C\u56DE\u9000\u5230 5MB:", e);
             return 5 * 1024 * 1024;
           }
         },
@@ -5189,6 +5202,27 @@ ${quoted}
       var { AIService: AIService2 } = require_ai();
       var BookmarkExporter2 = {
         _pageInsightCache: {},
+        // 已导出书签映射缓存（H5：消除循环内逐条 JSON.parse+stringify 的 O(N²)）。
+        // getExported 命中缓存返对象引用，markExported 就地 mutate 缓存 + 单次 stringify 写回。
+        _exportedCache: null,
+        // 用户触发导出的写入审计（ISS-20260724-011，CWE-862/778）。与 BookmarkAutoImporter._auditAutoSync
+        // 同模式但信任边界不同：用户主动触发（actor="user"）而非系统自动同步（actor="system"）。
+        // canExecute 非阻塞闸门管权限，审计管可观测性——谁在何时建/改了哪些页面可事后追溯。
+        _auditExport: (operation, status, context = {}) => {
+          try {
+            const { OperationLog: OperationLog2 } = require_security();
+            OperationLog2.add({
+              audit_event: OperationLog2.inferAuditEvent(operation, status),
+              actor: "user",
+              source: "bookmark-export",
+              operationName: operation,
+              status,
+              context
+            });
+          } catch (e) {
+            console.warn("[LD-Notion] \u4E66\u7B7E\u5BFC\u51FA\u5BA1\u8BA1\u5199\u5165\u5931\u8D25:", e);
+          }
+        },
         // 展平书签树为列表，记录文件夹路径
         flattenTree: (nodes, parentPath = "") => {
           const result = [];
@@ -5558,9 +5592,23 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
             const allChanges = { ...propsToAdd, ...propsToUpdate };
             if (Object.keys(allChanges).length > 0) {
+              const { OperationGuard: OperationGuard2 } = require_security();
+              if (!OperationGuard2.canExecute("updateDatabase")) {
+                BookmarkExporter2._auditExport(
+                  "updateDatabase",
+                  "denied",
+                  { databaseId, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784\u9700 level\u22651", changes: Object.keys(allChanges) }
+                );
+                return { success: false, error: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u65E0\u6CD5\u4FEE\u6539\u6570\u636E\u5E93\u7ED3\u6784\uFF08\u9700 level\u22651\uFF09" };
+              }
               await NotionAPI2.request("PATCH", `/databases/${databaseId}`, {
                 properties: allChanges
               }, apiKey);
+              BookmarkExporter2._auditExport(
+                "updateDatabase",
+                "success",
+                { databaseId, added: Object.keys(propsToAdd), renamed: Object.keys(propsToUpdate) }
+              );
             }
             return { success: true, added: Object.keys(propsToAdd) };
           } catch (error) {
@@ -5569,12 +5617,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         // 获取已导出的书签集合
         getExported: () => {
+          if (BookmarkExporter2._exportedCache) return BookmarkExporter2._exportedCache;
           try {
-            return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}"));
+            BookmarkExporter2._exportedCache = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}"));
           } catch (error) {
             console.warn("[LD-Notion] \u5DF2\u5BFC\u51FA\u4E66\u7B7E\u96C6\u5408\u89E3\u6790\u5931\u8D25:", error);
-            return {};
+            BookmarkExporter2._exportedCache = {};
           }
+          return BookmarkExporter2._exportedCache;
         },
         markExported: (bookmarkUrl) => {
           const exported = BookmarkExporter2.getExported();
@@ -5610,18 +5660,38 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             try {
               const enriched = await BookmarkExporter2.enrichBookmark(bm, settings, enrichContext);
               const properties = BookmarkExporter2.buildProperties(enriched);
-              await NotionAPI2.request("POST", "/pages", {
+              const { OperationGuard: OperationGuard2 } = require_security();
+              if (!OperationGuard2.canExecute("createDatabasePage")) {
+                BookmarkExporter2._auditExport(
+                  "createDatabasePage",
+                  "denied",
+                  { bookmarkUrl: bm.url, itemName: bm.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
+                );
+                failed++;
+                continue;
+              }
+              const page = await NotionAPI2.request("POST", "/pages", {
                 parent: { database_id: databaseId },
                 properties
               }, apiKey);
               BookmarkExporter2.markExported(bm.url);
+              BookmarkExporter2._auditExport(
+                "createDatabasePage",
+                "success",
+                { pageId: String((page == null ? void 0 : page.id) || ""), bookmarkUrl: bm.url, itemName: bm.title, databaseId }
+              );
               success++;
             } catch (e) {
               console.warn(`[BookmarkExporter] \u5BFC\u51FA\u5931\u8D25: ${bm.url}`, e);
+              BookmarkExporter2._auditExport(
+                "createDatabasePage",
+                "failed",
+                { bookmarkUrl: bm.url, itemName: bm.title, reason: String((e == null ? void 0 : e.message) || e) }
+              );
               failed++;
             }
             if (i < newBookmarks.length - 1) {
-              await new Promise((r) => setTimeout(r, delay));
+              await Utils2.sleep(delay);
             }
           }
           return { total: bookmarks.length, exported: success, failed, newCount: newBookmarks.length };
@@ -6011,7 +6081,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (!BookmarkBridge3 || !BookmarkBridge3.isExtensionAvailable()) return [];
           const tree = await BookmarkBridge3.getBookmarkTree();
           const flat = BookmarkBridge3.flattenTree ? BookmarkBridge3.flattenTree(tree) : this._flattenTree(tree);
-          const items = flat.filter((b) => b.url && BookmarkExporter2 && BookmarkExporter2.isHttpUrl ? BookmarkExporter2.isHttpUrl(b.url) : /^https?:\/\//i.test(b.url || "")).map((b) => this.normalize(b));
+          const isHttpUrl = (url) => {
+            var _a;
+            return ((_a = BookmarkExporter2 == null ? void 0 : BookmarkExporter2.isHttpUrl) == null ? void 0 : _a.call(BookmarkExporter2, url)) ?? /^https?:\/\//i.test(url || "");
+          };
+          const items = flat.filter((b) => b.url && isHttpUrl(b.url)).map((b) => this.normalize(b));
           if (watermark && watermark.time) {
             return items.filter((item) => item.createdAt > watermark.time);
           }
@@ -6564,6 +6638,29 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             pageId: String(pageId || "").trim()
           };
         },
+        // 自动同步写入审计（CWE-862 审计完整性，C1）。
+        // 自动同步是系统级 actor 批量写/删 Notion，不经 OperationGuard.execute（会弹
+        // ConfirmationDialog 阻塞批量），但必须留 OperationLog 审计痕迹——成功/失败都记，
+        // 谁在何时建/更/归档了哪些页面可事后追溯。与归档 canExecute 闸门（3.7.7）互补：
+        // 闸门管权限，审计管可观测性。
+        // actor/source 经 context 注入以支持用户触发路径复用（ISS-20260724-011：导出路径
+        // 传 actor="user"/source="bookmark-export"|"github-export"）；未传时保持自动同步默认值，
+        // 向后兼容现有调用方。
+        _auditAutoSync: (operation, status, context = {}) => {
+          try {
+            const { OperationLog: OperationLog2 } = require_security();
+            OperationLog2.add({
+              audit_event: OperationLog2.inferAuditEvent(operation, status),
+              actor: context.actor || "system",
+              source: context.source || "bookmark-auto-sync",
+              operationName: operation,
+              status,
+              context
+            });
+          } catch (e) {
+            console.warn("[LD-Notion] \u81EA\u52A8\u540C\u6B65\u5BA1\u8BA1\u5199\u5165\u5931\u8D25:", e);
+          }
+        },
         getPageRichText: (page, propertyName) => {
           var _a, _b;
           const richText = (_b = (_a = page == null ? void 0 : page.properties) == null ? void 0 : _a[propertyName]) == null ? void 0 : _b.rich_text;
@@ -6766,6 +6863,17 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             try {
               if (!pageMeta) {
                 BookmarkAutoImporter2.updateStatus(`\u{1F4C4} \u6B63\u5728\u65B0\u589E\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                const { OperationGuard: OperationGuard2 } = require_security();
+                if (!OperationGuard2.canExecute("createDatabasePage")) {
+                  BookmarkAutoImporter2._auditAutoSync(
+                    "createDatabasePage",
+                    "denied",
+                    { bookmarkId, itemName: bookmark.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
+                  );
+                  failed++;
+                  if (snapshotEntry) nextSnapshot[bookmarkId] = snapshotEntry;
+                  return;
+                }
                 const enriched = await BookmarkExporter2.enrichBookmark(bookmark, settings, enrichContext);
                 const page = await NotionAPI2.request("POST", "/pages", {
                   parent: { database_id: settings.databaseId },
@@ -6779,11 +6887,32 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   folderPath: bookmark.folderPath,
                   dateAdded: SyncState2.normalizeTime(bookmark.dateAdded)
                 };
+                BookmarkAutoImporter2._auditAutoSync(
+                  "createDatabasePage",
+                  "success",
+                  { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, databaseId: settings.databaseId }
+                );
                 created++;
               } else if (BookmarkAutoImporter2.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
                 BookmarkAutoImporter2.updateStatus(`\u{1F4E7} \u6B63\u5728\u66F4\u65B0\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                const { OperationGuard: OperationGuard2 } = require_security();
+                if (!OperationGuard2.canExecute("updatePage")) {
+                  BookmarkAutoImporter2._auditAutoSync(
+                    "updatePage",
+                    "denied",
+                    { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u540C\u6B65\u66F4\u65B0\u9700 level\u22651" }
+                  );
+                  failed++;
+                  nextSnapshot[bookmarkId] = snapshotEntry || BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageMeta.pageId);
+                  return;
+                }
                 const properties = BookmarkAutoImporter2.needsFullRefresh(bookmark, snapshotEntry, pageMeta) ? BookmarkExporter2.buildProperties(await BookmarkExporter2.enrichBookmark(bookmark, settings, enrichContext)) : BookmarkAutoImporter2.buildMinimalProperties(bookmark);
                 await NotionAPI2.updatePage(pageMeta.pageId, properties, settings.apiKey);
+                BookmarkAutoImporter2._auditAutoSync(
+                  "updatePage",
+                  "success",
+                  { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title }
+                );
                 updated++;
               } else {
                 unchanged++;
@@ -6804,6 +6933,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageId);
             } catch (error) {
               console.error(`[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5931\u8D25: ${bookmark.title || bookmark.url}`, error);
+              BookmarkAutoImporter2._auditAutoSync(
+                "createDatabasePage",
+                "failed",
+                { bookmarkId, itemName: bookmark.title || bookmark.url, reason: String((error == null ? void 0 : error.message) || error) }
+              );
               failed++;
               if (snapshotEntry) {
                 nextSnapshot[bookmarkId] = snapshotEntry;
@@ -6841,9 +6975,19 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 return;
               }
               await NotionAPI2.deletePage(pageMeta.pageId, settings.apiKey);
+              BookmarkAutoImporter2._auditAutoSync(
+                "deletePage",
+                "success",
+                { pageId: pageMeta.pageId, bookmarkId, itemName: (snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId }
+              );
               archived++;
             } catch (error) {
               console.error(`[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u5F52\u6863\u5931\u8D25: ${(snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId}`, error);
+              BookmarkAutoImporter2._auditAutoSync(
+                "deletePage",
+                "failed",
+                { pageId: pageMeta == null ? void 0 : pageMeta.pageId, bookmarkId, itemName: (snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId, reason: String((error == null ? void 0 : error.message) || error) }
+              );
               failed++;
               nextSnapshot[bookmarkId] = snapshotEntry;
             }
@@ -6896,7 +7040,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (UI2 && typeof UI2.renderSyncCenterSummary === "function") {
             try {
               UI2.renderSyncCenterSummary();
-            } catch {
+            } catch (e) {
+              console.warn("[LD-Notion] \u540C\u6B65\u4E2D\u5FC3\u9762\u677F\u6E32\u67D3\u5931\u8D25:", e);
             }
           }
         }
@@ -7205,6 +7350,25 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             itemKey: RSSAutoImporter2.buildItemKey(normalized)
           };
         },
+        // 自动同步写入审计（C1 审计完整性，CWE-862）。与 BookmarkAutoImporter._auditAutoSync 同模式：
+        // canExecute 非阻塞闸门 + OperationLog 成功/失败审计，批量场景不弹 dialog。
+        // actor/source 经 context 注入（与 BookmarkAutoImporter._auditAutoSync 参数化保持一致，
+        // ISS-20260724-011）；未传时保持 RSS 自动同步默认值，向后兼容。
+        _auditAutoSync: (operation, status, context = {}) => {
+          try {
+            const { OperationLog: OperationLog2 } = require_security();
+            OperationLog2.add({
+              audit_event: OperationLog2.inferAuditEvent(operation, status),
+              actor: context.actor || "system",
+              source: context.source || "rss-auto-sync",
+              operationName: operation,
+              status,
+              context
+            });
+          } catch (e) {
+            console.warn("[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u5BA1\u8BA1\u5199\u5165\u5931\u8D25:", e);
+          }
+        },
         buildProperties: (item) => {
           const normalized = RSSAutoImporter2.normalizeItem(item);
           const inferredCategory = BookmarkExporter2.normalizeText((item == null ? void 0 : item.inferredCategory) || "", 300);
@@ -7269,7 +7433,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 enriched.inferredCategory = aiCategory;
               }
               context.aiUsedCount = (context.aiUsedCount || 0) + 1;
-            } catch {
+            } catch (e) {
+              console.warn("[LD-Notion] RSS AI \u5206\u7C7B\u5931\u8D25\uFF0C\u4F7F\u7528\u542F\u53D1\u5F0F fallback:", e);
+              context.aiFailureCount = (context.aiFailureCount || 0) + 1;
             }
           }
           return enriched;
@@ -7376,6 +7542,18 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           try {
             if (!pageMeta) {
               RSSAutoImporter2.updateStatus(`\u6B63\u5728\u65B0\u589E RSS \u6761\u76EE (${ctx.position}/${total}): ${item.title}`);
+              const { OperationGuard: OperationGuard2 } = require_security();
+              if (!OperationGuard2.canExecute("createDatabasePage")) {
+                RSSAutoImporter2._auditAutoSync(
+                  "createDatabasePage",
+                  "denied",
+                  { itemKey: item.itemKey, itemName: item.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1ARSS \u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
+                );
+                result.failed = 1;
+                if (snapshotEntry) nextSnapshot[item.itemKey] = snapshotEntry;
+                result.success = false;
+                return result;
+              }
               const enriched = await RSSAutoImporter2.enrichItem(item, settings, enrichContext);
               const page = await NotionAPI2.request("POST", "/pages", {
                 parent: { database_id: settings.databaseId },
@@ -7388,11 +7566,33 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 summary: item.summary,
                 publishedAt: item.publishedAt
               };
+              RSSAutoImporter2._auditAutoSync(
+                "createDatabasePage",
+                "success",
+                { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title, databaseId: settings.databaseId }
+              );
               result.created = 1;
             } else if (RSSAutoImporter2.needsUpdate(item, snapshotEntry, pageMeta)) {
               RSSAutoImporter2.updateStatus(`\u6B63\u5728\u66F4\u65B0 RSS \u6761\u76EE (${ctx.position}/${total}): ${item.title}`);
+              const { OperationGuard: OperationGuard2 } = require_security();
+              if (!OperationGuard2.canExecute("updatePage")) {
+                RSSAutoImporter2._auditAutoSync(
+                  "updatePage",
+                  "denied",
+                  { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1ARSS \u81EA\u52A8\u540C\u6B65\u66F4\u65B0\u9700 level\u22651" }
+                );
+                result.failed = 1;
+                nextSnapshot[item.itemKey] = snapshotEntry || RSSAutoImporter2.buildSnapshotEntry(item, pageMeta.pageId);
+                result.success = false;
+                return result;
+              }
               const enriched = await RSSAutoImporter2.enrichItem(item, settings, enrichContext);
               await NotionAPI2.updatePage(pageMeta.pageId, RSSAutoImporter2.buildProperties(enriched), settings.apiKey);
+              RSSAutoImporter2._auditAutoSync(
+                "updatePage",
+                "success",
+                { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title }
+              );
               result.updated = 1;
             } else {
               result.unchanged = 1;
@@ -7413,6 +7613,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             return result;
           } catch (error) {
             console.error(`[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u5931\u8D25: ${item.title || item.url}`, error);
+            RSSAutoImporter2._auditAutoSync(
+              "createDatabasePage",
+              "failed",
+              { itemKey: item.itemKey, itemName: item.title || item.url, reason: String((error == null ? void 0 : error.message) || error) }
+            );
             result.failed = 1;
             if (snapshotEntry) {
               nextSnapshot[item.itemKey] = snapshotEntry;
@@ -7531,7 +7736,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             if (UI2 && typeof UI2.renderSyncCenterSummary === "function") {
               try {
                 UI2.renderSyncCenterSummary();
-              } catch {
+              } catch (e) {
+                console.warn("[LD-Notion] \u540C\u6B65\u4E2D\u5FC3\u9762\u677F\u6E32\u67D3\u5931\u8D25:", e);
               }
             }
           }
@@ -8008,13 +8214,17 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           let lastErr = null;
           const opts = LinuxDoAPI2.getRequestOpts();
           for (let i = 0; i <= retries; i++) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 15e3);
             try {
-              const res = await fetch(url, opts);
+              const res = await fetch(url, { ...opts, signal: ctrl.signal });
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               return await res.json();
             } catch (e) {
               lastErr = e;
               if (i < retries) await Utils2.sleep(250 * (i + 1));
+            } finally {
+              clearTimeout(timer);
             }
           }
           throw lastErr || new Error("fetchJson failed");
@@ -8707,6 +8917,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { Storage: Storage2 } = require_storage();
       var GitHubAPI2 = {
         _readmeCache: {},
+        // 已导出集合缓存（H6：消除循环内逐条 JSON.parse 的 O(N²)，与 BookmarkExporter._exportedCache 同模式）。
+        _exportedCache: null,
+        _exportedGistsCache: null,
         _fetchPaginated: (url, token = "", label = "GitHub", options = {}) => {
           return new Promise((resolve, reject) => {
             const allItems = [];
@@ -8804,19 +9017,23 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         // 获取已导出的 repo 集合
         getExported: () => {
+          if (GitHubAPI2._exportedCache) return GitHubAPI2._exportedCache;
           try {
-            return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}"));
+            GitHubAPI2._exportedCache = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}"));
           } catch {
-            return {};
+            GitHubAPI2._exportedCache = {};
           }
+          return GitHubAPI2._exportedCache;
         },
         // 获取已导出的 gist 集合
         getExportedGists: () => {
+          if (GitHubAPI2._exportedGistsCache) return GitHubAPI2._exportedGistsCache;
           try {
-            return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}"));
+            GitHubAPI2._exportedGistsCache = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}"));
           } catch {
-            return {};
+            GitHubAPI2._exportedGistsCache = {};
           }
+          return GitHubAPI2._exportedGistsCache;
         },
         markExported: (repoFullName) => {
           const exported = GitHubAPI2.getExported();
@@ -8907,6 +9124,24 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
       var { AIService: AIService2 } = require_ai();
       var GitHubExporter2 = {
+        // 用户触发导出的写入审计（ISS-20260724-011，CWE-862/778）。与 BookmarkAutoImporter._auditAutoSync
+        // 同模式但信任边界不同：用户主动触发（actor="user"）而非系统自动同步（actor="system"）。
+        // canExecute 非阻塞闸门管权限，审计管可观测性——谁在何时建/改了哪些页面可事后追溯。
+        _auditExport: (operation, status, context = {}) => {
+          try {
+            const { OperationLog: OperationLog2 } = require_security();
+            OperationLog2.add({
+              audit_event: OperationLog2.inferAuditEvent(operation, status),
+              actor: "user",
+              source: "github-export",
+              operationName: operation,
+              status,
+              context
+            });
+          } catch (e) {
+            console.warn("[LD-Notion] GitHub \u5BFC\u51FA\u5BA1\u8BA1\u5199\u5165\u5931\u8D25:", e);
+          }
+        },
         normalizeText: (text, maxLen = 280) => {
           if (!text) return "";
           const normalized = String(text).replace(/\s+/g, " ").trim();
@@ -9140,9 +9375,23 @@ ${insight.summary || ""}`,
             }
             const allChanges = { ...propsToAdd, ...propsToUpdate };
             if (Object.keys(allChanges).length > 0) {
+              const { OperationGuard: OperationGuard2 } = require_security();
+              if (!OperationGuard2.canExecute("updateDatabase")) {
+                GitHubExporter2._auditExport(
+                  "updateDatabase",
+                  "denied",
+                  { databaseId, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784\u9700 level\u22651", changes: Object.keys(allChanges) }
+                );
+                return { success: false, error: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u65E0\u6CD5\u4FEE\u6539\u6570\u636E\u5E93\u7ED3\u6784\uFF08\u9700 level\u22651\uFF09" };
+              }
               await NotionAPI2.request("PATCH", `/databases/${databaseId}`, {
                 properties: allChanges
               }, apiKey);
+              GitHubExporter2._auditExport(
+                "updateDatabase",
+                "success",
+                { databaseId, added: Object.keys(propsToAdd), renamed: Object.keys(propsToUpdate) }
+              );
             }
             return { success: true, added: Object.keys(propsToAdd), renamed: Object.keys(propsToUpdate) };
           } catch (error) {
@@ -9170,18 +9419,38 @@ ${insight.summary || ""}`,
               for (const k of Object.keys(properties)) {
                 if (properties[k] === void 0) delete properties[k];
               }
-              await NotionAPI2.request("POST", "/pages", {
+              const { OperationGuard: OperationGuard2 } = require_security();
+              if (!OperationGuard2.canExecute("createDatabasePage")) {
+                GitHubExporter2._auditExport(
+                  "createDatabasePage",
+                  "denied",
+                  { itemKey: key, sourceType, itemName: item.full_name || key, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
+                );
+                failed++;
+                continue;
+              }
+              const page = await NotionAPI2.request("POST", "/pages", {
                 parent: { database_id: databaseId },
                 properties
               }, apiKey);
               markExportedFn(key);
+              GitHubExporter2._auditExport(
+                "createDatabasePage",
+                "success",
+                { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: key, sourceType, databaseId }
+              );
               success++;
             } catch (e) {
               console.warn(`[GitHubExporter] \u5BFC\u51FA\u5931\u8D25: ${key}`, e);
+              GitHubExporter2._auditExport(
+                "createDatabasePage",
+                "failed",
+                { itemKey: key, sourceType, reason: String((e == null ? void 0 : e.message) || e) }
+              );
               failed++;
             }
             if (i < newItems.length - 1) {
-              await new Promise((r) => setTimeout(r, delay));
+              await Utils2.sleep(delay);
             }
           }
           return { total: items.length, exported: success, failed, newCount: newItems.length };
@@ -9352,16 +9621,35 @@ ${insight.summary || ""}`,
                 aiBaseUrl
               });
               const matched = categories.find((c) => category.trim().includes(c)) || category.trim();
+              const { OperationGuard: OperationGuard2 } = require_security();
+              if (!OperationGuard2.canExecute("updatePage")) {
+                GitHubExporter2._auditExport(
+                  "updatePage",
+                  "denied",
+                  { pageId: page.id, itemName: title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5206\u7C7B\u5199\u5165\u9700 level\u22651" }
+                );
+                continue;
+              }
               await NotionAPI2.request("PATCH", `/pages/${page.id}`, {
                 properties: {
                   "\u5206\u7C7B": { rich_text: [{ text: { content: matched } }] }
                 }
               }, apiKey);
+              GitHubExporter2._auditExport(
+                "updatePage",
+                "success",
+                { pageId: page.id, itemName: title, category: matched }
+              );
               classified++;
             } catch (e) {
               console.warn(`[GitHubExporter] \u5206\u7C7B\u5931\u8D25: ${title}`, e);
+              GitHubExporter2._auditExport(
+                "updatePage",
+                "failed",
+                { pageId: page == null ? void 0 : page.id, itemName: title, reason: String((e == null ? void 0 : e.message) || e) }
+              );
             }
-            await new Promise((r) => setTimeout(r, 500));
+            await Utils2.sleep(500);
           }
           return { classified, total: pages.length };
         }
@@ -9514,18 +9802,40 @@ ${insight.summary || ""}`,
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
         for (let i = 0; i < mappedItems.length; i++) {
           const item = mappedItems[i];
+          const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
           try {
             const raw = item.raw || item;
+            const { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
+            if (!OperationGuard2.canExecute("createDatabasePage")) {
+              OperationLog2.add({
+                audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "denied"),
+                actor: "system",
+                source: "github-auto-sync",
+                operationName: "createDatabasePage",
+                status: "denied",
+                context: { itemKey, itemName: meta.getId(raw), reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AGitHub \u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
+              });
+              failed++;
+              continue;
+            }
             const enriched = await GitHubExporter2.enrichRepo(raw, settings, enrichContext);
             const buildFn = type === "gists" ? GitHubExporter2.buildGistProperties : (r) => GitHubExporter2.buildRepoProperties(r, meta.label);
             const properties = buildFn(enriched);
             for (const k of Object.keys(properties)) {
               if (properties[k] === void 0) delete properties[k];
             }
-            await NotionAPI2.request("POST", "/pages", {
+            const page = await NotionAPI2.request("POST", "/pages", {
               parent: { database_id: settings.databaseId },
               properties
             }, settings.apiKey);
+            OperationLog2.add({
+              audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "success"),
+              actor: "system",
+              source: "github-auto-sync",
+              operationName: "createDatabasePage",
+              status: "success",
+              context: { pageId: String((page == null ? void 0 : page.id) || "").trim(), itemKey, itemName: meta.getId(raw), databaseId: settings.databaseId }
+            });
             if (type === "gists") {
               GitHubAPI2.markGistExported(meta.getId(raw));
             } else {
@@ -9533,11 +9843,23 @@ ${insight.summary || ""}`,
             }
             success++;
           } catch (e) {
-            console.warn(`[GitHubAutoImporter] \u5BFC\u51FA\u5931\u8D25: ${item.itemKey || meta.getId(item.raw || item)}`, e);
+            console.warn(`[GitHubAutoImporter] \u5BFC\u51FA\u5931\u8D25: ${itemKey}`, e);
+            try {
+              const { OperationLog: OperationLog2 } = require_security();
+              OperationLog2.add({
+                audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "failed"),
+                actor: "system",
+                source: "github-auto-sync",
+                operationName: "createDatabasePage",
+                status: "failed",
+                context: { itemKey, reason: String((e == null ? void 0 : e.message) || e) }
+              });
+            } catch (_) {
+            }
             failed++;
           }
           if (i < mappedItems.length - 1) {
-            await new Promise((r) => setTimeout(r, delay));
+            await Utils2.sleep(delay);
           }
         }
         return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
@@ -9759,7 +10081,8 @@ ${insight.summary || ""}`,
           if (UI2 && typeof UI2.renderSyncCenterSummary === "function") {
             try {
               UI2.renderSyncCenterSummary();
-            } catch {
+            } catch (e) {
+              console.warn("[LD-Notion] \u540C\u6B65\u4E2D\u5FC3\u9762\u677F\u6E32\u67D3\u5931\u8D25:", e);
             }
           }
         }
@@ -9985,7 +10308,8 @@ ${insight.summary || ""}`,
           if (uiRef && uiRef.renderBookmarkList) {
             try {
               uiRef.renderBookmarkList();
-            } catch {
+            } catch (e) {
+              console.warn("[LD-Notion] \u4E66\u7B7E\u5217\u8868\u6E32\u67D3\u5931\u8D25:", e);
             }
           }
           const statePatch = {
@@ -10037,7 +10361,8 @@ ${insight.summary || ""}`,
           if (uiFinally && typeof uiFinally.renderSyncCenterSummary === "function") {
             try {
               uiFinally.renderSyncCenterSummary();
-            } catch {
+            } catch (e) {
+              console.warn("[LD-Notion] \u540C\u6B65\u4E2D\u5FC3\u9762\u677F\u6E32\u67D3\u5931\u8D25:", e);
             }
           }
         }
@@ -11961,6 +12286,7 @@ ${insight.summary || ""}`,
             };
           }
           const timeout = type === "error" ? 1e4 : 3e3;
+          if (container._statusTimer) clearTimeout(container._statusTimer);
           container._statusTimer = setTimeout(() => {
             container.innerHTML = "";
           }, timeout);
@@ -13401,6 +13727,7 @@ ${insight.summary || ""}`,
             };
           }
           const timeout = type === "error" ? 1e4 : 3e3;
+          if (container._statusTimer) clearTimeout(container._statusTimer);
           container._statusTimer = setTimeout(() => {
             container.innerHTML = "";
           }, timeout);
@@ -15815,7 +16142,16 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               for (const key of Object.keys(properties)) {
                 if (properties[key] === void 0) delete properties[key];
               }
-              await NotionAPI2.request("POST", "/pages", {
+              if (!OperationGuard2.canExecute("createDatabasePage")) {
+                GitHubExporter2._auditExport(
+                  "createDatabasePage",
+                  "denied",
+                  { itemKey: item.itemKey, sourceType, itemName: item.title || item.itemKey, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u624B\u52A8\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
+                );
+                failed.push({ title: item.title, error: "\u6743\u9650\u4E0D\u8DB3\uFF08\u9700 level\u22651\uFF09", itemKey: item.itemKey, sourceType });
+                continue;
+              }
+              const page = await NotionAPI2.request("POST", "/pages", {
                 parent: { database_id: databaseId },
                 properties
               }, apiKey);
@@ -15824,6 +16160,11 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               } else {
                 GitHubAPI2.markExported(item.itemKey);
               }
+              GitHubExporter2._auditExport(
+                "createDatabasePage",
+                "success",
+                { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: item.itemKey, sourceType, databaseId }
+              );
               success.push({
                 title: item.title,
                 url: (bookmark == null ? void 0 : bookmark.html_url) || "https://github.com",
@@ -15832,6 +16173,11 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               });
             } catch (error) {
               console.warn(`[UI] GitHub \u624B\u52A8\u5BFC\u51FA\u5931\u8D25: ${item.itemKey}`, error);
+              GitHubExporter2._auditExport(
+                "createDatabasePage",
+                "failed",
+                { itemKey: item.itemKey, sourceType, reason: String((error == null ? void 0 : error.message) || error) }
+              );
               failed.push({
                 title: item.title,
                 error: error.message,
@@ -18855,6 +19201,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 }
               }
             }, 1e3);
+            dialog._countdownTimer = timer;
             if (nameInput) {
               nameInput.oninput = () => {
                 canConfirm = nameInput.value.trim() === itemName;
@@ -18894,6 +19241,9 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         // 关闭对话框
         close: () => {
           if (ConfirmationDialog2.dialogElement) {
+            if (ConfirmationDialog2.dialogElement._countdownTimer) {
+              clearInterval(ConfirmationDialog2.dialogElement._countdownTimer);
+            }
             ConfirmationDialog2.dialogElement.remove();
             ConfirmationDialog2.dialogElement = null;
           }
@@ -19311,7 +19661,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                   if (response.status >= 200 && response.status < 300) {
                     resolve(((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "");
                   } else {
-                    reject(new Error(((_e = result.error) == null ? void 0 : _e.message) || `OpenAI \u9519\u8BEF: ${response.status}`));
+                    reject(new Error(((_e = result.error) == null ? void 0 : _e.message) || `OpenAI \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
                   }
                 } catch (e) {
                   reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
@@ -19348,7 +19698,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                   if (response.status >= 200 && response.status < 300) {
                     resolve(((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "");
                   } else {
-                    reject(new Error(((_d = result.error) == null ? void 0 : _d.message) || `Claude \u9519\u8BEF: ${response.status}`));
+                    reject(new Error(((_d = result.error) == null ? void 0 : _d.message) || `Claude \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
                   }
                 } catch (e) {
                   reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
@@ -19386,7 +19736,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                   if (response.status >= 200 && response.status < 300) {
                     resolve(((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "");
                   } else {
-                    reject(new Error(((_g = result.error) == null ? void 0 : _g.message) || `Gemini \u9519\u8BEF: ${response.status}`));
+                    reject(new Error(((_g = result.error) == null ? void 0 : _g.message) || `Gemini \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
                   }
                 } catch (e) {
                   reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
@@ -19430,10 +19780,32 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
         },
         // OpenAI 对话请求
+        // AI 请求重试包装（M1 reliability）：瞬时网络抖动/超时/5xx/429 重试 2 次（1s/2s 指数退避），
+        // 401/400 等不可重试错误直接 reject。对比 NotionAPI 429 重试、RSS fetchFeedWithRetry。
+        _retryable: async (requestFn, retries = 2) => {
+          let lastError;
+          for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+              return await requestFn();
+            } catch (error) {
+              lastError = error;
+              const msg = String((error == null ? void 0 : error.message) || error);
+              if (/401|403|400|鉴权|授权|invalid|unauthorized|forbidden/i.test(msg)) {
+                throw error;
+              }
+              if (attempt < retries) {
+                const delay = 1e3 * Math.pow(2, attempt);
+                await new Promise((r) => setTimeout(r, delay));
+              }
+            }
+          }
+          console.warn("[LD-Notion] AI \u8BF7\u6C42\u6700\u7EC8\u5931\u8D25\uFF08\u5DF2\u91CD\u8BD5\uFF09:", String((lastError == null ? void 0 : lastError.message) || lastError));
+          throw lastError;
+        },
         requestOpenAIChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
           const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
-          return new Promise((resolve, reject) => {
+          return AIService2._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
               method: "POST",
               url,
@@ -19454,7 +19826,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                   if (response.status >= 200 && response.status < 300) {
                     resolve(((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "");
                   } else {
-                    reject(new Error(((_e = result.error) == null ? void 0 : _e.message) || `OpenAI \u9519\u8BEF: ${response.status}`));
+                    reject(new Error(((_e = result.error) == null ? void 0 : _e.message) || `OpenAI \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
                   }
                 } catch (e) {
                   reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
@@ -19464,13 +19836,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               timeout: 9e4,
               ontimeout: () => reject(new Error("AI \u5BF9\u8BDD\u8BF7\u6C42\u8D85\u65F6"))
             });
-          });
+          }));
         },
         // Claude 对话请求
         requestClaudeChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
           const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-          return new Promise((resolve, reject) => {
+          return AIService2._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
               method: "POST",
               url,
@@ -19491,7 +19863,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                   if (response.status >= 200 && response.status < 300) {
                     resolve(((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "");
                   } else {
-                    reject(new Error(((_d = result.error) == null ? void 0 : _d.message) || `Claude \u9519\u8BEF: ${response.status}`));
+                    reject(new Error(((_d = result.error) == null ? void 0 : _d.message) || `Claude \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
                   }
                 } catch (e) {
                   reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
@@ -19501,13 +19873,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               timeout: 9e4,
               ontimeout: () => reject(new Error("AI \u5BF9\u8BDD\u8BF7\u6C42\u8D85\u65F6"))
             });
-          });
+          }));
         },
         // Gemini 对话请求
         requestGeminiChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
           const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
           const url = normalizedBase ? `${normalizedBase}/v1beta/models/${model}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-          return new Promise((resolve, reject) => {
+          return AIService2._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
               method: "POST",
               url,
@@ -19529,7 +19901,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                   if (response.status >= 200 && response.status < 300) {
                     resolve(((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "");
                   } else {
-                    reject(new Error(((_g = result.error) == null ? void 0 : _g.message) || `Gemini \u9519\u8BEF: ${response.status}`));
+                    reject(new Error(((_g = result.error) == null ? void 0 : _g.message) || `Gemini \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
                   }
                 } catch (e) {
                   reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
@@ -19539,7 +19911,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               timeout: 9e4,
               ontimeout: () => reject(new Error("AI \u5BF9\u8BDD\u8BF7\u6C42\u8D85\u65F6"))
             });
-          });
+          }));
         },
         // Agent 多轮对话请求（将 system + messages 拼接为单个 prompt）
         requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500) => {
@@ -20818,7 +21190,7 @@ ${candidateList}
               } catch (e) {
                 console.warn(`[batch_tag] \u5931\u8D25: ${title}`, e);
               }
-              await new Promise((r) => setTimeout(r, 500));
+              await Utils2.sleep(500);
             }
             return `\u2705 \u6279\u91CF\u6253\u6807\u7B7E\u5B8C\u6210\uFF1A\u5DF2\u4E3A ${tagged}/${pages.length} \u4E2A\u9875\u9762\u6DFB\u52A0\u6807\u7B7E\u3002`;
           }
@@ -23498,9 +23870,21 @@ ${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
               console.warn("[LD-Notion] AI \u751F\u6210\u7ED3\u6784 JSON \u89E3\u6790\u5931\u8D25:", error);
               return `\u274C AI \u751F\u6210\u7684\u7ED3\u6784\u65E0\u6548\u3002\u8BF7\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u3002`;
             }
-            if (!plan.children || plan.children.length === 0) {
+            if (!Array.isArray(plan.children) || plan.children.length === 0) {
               return `\u274C AI \u672A\u80FD\u89C4\u5212\u51FA\u6709\u6548\u7684\u5B50\u9875\u9762\u7ED3\u6784\u3002`;
             }
+            const MAX_CHILD_DESC = 2e3;
+            plan.children = plan.children.map((c) => ({
+              ...c,
+              title: AISchema.validatePropertyValue(c == null ? void 0 : c.title, "title"),
+              icon: AISchema.validateEmoji(c == null ? void 0 : c.icon),
+              description: AISchema.validatePropertyValue(c == null ? void 0 : c.description, "rich_text").slice(0, MAX_CHILD_DESC)
+            })).filter((c) => c.title);
+            if (plan.children.length === 0) {
+              return `\u274C AI \u89C4\u5212\u7684\u5B50\u9875\u9762\u6807\u9898\u65E0\u6548\u3002`;
+            }
+            plan.parent_title = AISchema.validatePropertyValue(plan.parent_title, "title");
+            plan.parent_summary = AISchema.validatePropertyValue(plan.parent_summary, "rich_text");
             const pageList = plan.children.map((c) => `${c.icon || "\u{1F4C4}"} ${c.title}`).join("\n");
             const confirmed = await ConfirmationDialog2.show({
               title: "\u{1F4D1} \u591A\u9875\u9762\u751F\u6210\u786E\u8BA4",
@@ -24102,7 +24486,20 @@ ${aiResponse}
             if (!key || value === void 0) continue;
             if (value && typeof value === "object" && !Array.isArray(value)) {
               const cleaned = AISchema.sanitizeObjectValue(value);
-              if (cleaned) properties[key] = cleaned;
+              if (cleaned) {
+                for (const propType of Object.keys(cleaned)) {
+                  const scalar = cleaned[propType];
+                  if (propType === "url" || propType === "email" || propType === "phone_number") {
+                    const validated = AISchema.validatePropertyValue(scalar, propType);
+                    if (validated !== null && validated !== "") {
+                      cleaned[propType] = validated;
+                    } else {
+                      delete cleaned[propType];
+                    }
+                  }
+                }
+                if (Object.keys(cleaned).length > 0) properties[key] = cleaned;
+              }
               continue;
             }
             if (Array.isArray(value)) {

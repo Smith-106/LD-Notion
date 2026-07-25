@@ -345,6 +345,26 @@ const RSSAutoImporter = {
         };
     },
 
+    // 自动同步写入审计（C1 审计完整性，CWE-862）。与 BookmarkAutoImporter._auditAutoSync 同模式：
+    // canExecute 非阻塞闸门 + OperationLog 成功/失败审计，批量场景不弹 dialog。
+    // actor/source 经 context 注入（与 BookmarkAutoImporter._auditAutoSync 参数化保持一致，
+    // ISS-20260724-011）；未传时保持 RSS 自动同步默认值，向后兼容。
+    _auditAutoSync: (operation, status, context = {}) => {
+        try {
+            const { OperationLog } = require("../security");
+            OperationLog.add({
+                audit_event: OperationLog.inferAuditEvent(operation, status),
+                actor: context.actor || "system",
+                source: context.source || "rss-auto-sync",
+                operationName: operation,
+                status,
+                context,
+            });
+        } catch (e) {
+            console.warn("[LD-Notion] RSS 自动同步审计写入失败:", e);
+        }
+    },
+
     buildProperties: (item) => {
         const normalized = RSSAutoImporter.normalizeItem(item);
         const inferredCategory = BookmarkExporter.normalizeText(item?.inferredCategory || "", 300);
@@ -415,8 +435,10 @@ const RSSAutoImporter = {
                     enriched.inferredCategory = aiCategory;
                 }
                 context.aiUsedCount = (context.aiUsedCount || 0) + 1;
-            } catch {
-                // ignore AI enrichment failures for RSS
+            } catch (e) {
+                // AI 分类失败降级到启发式，但留 warn + 计数保证可观测（H1，与 BookmarkExporter:288 一致）。
+                console.warn("[LD-Notion] RSS AI 分类失败，使用启发式 fallback:", e);
+                context.aiFailureCount = (context.aiFailureCount || 0) + 1;
             }
         }
 
@@ -543,6 +565,16 @@ const RSSAutoImporter = {
         try {
             if (!pageMeta) {
                 RSSAutoImporter.updateStatus(`正在新增 RSS 条目 (${ctx.position}/${total}): ${item.title}`);
+                // createDatabasePage level 1，canExecute 非阻塞闸门 + 审计（C1）。
+                const { OperationGuard } = require("../security");
+                if (!OperationGuard.canExecute("createDatabasePage")) {
+                    RSSAutoImporter._auditAutoSync("createDatabasePage", "denied",
+                        { itemKey: item.itemKey, itemName: item.title, reason: "权限不足：RSS 自动同步建页需 level≥1" });
+                    result.failed = 1;
+                    if (snapshotEntry) nextSnapshot[item.itemKey] = snapshotEntry;
+                    result.success = false;
+                    return result;
+                }
                 const enriched = await RSSAutoImporter.enrichItem(item, settings, enrichContext);
                 const page = await NotionAPI.request("POST", "/pages", {
                     parent: { database_id: settings.databaseId },
@@ -555,11 +587,24 @@ const RSSAutoImporter = {
                     summary: item.summary,
                     publishedAt: item.publishedAt,
                 };
+                RSSAutoImporter._auditAutoSync("createDatabasePage", "success",
+                    { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title, databaseId: settings.databaseId });
                 result.created = 1;
             } else if (RSSAutoImporter.needsUpdate(item, snapshotEntry, pageMeta)) {
                 RSSAutoImporter.updateStatus(`正在更新 RSS 条目 (${ctx.position}/${total}): ${item.title}`);
+                const { OperationGuard } = require("../security");
+                if (!OperationGuard.canExecute("updatePage")) {
+                    RSSAutoImporter._auditAutoSync("updatePage", "denied",
+                        { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title, reason: "权限不足：RSS 自动同步更新需 level≥1" });
+                    result.failed = 1;
+                    nextSnapshot[item.itemKey] = snapshotEntry || RSSAutoImporter.buildSnapshotEntry(item, pageMeta.pageId);
+                    result.success = false;
+                    return result;
+                }
                 const enriched = await RSSAutoImporter.enrichItem(item, settings, enrichContext);
                 await NotionAPI.updatePage(pageMeta.pageId, RSSAutoImporter.buildProperties(enriched), settings.apiKey);
+                RSSAutoImporter._auditAutoSync("updatePage", "success",
+                    { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title });
                 result.updated = 1;
             } else {
                 result.unchanged = 1;
@@ -581,6 +626,8 @@ const RSSAutoImporter = {
             return result;
         } catch (error) {
             console.error(`[LD-Notion] RSS 自动同步失败: ${item.title || item.url}`, error);
+            RSSAutoImporter._auditAutoSync("createDatabasePage", "failed",
+                { itemKey: item.itemKey, itemName: item.title || item.url, reason: String(error?.message || error) });
             result.failed = 1;
             if (snapshotEntry) {
                 nextSnapshot[item.itemKey] = snapshotEntry;
@@ -711,7 +758,7 @@ const RSSAutoImporter = {
             RSSAutoImporter.isRunning = false;
             const UI = _resolveUI();
             if (UI && typeof UI.renderSyncCenterSummary === "function") {
-                try { UI.renderSyncCenterSummary(); } catch {}
+                try { UI.renderSyncCenterSummary(); } catch (e) { console.warn("[LD-Notion] 同步中心面板渲染失败:", e); }
             }
         }
     },

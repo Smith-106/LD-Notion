@@ -8,6 +8,25 @@ const { GitHubAPI } = require("./GitHubAPI");
 const { AIService } = require("../ai");
 
 const GitHubExporter = {
+    // 用户触发导出的写入审计（ISS-20260724-011，CWE-862/778）。与 BookmarkAutoImporter._auditAutoSync
+    // 同模式但信任边界不同：用户主动触发（actor="user"）而非系统自动同步（actor="system"）。
+    // canExecute 非阻塞闸门管权限，审计管可观测性——谁在何时建/改了哪些页面可事后追溯。
+    _auditExport: (operation, status, context = {}) => {
+        try {
+            const { OperationLog } = require("../security");
+            OperationLog.add({
+                audit_event: OperationLog.inferAuditEvent(operation, status),
+                actor: "user",
+                source: "github-export",
+                operationName: operation,
+                status,
+                context,
+            });
+        } catch (e) {
+            console.warn("[LD-Notion] GitHub 导出审计写入失败:", e);
+        }
+    },
+
     normalizeText: (text, maxLen = 280) => {
         if (!text) return "";
         const normalized = String(text).replace(/\s+/g, " ").trim();
@@ -273,9 +292,18 @@ const GitHubExporter = {
 
             const allChanges = { ...propsToAdd, ...propsToUpdate };
             if (Object.keys(allChanges).length > 0) {
+                // updateDatabase 是 level 1 写操作（schema 变更），用户触发的导出前置不可裸调（ISS-20260724-011）。
+                const { OperationGuard } = require("../security");
+                if (!OperationGuard.canExecute("updateDatabase")) {
+                    GitHubExporter._auditExport("updateDatabase", "denied",
+                        { databaseId, reason: "权限不足：导出配置数据库结构需 level≥1", changes: Object.keys(allChanges) });
+                    return { success: false, error: "权限不足：无法修改数据库结构（需 level≥1）" };
+                }
                 await NotionAPI.request("PATCH", `/databases/${databaseId}`, {
                     properties: allChanges,
                 }, apiKey);
+                GitHubExporter._auditExport("updateDatabase", "success",
+                    { databaseId, added: Object.keys(propsToAdd), renamed: Object.keys(propsToUpdate) });
             }
 
             return { success: true, added: Object.keys(propsToAdd), renamed: Object.keys(propsToUpdate) };
@@ -309,19 +337,32 @@ const GitHubExporter = {
                 for (const k of Object.keys(properties)) {
                     if (properties[k] === undefined) delete properties[k];
                 }
-                await NotionAPI.request("POST", "/pages", {
+                // createDatabasePage 是 level 1 写操作，用户触发的批量导出不可裸调 NotionAPI（ISS-20260724-011）。
+                // canExecute 非阻塞（只查 permissionLevel），权限不足跳过并记审计，与自动同步 C1 模式对称。
+                const { OperationGuard } = require("../security");
+                if (!OperationGuard.canExecute("createDatabasePage")) {
+                    GitHubExporter._auditExport("createDatabasePage", "denied",
+                        { itemKey: key, sourceType, itemName: item.full_name || key, reason: "权限不足：导出建页需 level≥1" });
+                    failed++;
+                    continue;
+                }
+                const page = await NotionAPI.request("POST", "/pages", {
                     parent: { database_id: databaseId },
                     properties,
                 }, apiKey);
                 markExportedFn(key);
+                GitHubExporter._auditExport("createDatabasePage", "success",
+                    { pageId: String(page?.id || ""), itemKey: key, sourceType, databaseId });
                 success++;
             } catch (e) {
                 console.warn(`[GitHubExporter] 导出失败: ${key}`, e);
+                GitHubExporter._auditExport("createDatabasePage", "failed",
+                    { itemKey: key, sourceType, reason: String(e?.message || e) });
                 failed++;
             }
 
             if (i < newItems.length - 1) {
-                await new Promise(r => setTimeout(r, delay));
+                await Utils.sleep(delay);
             }
         }
 
@@ -509,17 +550,28 @@ const GitHubExporter = {
 
                 const matched = categories.find(c => category.trim().includes(c)) || category.trim();
 
+                // updatePage 是 level 1 写操作，用户触发的批量分类不可裸调 NotionAPI（ISS-20260724-011）。
+                const { OperationGuard } = require("../security");
+                if (!OperationGuard.canExecute("updatePage")) {
+                    GitHubExporter._auditExport("updatePage", "denied",
+                        { pageId: page.id, itemName: title, reason: "权限不足：分类写入需 level≥1" });
+                    continue;
+                }
                 await NotionAPI.request("PATCH", `/pages/${page.id}`, {
                     properties: {
                         "分类": { rich_text: [{ text: { content: matched } }] },
                     },
                 }, apiKey);
+                GitHubExporter._auditExport("updatePage", "success",
+                    { pageId: page.id, itemName: title, category: matched });
                 classified++;
             } catch (e) {
                 console.warn(`[GitHubExporter] 分类失败: ${title}`, e);
+                GitHubExporter._auditExport("updatePage", "failed",
+                    { pageId: page?.id, itemName: title, reason: String(e?.message || e) });
             }
 
-            await new Promise(r => setTimeout(r, 500));
+            await Utils.sleep(500);
         }
 
         return { classified, total: pages.length };

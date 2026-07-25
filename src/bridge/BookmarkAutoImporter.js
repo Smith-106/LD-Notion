@@ -95,6 +95,30 @@ const BookmarkAutoImporter = {
         };
     },
 
+    // 自动同步写入审计（CWE-862 审计完整性，C1）。
+    // 自动同步是系统级 actor 批量写/删 Notion，不经 OperationGuard.execute（会弹
+    // ConfirmationDialog 阻塞批量），但必须留 OperationLog 审计痕迹——成功/失败都记，
+    // 谁在何时建/更/归档了哪些页面可事后追溯。与归档 canExecute 闸门（3.7.7）互补：
+    // 闸门管权限，审计管可观测性。
+    // actor/source 经 context 注入以支持用户触发路径复用（ISS-20260724-011：导出路径
+    // 传 actor="user"/source="bookmark-export"|"github-export"）；未传时保持自动同步默认值，
+    // 向后兼容现有调用方。
+    _auditAutoSync: (operation, status, context = {}) => {
+        try {
+            const { OperationLog } = require("../security");
+            OperationLog.add({
+                audit_event: OperationLog.inferAuditEvent(operation, status),
+                actor: context.actor || "system",
+                source: context.source || "bookmark-auto-sync",
+                operationName: operation,
+                status,
+                context,
+            });
+        } catch (e) {
+            console.warn("[LD-Notion] 自动同步审计写入失败:", e);
+        }
+    },
+
     getPageRichText: (page, propertyName) => {
         const richText = page?.properties?.[propertyName]?.rich_text;
         if (!Array.isArray(richText)) return "";
@@ -320,6 +344,16 @@ BookmarkAutoImporter.run = async () => {
             try {
                 if (!pageMeta) {
                     BookmarkAutoImporter.updateStatus(`📄 正在新增书签 (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                    // createDatabasePage 是 level 1 写操作，自动同步不可裸调 NotionAPI（C1 审计完整性）。
+                    // canExecute 非阻塞（只查 permissionLevel，不弹 dialog），权限不足跳过并记审计。
+                    const { OperationGuard } = require("../security");
+                    if (!OperationGuard.canExecute("createDatabasePage")) {
+                        BookmarkAutoImporter._auditAutoSync("createDatabasePage", "denied",
+                            { bookmarkId, itemName: bookmark.title, reason: "权限不足：自动同步建页需 level≥1" });
+                        failed++;
+                        if (snapshotEntry) nextSnapshot[bookmarkId] = snapshotEntry;
+                        return;
+                    }
                     const enriched = await BookmarkExporter.enrichBookmark(bookmark, settings, enrichContext);
                     const page = await NotionAPI.request("POST", "/pages", {
                         parent: { database_id: settings.databaseId },
@@ -333,13 +367,26 @@ BookmarkAutoImporter.run = async () => {
                         folderPath: bookmark.folderPath,
                         dateAdded: SyncState.normalizeTime(bookmark.dateAdded),
                     };
+                    BookmarkAutoImporter._auditAutoSync("createDatabasePage", "success",
+                        { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, databaseId: settings.databaseId });
                     created++;
                 } else if (BookmarkAutoImporter.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
                     BookmarkAutoImporter.updateStatus(`📧 正在更新书签 (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                    // updatePage 是 level 1 写操作，同样过 canExecute 闸门 + 审计（C1）。
+                    const { OperationGuard } = require("../security");
+                    if (!OperationGuard.canExecute("updatePage")) {
+                        BookmarkAutoImporter._auditAutoSync("updatePage", "denied",
+                            { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, reason: "权限不足：自动同步更新需 level≥1" });
+                        failed++;
+                        nextSnapshot[bookmarkId] = snapshotEntry || BookmarkAutoImporter.buildSnapshotEntry(bookmark, pageMeta.pageId);
+                        return;
+                    }
                     const properties = BookmarkAutoImporter.needsFullRefresh(bookmark, snapshotEntry, pageMeta)
                         ? BookmarkExporter.buildProperties(await BookmarkExporter.enrichBookmark(bookmark, settings, enrichContext))
                         : BookmarkAutoImporter.buildMinimalProperties(bookmark);
                     await NotionAPI.updatePage(pageMeta.pageId, properties, settings.apiKey);
+                    BookmarkAutoImporter._auditAutoSync("updatePage", "success",
+                        { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title });
                     updated++;
                 } else {
                     unchanged++;
@@ -361,6 +408,8 @@ BookmarkAutoImporter.run = async () => {
                 nextSnapshot[bookmarkId] = BookmarkAutoImporter.buildSnapshotEntry(bookmark, pageId);
             } catch (error) {
                 console.error(`[LD-Notion] 浏览器书签自动同步失败: ${bookmark.title || bookmark.url}`, error);
+                BookmarkAutoImporter._auditAutoSync("createDatabasePage", "failed",
+                    { bookmarkId, itemName: bookmark.title || bookmark.url, reason: String(error?.message || error) });
                 failed++;
                 if (snapshotEntry) {
                     nextSnapshot[bookmarkId] = snapshotEntry;
@@ -411,9 +460,13 @@ BookmarkAutoImporter.run = async () => {
                     return;
                 }
                 await NotionAPI.deletePage(pageMeta.pageId, settings.apiKey);
+                BookmarkAutoImporter._auditAutoSync("deletePage", "success",
+                    { pageId: pageMeta.pageId, bookmarkId, itemName: snapshotEntry?.title || snapshotEntry?.url || bookmarkId });
                 archived++;
             } catch (error) {
                 console.error(`[LD-Notion] 浏览器书签归档失败: ${snapshotEntry?.title || snapshotEntry?.url || bookmarkId}`, error);
+                BookmarkAutoImporter._auditAutoSync("deletePage", "failed",
+                    { pageId: pageMeta?.pageId, bookmarkId, itemName: snapshotEntry?.title || snapshotEntry?.url || bookmarkId, reason: String(error?.message || error) });
                 failed++;
                 nextSnapshot[bookmarkId] = snapshotEntry;
             }
@@ -474,7 +527,7 @@ BookmarkAutoImporter.run = async () => {
         BookmarkAutoImporter.isRunning = false;
         const UI = _resolveUI();
         if (UI && typeof UI.renderSyncCenterSummary === "function") {
-            try { UI.renderSyncCenterSummary(); } catch {}
+            try { UI.renderSyncCenterSummary(); } catch (e) { console.warn("[LD-Notion] 同步中心面板渲染失败:", e); }
         }
     }
 };
