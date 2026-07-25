@@ -1,7 +1,8 @@
 "use strict";
 
 const { SourceAdapter } = require("./SourceAdapter");
-const { LinuxDoAPI } = require("../export");
+// ISS-20260723-010 W3 (ARCH-005): LinuxDoAPI 已迁回 extract 层，adapter 不再逆向依赖 export。
+const { LinuxDoAPI } = require("../extract");
 const { SyncState } = require("../storage");
 
 const LinuxDoAdapter = Object.assign(Object.create(SourceAdapter), {

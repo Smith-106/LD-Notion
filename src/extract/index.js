@@ -6,6 +6,8 @@ const { Storage } = require("../storage");
 const { NotionAPI, DOMToNotion, HTMLToMarkdown, InstallHelper } = require("../api");
 const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
 const { OperationGuard } = require("../security");
+// ISS-20260723-010 W3 (ARCH-005): LinuxDoAPI 从 export 层迁回 extract 层，消除 adapter→export 逆向依赖。
+const { LinuxDoAPI } = require("./LinuxDoAPI");
 
 const ZhihuAPI = {
     detectPage: () => {
@@ -424,7 +426,7 @@ const WorkspaceService = {
     },
 };
 
-module.exports = { ZhihuAPI, GenericExtractor, WorkspaceService };
+module.exports = { ZhihuAPI, GenericExtractor, WorkspaceService, LinuxDoAPI };
 // UICommandService 已迁至 src/coordination/UICommandService.js（ISS-20260718-008），
 // extract 层不再承担 UI 命令分发协调职责。
 

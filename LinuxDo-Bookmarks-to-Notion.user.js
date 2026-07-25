@@ -4828,6 +4828,172 @@ ${quoted}
     }
   });
 
+  // src/extract/LinuxDoAPI.js
+  var require_LinuxDoAPI = __commonJS({
+    "src/extract/LinuxDoAPI.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
+      var LinuxDoAPI2 = {
+        _getUsername: () => {
+          var _a;
+          const path = window.location.pathname;
+          const match = path.match(/\/u\/([^/]+)/);
+          if (match) return match[1];
+          const meta = document.querySelector('meta[name="discourse-username"]');
+          if (meta == null ? void 0 : meta.content) return meta.content;
+          const userMenu = document.querySelector(".user-menu .username, .user-menu .d-label");
+          if (userMenu) {
+            const text = (_a = userMenu.textContent) == null ? void 0 : _a.trim();
+            if (text) return text;
+          }
+          const avatar = document.querySelector("img.avatar");
+          if (avatar) {
+            const alt = avatar.getAttribute("alt");
+            if (alt) return alt;
+          }
+          return "";
+        },
+        getRequestOpts: () => {
+          var _a;
+          const csrf = (_a = document.querySelector('meta[name="csrf-token"]')) == null ? void 0 : _a.content;
+          const headers = { "x-requested-with": "XMLHttpRequest" };
+          if (csrf) headers["x-csrf-token"] = csrf;
+          return { headers };
+        },
+        fetchJson: async (url, retries = 2) => {
+          let lastErr = null;
+          const opts = LinuxDoAPI2.getRequestOpts();
+          for (let i = 0; i <= retries; i++) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 15e3);
+            try {
+              const res = await fetch(url, { ...opts, signal: ctrl.signal });
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              return await res.json();
+            } catch (e) {
+              lastErr = e;
+              if (i < retries) await Utils2.sleep(250 * (i + 1));
+            } finally {
+              clearTimeout(timer);
+            }
+          }
+          throw lastErr || new Error("fetchJson failed");
+        },
+        // 获取收藏列表
+        fetchBookmarks: async (username, page = 0) => {
+          const url = `${window.location.origin}/u/${username}/bookmarks.json?page=${page}`;
+          const data = await LinuxDoAPI2.fetchJson(url);
+          return data;
+        },
+        getBookmarkId: (bookmark) => String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || ""),
+        getBookmarkSyncTime: (bookmark) => (bookmark == null ? void 0 : bookmark.created_at) || (bookmark == null ? void 0 : bookmark.bookmarked_at) || (bookmark == null ? void 0 : bookmark.updated_at) || "",
+        // 获取所有收藏
+        fetchAllBookmarks: async (username, onProgress) => {
+          var _a, _b;
+          const allBookmarks = [];
+          let page = 0;
+          let hasMore = true;
+          while (hasMore) {
+            const data = await LinuxDoAPI2.fetchBookmarks(username, page);
+            const bookmarks = ((_a = data.user_bookmark_list) == null ? void 0 : _a.bookmarks) || [];
+            if (bookmarks.length === 0) {
+              hasMore = false;
+            } else {
+              allBookmarks.push(...bookmarks);
+              page++;
+              if (onProgress) onProgress(allBookmarks.length);
+              hasMore = ((_b = data.user_bookmark_list) == null ? void 0 : _b.more_bookmarks_url) != null;
+              const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+              await Utils2.sleep(delay);
+            }
+          }
+          return allBookmarks;
+        },
+        fetchBookmarksSince: async (username, watermark, onProgress) => {
+          var _a, _b;
+          const newBookmarks = [];
+          let page = 0;
+          let hasMore = true;
+          while (hasMore) {
+            const data = await LinuxDoAPI2.fetchBookmarks(username, page);
+            const bookmarks = ((_a = data.user_bookmark_list) == null ? void 0 : _a.bookmarks) || [];
+            if (bookmarks.length === 0) {
+              hasMore = false;
+              continue;
+            }
+            const batch = SyncState2.filterOrderedItems(
+              bookmarks,
+              watermark,
+              LinuxDoAPI2.getBookmarkSyncTime,
+              LinuxDoAPI2.getBookmarkId
+            );
+            newBookmarks.push(...batch);
+            if (onProgress) onProgress(newBookmarks.length);
+            if (batch.length < bookmarks.length) break;
+            hasMore = ((_b = data.user_bookmark_list) == null ? void 0 : _b.more_bookmarks_url) != null;
+            page++;
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            await Utils2.sleep(delay);
+          }
+          return newBookmarks;
+        },
+        // 获取帖子详情
+        fetchTopicDetail: async (topicId) => {
+          const url = `${window.location.origin}/t/${topicId}.json`;
+          return await LinuxDoAPI2.fetchJson(url);
+        },
+        // 获取帖子所有楼层
+        fetchAllPosts: async (topicId, onProgress) => {
+          var _a, _b, _c, _d, _e, _f, _g, _h;
+          const opts = LinuxDoAPI2.getRequestOpts();
+          const idData = await LinuxDoAPI2.fetchJson(
+            `${window.location.origin}/t/${topicId}/post_ids.json?post_number=0&limit=99999`
+          );
+          let postIds = idData.post_ids || [];
+          const mainData = await LinuxDoAPI2.fetchJson(`${window.location.origin}/t/${topicId}.json`);
+          const mainFirstPost = (_b = (_a = mainData.post_stream) == null ? void 0 : _a.posts) == null ? void 0 : _b[0];
+          if (mainFirstPost && !postIds.includes(mainFirstPost.id)) {
+            postIds.unshift(mainFirstPost.id);
+          }
+          const opUsername = ((_d = (_c = mainData == null ? void 0 : mainData.details) == null ? void 0 : _c.created_by) == null ? void 0 : _d.username) || ((_g = (_f = (_e = mainData == null ? void 0 : mainData.post_stream) == null ? void 0 : _e.posts) == null ? void 0 : _f[0]) == null ? void 0 : _g.username) || "";
+          const topic = {
+            topicId: String(topicId),
+            title: (mainData == null ? void 0 : mainData.title) || "",
+            category: (mainData == null ? void 0 : mainData.category_id) ? `\u5206\u7C7BID: ${mainData.category_id}` : "",
+            categoryName: "",
+            tags: (mainData == null ? void 0 : mainData.tags) || [],
+            url: `${window.location.origin}/t/${topicId}`,
+            opUsername,
+            createdAt: (mainData == null ? void 0 : mainData.created_at) || "",
+            postsCount: (mainData == null ? void 0 : mainData.posts_count) || 0,
+            likeCount: (mainData == null ? void 0 : mainData.like_count) || 0,
+            views: (mainData == null ? void 0 : mainData.views) || 0
+          };
+          const categoryBadge = document.querySelector(`.badge-category[data-category-id="${mainData.category_id}"]`);
+          if (categoryBadge) {
+            topic.categoryName = categoryBadge.textContent.trim();
+          }
+          let allPosts = [];
+          for (let i = 0; i < postIds.length; i += 200) {
+            const chunk = postIds.slice(i, i + 200);
+            const q = chunk.map((id) => `post_ids[]=${encodeURIComponent(id)}`).join("&");
+            const data = await LinuxDoAPI2.fetchJson(
+              `${window.location.origin}/t/${topicId}/posts.json?${q}&include_suggested=false`
+            );
+            const posts = ((_h = data.post_stream) == null ? void 0 : _h.posts) || [];
+            allPosts = allPosts.concat(posts);
+            if (onProgress) onProgress(Math.min(i + 200, postIds.length), postIds.length);
+          }
+          allPosts.sort((a, b) => a.post_number - b.post_number);
+          return { topic, posts: allPosts };
+        }
+      };
+      module.exports = { LinuxDoAPI: LinuxDoAPI2 };
+    }
+  });
+
   // src/extract/index.js
   var require_extract = __commonJS({
     "src/extract/index.js"(exports, module) {
@@ -4838,6 +5004,7 @@ ${quoted}
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, HTMLToMarkdown: HTMLToMarkdown2, InstallHelper: InstallHelper2 } = require_api();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { OperationGuard: OperationGuard2 } = require_security();
+      var { LinuxDoAPI: LinuxDoAPI2 } = require_LinuxDoAPI();
       var ZhihuAPI2 = {
         detectPage: () => {
           const url = location.href;
@@ -5187,7 +5354,7 @@ ${quoted}
           };
         }
       };
-      module.exports = { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 };
+      module.exports = { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2, LinuxDoAPI: LinuxDoAPI2 };
     }
   });
 
@@ -5932,7 +6099,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     "src/adapter/LinuxDoAdapter.js"(exports, module) {
       "use strict";
       var { SourceAdapter } = require_SourceAdapter();
-      var { LinuxDoAPI: LinuxDoAPI2 } = require_export();
+      var { LinuxDoAPI: LinuxDoAPI2 } = require_extract();
       var { SyncState: SyncState2 } = require_storage();
       var LinuxDoAdapter = Object.assign(Object.create(SourceAdapter), {
         sourceType: "linuxdo",
@@ -8183,161 +8350,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
         }
       };
-      var LinuxDoAPI2 = {
-        _getUsername: () => {
-          var _a;
-          const path = window.location.pathname;
-          const match = path.match(/\/u\/([^/]+)/);
-          if (match) return match[1];
-          const meta = document.querySelector('meta[name="discourse-username"]');
-          if (meta == null ? void 0 : meta.content) return meta.content;
-          const userMenu = document.querySelector(".user-menu .username, .user-menu .d-label");
-          if (userMenu) {
-            const text = (_a = userMenu.textContent) == null ? void 0 : _a.trim();
-            if (text) return text;
-          }
-          const avatar = document.querySelector("img.avatar");
-          if (avatar) {
-            const alt = avatar.getAttribute("alt");
-            if (alt) return alt;
-          }
-          return "";
-        },
-        getRequestOpts: () => {
-          var _a;
-          const csrf = (_a = document.querySelector('meta[name="csrf-token"]')) == null ? void 0 : _a.content;
-          const headers = { "x-requested-with": "XMLHttpRequest" };
-          if (csrf) headers["x-csrf-token"] = csrf;
-          return { headers };
-        },
-        fetchJson: async (url, retries = 2) => {
-          let lastErr = null;
-          const opts = LinuxDoAPI2.getRequestOpts();
-          for (let i = 0; i <= retries; i++) {
-            const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 15e3);
-            try {
-              const res = await fetch(url, { ...opts, signal: ctrl.signal });
-              if (!res.ok) throw new Error(`HTTP ${res.status}`);
-              return await res.json();
-            } catch (e) {
-              lastErr = e;
-              if (i < retries) await Utils2.sleep(250 * (i + 1));
-            } finally {
-              clearTimeout(timer);
-            }
-          }
-          throw lastErr || new Error("fetchJson failed");
-        },
-        // 获取收藏列表
-        fetchBookmarks: async (username, page = 0) => {
-          const url = `${window.location.origin}/u/${username}/bookmarks.json?page=${page}`;
-          const data = await LinuxDoAPI2.fetchJson(url);
-          return data;
-        },
-        getBookmarkId: (bookmark) => String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || ""),
-        getBookmarkSyncTime: (bookmark) => (bookmark == null ? void 0 : bookmark.created_at) || (bookmark == null ? void 0 : bookmark.bookmarked_at) || (bookmark == null ? void 0 : bookmark.updated_at) || "",
-        // 获取所有收藏
-        fetchAllBookmarks: async (username, onProgress) => {
-          var _a, _b;
-          const allBookmarks = [];
-          let page = 0;
-          let hasMore = true;
-          while (hasMore) {
-            const data = await LinuxDoAPI2.fetchBookmarks(username, page);
-            const bookmarks = ((_a = data.user_bookmark_list) == null ? void 0 : _a.bookmarks) || [];
-            if (bookmarks.length === 0) {
-              hasMore = false;
-            } else {
-              allBookmarks.push(...bookmarks);
-              page++;
-              if (onProgress) onProgress(allBookmarks.length);
-              hasMore = ((_b = data.user_bookmark_list) == null ? void 0 : _b.more_bookmarks_url) != null;
-              const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-              await Utils2.sleep(delay);
-            }
-          }
-          return allBookmarks;
-        },
-        fetchBookmarksSince: async (username, watermark, onProgress) => {
-          var _a, _b;
-          const newBookmarks = [];
-          let page = 0;
-          let hasMore = true;
-          while (hasMore) {
-            const data = await LinuxDoAPI2.fetchBookmarks(username, page);
-            const bookmarks = ((_a = data.user_bookmark_list) == null ? void 0 : _a.bookmarks) || [];
-            if (bookmarks.length === 0) {
-              hasMore = false;
-              continue;
-            }
-            const batch = SyncState2.filterOrderedItems(
-              bookmarks,
-              watermark,
-              LinuxDoAPI2.getBookmarkSyncTime,
-              LinuxDoAPI2.getBookmarkId
-            );
-            newBookmarks.push(...batch);
-            if (onProgress) onProgress(newBookmarks.length);
-            if (batch.length < bookmarks.length) break;
-            hasMore = ((_b = data.user_bookmark_list) == null ? void 0 : _b.more_bookmarks_url) != null;
-            page++;
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            await Utils2.sleep(delay);
-          }
-          return newBookmarks;
-        },
-        // 获取帖子详情
-        fetchTopicDetail: async (topicId) => {
-          const url = `${window.location.origin}/t/${topicId}.json`;
-          return await LinuxDoAPI2.fetchJson(url);
-        },
-        // 获取帖子所有楼层
-        fetchAllPosts: async (topicId, onProgress) => {
-          var _a, _b, _c, _d, _e, _f, _g, _h;
-          const opts = LinuxDoAPI2.getRequestOpts();
-          const idData = await LinuxDoAPI2.fetchJson(
-            `${window.location.origin}/t/${topicId}/post_ids.json?post_number=0&limit=99999`
-          );
-          let postIds = idData.post_ids || [];
-          const mainData = await LinuxDoAPI2.fetchJson(`${window.location.origin}/t/${topicId}.json`);
-          const mainFirstPost = (_b = (_a = mainData.post_stream) == null ? void 0 : _a.posts) == null ? void 0 : _b[0];
-          if (mainFirstPost && !postIds.includes(mainFirstPost.id)) {
-            postIds.unshift(mainFirstPost.id);
-          }
-          const opUsername = ((_d = (_c = mainData == null ? void 0 : mainData.details) == null ? void 0 : _c.created_by) == null ? void 0 : _d.username) || ((_g = (_f = (_e = mainData == null ? void 0 : mainData.post_stream) == null ? void 0 : _e.posts) == null ? void 0 : _f[0]) == null ? void 0 : _g.username) || "";
-          const topic = {
-            topicId: String(topicId),
-            title: (mainData == null ? void 0 : mainData.title) || "",
-            category: (mainData == null ? void 0 : mainData.category_id) ? `\u5206\u7C7BID: ${mainData.category_id}` : "",
-            categoryName: "",
-            tags: (mainData == null ? void 0 : mainData.tags) || [],
-            url: `${window.location.origin}/t/${topicId}`,
-            opUsername,
-            createdAt: (mainData == null ? void 0 : mainData.created_at) || "",
-            postsCount: (mainData == null ? void 0 : mainData.posts_count) || 0,
-            likeCount: (mainData == null ? void 0 : mainData.like_count) || 0,
-            views: (mainData == null ? void 0 : mainData.views) || 0
-          };
-          const categoryBadge = document.querySelector(`.badge-category[data-category-id="${mainData.category_id}"]`);
-          if (categoryBadge) {
-            topic.categoryName = categoryBadge.textContent.trim();
-          }
-          let allPosts = [];
-          for (let i = 0; i < postIds.length; i += 200) {
-            const chunk = postIds.slice(i, i + 200);
-            const q = chunk.map((id) => `post_ids[]=${encodeURIComponent(id)}`).join("&");
-            const data = await LinuxDoAPI2.fetchJson(
-              `${window.location.origin}/t/${topicId}/posts.json?${q}&include_suggested=false`
-            );
-            const posts = ((_h = data.post_stream) == null ? void 0 : _h.posts) || [];
-            allPosts = allPosts.concat(posts);
-            if (onProgress) onProgress(Math.min(i + 200, postIds.length), postIds.length);
-          }
-          allPosts.sort((a, b) => a.post_number - b.post_number);
-          return { topic, posts: allPosts };
-        }
-      };
+      var { LinuxDoAPI: LinuxDoAPI2 } = require_extract();
       var Exporter2 = {
         // 筛选帖子
         filterPosts: (posts, topic, settings) => {
