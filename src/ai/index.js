@@ -6048,6 +6048,132 @@ compound 格式（仅当 intent 为 compound 时使用）：
 
     // ======= Agent 自主代理 =======
 
+    // 生成 Agent 执行计划并等待用户确认。
+    // W5 (MAINT-004/011): 从 handleAgentTask 提取。返回 { plan, planMsg } | 错误字符串。
+    _generateAgentPlan: async (params, settings) => {
+        const { task_description } = params;
+
+        const planPrompt = `你是一个 Notion 任务规划器。将用户的高层任务分解为可执行步骤。
+每一步必须是以下操作之一：query, search, workspace_search, classify, batch_classify,
+update, move, copy, create_database, write_content, edit_content, translate_content,
+ai_autofill, ask, deep_research, template_output, summarize, brainstorm, proofread,
+batch_translate, extract_to_database, generate_pages, batch_analyze
+
+返回 JSON（只返回 JSON，不要其他内容）：
+{
+  "plan": [
+{ "intent": "操作名", "params": { 对应操作的参数 }, "explanation": "步骤说明" }
+  ],
+  "explanation": "整体计划说明"
+}
+
+用户任务：${task_description}`;
+
+        const planResponse = await AIService.requestChat(planPrompt, settings, 1500);
+
+        // 解析计划 JSON
+        const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+            return "❌ Agent 无法生成有效的执行计划。请尝试更具体地描述任务。";
+        }
+
+        let plan;
+        try {
+            plan = JSON.parse(jsonMatch[0]);
+        } catch (error) {
+            console.warn("[LD-Notion] Agent 计划 JSON 解析失败:", error);
+            return "❌ Agent 生成的计划格式无效。请尝试换一种方式描述任务。";
+        }
+
+        if (!plan.plan || plan.plan.length === 0) {
+            return "❌ Agent 未能分解出有效的执行步骤。请尝试更具体地描述任务。";
+        }
+
+        // 展示计划并等待确认
+        let planMsg = `🤖 **Agent 执行计划**\n${plan.explanation || ""}\n\n`;
+        plan.plan.forEach((step, i) => {
+            planMsg += `${i + 1}. ${step.explanation}\n`;
+        });
+
+        ChatState.updateLastMessage(planMsg + "\n⏳ 等待确认...", "processing");
+
+        const confirmed = await ConfirmationDialog.show({
+            title: "🤖 Agent 执行计划确认",
+            message: plan.plan.map((s, i) => `${i + 1}. ${s.explanation}`).join("\n"),
+            itemName: task_description,
+            countdown: 5,
+            requireNameInput: false,
+        });
+
+        if (!confirmed) {
+            return "🤖 Agent 任务已取消。";
+        }
+
+        return { plan, planMsg };
+    },
+
+    // 执行 Agent 计划并生成汇总报告。
+    // W5 (MAINT-004/011): 从 handleAgentTask 提取。executeIntent 异常被内部 catch 捕获（降级，coding-conventions-007）。
+    _executeAgentPlan: async (plan, settings, planMsg) => {
+        // 执行计划（复用 compound 的执行模式）
+        const results = [];
+        let aborted = false;
+
+        for (let i = 0; i < plan.plan.length; i++) {
+            const step = plan.plan[i];
+
+            ChatState.updateLastMessage(
+                `${planMsg}\n⏳ 步骤 ${i + 1}/${plan.plan.length}: ${step.explanation}`,
+                "processing"
+            );
+
+            try {
+                const stepResult = await AIAssistant.executeIntent(step, settings);
+                const normalizedStepResult = AIAssistant._normalizeExecutionResult(stepResult);
+
+                if (AIAssistant._isErrorResult(normalizedStepResult)) {
+                    results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
+                    aborted = true;
+                    break;
+                }
+
+                results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
+            } catch (error) {
+                results.push({
+                    index: i + 1,
+                    explanation: step.explanation,
+                    success: false,
+                    result: AIAssistant._normalizeExecutionResult(`❌ ${error.message}`, { status: "error", name: step.intent })
+                });
+                aborted = true;
+                break;
+            }
+        }
+
+        // 汇总报告
+        let report = `🤖 **Agent 任务${aborted ? "中断" : "完成"}**\n\n`;
+        for (const r of results) {
+            report += `${r.success ? "✅" : "❌"} 步骤 ${r.index}: ${r.explanation}\n`;
+        }
+
+        if (aborted) {
+            const skipped = plan.plan.slice(results.length);
+            if (skipped.length > 0) {
+                report += `\n⏭️ 已跳过：\n`;
+                skipped.forEach((step, i) => {
+                    report += `${results.length + i + 1}. ${step.explanation}\n`;
+                });
+            }
+        }
+
+        report += `\n---\n`;
+        for (const r of results) {
+            report += `\n**步骤 ${r.index}**: ${r.explanation}\n${AIAssistant._resultToText(r.result)}\n`;
+        }
+
+        return report;
+    },
+
     handleAgentTask: async (params, settings, explanation) => {
         const configCheck = AIAssistant.checkConfig(settings, false);
         if (!configCheck.valid) return configCheck.error;
@@ -6064,119 +6190,11 @@ compound 格式（仅当 intent 为 compound 时使用）：
         ChatState.updateLastMessage("🤖 Agent 正在规划任务...", "processing");
 
         try {
-            const planPrompt = `你是一个 Notion 任务规划器。将用户的高层任务分解为可执行步骤。
-每一步必须是以下操作之一：query, search, workspace_search, classify, batch_classify,
-update, move, copy, create_database, write_content, edit_content, translate_content,
-ai_autofill, ask, deep_research, template_output, summarize, brainstorm, proofread,
-batch_translate, extract_to_database, generate_pages, batch_analyze
+            const generated = await AIAssistant._generateAgentPlan(params, settings);
+            if (typeof generated === "string") return generated;
+            const { plan, planMsg } = generated;
 
-返回 JSON（只返回 JSON，不要其他内容）：
-{
-  "plan": [
-{ "intent": "操作名", "params": { 对应操作的参数 }, "explanation": "步骤说明" }
-  ],
-  "explanation": "整体计划说明"
-}
-
-用户任务：${task_description}`;
-
-            const planResponse = await AIService.requestChat(planPrompt, settings, 1500);
-
-            // 解析计划 JSON
-            const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-                return "❌ Agent 无法生成有效的执行计划。请尝试更具体地描述任务。";
-            }
-
-            let plan;
-            try {
-                plan = JSON.parse(jsonMatch[0]);
-            } catch (error) {
-                console.warn("[LD-Notion] Agent 计划 JSON 解析失败:", error);
-                return "❌ Agent 生成的计划格式无效。请尝试换一种方式描述任务。";
-            }
-
-            if (!plan.plan || plan.plan.length === 0) {
-                return "❌ Agent 未能分解出有效的执行步骤。请尝试更具体地描述任务。";
-            }
-
-            // 展示计划并等待确认
-            let planMsg = `🤖 **Agent 执行计划**\n${plan.explanation || ""}\n\n`;
-            plan.plan.forEach((step, i) => {
-                planMsg += `${i + 1}. ${step.explanation}\n`;
-            });
-
-            ChatState.updateLastMessage(planMsg + "\n⏳ 等待确认...", "processing");
-
-            const confirmed = await ConfirmationDialog.show({
-                title: "🤖 Agent 执行计划确认",
-                message: plan.plan.map((s, i) => `${i + 1}. ${s.explanation}`).join("\n"),
-                itemName: task_description,
-                countdown: 5,
-                requireNameInput: false,
-            });
-
-            if (!confirmed) {
-                return "🤖 Agent 任务已取消。";
-            }
-
-            // 执行计划（复用 compound 的执行模式）
-            const results = [];
-            let aborted = false;
-
-            for (let i = 0; i < plan.plan.length; i++) {
-                const step = plan.plan[i];
-
-                ChatState.updateLastMessage(
-                    `${planMsg}\n⏳ 步骤 ${i + 1}/${plan.plan.length}: ${step.explanation}`,
-                    "processing"
-                );
-
-                try {
-                    const stepResult = await AIAssistant.executeIntent(step, settings);
-                    const normalizedStepResult = AIAssistant._normalizeExecutionResult(stepResult);
-
-                    if (AIAssistant._isErrorResult(normalizedStepResult)) {
-                        results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
-                        aborted = true;
-                        break;
-                    }
-
-                    results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
-                } catch (error) {
-                    results.push({
-                        index: i + 1,
-                        explanation: step.explanation,
-                        success: false,
-                        result: AIAssistant._normalizeExecutionResult(`❌ ${error.message}`, { status: "error", name: step.intent })
-                    });
-                    aborted = true;
-                    break;
-                }
-            }
-
-            // 汇总报告
-            let report = `🤖 **Agent 任务${aborted ? "中断" : "完成"}**\n\n`;
-            for (const r of results) {
-                report += `${r.success ? "✅" : "❌"} 步骤 ${r.index}: ${r.explanation}\n`;
-            }
-
-            if (aborted) {
-                const skipped = plan.plan.slice(results.length);
-                if (skipped.length > 0) {
-                    report += `\n⏭️ 已跳过：\n`;
-                    skipped.forEach((step, i) => {
-                        report += `${results.length + i + 1}. ${step.explanation}\n`;
-                    });
-                }
-            }
-
-            report += `\n---\n`;
-            for (const r of results) {
-                report += `\n**步骤 ${r.index}**: ${r.explanation}\n${AIAssistant._resultToText(r.result)}\n`;
-            }
-
-            return report;
+            return await AIAssistant._executeAgentPlan(plan, settings, planMsg);
         } catch (error) {
             return `❌ Agent 任务失败: ${error.message}`;
         }
@@ -6235,16 +6253,10 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
         return null;
     },
 
-    // 核心 Agent 循环
-    runAgentLoop: async (userMessage, settings, maxIterations = Storage.get(CONFIG.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG.DEFAULTS.agentMaxIterations)) => {
-        const permLevel = OperationGuard.getLevel();
-
-        // 1. 构建系统提示（含可用工具列表，根据权限过滤）
-        const availableTools = Object.entries(AIAssistant.AGENT_TOOLS)
-            .filter(([_, tool]) => tool.level <= permLevel)
-            .map(([name, tool]) => `- ${name}: ${tool.description} | 参数: ${tool.params}`)
-            .join("\n");
-
+    // 构建 Agent 系统提示（含可用工具列表、工作区上下文、persona 个性化）。
+    // W5 (MAINT-003/011): 从 runAgentLoop 提取，保留 prompt injection 防御
+    // （persona.instructions 过滤 + <user_input> 包裹由调用方 runAgentLoop 注入，learnings-003）。
+    _buildAgentSystemPrompt: (permLevel, availableTools, settings) => {
         const aiTargetState = TargetState.getDisplayAITargetState();
         let dbInfo;
         if (aiTargetState.mode === "all") {
@@ -6287,7 +6299,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
             ? `\n个性化指令：${String(persona.instructions).slice(0, 500).replace(/<system|ignore previous|ignore all previous|disregard|you are now|new instructions/gi, "[已过滤]")}`
             : "";
 
-        const systemPrompt = `你是${persona.name}，一个专注于${persona.expertise}的助手。语气风格：${persona.tone}。${personaBlock}
+        return `你是${persona.name}，一个专注于${persona.expertise}的助手。语气风格：${persona.tone}。${personaBlock}
 你可以使用以下工具来完成用户的任务。
 
 当前环境：${dbInfo}
@@ -6305,8 +6317,77 @@ ${availableTools}
 5. 如果任务需要多步，逐步执行，每次一个工具调用
 6. 执行写入/修改操作前，先用读取工具确认目标存在
 7. 参数值必须是具体的值，不要用占位符`;
+    },
 
-        // 2. Agent 循环
+    // 执行单次 Agent 工具调用（4 分支：未知工具/权限不足/Level≥1需确认/Level=0直接执行）。
+    // W5 (MAINT-003/011): 从 runAgentLoop 提取，保留 OperationGuard.execute 闸门 + 取消语义。
+    _executeAgentToolCall: async (toolCall, settings, permLevel) => {
+        const tool = AIAssistant.AGENT_TOOLS[toolCall.tool];
+        let result;
+        if (!tool) {
+            result = AIAssistant._normalizeExecutionResult(
+                `错误: 未知工具 "${toolCall.tool}"。可用工具: ${Object.keys(AIAssistant.AGENT_TOOLS).filter(name => AIAssistant.AGENT_TOOLS[name].level <= permLevel).join(", ")}`,
+                { source: "tool", name: toolCall.tool, status: "error" }
+            );
+        } else if (tool.level > permLevel) {
+            result = AIAssistant._normalizeExecutionResult(
+                `错误: 权限不足，"${toolCall.tool}" 需要「${CONFIG.PERMISSION_NAMES[tool.level]}」权限，当前为「${CONFIG.PERMISSION_NAMES[permLevel]}」`,
+                { source: "tool", name: toolCall.tool, status: "error" }
+            );
+        } else {
+            // Level >= 1 的写入操作需要用户确认
+            if (tool.level >= 1) {
+                try {
+                    result = await OperationGuard.execute(toolCall.tool, async () => {
+                        return await tool.execute(toolCall.args || {}, settings);
+                    }, {
+                        source: "ai-agent-loop",
+                        actor: "ai",
+                        itemName: toolCall.tool,
+                        trigger: "ai_tool_execution",
+                    });
+                } catch (guardError) {
+                    if (guardError.message === "操作已取消") {
+                        result = AIAssistant._normalizeExecutionResult(
+                            `错误: 用户取消了 "${toolCall.tool}" 操作的执行`,
+                            { source: "tool", name: toolCall.tool, status: "cancelled" }
+                        );
+                    } else {
+                        result = AIAssistant._normalizeExecutionResult(`错误: ${guardError.message}`, {
+                            source: "tool",
+                            name: toolCall.tool,
+                            status: "error",
+                        });
+                    }
+                }
+            } else {
+                try {
+                    result = await tool.execute(toolCall.args || {}, settings);
+                } catch (e) {
+                    result = AIAssistant._normalizeExecutionResult(`错误: ${e.message}`, {
+                        source: "tool",
+                        name: toolCall.tool,
+                        status: "error",
+                    });
+                }
+            }
+        }
+        return result;
+    },
+
+    // 核心 Agent 循环
+    runAgentLoop: async (userMessage, settings, maxIterations = Storage.get(CONFIG.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG.DEFAULTS.agentMaxIterations)) => {
+        const permLevel = OperationGuard.getLevel();
+
+        // 1. 构建系统提示（含可用工具列表，根据权限过滤）
+        const availableTools = Object.entries(AIAssistant.AGENT_TOOLS)
+            .filter(([_, tool]) => tool.level <= permLevel)
+            .map(([name, tool]) => `- ${name}: ${tool.description} | 参数: ${tool.params}`)
+            .join("\n");
+
+        const systemPrompt = AIAssistant._buildAgentSystemPrompt(permLevel, availableTools, settings);
+
+        // 2. Agent 循环（<user_input> 包裹防 prompt injection，learnings-003）
         const messages = [{ role: "user", content: `<user_input>\n${userMessage}\n</user_input>` }];
         let iteration = 0;
 
@@ -6345,56 +6426,7 @@ ${availableTools}
                 "processing"
             );
 
-            const tool = AIAssistant.AGENT_TOOLS[toolCall.tool];
-            let result;
-            if (!tool) {
-                result = AIAssistant._normalizeExecutionResult(
-                    `错误: 未知工具 "${toolCall.tool}"。可用工具: ${Object.keys(AIAssistant.AGENT_TOOLS).filter(name => AIAssistant.AGENT_TOOLS[name].level <= permLevel).join(", ")}`,
-                    { source: "tool", name: toolCall.tool, status: "error" }
-                );
-            } else if (tool.level > permLevel) {
-                result = AIAssistant._normalizeExecutionResult(
-                    `错误: 权限不足，"${toolCall.tool}" 需要「${CONFIG.PERMISSION_NAMES[tool.level]}」权限，当前为「${CONFIG.PERMISSION_NAMES[permLevel]}」`,
-                    { source: "tool", name: toolCall.tool, status: "error" }
-                );
-            } else {
-                // Level >= 1 的写入操作需要用户确认
-                if (tool.level >= 1) {
-                    try {
-                        result = await OperationGuard.execute(toolCall.tool, async () => {
-                            return await tool.execute(toolCall.args || {}, settings);
-                        }, {
-                            source: "ai-agent-loop",
-                            actor: "ai",
-                            itemName: toolCall.tool,
-                            trigger: "ai_tool_execution",
-                        });
-                    } catch (guardError) {
-                        if (guardError.message === "操作已取消") {
-                            result = AIAssistant._normalizeExecutionResult(
-                                `错误: 用户取消了 "${toolCall.tool}" 操作的执行`,
-                                { source: "tool", name: toolCall.tool, status: "cancelled" }
-                            );
-                        } else {
-                            result = AIAssistant._normalizeExecutionResult(`错误: ${guardError.message}`, {
-                                source: "tool",
-                                name: toolCall.tool,
-                                status: "error",
-                            });
-                        }
-                    }
-                } else {
-                    try {
-                        result = await tool.execute(toolCall.args || {}, settings);
-                    } catch (e) {
-                        result = AIAssistant._normalizeExecutionResult(`错误: ${e.message}`, {
-                            source: "tool",
-                            name: toolCall.tool,
-                            status: "error",
-                        });
-                    }
-                }
-            }
+            const result = await AIAssistant._executeAgentToolCall(toolCall, settings, permLevel);
 
             // 将工具结果喂回 AI
             messages.push({ role: "user", content: `[工具结果] ${toolCall.tool}:\n${AIAssistant._resultToAgentPayload(result)}` });

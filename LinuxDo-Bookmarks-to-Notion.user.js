@@ -25461,19 +25461,11 @@ ${userMessage}
         // ======= 浏览器书签导入 =======
         // ======= AI 输出模板 =======
         // ======= Agent 自主代理 =======
-        handleAgentTask: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("agentTask")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1AAgent \u81EA\u4E3B\u4EE3\u7406\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
-          }
+        // 生成 Agent 执行计划并等待用户确认。
+        // W5 (MAINT-004/011): 从 handleAgentTask 提取。返回 { plan, planMsg } | 错误字符串。
+        _generateAgentPlan: async (params, settings) => {
           const { task_description } = params;
-          if (!task_description) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u60F3\u8BA9 Agent \u5B8C\u6210\u7684\u4EFB\u52A1\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5E2E\u6211\u6574\u7406\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50\u5E76\u751F\u6210\u6458\u8981\u300D";
-          }
-          ChatState2.updateLastMessage("\u{1F916} Agent \u6B63\u5728\u89C4\u5212\u4EFB\u52A1...", "processing");
-          try {
-            const planPrompt = `\u4F60\u662F\u4E00\u4E2A Notion \u4EFB\u52A1\u89C4\u5212\u5668\u3002\u5C06\u7528\u6237\u7684\u9AD8\u5C42\u4EFB\u52A1\u5206\u89E3\u4E3A\u53EF\u6267\u884C\u6B65\u9AA4\u3002
+          const planPrompt = `\u4F60\u662F\u4E00\u4E2A Notion \u4EFB\u52A1\u89C4\u5212\u5668\u3002\u5C06\u7528\u6237\u7684\u9AD8\u5C42\u4EFB\u52A1\u5206\u89E3\u4E3A\u53EF\u6267\u884C\u6B65\u9AA4\u3002
 \u6BCF\u4E00\u6B65\u5FC5\u987B\u662F\u4EE5\u4E0B\u64CD\u4F5C\u4E4B\u4E00\uFF1Aquery, search, workspace_search, classify, batch_classify,
 update, move, copy, create_database, write_content, edit_content, translate_content,
 ai_autofill, ask, deep_research, template_output, summarize, brainstorm, proofread,
@@ -25488,98 +25480,120 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
 }
 
 \u7528\u6237\u4EFB\u52A1\uFF1A${task_description}`;
-            const planResponse = await AIService2.requestChat(planPrompt, settings, 1500);
-            const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-              return "\u274C Agent \u65E0\u6CD5\u751F\u6210\u6709\u6548\u7684\u6267\u884C\u8BA1\u5212\u3002\u8BF7\u5C1D\u8BD5\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u4EFB\u52A1\u3002";
-            }
-            let plan;
-            try {
-              plan = JSON.parse(jsonMatch[0]);
-            } catch (error) {
-              console.warn("[LD-Notion] Agent \u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", error);
-              return "\u274C Agent \u751F\u6210\u7684\u8BA1\u5212\u683C\u5F0F\u65E0\u6548\u3002\u8BF7\u5C1D\u8BD5\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u4EFB\u52A1\u3002";
-            }
-            if (!plan.plan || plan.plan.length === 0) {
-              return "\u274C Agent \u672A\u80FD\u5206\u89E3\u51FA\u6709\u6548\u7684\u6267\u884C\u6B65\u9AA4\u3002\u8BF7\u5C1D\u8BD5\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u4EFB\u52A1\u3002";
-            }
-            let planMsg = `\u{1F916} **Agent \u6267\u884C\u8BA1\u5212**
+          const planResponse = await AIService2.requestChat(planPrompt, settings, 1500);
+          const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) {
+            return "\u274C Agent \u65E0\u6CD5\u751F\u6210\u6709\u6548\u7684\u6267\u884C\u8BA1\u5212\u3002\u8BF7\u5C1D\u8BD5\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u4EFB\u52A1\u3002";
+          }
+          let plan;
+          try {
+            plan = JSON.parse(jsonMatch[0]);
+          } catch (error) {
+            console.warn("[LD-Notion] Agent \u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", error);
+            return "\u274C Agent \u751F\u6210\u7684\u8BA1\u5212\u683C\u5F0F\u65E0\u6548\u3002\u8BF7\u5C1D\u8BD5\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u4EFB\u52A1\u3002";
+          }
+          if (!plan.plan || plan.plan.length === 0) {
+            return "\u274C Agent \u672A\u80FD\u5206\u89E3\u51FA\u6709\u6548\u7684\u6267\u884C\u6B65\u9AA4\u3002\u8BF7\u5C1D\u8BD5\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u4EFB\u52A1\u3002";
+          }
+          let planMsg = `\u{1F916} **Agent \u6267\u884C\u8BA1\u5212**
 ${plan.explanation || ""}
 
 `;
-            plan.plan.forEach((step, i) => {
-              planMsg += `${i + 1}. ${step.explanation}
+          plan.plan.forEach((step, i) => {
+            planMsg += `${i + 1}. ${step.explanation}
 `;
-            });
-            ChatState2.updateLastMessage(planMsg + "\n\u23F3 \u7B49\u5F85\u786E\u8BA4...", "processing");
-            const confirmed = await ConfirmationDialog2.show({
-              title: "\u{1F916} Agent \u6267\u884C\u8BA1\u5212\u786E\u8BA4",
-              message: plan.plan.map((s, i) => `${i + 1}. ${s.explanation}`).join("\n"),
-              itemName: task_description,
-              countdown: 5,
-              requireNameInput: false
-            });
-            if (!confirmed) {
-              return "\u{1F916} Agent \u4EFB\u52A1\u5DF2\u53D6\u6D88\u3002";
-            }
-            const results = [];
-            let aborted = false;
-            for (let i = 0; i < plan.plan.length; i++) {
-              const step = plan.plan[i];
-              ChatState2.updateLastMessage(
-                `${planMsg}
+          });
+          ChatState2.updateLastMessage(planMsg + "\n\u23F3 \u7B49\u5F85\u786E\u8BA4...", "processing");
+          const confirmed = await ConfirmationDialog2.show({
+            title: "\u{1F916} Agent \u6267\u884C\u8BA1\u5212\u786E\u8BA4",
+            message: plan.plan.map((s, i) => `${i + 1}. ${s.explanation}`).join("\n"),
+            itemName: task_description,
+            countdown: 5,
+            requireNameInput: false
+          });
+          if (!confirmed) {
+            return "\u{1F916} Agent \u4EFB\u52A1\u5DF2\u53D6\u6D88\u3002";
+          }
+          return { plan, planMsg };
+        },
+        // 执行 Agent 计划并生成汇总报告。
+        // W5 (MAINT-004/011): 从 handleAgentTask 提取。executeIntent 异常被内部 catch 捕获（降级，coding-conventions-007）。
+        _executeAgentPlan: async (plan, settings, planMsg) => {
+          const results = [];
+          let aborted = false;
+          for (let i = 0; i < plan.plan.length; i++) {
+            const step = plan.plan[i];
+            ChatState2.updateLastMessage(
+              `${planMsg}
 \u23F3 \u6B65\u9AA4 ${i + 1}/${plan.plan.length}: ${step.explanation}`,
-                "processing"
-              );
-              try {
-                const stepResult = await AIAssistant2.executeIntent(step, settings);
-                const normalizedStepResult = AIAssistant2._normalizeExecutionResult(stepResult);
-                if (AIAssistant2._isErrorResult(normalizedStepResult)) {
-                  results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
-                  aborted = true;
-                  break;
-                }
-                results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
-              } catch (error) {
-                results.push({
-                  index: i + 1,
-                  explanation: step.explanation,
-                  success: false,
-                  result: AIAssistant2._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
-                });
+              "processing"
+            );
+            try {
+              const stepResult = await AIAssistant2.executeIntent(step, settings);
+              const normalizedStepResult = AIAssistant2._normalizeExecutionResult(stepResult);
+              if (AIAssistant2._isErrorResult(normalizedStepResult)) {
+                results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
                 aborted = true;
                 break;
               }
+              results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
+            } catch (error) {
+              results.push({
+                index: i + 1,
+                explanation: step.explanation,
+                success: false,
+                result: AIAssistant2._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
+              });
+              aborted = true;
+              break;
             }
-            let report = `\u{1F916} **Agent \u4EFB\u52A1${aborted ? "\u4E2D\u65AD" : "\u5B8C\u6210"}**
+          }
+          let report = `\u{1F916} **Agent \u4EFB\u52A1${aborted ? "\u4E2D\u65AD" : "\u5B8C\u6210"}**
 
 `;
-            for (const r of results) {
-              report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.index}: ${r.explanation}
+          for (const r of results) {
+            report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.index}: ${r.explanation}
 `;
-            }
-            if (aborted) {
-              const skipped = plan.plan.slice(results.length);
-              if (skipped.length > 0) {
-                report += `
+          }
+          if (aborted) {
+            const skipped = plan.plan.slice(results.length);
+            if (skipped.length > 0) {
+              report += `
 \u23ED\uFE0F \u5DF2\u8DF3\u8FC7\uFF1A
 `;
-                skipped.forEach((step, i) => {
-                  report += `${results.length + i + 1}. ${step.explanation}
+              skipped.forEach((step, i) => {
+                report += `${results.length + i + 1}. ${step.explanation}
 `;
-                });
-              }
+              });
             }
-            report += `
+          }
+          report += `
 ---
 `;
-            for (const r of results) {
-              report += `
+          for (const r of results) {
+            report += `
 **\u6B65\u9AA4 ${r.index}**: ${r.explanation}
 ${AIAssistant2._resultToText(r.result)}
 `;
-            }
-            return report;
+          }
+          return report;
+        },
+        handleAgentTask: async (params, settings, explanation) => {
+          const configCheck = AIAssistant2.checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("agentTask")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1AAgent \u81EA\u4E3B\u4EE3\u7406\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
+          }
+          const { task_description } = params;
+          if (!task_description) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u60F3\u8BA9 Agent \u5B8C\u6210\u7684\u4EFB\u52A1\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5E2E\u6211\u6574\u7406\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50\u5E76\u751F\u6210\u6458\u8981\u300D";
+          }
+          ChatState2.updateLastMessage("\u{1F916} Agent \u6B63\u5728\u89C4\u5212\u4EFB\u52A1...", "processing");
+          try {
+            const generated = await AIAssistant2._generateAgentPlan(params, settings);
+            if (typeof generated === "string") return generated;
+            const { plan, planMsg } = generated;
+            return await AIAssistant2._executeAgentPlan(plan, settings, planMsg);
           } catch (error) {
             return `\u274C Agent \u4EFB\u52A1\u5931\u8D25: ${error.message}`;
           }
@@ -25629,11 +25643,11 @@ ${AIAssistant2._resultToText(r.result)}
           }
           return null;
         },
-        // 核心 Agent 循环
-        runAgentLoop: async (userMessage, settings, maxIterations = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG2.DEFAULTS.agentMaxIterations)) => {
+        // 构建 Agent 系统提示（含可用工具列表、工作区上下文、persona 个性化）。
+        // W5 (MAINT-003/011): 从 runAgentLoop 提取，保留 prompt injection 防御
+        // （persona.instructions 过滤 + <user_input> 包裹由调用方 runAgentLoop 注入，learnings-003）。
+        _buildAgentSystemPrompt: (permLevel, availableTools, settings) => {
           var _a, _b, _c, _d, _e;
-          const permLevel = OperationGuard2.getLevel();
-          const availableTools = Object.entries(AIAssistant2.AGENT_TOOLS).filter(([_, tool]) => tool.level <= permLevel).map(([name, tool]) => `- ${name}: ${tool.description} | \u53C2\u6570: ${tool.params}`).join("\n");
           const aiTargetState = TargetState2.getDisplayAITargetState();
           let dbInfo;
           if (aiTargetState.mode === "all") {
@@ -25677,7 +25691,7 @@ ${AIAssistant2._resultToText(r.result)}
           };
           const personaBlock = persona.instructions ? `
 \u4E2A\u6027\u5316\u6307\u4EE4\uFF1A${String(persona.instructions).slice(0, 500).replace(/<system|ignore previous|ignore all previous|disregard|you are now|new instructions/gi, "[\u5DF2\u8FC7\u6EE4]")}` : "";
-          const systemPrompt = `\u4F60\u662F${persona.name}\uFF0C\u4E00\u4E2A\u4E13\u6CE8\u4E8E${persona.expertise}\u7684\u52A9\u624B\u3002\u8BED\u6C14\u98CE\u683C\uFF1A${persona.tone}\u3002${personaBlock}
+          return `\u4F60\u662F${persona.name}\uFF0C\u4E00\u4E2A\u4E13\u6CE8\u4E8E${persona.expertise}\u7684\u52A9\u624B\u3002\u8BED\u6C14\u98CE\u683C\uFF1A${persona.tone}\u3002${personaBlock}
 \u4F60\u53EF\u4EE5\u4F7F\u7528\u4EE5\u4E0B\u5DE5\u5177\u6765\u5B8C\u6210\u7528\u6237\u7684\u4EFB\u52A1\u3002
 
 \u5F53\u524D\u73AF\u5883\uFF1A${dbInfo}
@@ -25695,6 +25709,66 @@ ${availableTools}
 5. \u5982\u679C\u4EFB\u52A1\u9700\u8981\u591A\u6B65\uFF0C\u9010\u6B65\u6267\u884C\uFF0C\u6BCF\u6B21\u4E00\u4E2A\u5DE5\u5177\u8C03\u7528
 6. \u6267\u884C\u5199\u5165/\u4FEE\u6539\u64CD\u4F5C\u524D\uFF0C\u5148\u7528\u8BFB\u53D6\u5DE5\u5177\u786E\u8BA4\u76EE\u6807\u5B58\u5728
 7. \u53C2\u6570\u503C\u5FC5\u987B\u662F\u5177\u4F53\u7684\u503C\uFF0C\u4E0D\u8981\u7528\u5360\u4F4D\u7B26`;
+        },
+        // 执行单次 Agent 工具调用（4 分支：未知工具/权限不足/Level≥1需确认/Level=0直接执行）。
+        // W5 (MAINT-003/011): 从 runAgentLoop 提取，保留 OperationGuard.execute 闸门 + 取消语义。
+        _executeAgentToolCall: async (toolCall, settings, permLevel) => {
+          const tool = AIAssistant2.AGENT_TOOLS[toolCall.tool];
+          let result;
+          if (!tool) {
+            result = AIAssistant2._normalizeExecutionResult(
+              `\u9519\u8BEF: \u672A\u77E5\u5DE5\u5177 "${toolCall.tool}"\u3002\u53EF\u7528\u5DE5\u5177: ${Object.keys(AIAssistant2.AGENT_TOOLS).filter((name) => AIAssistant2.AGENT_TOOLS[name].level <= permLevel).join(", ")}`,
+              { source: "tool", name: toolCall.tool, status: "error" }
+            );
+          } else if (tool.level > permLevel) {
+            result = AIAssistant2._normalizeExecutionResult(
+              `\u9519\u8BEF: \u6743\u9650\u4E0D\u8DB3\uFF0C"${toolCall.tool}" \u9700\u8981\u300C${CONFIG2.PERMISSION_NAMES[tool.level]}\u300D\u6743\u9650\uFF0C\u5F53\u524D\u4E3A\u300C${CONFIG2.PERMISSION_NAMES[permLevel]}\u300D`,
+              { source: "tool", name: toolCall.tool, status: "error" }
+            );
+          } else {
+            if (tool.level >= 1) {
+              try {
+                result = await OperationGuard2.execute(toolCall.tool, async () => {
+                  return await tool.execute(toolCall.args || {}, settings);
+                }, {
+                  source: "ai-agent-loop",
+                  actor: "ai",
+                  itemName: toolCall.tool,
+                  trigger: "ai_tool_execution"
+                });
+              } catch (guardError) {
+                if (guardError.message === "\u64CD\u4F5C\u5DF2\u53D6\u6D88") {
+                  result = AIAssistant2._normalizeExecutionResult(
+                    `\u9519\u8BEF: \u7528\u6237\u53D6\u6D88\u4E86 "${toolCall.tool}" \u64CD\u4F5C\u7684\u6267\u884C`,
+                    { source: "tool", name: toolCall.tool, status: "cancelled" }
+                  );
+                } else {
+                  result = AIAssistant2._normalizeExecutionResult(`\u9519\u8BEF: ${guardError.message}`, {
+                    source: "tool",
+                    name: toolCall.tool,
+                    status: "error"
+                  });
+                }
+              }
+            } else {
+              try {
+                result = await tool.execute(toolCall.args || {}, settings);
+              } catch (e) {
+                result = AIAssistant2._normalizeExecutionResult(`\u9519\u8BEF: ${e.message}`, {
+                  source: "tool",
+                  name: toolCall.tool,
+                  status: "error"
+                });
+              }
+            }
+          }
+          return result;
+        },
+        // 核心 Agent 循环
+        runAgentLoop: async (userMessage, settings, maxIterations = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG2.DEFAULTS.agentMaxIterations)) => {
+          const permLevel = OperationGuard2.getLevel();
+          const availableTools = Object.entries(AIAssistant2.AGENT_TOOLS).filter(([_, tool]) => tool.level <= permLevel).map(([name, tool]) => `- ${name}: ${tool.description} | \u53C2\u6570: ${tool.params}`).join("\n");
+          const systemPrompt = AIAssistant2._buildAgentSystemPrompt(permLevel, availableTools, settings);
           const messages = [{ role: "user", content: `<user_input>
 ${userMessage}
 </user_input>` }];
@@ -25727,55 +25801,7 @@ ${userMessage}
               `\u{1F916} \u6B63\u5728\u6267\u884C: ${toolCall.tool}...${thoughtText}`,
               "processing"
             );
-            const tool = AIAssistant2.AGENT_TOOLS[toolCall.tool];
-            let result;
-            if (!tool) {
-              result = AIAssistant2._normalizeExecutionResult(
-                `\u9519\u8BEF: \u672A\u77E5\u5DE5\u5177 "${toolCall.tool}"\u3002\u53EF\u7528\u5DE5\u5177: ${Object.keys(AIAssistant2.AGENT_TOOLS).filter((name) => AIAssistant2.AGENT_TOOLS[name].level <= permLevel).join(", ")}`,
-                { source: "tool", name: toolCall.tool, status: "error" }
-              );
-            } else if (tool.level > permLevel) {
-              result = AIAssistant2._normalizeExecutionResult(
-                `\u9519\u8BEF: \u6743\u9650\u4E0D\u8DB3\uFF0C"${toolCall.tool}" \u9700\u8981\u300C${CONFIG2.PERMISSION_NAMES[tool.level]}\u300D\u6743\u9650\uFF0C\u5F53\u524D\u4E3A\u300C${CONFIG2.PERMISSION_NAMES[permLevel]}\u300D`,
-                { source: "tool", name: toolCall.tool, status: "error" }
-              );
-            } else {
-              if (tool.level >= 1) {
-                try {
-                  result = await OperationGuard2.execute(toolCall.tool, async () => {
-                    return await tool.execute(toolCall.args || {}, settings);
-                  }, {
-                    source: "ai-agent-loop",
-                    actor: "ai",
-                    itemName: toolCall.tool,
-                    trigger: "ai_tool_execution"
-                  });
-                } catch (guardError) {
-                  if (guardError.message === "\u64CD\u4F5C\u5DF2\u53D6\u6D88") {
-                    result = AIAssistant2._normalizeExecutionResult(
-                      `\u9519\u8BEF: \u7528\u6237\u53D6\u6D88\u4E86 "${toolCall.tool}" \u64CD\u4F5C\u7684\u6267\u884C`,
-                      { source: "tool", name: toolCall.tool, status: "cancelled" }
-                    );
-                  } else {
-                    result = AIAssistant2._normalizeExecutionResult(`\u9519\u8BEF: ${guardError.message}`, {
-                      source: "tool",
-                      name: toolCall.tool,
-                      status: "error"
-                    });
-                  }
-                }
-              } else {
-                try {
-                  result = await tool.execute(toolCall.args || {}, settings);
-                } catch (e) {
-                  result = AIAssistant2._normalizeExecutionResult(`\u9519\u8BEF: ${e.message}`, {
-                    source: "tool",
-                    name: toolCall.tool,
-                    status: "error"
-                  });
-                }
-              }
-            }
+            const result = await AIAssistant2._executeAgentToolCall(toolCall, settings, permLevel);
             messages.push({ role: "user", content: `[\u5DE5\u5177\u7ED3\u679C] ${toolCall.tool}:
 ${AIAssistant2._resultToAgentPayload(result)}` });
           }
