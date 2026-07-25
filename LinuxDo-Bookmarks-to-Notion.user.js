@@ -19572,6 +19572,388 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
     }
   });
 
+  // src/ai/BlockConverter.js
+  var require_BlockConverter = __commonJS({
+    "src/ai/BlockConverter.js"(exports, module) {
+      "use strict";
+      var { Utils: Utils2 } = require_utils();
+      var BlockConverter = {
+        // markdown 文本 → Notion blocks 数组
+        textToBlocks: (text) => {
+          const blocks = [];
+          const lines = text.split("\n");
+          let inCodeBlock = false;
+          let codeLines = [];
+          let codeLang = "plain text";
+          const LANG_MAP = {
+            js: "javascript",
+            ts: "typescript",
+            py: "python",
+            rb: "ruby",
+            sh: "shell",
+            bash: "shell",
+            zsh: "shell",
+            yml: "yaml",
+            md: "markdown",
+            cs: "c#",
+            cpp: "c++",
+            objc: "objective-c",
+            kt: "kotlin",
+            rs: "rust",
+            go: "go",
+            java: "java",
+            html: "html",
+            css: "css",
+            json: "json",
+            xml: "xml",
+            sql: "sql",
+            r: "r",
+            swift: "swift",
+            scala: "scala",
+            php: "php",
+            perl: "perl",
+            lua: "lua",
+            dart: "dart",
+            dockerfile: "docker",
+            makefile: "makefile",
+            toml: "toml",
+            graphql: "graphql",
+            protobuf: "protobuf",
+            sass: "sass",
+            scss: "scss",
+            less: "less",
+            jsx: "javascript",
+            tsx: "typescript"
+          };
+          const NOTION_LANGS = /* @__PURE__ */ new Set([
+            "abap",
+            "arduino",
+            "bash",
+            "basic",
+            "c",
+            "clojure",
+            "coffeescript",
+            "c++",
+            "c#",
+            "css",
+            "dart",
+            "diff",
+            "docker",
+            "elixir",
+            "elm",
+            "erlang",
+            "flow",
+            "fortran",
+            "f#",
+            "gherkin",
+            "glsl",
+            "go",
+            "graphql",
+            "groovy",
+            "haskell",
+            "html",
+            "java",
+            "javascript",
+            "json",
+            "julia",
+            "kotlin",
+            "latex",
+            "less",
+            "lisp",
+            "livescript",
+            "lua",
+            "makefile",
+            "markdown",
+            "markup",
+            "matlab",
+            "mermaid",
+            "nix",
+            "objective-c",
+            "ocaml",
+            "pascal",
+            "perl",
+            "php",
+            "plain text",
+            "powershell",
+            "prolog",
+            "protobuf",
+            "python",
+            "r",
+            "reason",
+            "ruby",
+            "rust",
+            "sass",
+            "scala",
+            "scheme",
+            "scss",
+            "shell",
+            "sql",
+            "swift",
+            "typescript",
+            "vb.net",
+            "verilog",
+            "vhdl",
+            "visual basic",
+            "webassembly",
+            "xml",
+            "yaml",
+            "java/c/c++/c#"
+          ]);
+          const normalizeLanguage2 = (lang) => {
+            const lower = (lang || "").toLowerCase().trim();
+            if (!lower) return "plain text";
+            if (LANG_MAP[lower]) return LANG_MAP[lower];
+            if (NOTION_LANGS.has(lower)) return lower;
+            return "plain text";
+          };
+          const splitLongText = (str) => {
+            const maxLen = 2e3;
+            const chunks = [];
+            if (str.length <= maxLen) {
+              chunks.push({ type: "text", text: { content: str } });
+            } else {
+              let remaining = str;
+              while (remaining.length > 0) {
+                chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
+                remaining = remaining.substring(maxLen);
+              }
+            }
+            return chunks;
+          };
+          for (const line of lines) {
+            if (line.startsWith("```")) {
+              if (inCodeBlock) {
+                const code = codeLines.join("\n");
+                blocks.push({
+                  type: "code",
+                  code: { rich_text: splitLongText(code), language: codeLang }
+                });
+                codeLines = [];
+                inCodeBlock = false;
+              } else {
+                inCodeBlock = true;
+                codeLang = normalizeLanguage2(line.slice(3).trim());
+              }
+              continue;
+            }
+            if (inCodeBlock) {
+              codeLines.push(line);
+              continue;
+            }
+            if (!line.trim()) continue;
+            if (line.startsWith("### ")) {
+              blocks.push({ type: "heading_3", heading_3: { rich_text: splitLongText(line.slice(4)) } });
+            } else if (line.startsWith("## ")) {
+              blocks.push({ type: "heading_2", heading_2: { rich_text: splitLongText(line.slice(3)) } });
+            } else if (line.startsWith("# ")) {
+              blocks.push({ type: "heading_1", heading_1: { rich_text: splitLongText(line.slice(2)) } });
+            } else if (line.trim() === "---" || line.trim() === "***") {
+              blocks.push({ type: "divider", divider: {} });
+            } else if (line.startsWith("> ")) {
+              blocks.push({ type: "quote", quote: { rich_text: splitLongText(line.slice(2)) } });
+            } else if (/^[-*]\s/.test(line)) {
+              blocks.push({ type: "bulleted_list_item", bulleted_list_item: { rich_text: splitLongText(line.replace(/^[-*]\s/, "")) } });
+            } else if (/^\d+\.\s/.test(line)) {
+              blocks.push({ type: "numbered_list_item", numbered_list_item: { rich_text: splitLongText(line.replace(/^\d+\.\s/, "")) } });
+            } else {
+              blocks.push({ type: "paragraph", paragraph: { rich_text: splitLongText(line) } });
+            }
+          }
+          if (inCodeBlock && codeLines.length > 0) {
+            const code = codeLines.join("\n");
+            blocks.push({
+              type: "code",
+              code: { rich_text: splitLongText(code), language: codeLang }
+            });
+          }
+          return blocks;
+        },
+        // Notion block + 新内容 → 更新 payload（按 block 类型分发）
+        buildBlockUpdatePayload: (block, content, options = {}) => {
+          if (!block || !block.type) {
+            throw new Error("\u65E0\u6CD5\u8BC6\u522B\u5757\u7C7B\u578B");
+          }
+          const rawContent = String(content || "");
+          const richText = [{ type: "text", text: { content: String(content || "") } }];
+          const type = block.type;
+          const current = block[type] || {};
+          switch (type) {
+            case "paragraph":
+            case "heading_1":
+            case "heading_2":
+            case "heading_3":
+            case "bulleted_list_item":
+            case "numbered_list_item":
+            case "quote":
+            case "toggle":
+              return {
+                [type]: {
+                  ...current,
+                  rich_text: richText,
+                  color: options.color || current.color
+                }
+              };
+            case "to_do":
+              return {
+                to_do: {
+                  ...current,
+                  rich_text: richText,
+                  checked: typeof options.checked === "boolean" ? options.checked : !!current.checked,
+                  color: options.color || current.color
+                }
+              };
+            case "callout":
+              return {
+                callout: {
+                  ...current,
+                  rich_text: richText,
+                  icon: options.icon || current.icon,
+                  color: options.color || current.color
+                }
+              };
+            case "code":
+              return {
+                code: {
+                  ...current,
+                  rich_text: richText,
+                  caption: Array.isArray(current.caption) ? current.caption : [],
+                  language: current.language || "plain text"
+                }
+              };
+            case "template":
+              return {
+                template: {
+                  ...current,
+                  rich_text: richText
+                }
+              };
+            case "equation":
+              return {
+                equation: {
+                  ...current,
+                  expression: rawContent
+                }
+              };
+            case "bookmark":
+              if (!Utils2.isHttpUrl(rawContent)) {
+                throw new Error("bookmark \u5757\u4EC5\u652F\u6301\u66F4\u65B0\u4E3A http/https URL\u3002");
+              }
+              return {
+                bookmark: {
+                  ...current,
+                  url: rawContent,
+                  caption: Array.isArray(current.caption) ? current.caption : []
+                }
+              };
+            case "embed":
+              if (!Utils2.isHttpUrl(rawContent)) {
+                throw new Error("embed \u5757\u4EC5\u652F\u6301\u66F4\u65B0\u4E3A http/https URL\u3002");
+              }
+              return {
+                embed: {
+                  ...current,
+                  url: rawContent,
+                  caption: Array.isArray(current.caption) ? current.caption : []
+                }
+              };
+            case "link_preview":
+              throw new Error("link_preview \u5757\u662F Notion API \u7684\u53EA\u8BFB\u8FD4\u56DE\u7C7B\u578B\uFF0C\u4E0D\u80FD\u76F4\u63A5\u66F4\u65B0\uFF1B\u8BF7\u6539\u7528 bookmark \u6216 embed \u5757\u3002");
+            case "table_row":
+              throw new Error("table_row \u5757\u5F53\u524D\u65E0\u6CD5\u901A\u8FC7\u5355\u4E00 content \u53C2\u6570\u5B89\u5168\u66F4\u65B0\u5355\u5143\u683C\uFF1B\u8BF7\u6539\u7528\u9875\u9762 Markdown \u7F16\u8F91\u6216\u91CD\u65B0\u63D2\u5165\u8868\u683C\u884C\u3002");
+            default:
+              throw new Error(`\u6682\u4E0D\u652F\u6301\u66F4\u65B0\u5757\u7C7B\u578B\u300C${type}\u300D`);
+          }
+        }
+      };
+      module.exports = { BlockConverter };
+    }
+  });
+
+  // src/ai/NameResolver.js
+  var require_NameResolver = __commonJS({
+    "src/ai/NameResolver.js"(exports, module) {
+      "use strict";
+      var { Utils: Utils2 } = require_utils();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var NameResolver = {
+        // 数据库名称/ID → { id, name } | { error } | null
+        resolveDatabaseId: async (name, id, apiKey) => {
+          if (id) {
+            const parsedId = Utils2.extractNotionId(id) || String(id).replace(/-/g, "");
+            return { id: parsedId, name: name || id };
+          }
+          const refId = Utils2.extractNotionId(name);
+          if (refId) return { id: refId, name: name || refId };
+          if (!name) return null;
+          const response = await NotionAPI2.search(
+            name,
+            { property: "object", value: "database" },
+            apiKey
+          );
+          const databases = response.results || [];
+          let exactMatch = null;
+          const partialMatches = [];
+          for (const db of databases) {
+            const titleProp = db.title || [];
+            const dbTitle = titleProp.map((t) => t.plain_text).join("");
+            if (!dbTitle) continue;
+            if (dbTitle === name) {
+              exactMatch = { id: db.id.replace(/-/g, ""), name: dbTitle };
+              break;
+            }
+            if (dbTitle.includes(name)) {
+              partialMatches.push({ id: db.id.replace(/-/g, ""), name: dbTitle });
+            }
+          }
+          if (exactMatch) return exactMatch;
+          if (partialMatches.length === 1) return partialMatches[0];
+          if (partialMatches.length > 1) {
+            const names = partialMatches.map((m) => `\u300C${m.name}\u300D`).join("\u3001");
+            return { error: `\u627E\u5230\u591A\u4E2A\u5339\u914D\u7684\u6570\u636E\u5E93: ${names}\uFF0C\u8BF7\u4F7F\u7528\u66F4\u7CBE\u786E\u7684\u540D\u79F0\u3002` };
+          }
+          return null;
+        },
+        // 页面名称/ID → { id, name } | { error } | null
+        resolvePageId: async (name, id, apiKey) => {
+          if (id) {
+            const parsedId = Utils2.extractNotionId(id) || String(id).replace(/-/g, "");
+            return { id: parsedId, name: name || id };
+          }
+          const refId = Utils2.extractNotionId(name);
+          if (refId) return { id: refId, name: name || refId };
+          if (!name) return null;
+          const response = await NotionAPI2.search(
+            name,
+            { property: "object", value: "page" },
+            apiKey
+          );
+          const pages = (response.results || []).filter((p) => !p.archived);
+          let exactMatch = null;
+          const partialMatches = [];
+          for (const page of pages) {
+            const title = Utils2.getPageTitle(page);
+            if (!title) continue;
+            if (title === name) {
+              exactMatch = { id: page.id.replace(/-/g, ""), name: title };
+              break;
+            }
+            if (title.includes(name)) {
+              partialMatches.push({ id: page.id.replace(/-/g, ""), name: title });
+            }
+          }
+          if (exactMatch) return exactMatch;
+          if (partialMatches.length === 1) return partialMatches[0];
+          if (partialMatches.length > 1) {
+            const names = partialMatches.map((m) => `\u300C${m.name}\u300D`).join("\u3001");
+            return { error: `\u627E\u5230\u591A\u4E2A\u5339\u914D\u7684\u9875\u9762: ${names}\uFF0C\u8BF7\u4F7F\u7528\u66F4\u7CBE\u786E\u7684\u540D\u79F0\u3002` };
+          }
+          return null;
+        }
+      };
+      module.exports = { NameResolver };
+    }
+  });
+
   // src/ai/index.js
   var require_ai = __commonJS({
     "src/ai/index.js"(exports, module) {
@@ -19586,6 +19968,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { UndoManager: UndoManager2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { UrlValidator } = require_UrlValidator();
       var { AISchema } = require_schema();
+      var { BlockConverter } = require_BlockConverter();
+      var { NameResolver } = require_NameResolver();
       var AIService2 = {
         // 标准化 + 安全校验 baseUrl，返回 null 表示非法（调用方应 reject）
         // versionPath: "v1" 或 "v1beta"
@@ -22310,40 +22694,7 @@ ${result}`;
           }
         },
         _resolveDatabaseId: async (name, id, apiKey) => {
-          if (id) {
-            const parsedId = Utils2.extractNotionId(id) || String(id).replace(/-/g, "");
-            return { id: parsedId, name: name || id };
-          }
-          const refId = Utils2.extractNotionId(name);
-          if (refId) return { id: refId, name: name || refId };
-          if (!name) return null;
-          const response = await NotionAPI2.search(
-            name,
-            { property: "object", value: "database" },
-            apiKey
-          );
-          const databases = response.results || [];
-          let exactMatch = null;
-          const partialMatches = [];
-          for (const db of databases) {
-            const titleProp = db.title || [];
-            const dbTitle = titleProp.map((t) => t.plain_text).join("");
-            if (!dbTitle) continue;
-            if (dbTitle === name) {
-              exactMatch = { id: db.id.replace(/-/g, ""), name: dbTitle };
-              break;
-            }
-            if (dbTitle.includes(name)) {
-              partialMatches.push({ id: db.id.replace(/-/g, ""), name: dbTitle });
-            }
-          }
-          if (exactMatch) return exactMatch;
-          if (partialMatches.length === 1) return partialMatches[0];
-          if (partialMatches.length > 1) {
-            const names = partialMatches.map((m) => `\u300C${m.name}\u300D`).join("\u3001");
-            return { error: `\u627E\u5230\u591A\u4E2A\u5339\u914D\u7684\u6570\u636E\u5E93: ${names}\uFF0C\u8BF7\u4F7F\u7528\u66F4\u7CBE\u786E\u7684\u540D\u79F0\u3002` };
-          }
-          return null;
+          return NameResolver.resolveDatabaseId(name, id, apiKey);
         },
         _fetchSourcePages: async (databaseId, apiKey, pageTitle) => {
           const allPages = [];
@@ -22665,228 +23016,10 @@ ${AIAssistant2._resultToText(r.result)}
           }
         },
         _resolvePageId: async (name, id, apiKey) => {
-          if (id) {
-            const parsedId = Utils2.extractNotionId(id) || String(id).replace(/-/g, "");
-            return { id: parsedId, name: name || id };
-          }
-          const refId = Utils2.extractNotionId(name);
-          if (refId) return { id: refId, name: name || refId };
-          if (!name) return null;
-          const response = await NotionAPI2.search(
-            name,
-            { property: "object", value: "page" },
-            apiKey
-          );
-          const pages = (response.results || []).filter((p) => !p.archived);
-          let exactMatch = null;
-          const partialMatches = [];
-          for (const page of pages) {
-            const title = Utils2.getPageTitle(page);
-            if (!title) continue;
-            if (title === name) {
-              exactMatch = { id: page.id.replace(/-/g, ""), name: title };
-              break;
-            }
-            if (title.includes(name)) {
-              partialMatches.push({ id: page.id.replace(/-/g, ""), name: title });
-            }
-          }
-          if (exactMatch) return exactMatch;
-          if (partialMatches.length === 1) return partialMatches[0];
-          if (partialMatches.length > 1) {
-            const names = partialMatches.map((m) => `\u300C${m.name}\u300D`).join("\u3001");
-            return { error: `\u627E\u5230\u591A\u4E2A\u5339\u914D\u7684\u9875\u9762: ${names}\uFF0C\u8BF7\u4F7F\u7528\u66F4\u7CBE\u786E\u7684\u540D\u79F0\u3002` };
-          }
-          return null;
+          return NameResolver.resolvePageId(name, id, apiKey);
         },
         _textToBlocks: (text) => {
-          const blocks = [];
-          const lines = text.split("\n");
-          let inCodeBlock = false;
-          let codeLines = [];
-          let codeLang = "plain text";
-          const LANG_MAP = {
-            js: "javascript",
-            ts: "typescript",
-            py: "python",
-            rb: "ruby",
-            sh: "shell",
-            bash: "shell",
-            zsh: "shell",
-            yml: "yaml",
-            md: "markdown",
-            cs: "c#",
-            cpp: "c++",
-            objc: "objective-c",
-            kt: "kotlin",
-            rs: "rust",
-            go: "go",
-            java: "java",
-            html: "html",
-            css: "css",
-            json: "json",
-            xml: "xml",
-            sql: "sql",
-            r: "r",
-            swift: "swift",
-            scala: "scala",
-            php: "php",
-            perl: "perl",
-            lua: "lua",
-            dart: "dart",
-            dockerfile: "docker",
-            makefile: "makefile",
-            toml: "toml",
-            graphql: "graphql",
-            protobuf: "protobuf",
-            sass: "sass",
-            scss: "scss",
-            less: "less",
-            jsx: "javascript",
-            tsx: "typescript"
-          };
-          const NOTION_LANGS = /* @__PURE__ */ new Set([
-            "abap",
-            "arduino",
-            "bash",
-            "basic",
-            "c",
-            "clojure",
-            "coffeescript",
-            "c++",
-            "c#",
-            "css",
-            "dart",
-            "diff",
-            "docker",
-            "elixir",
-            "elm",
-            "erlang",
-            "flow",
-            "fortran",
-            "f#",
-            "gherkin",
-            "glsl",
-            "go",
-            "graphql",
-            "groovy",
-            "haskell",
-            "html",
-            "java",
-            "javascript",
-            "json",
-            "julia",
-            "kotlin",
-            "latex",
-            "less",
-            "lisp",
-            "livescript",
-            "lua",
-            "makefile",
-            "markdown",
-            "markup",
-            "matlab",
-            "mermaid",
-            "nix",
-            "objective-c",
-            "ocaml",
-            "pascal",
-            "perl",
-            "php",
-            "plain text",
-            "powershell",
-            "prolog",
-            "protobuf",
-            "python",
-            "r",
-            "reason",
-            "ruby",
-            "rust",
-            "sass",
-            "scala",
-            "scheme",
-            "scss",
-            "shell",
-            "sql",
-            "swift",
-            "typescript",
-            "vb.net",
-            "verilog",
-            "vhdl",
-            "visual basic",
-            "webassembly",
-            "xml",
-            "yaml",
-            "java/c/c++/c#"
-          ]);
-          const normalizeLanguage2 = (lang) => {
-            const lower = (lang || "").toLowerCase().trim();
-            if (!lower) return "plain text";
-            if (LANG_MAP[lower]) return LANG_MAP[lower];
-            if (NOTION_LANGS.has(lower)) return lower;
-            return "plain text";
-          };
-          const splitLongText = (str) => {
-            const maxLen = 2e3;
-            const chunks = [];
-            if (str.length <= maxLen) {
-              chunks.push({ type: "text", text: { content: str } });
-            } else {
-              let remaining = str;
-              while (remaining.length > 0) {
-                chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
-                remaining = remaining.substring(maxLen);
-              }
-            }
-            return chunks;
-          };
-          for (const line of lines) {
-            if (line.startsWith("```")) {
-              if (inCodeBlock) {
-                const code = codeLines.join("\n");
-                blocks.push({
-                  type: "code",
-                  code: { rich_text: splitLongText(code), language: codeLang }
-                });
-                codeLines = [];
-                inCodeBlock = false;
-              } else {
-                inCodeBlock = true;
-                codeLang = normalizeLanguage2(line.slice(3).trim());
-              }
-              continue;
-            }
-            if (inCodeBlock) {
-              codeLines.push(line);
-              continue;
-            }
-            if (!line.trim()) continue;
-            if (line.startsWith("### ")) {
-              blocks.push({ type: "heading_3", heading_3: { rich_text: splitLongText(line.slice(4)) } });
-            } else if (line.startsWith("## ")) {
-              blocks.push({ type: "heading_2", heading_2: { rich_text: splitLongText(line.slice(3)) } });
-            } else if (line.startsWith("# ")) {
-              blocks.push({ type: "heading_1", heading_1: { rich_text: splitLongText(line.slice(2)) } });
-            } else if (line.trim() === "---" || line.trim() === "***") {
-              blocks.push({ type: "divider", divider: {} });
-            } else if (line.startsWith("> ")) {
-              blocks.push({ type: "quote", quote: { rich_text: splitLongText(line.slice(2)) } });
-            } else if (/^[-*]\s/.test(line)) {
-              blocks.push({ type: "bulleted_list_item", bulleted_list_item: { rich_text: splitLongText(line.replace(/^[-*]\s/, "")) } });
-            } else if (/^\d+\.\s/.test(line)) {
-              blocks.push({ type: "numbered_list_item", numbered_list_item: { rich_text: splitLongText(line.replace(/^\d+\.\s/, "")) } });
-            } else {
-              blocks.push({ type: "paragraph", paragraph: { rich_text: splitLongText(line) } });
-            }
-          }
-          if (inCodeBlock && codeLines.length > 0) {
-            const code = codeLines.join("\n");
-            blocks.push({
-              type: "code",
-              code: { rich_text: splitLongText(code), language: codeLang }
-            });
-          }
-          return blocks;
+          return BlockConverter.textToBlocks(text);
         },
         _extractPageContent: async (pageId, apiKey, maxChars = 4e3) => {
           try {
@@ -24702,99 +24835,7 @@ ${aiResponse}
           return `${indent}- [${type}] ${text || "(\u65E0\u6587\u672C\u5185\u5BB9)"}${block.has_children ? " [+children]" : ""}${id ? ` (id: ${id})` : ""}`;
         },
         _buildBlockUpdatePayload: (block, content, options = {}) => {
-          if (!block || !block.type) {
-            throw new Error("\u65E0\u6CD5\u8BC6\u522B\u5757\u7C7B\u578B");
-          }
-          const rawContent = String(content || "");
-          const richText = [{ type: "text", text: { content: String(content || "") } }];
-          const type = block.type;
-          const current = block[type] || {};
-          switch (type) {
-            case "paragraph":
-            case "heading_1":
-            case "heading_2":
-            case "heading_3":
-            case "bulleted_list_item":
-            case "numbered_list_item":
-            case "quote":
-            case "toggle":
-              return {
-                [type]: {
-                  ...current,
-                  rich_text: richText,
-                  color: options.color || current.color
-                }
-              };
-            case "to_do":
-              return {
-                to_do: {
-                  ...current,
-                  rich_text: richText,
-                  checked: typeof options.checked === "boolean" ? options.checked : !!current.checked,
-                  color: options.color || current.color
-                }
-              };
-            case "callout":
-              return {
-                callout: {
-                  ...current,
-                  rich_text: richText,
-                  icon: options.icon || current.icon,
-                  color: options.color || current.color
-                }
-              };
-            case "code":
-              return {
-                code: {
-                  ...current,
-                  rich_text: richText,
-                  caption: Array.isArray(current.caption) ? current.caption : [],
-                  language: current.language || "plain text"
-                }
-              };
-            case "template":
-              return {
-                template: {
-                  ...current,
-                  rich_text: richText
-                }
-              };
-            case "equation":
-              return {
-                equation: {
-                  ...current,
-                  expression: rawContent
-                }
-              };
-            case "bookmark":
-              if (!Utils2.isHttpUrl(rawContent)) {
-                throw new Error("bookmark \u5757\u4EC5\u652F\u6301\u66F4\u65B0\u4E3A http/https URL\u3002");
-              }
-              return {
-                bookmark: {
-                  ...current,
-                  url: rawContent,
-                  caption: Array.isArray(current.caption) ? current.caption : []
-                }
-              };
-            case "embed":
-              if (!Utils2.isHttpUrl(rawContent)) {
-                throw new Error("embed \u5757\u4EC5\u652F\u6301\u66F4\u65B0\u4E3A http/https URL\u3002");
-              }
-              return {
-                embed: {
-                  ...current,
-                  url: rawContent,
-                  caption: Array.isArray(current.caption) ? current.caption : []
-                }
-              };
-            case "link_preview":
-              throw new Error("link_preview \u5757\u662F Notion API \u7684\u53EA\u8BFB\u8FD4\u56DE\u7C7B\u578B\uFF0C\u4E0D\u80FD\u76F4\u63A5\u66F4\u65B0\uFF1B\u8BF7\u6539\u7528 bookmark \u6216 embed \u5757\u3002");
-            case "table_row":
-              throw new Error("table_row \u5757\u5F53\u524D\u65E0\u6CD5\u901A\u8FC7\u5355\u4E00 content \u53C2\u6570\u5B89\u5168\u66F4\u65B0\u5355\u5143\u683C\uFF1B\u8BF7\u6539\u7528\u9875\u9762 Markdown \u7F16\u8F91\u6216\u91CD\u65B0\u63D2\u5165\u8868\u683C\u884C\u3002");
-            default:
-              throw new Error(`\u6682\u4E0D\u652F\u6301\u66F4\u65B0\u5757\u7C7B\u578B\u300C${type}\u300D`);
-          }
+          return BlockConverter.buildBlockUpdatePayload(block, content, options);
         },
         _collectBlockTree: async (rootBlockId, apiKey, maxNodes = 50, maxDepth = 2) => {
           const collected = [];

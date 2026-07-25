@@ -9,6 +9,11 @@ const { GenericExtractor, WorkspaceService } = require("../extract");
 const { UndoManager, ConfirmationDialog } = require("../security");
 const { UrlValidator } = require("../security/UrlValidator");
 const { AISchema } = require("./schema");
+// ISS-20260723-010 W4 (MAINT-005/006/009): BlockConverter + NameResolver 从本文件提取到独立模块。
+// AIAssistant 上保留转发壳（_textToBlocks/_buildBlockUpdatePayload/_resolveDatabaseId/_resolvePageId）
+// 保持 38 处调用点零改动；源码层分层已达成，esbuild 工厂内联是打包细节（review spec「分层重构验证」）。
+const { BlockConverter } = require("./BlockConverter");
+const { NameResolver } = require("./NameResolver");
 
 // ═══════════════════════════════════════════════════════
 // 🤖 AI Service — LLM 客户端（OpenAI / Claude / Gemini）
@@ -112,7 +117,7 @@ const AIService = {
                         if (response.status >= 200 && response.status < 300) {
                             resolve(result.choices?.[0]?.message?.content?.trim() || "");
                         } else {
-                            reject(new Error(result.error?.message || `OpenAI 错误: ${response.status}`));
+                            reject(new Error(result.error?.message || `OpenAI 错误: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
                         }
                     } catch (e) {
                         reject(new Error(`解析响应失败: ${e.message}`));
@@ -153,7 +158,7 @@ const AIService = {
                         if (response.status >= 200 && response.status < 300) {
                             resolve(result.content?.[0]?.text?.trim() || "");
                         } else {
-                            reject(new Error(result.error?.message || `Claude 错误: ${response.status}`));
+                            reject(new Error(result.error?.message || `Claude 错误: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
                         }
                     } catch (e) {
                         reject(new Error(`解析响应失败: ${e.message}`));
@@ -195,7 +200,7 @@ const AIService = {
                         if (response.status >= 200 && response.status < 300) {
                             resolve(result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "");
                         } else {
-                            reject(new Error(result.error?.message || `Gemini 错误: ${response.status}`));
+                            reject(new Error(result.error?.message || `Gemini 错误: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
                         }
                     } catch (e) {
                         reject(new Error(`解析响应失败: ${e.message}`));
@@ -251,6 +256,31 @@ const AIService = {
     },
 
     // OpenAI 对话请求
+    // AI 请求重试包装（M1 reliability）：瞬时网络抖动/超时/5xx/429 重试 2 次（1s/2s 指数退避），
+    // 401/400 等不可重试错误直接 reject。对比 NotionAPI 429 重试、RSS fetchFeedWithRetry。
+    _retryable: async (requestFn, retries = 2) => {
+        let lastError;
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                return await requestFn();
+            } catch (error) {
+                lastError = error;
+                const msg = String(error?.message || error);
+                // 不可重试：鉴权失败/参数错误（401/403/400），直接抛出
+                if (/401|403|400|鉴权|授权|invalid|unauthorized|forbidden/i.test(msg)) {
+                    throw error;
+                }
+                if (attempt < retries) {
+                    const delay = 1000 * Math.pow(2, attempt); // 1s, 2s
+                    await new Promise((r) => setTimeout(r, delay));
+                }
+            }
+        }
+        // M1 observability：AI 请求最终失败留 warn（provider/model 上下文），便于诊断配额/限流/模型不存在。
+        console.warn("[LD-Notion] AI 请求最终失败（已重试）:", String(lastError?.message || lastError));
+        throw lastError;
+    },
+
     requestOpenAIChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
         // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
         const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1");
@@ -258,7 +288,7 @@ const AIService = {
             ? `${normalizedBase}/v1/chat/completions`
             : "https://api.openai.com/v1/chat/completions";
 
-        return new Promise((resolve, reject) => {
+        return AIService._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST",
                 url: url,
@@ -278,7 +308,7 @@ const AIService = {
                         if (response.status >= 200 && response.status < 300) {
                             resolve(result.choices?.[0]?.message?.content?.trim() || "");
                         } else {
-                            reject(new Error(result.error?.message || `OpenAI 错误: ${response.status}`));
+                            reject(new Error(result.error?.message || `OpenAI 错误: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
                         }
                     } catch (e) {
                         reject(new Error(`解析响应失败: ${e.message}`));
@@ -288,7 +318,7 @@ const AIService = {
                 timeout: 90000,
                 ontimeout: () => reject(new Error("AI 对话请求超时")),
             });
-        });
+        }));
     },
 
     // Claude 对话请求
@@ -299,7 +329,7 @@ const AIService = {
             ? `${normalizedBase}/v1/messages`
             : "https://api.anthropic.com/v1/messages";
 
-        return new Promise((resolve, reject) => {
+        return AIService._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST",
                 url: url,
@@ -319,7 +349,7 @@ const AIService = {
                         if (response.status >= 200 && response.status < 300) {
                             resolve(result.content?.[0]?.text?.trim() || "");
                         } else {
-                            reject(new Error(result.error?.message || `Claude 错误: ${response.status}`));
+                            reject(new Error(result.error?.message || `Claude 错误: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
                         }
                     } catch (e) {
                         reject(new Error(`解析响应失败: ${e.message}`));
@@ -329,7 +359,7 @@ const AIService = {
                 timeout: 90000,
                 ontimeout: () => reject(new Error("AI 对话请求超时")),
             });
-        });
+        }));
     },
 
     // Gemini 对话请求
@@ -340,7 +370,7 @@ const AIService = {
             ? `${normalizedBase}/v1beta/models/${model}:generateContent`
             : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-        return new Promise((resolve, reject) => {
+        return AIService._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST",
                 url: url,
@@ -361,7 +391,7 @@ const AIService = {
                         if (response.status >= 200 && response.status < 300) {
                             resolve(result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "");
                         } else {
-                            reject(new Error(result.error?.message || `Gemini 错误: ${response.status}`));
+                            reject(new Error(result.error?.message || `Gemini 错误: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
                         }
                     } catch (e) {
                         reject(new Error(`解析响应失败: ${e.message}`));
@@ -371,7 +401,7 @@ const AIService = {
                 timeout: 90000,
                 ontimeout: () => reject(new Error("AI 对话请求超时")),
             });
-        });
+        }));
     },
 
     // Agent 多轮对话请求（将 system + messages 拼接为单个 prompt）
@@ -1777,7 +1807,7 @@ ${candidateList}
                     console.warn(`[batch_tag] 失败: ${title}`, e);
                 }
 
-                await new Promise(r => setTimeout(r, 500));
+                await Utils.sleep(500);
             }
 
             return `✅ 批量打标签完成：已为 ${tagged}/${pages.length} 个页面添加标签。`;
@@ -2987,50 +3017,8 @@ handleUpdate: async (params, settings, explanation) => {
     }
 },
 _resolveDatabaseId: async (name, id, apiKey) => {
-    // 优先使用直接提供的 ID
-    if (id) {
-        const parsedId = Utils.extractNotionId(id) || String(id).replace(/-/g, "");
-        return { id: parsedId, name: name || id };
-    }
-
-    const refId = Utils.extractNotionId(name);
-    if (refId) return { id: refId, name: name || refId };
-
-    if (!name) return null;
-
-    // 通过名称搜索数据库
-    const response = await NotionAPI.search(
-        name,
-        { property: "object", value: "database" },
-        apiKey
-    );
-
-    const databases = response.results || [];
-    // 优先精确匹配，再模糊匹配
-    let exactMatch = null;
-    const partialMatches = [];
-    for (const db of databases) {
-        const titleProp = db.title || [];
-        const dbTitle = titleProp.map(t => t.plain_text).join("");
-        if (!dbTitle) continue;
-        if (dbTitle === name) {
-            exactMatch = { id: db.id.replace(/-/g, ""), name: dbTitle };
-            break;
-        }
-        if (dbTitle.includes(name)) {
-            partialMatches.push({ id: db.id.replace(/-/g, ""), name: dbTitle });
-        }
-    }
-
-    if (exactMatch) return exactMatch;
-    if (partialMatches.length === 1) return partialMatches[0];
-    if (partialMatches.length > 1) {
-        // 多个模糊匹配，返回错误避免误操作
-        const names = partialMatches.map(m => `「${m.name}」`).join("、");
-        return { error: `找到多个匹配的数据库: ${names}，请使用更精确的名称。` };
-    }
-
-    return null;
+    // W4 (MAINT-009): 实现已迁移至 src/ai/NameResolver.js，此处为向后兼容转发壳。
+    return NameResolver.resolveDatabaseId(name, id, apiKey);
 },
 _fetchSourcePages: async (databaseId, apiKey, pageTitle) => {
     const allPages = [];
@@ -3388,165 +3376,13 @@ handleCreateDatabase: async (params, settings, explanation) => {
     }
 },
 _resolvePageId: async (name, id, apiKey) => {
-    if (id) {
-        const parsedId = Utils.extractNotionId(id) || String(id).replace(/-/g, "");
-        return { id: parsedId, name: name || id };
-    }
-    const refId = Utils.extractNotionId(name);
-    if (refId) return { id: refId, name: name || refId };
-    if (!name) return null;
-
-    const response = await NotionAPI.search(
-        name,
-        { property: "object", value: "page" },
-        apiKey
-    );
-
-    const pages = (response.results || []).filter(p => !p.archived);
-    let exactMatch = null;
-    const partialMatches = [];
-    for (const page of pages) {
-        const title = Utils.getPageTitle(page);
-        if (!title) continue;
-        if (title === name) {
-            exactMatch = { id: page.id.replace(/-/g, ""), name: title };
-            break;
-        }
-        if (title.includes(name)) {
-            partialMatches.push({ id: page.id.replace(/-/g, ""), name: title });
-        }
-    }
-
-    if (exactMatch) return exactMatch;
-    if (partialMatches.length === 1) return partialMatches[0];
-    if (partialMatches.length > 1) {
-        const names = partialMatches.map(m => `「${m.name}」`).join("、");
-        return { error: `找到多个匹配的页面: ${names}，请使用更精确的名称。` };
-    }
-    return null;
+    // W4 (MAINT-009): 实现已迁移至 src/ai/NameResolver.js，此处为向后兼容转发壳。
+    return NameResolver.resolvePageId(name, id, apiKey);
 },
 _textToBlocks: (text) => {
-    const blocks = [];
-    const lines = text.split("\n");
-    let inCodeBlock = false;
-    let codeLines = [];
-    let codeLang = "plain text";
-
-    // Notion 接受的代码语言映射（常见缩写 → Notion 标准名）
-    const LANG_MAP = {
-        js: "javascript", ts: "typescript", py: "python", rb: "ruby",
-        sh: "shell", bash: "shell", zsh: "shell", yml: "yaml",
-        md: "markdown", cs: "c#", cpp: "c++", objc: "objective-c",
-        kt: "kotlin", rs: "rust", go: "go", java: "java",
-        html: "html", css: "css", json: "json", xml: "xml",
-        sql: "sql", r: "r", swift: "swift", scala: "scala",
-        php: "php", perl: "perl", lua: "lua", dart: "dart",
-        dockerfile: "docker", makefile: "makefile", toml: "toml",
-        graphql: "graphql", protobuf: "protobuf", sass: "sass",
-        scss: "scss", less: "less", jsx: "javascript", tsx: "typescript",
-    };
-    const NOTION_LANGS = new Set([
-        "abap", "arduino", "bash", "basic", "c", "clojure", "coffeescript",
-        "c++", "c#", "css", "dart", "diff", "docker", "elixir", "elm",
-        "erlang", "flow", "fortran", "f#", "gherkin", "glsl", "go", "graphql",
-        "groovy", "haskell", "html", "java", "javascript", "json", "julia",
-        "kotlin", "latex", "less", "lisp", "livescript", "lua", "makefile",
-        "markdown", "markup", "matlab", "mermaid", "nix", "objective-c",
-        "ocaml", "pascal", "perl", "php", "plain text", "powershell",
-        "prolog", "protobuf", "python", "r", "reason", "ruby", "rust",
-        "sass", "scala", "scheme", "scss", "shell", "sql", "swift",
-        "typescript", "vb.net", "verilog", "vhdl", "visual basic",
-        "webassembly", "xml", "yaml", "java/c/c++/c#",
-    ]);
-    const normalizeLanguage = (lang) => {
-        const lower = (lang || "").toLowerCase().trim();
-        if (!lower) return "plain text";
-        if (LANG_MAP[lower]) return LANG_MAP[lower];
-        if (NOTION_LANGS.has(lower)) return lower;
-        return "plain text";
-    };
-
-    const splitLongText = (str) => {
-        const maxLen = 2000;
-        const chunks = [];
-        if (str.length <= maxLen) {
-            chunks.push({ type: "text", text: { content: str } });
-        } else {
-            let remaining = str;
-            while (remaining.length > 0) {
-                chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
-                remaining = remaining.substring(maxLen);
-            }
-        }
-        return chunks;
-    };
-
-    for (const line of lines) {
-        // 代码块处理
-        if (line.startsWith("```")) {
-            if (inCodeBlock) {
-                const code = codeLines.join("\n");
-                blocks.push({
-                    type: "code",
-                    code: { rich_text: splitLongText(code), language: codeLang }
-                });
-                codeLines = [];
-                inCodeBlock = false;
-            } else {
-                inCodeBlock = true;
-                codeLang = normalizeLanguage(line.slice(3).trim());
-            }
-            continue;
-        }
-
-        if (inCodeBlock) {
-            codeLines.push(line);
-            continue;
-        }
-
-        // 空行跳过
-        if (!line.trim()) continue;
-
-        // 标题
-        if (line.startsWith("### ")) {
-            blocks.push({ type: "heading_3", heading_3: { rich_text: splitLongText(line.slice(4)) } });
-        } else if (line.startsWith("## ")) {
-            blocks.push({ type: "heading_2", heading_2: { rich_text: splitLongText(line.slice(3)) } });
-        } else if (line.startsWith("# ")) {
-            blocks.push({ type: "heading_1", heading_1: { rich_text: splitLongText(line.slice(2)) } });
-        }
-        // 分割线
-        else if (line.trim() === "---" || line.trim() === "***") {
-            blocks.push({ type: "divider", divider: {} });
-        }
-        // 引用
-        else if (line.startsWith("> ")) {
-            blocks.push({ type: "quote", quote: { rich_text: splitLongText(line.slice(2)) } });
-        }
-        // 无序列表
-        else if (/^[-*]\s/.test(line)) {
-            blocks.push({ type: "bulleted_list_item", bulleted_list_item: { rich_text: splitLongText(line.replace(/^[-*]\s/, "")) } });
-        }
-        // 有序列表
-        else if (/^\d+\.\s/.test(line)) {
-            blocks.push({ type: "numbered_list_item", numbered_list_item: { rich_text: splitLongText(line.replace(/^\d+\.\s/, "")) } });
-        }
-        // 普通段落
-        else {
-            blocks.push({ type: "paragraph", paragraph: { rich_text: splitLongText(line) } });
-        }
-    }
-
-    // 处理未闭合的代码块
-    if (inCodeBlock && codeLines.length > 0) {
-        const code = codeLines.join("\n");
-        blocks.push({
-            type: "code",
-            code: { rich_text: splitLongText(code), language: codeLang }
-        });
-    }
-
-    return blocks;
+    // W4 (MAINT-006): 实现已迁移至 src/ai/BlockConverter.js，此处为向后兼容转发壳。
+    // tests/ai-text-to-blocks.test.js 的 27 用例守护此契约（W2 基线）。
+    return BlockConverter.textToBlocks(text);
 },
 _extractPageContent: async (pageId, apiKey, maxChars = 4000) => {
     try {
@@ -4636,9 +4472,23 @@ ${structure_prompt ? `补充要求：${structure_prompt}` : ""}
             return `❌ AI 生成的结构无效。请换一种方式描述。`;
         }
 
-        if (!plan.children || plan.children.length === 0) {
+        // plan.children 经 AISchema 校验（M2，ISS-009 消费点补全：handleGeneratePages 遗漏路径）。
+        // title 走 validatePropertyValue 截断 ≤2000、icon 走 validateEmoji、description 截断，防 prompt injection 污染。
+        if (!Array.isArray(plan.children) || plan.children.length === 0) {
             return `❌ AI 未能规划出有效的子页面结构。`;
         }
+        const MAX_CHILD_DESC = 2000;
+        plan.children = plan.children.map((c) => ({
+            ...c,
+            title: AISchema.validatePropertyValue(c?.title, "title"),
+            icon: AISchema.validateEmoji(c?.icon),
+            description: AISchema.validatePropertyValue(c?.description, "rich_text").slice(0, MAX_CHILD_DESC),
+        })).filter((c) => c.title);
+        if (plan.children.length === 0) {
+            return `❌ AI 规划的子页面标题无效。`;
+        }
+        plan.parent_title = AISchema.validatePropertyValue(plan.parent_title, "title");
+        plan.parent_summary = AISchema.validatePropertyValue(plan.parent_summary, "rich_text");
 
         // 确认
         const pageList = plan.children.map(c => `${c.icon || "📄"} ${c.title}`).join("\n");
@@ -5247,7 +5097,23 @@ const AIAssistant = {
                 // 对象值经白名单清洗：仅允许 title/rich_text/number/select 等，
                 // 拒 relation/people/files/created_by/created_time 等系统/关联字段（M2）
                 const cleaned = AISchema.sanitizeObjectValue(value);
-                if (cleaned) properties[key] = cleaned;
+                if (cleaned) {
+                    // M3（ISS-009 消费点补全）：对象值内的标量再按 type 校验/截断，
+                    // 与 _buildPropertyValuePayload 一致——url/email/phone_number 走 validatePropertyValue
+                    // 截断 + 基本 http(s) 校验（url 类），防 AI 注入 javascript: 等协议污染 Notion url 属性。
+                    for (const propType of Object.keys(cleaned)) {
+                        const scalar = cleaned[propType];
+                        if (propType === "url" || propType === "email" || propType === "phone_number") {
+                            const validated = AISchema.validatePropertyValue(scalar, propType);
+                            if (validated !== null && validated !== "") {
+                                cleaned[propType] = validated;
+                            } else {
+                                delete cleaned[propType];
+                            }
+                        }
+                    }
+                    if (Object.keys(cleaned).length > 0) properties[key] = cleaned;
+                }
                 continue;
             }
 
@@ -5458,101 +5324,8 @@ const AIAssistant = {
     },
 
     _buildBlockUpdatePayload: (block, content, options = {}) => {
-        if (!block || !block.type) {
-            throw new Error("无法识别块类型");
-        }
-
-        const rawContent = String(content || "");
-        const richText = [{ type: "text", text: { content: String(content || "") } }];
-        const type = block.type;
-        const current = block[type] || {};
-
-        switch (type) {
-            case "paragraph":
-            case "heading_1":
-            case "heading_2":
-            case "heading_3":
-            case "bulleted_list_item":
-            case "numbered_list_item":
-            case "quote":
-            case "toggle":
-                return {
-                    [type]: {
-                        ...current,
-                        rich_text: richText,
-                        color: options.color || current.color,
-                    }
-                };
-            case "to_do":
-                return {
-                    to_do: {
-                        ...current,
-                        rich_text: richText,
-                        checked: typeof options.checked === "boolean" ? options.checked : !!current.checked,
-                        color: options.color || current.color,
-                    }
-                };
-            case "callout":
-                return {
-                    callout: {
-                        ...current,
-                        rich_text: richText,
-                        icon: options.icon || current.icon,
-                        color: options.color || current.color,
-                    }
-                };
-            case "code":
-                return {
-                    code: {
-                        ...current,
-                        rich_text: richText,
-                        caption: Array.isArray(current.caption) ? current.caption : [],
-                        language: current.language || "plain text",
-                    }
-                };
-            case "template":
-                return {
-                    template: {
-                        ...current,
-                        rich_text: richText,
-                    }
-                };
-            case "equation":
-                return {
-                    equation: {
-                        ...current,
-                        expression: rawContent,
-                    }
-                };
-            case "bookmark":
-                if (!Utils.isHttpUrl(rawContent)) {
-                    throw new Error("bookmark 块仅支持更新为 http/https URL。");
-                }
-                return {
-                    bookmark: {
-                        ...current,
-                        url: rawContent,
-                        caption: Array.isArray(current.caption) ? current.caption : [],
-                    }
-                };
-            case "embed":
-                if (!Utils.isHttpUrl(rawContent)) {
-                    throw new Error("embed 块仅支持更新为 http/https URL。");
-                }
-                return {
-                    embed: {
-                        ...current,
-                        url: rawContent,
-                        caption: Array.isArray(current.caption) ? current.caption : [],
-                    }
-                };
-            case "link_preview":
-                throw new Error("link_preview 块是 Notion API 的只读返回类型，不能直接更新；请改用 bookmark 或 embed 块。");
-            case "table_row":
-                throw new Error("table_row 块当前无法通过单一 content 参数安全更新单元格；请改用页面 Markdown 编辑或重新插入表格行。");
-            default:
-                throw new Error(`暂不支持更新块类型「${type}」`);
-        }
+        // W4 (MAINT-005): 实现已迁移至 src/ai/BlockConverter.js，此处为向后兼容转发壳。
+        return BlockConverter.buildBlockUpdatePayload(block, content, options);
     },
 
     _collectBlockTree: async (rootBlockId, apiKey, maxNodes = 50, maxDepth = 2) => {
