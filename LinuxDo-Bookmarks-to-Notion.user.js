@@ -21511,6 +21511,2108 @@ ${result}`;
     }
   });
 
+  // src/ai/Handlers.js
+  var require_Handlers = __commonJS({
+    "src/ai/Handlers.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { TargetState: TargetState2 } = require_auth();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { OperationGuard: OperationGuard2 } = require_security();
+      var { ConfirmationDialog: ConfirmationDialog2 } = require_security();
+      var { AISchema } = require_schema();
+      var { BlockConverter } = require_BlockConverter();
+      var { NameResolver } = require_NameResolver();
+      var _AI = null;
+      var AI = () => _AI || (_AI = require_ai().AIAssistant);
+      var _state = null;
+      var state = () => _state || (_state = require_ai().ChatState);
+      var _svc = null;
+      var svc = () => _svc || (_svc = require_ai().AIService);
+      var AIHandlers2 = {
+        handleQuery: async (params, settings, explanation) => {
+          var _a, _b, _c;
+          if (!settings.notionDatabaseId) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
+          }
+          state().updateLastMessage(`\u6B63\u5728\u67E5\u8BE2\u6570\u636E\u5E93...`, "processing");
+          try {
+            const { limit = 10, filter_field, filter_value } = params;
+            let filter = null;
+            if (filter_field && filter_value) {
+              const fieldConfig = {
+                "\u4F5C\u8005": { name: "\u4F5C\u8005", type: "rich_text" },
+                "\u5206\u7C7B": { name: "\u5206\u7C7B", type: "rich_text" },
+                "\u6807\u7B7E": { name: "\u6807\u7B7E", type: "multi_select" },
+                "AI\u5206\u7C7B": { name: "AI\u5206\u7C7B", type: "select" }
+              };
+              const config = fieldConfig[filter_field] || { name: filter_field, type: "rich_text" };
+              if (config.type === "select") {
+                filter = {
+                  property: config.name,
+                  select: { equals: filter_value }
+                };
+              } else if (config.type === "multi_select") {
+                filter = {
+                  property: config.name,
+                  multi_select: { contains: filter_value }
+                };
+              } else {
+                filter = {
+                  property: config.name,
+                  rich_text: { contains: filter_value }
+                };
+              }
+            }
+            const allPages = [];
+            let cursor = null;
+            let hasMore = true;
+            const maxPages = 10;
+            let pageCount = 0;
+            let querySorts = [];
+            while (hasMore && pageCount < maxPages) {
+              let response;
+              try {
+                response = await NotionAPI2.queryDatabase(
+                  settings.notionDatabaseId,
+                  filter,
+                  pageCount === 0 ? [{ property: "\u6536\u85CF\u65F6\u95F4", direction: "descending" }] : querySorts,
+                  cursor,
+                  settings.notionApiKey
+                );
+                if (pageCount === 0) querySorts = [{ property: "\u6536\u85CF\u65F6\u95F4", direction: "descending" }];
+              } catch (sortError) {
+                if (pageCount === 0 && ((_a = sortError.message) == null ? void 0 : _a.includes("\u6536\u85CF\u65F6\u95F4"))) {
+                  querySorts = [{ timestamp: "created_time", direction: "descending" }];
+                  response = await NotionAPI2.queryDatabase(
+                    settings.notionDatabaseId,
+                    filter,
+                    querySorts,
+                    cursor,
+                    settings.notionApiKey
+                  );
+                } else {
+                  throw sortError;
+                }
+              }
+              allPages.push(...response.results || []);
+              hasMore = response.has_more;
+              cursor = response.next_cursor;
+              pageCount++;
+              if (hasMore) {
+                state().updateLastMessage(`\u6B63\u5728\u67E5\u8BE2\u6570\u636E\u5E93... (\u5DF2\u83B7\u53D6 ${allPages.length} \u6761)`, "processing");
+              }
+            }
+            const pages = allPages;
+            const total = pages.length;
+            const isTruncated = hasMore;
+            if (total === 0) {
+              return `\u{1F4CA} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u7B26\u5408\u6761\u4EF6\u7684\u5E16\u5B50\u3002${filter ? `
+\u7B5B\u9009\u6761\u4EF6\uFF1A${filter_field} \u5305\u542B "${filter_value}"` : ""}`;
+            }
+            let result = `\u{1F4CA} **\u67E5\u8BE2\u7ED3\u679C**
+
+`;
+            result += `\u5171\u627E\u5230 **${total}** \u4E2A\u5E16\u5B50`;
+            if (isTruncated) {
+              result += ` (\u5DF2\u8FBE\u67E5\u8BE2\u4E0A\u9650\uFF0C\u53EF\u80FD\u8FD8\u6709\u66F4\u591A)`;
+            }
+            if (((_b = params.keyword) == null ? void 0 : _b.includes("\u7EDF\u8BA1")) || ((_c = params.keyword) == null ? void 0 : _c.includes("\u5206\u7C7B"))) {
+              const categoryCount = {};
+              pages.forEach((page) => {
+                var _a2, _b2, _c2, _d, _e;
+                const cat = ((_b2 = (_a2 = page.properties["AI\u5206\u7C7B"]) == null ? void 0 : _a2.select) == null ? void 0 : _b2.name) || ((_e = (_d = (_c2 = page.properties["\u5206\u7C7B"]) == null ? void 0 : _c2.rich_text) == null ? void 0 : _d[0]) == null ? void 0 : _e.plain_text) || "\u672A\u5206\u7C7B";
+                categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+              });
+              result += `
+
+**\u5206\u7C7B\u7EDF\u8BA1\uFF1A**
+`;
+              Object.entries(categoryCount).sort((a, b) => b[1] - a[1]).forEach(([cat, count]) => {
+                result += `- ${cat}: ${count} \u4E2A
+`;
+              });
+            } else {
+              const showLimit = Math.min(limit, total);
+              result += `\uFF08\u663E\u793A\u524D ${showLimit} \u6761\uFF09
+
+`;
+              pages.slice(0, showLimit).forEach((page, i) => {
+                var _a2, _b2, _c2;
+                const title = Utils2.getPageTitle(page);
+                const author = ((_c2 = (_b2 = (_a2 = page.properties["\u4F5C\u8005"]) == null ? void 0 : _a2.rich_text) == null ? void 0 : _b2[0]) == null ? void 0 : _c2.plain_text) || "\u672A\u77E5";
+                result += `${i + 1}. **${title}**
+   \u4F5C\u8005: ${author}
+`;
+              });
+            }
+            return result;
+          } catch (error) {
+            return `\u274C \u67E5\u8BE2\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleSearch: async (params, settings, explanation) => {
+          if (!settings.notionDatabaseId) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22 xxx\u300D\u6765\u641C\u7D22\u6574\u4E2A\u5DE5\u4F5C\u533A\uFF0C\u6216\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
+          }
+          state().updateLastMessage(`\u6B63\u5728\u641C\u7D22...`, "processing");
+          try {
+            const { keyword, limit = 10 } = params;
+            if (!keyword) {
+              return "\u8BF7\u544A\u8BC9\u6211\u4F60\u60F3\u641C\u7D22\u4EC0\u4E48\u5173\u952E\u8BCD\uFF1F";
+            }
+            const response = await NotionAPI2.search(
+              keyword,
+              { property: "object", value: "page" },
+              settings.notionApiKey
+            );
+            const pages = (response.results || []).filter((p) => {
+              var _a, _b;
+              return ((_b = (_a = p.parent) == null ? void 0 : _a.database_id) == null ? void 0 : _b.replace(/-/g, "")) === settings.notionDatabaseId.replace(/-/g, "");
+            });
+            if (pages.length === 0) {
+              return `\u{1F50D} \u6CA1\u6709\u627E\u5230\u5305\u542B\u300C${keyword}\u300D\u7684\u5E16\u5B50\u3002`;
+            }
+            let result = `\u{1F50D} **\u641C\u7D22\u7ED3\u679C**
+
+`;
+            result += `\u627E\u5230 **${pages.length}** \u4E2A\u5305\u542B\u300C${keyword}\u300D\u7684\u5E16\u5B50\uFF1A
+
+`;
+            pages.slice(0, limit).forEach((page, i) => {
+              const title = Utils2.getPageTitle(page);
+              const url = page.url || "";
+              result += `${i + 1}. [${title}](${url})
+`;
+            });
+            if (pages.length > limit) {
+              result += `
+... \u8FD8\u6709 ${pages.length - limit} \u6761\u7ED3\u679C`;
+            }
+            return result;
+          } catch (error) {
+            return `\u274C \u641C\u7D22\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleWorkspaceSearch: async (params, settings, explanation) => {
+          state().updateLastMessage(`\u6B63\u5728\u641C\u7D22\u6574\u4E2A\u5DE5\u4F5C\u533A...`, "processing");
+          try {
+            const { keyword = "", limit = 10, object_type } = params;
+            let filter = null;
+            if (object_type === "page") {
+              filter = { property: "object", value: "page" };
+            } else if (object_type === "database") {
+              filter = { property: "object", value: "database" };
+            }
+            let allResults = [];
+            let cursor = void 0;
+            let searchPageCount = 0;
+            do {
+              const response = await NotionAPI2.search(keyword, filter, settings.notionApiKey, cursor);
+              allResults = allResults.concat(response.results || []);
+              cursor = response.has_more ? response.next_cursor : void 0;
+              searchPageCount++;
+            } while (cursor && searchPageCount < 10);
+            const results = allResults;
+            if (results.length === 0) {
+              const typeLabel = object_type === "page" ? "\u9875\u9762" : object_type === "database" ? "\u6570\u636E\u5E93" : "\u5185\u5BB9";
+              return keyword ? `\u{1F310} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u5305\u542B\u300C${keyword}\u300D\u7684${typeLabel}\u3002` : `\u{1F310} \u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230${typeLabel}\u3002`;
+            }
+            const pages = results.filter((r) => r.object === "page");
+            const databases = results.filter((r) => r.object === "database");
+            let result = `\u{1F310} **\u5DE5\u4F5C\u533A\u641C\u7D22\u7ED3\u679C**
+
+`;
+            if (keyword) {
+              result += `\u641C\u7D22\u5173\u952E\u8BCD\uFF1A\u300C${keyword}\u300D
+`;
+            }
+            result += `\u5171\u627E\u5230 **${results.length}** \u4E2A\u7ED3\u679C`;
+            if (pages.length > 0 && databases.length > 0) {
+              result += `\uFF08${pages.length} \u4E2A\u9875\u9762\uFF0C${databases.length} \u4E2A\u6570\u636E\u5E93\uFF09`;
+            }
+            result += `
+
+`;
+            if (databases.length > 0 && (!object_type || object_type === "database")) {
+              result += `\u{1F4C1} **\u6570\u636E\u5E93** (${databases.length})
+`;
+              databases.slice(0, limit).forEach((db, i) => {
+                var _a, _b, _c;
+                const title = ((_b = (_a = db.title) == null ? void 0 : _a[0]) == null ? void 0 : _b.plain_text) || "\u65E0\u6807\u9898\u6570\u636E\u5E93";
+                const url = db.url || "";
+                const id = ((_c = db.id) == null ? void 0 : _c.replace(/-/g, "")) || "";
+                result += `${i + 1}. [${title}](${url})
+`;
+                result += `   ID: \`${id}\`
+`;
+              });
+              if (databases.length > limit) {
+                result += `   ... \u8FD8\u6709 ${databases.length - limit} \u4E2A\u6570\u636E\u5E93
+`;
+              }
+              result += `
+`;
+            }
+            if (pages.length > 0 && (!object_type || object_type === "page")) {
+              result += `\u{1F4C4} **\u9875\u9762** (${pages.length})
+`;
+              pages.slice(0, limit).forEach((page, i) => {
+                var _a;
+                const title = Utils2.getPageTitle(page);
+                const url = page.url || "";
+                const parentType = ((_a = page.parent) == null ? void 0 : _a.type) || "";
+                let parentLabel = "";
+                if (parentType === "database_id") {
+                  parentLabel = "\u{1F4C1} \u6570\u636E\u5E93\u6761\u76EE";
+                } else if (parentType === "page_id") {
+                  parentLabel = "\u{1F4C4} \u5B50\u9875\u9762";
+                } else if (parentType === "workspace") {
+                  parentLabel = "\u{1F310} \u5DE5\u4F5C\u533A\u9875\u9762";
+                }
+                result += `${i + 1}. [${title}](${url})`;
+                if (parentLabel) {
+                  result += ` - ${parentLabel}`;
+                }
+                result += `
+`;
+              });
+              if (pages.length > limit) {
+                result += `   ... \u8FD8\u6709 ${pages.length - limit} \u4E2A\u9875\u9762
+`;
+              }
+            }
+            result += `
+\u{1F4A1} \u63D0\u793A\uFF1A\u590D\u5236\u6570\u636E\u5E93 ID \u53EF\u4EE5\u914D\u7F6E\u5230\u8BBE\u7F6E\u4E2D\u4F7F\u7528\u66F4\u591A\u529F\u80FD\u3002`;
+            return result;
+          } catch (error) {
+            return `\u274C \u5DE5\u4F5C\u533A\u641C\u7D22\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleClassify: async (params, settings, explanation) => {
+          return "\u{1F4DD} \u5355\u4E2A\u5206\u7C7B\u529F\u80FD\u5F00\u53D1\u4E2D...\n\n\u76EE\u524D\u53EF\u4EE5\u4F7F\u7528\u300C\u81EA\u52A8\u5206\u7C7B\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50\u300D\u6765\u6279\u91CF\u5206\u7C7B\u3002";
+        },
+        handleBatchClassify: async (params, settings, explanation) => {
+          if (!settings.notionDatabaseId) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
+          }
+          if (settings.categories.length < 2) {
+            return "\u274C \u8BF7\u5148\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u914D\u7F6E\u81F3\u5C11\u4E24\u4E2A\u5206\u7C7B\u9009\u9879\u3002";
+          }
+          state().updateLastMessage(`\u6B63\u5728\u51C6\u5907\u6279\u91CF\u5206\u7C7B...
+\u5206\u7C7B\u9009\u9879: ${settings.categories.join(", ")}`, "processing");
+          try {
+            await AIClassifier.ensureAICategoryProperty(settings);
+            state().updateLastMessage(`\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...`, "processing");
+            const pages = await AIClassifier.fetchAllPages(settings);
+            if (pages.length === 0) {
+              return "\u{1F4ED} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762\u3002";
+            }
+            const unclassified = pages.filter((p) => {
+              var _a;
+              const aiCategory = p.properties["AI\u5206\u7C7B"];
+              return !((_a = aiCategory == null ? void 0 : aiCategory.select) == null ? void 0 : _a.name);
+            });
+            if (unclassified.length === 0) {
+              return `\u2705 \u6240\u6709 ${pages.length} \u4E2A\u9875\u9762\u90FD\u5DF2\u5206\u7C7B\u5B8C\u6210\uFF01`;
+            }
+            const results = { success: 0, failed: 0 };
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            for (let i = 0; i < unclassified.length; i++) {
+              const page = unclassified[i];
+              const title = AIClassifier.getPageTitle(page);
+              state().updateLastMessage(
+                `\u{1F504} \u6B63\u5728\u5206\u7C7B (${i + 1}/${unclassified.length})
+
+\u5F53\u524D: ${title}`,
+                "processing"
+              );
+              try {
+                await AIClassifier.classifyPage(page, settings);
+                results.success++;
+              } catch (error) {
+                console.error(`[LD-Notion] \u5206\u7C7B\u5931\u8D25: ${title}`, error);
+                results.failed++;
+              }
+              if (i < unclassified.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            }
+            let resultMsg = `\u2705 **\u6279\u91CF\u5206\u7C7B\u5B8C\u6210**
+
+`;
+            resultMsg += `- \u603B\u8BA1: ${pages.length} \u4E2A\u9875\u9762
+`;
+            resultMsg += `- \u5DF2\u5206\u7C7B: ${pages.length - unclassified.length} \u4E2A
+`;
+            resultMsg += `- \u672C\u6B21\u5206\u7C7B: ${results.success} \u4E2A
+`;
+            if (results.failed > 0) {
+              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
+`;
+            }
+            return resultMsg;
+          } catch (error) {
+            return `\u274C \u6279\u91CF\u5206\u7C7B\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleUpdate: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("updatePage")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u66F4\u65B0\u9875\u9762\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          state().updateLastMessage("\u6B63\u5728\u5B9A\u4F4D\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targets = await AI()._resolvePageTargets({
+              ...params,
+              page_name: params.page_name || params.keyword
+            }, settings);
+            if (targets == null ? void 0 : targets.error) return `\u274C ${targets.error}`;
+            if (!targets || targets.length === 0) {
+              return "\u274C \u6CA1\u6709\u627E\u5230\u53EF\u66F4\u65B0\u7684\u9875\u9762\u3002\u8BF7\u63D0\u4F9B page_name/page_id/page_ids\uFF0C\u6216\u63D0\u4F9B\u6570\u636E\u5E93 + page_title\u3002";
+            }
+            const batchMode = !!params.batch || Array.isArray(params.page_ids) || !!params.page_title || targets.length > 1;
+            if (!batchMode && targets.length > 1) {
+              const names = targets.map((t) => `\u300C${t.name}\u300D`).join("\u3001");
+              return `\u274C \u627E\u5230\u591A\u4E2A\u9875\u9762\uFF1A${names}\u3002\u8BF7\u63D0\u4F9B\u66F4\u7CBE\u786E\u7684 page_name \u6216\u76F4\u63A5\u63D0\u4F9B page_id\u3002`;
+            }
+            const { success, failed } = await AI()._applyPageUpdatesToTargets(targets, params, settings);
+            if (!batchMode && success === 1 && failed === 0) {
+              return `\u2705 \u5DF2\u66F4\u65B0\u9875\u9762\u300C${targets[0].name}\u300D\u3002`;
+            }
+            return `\u2705 \u6279\u91CF\u66F4\u65B0\u5B8C\u6210\uFF1A\u6210\u529F ${success} \u4E2A\uFF0C\u5931\u8D25 ${failed} \u4E2A\u3002`;
+          } catch (error) {
+            return `\u274C \u66F4\u65B0\u9875\u9762\u5931\u8D25: ${error.message}`;
+          }
+        },
+        _resolveDatabaseId: async (name, id, apiKey) => {
+          return NameResolver.resolveDatabaseId(name, id, apiKey);
+        },
+        _fetchSourcePages: async (databaseId, apiKey, pageTitle) => {
+          const allPages = [];
+          let cursor = null;
+          do {
+            const response = await NotionAPI2.queryDatabase(databaseId, null, null, cursor, apiKey);
+            allPages.push(...response.results || []);
+            cursor = response.has_more ? response.next_cursor : null;
+          } while (cursor);
+          if (pageTitle) {
+            return allPages.filter((page) => {
+              const title = Utils2.getPageTitle(page);
+              return title.includes(pageTitle);
+            });
+          }
+          return allPages;
+        },
+        handleMove: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("movePage")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u79FB\u52A8\u9875\u9762\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
+          }
+          const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u6570\u636E\u5E93\u4FE1\u606F...", "processing");
+          try {
+            let source = await AI()._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
+            if (source == null ? void 0 : source.error) return `\u274C \u6E90\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${source.error}`;
+            if (!source && settings.notionDatabaseId) {
+              source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93" };
+            }
+            if (!source) {
+              return "\u274C \u65E0\u6CD5\u786E\u5B9A\u6E90\u6570\u636E\u5E93\u3002\u8BF7\u6307\u5B9A\u6E90\u6570\u636E\u5E93\u540D\u79F0\uFF0C\u6216\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002";
+            }
+            const target = await AI()._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+            if (target == null ? void 0 : target.error) return `\u274C \u76EE\u6807\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${target.error}`;
+            if (!target) {
+              return `\u274C \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002
+
+\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002`;
+            }
+            if (source.id === target.id) {
+              return "\u274C \u6E90\u6570\u636E\u5E93\u548C\u76EE\u6807\u6570\u636E\u5E93\u76F8\u540C\uFF0C\u65E0\u9700\u79FB\u52A8\u3002";
+            }
+            state().updateLastMessage(`\u6B63\u5728\u4ECE\u300C${source.name}\u300D\u83B7\u53D6\u9875\u9762...`, "processing");
+            const pages = await AI()._fetchSourcePages(source.id, settings.notionApiKey, page_title);
+            if (pages.length === 0) {
+              return page_title ? `\u{1F4ED} \u5728\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u6807\u9898\u5305\u542B\u300C${page_title}\u300D\u7684\u9875\u9762\u3002` : `\u{1F4ED}\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u9875\u9762\u3002`;
+            }
+            const results = { success: 0, failed: 0 };
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            for (let i = 0; i < pages.length; i++) {
+              const page = pages[i];
+              const title = Utils2.getPageTitle(page);
+              state().updateLastMessage(
+                `\u{1F4E6} \u6B63\u5728\u79FB\u52A8 (${i + 1}/${pages.length})
+
+\u5F53\u524D: ${title}
+\u2192 \u76EE\u6807: ${target.name}`,
+                "processing"
+              );
+              try {
+                await AI()._executeGuardedPageWrite(
+                  "movePage",
+                  { id: page.id, name: title },
+                  () => NotionAPI2.movePage(page.id, target.id, "database", settings.notionApiKey),
+                  settings
+                );
+                results.success++;
+              } catch (error) {
+                console.error(`[LD-Notion] \u79FB\u52A8\u5931\u8D25: ${title}`, error);
+                results.failed++;
+              }
+              if (i < pages.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            }
+            let resultMsg = `\u2705 **\u79FB\u52A8\u5B8C\u6210**
+
+`;
+            resultMsg += `- \u6E90\u6570\u636E\u5E93: ${source.name}
+`;
+            resultMsg += `- \u76EE\u6807\u6570\u636E\u5E93: ${target.name}
+`;
+            resultMsg += `- \u6210\u529F: ${results.success} \u4E2A
+`;
+            if (results.failed > 0) {
+              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
+`;
+            }
+            return resultMsg;
+          } catch (error) {
+            return `\u274C \u79FB\u52A8\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleCopy: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("duplicatePage")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u590D\u5236\u9875\u9762\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
+          }
+          const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u6570\u636E\u5E93\u4FE1\u606F...", "processing");
+          try {
+            let source = await AI()._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
+            if (source == null ? void 0 : source.error) return `\u274C \u6E90\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${source.error}`;
+            if (!source && settings.notionDatabaseId) {
+              source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93" };
+            }
+            if (!source) {
+              return "\u274C \u65E0\u6CD5\u786E\u5B9A\u6E90\u6570\u636E\u5E93\u3002\u8BF7\u6307\u5B9A\u6E90\u6570\u636E\u5E93\u540D\u79F0\uFF0C\u6216\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002";
+            }
+            const target = await AI()._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+            if (target == null ? void 0 : target.error) return `\u274C \u76EE\u6807\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${target.error}`;
+            if (!target) {
+              return `\u274C \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002
+
+\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002`;
+            }
+            if (source.id === target.id) {
+              return "\u274C \u6E90\u6570\u636E\u5E93\u548C\u76EE\u6807\u6570\u636E\u5E93\u76F8\u540C\uFF0C\u65E0\u9700\u590D\u5236\u3002";
+            }
+            state().updateLastMessage(`\u6B63\u5728\u4ECE\u300C${source.name}\u300D\u83B7\u53D6\u9875\u9762...`, "processing");
+            const pages = await AI()._fetchSourcePages(source.id, settings.notionApiKey, page_title);
+            if (pages.length === 0) {
+              return page_title ? `\u{1F4ED} \u5728\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u6807\u9898\u5305\u542B\u300C${page_title}\u300D\u7684\u9875\u9762\u3002` : `\u{1F4ED}\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u9875\u9762\u3002`;
+            }
+            const results = { success: 0, failed: 0 };
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            for (let i = 0; i < pages.length; i++) {
+              const page = pages[i];
+              const title = Utils2.getPageTitle(page);
+              state().updateLastMessage(
+                `\u{1F4CB} \u6B63\u5728\u590D\u5236 (${i + 1}/${pages.length})
+
+\u5F53\u524D: ${title}
+\u2192 \u76EE\u6807: ${target.name}`,
+                "processing"
+              );
+              try {
+                await AI()._executeGuardedPageWrite(
+                  "duplicatePage",
+                  { id: page.id, name: title },
+                  () => NotionAPI2.duplicatePage(page.id, target.id, "database", settings.notionApiKey),
+                  settings
+                );
+                results.success++;
+              } catch (error) {
+                console.error(`[LD-Notion] \u590D\u5236\u5931\u8D25: ${title}`, error);
+                results.failed++;
+              }
+              if (i < pages.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            }
+            let resultMsg = `\u2705 **\u590D\u5236\u5B8C\u6210**
+
+`;
+            resultMsg += `- \u6E90\u6570\u636E\u5E93: ${source.name}
+`;
+            resultMsg += `- \u76EE\u6807\u6570\u636E\u5E93: ${target.name}
+`;
+            resultMsg += `- \u6210\u529F: ${results.success} \u4E2A
+`;
+            if (results.failed > 0) {
+              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
+`;
+            }
+            return resultMsg;
+          } catch (error) {
+            return `\u274C \u590D\u5236\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleCompound: async (intentResult, settings) => {
+          const { steps, explanation } = intentResult;
+          if (!steps || steps.length === 0) {
+            return "\u274C \u7EC4\u5408\u6307\u4EE4\u89E3\u6790\u5931\u8D25\uFF1A\u672A\u8BC6\u522B\u5230\u6709\u6548\u7684\u6267\u884C\u6B65\u9AA4\u3002";
+          }
+          let planMsg = `\u{1F517} **\u7EC4\u5408\u6307\u4EE4** \u2014 ${explanation}
+
+\u{1F4CB} \u6267\u884C\u8BA1\u5212\uFF1A
+`;
+          steps.forEach((step, i) => {
+            planMsg += `${i + 1}. ${step.explanation}
+`;
+          });
+          state().updateLastMessage(planMsg, "processing");
+          const results = [];
+          let aborted = false;
+          for (let i = 0; i < steps.length; i++) {
+            const step = steps[i];
+            state().updateLastMessage(
+              `${planMsg}
+\u23F3 \u6B65\u9AA4 ${i + 1}/${steps.length}: ${step.explanation}`,
+              "processing"
+            );
+            try {
+              const stepResult = await AI().executeIntent(step, settings);
+              const normalizedStepResult = AI()._normalizeExecutionResult(stepResult);
+              if (AI()._isErrorResult(normalizedStepResult)) {
+                results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
+                aborted = true;
+                break;
+              }
+              results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
+            } catch (error) {
+              results.push({
+                index: i + 1,
+                explanation: step.explanation,
+                success: false,
+                result: AI()._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
+              });
+              aborted = true;
+              break;
+            }
+          }
+          let report = `\u{1F517} **\u7EC4\u5408\u6307\u4EE4\u6267\u884C${aborted ? "\u4E2D\u65AD" : "\u5B8C\u6210"}**
+
+`;
+          for (const r of results) {
+            report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.index}: ${r.explanation}
+`;
+          }
+          if (aborted) {
+            const skipped = steps.slice(results.length);
+            if (skipped.length > 0) {
+              report += `
+\u23ED\uFE0F \u5DF2\u8DF3\u8FC7\uFF1A
+`;
+              skipped.forEach((step, i) => {
+                report += `${results.length + i + 1}. ${step.explanation}
+`;
+              });
+            }
+          }
+          report += `
+---
+`;
+          for (const r of results) {
+            report += `
+**\u6B65\u9AA4 ${r.index}**: ${r.explanation}
+${AI()._resultToText(r.result)}
+`;
+          }
+          return report;
+        },
+        handleCreateDatabase: async (params, settings, explanation) => {
+          var _a;
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("createDatabase")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u521B\u5EFA\u6570\u636E\u5E93\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
+          }
+          const { database_name, parent_page_name, parent_page_id } = params;
+          if (!database_name) {
+            return "\u274C \u8BF7\u6307\u5B9A\u8981\u521B\u5EFA\u7684\u6570\u636E\u5E93\u540D\u79F0\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u521B\u5EFA\u4E00\u4E2A\u53EB\u6280\u672F\u6587\u6863\u7684\u6570\u636E\u5E93\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u7236\u9875\u9762\u4FE1\u606F...", "processing");
+          try {
+            let parentPage = null;
+            if (parent_page_id || parent_page_name) {
+              parentPage = await AI()._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
+              if (parentPage == null ? void 0 : parentPage.error) return `\u274C \u7236\u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${parentPage.error}`;
+              if (!parentPage) {
+                return `\u274C \u627E\u4E0D\u5230\u540D\u4E3A\u300C${parent_page_name}\u300D\u7684\u9875\u9762\u3002
+
+\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22\u6240\u6709\u9875\u9762\u300D\u67E5\u770B\u53EF\u7528\u9875\u9762\u3002`;
+              }
+            } else {
+              state().updateLastMessage("\u672A\u6307\u5B9A\u7236\u9875\u9762\uFF0C\u6B63\u5728\u641C\u7D22\u5DE5\u4F5C\u533A\u9875\u9762...", "processing");
+              const response = await NotionAPI2.search(
+                "",
+                { property: "object", value: "page" },
+                settings.notionApiKey
+              );
+              const pages = (response.results || []).filter((p) => {
+                var _a2;
+                return !p.archived && ((_a2 = p.parent) == null ? void 0 : _a2.type) === "workspace";
+              });
+              if (pages.length === 0) {
+                return "\u274C \u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u53EF\u7528\u7684\u9875\u9762\u4F5C\u4E3A\u7236\u9875\u9762\u3002\n\n\u{1F4A1} \u8BF7\u5148\u5728 Notion \u4E2D\u521B\u5EFA\u4E00\u4E2A\u9875\u9762\uFF0C\u6216\u6307\u5B9A\u7236\u9875\u9762\u540D\u79F0\u3002\n\n\u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u4E0B\u521B\u5EFA\u4E00\u4E2A\u53EB\u6280\u672F\u6587\u6863\u7684\u6570\u636E\u5E93\u300D";
+              }
+              const firstPage = pages[0];
+              parentPage = { id: firstPage.id.replace(/-/g, ""), name: Utils2.getPageTitle(firstPage) || "\u672A\u547D\u540D\u9875\u9762" };
+            }
+            state().updateLastMessage(`\u6B63\u5728\u521B\u5EFA\u6570\u636E\u5E93\u300C${database_name}\u300D...`, "processing");
+            const properties = {
+              "\u6807\u9898": { title: {} },
+              "\u94FE\u63A5": { url: {} },
+              "\u5206\u7C7B": { rich_text: {} },
+              "\u6807\u7B7E": { multi_select: { options: [] } },
+              "\u4F5C\u8005": { rich_text: {} },
+              "\u6536\u85CF\u65F6\u95F4": { date: {} },
+              "\u5E16\u5B50\u6570": { number: { format: "number" } },
+              "\u6D4F\u89C8\u6570": { number: { format: "number" } },
+              "\u70B9\u8D5E\u6570": { number: { format: "number" } }
+            };
+            const result = await AI()._executeGuardedWrite(
+              "createDatabase",
+              () => NotionAPI2.createDatabase(parentPage.id, database_name, properties, settings.notionApiKey),
+              { itemName: database_name },
+              settings
+            );
+            const newDbId = ((_a = result.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
+            let msg = `\u2705 **\u6570\u636E\u5E93\u521B\u5EFA\u6210\u529F**
+
+`;
+            msg += `- \u6570\u636E\u5E93\u540D\u79F0: ${database_name}
+`;
+            msg += `- \u6570\u636E\u5E93 ID: \`${newDbId}\`
+`;
+            msg += `- \u7236\u9875\u9762: ${parentPage.name}
+`;
+            msg += `
+\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u5C06\u6B64 ID \u586B\u5165\u8BBE\u7F6E\u4E2D\u7684\u300C\u6570\u636E\u5E93 ID\u300D\u5B57\u6BB5\u6765\u4F7F\u7528\u8BE5\u6570\u636E\u5E93\u3002`;
+            return msg;
+          } catch (error) {
+            return `\u274C \u521B\u5EFA\u6570\u636E\u5E93\u5931\u8D25: ${error.message}`;
+          }
+        },
+        _resolvePageId: async (name, id, apiKey) => {
+          return NameResolver.resolvePageId(name, id, apiKey);
+        },
+        _textToBlocks: (text) => {
+          return BlockConverter.textToBlocks(text);
+        },
+        _extractPageContent: async (pageId, apiKey, maxChars = 4e3) => {
+          try {
+            const markdownResponse = await NotionAPI2.fetchPageMarkdown(pageId, apiKey);
+            const markdown = String(markdownResponse.markdown || "").trim();
+            if (markdown) {
+              return markdown.slice(0, maxChars);
+            }
+          } catch (error) {
+            console.warn("[LD-Notion] Markdown API \u4E0D\u53EF\u7528\uFF0C\u56DE\u9000\u5230 blocks \u63D0\u53D6:", error);
+          }
+          const allBlocks = [];
+          let cursor = null;
+          do {
+            const data = await NotionAPI2.fetchBlocks(pageId, cursor, apiKey);
+            allBlocks.push(...data.results || []);
+            cursor = data.has_more ? data.next_cursor : null;
+          } while (cursor);
+          return AIClassifier.extractText(allBlocks).slice(0, maxChars);
+        },
+        handleWriteContent: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("appendBlocks")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u751F\u6210\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { content_prompt, page_name, page_id } = params;
+          if (!content_prompt) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u60F3\u751F\u6210\u7684\u5185\u5BB9\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u5199\u4E00\u6BB5\u5173\u4E8E Docker \u7684\u4ECB\u7ECD\u300D";
+          }
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u5199\u4E00\u6BB5\u5173\u4E8E Docker \u7684\u4ECB\u7ECD\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002
+
+\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22\u6240\u6709\u9875\u9762\u300D\u67E5\u770B\u53EF\u7528\u9875\u9762\u3002`;
+            state().updateLastMessage("\u6B63\u5728\u751F\u6210\u5185\u5BB9...", "processing");
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u751F\u6210\u52A9\u624B\u3002\u6839\u636E\u7528\u6237\u8981\u6C42\u751F\u6210\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u3002
+
+\u7528\u6237\u8981\u6C42\uFF1A${content_prompt}`;
+            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
+            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
+            try {
+              await AI()._executeGuardedPageWrite(
+                "appendBlocks",
+                targetPage,
+                async () => {
+                  try {
+                    await NotionAPI2.appendPageMarkdown(targetPage.id, aiResponse, settings.notionApiKey);
+                  } catch (error) {
+                    console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
+                    const blocks = AI()._textToBlocks(aiResponse);
+                    await NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
+                  }
+                },
+                settings
+              );
+            } catch (error) {
+              return `\u274C \u5185\u5BB9\u751F\u6210\u5931\u8D25: ${error.message}`;
+            }
+            return `\u2705 **\u5185\u5BB9\u5DF2\u751F\u6210\u5E76\u8FFD\u52A0\u5230\u9875\u9762**
+
+- \u76EE\u6807\u9875\u9762: ${targetPage.name}
+- \u751F\u6210\u5185\u5BB9: ${aiResponse.length} \u5B57
+
+\u{1F4A1} \u5185\u5BB9\u5DF2\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\u3002`;
+          } catch (error) {
+            return `\u274C \u5185\u5BB9\u751F\u6210\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleEditContent: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("appendBlocks")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u7F16\u8F91\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { content_prompt, page_name, page_id } = params;
+          if (!content_prompt) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u7F16\u8F91\u8981\u6C42\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u5185\u5BB9\u6539\u5F97\u66F4\u7B80\u6D01\u300D";
+          }
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u5185\u5BB9\u6539\u5F97\u66F4\u7B80\u6D01\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
+            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey);
+            if (!existingContent.trim()) {
+              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u7F16\u8F91\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage("\u6B63\u5728\u89C4\u5212\u7CBE\u786E\u7F16\u8F91...", "processing");
+            const editPlanPrompt = `\u4F60\u662F\u4E00\u4E2A\u7CBE\u786E\u7684 Notion Markdown \u7F16\u8F91\u5668\u3002\u8BF7\u6839\u636E\u7F16\u8F91\u6307\u4EE4\uFF0C\u4F18\u5148\u7ED9\u51FA\u5C40\u90E8\u66FF\u6362\u65B9\u6848\uFF0C\u800C\u4E0D\u662F\u91CD\u5199\u6574\u9875\u3002
+
+\u8F93\u51FA JSON\uFF0C\u4E14\u53EA\u80FD\u8FD4\u56DE JSON\uFF1A
+{
+  "mode": "update_content" | "append_version",
+  "content_updates": [
+{
+  "old_str": "\u9700\u8981\u88AB\u7CBE\u786E\u66FF\u6362\u7684\u539F\u6587\u7247\u6BB5",
+  "new_str": "\u66FF\u6362\u540E\u7684\u65B0\u5185\u5BB9",
+  "replace_all_matches": false
+}
+  ],
+  "append_markdown": "\u4EC5\u5F53 mode=append_version \u65F6\u63D0\u4F9B\uFF0C\u8FD4\u56DE\u5B8C\u6574\u6539\u5199\u7248\u672C"
+}
+
+\u89C4\u5219\uFF1A
+1. \u5982\u679C\u80FD\u901A\u8FC7 1-5 \u6761\u7CBE\u786E\u66FF\u6362\u5B8C\u6210\uFF0C\u5C31\u7528 update_content\u3002
+2. old_str \u5FC5\u987B\u9010\u5B57\u51FA\u81EA\u539F\u6587\u3002
+3. \u53EA\u6709\u5728\u9700\u8981\u5927\u5E45\u6539\u5199\u3001\u91CD\u7EC4\u7ED3\u6784\u6216\u65E0\u6CD5\u7A33\u5B9A\u5B9A\u4F4D\u539F\u6587\u65F6\uFF0C\u624D\u7528 append_version\u3002
+4. append_markdown \u5FC5\u987B\u662F Markdown\u3002
+
+\u539F\u6587\uFF1A
+${existingContent}
+
+\u7F16\u8F91\u6307\u4EE4\uFF1A
+${content_prompt}`;
+            const editPlanRaw = await svc().requestChat(editPlanPrompt, settings, 2200);
+            const jsonMatch = editPlanRaw.match(/\{[\s\S]*\}/);
+            let editPlan = null;
+            if (jsonMatch) {
+              try {
+                editPlan = JSON.parse(jsonMatch[0]);
+              } catch (error) {
+                console.warn("[LD-Notion] \u7F16\u8F91\u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", error);
+              }
+            }
+            let exactUpdateError = null;
+            let inPlaceSkippedReason = null;
+            const hasValidContentUpdates = (editPlan == null ? void 0 : editPlan.mode) === "update_content" && Array.isArray(editPlan.content_updates) && editPlan.content_updates.length > 0 && editPlan.content_updates.every((u) => u && typeof u.old_str === "string" && typeof u.new_str === "string");
+            if ((editPlan == null ? void 0 : editPlan.mode) === "update_content" && !hasValidContentUpdates) {
+              inPlaceSkippedReason = "\u539F\u4F4D\u7F16\u8F91\u7ED3\u6784\u6821\u9A8C\u5931\u8D25\uFF08content_updates \u7F3A\u5931\u6216\u65E0\u6548\uFF09";
+              console.warn("[LD-Notion] editPlan content_updates \u7ED3\u6784\u65E0\u6548\uFF0C\u964D\u7EA7\u4E3A\u5168\u6587\u8FFD\u52A0:", inPlaceSkippedReason);
+            }
+            if (hasValidContentUpdates) {
+              state().updateLastMessage("\u6B63\u5728\u6267\u884C\u539F\u4F4D\u7CBE\u786E\u7F16\u8F91...", "processing");
+              try {
+                await AI()._executeGuardedPageWrite(
+                  "updatePageMarkdown",
+                  targetPage,
+                  () => NotionAPI2.searchReplacePageMarkdown(
+                    targetPage.id,
+                    editPlan.content_updates,
+                    settings.notionApiKey
+                  ),
+                  settings
+                );
+                return `\u2705 **\u9875\u9762\u5DF2\u539F\u4F4D\u66F4\u65B0**
+
+- \u76EE\u6807\u9875\u9762: ${targetPage.name}
+- \u7F16\u8F91\u6307\u4EE4: ${content_prompt}
+- \u7CBE\u786E\u66FF\u6362: ${editPlan.content_updates.length} \u5904`;
+              } catch (error) {
+                exactUpdateError = error;
+              }
+            }
+            state().updateLastMessage("\u6B63\u5728\u751F\u6210\u7F16\u8F91\u7248\u672C...", "processing");
+            const fallbackMarkdown = String((editPlan == null ? void 0 : editPlan.append_markdown) || "").trim();
+            let aiResponse = fallbackMarkdown;
+            if (!aiResponse) {
+              const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u7F16\u8F91\u52A9\u624B\u3002\u6839\u636E\u7F16\u8F91\u6307\u4EE4\u6539\u5199\u4EE5\u4E0B\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u6539\u5199\u540E\u7684\u5B8C\u6574\u5185\u5BB9\u3002
+
+\u539F\u6587\uFF1A
+${existingContent}
+
+\u7F16\u8F91\u6307\u4EE4\uFF1A${content_prompt}`;
+              aiResponse = await svc().requestChat(prompt2, settings, 2e3);
+            }
+            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u7F16\u8F91\u7248\u672C...", "processing");
+            const versionMarkdown = `---
+
+## \u270F\uFE0F AI \u7F16\u8F91\u7248\u672C
+
+${aiResponse}`;
+            await AI()._executeGuardedPageWrite(
+              "appendBlocks",
+              targetPage,
+              async () => {
+                try {
+                  await NotionAPI2.appendPageMarkdown(targetPage.id, versionMarkdown, settings.notionApiKey);
+                } catch (error) {
+                  console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
+                  const contentBlocks = AI()._textToBlocks(aiResponse);
+                  const blocks = [
+                    { type: "divider", divider: {} },
+                    { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: "\u270F\uFE0F AI \u7F16\u8F91\u7248\u672C" } }] } },
+                    ...contentBlocks
+                  ];
+                  await NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
+                }
+              },
+              settings
+            );
+            const fallbackReason = (exactUpdateError == null ? void 0 : exactUpdateError.message) ? `
+
+\u{1F4A1} \u539F\u4F4D\u7CBE\u786E\u66FF\u6362\u5931\u8D25\uFF1A${exactUpdateError.message}\uFF1B\u5DF2\u81EA\u52A8\u8FFD\u52A0\u5B8C\u6574\u7F16\u8F91\u7248\u672C\uFF0C\u539F\u5185\u5BB9\u4FDD\u7559\u3002` : inPlaceSkippedReason ? `
+
+\u{1F4A1} ${inPlaceSkippedReason}\uFF1B\u5DF2\u5C06\u5B8C\u6574\u7F16\u8F91\u7248\u672C\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002` : "\n\n\u{1F4A1} \u672C\u6B21\u672A\u6267\u884C\u539F\u4F4D\u66FF\u6362\uFF0C\u5DF2\u5C06\u5B8C\u6574\u7F16\u8F91\u7248\u672C\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002";
+            return `\u2705 **\u7F16\u8F91\u7248\u672C\u5DF2\u8FFD\u52A0\u5230\u9875\u9762**
+
+- \u76EE\u6807\u9875\u9762: ${targetPage.name}
+- \u7F16\u8F91\u6307\u4EE4: ${content_prompt}${fallbackReason}`;
+          } catch (error) {
+            return `\u274C \u5185\u5BB9\u7F16\u8F91\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleTranslateContent: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("appendBlocks")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u7FFB\u8BD1\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { page_name, page_id, target_language } = params;
+          const lang = target_language || "\u82F1\u6587";
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u8981\u7FFB\u8BD1\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7FFB\u8BD1\u6210\u82F1\u6587\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
+            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey);
+            if (!existingContent.trim()) {
+              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage(`\u6B63\u5728\u7FFB\u8BD1\u4E3A${lang}...`, "processing");
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7FFB\u8BD1\u3002\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\u4E3A${lang}\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\uFF0C\u4FDD\u6301\u539F\u6587\u7ED3\u6784\u3002
+
+\u539F\u6587\uFF1A
+${existingContent}`;
+            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
+            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u7FFB\u8BD1\u7248\u672C...", "processing");
+            const contentBlocks = AI()._textToBlocks(aiResponse);
+            const blocks = [
+              { type: "divider", divider: {} },
+              { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `\u{1F310} AI \u7FFB\u8BD1\uFF08${lang}\uFF09` } }] } },
+              ...contentBlocks
+            ];
+            await AI()._executeGuardedPageWrite(
+              "appendBlocks",
+              targetPage,
+              () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
+              settings
+            );
+            return `\u2705 **\u7FFB\u8BD1\u5DF2\u8FFD\u52A0\u5230\u9875\u9762**
+
+- \u76EE\u6807\u9875\u9762: ${targetPage.name}
+- \u7FFB\u8BD1\u8BED\u8A00: ${lang}
+- \u7FFB\u8BD1\u5185\u5BB9: ${aiResponse.length} \u5B57
+
+\u{1F4A1} \u7FFB\u8BD1\u7248\u672C\u5DF2\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002`;
+          } catch (error) {
+            return `\u274C \u7FFB\u8BD1\u5931\u8D25: ${error.message}`;
+          }
+        },
+        _ensureAIProperty: async (databaseId, propertyName, propertyType, apiKey) => {
+          const database = await NotionAPI2.fetchDatabase(databaseId, apiKey);
+          const properties = database.properties || {};
+          if (properties[propertyName]) return;
+          const propDef = {};
+          if (propertyType === "multi_select") {
+            propDef[propertyName] = { multi_select: { options: [] } };
+          } else {
+            propDef[propertyName] = { rich_text: {} };
+          }
+          await AI()._executeGuardedDatabaseWrite(
+            "updateDatabase",
+            databaseId,
+            () => NotionAPI2.updateDatabase(databaseId, propDef, apiKey),
+            apiKey
+          );
+        },
+        handleAIAutofill: async (params, settings, explanation) => {
+          if (!OperationGuard2.canExecute("updatePage")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1AAI \u5C5E\u6027\u586B\u5145\u9700\u8981\u300C\u6807\u51C6\u300D\u53CA\u4EE5\u4E0A\u6743\u9650\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u63D0\u5347\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const configCheck = AI().checkConfig(settings, true);
+          if (!configCheck.valid) return configCheck.error;
+          const { autofill_type, property_name } = params;
+          if (!autofill_type) {
+            return "\u274C \u8BF7\u6307\u5B9A\u586B\u5145\u7C7B\u578B\u3002\n\n\u{1F4A1} \u652F\u6301\u7684\u7C7B\u578B\uFF1A\n- \u6458\u8981\uFF1A\u300C\u7ED9\u6240\u6709\u5E16\u5B50\u751F\u6210 AI \u6458\u8981\u300D\n- \u5173\u952E\u8BCD\uFF1A\u300C\u63D0\u53D6\u6240\u6709\u5E16\u5B50\u7684\u5173\u952E\u8BCD\u300D\n- \u7FFB\u8BD1\uFF1A\u300C\u628A\u6240\u6709\u5E16\u5B50\u6807\u9898\u7FFB\u8BD1\u6210\u82F1\u6587\u300D";
+          }
+          let propName, propType, aiPromptTemplate;
+          switch (autofill_type) {
+            case "summary":
+              propName = "AI\u6458\u8981";
+              propType = "rich_text";
+              aiPromptTemplate = "\u8BF7\u75282-3\u53E5\u8BDD\u7B80\u6D01\u6982\u62EC\u4EE5\u4E0B\u5185\u5BB9\u7684\u8981\u70B9\uFF1A\n\n";
+              break;
+            case "keywords":
+              propName = "AI\u5173\u952E\u8BCD";
+              propType = "multi_select";
+              aiPromptTemplate = "\u8BF7\u4ECE\u4EE5\u4E0B\u5185\u5BB9\u4E2D\u63D0\u53D63-5\u4E2A\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694\uFF0C\u53EA\u8FD4\u56DE\u5173\u952E\u8BCD\uFF1A\n\n";
+              break;
+            case "translation":
+              propName = "AI\u7FFB\u8BD1";
+              propType = "rich_text";
+              aiPromptTemplate = "\u8BF7\u5C06\u4EE5\u4E0B\u6807\u9898\u7FFB\u8BD1\u4E3A\u82F1\u6587\uFF0C\u53EA\u8FD4\u56DE\u7FFB\u8BD1\u7ED3\u679C\uFF1A\n\n";
+              break;
+            case "custom":
+              propName = property_name || "AI\u81EA\u5B9A\u4E49";
+              propType = "rich_text";
+              aiPromptTemplate = "\u8BF7\u6839\u636E\u4EE5\u4E0B\u5185\u5BB9\u751F\u6210\u5BF9\u5E94\u7684\u5C5E\u6027\u503C\uFF1A\n\n";
+              break;
+            default:
+              return `\u274C \u4E0D\u652F\u6301\u7684\u586B\u5145\u7C7B\u578B\u300C${autofill_type}\u300D\u3002\u652F\u6301\uFF1Asummary/keywords/translation/custom`;
+          }
+          state().updateLastMessage(`\u6B63\u5728\u51C6\u5907 AI \u5C5E\u6027\u586B\u5145\uFF08${propName}\uFF09...`, "processing");
+          try {
+            await AI()._ensureAIProperty(settings.notionDatabaseId, propName, propType, settings.notionApiKey);
+            state().updateLastMessage("\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...", "processing");
+            const allPages = [];
+            let cursor = null;
+            do {
+              const response = await NotionAPI2.queryDatabase(settings.notionDatabaseId, null, null, cursor, settings.notionApiKey);
+              allPages.push(...response.results || []);
+              cursor = response.has_more ? response.next_cursor : null;
+            } while (cursor);
+            if (allPages.length === 0) {
+              return "\u{1F4ED} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762\u3002";
+            }
+            const needFill = allPages.filter((page) => {
+              const prop = page.properties[propName];
+              if (!prop) return true;
+              if (propType === "multi_select") {
+                return !prop.multi_select || prop.multi_select.length === 0;
+              }
+              return !prop.rich_text || prop.rich_text.length === 0;
+            });
+            if (needFill.length === 0) {
+              return `\u2705 \u6240\u6709 ${allPages.length} \u4E2A\u9875\u9762\u7684\u300C${propName}\u300D\u5C5E\u6027\u90FD\u5DF2\u586B\u5145\u3002`;
+            }
+            const results = { success: 0, failed: 0 };
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            for (let i = 0; i < needFill.length; i++) {
+              const page = needFill[i];
+              const title = Utils2.getPageTitle(page);
+              state().updateLastMessage(
+                `\u{1F504} \u6B63\u5728\u586B\u5145\u300C${propName}\u300D(${i + 1}/${needFill.length})
+
+\u5F53\u524D: ${title}`,
+                "processing"
+              );
+              try {
+                let inputText = title;
+                if (autofill_type !== "translation") {
+                  try {
+                    const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 2e3);
+                    inputText = content || title;
+                  } catch (error) {
+                    console.warn("[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25:", error);
+                    inputText = title;
+                  }
+                }
+                const aiResult = await svc().requestChat(
+                  aiPromptTemplate + inputText,
+                  settings,
+                  500
+                );
+                const updateProps = {};
+                if (propType === "multi_select") {
+                  const keywords = aiResult.split(/[,，]/).map((k) => k.trim()).filter(Boolean).slice(0, 10);
+                  updateProps[propName] = { multi_select: keywords.map((k) => ({ name: k })) };
+                } else {
+                  const trimmed = aiResult.slice(0, 2e3);
+                  updateProps[propName] = { rich_text: [{ type: "text", text: { content: trimmed } }] };
+                }
+                await AI()._executeGuardedPageWrite(
+                  "updatePage",
+                  { id: page.id, name: title },
+                  () => NotionAPI2.request("PATCH", `/pages/${page.id}`, { properties: updateProps }, settings.notionApiKey),
+                  settings
+                );
+                results.success++;
+              } catch (error) {
+                console.error(`[LD-Notion] AI \u586B\u5145\u5931\u8D25: ${title}`, error);
+                results.failed++;
+              }
+              if (i < needFill.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            }
+            let resultMsg = `\u2705 **AI \u5C5E\u6027\u586B\u5145\u5B8C\u6210**
+
+`;
+            resultMsg += `- \u5C5E\u6027\u540D: ${propName}
+`;
+            resultMsg += `- \u603B\u8BA1: ${allPages.length} \u4E2A\u9875\u9762
+`;
+            resultMsg += `- \u5DF2\u586B\u5145: ${allPages.length - needFill.length} \u4E2A
+`;
+            resultMsg += `- \u672C\u6B21\u586B\u5145: ${results.success} \u4E2A
+`;
+            if (results.failed > 0) {
+              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
+`;
+            }
+            return resultMsg;
+          } catch (error) {
+            return `\u274C AI \u5C5E\u6027\u586B\u5145\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleAsk: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { question, keyword } = params;
+          const searchTerm = question || keyword;
+          if (!searchTerm) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u7684\u95EE\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5173\u4E8E Docker \u7684\u5E16\u5B50\u90FD\u8BF4\u4E86\u4EC0\u4E48\uFF1F\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u641C\u7D22\u76F8\u5173\u5185\u5BB9...", "processing");
+          try {
+            const response = await NotionAPI2.search(searchTerm, null, settings.notionApiKey);
+            const results = (response.results || []).filter((r) => !r.archived && r.object === "page").slice(0, 5);
+            if (results.length === 0) {
+              return `\u{1F4ED} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${searchTerm}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage(`\u627E\u5230 ${results.length} \u4E2A\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5728\u63D0\u53D6...`, "processing");
+            const contextParts = [];
+            const sourceList = [];
+            for (let i = 0; i < results.length; i++) {
+              const item = results[i];
+              const title = Utils2.getPageTitle(item, item.object === "database" ? "\u672A\u547D\u540D\u6570\u636E\u5E93" : "\u672A\u547D\u540D\u9875\u9762");
+              const url = item.url || "";
+              sourceList.push({ title, url });
+              try {
+                const content = await AI()._extractPageContent(item.id, settings.notionApiKey, 2e3);
+                contextParts.push(`[${i + 1}] ${title}:
+${content || "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09"}`);
+              } catch (error) {
+                console.warn(`[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25: ${title}`, error);
+                contextParts.push(`[${i + 1}] ${title}:
+\uFF08\u65E0\u6CD5\u8BFB\u53D6\u5185\u5BB9\uFF09`);
+              }
+            }
+            state().updateLastMessage("\u6B63\u5728\u5206\u6790\u5E76\u751F\u6210\u56DE\u7B54...", "processing");
+            const ragPrompt = `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u95EE\u7B54\u52A9\u624B\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA Notion \u5DE5\u4F5C\u533A\u7684\u5185\u5BB9\u56DE\u7B54\u7528\u6237\u7684\u95EE\u9898\u3002
+\u5982\u679C\u5185\u5BB9\u4E2D\u6CA1\u6709\u76F8\u5173\u4FE1\u606F\uFF0C\u8BF7\u5982\u5B9E\u8BF4\u660E\u3002\u56DE\u7B54\u540E\u5217\u51FA\u4FE1\u606F\u6765\u6E90\u3002
+
+--- \u53C2\u8003\u5185\u5BB9 ---
+${contextParts.join("\n\n")}
+
+--- \u7528\u6237\u95EE\u9898 ---
+${searchTerm}`;
+            const aiAnswer = await svc().requestChat(ragPrompt, settings, 2e3);
+            let sourceText = "\n\n\u{1F4DA} **\u4FE1\u606F\u6765\u6E90**\uFF1A\n";
+            sourceList.forEach((s, i) => {
+              sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
+`;
+            });
+            return aiAnswer + sourceText;
+          } catch (error) {
+            return `\u274C \u95EE\u7B54\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleDeepResearch: async (params, settings, explanation) => {
+          var _a;
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { research_topic, scope = "workspace" } = params;
+          if (!research_topic) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u7684\u7814\u7A76\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u6DF1\u5165\u7814\u7A76\u4E00\u4E0B\u5173\u4E8E Docker \u7684\u6240\u6709\u5185\u5BB9\u300D";
+          }
+          try {
+            state().updateLastMessage("\u{1F52C} \u6B63\u5728\u62C6\u89E3\u7814\u7A76\u4E3B\u9898...", "processing");
+            const keywordsPrompt = `\u5C06\u4EE5\u4E0B\u7814\u7A76\u4E3B\u9898\u62C6\u5206\u4E3A3-5\u4E2A\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u6BCF\u884C\u4E00\u4E2A\u5173\u952E\u8BCD\uFF0C\u53EA\u8FD4\u56DE\u5173\u952E\u8BCD\uFF1A
+${research_topic}`;
+            const keywordsRaw = await svc().requestChat(keywordsPrompt, settings, 200);
+            const keywords = keywordsRaw.split("\n").map((k) => k.trim().replace(/^[-•\d.]+\s*/, "")).filter(Boolean).slice(0, 5);
+            if (keywords.length === 0) keywords.push(research_topic);
+            state().updateLastMessage(`\u{1F50D} \u641C\u7D22\u4E2D... (${keywords.length} \u4E2A\u5173\u952E\u8BCD: ${keywords.join(", ")})`, "processing");
+            const allResults = [];
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            const normalizedScope = String(scope || "workspace").toLowerCase();
+            const useDatabaseScope = normalizedScope === "database";
+            let scopedDatabaseInfo = null;
+            let scopedTitleProperty = null;
+            let scopedRichTextProperties = [];
+            if (useDatabaseScope) {
+              const scopedDatabaseId = TargetState2.getEffectiveAIDatabaseId({
+                fallbackDatabaseId: settings.notionDatabaseId
+              });
+              if (!scopedDatabaseId) {
+                return "\u274C \u5F53\u524D\u672A\u914D\u7F6E\u53EF\u7528\u4E8E\u6DF1\u5EA6\u7814\u7A76\u7684\u6570\u636E\u5E93\u3002\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u9ED8\u8BA4\u6570\u636E\u5E93\uFF0C\u6216\u5C06 AI \u76EE\u6807\u5207\u6362\u5230\u67D0\u4E2A\u6570\u636E\u5E93\u3002";
+              }
+              const scopedDatabase = await NotionAPI2.fetchDatabase(scopedDatabaseId, settings.notionApiKey);
+              scopedDatabaseInfo = {
+                id: scopedDatabaseId,
+                title: (scopedDatabase.title || []).map((item) => item.plain_text || "").join("") || "\u76EE\u6807\u6570\u636E\u5E93"
+              };
+              scopedTitleProperty = ((_a = Object.entries(scopedDatabase.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _a[0]) || null;
+              scopedRichTextProperties = Object.entries(scopedDatabase.properties || {}).filter(([_, prop]) => (prop == null ? void 0 : prop.type) === "rich_text").map(([name]) => name).filter((name) => ["\u63CF\u8FF0", "\u6458\u8981", "\u603B\u7ED3", "\u8BF4\u660E", "\u5185\u5BB9"].includes(name));
+            }
+            for (let i = 0; i < keywords.length; i++) {
+              const keyword = keywords[i];
+              let pages = [];
+              if (useDatabaseScope) {
+                const filterConditions = [];
+                if (scopedTitleProperty) {
+                  filterConditions.push({
+                    property: scopedTitleProperty,
+                    title: { contains: keyword }
+                  });
+                }
+                scopedRichTextProperties.forEach((propertyName) => {
+                  filterConditions.push({
+                    property: propertyName,
+                    rich_text: { contains: keyword }
+                  });
+                });
+                const filter = filterConditions.length === 1 ? filterConditions[0] : filterConditions.length > 1 ? { or: filterConditions } : null;
+                const response = await NotionAPI2.queryDatabase(
+                  scopedDatabaseInfo.id,
+                  filter,
+                  null,
+                  null,
+                  settings.notionApiKey,
+                  25
+                );
+                pages = (response.results || []).filter((item) => {
+                  if (item.archived || item.object !== "page") return false;
+                  const loweredKeyword = keyword.toLowerCase();
+                  const title = Utils2.getPageTitle(item, "").toLowerCase();
+                  const richTextMatches = scopedRichTextProperties.some((propertyName) => {
+                    var _a2, _b, _c;
+                    const value = ((_c = (_b = (_a2 = item.properties) == null ? void 0 : _a2[propertyName]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c.map((part) => {
+                      var _a3;
+                      return part.plain_text || ((_a3 = part.text) == null ? void 0 : _a3.content) || "";
+                    }).join("").toLowerCase()) || "";
+                    return value.includes(loweredKeyword);
+                  });
+                  return title.includes(loweredKeyword) || richTextMatches;
+                });
+              } else {
+                const response = await NotionAPI2.search(keyword, null, settings.notionApiKey);
+                pages = (response.results || []).filter((r) => !r.archived && r.object === "page");
+              }
+              allResults.push(...pages);
+              if (i < keywords.length - 1) await Utils2.sleep(delay);
+            }
+            const uniquePages = [...new Map(allResults.map((r) => [r.id, r])).values()];
+            if (uniquePages.length === 0) {
+              if (useDatabaseScope) {
+                return `\u{1F4ED} \u5728\u6570\u636E\u5E93\u300C${(scopedDatabaseInfo == null ? void 0 : scopedDatabaseInfo.title) || "\u76EE\u6807\u6570\u636E\u5E93"}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${research_topic}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002
+
+\u5C1D\u8BD5\u7528\u66F4\u5BBD\u6CDB\u7684\u5173\u952E\u8BCD\uFF0C\u6216\u786E\u8BA4\u8BE5\u6570\u636E\u5E93\u4E2D\u5305\u542B\u76F8\u5173\u9875\u9762\u3002`;
+              }
+              return `\u{1F4ED} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${research_topic}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002
+
+\u5C1D\u8BD5\u7528\u66F4\u5BBD\u6CDB\u7684\u5173\u952E\u8BCD\uFF0C\u6216\u786E\u4FDD\u5DE5\u4F5C\u533A\u4E2D\u6709\u76F8\u5173\u9875\u9762\u3002`;
+            }
+            const maxPages = Math.min(10, uniquePages.length);
+            state().updateLastMessage(`\u{1F4C4} \u63D0\u53D6 ${maxPages}/${uniquePages.length} \u4E2A\u9875\u9762\u5185\u5BB9...`, "processing");
+            const contentParts = [];
+            const sourceList = [];
+            for (let i = 0; i < maxPages; i++) {
+              const page = uniquePages[i];
+              const title = Utils2.getPageTitle(page);
+              const url = page.url || "";
+              sourceList.push({ title, url });
+              try {
+                const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 3e3);
+                contentParts.push(`[${i + 1}] ${title}:
+${content || "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09"}`);
+              } catch (error) {
+                console.warn(`[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25: ${title}`, error);
+                contentParts.push(`[${i + 1}] ${title}:
+\uFF08\u65E0\u6CD5\u8BFB\u53D6\u5185\u5BB9\uFF09`);
+              }
+              if (i < maxPages - 1) await Utils2.sleep(delay);
+            }
+            state().updateLastMessage("\u{1F4CA} \u6B63\u5728\u751F\u6210\u7814\u7A76\u62A5\u544A...", "processing");
+            const reportPrompt = `\u4F60\u662F\u4E00\u4E2A\u7814\u7A76\u5206\u6790\u5E08\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA Notion \u5DE5\u4F5C\u533A\u7684\u5185\u5BB9\uFF0C\u9488\u5BF9\u4E3B\u9898\u300C${research_topic}\u300D\u751F\u6210\u4E00\u4EFD\u7ED3\u6784\u5316\u7814\u7A76\u62A5\u544A\u3002
+
+\u62A5\u544A\u683C\u5F0F\u8981\u6C42\uFF08\u4F7F\u7528 Markdown\uFF09:
+# \u7814\u7A76\u62A5\u544A: ${research_topic}
+## \u6458\u8981
+\uFF082-3\u53E5\u8BDD\u6982\u62EC\u6838\u5FC3\u53D1\u73B0\uFF09
+## \u4E3B\u8981\u53D1\u73B0
+\uFF083-5\u4E2A\u8981\u70B9\uFF0C\u6BCF\u4E2A\u8981\u70B9\u4E00\u53E5\u8BDD\uFF09
+## \u8BE6\u7EC6\u5206\u6790
+\uFF08\u6309\u4E3B\u9898\u5206\u6BB5\u8BBA\u8FF0\uFF0C\u5F15\u7528\u5177\u4F53\u6765\u6E90\u7F16\u53F7\u5982[1][2]\uFF09
+## \u5EFA\u8BAE\u4E0E\u884C\u52A8\u9879
+\uFF08\u53EF\u6267\u884C\u7684\u5EFA\u8BAE\uFF0C\u6BCF\u6761\u4E00\u53E5\u8BDD\uFF09
+## \u4FE1\u606F\u6765\u6E90
+\uFF08\u5217\u51FA\u5F15\u7528\u7684\u9875\u9762\uFF09
+
+--- \u53C2\u8003\u5185\u5BB9 ---
+${contentParts.join("\n\n---\n\n")}`;
+            const report = await svc().requestChat(reportPrompt, settings, 4e3);
+            let sourceText = "\n\n\u{1F4DA} **\u5206\u6790\u57FA\u7840**\uFF1A\n";
+            sourceList.forEach((s, i) => {
+              sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
+`;
+            });
+            const scopeLabel = useDatabaseScope ? `\u6570\u636E\u5E93\u300C${(scopedDatabaseInfo == null ? void 0 : scopedDatabaseInfo.title) || "\u76EE\u6807\u6570\u636E\u5E93"}\u300D` : "\u5DE5\u4F5C\u533A";
+            const summary = `\u{1F52C} \u8303\u56F4\uFF1A${scopeLabel}\u3002\u5171\u4F7F\u7528 ${keywords.length} \u4E2A\u5173\u952E\u8BCD\uFF0C\u627E\u5230 ${uniquePages.length} \u4E2A\u76F8\u5173\u9875\u9762\uFF0C\u6DF1\u5165\u5206\u6790\u4E86 ${maxPages} \u4E2A\u3002`;
+            return `${report}${sourceText}
+---
+${summary}`;
+          } catch (error) {
+            return `\u274C \u6DF1\u5EA6\u7814\u7A76\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleSummarize: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { page_name, page_id, summary_style } = params;
+          const style = summary_style || "brief";
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u8981\u603B\u7ED3\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u603B\u7ED3\u4E00\u4E0B xxx \u9875\u9762\u7684\u5185\u5BB9\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
+            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 6e3);
+            if (!existingContent.trim()) {
+              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u603B\u7ED3\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage("\u{1F4DD} \u6B63\u5728\u751F\u6210\u6458\u8981...", "processing");
+            const styleInstructions = {
+              brief: "\u751F\u6210\u7B80\u77ED\u6458\u8981\uFF082-3\u53E5\u8BDD\uFF09\uFF0C\u63D0\u70BC\u6838\u5FC3\u8981\u70B9\u3002",
+              detailed: "\u751F\u6210\u8BE6\u7EC6\u6458\u8981\uFF0C\u5305\u542B\uFF1A\u6838\u5FC3\u4E3B\u9898\u3001\u4E3B\u8981\u8BBA\u70B9\u3001\u5173\u952E\u7EC6\u8282\u548C\u7ED3\u8BBA\u3002",
+              bullet: "\u4EE5\u8981\u70B9\u5217\u8868\u5F62\u5F0F\u603B\u7ED3\uFF0C\u6BCF\u4E2A\u8981\u70B9\u4E00\u884C\uFF0C\u63D0\u70BC\u5173\u952E\u4FE1\u606F\u3002"
+            };
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u6458\u8981\u52A9\u624B\u3002${styleInstructions[style] || styleInstructions.brief}
+
+\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002
+
+\u4EE5\u4E0B\u662F\u9700\u8981\u603B\u7ED3\u7684\u5185\u5BB9\uFF1A
+${existingContent}`;
+            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
+            return `\u{1F4DD} **\u9875\u9762\u6458\u8981\uFF1A${targetPage.name}**
+
+${aiResponse}
+
+---
+\u{1F4C4} \u6458\u8981\u98CE\u683C: ${style === "brief" ? "\u7B80\u77ED" : style === "detailed" ? "\u8BE6\u7EC6" : "\u8981\u70B9\u5217\u8868"}`;
+          } catch (error) {
+            return `\u274C \u5185\u5BB9\u603B\u7ED3\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleBrainstorm: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { brainstorm_topic, page_name, page_id } = params;
+          const count = Math.min(Math.max(parseInt(params.brainstorm_count) || 10, 3), 30);
+          const topic = brainstorm_topic || page_name || explanation;
+          if (!topic) {
+            return "\u274C \u8BF7\u6307\u5B9A\u5934\u8111\u98CE\u66B4\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u56F4\u7ED5\u8FDC\u7A0B\u529E\u516C\u7ED9\u6211\u4E00\u4E9B\u521B\u610F\u5EFA\u8BAE\u300D";
+          }
+          let pageContext = "";
+          if (page_name || page_id) {
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9\u4F5C\u4E3A\u53C2\u8003...", "processing");
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage) {
+              pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 3e3);
+            }
+          }
+          state().updateLastMessage("\u{1F4A1} \u6B63\u5728\u5934\u8111\u98CE\u66B4...", "processing");
+          try {
+            const contextBlock = pageContext ? `
+
+\u4EE5\u4E0B\u662F\u76F8\u5173\u53C2\u8003\u5185\u5BB9\uFF1A
+${pageContext}` : "";
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u521B\u610F\u987E\u95EE\u3002\u56F4\u7ED5\u4E3B\u9898\u300C${topic}\u300D\u8FDB\u884C\u5934\u8111\u98CE\u66B4\uFF0C\u751F\u6210 ${count} \u4E2A\u521B\u610F\u60F3\u6CD5\u6216\u5EFA\u8BAE\u3002
+
+\u8981\u6C42\uFF1A
+- \u60F3\u6CD5\u8981\u591A\u6837\u5316\uFF0C\u6DB5\u76D6\u4E0D\u540C\u89D2\u5EA6\u548C\u7EF4\u5EA6
+- \u6BCF\u4E2A\u60F3\u6CD5\u5305\u542B\u7B80\u77ED\u6807\u9898\u548C\u4E00\u53E5\u8BDD\u8BF4\u660E
+- \u4ECE\u5B9E\u7528\u5230\u5927\u80C6\u521B\u65B0\uFF0C\u7531\u8FD1\u53CA\u8FDC\u6392\u5217
+- \u4F7F\u7528 Markdown \u7F16\u53F7\u5217\u8868\u683C\u5F0F\u8F93\u51FA${contextBlock}`;
+            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
+            return `\u{1F4A1} **\u5934\u8111\u98CE\u66B4\uFF1A${topic}**
+
+${aiResponse}
+
+---
+\u{1F3AF} \u5171\u751F\u6210 ${count} \u4E2A\u521B\u610F\u60F3\u6CD5`;
+          } catch (error) {
+            return `\u274C \u5934\u8111\u98CE\u66B4\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleProofread: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { page_name, page_id } = params;
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u8981\u6821\u5BF9\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u6821\u5BF9\u4E00\u4E0B xxx \u9875\u9762\u7684\u62FC\u5199\u548C\u8BED\u6CD5\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
+            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey);
+            if (!existingContent.trim()) {
+              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u6821\u5BF9\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage("\u2705 \u6B63\u5728\u6821\u5BF9\u4E2D...", "processing");
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u6821\u5BF9\u7F16\u8F91\u3002\u8BF7\u4ED4\u7EC6\u68C0\u67E5\u4EE5\u4E0B\u5185\u5BB9\u7684\u62FC\u5199\u3001\u8BED\u6CD5\u548C\u8868\u8FBE\u95EE\u9898\u3002
+
+\u8F93\u51FA\u683C\u5F0F\uFF1A
+1. \u5148\u5217\u51FA\u53D1\u73B0\u7684\u6240\u6709\u95EE\u9898\uFF08\u6BCF\u4E2A\u95EE\u9898\u6807\u6CE8\u4F4D\u7F6E\u548C\u7C7B\u578B\uFF1A\u62FC\u5199/\u8BED\u6CD5/\u6807\u70B9/\u8868\u8FBE\uFF09
+2. \u7136\u540E\u7ED9\u51FA\u4FEE\u6B63\u540E\u7684\u5B8C\u6574\u5185\u5BB9
+
+\u5982\u679C\u6CA1\u6709\u53D1\u73B0\u4EFB\u4F55\u95EE\u9898\uFF0C\u8BF7\u8BF4\u660E\u5185\u5BB9\u65E0\u8BEF\u3002
+
+\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002
+
+\u4EE5\u4E0B\u662F\u9700\u8981\u6821\u5BF9\u7684\u5185\u5BB9\uFF1A
+${existingContent}`;
+            const aiResponse = await svc().requestChat(prompt2, settings, 3e3);
+            return `\u2705 **\u6821\u5BF9\u7ED3\u679C\uFF1A${targetPage.name}**
+
+${aiResponse}`;
+          } catch (error) {
+            return `\u274C \u6821\u5BF9\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleBatchTranslate: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("appendBlocks")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6279\u91CF\u7FFB\u8BD1\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { database_name, database_id, target_language } = params;
+          const lang = target_language || "\u82F1\u6587";
+          if (!database_name && !database_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u8981\u7FFB\u8BD1\u7684\u6570\u636E\u5E93\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u6570\u636E\u5E93\u7FFB\u8BD1\u6210\u65E5\u6587\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u67E5\u627E\u6570\u636E\u5E93...", "processing");
+          try {
+            let dbId = database_id;
+            if (!dbId && database_name) {
+              const searchResp = await NotionAPI2.search(database_name, "database", settings.notionApiKey);
+              const db = (searchResp.results || []).find((r) => !r.archived);
+              if (!db) return `\u274C \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${database_name}\u300D\u3002`;
+              dbId = db.id;
+            }
+            state().updateLastMessage("\u6B63\u5728\u83B7\u53D6\u9875\u9762\u5217\u8868...", "processing");
+            const queryResp = await NotionAPI2.queryDatabase(dbId, null, null, null, settings.notionApiKey, 20);
+            const pages = (queryResp.results || []).filter((p) => !p.archived);
+            if (pages.length === 0) {
+              return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u9875\u9762\u3002`;
+            }
+            const confirmed = await ConfirmationDialog2.show({
+              title: `\u{1F310} \u6279\u91CF\u7FFB\u8BD1\u786E\u8BA4`,
+              message: `\u5373\u5C06\u7FFB\u8BD1 ${pages.length} \u4E2A\u9875\u9762\u4E3A${lang}\u3002
+\u7FFB\u8BD1\u540E\u7684\u5185\u5BB9\u5C06\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002`,
+              confirmText: "\u5F00\u59CB\u7FFB\u8BD1",
+              cancelText: "\u53D6\u6D88"
+            });
+            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u6279\u91CF\u7FFB\u8BD1\u3002";
+            let successCount = 0;
+            let failCount = 0;
+            for (let i = 0; i < pages.length; i++) {
+              const page = pages[i];
+              const title = Utils2.getPageTitle(page);
+              state().updateLastMessage(`\u{1F310} \u7FFB\u8BD1\u4E2D (${i + 1}/${pages.length}): ${title}...`, "processing");
+              try {
+                const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 4e3);
+                if (!content.trim()) {
+                  failCount++;
+                  continue;
+                }
+                const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7FFB\u8BD1\u3002\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\u4E3A${lang}\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\uFF0C\u4FDD\u6301\u539F\u6587\u7ED3\u6784\u3002
+
+\u539F\u6587\uFF1A
+${content}`;
+                const translated = await svc().requestChat(prompt2, settings, 2e3);
+                const blocks = [
+                  { type: "divider", divider: {} },
+                  { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `\u{1F310} ${lang}\u7FFB\u8BD1` } }] } },
+                  ...AI()._textToBlocks(translated)
+                ];
+                await AI()._executeGuardedPageWrite(
+                  "appendBlocks",
+                  page,
+                  () => NotionAPI2.appendBlocks(page.id, blocks, settings.notionApiKey),
+                  settings,
+                  { itemName: title }
+                );
+                successCount++;
+              } catch (error) {
+                console.warn(`[LD-Notion] \u9875\u9762\u521B\u5EFA\u5931\u8D25: ${title}`, error);
+                failCount++;
+              }
+            }
+            return `\u{1F310} **\u6279\u91CF\u7FFB\u8BD1\u5B8C\u6210**
+
+- \u76EE\u6807\u8BED\u8A00: ${lang}
+- \u6210\u529F: ${successCount} \u9875
+- \u5931\u8D25: ${failCount} \u9875
+- \u603B\u8BA1: ${pages.length} \u9875
+
+\u{1F4A1} \u7FFB\u8BD1\u5185\u5BB9\u5DF2\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\u3002`;
+          } catch (error) {
+            return `\u274C \u6279\u91CF\u7FFB\u8BD1\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleExtractToDatabase: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("createDatabase")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u521B\u5EFA\u6570\u636E\u5E93\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { page_name, page_id, database_name, extraction_prompt } = params;
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u6E90\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u7B14\u8BB0\u63D0\u53D6\u4E3A\u4EFB\u52A1\u6570\u636E\u5E93\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u6E90\u9875\u9762...", "processing");
+          try {
+            const sourcePage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (sourcePage == null ? void 0 : sourcePage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${sourcePage.error}`;
+            if (!sourcePage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            const content = await AI()._extractPageContent(sourcePage.id, settings.notionApiKey, 6e3);
+            if (!content.trim()) {
+              return `\u274C \u9875\u9762\u300C${sourcePage.name}\u300D\u6CA1\u6709\u53EF\u63D0\u53D6\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage("\u{1F50D} \u6B63\u5728\u5206\u6790\u5185\u5BB9\u7ED3\u6784...", "processing");
+            const dbName = database_name || `${sourcePage.name} - \u63D0\u53D6\u6570\u636E`;
+            const extractHint = extraction_prompt || explanation || "\u63D0\u53D6\u6240\u6709\u7ED3\u6784\u5316\u6761\u76EE";
+            const analyzePrompt = `\u4F60\u662F\u4E00\u4E2A\u6570\u636E\u63D0\u53D6\u4E13\u5BB6\u3002\u5206\u6790\u4EE5\u4E0B\u9875\u9762\u5185\u5BB9\uFF0C\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002
+
+\u63D0\u53D6\u8981\u6C42\uFF1A${extractHint}
+
+\u8BF7\u8FD4\u56DE JSON \u683C\u5F0F\uFF08\u53EA\u8FD4\u56DE JSON\uFF09\uFF1A
+{
+  "properties": [
+{ "name": "\u5C5E\u6027\u540D", "type": "title|rich_text|select|number|checkbox", "description": "\u5C5E\u6027\u8BF4\u660E" }
+  ],
+  "entries": [
+{ "\u5C5E\u6027\u540D1": "\u503C1", "\u5C5E\u6027\u540D2": "\u503C2" }
+  ]
+}
+
+\u5C5E\u6027\u7C7B\u578B\u8BF4\u660E\uFF1A
+- \u7B2C\u4E00\u4E2A\u5C5E\u6027\u5FC5\u987B\u662F title \u7C7B\u578B
+- \u5206\u7C7B/\u72B6\u6001 \u2192 select\uFF0C\u6570\u91CF/\u91D1\u989D \u2192 number\uFF0C\u662F\u5426 \u2192 checkbox\uFF0C\u5176\u4ED6 \u2192 rich_text
+
+\u9875\u9762\u5185\u5BB9\uFF1A
+${content}`;
+            const aiResponse = await svc().requestChat(analyzePrompt, settings, 3e3);
+            const parsedResult = AISchema.parseAIJson("extractToDatabase", aiResponse);
+            if (!parsedResult.ok) {
+              return `\u274C ${parsedResult.reason}`;
+            }
+            const extractedData = parsedResult.value;
+            const validProps = extractedData.properties.filter((prop) => {
+              const nameOk = AISchema.validatePropertyName(prop.name);
+              const typeOk = AISchema.validatePropertyType(prop.type);
+              if (!nameOk || !typeOk.valid) {
+                console.warn(`[LD-Notion] AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5DF2\u8DF3\u8FC7\uFF08name=${prop.name}, type=${prop.type}\uFF09`);
+                return false;
+              }
+              prop.name = nameOk;
+              prop.type = typeOk.type;
+              return true;
+            });
+            if (validProps.length === 0) {
+              return `\u274C AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5747\u65E0\u6548\uFF0C\u65E0\u6CD5\u521B\u5EFA\u6570\u636E\u5E93\u3002`;
+            }
+            extractedData.properties = validProps;
+            const confirmed = await ConfirmationDialog2.show({
+              title: "\u{1F4CA} \u521B\u5EFA\u6570\u636E\u5E93\u786E\u8BA4",
+              message: `\u5C06\u4ECE\u300C${sourcePage.name}\u300D\u63D0\u53D6 ${extractedData.entries.length} \u4E2A\u6761\u76EE\u3002
+\u6570\u636E\u5E93\u540D\u79F0: ${dbName}
+\u5C5E\u6027: ${extractedData.properties.map((p) => p.name).join(", ")}`,
+              confirmText: "\u521B\u5EFA",
+              cancelText: "\u53D6\u6D88"
+            });
+            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u3002";
+            state().updateLastMessage("\u{1F4CA} \u6B63\u5728\u521B\u5EFA\u6570\u636E\u5E93...", "processing");
+            const dbProperties = {};
+            for (const prop of extractedData.properties) {
+              if (prop.type === "title") {
+                dbProperties[prop.name] = { title: {} };
+              } else if (prop.type === "select") {
+                dbProperties[prop.name] = { select: {} };
+              } else if (prop.type === "number") {
+                dbProperties[prop.name] = { number: {} };
+              } else if (prop.type === "checkbox") {
+                dbProperties[prop.name] = { checkbox: {} };
+              } else {
+                dbProperties[prop.name] = { rich_text: {} };
+              }
+            }
+            const newDb = await AI()._executeGuardedPageWrite(
+              "createDatabase",
+              sourcePage,
+              () => NotionAPI2.createDatabase(sourcePage.id, dbName, dbProperties, settings.notionApiKey),
+              settings,
+              { itemName: dbName }
+            );
+            state().updateLastMessage(`\u{1F4DD} \u6B63\u5728\u586B\u5145 ${extractedData.entries.length} \u4E2A\u6761\u76EE...`, "processing");
+            let addedCount = 0;
+            let failedCount = 0;
+            const titleProp = extractedData.properties.find((p) => p.type === "title");
+            const titleKey = titleProp ? titleProp.name : extractedData.properties[0].name;
+            for (const entry of extractedData.entries) {
+              try {
+                const pageProperties = {};
+                for (const prop of extractedData.properties) {
+                  const val = entry[prop.name];
+                  if (val === void 0 || val === null) continue;
+                  pageProperties[prop.name] = AI()._buildPropertyValuePayload(val, prop.type);
+                }
+                const entryName = String(entry[titleKey] || `\u6761\u76EE ${addedCount + 1}`).trim() || `\u6761\u76EE ${addedCount + 1}`;
+                await AI()._executeGuardedDatabaseWrite(
+                  "createDatabasePage",
+                  newDb.id,
+                  () => NotionAPI2.createPage(newDb.id, pageProperties, settings.notionApiKey),
+                  settings,
+                  { itemName: entryName }
+                );
+                addedCount++;
+              } catch (error) {
+                failedCount++;
+                console.warn(`[LD-Notion] \u6761\u76EE\u521B\u5EFA\u5931\u8D25 (#${failedCount}):`, error.message);
+              }
+            }
+            const failedLine = failedCount > 0 ? `
+- \u5931\u8D25: ${failedCount}\uFF08\u89C1\u63A7\u5236\u53F0\u8B66\u544A\uFF09` : "";
+            return `\u{1F4CA} **\u6570\u636E\u5E93\u521B\u5EFA\u5B8C\u6210**
+
+- \u6570\u636E\u5E93: ${dbName}
+- \u6765\u6E90: ${sourcePage.name}
+- \u5C5E\u6027: ${extractedData.properties.map((p) => p.name).join(", ")}
+- \u6761\u76EE: ${addedCount}/${extractedData.entries.length}${failedLine}
+
+\u{1F4A1} \u6570\u636E\u5E93\u5DF2\u521B\u5EFA\u5728\u6E90\u9875\u9762\u4E0B\u65B9\u3002`;
+          } catch (error) {
+            return `\u274C \u63D0\u53D6\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleGeneratePages: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("createDatabase")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u591A\u9875\u9762\u751F\u6210\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { page_name, page_id, parent_page_name, parent_page_id, structure_prompt } = params;
+          const topic = page_name || structure_prompt || explanation;
+          if (!topic) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u8981\u751F\u6210\u7684\u5185\u5BB9\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u4E3A\u65B0\u5458\u5DE5\u521B\u5EFA\u5165\u804C\u6307\u5357\uFF0C\u5305\u542B\u5DE5\u5177\u6E05\u5355\u3001\u56E2\u961F\u4ECB\u7ECD\u3001\u5E38\u89C1\u95EE\u9898\u300D";
+          }
+          state().updateLastMessage("\u{1F4D1} \u6B63\u5728\u89C4\u5212\u9875\u9762\u7ED3\u6784...", "processing");
+          try {
+            const planPrompt = `\u4F60\u662F\u4E00\u4E2A Notion \u5185\u5BB9\u67B6\u6784\u5E08\u3002\u6839\u636E\u7528\u6237\u9700\u6C42\u89C4\u5212\u591A\u9875\u9762\u5185\u5BB9\u7ED3\u6784\u3002
+
+\u7528\u6237\u9700\u6C42\uFF1A${topic}
+${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
+
+\u8FD4\u56DE JSON \u683C\u5F0F\uFF08\u53EA\u8FD4\u56DE JSON\uFF09\uFF1A
+{
+  "parent_title": "\u7236\u9875\u9762\u6807\u9898",
+  "parent_summary": "\u7236\u9875\u9762\u7B80\u4ECB\uFF081-2\u53E5\u8BDD\uFF09",
+  "children": [
+{
+  "title": "\u5B50\u9875\u9762\u6807\u9898",
+  "description": "\u5B50\u9875\u9762\u5185\u5BB9\u63CF\u8FF0\uFF08\u7528\u4E8E\u751F\u6210\u6B63\u6587\uFF09",
+  "icon": "emoji\u56FE\u6807"
+}
+  ]
+}
+
+\u8981\u6C42\uFF1A
+- \u5B50\u9875\u9762\u6570\u91CF\u63A7\u5236\u5728 3-8 \u4E2A
+- \u6BCF\u4E2A\u5B50\u9875\u9762\u5E94\u6709\u660E\u786E\u7684\u4E3B\u9898\u548C\u8FB9\u754C
+- \u7236\u9875\u9762\u4F5C\u4E3A\u76EE\u5F55/\u6982\u89C8\u9875`;
+            const planResponse = await svc().requestChat(planPrompt, settings, 1500);
+            const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+              return `\u274C AI \u65E0\u6CD5\u89C4\u5212\u9875\u9762\u7ED3\u6784\u3002\u8BF7\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u9700\u6C42\u3002`;
+            }
+            let plan;
+            try {
+              plan = JSON.parse(jsonMatch[0]);
+            } catch (error) {
+              console.warn("[LD-Notion] AI \u751F\u6210\u7ED3\u6784 JSON \u89E3\u6790\u5931\u8D25:", error);
+              return `\u274C AI \u751F\u6210\u7684\u7ED3\u6784\u65E0\u6548\u3002\u8BF7\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u3002`;
+            }
+            if (!Array.isArray(plan.children) || plan.children.length === 0) {
+              return `\u274C AI \u672A\u80FD\u89C4\u5212\u51FA\u6709\u6548\u7684\u5B50\u9875\u9762\u7ED3\u6784\u3002`;
+            }
+            const MAX_CHILD_DESC = 2e3;
+            plan.children = plan.children.map((c) => ({
+              ...c,
+              title: AISchema.validatePropertyValue(c == null ? void 0 : c.title, "title"),
+              icon: AISchema.validateEmoji(c == null ? void 0 : c.icon),
+              description: AISchema.validatePropertyValue(c == null ? void 0 : c.description, "rich_text").slice(0, MAX_CHILD_DESC)
+            })).filter((c) => c.title);
+            if (plan.children.length === 0) {
+              return `\u274C AI \u89C4\u5212\u7684\u5B50\u9875\u9762\u6807\u9898\u65E0\u6548\u3002`;
+            }
+            plan.parent_title = AISchema.validatePropertyValue(plan.parent_title, "title");
+            plan.parent_summary = AISchema.validatePropertyValue(plan.parent_summary, "rich_text");
+            const pageList = plan.children.map((c) => `${c.icon || "\u{1F4C4}"} ${c.title}`).join("\n");
+            const confirmed = await ConfirmationDialog2.show({
+              title: "\u{1F4D1} \u591A\u9875\u9762\u751F\u6210\u786E\u8BA4",
+              message: `\u5C06\u521B\u5EFA\u4EE5\u4E0B\u9875\u9762\u7ED3\u6784\uFF1A
+
+\u{1F4C1} ${plan.parent_title}
+${pageList}
+
+\u5171 ${plan.children.length + 1} \u4E2A\u9875\u9762\u3002`,
+              confirmText: "\u5F00\u59CB\u751F\u6210",
+              cancelText: "\u53D6\u6D88"
+            });
+            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u3002";
+            let parentPageId = parent_page_id;
+            if (!parentPageId && parent_page_name) {
+              const parentPage2 = await AI()._resolvePageId(parent_page_name, null, settings.notionApiKey);
+              if (parentPage2) parentPageId = parentPage2.id;
+            }
+            state().updateLastMessage(`\u{1F4C1} \u6B63\u5728\u521B\u5EFA\u7236\u9875\u9762: ${plan.parent_title}...`, "processing");
+            const parentProps = {
+              title: { title: [{ text: { content: plan.parent_title } }] }
+            };
+            let parentPage;
+            if (parentPageId) {
+              parentPage = await AI()._executeGuardedPageWrite(
+                "createDatabasePage",
+                { id: parentPageId, name: parent_page_name || parentPageId },
+                () => NotionAPI2.createPageInPage(parentPageId, parentProps, settings.notionApiKey),
+                settings,
+                { itemName: plan.parent_title, pageId: parentPageId }
+              );
+            } else {
+              return `\u274C \u8BF7\u6307\u5B9A\u7236\u9875\u9762\u3002Notion API \u8981\u6C42\u9875\u9762\u5FC5\u987B\u521B\u5EFA\u5728\u67D0\u4E2A\u7236\u9875\u9762\u4E0B\u3002
+
+\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u4E0B\u521B\u5EFA\u5165\u804C\u6307\u5357\u300D`;
+            }
+            const overviewBlocks = AI()._textToBlocks(`${plan.parent_summary || ""}
+
+## \u{1F4CB} \u76EE\u5F55
+
+${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}** - ${c.description}`).join("\n")}`);
+            await AI()._executeGuardedPageWrite(
+              "appendBlocks",
+              parentPage,
+              () => NotionAPI2.appendBlocks(parentPage.id, overviewBlocks, settings.notionApiKey),
+              settings,
+              { itemName: plan.parent_title }
+            );
+            let createdCount = 0;
+            for (let i = 0; i < plan.children.length; i++) {
+              const child = plan.children[i];
+              state().updateLastMessage(`\u{1F4DD} \u751F\u6210\u5B50\u9875\u9762 (${i + 1}/${plan.children.length}): ${child.title}...`, "processing");
+              try {
+                const childProps = {
+                  title: { title: [{ text: { content: `${child.icon || ""} ${child.title}`.trim() } }] }
+                };
+                const childPage = await AI()._executeGuardedPageWrite(
+                  "createDatabasePage",
+                  parentPage,
+                  () => NotionAPI2.createPageInPage(parentPage.id, childProps, settings.notionApiKey),
+                  settings,
+                  { itemName: child.title }
+                );
+                const contentPrompt = `\u4E3A\u4EE5\u4E0B\u4E3B\u9898\u751F\u6210\u8BE6\u7EC6\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u3002
+
+\u4E3B\u9898\uFF1A${child.title}
+\u63CF\u8FF0\uFF1A${child.description}
+\u4E0A\u4E0B\u6587\uFF1A\u8FD9\u662F\u300C${plan.parent_title}\u300D\u7684\u5B50\u9875\u9762
+
+\u8BF7\u751F\u6210\u5B9E\u7528\u3001\u5177\u4F53\u7684\u5185\u5BB9\uFF0C\u5305\u542B\u5408\u9002\u7684\u6807\u9898\u5C42\u7EA7\u548C\u7ED3\u6784\u5316\u4FE1\u606F\u3002`;
+                const content = await svc().requestChat(contentPrompt, settings, 2e3);
+                const contentBlocks = AI()._textToBlocks(content);
+                await AI()._executeGuardedPageWrite(
+                  "appendBlocks",
+                  childPage,
+                  () => NotionAPI2.appendBlocks(childPage.id, contentBlocks, settings.notionApiKey),
+                  settings,
+                  { itemName: child.title }
+                );
+                createdCount++;
+              } catch (error) {
+                console.warn(`[LD-Notion] \u5B50\u9875\u9762\u521B\u5EFA\u5931\u8D25: ${child.title}`, error);
+              }
+            }
+            return `\u{1F4D1} **\u591A\u9875\u9762\u5185\u5BB9\u751F\u6210\u5B8C\u6210**
+
+- \u7236\u9875\u9762: ${plan.parent_title}
+- \u5B50\u9875\u9762: ${createdCount}/${plan.children.length} \u521B\u5EFA\u6210\u529F
+
+\u{1F4A1} \u6240\u6709\u9875\u9762\u5DF2\u521B\u5EFA\u5E76\u586B\u5145\u5185\u5BB9\u3002`;
+          } catch (error) {
+            return `\u274C \u9875\u9762\u751F\u6210\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleBatchAnalyze: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { database_name, database_id, analysis_prompt } = params;
+          const limit = Math.min(Math.max(parseInt(params.limit) || 10, 1), 20);
+          if (!database_name && !database_id) {
+            if (!settings.notionDatabaseId) {
+              return "\u274C \u8BF7\u6307\u5B9A\u8981\u5206\u6790\u7684\u6570\u636E\u5E93\uFF0C\u6216\u5148\u914D\u7F6E\u9ED8\u8BA4\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5206\u6790 xxx \u6570\u636E\u5E93\u7684\u6240\u6709\u9875\u9762\u300D";
+            }
+          }
+          state().updateLastMessage("\u6B63\u5728\u67E5\u627E\u6570\u636E\u5E93...", "processing");
+          try {
+            let dbId = database_id || settings.notionDatabaseId;
+            if (!dbId && database_name) {
+              const searchResp = await NotionAPI2.search(database_name, "database", settings.notionApiKey);
+              const db = (searchResp.results || []).find((r) => !r.archived);
+              if (!db) return `\u274C \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${database_name}\u300D\u3002`;
+              dbId = db.id;
+            }
+            state().updateLastMessage("\u6B63\u5728\u83B7\u53D6\u9875\u9762...", "processing");
+            const queryResp = await NotionAPI2.queryDatabase(dbId, null, null, null, settings.notionApiKey, limit);
+            const pages = (queryResp.results || []).filter((p) => !p.archived);
+            if (pages.length === 0) {
+              return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u5206\u6790\u7684\u9875\u9762\u3002`;
+            }
+            state().updateLastMessage(`\u{1F50E} \u6B63\u5728\u63D0\u53D6 ${pages.length} \u4E2A\u9875\u9762\u5185\u5BB9...`, "processing");
+            const contentParts = [];
+            for (let i = 0; i < pages.length; i++) {
+              const page = pages[i];
+              const title = Utils2.getPageTitle(page);
+              state().updateLastMessage(`\u{1F50E} \u63D0\u53D6\u4E2D (${i + 1}/${pages.length}): ${title}...`, "processing");
+              const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 2e3);
+              contentParts.push(`## ${title}
+${content || "\uFF08\u65E0\u5185\u5BB9\uFF09"}`);
+            }
+            state().updateLastMessage("\u{1F4CA} \u6B63\u5728\u751F\u6210\u7EFC\u5408\u5206\u6790...", "processing");
+            const analysisGoal = analysis_prompt || explanation || "\u7EFC\u5408\u5206\u6790\u6240\u6709\u9875\u9762\u5185\u5BB9\uFF0C\u627E\u51FA\u5173\u952E\u4E3B\u9898\u3001\u8D8B\u52BF\u548C\u5EFA\u8BAE";
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u6570\u636E\u5206\u6790\u5E08\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA\u6570\u636E\u5E93\u7684\u591A\u4E2A\u9875\u9762\u5185\u5BB9\u8FDB\u884C\u7EFC\u5408\u5206\u6790\u3002
+
+\u5206\u6790\u8981\u6C42\uFF1A${analysisGoal}
+
+\u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u5206\u6790\u62A5\u544A\uFF0C\u5305\u542B\uFF1A
+1. \u6982\u8FF0\uFF08\u603B\u4F53\u60C5\u51B5\u6458\u8981\uFF09
+2. \u5173\u952E\u53D1\u73B0\uFF08\u4E3B\u8981\u4E3B\u9898\u548C\u6A21\u5F0F\uFF09
+3. \u8BE6\u7EC6\u5206\u6790\uFF08\u6309\u4E3B\u9898/\u7C7B\u522B\u5206\u7EC4\uFF09
+4. \u8D8B\u52BF\u4E0E\u6D1E\u5BDF
+5. \u5EFA\u8BAE\u4E0E\u884C\u52A8\u9879
+
+--- \u4EE5\u4E0B\u662F ${pages.length} \u4E2A\u9875\u9762\u7684\u5185\u5BB9 ---
+
+${contentParts.join("\n\n---\n\n")}`;
+            const report = await svc().requestChat(prompt2, settings, 4e3);
+            return `\u{1F4CA} **\u6279\u91CF\u5206\u6790\u62A5\u544A**
+
+${report}
+
+---
+\u{1F50E} \u5171\u5206\u6790 ${pages.length} \u4E2A\u9875\u9762`;
+          } catch (error) {
+            return `\u274C \u6279\u91CF\u5206\u6790\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleGitHubImport: async (params, settings, explanation) => {
+          const username = params.username || Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
+          const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
+          const databaseId = settings.notionDatabaseId;
+          if (!username) {
+            return "\u274C \u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E GitHub \u7528\u6237\u540D\u3002\n\n\u{1F4A1} \u5728 Notion \u9762\u677F\u7684\u8BBE\u7F6E\u4E2D\u627E\u5230\u300CGitHub \u6536\u85CF\u5BFC\u5165\u300D\u90E8\u5206\u586B\u5199\u7528\u6237\u540D\u3002";
+          }
+          if (!settings.notionApiKey) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion API Key\u3002";
+          }
+          if (!databaseId) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E GitHub \u6536\u85CF\u7684\u76EE\u6807\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u53EF\u4EE5\u5728\u8BBE\u7F6E\u4E2D\u4E13\u95E8\u6307\u5B9A\uFF0C\u6216\u4F7F\u7528\u9ED8\u8BA4\u6570\u636E\u5E93\u3002";
+          }
+          const classify = params.classify || false;
+          const importTypes = require_import().GitHubAPI.getImportTypes();
+          try {
+            const allResults = await require_import().GitHubExporter.exportAll({
+              apiKey: settings.notionApiKey,
+              databaseId,
+              username,
+              token,
+              aiApiKey: settings.aiApiKey,
+              aiService: settings.aiService,
+              aiModel: settings.aiModel,
+              aiBaseUrl: settings.aiBaseUrl,
+              categories: settings.categories
+            }, (msg, pct) => {
+              state().updateLastMessage(`\u{1F419} ${msg}`, "processing");
+            });
+            let response = `\u2705 **GitHub \u5BFC\u5165\u5B8C\u6210**
+
+`;
+            let totalExported = 0;
+            let totalFailed = 0;
+            const typeNames = { stars: "Stars", repos: "Repos", forks: "Forks", gists: "Gists" };
+            for (const type of importTypes) {
+              const r = allResults[type];
+              if (!r) continue;
+              if (r.error) {
+                response += `\u274C ${typeNames[type]}: ${r.error}
+`;
+              } else {
+                response += `\u{1F4CA} ${typeNames[type]}: \u5171 ${r.total} \u4E2A\uFF0C\u5BFC\u51FA ${r.exported} \u4E2A`;
+                if (r.failed > 0) response += `\uFF0C\u5931\u8D25 ${r.failed} \u4E2A`;
+                response += `
+`;
+                totalExported += r.exported || 0;
+                totalFailed += r.failed || 0;
+              }
+            }
+            if (totalExported === 0 && totalFailed === 0) {
+              response += `
+\u6240\u6709\u5185\u5BB9\u5DF2\u662F\u6700\u65B0\u72B6\u6001\u3002`;
+            }
+            if (classify && totalExported > 0 && settings.aiApiKey) {
+              state().updateLastMessage("\u{1F3F7}\uFE0F \u6B63\u5728\u8FDB\u884C AI \u5206\u7C7B...", "processing");
+              try {
+                const classifyResult = await require_import().GitHubExporter.classifyRepos({
+                  ...settings,
+                  databaseId
+                }, (msg, pct) => {
+                  state().updateLastMessage(`\u{1F3F7}\uFE0F ${msg}`, "processing");
+                });
+                response += `
+
+\u{1F3F7}\uFE0F **AI \u5206\u7C7B\u5B8C\u6210**: \u5DF2\u5206\u7C7B ${classifyResult.classified}/${classifyResult.total} \u4E2A`;
+              } catch (e) {
+                response += `
+
+\u26A0\uFE0F AI \u5206\u7C7B\u51FA\u9519: ${e.message}`;
+              }
+            } else if (classify && !settings.aiApiKey) {
+              response += `
+
+\u26A0\uFE0F \u672A\u914D\u7F6E AI API Key\uFF0C\u8DF3\u8FC7\u81EA\u52A8\u5206\u7C7B\u3002`;
+            }
+            return response;
+          } catch (error) {
+            return `\u274C GitHub \u5BFC\u5165\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleBookmarkImport: async (params, settings, explanation) => {
+          const databaseId = settings.notionDatabaseId;
+          if (!settings.notionApiKey) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion API Key\u3002";
+          }
+          if (!databaseId) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E\u76EE\u6807\u6570\u636E\u5E93 ID\u3002";
+          }
+          if (!require_bridge().BookmarkBridge.isExtensionAvailable()) {
+            const installUrl = require_api().InstallHelper.getBookmarkExtensionUrl();
+            return `\u274C \u672A\u68C0\u6D4B\u5230 LD-Notion \u4E66\u7B7E\u6865\u63A5\u6269\u5C55\u3002
+
+\u{1F4A1} \u8BF7\u70B9\u51FB\u5B89\u88C5\uFF1A${installUrl}
+
+\u624B\u52A8\u5B89\u88C5\u6B65\u9AA4\uFF1A
+1. \u6253\u5F00 chrome://extensions/
+2. \u5F00\u542F\u300C\u5F00\u53D1\u8005\u6A21\u5F0F\u300D
+3. \u70B9\u51FB\u300C\u52A0\u8F7D\u5DF2\u89E3\u538B\u7684\u6269\u5C55\u300D
+4. \u9009\u62E9\u9879\u76EE\u4E2D\u7684 chrome-extension \u6587\u4EF6\u5939
+5. \u5237\u65B0\u5F53\u524D\u9875\u9762
+
+\u{1F50E} \u8BCA\u65AD\u5EFA\u8BAE\uFF1A
+- \u82E5\u4F60\u5F53\u524D\u4F7F\u7528\u7684\u662F chrome-extension-full \u72EC\u7ACB\u7248\uFF0C\u8BF7\u5173\u95ED userscript\uFF0C\u907F\u514D\u53CC\u6A21\u5F0F\u6DF7\u7528
+- \u82E5\u4F60\u575A\u6301 userscript \u6A21\u5F0F\uFF0C\u8BF7\u4EC5\u5B89\u88C5 chrome-extension\uFF08\u6865\u63A5\u7248\uFF09`;
+          }
+          try {
+            state().updateLastMessage("\u{1F4D6} \u6B63\u5728\u8BFB\u53D6\u6D4F\u89C8\u5668\u4E66\u7B7E...", "processing");
+            const tree = await require_bridge().BookmarkBridge.getBookmarkTree();
+            const allBookmarks = require_bridge().BookmarkExporter.flattenTree(tree);
+            if (allBookmarks.length === 0) {
+              return "\u{1F4ED} \u6CA1\u6709\u627E\u5230\u6D4F\u89C8\u5668\u4E66\u7B7E\u3002";
+            }
+            const dedupStrict = Utils2.isBookmarkDedupStrict();
+            const newCount = dedupStrict ? allBookmarks.filter((b) => !require_bridge().BookmarkExporter.isExported(b.url)).length : allBookmarks.length;
+            state().updateLastMessage(`\u{1F4D6} \u627E\u5230 ${allBookmarks.length} \u4E2A\u4E66\u7B7E (${newCount} \u4E2A\u65B0\u4E66\u7B7E)\uFF0C\u6B63\u5728\u5BFC\u51FA...`, "processing");
+            const result = await require_bridge().BookmarkExporter.exportBookmarks({
+              apiKey: settings.notionApiKey,
+              databaseId,
+              bookmarks: allBookmarks,
+              aiApiKey: settings.aiApiKey,
+              aiService: settings.aiService,
+              aiModel: settings.aiModel,
+              aiBaseUrl: settings.aiBaseUrl
+            }, (msg, pct) => {
+              state().updateLastMessage(`\u{1F4D6} ${msg}`, "processing");
+            });
+            let response = `\u2705 **\u6D4F\u89C8\u5668\u4E66\u7B7E\u5BFC\u5165\u5B8C\u6210**
+
+`;
+            response += `\u{1F4CA} \u5171 ${result.total} \u4E2A\u4E66\u7B7E
+`;
+            response += `\u{1F4E5} \u672C\u6B21\u5BFC\u51FA ${result.exported} \u4E2A
+`;
+            if (result.failed > 0) response += `\u274C \u5931\u8D25 ${result.failed} \u4E2A
+`;
+            if (result.exported === 0 && result.failed === 0) response += `
+\u6240\u6709\u4E66\u7B7E\u5DF2\u662F\u6700\u65B0\u72B6\u6001\u3002`;
+            if (result.exported > 0 && settings.aiApiKey) {
+              response += `
+
+\u{1F4A1} \u53EF\u4EE5\u8F93\u5165\u300C\u5206\u7C7B\u4E66\u7B7E\u300D\u8BA9 AI \u81EA\u52A8\u4E3A\u5BFC\u5165\u7684\u4E66\u7B7E\u5206\u7C7B\u3002`;
+            }
+            return response;
+          } catch (error) {
+            return `\u274C \u4E66\u7B7E\u5BFC\u5165\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleTemplateOutput: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("appendBlocks")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6A21\u677F\u8F93\u51FA\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { template_name, page_name, page_id, custom_context } = params;
+          let templates;
+          try {
+            templates = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, CONFIG2.DEFAULTS.aiTemplates));
+          } catch (error) {
+            console.warn("[LD-Notion] AI \u6A21\u677F\u52A0\u8F7D\u5931\u8D25\uFF0C\u4F7F\u7528\u9ED8\u8BA4\u6A21\u677F:", error);
+            templates = JSON.parse(CONFIG2.DEFAULTS.aiTemplates);
+          }
+          if (!template_name) {
+            const list = templates.map((t) => `${t.icon} **${t.name}**`).join("\n");
+            return `\u{1F4CB} **\u53EF\u7528\u7684 AI \u8F93\u51FA\u6A21\u677F**
+
+${list}
+
+\u{1F4A1} \u4F7F\u7528\u65B9\u5F0F\uFF1A\u300C\u7528\u5468\u62A5\u6A21\u677F\u603B\u7ED3 xxx \u9875\u9762\u300D\u6216\u300C\u7528\u6458\u8981\u63D0\u7EB2\u6A21\u677F\u6574\u7406 xxx\u300D`;
+          }
+          const template = templates.find(
+            (t) => t.name === template_name || t.name.includes(template_name) || template_name.includes(t.name)
+          );
+          if (!template) {
+            const list = templates.map((t) => `${t.icon} ${t.name}`).join(", ");
+            return `\u274C \u627E\u4E0D\u5230\u6A21\u677F\u300C${template_name}\u300D\u3002
+
+\u53EF\u7528\u6A21\u677F: ${list}`;
+          }
+          let pageContext = "";
+          let targetPage = null;
+          if (page_name || page_id) {
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
+            targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (targetPage) {
+              pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 4e3);
+            }
+          }
+          state().updateLastMessage(`${template.icon} \u6B63\u5728\u4F7F\u7528\u300C${template.name}\u300D\u6A21\u677F\u751F\u6210...`, "processing");
+          const contextBlock = pageContext ? `
+
+\u4EE5\u4E0B\u662F\u53C2\u8003\u5185\u5BB9\uFF1A
+${pageContext}` : "";
+          const customBlock = custom_context ? `
+
+\u7528\u6237\u8865\u5145\u8BF4\u660E\uFF1A${custom_context}` : "";
+          const fullPrompt = `${template.prompt}${contextBlock}${customBlock}
+
+\u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002`;
+          const aiResponse = await svc().requestChat(fullPrompt, settings, 3e3);
+          if (targetPage) {
+            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
+            const contentBlocks = AI()._textToBlocks(aiResponse);
+            const blocks = [
+              { type: "divider", divider: {} },
+              { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `${template.icon} ${template.name}` } }] } },
+              ...contentBlocks
+            ];
+            await AI()._executeGuardedPageWrite(
+              "appendBlocks",
+              targetPage,
+              () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
+              settings,
+              { itemName: targetPage.name }
+            );
+            return `\u2705 **${template.icon} ${template.name}** \u5DF2\u751F\u6210\u5E76\u5199\u5165\u9875\u9762\u300C${targetPage.name}\u300D
+
+${aiResponse}`;
+          }
+          return `${template.icon} **${template.name}**
+
+${aiResponse}
+
+\u{1F4A1} \u5982\u9700\u5199\u5165\u9875\u9762\uFF0C\u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\uFF1A\u300C\u7528${template.name}\u6A21\u677F\u5904\u7406 xxx \u9875\u9762\u300D`;
+        }
+      };
+      module.exports = { AIHandlers: AIHandlers2 };
+    }
+  });
+
   // src/ai/index.js
   var require_ai = __commonJS({
     "src/ai/index.js"(exports, module) {
@@ -21528,6 +23630,7 @@ ${result}`;
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
       var { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 } = require_AgentTools();
+      var { AIHandlers: AIHandlers2 } = require_Handlers();
       var AIService2 = {
         // 标准化 + 安全校验 baseUrl，返回 null 表示非法（调用方应 reject）
         // versionPath: "v1" 或 "v1beta"
@@ -22355,2084 +24458,6 @@ ${systemPrompt}
           })
         }
       ]);
-      var AIHandlers2 = {
-        handleQuery: async (params, settings, explanation) => {
-          var _a, _b, _c;
-          if (!settings.notionDatabaseId) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
-          }
-          ChatState2.updateLastMessage(`\u6B63\u5728\u67E5\u8BE2\u6570\u636E\u5E93...`, "processing");
-          try {
-            const { limit = 10, filter_field, filter_value } = params;
-            let filter = null;
-            if (filter_field && filter_value) {
-              const fieldConfig = {
-                "\u4F5C\u8005": { name: "\u4F5C\u8005", type: "rich_text" },
-                "\u5206\u7C7B": { name: "\u5206\u7C7B", type: "rich_text" },
-                "\u6807\u7B7E": { name: "\u6807\u7B7E", type: "multi_select" },
-                "AI\u5206\u7C7B": { name: "AI\u5206\u7C7B", type: "select" }
-              };
-              const config = fieldConfig[filter_field] || { name: filter_field, type: "rich_text" };
-              if (config.type === "select") {
-                filter = {
-                  property: config.name,
-                  select: { equals: filter_value }
-                };
-              } else if (config.type === "multi_select") {
-                filter = {
-                  property: config.name,
-                  multi_select: { contains: filter_value }
-                };
-              } else {
-                filter = {
-                  property: config.name,
-                  rich_text: { contains: filter_value }
-                };
-              }
-            }
-            const allPages = [];
-            let cursor = null;
-            let hasMore = true;
-            const maxPages = 10;
-            let pageCount = 0;
-            let querySorts = [];
-            while (hasMore && pageCount < maxPages) {
-              let response;
-              try {
-                response = await NotionAPI2.queryDatabase(
-                  settings.notionDatabaseId,
-                  filter,
-                  pageCount === 0 ? [{ property: "\u6536\u85CF\u65F6\u95F4", direction: "descending" }] : querySorts,
-                  cursor,
-                  settings.notionApiKey
-                );
-                if (pageCount === 0) querySorts = [{ property: "\u6536\u85CF\u65F6\u95F4", direction: "descending" }];
-              } catch (sortError) {
-                if (pageCount === 0 && ((_a = sortError.message) == null ? void 0 : _a.includes("\u6536\u85CF\u65F6\u95F4"))) {
-                  querySorts = [{ timestamp: "created_time", direction: "descending" }];
-                  response = await NotionAPI2.queryDatabase(
-                    settings.notionDatabaseId,
-                    filter,
-                    querySorts,
-                    cursor,
-                    settings.notionApiKey
-                  );
-                } else {
-                  throw sortError;
-                }
-              }
-              allPages.push(...response.results || []);
-              hasMore = response.has_more;
-              cursor = response.next_cursor;
-              pageCount++;
-              if (hasMore) {
-                ChatState2.updateLastMessage(`\u6B63\u5728\u67E5\u8BE2\u6570\u636E\u5E93... (\u5DF2\u83B7\u53D6 ${allPages.length} \u6761)`, "processing");
-              }
-            }
-            const pages = allPages;
-            const total = pages.length;
-            const isTruncated = hasMore;
-            if (total === 0) {
-              return `\u{1F4CA} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u7B26\u5408\u6761\u4EF6\u7684\u5E16\u5B50\u3002${filter ? `
-\u7B5B\u9009\u6761\u4EF6\uFF1A${filter_field} \u5305\u542B "${filter_value}"` : ""}`;
-            }
-            let result = `\u{1F4CA} **\u67E5\u8BE2\u7ED3\u679C**
-
-`;
-            result += `\u5171\u627E\u5230 **${total}** \u4E2A\u5E16\u5B50`;
-            if (isTruncated) {
-              result += ` (\u5DF2\u8FBE\u67E5\u8BE2\u4E0A\u9650\uFF0C\u53EF\u80FD\u8FD8\u6709\u66F4\u591A)`;
-            }
-            if (((_b = params.keyword) == null ? void 0 : _b.includes("\u7EDF\u8BA1")) || ((_c = params.keyword) == null ? void 0 : _c.includes("\u5206\u7C7B"))) {
-              const categoryCount = {};
-              pages.forEach((page) => {
-                var _a2, _b2, _c2, _d, _e;
-                const cat = ((_b2 = (_a2 = page.properties["AI\u5206\u7C7B"]) == null ? void 0 : _a2.select) == null ? void 0 : _b2.name) || ((_e = (_d = (_c2 = page.properties["\u5206\u7C7B"]) == null ? void 0 : _c2.rich_text) == null ? void 0 : _d[0]) == null ? void 0 : _e.plain_text) || "\u672A\u5206\u7C7B";
-                categoryCount[cat] = (categoryCount[cat] || 0) + 1;
-              });
-              result += `
-
-**\u5206\u7C7B\u7EDF\u8BA1\uFF1A**
-`;
-              Object.entries(categoryCount).sort((a, b) => b[1] - a[1]).forEach(([cat, count]) => {
-                result += `- ${cat}: ${count} \u4E2A
-`;
-              });
-            } else {
-              const showLimit = Math.min(limit, total);
-              result += `\uFF08\u663E\u793A\u524D ${showLimit} \u6761\uFF09
-
-`;
-              pages.slice(0, showLimit).forEach((page, i) => {
-                var _a2, _b2, _c2;
-                const title = Utils2.getPageTitle(page);
-                const author = ((_c2 = (_b2 = (_a2 = page.properties["\u4F5C\u8005"]) == null ? void 0 : _a2.rich_text) == null ? void 0 : _b2[0]) == null ? void 0 : _c2.plain_text) || "\u672A\u77E5";
-                result += `${i + 1}. **${title}**
-   \u4F5C\u8005: ${author}
-`;
-              });
-            }
-            return result;
-          } catch (error) {
-            return `\u274C \u67E5\u8BE2\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleSearch: async (params, settings, explanation) => {
-          if (!settings.notionDatabaseId) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22 xxx\u300D\u6765\u641C\u7D22\u6574\u4E2A\u5DE5\u4F5C\u533A\uFF0C\u6216\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
-          }
-          ChatState2.updateLastMessage(`\u6B63\u5728\u641C\u7D22...`, "processing");
-          try {
-            const { keyword, limit = 10 } = params;
-            if (!keyword) {
-              return "\u8BF7\u544A\u8BC9\u6211\u4F60\u60F3\u641C\u7D22\u4EC0\u4E48\u5173\u952E\u8BCD\uFF1F";
-            }
-            const response = await NotionAPI2.search(
-              keyword,
-              { property: "object", value: "page" },
-              settings.notionApiKey
-            );
-            const pages = (response.results || []).filter((p) => {
-              var _a, _b;
-              return ((_b = (_a = p.parent) == null ? void 0 : _a.database_id) == null ? void 0 : _b.replace(/-/g, "")) === settings.notionDatabaseId.replace(/-/g, "");
-            });
-            if (pages.length === 0) {
-              return `\u{1F50D} \u6CA1\u6709\u627E\u5230\u5305\u542B\u300C${keyword}\u300D\u7684\u5E16\u5B50\u3002`;
-            }
-            let result = `\u{1F50D} **\u641C\u7D22\u7ED3\u679C**
-
-`;
-            result += `\u627E\u5230 **${pages.length}** \u4E2A\u5305\u542B\u300C${keyword}\u300D\u7684\u5E16\u5B50\uFF1A
-
-`;
-            pages.slice(0, limit).forEach((page, i) => {
-              const title = Utils2.getPageTitle(page);
-              const url = page.url || "";
-              result += `${i + 1}. [${title}](${url})
-`;
-            });
-            if (pages.length > limit) {
-              result += `
-... \u8FD8\u6709 ${pages.length - limit} \u6761\u7ED3\u679C`;
-            }
-            return result;
-          } catch (error) {
-            return `\u274C \u641C\u7D22\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleWorkspaceSearch: async (params, settings, explanation) => {
-          ChatState2.updateLastMessage(`\u6B63\u5728\u641C\u7D22\u6574\u4E2A\u5DE5\u4F5C\u533A...`, "processing");
-          try {
-            const { keyword = "", limit = 10, object_type } = params;
-            let filter = null;
-            if (object_type === "page") {
-              filter = { property: "object", value: "page" };
-            } else if (object_type === "database") {
-              filter = { property: "object", value: "database" };
-            }
-            let allResults = [];
-            let cursor = void 0;
-            let searchPageCount = 0;
-            do {
-              const response = await NotionAPI2.search(keyword, filter, settings.notionApiKey, cursor);
-              allResults = allResults.concat(response.results || []);
-              cursor = response.has_more ? response.next_cursor : void 0;
-              searchPageCount++;
-            } while (cursor && searchPageCount < 10);
-            const results = allResults;
-            if (results.length === 0) {
-              const typeLabel = object_type === "page" ? "\u9875\u9762" : object_type === "database" ? "\u6570\u636E\u5E93" : "\u5185\u5BB9";
-              return keyword ? `\u{1F310} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u5305\u542B\u300C${keyword}\u300D\u7684${typeLabel}\u3002` : `\u{1F310} \u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230${typeLabel}\u3002`;
-            }
-            const pages = results.filter((r) => r.object === "page");
-            const databases = results.filter((r) => r.object === "database");
-            let result = `\u{1F310} **\u5DE5\u4F5C\u533A\u641C\u7D22\u7ED3\u679C**
-
-`;
-            if (keyword) {
-              result += `\u641C\u7D22\u5173\u952E\u8BCD\uFF1A\u300C${keyword}\u300D
-`;
-            }
-            result += `\u5171\u627E\u5230 **${results.length}** \u4E2A\u7ED3\u679C`;
-            if (pages.length > 0 && databases.length > 0) {
-              result += `\uFF08${pages.length} \u4E2A\u9875\u9762\uFF0C${databases.length} \u4E2A\u6570\u636E\u5E93\uFF09`;
-            }
-            result += `
-
-`;
-            if (databases.length > 0 && (!object_type || object_type === "database")) {
-              result += `\u{1F4C1} **\u6570\u636E\u5E93** (${databases.length})
-`;
-              databases.slice(0, limit).forEach((db, i) => {
-                var _a, _b, _c;
-                const title = ((_b = (_a = db.title) == null ? void 0 : _a[0]) == null ? void 0 : _b.plain_text) || "\u65E0\u6807\u9898\u6570\u636E\u5E93";
-                const url = db.url || "";
-                const id = ((_c = db.id) == null ? void 0 : _c.replace(/-/g, "")) || "";
-                result += `${i + 1}. [${title}](${url})
-`;
-                result += `   ID: \`${id}\`
-`;
-              });
-              if (databases.length > limit) {
-                result += `   ... \u8FD8\u6709 ${databases.length - limit} \u4E2A\u6570\u636E\u5E93
-`;
-              }
-              result += `
-`;
-            }
-            if (pages.length > 0 && (!object_type || object_type === "page")) {
-              result += `\u{1F4C4} **\u9875\u9762** (${pages.length})
-`;
-              pages.slice(0, limit).forEach((page, i) => {
-                var _a;
-                const title = Utils2.getPageTitle(page);
-                const url = page.url || "";
-                const parentType = ((_a = page.parent) == null ? void 0 : _a.type) || "";
-                let parentLabel = "";
-                if (parentType === "database_id") {
-                  parentLabel = "\u{1F4C1} \u6570\u636E\u5E93\u6761\u76EE";
-                } else if (parentType === "page_id") {
-                  parentLabel = "\u{1F4C4} \u5B50\u9875\u9762";
-                } else if (parentType === "workspace") {
-                  parentLabel = "\u{1F310} \u5DE5\u4F5C\u533A\u9875\u9762";
-                }
-                result += `${i + 1}. [${title}](${url})`;
-                if (parentLabel) {
-                  result += ` - ${parentLabel}`;
-                }
-                result += `
-`;
-              });
-              if (pages.length > limit) {
-                result += `   ... \u8FD8\u6709 ${pages.length - limit} \u4E2A\u9875\u9762
-`;
-              }
-            }
-            result += `
-\u{1F4A1} \u63D0\u793A\uFF1A\u590D\u5236\u6570\u636E\u5E93 ID \u53EF\u4EE5\u914D\u7F6E\u5230\u8BBE\u7F6E\u4E2D\u4F7F\u7528\u66F4\u591A\u529F\u80FD\u3002`;
-            return result;
-          } catch (error) {
-            return `\u274C \u5DE5\u4F5C\u533A\u641C\u7D22\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleClassify: async (params, settings, explanation) => {
-          return "\u{1F4DD} \u5355\u4E2A\u5206\u7C7B\u529F\u80FD\u5F00\u53D1\u4E2D...\n\n\u76EE\u524D\u53EF\u4EE5\u4F7F\u7528\u300C\u81EA\u52A8\u5206\u7C7B\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50\u300D\u6765\u6279\u91CF\u5206\u7C7B\u3002";
-        },
-        handleBatchClassify: async (params, settings, explanation) => {
-          if (!settings.notionDatabaseId) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
-          }
-          if (settings.categories.length < 2) {
-            return "\u274C \u8BF7\u5148\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u914D\u7F6E\u81F3\u5C11\u4E24\u4E2A\u5206\u7C7B\u9009\u9879\u3002";
-          }
-          ChatState2.updateLastMessage(`\u6B63\u5728\u51C6\u5907\u6279\u91CF\u5206\u7C7B...
-\u5206\u7C7B\u9009\u9879: ${settings.categories.join(", ")}`, "processing");
-          try {
-            await AIClassifier3.ensureAICategoryProperty(settings);
-            ChatState2.updateLastMessage(`\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...`, "processing");
-            const pages = await AIClassifier3.fetchAllPages(settings);
-            if (pages.length === 0) {
-              return "\u{1F4ED} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762\u3002";
-            }
-            const unclassified = pages.filter((p) => {
-              var _a;
-              const aiCategory = p.properties["AI\u5206\u7C7B"];
-              return !((_a = aiCategory == null ? void 0 : aiCategory.select) == null ? void 0 : _a.name);
-            });
-            if (unclassified.length === 0) {
-              return `\u2705 \u6240\u6709 ${pages.length} \u4E2A\u9875\u9762\u90FD\u5DF2\u5206\u7C7B\u5B8C\u6210\uFF01`;
-            }
-            const results = { success: 0, failed: 0 };
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            for (let i = 0; i < unclassified.length; i++) {
-              const page = unclassified[i];
-              const title = AIClassifier3.getPageTitle(page);
-              ChatState2.updateLastMessage(
-                `\u{1F504} \u6B63\u5728\u5206\u7C7B (${i + 1}/${unclassified.length})
-
-\u5F53\u524D: ${title}`,
-                "processing"
-              );
-              try {
-                await AIClassifier3.classifyPage(page, settings);
-                results.success++;
-              } catch (error) {
-                console.error(`[LD-Notion] \u5206\u7C7B\u5931\u8D25: ${title}`, error);
-                results.failed++;
-              }
-              if (i < unclassified.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-            let resultMsg = `\u2705 **\u6279\u91CF\u5206\u7C7B\u5B8C\u6210**
-
-`;
-            resultMsg += `- \u603B\u8BA1: ${pages.length} \u4E2A\u9875\u9762
-`;
-            resultMsg += `- \u5DF2\u5206\u7C7B: ${pages.length - unclassified.length} \u4E2A
-`;
-            resultMsg += `- \u672C\u6B21\u5206\u7C7B: ${results.success} \u4E2A
-`;
-            if (results.failed > 0) {
-              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
-`;
-            }
-            return resultMsg;
-          } catch (error) {
-            return `\u274C \u6279\u91CF\u5206\u7C7B\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleUpdate: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("updatePage")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u66F4\u65B0\u9875\u9762\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          ChatState2.updateLastMessage("\u6B63\u5728\u5B9A\u4F4D\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targets = await AIAssistant2._resolvePageTargets({
-              ...params,
-              page_name: params.page_name || params.keyword
-            }, settings);
-            if (targets == null ? void 0 : targets.error) return `\u274C ${targets.error}`;
-            if (!targets || targets.length === 0) {
-              return "\u274C \u6CA1\u6709\u627E\u5230\u53EF\u66F4\u65B0\u7684\u9875\u9762\u3002\u8BF7\u63D0\u4F9B page_name/page_id/page_ids\uFF0C\u6216\u63D0\u4F9B\u6570\u636E\u5E93 + page_title\u3002";
-            }
-            const batchMode = !!params.batch || Array.isArray(params.page_ids) || !!params.page_title || targets.length > 1;
-            if (!batchMode && targets.length > 1) {
-              const names = targets.map((t) => `\u300C${t.name}\u300D`).join("\u3001");
-              return `\u274C \u627E\u5230\u591A\u4E2A\u9875\u9762\uFF1A${names}\u3002\u8BF7\u63D0\u4F9B\u66F4\u7CBE\u786E\u7684 page_name \u6216\u76F4\u63A5\u63D0\u4F9B page_id\u3002`;
-            }
-            const { success, failed } = await AIAssistant2._applyPageUpdatesToTargets(targets, params, settings);
-            if (!batchMode && success === 1 && failed === 0) {
-              return `\u2705 \u5DF2\u66F4\u65B0\u9875\u9762\u300C${targets[0].name}\u300D\u3002`;
-            }
-            return `\u2705 \u6279\u91CF\u66F4\u65B0\u5B8C\u6210\uFF1A\u6210\u529F ${success} \u4E2A\uFF0C\u5931\u8D25 ${failed} \u4E2A\u3002`;
-          } catch (error) {
-            return `\u274C \u66F4\u65B0\u9875\u9762\u5931\u8D25: ${error.message}`;
-          }
-        },
-        _resolveDatabaseId: async (name, id, apiKey) => {
-          return NameResolver.resolveDatabaseId(name, id, apiKey);
-        },
-        _fetchSourcePages: async (databaseId, apiKey, pageTitle) => {
-          const allPages = [];
-          let cursor = null;
-          do {
-            const response = await NotionAPI2.queryDatabase(databaseId, null, null, cursor, apiKey);
-            allPages.push(...response.results || []);
-            cursor = response.has_more ? response.next_cursor : null;
-          } while (cursor);
-          if (pageTitle) {
-            return allPages.filter((page) => {
-              const title = Utils2.getPageTitle(page);
-              return title.includes(pageTitle);
-            });
-          }
-          return allPages;
-        },
-        handleMove: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("movePage")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u79FB\u52A8\u9875\u9762\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
-          }
-          const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
-          ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u6570\u636E\u5E93\u4FE1\u606F...", "processing");
-          try {
-            let source = await AIAssistant2._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
-            if (source == null ? void 0 : source.error) return `\u274C \u6E90\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${source.error}`;
-            if (!source && settings.notionDatabaseId) {
-              source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93" };
-            }
-            if (!source) {
-              return "\u274C \u65E0\u6CD5\u786E\u5B9A\u6E90\u6570\u636E\u5E93\u3002\u8BF7\u6307\u5B9A\u6E90\u6570\u636E\u5E93\u540D\u79F0\uFF0C\u6216\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002";
-            }
-            const target = await AIAssistant2._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
-            if (target == null ? void 0 : target.error) return `\u274C \u76EE\u6807\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${target.error}`;
-            if (!target) {
-              return `\u274C \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002
-
-\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002`;
-            }
-            if (source.id === target.id) {
-              return "\u274C \u6E90\u6570\u636E\u5E93\u548C\u76EE\u6807\u6570\u636E\u5E93\u76F8\u540C\uFF0C\u65E0\u9700\u79FB\u52A8\u3002";
-            }
-            ChatState2.updateLastMessage(`\u6B63\u5728\u4ECE\u300C${source.name}\u300D\u83B7\u53D6\u9875\u9762...`, "processing");
-            const pages = await AIAssistant2._fetchSourcePages(source.id, settings.notionApiKey, page_title);
-            if (pages.length === 0) {
-              return page_title ? `\u{1F4ED} \u5728\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u6807\u9898\u5305\u542B\u300C${page_title}\u300D\u7684\u9875\u9762\u3002` : `\u{1F4ED}\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u9875\u9762\u3002`;
-            }
-            const results = { success: 0, failed: 0 };
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            for (let i = 0; i < pages.length; i++) {
-              const page = pages[i];
-              const title = Utils2.getPageTitle(page);
-              ChatState2.updateLastMessage(
-                `\u{1F4E6} \u6B63\u5728\u79FB\u52A8 (${i + 1}/${pages.length})
-
-\u5F53\u524D: ${title}
-\u2192 \u76EE\u6807: ${target.name}`,
-                "processing"
-              );
-              try {
-                await AIAssistant2._executeGuardedPageWrite(
-                  "movePage",
-                  { id: page.id, name: title },
-                  () => NotionAPI2.movePage(page.id, target.id, "database", settings.notionApiKey),
-                  settings
-                );
-                results.success++;
-              } catch (error) {
-                console.error(`[LD-Notion] \u79FB\u52A8\u5931\u8D25: ${title}`, error);
-                results.failed++;
-              }
-              if (i < pages.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-            let resultMsg = `\u2705 **\u79FB\u52A8\u5B8C\u6210**
-
-`;
-            resultMsg += `- \u6E90\u6570\u636E\u5E93: ${source.name}
-`;
-            resultMsg += `- \u76EE\u6807\u6570\u636E\u5E93: ${target.name}
-`;
-            resultMsg += `- \u6210\u529F: ${results.success} \u4E2A
-`;
-            if (results.failed > 0) {
-              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
-`;
-            }
-            return resultMsg;
-          } catch (error) {
-            return `\u274C \u79FB\u52A8\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleCopy: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("duplicatePage")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u590D\u5236\u9875\u9762\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
-          }
-          const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
-          ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u6570\u636E\u5E93\u4FE1\u606F...", "processing");
-          try {
-            let source = await AIAssistant2._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
-            if (source == null ? void 0 : source.error) return `\u274C \u6E90\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${source.error}`;
-            if (!source && settings.notionDatabaseId) {
-              source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93" };
-            }
-            if (!source) {
-              return "\u274C \u65E0\u6CD5\u786E\u5B9A\u6E90\u6570\u636E\u5E93\u3002\u8BF7\u6307\u5B9A\u6E90\u6570\u636E\u5E93\u540D\u79F0\uFF0C\u6216\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002";
-            }
-            const target = await AIAssistant2._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
-            if (target == null ? void 0 : target.error) return `\u274C \u76EE\u6807\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${target.error}`;
-            if (!target) {
-              return `\u274C \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002
-
-\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002`;
-            }
-            if (source.id === target.id) {
-              return "\u274C \u6E90\u6570\u636E\u5E93\u548C\u76EE\u6807\u6570\u636E\u5E93\u76F8\u540C\uFF0C\u65E0\u9700\u590D\u5236\u3002";
-            }
-            ChatState2.updateLastMessage(`\u6B63\u5728\u4ECE\u300C${source.name}\u300D\u83B7\u53D6\u9875\u9762...`, "processing");
-            const pages = await AIAssistant2._fetchSourcePages(source.id, settings.notionApiKey, page_title);
-            if (pages.length === 0) {
-              return page_title ? `\u{1F4ED} \u5728\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u6807\u9898\u5305\u542B\u300C${page_title}\u300D\u7684\u9875\u9762\u3002` : `\u{1F4ED}\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u9875\u9762\u3002`;
-            }
-            const results = { success: 0, failed: 0 };
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            for (let i = 0; i < pages.length; i++) {
-              const page = pages[i];
-              const title = Utils2.getPageTitle(page);
-              ChatState2.updateLastMessage(
-                `\u{1F4CB} \u6B63\u5728\u590D\u5236 (${i + 1}/${pages.length})
-
-\u5F53\u524D: ${title}
-\u2192 \u76EE\u6807: ${target.name}`,
-                "processing"
-              );
-              try {
-                await AIAssistant2._executeGuardedPageWrite(
-                  "duplicatePage",
-                  { id: page.id, name: title },
-                  () => NotionAPI2.duplicatePage(page.id, target.id, "database", settings.notionApiKey),
-                  settings
-                );
-                results.success++;
-              } catch (error) {
-                console.error(`[LD-Notion] \u590D\u5236\u5931\u8D25: ${title}`, error);
-                results.failed++;
-              }
-              if (i < pages.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-            let resultMsg = `\u2705 **\u590D\u5236\u5B8C\u6210**
-
-`;
-            resultMsg += `- \u6E90\u6570\u636E\u5E93: ${source.name}
-`;
-            resultMsg += `- \u76EE\u6807\u6570\u636E\u5E93: ${target.name}
-`;
-            resultMsg += `- \u6210\u529F: ${results.success} \u4E2A
-`;
-            if (results.failed > 0) {
-              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
-`;
-            }
-            return resultMsg;
-          } catch (error) {
-            return `\u274C \u590D\u5236\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleCompound: async (intentResult, settings) => {
-          const { steps, explanation } = intentResult;
-          if (!steps || steps.length === 0) {
-            return "\u274C \u7EC4\u5408\u6307\u4EE4\u89E3\u6790\u5931\u8D25\uFF1A\u672A\u8BC6\u522B\u5230\u6709\u6548\u7684\u6267\u884C\u6B65\u9AA4\u3002";
-          }
-          let planMsg = `\u{1F517} **\u7EC4\u5408\u6307\u4EE4** \u2014 ${explanation}
-
-\u{1F4CB} \u6267\u884C\u8BA1\u5212\uFF1A
-`;
-          steps.forEach((step, i) => {
-            planMsg += `${i + 1}. ${step.explanation}
-`;
-          });
-          ChatState2.updateLastMessage(planMsg, "processing");
-          const results = [];
-          let aborted = false;
-          for (let i = 0; i < steps.length; i++) {
-            const step = steps[i];
-            ChatState2.updateLastMessage(
-              `${planMsg}
-\u23F3 \u6B65\u9AA4 ${i + 1}/${steps.length}: ${step.explanation}`,
-              "processing"
-            );
-            try {
-              const stepResult = await AIAssistant2.executeIntent(step, settings);
-              const normalizedStepResult = AIAssistant2._normalizeExecutionResult(stepResult);
-              if (AIAssistant2._isErrorResult(normalizedStepResult)) {
-                results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
-                aborted = true;
-                break;
-              }
-              results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
-            } catch (error) {
-              results.push({
-                index: i + 1,
-                explanation: step.explanation,
-                success: false,
-                result: AIAssistant2._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
-              });
-              aborted = true;
-              break;
-            }
-          }
-          let report = `\u{1F517} **\u7EC4\u5408\u6307\u4EE4\u6267\u884C${aborted ? "\u4E2D\u65AD" : "\u5B8C\u6210"}**
-
-`;
-          for (const r of results) {
-            report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.index}: ${r.explanation}
-`;
-          }
-          if (aborted) {
-            const skipped = steps.slice(results.length);
-            if (skipped.length > 0) {
-              report += `
-\u23ED\uFE0F \u5DF2\u8DF3\u8FC7\uFF1A
-`;
-              skipped.forEach((step, i) => {
-                report += `${results.length + i + 1}. ${step.explanation}
-`;
-              });
-            }
-          }
-          report += `
----
-`;
-          for (const r of results) {
-            report += `
-**\u6B65\u9AA4 ${r.index}**: ${r.explanation}
-${AIAssistant2._resultToText(r.result)}
-`;
-          }
-          return report;
-        },
-        handleCreateDatabase: async (params, settings, explanation) => {
-          var _a;
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("createDatabase")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u521B\u5EFA\u6570\u636E\u5E93\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
-          }
-          const { database_name, parent_page_name, parent_page_id } = params;
-          if (!database_name) {
-            return "\u274C \u8BF7\u6307\u5B9A\u8981\u521B\u5EFA\u7684\u6570\u636E\u5E93\u540D\u79F0\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u521B\u5EFA\u4E00\u4E2A\u53EB\u6280\u672F\u6587\u6863\u7684\u6570\u636E\u5E93\u300D";
-          }
-          ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u7236\u9875\u9762\u4FE1\u606F...", "processing");
-          try {
-            let parentPage = null;
-            if (parent_page_id || parent_page_name) {
-              parentPage = await AIAssistant2._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
-              if (parentPage == null ? void 0 : parentPage.error) return `\u274C \u7236\u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${parentPage.error}`;
-              if (!parentPage) {
-                return `\u274C \u627E\u4E0D\u5230\u540D\u4E3A\u300C${parent_page_name}\u300D\u7684\u9875\u9762\u3002
-
-\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22\u6240\u6709\u9875\u9762\u300D\u67E5\u770B\u53EF\u7528\u9875\u9762\u3002`;
-              }
-            } else {
-              ChatState2.updateLastMessage("\u672A\u6307\u5B9A\u7236\u9875\u9762\uFF0C\u6B63\u5728\u641C\u7D22\u5DE5\u4F5C\u533A\u9875\u9762...", "processing");
-              const response = await NotionAPI2.search(
-                "",
-                { property: "object", value: "page" },
-                settings.notionApiKey
-              );
-              const pages = (response.results || []).filter((p) => {
-                var _a2;
-                return !p.archived && ((_a2 = p.parent) == null ? void 0 : _a2.type) === "workspace";
-              });
-              if (pages.length === 0) {
-                return "\u274C \u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u53EF\u7528\u7684\u9875\u9762\u4F5C\u4E3A\u7236\u9875\u9762\u3002\n\n\u{1F4A1} \u8BF7\u5148\u5728 Notion \u4E2D\u521B\u5EFA\u4E00\u4E2A\u9875\u9762\uFF0C\u6216\u6307\u5B9A\u7236\u9875\u9762\u540D\u79F0\u3002\n\n\u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u4E0B\u521B\u5EFA\u4E00\u4E2A\u53EB\u6280\u672F\u6587\u6863\u7684\u6570\u636E\u5E93\u300D";
-              }
-              const firstPage = pages[0];
-              parentPage = { id: firstPage.id.replace(/-/g, ""), name: Utils2.getPageTitle(firstPage) || "\u672A\u547D\u540D\u9875\u9762" };
-            }
-            ChatState2.updateLastMessage(`\u6B63\u5728\u521B\u5EFA\u6570\u636E\u5E93\u300C${database_name}\u300D...`, "processing");
-            const properties = {
-              "\u6807\u9898": { title: {} },
-              "\u94FE\u63A5": { url: {} },
-              "\u5206\u7C7B": { rich_text: {} },
-              "\u6807\u7B7E": { multi_select: { options: [] } },
-              "\u4F5C\u8005": { rich_text: {} },
-              "\u6536\u85CF\u65F6\u95F4": { date: {} },
-              "\u5E16\u5B50\u6570": { number: { format: "number" } },
-              "\u6D4F\u89C8\u6570": { number: { format: "number" } },
-              "\u70B9\u8D5E\u6570": { number: { format: "number" } }
-            };
-            const result = await AIAssistant2._executeGuardedWrite(
-              "createDatabase",
-              () => NotionAPI2.createDatabase(parentPage.id, database_name, properties, settings.notionApiKey),
-              { itemName: database_name },
-              settings
-            );
-            const newDbId = ((_a = result.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
-            let msg = `\u2705 **\u6570\u636E\u5E93\u521B\u5EFA\u6210\u529F**
-
-`;
-            msg += `- \u6570\u636E\u5E93\u540D\u79F0: ${database_name}
-`;
-            msg += `- \u6570\u636E\u5E93 ID: \`${newDbId}\`
-`;
-            msg += `- \u7236\u9875\u9762: ${parentPage.name}
-`;
-            msg += `
-\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u5C06\u6B64 ID \u586B\u5165\u8BBE\u7F6E\u4E2D\u7684\u300C\u6570\u636E\u5E93 ID\u300D\u5B57\u6BB5\u6765\u4F7F\u7528\u8BE5\u6570\u636E\u5E93\u3002`;
-            return msg;
-          } catch (error) {
-            return `\u274C \u521B\u5EFA\u6570\u636E\u5E93\u5931\u8D25: ${error.message}`;
-          }
-        },
-        _resolvePageId: async (name, id, apiKey) => {
-          return NameResolver.resolvePageId(name, id, apiKey);
-        },
-        _textToBlocks: (text) => {
-          return BlockConverter.textToBlocks(text);
-        },
-        _extractPageContent: async (pageId, apiKey, maxChars = 4e3) => {
-          try {
-            const markdownResponse = await NotionAPI2.fetchPageMarkdown(pageId, apiKey);
-            const markdown = String(markdownResponse.markdown || "").trim();
-            if (markdown) {
-              return markdown.slice(0, maxChars);
-            }
-          } catch (error) {
-            console.warn("[LD-Notion] Markdown API \u4E0D\u53EF\u7528\uFF0C\u56DE\u9000\u5230 blocks \u63D0\u53D6:", error);
-          }
-          const allBlocks = [];
-          let cursor = null;
-          do {
-            const data = await NotionAPI2.fetchBlocks(pageId, cursor, apiKey);
-            allBlocks.push(...data.results || []);
-            cursor = data.has_more ? data.next_cursor : null;
-          } while (cursor);
-          return AIClassifier3.extractText(allBlocks).slice(0, maxChars);
-        },
-        handleWriteContent: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("appendBlocks")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u751F\u6210\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { content_prompt, page_name, page_id } = params;
-          if (!content_prompt) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u60F3\u751F\u6210\u7684\u5185\u5BB9\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u5199\u4E00\u6BB5\u5173\u4E8E Docker \u7684\u4ECB\u7ECD\u300D";
-          }
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u5199\u4E00\u6BB5\u5173\u4E8E Docker \u7684\u4ECB\u7ECD\u300D";
-          }
-          ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002
-
-\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22\u6240\u6709\u9875\u9762\u300D\u67E5\u770B\u53EF\u7528\u9875\u9762\u3002`;
-            ChatState2.updateLastMessage("\u6B63\u5728\u751F\u6210\u5185\u5BB9...", "processing");
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u751F\u6210\u52A9\u624B\u3002\u6839\u636E\u7528\u6237\u8981\u6C42\u751F\u6210\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u3002
-
-\u7528\u6237\u8981\u6C42\uFF1A${content_prompt}`;
-            const aiResponse = await AIService2.requestChat(prompt2, settings, 2e3);
-            ChatState2.updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
-            try {
-              await AIAssistant2._executeGuardedPageWrite(
-                "appendBlocks",
-                targetPage,
-                async () => {
-                  try {
-                    await NotionAPI2.appendPageMarkdown(targetPage.id, aiResponse, settings.notionApiKey);
-                  } catch (error) {
-                    console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
-                    const blocks = AIAssistant2._textToBlocks(aiResponse);
-                    await NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
-                  }
-                },
-                settings
-              );
-            } catch (error) {
-              return `\u274C \u5185\u5BB9\u751F\u6210\u5931\u8D25: ${error.message}`;
-            }
-            return `\u2705 **\u5185\u5BB9\u5DF2\u751F\u6210\u5E76\u8FFD\u52A0\u5230\u9875\u9762**
-
-- \u76EE\u6807\u9875\u9762: ${targetPage.name}
-- \u751F\u6210\u5185\u5BB9: ${aiResponse.length} \u5B57
-
-\u{1F4A1} \u5185\u5BB9\u5DF2\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\u3002`;
-          } catch (error) {
-            return `\u274C \u5185\u5BB9\u751F\u6210\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleEditContent: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("appendBlocks")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u7F16\u8F91\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { content_prompt, page_name, page_id } = params;
-          if (!content_prompt) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u7F16\u8F91\u8981\u6C42\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u5185\u5BB9\u6539\u5F97\u66F4\u7B80\u6D01\u300D";
-          }
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u5185\u5BB9\u6539\u5F97\u66F4\u7B80\u6D01\u300D";
-          }
-          ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey);
-            if (!existingContent.trim()) {
-              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u7F16\u8F91\u7684\u5185\u5BB9\u3002`;
-            }
-            ChatState2.updateLastMessage("\u6B63\u5728\u89C4\u5212\u7CBE\u786E\u7F16\u8F91...", "processing");
-            const editPlanPrompt = `\u4F60\u662F\u4E00\u4E2A\u7CBE\u786E\u7684 Notion Markdown \u7F16\u8F91\u5668\u3002\u8BF7\u6839\u636E\u7F16\u8F91\u6307\u4EE4\uFF0C\u4F18\u5148\u7ED9\u51FA\u5C40\u90E8\u66FF\u6362\u65B9\u6848\uFF0C\u800C\u4E0D\u662F\u91CD\u5199\u6574\u9875\u3002
-
-\u8F93\u51FA JSON\uFF0C\u4E14\u53EA\u80FD\u8FD4\u56DE JSON\uFF1A
-{
-  "mode": "update_content" | "append_version",
-  "content_updates": [
-{
-  "old_str": "\u9700\u8981\u88AB\u7CBE\u786E\u66FF\u6362\u7684\u539F\u6587\u7247\u6BB5",
-  "new_str": "\u66FF\u6362\u540E\u7684\u65B0\u5185\u5BB9",
-  "replace_all_matches": false
-}
-  ],
-  "append_markdown": "\u4EC5\u5F53 mode=append_version \u65F6\u63D0\u4F9B\uFF0C\u8FD4\u56DE\u5B8C\u6574\u6539\u5199\u7248\u672C"
-}
-
-\u89C4\u5219\uFF1A
-1. \u5982\u679C\u80FD\u901A\u8FC7 1-5 \u6761\u7CBE\u786E\u66FF\u6362\u5B8C\u6210\uFF0C\u5C31\u7528 update_content\u3002
-2. old_str \u5FC5\u987B\u9010\u5B57\u51FA\u81EA\u539F\u6587\u3002
-3. \u53EA\u6709\u5728\u9700\u8981\u5927\u5E45\u6539\u5199\u3001\u91CD\u7EC4\u7ED3\u6784\u6216\u65E0\u6CD5\u7A33\u5B9A\u5B9A\u4F4D\u539F\u6587\u65F6\uFF0C\u624D\u7528 append_version\u3002
-4. append_markdown \u5FC5\u987B\u662F Markdown\u3002
-
-\u539F\u6587\uFF1A
-${existingContent}
-
-\u7F16\u8F91\u6307\u4EE4\uFF1A
-${content_prompt}`;
-            const editPlanRaw = await AIService2.requestChat(editPlanPrompt, settings, 2200);
-            const jsonMatch = editPlanRaw.match(/\{[\s\S]*\}/);
-            let editPlan = null;
-            if (jsonMatch) {
-              try {
-                editPlan = JSON.parse(jsonMatch[0]);
-              } catch (error) {
-                console.warn("[LD-Notion] \u7F16\u8F91\u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", error);
-              }
-            }
-            let exactUpdateError = null;
-            let inPlaceSkippedReason = null;
-            const hasValidContentUpdates = (editPlan == null ? void 0 : editPlan.mode) === "update_content" && Array.isArray(editPlan.content_updates) && editPlan.content_updates.length > 0 && editPlan.content_updates.every((u) => u && typeof u.old_str === "string" && typeof u.new_str === "string");
-            if ((editPlan == null ? void 0 : editPlan.mode) === "update_content" && !hasValidContentUpdates) {
-              inPlaceSkippedReason = "\u539F\u4F4D\u7F16\u8F91\u7ED3\u6784\u6821\u9A8C\u5931\u8D25\uFF08content_updates \u7F3A\u5931\u6216\u65E0\u6548\uFF09";
-              console.warn("[LD-Notion] editPlan content_updates \u7ED3\u6784\u65E0\u6548\uFF0C\u964D\u7EA7\u4E3A\u5168\u6587\u8FFD\u52A0:", inPlaceSkippedReason);
-            }
-            if (hasValidContentUpdates) {
-              ChatState2.updateLastMessage("\u6B63\u5728\u6267\u884C\u539F\u4F4D\u7CBE\u786E\u7F16\u8F91...", "processing");
-              try {
-                await AIAssistant2._executeGuardedPageWrite(
-                  "updatePageMarkdown",
-                  targetPage,
-                  () => NotionAPI2.searchReplacePageMarkdown(
-                    targetPage.id,
-                    editPlan.content_updates,
-                    settings.notionApiKey
-                  ),
-                  settings
-                );
-                return `\u2705 **\u9875\u9762\u5DF2\u539F\u4F4D\u66F4\u65B0**
-
-- \u76EE\u6807\u9875\u9762: ${targetPage.name}
-- \u7F16\u8F91\u6307\u4EE4: ${content_prompt}
-- \u7CBE\u786E\u66FF\u6362: ${editPlan.content_updates.length} \u5904`;
-              } catch (error) {
-                exactUpdateError = error;
-              }
-            }
-            ChatState2.updateLastMessage("\u6B63\u5728\u751F\u6210\u7F16\u8F91\u7248\u672C...", "processing");
-            const fallbackMarkdown = String((editPlan == null ? void 0 : editPlan.append_markdown) || "").trim();
-            let aiResponse = fallbackMarkdown;
-            if (!aiResponse) {
-              const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u7F16\u8F91\u52A9\u624B\u3002\u6839\u636E\u7F16\u8F91\u6307\u4EE4\u6539\u5199\u4EE5\u4E0B\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u6539\u5199\u540E\u7684\u5B8C\u6574\u5185\u5BB9\u3002
-
-\u539F\u6587\uFF1A
-${existingContent}
-
-\u7F16\u8F91\u6307\u4EE4\uFF1A${content_prompt}`;
-              aiResponse = await AIService2.requestChat(prompt2, settings, 2e3);
-            }
-            ChatState2.updateLastMessage("\u6B63\u5728\u5199\u5165\u7F16\u8F91\u7248\u672C...", "processing");
-            const versionMarkdown = `---
-
-## \u270F\uFE0F AI \u7F16\u8F91\u7248\u672C
-
-${aiResponse}`;
-            await AIAssistant2._executeGuardedPageWrite(
-              "appendBlocks",
-              targetPage,
-              async () => {
-                try {
-                  await NotionAPI2.appendPageMarkdown(targetPage.id, versionMarkdown, settings.notionApiKey);
-                } catch (error) {
-                  console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
-                  const contentBlocks = AIAssistant2._textToBlocks(aiResponse);
-                  const blocks = [
-                    { type: "divider", divider: {} },
-                    { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: "\u270F\uFE0F AI \u7F16\u8F91\u7248\u672C" } }] } },
-                    ...contentBlocks
-                  ];
-                  await NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
-                }
-              },
-              settings
-            );
-            const fallbackReason = (exactUpdateError == null ? void 0 : exactUpdateError.message) ? `
-
-\u{1F4A1} \u539F\u4F4D\u7CBE\u786E\u66FF\u6362\u5931\u8D25\uFF1A${exactUpdateError.message}\uFF1B\u5DF2\u81EA\u52A8\u8FFD\u52A0\u5B8C\u6574\u7F16\u8F91\u7248\u672C\uFF0C\u539F\u5185\u5BB9\u4FDD\u7559\u3002` : inPlaceSkippedReason ? `
-
-\u{1F4A1} ${inPlaceSkippedReason}\uFF1B\u5DF2\u5C06\u5B8C\u6574\u7F16\u8F91\u7248\u672C\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002` : "\n\n\u{1F4A1} \u672C\u6B21\u672A\u6267\u884C\u539F\u4F4D\u66FF\u6362\uFF0C\u5DF2\u5C06\u5B8C\u6574\u7F16\u8F91\u7248\u672C\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002";
-            return `\u2705 **\u7F16\u8F91\u7248\u672C\u5DF2\u8FFD\u52A0\u5230\u9875\u9762**
-
-- \u76EE\u6807\u9875\u9762: ${targetPage.name}
-- \u7F16\u8F91\u6307\u4EE4: ${content_prompt}${fallbackReason}`;
-          } catch (error) {
-            return `\u274C \u5185\u5BB9\u7F16\u8F91\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleTranslateContent: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("appendBlocks")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u7FFB\u8BD1\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { page_name, page_id, target_language } = params;
-          const lang = target_language || "\u82F1\u6587";
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u8981\u7FFB\u8BD1\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7FFB\u8BD1\u6210\u82F1\u6587\u300D";
-          }
-          ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey);
-            if (!existingContent.trim()) {
-              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u5185\u5BB9\u3002`;
-            }
-            ChatState2.updateLastMessage(`\u6B63\u5728\u7FFB\u8BD1\u4E3A${lang}...`, "processing");
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7FFB\u8BD1\u3002\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\u4E3A${lang}\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\uFF0C\u4FDD\u6301\u539F\u6587\u7ED3\u6784\u3002
-
-\u539F\u6587\uFF1A
-${existingContent}`;
-            const aiResponse = await AIService2.requestChat(prompt2, settings, 2e3);
-            ChatState2.updateLastMessage("\u6B63\u5728\u5199\u5165\u7FFB\u8BD1\u7248\u672C...", "processing");
-            const contentBlocks = AIAssistant2._textToBlocks(aiResponse);
-            const blocks = [
-              { type: "divider", divider: {} },
-              { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `\u{1F310} AI \u7FFB\u8BD1\uFF08${lang}\uFF09` } }] } },
-              ...contentBlocks
-            ];
-            await AIAssistant2._executeGuardedPageWrite(
-              "appendBlocks",
-              targetPage,
-              () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
-              settings
-            );
-            return `\u2705 **\u7FFB\u8BD1\u5DF2\u8FFD\u52A0\u5230\u9875\u9762**
-
-- \u76EE\u6807\u9875\u9762: ${targetPage.name}
-- \u7FFB\u8BD1\u8BED\u8A00: ${lang}
-- \u7FFB\u8BD1\u5185\u5BB9: ${aiResponse.length} \u5B57
-
-\u{1F4A1} \u7FFB\u8BD1\u7248\u672C\u5DF2\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002`;
-          } catch (error) {
-            return `\u274C \u7FFB\u8BD1\u5931\u8D25: ${error.message}`;
-          }
-        },
-        _ensureAIProperty: async (databaseId, propertyName, propertyType, apiKey) => {
-          const database = await NotionAPI2.fetchDatabase(databaseId, apiKey);
-          const properties = database.properties || {};
-          if (properties[propertyName]) return;
-          const propDef = {};
-          if (propertyType === "multi_select") {
-            propDef[propertyName] = { multi_select: { options: [] } };
-          } else {
-            propDef[propertyName] = { rich_text: {} };
-          }
-          await AIAssistant2._executeGuardedDatabaseWrite(
-            "updateDatabase",
-            databaseId,
-            () => NotionAPI2.updateDatabase(databaseId, propDef, apiKey),
-            apiKey
-          );
-        },
-        handleAIAutofill: async (params, settings, explanation) => {
-          if (!OperationGuard2.canExecute("updatePage")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1AAI \u5C5E\u6027\u586B\u5145\u9700\u8981\u300C\u6807\u51C6\u300D\u53CA\u4EE5\u4E0A\u6743\u9650\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u63D0\u5347\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const configCheck = AIAssistant2.checkConfig(settings, true);
-          if (!configCheck.valid) return configCheck.error;
-          const { autofill_type, property_name } = params;
-          if (!autofill_type) {
-            return "\u274C \u8BF7\u6307\u5B9A\u586B\u5145\u7C7B\u578B\u3002\n\n\u{1F4A1} \u652F\u6301\u7684\u7C7B\u578B\uFF1A\n- \u6458\u8981\uFF1A\u300C\u7ED9\u6240\u6709\u5E16\u5B50\u751F\u6210 AI \u6458\u8981\u300D\n- \u5173\u952E\u8BCD\uFF1A\u300C\u63D0\u53D6\u6240\u6709\u5E16\u5B50\u7684\u5173\u952E\u8BCD\u300D\n- \u7FFB\u8BD1\uFF1A\u300C\u628A\u6240\u6709\u5E16\u5B50\u6807\u9898\u7FFB\u8BD1\u6210\u82F1\u6587\u300D";
-          }
-          let propName, propType, aiPromptTemplate;
-          switch (autofill_type) {
-            case "summary":
-              propName = "AI\u6458\u8981";
-              propType = "rich_text";
-              aiPromptTemplate = "\u8BF7\u75282-3\u53E5\u8BDD\u7B80\u6D01\u6982\u62EC\u4EE5\u4E0B\u5185\u5BB9\u7684\u8981\u70B9\uFF1A\n\n";
-              break;
-            case "keywords":
-              propName = "AI\u5173\u952E\u8BCD";
-              propType = "multi_select";
-              aiPromptTemplate = "\u8BF7\u4ECE\u4EE5\u4E0B\u5185\u5BB9\u4E2D\u63D0\u53D63-5\u4E2A\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694\uFF0C\u53EA\u8FD4\u56DE\u5173\u952E\u8BCD\uFF1A\n\n";
-              break;
-            case "translation":
-              propName = "AI\u7FFB\u8BD1";
-              propType = "rich_text";
-              aiPromptTemplate = "\u8BF7\u5C06\u4EE5\u4E0B\u6807\u9898\u7FFB\u8BD1\u4E3A\u82F1\u6587\uFF0C\u53EA\u8FD4\u56DE\u7FFB\u8BD1\u7ED3\u679C\uFF1A\n\n";
-              break;
-            case "custom":
-              propName = property_name || "AI\u81EA\u5B9A\u4E49";
-              propType = "rich_text";
-              aiPromptTemplate = "\u8BF7\u6839\u636E\u4EE5\u4E0B\u5185\u5BB9\u751F\u6210\u5BF9\u5E94\u7684\u5C5E\u6027\u503C\uFF1A\n\n";
-              break;
-            default:
-              return `\u274C \u4E0D\u652F\u6301\u7684\u586B\u5145\u7C7B\u578B\u300C${autofill_type}\u300D\u3002\u652F\u6301\uFF1Asummary/keywords/translation/custom`;
-          }
-          ChatState2.updateLastMessage(`\u6B63\u5728\u51C6\u5907 AI \u5C5E\u6027\u586B\u5145\uFF08${propName}\uFF09...`, "processing");
-          try {
-            await AIAssistant2._ensureAIProperty(settings.notionDatabaseId, propName, propType, settings.notionApiKey);
-            ChatState2.updateLastMessage("\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...", "processing");
-            const allPages = [];
-            let cursor = null;
-            do {
-              const response = await NotionAPI2.queryDatabase(settings.notionDatabaseId, null, null, cursor, settings.notionApiKey);
-              allPages.push(...response.results || []);
-              cursor = response.has_more ? response.next_cursor : null;
-            } while (cursor);
-            if (allPages.length === 0) {
-              return "\u{1F4ED} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762\u3002";
-            }
-            const needFill = allPages.filter((page) => {
-              const prop = page.properties[propName];
-              if (!prop) return true;
-              if (propType === "multi_select") {
-                return !prop.multi_select || prop.multi_select.length === 0;
-              }
-              return !prop.rich_text || prop.rich_text.length === 0;
-            });
-            if (needFill.length === 0) {
-              return `\u2705 \u6240\u6709 ${allPages.length} \u4E2A\u9875\u9762\u7684\u300C${propName}\u300D\u5C5E\u6027\u90FD\u5DF2\u586B\u5145\u3002`;
-            }
-            const results = { success: 0, failed: 0 };
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            for (let i = 0; i < needFill.length; i++) {
-              const page = needFill[i];
-              const title = Utils2.getPageTitle(page);
-              ChatState2.updateLastMessage(
-                `\u{1F504} \u6B63\u5728\u586B\u5145\u300C${propName}\u300D(${i + 1}/${needFill.length})
-
-\u5F53\u524D: ${title}`,
-                "processing"
-              );
-              try {
-                let inputText = title;
-                if (autofill_type !== "translation") {
-                  try {
-                    const content = await AIAssistant2._extractPageContent(page.id, settings.notionApiKey, 2e3);
-                    inputText = content || title;
-                  } catch (error) {
-                    console.warn("[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25:", error);
-                    inputText = title;
-                  }
-                }
-                const aiResult = await AIService2.requestChat(
-                  aiPromptTemplate + inputText,
-                  settings,
-                  500
-                );
-                const updateProps = {};
-                if (propType === "multi_select") {
-                  const keywords = aiResult.split(/[,，]/).map((k) => k.trim()).filter(Boolean).slice(0, 10);
-                  updateProps[propName] = { multi_select: keywords.map((k) => ({ name: k })) };
-                } else {
-                  const trimmed = aiResult.slice(0, 2e3);
-                  updateProps[propName] = { rich_text: [{ type: "text", text: { content: trimmed } }] };
-                }
-                await AIAssistant2._executeGuardedPageWrite(
-                  "updatePage",
-                  { id: page.id, name: title },
-                  () => NotionAPI2.request("PATCH", `/pages/${page.id}`, { properties: updateProps }, settings.notionApiKey),
-                  settings
-                );
-                results.success++;
-              } catch (error) {
-                console.error(`[LD-Notion] AI \u586B\u5145\u5931\u8D25: ${title}`, error);
-                results.failed++;
-              }
-              if (i < needFill.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-            let resultMsg = `\u2705 **AI \u5C5E\u6027\u586B\u5145\u5B8C\u6210**
-
-`;
-            resultMsg += `- \u5C5E\u6027\u540D: ${propName}
-`;
-            resultMsg += `- \u603B\u8BA1: ${allPages.length} \u4E2A\u9875\u9762
-`;
-            resultMsg += `- \u5DF2\u586B\u5145: ${allPages.length - needFill.length} \u4E2A
-`;
-            resultMsg += `- \u672C\u6B21\u586B\u5145: ${results.success} \u4E2A
-`;
-            if (results.failed > 0) {
-              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
-`;
-            }
-            return resultMsg;
-          } catch (error) {
-            return `\u274C AI \u5C5E\u6027\u586B\u5145\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleAsk: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { question, keyword } = params;
-          const searchTerm = question || keyword;
-          if (!searchTerm) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u7684\u95EE\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5173\u4E8E Docker \u7684\u5E16\u5B50\u90FD\u8BF4\u4E86\u4EC0\u4E48\uFF1F\u300D";
-          }
-          ChatState2.updateLastMessage("\u6B63\u5728\u641C\u7D22\u76F8\u5173\u5185\u5BB9...", "processing");
-          try {
-            const response = await NotionAPI2.search(searchTerm, null, settings.notionApiKey);
-            const results = (response.results || []).filter((r) => !r.archived && r.object === "page").slice(0, 5);
-            if (results.length === 0) {
-              return `\u{1F4ED} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${searchTerm}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002`;
-            }
-            ChatState2.updateLastMessage(`\u627E\u5230 ${results.length} \u4E2A\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5728\u63D0\u53D6...`, "processing");
-            const contextParts = [];
-            const sourceList = [];
-            for (let i = 0; i < results.length; i++) {
-              const item = results[i];
-              const title = Utils2.getPageTitle(item, item.object === "database" ? "\u672A\u547D\u540D\u6570\u636E\u5E93" : "\u672A\u547D\u540D\u9875\u9762");
-              const url = item.url || "";
-              sourceList.push({ title, url });
-              try {
-                const content = await AIAssistant2._extractPageContent(item.id, settings.notionApiKey, 2e3);
-                contextParts.push(`[${i + 1}] ${title}:
-${content || "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09"}`);
-              } catch (error) {
-                console.warn(`[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25: ${title}`, error);
-                contextParts.push(`[${i + 1}] ${title}:
-\uFF08\u65E0\u6CD5\u8BFB\u53D6\u5185\u5BB9\uFF09`);
-              }
-            }
-            ChatState2.updateLastMessage("\u6B63\u5728\u5206\u6790\u5E76\u751F\u6210\u56DE\u7B54...", "processing");
-            const ragPrompt = `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u95EE\u7B54\u52A9\u624B\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA Notion \u5DE5\u4F5C\u533A\u7684\u5185\u5BB9\u56DE\u7B54\u7528\u6237\u7684\u95EE\u9898\u3002
-\u5982\u679C\u5185\u5BB9\u4E2D\u6CA1\u6709\u76F8\u5173\u4FE1\u606F\uFF0C\u8BF7\u5982\u5B9E\u8BF4\u660E\u3002\u56DE\u7B54\u540E\u5217\u51FA\u4FE1\u606F\u6765\u6E90\u3002
-
---- \u53C2\u8003\u5185\u5BB9 ---
-${contextParts.join("\n\n")}
-
---- \u7528\u6237\u95EE\u9898 ---
-${searchTerm}`;
-            const aiAnswer = await AIService2.requestChat(ragPrompt, settings, 2e3);
-            let sourceText = "\n\n\u{1F4DA} **\u4FE1\u606F\u6765\u6E90**\uFF1A\n";
-            sourceList.forEach((s, i) => {
-              sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
-`;
-            });
-            return aiAnswer + sourceText;
-          } catch (error) {
-            return `\u274C \u95EE\u7B54\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleDeepResearch: async (params, settings, explanation) => {
-          var _a;
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { research_topic, scope = "workspace" } = params;
-          if (!research_topic) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u7684\u7814\u7A76\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u6DF1\u5165\u7814\u7A76\u4E00\u4E0B\u5173\u4E8E Docker \u7684\u6240\u6709\u5185\u5BB9\u300D";
-          }
-          try {
-            ChatState2.updateLastMessage("\u{1F52C} \u6B63\u5728\u62C6\u89E3\u7814\u7A76\u4E3B\u9898...", "processing");
-            const keywordsPrompt = `\u5C06\u4EE5\u4E0B\u7814\u7A76\u4E3B\u9898\u62C6\u5206\u4E3A3-5\u4E2A\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u6BCF\u884C\u4E00\u4E2A\u5173\u952E\u8BCD\uFF0C\u53EA\u8FD4\u56DE\u5173\u952E\u8BCD\uFF1A
-${research_topic}`;
-            const keywordsRaw = await AIService2.requestChat(keywordsPrompt, settings, 200);
-            const keywords = keywordsRaw.split("\n").map((k) => k.trim().replace(/^[-•\d.]+\s*/, "")).filter(Boolean).slice(0, 5);
-            if (keywords.length === 0) keywords.push(research_topic);
-            ChatState2.updateLastMessage(`\u{1F50D} \u641C\u7D22\u4E2D... (${keywords.length} \u4E2A\u5173\u952E\u8BCD: ${keywords.join(", ")})`, "processing");
-            const allResults = [];
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            const normalizedScope = String(scope || "workspace").toLowerCase();
-            const useDatabaseScope = normalizedScope === "database";
-            let scopedDatabaseInfo = null;
-            let scopedTitleProperty = null;
-            let scopedRichTextProperties = [];
-            if (useDatabaseScope) {
-              const scopedDatabaseId = TargetState2.getEffectiveAIDatabaseId({
-                fallbackDatabaseId: settings.notionDatabaseId
-              });
-              if (!scopedDatabaseId) {
-                return "\u274C \u5F53\u524D\u672A\u914D\u7F6E\u53EF\u7528\u4E8E\u6DF1\u5EA6\u7814\u7A76\u7684\u6570\u636E\u5E93\u3002\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u9ED8\u8BA4\u6570\u636E\u5E93\uFF0C\u6216\u5C06 AI \u76EE\u6807\u5207\u6362\u5230\u67D0\u4E2A\u6570\u636E\u5E93\u3002";
-              }
-              const scopedDatabase = await NotionAPI2.fetchDatabase(scopedDatabaseId, settings.notionApiKey);
-              scopedDatabaseInfo = {
-                id: scopedDatabaseId,
-                title: (scopedDatabase.title || []).map((item) => item.plain_text || "").join("") || "\u76EE\u6807\u6570\u636E\u5E93"
-              };
-              scopedTitleProperty = ((_a = Object.entries(scopedDatabase.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _a[0]) || null;
-              scopedRichTextProperties = Object.entries(scopedDatabase.properties || {}).filter(([_, prop]) => (prop == null ? void 0 : prop.type) === "rich_text").map(([name]) => name).filter((name) => ["\u63CF\u8FF0", "\u6458\u8981", "\u603B\u7ED3", "\u8BF4\u660E", "\u5185\u5BB9"].includes(name));
-            }
-            for (let i = 0; i < keywords.length; i++) {
-              const keyword = keywords[i];
-              let pages = [];
-              if (useDatabaseScope) {
-                const filterConditions = [];
-                if (scopedTitleProperty) {
-                  filterConditions.push({
-                    property: scopedTitleProperty,
-                    title: { contains: keyword }
-                  });
-                }
-                scopedRichTextProperties.forEach((propertyName) => {
-                  filterConditions.push({
-                    property: propertyName,
-                    rich_text: { contains: keyword }
-                  });
-                });
-                const filter = filterConditions.length === 1 ? filterConditions[0] : filterConditions.length > 1 ? { or: filterConditions } : null;
-                const response = await NotionAPI2.queryDatabase(
-                  scopedDatabaseInfo.id,
-                  filter,
-                  null,
-                  null,
-                  settings.notionApiKey,
-                  25
-                );
-                pages = (response.results || []).filter((item) => {
-                  if (item.archived || item.object !== "page") return false;
-                  const loweredKeyword = keyword.toLowerCase();
-                  const title = Utils2.getPageTitle(item, "").toLowerCase();
-                  const richTextMatches = scopedRichTextProperties.some((propertyName) => {
-                    var _a2, _b, _c;
-                    const value = ((_c = (_b = (_a2 = item.properties) == null ? void 0 : _a2[propertyName]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c.map((part) => {
-                      var _a3;
-                      return part.plain_text || ((_a3 = part.text) == null ? void 0 : _a3.content) || "";
-                    }).join("").toLowerCase()) || "";
-                    return value.includes(loweredKeyword);
-                  });
-                  return title.includes(loweredKeyword) || richTextMatches;
-                });
-              } else {
-                const response = await NotionAPI2.search(keyword, null, settings.notionApiKey);
-                pages = (response.results || []).filter((r) => !r.archived && r.object === "page");
-              }
-              allResults.push(...pages);
-              if (i < keywords.length - 1) await Utils2.sleep(delay);
-            }
-            const uniquePages = [...new Map(allResults.map((r) => [r.id, r])).values()];
-            if (uniquePages.length === 0) {
-              if (useDatabaseScope) {
-                return `\u{1F4ED} \u5728\u6570\u636E\u5E93\u300C${(scopedDatabaseInfo == null ? void 0 : scopedDatabaseInfo.title) || "\u76EE\u6807\u6570\u636E\u5E93"}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${research_topic}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002
-
-\u5C1D\u8BD5\u7528\u66F4\u5BBD\u6CDB\u7684\u5173\u952E\u8BCD\uFF0C\u6216\u786E\u8BA4\u8BE5\u6570\u636E\u5E93\u4E2D\u5305\u542B\u76F8\u5173\u9875\u9762\u3002`;
-              }
-              return `\u{1F4ED} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${research_topic}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002
-
-\u5C1D\u8BD5\u7528\u66F4\u5BBD\u6CDB\u7684\u5173\u952E\u8BCD\uFF0C\u6216\u786E\u4FDD\u5DE5\u4F5C\u533A\u4E2D\u6709\u76F8\u5173\u9875\u9762\u3002`;
-            }
-            const maxPages = Math.min(10, uniquePages.length);
-            ChatState2.updateLastMessage(`\u{1F4C4} \u63D0\u53D6 ${maxPages}/${uniquePages.length} \u4E2A\u9875\u9762\u5185\u5BB9...`, "processing");
-            const contentParts = [];
-            const sourceList = [];
-            for (let i = 0; i < maxPages; i++) {
-              const page = uniquePages[i];
-              const title = Utils2.getPageTitle(page);
-              const url = page.url || "";
-              sourceList.push({ title, url });
-              try {
-                const content = await AIAssistant2._extractPageContent(page.id, settings.notionApiKey, 3e3);
-                contentParts.push(`[${i + 1}] ${title}:
-${content || "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09"}`);
-              } catch (error) {
-                console.warn(`[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25: ${title}`, error);
-                contentParts.push(`[${i + 1}] ${title}:
-\uFF08\u65E0\u6CD5\u8BFB\u53D6\u5185\u5BB9\uFF09`);
-              }
-              if (i < maxPages - 1) await Utils2.sleep(delay);
-            }
-            ChatState2.updateLastMessage("\u{1F4CA} \u6B63\u5728\u751F\u6210\u7814\u7A76\u62A5\u544A...", "processing");
-            const reportPrompt = `\u4F60\u662F\u4E00\u4E2A\u7814\u7A76\u5206\u6790\u5E08\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA Notion \u5DE5\u4F5C\u533A\u7684\u5185\u5BB9\uFF0C\u9488\u5BF9\u4E3B\u9898\u300C${research_topic}\u300D\u751F\u6210\u4E00\u4EFD\u7ED3\u6784\u5316\u7814\u7A76\u62A5\u544A\u3002
-
-\u62A5\u544A\u683C\u5F0F\u8981\u6C42\uFF08\u4F7F\u7528 Markdown\uFF09:
-# \u7814\u7A76\u62A5\u544A: ${research_topic}
-## \u6458\u8981
-\uFF082-3\u53E5\u8BDD\u6982\u62EC\u6838\u5FC3\u53D1\u73B0\uFF09
-## \u4E3B\u8981\u53D1\u73B0
-\uFF083-5\u4E2A\u8981\u70B9\uFF0C\u6BCF\u4E2A\u8981\u70B9\u4E00\u53E5\u8BDD\uFF09
-## \u8BE6\u7EC6\u5206\u6790
-\uFF08\u6309\u4E3B\u9898\u5206\u6BB5\u8BBA\u8FF0\uFF0C\u5F15\u7528\u5177\u4F53\u6765\u6E90\u7F16\u53F7\u5982[1][2]\uFF09
-## \u5EFA\u8BAE\u4E0E\u884C\u52A8\u9879
-\uFF08\u53EF\u6267\u884C\u7684\u5EFA\u8BAE\uFF0C\u6BCF\u6761\u4E00\u53E5\u8BDD\uFF09
-## \u4FE1\u606F\u6765\u6E90
-\uFF08\u5217\u51FA\u5F15\u7528\u7684\u9875\u9762\uFF09
-
---- \u53C2\u8003\u5185\u5BB9 ---
-${contentParts.join("\n\n---\n\n")}`;
-            const report = await AIService2.requestChat(reportPrompt, settings, 4e3);
-            let sourceText = "\n\n\u{1F4DA} **\u5206\u6790\u57FA\u7840**\uFF1A\n";
-            sourceList.forEach((s, i) => {
-              sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
-`;
-            });
-            const scopeLabel = useDatabaseScope ? `\u6570\u636E\u5E93\u300C${(scopedDatabaseInfo == null ? void 0 : scopedDatabaseInfo.title) || "\u76EE\u6807\u6570\u636E\u5E93"}\u300D` : "\u5DE5\u4F5C\u533A";
-            const summary = `\u{1F52C} \u8303\u56F4\uFF1A${scopeLabel}\u3002\u5171\u4F7F\u7528 ${keywords.length} \u4E2A\u5173\u952E\u8BCD\uFF0C\u627E\u5230 ${uniquePages.length} \u4E2A\u76F8\u5173\u9875\u9762\uFF0C\u6DF1\u5165\u5206\u6790\u4E86 ${maxPages} \u4E2A\u3002`;
-            return `${report}${sourceText}
----
-${summary}`;
-          } catch (error) {
-            return `\u274C \u6DF1\u5EA6\u7814\u7A76\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleSummarize: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { page_name, page_id, summary_style } = params;
-          const style = summary_style || "brief";
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u8981\u603B\u7ED3\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u603B\u7ED3\u4E00\u4E0B xxx \u9875\u9762\u7684\u5185\u5BB9\u300D";
-          }
-          ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey, 6e3);
-            if (!existingContent.trim()) {
-              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u603B\u7ED3\u7684\u5185\u5BB9\u3002`;
-            }
-            ChatState2.updateLastMessage("\u{1F4DD} \u6B63\u5728\u751F\u6210\u6458\u8981...", "processing");
-            const styleInstructions = {
-              brief: "\u751F\u6210\u7B80\u77ED\u6458\u8981\uFF082-3\u53E5\u8BDD\uFF09\uFF0C\u63D0\u70BC\u6838\u5FC3\u8981\u70B9\u3002",
-              detailed: "\u751F\u6210\u8BE6\u7EC6\u6458\u8981\uFF0C\u5305\u542B\uFF1A\u6838\u5FC3\u4E3B\u9898\u3001\u4E3B\u8981\u8BBA\u70B9\u3001\u5173\u952E\u7EC6\u8282\u548C\u7ED3\u8BBA\u3002",
-              bullet: "\u4EE5\u8981\u70B9\u5217\u8868\u5F62\u5F0F\u603B\u7ED3\uFF0C\u6BCF\u4E2A\u8981\u70B9\u4E00\u884C\uFF0C\u63D0\u70BC\u5173\u952E\u4FE1\u606F\u3002"
-            };
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u6458\u8981\u52A9\u624B\u3002${styleInstructions[style] || styleInstructions.brief}
-
-\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002
-
-\u4EE5\u4E0B\u662F\u9700\u8981\u603B\u7ED3\u7684\u5185\u5BB9\uFF1A
-${existingContent}`;
-            const aiResponse = await AIService2.requestChat(prompt2, settings, 2e3);
-            return `\u{1F4DD} **\u9875\u9762\u6458\u8981\uFF1A${targetPage.name}**
-
-${aiResponse}
-
----
-\u{1F4C4} \u6458\u8981\u98CE\u683C: ${style === "brief" ? "\u7B80\u77ED" : style === "detailed" ? "\u8BE6\u7EC6" : "\u8981\u70B9\u5217\u8868"}`;
-          } catch (error) {
-            return `\u274C \u5185\u5BB9\u603B\u7ED3\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleBrainstorm: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { brainstorm_topic, page_name, page_id } = params;
-          const count = Math.min(Math.max(parseInt(params.brainstorm_count) || 10, 3), 30);
-          const topic = brainstorm_topic || page_name || explanation;
-          if (!topic) {
-            return "\u274C \u8BF7\u6307\u5B9A\u5934\u8111\u98CE\u66B4\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u56F4\u7ED5\u8FDC\u7A0B\u529E\u516C\u7ED9\u6211\u4E00\u4E9B\u521B\u610F\u5EFA\u8BAE\u300D";
-          }
-          let pageContext = "";
-          if (page_name || page_id) {
-            ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9\u4F5C\u4E3A\u53C2\u8003...", "processing");
-            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage) {
-              pageContext = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey, 3e3);
-            }
-          }
-          ChatState2.updateLastMessage("\u{1F4A1} \u6B63\u5728\u5934\u8111\u98CE\u66B4...", "processing");
-          try {
-            const contextBlock = pageContext ? `
-
-\u4EE5\u4E0B\u662F\u76F8\u5173\u53C2\u8003\u5185\u5BB9\uFF1A
-${pageContext}` : "";
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u521B\u610F\u987E\u95EE\u3002\u56F4\u7ED5\u4E3B\u9898\u300C${topic}\u300D\u8FDB\u884C\u5934\u8111\u98CE\u66B4\uFF0C\u751F\u6210 ${count} \u4E2A\u521B\u610F\u60F3\u6CD5\u6216\u5EFA\u8BAE\u3002
-
-\u8981\u6C42\uFF1A
-- \u60F3\u6CD5\u8981\u591A\u6837\u5316\uFF0C\u6DB5\u76D6\u4E0D\u540C\u89D2\u5EA6\u548C\u7EF4\u5EA6
-- \u6BCF\u4E2A\u60F3\u6CD5\u5305\u542B\u7B80\u77ED\u6807\u9898\u548C\u4E00\u53E5\u8BDD\u8BF4\u660E
-- \u4ECE\u5B9E\u7528\u5230\u5927\u80C6\u521B\u65B0\uFF0C\u7531\u8FD1\u53CA\u8FDC\u6392\u5217
-- \u4F7F\u7528 Markdown \u7F16\u53F7\u5217\u8868\u683C\u5F0F\u8F93\u51FA${contextBlock}`;
-            const aiResponse = await AIService2.requestChat(prompt2, settings, 2e3);
-            return `\u{1F4A1} **\u5934\u8111\u98CE\u66B4\uFF1A${topic}**
-
-${aiResponse}
-
----
-\u{1F3AF} \u5171\u751F\u6210 ${count} \u4E2A\u521B\u610F\u60F3\u6CD5`;
-          } catch (error) {
-            return `\u274C \u5934\u8111\u98CE\u66B4\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleProofread: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { page_name, page_id } = params;
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u8981\u6821\u5BF9\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u6821\u5BF9\u4E00\u4E0B xxx \u9875\u9762\u7684\u62FC\u5199\u548C\u8BED\u6CD5\u300D";
-          }
-          ChatState2.updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey);
-            if (!existingContent.trim()) {
-              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u6821\u5BF9\u7684\u5185\u5BB9\u3002`;
-            }
-            ChatState2.updateLastMessage("\u2705 \u6B63\u5728\u6821\u5BF9\u4E2D...", "processing");
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u6821\u5BF9\u7F16\u8F91\u3002\u8BF7\u4ED4\u7EC6\u68C0\u67E5\u4EE5\u4E0B\u5185\u5BB9\u7684\u62FC\u5199\u3001\u8BED\u6CD5\u548C\u8868\u8FBE\u95EE\u9898\u3002
-
-\u8F93\u51FA\u683C\u5F0F\uFF1A
-1. \u5148\u5217\u51FA\u53D1\u73B0\u7684\u6240\u6709\u95EE\u9898\uFF08\u6BCF\u4E2A\u95EE\u9898\u6807\u6CE8\u4F4D\u7F6E\u548C\u7C7B\u578B\uFF1A\u62FC\u5199/\u8BED\u6CD5/\u6807\u70B9/\u8868\u8FBE\uFF09
-2. \u7136\u540E\u7ED9\u51FA\u4FEE\u6B63\u540E\u7684\u5B8C\u6574\u5185\u5BB9
-
-\u5982\u679C\u6CA1\u6709\u53D1\u73B0\u4EFB\u4F55\u95EE\u9898\uFF0C\u8BF7\u8BF4\u660E\u5185\u5BB9\u65E0\u8BEF\u3002
-
-\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002
-
-\u4EE5\u4E0B\u662F\u9700\u8981\u6821\u5BF9\u7684\u5185\u5BB9\uFF1A
-${existingContent}`;
-            const aiResponse = await AIService2.requestChat(prompt2, settings, 3e3);
-            return `\u2705 **\u6821\u5BF9\u7ED3\u679C\uFF1A${targetPage.name}**
-
-${aiResponse}`;
-          } catch (error) {
-            return `\u274C \u6821\u5BF9\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleBatchTranslate: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("appendBlocks")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6279\u91CF\u7FFB\u8BD1\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { database_name, database_id, target_language } = params;
-          const lang = target_language || "\u82F1\u6587";
-          if (!database_name && !database_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u8981\u7FFB\u8BD1\u7684\u6570\u636E\u5E93\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u6570\u636E\u5E93\u7FFB\u8BD1\u6210\u65E5\u6587\u300D";
-          }
-          ChatState2.updateLastMessage("\u6B63\u5728\u67E5\u627E\u6570\u636E\u5E93...", "processing");
-          try {
-            let dbId = database_id;
-            if (!dbId && database_name) {
-              const searchResp = await NotionAPI2.search(database_name, "database", settings.notionApiKey);
-              const db = (searchResp.results || []).find((r) => !r.archived);
-              if (!db) return `\u274C \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${database_name}\u300D\u3002`;
-              dbId = db.id;
-            }
-            ChatState2.updateLastMessage("\u6B63\u5728\u83B7\u53D6\u9875\u9762\u5217\u8868...", "processing");
-            const queryResp = await NotionAPI2.queryDatabase(dbId, null, null, null, settings.notionApiKey, 20);
-            const pages = (queryResp.results || []).filter((p) => !p.archived);
-            if (pages.length === 0) {
-              return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u9875\u9762\u3002`;
-            }
-            const confirmed = await ConfirmationDialog2.show({
-              title: `\u{1F310} \u6279\u91CF\u7FFB\u8BD1\u786E\u8BA4`,
-              message: `\u5373\u5C06\u7FFB\u8BD1 ${pages.length} \u4E2A\u9875\u9762\u4E3A${lang}\u3002
-\u7FFB\u8BD1\u540E\u7684\u5185\u5BB9\u5C06\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002`,
-              confirmText: "\u5F00\u59CB\u7FFB\u8BD1",
-              cancelText: "\u53D6\u6D88"
-            });
-            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u6279\u91CF\u7FFB\u8BD1\u3002";
-            let successCount = 0;
-            let failCount = 0;
-            for (let i = 0; i < pages.length; i++) {
-              const page = pages[i];
-              const title = Utils2.getPageTitle(page);
-              ChatState2.updateLastMessage(`\u{1F310} \u7FFB\u8BD1\u4E2D (${i + 1}/${pages.length}): ${title}...`, "processing");
-              try {
-                const content = await AIAssistant2._extractPageContent(page.id, settings.notionApiKey, 4e3);
-                if (!content.trim()) {
-                  failCount++;
-                  continue;
-                }
-                const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7FFB\u8BD1\u3002\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\u4E3A${lang}\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\uFF0C\u4FDD\u6301\u539F\u6587\u7ED3\u6784\u3002
-
-\u539F\u6587\uFF1A
-${content}`;
-                const translated = await AIService2.requestChat(prompt2, settings, 2e3);
-                const blocks = [
-                  { type: "divider", divider: {} },
-                  { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `\u{1F310} ${lang}\u7FFB\u8BD1` } }] } },
-                  ...AIAssistant2._textToBlocks(translated)
-                ];
-                await AIAssistant2._executeGuardedPageWrite(
-                  "appendBlocks",
-                  page,
-                  () => NotionAPI2.appendBlocks(page.id, blocks, settings.notionApiKey),
-                  settings,
-                  { itemName: title }
-                );
-                successCount++;
-              } catch (error) {
-                console.warn(`[LD-Notion] \u9875\u9762\u521B\u5EFA\u5931\u8D25: ${title}`, error);
-                failCount++;
-              }
-            }
-            return `\u{1F310} **\u6279\u91CF\u7FFB\u8BD1\u5B8C\u6210**
-
-- \u76EE\u6807\u8BED\u8A00: ${lang}
-- \u6210\u529F: ${successCount} \u9875
-- \u5931\u8D25: ${failCount} \u9875
-- \u603B\u8BA1: ${pages.length} \u9875
-
-\u{1F4A1} \u7FFB\u8BD1\u5185\u5BB9\u5DF2\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\u3002`;
-          } catch (error) {
-            return `\u274C \u6279\u91CF\u7FFB\u8BD1\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleExtractToDatabase: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("createDatabase")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u521B\u5EFA\u6570\u636E\u5E93\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { page_name, page_id, database_name, extraction_prompt } = params;
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u6E90\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u7B14\u8BB0\u63D0\u53D6\u4E3A\u4EFB\u52A1\u6570\u636E\u5E93\u300D";
-          }
-          ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u6E90\u9875\u9762...", "processing");
-          try {
-            const sourcePage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (sourcePage == null ? void 0 : sourcePage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${sourcePage.error}`;
-            if (!sourcePage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            const content = await AIAssistant2._extractPageContent(sourcePage.id, settings.notionApiKey, 6e3);
-            if (!content.trim()) {
-              return `\u274C \u9875\u9762\u300C${sourcePage.name}\u300D\u6CA1\u6709\u53EF\u63D0\u53D6\u7684\u5185\u5BB9\u3002`;
-            }
-            ChatState2.updateLastMessage("\u{1F50D} \u6B63\u5728\u5206\u6790\u5185\u5BB9\u7ED3\u6784...", "processing");
-            const dbName = database_name || `${sourcePage.name} - \u63D0\u53D6\u6570\u636E`;
-            const extractHint = extraction_prompt || explanation || "\u63D0\u53D6\u6240\u6709\u7ED3\u6784\u5316\u6761\u76EE";
-            const analyzePrompt = `\u4F60\u662F\u4E00\u4E2A\u6570\u636E\u63D0\u53D6\u4E13\u5BB6\u3002\u5206\u6790\u4EE5\u4E0B\u9875\u9762\u5185\u5BB9\uFF0C\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002
-
-\u63D0\u53D6\u8981\u6C42\uFF1A${extractHint}
-
-\u8BF7\u8FD4\u56DE JSON \u683C\u5F0F\uFF08\u53EA\u8FD4\u56DE JSON\uFF09\uFF1A
-{
-  "properties": [
-{ "name": "\u5C5E\u6027\u540D", "type": "title|rich_text|select|number|checkbox", "description": "\u5C5E\u6027\u8BF4\u660E" }
-  ],
-  "entries": [
-{ "\u5C5E\u6027\u540D1": "\u503C1", "\u5C5E\u6027\u540D2": "\u503C2" }
-  ]
-}
-
-\u5C5E\u6027\u7C7B\u578B\u8BF4\u660E\uFF1A
-- \u7B2C\u4E00\u4E2A\u5C5E\u6027\u5FC5\u987B\u662F title \u7C7B\u578B
-- \u5206\u7C7B/\u72B6\u6001 \u2192 select\uFF0C\u6570\u91CF/\u91D1\u989D \u2192 number\uFF0C\u662F\u5426 \u2192 checkbox\uFF0C\u5176\u4ED6 \u2192 rich_text
-
-\u9875\u9762\u5185\u5BB9\uFF1A
-${content}`;
-            const aiResponse = await AIService2.requestChat(analyzePrompt, settings, 3e3);
-            const parsedResult = AISchema.parseAIJson("extractToDatabase", aiResponse);
-            if (!parsedResult.ok) {
-              return `\u274C ${parsedResult.reason}`;
-            }
-            const extractedData = parsedResult.value;
-            const validProps = extractedData.properties.filter((prop) => {
-              const nameOk = AISchema.validatePropertyName(prop.name);
-              const typeOk = AISchema.validatePropertyType(prop.type);
-              if (!nameOk || !typeOk.valid) {
-                console.warn(`[LD-Notion] AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5DF2\u8DF3\u8FC7\uFF08name=${prop.name}, type=${prop.type}\uFF09`);
-                return false;
-              }
-              prop.name = nameOk;
-              prop.type = typeOk.type;
-              return true;
-            });
-            if (validProps.length === 0) {
-              return `\u274C AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5747\u65E0\u6548\uFF0C\u65E0\u6CD5\u521B\u5EFA\u6570\u636E\u5E93\u3002`;
-            }
-            extractedData.properties = validProps;
-            const confirmed = await ConfirmationDialog2.show({
-              title: "\u{1F4CA} \u521B\u5EFA\u6570\u636E\u5E93\u786E\u8BA4",
-              message: `\u5C06\u4ECE\u300C${sourcePage.name}\u300D\u63D0\u53D6 ${extractedData.entries.length} \u4E2A\u6761\u76EE\u3002
-\u6570\u636E\u5E93\u540D\u79F0: ${dbName}
-\u5C5E\u6027: ${extractedData.properties.map((p) => p.name).join(", ")}`,
-              confirmText: "\u521B\u5EFA",
-              cancelText: "\u53D6\u6D88"
-            });
-            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u3002";
-            ChatState2.updateLastMessage("\u{1F4CA} \u6B63\u5728\u521B\u5EFA\u6570\u636E\u5E93...", "processing");
-            const dbProperties = {};
-            for (const prop of extractedData.properties) {
-              if (prop.type === "title") {
-                dbProperties[prop.name] = { title: {} };
-              } else if (prop.type === "select") {
-                dbProperties[prop.name] = { select: {} };
-              } else if (prop.type === "number") {
-                dbProperties[prop.name] = { number: {} };
-              } else if (prop.type === "checkbox") {
-                dbProperties[prop.name] = { checkbox: {} };
-              } else {
-                dbProperties[prop.name] = { rich_text: {} };
-              }
-            }
-            const newDb = await AIAssistant2._executeGuardedPageWrite(
-              "createDatabase",
-              sourcePage,
-              () => NotionAPI2.createDatabase(sourcePage.id, dbName, dbProperties, settings.notionApiKey),
-              settings,
-              { itemName: dbName }
-            );
-            ChatState2.updateLastMessage(`\u{1F4DD} \u6B63\u5728\u586B\u5145 ${extractedData.entries.length} \u4E2A\u6761\u76EE...`, "processing");
-            let addedCount = 0;
-            let failedCount = 0;
-            const titleProp = extractedData.properties.find((p) => p.type === "title");
-            const titleKey = titleProp ? titleProp.name : extractedData.properties[0].name;
-            for (const entry of extractedData.entries) {
-              try {
-                const pageProperties = {};
-                for (const prop of extractedData.properties) {
-                  const val = entry[prop.name];
-                  if (val === void 0 || val === null) continue;
-                  pageProperties[prop.name] = AIAssistant2._buildPropertyValuePayload(val, prop.type);
-                }
-                const entryName = String(entry[titleKey] || `\u6761\u76EE ${addedCount + 1}`).trim() || `\u6761\u76EE ${addedCount + 1}`;
-                await AIAssistant2._executeGuardedDatabaseWrite(
-                  "createDatabasePage",
-                  newDb.id,
-                  () => NotionAPI2.createPage(newDb.id, pageProperties, settings.notionApiKey),
-                  settings,
-                  { itemName: entryName }
-                );
-                addedCount++;
-              } catch (error) {
-                failedCount++;
-                console.warn(`[LD-Notion] \u6761\u76EE\u521B\u5EFA\u5931\u8D25 (#${failedCount}):`, error.message);
-              }
-            }
-            const failedLine = failedCount > 0 ? `
-- \u5931\u8D25: ${failedCount}\uFF08\u89C1\u63A7\u5236\u53F0\u8B66\u544A\uFF09` : "";
-            return `\u{1F4CA} **\u6570\u636E\u5E93\u521B\u5EFA\u5B8C\u6210**
-
-- \u6570\u636E\u5E93: ${dbName}
-- \u6765\u6E90: ${sourcePage.name}
-- \u5C5E\u6027: ${extractedData.properties.map((p) => p.name).join(", ")}
-- \u6761\u76EE: ${addedCount}/${extractedData.entries.length}${failedLine}
-
-\u{1F4A1} \u6570\u636E\u5E93\u5DF2\u521B\u5EFA\u5728\u6E90\u9875\u9762\u4E0B\u65B9\u3002`;
-          } catch (error) {
-            return `\u274C \u63D0\u53D6\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleGeneratePages: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("createDatabase")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u591A\u9875\u9762\u751F\u6210\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { page_name, page_id, parent_page_name, parent_page_id, structure_prompt } = params;
-          const topic = page_name || structure_prompt || explanation;
-          if (!topic) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u8981\u751F\u6210\u7684\u5185\u5BB9\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u4E3A\u65B0\u5458\u5DE5\u521B\u5EFA\u5165\u804C\u6307\u5357\uFF0C\u5305\u542B\u5DE5\u5177\u6E05\u5355\u3001\u56E2\u961F\u4ECB\u7ECD\u3001\u5E38\u89C1\u95EE\u9898\u300D";
-          }
-          ChatState2.updateLastMessage("\u{1F4D1} \u6B63\u5728\u89C4\u5212\u9875\u9762\u7ED3\u6784...", "processing");
-          try {
-            const planPrompt = `\u4F60\u662F\u4E00\u4E2A Notion \u5185\u5BB9\u67B6\u6784\u5E08\u3002\u6839\u636E\u7528\u6237\u9700\u6C42\u89C4\u5212\u591A\u9875\u9762\u5185\u5BB9\u7ED3\u6784\u3002
-
-\u7528\u6237\u9700\u6C42\uFF1A${topic}
-${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
-
-\u8FD4\u56DE JSON \u683C\u5F0F\uFF08\u53EA\u8FD4\u56DE JSON\uFF09\uFF1A
-{
-  "parent_title": "\u7236\u9875\u9762\u6807\u9898",
-  "parent_summary": "\u7236\u9875\u9762\u7B80\u4ECB\uFF081-2\u53E5\u8BDD\uFF09",
-  "children": [
-{
-  "title": "\u5B50\u9875\u9762\u6807\u9898",
-  "description": "\u5B50\u9875\u9762\u5185\u5BB9\u63CF\u8FF0\uFF08\u7528\u4E8E\u751F\u6210\u6B63\u6587\uFF09",
-  "icon": "emoji\u56FE\u6807"
-}
-  ]
-}
-
-\u8981\u6C42\uFF1A
-- \u5B50\u9875\u9762\u6570\u91CF\u63A7\u5236\u5728 3-8 \u4E2A
-- \u6BCF\u4E2A\u5B50\u9875\u9762\u5E94\u6709\u660E\u786E\u7684\u4E3B\u9898\u548C\u8FB9\u754C
-- \u7236\u9875\u9762\u4F5C\u4E3A\u76EE\u5F55/\u6982\u89C8\u9875`;
-            const planResponse = await AIService2.requestChat(planPrompt, settings, 1500);
-            const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-              return `\u274C AI \u65E0\u6CD5\u89C4\u5212\u9875\u9762\u7ED3\u6784\u3002\u8BF7\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u9700\u6C42\u3002`;
-            }
-            let plan;
-            try {
-              plan = JSON.parse(jsonMatch[0]);
-            } catch (error) {
-              console.warn("[LD-Notion] AI \u751F\u6210\u7ED3\u6784 JSON \u89E3\u6790\u5931\u8D25:", error);
-              return `\u274C AI \u751F\u6210\u7684\u7ED3\u6784\u65E0\u6548\u3002\u8BF7\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u3002`;
-            }
-            if (!Array.isArray(plan.children) || plan.children.length === 0) {
-              return `\u274C AI \u672A\u80FD\u89C4\u5212\u51FA\u6709\u6548\u7684\u5B50\u9875\u9762\u7ED3\u6784\u3002`;
-            }
-            const MAX_CHILD_DESC = 2e3;
-            plan.children = plan.children.map((c) => ({
-              ...c,
-              title: AISchema.validatePropertyValue(c == null ? void 0 : c.title, "title"),
-              icon: AISchema.validateEmoji(c == null ? void 0 : c.icon),
-              description: AISchema.validatePropertyValue(c == null ? void 0 : c.description, "rich_text").slice(0, MAX_CHILD_DESC)
-            })).filter((c) => c.title);
-            if (plan.children.length === 0) {
-              return `\u274C AI \u89C4\u5212\u7684\u5B50\u9875\u9762\u6807\u9898\u65E0\u6548\u3002`;
-            }
-            plan.parent_title = AISchema.validatePropertyValue(plan.parent_title, "title");
-            plan.parent_summary = AISchema.validatePropertyValue(plan.parent_summary, "rich_text");
-            const pageList = plan.children.map((c) => `${c.icon || "\u{1F4C4}"} ${c.title}`).join("\n");
-            const confirmed = await ConfirmationDialog2.show({
-              title: "\u{1F4D1} \u591A\u9875\u9762\u751F\u6210\u786E\u8BA4",
-              message: `\u5C06\u521B\u5EFA\u4EE5\u4E0B\u9875\u9762\u7ED3\u6784\uFF1A
-
-\u{1F4C1} ${plan.parent_title}
-${pageList}
-
-\u5171 ${plan.children.length + 1} \u4E2A\u9875\u9762\u3002`,
-              confirmText: "\u5F00\u59CB\u751F\u6210",
-              cancelText: "\u53D6\u6D88"
-            });
-            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u3002";
-            let parentPageId = parent_page_id;
-            if (!parentPageId && parent_page_name) {
-              const parentPage2 = await AIAssistant2._resolvePageId(parent_page_name, null, settings.notionApiKey);
-              if (parentPage2) parentPageId = parentPage2.id;
-            }
-            ChatState2.updateLastMessage(`\u{1F4C1} \u6B63\u5728\u521B\u5EFA\u7236\u9875\u9762: ${plan.parent_title}...`, "processing");
-            const parentProps = {
-              title: { title: [{ text: { content: plan.parent_title } }] }
-            };
-            let parentPage;
-            if (parentPageId) {
-              parentPage = await AIAssistant2._executeGuardedPageWrite(
-                "createDatabasePage",
-                { id: parentPageId, name: parent_page_name || parentPageId },
-                () => NotionAPI2.createPageInPage(parentPageId, parentProps, settings.notionApiKey),
-                settings,
-                { itemName: plan.parent_title, pageId: parentPageId }
-              );
-            } else {
-              return `\u274C \u8BF7\u6307\u5B9A\u7236\u9875\u9762\u3002Notion API \u8981\u6C42\u9875\u9762\u5FC5\u987B\u521B\u5EFA\u5728\u67D0\u4E2A\u7236\u9875\u9762\u4E0B\u3002
-
-\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u4E0B\u521B\u5EFA\u5165\u804C\u6307\u5357\u300D`;
-            }
-            const overviewBlocks = AIAssistant2._textToBlocks(`${plan.parent_summary || ""}
-
-## \u{1F4CB} \u76EE\u5F55
-
-${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}** - ${c.description}`).join("\n")}`);
-            await AIAssistant2._executeGuardedPageWrite(
-              "appendBlocks",
-              parentPage,
-              () => NotionAPI2.appendBlocks(parentPage.id, overviewBlocks, settings.notionApiKey),
-              settings,
-              { itemName: plan.parent_title }
-            );
-            let createdCount = 0;
-            for (let i = 0; i < plan.children.length; i++) {
-              const child = plan.children[i];
-              ChatState2.updateLastMessage(`\u{1F4DD} \u751F\u6210\u5B50\u9875\u9762 (${i + 1}/${plan.children.length}): ${child.title}...`, "processing");
-              try {
-                const childProps = {
-                  title: { title: [{ text: { content: `${child.icon || ""} ${child.title}`.trim() } }] }
-                };
-                const childPage = await AIAssistant2._executeGuardedPageWrite(
-                  "createDatabasePage",
-                  parentPage,
-                  () => NotionAPI2.createPageInPage(parentPage.id, childProps, settings.notionApiKey),
-                  settings,
-                  { itemName: child.title }
-                );
-                const contentPrompt = `\u4E3A\u4EE5\u4E0B\u4E3B\u9898\u751F\u6210\u8BE6\u7EC6\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u3002
-
-\u4E3B\u9898\uFF1A${child.title}
-\u63CF\u8FF0\uFF1A${child.description}
-\u4E0A\u4E0B\u6587\uFF1A\u8FD9\u662F\u300C${plan.parent_title}\u300D\u7684\u5B50\u9875\u9762
-
-\u8BF7\u751F\u6210\u5B9E\u7528\u3001\u5177\u4F53\u7684\u5185\u5BB9\uFF0C\u5305\u542B\u5408\u9002\u7684\u6807\u9898\u5C42\u7EA7\u548C\u7ED3\u6784\u5316\u4FE1\u606F\u3002`;
-                const content = await AIService2.requestChat(contentPrompt, settings, 2e3);
-                const contentBlocks = AIAssistant2._textToBlocks(content);
-                await AIAssistant2._executeGuardedPageWrite(
-                  "appendBlocks",
-                  childPage,
-                  () => NotionAPI2.appendBlocks(childPage.id, contentBlocks, settings.notionApiKey),
-                  settings,
-                  { itemName: child.title }
-                );
-                createdCount++;
-              } catch (error) {
-                console.warn(`[LD-Notion] \u5B50\u9875\u9762\u521B\u5EFA\u5931\u8D25: ${child.title}`, error);
-              }
-            }
-            return `\u{1F4D1} **\u591A\u9875\u9762\u5185\u5BB9\u751F\u6210\u5B8C\u6210**
-
-- \u7236\u9875\u9762: ${plan.parent_title}
-- \u5B50\u9875\u9762: ${createdCount}/${plan.children.length} \u521B\u5EFA\u6210\u529F
-
-\u{1F4A1} \u6240\u6709\u9875\u9762\u5DF2\u521B\u5EFA\u5E76\u586B\u5145\u5185\u5BB9\u3002`;
-          } catch (error) {
-            return `\u274C \u9875\u9762\u751F\u6210\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleBatchAnalyze: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { database_name, database_id, analysis_prompt } = params;
-          const limit = Math.min(Math.max(parseInt(params.limit) || 10, 1), 20);
-          if (!database_name && !database_id) {
-            if (!settings.notionDatabaseId) {
-              return "\u274C \u8BF7\u6307\u5B9A\u8981\u5206\u6790\u7684\u6570\u636E\u5E93\uFF0C\u6216\u5148\u914D\u7F6E\u9ED8\u8BA4\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5206\u6790 xxx \u6570\u636E\u5E93\u7684\u6240\u6709\u9875\u9762\u300D";
-            }
-          }
-          ChatState2.updateLastMessage("\u6B63\u5728\u67E5\u627E\u6570\u636E\u5E93...", "processing");
-          try {
-            let dbId = database_id || settings.notionDatabaseId;
-            if (!dbId && database_name) {
-              const searchResp = await NotionAPI2.search(database_name, "database", settings.notionApiKey);
-              const db = (searchResp.results || []).find((r) => !r.archived);
-              if (!db) return `\u274C \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${database_name}\u300D\u3002`;
-              dbId = db.id;
-            }
-            ChatState2.updateLastMessage("\u6B63\u5728\u83B7\u53D6\u9875\u9762...", "processing");
-            const queryResp = await NotionAPI2.queryDatabase(dbId, null, null, null, settings.notionApiKey, limit);
-            const pages = (queryResp.results || []).filter((p) => !p.archived);
-            if (pages.length === 0) {
-              return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u5206\u6790\u7684\u9875\u9762\u3002`;
-            }
-            ChatState2.updateLastMessage(`\u{1F50E} \u6B63\u5728\u63D0\u53D6 ${pages.length} \u4E2A\u9875\u9762\u5185\u5BB9...`, "processing");
-            const contentParts = [];
-            for (let i = 0; i < pages.length; i++) {
-              const page = pages[i];
-              const title = Utils2.getPageTitle(page);
-              ChatState2.updateLastMessage(`\u{1F50E} \u63D0\u53D6\u4E2D (${i + 1}/${pages.length}): ${title}...`, "processing");
-              const content = await AIAssistant2._extractPageContent(page.id, settings.notionApiKey, 2e3);
-              contentParts.push(`## ${title}
-${content || "\uFF08\u65E0\u5185\u5BB9\uFF09"}`);
-            }
-            ChatState2.updateLastMessage("\u{1F4CA} \u6B63\u5728\u751F\u6210\u7EFC\u5408\u5206\u6790...", "processing");
-            const analysisGoal = analysis_prompt || explanation || "\u7EFC\u5408\u5206\u6790\u6240\u6709\u9875\u9762\u5185\u5BB9\uFF0C\u627E\u51FA\u5173\u952E\u4E3B\u9898\u3001\u8D8B\u52BF\u548C\u5EFA\u8BAE";
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u6570\u636E\u5206\u6790\u5E08\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA\u6570\u636E\u5E93\u7684\u591A\u4E2A\u9875\u9762\u5185\u5BB9\u8FDB\u884C\u7EFC\u5408\u5206\u6790\u3002
-
-\u5206\u6790\u8981\u6C42\uFF1A${analysisGoal}
-
-\u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u5206\u6790\u62A5\u544A\uFF0C\u5305\u542B\uFF1A
-1. \u6982\u8FF0\uFF08\u603B\u4F53\u60C5\u51B5\u6458\u8981\uFF09
-2. \u5173\u952E\u53D1\u73B0\uFF08\u4E3B\u8981\u4E3B\u9898\u548C\u6A21\u5F0F\uFF09
-3. \u8BE6\u7EC6\u5206\u6790\uFF08\u6309\u4E3B\u9898/\u7C7B\u522B\u5206\u7EC4\uFF09
-4. \u8D8B\u52BF\u4E0E\u6D1E\u5BDF
-5. \u5EFA\u8BAE\u4E0E\u884C\u52A8\u9879
-
---- \u4EE5\u4E0B\u662F ${pages.length} \u4E2A\u9875\u9762\u7684\u5185\u5BB9 ---
-
-${contentParts.join("\n\n---\n\n")}`;
-            const report = await AIService2.requestChat(prompt2, settings, 4e3);
-            return `\u{1F4CA} **\u6279\u91CF\u5206\u6790\u62A5\u544A**
-
-${report}
-
----
-\u{1F50E} \u5171\u5206\u6790 ${pages.length} \u4E2A\u9875\u9762`;
-          } catch (error) {
-            return `\u274C \u6279\u91CF\u5206\u6790\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleGitHubImport: async (params, settings, explanation) => {
-          const username = params.username || Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
-          const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
-          const databaseId = settings.notionDatabaseId;
-          if (!username) {
-            return "\u274C \u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E GitHub \u7528\u6237\u540D\u3002\n\n\u{1F4A1} \u5728 Notion \u9762\u677F\u7684\u8BBE\u7F6E\u4E2D\u627E\u5230\u300CGitHub \u6536\u85CF\u5BFC\u5165\u300D\u90E8\u5206\u586B\u5199\u7528\u6237\u540D\u3002";
-          }
-          if (!settings.notionApiKey) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion API Key\u3002";
-          }
-          if (!databaseId) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E GitHub \u6536\u85CF\u7684\u76EE\u6807\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u53EF\u4EE5\u5728\u8BBE\u7F6E\u4E2D\u4E13\u95E8\u6307\u5B9A\uFF0C\u6216\u4F7F\u7528\u9ED8\u8BA4\u6570\u636E\u5E93\u3002";
-          }
-          const classify = params.classify || false;
-          const importTypes = require_import().GitHubAPI.getImportTypes();
-          try {
-            const allResults = await require_import().GitHubExporter.exportAll({
-              apiKey: settings.notionApiKey,
-              databaseId,
-              username,
-              token,
-              aiApiKey: settings.aiApiKey,
-              aiService: settings.aiService,
-              aiModel: settings.aiModel,
-              aiBaseUrl: settings.aiBaseUrl,
-              categories: settings.categories
-            }, (msg, pct) => {
-              ChatState2.updateLastMessage(`\u{1F419} ${msg}`, "processing");
-            });
-            let response = `\u2705 **GitHub \u5BFC\u5165\u5B8C\u6210**
-
-`;
-            let totalExported = 0;
-            let totalFailed = 0;
-            const typeNames = { stars: "Stars", repos: "Repos", forks: "Forks", gists: "Gists" };
-            for (const type of importTypes) {
-              const r = allResults[type];
-              if (!r) continue;
-              if (r.error) {
-                response += `\u274C ${typeNames[type]}: ${r.error}
-`;
-              } else {
-                response += `\u{1F4CA} ${typeNames[type]}: \u5171 ${r.total} \u4E2A\uFF0C\u5BFC\u51FA ${r.exported} \u4E2A`;
-                if (r.failed > 0) response += `\uFF0C\u5931\u8D25 ${r.failed} \u4E2A`;
-                response += `
-`;
-                totalExported += r.exported || 0;
-                totalFailed += r.failed || 0;
-              }
-            }
-            if (totalExported === 0 && totalFailed === 0) {
-              response += `
-\u6240\u6709\u5185\u5BB9\u5DF2\u662F\u6700\u65B0\u72B6\u6001\u3002`;
-            }
-            if (classify && totalExported > 0 && settings.aiApiKey) {
-              ChatState2.updateLastMessage("\u{1F3F7}\uFE0F \u6B63\u5728\u8FDB\u884C AI \u5206\u7C7B...", "processing");
-              try {
-                const classifyResult = await require_import().GitHubExporter.classifyRepos({
-                  ...settings,
-                  databaseId
-                }, (msg, pct) => {
-                  ChatState2.updateLastMessage(`\u{1F3F7}\uFE0F ${msg}`, "processing");
-                });
-                response += `
-
-\u{1F3F7}\uFE0F **AI \u5206\u7C7B\u5B8C\u6210**: \u5DF2\u5206\u7C7B ${classifyResult.classified}/${classifyResult.total} \u4E2A`;
-              } catch (e) {
-                response += `
-
-\u26A0\uFE0F AI \u5206\u7C7B\u51FA\u9519: ${e.message}`;
-              }
-            } else if (classify && !settings.aiApiKey) {
-              response += `
-
-\u26A0\uFE0F \u672A\u914D\u7F6E AI API Key\uFF0C\u8DF3\u8FC7\u81EA\u52A8\u5206\u7C7B\u3002`;
-            }
-            return response;
-          } catch (error) {
-            return `\u274C GitHub \u5BFC\u5165\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleBookmarkImport: async (params, settings, explanation) => {
-          const databaseId = settings.notionDatabaseId;
-          if (!settings.notionApiKey) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion API Key\u3002";
-          }
-          if (!databaseId) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E\u76EE\u6807\u6570\u636E\u5E93 ID\u3002";
-          }
-          if (!require_bridge().BookmarkBridge.isExtensionAvailable()) {
-            const installUrl = require_api().InstallHelper.getBookmarkExtensionUrl();
-            return `\u274C \u672A\u68C0\u6D4B\u5230 LD-Notion \u4E66\u7B7E\u6865\u63A5\u6269\u5C55\u3002
-
-\u{1F4A1} \u8BF7\u70B9\u51FB\u5B89\u88C5\uFF1A${installUrl}
-
-\u624B\u52A8\u5B89\u88C5\u6B65\u9AA4\uFF1A
-1. \u6253\u5F00 chrome://extensions/
-2. \u5F00\u542F\u300C\u5F00\u53D1\u8005\u6A21\u5F0F\u300D
-3. \u70B9\u51FB\u300C\u52A0\u8F7D\u5DF2\u89E3\u538B\u7684\u6269\u5C55\u300D
-4. \u9009\u62E9\u9879\u76EE\u4E2D\u7684 chrome-extension \u6587\u4EF6\u5939
-5. \u5237\u65B0\u5F53\u524D\u9875\u9762
-
-\u{1F50E} \u8BCA\u65AD\u5EFA\u8BAE\uFF1A
-- \u82E5\u4F60\u5F53\u524D\u4F7F\u7528\u7684\u662F chrome-extension-full \u72EC\u7ACB\u7248\uFF0C\u8BF7\u5173\u95ED userscript\uFF0C\u907F\u514D\u53CC\u6A21\u5F0F\u6DF7\u7528
-- \u82E5\u4F60\u575A\u6301 userscript \u6A21\u5F0F\uFF0C\u8BF7\u4EC5\u5B89\u88C5 chrome-extension\uFF08\u6865\u63A5\u7248\uFF09`;
-          }
-          try {
-            ChatState2.updateLastMessage("\u{1F4D6} \u6B63\u5728\u8BFB\u53D6\u6D4F\u89C8\u5668\u4E66\u7B7E...", "processing");
-            const tree = await require_bridge().BookmarkBridge.getBookmarkTree();
-            const allBookmarks = require_bridge().BookmarkExporter.flattenTree(tree);
-            if (allBookmarks.length === 0) {
-              return "\u{1F4ED} \u6CA1\u6709\u627E\u5230\u6D4F\u89C8\u5668\u4E66\u7B7E\u3002";
-            }
-            const dedupStrict = Utils2.isBookmarkDedupStrict();
-            const newCount = dedupStrict ? allBookmarks.filter((b) => !require_bridge().BookmarkExporter.isExported(b.url)).length : allBookmarks.length;
-            ChatState2.updateLastMessage(`\u{1F4D6} \u627E\u5230 ${allBookmarks.length} \u4E2A\u4E66\u7B7E (${newCount} \u4E2A\u65B0\u4E66\u7B7E)\uFF0C\u6B63\u5728\u5BFC\u51FA...`, "processing");
-            const result = await require_bridge().BookmarkExporter.exportBookmarks({
-              apiKey: settings.notionApiKey,
-              databaseId,
-              bookmarks: allBookmarks,
-              aiApiKey: settings.aiApiKey,
-              aiService: settings.aiService,
-              aiModel: settings.aiModel,
-              aiBaseUrl: settings.aiBaseUrl
-            }, (msg, pct) => {
-              ChatState2.updateLastMessage(`\u{1F4D6} ${msg}`, "processing");
-            });
-            let response = `\u2705 **\u6D4F\u89C8\u5668\u4E66\u7B7E\u5BFC\u5165\u5B8C\u6210**
-
-`;
-            response += `\u{1F4CA} \u5171 ${result.total} \u4E2A\u4E66\u7B7E
-`;
-            response += `\u{1F4E5} \u672C\u6B21\u5BFC\u51FA ${result.exported} \u4E2A
-`;
-            if (result.failed > 0) response += `\u274C \u5931\u8D25 ${result.failed} \u4E2A
-`;
-            if (result.exported === 0 && result.failed === 0) response += `
-\u6240\u6709\u4E66\u7B7E\u5DF2\u662F\u6700\u65B0\u72B6\u6001\u3002`;
-            if (result.exported > 0 && settings.aiApiKey) {
-              response += `
-
-\u{1F4A1} \u53EF\u4EE5\u8F93\u5165\u300C\u5206\u7C7B\u4E66\u7B7E\u300D\u8BA9 AI \u81EA\u52A8\u4E3A\u5BFC\u5165\u7684\u4E66\u7B7E\u5206\u7C7B\u3002`;
-            }
-            return response;
-          } catch (error) {
-            return `\u274C \u4E66\u7B7E\u5BFC\u5165\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleTemplateOutput: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("appendBlocks")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6A21\u677F\u8F93\u51FA\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { template_name, page_name, page_id, custom_context } = params;
-          let templates;
-          try {
-            templates = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, CONFIG2.DEFAULTS.aiTemplates));
-          } catch (error) {
-            console.warn("[LD-Notion] AI \u6A21\u677F\u52A0\u8F7D\u5931\u8D25\uFF0C\u4F7F\u7528\u9ED8\u8BA4\u6A21\u677F:", error);
-            templates = JSON.parse(CONFIG2.DEFAULTS.aiTemplates);
-          }
-          if (!template_name) {
-            const list = templates.map((t) => `${t.icon} **${t.name}**`).join("\n");
-            return `\u{1F4CB} **\u53EF\u7528\u7684 AI \u8F93\u51FA\u6A21\u677F**
-
-${list}
-
-\u{1F4A1} \u4F7F\u7528\u65B9\u5F0F\uFF1A\u300C\u7528\u5468\u62A5\u6A21\u677F\u603B\u7ED3 xxx \u9875\u9762\u300D\u6216\u300C\u7528\u6458\u8981\u63D0\u7EB2\u6A21\u677F\u6574\u7406 xxx\u300D`;
-          }
-          const template = templates.find(
-            (t) => t.name === template_name || t.name.includes(template_name) || template_name.includes(t.name)
-          );
-          if (!template) {
-            const list = templates.map((t) => `${t.icon} ${t.name}`).join(", ");
-            return `\u274C \u627E\u4E0D\u5230\u6A21\u677F\u300C${template_name}\u300D\u3002
-
-\u53EF\u7528\u6A21\u677F: ${list}`;
-          }
-          let pageContext = "";
-          let targetPage = null;
-          if (page_name || page_id) {
-            ChatState2.updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            targetPage = await AIAssistant2._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (targetPage) {
-              pageContext = await AIAssistant2._extractPageContent(targetPage.id, settings.notionApiKey, 4e3);
-            }
-          }
-          ChatState2.updateLastMessage(`${template.icon} \u6B63\u5728\u4F7F\u7528\u300C${template.name}\u300D\u6A21\u677F\u751F\u6210...`, "processing");
-          const contextBlock = pageContext ? `
-
-\u4EE5\u4E0B\u662F\u53C2\u8003\u5185\u5BB9\uFF1A
-${pageContext}` : "";
-          const customBlock = custom_context ? `
-
-\u7528\u6237\u8865\u5145\u8BF4\u660E\uFF1A${custom_context}` : "";
-          const fullPrompt = `${template.prompt}${contextBlock}${customBlock}
-
-\u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002`;
-          const aiResponse = await AIService2.requestChat(fullPrompt, settings, 3e3);
-          if (targetPage) {
-            ChatState2.updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
-            const contentBlocks = AIAssistant2._textToBlocks(aiResponse);
-            const blocks = [
-              { type: "divider", divider: {} },
-              { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `${template.icon} ${template.name}` } }] } },
-              ...contentBlocks
-            ];
-            await AIAssistant2._executeGuardedPageWrite(
-              "appendBlocks",
-              targetPage,
-              () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
-              settings,
-              { itemName: targetPage.name }
-            );
-            return `\u2705 **${template.icon} ${template.name}** \u5DF2\u751F\u6210\u5E76\u5199\u5165\u9875\u9762\u300C${targetPage.name}\u300D
-
-${aiResponse}`;
-          }
-          return `${template.icon} **${template.name}**
-
-${aiResponse}
-
-\u{1F4A1} \u5982\u9700\u5199\u5165\u9875\u9762\uFF0C\u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\uFF1A\u300C\u7528${template.name}\u6A21\u677F\u5904\u7406 xxx \u9875\u9762\u300D`;
-        }
-      };
       var AIAssistant2 = {
         // 意图类型
         INTENTS: {
