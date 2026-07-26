@@ -905,6 +905,8 @@ const NotionSiteUI = {
 
         // 错误消息延长显示时间（10秒），其他类型3秒
         const timeout = type === "error" ? 10000 : 3000;
+        // 清旧定时器，防高频调用堆叠致状态栏被过期定时器意外清空（L1 reliability）
+        if (container._statusTimer) clearTimeout(container._statusTimer);
         container._statusTimer = setTimeout(() => {
             container.innerHTML = "";
         }, timeout);

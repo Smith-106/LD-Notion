@@ -632,6 +632,7 @@ const ConfirmationDialog = {
                     }
                 }
             }, 1000);
+            dialog._countdownTimer = timer;
 
             // 名称输入验证
             if (nameInput) {
@@ -680,6 +681,10 @@ const ConfirmationDialog = {
     // 关闭对话框
     close: () => {
         if (ConfirmationDialog.dialogElement) {
+            // 清倒计时 interval，防 dialog 被外部移除后 interval 泄漏（L2 reliability）
+            if (ConfirmationDialog.dialogElement._countdownTimer) {
+                clearInterval(ConfirmationDialog.dialogElement._countdownTimer);
+            }
             ConfirmationDialog.dialogElement.remove();
             ConfirmationDialog.dialogElement = null;
         }

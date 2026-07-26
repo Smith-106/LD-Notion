@@ -240,7 +240,7 @@ AutoImporter.run = async () => {
 
         const uiRef = _resolveUI();
         if (uiRef && uiRef.renderBookmarkList) {
-            try { uiRef.renderBookmarkList(); } catch {}
+            try { uiRef.renderBookmarkList(); } catch (e) { console.warn("[LD-Notion] 书签列表渲染失败:", e); }
         }
 
         const statePatch = {
@@ -292,7 +292,7 @@ AutoImporter.run = async () => {
         if (obsExportBtn2) obsExportBtn2.disabled = false;
         const uiFinally = _resolveUI();
         if (uiFinally && typeof uiFinally.renderSyncCenterSummary === "function") {
-            try { uiFinally.renderSyncCenterSummary(); } catch {}
+            try { uiFinally.renderSyncCenterSummary(); } catch (e) { console.warn("[LD-Notion] 同步中心面板渲染失败:", e); }
         }
     }
 };

@@ -100,7 +100,10 @@ const Utils = {
             const discourseUser = window.Discourse?.User?.current?.();
             username = (discourseUser?.username || "").trim();
             if (username) return username;
-        } catch {}
+        } catch (e) {
+            // Discourse 全局存在但 .User.current() 抛错时补 warn，便于诊断用户名探测静默失败（L4）
+            console.warn("[LD-Notion] Discourse 用户名探测失败:", e);
+        }
 
         return "";
     },

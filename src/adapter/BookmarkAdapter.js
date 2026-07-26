@@ -53,8 +53,11 @@ const BookmarkAdapter = Object.assign(Object.create(SourceAdapter), {
         const tree = await BookmarkBridge.getBookmarkTree();
         // 扁平化书签树
         const flat = BookmarkBridge.flattenTree ? BookmarkBridge.flattenTree(tree) : this._flattenTree(tree);
+        // isHttpUrl 直接用 BookmarkExporter 实现（L6 maintainability：移除冗余 typeof-guard + 正则
+        // fallback 双路径，esbuild 自由变量反模式残留）。BookmarkExporter 由 _getBridge 运行时解析。
+        const isHttpUrl = (url) => BookmarkExporter?.isHttpUrl?.(url) ?? /^https?:\/\//i.test(url || "");
         const items = flat
-            .filter((b) => b.url && BookmarkExporter && BookmarkExporter.isHttpUrl ? BookmarkExporter.isHttpUrl(b.url) : /^https?:\/\//i.test(b.url || ""))
+            .filter((b) => b.url && isHttpUrl(b.url))
             .map((b) => this.normalize(b));
         if (watermark && watermark.time) {
             return items.filter((item) => item.createdAt > watermark.time);
