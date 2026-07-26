@@ -162,8 +162,21 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
     const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
     for (let i = 0; i < mappedItems.length; i++) {
         const item = mappedItems[i];
+        const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
         try {
             const raw = item.raw || item;
+            // createDatabasePage level 1，canExecute 非阻塞闸门 + 审计（C1 审计完整性）。
+            const { OperationGuard, OperationLog } = require("../security");
+            if (!OperationGuard.canExecute("createDatabasePage")) {
+                OperationLog.add({
+                    audit_event: OperationLog.inferAuditEvent("createDatabasePage", "denied"),
+                    actor: "system", source: "github-auto-sync",
+                    operationName: "createDatabasePage", status: "denied",
+                    context: { itemKey, itemName: meta.getId(raw), reason: "权限不足：GitHub 自动同步建页需 level≥1" },
+                });
+                failed++;
+                continue;
+            }
             const enriched = await GitHubExporter.enrichRepo(raw, settings, enrichContext);
             const buildFn = type === "gists"
                 ? GitHubExporter.buildGistProperties
@@ -172,10 +185,16 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
             for (const k of Object.keys(properties)) {
                 if (properties[k] === undefined) delete properties[k];
             }
-            await NotionAPI.request("POST", "/pages", {
+            const page = await NotionAPI.request("POST", "/pages", {
                 parent: { database_id: settings.databaseId },
                 properties,
             }, settings.apiKey);
+            OperationLog.add({
+                audit_event: OperationLog.inferAuditEvent("createDatabasePage", "success"),
+                actor: "system", source: "github-auto-sync",
+                operationName: "createDatabasePage", status: "success",
+                context: { pageId: String(page?.id || "").trim(), itemKey, itemName: meta.getId(raw), databaseId: settings.databaseId },
+            });
             if (type === "gists") {
                 GitHubAPI.markGistExported(meta.getId(raw));
             } else {
@@ -183,11 +202,20 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
             }
             success++;
         } catch (e) {
-            console.warn(`[GitHubAutoImporter] 导出失败: ${item.itemKey || meta.getId(item.raw || item)}`, e);
+            console.warn(`[GitHubAutoImporter] 导出失败: ${itemKey}`, e);
+            try {
+                const { OperationLog } = require("../security");
+                OperationLog.add({
+                    audit_event: OperationLog.inferAuditEvent("createDatabasePage", "failed"),
+                    actor: "system", source: "github-auto-sync",
+                    operationName: "createDatabasePage", status: "failed",
+                    context: { itemKey, reason: String(e?.message || e) },
+                });
+            } catch (_) { /* 审计失败不阻断降级 */ }
             failed++;
         }
         if (i < mappedItems.length - 1) {
-            await new Promise(r => setTimeout(r, delay));
+            await Utils.sleep(delay);
         }
     }
     return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
@@ -446,7 +474,7 @@ GitHubAutoImporter.run = async () => {
         GitHubAutoImporter.isRunning = false;
         const UI = _resolveUI();
         if (UI && typeof UI.renderSyncCenterSummary === "function") {
-            try { UI.renderSyncCenterSummary(); } catch {}
+            try { UI.renderSyncCenterSummary(); } catch (e) { console.warn("[LD-Notion] 同步中心面板渲染失败:", e); }
         }
     }
 };

@@ -243,11 +243,23 @@ const DOMToNotion = {
     // iframe 嵌入，返回 true 表示已处理（视频 src），false 表示未匹配需 fallthrough
     _cookIframe: (el, blocks) => {
         const src = el.getAttribute("src") || "";
-        if (src && (src.includes("youtube.com") || src.includes("youtu.be") ||
-            src.includes("vimeo.com") || src.includes("bilibili.com") ||
-            src.includes("player."))) {
-            blocks.push({ type: "embed", embed: { url: src } });
-            return true;
+        if (!src) return false;
+        // 子串匹配（src.includes）可被 evil.com/youtube.com 或 169.254.169.254/player.html 绕过
+        // 写入 Notion embed.url（服务端抓取触发 SSRF，CWE-918，ISS-009 sibling 补全）。
+        // 改 hostname 严格白名单 + _safeExternalUrl 校验（拒内网/169.254/非 http(s)）。
+        let host = "";
+        try { host = new URL(Utils.absoluteUrl(src)).hostname; } catch { return false; }
+        const isAllowedEmbedHost =
+            host === "youtube.com" || host.endsWith(".youtube.com") ||
+            host === "youtu.be" || host.endsWith(".youtu.be") ||
+            host === "vimeo.com" || host.endsWith(".vimeo.com") ||
+            host === "bilibili.com" || host.endsWith(".bilibili.com");
+        if (isAllowedEmbedHost || host.includes("player.")) {
+            const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
+            if (full) {
+                blocks.push({ type: "embed", embed: { url: full } });
+                return true;
+            }
         }
         return false;
     },
@@ -908,7 +920,9 @@ const NotionAPI = {
         try {
             const user = await NotionAPI.request("GET", "/users/me", null, apiKey);
             return user?.bot?.workspace_limits?.max_file_upload_size_in_bytes || 5 * 1024 * 1024;
-        } catch {
+        } catch (e) {
+            // 补 warn 区分真 5MB 与错误降级（L3 observability），便于诊断大文件上传失败
+            console.warn("[LD-Notion] 获取工作区文件大小限制失败，回退到 5MB:", e);
             return 5 * 1024 * 1024; // 默认 5MB (Free 计划)
         }
     },

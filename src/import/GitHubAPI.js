@@ -6,6 +6,9 @@ const { Storage } = require("../storage");
 
 const GitHubAPI = {
     _readmeCache: {},
+    // 已导出集合缓存（H6：消除循环内逐条 JSON.parse 的 O(N²)，与 BookmarkExporter._exportedCache 同模式）。
+    _exportedCache: null,
+    _exportedGistsCache: null,
     _fetchPaginated: (url, token = "", label = "GitHub", options = {}) => {
         return new Promise((resolve, reject) => {
             const allItems = [];
@@ -121,14 +124,18 @@ const GitHubAPI = {
 
     // 获取已导出的 repo 集合
     getExported: () => {
-        try { return JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}")); }
-        catch { return {}; }
+        if (GitHubAPI._exportedCache) return GitHubAPI._exportedCache;
+        try { GitHubAPI._exportedCache = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}")); }
+        catch { GitHubAPI._exportedCache = {}; }
+        return GitHubAPI._exportedCache;
     },
 
     // 获取已导出的 gist 集合
     getExportedGists: () => {
-        try { return JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}")); }
-        catch { return {}; }
+        if (GitHubAPI._exportedGistsCache) return GitHubAPI._exportedGistsCache;
+        try { GitHubAPI._exportedGistsCache = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}")); }
+        catch { GitHubAPI._exportedGistsCache = {}; }
+        return GitHubAPI._exportedGistsCache;
     },
 
     markExported: (repoFullName) => {
