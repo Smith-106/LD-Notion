@@ -5,6 +5,9 @@ const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { NotionAPI } = require("../api");
 const { AIService } = require("../ai");
+// ISS-20260723-010 W8 (SEC-009): generateAISummary 改用 AISchema.parseAIJson 统一接缝，
+// 不再手工 jsonMatch + JSON.parse（arch-013 第 8 消费点收敛）。schema.js 纯函数无循环依赖。
+const { AISchema } = require("../ai/schema");
 
 const BookmarkExporter = {
     _pageInsightCache: {},
@@ -220,9 +223,11 @@ const BookmarkExporter = {
 
         try {
             const response = await AIService.requestChat(prompt, settings, 220);
-            const jsonMatch = response.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) return null;
-            const data = JSON.parse(jsonMatch[0]);
+            // SEC-009: 走 AISchema.parseAIJson 统一接缝（arch-013），含 bookmarkSummary 结构校验
+            // （title/summary 必须为 string，防 AI 返回非字符串注入 CWE-94）。校验失败降级返回 null。
+            const parsed = AISchema.parseAIJson("bookmarkSummary", response);
+            if (!parsed.ok) return null;
+            const data = parsed.value;
             return {
                 title: BookmarkExporter.normalizeText(data.title || "", 120),
                 summary: BookmarkExporter.normalizeText(data.summary || "", 180),
@@ -344,7 +349,10 @@ const BookmarkExporter = {
                     enriched.generatedSummary = aiResult.summary;
                 }
                 const aiCategory = await BookmarkExporter.generateAICategory(bookmark, insight, settings);
-                if (aiCategory) {
+                // SEC-008: AI 返回的 category 必须在用户配置白名单内才采用，否则保留 heuristic
+                // 的 inferredCategory（inferCategoryHeuristic 始终返回白名单项）。防 AI 自由文本
+                // 注入恶意字符串写入 Notion 分类字段（CWE-94）。
+                if (aiCategory && (settings?.categories || []).some(c => String(c) === String(aiCategory))) {
                     inferredCategory = aiCategory;
                 }
                 context.aiUsedCount = (context.aiUsedCount || 0) + 1;

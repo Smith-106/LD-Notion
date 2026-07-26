@@ -138,6 +138,20 @@ const AISchema = {
         return { ok: true };
     },
 
+    // 校验 bookmark AI 摘要结构：title/summary 均为 string（防 AI 返回非字符串注入，
+    // CWE-94，ISS-010 W8 SEC-009）。返回 { ok: true } 或 { ok: false, reason }。
+    // 长度上限由消费侧 normalizeText 截断，此处只校验类型。
+    validateBookmarkSummarySchema: (data) => {
+        if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, reason: "AI 返回的摘要不是对象" };
+        if (data.title !== undefined && typeof data.title !== "string") {
+            return { ok: false, reason: "AI 返回的 title 不是字符串" };
+        }
+        if (data.summary !== undefined && typeof data.summary !== "string") {
+            return { ok: false, reason: "AI 返回的 summary 不是字符串" };
+        }
+        return { ok: true };
+    },
+
     // 统一 AI JSON 解析入口：正则提取 + JSON.parse + 按 name 路由校验。
     // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"}。
     // 返回 { ok: true, value } 或 { ok: false, reason }。
@@ -154,6 +168,10 @@ const AISchema = {
         // 按 name 路由结构校验
         if (name === "extractToDatabase") {
             const r = AISchema.validateExtractToDatabaseSchema(parsed);
+            if (!r.ok) return r;
+        }
+        if (name === "bookmarkSummary") {
+            const r = AISchema.validateBookmarkSummarySchema(parsed);
             if (!r.ok) return r;
         }
         // 其他 name 的结构校验由消费点按需调用对应 validate* 函数

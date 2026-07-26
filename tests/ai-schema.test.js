@@ -224,4 +224,58 @@ describe("AISchema — AI 输出 schema 校验层 (ISS-009)", () => {
             expect(AISchema.parseAIJson("x", null).ok).toBe(false);
         });
     });
+
+    // ISS-20260723-010 W8 (SEC-009): bookmark AI 摘要 schema 校验契约。
+    // generateAISummary 改用 parseAIJson("bookmarkSummary", ...) 统一接缝后，
+    // AI 返回非字符串 title/summary 必须被拒（防 CWE-94 注入），降级返回 null。
+    describe("validateBookmarkSummarySchema (SEC-009)", () => {
+        it("合法 title/summary 字符串通过", () => {
+            const r = AISchema.validateBookmarkSummarySchema({ title: "标题", summary: "摘要" });
+            expect(r.ok).toBe(true);
+        });
+
+        it("缺 title/summary 也通过（可选字段，消费侧 || 兜底）", () => {
+            expect(AISchema.validateBookmarkSummarySchema({}).ok).toBe(true);
+            expect(AISchema.validateBookmarkSummarySchema({ title: "仅标题" }).ok).toBe(true);
+        });
+
+        it("title 非 string 拒绝", () => {
+            const r = AISchema.validateBookmarkSummarySchema({ title: 123, summary: "ok" });
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/title 不是字符串/);
+        });
+
+        it("summary 非 string 拒绝", () => {
+            const r = AISchema.validateBookmarkSummarySchema({ title: "ok", summary: { evil: true } });
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/summary 不是字符串/);
+        });
+
+        it("非对象拒绝", () => {
+            expect(AISchema.validateBookmarkSummarySchema(null).ok).toBe(false);
+            expect(AISchema.validateBookmarkSummarySchema("string").ok).toBe(false);
+            expect(AISchema.validateBookmarkSummarySchema([1, 2]).ok).toBe(false);
+        });
+    });
+
+    describe("parseAIJson bookmarkSummary 路由 (SEC-009)", () => {
+        it("合法 JSON 通过并返回 value", () => {
+            const r = AISchema.parseAIJson("bookmarkSummary", '{"title":"t","summary":"s"}');
+            expect(r.ok).toBe(true);
+            expect(r.value.title).toBe("t");
+            expect(r.value.summary).toBe("s");
+        });
+
+        it("AI 返回非字符串 title 经路由校验拒绝", () => {
+            const r = AISchema.parseAIJson("bookmarkSummary", '{"title":123,"summary":"s"}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/title 不是字符串/);
+        });
+
+        it("无 JSON 返回未找到原因", () => {
+            const r = AISchema.parseAIJson("bookmarkSummary", "纯文本无 JSON");
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/未找到 JSON/);
+        });
+    });
 });

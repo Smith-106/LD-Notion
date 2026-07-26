@@ -548,7 +548,14 @@ const GitHubExporter = {
                     aiService, aiApiKey, aiModel: aiModel, aiBaseUrl,
                 });
 
-                const matched = categories.find(c => category.trim().includes(c)) || category.trim();
+                // SEC-008: AI 返回的 category 必须匹配用户配置白名单之一，否则降级跳过该 page
+                // （不用 AI 原文写入分类字段，防自由文本注入 CWE-94）。审计记录 skipped。
+                const matched = categories.find(c => category.trim().includes(c));
+                if (!matched) {
+                    GitHubExporter._auditExport("updatePage", "skipped",
+                        { pageId: page.id, itemName: title, reason: `AI 分类「${category.trim().slice(0, 50)}」不在白名单，跳过` });
+                    continue;
+                }
 
                 // updatePage 是 level 1 写操作，用户触发的批量分类不可裸调 NotionAPI（ISS-20260724-011）。
                 const { OperationGuard } = require("../security");

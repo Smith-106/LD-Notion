@@ -5358,6 +5358,190 @@ ${quoted}
     }
   });
 
+  // src/ai/schema.js
+  var require_schema = __commonJS({
+    "src/ai/schema.js"(exports, module) {
+      "use strict";
+      var { UrlValidator } = require_UrlValidator();
+      var AISchema = {
+        // 长度上限
+        MAX_PROP_NAME: 64,
+        MAX_TITLE: 2e3,
+        MAX_RICH_TEXT: 2e3,
+        MAX_SELECT_NAME: 100,
+        MAX_EMOJI: 32,
+        MAX_NUMBER: 1e15,
+        // 属性名白名单：中英数字 + 下划线/连字符/空格
+        PROP_NAME_RE: /^[一-龥a-zA-Z0-9 _\-]+$/,
+        // Notion 保留/系统属性名（不可作 AI 生成的自定义属性，避免与系统字段冲突）
+        NOTION_RESERVED_NAMES: /* @__PURE__ */ new Set([
+          "title",
+          "created_time",
+          "last_edited_time",
+          "created_by",
+          "last_edited_by",
+          "url",
+          "path",
+          "Name"
+        ]),
+        // 合法属性类型白名单
+        ALLOWED_PROPERTY_TYPES: /* @__PURE__ */ new Set([
+          "title",
+          "rich_text",
+          "number",
+          "select",
+          "multi_select",
+          "checkbox",
+          "date",
+          "url",
+          "email",
+          "phone_number",
+          "status"
+        ]),
+        // _normalizeNotionProperties 对象值允许的 Notion 属性类型键（拒 relation/people/files 等系统字段）
+        ALLOWED_OBJECT_VALUE_TYPES: /* @__PURE__ */ new Set([
+          "title",
+          "rich_text",
+          "number",
+          "select",
+          "multi_select",
+          "checkbox",
+          "date",
+          "url",
+          "email",
+          "phone_number",
+          "status"
+        ]),
+        // ISO 8601 日期正则（简化：YYYY-MM-DD 或带时间）
+        ISO_DATE_RE: /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/,
+        // 校验 AI 返回的页面外部 URL（icon/cover）。转发 UrlValidator.validatePageExternalUrl。
+        validatePageExternalUrl: (url) => {
+          return UrlValidator.validatePageExternalUrl(url);
+        },
+        // 校验属性名：白名单 + 截断 + 拒 Notion 保留名。返回规范化名或 ""（非法）。
+        validatePropertyName: (name) => {
+          let n = String(name || "").trim();
+          if (!n) return "";
+          if (n.length > AISchema.MAX_PROP_NAME) n = n.slice(0, AISchema.MAX_PROP_NAME);
+          if (!AISchema.PROP_NAME_RE.test(n)) return "";
+          if (AISchema.NOTION_RESERVED_NAMES.has(n)) return "";
+          return n;
+        },
+        // 校验属性类型。返回 { valid, type } 或 { valid: false }。
+        validatePropertyType: (type) => {
+          const t = String(type || "").trim();
+          if (AISchema.ALLOWED_PROPERTY_TYPES.has(t)) return { valid: true, type: t };
+          return { valid: false };
+        },
+        // 校验属性值（按 type）。返回规范化值或 null（非法/应跳过）。
+        validatePropertyValue: (val, type) => {
+          if (val === void 0 || val === null) return null;
+          switch (type) {
+            case "title":
+            case "rich_text":
+              return String(val).slice(0, type === "title" ? AISchema.MAX_TITLE : AISchema.MAX_RICH_TEXT);
+            case "select":
+            case "status":
+              return String(val).trim().slice(0, AISchema.MAX_SELECT_NAME);
+            case "multi_select": {
+              const arr = Array.isArray(val) ? val : [val];
+              return arr.map((v) => String(v || "").trim()).filter(Boolean).map((v) => v.slice(0, AISchema.MAX_SELECT_NAME));
+            }
+            case "number": {
+              const n = Number(val);
+              if (!isFinite(n) || Math.abs(n) > AISchema.MAX_NUMBER) return null;
+              return n;
+            }
+            case "checkbox":
+              return Boolean(val);
+            case "date":
+              return AISchema.ISO_DATE_RE.test(String(val).trim()) ? String(val).trim() : null;
+            case "url":
+            case "email":
+            case "phone_number":
+              return String(val).trim().slice(0, AISchema.MAX_RICH_TEXT);
+            default:
+              return String(val).slice(0, AISchema.MAX_RICH_TEXT);
+          }
+        },
+        // 校验 emoji（icon）。长度 + 拒控制字符。
+        validateEmoji: (emoji) => {
+          const e = String(emoji || "").trim();
+          if (!e) return "";
+          if (e.length > AISchema.MAX_EMOJI) return e.slice(0, AISchema.MAX_EMOJI);
+          if (/[\x00-\x1f\x7f]/.test(e)) return "";
+          return e;
+        },
+        // 规范化 _normalizeNotionProperties 的对象值：仅允许 ALLOWED_OBJECT_VALUE_TYPES 顶层键，
+        // 拒 relation/people/files/created_by/created_time/last_edited_time 等系统/关联字段。
+        // 返回清洗后的对象或 null（应跳过）。
+        sanitizeObjectValue: (value) => {
+          if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+          const cleaned = {};
+          let hasValid = false;
+          for (const key of Object.keys(value)) {
+            if (AISchema.ALLOWED_OBJECT_VALUE_TYPES.has(key)) {
+              cleaned[key] = value[key];
+              hasValid = true;
+            }
+          }
+          return hasValid ? cleaned : null;
+        },
+        // 校验 extractToDatabase 结构：properties/entries 均为 Array、properties[i].name/type 非空 string。
+        // 返回 { ok: true } 或 { ok: false, reason }。
+        validateExtractToDatabaseSchema: (data) => {
+          if (!data || typeof data !== "object") return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u6570\u636E\u4E0D\u662F\u5BF9\u8C61" };
+          if (!Array.isArray(data.properties)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684 properties \u4E0D\u662F\u6570\u7EC4" };
+          if (!Array.isArray(data.entries)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684 entries \u4E0D\u662F\u6570\u7EC4" };
+          if (data.entries.length === 0) return { ok: false, reason: "\u672A\u80FD\u4ECE\u9875\u9762\u4E2D\u63D0\u53D6\u5230\u6709\u6548\u6761\u76EE" };
+          for (const prop of data.properties) {
+            if (!prop || typeof prop.name !== "string" || !prop.name.trim() || typeof prop.type !== "string" || !prop.type.trim()) {
+              return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u5C5E\u6027\u7ED3\u6784\u65E0\u6548\uFF08name/type \u7F3A\u5931\uFF09" };
+            }
+          }
+          return { ok: true };
+        },
+        // 校验 bookmark AI 摘要结构：title/summary 均为 string（防 AI 返回非字符串注入，
+        // CWE-94，ISS-010 W8 SEC-009）。返回 { ok: true } 或 { ok: false, reason }。
+        // 长度上限由消费侧 normalizeText 截断，此处只校验类型。
+        validateBookmarkSummarySchema: (data) => {
+          if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u6458\u8981\u4E0D\u662F\u5BF9\u8C61" };
+          if (data.title !== void 0 && typeof data.title !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 title \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          if (data.summary !== void 0 && typeof data.summary !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 summary \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          return { ok: true };
+        },
+        // 统一 AI JSON 解析入口：正则提取 + JSON.parse + 按 name 路由校验。
+        // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"}。
+        // 返回 { ok: true, value } 或 { ok: false, reason }。
+        parseAIJson: (name, rawText) => {
+          if (!rawText) return { ok: false, reason: "AI \u54CD\u5E94\u4E3A\u7A7A" };
+          const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) return { ok: false, reason: "AI \u54CD\u5E94\u4E2D\u672A\u627E\u5230 JSON" };
+          let parsed;
+          try {
+            parsed = JSON.parse(jsonMatch[0]);
+          } catch (error) {
+            return { ok: false, reason: `AI \u8FD4\u56DE\u7684 JSON \u683C\u5F0F\u65E0\u6548: ${error.message}` };
+          }
+          if (name === "extractToDatabase") {
+            const r = AISchema.validateExtractToDatabaseSchema(parsed);
+            if (!r.ok) return r;
+          }
+          if (name === "bookmarkSummary") {
+            const r = AISchema.validateBookmarkSummarySchema(parsed);
+            if (!r.ok) return r;
+          }
+          return { ok: true, value: parsed };
+        }
+      };
+      module.exports = { AISchema };
+    }
+  });
+
   // src/bridge/BookmarkExporter.js
   var require_BookmarkExporter = __commonJS({
     "src/bridge/BookmarkExporter.js"(exports, module) {
@@ -5367,6 +5551,7 @@ ${quoted}
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { AIService: AIService2 } = require_ai();
+      var { AISchema } = require_schema();
       var BookmarkExporter2 = {
         _pageInsightCache: {},
         // 已导出书签映射缓存（H5：消除循环内逐条 JSON.parse+stringify 的 O(N²)）。
@@ -5559,9 +5744,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
 \u9875\u9762\u6458\u8981\uFF1A${insight.summary || ""}`;
           try {
             const response = await AIService2.requestChat(prompt2, settings, 220);
-            const jsonMatch = response.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) return null;
-            const data = JSON.parse(jsonMatch[0]);
+            const parsed = AISchema.parseAIJson("bookmarkSummary", response);
+            if (!parsed.ok) return null;
+            const data = parsed.value;
             return {
               title: BookmarkExporter2.normalizeText(data.title || "", 120),
               summary: BookmarkExporter2.normalizeText(data.summary || "", 180)
@@ -5666,7 +5851,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 enriched.generatedSummary = aiResult.summary;
               }
               const aiCategory = await BookmarkExporter2.generateAICategory(bookmark, insight, settings);
-              if (aiCategory) {
+              if (aiCategory && ((settings == null ? void 0 : settings.categories) || []).some((c) => String(c) === String(aiCategory))) {
                 inferredCategory = aiCategory;
               }
               context.aiUsedCount = (context.aiUsedCount || 0) + 1;
@@ -9633,7 +9818,15 @@ ${insight.summary || ""}`,
                 aiModel,
                 aiBaseUrl
               });
-              const matched = categories.find((c) => category.trim().includes(c)) || category.trim();
+              const matched = categories.find((c) => category.trim().includes(c));
+              if (!matched) {
+                GitHubExporter2._auditExport(
+                  "updatePage",
+                  "skipped",
+                  { pageId: page.id, itemName: title, reason: `AI \u5206\u7C7B\u300C${category.trim().slice(0, 50)}\u300D\u4E0D\u5728\u767D\u540D\u5355\uFF0C\u8DF3\u8FC7` }
+                );
+                continue;
+              }
               const { OperationGuard: OperationGuard2 } = require_security();
               if (!OperationGuard2.canExecute("updatePage")) {
                 GitHubExporter2._auditExport(
@@ -19402,173 +19595,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         }
       };
       module.exports = { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2, UndoManager: UndoManager2 };
-    }
-  });
-
-  // src/ai/schema.js
-  var require_schema = __commonJS({
-    "src/ai/schema.js"(exports, module) {
-      "use strict";
-      var { UrlValidator } = require_UrlValidator();
-      var AISchema = {
-        // 长度上限
-        MAX_PROP_NAME: 64,
-        MAX_TITLE: 2e3,
-        MAX_RICH_TEXT: 2e3,
-        MAX_SELECT_NAME: 100,
-        MAX_EMOJI: 32,
-        MAX_NUMBER: 1e15,
-        // 属性名白名单：中英数字 + 下划线/连字符/空格
-        PROP_NAME_RE: /^[一-龥a-zA-Z0-9 _\-]+$/,
-        // Notion 保留/系统属性名（不可作 AI 生成的自定义属性，避免与系统字段冲突）
-        NOTION_RESERVED_NAMES: /* @__PURE__ */ new Set([
-          "title",
-          "created_time",
-          "last_edited_time",
-          "created_by",
-          "last_edited_by",
-          "url",
-          "path",
-          "Name"
-        ]),
-        // 合法属性类型白名单
-        ALLOWED_PROPERTY_TYPES: /* @__PURE__ */ new Set([
-          "title",
-          "rich_text",
-          "number",
-          "select",
-          "multi_select",
-          "checkbox",
-          "date",
-          "url",
-          "email",
-          "phone_number",
-          "status"
-        ]),
-        // _normalizeNotionProperties 对象值允许的 Notion 属性类型键（拒 relation/people/files 等系统字段）
-        ALLOWED_OBJECT_VALUE_TYPES: /* @__PURE__ */ new Set([
-          "title",
-          "rich_text",
-          "number",
-          "select",
-          "multi_select",
-          "checkbox",
-          "date",
-          "url",
-          "email",
-          "phone_number",
-          "status"
-        ]),
-        // ISO 8601 日期正则（简化：YYYY-MM-DD 或带时间）
-        ISO_DATE_RE: /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/,
-        // 校验 AI 返回的页面外部 URL（icon/cover）。转发 UrlValidator.validatePageExternalUrl。
-        validatePageExternalUrl: (url) => {
-          return UrlValidator.validatePageExternalUrl(url);
-        },
-        // 校验属性名：白名单 + 截断 + 拒 Notion 保留名。返回规范化名或 ""（非法）。
-        validatePropertyName: (name) => {
-          let n = String(name || "").trim();
-          if (!n) return "";
-          if (n.length > AISchema.MAX_PROP_NAME) n = n.slice(0, AISchema.MAX_PROP_NAME);
-          if (!AISchema.PROP_NAME_RE.test(n)) return "";
-          if (AISchema.NOTION_RESERVED_NAMES.has(n)) return "";
-          return n;
-        },
-        // 校验属性类型。返回 { valid, type } 或 { valid: false }。
-        validatePropertyType: (type) => {
-          const t = String(type || "").trim();
-          if (AISchema.ALLOWED_PROPERTY_TYPES.has(t)) return { valid: true, type: t };
-          return { valid: false };
-        },
-        // 校验属性值（按 type）。返回规范化值或 null（非法/应跳过）。
-        validatePropertyValue: (val, type) => {
-          if (val === void 0 || val === null) return null;
-          switch (type) {
-            case "title":
-            case "rich_text":
-              return String(val).slice(0, type === "title" ? AISchema.MAX_TITLE : AISchema.MAX_RICH_TEXT);
-            case "select":
-            case "status":
-              return String(val).trim().slice(0, AISchema.MAX_SELECT_NAME);
-            case "multi_select": {
-              const arr = Array.isArray(val) ? val : [val];
-              return arr.map((v) => String(v || "").trim()).filter(Boolean).map((v) => v.slice(0, AISchema.MAX_SELECT_NAME));
-            }
-            case "number": {
-              const n = Number(val);
-              if (!isFinite(n) || Math.abs(n) > AISchema.MAX_NUMBER) return null;
-              return n;
-            }
-            case "checkbox":
-              return Boolean(val);
-            case "date":
-              return AISchema.ISO_DATE_RE.test(String(val).trim()) ? String(val).trim() : null;
-            case "url":
-            case "email":
-            case "phone_number":
-              return String(val).trim().slice(0, AISchema.MAX_RICH_TEXT);
-            default:
-              return String(val).slice(0, AISchema.MAX_RICH_TEXT);
-          }
-        },
-        // 校验 emoji（icon）。长度 + 拒控制字符。
-        validateEmoji: (emoji) => {
-          const e = String(emoji || "").trim();
-          if (!e) return "";
-          if (e.length > AISchema.MAX_EMOJI) return e.slice(0, AISchema.MAX_EMOJI);
-          if (/[\x00-\x1f\x7f]/.test(e)) return "";
-          return e;
-        },
-        // 规范化 _normalizeNotionProperties 的对象值：仅允许 ALLOWED_OBJECT_VALUE_TYPES 顶层键，
-        // 拒 relation/people/files/created_by/created_time/last_edited_time 等系统/关联字段。
-        // 返回清洗后的对象或 null（应跳过）。
-        sanitizeObjectValue: (value) => {
-          if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-          const cleaned = {};
-          let hasValid = false;
-          for (const key of Object.keys(value)) {
-            if (AISchema.ALLOWED_OBJECT_VALUE_TYPES.has(key)) {
-              cleaned[key] = value[key];
-              hasValid = true;
-            }
-          }
-          return hasValid ? cleaned : null;
-        },
-        // 校验 extractToDatabase 结构：properties/entries 均为 Array、properties[i].name/type 非空 string。
-        // 返回 { ok: true } 或 { ok: false, reason }。
-        validateExtractToDatabaseSchema: (data) => {
-          if (!data || typeof data !== "object") return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u6570\u636E\u4E0D\u662F\u5BF9\u8C61" };
-          if (!Array.isArray(data.properties)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684 properties \u4E0D\u662F\u6570\u7EC4" };
-          if (!Array.isArray(data.entries)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684 entries \u4E0D\u662F\u6570\u7EC4" };
-          if (data.entries.length === 0) return { ok: false, reason: "\u672A\u80FD\u4ECE\u9875\u9762\u4E2D\u63D0\u53D6\u5230\u6709\u6548\u6761\u76EE" };
-          for (const prop of data.properties) {
-            if (!prop || typeof prop.name !== "string" || !prop.name.trim() || typeof prop.type !== "string" || !prop.type.trim()) {
-              return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u5C5E\u6027\u7ED3\u6784\u65E0\u6548\uFF08name/type \u7F3A\u5931\uFF09" };
-            }
-          }
-          return { ok: true };
-        },
-        // 统一 AI JSON 解析入口：正则提取 + JSON.parse + 按 name 路由校验。
-        // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"}。
-        // 返回 { ok: true, value } 或 { ok: false, reason }。
-        parseAIJson: (name, rawText) => {
-          if (!rawText) return { ok: false, reason: "AI \u54CD\u5E94\u4E3A\u7A7A" };
-          const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) return { ok: false, reason: "AI \u54CD\u5E94\u4E2D\u672A\u627E\u5230 JSON" };
-          let parsed;
-          try {
-            parsed = JSON.parse(jsonMatch[0]);
-          } catch (error) {
-            return { ok: false, reason: `AI \u8FD4\u56DE\u7684 JSON \u683C\u5F0F\u65E0\u6548: ${error.message}` };
-          }
-          if (name === "extractToDatabase") {
-            const r = AISchema.validateExtractToDatabaseSchema(parsed);
-            if (!r.ok) return r;
-          }
-          return { ok: true, value: parsed };
-        }
-      };
-      module.exports = { AISchema };
     }
   });
 
