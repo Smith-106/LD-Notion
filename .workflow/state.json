@@ -33,7 +33,10 @@
             "W2",
             "W3",
             "W4",
-            "W5"
+            "W5",
+            "W6",
+            "W7",
+            "W8"
           ]
         }
       ]
@@ -239,7 +242,7 @@
       "summary": "Verification passed: 24 must-haves, coverage=1.0, 349/349 tests"
     }
   ],
-  "last_updated": "2026-07-15T21:47:00+08:00",
+  "last_updated": "2026-07-27T11:00:00+08:00",
   "last_codebase_rebuild": "2026-07-15T21:47:00+08:00",
   "last_pruned": "2026-06-20T12:00:00+08:00",
   "accumulated_context": {
@@ -262,8 +265,8 @@
       },
       {
         "title": "新知识源接入",
-        "status": "deferred",
-        "reason": "依赖SourceAdapter抽象层"
+        "status": "partial",
+        "reason": "SourceAdapter 抽象层 + 6 adapters 已实现（Bookmark/Generic/GitHub/LinuxDo/RSS/Zhihu），RSS 源已接入（RSSAdapter+RSSAutoImporter+rss-importer.test.js，v3.7.x）；Twitter/X、Hacker News、Reddit 仍 deferred"
       },
       {
         "title": "知识分享与协作",
@@ -299,5 +302,6 @@
     ]
   },
   "transition_history": [],
-  "milestone_history": []
+  "milestone_history": [],
+  "last_drift_realign": "2026-07-27T10:42:00+08:00"
 }
