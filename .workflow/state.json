@@ -242,8 +242,8 @@
       "summary": "Verification passed: 24 must-haves, coverage=1.0, 349/349 tests"
     }
   ],
-  "last_updated": "2026-07-27T11:00:00+08:00",
-  "last_codebase_rebuild": "2026-07-15T21:47:00+08:00",
+  "last_updated": "2026-07-27T11:50:00+08:00",
+  "last_codebase_rebuild": "2026-07-27T11:50:00+08:00",
   "last_pruned": "2026-06-20T12:00:00+08:00",
   "accumulated_context": {
     "key_decisions": [
