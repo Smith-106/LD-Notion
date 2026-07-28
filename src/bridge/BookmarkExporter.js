@@ -497,10 +497,16 @@ const BookmarkExporter = {
         return BookmarkExporter._exportedCache;
     },
 
+    // 仅 mutate 内存缓存，不写存储（DISCOVER P3 同类修复）：循环内逐条调用避免写侧 O(N²)。
+    // 单次调用场景须紧跟 flushExported() 持久化，或用 markExportedAndFlush。与 GitHubAPI.markExported 同构。
     markExported: (bookmarkUrl) => {
         const exported = BookmarkExporter.getExported();
         exported[bookmarkUrl] = Date.now();
-        Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(exported));
+    },
+
+    markExportedAndFlush: (bookmarkUrl) => {
+        BookmarkExporter.markExported(bookmarkUrl);
+        BookmarkExporter.flushExported();
     },
 
     // 批量导出循环末尾单次回写已导出映射（PERF-003）：循环内仅 mutate 内存缓存，

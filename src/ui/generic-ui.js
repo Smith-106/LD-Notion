@@ -462,9 +462,14 @@ const GenericUI = {
 
         // 刷新工作区目标列表
         panel.querySelector("#gclip-refresh-workspace").addEventListener("click", async () => {
-            const keyInput = panel.querySelector("#gclip-api-key-input").value.trim();
-            const apiKey = NotionOAuth.getAccessToken(keyInput);
-            await GenericUI.refreshWorkspaceTargets(apiKey);
+            try {
+                const keyInput = panel.querySelector("#gclip-api-key-input").value.trim();
+                const apiKey = NotionOAuth.getAccessToken(keyInput);
+                await GenericUI.refreshWorkspaceTargets(apiKey);
+            } catch (error) {
+                console.error("[LD-Notion] 刷新工作区目标失败:", error);
+                GenericUI.showStatus(`刷新工作区目标失败: ${error?.message || error}`, "error");
+            }
         });
 
         // 手动输入开关

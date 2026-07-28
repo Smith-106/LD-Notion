@@ -422,6 +422,9 @@ BookmarkAutoImporter.run = async () => {
         };
 
         await processInBatches(currentBookmarks, processBookmark);
+        // 批量回写已导出映射（DISCOVER P3 同类修复）：processBookmark 内 markExported 仅 mutate 内存缓存，
+        // 批次全部完成后单次 flush，写侧从 O(N²)→O(N)。flush 内有 if(cache) 守卫，未 mutate 的缓存为 null 不写。
+        BookmarkExporter.flushExported();
 
         const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
 

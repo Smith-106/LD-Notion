@@ -4144,9 +4144,9 @@ const UI = {
                 }, apiKey);
 
                 if (sourceType === "gists") {
-                    GitHubAPI.markGistExported(item.itemKey);
+                    GitHubAPI.markGistExportedAndFlush(item.itemKey);
                 } else {
-                    GitHubAPI.markExported(item.itemKey);
+                    GitHubAPI.markExportedAndFlush(item.itemKey);
                 }
                 GitHubExporter._auditExport("createDatabasePage", "success",
                     { pageId: String(page?.id || ""), itemKey: item.itemKey, sourceType, databaseId });

@@ -313,7 +313,7 @@ const GitHubExporter = {
     },
 
     // 通用导出方法
-    _exportItems: async (items, settings, sourceType, buildFn, isExportedFn, markExportedFn, getKeyFn, onProgress) => {
+    _exportItems: async (items, settings, sourceType, buildFn, isExportedFn, markExportedFn, getKeyFn, onProgress, flushFn) => {
         const { apiKey, databaseId } = settings;
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
 
@@ -366,6 +366,10 @@ const GitHubExporter = {
             }
         }
 
+        // 批量回写已导出映射（DISCOVER P3）：循环内 markExportedFn 仅 mutate 内存缓存，
+        // 循环末单次 flush，写侧从 O(N²)→O(N)。与 BookmarkExporter.flushExported 同构。
+        if (flushFn) flushFn();
+
         return { total: items.length, exported: success, failed, newCount: newItems.length };
     },
 
@@ -390,7 +394,7 @@ const GitHubExporter = {
             repos, settings, "Star",
             (r) => GitHubExporter.buildRepoProperties(r, "Star"),
             GitHubAPI.isExported, GitHubAPI.markExported,
-            (r) => r.full_name, onProgress
+            (r) => r.full_name, onProgress, GitHubAPI.flushExported
         );
     },
 
@@ -413,7 +417,7 @@ const GitHubExporter = {
             ownRepos, settings, "Repo",
             (r) => GitHubExporter.buildRepoProperties(r, "Repo"),
             GitHubAPI.isExported, GitHubAPI.markExported,
-            (r) => r.full_name, onProgress
+            (r) => r.full_name, onProgress, GitHubAPI.flushExported
         );
     },
 
@@ -435,7 +439,7 @@ const GitHubExporter = {
             forks, settings, "Fork",
             (r) => GitHubExporter.buildRepoProperties(r, "Fork"),
             GitHubAPI.isExported, GitHubAPI.markExported,
-            (r) => r.full_name, onProgress
+            (r) => r.full_name, onProgress, GitHubAPI.flushExported
         );
     },
 
@@ -457,7 +461,7 @@ const GitHubExporter = {
             gists, settings, "Gist",
             GitHubExporter.buildGistProperties,
             GitHubAPI.isGistExported, GitHubAPI.markGistExported,
-            (g) => g.id, onProgress
+            (g) => g.id, onProgress, GitHubAPI.flushGistsExported
         );
     },
 

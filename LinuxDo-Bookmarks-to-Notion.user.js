@@ -6051,10 +6051,15 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           return BookmarkExporter2._exportedCache;
         },
+        // 仅 mutate 内存缓存，不写存储（DISCOVER P3 同类修复）：循环内逐条调用避免写侧 O(N²)。
+        // 单次调用场景须紧跟 flushExported() 持久化，或用 markExportedAndFlush。与 GitHubAPI.markExported 同构。
         markExported: (bookmarkUrl) => {
           const exported = BookmarkExporter2.getExported();
           exported[bookmarkUrl] = Date.now();
-          Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(exported));
+        },
+        markExportedAndFlush: (bookmarkUrl) => {
+          BookmarkExporter2.markExported(bookmarkUrl);
+          BookmarkExporter2.flushExported();
         },
         // 批量导出循环末尾单次回写已导出映射（PERF-003）：循环内仅 mutate 内存缓存，
         // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。语义与逐条 markExported 等价。
@@ -7388,6 +7393,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
           };
           await processInBatches(currentBookmarks, processBookmark);
+          BookmarkExporter2.flushExported();
           const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
           const processDeleted = async (bookmarkId, itemIndex) => {
             const snapshotEntry = previousSnapshot[bookmarkId];
@@ -9326,15 +9332,35 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           return GitHubAPI2._exportedGistsCache;
         },
+        // 仅 mutate 内存缓存，不写存储（DISCOVER P3）：循环内逐条调用避免写侧 O(N²)。
+        // 单次调用场景须紧跟 flushExported() 持久化，或用 markExportedAndFlush。
         markExported: (repoFullName) => {
           const exported = GitHubAPI2.getExported();
           exported[repoFullName] = Date.now();
-          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(exported));
+        },
+        markExportedAndFlush: (repoFullName) => {
+          GitHubAPI2.markExported(repoFullName);
+          GitHubAPI2.flushExported();
+        },
+        // 批量导出循环末尾单次回写已导出映射（DISCOVER P3 同类修复）：循环内仅 mutate 内存缓存，
+        // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。与 BookmarkExporter.flushExported 同构。
+        flushExported: () => {
+          if (GitHubAPI2._exportedCache) {
+            Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(GitHubAPI2._exportedCache));
+          }
         },
         markGistExported: (gistId) => {
           const exported = GitHubAPI2.getExportedGists();
           exported[gistId] = Date.now();
-          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(exported));
+        },
+        markGistExportedAndFlush: (gistId) => {
+          GitHubAPI2.markGistExported(gistId);
+          GitHubAPI2.flushGistsExported();
+        },
+        flushGistsExported: () => {
+          if (GitHubAPI2._exportedGistsCache) {
+            Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(GitHubAPI2._exportedGistsCache));
+          }
         },
         isExported: (repoFullName) => {
           return !!GitHubAPI2.getExported()[repoFullName];
@@ -9698,7 +9724,7 @@ ${insight.summary || ""}`,
           }
         },
         // 通用导出方法
-        _exportItems: async (items, settings, sourceType, buildFn, isExportedFn, markExportedFn, getKeyFn, onProgress) => {
+        _exportItems: async (items, settings, sourceType, buildFn, isExportedFn, markExportedFn, getKeyFn, onProgress, flushFn) => {
           const { apiKey, databaseId } = settings;
           const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
           const newItems = items.filter((item) => !isExportedFn(getKeyFn(item)));
@@ -9752,6 +9778,7 @@ ${insight.summary || ""}`,
               await Utils2.sleep(delay);
             }
           }
+          if (flushFn) flushFn();
           return { total: items.length, exported: success, failed, newCount: newItems.length };
         },
         // 导出 stars 到 Notion
@@ -9775,7 +9802,8 @@ ${insight.summary || ""}`,
             GitHubAPI2.isExported,
             GitHubAPI2.markExported,
             (r) => r.full_name,
-            onProgress
+            onProgress,
+            GitHubAPI2.flushExported
           );
         },
         // 导出用户仓库到 Notion
@@ -9797,7 +9825,8 @@ ${insight.summary || ""}`,
             GitHubAPI2.isExported,
             GitHubAPI2.markExported,
             (r) => r.full_name,
-            onProgress
+            onProgress,
+            GitHubAPI2.flushExported
           );
         },
         // 导出 fork 的仓库到 Notion
@@ -9818,7 +9847,8 @@ ${insight.summary || ""}`,
             GitHubAPI2.isExported,
             GitHubAPI2.markExported,
             (r) => r.full_name,
-            onProgress
+            onProgress,
+            GitHubAPI2.flushExported
           );
         },
         // 导出 Gists 到 Notion
@@ -9839,7 +9869,8 @@ ${insight.summary || ""}`,
             GitHubAPI2.isGistExported,
             GitHubAPI2.markGistExported,
             (g) => g.id,
-            onProgress
+            onProgress,
+            GitHubAPI2.flushGistsExported
           );
         },
         // 按用户选择的类型批量导出
@@ -10169,6 +10200,8 @@ ${insight.summary || ""}`,
             await Utils2.sleep(delay);
           }
         }
+        GitHubAPI2.flushExported();
+        GitHubAPI2.flushGistsExported();
         return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
       };
       GitHubAutoImporter2._exportMappedItems = async (mappedItems, type, meta, settings) => {
@@ -16463,9 +16496,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 properties
               }, apiKey);
               if (sourceType === "gists") {
-                GitHubAPI2.markGistExported(item.itemKey);
+                GitHubAPI2.markGistExportedAndFlush(item.itemKey);
               } else {
-                GitHubAPI2.markExported(item.itemKey);
+                GitHubAPI2.markExportedAndFlush(item.itemKey);
               }
               GitHubExporter2._auditExport(
                 "createDatabasePage",
@@ -18684,9 +18717,14 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             GenericUI2.loadTargetOptionsFromCache(NotionOAuth2.getAccessToken(panel.querySelector("#gclip-api-key-input").value.trim()));
           });
           panel.querySelector("#gclip-refresh-workspace").addEventListener("click", async () => {
-            const keyInput = panel.querySelector("#gclip-api-key-input").value.trim();
-            const apiKey = NotionOAuth2.getAccessToken(keyInput);
-            await GenericUI2.refreshWorkspaceTargets(apiKey);
+            try {
+              const keyInput = panel.querySelector("#gclip-api-key-input").value.trim();
+              const apiKey = NotionOAuth2.getAccessToken(keyInput);
+              await GenericUI2.refreshWorkspaceTargets(apiKey);
+            } catch (error) {
+              console.error("[LD-Notion] \u5237\u65B0\u5DE5\u4F5C\u533A\u76EE\u6807\u5931\u8D25:", error);
+              GenericUI2.showStatus(`\u5237\u65B0\u5DE5\u4F5C\u533A\u76EE\u6807\u5931\u8D25: ${(error == null ? void 0 : error.message) || error}`, "error");
+            }
           });
           panel.querySelector("#gclip-toggle-manual-target").addEventListener("click", () => {
             const wrap = panel.querySelector("#gclip-manual-target-wrap");
@@ -23940,117 +23978,53 @@ ${aiResponse}
           }
           throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
         },
-        // OpenAI API 请求
+        // OpenAI 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，max_completion_tokens=50）
         requestOpenAI: (prompt2, model, apiKey, baseUrl) => {
           const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
-          return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "POST",
-              url,
-              headers: {
-                "Authorization": `Bearer ${apiKey}`,
-                "Content-Type": "application/json"
-              },
-              data: JSON.stringify({
-                model,
-                messages: [{ role: "user", content: prompt2 }],
-                max_completion_tokens: 50,
-                temperature: 0
-              }),
-              onload: (response) => {
-                var _a, _b, _c, _d, _e;
-                try {
-                  const result = JSON.parse(response.responseText);
-                  if (response.status >= 200 && response.status < 300) {
-                    resolve(((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "");
-                  } else {
-                    reject(new Error(((_e = result.error) == null ? void 0 : _e.message) || `OpenAI \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
-                  }
-                } catch (e) {
-                  reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
-                }
-              },
-              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
-              timeout: 3e4,
-              ontimeout: () => reject(new Error("AI \u5206\u7C7B\u8BF7\u6C42\u8D85\u65F6"))
-            });
-          });
+          return AIService2._chatRequest(
+            url,
+            { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            { model, messages: [{ role: "user", content: prompt2 }], max_completion_tokens: 50, temperature: 0 },
+            (result) => {
+              var _a, _b, _c, _d;
+              return ((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "";
+            },
+            "OpenAI",
+            3e4
+          );
         },
-        // Claude API 请求
+        // Claude 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，max_tokens=50）
         requestClaude: (prompt2, model, apiKey, baseUrl) => {
           const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-          return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "POST",
-              url,
-              headers: {
-                "x-api-key": apiKey,
-                "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01"
-              },
-              data: JSON.stringify({
-                model,
-                messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }],
-                max_tokens: 50
-              }),
-              onload: (response) => {
-                var _a, _b, _c, _d;
-                try {
-                  const result = JSON.parse(response.responseText);
-                  if (response.status >= 200 && response.status < 300) {
-                    resolve(((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "");
-                  } else {
-                    reject(new Error(((_d = result.error) == null ? void 0 : _d.message) || `Claude \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
-                  }
-                } catch (e) {
-                  reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
-                }
-              },
-              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
-              timeout: 3e4,
-              ontimeout: () => reject(new Error("AI \u5206\u7C7B\u8BF7\u6C42\u8D85\u65F6"))
-            });
-          });
+          return AIService2._chatRequest(
+            url,
+            { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+            { model, messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }], max_tokens: 50 },
+            (result) => {
+              var _a, _b, _c;
+              return ((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "";
+            },
+            "Claude",
+            3e4
+          );
         },
-        // Gemini API 请求
+        // Gemini 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，maxOutputTokens=50）
         requestGemini: (prompt2, model, apiKey, baseUrl) => {
           const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
           const url = normalizedBase ? `${normalizedBase}/v1beta/models/${model}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-          return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "POST",
-              url,
-              headers: {
-                "Content-Type": "application/json",
-                "x-goog-api-key": apiKey
-              },
-              data: JSON.stringify({
-                contents: [{ parts: [{ text: prompt2 }] }],
-                generationConfig: {
-                  maxOutputTokens: 50,
-                  temperature: 0
-                }
-              }),
-              onload: (response) => {
-                var _a, _b, _c, _d, _e, _f, _g;
-                try {
-                  const result = JSON.parse(response.responseText);
-                  if (response.status >= 200 && response.status < 300) {
-                    resolve(((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "");
-                  } else {
-                    reject(new Error(((_g = result.error) == null ? void 0 : _g.message) || `Gemini \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
-                  }
-                } catch (e) {
-                  reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
-                }
-              },
-              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
-              timeout: 3e4,
-              ontimeout: () => reject(new Error("AI \u5206\u7C7B\u8BF7\u6C42\u8D85\u65F6"))
-            });
-          });
+          return AIService2._chatRequest(
+            url,
+            { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            { contents: [{ parts: [{ text: prompt2 }] }], generationConfig: { maxOutputTokens: 50, temperature: 0 } },
+            (result) => {
+              var _a, _b, _c, _d, _e, _f;
+              return ((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "";
+            },
+            "Gemini",
+            3e4
+          );
         },
         // 匹配分类（模糊匹配）
         matchCategory: (response, categories) => {
@@ -24108,8 +24082,9 @@ ${aiResponse}
         },
         // 公共 AI 对话请求骨架（MAINT-004）：封装 GM_xmlhttpRequest Promise + _retryable +
         // onload/onerror/timeout 模板。三 provider 仅声明差异部分（url/headers/body/extractResponse/errorPrefix）。
+        // timeout 默认 90000（长对话）；分类请求（requestOpenAI/Claude/Gemini）传 30000（DISCOVER P6 同类去重）。
         // 90000ms 超时是长对话请求统一值（MAINT-007 已常量化建议，此处暂留内联）。
-        _chatRequest: (url, headers, body, extractResponse, errorPrefix) => {
+        _chatRequest: (url, headers, body, extractResponse, errorPrefix, timeout = 9e4) => {
           return AIService2._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
               method: "POST",
@@ -24130,7 +24105,7 @@ ${aiResponse}
                 }
               },
               onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
-              timeout: 9e4,
+              timeout,
               ontimeout: () => reject(new Error("AI \u5BF9\u8BDD\u8BF7\u6C42\u8D85\u65F6"))
             });
           }));

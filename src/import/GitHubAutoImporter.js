@@ -218,6 +218,10 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
             await Utils.sleep(delay);
         }
     }
+    // 批量回写已导出映射（DISCOVER P3）：循环内 markExported/markGistExported 仅 mutate 内存缓存，
+    // 循环末单次 flush，写侧从 O(N²)→O(N)。flush 内有 if(cache) 守卫，未 mutate 的缓存为 null 不写。
+    GitHubAPI.flushExported();
+    GitHubAPI.flushGistsExported();
     return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
 };
 

@@ -141,16 +141,40 @@ const GitHubAPI = {
         return GitHubAPI._exportedGistsCache;
     },
 
+    // 仅 mutate 内存缓存，不写存储（DISCOVER P3）：循环内逐条调用避免写侧 O(N²)。
+    // 单次调用场景须紧跟 flushExported() 持久化，或用 markExportedAndFlush。
     markExported: (repoFullName) => {
         const exported = GitHubAPI.getExported();
         exported[repoFullName] = Date.now();
-        Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(exported));
+    },
+
+    markExportedAndFlush: (repoFullName) => {
+        GitHubAPI.markExported(repoFullName);
+        GitHubAPI.flushExported();
+    },
+
+    // 批量导出循环末尾单次回写已导出映射（DISCOVER P3 同类修复）：循环内仅 mutate 内存缓存，
+    // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。与 BookmarkExporter.flushExported 同构。
+    flushExported: () => {
+        if (GitHubAPI._exportedCache) {
+            Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(GitHubAPI._exportedCache));
+        }
     },
 
     markGistExported: (gistId) => {
         const exported = GitHubAPI.getExportedGists();
         exported[gistId] = Date.now();
-        Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(exported));
+    },
+
+    markGistExportedAndFlush: (gistId) => {
+        GitHubAPI.markGistExported(gistId);
+        GitHubAPI.flushGistsExported();
+    },
+
+    flushGistsExported: () => {
+        if (GitHubAPI._exportedGistsCache) {
+            Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(GitHubAPI._exportedGistsCache));
+        }
     },
 
     isExported: (repoFullName) => {
