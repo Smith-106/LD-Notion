@@ -9,6 +9,8 @@ const { GenericExtractor, WorkspaceService } = require("../extract");
 const { UndoManager, ConfirmationDialog } = require("../security");
 const { UrlValidator } = require("../security/UrlValidator");
 const { AISchema } = require("./schema");
+// ISS-012 MAINT-002: AI Agent 调用链路追踪持久化（observability）。
+const { AgentTrace } = require("./AgentTrace");
 // ISS-20260723-010 W4 (MAINT-005/006/009): BlockConverter + NameResolver 从本文件提取到独立模块。
 // AIAssistant 上保留转发壳（_textToBlocks/_buildBlockUpdatePayload/_resolveDatabaseId/_resolvePageId）
 // 保持 38 处调用点零改动；源码层分层已达成，esbuild 工厂内联是打包细节（review spec「分层重构验证」）。
@@ -2456,6 +2458,9 @@ ${availableTools}
     runAgentLoop: async (userMessage, settings, maxIterations = Storage.get(CONFIG.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG.DEFAULTS.agentMaxIterations)) => {
         const permLevel = OperationGuard.getLevel();
 
+        // ISS-012 MAINT-002: 创建调用链路 trace（observability），出口 persist 落盘。
+        const trace = AgentTrace.create(userMessage);
+
         // 1. 构建系统提示（含可用工具列表，根据权限过滤）
         const availableTools = Object.entries(AIAssistant.AGENT_TOOLS)
             .filter(([_, tool]) => tool.level <= permLevel)
@@ -2470,6 +2475,7 @@ ${availableTools}
 
         while (iteration < maxIterations) {
             iteration++;
+            trace.iterations = iteration;
             ChatState.updateLastMessage(
                 `🤖 Agent 思考中... (${iteration}/${maxIterations})`,
                 "processing"
@@ -2482,6 +2488,8 @@ ${availableTools}
                     systemPrompt, messages, settings, 1500
                 );
             } catch (error) {
+                AgentTrace.recordError(trace, error);
+                AgentTrace.persist(trace, "failed", `❌ AI 调用失败: ${error.message}`);
                 return `❌ AI 调用失败: ${error.message}`;
             }
 
@@ -2490,6 +2498,7 @@ ${availableTools}
 
             if (!toolCall) {
                 // 不是工具调用 → 最终回复
+                AgentTrace.persist(trace, "completed", response);
                 return response;
             }
 
@@ -2503,13 +2512,17 @@ ${availableTools}
                 "processing"
             );
 
+            AgentTrace.recordToolCall(trace, toolCall, iteration);
             const result = await AIAssistant._executeAgentToolCall(toolCall, settings, permLevel);
+            AgentTrace.recordResult(trace, toolCall, result, iteration);
 
             // 将工具结果喂回 AI
             messages.push({ role: "user", content: `[工具结果] ${toolCall.tool}:\n${AIAssistant._resultToAgentPayload(result)}` });
         }
 
-        return "🤖 Agent 达到最大执行步数，已停止。如果任务尚未完成，请继续描述你的需求。";
+        const maxMsg = "🤖 Agent 达到最大执行步数，已停止。如果任务尚未完成，请继续描述你的需求。";
+        AgentTrace.persist(trace, "max_iterations", maxMsg);
+        return maxMsg;
     },
 };
 // Mixin handlers for dynamic dispatch (AIAssistant[handlerName])

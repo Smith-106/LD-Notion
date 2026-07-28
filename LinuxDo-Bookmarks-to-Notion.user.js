@@ -100,6 +100,8 @@
           AI_BASE_URL: "ldb_ai_base_url",
           // AI 对话历史
           CHAT_HISTORY: "ldb_chat_history",
+          // AI Agent 调用链路追踪（ISS-012 MAINT-002，observability）
+          AI_TRACE_LOG: "ldb_ai_trace_log",
           // 导出目标配置
           EXPORT_TARGET_TYPE: "ldb_export_target_type",
           PARENT_PAGE_ID: "ldb_parent_page_id",
@@ -19652,6 +19654,124 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
     }
   });
 
+  // src/ai/AgentTrace.js
+  var require_AgentTrace = __commonJS({
+    "src/ai/AgentTrace.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var AgentTrace = {
+        MAX_TRACES: 50,
+        MAX_USER_INPUT: 500,
+        MAX_RESULT_PREVIEW: 200,
+        MAX_FINAL_RESPONSE: 1e3,
+        _key() {
+          return CONFIG2.STORAGE_KEYS.AI_TRACE_LOG;
+        },
+        _load() {
+          const raw = GM_getValue(this._key(), "[]");
+          try {
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr : [];
+          } catch {
+            return [];
+          }
+        },
+        _save(traces) {
+          GM_setValue(this._key(), JSON.stringify(traces));
+        },
+        /**
+         * 创建一条新 trace（runAgentLoop 入口调用）。
+         * @param {string} userInput
+         * @returns {object} trace 对象（尚未持久化，调 persist 落盘）
+         */
+        create(userInput) {
+          const ts = (/* @__PURE__ */ new Date()).toISOString();
+          const trimmedInput = String(userInput || "").slice(0, this.MAX_USER_INPUT);
+          return {
+            id: `trace-${ts}-${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: ts,
+            userInput: trimmedInput,
+            iterations: 0,
+            toolCalls: [],
+            results: [],
+            finalResponse: "",
+            latencyMs: 0,
+            errors: [],
+            status: "in_progress",
+            _startedAt: Date.now()
+          };
+        },
+        /**
+         * 记录一次工具调用（_executeAgentToolCall 前后调用）。
+         */
+        recordToolCall(trace, toolCall, iter) {
+          if (!trace) return;
+          trace.toolCalls.push({
+            tool: (toolCall == null ? void 0 : toolCall.tool) || "unknown",
+            thought: (toolCall == null ? void 0 : toolCall.thought) ? String(toolCall.thought).slice(0, 200) : void 0,
+            iter
+          });
+        },
+        /**
+         * 记录一次工具结果（截断预览，不存原始大对象防存储膨胀）。
+         */
+        recordResult(trace, toolCall, result, iter) {
+          if (!trace) return;
+          const status = result && result.status || "ok";
+          let preview = "";
+          if (result && result.message != null) {
+            preview = String(result.message).slice(0, this.MAX_RESULT_PREVIEW);
+          } else if (typeof result === "string") {
+            preview = result.slice(0, this.MAX_RESULT_PREVIEW);
+          }
+          trace.results.push({ tool: (toolCall == null ? void 0 : toolCall.tool) || "unknown", status, preview, iter });
+        },
+        /**
+         * 记录错误（AI 调用失败/工具异常）。
+         */
+        recordError(trace, error) {
+          if (!trace) return;
+          const msg = (error == null ? void 0 : error.message) ? String(error.message).slice(0, 300) : String(error).slice(0, 300);
+          trace.errors.push(msg);
+        },
+        /**
+         * 持久化 trace（runAgentLoop 出口调用），rotate 超限丢弃最旧。
+         * @param {object} trace — create() 返回的 trace，已填充 toolCalls/results/finalResponse/status
+         * @param {string} status — "completed" | "failed" | "max_iterations"
+         * @param {string} finalResponse — 最终 AI 回复
+         * @returns {object} 持久化后的 trace（去 _startedAt，补 latencyMs）
+         */
+        persist(trace, status, finalResponse) {
+          if (!trace) return null;
+          trace.status = status || "completed";
+          trace.finalResponse = String(finalResponse || "").slice(0, this.MAX_FINAL_RESPONSE);
+          trace.latencyMs = trace._startedAt ? Date.now() - trace._startedAt : 0;
+          delete trace._startedAt;
+          const traces = this._load();
+          traces.push(trace);
+          while (traces.length > this.MAX_TRACES) {
+            traces.shift();
+          }
+          this._save(traces);
+          return trace;
+        },
+        /**
+         * 读取全部 trace（诊断/测试用）。
+         */
+        list() {
+          return this._load();
+        },
+        /**
+         * 清空所有 trace（测试/重置用）。
+         */
+        clear() {
+          this._save([]);
+        }
+      };
+      module.exports = { AgentTrace };
+    }
+  });
+
   // src/ai/BlockConverter.js
   var require_BlockConverter = __commonJS({
     "src/ai/BlockConverter.js"(exports, module) {
@@ -23700,6 +23820,7 @@ ${aiResponse}
       var { UndoManager: UndoManager2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { UrlValidator } = require_UrlValidator();
       var { AISchema } = require_schema();
+      var { AgentTrace } = require_AgentTrace();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
       var { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 } = require_AgentTools();
@@ -25880,6 +26001,7 @@ ${availableTools}
         // 核心 Agent 循环
         runAgentLoop: async (userMessage, settings, maxIterations = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG2.DEFAULTS.agentMaxIterations)) => {
           const permLevel = OperationGuard2.getLevel();
+          const trace = AgentTrace.create(userMessage);
           const availableTools = Object.entries(AIAssistant2.AGENT_TOOLS).filter(([_, tool]) => tool.level <= permLevel).map(([name, tool]) => `- ${name}: ${tool.description} | \u53C2\u6570: ${tool.params}`).join("\n");
           const systemPrompt = AIAssistant2._buildAgentSystemPrompt(permLevel, availableTools, settings);
           const messages = [{ role: "user", content: `<user_input>
@@ -25888,6 +26010,7 @@ ${userMessage}
           let iteration = 0;
           while (iteration < maxIterations) {
             iteration++;
+            trace.iterations = iteration;
             ChatState2.updateLastMessage(
               `\u{1F916} Agent \u601D\u8003\u4E2D... (${iteration}/${maxIterations})`,
               "processing"
@@ -25901,10 +26024,13 @@ ${userMessage}
                 1500
               );
             } catch (error) {
+              AgentTrace.recordError(trace, error);
+              AgentTrace.persist(trace, "failed", `\u274C AI \u8C03\u7528\u5931\u8D25: ${error.message}`);
               return `\u274C AI \u8C03\u7528\u5931\u8D25: ${error.message}`;
             }
             const toolCall = AIAssistant2._tryParseToolCall(response);
             if (!toolCall) {
+              AgentTrace.persist(trace, "completed", response);
               return response;
             }
             messages.push({ role: "assistant", content: response });
@@ -25914,11 +26040,15 @@ ${userMessage}
               `\u{1F916} \u6B63\u5728\u6267\u884C: ${toolCall.tool}...${thoughtText}`,
               "processing"
             );
+            AgentTrace.recordToolCall(trace, toolCall, iteration);
             const result = await AIAssistant2._executeAgentToolCall(toolCall, settings, permLevel);
+            AgentTrace.recordResult(trace, toolCall, result, iteration);
             messages.push({ role: "user", content: `[\u5DE5\u5177\u7ED3\u679C] ${toolCall.tool}:
 ${AIAssistant2._resultToAgentPayload(result)}` });
           }
-          return "\u{1F916} Agent \u8FBE\u5230\u6700\u5927\u6267\u884C\u6B65\u6570\uFF0C\u5DF2\u505C\u6B62\u3002\u5982\u679C\u4EFB\u52A1\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u7EE7\u7EED\u63CF\u8FF0\u4F60\u7684\u9700\u6C42\u3002";
+          const maxMsg = "\u{1F916} Agent \u8FBE\u5230\u6700\u5927\u6267\u884C\u6B65\u6570\uFF0C\u5DF2\u505C\u6B62\u3002\u5982\u679C\u4EFB\u52A1\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u7EE7\u7EED\u63CF\u8FF0\u4F60\u7684\u9700\u6C42\u3002";
+          AgentTrace.persist(trace, "max_iterations", maxMsg);
+          return maxMsg;
         }
       };
       Object.assign(AIAssistant2, AIHandlers2);

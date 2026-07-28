@@ -43,6 +43,8 @@ const CONFIG = {
         AI_BASE_URL: "ldb_ai_base_url",
         // AI 对话历史
         CHAT_HISTORY: "ldb_chat_history",
+        // AI Agent 调用链路追踪（ISS-012 MAINT-002，observability）
+        AI_TRACE_LOG: "ldb_ai_trace_log",
         // 导出目标配置
         EXPORT_TARGET_TYPE: "ldb_export_target_type",
         PARENT_PAGE_ID: "ldb_parent_page_id",
