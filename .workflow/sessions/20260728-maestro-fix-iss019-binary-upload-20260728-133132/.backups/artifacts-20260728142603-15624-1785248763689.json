@@ -1,0 +1,78 @@
+{
+  "schema_version": "artifacts/1.0",
+  "revision": 3,
+  "artifacts": {
+    "ART-001-001": {
+      "kind": "analyze-findings",
+      "role": "evidence",
+      "producer_run_id": "20260728-001-analyze",
+      "relative_path": "runs/20260728-001-analyze/outputs/analyze-findings.json",
+      "media_type": "application/json",
+      "schema_version": "analyze-findings/1.0",
+      "content_hash": "06a5af57e53c07d0639eaf70dcf95f424f98cd041886fbb477f6df51d9221b93",
+      "size": 3942,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-001-002": {
+      "kind": "analyze-findings",
+      "role": "primary",
+      "producer_run_id": "20260728-001-analyze",
+      "relative_path": "runs/20260728-001-analyze/outputs/findings.json",
+      "media_type": "application/json",
+      "schema_version": "analyze-findings/1.0",
+      "content_hash": "5ea1e6562ac5f99e73ab4f7fca762d01e51bfd62301094c439c058ede064e660",
+      "size": 2102,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-001-003": {
+      "kind": "priors",
+      "role": "primary",
+      "producer_run_id": "20260728-001-analyze",
+      "relative_path": "runs/20260728-001-analyze/outputs/priors.json",
+      "media_type": "application/json",
+      "schema_version": "priors/1.0",
+      "content_hash": "21c4be593f774106261da2bae34ec4e746040500a6e2f23086e03b38d03c96b7",
+      "size": 1480,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-001-004": {
+      "kind": "risk-matrix",
+      "role": "primary",
+      "producer_run_id": "20260728-001-analyze",
+      "relative_path": "runs/20260728-001-analyze/outputs/risk-matrix.json",
+      "media_type": "application/json",
+      "schema_version": "risk-matrix/1.0",
+      "content_hash": "536ad693ae8da66add898900f78032c14d932ef2f9f4794c893bed640b1c33e0",
+      "size": 1392,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    },
+    "ART-002-001": {
+      "kind": "plan",
+      "role": "evidence",
+      "producer_run_id": "20260728-002-plan",
+      "relative_path": "runs/20260728-002-plan/outputs/plan.json",
+      "media_type": "application/json",
+      "schema_version": "plan/1.0",
+      "content_hash": "b433c3ef2f61674ec7a493fdc45baadce3172585ccd11c2af2147a8d3d1743d0",
+      "size": 3515,
+      "status": "sealed",
+      "derived_from": [],
+      "replaces": null
+    }
+  },
+  "aliases": {
+    "iss019-send-api-contract": "ART-001-001",
+    "iss019-findings": "ART-001-002",
+    "iss019-priors": "ART-001-003",
+    "iss019-risk": "ART-001-004",
+    "iss019-plan": "ART-002-001"
+  }
+}

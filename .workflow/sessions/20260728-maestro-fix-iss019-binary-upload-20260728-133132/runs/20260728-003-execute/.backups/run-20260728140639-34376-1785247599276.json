@@ -1,0 +1,152 @@
+{
+  "schema_version": "command-run/1.3",
+  "session_id": "20260728-maestro-fix-iss019-binary-upload-20260728-133132",
+  "run_id": "20260728-003-execute",
+  "sequence": 3,
+  "parent_run_id": null,
+  "chain_step_id": "step-002-execute",
+  "resolved_platform": "claude",
+  "goal_binding": null,
+  "checkpoint_expectation": null,
+  "checkpoint": null,
+  "retry_fence": null,
+  "contract_snapshot": {
+    "schema_version": "contract-snapshot/1.0",
+    "contract_version": "command-contract/1.0",
+    "normalized": {
+      "contract_version": 1,
+      "consumes": [
+        {
+          "kind": "plan",
+          "alias": "current-plan",
+          "required": false
+        },
+        {
+          "kind": "review-findings",
+          "alias": "latest-review",
+          "required": false
+        },
+        {
+          "kind": "fix-directions",
+          "alias": "latest-fix-directions",
+          "required": false
+        },
+        {
+          "kind": "diagnosis",
+          "alias": "latest-debug",
+          "required": false
+        },
+        {
+          "kind": "priors",
+          "alias": "session-priors",
+          "required": false
+        }
+      ],
+      "produces": [
+        {
+          "kind": "execution",
+          "primary": false,
+          "path": "outputs/execution.json",
+          "alias": "current-execution"
+        },
+        {
+          "kind": "task-results",
+          "primary": false,
+          "path": "outputs/task-results.json"
+        },
+        {
+          "kind": "self-check",
+          "primary": false,
+          "path": "outputs/self-check.json"
+        },
+        {
+          "kind": "change-manifest",
+          "primary": false,
+          "path": "outputs/change-manifest.json"
+        }
+      ],
+      "gates": {
+        "entry": [],
+        "exit": [
+          "execution-complete",
+          "self-check-passed"
+        ]
+      }
+    },
+    "snapshot_hash": "sha256:2436a526e336e4e19317d15a7083360566ebe6d59467957d3d78d26cc19f298e",
+    "parser_version": "maestro-command-contract/2",
+    "captured_at": "2026-07-28T14:01:01.342Z",
+    "warnings": [
+      "v1 produces[0].role is metadata-only; set contract_version: 2 to enforce it",
+      "v1 produces[1].role is metadata-only; set contract_version: 2 to enforce it",
+      "v1 produces[2].role is metadata-only; set contract_version: 2 to enforce it",
+      "v1 produces[3].role is metadata-only; set contract_version: 2 to enforce it"
+    ]
+  },
+  "guidance_snapshot": {
+    "schema_version": "guidance-snapshot/1.0",
+    "source_path": "../../../.maestro/prepare/execute.md",
+    "content_hash": "sha256:482f199905479fbf1bc9b6cd02ab72d3293c499c06b1dedb3cca8193aaa2ebb7",
+    "resolved_prompt_hash": "sha256:482f199905479fbf1bc9b6cd02ab72d3293c499c06b1dedb3cca8193aaa2ebb7",
+    "prepare_hash": "sha256:482f199905479fbf1bc9b6cd02ab72d3293c499c06b1dedb3cca8193aaa2ebb7",
+    "workflow_hash": "sha256:2546a69eb698314749eaed85ab9493059b1fbf489efaef4dcc5394d81c671c82",
+    "run_mode_hash": "sha256:84d0caceca5d919efda5a3d16df176752b4d18756db2cea2a5e08c649bee63bf"
+  },
+  "creation_decision": {
+    "schema_version": "creation-decision/1.0",
+    "decision_id": "dec_22b715ed7cd45e0ec9a9e593",
+    "request_id": null,
+    "mode": "chain-next",
+    "authority": "chain-transition",
+    "decided_at": "2026-07-28T22:01:01+08:00",
+    "session_identity_revision": 2,
+    "session_activity_revision": 4,
+    "confirmation_token_hash": null
+  },
+  "creation_provenance": {
+    "schema_version": "creation-provenance/1.0",
+    "provenance": "native-v2",
+    "source_workspace_id": null,
+    "source_session_id": null,
+    "source_run_id": null,
+    "imported_artifact_hashes": []
+  },
+  "transition": null,
+  "command": {
+    "name": "execute",
+    "version": "1.0",
+    "source_path": "../../../.maestro/prepare/execute.md",
+    "content_hash": "482f199905479fbf1bc9b6cd02ab72d3293c499c06b1dedb3cca8193aaa2ebb7",
+    "resolved_prompt_hash": "482f199905479fbf1bc9b6cd02ab72d3293c499c06b1dedb3cca8193aaa2ebb7",
+    "contract_hash": "2436a526e336e4e19317d15a7083360566ebe6d59467957d3d78d26cc19f298e"
+  },
+  "status": "running",
+  "input": {
+    "args": [],
+    "consumes": [],
+    "context_identity_revision": 2,
+    "reuse_assessments": []
+  },
+  "gate_ids": [
+    "GATE-003-01",
+    "GATE-003-02",
+    "GATE-003-03",
+    "GATE-003-04",
+    "GATE-003-05",
+    "GATE-003-06",
+    "GATE-003-07",
+    "GATE-003-08",
+    "GATE-003-09",
+    "GATE-003-10",
+    "GATE-003-11"
+  ],
+  "output": {
+    "produces": [],
+    "primary_artifact_id": null,
+    "verdict": null
+  },
+  "handoff": null,
+  "started_at": "2026-07-28T22:01:01+08:00",
+  "completed_at": null,
+  "sealed_at": null
+}

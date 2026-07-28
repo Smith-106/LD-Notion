@@ -1,0 +1,141 @@
+{
+  "schema_version": "command-run/1.3",
+  "session_id": "20260728-maestro-fix-iss019-binary-upload-20260728-133132",
+  "run_id": "20260728-001-analyze",
+  "sequence": 1,
+  "parent_run_id": null,
+  "chain_step_id": "step-000-analyze",
+  "resolved_platform": "claude",
+  "goal_binding": null,
+  "checkpoint_expectation": null,
+  "checkpoint": null,
+  "retry_fence": null,
+  "contract_snapshot": {
+    "schema_version": "contract-snapshot/1.0",
+    "contract_version": "command-contract/1.0",
+    "normalized": {
+      "contract_version": 1,
+      "consumes": [
+        {
+          "kind": "guidance",
+          "alias": "current-guidance",
+          "required": false
+        },
+        {
+          "kind": "blueprint",
+          "alias": "current-blueprint",
+          "required": false
+        },
+        {
+          "kind": "diagnosis",
+          "alias": "latest-debug",
+          "required": false
+        }
+      ],
+      "produces": [
+        {
+          "kind": "findings",
+          "primary": false,
+          "path": "outputs/findings.json",
+          "alias": "current-analysis"
+        },
+        {
+          "kind": "risk-matrix",
+          "primary": false,
+          "path": "outputs/risk-matrix.json"
+        },
+        {
+          "kind": "priors",
+          "primary": false,
+          "path": "outputs/priors.json",
+          "alias": "session-priors"
+        }
+      ],
+      "gates": {
+        "entry": [],
+        "exit": [
+          "exploration-done",
+          "discussion-round",
+          "scoring-complete",
+          "intent-covered"
+        ]
+      }
+    },
+    "snapshot_hash": "sha256:522844e66c2df350a5b3a1698c773ae7b3f57a54c33809b692f9178c64a5e1fa",
+    "parser_version": "maestro-command-contract/2",
+    "captured_at": "2026-07-28T13:31:58.245Z",
+    "warnings": [
+      "v1 produces[0].role is metadata-only; set contract_version: 2 to enforce it",
+      "v1 produces[1].role is metadata-only; set contract_version: 2 to enforce it",
+      "v1 produces[2].required is metadata-only; set contract_version: 2 to enforce it",
+      "v1 produces[2].role is metadata-only; set contract_version: 2 to enforce it"
+    ]
+  },
+  "guidance_snapshot": {
+    "schema_version": "guidance-snapshot/1.0",
+    "source_path": "../../../.maestro/prepare/analyze.md",
+    "content_hash": "sha256:6880fb619dd0d3992725a5a1368ebb77a16de4de77d178ab76f965e98717aaf3",
+    "resolved_prompt_hash": "sha256:6880fb619dd0d3992725a5a1368ebb77a16de4de77d178ab76f965e98717aaf3",
+    "prepare_hash": "sha256:6880fb619dd0d3992725a5a1368ebb77a16de4de77d178ab76f965e98717aaf3",
+    "workflow_hash": "sha256:e0d47d0c5441191541e427b4609223a02f18e6a4616af346c63169c375454559",
+    "run_mode_hash": "sha256:84d0caceca5d919efda5a3d16df176752b4d18756db2cea2a5e08c649bee63bf"
+  },
+  "creation_decision": {
+    "schema_version": "creation-decision/1.0",
+    "decision_id": "dec_c869420e1f36bfce0f56cede",
+    "request_id": null,
+    "mode": "chain-next",
+    "authority": "chain-transition",
+    "decided_at": "2026-07-28T21:31:58+08:00",
+    "session_identity_revision": 2,
+    "session_activity_revision": 0,
+    "confirmation_token_hash": null
+  },
+  "creation_provenance": {
+    "schema_version": "creation-provenance/1.0",
+    "provenance": "native-v2",
+    "source_workspace_id": null,
+    "source_session_id": null,
+    "source_run_id": null,
+    "imported_artifact_hashes": []
+  },
+  "transition": null,
+  "command": {
+    "name": "analyze",
+    "version": "1.0",
+    "source_path": "../../../.maestro/prepare/analyze.md",
+    "content_hash": "6880fb619dd0d3992725a5a1368ebb77a16de4de77d178ab76f965e98717aaf3",
+    "resolved_prompt_hash": "6880fb619dd0d3992725a5a1368ebb77a16de4de77d178ab76f965e98717aaf3",
+    "contract_hash": "522844e66c2df350a5b3a1698c773ae7b3f57a54c33809b692f9178c64a5e1fa"
+  },
+  "status": "running",
+  "input": {
+    "args": [
+      "--gaps ISS-20260728-019"
+    ],
+    "consumes": [],
+    "context_identity_revision": 2,
+    "reuse_assessments": []
+  },
+  "gate_ids": [
+    "GATE-001-01",
+    "GATE-001-02",
+    "GATE-001-03",
+    "GATE-001-04",
+    "GATE-001-05",
+    "GATE-001-06",
+    "GATE-001-07",
+    "GATE-001-08",
+    "GATE-001-09",
+    "GATE-001-10"
+  ],
+  "output": {
+    "produces": [],
+    "primary_artifact_id": null,
+    "verdict": null
+  },
+  "handoff": null,
+  "started_at": "2026-07-28T21:31:58+08:00",
+  "completed_at": null,
+  "sealed_at": null
+}

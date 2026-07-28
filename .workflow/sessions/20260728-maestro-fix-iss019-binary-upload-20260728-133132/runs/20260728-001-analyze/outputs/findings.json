@@ -1,0 +1,38 @@
+{
+  "_meta": { "kind": "analyze-findings", "schema": "analyze-findings/1.0", "role": "primary", "alias": "iss019-findings" },
+  "issue_id": "ISS-20260728-019",
+  "finding_ref": "PERF-001",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "critical",
+      "dimension": "performance",
+      "title": "sendFilePart 走 JSON base64 通道，违反 Notion send endpoint multipart/form-data 二进制契约",
+      "location": "src/api/index.js:906-911",
+      "evidence": "Context7 /websites/developers_notion_reference: 'use a Content-Type of multipart/form-data and provide file contents under the file key. This method is unique to this endpoint; other Notion file upload APIs use JSON parameters.'",
+      "impact": "每片 20MB base64 膨胀 33%→~27MB，100MB 文件 5 片分配 ~270MB 临时字符串；JSON.stringify 二次复制",
+      "contract_requirement": "multipart/form-data; boundary={boundary}, file field=binary, part_number field"
+    },
+    {
+      "id": "F2",
+      "severity": "high",
+      "dimension": "correctness",
+      "title": "createMultiPartUpload 缺 number_of_parts 参数，违反 multi_part 契约",
+      "location": "src/api/index.js:896-903",
+      "evidence": "Context7 OpenAPI: number_of_parts (integer 1-10000) required when mode=multi_part, must match final part_number",
+      "impact": "可能触发 Notion API 400 bad request；当前实现未声明分片数",
+      "contract_requirement": "createMultiPartUpload body 补 number_of_parts: totalParts"
+    },
+    {
+      "id": "F3",
+      "severity": "medium",
+      "dimension": "performance",
+      "title": "multi_part 循环串行 + 无并发（契约允许 part 并发乱序）",
+      "location": "src/api/index.js:1037-1051",
+      "evidence": "Context7: 'Parts can be sent concurrently up to Notion API rate limits and out of order'",
+      "impact": ">20MB 大文件上传延迟累积",
+      "note": "本 issue 不修，归 PERF-002/ISS-017 范畴（并发改造需谨慎 + 速率限制处理）"
+    }
+  ],
+  "decision": { "id": "D1", "verdict": "proceed-binary", "confidence": "high" }
+}

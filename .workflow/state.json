@@ -140,6 +140,65 @@
       "summary": "Executed UI/UX and frontend/backend consistency optimization — 5 tasks across 3 waves: TASK-001 CSS token unification (325 replacements), TASK-002 interaction state + accessibility (disabled tokenization + 12 aria-label + 2 aria-live), TASK-003 error display unification (10 inline-color → semantic classes), TASK-004/005 verified already-satisfied (data contract + state management). 349/349 tests pass throughout."
     }
   ],
+  "accumulated_context": {
+    "key_decisions": [
+      "v3.5.0: 文件处理系统全面升级（54种文件类型、去重上传、多分片、video/audio block）",
+      "认证: 支持 Manual API Key + OAuth 双模式",
+      "AI: 多服务商（OpenAI/Anthropic/Gemini）统一接口"
+    ],
+    "blockers": [],
+    "deferred": [
+      {
+        "title": "多源统一管理架构",
+        "status": "deferred",
+        "reason": "依赖模块拆分完成"
+      },
+      {
+        "title": "AI驱动知识整理",
+        "status": "deferred",
+        "reason": "依赖多源统一管理"
+      },
+      {
+        "title": "新知识源接入",
+        "status": "partial",
+        "reason": "SourceAdapter 抽象层 + 6 adapters 已实现（Bookmark/Generic/GitHub/LinuxDo/RSS/Zhihu），RSS 源已接入（RSSAdapter+RSSAutoImporter+rss-importer.test.js，v3.7.x）；Twitter/X、Hacker News、Reddit 仍 deferred"
+      },
+      {
+        "title": "知识分享与协作",
+        "status": "deferred",
+        "reason": "最低优先级，远期规划"
+      }
+    ],
+    "pruned_log": [
+      {
+        "field": "key_decisions",
+        "pruned": "架构: 单文件 Userscript + Chrome Extension 双形态",
+        "reason": "deduplicated to spec: 单文件输出不变(Locked) + 纯客户端架构(Locked)",
+        "pruned_at": "2026-06-20T12:00:00+08:00"
+      },
+      {
+        "field": "key_decisions",
+        "pruned": "分析: 构建系统升级优先于功能升级（2026-06-13）",
+        "reason": "deduplicated to spec: 构建系统升级优先于功能升级",
+        "pruned_at": "2026-06-20T12:00:00+08:00"
+      },
+      {
+        "field": "key_decisions",
+        "pruned": "安全: @connect白名单化+API Key加密立即执行（2026-06-13）",
+        "reason": "deduplicated to spec: 安全加固立即执行",
+        "pruned_at": "2026-06-20T12:00:00+08:00"
+      },
+      {
+        "field": "key_decisions",
+        "pruned": "M1 完成: critical/high 评审问题清零，v3.7.0 已发布并 push（2026-06-18）",
+        "reason": "deduplicated to spec: M1 条件性 PASS 关闭",
+        "pruned_at": "2026-06-20T12:00:00+08:00"
+      }
+    ]
+  },
+  "transition_history": [],
+  "milestone_history": [],
+  "last_updated": "2026-07-28T22:40:37+08:00",
   "artifact_archive": [
     {
       "id": "ANL-001",
@@ -268,66 +327,18 @@
       "summary": "Verification passed: 24 must-haves, coverage=1.0, 349/349 tests"
     }
   ],
-  "last_updated": "2026-07-28T12:45:00+08:00",
   "last_codebase_rebuild": "2026-07-27T11:50:00+08:00",
   "last_pruned": "2026-06-20T12:00:00+08:00",
-  "accumulated_context": {
-    "key_decisions": [
-      "v3.5.0: 文件处理系统全面升级（54种文件类型、去重上传、多分片、video/audio block）",
-      "认证: 支持 Manual API Key + OAuth 双模式",
-      "AI: 多服务商（OpenAI/Anthropic/Gemini）统一接口"
-    ],
-    "blockers": [],
-    "deferred": [
-      {
-        "title": "多源统一管理架构",
-        "status": "deferred",
-        "reason": "依赖模块拆分完成"
-      },
-      {
-        "title": "AI驱动知识整理",
-        "status": "deferred",
-        "reason": "依赖多源统一管理"
-      },
-      {
-        "title": "新知识源接入",
-        "status": "partial",
-        "reason": "SourceAdapter 抽象层 + 6 adapters 已实现（Bookmark/Generic/GitHub/LinuxDo/RSS/Zhihu），RSS 源已接入（RSSAdapter+RSSAutoImporter+rss-importer.test.js，v3.7.x）；Twitter/X、Hacker News、Reddit 仍 deferred"
-      },
-      {
-        "title": "知识分享与协作",
-        "status": "deferred",
-        "reason": "最低优先级，远期规划"
-      }
-    ],
-    "pruned_log": [
-      {
-        "field": "key_decisions",
-        "pruned": "架构: 单文件 Userscript + Chrome Extension 双形态",
-        "reason": "deduplicated to spec: 单文件输出不变(Locked) + 纯客户端架构(Locked)",
-        "pruned_at": "2026-06-20T12:00:00+08:00"
-      },
-      {
-        "field": "key_decisions",
-        "pruned": "分析: 构建系统升级优先于功能升级（2026-06-13）",
-        "reason": "deduplicated to spec: 构建系统升级优先于功能升级",
-        "pruned_at": "2026-06-20T12:00:00+08:00"
-      },
-      {
-        "field": "key_decisions",
-        "pruned": "安全: @connect白名单化+API Key加密立即执行（2026-06-13）",
-        "reason": "deduplicated to spec: 安全加固立即执行",
-        "pruned_at": "2026-06-20T12:00:00+08:00"
-      },
-      {
-        "field": "key_decisions",
-        "pruned": "M1 完成: critical/high 评审问题清零，v3.7.0 已发布并 push（2026-06-18）",
-        "reason": "deduplicated to spec: M1 条件性 PASS 关闭",
-        "pruned_at": "2026-06-20T12:00:00+08:00"
-      }
-    ]
-  },
-  "transition_history": [],
-  "milestone_history": [],
-  "last_drift_realign": "2026-07-28T12:45:00+08:00"
+  "last_drift_realign": "2026-07-28T12:45:00+08:00",
+  "sessions": [
+    {
+      "session_id": "20260728-maestro-fix-iss019-binary-upload-20260728-133132",
+      "intent": "依次修复 ISS-019 (critical): Notion 多分片上传 base64→二进制",
+      "status": "sealed",
+      "depends_on": [],
+      "roadmap_artifact_id": null,
+      "seed_ref": null
+    }
+  ],
+  "active_session_id": null
 }

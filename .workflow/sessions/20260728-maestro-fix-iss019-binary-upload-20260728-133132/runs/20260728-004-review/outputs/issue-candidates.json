@@ -1,0 +1,24 @@
+{
+  "_meta": { "kind": "issue-candidates", "schema": "issue-candidates/1.0", "role": "primary", "alias": "iss019-issue-candidates" },
+  "issue_id": "ISS-20260728-019",
+  "candidates": [
+    {
+      "id": "IC1",
+      "title": "multi_part 并发上传优化",
+      "severity": "medium",
+      "dimension": "performance",
+      "existing_issue": "ISS-20260728-017",
+      "rationale": "Context7 契约允许 part 并发乱序发送，但需 Notion API 速率限制处理；属 PERF-002 范畴，本 review 不做"
+    },
+    {
+      "id": "IC2",
+      "title": "file-upload 链路契约单测",
+      "severity": "medium",
+      "dimension": "maintainability",
+      "existing_issue": "ISS-20260728-014",
+      "rationale": "MAINT-005 file-upload 零专属单测；补 sendFilePart/createMultiPartUpload 契约单测可加固本次改动，但归 ISS-014 UI 单测范畴"
+    }
+  ],
+  "new_issues_to_create": 0,
+  "summary": "无新 issue 需创建；2 个 deferred 项均映射到已存在的 ISS-017/ISS-014"
+}

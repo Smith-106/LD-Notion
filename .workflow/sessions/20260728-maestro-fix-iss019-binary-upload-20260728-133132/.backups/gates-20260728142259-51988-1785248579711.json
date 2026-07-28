@@ -1,0 +1,832 @@
+{
+  "schema_version": "gates/1.0",
+  "revision": 17,
+  "gates": {
+    "GATE-001-01": {
+      "key": "consume-current-guidance",
+      "title": "Resolve required guidance input",
+      "scope": "entry",
+      "run_id": "20260728-001-analyze",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "guidance",
+        "alias": "current-guidance"
+      },
+      "evidence_refs": [
+        "EVD-001-002"
+      ],
+      "waiver": null
+    },
+    "GATE-001-02": {
+      "key": "consume-current-blueprint",
+      "title": "Resolve required blueprint input",
+      "scope": "entry",
+      "run_id": "20260728-001-analyze",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "blueprint",
+        "alias": "current-blueprint"
+      },
+      "evidence_refs": [
+        "EVD-001-003"
+      ],
+      "waiver": null
+    },
+    "GATE-001-03": {
+      "key": "consume-latest-debug",
+      "title": "Resolve required diagnosis input",
+      "scope": "entry",
+      "run_id": "20260728-001-analyze",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "diagnosis",
+        "alias": "latest-debug"
+      },
+      "evidence_refs": [
+        "EVD-001-004"
+      ],
+      "waiver": null
+    },
+    "GATE-001-04": {
+      "key": "produce-findings",
+      "title": "Produce findings",
+      "scope": "exit",
+      "run_id": "20260728-001-analyze",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "findings",
+        "alias": "current-analysis"
+      },
+      "evidence_refs": [
+        "EVD-001-005"
+      ],
+      "waiver": null
+    },
+    "GATE-001-05": {
+      "key": "produce-risk-matrix",
+      "title": "Produce risk-matrix",
+      "scope": "exit",
+      "run_id": "20260728-001-analyze",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "passed",
+      "check": {
+        "type": "artifact",
+        "kind": "risk-matrix"
+      },
+      "evidence_refs": [
+        "EVD-001-006"
+      ],
+      "waiver": null
+    },
+    "GATE-001-06": {
+      "key": "produce-priors",
+      "title": "Produce priors",
+      "scope": "exit",
+      "run_id": "20260728-001-analyze",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "priors",
+        "alias": "session-priors"
+      },
+      "evidence_refs": [
+        "EVD-001-007"
+      ],
+      "waiver": null
+    },
+    "GATE-001-07": {
+      "key": "exploration-done",
+      "title": "exploration-done",
+      "scope": "exit",
+      "run_id": "20260728-001-analyze",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "exploration-done"
+      },
+      "evidence_refs": [
+        "EVD-001-008"
+      ],
+      "waiver": null
+    },
+    "GATE-001-08": {
+      "key": "discussion-round",
+      "title": "discussion-round",
+      "scope": "exit",
+      "run_id": "20260728-001-analyze",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "discussion-round"
+      },
+      "evidence_refs": [
+        "EVD-001-009"
+      ],
+      "waiver": null
+    },
+    "GATE-001-09": {
+      "key": "scoring-complete",
+      "title": "scoring-complete",
+      "scope": "exit",
+      "run_id": "20260728-001-analyze",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "scoring-complete"
+      },
+      "evidence_refs": [
+        "EVD-001-010"
+      ],
+      "waiver": null
+    },
+    "GATE-001-10": {
+      "key": "intent-covered",
+      "title": "intent-covered",
+      "scope": "exit",
+      "run_id": "20260728-001-analyze",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "intent-covered"
+      },
+      "evidence_refs": [
+        "EVD-001-011"
+      ],
+      "waiver": null
+    },
+    "GATE-002-01": {
+      "key": "consume-current-analysis",
+      "title": "Resolve required findings input",
+      "scope": "entry",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "findings",
+        "alias": "current-analysis"
+      },
+      "evidence_refs": [
+        "EVD-002-002"
+      ],
+      "waiver": null
+    },
+    "GATE-002-02": {
+      "key": "consume-latest-debug",
+      "title": "Resolve required diagnosis input",
+      "scope": "entry",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "diagnosis",
+        "alias": "latest-debug"
+      },
+      "evidence_refs": [
+        "EVD-002-003"
+      ],
+      "waiver": null
+    },
+    "GATE-002-03": {
+      "key": "consume-current-blueprint",
+      "title": "Resolve required blueprint input",
+      "scope": "entry",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "blueprint",
+        "alias": "current-blueprint"
+      },
+      "evidence_refs": [
+        "EVD-002-004"
+      ],
+      "waiver": null
+    },
+    "GATE-002-04": {
+      "key": "consume-current-roadmap",
+      "title": "Resolve required roadmap input",
+      "scope": "entry",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "roadmap",
+        "alias": "current-roadmap"
+      },
+      "evidence_refs": [
+        "EVD-002-005"
+      ],
+      "waiver": null
+    },
+    "GATE-002-05": {
+      "key": "consume-current-plan",
+      "title": "Resolve required plan input",
+      "scope": "entry",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "plan",
+        "alias": "current-plan"
+      },
+      "evidence_refs": [
+        "EVD-002-006"
+      ],
+      "waiver": null
+    },
+    "GATE-002-06": {
+      "key": "consume-session-priors",
+      "title": "Resolve required priors input",
+      "scope": "entry",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "priors",
+        "alias": "session-priors"
+      },
+      "evidence_refs": [
+        "EVD-002-007"
+      ],
+      "waiver": null
+    },
+    "GATE-002-07": {
+      "key": "produce-plan",
+      "title": "Produce plan",
+      "scope": "exit",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "plan",
+        "alias": "current-plan"
+      },
+      "evidence_refs": [
+        "EVD-002-008"
+      ],
+      "waiver": null
+    },
+    "GATE-002-08": {
+      "key": "produce-plan-task",
+      "title": "Produce plan-task",
+      "scope": "exit",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "plan-task"
+      },
+      "evidence_refs": [
+        "EVD-002-009"
+      ],
+      "waiver": null
+    },
+    "GATE-002-09": {
+      "key": "produce-execution-waves",
+      "title": "Produce execution-waves",
+      "scope": "exit",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "execution-waves"
+      },
+      "evidence_refs": [
+        "EVD-002-010"
+      ],
+      "waiver": null
+    },
+    "GATE-002-10": {
+      "key": "produce-dependency-graph",
+      "title": "Produce dependency-graph",
+      "scope": "exit",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "dependency-graph"
+      },
+      "evidence_refs": [
+        "EVD-002-011"
+      ],
+      "waiver": null
+    },
+    "GATE-002-11": {
+      "key": "produce-collision-report",
+      "title": "Produce collision-report",
+      "scope": "exit",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "collision-report"
+      },
+      "evidence_refs": [
+        "EVD-002-012"
+      ],
+      "waiver": null
+    },
+    "GATE-002-12": {
+      "key": "produce-plan-check",
+      "title": "Produce plan-check",
+      "scope": "exit",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "plan-check"
+      },
+      "evidence_refs": [
+        "EVD-002-013"
+      ],
+      "waiver": null
+    },
+    "GATE-002-13": {
+      "key": "context-collected",
+      "title": "context-collected",
+      "scope": "exit",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "context-collected"
+      },
+      "evidence_refs": [
+        "EVD-002-014"
+      ],
+      "waiver": null
+    },
+    "GATE-002-14": {
+      "key": "plan-generated",
+      "title": "plan-generated",
+      "scope": "exit",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "plan-generated"
+      },
+      "evidence_refs": [
+        "EVD-002-015"
+      ],
+      "waiver": null
+    },
+    "GATE-002-15": {
+      "key": "plan-checked",
+      "title": "plan-checked",
+      "scope": "exit",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "plan-checked"
+      },
+      "evidence_refs": [
+        "EVD-002-016"
+      ],
+      "waiver": null
+    },
+    "GATE-002-16": {
+      "key": "plan-confirmed",
+      "title": "plan-confirmed",
+      "scope": "exit",
+      "run_id": "20260728-002-plan",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "plan-confirmed"
+      },
+      "evidence_refs": [
+        "EVD-002-017"
+      ],
+      "waiver": null
+    },
+    "GATE-003-01": {
+      "key": "consume-current-plan",
+      "title": "Resolve required plan input",
+      "scope": "entry",
+      "run_id": "20260728-003-execute",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "plan",
+        "alias": "current-plan"
+      },
+      "evidence_refs": [
+        "EVD-003-002"
+      ],
+      "waiver": null
+    },
+    "GATE-003-02": {
+      "key": "consume-latest-review",
+      "title": "Resolve required review-findings input",
+      "scope": "entry",
+      "run_id": "20260728-003-execute",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "review-findings",
+        "alias": "latest-review"
+      },
+      "evidence_refs": [
+        "EVD-003-003"
+      ],
+      "waiver": null
+    },
+    "GATE-003-03": {
+      "key": "consume-latest-fix-directions",
+      "title": "Resolve required fix-directions input",
+      "scope": "entry",
+      "run_id": "20260728-003-execute",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "fix-directions",
+        "alias": "latest-fix-directions"
+      },
+      "evidence_refs": [
+        "EVD-003-004"
+      ],
+      "waiver": null
+    },
+    "GATE-003-04": {
+      "key": "consume-latest-debug",
+      "title": "Resolve required diagnosis input",
+      "scope": "entry",
+      "run_id": "20260728-003-execute",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "diagnosis",
+        "alias": "latest-debug"
+      },
+      "evidence_refs": [
+        "EVD-003-005"
+      ],
+      "waiver": null
+    },
+    "GATE-003-05": {
+      "key": "consume-session-priors",
+      "title": "Resolve required priors input",
+      "scope": "entry",
+      "run_id": "20260728-003-execute",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "priors",
+        "alias": "session-priors"
+      },
+      "evidence_refs": [
+        "EVD-003-006"
+      ],
+      "waiver": null
+    },
+    "GATE-003-06": {
+      "key": "produce-execution",
+      "title": "Produce execution",
+      "scope": "exit",
+      "run_id": "20260728-003-execute",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "execution",
+        "alias": "current-execution"
+      },
+      "evidence_refs": [
+        "EVD-003-007"
+      ],
+      "waiver": null
+    },
+    "GATE-003-07": {
+      "key": "produce-task-results",
+      "title": "Produce task-results",
+      "scope": "exit",
+      "run_id": "20260728-003-execute",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "task-results"
+      },
+      "evidence_refs": [
+        "EVD-003-008"
+      ],
+      "waiver": null
+    },
+    "GATE-003-08": {
+      "key": "produce-self-check",
+      "title": "Produce self-check",
+      "scope": "exit",
+      "run_id": "20260728-003-execute",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "self-check"
+      },
+      "evidence_refs": [
+        "EVD-003-009"
+      ],
+      "waiver": null
+    },
+    "GATE-003-09": {
+      "key": "produce-change-manifest",
+      "title": "Produce change-manifest",
+      "scope": "exit",
+      "run_id": "20260728-003-execute",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "change-manifest"
+      },
+      "evidence_refs": [
+        "EVD-003-010"
+      ],
+      "waiver": null
+    },
+    "GATE-003-10": {
+      "key": "execution-complete",
+      "title": "execution-complete",
+      "scope": "exit",
+      "run_id": "20260728-003-execute",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "execution-complete"
+      },
+      "evidence_refs": [
+        "EVD-003-011"
+      ],
+      "waiver": null
+    },
+    "GATE-003-11": {
+      "key": "self-check-passed",
+      "title": "self-check-passed",
+      "scope": "exit",
+      "run_id": "20260728-003-execute",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "self-check-passed"
+      },
+      "evidence_refs": [
+        "EVD-003-012"
+      ],
+      "waiver": null
+    },
+    "GATE-004-01": {
+      "key": "consume-current-execution",
+      "title": "Resolve required execution input",
+      "scope": "entry",
+      "run_id": "20260728-004-review",
+      "required": true,
+      "blocking": true,
+      "applicable_modes": [],
+      "status": "failed",
+      "check": {
+        "type": "artifact",
+        "kind": "execution",
+        "alias": "current-execution"
+      },
+      "evidence_refs": [],
+      "waiver": null
+    },
+    "GATE-004-02": {
+      "key": "consume-latest-verification",
+      "title": "Resolve required verification input",
+      "scope": "entry",
+      "run_id": "20260728-004-review",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "verification",
+        "alias": "latest-verification"
+      },
+      "evidence_refs": [],
+      "waiver": null
+    },
+    "GATE-004-03": {
+      "key": "consume-prior-review",
+      "title": "Resolve required review-findings input",
+      "scope": "entry",
+      "run_id": "20260728-004-review",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "review-findings",
+        "alias": "prior-review"
+      },
+      "evidence_refs": [],
+      "waiver": null
+    },
+    "GATE-004-04": {
+      "key": "produce-review-findings",
+      "title": "Produce review-findings",
+      "scope": "exit",
+      "run_id": "20260728-004-review",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "artifact",
+        "kind": "review-findings",
+        "alias": "latest-review"
+      },
+      "evidence_refs": [],
+      "waiver": null
+    },
+    "GATE-004-05": {
+      "key": "produce-spec-conflicts",
+      "title": "Produce spec-conflicts",
+      "scope": "exit",
+      "run_id": "20260728-004-review",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "passed",
+      "check": {
+        "type": "artifact",
+        "kind": "spec-conflicts"
+      },
+      "evidence_refs": [],
+      "waiver": null
+    },
+    "GATE-004-06": {
+      "key": "produce-issue-candidates",
+      "title": "Produce issue-candidates",
+      "scope": "exit",
+      "run_id": "20260728-004-review",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "passed",
+      "check": {
+        "type": "artifact",
+        "kind": "issue-candidates"
+      },
+      "evidence_refs": [],
+      "waiver": null
+    },
+    "GATE-004-07": {
+      "key": "dimension-coverage",
+      "title": "dimension-coverage",
+      "scope": "exit",
+      "run_id": "20260728-004-review",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "dimension-coverage"
+      },
+      "evidence_refs": [],
+      "waiver": null
+    },
+    "GATE-004-08": {
+      "key": "severity-triaged",
+      "title": "severity-triaged",
+      "scope": "exit",
+      "run_id": "20260728-004-review",
+      "required": false,
+      "blocking": false,
+      "applicable_modes": [],
+      "status": "skipped",
+      "check": {
+        "type": "manual",
+        "prompt": "severity-triaged"
+      },
+      "evidence_refs": [],
+      "waiver": null
+    }
+  },
+  "summary": {
+    "total": 45,
+    "passed": 3,
+    "blocked": 0,
+    "failed": 1,
+    "active_gate_ids": [
+      "GATE-004-01"
+    ],
+    "blocking_run_id": "20260728-004-review"
+  }
+}

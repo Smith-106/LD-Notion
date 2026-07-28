@@ -1,0 +1,41 @@
+{
+  "_meta": { "kind": "priors", "schema": "priors/1.0", "role": "primary", "alias": "iss019-priors" },
+  "issue_id": "ISS-20260728-019",
+  "priors": [
+    {
+      "id": "P1",
+      "type": "spec",
+      "ref": "memory:refactor-rebuild-then-verify",
+      "summary": "refactor 后必须重建 dist + cp 根 .user.js + verify:baseline + verify:equivalence，否则过期产物假绿",
+      "apply": "execute step 改 sendFilePart 后必跑此流程"
+    },
+    {
+      "id": "P2",
+      "type": "codebase-pattern",
+      "ref": "src/api/index.js:931-977 uploadFileContent",
+      "summary": "同构 multipart/form-data 二进制 body 构造（boundary+header+Uint8Array+footer+binary:true）",
+      "apply": "sendFilePart 改造参照此模式，但 endpoint 改 Notion API + Bearer auth"
+    },
+    {
+      "id": "P3",
+      "type": "issue",
+      "ref": "ISS-20260728-019",
+      "summary": "PERF-001 (critical) 提取，需 Context7 确认 send 二进制格式",
+      "apply": "本 issue 闭环目标"
+    },
+    {
+      "id": "P4",
+      "type": "issue",
+      "ref": "ISS-20260728-017",
+      "summary": "exportBookmarks 并发 + multi_part 并发乱序 — PERF-002 范畴",
+      "apply": "本 issue F3 不修，留给 ISS-017"
+    },
+    {
+      "id": "P5",
+      "type": "issue",
+      "ref": "ISS-20260728-014",
+      "summary": "UI 纯逻辑单测 + file-upload 契约单测",
+      "apply": "本 issue 改动后补 sendFilePart 契约单测归此 issue"
+    }
+  ]
+}

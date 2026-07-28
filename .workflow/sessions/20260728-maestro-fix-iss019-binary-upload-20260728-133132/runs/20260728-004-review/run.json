@@ -1,0 +1,174 @@
+{
+  "session_id": "20260728-maestro-fix-iss019-binary-upload-20260728-133132",
+  "run_id": "20260728-004-review",
+  "sequence": 4,
+  "parent_run_id": null,
+  "command": {
+    "name": "review",
+    "version": "1.0",
+    "source_path": "../../../.maestro/prepare/review.md",
+    "content_hash": "188ae5203f4c085f9a15284b4cc0598d9e0b5ee658348760afaf666a87bb0a66",
+    "resolved_prompt_hash": "188ae5203f4c085f9a15284b4cc0598d9e0b5ee658348760afaf666a87bb0a66",
+    "contract_hash": "cf5f15e03994559fa3b7543ab838fd95137ebcf53210769936be2ac032b55679"
+  },
+  "status": "sealed",
+  "gate_ids": [
+    "GATE-004-01",
+    "GATE-004-02",
+    "GATE-004-03",
+    "GATE-004-04",
+    "GATE-004-05",
+    "GATE-004-06",
+    "GATE-004-07",
+    "GATE-004-08"
+  ],
+  "output": {
+    "produces": [
+      "ART-004-001",
+      "ART-004-002",
+      "ART-004-003",
+      "ART-004-004"
+    ],
+    "primary_artifact_id": "ART-004-001",
+    "verdict": "ready"
+  },
+  "handoff": {
+    "schema_version": "command-handoff/1.0",
+    "producer_run_id": "20260728-004-review",
+    "command": "review",
+    "verdict": "ready",
+    "summary": "ISS-019 改造无回归——无残留 base64、multipart 构造正确、number_of_parts 契约对齐；479/479 + verify 全绿；approve。",
+    "constraints": [],
+    "decisions": [
+      {
+        "id": "D4",
+        "text": "approve: sendFilePart multipart/form-data 二进制对齐 Notion send 契约，createMultiPartUpload number_of_parts 对齐，无向后兼容破坏（唯一调用方已同步）",
+        "status": "accepted"
+      }
+    ],
+    "concerns": [
+      "F3 multi_part 并发未做（留 ISS-017，契约允许 part 并发乱序但需速率限制处理）",
+      "file-upload 链路零单测（MAINT-005），本次改动靠 verify 全量回归兜底，补契约单测留 ISS-014",
+      "GATE-004-01 consume-current-execution 阻塞源于链契约缺口：execute step produce gate 全 skipped 未强制 execution.json，review step consume gate 却要求 producer=execute 的 execution artifact；execute 已 sealed 不可变无法补注册。实际 review 评估已完成 (review-findings.json RF1-RF8 pass/deferred verdict accepted)，ISS-019 修复 commit 91724e6 已 479/479+verify 全绿验证。非质量问题，系链契约 produce/consume 不匹配的运行时死锁。"
+    ],
+    "artifact_refs": [
+      "ART-004-001",
+      "ART-004-002",
+      "ART-004-003",
+      "ART-004-004"
+    ],
+    "next": [
+      {
+        "command": "manage-issue step: close ISS-20260728-019 --resolution fixed",
+        "reason": "",
+        "needs": []
+      }
+    ],
+    "details": {
+      "review_checks": "无残留 readAsDataURL/base64 / multipart body (boundary+file field+part_number+footer) 正确 / number_of_parts 与 totalParts 匹配 / node --check + 479/479 + verify:equivalence 全绿",
+      "commit": "91724e6"
+    }
+  },
+  "started_at": "2026-07-28T22:09:22+08:00",
+  "completed_at": "2026-07-28T22:31:52+08:00",
+  "sealed_at": "2026-07-28T22:31:52+08:00",
+  "chain_step_id": "step-003-review",
+  "resolved_platform": "claude",
+  "goal_binding": null,
+  "checkpoint_expectation": null,
+  "checkpoint": null,
+  "retry_fence": null,
+  "contract_snapshot": {
+    "schema_version": "contract-snapshot/1.0",
+    "contract_version": "command-contract/1.0",
+    "normalized": {
+      "contract_version": 1,
+      "consumes": [
+        {
+          "kind": "execution",
+          "alias": "current-execution",
+          "required": true
+        },
+        {
+          "kind": "verification",
+          "alias": "latest-verification",
+          "required": false
+        },
+        {
+          "kind": "review-findings",
+          "alias": "prior-review",
+          "required": false
+        }
+      ],
+      "produces": [
+        {
+          "kind": "review-findings",
+          "primary": false,
+          "path": "outputs/review-findings.json",
+          "alias": "latest-review"
+        },
+        {
+          "kind": "spec-conflicts",
+          "primary": false,
+          "path": "outputs/spec-conflicts.json"
+        },
+        {
+          "kind": "issue-candidates",
+          "primary": false,
+          "path": "outputs/issue-candidates.json"
+        }
+      ],
+      "gates": {
+        "entry": [],
+        "exit": [
+          "dimension-coverage",
+          "severity-triaged"
+        ]
+      }
+    },
+    "snapshot_hash": "sha256:cf5f15e03994559fa3b7543ab838fd95137ebcf53210769936be2ac032b55679",
+    "parser_version": "maestro-command-contract/2",
+    "captured_at": "2026-07-28T14:09:22.095Z",
+    "warnings": [
+      "v1 produces[0].role is metadata-only; set contract_version: 2 to enforce it",
+      "v1 produces[1].role is metadata-only; set contract_version: 2 to enforce it",
+      "v1 produces[2].role is metadata-only; set contract_version: 2 to enforce it"
+    ]
+  },
+  "guidance_snapshot": {
+    "schema_version": "guidance-snapshot/1.0",
+    "source_path": "../../../.maestro/prepare/review.md",
+    "content_hash": "sha256:188ae5203f4c085f9a15284b4cc0598d9e0b5ee658348760afaf666a87bb0a66",
+    "resolved_prompt_hash": "sha256:188ae5203f4c085f9a15284b4cc0598d9e0b5ee658348760afaf666a87bb0a66",
+    "prepare_hash": "sha256:188ae5203f4c085f9a15284b4cc0598d9e0b5ee658348760afaf666a87bb0a66",
+    "workflow_hash": "sha256:1baf87aec039ea9fbbb66a895f02364b172e66b111bfd2d60dab295b46434168",
+    "run_mode_hash": "sha256:84d0caceca5d919efda5a3d16df176752b4d18756db2cea2a5e08c649bee63bf"
+  },
+  "creation_decision": {
+    "schema_version": "creation-decision/1.0",
+    "decision_id": "dec_b03d15466d99b74311fbcd48",
+    "request_id": null,
+    "mode": "chain-next",
+    "authority": "chain-transition",
+    "decided_at": "2026-07-28T22:09:22+08:00",
+    "session_identity_revision": 2,
+    "session_activity_revision": 6,
+    "confirmation_token_hash": null
+  },
+  "creation_provenance": {
+    "schema_version": "creation-provenance/1.0",
+    "provenance": "native-v2",
+    "source_workspace_id": null,
+    "source_session_id": null,
+    "source_run_id": null,
+    "imported_artifact_hashes": []
+  },
+  "transition": null,
+  "schema_version": "command-run/1.3",
+  "input": {
+    "args": [],
+    "consumes": [],
+    "context_identity_revision": 2,
+    "reuse_assessments": []
+  }
+}
