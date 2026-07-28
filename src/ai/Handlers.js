@@ -930,14 +930,14 @@ ${existingContent}
 ${content_prompt}`;
 
         const editPlanRaw = await svc().requestChat(editPlanPrompt, settings, 2200);
-        const jsonMatch = editPlanRaw.match(/\{[\s\S]*\}/);
+        // ISS-013: 统一走 parseAIJson 接缝（arch-013），消除手工 jsonMatch+JSON.parse 三段式。
+        // 解析失败 editPlan 保持 null → 消费点 hasValidContentUpdates 走空值保护降级全文追加。
+        const editPlanResult = AISchema.parseAIJson("editPlan", editPlanRaw);
         let editPlan = null;
-        if (jsonMatch) {
-            try {
-                editPlan = JSON.parse(jsonMatch[0]);
-            } catch (error) {
-                console.warn("[LD-Notion] 编辑计划 JSON 解析失败:", error);
-            }
+        if (editPlanResult.ok) {
+            editPlan = editPlanResult.value;
+        } else {
+            console.warn("[LD-Notion] 编辑计划 JSON 解析失败:", editPlanResult.reason);
         }
 
         let exactUpdateError = null;
@@ -1871,18 +1871,14 @@ ${structure_prompt ? `补充要求：${structure_prompt}` : ""}
 
         const planResponse = await svc().requestChat(planPrompt, settings, 1500);
 
-        const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            return `❌ AI 无法规划页面结构。请更具体地描述需求。`;
-        }
-
-        let plan;
-        try {
-            plan = JSON.parse(jsonMatch[0]);
-        } catch (error) {
-            console.warn("[LD-Notion] AI 生成结构 JSON 解析失败:", error);
+        // ISS-013: 统一走 parseAIJson 接缝（arch-013），消除手工 jsonMatch+JSON.parse 三段式。
+        // ok=false（未找到 JSON / 格式无效 / children 结构无效）→ 返回错误提示，与原逻辑等价。
+        const planResult = AISchema.parseAIJson("generatePages", planResponse);
+        if (!planResult.ok) {
+            console.warn("[LD-Notion] AI 生成结构 JSON 解析失败:", planResult.reason);
             return `❌ AI 生成的结构无效。请换一种方式描述。`;
         }
+        const plan = planResult.value;
 
         // plan.children 经 AISchema 校验（M2，ISS-009 消费点补全：handleGeneratePages 遗漏路径）。
         // title 走 validatePropertyValue 截断 ≤2000、icon 走 validateEmoji、description 截断，防 prompt injection 污染。

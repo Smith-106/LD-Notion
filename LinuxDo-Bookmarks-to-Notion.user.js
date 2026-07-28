@@ -5514,8 +5514,57 @@ ${quoted}
           }
           return { ok: true };
         },
+        // 校验 editPlan 结构（ISS-013 Handlers.js:933 迁移接缝）。
+        // mode 为 string（可选）；content_updates 若存在须为 Array 且每项含 old_str/new_str 字符串。
+        // 字段级空值保护由消费点已做（hasValidContentUpdates），此处只校验顶层结构 + 可选字段类型。
+        validateEditPlanSchema: (data) => {
+          if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u7F16\u8F91\u8BA1\u5212\u4E0D\u662F\u5BF9\u8C61" };
+          if (data.mode !== void 0 && typeof data.mode !== "string") return { ok: false, reason: "AI \u8FD4\u56DE\u7684 mode \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          if (data.content_updates !== void 0) {
+            if (!Array.isArray(data.content_updates)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684 content_updates \u4E0D\u662F\u6570\u7EC4" };
+            for (const u of data.content_updates) {
+              if (!u || typeof u.old_str !== "string" || typeof u.new_str !== "string") {
+                return { ok: false, reason: "AI \u8FD4\u56DE\u7684 content_updates \u9879\u7F3A\u5C11 old_str/new_str" };
+              }
+            }
+          }
+          return { ok: true };
+        },
+        // 校验 generatePages 结构（ISS-013 Handlers.js:1874 迁移接缝）。
+        // children 须为非空 Array 且每项为对象（title/icon/description 字段级校验由消费点 validatePropertyValue/validateEmoji 做）。
+        validateGeneratePagesSchema: (data) => {
+          if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u9875\u9762\u7ED3\u6784\u4E0D\u662F\u5BF9\u8C61" };
+          if (!Array.isArray(data.children) || data.children.length === 0) return { ok: false, reason: "AI \u672A\u80FD\u89C4\u5212\u51FA\u6709\u6548\u7684\u5B50\u9875\u9762\u7ED3\u6784" };
+          for (const c of data.children) {
+            if (!c || typeof c !== "object") return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u5B50\u9875\u9762\u9879\u4E0D\u662F\u5BF9\u8C61" };
+          }
+          return { ok: true };
+        },
+        // 校验 agentPlan 结构（ISS-013 index.js:2154 迁移接缝）。
+        // plan 须为非空 Array 且每项为对象（含 explanation 字符串，消费点 plan.plan.forEach 渲染 step.explanation）。
+        validateAgentPlanSchema: (data) => {
+          if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u6267\u884C\u8BA1\u5212\u4E0D\u662F\u5BF9\u8C61" };
+          if (!Array.isArray(data.plan) || data.plan.length === 0) return { ok: false, reason: "AI \u672A\u80FD\u5206\u89E3\u51FA\u6709\u6548\u7684\u6267\u884C\u6B65\u9AA4" };
+          for (const s of data.plan) {
+            if (!s || typeof s !== "object" || typeof s.explanation !== "string") {
+              return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u6267\u884C\u6B65\u9AA4\u7F3A\u5C11 explanation" };
+            }
+          }
+          if (data.explanation !== void 0 && typeof data.explanation !== "string") return { ok: false, reason: "AI \u8FD4\u56DE\u7684 explanation \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          return { ok: true };
+        },
+        // 校验 intent 结构（ISS-013 index.js:1899 迁移接缝）。
+        // intent 须为 string（白名单强校验仍由消费点 _resolveIntentExecutor 做，schema 只防 AI 返回非字符串/非对象注入）。
+        // steps 若存在须为 Array（长度截断由消费点做）。
+        validateIntentSchema: (data) => {
+          if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u610F\u56FE\u4E0D\u662F\u5BF9\u8C61" };
+          if (typeof data.intent !== "string") return { ok: false, reason: "AI \u8FD4\u56DE\u7684 intent \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          if (data.steps !== void 0 && !Array.isArray(data.steps)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684 steps \u4E0D\u662F\u6570\u7EC4" };
+          if (data.explanation !== void 0 && typeof data.explanation !== "string") return { ok: false, reason: "AI \u8FD4\u56DE\u7684 explanation \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          return { ok: true };
+        },
         // 统一 AI JSON 解析入口：正则提取 + JSON.parse + 按 name 路由校验。
-        // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"}。
+        // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"|"bookmarkSummary"}。
         // 返回 { ok: true, value } 或 { ok: false, reason }。
         parseAIJson: (name, rawText) => {
           if (!rawText) return { ok: false, reason: "AI \u54CD\u5E94\u4E3A\u7A7A" };
@@ -5527,12 +5576,17 @@ ${quoted}
           } catch (error) {
             return { ok: false, reason: `AI \u8FD4\u56DE\u7684 JSON \u683C\u5F0F\u65E0\u6548: ${error.message}` };
           }
-          if (name === "extractToDatabase") {
-            const r = AISchema.validateExtractToDatabaseSchema(parsed);
-            if (!r.ok) return r;
-          }
-          if (name === "bookmarkSummary") {
-            const r = AISchema.validateBookmarkSummarySchema(parsed);
+          const validators = {
+            extractToDatabase: AISchema.validateExtractToDatabaseSchema,
+            bookmarkSummary: AISchema.validateBookmarkSummarySchema,
+            editPlan: AISchema.validateEditPlanSchema,
+            generatePages: AISchema.validateGeneratePagesSchema,
+            agentPlan: AISchema.validateAgentPlanSchema,
+            intent: AISchema.validateIntentSchema
+          };
+          const validator = validators[name];
+          if (validator) {
+            const r = validator(parsed);
             if (!r.ok) return r;
           }
           return { ok: true, value: parsed };
@@ -22366,14 +22420,12 @@ ${existingContent}
 \u7F16\u8F91\u6307\u4EE4\uFF1A
 ${content_prompt}`;
             const editPlanRaw = await svc().requestChat(editPlanPrompt, settings, 2200);
-            const jsonMatch = editPlanRaw.match(/\{[\s\S]*\}/);
+            const editPlanResult = AISchema.parseAIJson("editPlan", editPlanRaw);
             let editPlan = null;
-            if (jsonMatch) {
-              try {
-                editPlan = JSON.parse(jsonMatch[0]);
-              } catch (error) {
-                console.warn("[LD-Notion] \u7F16\u8F91\u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", error);
-              }
+            if (editPlanResult.ok) {
+              editPlan = editPlanResult.value;
+            } else {
+              console.warn("[LD-Notion] \u7F16\u8F91\u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", editPlanResult.reason);
             }
             let exactUpdateError = null;
             let inPlaceSkippedReason = null;
@@ -23226,17 +23278,12 @@ ${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
 - \u6BCF\u4E2A\u5B50\u9875\u9762\u5E94\u6709\u660E\u786E\u7684\u4E3B\u9898\u548C\u8FB9\u754C
 - \u7236\u9875\u9762\u4F5C\u4E3A\u76EE\u5F55/\u6982\u89C8\u9875`;
             const planResponse = await svc().requestChat(planPrompt, settings, 1500);
-            const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-              return `\u274C AI \u65E0\u6CD5\u89C4\u5212\u9875\u9762\u7ED3\u6784\u3002\u8BF7\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u9700\u6C42\u3002`;
-            }
-            let plan;
-            try {
-              plan = JSON.parse(jsonMatch[0]);
-            } catch (error) {
-              console.warn("[LD-Notion] AI \u751F\u6210\u7ED3\u6784 JSON \u89E3\u6790\u5931\u8D25:", error);
+            const planResult = AISchema.parseAIJson("generatePages", planResponse);
+            if (!planResult.ok) {
+              console.warn("[LD-Notion] AI \u751F\u6210\u7ED3\u6784 JSON \u89E3\u6790\u5931\u8D25:", planResult.reason);
               return `\u274C AI \u751F\u6210\u7684\u7ED3\u6784\u65E0\u6548\u3002\u8BF7\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u3002`;
             }
+            const plan = planResult.value;
             if (!Array.isArray(plan.children) || plan.children.length === 0) {
               return `\u274C AI \u672A\u80FD\u89C4\u5212\u51FA\u6709\u6548\u7684\u5B50\u9875\u9762\u7ED3\u6784\u3002`;
             }
@@ -25373,9 +25420,9 @@ ${userMessage}
               settings,
               800
             );
-            const jsonMatch = response.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              const parsed = JSON.parse(jsonMatch[0]);
+            const intentResult = AISchema.parseAIJson("intent", response);
+            if (intentResult.ok) {
+              const parsed = intentResult.value;
               if (!AIAssistant2._resolveIntentExecutor(parsed.intent)) {
                 return { intent: "unknown", explanation: `\u672A\u8BC6\u522B\u7684\u610F\u56FE: ${parsed.intent}` };
               }
@@ -25388,6 +25435,7 @@ ${userMessage}
               }
               return parsed;
             }
+            console.warn("[LD-Notion] \u610F\u56FE JSON \u89E3\u6790\u5931\u8D25:", intentResult.reason);
             return { intent: "unknown", explanation: "\u65E0\u6CD5\u89E3\u6790\u54CD\u5E94" };
           } catch (error) {
             console.error("[LD-Notion] \u89E3\u6790\u610F\u56FE\u5931\u8D25:", error);
@@ -25551,17 +25599,12 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
 
 \u7528\u6237\u4EFB\u52A1\uFF1A${task_description}`;
           const planResponse = await AIService2.requestChat(planPrompt, settings, 1500);
-          const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) {
-            return "\u274C Agent \u65E0\u6CD5\u751F\u6210\u6709\u6548\u7684\u6267\u884C\u8BA1\u5212\u3002\u8BF7\u5C1D\u8BD5\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u4EFB\u52A1\u3002";
+          const planResult = AISchema.parseAIJson("agentPlan", planResponse);
+          if (!planResult.ok) {
+            console.warn("[LD-Notion] Agent \u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", planResult.reason);
+            return "\u274C Agent \u751F\u6210\u7684\u8BA1\u5212\u683C\u5F0F\u65E0\u6548\u3002\u8BF7\u5C1D\u8BD5\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u3002";
           }
-          let plan;
-          try {
-            plan = JSON.parse(jsonMatch[0]);
-          } catch (error) {
-            console.warn("[LD-Notion] Agent \u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", error);
-            return "\u274C Agent \u751F\u6210\u7684\u8BA1\u5212\u683C\u5F0F\u65E0\u6548\u3002\u8BF7\u5C1D\u8BD5\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u4EFB\u52A1\u3002";
-          }
+          const plan = planResult.value;
           if (!plan.plan || plan.plan.length === 0) {
             return "\u274C Agent \u672A\u80FD\u5206\u89E3\u51FA\u6709\u6548\u7684\u6267\u884C\u6B65\u9AA4\u3002\u8BF7\u5C1D\u8BD5\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u4EFB\u52A1\u3002";
           }

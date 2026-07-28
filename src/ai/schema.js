@@ -152,8 +152,61 @@ const AISchema = {
         return { ok: true };
     },
 
+    // 校验 editPlan 结构（ISS-013 Handlers.js:933 迁移接缝）。
+    // mode 为 string（可选）；content_updates 若存在须为 Array 且每项含 old_str/new_str 字符串。
+    // 字段级空值保护由消费点已做（hasValidContentUpdates），此处只校验顶层结构 + 可选字段类型。
+    validateEditPlanSchema: (data) => {
+        if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, reason: "AI 返回的编辑计划不是对象" };
+        if (data.mode !== undefined && typeof data.mode !== "string") return { ok: false, reason: "AI 返回的 mode 不是字符串" };
+        if (data.content_updates !== undefined) {
+            if (!Array.isArray(data.content_updates)) return { ok: false, reason: "AI 返回的 content_updates 不是数组" };
+            for (const u of data.content_updates) {
+                if (!u || typeof u.old_str !== "string" || typeof u.new_str !== "string") {
+                    return { ok: false, reason: "AI 返回的 content_updates 项缺少 old_str/new_str" };
+                }
+            }
+        }
+        return { ok: true };
+    },
+
+    // 校验 generatePages 结构（ISS-013 Handlers.js:1874 迁移接缝）。
+    // children 须为非空 Array 且每项为对象（title/icon/description 字段级校验由消费点 validatePropertyValue/validateEmoji 做）。
+    validateGeneratePagesSchema: (data) => {
+        if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, reason: "AI 返回的页面结构不是对象" };
+        if (!Array.isArray(data.children) || data.children.length === 0) return { ok: false, reason: "AI 未能规划出有效的子页面结构" };
+        for (const c of data.children) {
+            if (!c || typeof c !== "object") return { ok: false, reason: "AI 返回的子页面项不是对象" };
+        }
+        return { ok: true };
+    },
+
+    // 校验 agentPlan 结构（ISS-013 index.js:2154 迁移接缝）。
+    // plan 须为非空 Array 且每项为对象（含 explanation 字符串，消费点 plan.plan.forEach 渲染 step.explanation）。
+    validateAgentPlanSchema: (data) => {
+        if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, reason: "AI 返回的执行计划不是对象" };
+        if (!Array.isArray(data.plan) || data.plan.length === 0) return { ok: false, reason: "AI 未能分解出有效的执行步骤" };
+        for (const s of data.plan) {
+            if (!s || typeof s !== "object" || typeof s.explanation !== "string") {
+                return { ok: false, reason: "AI 返回的执行步骤缺少 explanation" };
+            }
+        }
+        if (data.explanation !== undefined && typeof data.explanation !== "string") return { ok: false, reason: "AI 返回的 explanation 不是字符串" };
+        return { ok: true };
+    },
+
+    // 校验 intent 结构（ISS-013 index.js:1899 迁移接缝）。
+    // intent 须为 string（白名单强校验仍由消费点 _resolveIntentExecutor 做，schema 只防 AI 返回非字符串/非对象注入）。
+    // steps 若存在须为 Array（长度截断由消费点做）。
+    validateIntentSchema: (data) => {
+        if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, reason: "AI 返回的意图不是对象" };
+        if (typeof data.intent !== "string") return { ok: false, reason: "AI 返回的 intent 不是字符串" };
+        if (data.steps !== undefined && !Array.isArray(data.steps)) return { ok: false, reason: "AI 返回的 steps 不是数组" };
+        if (data.explanation !== undefined && typeof data.explanation !== "string") return { ok: false, reason: "AI 返回的 explanation 不是字符串" };
+        return { ok: true };
+    },
+
     // 统一 AI JSON 解析入口：正则提取 + JSON.parse + 按 name 路由校验。
-    // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"}。
+    // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"|"bookmarkSummary"}。
     // 返回 { ok: true, value } 或 { ok: false, reason }。
     parseAIJson: (name, rawText) => {
         if (!rawText) return { ok: false, reason: "AI 响应为空" };
@@ -165,16 +218,21 @@ const AISchema = {
         } catch (error) {
             return { ok: false, reason: `AI 返回的 JSON 格式无效: ${error.message}` };
         }
-        // 按 name 路由结构校验
-        if (name === "extractToDatabase") {
-            const r = AISchema.validateExtractToDatabaseSchema(parsed);
+        // 按 name 路由结构校验（ISS-013 全 8 消费点迁移后均走接缝校验）
+        const validators = {
+            extractToDatabase: AISchema.validateExtractToDatabaseSchema,
+            bookmarkSummary: AISchema.validateBookmarkSummarySchema,
+            editPlan: AISchema.validateEditPlanSchema,
+            generatePages: AISchema.validateGeneratePagesSchema,
+            agentPlan: AISchema.validateAgentPlanSchema,
+            intent: AISchema.validateIntentSchema,
+        };
+        const validator = validators[name];
+        if (validator) {
+            const r = validator(parsed);
             if (!r.ok) return r;
         }
-        if (name === "bookmarkSummary") {
-            const r = AISchema.validateBookmarkSummarySchema(parsed);
-            if (!r.ok) return r;
-        }
-        // 其他 name 的结构校验由消费点按需调用对应 validate* 函数
+        // toolCall 等未注册 name：仅返回 parsed，结构校验由消费点按需调用对应 validate* 函数
         return { ok: true, value: parsed };
     },
 };

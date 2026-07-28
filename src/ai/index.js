@@ -1895,10 +1895,12 @@ compound 格式（仅当 intent 为 compound 时使用）：
                 800
             );
 
-            // 尝试提取 JSON
-            const jsonMatch = response.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const parsed = JSON.parse(jsonMatch[0]);
+            // ISS-013: 统一走 parseAIJson 接缝（arch-013），消除手工 jsonMatch+JSON.parse 三段式。
+            // validateIntentSchema 校验 intent 为 string（防非对象/非字符串注入）；白名单强校验 +
+            // compound steps 截断仍由消费点 _resolveIntentExecutor + slice 做。
+            const intentResult = AISchema.parseAIJson("intent", response);
+            if (intentResult.ok) {
+                const parsed = intentResult.value;
                 // intent 白名单校验（ISS-20260723-009 L1）：未知 intent 降级为 unknown，
                 // 避免 _resolveIntentExecutor 抛模糊错误。compound steps 加上限防 AI 注入超长循环。
                 if (!AIAssistant._resolveIntentExecutor(parsed.intent)) {
@@ -1913,6 +1915,7 @@ compound 格式（仅当 intent 为 compound 时使用）：
                 }
                 return parsed;
             }
+            console.warn("[LD-Notion] 意图 JSON 解析失败:", intentResult.reason);
             return { intent: "unknown", explanation: "无法解析响应" };
         } catch (error) {
             console.error("[LD-Notion] 解析意图失败:", error);
@@ -2150,19 +2153,14 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
 
         const planResponse = await AIService.requestChat(planPrompt, settings, 1500);
 
-        // 解析计划 JSON
-        const jsonMatch = planResponse.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            return "❌ Agent 无法生成有效的执行计划。请尝试更具体地描述任务。";
+        // ISS-013: 统一走 parseAIJson 接缝（arch-013），消除手工 jsonMatch+JSON.parse 三段式。
+        // validateAgentPlanSchema 校验 plan 为非空 Array 且每项含 explanation；ok=false 返回错误提示。
+        const planResult = AISchema.parseAIJson("agentPlan", planResponse);
+        if (!planResult.ok) {
+            console.warn("[LD-Notion] Agent 计划 JSON 解析失败:", planResult.reason);
+            return "❌ Agent 生成的计划格式无效。请尝试换一种方式描述。";
         }
-
-        let plan;
-        try {
-            plan = JSON.parse(jsonMatch[0]);
-        } catch (error) {
-            console.warn("[LD-Notion] Agent 计划 JSON 解析失败:", error);
-            return "❌ Agent 生成的计划格式无效。请尝试换一种方式描述任务。";
-        }
+        const plan = planResult.value;
 
         if (!plan.plan || plan.plan.length === 0) {
             return "❌ Agent 未能分解出有效的执行步骤。请尝试更具体地描述任务。";

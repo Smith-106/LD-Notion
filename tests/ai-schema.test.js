@@ -278,4 +278,119 @@ describe("AISchema — AI 输出 schema 校验层 (ISS-009)", () => {
             expect(r.reason).toMatch(/未找到 JSON/);
         });
     });
+
+    // ISS-013: 4 处手工 jsonMatch+JSON.parse 迁移 parseAIJson 接缝后的路由契约
+    describe("parseAIJson editPlan 路由 (ISS-013)", () => {
+        it("合法 editPlan 通过并返回 value", () => {
+            const raw = '{"mode":"update_content","content_updates":[{"old_str":"a","new_str":"b"}]}';
+            const r = AISchema.parseAIJson("editPlan", raw);
+            expect(r.ok).toBe(true);
+            expect(r.value.mode).toBe("update_content");
+            expect(r.value.content_updates).toHaveLength(1);
+        });
+
+        it("content_updates 项缺 old_str 拒绝", () => {
+            const r = AISchema.parseAIJson("editPlan", '{"mode":"update_content","content_updates":[{"new_str":"b"}]}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/old_str\/new_str/);
+        });
+
+        it("content_updates 非数组拒绝", () => {
+            const r = AISchema.parseAIJson("editPlan", '{"content_updates":"not-array"}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/content_updates 不是数组/);
+        });
+
+        it("无 content_updates 的 mode-only 计划通过（可选字段）", () => {
+            const r = AISchema.parseAIJson("editPlan", '{"mode":"append"}');
+            expect(r.ok).toBe(true);
+            expect(r.value.mode).toBe("append");
+        });
+    });
+
+    describe("parseAIJson generatePages 路由 (ISS-013)", () => {
+        it("合法 children 结构通过", () => {
+            const raw = '{"parent_title":"P","children":[{"title":"c1"},{"title":"c2"}]}';
+            const r = AISchema.parseAIJson("generatePages", raw);
+            expect(r.ok).toBe(true);
+            expect(r.value.children).toHaveLength(2);
+        });
+
+        it("children 空数组拒绝", () => {
+            const r = AISchema.parseAIJson("generatePages", '{"parent_title":"P","children":[]}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/有效的子页面结构/);
+        });
+
+        it("children 非数组拒绝", () => {
+            const r = AISchema.parseAIJson("generatePages", '{"children":"x"}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/有效的子页面结构/);
+        });
+
+        it("children 项非对象拒绝", () => {
+            const r = AISchema.parseAIJson("generatePages", '{"children":["str"]}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/子页面项不是对象/);
+        });
+    });
+
+    describe("parseAIJson agentPlan 路由 (ISS-013)", () => {
+        it("合法 plan 结构通过", () => {
+            const raw = '{"explanation":"整体","plan":[{"intent":"x","explanation":"步骤1"}]}';
+            const r = AISchema.parseAIJson("agentPlan", raw);
+            expect(r.ok).toBe(true);
+            expect(r.value.plan).toHaveLength(1);
+        });
+
+        it("plan 空数组拒绝", () => {
+            const r = AISchema.parseAIJson("agentPlan", '{"plan":[]}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/有效的执行步骤/);
+        });
+
+        it("步骤缺 explanation 拒绝", () => {
+            const r = AISchema.parseAIJson("agentPlan", '{"plan":[{"intent":"x"}]}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/explanation/);
+        });
+
+        it("plan 非数组拒绝", () => {
+            const r = AISchema.parseAIJson("agentPlan", '{"plan":"x"}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/有效的执行步骤/);
+        });
+    });
+
+    describe("parseAIJson intent 路由 (ISS-013)", () => {
+        it("合法 intent 通过", () => {
+            const r = AISchema.parseAIJson("intent", '{"intent":"query","explanation":"查询"}');
+            expect(r.ok).toBe(true);
+            expect(r.value.intent).toBe("query");
+        });
+
+        it("intent 非字符串拒绝（防 AI 返回非字符串注入）", () => {
+            const r = AISchema.parseAIJson("intent", '{"intent":123}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/intent 不是字符串/);
+        });
+
+        it("steps 非数组拒绝", () => {
+            const r = AISchema.parseAIJson("intent", '{"intent":"compound","steps":"x"}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/steps 不是数组/);
+        });
+
+        it("explanation 非字符串拒绝", () => {
+            const r = AISchema.parseAIJson("intent", '{"intent":"query","explanation":123}');
+            expect(r.ok).toBe(false);
+            expect(r.reason).toMatch(/explanation 不是字符串/);
+        });
+
+        it("compound + 合法 steps 数组通过（长度截断由消费点）", () => {
+            const r = AISchema.parseAIJson("intent", '{"intent":"compound","steps":[{"intent":"a"}]}');
+            expect(r.ok).toBe(true);
+            expect(r.value.steps).toHaveLength(1);
+        });
+    });
 });
