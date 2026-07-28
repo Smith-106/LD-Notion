@@ -32,11 +32,37 @@
             "W1",
             "W2",
             "W3",
+            "W4"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "M2",
+      "title": "持续质量改进",
+      "version": "v3.7.8",
+      "status": "completed",
+      "phase_slugs": [
+        "02-odyssey-improve"
+      ],
+      "phases": [
+        {
+          "id": 1,
+          "slug": "02-odyssey-improve",
+          "title": "odyssey-improve W1-W8 + 收尾",
+          "status": "completed",
+          "tasks": [],
+          "waves": [
+            "W1",
+            "W2",
+            "W3",
             "W4",
             "W5",
-            "W6",
+            "W6-1",
+            "W6-2",
             "W7",
-            "W8"
+            "W8",
+            "W9"
           ]
         }
       ]
@@ -242,7 +268,7 @@
       "summary": "Verification passed: 24 must-haves, coverage=1.0, 349/349 tests"
     }
   ],
-  "last_updated": "2026-07-27T11:50:00+08:00",
+  "last_updated": "2026-07-28T12:45:00+08:00",
   "last_codebase_rebuild": "2026-07-27T11:50:00+08:00",
   "last_pruned": "2026-06-20T12:00:00+08:00",
   "accumulated_context": {
@@ -303,5 +329,5 @@
   },
   "transition_history": [],
   "milestone_history": [],
-  "last_drift_realign": "2026-07-27T10:42:00+08:00"
+  "last_drift_realign": "2026-07-28T12:45:00+08:00"
 }
