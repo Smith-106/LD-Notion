@@ -624,15 +624,19 @@ const Exporter = {
 
         for (let i = 0; i < uniqueUrls.length; i += CONCURRENCY) {
             const batch = uniqueUrls.slice(i, i + CONCURRENCY);
+            let didNetworkWork = false;
             await Promise.all(batch.map(url => {
                 if (fileUrlCache.has(url)) {
                     uploaded++;
                     if (onProgress) onProgress(uploaded, uniqueUrls.length);
                     return Promise.resolve();
                 }
+                didNetworkWork = true;
                 return uploadWithRetry(url);
             }));
-            if (i + CONCURRENCY < uniqueUrls.length) {
+            // 仅当该批实际发生了网络上传时才 sleep（PERF-006）：
+            // 全缓存命中时跳过 sleep，重新导出已缓存上传的帖子不再付 ceil(N/3)×300ms 延迟。
+            if (didNetworkWork && i + CONCURRENCY < uniqueUrls.length) {
                 await Utils.sleep(300);
             }
         }

@@ -473,7 +473,7 @@ function isUrlAllowed(url) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type !== "GM_xmlhttpRequest") return false;
 
-    const { method, url, headers, data } = message.payload;
+    const { method, url, headers, data, timeout } = message.payload;
 
     // URL 白名单校验
     if (!isUrlAllowed(url)) {
@@ -488,6 +488,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (data && method !== "GET") {
         fetchOptions.body = data;
+    }
+
+    // 超时透传（REL-002）：userscript 侧 GM_xmlhttpRequest 的 timeout/ontimeout 原本被垫片丢弃，
+    // 扩展环境所有请求无超时保护。此处用 AbortController 实现，超时 abort 触发 ontimeout 回调。
+    const ctrl = new AbortController();
+    let timer = null;
+    if (timeout && timeout > 0) {
+        fetchOptions.signal = ctrl.signal;
+        timer = setTimeout(() => ctrl.abort(), timeout);
     }
 
     fetch(url, fetchOptions)
@@ -508,10 +517,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
         })
         .catch((error) => {
-            sendResponse({
-                success: false,
-                error: error.message
-            });
+            if (error && error.name === "AbortError" && timer) {
+                sendResponse({ success: false, timedOut: true, error: "timeout" });
+            } else {
+                sendResponse({
+                    success: false,
+                    error: error.message
+                });
+            }
+        })
+        .finally(() => {
+            if (timer) clearTimeout(timer);
         });
 
     // 返回 true 表示异步 sendResponse
@@ -772,12 +788,12 @@ function GM_deleteValue(key) {
 
 // HTTP 请求垫片 — 通过 background service worker 代理
 function GM_xmlhttpRequest(details) {
-    const { method, url, headers, data, onload, onerror } = details;
+    const { method, url, headers, data, onload, onerror, timeout, ontimeout } = details;
 
     chrome.runtime.sendMessage(
         {
             type: "GM_xmlhttpRequest",
-            payload: { method, url, headers, data }
+            payload: { method, url, headers, data, timeout }
         },
         (response) => {
             if (chrome.runtime.lastError) {
@@ -793,6 +809,9 @@ function GM_xmlhttpRequest(details) {
                     response: response.responseText,
                     finalUrl: response.finalUrl || url
                 });
+            } else if (response && response.timedOut && ontimeout) {
+                // background 用 AbortController 实现超时，透传回 ontimeout（REL-002）
+                ontimeout();
             } else {
                 if (onerror) onerror({
                     error: (response && response.error) || "Unknown error"

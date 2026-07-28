@@ -4184,14 +4184,17 @@ const UI = {
         const isExported = UI.isBookmarkKeyExported(bookmarkKey);
         const isSelected = UI.selectedBookmarks?.has(bookmarkKey);
         const sourceTag = githubMode
-            ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${(bookmark.sourceType || "stars").toUpperCase()}</span>`
+            ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${Utils.escapeHtml((bookmark.sourceType || "stars").toUpperCase())}</span>`
             : "";
         const reexportAction = !githubMode && isExported
             ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="移除该帖子的导出记录并重新加入待导出列表">重新导出</button>`
             : "";
+        // bookmarkKey 含 GitHub itemKey 等远程不可信数据，注入 data-topic-id 属性须转义防 CWE-79（SEC-001）。
+        // getBookmarkKey split 解析用原始 bookmarkKey 变量（非转义后的），转义仅作用于 HTML 序列化，不影响逻辑。
+        const escapedBookmarkKey = Utils.escapeHtml(bookmarkKey);
 
         return `
-            <div class="ldb-bookmark-item" data-topic-id="${bookmarkKey}">
+            <div class="ldb-bookmark-item" data-topic-id="${escapedBookmarkKey}">
                 <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
                 <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
                 ${sourceTag}${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
@@ -4209,7 +4212,7 @@ const UI = {
         if (!UI.bookmarks || UI.bookmarks.length === 0) {
             list.innerHTML = '<div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">暂无收藏</div>';
             UI.updateSelectCount();
-            UI.renderVisualSummary();
+            // renderVisualSummary 由 updateSelectCount 末尾调用，无需重复（PERF-004）
             return;
         }
 
@@ -4235,7 +4238,7 @@ const UI = {
 
         appendChunk();
         UI.updateSelectCount();
-        UI.renderVisualSummary();
+        // renderVisualSummary 由 updateSelectCount 末尾调用，无需重复（PERF-004）
     },
 
     // 重算导出统计（在列表变更后调用）

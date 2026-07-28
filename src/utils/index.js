@@ -18,11 +18,23 @@ const Utils = {
 
     runWhenBrowserIdle: (task, timeout = 1200) => {
         if (typeof task !== "function") return;
+        // 包 try/catch + promise catch：init 异常若被静默吞，main 顶层 try/catch 也捕获不到
+        // 独立事件回调（requestIdleCallback/setTimeout）内的异常不冒泡到 main，须在此处兜底（REL-004）。
+        const run = () => {
+            try {
+                const r = task();
+                if (r && typeof r.catch === "function") {
+                    r.catch((e) => console.error("[LD-Notion] idle task rejected:", e));
+                }
+            } catch (e) {
+                console.error("[LD-Notion] idle task threw:", e);
+            }
+        };
         if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
-            window.requestIdleCallback(() => task(), { timeout });
+            window.requestIdleCallback(run, { timeout });
             return;
         }
-        task();
+        run();
     },
 
     absoluteUrl: (src) => {

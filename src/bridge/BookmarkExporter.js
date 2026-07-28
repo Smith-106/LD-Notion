@@ -11,6 +11,9 @@ const { AISchema } = require("../ai/schema");
 
 const BookmarkExporter = {
     _pageInsightCache: {},
+    // FIFO 上限（PERF-005）：_pageInsightCache 原为无界普通对象，长会话累积内存泄漏。
+    // 超 MAX_INSIGHT_CACHE 时删最旧 key（Object.keys 保插入顺序），仿 AgentTrace.MAX_TRACES=50 的 FIFO rotate 模式。
+    MAX_INSIGHT_CACHE: 50,
     // 已导出书签映射缓存（H5：消除循环内逐条 JSON.parse+stringify 的 O(N²)）。
     // getExported 命中缓存返对象引用，markExported 就地 mutate 缓存 + 单次 stringify 写回。
     _exportedCache: null,
@@ -204,6 +207,11 @@ const BookmarkExporter = {
                     try {
                         const html = BookmarkExporter.decodeHtmlFromResponse(response);
                         const insight = BookmarkExporter.extractPageInsightFromHtml(html, url);
+                        // FIFO 淘汰（PERF-005）：超上限删最旧 key 防无界内存泄漏
+                        const keys = Object.keys(BookmarkExporter._pageInsightCache);
+                        if (keys.length >= BookmarkExporter.MAX_INSIGHT_CACHE) {
+                            delete BookmarkExporter._pageInsightCache[keys[0]];
+                        }
                         BookmarkExporter._pageInsightCache[url] = insight;
                         resolve(insight);
                     } catch (e) {
@@ -495,6 +503,14 @@ const BookmarkExporter = {
         Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(exported));
     },
 
+    // 批量导出循环末尾单次回写已导出映射（PERF-003）：循环内仅 mutate 内存缓存，
+    // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。语义与逐条 markExported 等价。
+    flushExported: () => {
+        if (BookmarkExporter._exportedCache) {
+            Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(BookmarkExporter._exportedCache));
+        }
+    },
+
     isExported: (bookmarkUrl) => {
         return !!BookmarkExporter.getExported()[bookmarkUrl];
     },
@@ -547,7 +563,10 @@ const BookmarkExporter = {
                     parent: { database_id: databaseId },
                     properties,
                 }, apiKey);
-                BookmarkExporter.markExported(bm.url);
+                // 循环内仅 mutate 内存缓存（getExported 返引用），避免逐条 JSON.stringify 写侧 O(N²)（PERF-003）。
+                // 循环末尾 BookmarkExporter.flushExported() 单次回写。
+                BookmarkExporter._exportedCache = BookmarkExporter._exportedCache || {};
+                BookmarkExporter._exportedCache[bm.url] = Date.now();
                 BookmarkExporter._auditExport("createDatabasePage", "success",
                     { pageId: String(page?.id || ""), bookmarkUrl: bm.url, itemName: bm.title, databaseId });
                 success++;
@@ -562,6 +581,9 @@ const BookmarkExporter = {
                 await Utils.sleep(delay);
             }
         }
+
+        // 批量回写已导出映射（PERF-003）：无论 success/failed，循环结束单次 flush，写侧从 O(N²)→O(N)。
+        BookmarkExporter.flushExported();
 
         return { total: bookmarks.length, exported: success, failed, newCount: newBookmarks.length };
     },

@@ -917,11 +917,21 @@
         sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
         runWhenBrowserIdle: (task, timeout = 1200) => {
           if (typeof task !== "function") return;
+          const run = () => {
+            try {
+              const r = task();
+              if (r && typeof r.catch === "function") {
+                r.catch((e) => console.error("[LD-Notion] idle task rejected:", e));
+              }
+            } catch (e) {
+              console.error("[LD-Notion] idle task threw:", e);
+            }
+          };
           if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
-            window.requestIdleCallback(() => task(), { timeout });
+            window.requestIdleCallback(run, { timeout });
             return;
           }
-          task();
+          run();
         },
         absoluteUrl: (src) => {
           if (!src) return "";
@@ -5610,6 +5620,9 @@ ${quoted}
       var { AISchema } = require_schema();
       var BookmarkExporter2 = {
         _pageInsightCache: {},
+        // FIFO 上限（PERF-005）：_pageInsightCache 原为无界普通对象，长会话累积内存泄漏。
+        // 超 MAX_INSIGHT_CACHE 时删最旧 key（Object.keys 保插入顺序），仿 AgentTrace.MAX_TRACES=50 的 FIFO rotate 模式。
+        MAX_INSIGHT_CACHE: 50,
         // 已导出书签映射缓存（H5：消除循环内逐条 JSON.parse+stringify 的 O(N²)）。
         // getExported 命中缓存返对象引用，markExported 就地 mutate 缓存 + 单次 stringify 写回。
         _exportedCache: null,
@@ -5773,6 +5786,10 @@ ${quoted}
                 try {
                   const html = BookmarkExporter2.decodeHtmlFromResponse(response);
                   const insight = BookmarkExporter2.extractPageInsightFromHtml(html, url);
+                  const keys = Object.keys(BookmarkExporter2._pageInsightCache);
+                  if (keys.length >= BookmarkExporter2.MAX_INSIGHT_CACHE) {
+                    delete BookmarkExporter2._pageInsightCache[keys[0]];
+                  }
                   BookmarkExporter2._pageInsightCache[url] = insight;
                   resolve(insight);
                 } catch (e) {
@@ -6039,6 +6056,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           exported[bookmarkUrl] = Date.now();
           Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(exported));
         },
+        // 批量导出循环末尾单次回写已导出映射（PERF-003）：循环内仅 mutate 内存缓存，
+        // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。语义与逐条 markExported 等价。
+        flushExported: () => {
+          if (BookmarkExporter2._exportedCache) {
+            Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(BookmarkExporter2._exportedCache));
+          }
+        },
         isExported: (bookmarkUrl) => {
           return !!BookmarkExporter2.getExported()[bookmarkUrl];
         },
@@ -6082,7 +6106,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 parent: { database_id: databaseId },
                 properties
               }, apiKey);
-              BookmarkExporter2.markExported(bm.url);
+              BookmarkExporter2._exportedCache = BookmarkExporter2._exportedCache || {};
+              BookmarkExporter2._exportedCache[bm.url] = Date.now();
               BookmarkExporter2._auditExport(
                 "createDatabasePage",
                 "success",
@@ -6102,6 +6127,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               await Utils2.sleep(delay);
             }
           }
+          BookmarkExporter2.flushExported();
           return { total: bookmarks.length, exported: success, failed, newCount: newBookmarks.length };
         }
       };
@@ -6819,6 +6845,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         rss: CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED
       };
       var RETRY_DELAYS = [5 * 60 * 1e3, 15 * 60 * 1e3, 60 * 60 * 1e3];
+      var MAX_RETRIES = RETRY_DELAYS.length + 2;
       var SyncScheduler = {
         _timers: /* @__PURE__ */ new Map(),
         // sourceType → intervalId
@@ -6936,6 +6963,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         _scheduleRetry(sourceType) {
           this._cancelRetry(sourceType);
           const count = (this._retryCounts.get(sourceType) || 0) + 1;
+          if (count > MAX_RETRIES) {
+            console.warn(`[LD-Notion] sync \u653E\u5F03\u91CD\u8BD5 (\u5DF2\u8FBE\u4E0A\u9650 ${MAX_RETRIES} \u6B21):`, sourceType);
+            this._retryCounts.set(sourceType, 0);
+            return;
+          }
           this._retryCounts.set(sourceType, count);
           const delay = RETRY_DELAYS[Math.min(count - 1, RETRY_DELAYS.length - 1)];
           const retryId = globalThis.setTimeout(() => this._doSync(sourceType), delay);
@@ -8764,15 +8796,17 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           };
           for (let i = 0; i < uniqueUrls.length; i += CONCURRENCY) {
             const batch = uniqueUrls.slice(i, i + CONCURRENCY);
+            let didNetworkWork = false;
             await Promise.all(batch.map((url) => {
               if (fileUrlCache.has(url)) {
                 uploaded++;
                 if (onProgress) onProgress(uploaded, uniqueUrls.length);
                 return Promise.resolve();
               }
+              didNetworkWork = true;
               return uploadWithRetry(url);
             }));
-            if (i + CONCURRENCY < uniqueUrls.length) {
+            if (didNetworkWork && i + CONCURRENCY < uniqueUrls.length) {
               await Utils2.sleep(300);
             }
           }
@@ -9171,6 +9205,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { Storage: Storage2 } = require_storage();
       var GitHubAPI2 = {
         _readmeCache: {},
+        // FIFO 上限（PERF-005）：_readmeCache 原为无界普通对象，长会话累积内存泄漏。
+        // 超 MAX_README_CACHE 时删最旧 key（Object.keys 保插入顺序），仿 AgentTrace.MAX_TRACES=50 的 FIFO rotate 模式。
+        MAX_README_CACHE: 50,
         // 已导出集合缓存（H6：消除循环内逐条 JSON.parse 的 O(N²)，与 BookmarkExporter._exportedCache 同模式）。
         _exportedCache: null,
         _exportedGistsCache: null,
@@ -9316,6 +9353,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         setImportTypes: (types) => {
           Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_IMPORT_TYPES, JSON.stringify(types));
         },
+        // 写入 readme 缓存并执行 FIFO 淘汰（PERF-005）：统一所有写入点，超 MAX_README_CACHE 删最旧 key。
+        _cacheReadme: (cacheKey, text) => {
+          const keys = Object.keys(GitHubAPI2._readmeCache);
+          if (!Object.prototype.hasOwnProperty.call(GitHubAPI2._readmeCache, cacheKey) && keys.length >= GitHubAPI2.MAX_README_CACHE) {
+            delete GitHubAPI2._readmeCache[keys[0]];
+          }
+          GitHubAPI2._readmeCache[cacheKey] = text;
+        },
         fetchRepoReadme: (repoFullName, token = "") => {
           if (!repoFullName) return Promise.resolve("");
           const cacheKey = `${repoFullName}::${token ? "auth" : "anon"}`;
@@ -9338,25 +9383,25 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                     const data = JSON.parse(response.responseText || "{}");
                     const decoded = Utils2.base64DecodeUnicode(data.content || "");
                     const text = String(decoded || "").replace(/\r\n/g, "\n");
-                    GitHubAPI2._readmeCache[cacheKey] = text;
+                    GitHubAPI2._cacheReadme(cacheKey, text);
                     resolve(text);
                     return;
                   } catch {
-                    GitHubAPI2._readmeCache[cacheKey] = "";
+                    GitHubAPI2._cacheReadme(cacheKey, "");
                     resolve("");
                     return;
                   }
                 }
-                GitHubAPI2._readmeCache[cacheKey] = "";
+                GitHubAPI2._cacheReadme(cacheKey, "");
                 resolve("");
               },
               onerror: () => {
-                GitHubAPI2._readmeCache[cacheKey] = "";
+                GitHubAPI2._cacheReadme(cacheKey, "");
                 resolve("");
               },
               timeout: 15e3,
               ontimeout: () => {
-                GitHubAPI2._readmeCache[cacheKey] = "";
+                GitHubAPI2._cacheReadme(cacheKey, "");
                 resolve("");
               }
             });
@@ -16461,10 +16506,11 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const escapedTruncatedTitle = Utils2.escapeHtml(Utils2.truncateText(title, 35));
           const isExported = UI2.isBookmarkKeyExported(bookmarkKey);
           const isSelected = (_a = UI2.selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
-          const sourceTag = githubMode ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${(bookmark.sourceType || "stars").toUpperCase()}</span>` : "";
+          const sourceTag = githubMode ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${Utils2.escapeHtml((bookmark.sourceType || "stars").toUpperCase())}</span>` : "";
           const reexportAction = !githubMode && isExported ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868">\u91CD\u65B0\u5BFC\u51FA</button>` : "";
+          const escapedBookmarkKey = Utils2.escapeHtml(bookmarkKey);
           return `
-            <div class="ldb-bookmark-item" data-topic-id="${bookmarkKey}">
+            <div class="ldb-bookmark-item" data-topic-id="${escapedBookmarkKey}">
                 <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
                 <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
                 ${sourceTag}${isExported ? '<span class="status exported">\u5DF2\u5BFC\u51FA</span>' : '<span class="status pending">\u5F85\u5BFC\u51FA</span>'}
@@ -16481,7 +16527,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           if (!UI2.bookmarks || UI2.bookmarks.length === 0) {
             list.innerHTML = '<div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">\u6682\u65E0\u6536\u85CF</div>';
             UI2.updateSelectCount();
-            UI2.renderVisualSummary();
             return;
           }
           const githubMode = UI2.isActiveGitHubSource();
@@ -16504,7 +16549,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           };
           appendChunk();
           UI2.updateSelectCount();
-          UI2.renderVisualSummary();
         },
         // 重算导出统计（在列表变更后调用）
         recomputeExportStats: () => {
@@ -17650,6 +17694,10 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                           }
                           const safeName = `img-${Date.now()}-${Array.from(nameBytes, (b) => b.toString(16).padStart(2, "0")).join("")}.${ext}`;
                           const imgPath = `${obsImgDir}/${safeName}`;
+                          const { UrlValidator } = require_UrlValidator();
+                          if (!UrlValidator.validatePageExternalUrl(img.url)) {
+                            throw new Error("\u56FE\u7247 URL \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C");
+                          }
                           const blob = await new Promise((resolve, reject) => {
                             GM_xmlhttpRequest({
                               method: "GET",
@@ -17674,6 +17722,10 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                       while ((m = imgRegex.exec(md)) !== null) matches.push(m);
                       for (const match of matches.reverse()) {
                         try {
+                          const { UrlValidator } = require_UrlValidator();
+                          if (!UrlValidator.validatePageExternalUrl(match[2])) {
+                            throw new Error("\u56FE\u7247 URL \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C");
+                          }
                           const resp = await new Promise((resolve, reject) => {
                             GM_xmlhttpRequest({
                               method: "GET",
@@ -24054,31 +24106,24 @@ ${aiResponse}
           console.warn("[LD-Notion] AI \u8BF7\u6C42\u6700\u7EC8\u5931\u8D25\uFF08\u5DF2\u91CD\u8BD5\uFF09:", String((lastError == null ? void 0 : lastError.message) || lastError));
           throw lastError;
         },
-        requestOpenAIChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
-          const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
+        // 公共 AI 对话请求骨架（MAINT-004）：封装 GM_xmlhttpRequest Promise + _retryable +
+        // onload/onerror/timeout 模板。三 provider 仅声明差异部分（url/headers/body/extractResponse/errorPrefix）。
+        // 90000ms 超时是长对话请求统一值（MAINT-007 已常量化建议，此处暂留内联）。
+        _chatRequest: (url, headers, body, extractResponse, errorPrefix) => {
           return AIService2._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
               method: "POST",
               url,
-              headers: {
-                "Authorization": `Bearer ${apiKey}`,
-                "Content-Type": "application/json"
-              },
-              data: JSON.stringify({
-                model,
-                messages: [{ role: "user", content: prompt2 }],
-                max_completion_tokens: maxTokens,
-                temperature: 0.7
-              }),
+              headers,
+              data: JSON.stringify(body),
               onload: (response) => {
-                var _a, _b, _c, _d, _e;
+                var _a;
                 try {
                   const result = JSON.parse(response.responseText);
                   if (response.status >= 200 && response.status < 300) {
-                    resolve(((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "");
+                    resolve(extractResponse(result));
                   } else {
-                    reject(new Error(((_e = result.error) == null ? void 0 : _e.message) || `OpenAI \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
+                    reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `${errorPrefix}\u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
                   }
                 } catch (e) {
                   reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
@@ -24089,81 +24134,50 @@ ${aiResponse}
               ontimeout: () => reject(new Error("AI \u5BF9\u8BDD\u8BF7\u6C42\u8D85\u65F6"))
             });
           }));
+        },
+        requestOpenAIChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
+          const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
+          return AIService2._chatRequest(
+            url,
+            { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            { model, messages: [{ role: "user", content: prompt2 }], max_completion_tokens: maxTokens, temperature: 0.7 },
+            (result) => {
+              var _a, _b, _c, _d;
+              return ((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "";
+            },
+            "OpenAI"
+          );
         },
         // Claude 对话请求
         requestClaudeChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
           const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-          return AIService2._retryable(() => new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "POST",
-              url,
-              headers: {
-                "x-api-key": apiKey,
-                "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01"
-              },
-              data: JSON.stringify({
-                model,
-                messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }],
-                max_tokens: maxTokens
-              }),
-              onload: (response) => {
-                var _a, _b, _c, _d;
-                try {
-                  const result = JSON.parse(response.responseText);
-                  if (response.status >= 200 && response.status < 300) {
-                    resolve(((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "");
-                  } else {
-                    reject(new Error(((_d = result.error) == null ? void 0 : _d.message) || `Claude \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
-                  }
-                } catch (e) {
-                  reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
-                }
-              },
-              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
-              timeout: 9e4,
-              ontimeout: () => reject(new Error("AI \u5BF9\u8BDD\u8BF7\u6C42\u8D85\u65F6"))
-            });
-          }));
+          return AIService2._chatRequest(
+            url,
+            { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+            { model, messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }], max_tokens: maxTokens },
+            (result) => {
+              var _a, _b, _c;
+              return ((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "";
+            },
+            "Claude"
+          );
         },
         // Gemini 对话请求
         requestGeminiChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
           const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
           const url = normalizedBase ? `${normalizedBase}/v1beta/models/${model}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-          return AIService2._retryable(() => new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "POST",
-              url,
-              headers: {
-                "Content-Type": "application/json",
-                "x-goog-api-key": apiKey
-              },
-              data: JSON.stringify({
-                contents: [{ parts: [{ text: prompt2 }] }],
-                generationConfig: {
-                  maxOutputTokens: maxTokens,
-                  temperature: 0.7
-                }
-              }),
-              onload: (response) => {
-                var _a, _b, _c, _d, _e, _f, _g;
-                try {
-                  const result = JSON.parse(response.responseText);
-                  if (response.status >= 200 && response.status < 300) {
-                    resolve(((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "");
-                  } else {
-                    reject(new Error(((_g = result.error) == null ? void 0 : _g.message) || `Gemini \u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
-                  }
-                } catch (e) {
-                  reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
-                }
-              },
-              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
-              timeout: 9e4,
-              ontimeout: () => reject(new Error("AI \u5BF9\u8BDD\u8BF7\u6C42\u8D85\u65F6"))
-            });
-          }));
+          return AIService2._chatRequest(
+            url,
+            { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            { contents: [{ parts: [{ text: prompt2 }] }], generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
+            (result) => {
+              var _a, _b, _c, _d, _e, _f;
+              return ((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "";
+            },
+            "Gemini"
+          );
         },
         // Agent 多轮对话请求（将 system + messages 拼接为单个 prompt）
         requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500) => {
@@ -26511,43 +26525,55 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   });
   function main() {
     const initUI = async () => {
-      DesignSystem.initTheme();
-      await NotionOAuth.handleRedirectCallback();
-      NotionOAuth.syncApiKeyInputs();
-      const currentSite = SiteDetector.detect();
-      if (currentSite === SiteDetector.SITES.LINUX_DO) {
-        UI.init();
-        Utils.runWhenBrowserIdle(() => UpdateChecker.init());
-        const isBookmarkPage = /\/u\/[^/]+\/activity\/bookmarks/.test(window.location.pathname);
-        if (!isBookmarkPage) {
-          Utils.runWhenBrowserIdle(() => GenericUI.init());
-          Utils.runWhenBrowserIdle(() => AutoImporter.init());
+      try {
+        DesignSystem.initTheme();
+        await NotionOAuth.handleRedirectCallback();
+        NotionOAuth.syncApiKeyInputs();
+        const currentSite = SiteDetector.detect();
+        if (currentSite === SiteDetector.SITES.LINUX_DO) {
+          UI.init();
+          Utils.runWhenBrowserIdle(() => UpdateChecker.init());
+          const isBookmarkPage = /\/u\/[^/]+\/activity\/bookmarks/.test(window.location.pathname);
+          if (!isBookmarkPage) {
+            Utils.runWhenBrowserIdle(() => GenericUI.init());
+            Utils.runWhenBrowserIdle(() => AutoImporter.init());
+          }
+          Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
+          Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
+        } else if (currentSite === SiteDetector.SITES.NOTION) {
+          NotionSiteUI.init();
+          Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
+          Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
+        } else if (currentSite === SiteDetector.SITES.GITHUB) {
+          UI.init();
+          Utils.runWhenBrowserIdle(() => UpdateChecker.init());
+          Utils.runWhenBrowserIdle(() => GitHubAutoImporter.init());
+          Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
+          Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
+        } else if (currentSite === SiteDetector.SITES.ZHIHU) {
+          GenericUI.init();
+        } else if (currentSite === SiteDetector.SITES.GENERIC) {
+          GenericUI.init();
         }
-        Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
-        Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
-      } else if (currentSite === SiteDetector.SITES.NOTION) {
-        NotionSiteUI.init();
-        Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
-        Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
-      } else if (currentSite === SiteDetector.SITES.GITHUB) {
-        UI.init();
-        Utils.runWhenBrowserIdle(() => UpdateChecker.init());
-        Utils.runWhenBrowserIdle(() => GitHubAutoImporter.init());
-        Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
-        Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
-      } else if (currentSite === SiteDetector.SITES.ZHIHU) {
-        GenericUI.init();
-      } else if (currentSite === SiteDetector.SITES.GENERIC) {
-        GenericUI.init();
-      }
-      const notice = NotionOAuth.consumeNotice();
-      if (notice == null ? void 0 : notice.message) {
-        if (currentSite === SiteDetector.SITES.NOTION && typeof NotionSiteUI.showStatus === "function") {
-          NotionSiteUI.showStatus(notice.message, notice.type || "info");
-        } else if (currentSite === SiteDetector.SITES.GENERIC && typeof GenericUI.showStatus === "function") {
-          GenericUI.showStatus(notice.message, notice.type || "info");
-        } else if (typeof UI.showStatus === "function") {
-          UI.showStatus(notice.message, notice.type || "info");
+        const notice = NotionOAuth.consumeNotice();
+        if (notice == null ? void 0 : notice.message) {
+          if (currentSite === SiteDetector.SITES.NOTION && typeof NotionSiteUI.showStatus === "function") {
+            NotionSiteUI.showStatus(notice.message, notice.type || "info");
+          } else if (currentSite === SiteDetector.SITES.GENERIC && typeof GenericUI.showStatus === "function") {
+            GenericUI.showStatus(notice.message, notice.type || "info");
+          } else if (typeof UI.showStatus === "function") {
+            UI.showStatus(notice.message, notice.type || "info");
+          }
+        }
+      } catch (e) {
+        console.error("[LD-Notion] \u521D\u59CB\u5316\u5931\u8D25:", e);
+        try {
+          if (typeof UI !== "undefined" && typeof UI.showStatus === "function") {
+            UI.showStatus(`LD-Notion \u521D\u59CB\u5316\u5931\u8D25: ${(e == null ? void 0 : e.message) || e}`, "error");
+          } else if (typeof GenericUI !== "undefined" && typeof GenericUI.showStatus === "function") {
+            GenericUI.showStatus(`LD-Notion \u521D\u59CB\u5316\u5931\u8D25: ${(e == null ? void 0 : e.message) || e}`, "error");
+          }
+        } catch {
         }
       }
     };

@@ -293,34 +293,23 @@ const AIService = {
         throw lastError;
     },
 
-    requestOpenAIChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
-        // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
-        const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1");
-        const url = normalizedBase
-            ? `${normalizedBase}/v1/chat/completions`
-            : "https://api.openai.com/v1/chat/completions";
-
+    // 公共 AI 对话请求骨架（MAINT-004）：封装 GM_xmlhttpRequest Promise + _retryable +
+    // onload/onerror/timeout 模板。三 provider 仅声明差异部分（url/headers/body/extractResponse/errorPrefix）。
+    // 90000ms 超时是长对话请求统一值（MAINT-007 已常量化建议，此处暂留内联）。
+    _chatRequest: (url, headers, body, extractResponse, errorPrefix) => {
         return AIService._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST",
                 url: url,
-                headers: {
-                    "Authorization": `Bearer ${apiKey}`,
-                    "Content-Type": "application/json",
-                },
-                data: JSON.stringify({
-                    model: model,
-                    messages: [{ role: "user", content: prompt }],
-                    max_completion_tokens: maxTokens,
-                    temperature: 0.7,
-                }),
+                headers: headers,
+                data: JSON.stringify(body),
                 onload: (response) => {
                     try {
                         const result = JSON.parse(response.responseText);
                         if (response.status >= 200 && response.status < 300) {
-                            resolve(result.choices?.[0]?.message?.content?.trim() || "");
+                            resolve(extractResponse(result));
                         } else {
-                            reject(new Error(result.error?.message || `OpenAI 错误: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
+                            reject(new Error(result.error?.message || `${errorPrefix}错误: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
                         }
                     } catch (e) {
                         reject(new Error(`解析响应失败: ${e.message}`));
@@ -331,6 +320,22 @@ const AIService = {
                 ontimeout: () => reject(new Error("AI 对话请求超时")),
             });
         }));
+    },
+
+    requestOpenAIChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
+        // 标准化 baseUrl：移除末尾的 / 和 /v1，避免重复路径
+        const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1");
+        const url = normalizedBase
+            ? `${normalizedBase}/v1/chat/completions`
+            : "https://api.openai.com/v1/chat/completions";
+
+        return AIService._chatRequest(
+            url,
+            { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            { model, messages: [{ role: "user", content: prompt }], max_completion_tokens: maxTokens, temperature: 0.7 },
+            (result) => result.choices?.[0]?.message?.content?.trim() || "",
+            "OpenAI"
+        );
     },
 
     // Claude 对话请求
@@ -341,37 +346,13 @@ const AIService = {
             ? `${normalizedBase}/v1/messages`
             : "https://api.anthropic.com/v1/messages";
 
-        return AIService._retryable(() => new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: "POST",
-                url: url,
-                headers: {
-                    "x-api-key": apiKey,
-                    "Content-Type": "application/json",
-                    "anthropic-version": "2023-06-01",
-                },
-                data: JSON.stringify({
-                    model: model,
-                    messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
-                    max_tokens: maxTokens,
-                }),
-                onload: (response) => {
-                    try {
-                        const result = JSON.parse(response.responseText);
-                        if (response.status >= 200 && response.status < 300) {
-                            resolve(result.content?.[0]?.text?.trim() || "");
-                        } else {
-                            reject(new Error(result.error?.message || `Claude 错误: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
-                        }
-                    } catch (e) {
-                        reject(new Error(`解析响应失败: ${e.message}`));
-                    }
-                },
-                onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
-                timeout: 90000,
-                ontimeout: () => reject(new Error("AI 对话请求超时")),
-            });
-        }));
+        return AIService._chatRequest(
+            url,
+            { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+            { model, messages: [{ role: "user", content: [{ type: "text", text: prompt }] }], max_tokens: maxTokens },
+            (result) => result.content?.[0]?.text?.trim() || "",
+            "Claude"
+        );
     },
 
     // Gemini 对话请求
@@ -382,38 +363,13 @@ const AIService = {
             ? `${normalizedBase}/v1beta/models/${model}:generateContent`
             : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-        return AIService._retryable(() => new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: "POST",
-                url: url,
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-goog-api-key": apiKey,
-                },
-                data: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: {
-                        maxOutputTokens: maxTokens,
-                        temperature: 0.7,
-                    },
-                }),
-                onload: (response) => {
-                    try {
-                        const result = JSON.parse(response.responseText);
-                        if (response.status >= 200 && response.status < 300) {
-                            resolve(result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "");
-                        } else {
-                            reject(new Error(result.error?.message || `Gemini 错误: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
-                        }
-                    } catch (e) {
-                        reject(new Error(`解析响应失败: ${e.message}`));
-                    }
-                },
-                onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
-                timeout: 90000,
-                ontimeout: () => reject(new Error("AI 对话请求超时")),
-            });
-        }));
+        return AIService._chatRequest(
+            url,
+            { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
+            (result) => result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "",
+            "Gemini"
+        );
     },
 
     // Agent 多轮对话请求（将 system + messages 拼接为单个 prompt）

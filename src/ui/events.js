@@ -1077,6 +1077,13 @@ const UIEvents = {
                                         }
                                         const safeName = `img-${Date.now()}-${Array.from(nameBytes, b => b.toString(16).padStart(2, "0")).join("")}.${ext}`;
                                         const imgPath = `${obsImgDir}/${safeName}`;
+                                        // SSRF 防护（SEC-003）：img.url 来自导入页面 Markdown/HTML 解析的 img src，
+                                        // 远程不可信。校验外链 URL 拒内网/私有地址后再下载（@connect 白名单已限制可达域，
+                                        // 但白名单含 *.amazonaws.com/zhihu.com 宽泛域，此处补私有地址过滤）。
+                                        const { UrlValidator } = require("../security/UrlValidator");
+                                        if (!UrlValidator.validatePageExternalUrl(img.url)) {
+                                            throw new Error("图片 URL 未通过安全校验");
+                                        }
                                         const blob = await new Promise((resolve, reject) => {
                                             GM_xmlhttpRequest({
                                                 method: "GET",
@@ -1102,6 +1109,11 @@ const UIEvents = {
                                 while ((m = imgRegex.exec(md)) !== null) matches.push(m);
                                 for (const match of matches.reverse()) {
                                     try {
+                                        // SSRF 防护（SEC-003）：match[2] 同为页面解析的 img src，校验外链 URL。
+                                        const { UrlValidator } = require("../security/UrlValidator");
+                                        if (!UrlValidator.validatePageExternalUrl(match[2])) {
+                                            throw new Error("图片 URL 未通过安全校验");
+                                        }
                                         const resp = await new Promise((resolve, reject) => {
                                             GM_xmlhttpRequest({
                                                 method: "GET",

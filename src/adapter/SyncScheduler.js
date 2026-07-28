@@ -42,6 +42,9 @@ const SOURCE_ENABLED_KEYS = {
 
 // 重试退避策略: 初始 5 分钟, 二次 15 分钟, 后续 60 分钟
 const RETRY_DELAYS = [5 * 60 * 1000, 15 * 60 * 1000, 60 * 60 * 1000];
+// 最大重试次数熔断（REL-003）：超过上限后放弃重试，避免源持续失败时每 60min 永不停止重试。
+// 上限取 RETRY_DELAYS 长度 + 2（约 5 次），达上限后归零计数，待下次正常 interval 周期再试。
+const MAX_RETRIES = RETRY_DELAYS.length + 2;
 
 /**
  * SyncScheduler — 统一的定时同步调度器
@@ -174,6 +177,12 @@ const SyncScheduler = {
     _scheduleRetry(sourceType) {
         this._cancelRetry(sourceType);
         const count = (this._retryCounts.get(sourceType) || 0) + 1;
+        // 熔断（REL-003）：达上限放弃重试，归零计数，源持续失败不再每 60min 无限重试。
+        if (count > MAX_RETRIES) {
+            console.warn(`[LD-Notion] sync 放弃重试 (已达上限 ${MAX_RETRIES} 次):`, sourceType);
+            this._retryCounts.set(sourceType, 0);
+            return;
+        }
         this._retryCounts.set(sourceType, count);
         const delay = RETRY_DELAYS[Math.min(count - 1, RETRY_DELAYS.length - 1)];
         const retryId = globalThis.setTimeout(() => this._doSync(sourceType), delay);

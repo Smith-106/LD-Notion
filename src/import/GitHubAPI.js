@@ -6,6 +6,9 @@ const { Storage } = require("../storage");
 
 const GitHubAPI = {
     _readmeCache: {},
+    // FIFO 上限（PERF-005）：_readmeCache 原为无界普通对象，长会话累积内存泄漏。
+    // 超 MAX_README_CACHE 时删最旧 key（Object.keys 保插入顺序），仿 AgentTrace.MAX_TRACES=50 的 FIFO rotate 模式。
+    MAX_README_CACHE: 50,
     // 已导出集合缓存（H6：消除循环内逐条 JSON.parse 的 O(N²)，与 BookmarkExporter._exportedCache 同模式）。
     _exportedCache: null,
     _exportedGistsCache: null,
@@ -171,6 +174,16 @@ const GitHubAPI = {
         Storage.set(CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES, JSON.stringify(types));
     },
 
+    // 写入 readme 缓存并执行 FIFO 淘汰（PERF-005）：统一所有写入点，超 MAX_README_CACHE 删最旧 key。
+    _cacheReadme: (cacheKey, text) => {
+        const keys = Object.keys(GitHubAPI._readmeCache);
+        if (!Object.prototype.hasOwnProperty.call(GitHubAPI._readmeCache, cacheKey)
+            && keys.length >= GitHubAPI.MAX_README_CACHE) {
+            delete GitHubAPI._readmeCache[keys[0]];
+        }
+        GitHubAPI._readmeCache[cacheKey] = text;
+    },
+
     fetchRepoReadme: (repoFullName, token = "") => {
         if (!repoFullName) return Promise.resolve("");
         const cacheKey = `${repoFullName}::${token ? "auth" : "anon"}`;
@@ -195,25 +208,25 @@ const GitHubAPI = {
                             const data = JSON.parse(response.responseText || "{}");
                             const decoded = Utils.base64DecodeUnicode(data.content || "");
                             const text = String(decoded || "").replace(/\r\n/g, "\n");
-                            GitHubAPI._readmeCache[cacheKey] = text;
+                            GitHubAPI._cacheReadme(cacheKey, text);
                             resolve(text);
                             return;
                         } catch {
-                            GitHubAPI._readmeCache[cacheKey] = "";
+                            GitHubAPI._cacheReadme(cacheKey, "");
                             resolve("");
                             return;
                         }
                     }
-                    GitHubAPI._readmeCache[cacheKey] = "";
+                    GitHubAPI._cacheReadme(cacheKey, "");
                     resolve("");
                 },
                 onerror: () => {
-                    GitHubAPI._readmeCache[cacheKey] = "";
+                    GitHubAPI._cacheReadme(cacheKey, "");
                     resolve("");
                 },
                 timeout: 15000,
                 ontimeout: () => {
-                    GitHubAPI._readmeCache[cacheKey] = "";
+                    GitHubAPI._cacheReadme(cacheKey, "");
                     resolve(""); // 超时降级为空，与其他错误路径一致
                 },
             });

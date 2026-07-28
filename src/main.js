@@ -76,6 +76,7 @@ window.addEventListener("ld-notion-popup-action", (event) => {
 
 function main() {
     const initUI = async () => {
+      try {
         // 初始化主题系统
         DesignSystem.initTheme();
         await NotionOAuth.handleRedirectCallback();
@@ -119,6 +120,19 @@ function main() {
                 UI.showStatus(notice.message, notice.type || "info");
             }
         }
+      } catch (e) {
+        // 入口错误边界（REL-001）：initUI 内任一初始化异常（OAuth 回调/主题/UI.init/AutoImporter.init）
+        // 原本成 unhandledrejection 被 userscript 容错环境静默吞，用户面板不加载且无报错。
+        // 此处 console.error 落诊断 + 尽力向用户展示失败提示（showStatus 自身失败不影响）。
+        console.error("[LD-Notion] 初始化失败:", e);
+        try {
+            if (typeof UI !== "undefined" && typeof UI.showStatus === "function") {
+                UI.showStatus(`LD-Notion 初始化失败: ${e?.message || e}`, "error");
+            } else if (typeof GenericUI !== "undefined" && typeof GenericUI.showStatus === "function") {
+                GenericUI.showStatus(`LD-Notion 初始化失败: ${e?.message || e}`, "error");
+            }
+        } catch {}
+      }
     };
 
     if (document.readyState === "loading") {
