@@ -39,7 +39,7 @@
 
 ## Context
 
-项目从 LinuxDo 帖子导出工具起步（基于 flobby 和 JackLiii 的作品改编），v3.5.0 已发展为功能丰富的多源知识工具。源码为 esbuild 模块化（src/ 多目录分层：extract/adapter/bridge/api/ai/ui/security/coordination 等），构建产物为单文件 .user.js（~26K 行）。含 Chrome Extension 构建系统。已有 AI 对话、OAuth、权限控制、审计日志等企业级特性。文件处理系统刚完成全面升级，支持 Notion File Upload API 的完整能力。
+项目从 LinuxDo 帖子导出工具起步（基于 flobby 和 JackLiii 的作品改编），v3.5.0 已发展为功能丰富的多源知识工具。源码为 esbuild 模块化（src/ 多目录分层：extract/adapter/bridge/api/ai/ui/security/coordination 等），构建产物为单文件 .user.js（~26K 行）。含 Chrome Extension 构建系统。已有 AI 对话、OAuth、权限控制、审计日志等企业级特性。文件处理系统刚完成全面升级，支持 Notion File Upload API 的完整能力。AI Agent 调用链全量追踪持久化（AgentTrace 模块，per-invocation toolCalls/results/latency/errors，GM 存储 FIFO rotate 50 条）已落地，补 observability 维度。
 
 ## Constraints
 
@@ -53,7 +53,7 @@
 - **Language**: JavaScript (ES2020+), Node.js >=18
 - **Runtime**: Tampermonkey/Greasemonkey (Userscript ~26K lines) + Chrome Extension (Manifest V3, bounded + full)
 - **Build**: esbuild (build.js bundles src/ modules → single .user.js); scripts/build-extension.js (extension packaging)
-- **Test**: Vitest 4.x (441 tests, tests/ + tests/setup.js); legacy node tests (utils/logic-modules/notion-oauth)
+- **Test**: Vitest 4.x (479 tests, tests/ + tests/setup.js); legacy node tests (utils/logic-modules/notion-oauth)
 - **Docs**: VitePress 2.x (docs/)
 - **Verification**: verify:* suite (baseline, build, extension bounded/bridge/surfaces, bundle equivalence, delivery)
 - **APIs**: Notion API (+ File Upload API, 54 file types), Discourse API, GitHub API v3, OpenAI/Anthropic/Gemini AI APIs, Obsidian Local REST API
@@ -76,4 +76,4 @@
 - 开源贡献者（MIT 协议）
 
 ---
-*Last updated: 2026-07-27 (drift-realign: W1-W8 ai 拆分后源码模块化 + 测试 384→441)*
+*Last updated: 2026-07-28 (drift-realign: ISS-012 AI trace 全量持久化 + ISS-013 arch-013 接缝 4 处迁移，测试 441→479)*
