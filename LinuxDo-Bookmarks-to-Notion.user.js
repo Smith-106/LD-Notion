@@ -3051,20 +3051,85 @@
           }, apiKey);
         },
         // 创建多分片上传 (>20MB)
-        createMultiPartUpload: async (filename, contentType, fileSize, apiKey) => {
+        // numberOfParts (ISS-019/F2)：Notion API multi_part 契约要求声明 number_of_parts(1-10000)，
+        // 须与最终 part_number 匹配。Context7 OpenAPI /file_uploads POST mode=multi_part。
+        createMultiPartUpload: async (filename, contentType, fileSize, apiKey, numberOfParts) => {
           return await NotionAPI2.request("POST", "/file_uploads", {
             mode: "multi_part",
             filename,
             content_type: contentType,
-            file_size: fileSize
+            file_size: fileSize,
+            number_of_parts: numberOfParts
           }, apiKey);
         },
-        // 发送分片
-        sendFilePart: async (uploadId, partData, partNumber, apiKey) => {
-          return await NotionAPI2.request("POST", `/file_uploads/${uploadId}/send`, {
-            data: partData,
-            part_number: partNumber
-          }, apiKey);
+        // 发送分片（ISS-019/F1：multipart/form-data 二进制，对齐 Notion send endpoint 契约）
+        // Context7 /websites/developers_notion_reference: send endpoint 用 multipart/form-data（unique to this endpoint），
+        // file field 放原始二进制，part_number field(1-1000)。原 base64+JSON 实现违反契约且体积膨胀 33%。
+        // 仿 uploadFileContent:931 multipart 模式，但走 Notion API endpoint + Authorization Bearer（非 S3 预签名 URL）。
+        sendFilePart: (uploadId, partBlob, partNumber, apiKey, filename) => {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const boundaryBytes = new Uint8Array(8);
+              if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                crypto.getRandomValues(boundaryBytes);
+              } else {
+                reject(new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 multipart boundary"));
+                return;
+              }
+              const boundary = "----LDNotionFormBoundary" + Array.from(boundaryBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+              const partName = filename || `part-${partNumber}.bin`;
+              const uint8Array = new Uint8Array(reader.result);
+              const fileHeader = `--${boundary}\r
+Content-Disposition: form-data; name="file"; filename="${partName}"\r
+Content-Type: application/octet-stream\r
+\r
+`;
+              const partNumberField = `\r
+--${boundary}\r
+Content-Disposition: form-data; name="part_number"\r
+\r
+${partNumber}\r
+`;
+              const footer = `--${boundary}--\r
+`;
+              const headerBytes = new TextEncoder().encode(fileHeader);
+              const partNumberBytes = new TextEncoder().encode(partNumberField);
+              const footerBytes = new TextEncoder().encode(footer);
+              const body = new Uint8Array(headerBytes.length + uint8Array.length + partNumberBytes.length + footerBytes.length);
+              body.set(headerBytes, 0);
+              body.set(uint8Array, headerBytes.length);
+              body.set(partNumberBytes, headerBytes.length + uint8Array.length);
+              body.set(footerBytes, headerBytes.length + uint8Array.length + partNumberBytes.length);
+              GM_xmlhttpRequest({
+                method: "POST",
+                url: NotionAPI2.Transport.buildUrl(`/file_uploads/${uploadId}/send`),
+                headers: {
+                  "Authorization": `Bearer ${NotionOAuth2.getAccessToken(apiKey)}`,
+                  "Notion-Version": CONFIG2.API.NOTION_VERSION,
+                  "Content-Type": `multipart/form-data; boundary=${boundary}`
+                },
+                data: body.buffer,
+                binary: true,
+                timeout: 12e4,
+                onload: (response) => {
+                  if (response.status >= 200 && response.status < 300) {
+                    try {
+                      resolve(Utils2.safeJsonParse(response.responseText, {}));
+                    } catch {
+                      resolve({});
+                    }
+                  } else {
+                    reject(new Error(`\u53D1\u9001\u5206\u7247\u5931\u8D25: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
+                  }
+                },
+                onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
+                ontimeout: () => reject(new Error("\u53D1\u9001\u5206\u7247\u8D85\u65F6"))
+              });
+            };
+            reader.onerror = () => reject(new Error("\u8BFB\u53D6\u5206\u7247\u6570\u636E\u5931\u8D25"));
+            reader.readAsArrayBuffer(partBlob);
+          });
         },
         // 完成多分片上传
         completeFileUpload: async (uploadId, apiKey) => {
@@ -3170,28 +3235,21 @@ Content-Type: ${contentType}\r
           else if (category === "file") blockType = "file";
           const filename = originalFileName || `${blockType}-${Date.now()}.${ext}`;
           if (blob.size > MULTI_PART_THRESHOLD2) {
+            const PART_SIZE = 20 * 1024 * 1024;
+            const totalParts = Math.ceil(blob.size / PART_SIZE);
             const multiUpload = await NotionAPI2.createMultiPartUpload(
               filename,
               contentType,
               blob.size,
-              apiKey
+              apiKey,
+              totalParts
             );
             if (!(multiUpload == null ? void 0 : multiUpload.id)) throw new Error("\u521B\u5EFA\u591A\u5206\u7247\u4E0A\u4F20\u5931\u8D25");
-            const PART_SIZE = 20 * 1024 * 1024;
-            const totalParts = Math.ceil(blob.size / PART_SIZE);
             for (let i = 0; i < totalParts; i++) {
               const start = i * PART_SIZE;
               const end = Math.min(start + PART_SIZE, blob.size);
               const partBlob = blob.slice(start, end);
-              const partBase64 = await new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = () => {
-                  const dataUrl = reader.result;
-                  resolve(dataUrl.split(",")[1]);
-                };
-                reader.readAsDataURL(partBlob);
-              });
-              await NotionAPI2.sendFilePart(multiUpload.id, partBase64, i + 1, apiKey);
+              await NotionAPI2.sendFilePart(multiUpload.id, partBlob, i + 1, apiKey, filename);
             }
             await NotionAPI2.completeFileUpload(multiUpload.id, apiKey);
             return { fileId: multiUpload.id, blockType };
