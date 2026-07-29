@@ -198,7 +198,7 @@
   },
   "transition_history": [],
   "milestone_history": [],
-  "last_updated": "2026-07-28T22:40:37+08:00",
+  "last_updated": "2026-07-29T21:38:25+08:00",
   "artifact_archive": [
     {
       "id": "ANL-001",
@@ -334,6 +334,14 @@
     {
       "session_id": "20260728-maestro-fix-iss019-binary-upload-20260728-133132",
       "intent": "依次修复 ISS-019 (critical): Notion 多分片上传 base64→二进制",
+      "status": "sealed",
+      "depends_on": [],
+      "roadmap_artifact_id": null,
+      "seed_ref": null
+    },
+    {
+      "session_id": "20260729-odyssey-planex-split-monoliths",
+      "intent": "按保守物理拆分方案重构 main-ui.js(4489行)和 ai/index.js(2923+2281行) 巨石文件",
       "status": "sealed",
       "depends_on": [],
       "roadmap_artifact_id": null,
