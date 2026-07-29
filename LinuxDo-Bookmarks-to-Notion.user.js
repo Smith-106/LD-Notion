@@ -13293,6 +13293,227 @@ ${insight.summary || ""}`,
     }
   });
 
+  // src/ui/bookmark-list.js
+  var require_bookmark_list = __commonJS({
+    "src/ui/bookmark-list.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { SiteDetector: SiteDetector2 } = require_api();
+      var { GitHubAPI: GitHubAPI2 } = require_import();
+      var _UI = null;
+      var UI2 = () => {
+        if (!_UI) _UI = require_main_ui().UI;
+        return _UI;
+      };
+      var BookmarkList = {
+        isGitHubMode: () => SiteDetector2.isGitHub(),
+        getActiveBookmarkSource: () => {
+          const source = Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG2.DEFAULTS.bookmarkSource);
+          return source === "github" ? "github" : "linuxdo";
+        },
+        isActiveGitHubSource: () => UI2().getActiveBookmarkSource() === "github",
+        getAutoImportConfigBySource: () => {
+          const isGitHub = UI2().isActiveGitHubSource();
+          return {
+            isGitHub,
+            enabledKey: isGitHub ? CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED : CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED,
+            intervalKey: isGitHub ? CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL : CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL,
+            enabledDefault: isGitHub ? CONFIG2.DEFAULTS.githubAutoImportEnabled : CONFIG2.DEFAULTS.autoImportEnabled,
+            intervalDefault: isGitHub ? CONFIG2.DEFAULTS.githubAutoImportInterval : CONFIG2.DEFAULTS.autoImportInterval
+          };
+        },
+        updateVisualSnapshot: (source, bookmarks) => {
+          const key = source === "github" ? "github" : "linuxdo";
+          UI2().visualSnapshots[key] = Array.isArray(bookmarks) ? bookmarks.slice() : [];
+        },
+        getCombinedVisualBookmarks: () => {
+          return [
+            ...Array.isArray(UI2().visualSnapshots.linuxdo) ? UI2().visualSnapshots.linuxdo : [],
+            ...Array.isArray(UI2().visualSnapshots.github) ? UI2().visualSnapshots.github : []
+          ];
+        },
+        getBookmarkVisualSourceLabel: (bookmark) => {
+          return (bookmark == null ? void 0 : bookmark.source) === "github" ? "GitHub" : "Linux.do";
+        },
+        getBookmarkVisualTypeLabel: (bookmark) => {
+          if ((bookmark == null ? void 0 : bookmark.source) === "github") {
+            const sourceTypeMap = {
+              stars: "Stars",
+              repos: "Repos",
+              forks: "Forks",
+              gists: "Gists"
+            };
+            return sourceTypeMap[bookmark.sourceType] || "GitHub";
+          }
+          return "\u5E16\u5B50";
+        },
+        getBookmarkVisualDate: (bookmark) => {
+          var _a, _b, _c;
+          const candidates = (bookmark == null ? void 0 : bookmark.source) === "github" ? [
+            (_a = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _a.updated_at,
+            (_b = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _b.created_at,
+            (_c = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _c.pushed_at,
+            bookmark == null ? void 0 : bookmark.updated_at,
+            bookmark == null ? void 0 : bookmark.created_at
+          ] : [
+            bookmark == null ? void 0 : bookmark.created_at,
+            bookmark == null ? void 0 : bookmark.bookmarked_at,
+            bookmark == null ? void 0 : bookmark.updated_at
+          ];
+          for (const candidate of candidates) {
+            if (!candidate) continue;
+            const date = new Date(candidate);
+            if (!Number.isNaN(date.getTime())) {
+              return date;
+            }
+          }
+          return null;
+        },
+        applyBookmarkSourceUI: (source) => {
+          var _a;
+          const refs = UI2().refs || {};
+          const isGitHub = source === "github";
+          if (refs.bookmarksLabel) {
+            refs.bookmarksLabel.textContent = "\u5DF2\u52A0\u8F7D\u6536\u85CF\u6570\u91CF";
+          }
+          if (refs.autoImportLabel) {
+            refs.autoImportLabel.textContent = "\u542F\u7528\u81EA\u52A8\u5BFC\u5165\u65B0\u6536\u85CF";
+          }
+          if (refs.autoImportIntervalLabel) {
+            refs.autoImportIntervalLabel.textContent = "\u8F6E\u8BE2\u95F4\u9694";
+          }
+          if (refs.sourceSelectLinuxdo) {
+            refs.sourceSelectLinuxdo.classList.toggle("active", !isGitHub);
+          }
+          if (refs.sourceSelectGithub) {
+            refs.sourceSelectGithub.classList.toggle("active", isGitHub);
+          }
+          const autoStatus = refs.autoImportStatus || ((_a = UI2().panel) == null ? void 0 : _a.querySelector("#ldb-auto-import-status"));
+          if (autoStatus && autoStatus.textContent && !autoStatus.textContent.includes("\u26A0\uFE0F")) {
+            autoStatus.textContent = "";
+          }
+        },
+        getBookmarkKey: (bookmark) => {
+          if ((bookmark == null ? void 0 : bookmark.source) === "github") {
+            return `gh:${bookmark.sourceType}:${bookmark.itemKey}`;
+          }
+          return String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
+        },
+        isBookmarkKeyExported: (bookmarkKey) => {
+          if (!bookmarkKey) return false;
+          const dedupStrict = Utils2.isLinuxDoDedupStrict();
+          if (!bookmarkKey.startsWith("gh:")) {
+            if (!dedupStrict) return false;
+            return Storage2.isTopicExported(bookmarkKey);
+          }
+          const parts = bookmarkKey.split(":");
+          const sourceType = parts[1] || "";
+          const itemKey = parts.slice(2).join(":");
+          if (sourceType === "gists") {
+            return GitHubAPI2.isGistExported(itemKey);
+          }
+          return GitHubAPI2.isExported(itemKey);
+        },
+        isBookmarkExported: (bookmark) => {
+          return UI2().isBookmarkKeyExported(UI2().getBookmarkKey(bookmark));
+        },
+        getSelectedBookmarks: () => {
+          if (!Array.isArray(UI2().bookmarks) || UI2().bookmarks.length === 0) return [];
+          return UI2().bookmarks.filter((bookmark) => {
+            var _a;
+            const bookmarkKey = UI2().getBookmarkKey(bookmark);
+            return (_a = UI2().selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
+          });
+        },
+        buildBookmarkItemHtml: (bookmark, githubMode = false) => {
+          var _a;
+          const bookmarkKey = UI2().getBookmarkKey(bookmark);
+          const title = bookmark.title || bookmark.name || `\u5E16\u5B50 ${bookmarkKey}`;
+          const escapedTitle = Utils2.escapeHtml(title);
+          const escapedTruncatedTitle = Utils2.escapeHtml(Utils2.truncateText(title, 35));
+          const isExported = UI2().isBookmarkKeyExported(bookmarkKey);
+          const isSelected = (_a = UI2().selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
+          const sourceTag = githubMode ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${Utils2.escapeHtml((bookmark.sourceType || "stars").toUpperCase())}</span>` : "";
+          const reexportAction = !githubMode && isExported ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868">\u91CD\u65B0\u5BFC\u51FA</button>` : "";
+          const escapedBookmarkKey = Utils2.escapeHtml(bookmarkKey);
+          return `
+            <div class="ldb-bookmark-item" data-topic-id="${escapedBookmarkKey}">
+                <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
+                <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
+                ${sourceTag}${isExported ? '<span class="status exported">\u5DF2\u5BFC\u51FA</span>' : '<span class="status pending">\u5F85\u5BFC\u51FA</span>'}
+                ${reexportAction}
+            </div>
+        `;
+        },
+        // 渲染收藏列表
+        renderBookmarkList: () => {
+          const list = UI2().refs.bookmarkList;
+          UI2().recomputeExportStats();
+          UI2().renderJobId += 1;
+          const renderJobId = UI2().renderJobId;
+          if (!UI2().bookmarks || UI2().bookmarks.length === 0) {
+            list.innerHTML = '<div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">\u6682\u65E0\u6536\u85CF</div>';
+            UI2().updateSelectCount();
+            return;
+          }
+          const githubMode = UI2().isActiveGitHubSource();
+          const bookmarks = UI2().bookmarks.slice();
+          const chunkSize = bookmarks.length > 150 ? 80 : bookmarks.length;
+          let cursor = 0;
+          list.innerHTML = "";
+          const appendChunk = () => {
+            if (UI2().renderJobId !== renderJobId) return;
+            const chunk = bookmarks.slice(cursor, cursor + chunkSize).map((bookmark) => UI2().buildBookmarkItemHtml(bookmark, githubMode)).join("");
+            list.insertAdjacentHTML("beforeend", chunk);
+            cursor += chunkSize;
+            if (cursor < bookmarks.length) {
+              if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+                window.requestAnimationFrame(appendChunk);
+              } else {
+                setTimeout(appendChunk, 0);
+              }
+            }
+          };
+          appendChunk();
+          UI2().updateSelectCount();
+        },
+        requeueLinuxDoBookmark: (bookmarkKey) => {
+          if (!bookmarkKey || bookmarkKey.startsWith("gh:")) return false;
+          if (!Utils2.isLinuxDoDedupStrict()) {
+            UI2().showStatus("\u5F53\u524D\u4E3A\u5141\u8BB8\u91CD\u590D\u6A21\u5F0F\uFF0C\u65E0\u9700\u91CD\u65B0\u5BFC\u51FA\uFF1B\u76F4\u63A5\u52FE\u9009\u5E76\u5BFC\u51FA\u5373\u53EF\u3002", "info");
+            return false;
+          }
+          const removed = Storage2.unmarkTopicExported(bookmarkKey);
+          if (!removed) {
+            UI2().showStatus("\u8BE5\u5E16\u5B50\u5F53\u524D\u4E0D\u5728\u5DF2\u5BFC\u51FA\u8BB0\u5F55\u4E2D\u3002", "info");
+            return false;
+          }
+          UI2().selectedBookmarks.add(bookmarkKey);
+          UI2().recomputeExportStats();
+          UI2().renderBookmarkList();
+          UI2().showStatus("\u5DF2\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u8BF7\u91CD\u65B0\u70B9\u51FB\u5BFC\u51FA\u3002", "success");
+          return true;
+        },
+        syncRenderedSelectionState: () => {
+          var _a;
+          const list = UI2().refs && UI2().refs.bookmarkList || ((_a = UI2().panel) == null ? void 0 : _a.querySelector("#ldb-bookmark-list"));
+          if (!list) return;
+          list.querySelectorAll(".ldb-bookmark-item").forEach((item) => {
+            var _a2;
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            if (!checkbox || checkbox.disabled) return;
+            const bookmarkKey = String(item.dataset.topicId || "");
+            if (!bookmarkKey) return;
+            checkbox.checked = ((_a2 = UI2().selectedBookmarks) == null ? void 0 : _a2.has(bookmarkKey)) || false;
+          });
+        }
+      };
+      module.exports = { BookmarkList };
+    }
+  });
+
   // src/ui/main-ui.js
   var require_main_ui = __commonJS({
     "src/ui/main-ui.js"(exports, module) {
@@ -14740,69 +14961,6 @@ ${insight.summary || ""}`,
           if (savedValue) {
             select.value = savedValue;
           }
-        },
-        isGitHubMode: () => SiteDetector2.isGitHub(),
-        getActiveBookmarkSource: () => {
-          const source = Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG2.DEFAULTS.bookmarkSource);
-          return source === "github" ? "github" : "linuxdo";
-        },
-        isActiveGitHubSource: () => UI2.getActiveBookmarkSource() === "github",
-        getAutoImportConfigBySource: () => {
-          const isGitHub = UI2.isActiveGitHubSource();
-          return {
-            isGitHub,
-            enabledKey: isGitHub ? CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED : CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED,
-            intervalKey: isGitHub ? CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL : CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL,
-            enabledDefault: isGitHub ? CONFIG2.DEFAULTS.githubAutoImportEnabled : CONFIG2.DEFAULTS.autoImportEnabled,
-            intervalDefault: isGitHub ? CONFIG2.DEFAULTS.githubAutoImportInterval : CONFIG2.DEFAULTS.autoImportInterval
-          };
-        },
-        updateVisualSnapshot: (source, bookmarks) => {
-          const key = source === "github" ? "github" : "linuxdo";
-          UI2.visualSnapshots[key] = Array.isArray(bookmarks) ? bookmarks.slice() : [];
-        },
-        getCombinedVisualBookmarks: () => {
-          return [
-            ...Array.isArray(UI2.visualSnapshots.linuxdo) ? UI2.visualSnapshots.linuxdo : [],
-            ...Array.isArray(UI2.visualSnapshots.github) ? UI2.visualSnapshots.github : []
-          ];
-        },
-        getBookmarkVisualSourceLabel: (bookmark) => {
-          return (bookmark == null ? void 0 : bookmark.source) === "github" ? "GitHub" : "Linux.do";
-        },
-        getBookmarkVisualTypeLabel: (bookmark) => {
-          if ((bookmark == null ? void 0 : bookmark.source) === "github") {
-            const sourceTypeMap = {
-              stars: "Stars",
-              repos: "Repos",
-              forks: "Forks",
-              gists: "Gists"
-            };
-            return sourceTypeMap[bookmark.sourceType] || "GitHub";
-          }
-          return "\u5E16\u5B50";
-        },
-        getBookmarkVisualDate: (bookmark) => {
-          var _a, _b, _c;
-          const candidates = (bookmark == null ? void 0 : bookmark.source) === "github" ? [
-            (_a = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _a.updated_at,
-            (_b = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _b.created_at,
-            (_c = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _c.pushed_at,
-            bookmark == null ? void 0 : bookmark.updated_at,
-            bookmark == null ? void 0 : bookmark.created_at
-          ] : [
-            bookmark == null ? void 0 : bookmark.created_at,
-            bookmark == null ? void 0 : bookmark.bookmarked_at,
-            bookmark == null ? void 0 : bookmark.updated_at
-          ];
-          for (const candidate of candidates) {
-            if (!candidate) continue;
-            const date = new Date(candidate);
-            if (!Number.isNaN(date.getTime())) {
-              return date;
-            }
-          }
-          return null;
         },
         buildWorkspaceInsightMarkdown: (model = UI2.buildWorkspaceVisualizationModel(), aiSummary = UI2.workspaceInsightSummary || "") => {
           if (!(model == null ? void 0 : model.scannedAt)) {
@@ -16253,62 +16411,6 @@ ${insight.summary || ""}`,
             </div>
         `;
         },
-        applyBookmarkSourceUI: (source) => {
-          var _a;
-          const refs = UI2.refs || {};
-          const isGitHub = source === "github";
-          if (refs.bookmarksLabel) {
-            refs.bookmarksLabel.textContent = "\u5DF2\u52A0\u8F7D\u6536\u85CF\u6570\u91CF";
-          }
-          if (refs.autoImportLabel) {
-            refs.autoImportLabel.textContent = "\u542F\u7528\u81EA\u52A8\u5BFC\u5165\u65B0\u6536\u85CF";
-          }
-          if (refs.autoImportIntervalLabel) {
-            refs.autoImportIntervalLabel.textContent = "\u8F6E\u8BE2\u95F4\u9694";
-          }
-          if (refs.sourceSelectLinuxdo) {
-            refs.sourceSelectLinuxdo.classList.toggle("active", !isGitHub);
-          }
-          if (refs.sourceSelectGithub) {
-            refs.sourceSelectGithub.classList.toggle("active", isGitHub);
-          }
-          const autoStatus = refs.autoImportStatus || ((_a = UI2.panel) == null ? void 0 : _a.querySelector("#ldb-auto-import-status"));
-          if (autoStatus && autoStatus.textContent && !autoStatus.textContent.includes("\u26A0\uFE0F")) {
-            autoStatus.textContent = "";
-          }
-        },
-        getBookmarkKey: (bookmark) => {
-          if ((bookmark == null ? void 0 : bookmark.source) === "github") {
-            return `gh:${bookmark.sourceType}:${bookmark.itemKey}`;
-          }
-          return String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
-        },
-        isBookmarkKeyExported: (bookmarkKey) => {
-          if (!bookmarkKey) return false;
-          const dedupStrict = Utils2.isLinuxDoDedupStrict();
-          if (!bookmarkKey.startsWith("gh:")) {
-            if (!dedupStrict) return false;
-            return Storage2.isTopicExported(bookmarkKey);
-          }
-          const parts = bookmarkKey.split(":");
-          const sourceType = parts[1] || "";
-          const itemKey = parts.slice(2).join(":");
-          if (sourceType === "gists") {
-            return GitHubAPI2.isGistExported(itemKey);
-          }
-          return GitHubAPI2.isExported(itemKey);
-        },
-        isBookmarkExported: (bookmark) => {
-          return UI2.isBookmarkKeyExported(UI2.getBookmarkKey(bookmark));
-        },
-        getSelectedBookmarks: () => {
-          if (!Array.isArray(UI2.bookmarks) || UI2.bookmarks.length === 0) return [];
-          return UI2.bookmarks.filter((bookmark) => {
-            var _a;
-            const bookmarkKey = UI2.getBookmarkKey(bookmark);
-            return (_a = UI2.selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
-          });
-        },
         sanitizeObsidianFileName: (name, fallback = "untitled") => {
           const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
           return base || fallback;
@@ -16605,58 +16707,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }
           return { success, failed, skipped: [] };
         },
-        buildBookmarkItemHtml: (bookmark, githubMode = false) => {
-          var _a;
-          const bookmarkKey = UI2.getBookmarkKey(bookmark);
-          const title = bookmark.title || bookmark.name || `\u5E16\u5B50 ${bookmarkKey}`;
-          const escapedTitle = Utils2.escapeHtml(title);
-          const escapedTruncatedTitle = Utils2.escapeHtml(Utils2.truncateText(title, 35));
-          const isExported = UI2.isBookmarkKeyExported(bookmarkKey);
-          const isSelected = (_a = UI2.selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
-          const sourceTag = githubMode ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${Utils2.escapeHtml((bookmark.sourceType || "stars").toUpperCase())}</span>` : "";
-          const reexportAction = !githubMode && isExported ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868">\u91CD\u65B0\u5BFC\u51FA</button>` : "";
-          const escapedBookmarkKey = Utils2.escapeHtml(bookmarkKey);
-          return `
-            <div class="ldb-bookmark-item" data-topic-id="${escapedBookmarkKey}">
-                <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
-                <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
-                ${sourceTag}${isExported ? '<span class="status exported">\u5DF2\u5BFC\u51FA</span>' : '<span class="status pending">\u5F85\u5BFC\u51FA</span>'}
-                ${reexportAction}
-            </div>
-        `;
-        },
-        // 渲染收藏列表
-        renderBookmarkList: () => {
-          const list = UI2.refs.bookmarkList;
-          UI2.recomputeExportStats();
-          UI2.renderJobId += 1;
-          const renderJobId = UI2.renderJobId;
-          if (!UI2.bookmarks || UI2.bookmarks.length === 0) {
-            list.innerHTML = '<div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">\u6682\u65E0\u6536\u85CF</div>';
-            UI2.updateSelectCount();
-            return;
-          }
-          const githubMode = UI2.isActiveGitHubSource();
-          const bookmarks = UI2.bookmarks.slice();
-          const chunkSize = bookmarks.length > 150 ? 80 : bookmarks.length;
-          let cursor = 0;
-          list.innerHTML = "";
-          const appendChunk = () => {
-            if (UI2.renderJobId !== renderJobId) return;
-            const chunk = bookmarks.slice(cursor, cursor + chunkSize).map((bookmark) => UI2.buildBookmarkItemHtml(bookmark, githubMode)).join("");
-            list.insertAdjacentHTML("beforeend", chunk);
-            cursor += chunkSize;
-            if (cursor < bookmarks.length) {
-              if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
-                window.requestAnimationFrame(appendChunk);
-              } else {
-                setTimeout(appendChunk, 0);
-              }
-            }
-          };
-          appendChunk();
-          UI2.updateSelectCount();
-        },
         // 重算导出统计（在列表变更后调用）
         recomputeExportStats: () => {
           if (!UI2.bookmarks || UI2.bookmarks.length === 0) {
@@ -16698,36 +16748,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             selectAll.indeterminate = true;
           }
           UI2.renderVisualSummary();
-        },
-        requeueLinuxDoBookmark: (bookmarkKey) => {
-          if (!bookmarkKey || bookmarkKey.startsWith("gh:")) return false;
-          if (!Utils2.isLinuxDoDedupStrict()) {
-            UI2.showStatus("\u5F53\u524D\u4E3A\u5141\u8BB8\u91CD\u590D\u6A21\u5F0F\uFF0C\u65E0\u9700\u91CD\u65B0\u5BFC\u51FA\uFF1B\u76F4\u63A5\u52FE\u9009\u5E76\u5BFC\u51FA\u5373\u53EF\u3002", "info");
-            return false;
-          }
-          const removed = Storage2.unmarkTopicExported(bookmarkKey);
-          if (!removed) {
-            UI2.showStatus("\u8BE5\u5E16\u5B50\u5F53\u524D\u4E0D\u5728\u5DF2\u5BFC\u51FA\u8BB0\u5F55\u4E2D\u3002", "info");
-            return false;
-          }
-          UI2.selectedBookmarks.add(bookmarkKey);
-          UI2.recomputeExportStats();
-          UI2.renderBookmarkList();
-          UI2.showStatus("\u5DF2\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u8BF7\u91CD\u65B0\u70B9\u51FB\u5BFC\u51FA\u3002", "success");
-          return true;
-        },
-        syncRenderedSelectionState: () => {
-          var _a;
-          const list = UI2.refs && UI2.refs.bookmarkList || ((_a = UI2.panel) == null ? void 0 : _a.querySelector("#ldb-bookmark-list"));
-          if (!list) return;
-          list.querySelectorAll(".ldb-bookmark-item").forEach((item) => {
-            var _a2;
-            const checkbox = item.querySelector('input[type="checkbox"]');
-            if (!checkbox || checkbox.disabled) return;
-            const bookmarkKey = String(item.dataset.topicId || "");
-            if (!bookmarkKey) return;
-            checkbox.checked = ((_a2 = UI2.selectedBookmarks) == null ? void 0 : _a2.has(bookmarkKey)) || false;
-          });
         },
         // 显示导出报告
         showReport: (results) => {
@@ -16867,6 +16887,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         }
       };
       Object.assign(UI2, require_workspace_visual().WorkspaceVisual);
+      Object.assign(UI2, require_bookmark_list().BookmarkList);
       ;
       module.exports = { UI: UI2 };
     }
