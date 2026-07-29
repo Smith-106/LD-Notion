@@ -5433,7 +5433,7 @@ ${quoted}
     "src/ai/schema.js"(exports, module) {
       "use strict";
       var { UrlValidator } = require_UrlValidator();
-      var AISchema = {
+      var AISchema2 = {
         // 长度上限
         MAX_PROP_NAME: 64,
         MAX_TITLE: 2e3,
@@ -5492,15 +5492,15 @@ ${quoted}
         validatePropertyName: (name) => {
           let n = String(name || "").trim();
           if (!n) return "";
-          if (n.length > AISchema.MAX_PROP_NAME) n = n.slice(0, AISchema.MAX_PROP_NAME);
-          if (!AISchema.PROP_NAME_RE.test(n)) return "";
-          if (AISchema.NOTION_RESERVED_NAMES.has(n)) return "";
+          if (n.length > AISchema2.MAX_PROP_NAME) n = n.slice(0, AISchema2.MAX_PROP_NAME);
+          if (!AISchema2.PROP_NAME_RE.test(n)) return "";
+          if (AISchema2.NOTION_RESERVED_NAMES.has(n)) return "";
           return n;
         },
         // 校验属性类型。返回 { valid, type } 或 { valid: false }。
         validatePropertyType: (type) => {
           const t = String(type || "").trim();
-          if (AISchema.ALLOWED_PROPERTY_TYPES.has(t)) return { valid: true, type: t };
+          if (AISchema2.ALLOWED_PROPERTY_TYPES.has(t)) return { valid: true, type: t };
           return { valid: false };
         },
         // 校验属性值（按 type）。返回规范化值或 null（非法/应跳过）。
@@ -5509,36 +5509,36 @@ ${quoted}
           switch (type) {
             case "title":
             case "rich_text":
-              return String(val).slice(0, type === "title" ? AISchema.MAX_TITLE : AISchema.MAX_RICH_TEXT);
+              return String(val).slice(0, type === "title" ? AISchema2.MAX_TITLE : AISchema2.MAX_RICH_TEXT);
             case "select":
             case "status":
-              return String(val).trim().slice(0, AISchema.MAX_SELECT_NAME);
+              return String(val).trim().slice(0, AISchema2.MAX_SELECT_NAME);
             case "multi_select": {
               const arr = Array.isArray(val) ? val : [val];
-              return arr.map((v) => String(v || "").trim()).filter(Boolean).map((v) => v.slice(0, AISchema.MAX_SELECT_NAME));
+              return arr.map((v) => String(v || "").trim()).filter(Boolean).map((v) => v.slice(0, AISchema2.MAX_SELECT_NAME));
             }
             case "number": {
               const n = Number(val);
-              if (!isFinite(n) || Math.abs(n) > AISchema.MAX_NUMBER) return null;
+              if (!isFinite(n) || Math.abs(n) > AISchema2.MAX_NUMBER) return null;
               return n;
             }
             case "checkbox":
               return Boolean(val);
             case "date":
-              return AISchema.ISO_DATE_RE.test(String(val).trim()) ? String(val).trim() : null;
+              return AISchema2.ISO_DATE_RE.test(String(val).trim()) ? String(val).trim() : null;
             case "url":
             case "email":
             case "phone_number":
-              return String(val).trim().slice(0, AISchema.MAX_RICH_TEXT);
+              return String(val).trim().slice(0, AISchema2.MAX_RICH_TEXT);
             default:
-              return String(val).slice(0, AISchema.MAX_RICH_TEXT);
+              return String(val).slice(0, AISchema2.MAX_RICH_TEXT);
           }
         },
         // 校验 emoji（icon）。长度 + 拒控制字符。
         validateEmoji: (emoji) => {
           const e = String(emoji || "").trim();
           if (!e) return "";
-          if (e.length > AISchema.MAX_EMOJI) return e.slice(0, AISchema.MAX_EMOJI);
+          if (e.length > AISchema2.MAX_EMOJI) return e.slice(0, AISchema2.MAX_EMOJI);
           if (/[\x00-\x1f\x7f]/.test(e)) return "";
           return e;
         },
@@ -5550,7 +5550,7 @@ ${quoted}
           const cleaned = {};
           let hasValid = false;
           for (const key of Object.keys(value)) {
-            if (AISchema.ALLOWED_OBJECT_VALUE_TYPES.has(key)) {
+            if (AISchema2.ALLOWED_OBJECT_VALUE_TYPES.has(key)) {
               cleaned[key] = value[key];
               hasValid = true;
             }
@@ -5647,12 +5647,12 @@ ${quoted}
             return { ok: false, reason: `AI \u8FD4\u56DE\u7684 JSON \u683C\u5F0F\u65E0\u6548: ${error.message}` };
           }
           const validators = {
-            extractToDatabase: AISchema.validateExtractToDatabaseSchema,
-            bookmarkSummary: AISchema.validateBookmarkSummarySchema,
-            editPlan: AISchema.validateEditPlanSchema,
-            generatePages: AISchema.validateGeneratePagesSchema,
-            agentPlan: AISchema.validateAgentPlanSchema,
-            intent: AISchema.validateIntentSchema
+            extractToDatabase: AISchema2.validateExtractToDatabaseSchema,
+            bookmarkSummary: AISchema2.validateBookmarkSummarySchema,
+            editPlan: AISchema2.validateEditPlanSchema,
+            generatePages: AISchema2.validateGeneratePagesSchema,
+            agentPlan: AISchema2.validateAgentPlanSchema,
+            intent: AISchema2.validateIntentSchema
           };
           const validator = validators[name];
           if (validator) {
@@ -5662,7 +5662,7 @@ ${quoted}
           return { ok: true, value: parsed };
         }
       };
-      module.exports = { AISchema };
+      module.exports = { AISchema: AISchema2 };
     }
   });
 
@@ -5675,7 +5675,7 @@ ${quoted}
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { AIService: AIService2 } = require_ai();
-      var { AISchema } = require_schema();
+      var { AISchema: AISchema2 } = require_schema();
       var BookmarkExporter2 = {
         _pageInsightCache: {},
         // FIFO 上限（PERF-005）：_pageInsightCache 原为无界普通对象，长会话累积内存泄漏。
@@ -5875,7 +5875,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
 \u9875\u9762\u6458\u8981\uFF1A${insight.summary || ""}`;
           try {
             const response = await AIService2.requestChat(prompt2, settings, 220);
-            const parsed = AISchema.parseAIJson("bookmarkSummary", response);
+            const parsed = AISchema2.parseAIJson("bookmarkSummary", response);
             if (!parsed.ok) return null;
             const data = parsed.value;
             return {
@@ -11893,7 +11893,7 @@ ${insight.summary || ""}`,
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
-      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
+      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UICommandService } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
@@ -12782,6 +12782,517 @@ ${insight.summary || ""}`,
     }
   });
 
+  // src/ui/workspace-visual.js
+  var require_workspace_visual = __commonJS({
+    "src/ui/workspace-visual.js"(exports, module) {
+      "use strict";
+      var { Utils: Utils2 } = require_utils();
+      var _UI = null;
+      var UI2 = () => {
+        if (!_UI) _UI = require_main_ui().UI;
+        return _UI;
+      };
+      var WorkspaceVisual = {
+        getViewPct: (count, total) => total > 0 ? Math.round(count / total * 100) : 0,
+        buildViewDateBucket: (date) => ({
+          key: [
+            date.getFullYear(),
+            String(date.getMonth() + 1).padStart(2, "0"),
+            String(date.getDate()).padStart(2, "0")
+          ].join("-"),
+          label: `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`
+        }),
+        collectWorkspacePlainText: (items = []) => {
+          return Array.isArray(items) ? items.map((item) => {
+            var _a;
+            return (item == null ? void 0 : item.plain_text) || ((_a = item == null ? void 0 : item.text) == null ? void 0 : _a.content) || "";
+          }).join("").trim() : "";
+        },
+        getWorkspacePageProperty: (page, names = []) => {
+          const properties = (page == null ? void 0 : page.properties) || {};
+          for (const name of names) {
+            if (name && Object.prototype.hasOwnProperty.call(properties, name)) {
+              return properties[name];
+            }
+          }
+          return null;
+        },
+        getWorkspacePagePropertyText: (page, names = []) => {
+          var _a;
+          const prop = UI2().getWorkspacePageProperty(page, names);
+          if (!prop) return "";
+          switch (prop.type) {
+            case "title":
+              return UI2().collectWorkspacePlainText(prop.title);
+            case "rich_text":
+              return UI2().collectWorkspacePlainText(prop.rich_text);
+            case "select":
+              return String(((_a = prop.select) == null ? void 0 : _a.name) || "").trim();
+            case "multi_select":
+              return Array.isArray(prop.multi_select) ? prop.multi_select.map((item) => (item == null ? void 0 : item.name) || "").filter(Boolean).join(", ") : "";
+            case "url":
+              return String(prop.url || "").trim();
+            case "number":
+              return prop.number === 0 || Number.isFinite(prop.number) ? String(prop.number) : "";
+            case "checkbox":
+              return prop.checkbox ? "true" : "";
+            case "created_time":
+              return String(prop.created_time || "").trim();
+            case "last_edited_time":
+              return String(prop.last_edited_time || "").trim();
+            default:
+              return "";
+          }
+        },
+        getWorkspacePagePropertyDateValue: (page, names = []) => {
+          var _a;
+          const prop = UI2().getWorkspacePageProperty(page, names);
+          if (!prop) return "";
+          if (prop.type === "date") return String(((_a = prop.date) == null ? void 0 : _a.start) || "").trim();
+          if (prop.type === "created_time") return String(prop.created_time || "").trim();
+          if (prop.type === "last_edited_time") return String(prop.last_edited_time || "").trim();
+          return "";
+        },
+        getWorkspaceVisualSourceUrl: (pageOrRecord) => {
+          if (pageOrRecord == null ? void 0 : pageOrRecord.sourceUrl) return String(pageOrRecord.sourceUrl || "").trim();
+          const explicitUrl = UI2().getWorkspacePagePropertyText(pageOrRecord, ["\u94FE\u63A5", "URL", "\u7F51\u5740", "\u94FE\u63A5\u5730\u5740"]);
+          if (explicitUrl) return explicitUrl;
+          return String((pageOrRecord == null ? void 0 : pageOrRecord.url) || "").trim();
+        },
+        normalizeWorkspaceSourceLabel: (value) => {
+          const raw = String(value || "").trim();
+          if (!raw) return "";
+          const lower = raw.toLowerCase();
+          if (lower.includes("linux.do") || lower.includes("linuxdo")) return "Linux.do";
+          if (lower.includes("github") || ["repo", "repos", "star", "stars", "fork", "forks", "gist", "gists"].includes(lower)) return "GitHub";
+          if (lower.includes("rss") || lower.includes("feed")) return "RSS";
+          if (lower.includes("candidate") || raw.includes("\u7EDF\u4E00\u5019\u9009")) return "\u7EDF\u4E00\u5019\u9009";
+          if (lower.includes("zhihu") || raw.includes("\u77E5\u4E4E")) return "\u77E5\u4E4E";
+          if (lower.includes("bookmark") || lower.includes("\u4E66\u7B7E")) return "\u6D4F\u89C8\u5668\u4E66\u7B7E";
+          if (lower.includes("generic") || lower.includes("\u901A\u7528\u9875\u9762")) return "\u901A\u7528\u9875\u9762";
+          if (lower.includes("unknown") || lower.includes("\u672A\u6807\u8BB0")) return "\u672A\u6807\u8BB0";
+          return raw;
+        },
+        normalizeWorkspaceSourceTypeLabel: (value, source = "") => {
+          const raw = String(value || "").trim();
+          if (!raw) {
+            if (source === "GitHub") return "GitHub";
+            if (source === "Linux.do") return "\u5E16\u5B50";
+            if (source === "RSS") return "Feed";
+            if (source === "\u6D4F\u89C8\u5668\u4E66\u7B7E") return "\u4E66\u7B7E";
+            if (source === "\u77E5\u4E4E") return "\u7F51\u9875";
+            return "";
+          }
+          const lower = raw.toLowerCase();
+          if (["star", "stars"].includes(lower)) return "Stars";
+          if (["repo", "repos"].includes(lower)) return "Repos";
+          if (["fork", "forks"].includes(lower)) return "Forks";
+          if (["gist", "gists"].includes(lower)) return "Gists";
+          if (lower.includes("rss") || lower.includes("feed")) return "Feed";
+          if (lower.includes("bookmark") || lower.includes("\u4E66\u7B7E")) return "\u4E66\u7B7E";
+          if (lower.includes("post") || lower.includes("topic") || lower.includes("\u5E16\u5B50")) return "\u5E16\u5B50";
+          if (lower.includes("candidate") || raw.includes("\u5019\u9009")) return "\u8DE8\u6E90\u5173\u8054\u5019\u9009";
+          if (["answer", "\u56DE\u7B54"].includes(lower) || raw.includes("\u56DE\u7B54")) return "\u56DE\u7B54";
+          if (["question", "\u95EE\u9898", "\u95EE\u7B54"].includes(lower) || raw.includes("\u95EE\u9898") || raw.includes("\u95EE\u7B54")) return "\u95EE\u9898";
+          if (["article", "column_article", "\u6587\u7AE0", "\u4E13\u680F\u6587\u7AE0"].includes(lower) || raw.includes("\u6587\u7AE0")) return "\u6587\u7AE0";
+          if (["web", "webpage", "web page", "page", "\u7F51\u9875"].includes(lower) || raw.includes("\u7F51\u9875")) return "\u7F51\u9875";
+          return raw;
+        },
+        getWorkspaceVisualDate: (pageOrRecord) => {
+          if ((pageOrRecord == null ? void 0 : pageOrRecord.date) instanceof Date && (pageOrRecord == null ? void 0 : pageOrRecord.dateKey)) {
+            return {
+              date: pageOrRecord.date,
+              key: pageOrRecord.dateKey,
+              label: pageOrRecord.dateLabel || UI2().buildViewDateBucket(pageOrRecord.date).label,
+              field: pageOrRecord.dateField || ""
+            };
+          }
+          const candidates = [
+            { field: "\u6536\u85CF\u65F6\u95F4", value: UI2().getWorkspacePagePropertyDateValue(pageOrRecord, ["\u6536\u85CF\u65F6\u95F4"]) },
+            { field: "\u66F4\u65B0\u65F6\u95F4", value: UI2().getWorkspacePagePropertyDateValue(pageOrRecord, ["\u66F4\u65B0\u65F6\u95F4"]) },
+            { field: "\u53D1\u5E03\u65E5\u671F", value: UI2().getWorkspacePagePropertyDateValue(pageOrRecord, ["\u53D1\u5E03\u65E5\u671F"]) },
+            { field: "created_time", value: String((pageOrRecord == null ? void 0 : pageOrRecord.created_time) || "").trim() },
+            { field: "last_edited_time", value: String((pageOrRecord == null ? void 0 : pageOrRecord.last_edited_time) || "").trim() }
+          ];
+          for (const candidate of candidates) {
+            if (!candidate.value) continue;
+            const date = new Date(candidate.value);
+            if (Number.isNaN(date.getTime())) continue;
+            const bucket = UI2().buildViewDateBucket(date);
+            return {
+              date,
+              key: bucket.key,
+              label: bucket.label,
+              field: candidate.field
+            };
+          }
+          return null;
+        },
+        inferWorkspaceVisualSource: (page, databases = []) => {
+          var _a, _b;
+          const explicitSource = UI2().normalizeWorkspaceSourceLabel(UI2().getWorkspacePagePropertyText(page, ["\u6765\u6E90"]));
+          const explicitTypeRaw = UI2().getWorkspacePagePropertyText(page, ["\u6765\u6E90\u7C7B\u578B"]);
+          const properties = (page == null ? void 0 : page.properties) || {};
+          const propertyNames = Object.keys(properties);
+          const parentDatabaseId = String(((_a = page == null ? void 0 : page.parent) == null ? void 0 : _a.database_id) || "").replace(/-/g, "");
+          const parentDatabaseTitle = ((_b = databases.find((db) => db.id === parentDatabaseId)) == null ? void 0 : _b.title) || "";
+          const pageTitle = Utils2.getPageTitle(page);
+          const hintText = [explicitSource, explicitTypeRaw, parentDatabaseTitle, pageTitle].join(" ").toLowerCase();
+          const hasProp = (...names) => names.some((name) => propertyNames.includes(name));
+          let source = explicitSource;
+          let sourceType = UI2().normalizeWorkspaceSourceTypeLabel(explicitTypeRaw, explicitSource);
+          if (!source && sourceType) {
+            if (sourceType === "\u4E66\u7B7E") source = "\u6D4F\u89C8\u5668\u4E66\u7B7E";
+            else if (["Stars", "Repos", "Forks", "Gists", "GitHub"].includes(sourceType)) source = "GitHub";
+            else if (sourceType === "Feed") source = "RSS";
+            else if (sourceType === "\u5E16\u5B50") source = "Linux.do";
+            else if (["\u56DE\u7B54", "\u95EE\u9898", "\u6587\u7AE0", "\u7F51\u9875"].includes(sourceType)) source = hintText.includes("zhihu") ? "\u77E5\u4E4E" : "\u901A\u7528\u9875\u9762";
+          }
+          if (!source && (hasProp("\u5E16\u5B50\u6570", "\u6D4F\u89C8\u6570", "\u70B9\u8D5E\u6570") || hintText.includes("linux.do") || hintText.includes("linuxdo"))) {
+            source = "Linux.do";
+            if (!sourceType) sourceType = "\u5E16\u5B50";
+          }
+          if (!source && (hasProp("Stars", "\u8BED\u8A00", "\u66F4\u65B0\u65F6\u95F4") || hintText.includes("github"))) {
+            source = "GitHub";
+            if (!sourceType) sourceType = hasProp("Stars") ? "Repos" : "GitHub";
+          }
+          if (!source && (hasProp("\u4E66\u7B7E\u8DEF\u5F84") || hintText.includes("bookmark") || hintText.includes("\u4E66\u7B7E"))) {
+            source = "\u6D4F\u89C8\u5668\u4E66\u7B7E";
+            if (!sourceType) sourceType = "\u4E66\u7B7E";
+          }
+          if (!source && (hintText.includes("rss") || hintText.includes("feed"))) {
+            source = "RSS";
+            if (!sourceType) sourceType = "Feed";
+          }
+          if (!source && (hintText.includes("\u7EDF\u4E00\u5019\u9009") || hintText.includes("candidate"))) {
+            source = "\u7EDF\u4E00\u5019\u9009";
+            if (!sourceType) sourceType = "\u8DE8\u6E90\u5173\u8054\u5019\u9009";
+          }
+          if (!source && (hintText.includes("zhihu") || hasProp("\u4F5C\u8005", "\u53D1\u5E03\u65E5\u671F", "\u6458\u8981") && ["\u56DE\u7B54", "\u95EE\u9898", "\u6587\u7AE0"].includes(sourceType))) {
+            source = "\u77E5\u4E4E";
+            if (!sourceType) sourceType = "\u7F51\u9875";
+          }
+          if (!source && (hasProp("\u53D1\u5E03\u65E5\u671F") || hasProp("\u6458\u8981", "\u63CF\u8FF0"))) {
+            source = explicitSource || "\u901A\u7528\u9875\u9762";
+          }
+          if (source && !["Linux.do", "GitHub", "RSS", "\u6D4F\u89C8\u5668\u4E66\u7B7E", "\u77E5\u4E4E", "\u901A\u7528\u9875\u9762", "\u672A\u6807\u8BB0"].includes(source)) {
+            if (["\u56DE\u7B54", "\u95EE\u9898", "\u6587\u7AE0", "\u7F51\u9875"].includes(sourceType)) {
+              source = source === "\u77E5\u4E4E" ? "\u77E5\u4E4E" : "\u901A\u7528\u9875\u9762";
+            }
+          }
+          if (!source) source = explicitSource || "\u672A\u6807\u8BB0";
+          if (!sourceType) sourceType = UI2().normalizeWorkspaceSourceTypeLabel(explicitTypeRaw, source);
+          return { source, sourceType };
+        },
+        getWorkspaceVisualCategory: (pageOrRecord) => {
+          if (pageOrRecord == null ? void 0 : pageOrRecord.category) return String(pageOrRecord.category).trim();
+          return String(
+            UI2().getWorkspacePagePropertyText(pageOrRecord, ["AI\u5206\u7C7B"]) || UI2().getWorkspacePagePropertyText(pageOrRecord, ["\u5206\u7C7B"]) || ""
+          ).trim();
+        },
+        getWorkspaceVisualParentLabel: (record) => {
+          if (record == null ? void 0 : record.parentDatabaseTitle) return record.parentDatabaseTitle;
+          if ((record == null ? void 0 : record.parentType) === "workspace") return "\u5DE5\u4F5C\u533A\u9875\u9762";
+          if ((record == null ? void 0 : record.parentType) === "page_id") return "\u5B50\u9875\u9762";
+          if ((record == null ? void 0 : record.parentType) === "block_id") return "\u5757\u5185\u9875\u9762";
+          if ((record == null ? void 0 : record.parentType) === "database_id") return "\u672A\u547D\u540D\u6570\u636E\u5E93";
+          return "\u672A\u5F52\u6863\u9875\u9762";
+        },
+        mapWorkspacePageSummary: (page) => {
+          var _a, _b, _c, _d;
+          return {
+            id: ((_a = page == null ? void 0 : page.id) == null ? void 0 : _a.replace(/-/g, "")) || "",
+            title: Utils2.getPageTitle(page),
+            type: "page",
+            url: (page == null ? void 0 : page.url) || "",
+            parent: ((_b = page == null ? void 0 : page.parent) == null ? void 0 : _b.type) || "",
+            parentId: String(((_c = page == null ? void 0 : page.parent) == null ? void 0 : _c.database_id) || ((_d = page == null ? void 0 : page.parent) == null ? void 0 : _d.page_id) || "").replace(/-/g, "")
+          };
+        },
+        extractWorkspaceVisualRecord: (page, databasesMap = /* @__PURE__ */ new Map()) => {
+          var _a;
+          const summary = UI2().mapWorkspacePageSummary(page);
+          const dateInfo = UI2().getWorkspaceVisualDate(page);
+          const category = UI2().getWorkspaceVisualCategory(page);
+          const sourceInfo = UI2().inferWorkspaceVisualSource(page, Array.from(databasesMap.values()));
+          const sourceUrl = UI2().getWorkspaceVisualSourceUrl(page);
+          const hasSource = sourceInfo.source && sourceInfo.source !== "\u672A\u6807\u8BB0";
+          const hasDate = !!dateInfo;
+          const hasCategory = !!category;
+          return {
+            id: summary.id,
+            title: summary.title,
+            url: sourceUrl || summary.url,
+            sourceUrl,
+            notionUrl: summary.url,
+            parentType: summary.parent,
+            parentDatabaseId: summary.parent === "database_id" ? summary.parentId : "",
+            parentPageId: summary.parent === "page_id" ? summary.parentId : "",
+            parentDatabaseTitle: ((_a = databasesMap.get(summary.parentId)) == null ? void 0 : _a.title) || "",
+            source: sourceInfo.source,
+            sourceType: sourceInfo.sourceType,
+            category,
+            date: (dateInfo == null ? void 0 : dateInfo.date) || null,
+            dateKey: (dateInfo == null ? void 0 : dateInfo.key) || "",
+            dateLabel: (dateInfo == null ? void 0 : dateInfo.label) || "",
+            dateField: (dateInfo == null ? void 0 : dateInfo.field) || "",
+            hasSource,
+            hasDate,
+            hasCategory,
+            isFullyStructured: hasSource && hasDate && hasCategory
+          };
+        },
+        buildVisualizationModel: (bookmarks = UI2().getCombinedVisualBookmarks()) => {
+          var _a;
+          const items = Array.isArray(bookmarks) ? bookmarks : [];
+          const sourceCounts = /* @__PURE__ */ new Map();
+          const typeCounts = /* @__PURE__ */ new Map();
+          const timelineCounts = /* @__PURE__ */ new Map();
+          let exported = 0;
+          let pending = 0;
+          items.forEach((bookmark) => {
+            const bookmarkKey = UI2().getBookmarkKey(bookmark);
+            const isExported = UI2().isBookmarkKeyExported(bookmarkKey);
+            if (isExported) {
+              exported += 1;
+            } else {
+              pending += 1;
+            }
+            const sourceLabel = UI2().getBookmarkVisualSourceLabel(bookmark);
+            sourceCounts.set(sourceLabel, (sourceCounts.get(sourceLabel) || 0) + 1);
+            const typeLabel = UI2().getBookmarkVisualTypeLabel(bookmark);
+            typeCounts.set(typeLabel, (typeCounts.get(typeLabel) || 0) + 1);
+            const dateInfo = UI2().getBookmarkVisualDate(bookmark);
+            if (!dateInfo) return;
+            const bucket = UI2().buildViewDateBucket(dateInfo);
+            const existing = timelineCounts.get(bucket.key) || {
+              key: bucket.key,
+              label: bucket.label,
+              count: 0,
+              exported: 0
+            };
+            existing.count += 1;
+            if (isExported) existing.exported += 1;
+            timelineCounts.set(bucket.key, existing);
+          });
+          const total = items.length;
+          const toBreakdown = (map) => Array.from(map.entries()).map(([label, count]) => ({
+            label,
+            count,
+            pct: UI2().getViewPct(count, total)
+          })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+          const timeline = Array.from(timelineCounts.values()).sort((a, b) => b.key.localeCompare(a.key)).slice(0, 6);
+          const loadedSources = Object.entries(UI2().visualSnapshots).filter(([, snapshot]) => Array.isArray(snapshot) && snapshot.length > 0).map(([source]) => source === "github" ? "GitHub" : "Linux.do");
+          return {
+            total,
+            exported,
+            pending,
+            selected: ((_a = UI2().selectedBookmarks) == null ? void 0 : _a.size) || 0,
+            loadedSources,
+            sourceBreakdown: toBreakdown(sourceCounts),
+            typeBreakdown: toBreakdown(typeCounts),
+            timeline
+          };
+        },
+        buildWorkspaceVisualizationModel: (snapshot = UI2().workspaceVisualSnapshot) => {
+          const databases = Array.isArray(snapshot == null ? void 0 : snapshot.databases) ? snapshot.databases : [];
+          const records = Array.isArray(snapshot == null ? void 0 : snapshot.records) ? snapshot.records : [];
+          const totalPages = records.length;
+          const sourceCounts = /* @__PURE__ */ new Map();
+          const categoryCounts = /* @__PURE__ */ new Map();
+          const timelineCounts = /* @__PURE__ */ new Map();
+          const relationshipCounts = /* @__PURE__ */ new Map();
+          const recognizedSources = /* @__PURE__ */ new Set();
+          const duplicateGroups = /* @__PURE__ */ new Map();
+          const linkGroups = /* @__PURE__ */ new Map();
+          let sourcedPages = 0;
+          let datedPages = 0;
+          let categorizedPages = 0;
+          let structuredPages = 0;
+          records.forEach((record) => {
+            const sourceLabel = (record == null ? void 0 : record.source) || "\u672A\u6807\u8BB0";
+            sourceCounts.set(sourceLabel, (sourceCounts.get(sourceLabel) || 0) + 1);
+            if (record == null ? void 0 : record.hasSource) {
+              sourcedPages += 1;
+              recognizedSources.add(sourceLabel);
+            }
+            if (record == null ? void 0 : record.hasCategory) {
+              const categoryLabel = record.category;
+              categoryCounts.set(categoryLabel, (categoryCounts.get(categoryLabel) || 0) + 1);
+              categorizedPages += 1;
+            }
+            if ((record == null ? void 0 : record.hasDate) && (record == null ? void 0 : record.dateKey)) {
+              datedPages += 1;
+              const existingTimeline = timelineCounts.get(record.dateKey) || {
+                key: record.dateKey,
+                label: record.dateLabel || record.dateKey,
+                count: 0
+              };
+              existingTimeline.count += 1;
+              timelineCounts.set(record.dateKey, existingTimeline);
+            }
+            if (record == null ? void 0 : record.isFullyStructured) {
+              structuredPages += 1;
+            }
+            const parentLabel = UI2().getWorkspaceVisualParentLabel(record);
+            const linkLabel = `${parentLabel} \u2192 ${sourceLabel}`;
+            const existingRelationship = relationshipCounts.get(linkLabel) || {
+              label: linkLabel,
+              parentLabel,
+              sourceLabel,
+              count: 0
+            };
+            existingRelationship.count += 1;
+            relationshipCounts.set(linkLabel, existingRelationship);
+            const duplicateKey = UI2().normalizeWorkspaceInsightKey(record == null ? void 0 : record.title);
+            if (duplicateKey) {
+              const existingDuplicate = duplicateGroups.get(duplicateKey) || {
+                key: duplicateKey,
+                title: String((record == null ? void 0 : record.title) || "").trim() || "\u672A\u547D\u540D\u9875\u9762",
+                items: [],
+                sources: /* @__PURE__ */ new Set()
+              };
+              existingDuplicate.items.push({
+                id: (record == null ? void 0 : record.id) || "",
+                title: String((record == null ? void 0 : record.title) || "").trim() || "\u672A\u547D\u540D\u9875\u9762",
+                source: sourceLabel,
+                parentLabel,
+                url: (record == null ? void 0 : record.url) || ""
+              });
+              if (record == null ? void 0 : record.hasSource) existingDuplicate.sources.add(sourceLabel);
+              duplicateGroups.set(duplicateKey, existingDuplicate);
+            }
+            const linkKey = UI2().normalizeWorkspaceInsightUrl(record == null ? void 0 : record.url);
+            if (linkKey) {
+              const existingGroup = linkGroups.get(linkKey) || {
+                key: linkKey,
+                title: String((record == null ? void 0 : record.title) || "").trim() || String((record == null ? void 0 : record.url) || "").trim() || "\u672A\u547D\u540D\u9875\u9762",
+                url: String((record == null ? void 0 : record.url) || "").trim(),
+                items: [],
+                sources: /* @__PURE__ */ new Set()
+              };
+              existingGroup.items.push({
+                id: (record == null ? void 0 : record.id) || "",
+                title: String((record == null ? void 0 : record.title) || "").trim() || "\u672A\u547D\u540D\u9875\u9762",
+                source: sourceLabel,
+                parentLabel,
+                url: (record == null ? void 0 : record.url) || ""
+              });
+              if (record == null ? void 0 : record.hasSource) existingGroup.sources.add(sourceLabel);
+              linkGroups.set(linkKey, existingGroup);
+            }
+          });
+          const toBreakdown = (map) => Array.from(map.entries()).map(([label, count]) => ({
+            label,
+            count,
+            pct: UI2().getViewPct(count, totalPages)
+          })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+          const timeline = Array.from(timelineCounts.values()).sort((a, b) => b.key.localeCompare(a.key)).slice(0, 8);
+          const relationships = Array.from(relationshipCounts.values()).map((item) => ({
+            ...item,
+            pct: UI2().getViewPct(item.count, totalPages)
+          })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).slice(0, 10);
+          const duplicateCandidates = Array.from(duplicateGroups.values()).filter((group) => group.items.length > 1).map((group) => {
+            const sourceList = Array.from(group.sources).sort((a, b) => a.localeCompare(b));
+            return {
+              key: group.key,
+              label: group.title,
+              count: group.items.length,
+              sourceCount: sourceList.length,
+              sources: sourceList,
+              items: group.items
+            };
+          }).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).slice(0, 8);
+          const linkConnectionCandidates = Array.from(linkGroups.values()).filter((group) => group.items.length > 1 && group.sources.size > 1).map((group) => ({
+            key: `url:${group.key}`,
+            label: `${group.title} \xB7 ${Array.from(group.sources).sort((a, b) => a.localeCompare(b)).join(" + ")}`,
+            count: group.items.length,
+            sources: Array.from(group.sources).sort((a, b) => a.localeCompare(b)),
+            reason: "\u540C\u94FE\u63A5\u8DE8\u6E90\u5019\u9009",
+            items: group.items,
+            url: group.url
+          }));
+          const connectionCandidates = Array.from(new Map([
+            ...duplicateCandidates.filter((group) => group.sourceCount > 1).map((group) => [group.key, {
+              key: `title:${group.key}`,
+              label: `${group.label} \xB7 ${group.sources.join(" + ")}`,
+              count: group.count,
+              sources: group.sources,
+              reason: "\u540C\u6807\u9898\u8DE8\u6E90\u5019\u9009",
+              items: group.items
+            }]),
+            ...linkConnectionCandidates.map((group) => [group.key, group])
+          ]).values()).slice(0, 8);
+          const funnel = [
+            { label: "\u5DF2\u626B\u63CF\u9875\u9762", count: totalPages, pct: UI2().getViewPct(totalPages, totalPages) },
+            { label: "\u8BC6\u522B\u6765\u6E90", count: sourcedPages, pct: UI2().getViewPct(sourcedPages, totalPages) },
+            { label: "\u6709\u65F6\u95F4\u5B57\u6BB5", count: datedPages, pct: UI2().getViewPct(datedPages, totalPages) },
+            { label: "\u5DF2\u5206\u7C7B", count: categorizedPages, pct: UI2().getViewPct(categorizedPages, totalPages) },
+            { label: "\u7ED3\u6784\u5B8C\u6574", count: structuredPages, pct: UI2().getViewPct(structuredPages, totalPages) }
+          ];
+          return {
+            totalPages,
+            totalDatabases: databases.length,
+            scannedAt: Number((snapshot == null ? void 0 : snapshot.scannedAt) || 0),
+            maxPages: Number((snapshot == null ? void 0 : snapshot.maxPages) || 0),
+            recognizedSources: Array.from(recognizedSources).sort((a, b) => a.localeCompare(b)),
+            sourceBreakdown: toBreakdown(sourceCounts),
+            categoryBreakdown: toBreakdown(categoryCounts),
+            timeline,
+            relationships,
+            duplicateCandidates,
+            connectionCandidates,
+            funnel,
+            sourcedPages,
+            datedPages,
+            categorizedPages,
+            structuredPages,
+            missingSourcePages: Math.max(0, totalPages - sourcedPages),
+            missingDatePages: Math.max(0, totalPages - datedPages),
+            missingCategoryPages: Math.max(0, totalPages - categorizedPages)
+          };
+        },
+        normalizeWorkspaceInsightKey: (value) => {
+          const raw = String(value || "").toLowerCase().replace(/[\s\u3000]+/g, " ").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+          if (!raw) return "";
+          return raw.replace(/\s+/g, " ");
+        },
+        normalizeWorkspaceInsightUrl: (value) => {
+          const raw = String(value || "").trim();
+          if (!raw) return "";
+          try {
+            const parsed = new URL(raw);
+            const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+            const search = parsed.search || "";
+            return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${pathname}${search}`;
+          } catch {
+            return raw.toLowerCase().replace(/#.*$/, "").replace(/\/+$/, "");
+          }
+        },
+        buildWorkspaceInsightFallbackSummary: (model) => {
+          const lines = [];
+          if (model.connectionCandidates.length > 0) {
+            lines.push(`- \u68C0\u6D4B\u5230 ${model.connectionCandidates.length} \u7EC4\u8DE8\u6E90\u5173\u8054\u5019\u9009\uFF0C\u4F18\u5148\u9002\u5408\u4F5C\u4E3A\u7EDF\u4E00\u77E5\u8BC6\u6761\u76EE\u7684\u5408\u5E76\u5165\u53E3\u3002`);
+          } else {
+            lines.push("- \u5F53\u524D\u8FD8\u6CA1\u6709\u660E\u663E\u7684\u8DE8\u6E90\u540C\u6807\u9898\u6216\u540C\u94FE\u63A5\u5019\u9009\uFF0C\u7EDF\u4E00\u77E5\u8BC6\u5C42\u66F4\u591A\u4F9D\u8D56\u6765\u6E90\u5B57\u6BB5\u4E0E\u5206\u7C7B\u5B57\u6BB5\u8865\u9F50\u3002");
+          }
+          if (model.missingSourcePages > 0 || model.missingDatePages > 0 || model.missingCategoryPages > 0) {
+            lines.push(`- \u7ED3\u6784\u7F3A\u53E3\u4ECD\u7136\u5B58\u5728\uFF1A\u672A\u6807\u8BB0 ${model.missingSourcePages}\uFF0C\u7F3A\u65F6\u95F4 ${model.missingDatePages}\uFF0C\u672A\u5206\u7C7B ${model.missingCategoryPages}\u3002`);
+          } else {
+            lines.push("- \u5F53\u524D\u626B\u63CF\u8303\u56F4\u5185\u7684\u6765\u6E90\u3001\u65F6\u95F4\u548C\u5206\u7C7B\u5B57\u6BB5\u5DF2\u7ECF\u5168\u90E8\u9F50\u5907\u3002");
+          }
+          const topSource = model.sourceBreakdown[0];
+          if (topSource) {
+            lines.push(`- \u5F53\u524D\u5DE5\u4F5C\u533A\u4EE5\u300C${topSource.label}\u300D\u4E3A\u4E3B\uFF0C\u5360 ${topSource.pct}%\uFF08${topSource.count} \u9875\uFF09\u3002`);
+          }
+          lines.push("- \u4E0B\u4E00\u6B65\u5EFA\u8BAE\u4F18\u5148\u628A\u5173\u8054\u5019\u9009\u6536\u655B\u6210\u7EDF\u4E00\u6761\u76EE\uFF0C\u518D\u5BF9\u7F3A\u5B57\u6BB5\u9875\u9762\u8DD1 AI \u6458\u8981\u4E0E\u5206\u7C7B\u8865\u9F50\u3002");
+          return lines.join("\n");
+        }
+      };
+      module.exports = { WorkspaceVisual };
+    }
+  });
+
   // src/ui/main-ui.js
   var require_main_ui = __commonJS({
     "src/ui/main-ui.js"(exports, module) {
@@ -12791,7 +13302,7 @@ ${insight.summary || ""}`,
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
-      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
+      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
@@ -14292,501 +14803,6 @@ ${insight.summary || ""}`,
             }
           }
           return null;
-        },
-        getViewPct: (count, total) => total > 0 ? Math.round(count / total * 100) : 0,
-        buildViewDateBucket: (date) => ({
-          key: [
-            date.getFullYear(),
-            String(date.getMonth() + 1).padStart(2, "0"),
-            String(date.getDate()).padStart(2, "0")
-          ].join("-"),
-          label: `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`
-        }),
-        collectWorkspacePlainText: (items = []) => {
-          return Array.isArray(items) ? items.map((item) => {
-            var _a;
-            return (item == null ? void 0 : item.plain_text) || ((_a = item == null ? void 0 : item.text) == null ? void 0 : _a.content) || "";
-          }).join("").trim() : "";
-        },
-        getWorkspacePageProperty: (page, names = []) => {
-          const properties = (page == null ? void 0 : page.properties) || {};
-          for (const name of names) {
-            if (name && Object.prototype.hasOwnProperty.call(properties, name)) {
-              return properties[name];
-            }
-          }
-          return null;
-        },
-        getWorkspacePagePropertyText: (page, names = []) => {
-          var _a;
-          const prop = UI2.getWorkspacePageProperty(page, names);
-          if (!prop) return "";
-          switch (prop.type) {
-            case "title":
-              return UI2.collectWorkspacePlainText(prop.title);
-            case "rich_text":
-              return UI2.collectWorkspacePlainText(prop.rich_text);
-            case "select":
-              return String(((_a = prop.select) == null ? void 0 : _a.name) || "").trim();
-            case "multi_select":
-              return Array.isArray(prop.multi_select) ? prop.multi_select.map((item) => (item == null ? void 0 : item.name) || "").filter(Boolean).join(", ") : "";
-            case "url":
-              return String(prop.url || "").trim();
-            case "number":
-              return prop.number === 0 || Number.isFinite(prop.number) ? String(prop.number) : "";
-            case "checkbox":
-              return prop.checkbox ? "true" : "";
-            case "created_time":
-              return String(prop.created_time || "").trim();
-            case "last_edited_time":
-              return String(prop.last_edited_time || "").trim();
-            default:
-              return "";
-          }
-        },
-        getWorkspacePagePropertyDateValue: (page, names = []) => {
-          var _a;
-          const prop = UI2.getWorkspacePageProperty(page, names);
-          if (!prop) return "";
-          if (prop.type === "date") return String(((_a = prop.date) == null ? void 0 : _a.start) || "").trim();
-          if (prop.type === "created_time") return String(prop.created_time || "").trim();
-          if (prop.type === "last_edited_time") return String(prop.last_edited_time || "").trim();
-          return "";
-        },
-        getWorkspaceVisualSourceUrl: (pageOrRecord) => {
-          if (pageOrRecord == null ? void 0 : pageOrRecord.sourceUrl) return String(pageOrRecord.sourceUrl || "").trim();
-          const explicitUrl = UI2.getWorkspacePagePropertyText(pageOrRecord, ["\u94FE\u63A5", "URL", "\u7F51\u5740", "\u94FE\u63A5\u5730\u5740"]);
-          if (explicitUrl) return explicitUrl;
-          return String((pageOrRecord == null ? void 0 : pageOrRecord.url) || "").trim();
-        },
-        normalizeWorkspaceSourceLabel: (value) => {
-          const raw = String(value || "").trim();
-          if (!raw) return "";
-          const lower = raw.toLowerCase();
-          if (lower.includes("linux.do") || lower.includes("linuxdo")) return "Linux.do";
-          if (lower.includes("github") || ["repo", "repos", "star", "stars", "fork", "forks", "gist", "gists"].includes(lower)) return "GitHub";
-          if (lower.includes("rss") || lower.includes("feed")) return "RSS";
-          if (lower.includes("candidate") || raw.includes("\u7EDF\u4E00\u5019\u9009")) return "\u7EDF\u4E00\u5019\u9009";
-          if (lower.includes("zhihu") || raw.includes("\u77E5\u4E4E")) return "\u77E5\u4E4E";
-          if (lower.includes("bookmark") || lower.includes("\u4E66\u7B7E")) return "\u6D4F\u89C8\u5668\u4E66\u7B7E";
-          if (lower.includes("generic") || lower.includes("\u901A\u7528\u9875\u9762")) return "\u901A\u7528\u9875\u9762";
-          if (lower.includes("unknown") || lower.includes("\u672A\u6807\u8BB0")) return "\u672A\u6807\u8BB0";
-          return raw;
-        },
-        normalizeWorkspaceSourceTypeLabel: (value, source = "") => {
-          const raw = String(value || "").trim();
-          if (!raw) {
-            if (source === "GitHub") return "GitHub";
-            if (source === "Linux.do") return "\u5E16\u5B50";
-            if (source === "RSS") return "Feed";
-            if (source === "\u6D4F\u89C8\u5668\u4E66\u7B7E") return "\u4E66\u7B7E";
-            if (source === "\u77E5\u4E4E") return "\u7F51\u9875";
-            return "";
-          }
-          const lower = raw.toLowerCase();
-          if (["star", "stars"].includes(lower)) return "Stars";
-          if (["repo", "repos"].includes(lower)) return "Repos";
-          if (["fork", "forks"].includes(lower)) return "Forks";
-          if (["gist", "gists"].includes(lower)) return "Gists";
-          if (lower.includes("rss") || lower.includes("feed")) return "Feed";
-          if (lower.includes("bookmark") || lower.includes("\u4E66\u7B7E")) return "\u4E66\u7B7E";
-          if (lower.includes("post") || lower.includes("topic") || lower.includes("\u5E16\u5B50")) return "\u5E16\u5B50";
-          if (lower.includes("candidate") || raw.includes("\u5019\u9009")) return "\u8DE8\u6E90\u5173\u8054\u5019\u9009";
-          if (["answer", "\u56DE\u7B54"].includes(lower) || raw.includes("\u56DE\u7B54")) return "\u56DE\u7B54";
-          if (["question", "\u95EE\u9898", "\u95EE\u7B54"].includes(lower) || raw.includes("\u95EE\u9898") || raw.includes("\u95EE\u7B54")) return "\u95EE\u9898";
-          if (["article", "column_article", "\u6587\u7AE0", "\u4E13\u680F\u6587\u7AE0"].includes(lower) || raw.includes("\u6587\u7AE0")) return "\u6587\u7AE0";
-          if (["web", "webpage", "web page", "page", "\u7F51\u9875"].includes(lower) || raw.includes("\u7F51\u9875")) return "\u7F51\u9875";
-          return raw;
-        },
-        getWorkspaceVisualDate: (pageOrRecord) => {
-          if ((pageOrRecord == null ? void 0 : pageOrRecord.date) instanceof Date && (pageOrRecord == null ? void 0 : pageOrRecord.dateKey)) {
-            return {
-              date: pageOrRecord.date,
-              key: pageOrRecord.dateKey,
-              label: pageOrRecord.dateLabel || UI2.buildViewDateBucket(pageOrRecord.date).label,
-              field: pageOrRecord.dateField || ""
-            };
-          }
-          const candidates = [
-            { field: "\u6536\u85CF\u65F6\u95F4", value: UI2.getWorkspacePagePropertyDateValue(pageOrRecord, ["\u6536\u85CF\u65F6\u95F4"]) },
-            { field: "\u66F4\u65B0\u65F6\u95F4", value: UI2.getWorkspacePagePropertyDateValue(pageOrRecord, ["\u66F4\u65B0\u65F6\u95F4"]) },
-            { field: "\u53D1\u5E03\u65E5\u671F", value: UI2.getWorkspacePagePropertyDateValue(pageOrRecord, ["\u53D1\u5E03\u65E5\u671F"]) },
-            { field: "created_time", value: String((pageOrRecord == null ? void 0 : pageOrRecord.created_time) || "").trim() },
-            { field: "last_edited_time", value: String((pageOrRecord == null ? void 0 : pageOrRecord.last_edited_time) || "").trim() }
-          ];
-          for (const candidate of candidates) {
-            if (!candidate.value) continue;
-            const date = new Date(candidate.value);
-            if (Number.isNaN(date.getTime())) continue;
-            const bucket = UI2.buildViewDateBucket(date);
-            return {
-              date,
-              key: bucket.key,
-              label: bucket.label,
-              field: candidate.field
-            };
-          }
-          return null;
-        },
-        inferWorkspaceVisualSource: (page, databases = []) => {
-          var _a, _b;
-          const explicitSource = UI2.normalizeWorkspaceSourceLabel(UI2.getWorkspacePagePropertyText(page, ["\u6765\u6E90"]));
-          const explicitTypeRaw = UI2.getWorkspacePagePropertyText(page, ["\u6765\u6E90\u7C7B\u578B"]);
-          const properties = (page == null ? void 0 : page.properties) || {};
-          const propertyNames = Object.keys(properties);
-          const parentDatabaseId = String(((_a = page == null ? void 0 : page.parent) == null ? void 0 : _a.database_id) || "").replace(/-/g, "");
-          const parentDatabaseTitle = ((_b = databases.find((db) => db.id === parentDatabaseId)) == null ? void 0 : _b.title) || "";
-          const pageTitle = Utils2.getPageTitle(page);
-          const hintText = [explicitSource, explicitTypeRaw, parentDatabaseTitle, pageTitle].join(" ").toLowerCase();
-          const hasProp = (...names) => names.some((name) => propertyNames.includes(name));
-          let source = explicitSource;
-          let sourceType = UI2.normalizeWorkspaceSourceTypeLabel(explicitTypeRaw, explicitSource);
-          if (!source && sourceType) {
-            if (sourceType === "\u4E66\u7B7E") source = "\u6D4F\u89C8\u5668\u4E66\u7B7E";
-            else if (["Stars", "Repos", "Forks", "Gists", "GitHub"].includes(sourceType)) source = "GitHub";
-            else if (sourceType === "Feed") source = "RSS";
-            else if (sourceType === "\u5E16\u5B50") source = "Linux.do";
-            else if (["\u56DE\u7B54", "\u95EE\u9898", "\u6587\u7AE0", "\u7F51\u9875"].includes(sourceType)) source = hintText.includes("zhihu") ? "\u77E5\u4E4E" : "\u901A\u7528\u9875\u9762";
-          }
-          if (!source && (hasProp("\u5E16\u5B50\u6570", "\u6D4F\u89C8\u6570", "\u70B9\u8D5E\u6570") || hintText.includes("linux.do") || hintText.includes("linuxdo"))) {
-            source = "Linux.do";
-            if (!sourceType) sourceType = "\u5E16\u5B50";
-          }
-          if (!source && (hasProp("Stars", "\u8BED\u8A00", "\u66F4\u65B0\u65F6\u95F4") || hintText.includes("github"))) {
-            source = "GitHub";
-            if (!sourceType) sourceType = hasProp("Stars") ? "Repos" : "GitHub";
-          }
-          if (!source && (hasProp("\u4E66\u7B7E\u8DEF\u5F84") || hintText.includes("bookmark") || hintText.includes("\u4E66\u7B7E"))) {
-            source = "\u6D4F\u89C8\u5668\u4E66\u7B7E";
-            if (!sourceType) sourceType = "\u4E66\u7B7E";
-          }
-          if (!source && (hintText.includes("rss") || hintText.includes("feed"))) {
-            source = "RSS";
-            if (!sourceType) sourceType = "Feed";
-          }
-          if (!source && (hintText.includes("\u7EDF\u4E00\u5019\u9009") || hintText.includes("candidate"))) {
-            source = "\u7EDF\u4E00\u5019\u9009";
-            if (!sourceType) sourceType = "\u8DE8\u6E90\u5173\u8054\u5019\u9009";
-          }
-          if (!source && (hintText.includes("zhihu") || hasProp("\u4F5C\u8005", "\u53D1\u5E03\u65E5\u671F", "\u6458\u8981") && ["\u56DE\u7B54", "\u95EE\u9898", "\u6587\u7AE0"].includes(sourceType))) {
-            source = "\u77E5\u4E4E";
-            if (!sourceType) sourceType = "\u7F51\u9875";
-          }
-          if (!source && (hasProp("\u53D1\u5E03\u65E5\u671F") || hasProp("\u6458\u8981", "\u63CF\u8FF0"))) {
-            source = explicitSource || "\u901A\u7528\u9875\u9762";
-          }
-          if (source && !["Linux.do", "GitHub", "RSS", "\u6D4F\u89C8\u5668\u4E66\u7B7E", "\u77E5\u4E4E", "\u901A\u7528\u9875\u9762", "\u672A\u6807\u8BB0"].includes(source)) {
-            if (["\u56DE\u7B54", "\u95EE\u9898", "\u6587\u7AE0", "\u7F51\u9875"].includes(sourceType)) {
-              source = source === "\u77E5\u4E4E" ? "\u77E5\u4E4E" : "\u901A\u7528\u9875\u9762";
-            }
-          }
-          if (!source) source = explicitSource || "\u672A\u6807\u8BB0";
-          if (!sourceType) sourceType = UI2.normalizeWorkspaceSourceTypeLabel(explicitTypeRaw, source);
-          return { source, sourceType };
-        },
-        getWorkspaceVisualCategory: (pageOrRecord) => {
-          if (pageOrRecord == null ? void 0 : pageOrRecord.category) return String(pageOrRecord.category).trim();
-          return String(
-            UI2.getWorkspacePagePropertyText(pageOrRecord, ["AI\u5206\u7C7B"]) || UI2.getWorkspacePagePropertyText(pageOrRecord, ["\u5206\u7C7B"]) || ""
-          ).trim();
-        },
-        getWorkspaceVisualParentLabel: (record) => {
-          if (record == null ? void 0 : record.parentDatabaseTitle) return record.parentDatabaseTitle;
-          if ((record == null ? void 0 : record.parentType) === "workspace") return "\u5DE5\u4F5C\u533A\u9875\u9762";
-          if ((record == null ? void 0 : record.parentType) === "page_id") return "\u5B50\u9875\u9762";
-          if ((record == null ? void 0 : record.parentType) === "block_id") return "\u5757\u5185\u9875\u9762";
-          if ((record == null ? void 0 : record.parentType) === "database_id") return "\u672A\u547D\u540D\u6570\u636E\u5E93";
-          return "\u672A\u5F52\u6863\u9875\u9762";
-        },
-        mapWorkspacePageSummary: (page) => {
-          var _a, _b, _c, _d;
-          return {
-            id: ((_a = page == null ? void 0 : page.id) == null ? void 0 : _a.replace(/-/g, "")) || "",
-            title: Utils2.getPageTitle(page),
-            type: "page",
-            url: (page == null ? void 0 : page.url) || "",
-            parent: ((_b = page == null ? void 0 : page.parent) == null ? void 0 : _b.type) || "",
-            parentId: String(((_c = page == null ? void 0 : page.parent) == null ? void 0 : _c.database_id) || ((_d = page == null ? void 0 : page.parent) == null ? void 0 : _d.page_id) || "").replace(/-/g, "")
-          };
-        },
-        extractWorkspaceVisualRecord: (page, databasesMap = /* @__PURE__ */ new Map()) => {
-          var _a;
-          const summary = UI2.mapWorkspacePageSummary(page);
-          const dateInfo = UI2.getWorkspaceVisualDate(page);
-          const category = UI2.getWorkspaceVisualCategory(page);
-          const sourceInfo = UI2.inferWorkspaceVisualSource(page, Array.from(databasesMap.values()));
-          const sourceUrl = UI2.getWorkspaceVisualSourceUrl(page);
-          const hasSource = sourceInfo.source && sourceInfo.source !== "\u672A\u6807\u8BB0";
-          const hasDate = !!dateInfo;
-          const hasCategory = !!category;
-          return {
-            id: summary.id,
-            title: summary.title,
-            url: sourceUrl || summary.url,
-            sourceUrl,
-            notionUrl: summary.url,
-            parentType: summary.parent,
-            parentDatabaseId: summary.parent === "database_id" ? summary.parentId : "",
-            parentPageId: summary.parent === "page_id" ? summary.parentId : "",
-            parentDatabaseTitle: ((_a = databasesMap.get(summary.parentId)) == null ? void 0 : _a.title) || "",
-            source: sourceInfo.source,
-            sourceType: sourceInfo.sourceType,
-            category,
-            date: (dateInfo == null ? void 0 : dateInfo.date) || null,
-            dateKey: (dateInfo == null ? void 0 : dateInfo.key) || "",
-            dateLabel: (dateInfo == null ? void 0 : dateInfo.label) || "",
-            dateField: (dateInfo == null ? void 0 : dateInfo.field) || "",
-            hasSource,
-            hasDate,
-            hasCategory,
-            isFullyStructured: hasSource && hasDate && hasCategory
-          };
-        },
-        buildVisualizationModel: (bookmarks = UI2.getCombinedVisualBookmarks()) => {
-          var _a;
-          const items = Array.isArray(bookmarks) ? bookmarks : [];
-          const sourceCounts = /* @__PURE__ */ new Map();
-          const typeCounts = /* @__PURE__ */ new Map();
-          const timelineCounts = /* @__PURE__ */ new Map();
-          let exported = 0;
-          let pending = 0;
-          items.forEach((bookmark) => {
-            const bookmarkKey = UI2.getBookmarkKey(bookmark);
-            const isExported = UI2.isBookmarkKeyExported(bookmarkKey);
-            if (isExported) {
-              exported += 1;
-            } else {
-              pending += 1;
-            }
-            const sourceLabel = UI2.getBookmarkVisualSourceLabel(bookmark);
-            sourceCounts.set(sourceLabel, (sourceCounts.get(sourceLabel) || 0) + 1);
-            const typeLabel = UI2.getBookmarkVisualTypeLabel(bookmark);
-            typeCounts.set(typeLabel, (typeCounts.get(typeLabel) || 0) + 1);
-            const dateInfo = UI2.getBookmarkVisualDate(bookmark);
-            if (!dateInfo) return;
-            const bucket = UI2.buildViewDateBucket(dateInfo);
-            const existing = timelineCounts.get(bucket.key) || {
-              key: bucket.key,
-              label: bucket.label,
-              count: 0,
-              exported: 0
-            };
-            existing.count += 1;
-            if (isExported) existing.exported += 1;
-            timelineCounts.set(bucket.key, existing);
-          });
-          const total = items.length;
-          const toBreakdown = (map) => Array.from(map.entries()).map(([label, count]) => ({
-            label,
-            count,
-            pct: UI2.getViewPct(count, total)
-          })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-          const timeline = Array.from(timelineCounts.values()).sort((a, b) => b.key.localeCompare(a.key)).slice(0, 6);
-          const loadedSources = Object.entries(UI2.visualSnapshots).filter(([, snapshot]) => Array.isArray(snapshot) && snapshot.length > 0).map(([source]) => source === "github" ? "GitHub" : "Linux.do");
-          return {
-            total,
-            exported,
-            pending,
-            selected: ((_a = UI2.selectedBookmarks) == null ? void 0 : _a.size) || 0,
-            loadedSources,
-            sourceBreakdown: toBreakdown(sourceCounts),
-            typeBreakdown: toBreakdown(typeCounts),
-            timeline
-          };
-        },
-        buildWorkspaceVisualizationModel: (snapshot = UI2.workspaceVisualSnapshot) => {
-          const databases = Array.isArray(snapshot == null ? void 0 : snapshot.databases) ? snapshot.databases : [];
-          const records = Array.isArray(snapshot == null ? void 0 : snapshot.records) ? snapshot.records : [];
-          const totalPages = records.length;
-          const sourceCounts = /* @__PURE__ */ new Map();
-          const categoryCounts = /* @__PURE__ */ new Map();
-          const timelineCounts = /* @__PURE__ */ new Map();
-          const relationshipCounts = /* @__PURE__ */ new Map();
-          const recognizedSources = /* @__PURE__ */ new Set();
-          const duplicateGroups = /* @__PURE__ */ new Map();
-          const linkGroups = /* @__PURE__ */ new Map();
-          let sourcedPages = 0;
-          let datedPages = 0;
-          let categorizedPages = 0;
-          let structuredPages = 0;
-          records.forEach((record) => {
-            const sourceLabel = (record == null ? void 0 : record.source) || "\u672A\u6807\u8BB0";
-            sourceCounts.set(sourceLabel, (sourceCounts.get(sourceLabel) || 0) + 1);
-            if (record == null ? void 0 : record.hasSource) {
-              sourcedPages += 1;
-              recognizedSources.add(sourceLabel);
-            }
-            if (record == null ? void 0 : record.hasCategory) {
-              const categoryLabel = record.category;
-              categoryCounts.set(categoryLabel, (categoryCounts.get(categoryLabel) || 0) + 1);
-              categorizedPages += 1;
-            }
-            if ((record == null ? void 0 : record.hasDate) && (record == null ? void 0 : record.dateKey)) {
-              datedPages += 1;
-              const existingTimeline = timelineCounts.get(record.dateKey) || {
-                key: record.dateKey,
-                label: record.dateLabel || record.dateKey,
-                count: 0
-              };
-              existingTimeline.count += 1;
-              timelineCounts.set(record.dateKey, existingTimeline);
-            }
-            if (record == null ? void 0 : record.isFullyStructured) {
-              structuredPages += 1;
-            }
-            const parentLabel = UI2.getWorkspaceVisualParentLabel(record);
-            const linkLabel = `${parentLabel} \u2192 ${sourceLabel}`;
-            const existingRelationship = relationshipCounts.get(linkLabel) || {
-              label: linkLabel,
-              parentLabel,
-              sourceLabel,
-              count: 0
-            };
-            existingRelationship.count += 1;
-            relationshipCounts.set(linkLabel, existingRelationship);
-            const duplicateKey = UI2.normalizeWorkspaceInsightKey(record == null ? void 0 : record.title);
-            if (duplicateKey) {
-              const existingDuplicate = duplicateGroups.get(duplicateKey) || {
-                key: duplicateKey,
-                title: String((record == null ? void 0 : record.title) || "").trim() || "\u672A\u547D\u540D\u9875\u9762",
-                items: [],
-                sources: /* @__PURE__ */ new Set()
-              };
-              existingDuplicate.items.push({
-                id: (record == null ? void 0 : record.id) || "",
-                title: String((record == null ? void 0 : record.title) || "").trim() || "\u672A\u547D\u540D\u9875\u9762",
-                source: sourceLabel,
-                parentLabel,
-                url: (record == null ? void 0 : record.url) || ""
-              });
-              if (record == null ? void 0 : record.hasSource) existingDuplicate.sources.add(sourceLabel);
-              duplicateGroups.set(duplicateKey, existingDuplicate);
-            }
-            const linkKey = UI2.normalizeWorkspaceInsightUrl(record == null ? void 0 : record.url);
-            if (linkKey) {
-              const existingGroup = linkGroups.get(linkKey) || {
-                key: linkKey,
-                title: String((record == null ? void 0 : record.title) || "").trim() || String((record == null ? void 0 : record.url) || "").trim() || "\u672A\u547D\u540D\u9875\u9762",
-                url: String((record == null ? void 0 : record.url) || "").trim(),
-                items: [],
-                sources: /* @__PURE__ */ new Set()
-              };
-              existingGroup.items.push({
-                id: (record == null ? void 0 : record.id) || "",
-                title: String((record == null ? void 0 : record.title) || "").trim() || "\u672A\u547D\u540D\u9875\u9762",
-                source: sourceLabel,
-                parentLabel,
-                url: (record == null ? void 0 : record.url) || ""
-              });
-              if (record == null ? void 0 : record.hasSource) existingGroup.sources.add(sourceLabel);
-              linkGroups.set(linkKey, existingGroup);
-            }
-          });
-          const toBreakdown = (map) => Array.from(map.entries()).map(([label, count]) => ({
-            label,
-            count,
-            pct: UI2.getViewPct(count, totalPages)
-          })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-          const timeline = Array.from(timelineCounts.values()).sort((a, b) => b.key.localeCompare(a.key)).slice(0, 8);
-          const relationships = Array.from(relationshipCounts.values()).map((item) => ({
-            ...item,
-            pct: UI2.getViewPct(item.count, totalPages)
-          })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).slice(0, 10);
-          const duplicateCandidates = Array.from(duplicateGroups.values()).filter((group) => group.items.length > 1).map((group) => {
-            const sourceList = Array.from(group.sources).sort((a, b) => a.localeCompare(b));
-            return {
-              key: group.key,
-              label: group.title,
-              count: group.items.length,
-              sourceCount: sourceList.length,
-              sources: sourceList,
-              items: group.items
-            };
-          }).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).slice(0, 8);
-          const linkConnectionCandidates = Array.from(linkGroups.values()).filter((group) => group.items.length > 1 && group.sources.size > 1).map((group) => ({
-            key: `url:${group.key}`,
-            label: `${group.title} \xB7 ${Array.from(group.sources).sort((a, b) => a.localeCompare(b)).join(" + ")}`,
-            count: group.items.length,
-            sources: Array.from(group.sources).sort((a, b) => a.localeCompare(b)),
-            reason: "\u540C\u94FE\u63A5\u8DE8\u6E90\u5019\u9009",
-            items: group.items,
-            url: group.url
-          }));
-          const connectionCandidates = Array.from(new Map([
-            ...duplicateCandidates.filter((group) => group.sourceCount > 1).map((group) => [group.key, {
-              key: `title:${group.key}`,
-              label: `${group.label} \xB7 ${group.sources.join(" + ")}`,
-              count: group.count,
-              sources: group.sources,
-              reason: "\u540C\u6807\u9898\u8DE8\u6E90\u5019\u9009",
-              items: group.items
-            }]),
-            ...linkConnectionCandidates.map((group) => [group.key, group])
-          ]).values()).slice(0, 8);
-          const funnel = [
-            { label: "\u5DF2\u626B\u63CF\u9875\u9762", count: totalPages, pct: UI2.getViewPct(totalPages, totalPages) },
-            { label: "\u8BC6\u522B\u6765\u6E90", count: sourcedPages, pct: UI2.getViewPct(sourcedPages, totalPages) },
-            { label: "\u6709\u65F6\u95F4\u5B57\u6BB5", count: datedPages, pct: UI2.getViewPct(datedPages, totalPages) },
-            { label: "\u5DF2\u5206\u7C7B", count: categorizedPages, pct: UI2.getViewPct(categorizedPages, totalPages) },
-            { label: "\u7ED3\u6784\u5B8C\u6574", count: structuredPages, pct: UI2.getViewPct(structuredPages, totalPages) }
-          ];
-          return {
-            totalPages,
-            totalDatabases: databases.length,
-            scannedAt: Number((snapshot == null ? void 0 : snapshot.scannedAt) || 0),
-            maxPages: Number((snapshot == null ? void 0 : snapshot.maxPages) || 0),
-            recognizedSources: Array.from(recognizedSources).sort((a, b) => a.localeCompare(b)),
-            sourceBreakdown: toBreakdown(sourceCounts),
-            categoryBreakdown: toBreakdown(categoryCounts),
-            timeline,
-            relationships,
-            duplicateCandidates,
-            connectionCandidates,
-            funnel,
-            sourcedPages,
-            datedPages,
-            categorizedPages,
-            structuredPages,
-            missingSourcePages: Math.max(0, totalPages - sourcedPages),
-            missingDatePages: Math.max(0, totalPages - datedPages),
-            missingCategoryPages: Math.max(0, totalPages - categorizedPages)
-          };
-        },
-        normalizeWorkspaceInsightKey: (value) => {
-          const raw = String(value || "").toLowerCase().replace(/[\s\u3000]+/g, " ").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-          if (!raw) return "";
-          return raw.replace(/\s+/g, " ");
-        },
-        normalizeWorkspaceInsightUrl: (value) => {
-          const raw = String(value || "").trim();
-          if (!raw) return "";
-          try {
-            const parsed = new URL(raw);
-            const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
-            const search = parsed.search || "";
-            return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${pathname}${search}`;
-          } catch {
-            return raw.toLowerCase().replace(/#.*$/, "").replace(/\/+$/, "");
-          }
-        },
-        buildWorkspaceInsightFallbackSummary: (model) => {
-          const lines = [];
-          if (model.connectionCandidates.length > 0) {
-            lines.push(`- \u68C0\u6D4B\u5230 ${model.connectionCandidates.length} \u7EC4\u8DE8\u6E90\u5173\u8054\u5019\u9009\uFF0C\u4F18\u5148\u9002\u5408\u4F5C\u4E3A\u7EDF\u4E00\u77E5\u8BC6\u6761\u76EE\u7684\u5408\u5E76\u5165\u53E3\u3002`);
-          } else {
-            lines.push("- \u5F53\u524D\u8FD8\u6CA1\u6709\u660E\u663E\u7684\u8DE8\u6E90\u540C\u6807\u9898\u6216\u540C\u94FE\u63A5\u5019\u9009\uFF0C\u7EDF\u4E00\u77E5\u8BC6\u5C42\u66F4\u591A\u4F9D\u8D56\u6765\u6E90\u5B57\u6BB5\u4E0E\u5206\u7C7B\u5B57\u6BB5\u8865\u9F50\u3002");
-          }
-          if (model.missingSourcePages > 0 || model.missingDatePages > 0 || model.missingCategoryPages > 0) {
-            lines.push(`- \u7ED3\u6784\u7F3A\u53E3\u4ECD\u7136\u5B58\u5728\uFF1A\u672A\u6807\u8BB0 ${model.missingSourcePages}\uFF0C\u7F3A\u65F6\u95F4 ${model.missingDatePages}\uFF0C\u672A\u5206\u7C7B ${model.missingCategoryPages}\u3002`);
-          } else {
-            lines.push("- \u5F53\u524D\u626B\u63CF\u8303\u56F4\u5185\u7684\u6765\u6E90\u3001\u65F6\u95F4\u548C\u5206\u7C7B\u5B57\u6BB5\u5DF2\u7ECF\u5168\u90E8\u9F50\u5907\u3002");
-          }
-          const topSource = model.sourceBreakdown[0];
-          if (topSource) {
-            lines.push(`- \u5F53\u524D\u5DE5\u4F5C\u533A\u4EE5\u300C${topSource.label}\u300D\u4E3A\u4E3B\uFF0C\u5360 ${topSource.pct}%\uFF08${topSource.count} \u9875\uFF09\u3002`);
-          }
-          lines.push("- \u4E0B\u4E00\u6B65\u5EFA\u8BAE\u4F18\u5148\u628A\u5173\u8054\u5019\u9009\u6536\u655B\u6210\u7EDF\u4E00\u6761\u76EE\uFF0C\u518D\u5BF9\u7F3A\u5B57\u6BB5\u9875\u9762\u8DD1 AI \u6458\u8981\u4E0E\u5206\u7C7B\u8865\u9F50\u3002");
-          return lines.join("\n");
         },
         buildWorkspaceInsightMarkdown: (model = UI2.buildWorkspaceVisualizationModel(), aiSummary = UI2.workspaceInsightSummary || "") => {
           if (!(model == null ? void 0 : model.scannedAt)) {
@@ -16850,6 +16866,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           UI2.isMinimized = true;
         }
       };
+      Object.assign(UI2, require_workspace_visual().WorkspaceVisual);
       ;
       module.exports = { UI: UI2 };
     }
@@ -16864,7 +16881,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
-      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
+      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UICommandService } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
@@ -18358,7 +18375,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
-      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
+      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UICommandService } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
@@ -19199,7 +19216,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           }
           if (OperationGuard2.isDangerous(operation) && OperationGuard2.requiresConfirm()) {
             const isPermanent = operation === "deleteBlock";
-            const confirmed = await ConfirmationDialog2.show({
+            const confirmed = await ConfirmationDialog3.show({
               title: isPermanent ? "\u26A0\uFE0F \u6C38\u4E45\u5220\u9664\u786E\u8BA4" : "\u5371\u9669\u64CD\u4F5C\u786E\u8BA4",
               message: isPermanent ? `\u60A8\u5373\u5C06\u6C38\u4E45\u5220\u9664\u5757\uFF0C\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\uFF01` : `\u60A8\u5373\u5C06\u6267\u884C\u5371\u9669\u64CD\u4F5C: ${operation}`,
               itemName: context.itemName || "\u672A\u77E5\u9879\u76EE",
@@ -19542,7 +19559,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           };
         }
       };
-      var ConfirmationDialog2 = {
+      var ConfirmationDialog3 = {
         dialogElement: null,
         // 显示确认对话框
         show: (options) => {
@@ -19586,7 +19603,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 </div>
             `;
             document.body.appendChild(dialog);
-            ConfirmationDialog2.dialogElement = dialog;
+            ConfirmationDialog3.dialogElement = dialog;
             const okBtn = dialog.querySelector("#ldb-confirm-ok");
             const cancelBtn = dialog.querySelector("#ldb-confirm-cancel");
             const countdownEl = dialog.querySelector("#ldb-confirm-countdown");
@@ -19626,21 +19643,21 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             cancelBtn.onclick = () => {
               clearInterval(timer);
               dialog.remove();
-              ConfirmationDialog2.dialogElement = null;
+              ConfirmationDialog3.dialogElement = null;
               resolve(false);
             };
             okBtn.onclick = () => {
               if (okBtn.disabled) return;
               clearInterval(timer);
               dialog.remove();
-              ConfirmationDialog2.dialogElement = null;
+              ConfirmationDialog3.dialogElement = null;
               resolve(true);
             };
             const escHandler = (e) => {
               if (e.key === "Escape") {
                 clearInterval(timer);
                 dialog.remove();
-                ConfirmationDialog2.dialogElement = null;
+                ConfirmationDialog3.dialogElement = null;
                 document.removeEventListener("keydown", escHandler);
                 resolve(false);
               }
@@ -19650,12 +19667,12 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         },
         // 关闭对话框
         close: () => {
-          if (ConfirmationDialog2.dialogElement) {
-            if (ConfirmationDialog2.dialogElement._countdownTimer) {
-              clearInterval(ConfirmationDialog2.dialogElement._countdownTimer);
+          if (ConfirmationDialog3.dialogElement) {
+            if (ConfirmationDialog3.dialogElement._countdownTimer) {
+              clearInterval(ConfirmationDialog3.dialogElement._countdownTimer);
             }
-            ConfirmationDialog2.dialogElement.remove();
-            ConfirmationDialog2.dialogElement = null;
+            ConfirmationDialog3.dialogElement.remove();
+            ConfirmationDialog3.dialogElement = null;
           }
         }
       };
@@ -19798,7 +19815,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           return Math.max(0, CONFIG2.API.UNDO_TIMEOUT - elapsed);
         }
       };
-      module.exports = { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2, UndoManager: UndoManager2 };
+      module.exports = { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 };
     }
   });
 
@@ -21869,8 +21886,8 @@ ${result}`;
       var { TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { OperationGuard: OperationGuard2 } = require_security();
-      var { ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { AISchema } = require_schema();
+      var { ConfirmationDialog: ConfirmationDialog3 } = require_security();
+      var { AISchema: AISchema2 } = require_schema();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
       var _AI = null;
@@ -22688,7 +22705,7 @@ ${existingContent}
 \u7F16\u8F91\u6307\u4EE4\uFF1A
 ${content_prompt}`;
             const editPlanRaw = await svc().requestChat(editPlanPrompt, settings, 2200);
-            const editPlanResult = AISchema.parseAIJson("editPlan", editPlanRaw);
+            const editPlanResult = AISchema2.parseAIJson("editPlan", editPlanRaw);
             let editPlan = null;
             if (editPlanResult.ok) {
               editPlan = editPlanResult.value;
@@ -23320,7 +23337,7 @@ ${aiResponse}`;
             if (pages.length === 0) {
               return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u9875\u9762\u3002`;
             }
-            const confirmed = await ConfirmationDialog2.show({
+            const confirmed = await ConfirmationDialog3.show({
               title: `\u{1F310} \u6279\u91CF\u7FFB\u8BD1\u786E\u8BA4`,
               message: `\u5373\u5C06\u7FFB\u8BD1 ${pages.length} \u4E2A\u9875\u9762\u4E3A${lang}\u3002
 \u7FFB\u8BD1\u540E\u7684\u5185\u5BB9\u5C06\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002`,
@@ -23418,14 +23435,14 @@ ${content}`;
 \u9875\u9762\u5185\u5BB9\uFF1A
 ${content}`;
             const aiResponse = await svc().requestChat(analyzePrompt, settings, 3e3);
-            const parsedResult = AISchema.parseAIJson("extractToDatabase", aiResponse);
+            const parsedResult = AISchema2.parseAIJson("extractToDatabase", aiResponse);
             if (!parsedResult.ok) {
               return `\u274C ${parsedResult.reason}`;
             }
             const extractedData = parsedResult.value;
             const validProps = extractedData.properties.filter((prop) => {
-              const nameOk = AISchema.validatePropertyName(prop.name);
-              const typeOk = AISchema.validatePropertyType(prop.type);
+              const nameOk = AISchema2.validatePropertyName(prop.name);
+              const typeOk = AISchema2.validatePropertyType(prop.type);
               if (!nameOk || !typeOk.valid) {
                 console.warn(`[LD-Notion] AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5DF2\u8DF3\u8FC7\uFF08name=${prop.name}, type=${prop.type}\uFF09`);
                 return false;
@@ -23438,7 +23455,7 @@ ${content}`;
               return `\u274C AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5747\u65E0\u6548\uFF0C\u65E0\u6CD5\u521B\u5EFA\u6570\u636E\u5E93\u3002`;
             }
             extractedData.properties = validProps;
-            const confirmed = await ConfirmationDialog2.show({
+            const confirmed = await ConfirmationDialog3.show({
               title: "\u{1F4CA} \u521B\u5EFA\u6570\u636E\u5E93\u786E\u8BA4",
               message: `\u5C06\u4ECE\u300C${sourcePage.name}\u300D\u63D0\u53D6 ${extractedData.entries.length} \u4E2A\u6761\u76EE\u3002
 \u6570\u636E\u5E93\u540D\u79F0: ${dbName}
@@ -23546,7 +23563,7 @@ ${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
 - \u6BCF\u4E2A\u5B50\u9875\u9762\u5E94\u6709\u660E\u786E\u7684\u4E3B\u9898\u548C\u8FB9\u754C
 - \u7236\u9875\u9762\u4F5C\u4E3A\u76EE\u5F55/\u6982\u89C8\u9875`;
             const planResponse = await svc().requestChat(planPrompt, settings, 1500);
-            const planResult = AISchema.parseAIJson("generatePages", planResponse);
+            const planResult = AISchema2.parseAIJson("generatePages", planResponse);
             if (!planResult.ok) {
               console.warn("[LD-Notion] AI \u751F\u6210\u7ED3\u6784 JSON \u89E3\u6790\u5931\u8D25:", planResult.reason);
               return `\u274C AI \u751F\u6210\u7684\u7ED3\u6784\u65E0\u6548\u3002\u8BF7\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u3002`;
@@ -23558,17 +23575,17 @@ ${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
             const MAX_CHILD_DESC = 2e3;
             plan.children = plan.children.map((c) => ({
               ...c,
-              title: AISchema.validatePropertyValue(c == null ? void 0 : c.title, "title"),
-              icon: AISchema.validateEmoji(c == null ? void 0 : c.icon),
-              description: AISchema.validatePropertyValue(c == null ? void 0 : c.description, "rich_text").slice(0, MAX_CHILD_DESC)
+              title: AISchema2.validatePropertyValue(c == null ? void 0 : c.title, "title"),
+              icon: AISchema2.validateEmoji(c == null ? void 0 : c.icon),
+              description: AISchema2.validatePropertyValue(c == null ? void 0 : c.description, "rich_text").slice(0, MAX_CHILD_DESC)
             })).filter((c) => c.title);
             if (plan.children.length === 0) {
               return `\u274C AI \u89C4\u5212\u7684\u5B50\u9875\u9762\u6807\u9898\u65E0\u6548\u3002`;
             }
-            plan.parent_title = AISchema.validatePropertyValue(plan.parent_title, "title");
-            plan.parent_summary = AISchema.validatePropertyValue(plan.parent_summary, "rich_text");
+            plan.parent_title = AISchema2.validatePropertyValue(plan.parent_title, "title");
+            plan.parent_summary = AISchema2.validatePropertyValue(plan.parent_summary, "rich_text");
             const pageList = plan.children.map((c) => `${c.icon || "\u{1F4C4}"} ${c.title}`).join("\n");
-            const confirmed = await ConfirmationDialog2.show({
+            const confirmed = await ConfirmationDialog3.show({
               title: "\u{1F4D1} \u591A\u9875\u9762\u751F\u6210\u786E\u8BA4",
               message: `\u5C06\u521B\u5EFA\u4EE5\u4E0B\u9875\u9762\u7ED3\u6784\uFF1A
 
@@ -23954,6 +23971,440 @@ ${aiResponse}
     }
   });
 
+  // src/ai/guarded-write.js
+  var require_guarded_write = __commonJS({
+    "src/ai/guarded-write.js"(exports, module) {
+      "use strict";
+      var { OperationGuard: OperationGuard2 } = require_security();
+      var GuardedWrite = {
+        _resolveGuardApiKey: (settingsOrApiKey, fallbackApiKey) => {
+          if (typeof settingsOrApiKey === "string" && settingsOrApiKey) {
+            return settingsOrApiKey;
+          }
+          if (settingsOrApiKey == null ? void 0 : settingsOrApiKey.notionApiKey) {
+            return settingsOrApiKey.notionApiKey;
+          }
+          if (settingsOrApiKey == null ? void 0 : settingsOrApiKey.apiKey) {
+            return settingsOrApiKey.apiKey;
+          }
+          return fallbackApiKey;
+        },
+        _buildGuardContext: (context = {}, settingsOrApiKey) => {
+          const guardContext = { ...context };
+          const apiKey = GuardedWrite._resolveGuardApiKey(settingsOrApiKey, guardContext.apiKey);
+          if (apiKey) {
+            guardContext.apiKey = apiKey;
+          }
+          if (!guardContext.itemName && guardContext.pageId) {
+            guardContext.itemName = guardContext.pageId;
+          }
+          return guardContext;
+        },
+        _executeGuardedWrite: async (operation, executor, context = {}, settingsOrApiKey) => {
+          return await OperationGuard2.execute(
+            operation,
+            executor,
+            GuardedWrite._buildGuardContext(context, settingsOrApiKey)
+          );
+        },
+        _executeGuardedPageWrite: async (operation, target, executor, settingsOrApiKey, context = {}) => {
+          const pageId = context.pageId || (target == null ? void 0 : target.id) || "";
+          const itemName = context.itemName || (target == null ? void 0 : target.name) || (target == null ? void 0 : target.id) || pageId || "\u672A\u77E5\u9875\u9762";
+          return await GuardedWrite._executeGuardedWrite(
+            operation,
+            executor,
+            { ...context, itemName, pageId },
+            settingsOrApiKey
+          );
+        },
+        _executeGuardedDatabaseWrite: async (operation, databaseId, executor, settingsOrApiKey, context = {}) => {
+          return await GuardedWrite._executeGuardedWrite(
+            operation,
+            executor,
+            {
+              ...context,
+              itemName: context.itemName || databaseId,
+              databaseId: context.databaseId || databaseId
+            },
+            settingsOrApiKey
+          );
+        }
+      };
+      module.exports = { GuardedWrite };
+    }
+  });
+
+  // src/ai/agent-executor.js
+  var require_agent_executor = __commonJS({
+    "src/ai/agent-executor.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Storage: Storage2 } = require_storage();
+      var { TargetState: TargetState2 } = require_auth();
+      var { OperationGuard: OperationGuard2 } = require_security();
+      var { AgentTrace } = require_AgentTrace();
+      var { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 } = require_AgentTools();
+      var _AI = null;
+      var AI = () => {
+        if (!_AI) _AI = require_ai().AIAssistant;
+        return _AI;
+      };
+      var ChatState2 = new Proxy({}, { get: (_, prop) => require_ai().ChatState[prop] });
+      var AIService2 = new Proxy({}, { get: (_, prop) => require_ai().AIService[prop] });
+      var AgentExecutor = {
+        _generateAgentPlan: async (params, settings) => {
+          const { task_description } = params;
+          const planPrompt = `\u4F60\u662F\u4E00\u4E2A Notion \u4EFB\u52A1\u89C4\u5212\u5668\u3002\u5C06\u7528\u6237\u7684\u9AD8\u5C42\u4EFB\u52A1\u5206\u89E3\u4E3A\u53EF\u6267\u884C\u6B65\u9AA4\u3002
+\u6BCF\u4E00\u6B65\u5FC5\u987B\u662F\u4EE5\u4E0B\u64CD\u4F5C\u4E4B\u4E00\uFF1Aquery, search, workspace_search, classify, batch_classify,
+update, move, copy, create_database, write_content, edit_content, translate_content,
+ai_autofill, ask, deep_research, template_output, summarize, brainstorm, proofread,
+batch_translate, extract_to_database, generate_pages, batch_analyze
+
+\u8FD4\u56DE JSON\uFF08\u53EA\u8FD4\u56DE JSON\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\uFF09\uFF1A
+{
+  "plan": [
+{ "intent": "\u64CD\u4F5C\u540D", "params": { \u5BF9\u5E94\u64CD\u4F5C\u7684\u53C2\u6570 }, "explanation": "\u6B65\u9AA4\u8BF4\u660E" }
+  ],
+  "explanation": "\u6574\u4F53\u8BA1\u5212\u8BF4\u660E"
+}
+
+\u7528\u6237\u4EFB\u52A1\uFF1A${task_description}`;
+          const planResponse = await AIService2.requestChat(planPrompt, settings, 1500);
+          const planResult = AISchema.parseAIJson("agentPlan", planResponse);
+          if (!planResult.ok) {
+            console.warn("[LD-Notion] Agent \u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", planResult.reason);
+            return "\u274C Agent \u751F\u6210\u7684\u8BA1\u5212\u683C\u5F0F\u65E0\u6548\u3002\u8BF7\u5C1D\u8BD5\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u3002";
+          }
+          const plan = planResult.value;
+          if (!plan.plan || plan.plan.length === 0) {
+            return "\u274C Agent \u672A\u80FD\u5206\u89E3\u51FA\u6709\u6548\u7684\u6267\u884C\u6B65\u9AA4\u3002\u8BF7\u5C1D\u8BD5\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u4EFB\u52A1\u3002";
+          }
+          let planMsg = `\u{1F916} **Agent \u6267\u884C\u8BA1\u5212**
+${plan.explanation || ""}
+
+`;
+          plan.plan.forEach((step, i) => {
+            planMsg += `${i + 1}. ${step.explanation}
+`;
+          });
+          ChatState2.updateLastMessage(planMsg + "\n\u23F3 \u7B49\u5F85\u786E\u8BA4...", "processing");
+          const confirmed = await ConfirmationDialog.show({
+            title: "\u{1F916} Agent \u6267\u884C\u8BA1\u5212\u786E\u8BA4",
+            message: plan.plan.map((s, i) => `${i + 1}. ${s.explanation}`).join("\n"),
+            itemName: task_description,
+            countdown: 5,
+            requireNameInput: false
+          });
+          if (!confirmed) {
+            return "\u{1F916} Agent \u4EFB\u52A1\u5DF2\u53D6\u6D88\u3002";
+          }
+          return { plan, planMsg };
+        },
+        // 执行 Agent 计划并生成汇总报告。
+        // W5 (MAINT-004/011): 从 handleAgentTask 提取。executeIntent 异常被内部 catch 捕获（降级，coding-conventions-007）。
+        _executeAgentPlan: async (plan, settings, planMsg) => {
+          const results = [];
+          let aborted = false;
+          for (let i = 0; i < plan.plan.length; i++) {
+            const step = plan.plan[i];
+            ChatState2.updateLastMessage(
+              `${planMsg}
+\u23F3 \u6B65\u9AA4 ${i + 1}/${plan.plan.length}: ${step.explanation}`,
+              "processing"
+            );
+            try {
+              const stepResult = await AI().executeIntent(step, settings);
+              const normalizedStepResult = AI()._normalizeExecutionResult(stepResult);
+              if (AI()._isErrorResult(normalizedStepResult)) {
+                results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
+                aborted = true;
+                break;
+              }
+              results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
+            } catch (error) {
+              results.push({
+                index: i + 1,
+                explanation: step.explanation,
+                success: false,
+                result: AI()._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
+              });
+              aborted = true;
+              break;
+            }
+          }
+          let report = `\u{1F916} **Agent \u4EFB\u52A1${aborted ? "\u4E2D\u65AD" : "\u5B8C\u6210"}**
+
+`;
+          for (const r of results) {
+            report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.index}: ${r.explanation}
+`;
+          }
+          if (aborted) {
+            const skipped = plan.plan.slice(results.length);
+            if (skipped.length > 0) {
+              report += `
+\u23ED\uFE0F \u5DF2\u8DF3\u8FC7\uFF1A
+`;
+              skipped.forEach((step, i) => {
+                report += `${results.length + i + 1}. ${step.explanation}
+`;
+              });
+            }
+          }
+          report += `
+---
+`;
+          for (const r of results) {
+            report += `
+**\u6B65\u9AA4 ${r.index}**: ${r.explanation}
+${AI()._resultToText(r.result)}
+`;
+          }
+          return report;
+        },
+        handleAgentTask: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("agentTask")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1AAgent \u81EA\u4E3B\u4EE3\u7406\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
+          }
+          const { task_description } = params;
+          if (!task_description) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u60F3\u8BA9 Agent \u5B8C\u6210\u7684\u4EFB\u52A1\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5E2E\u6211\u6574\u7406\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50\u5E76\u751F\u6210\u6458\u8981\u300D";
+          }
+          ChatState2.updateLastMessage("\u{1F916} Agent \u6B63\u5728\u89C4\u5212\u4EFB\u52A1...", "processing");
+          try {
+            const generated = await AI()._generateAgentPlan(params, settings);
+            if (typeof generated === "string") return generated;
+            const { plan, planMsg } = generated;
+            return await AI()._executeAgentPlan(plan, settings, planMsg);
+          } catch (error) {
+            return `\u274C Agent \u4EFB\u52A1\u5931\u8D25: ${error.message}`;
+          }
+        },
+        // ======= Agent Loop (ReAct 模式) =======
+        // 尝试解析 AI 回复为工具调用 JSON
+        _tryParseToolCall: (response) => {
+          if (!response) return null;
+          const trimmed = response.trim();
+          let parsed = null;
+          try {
+            parsed = JSON.parse(trimmed);
+            if (parsed.tool && typeof parsed.tool === "string") {
+              const toolDef = AI_AGENT_TOOLS2[parsed.tool];
+              if (!toolDef) {
+                console.warn(`[LD-Notion] _tryParseToolCall: \u62D2\u7EDD\u672A\u77E5\u5DE5\u5177 "${parsed.tool}"`);
+                return null;
+              }
+              if (parsed.args !== void 0 && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
+                console.warn(`[LD-Notion] _tryParseToolCall: \u5DE5\u5177 "${parsed.tool}" \u7684\u53C2\u6570\u7C7B\u578B\u65E0\u6548`);
+                return null;
+              }
+              return parsed;
+            }
+          } catch (error) {
+            console.warn("[LD-Notion] \u5DE5\u5177\u8C03\u7528\u89E3\u6790\u5931\u8D25:", error);
+          }
+          const jsonMatch = trimmed.match(/\{[\s\S]*"tool"\s*:\s*"[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              parsed = JSON.parse(jsonMatch[0]);
+              if (parsed.tool && typeof parsed.tool === "string") {
+                const toolDef = AI_AGENT_TOOLS2[parsed.tool];
+                if (!toolDef) {
+                  console.warn(`[LD-Notion] _tryParseToolCall: \u62D2\u7EDD\u672A\u77E5\u5DE5\u5177 "${parsed.tool}"`);
+                  return null;
+                }
+                if (parsed.args !== void 0 && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
+                  console.warn(`[LD-Notion] _tryParseToolCall: \u5DE5\u5177 "${parsed.tool}" \u7684\u53C2\u6570\u7C7B\u578B\u65E0\u6548`);
+                  return null;
+                }
+                return parsed;
+              }
+            } catch (error) {
+              console.warn("[LD-Notion] \u5DE5\u5177\u8C03\u7528\u89E3\u6790\u5931\u8D25:", error);
+            }
+          }
+          return null;
+        },
+        // 构建 Agent 系统提示（含可用工具列表、工作区上下文、persona 个性化）。
+        // W5 (MAINT-003/011): 从 runAgentLoop 提取，保留 prompt injection 防御
+        // （persona.instructions 过滤 + <user_input> 包裹由调用方 runAgentLoop 注入，learnings-003）。
+        _buildAgentSystemPrompt: (permLevel, availableTools, settings) => {
+          var _a, _b, _c, _d, _e;
+          const aiTargetState = TargetState2.getDisplayAITargetState();
+          let dbInfo;
+          if (aiTargetState.mode === "all") {
+            let cached;
+            try {
+              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
+            } catch (error) {
+              console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
+              cached = {};
+            }
+            const dbCount = ((_a = cached.databases) == null ? void 0 : _a.length) || 0;
+            dbInfo = `\u67E5\u8BE2\u6A21\u5F0F: \u6240\u6709\u5DE5\u4F5C\u533A\u6570\u636E\u5E93 (${dbCount} \u4E2A)`;
+          } else if (aiTargetState.mode === "database") {
+            let cached;
+            try {
+              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
+            } catch (error) {
+              console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
+              cached = {};
+            }
+            const dbName = ((_c = (_b = cached.databases) == null ? void 0 : _b.find((d) => d.id === aiTargetState.databaseId)) == null ? void 0 : _c.title) || aiTargetState.databaseId;
+            dbInfo = `\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93: ${dbName} (ID: ${aiTargetState.databaseId})`;
+          } else if (aiTargetState.mode === "page") {
+            let cached;
+            try {
+              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
+            } catch (error) {
+              console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
+              cached = {};
+            }
+            const pageName = ((_e = (_d = cached.pages) == null ? void 0 : _d.find((p) => p.id === aiTargetState.pageId)) == null ? void 0 : _e.title) || aiTargetState.pageId;
+            dbInfo = `\u5F53\u524D AI \u76EE\u6807\u9875\u9762: ${pageName} (ID: ${aiTargetState.pageId})`;
+          } else {
+            dbInfo = settings.notionDatabaseId ? `\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93 ID: ${settings.notionDatabaseId}` : "\u672A\u914D\u7F6E\u6570\u636E\u5E93 ID";
+          }
+          const persona = {
+            name: Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG2.DEFAULTS.agentPersonaName),
+            tone: Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_TONE, CONFIG2.DEFAULTS.agentPersonaTone),
+            expertise: Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG2.DEFAULTS.agentPersonaExpertise),
+            instructions: Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG2.DEFAULTS.agentPersonaInstructions)
+          };
+          const personaBlock = persona.instructions ? `
+\u4E2A\u6027\u5316\u6307\u4EE4\uFF1A${String(persona.instructions).slice(0, 500).replace(/<system|ignore previous|ignore all previous|disregard|you are now|new instructions/gi, "[\u5DF2\u8FC7\u6EE4]")}` : "";
+          return `\u4F60\u662F${persona.name}\uFF0C\u4E00\u4E2A\u4E13\u6CE8\u4E8E${persona.expertise}\u7684\u52A9\u624B\u3002\u8BED\u6C14\u98CE\u683C\uFF1A${persona.tone}\u3002${personaBlock}
+\u4F60\u53EF\u4EE5\u4F7F\u7528\u4EE5\u4E0B\u5DE5\u5177\u6765\u5B8C\u6210\u7528\u6237\u7684\u4EFB\u52A1\u3002
+
+\u5F53\u524D\u73AF\u5883\uFF1A${dbInfo}
+\u5F53\u524D\u6743\u9650\u7EA7\u522B\uFF1A${CONFIG2.PERMISSION_NAMES[permLevel] || permLevel}
+
+\u53EF\u7528\u5DE5\u5177\uFF1A
+${availableTools}
+
+\u4F7F\u7528\u89C4\u5219\uFF1A
+1. \u6BCF\u6B21\u56DE\u590D\u53EA\u80FD\u505A\u4E00\u4EF6\u4E8B\uFF1A\u8C03\u7528\u4E00\u4E2A\u5DE5\u5177 OR \u7ED9\u7528\u6237\u6700\u7EC8\u56DE\u590D
+2. \u8C03\u7528\u5DE5\u5177\u65F6\uFF0C\u53EA\u8FD4\u56DE JSON\uFF08\u4E0D\u8981\u5305\u542B\u5176\u4ED6\u6587\u5B57\uFF09\uFF1A
+   {"tool": "\u5DE5\u5177\u540D", "args": {\u53C2\u6570\u5BF9\u8C61}, "thought": "\u4F60\u7684\u601D\u8003\u8FC7\u7A0B"}
+3. \u7ED9\u7528\u6237\u6700\u7EC8\u56DE\u590D\u65F6\uFF0C\u76F4\u63A5\u8FD4\u56DE\u6587\u672C\uFF08\u4E0D\u8981 JSON \u683C\u5F0F\uFF09
+4. \u6839\u636E\u5DE5\u5177\u8FD4\u56DE\u7684\u7ED3\u679C\u51B3\u5B9A\u4E0B\u4E00\u6B65\u884C\u52A8
+5. \u5982\u679C\u4EFB\u52A1\u9700\u8981\u591A\u6B65\uFF0C\u9010\u6B65\u6267\u884C\uFF0C\u6BCF\u6B21\u4E00\u4E2A\u5DE5\u5177\u8C03\u7528
+6. \u6267\u884C\u5199\u5165/\u4FEE\u6539\u64CD\u4F5C\u524D\uFF0C\u5148\u7528\u8BFB\u53D6\u5DE5\u5177\u786E\u8BA4\u76EE\u6807\u5B58\u5728
+7. \u53C2\u6570\u503C\u5FC5\u987B\u662F\u5177\u4F53\u7684\u503C\uFF0C\u4E0D\u8981\u7528\u5360\u4F4D\u7B26`;
+        },
+        // 执行单次 Agent 工具调用（4 分支：未知工具/权限不足/Level≥1需确认/Level=0直接执行）。
+        // W5 (MAINT-003/011): 从 runAgentLoop 提取，保留 OperationGuard.execute 闸门 + 取消语义。
+        _executeAgentToolCall: async (toolCall, settings, permLevel) => {
+          const tool = AI().AGENT_TOOLS[toolCall.tool];
+          let result;
+          if (!tool) {
+            result = AI()._normalizeExecutionResult(
+              `\u9519\u8BEF: \u672A\u77E5\u5DE5\u5177 "${toolCall.tool}"\u3002\u53EF\u7528\u5DE5\u5177: ${Object.keys(AI().AGENT_TOOLS).filter((name) => AI().AGENT_TOOLS[name].level <= permLevel).join(", ")}`,
+              { source: "tool", name: toolCall.tool, status: "error" }
+            );
+          } else if (tool.level > permLevel) {
+            result = AI()._normalizeExecutionResult(
+              `\u9519\u8BEF: \u6743\u9650\u4E0D\u8DB3\uFF0C"${toolCall.tool}" \u9700\u8981\u300C${CONFIG2.PERMISSION_NAMES[tool.level]}\u300D\u6743\u9650\uFF0C\u5F53\u524D\u4E3A\u300C${CONFIG2.PERMISSION_NAMES[permLevel]}\u300D`,
+              { source: "tool", name: toolCall.tool, status: "error" }
+            );
+          } else {
+            if (tool.level >= 1) {
+              try {
+                result = await OperationGuard2.execute(toolCall.tool, async () => {
+                  return await tool.execute(toolCall.args || {}, settings);
+                }, {
+                  source: "ai-agent-loop",
+                  actor: "ai",
+                  itemName: toolCall.tool,
+                  trigger: "ai_tool_execution"
+                });
+              } catch (guardError) {
+                if (guardError.message === "\u64CD\u4F5C\u5DF2\u53D6\u6D88") {
+                  result = AI()._normalizeExecutionResult(
+                    `\u9519\u8BEF: \u7528\u6237\u53D6\u6D88\u4E86 "${toolCall.tool}" \u64CD\u4F5C\u7684\u6267\u884C`,
+                    { source: "tool", name: toolCall.tool, status: "cancelled" }
+                  );
+                } else {
+                  result = AI()._normalizeExecutionResult(`\u9519\u8BEF: ${guardError.message}`, {
+                    source: "tool",
+                    name: toolCall.tool,
+                    status: "error"
+                  });
+                }
+              }
+            } else {
+              try {
+                result = await tool.execute(toolCall.args || {}, settings);
+              } catch (e) {
+                result = AI()._normalizeExecutionResult(`\u9519\u8BEF: ${e.message}`, {
+                  source: "tool",
+                  name: toolCall.tool,
+                  status: "error"
+                });
+              }
+            }
+          }
+          return result;
+        },
+        // 核心 Agent 循环
+        runAgentLoop: async (userMessage, settings, maxIterations = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG2.DEFAULTS.agentMaxIterations)) => {
+          const permLevel = OperationGuard2.getLevel();
+          const trace = AgentTrace.create(userMessage);
+          const availableTools = Object.entries(AI().AGENT_TOOLS).filter(([_, tool]) => tool.level <= permLevel).map(([name, tool]) => `- ${name}: ${tool.description} | \u53C2\u6570: ${tool.params}`).join("\n");
+          const systemPrompt = AI()._buildAgentSystemPrompt(permLevel, availableTools, settings);
+          const messages = [{ role: "user", content: `<user_input>
+${userMessage}
+</user_input>` }];
+          let iteration = 0;
+          while (iteration < maxIterations) {
+            iteration++;
+            trace.iterations = iteration;
+            ChatState2.updateLastMessage(
+              `\u{1F916} Agent \u601D\u8003\u4E2D... (${iteration}/${maxIterations})`,
+              "processing"
+            );
+            let response;
+            try {
+              response = await AIService2.requestAgentChat(
+                systemPrompt,
+                messages,
+                settings,
+                1500
+              );
+            } catch (error) {
+              AgentTrace.recordError(trace, error);
+              AgentTrace.persist(trace, "failed", `\u274C AI \u8C03\u7528\u5931\u8D25: ${error.message}`);
+              return `\u274C AI \u8C03\u7528\u5931\u8D25: ${error.message}`;
+            }
+            const toolCall = AI()._tryParseToolCall(response);
+            if (!toolCall) {
+              AgentTrace.persist(trace, "completed", response);
+              return response;
+            }
+            messages.push({ role: "assistant", content: response });
+            const thoughtText = toolCall.thought ? `
+\u{1F4AD} ${toolCall.thought}` : "";
+            ChatState2.updateLastMessage(
+              `\u{1F916} \u6B63\u5728\u6267\u884C: ${toolCall.tool}...${thoughtText}`,
+              "processing"
+            );
+            AgentTrace.recordToolCall(trace, toolCall, iteration);
+            const result = await AI()._executeAgentToolCall(toolCall, settings, permLevel);
+            AgentTrace.recordResult(trace, toolCall, result, iteration);
+            messages.push({ role: "user", content: `[\u5DE5\u5177\u7ED3\u679C] ${toolCall.tool}:
+${AI()._resultToAgentPayload(result)}` });
+          }
+          const maxMsg = "\u{1F916} Agent \u8FBE\u5230\u6700\u5927\u6267\u884C\u6B65\u6570\uFF0C\u5DF2\u505C\u6B62\u3002\u5982\u679C\u4EFB\u52A1\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u7EE7\u7EED\u63CF\u8FF0\u4F60\u7684\u9700\u6C42\u3002";
+          AgentTrace.persist(trace, "max_iterations", maxMsg);
+          return maxMsg;
+        }
+      };
+      module.exports = { AgentExecutor };
+    }
+  });
+
   // src/ai/index.js
   var require_ai = __commonJS({
     "src/ai/index.js"(exports, module) {
@@ -23965,9 +24416,9 @@ ${aiResponse}
       var { NotionAPI: NotionAPI2, SiteDetector: SiteDetector2, EMOJI_MAP: EMOJI_MAP2, DOMToNotion: DOMToNotion2 } = require_api();
       var { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
       var { GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
-      var { UndoManager: UndoManager2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
+      var { UndoManager: UndoManager2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
       var { UrlValidator } = require_UrlValidator();
-      var { AISchema } = require_schema();
+      var { AISchema: AISchema2 } = require_schema();
       var { AgentTrace } = require_AgentTrace();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
@@ -24883,13 +25334,13 @@ ${systemPrompt}
         },
         _isErrorResult: (result) => AIAssistant2._normalizeExecutionResult(result).status === "error",
         _buildPageIconPayload: (args = {}) => {
-          const iconEmoji = AISchema.validateEmoji(args.icon_emoji || "");
+          const iconEmoji = AISchema2.validateEmoji(args.icon_emoji || "");
           const iconUrlRaw = String(args.icon_url || "").trim();
           const clearIcon = !!args.clear_icon;
           if (clearIcon) return null;
           if (iconEmoji) return { type: "emoji", emoji: iconEmoji };
           if (iconUrlRaw) {
-            if (!AISchema.validatePageExternalUrl(iconUrlRaw)) {
+            if (!AISchema2.validatePageExternalUrl(iconUrlRaw)) {
               console.warn("[LD-Notion] AI \u8FD4\u56DE\u7684 icon_url \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C\uFF0C\u5DF2\u8DF3\u8FC7:", iconUrlRaw.slice(0, 80));
               return void 0;
             }
@@ -24902,7 +25353,7 @@ ${systemPrompt}
           const clearCover = !!args.clear_cover;
           if (clearCover) return null;
           if (coverUrlRaw) {
-            if (!AISchema.validatePageExternalUrl(coverUrlRaw)) {
+            if (!AISchema2.validatePageExternalUrl(coverUrlRaw)) {
               console.warn("[LD-Notion] AI \u8FD4\u56DE\u7684 cover_url \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C\uFF0C\u5DF2\u8DF3\u8FC7:", coverUrlRaw.slice(0, 80));
               return void 0;
             }
@@ -24913,15 +25364,15 @@ ${systemPrompt}
         _normalizeNotionProperties: (rawProperties = {}) => {
           const properties = {};
           for (const [rawKey, value] of Object.entries(rawProperties || {})) {
-            const key = AISchema.validatePropertyName(rawKey);
+            const key = AISchema2.validatePropertyName(rawKey);
             if (!key || value === void 0) continue;
             if (value && typeof value === "object" && !Array.isArray(value)) {
-              const cleaned = AISchema.sanitizeObjectValue(value);
+              const cleaned = AISchema2.sanitizeObjectValue(value);
               if (cleaned) {
                 for (const propType of Object.keys(cleaned)) {
                   const scalar = cleaned[propType];
                   if (propType === "url" || propType === "email" || propType === "phone_number") {
-                    const validated = AISchema.validatePropertyValue(scalar, propType);
+                    const validated = AISchema2.validatePropertyValue(scalar, propType);
                     if (validated !== null && validated !== "") {
                       cleaned[propType] = validated;
                     } else {
@@ -24956,7 +25407,7 @@ ${systemPrompt}
           return properties;
         },
         _buildPropertyValuePayload: (value, type = "text") => {
-          const v = AISchema.validatePropertyValue(value, type);
+          const v = AISchema2.validatePropertyValue(value, type);
           switch (type) {
             case "title":
               return { title: [{ type: "text", text: { content: v !== null ? String(v) : "" } }] };
@@ -25001,58 +25452,6 @@ ${systemPrompt}
             return { error: "\u8BF7\u63D0\u4F9B\u53EF\u66F4\u65B0\u5185\u5BB9\u3002\u53EF\u66F4\u65B0\u5C5E\u6027\uFF0C\u6216\u4F20\u5165 icon_emoji/icon_url/cover_url/is_locked \u7B49\u5143\u6570\u636E\u3002" };
           }
           return { propertyUpdates, metaPayload };
-        },
-        _resolveGuardApiKey: (settingsOrApiKey, fallbackApiKey) => {
-          if (typeof settingsOrApiKey === "string" && settingsOrApiKey) {
-            return settingsOrApiKey;
-          }
-          if (settingsOrApiKey == null ? void 0 : settingsOrApiKey.notionApiKey) {
-            return settingsOrApiKey.notionApiKey;
-          }
-          if (settingsOrApiKey == null ? void 0 : settingsOrApiKey.apiKey) {
-            return settingsOrApiKey.apiKey;
-          }
-          return fallbackApiKey;
-        },
-        _buildGuardContext: (context = {}, settingsOrApiKey) => {
-          const guardContext = { ...context };
-          const apiKey = AIAssistant2._resolveGuardApiKey(settingsOrApiKey, guardContext.apiKey);
-          if (apiKey) {
-            guardContext.apiKey = apiKey;
-          }
-          if (!guardContext.itemName && guardContext.pageId) {
-            guardContext.itemName = guardContext.pageId;
-          }
-          return guardContext;
-        },
-        _executeGuardedWrite: async (operation, executor, context = {}, settingsOrApiKey) => {
-          return await OperationGuard2.execute(
-            operation,
-            executor,
-            AIAssistant2._buildGuardContext(context, settingsOrApiKey)
-          );
-        },
-        _executeGuardedPageWrite: async (operation, target, executor, settingsOrApiKey, context = {}) => {
-          const pageId = context.pageId || (target == null ? void 0 : target.id) || "";
-          const itemName = context.itemName || (target == null ? void 0 : target.name) || (target == null ? void 0 : target.id) || pageId || "\u672A\u77E5\u9875\u9762";
-          return await AIAssistant2._executeGuardedWrite(
-            operation,
-            executor,
-            { ...context, itemName, pageId },
-            settingsOrApiKey
-          );
-        },
-        _executeGuardedDatabaseWrite: async (operation, databaseId, executor, settingsOrApiKey, context = {}) => {
-          return await AIAssistant2._executeGuardedWrite(
-            operation,
-            executor,
-            {
-              ...context,
-              itemName: context.itemName || databaseId,
-              databaseId: context.databaseId || databaseId
-            },
-            settingsOrApiKey
-          );
         },
         _applyPageUpdatesToTargets: async (targets, params, settings) => {
           const built = AIAssistant2._buildPageUpdatePayloads(params);
@@ -25588,7 +25987,7 @@ ${userMessage}
               settings,
               800
             );
-            const intentResult = AISchema.parseAIJson("intent", response);
+            const intentResult = AISchema2.parseAIJson("intent", response);
             if (intentResult.ok) {
               const parsed = intentResult.value;
               if (!AIAssistant2._resolveIntentExecutor(parsed.intent)) {
@@ -25713,7 +26112,7 @@ ${userMessage}
         // 执行意图
         executeIntent: async (intentResult, settings) => {
           return await AIAssistant2.IntentDispatcher.execute(intentResult, settings);
-        },
+        }
         // 处理查询
         // 处理搜索
         // 处理工作区搜索（搜索整个 Notion 工作区）
@@ -25749,354 +26148,6 @@ ${userMessage}
         // ======= Agent 自主代理 =======
         // 生成 Agent 执行计划并等待用户确认。
         // W5 (MAINT-004/011): 从 handleAgentTask 提取。返回 { plan, planMsg } | 错误字符串。
-        _generateAgentPlan: async (params, settings) => {
-          const { task_description } = params;
-          const planPrompt = `\u4F60\u662F\u4E00\u4E2A Notion \u4EFB\u52A1\u89C4\u5212\u5668\u3002\u5C06\u7528\u6237\u7684\u9AD8\u5C42\u4EFB\u52A1\u5206\u89E3\u4E3A\u53EF\u6267\u884C\u6B65\u9AA4\u3002
-\u6BCF\u4E00\u6B65\u5FC5\u987B\u662F\u4EE5\u4E0B\u64CD\u4F5C\u4E4B\u4E00\uFF1Aquery, search, workspace_search, classify, batch_classify,
-update, move, copy, create_database, write_content, edit_content, translate_content,
-ai_autofill, ask, deep_research, template_output, summarize, brainstorm, proofread,
-batch_translate, extract_to_database, generate_pages, batch_analyze
-
-\u8FD4\u56DE JSON\uFF08\u53EA\u8FD4\u56DE JSON\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\uFF09\uFF1A
-{
-  "plan": [
-{ "intent": "\u64CD\u4F5C\u540D", "params": { \u5BF9\u5E94\u64CD\u4F5C\u7684\u53C2\u6570 }, "explanation": "\u6B65\u9AA4\u8BF4\u660E" }
-  ],
-  "explanation": "\u6574\u4F53\u8BA1\u5212\u8BF4\u660E"
-}
-
-\u7528\u6237\u4EFB\u52A1\uFF1A${task_description}`;
-          const planResponse = await AIService2.requestChat(planPrompt, settings, 1500);
-          const planResult = AISchema.parseAIJson("agentPlan", planResponse);
-          if (!planResult.ok) {
-            console.warn("[LD-Notion] Agent \u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", planResult.reason);
-            return "\u274C Agent \u751F\u6210\u7684\u8BA1\u5212\u683C\u5F0F\u65E0\u6548\u3002\u8BF7\u5C1D\u8BD5\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u3002";
-          }
-          const plan = planResult.value;
-          if (!plan.plan || plan.plan.length === 0) {
-            return "\u274C Agent \u672A\u80FD\u5206\u89E3\u51FA\u6709\u6548\u7684\u6267\u884C\u6B65\u9AA4\u3002\u8BF7\u5C1D\u8BD5\u66F4\u5177\u4F53\u5730\u63CF\u8FF0\u4EFB\u52A1\u3002";
-          }
-          let planMsg = `\u{1F916} **Agent \u6267\u884C\u8BA1\u5212**
-${plan.explanation || ""}
-
-`;
-          plan.plan.forEach((step, i) => {
-            planMsg += `${i + 1}. ${step.explanation}
-`;
-          });
-          ChatState2.updateLastMessage(planMsg + "\n\u23F3 \u7B49\u5F85\u786E\u8BA4...", "processing");
-          const confirmed = await ConfirmationDialog2.show({
-            title: "\u{1F916} Agent \u6267\u884C\u8BA1\u5212\u786E\u8BA4",
-            message: plan.plan.map((s, i) => `${i + 1}. ${s.explanation}`).join("\n"),
-            itemName: task_description,
-            countdown: 5,
-            requireNameInput: false
-          });
-          if (!confirmed) {
-            return "\u{1F916} Agent \u4EFB\u52A1\u5DF2\u53D6\u6D88\u3002";
-          }
-          return { plan, planMsg };
-        },
-        // 执行 Agent 计划并生成汇总报告。
-        // W5 (MAINT-004/011): 从 handleAgentTask 提取。executeIntent 异常被内部 catch 捕获（降级，coding-conventions-007）。
-        _executeAgentPlan: async (plan, settings, planMsg) => {
-          const results = [];
-          let aborted = false;
-          for (let i = 0; i < plan.plan.length; i++) {
-            const step = plan.plan[i];
-            ChatState2.updateLastMessage(
-              `${planMsg}
-\u23F3 \u6B65\u9AA4 ${i + 1}/${plan.plan.length}: ${step.explanation}`,
-              "processing"
-            );
-            try {
-              const stepResult = await AIAssistant2.executeIntent(step, settings);
-              const normalizedStepResult = AIAssistant2._normalizeExecutionResult(stepResult);
-              if (AIAssistant2._isErrorResult(normalizedStepResult)) {
-                results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
-                aborted = true;
-                break;
-              }
-              results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
-            } catch (error) {
-              results.push({
-                index: i + 1,
-                explanation: step.explanation,
-                success: false,
-                result: AIAssistant2._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
-              });
-              aborted = true;
-              break;
-            }
-          }
-          let report = `\u{1F916} **Agent \u4EFB\u52A1${aborted ? "\u4E2D\u65AD" : "\u5B8C\u6210"}**
-
-`;
-          for (const r of results) {
-            report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.index}: ${r.explanation}
-`;
-          }
-          if (aborted) {
-            const skipped = plan.plan.slice(results.length);
-            if (skipped.length > 0) {
-              report += `
-\u23ED\uFE0F \u5DF2\u8DF3\u8FC7\uFF1A
-`;
-              skipped.forEach((step, i) => {
-                report += `${results.length + i + 1}. ${step.explanation}
-`;
-              });
-            }
-          }
-          report += `
----
-`;
-          for (const r of results) {
-            report += `
-**\u6B65\u9AA4 ${r.index}**: ${r.explanation}
-${AIAssistant2._resultToText(r.result)}
-`;
-          }
-          return report;
-        },
-        handleAgentTask: async (params, settings, explanation) => {
-          const configCheck = AIAssistant2.checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("agentTask")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1AAgent \u81EA\u4E3B\u4EE3\u7406\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
-          }
-          const { task_description } = params;
-          if (!task_description) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u60F3\u8BA9 Agent \u5B8C\u6210\u7684\u4EFB\u52A1\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5E2E\u6211\u6574\u7406\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50\u5E76\u751F\u6210\u6458\u8981\u300D";
-          }
-          ChatState2.updateLastMessage("\u{1F916} Agent \u6B63\u5728\u89C4\u5212\u4EFB\u52A1...", "processing");
-          try {
-            const generated = await AIAssistant2._generateAgentPlan(params, settings);
-            if (typeof generated === "string") return generated;
-            const { plan, planMsg } = generated;
-            return await AIAssistant2._executeAgentPlan(plan, settings, planMsg);
-          } catch (error) {
-            return `\u274C Agent \u4EFB\u52A1\u5931\u8D25: ${error.message}`;
-          }
-        },
-        // ======= Agent Loop (ReAct 模式) =======
-        // 尝试解析 AI 回复为工具调用 JSON
-        _tryParseToolCall: (response) => {
-          if (!response) return null;
-          const trimmed = response.trim();
-          let parsed = null;
-          try {
-            parsed = JSON.parse(trimmed);
-            if (parsed.tool && typeof parsed.tool === "string") {
-              const toolDef = AI_AGENT_TOOLS2[parsed.tool];
-              if (!toolDef) {
-                console.warn(`[LD-Notion] _tryParseToolCall: \u62D2\u7EDD\u672A\u77E5\u5DE5\u5177 "${parsed.tool}"`);
-                return null;
-              }
-              if (parsed.args !== void 0 && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
-                console.warn(`[LD-Notion] _tryParseToolCall: \u5DE5\u5177 "${parsed.tool}" \u7684\u53C2\u6570\u7C7B\u578B\u65E0\u6548`);
-                return null;
-              }
-              return parsed;
-            }
-          } catch (error) {
-            console.warn("[LD-Notion] \u5DE5\u5177\u8C03\u7528\u89E3\u6790\u5931\u8D25:", error);
-          }
-          const jsonMatch = trimmed.match(/\{[\s\S]*"tool"\s*:\s*"[\s\S]*\}/);
-          if (jsonMatch) {
-            try {
-              parsed = JSON.parse(jsonMatch[0]);
-              if (parsed.tool && typeof parsed.tool === "string") {
-                const toolDef = AI_AGENT_TOOLS2[parsed.tool];
-                if (!toolDef) {
-                  console.warn(`[LD-Notion] _tryParseToolCall: \u62D2\u7EDD\u672A\u77E5\u5DE5\u5177 "${parsed.tool}"`);
-                  return null;
-                }
-                if (parsed.args !== void 0 && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
-                  console.warn(`[LD-Notion] _tryParseToolCall: \u5DE5\u5177 "${parsed.tool}" \u7684\u53C2\u6570\u7C7B\u578B\u65E0\u6548`);
-                  return null;
-                }
-                return parsed;
-              }
-            } catch (error) {
-              console.warn("[LD-Notion] \u5DE5\u5177\u8C03\u7528\u89E3\u6790\u5931\u8D25:", error);
-            }
-          }
-          return null;
-        },
-        // 构建 Agent 系统提示（含可用工具列表、工作区上下文、persona 个性化）。
-        // W5 (MAINT-003/011): 从 runAgentLoop 提取，保留 prompt injection 防御
-        // （persona.instructions 过滤 + <user_input> 包裹由调用方 runAgentLoop 注入，learnings-003）。
-        _buildAgentSystemPrompt: (permLevel, availableTools, settings) => {
-          var _a, _b, _c, _d, _e;
-          const aiTargetState = TargetState2.getDisplayAITargetState();
-          let dbInfo;
-          if (aiTargetState.mode === "all") {
-            let cached;
-            try {
-              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
-            } catch (error) {
-              console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
-              cached = {};
-            }
-            const dbCount = ((_a = cached.databases) == null ? void 0 : _a.length) || 0;
-            dbInfo = `\u67E5\u8BE2\u6A21\u5F0F: \u6240\u6709\u5DE5\u4F5C\u533A\u6570\u636E\u5E93 (${dbCount} \u4E2A)`;
-          } else if (aiTargetState.mode === "database") {
-            let cached;
-            try {
-              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
-            } catch (error) {
-              console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
-              cached = {};
-            }
-            const dbName = ((_c = (_b = cached.databases) == null ? void 0 : _b.find((d) => d.id === aiTargetState.databaseId)) == null ? void 0 : _c.title) || aiTargetState.databaseId;
-            dbInfo = `\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93: ${dbName} (ID: ${aiTargetState.databaseId})`;
-          } else if (aiTargetState.mode === "page") {
-            let cached;
-            try {
-              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
-            } catch (error) {
-              console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
-              cached = {};
-            }
-            const pageName = ((_e = (_d = cached.pages) == null ? void 0 : _d.find((p) => p.id === aiTargetState.pageId)) == null ? void 0 : _e.title) || aiTargetState.pageId;
-            dbInfo = `\u5F53\u524D AI \u76EE\u6807\u9875\u9762: ${pageName} (ID: ${aiTargetState.pageId})`;
-          } else {
-            dbInfo = settings.notionDatabaseId ? `\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93 ID: ${settings.notionDatabaseId}` : "\u672A\u914D\u7F6E\u6570\u636E\u5E93 ID";
-          }
-          const persona = {
-            name: Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG2.DEFAULTS.agentPersonaName),
-            tone: Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_TONE, CONFIG2.DEFAULTS.agentPersonaTone),
-            expertise: Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG2.DEFAULTS.agentPersonaExpertise),
-            instructions: Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG2.DEFAULTS.agentPersonaInstructions)
-          };
-          const personaBlock = persona.instructions ? `
-\u4E2A\u6027\u5316\u6307\u4EE4\uFF1A${String(persona.instructions).slice(0, 500).replace(/<system|ignore previous|ignore all previous|disregard|you are now|new instructions/gi, "[\u5DF2\u8FC7\u6EE4]")}` : "";
-          return `\u4F60\u662F${persona.name}\uFF0C\u4E00\u4E2A\u4E13\u6CE8\u4E8E${persona.expertise}\u7684\u52A9\u624B\u3002\u8BED\u6C14\u98CE\u683C\uFF1A${persona.tone}\u3002${personaBlock}
-\u4F60\u53EF\u4EE5\u4F7F\u7528\u4EE5\u4E0B\u5DE5\u5177\u6765\u5B8C\u6210\u7528\u6237\u7684\u4EFB\u52A1\u3002
-
-\u5F53\u524D\u73AF\u5883\uFF1A${dbInfo}
-\u5F53\u524D\u6743\u9650\u7EA7\u522B\uFF1A${CONFIG2.PERMISSION_NAMES[permLevel] || permLevel}
-
-\u53EF\u7528\u5DE5\u5177\uFF1A
-${availableTools}
-
-\u4F7F\u7528\u89C4\u5219\uFF1A
-1. \u6BCF\u6B21\u56DE\u590D\u53EA\u80FD\u505A\u4E00\u4EF6\u4E8B\uFF1A\u8C03\u7528\u4E00\u4E2A\u5DE5\u5177 OR \u7ED9\u7528\u6237\u6700\u7EC8\u56DE\u590D
-2. \u8C03\u7528\u5DE5\u5177\u65F6\uFF0C\u53EA\u8FD4\u56DE JSON\uFF08\u4E0D\u8981\u5305\u542B\u5176\u4ED6\u6587\u5B57\uFF09\uFF1A
-   {"tool": "\u5DE5\u5177\u540D", "args": {\u53C2\u6570\u5BF9\u8C61}, "thought": "\u4F60\u7684\u601D\u8003\u8FC7\u7A0B"}
-3. \u7ED9\u7528\u6237\u6700\u7EC8\u56DE\u590D\u65F6\uFF0C\u76F4\u63A5\u8FD4\u56DE\u6587\u672C\uFF08\u4E0D\u8981 JSON \u683C\u5F0F\uFF09
-4. \u6839\u636E\u5DE5\u5177\u8FD4\u56DE\u7684\u7ED3\u679C\u51B3\u5B9A\u4E0B\u4E00\u6B65\u884C\u52A8
-5. \u5982\u679C\u4EFB\u52A1\u9700\u8981\u591A\u6B65\uFF0C\u9010\u6B65\u6267\u884C\uFF0C\u6BCF\u6B21\u4E00\u4E2A\u5DE5\u5177\u8C03\u7528
-6. \u6267\u884C\u5199\u5165/\u4FEE\u6539\u64CD\u4F5C\u524D\uFF0C\u5148\u7528\u8BFB\u53D6\u5DE5\u5177\u786E\u8BA4\u76EE\u6807\u5B58\u5728
-7. \u53C2\u6570\u503C\u5FC5\u987B\u662F\u5177\u4F53\u7684\u503C\uFF0C\u4E0D\u8981\u7528\u5360\u4F4D\u7B26`;
-        },
-        // 执行单次 Agent 工具调用（4 分支：未知工具/权限不足/Level≥1需确认/Level=0直接执行）。
-        // W5 (MAINT-003/011): 从 runAgentLoop 提取，保留 OperationGuard.execute 闸门 + 取消语义。
-        _executeAgentToolCall: async (toolCall, settings, permLevel) => {
-          const tool = AIAssistant2.AGENT_TOOLS[toolCall.tool];
-          let result;
-          if (!tool) {
-            result = AIAssistant2._normalizeExecutionResult(
-              `\u9519\u8BEF: \u672A\u77E5\u5DE5\u5177 "${toolCall.tool}"\u3002\u53EF\u7528\u5DE5\u5177: ${Object.keys(AIAssistant2.AGENT_TOOLS).filter((name) => AIAssistant2.AGENT_TOOLS[name].level <= permLevel).join(", ")}`,
-              { source: "tool", name: toolCall.tool, status: "error" }
-            );
-          } else if (tool.level > permLevel) {
-            result = AIAssistant2._normalizeExecutionResult(
-              `\u9519\u8BEF: \u6743\u9650\u4E0D\u8DB3\uFF0C"${toolCall.tool}" \u9700\u8981\u300C${CONFIG2.PERMISSION_NAMES[tool.level]}\u300D\u6743\u9650\uFF0C\u5F53\u524D\u4E3A\u300C${CONFIG2.PERMISSION_NAMES[permLevel]}\u300D`,
-              { source: "tool", name: toolCall.tool, status: "error" }
-            );
-          } else {
-            if (tool.level >= 1) {
-              try {
-                result = await OperationGuard2.execute(toolCall.tool, async () => {
-                  return await tool.execute(toolCall.args || {}, settings);
-                }, {
-                  source: "ai-agent-loop",
-                  actor: "ai",
-                  itemName: toolCall.tool,
-                  trigger: "ai_tool_execution"
-                });
-              } catch (guardError) {
-                if (guardError.message === "\u64CD\u4F5C\u5DF2\u53D6\u6D88") {
-                  result = AIAssistant2._normalizeExecutionResult(
-                    `\u9519\u8BEF: \u7528\u6237\u53D6\u6D88\u4E86 "${toolCall.tool}" \u64CD\u4F5C\u7684\u6267\u884C`,
-                    { source: "tool", name: toolCall.tool, status: "cancelled" }
-                  );
-                } else {
-                  result = AIAssistant2._normalizeExecutionResult(`\u9519\u8BEF: ${guardError.message}`, {
-                    source: "tool",
-                    name: toolCall.tool,
-                    status: "error"
-                  });
-                }
-              }
-            } else {
-              try {
-                result = await tool.execute(toolCall.args || {}, settings);
-              } catch (e) {
-                result = AIAssistant2._normalizeExecutionResult(`\u9519\u8BEF: ${e.message}`, {
-                  source: "tool",
-                  name: toolCall.tool,
-                  status: "error"
-                });
-              }
-            }
-          }
-          return result;
-        },
-        // 核心 Agent 循环
-        runAgentLoop: async (userMessage, settings, maxIterations = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG2.DEFAULTS.agentMaxIterations)) => {
-          const permLevel = OperationGuard2.getLevel();
-          const trace = AgentTrace.create(userMessage);
-          const availableTools = Object.entries(AIAssistant2.AGENT_TOOLS).filter(([_, tool]) => tool.level <= permLevel).map(([name, tool]) => `- ${name}: ${tool.description} | \u53C2\u6570: ${tool.params}`).join("\n");
-          const systemPrompt = AIAssistant2._buildAgentSystemPrompt(permLevel, availableTools, settings);
-          const messages = [{ role: "user", content: `<user_input>
-${userMessage}
-</user_input>` }];
-          let iteration = 0;
-          while (iteration < maxIterations) {
-            iteration++;
-            trace.iterations = iteration;
-            ChatState2.updateLastMessage(
-              `\u{1F916} Agent \u601D\u8003\u4E2D... (${iteration}/${maxIterations})`,
-              "processing"
-            );
-            let response;
-            try {
-              response = await AIService2.requestAgentChat(
-                systemPrompt,
-                messages,
-                settings,
-                1500
-              );
-            } catch (error) {
-              AgentTrace.recordError(trace, error);
-              AgentTrace.persist(trace, "failed", `\u274C AI \u8C03\u7528\u5931\u8D25: ${error.message}`);
-              return `\u274C AI \u8C03\u7528\u5931\u8D25: ${error.message}`;
-            }
-            const toolCall = AIAssistant2._tryParseToolCall(response);
-            if (!toolCall) {
-              AgentTrace.persist(trace, "completed", response);
-              return response;
-            }
-            messages.push({ role: "assistant", content: response });
-            const thoughtText = toolCall.thought ? `
-\u{1F4AD} ${toolCall.thought}` : "";
-            ChatState2.updateLastMessage(
-              `\u{1F916} \u6B63\u5728\u6267\u884C: ${toolCall.tool}...${thoughtText}`,
-              "processing"
-            );
-            AgentTrace.recordToolCall(trace, toolCall, iteration);
-            const result = await AIAssistant2._executeAgentToolCall(toolCall, settings, permLevel);
-            AgentTrace.recordResult(trace, toolCall, result, iteration);
-            messages.push({ role: "user", content: `[\u5DE5\u5177\u7ED3\u679C] ${toolCall.tool}:
-${AIAssistant2._resultToAgentPayload(result)}` });
-          }
-          const maxMsg = "\u{1F916} Agent \u8FBE\u5230\u6700\u5927\u6267\u884C\u6B65\u6570\uFF0C\u5DF2\u505C\u6B62\u3002\u5982\u679C\u4EFB\u52A1\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u7EE7\u7EED\u63CF\u8FF0\u4F60\u7684\u9700\u6C42\u3002";
-          AgentTrace.persist(trace, "max_iterations", maxMsg);
-          return maxMsg;
-        }
       };
       Object.assign(AIAssistant2, AIHandlers2);
       Object.entries(AIAssistant2.AGENT_TOOLS).forEach(([name, tool]) => {
@@ -26501,7 +26552,9 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           AIClassifier3.isCancelled = false;
         }
       };
+      Object.assign(AIAssistant2, require_guarded_write().GuardedWrite);
       module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier3 };
+      Object.assign(AIAssistant2, require_agent_executor().AgentExecutor);
     }
   });
 
@@ -26512,7 +26565,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { CredentialVault, TargetState, NotionOAuth } = require_auth();
   var { SiteDetector, InstallHelper, EMOJI_MAP, NOTION_LANGUAGES, normalizeLanguage, DOMToNotion, NotionTransport, NotionAPI, ObsidianAPI, HTMLToMarkdown } = require_api();
   var { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier: AIClassifier2 } = require_ai();
-  var { OperationGuard, OperationLog, ConfirmationDialog, UndoManager } = require_security();
+  var { OperationGuard, OperationLog, ConfirmationDialog: ConfirmationDialog2, UndoManager } = require_security();
   var { ZhihuAPI, GenericExtractor, WorkspaceService } = require_extract();
   var { GenericExporter, LinuxDoAPI, Exporter } = require_export();
   var { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require_import();
