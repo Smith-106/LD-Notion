@@ -13514,6 +13514,901 @@ ${insight.summary || ""}`,
     }
   });
 
+  // src/ui/workspace-insight.js
+  var require_workspace_insight = __commonJS({
+    "src/ui/workspace-insight.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
+      var { NotionOAuth: NotionOAuth2 } = require_auth();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { WorkspaceService: WorkspaceService2 } = require_extract();
+      var { AutoImporter: AutoImporter2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2 } = require_import();
+      var { BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, ChatUI: ChatUI2 } = require_ai();
+      var _UI = null;
+      var UI2 = () => {
+        if (!_UI) _UI = require_main_ui().UI;
+        return _UI;
+      };
+      var WorkspaceInsight = {
+        buildWorkspaceInsightMarkdown: (model = UI2().buildWorkspaceVisualizationModel(), aiSummary = UI2().workspaceInsightSummary || "") => {
+          if (!(model == null ? void 0 : model.scannedAt)) {
+            return "# \u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\n\n\u5C1A\u672A\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\uFF0C\u6682\u65E0\u53EF\u5206\u4EAB\u7684\u6570\u636E\u3002";
+          }
+          const scannedAt = new Date(model.scannedAt).toLocaleString("zh-CN", { hour12: false });
+          const structuredPct = UI2().getViewPct(model.structuredPages, model.totalPages);
+          const sourceLines = model.sourceBreakdown.length > 0 ? model.sourceBreakdown.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF08${item.pct}%\uFF09`) : ["- \u6682\u65E0\u6765\u6E90\u5206\u5E03\u6570\u636E"];
+          const categoryLines = model.categoryBreakdown.length > 0 ? model.categoryBreakdown.slice(0, 8).map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF08${item.pct}%\uFF09`) : ["- \u6682\u65E0\u5206\u7C7B\u7EDF\u8BA1"];
+          const timelineLines = model.timeline.length > 0 ? model.timeline.map((item) => `- ${item.label}\uFF1A${item.count} \u9875`) : ["- \u6682\u65E0\u65F6\u95F4\u7EBF\u6570\u636E"];
+          const relationshipLines = model.relationships.length > 0 ? model.relationships.slice(0, 8).map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF08${item.pct}%\uFF09`) : ["- \u6682\u65E0\u6765\u6E90\u5173\u7CFB\u6570\u636E"];
+          const funnelLines = model.funnel.length > 0 ? model.funnel.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF08${item.pct}%\uFF09`) : ["- \u6682\u65E0\u6F0F\u6597\u6570\u636E"];
+          const duplicateLines = model.duplicateCandidates.length > 0 ? model.duplicateCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF0C\u6765\u6E90 ${item.sources.join(" + ") || "\u672A\u6807\u8BB0"}`) : ["- \u6682\u65E0\u540C\u6807\u9898\u91CD\u590D\u5019\u9009"];
+          const connectionLines = model.connectionCandidates.length > 0 ? model.connectionCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF0C\u539F\u56E0\uFF1A${item.reason}`) : ["- \u6682\u65E0\u8DE8\u6E90\u5173\u8054\u5019\u9009"];
+          const summaryBlock = String(aiSummary || "").trim() || UI2().buildWorkspaceInsightFallbackSummary(model);
+          return [
+            "# \u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A",
+            "",
+            `- \u626B\u63CF\u65F6\u95F4\uFF1A${scannedAt}`,
+            `- \u9875\u9762\u603B\u6570\uFF1A${model.totalPages}`,
+            `- \u8986\u76D6\u6570\u636E\u5E93\uFF1A${model.totalDatabases}`,
+            `- \u5DF2\u8BC6\u522B\u6765\u6E90\uFF1A${model.sourcedPages}`,
+            `- \u7ED3\u6784\u5B8C\u6574\u7387\uFF1A${structuredPct}%`,
+            "",
+            "## \u6D1E\u5BDF\u6458\u8981",
+            summaryBlock,
+            "",
+            "## \u5BFC\u51FA\u6F0F\u6597",
+            ...funnelLines,
+            "",
+            "## \u6765\u6E90\u5206\u5E03",
+            ...sourceLines,
+            "",
+            "## \u5206\u7C7B\u5206\u5E03",
+            ...categoryLines,
+            "",
+            "## \u5168\u5C40\u65F6\u95F4\u7EBF",
+            ...timelineLines,
+            "",
+            "## \u6765\u6E90\u5173\u7CFB\u56FE",
+            ...relationshipLines,
+            "",
+            "## \u91CD\u590D\u5019\u9009",
+            ...duplicateLines,
+            "",
+            "## \u8DE8\u6E90\u5173\u8054\u5019\u9009",
+            ...connectionLines,
+            "",
+            "## \u5F85\u8865\u9F50\u7F3A\u53E3",
+            `- \u672A\u6807\u8BB0\u6765\u6E90\uFF1A${model.missingSourcePages}`,
+            `- \u7F3A\u5C11\u65F6\u95F4\u5B57\u6BB5\uFF1A${model.missingDatePages}`,
+            `- \u672A\u5B8C\u6210\u5206\u7C7B\uFF1A${model.missingCategoryPages}`
+          ].join("\n");
+        },
+        buildWorkspaceConnectionCandidateActionLabel: (action) => {
+          const normalized = String(action || "").trim().toLowerCase();
+          if (normalized === "merge") return "\u5408\u5E76\u6574\u7406";
+          if (normalized === "enrich") return "\u8865\u5145\u4FE1\u606F";
+          if (normalized === "archive") return "\u6682\u7F13\u5F52\u6863";
+          return "\u4EBA\u5DE5\u590D\u6838";
+        },
+        buildWorkspaceConnectionCandidateWorkflow: (candidate, aiDraft = null) => {
+          const normalized = String((aiDraft == null ? void 0 : aiDraft.recommendedAction) || "review").trim().toLowerCase();
+          const presets = {
+            merge: {
+              actionLabel: "\u5408\u5E76\u6574\u7406",
+              actionNames: ["\u5408\u5E76\u6574\u7406", "\u5408\u5E76", "Merge"],
+              statusLabel: "\u5F85\u5904\u7406",
+              statusNames: ["\u5F85\u5904\u7406", "\u5F85\u5408\u5E76", "\u5F85\u529E", "\u672A\u5F00\u59CB", "Not started", "Backlog", "Inbox", "To do"],
+              defaultNextStep: "\u786E\u8BA4\u4E3B\u6761\u76EE\u540E\u5408\u5E76\u91CD\u590D\u6765\u6E90\uFF0C\u5E76\u8865\u5145\u7EDF\u4E00\u6458\u8981\u3002"
+            },
+            review: {
+              actionLabel: "\u4EBA\u5DE5\u590D\u6838",
+              actionNames: ["\u4EBA\u5DE5\u590D\u6838", "\u590D\u6838", "Review"],
+              statusLabel: "\u5F85\u590D\u6838",
+              statusNames: ["\u5F85\u590D\u6838", "\u5F85\u5904\u7406", "\u5F85\u529E", "\u672A\u5F00\u59CB", "Not started", "Backlog", "Inbox", "To do"],
+              defaultNextStep: "\u4EBA\u5DE5\u786E\u8BA4\u8FD9\u4E9B\u6765\u6E90\u662F\u5426\u5C5E\u4E8E\u540C\u4E00\u77E5\u8BC6\u6761\u76EE\u3002"
+            },
+            enrich: {
+              actionLabel: "\u8865\u5145\u4FE1\u606F",
+              actionNames: ["\u8865\u5145\u4FE1\u606F", "\u8865\u5145", "Enrich"],
+              statusLabel: "\u5F85\u8865\u5145",
+              statusNames: ["\u5F85\u8865\u5145", "\u5F85\u5904\u7406", "\u5F85\u529E", "\u672A\u5F00\u59CB", "Not started", "Backlog", "Inbox", "To do"],
+              defaultNextStep: "\u5148\u8865\u5145\u7F3A\u5931\u6765\u6E90\u4E0A\u4E0B\u6587\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u5408\u5E76\u3002"
+            },
+            archive: {
+              actionLabel: "\u6682\u7F13\u5F52\u6863",
+              actionNames: ["\u6682\u7F13\u5F52\u6863", "\u5F52\u6863", "Archive"],
+              statusLabel: "\u5DF2\u6401\u7F6E",
+              statusNames: ["\u5DF2\u6401\u7F6E", "\u6682\u7F13", "\u5F52\u6863", "Not started", "Backlog"],
+              defaultNextStep: "\u6682\u7F13\u5904\u7406\uFF0C\u4FDD\u7559\u5019\u9009\u4EE5\u5907\u540E\u7EED\u590D\u6838\u3002"
+            }
+          };
+          const preset = presets[normalized] || presets.review;
+          return {
+            recommendedAction: normalized || "review",
+            actionLabel: preset.actionLabel,
+            actionNames: preset.actionNames,
+            statusLabel: preset.statusLabel,
+            statusNames: preset.statusNames,
+            nextStep: String((aiDraft == null ? void 0 : aiDraft.nextStep) || preset.defaultNextStep).trim().slice(0, 200),
+            mergeReason: String((aiDraft == null ? void 0 : aiDraft.mergeReason) || `${(candidate == null ? void 0 : candidate.reason) || "\u8DE8\u6E90\u5019\u9009"}\uFF0C\u5EFA\u8BAE\u4FDD\u7559\u4E3A\u7EDF\u4E00\u77E5\u8BC6\u6761\u76EE\u7684\u6574\u7406\u5165\u53E3\u3002`).trim().slice(0, 200)
+          };
+        },
+        buildWorkspaceConnectionCandidateAIPrompt: (candidate) => {
+          const items = Array.isArray(candidate == null ? void 0 : candidate.items) ? candidate.items : [];
+          return [
+            "\u4F60\u662F\u77E5\u8BC6\u6574\u7406\u52A9\u624B\u3002\u8BF7\u57FA\u4E8E\u4EE5\u4E0B\u8DE8\u6E90\u5173\u8054\u5019\u9009\uFF0C\u8F93\u51FA\u4E00\u4E2A\u9002\u5408\u5199\u56DE Notion \u7684\u7EDF\u4E00\u77E5\u8BC6\u6761\u76EE\u6574\u7406\u5EFA\u8BAE\u3002",
+            "\u8981\u6C42\uFF1A",
+            "1. \u53EA\u8FD4\u56DE JSON\uFF0C\u4E0D\u8981\u5305\u542B\u4EFB\u4F55\u989D\u5916\u8BF4\u660E\u3002",
+            "2. canonicalTitle \u4F7F\u7528\u4E2D\u6587\uFF0C20 \u5B57\u4EE5\u5185\uFF0C\u9002\u5408\u4F5C\u4E3A\u7EDF\u4E00\u77E5\u8BC6\u6761\u76EE\u6807\u9898\u3002",
+            "3. summary \u4F7F\u7528\u4E2D\u6587\uFF0C80 \u5B57\u4EE5\u5185\uFF0C\u6982\u62EC\u8FD9\u4E9B\u5019\u9009\u7684\u5171\u540C\u4E3B\u9898\u4E0E\u4EF7\u503C\u3002",
+            "4. recommendedAction \u53EA\u80FD\u662F merge\u3001review\u3001enrich\u3001archive \u4E4B\u4E00\u3002",
+            "5. nextStep \u4F7F\u7528\u4E00\u53E5\u4E2D\u6587\uFF0C\u7ED9\u51FA\u4E0B\u4E00\u6B65\u6574\u7406\u52A8\u4F5C\u3002",
+            "6. mergeReason \u4F7F\u7528\u4E00\u53E5\u4E2D\u6587\uFF0C\u8BF4\u660E\u4E3A\u4EC0\u4E48\u5B83\u4EEC\u5E94\u8BE5\u5408\u5E76\u6216\u5173\u8054\u3002",
+            "7. tags \u8FD4\u56DE 1-5 \u4E2A\u77ED\u6807\u7B7E\u3002",
+            "",
+            "JSON Schema:",
+            '{"canonicalTitle":"","summary":"","recommendedAction":"merge|review|enrich|archive","nextStep":"","mergeReason":"","tags":[""]}',
+            "",
+            JSON.stringify({
+              label: (candidate == null ? void 0 : candidate.label) || "",
+              reason: (candidate == null ? void 0 : candidate.reason) || "",
+              count: Number((candidate == null ? void 0 : candidate.count) || items.length || 0),
+              sources: Array.isArray(candidate == null ? void 0 : candidate.sources) ? candidate.sources : [],
+              url: (candidate == null ? void 0 : candidate.url) || "",
+              items: items.map((item) => ({
+                title: (item == null ? void 0 : item.title) || "",
+                source: (item == null ? void 0 : item.source) || "",
+                parentLabel: (item == null ? void 0 : item.parentLabel) || "",
+                url: (item == null ? void 0 : item.url) || ""
+              }))
+            }, null, 2)
+          ].join("\n");
+        },
+        buildWorkspaceConnectionCandidateAIDraft: async (candidate, settings) => {
+          if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService)) return null;
+          try {
+            const prompt2 = UI2().buildWorkspaceConnectionCandidateAIPrompt(candidate);
+            const raw = String(await AIService2.requestChat(prompt2, settings, 700) || "").trim();
+            const jsonMatch = raw.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+              throw new Error("AI \u672A\u8FD4\u56DE\u6709\u6548 JSON\u3002");
+            }
+            const parsed = JSON.parse(jsonMatch[0]);
+            const canonicalTitle = String((parsed == null ? void 0 : parsed.canonicalTitle) || (parsed == null ? void 0 : parsed.title) || "").trim();
+            const summary = String((parsed == null ? void 0 : parsed.summary) || "").trim();
+            const recommendedAction = String((parsed == null ? void 0 : parsed.recommendedAction) || "review").trim().toLowerCase();
+            const nextStep = String((parsed == null ? void 0 : parsed.nextStep) || "").trim();
+            const mergeReason = String((parsed == null ? void 0 : parsed.mergeReason) || "").trim();
+            const tags = Array.from(new Set(
+              (Array.isArray(parsed == null ? void 0 : parsed.tags) ? parsed.tags : []).map((item) => String(item || "").trim()).filter(Boolean)
+            )).slice(0, 5);
+            return {
+              canonicalTitle: canonicalTitle.slice(0, 80),
+              summary: summary.slice(0, 200),
+              recommendedAction,
+              actionLabel: UI2().buildWorkspaceConnectionCandidateActionLabel(recommendedAction),
+              nextStep: nextStep.slice(0, 200),
+              mergeReason: mergeReason.slice(0, 200),
+              tags
+            };
+          } catch (error) {
+            console.warn("[LD-Notion] \u7EDF\u4E00\u5019\u9009 AI \u6574\u7406\u5931\u8D25\uFF0C\u5DF2\u56DE\u9000\u89C4\u5219\u7248\uFF1A", error);
+            return null;
+          }
+        },
+        buildWorkspaceConnectionCandidateTitle: (candidate, index = 0, aiDraft = null) => {
+          var _a, _b;
+          const firstTitle = String(((_b = (_a = candidate == null ? void 0 : candidate.items) == null ? void 0 : _a[0]) == null ? void 0 : _b.title) || "").trim();
+          const fallbackLabel = String((candidate == null ? void 0 : candidate.label) || "").trim();
+          const aiTitle = String((aiDraft == null ? void 0 : aiDraft.canonicalTitle) || "").trim();
+          const baseTitle = aiTitle || firstTitle || fallbackLabel || `\u5019\u9009 ${index + 1}`;
+          const reason = String((candidate == null ? void 0 : candidate.reason) || "").trim();
+          const fullTitle = reason ? `\u7EDF\u4E00\u5019\u9009 \xB7 ${baseTitle} \xB7 ${reason}` : `\u7EDF\u4E00\u5019\u9009 \xB7 ${baseTitle}`;
+          return fullTitle.slice(0, 200);
+        },
+        buildWorkspaceConnectionCandidateMarkdown: (candidate, savedAt = Date.now(), aiDraft = null) => {
+          const items = Array.isArray(candidate == null ? void 0 : candidate.items) ? candidate.items : [];
+          const sourceList = Array.isArray(candidate == null ? void 0 : candidate.sources) ? candidate.sources.filter(Boolean) : [];
+          const exportedAt = new Date(savedAt).toLocaleString("zh-CN", { hour12: false });
+          const workflow = UI2().buildWorkspaceConnectionCandidateWorkflow(candidate, aiDraft);
+          const lines = [
+            "# \u7EDF\u4E00\u5019\u9009\u6761\u76EE",
+            "",
+            `- \u5019\u9009\u6807\u7B7E\uFF1A${(candidate == null ? void 0 : candidate.label) || "\u672A\u547D\u540D\u5019\u9009"}`,
+            `- \u539F\u56E0\uFF1A${(candidate == null ? void 0 : candidate.reason) || "\u672A\u6807\u8BB0"}`,
+            `- \u6765\u6E90\u7EC4\u5408\uFF1A${sourceList.join(" + ") || "\u672A\u6807\u8BB0"}`,
+            `- \u5019\u9009\u6570\u91CF\uFF1A${items.length}`,
+            `- \u5BFC\u51FA\u65F6\u95F4\uFF1A${exportedAt}`
+          ];
+          if (candidate == null ? void 0 : candidate.url) {
+            lines.push(`- \u5019\u9009\u94FE\u63A5\uFF1A${candidate.url}`);
+          }
+          if (candidate == null ? void 0 : candidate.key) {
+            lines.push(`- \u5019\u9009\u952E\uFF1A${candidate.key}`);
+          }
+          lines.push("", "## \u5904\u7406\u72B6\u6001");
+          lines.push(`- \u5F53\u524D\u72B6\u6001\uFF1A${workflow.statusLabel}`);
+          lines.push(`- \u5EFA\u8BAE\u52A8\u4F5C\uFF1A${workflow.actionLabel}`);
+          lines.push(`- \u4E0B\u4E00\u6B65\uFF1A${workflow.nextStep}`);
+          lines.push(`- \u5408\u5E76\u7406\u7531\uFF1A${workflow.mergeReason}`);
+          if (aiDraft) {
+            lines.push("", "## AI \u6574\u7406\u5EFA\u8BAE");
+            if (aiDraft.canonicalTitle) {
+              lines.push(`- \u7EDF\u4E00\u6807\u9898\uFF1A${aiDraft.canonicalTitle}`);
+            }
+            if (aiDraft.summary) {
+              lines.push(`- \u6458\u8981\uFF1A${aiDraft.summary}`);
+            }
+            if (Array.isArray(aiDraft.tags) && aiDraft.tags.length > 0) {
+              lines.push(`- AI \u6807\u7B7E\uFF1A${aiDraft.tags.join(" / ")}`);
+            }
+          }
+          lines.push("", "## \u5019\u9009\u6761\u76EE\u660E\u7EC6");
+          if (items.length === 0) {
+            lines.push("- \u5F53\u524D\u5019\u9009\u6CA1\u6709\u53EF\u5199\u5165\u7684\u6761\u76EE\u660E\u7EC6\u3002");
+          } else {
+            items.forEach((item, index) => {
+              lines.push(`### \u6761\u76EE ${index + 1}`);
+              lines.push(`- \u6807\u9898\uFF1A${(item == null ? void 0 : item.title) || "\u672A\u547D\u540D\u9875\u9762"}`);
+              lines.push(`- \u6765\u6E90\uFF1A${(item == null ? void 0 : item.source) || "\u672A\u6807\u8BB0"}`);
+              lines.push(`- \u4E0A\u7EA7\u5F52\u5C5E\uFF1A${(item == null ? void 0 : item.parentLabel) || "\u672A\u6807\u8BB0"}`);
+              lines.push(`- \u9875\u9762 ID\uFF1A${(item == null ? void 0 : item.id) || ""}`);
+              if (item == null ? void 0 : item.url) {
+                lines.push(`- URL\uFF1A${item.url}`);
+              }
+              lines.push("");
+            });
+          }
+          return lines.join("\n").trim();
+        },
+        buildWorkspaceConnectionCandidateDatabaseProperties: (database, titlePropertyName, candidate, candidateTitle, aiDraft = null) => {
+          const databaseProperties = (database == null ? void 0 : database.properties) || {};
+          const workflow = UI2().buildWorkspaceConnectionCandidateWorkflow(candidate, aiDraft);
+          const properties = {
+            [titlePropertyName]: {
+              title: [{ text: { content: String(candidateTitle || "\u7EDF\u4E00\u5019\u9009").slice(0, 2e3) } }]
+            }
+          };
+          const addTextProperty = (propertyName, value) => {
+            var _a;
+            const property = databaseProperties[propertyName];
+            const text = String(value || "").trim();
+            if (!property || !text) return;
+            if (property.type === "rich_text") {
+              properties[propertyName] = {
+                rich_text: [{ text: { content: text.slice(0, 2e3) } }]
+              };
+              return;
+            }
+            if (property.type === "select") {
+              const options = Array.isArray((_a = property.select) == null ? void 0 : _a.options) ? property.select.options : [];
+              if (options.some((option) => (option == null ? void 0 : option.name) === text)) {
+                properties[propertyName] = { select: { name: text } };
+              }
+              return;
+            }
+            if (property.type === "url" && /^https?:\/\//i.test(text)) {
+              properties[propertyName] = { url: text };
+            }
+          };
+          const addChoiceProperty = (propertyName, preferredNames, fallbackText = "") => {
+            var _a, _b;
+            const property = databaseProperties[propertyName];
+            if (!property) return;
+            const names = Array.isArray(preferredNames) ? preferredNames.map((item) => String(item || "").trim()).filter(Boolean) : [];
+            const fallback = String(fallbackText || "").trim();
+            if (property.type === "status") {
+              const options = Array.isArray((_a = property.status) == null ? void 0 : _a.options) ? property.status.options : [];
+              const matched = names.find((name) => options.some((option) => (option == null ? void 0 : option.name) === name));
+              if (matched) {
+                properties[propertyName] = { status: { name: matched } };
+              }
+              return;
+            }
+            if (property.type === "select") {
+              const options = Array.isArray((_b = property.select) == null ? void 0 : _b.options) ? property.select.options : [];
+              const matched = names.find((name) => options.some((option) => (option == null ? void 0 : option.name) === name));
+              if (matched) {
+                properties[propertyName] = { select: { name: matched } };
+              }
+              return;
+            }
+            if (property.type === "rich_text") {
+              const content = fallback || names[0] || "";
+              if (content) {
+                properties[propertyName] = {
+                  rich_text: [{ text: { content: content.slice(0, 2e3) } }]
+                };
+              }
+            }
+          };
+          const addTagProperty = (propertyName, values) => {
+            var _a;
+            const property = databaseProperties[propertyName];
+            const tags = Array.from(new Set((values || []).map((item) => String(item || "").trim()).filter(Boolean))).slice(0, 20);
+            if (!property || tags.length === 0) return;
+            if (property.type === "multi_select") {
+              const options = Array.isArray((_a = property.multi_select) == null ? void 0 : _a.options) ? property.multi_select.options : [];
+              const optionNames = new Set(options.map((option) => option == null ? void 0 : option.name).filter(Boolean));
+              const matchedTags = tags.filter((tag) => optionNames.has(tag));
+              if (matchedTags.length > 0) {
+                properties[propertyName] = {
+                  multi_select: matchedTags.map((tag) => ({ name: tag }))
+                };
+              }
+              return;
+            }
+            if (property.type === "rich_text") {
+              properties[propertyName] = {
+                rich_text: [{ text: { content: tags.join(", ").slice(0, 2e3) } }]
+              };
+            }
+          };
+          const sourceList = Array.isArray(candidate == null ? void 0 : candidate.sources) ? candidate.sources : [];
+          const aiTags = Array.isArray(aiDraft == null ? void 0 : aiDraft.tags) ? aiDraft.tags : [];
+          const summaryText = String((aiDraft == null ? void 0 : aiDraft.summary) || `${(candidate == null ? void 0 : candidate.reason) || "\u8DE8\u6E90\u5019\u9009"}\uFF1A${sourceList.join(" + ") || "\u672A\u6807\u8BB0"}`).trim();
+          addTextProperty("\u6765\u6E90", "\u7EDF\u4E00\u5019\u9009");
+          addTextProperty("\u6765\u6E90\u7C7B\u578B", "\u8DE8\u6E90\u5173\u8054\u5019\u9009");
+          addTextProperty("\u5206\u7C7B", "\u7EDF\u4E00\u5019\u9009");
+          addChoiceProperty("\u72B6\u6001", workflow.statusNames, workflow.statusLabel);
+          addChoiceProperty("\u5904\u7406\u72B6\u6001", workflow.statusNames, workflow.statusLabel);
+          addChoiceProperty("\u5019\u9009\u72B6\u6001", workflow.statusNames, workflow.statusLabel);
+          addChoiceProperty("\u5EFA\u8BAE\u52A8\u4F5C", workflow.actionNames, workflow.actionLabel);
+          addChoiceProperty("\u5904\u7406\u52A8\u4F5C", workflow.actionNames, workflow.actionLabel);
+          addTagProperty("\u6807\u7B7E", ["\u5019\u9009", candidate == null ? void 0 : candidate.reason, ...sourceList, ...aiTags]);
+          addTextProperty("\u94FE\u63A5", (candidate == null ? void 0 : candidate.url) || "");
+          addTextProperty("\u63CF\u8FF0", summaryText);
+          addTextProperty("\u6458\u8981", summaryText);
+          addTextProperty("AI\u6458\u8981", summaryText);
+          addTextProperty("\u4E0B\u4E00\u6B65", workflow.nextStep);
+          addTextProperty("\u5408\u5E76\u7406\u7531", workflow.mergeReason);
+          addTextProperty("\u7EDF\u4E00\u6807\u9898", String((aiDraft == null ? void 0 : aiDraft.canonicalTitle) || "").trim());
+          return properties;
+        },
+        getWorkspaceConnectionCandidateSchemaDefinition: () => {
+          const statusOptions = [
+            "\u5F85\u5904\u7406",
+            "\u5F85\u590D\u6838",
+            "\u5F85\u8865\u5145",
+            "\u5F85\u5408\u5E76",
+            "\u5F85\u529E",
+            "\u672A\u5F00\u59CB",
+            "\u5DF2\u6401\u7F6E",
+            "\u6682\u7F13",
+            "\u5F52\u6863"
+          ].map((name) => ({ name }));
+          const actionOptions = [
+            "\u5408\u5E76\u6574\u7406",
+            "\u4EBA\u5DE5\u590D\u6838",
+            "\u8865\u5145\u4FE1\u606F",
+            "\u6682\u7F13\u5F52\u6863",
+            "\u5408\u5E76",
+            "\u590D\u6838",
+            "\u8865\u5145",
+            "\u5F52\u6863"
+          ].map((name) => ({ name }));
+          return {
+            "\u6765\u6E90": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u6765\u6E90\u7C7B\u578B": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u5206\u7C7B": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u6807\u7B7E": { typeName: "multi_select", schema: { multi_select: { options: [] } } },
+            "\u94FE\u63A5": { typeName: "url", schema: { url: {} } },
+            "\u63CF\u8FF0": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u6458\u8981": { typeName: "rich_text", schema: { rich_text: {} } },
+            "AI\u6458\u8981": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u72B6\u6001": { typeName: "select", schema: { select: { options: statusOptions } } },
+            "\u5904\u7406\u72B6\u6001": { typeName: "select", schema: { select: { options: statusOptions } } },
+            "\u5019\u9009\u72B6\u6001": { typeName: "select", schema: { select: { options: statusOptions } } },
+            "\u5EFA\u8BAE\u52A8\u4F5C": { typeName: "select", schema: { select: { options: actionOptions } } },
+            "\u5904\u7406\u52A8\u4F5C": { typeName: "select", schema: { select: { options: actionOptions } } },
+            "\u4E0B\u4E00\u6B65": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u5408\u5E76\u7406\u7531": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u7EDF\u4E00\u6807\u9898": { typeName: "rich_text", schema: { rich_text: {} } }
+          };
+        },
+        ensureWorkspaceConnectionCandidateDatabaseSchema: async (databaseId, apiKey, database = null) => {
+          const currentDatabase = database || await NotionAPI2.fetchDatabase(databaseId, apiKey);
+          const existingProps = (currentDatabase == null ? void 0 : currentDatabase.properties) || {};
+          const requiredProperties = UI2().getWorkspaceConnectionCandidateSchemaDefinition();
+          const propsToAdd = {};
+          const typeConflicts = [];
+          for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
+            const existingProp = existingProps[name];
+            if (!existingProp) {
+              propsToAdd[name] = schema;
+              continue;
+            }
+            if (existingProp.type !== typeName) {
+              typeConflicts.push({
+                name,
+                expected: typeName,
+                actual: existingProp.type
+              });
+            }
+          }
+          if (typeConflicts.length > 0) {
+            const detail = typeConflicts.map((item) => `\u300C${item.name}\u300D\u671F\u671B ${item.expected}\uFF0C\u5F53\u524D\u4E3A ${item.actual}`).join("\uFF1B");
+            throw new Error(`\u7EDF\u4E00\u5019\u9009\u76EE\u6807\u6570\u636E\u5E93\u5C5E\u6027\u7C7B\u578B\u4E0D\u5339\u914D\uFF1A${detail}`);
+          }
+          if (Object.keys(propsToAdd).length === 0) {
+            return currentDatabase;
+          }
+          await AIAssistant2._executeGuardedDatabaseWrite(
+            "updateDatabase",
+            databaseId,
+            () => NotionAPI2.updateDatabase(databaseId, propsToAdd, apiKey),
+            apiKey,
+            {
+              itemName: "\u7EDF\u4E00\u5019\u9009 schema",
+              databaseId,
+              source: "ui",
+              surface: "workspace-visualization",
+              propertyNames: Object.keys(propsToAdd)
+            }
+          );
+          return {
+            ...currentDatabase,
+            properties: {
+              ...existingProps,
+              ...Object.fromEntries(
+                Object.entries(requiredProperties).filter(([name]) => propsToAdd[name]).map(([name, { typeName, schema }]) => [
+                  name,
+                  { type: typeName, ...schema }
+                ])
+              )
+            }
+          };
+        },
+        formatSyncDateTime: (timestamp, emptyText = "\u672A\u8BB0\u5F55") => {
+          const numeric = Number(timestamp);
+          if (!Number.isFinite(numeric) || numeric <= 0) return emptyText;
+          return new Date(numeric).toLocaleString("zh-CN", { hour12: false });
+        },
+        formatSyncWatermarkLabel: (watermark, emptyText = "\u672A\u5EFA\u7ACB") => {
+          if (!(watermark == null ? void 0 : watermark.time)) return emptyText;
+          const timeLabel = new Date(watermark.time).toLocaleString("zh-CN", { hour12: false });
+          const boundaryCount = Array.isArray(watermark.ids) ? watermark.ids.length : 0;
+          return boundaryCount > 0 ? `${timeLabel} \xB7 ${boundaryCount} \u4E2A\u8FB9\u754C ID` : timeLabel;
+        },
+        getSyncOutcomeMeta: (outcome) => {
+          const normalized = String(outcome || "idle");
+          if (normalized === "running") return { label: "\u540C\u6B65\u4E2D", tone: "running" };
+          if (normalized === "success") return { label: "\u6B63\u5E38", tone: "success" };
+          if (normalized === "partial") return { label: "\u90E8\u5206\u6210\u529F", tone: "partial" };
+          if (normalized === "error") return { label: "\u5931\u8D25", tone: "error" };
+          return { label: "\u5F85\u673A", tone: "idle" };
+        },
+        buildSyncStatsText: (sourceKey, stats = {}) => {
+          if (!stats || typeof stats !== "object") return "\u6682\u65E0\u7EDF\u8BA1";
+          if (sourceKey === "linuxdo") {
+            if (!stats.scanned && !stats.pending && !stats.success && !stats.failed) return "\u6682\u65E0\u7EDF\u8BA1";
+            return `\u626B\u63CF ${stats.scanned || 0}\uFF0C\u5F85\u5904\u7406 ${stats.pending || 0}\uFF0C\u6210\u529F ${stats.success || 0}${stats.failed ? `\uFF0C\u5931\u8D25 ${stats.failed}` : ""}`;
+          }
+          if (sourceKey === "github") {
+            if (!stats.enabledTypes && !stats.exported && !stats.failed && !stats.syncErrors) return "\u6682\u65E0\u7EDF\u8BA1";
+            return `\u542F\u7528 ${stats.enabledTypes || 0} \u7C7B\uFF0C\u6210\u529F ${stats.exported || 0}${stats.failed ? `\uFF0C\u5931\u8D25 ${stats.failed}` : ""}${stats.syncErrors ? `\uFF0C\u5F02\u5E38 ${stats.syncErrors}` : ""}`;
+          }
+          if (sourceKey === "bookmarks") {
+            if (!stats.created && !stats.updated && !stats.archived && !stats.failed && !stats.unchanged) return "\u6682\u65E0\u7EDF\u8BA1";
+            return `\u65B0\u589E ${stats.created || 0}\uFF0C\u66F4\u65B0 ${stats.updated || 0}\uFF0C\u5F52\u6863 ${stats.archived || 0}\uFF0C\u65E0\u53D8\u66F4 ${stats.unchanged || 0}${stats.failed ? `\uFF0C\u5931\u8D25 ${stats.failed}` : ""}`;
+          }
+          if (sourceKey === "rss") {
+            if (!stats.feeds && !stats.scanned && !stats.created && !stats.updated && !stats.failed && !stats.unchanged) return "\u6682\u65E0\u7EDF\u8BA1";
+            return `Feed ${stats.feeds || 0}\uFF0C\u626B\u63CF ${stats.scanned || 0}\uFF0C\u65B0\u589E ${stats.created || 0}\uFF0C\u66F4\u65B0 ${stats.updated || 0}\uFF0C\u65E0\u53D8\u66F4 ${stats.unchanged || 0}${stats.failed ? `\uFF0C\u5931\u8D25 ${stats.failed}` : ""}`;
+          }
+          return "\u6682\u65E0\u7EDF\u8BA1";
+        },
+        buildUnifiedSyncModel: () => {
+          const githubTypeLabelMap = {
+            stars: "Stars",
+            repos: "Repos",
+            forks: "Forks",
+            gists: "Gists"
+          };
+          const linuxdoState = SyncState2.getLinuxDoState();
+          const githubMeta = SyncState2.getGitHubMeta();
+          const githubTypes = Array.from(new Set((GitHubAPI2.getImportTypes() || []).filter(Boolean)));
+          const githubStates = githubTypes.map((type) => ({
+            type,
+            label: githubTypeLabelMap[type] || type,
+            state: SyncState2.getGitHubState(type)
+          }));
+          const bookmarkState = SyncState2.getBookmarkState();
+          const rssState = SyncState2.getRssState();
+          const rssFeedCount = RSSAutoImporter2.getFeedUrls().length;
+          const sourceRows = [
+            {
+              key: "linuxdo",
+              label: "Linux.do",
+              enabled: !!Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.autoImportEnabled),
+              intervalMinutes: parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.autoImportInterval), 10) || 0,
+              outcome: linuxdoState.lastOutcome,
+              lastSuccessAt: linuxdoState.lastSuccessAt || 0,
+              lastAttemptAt: linuxdoState.lastAttemptAt || 0,
+              lastError: linuxdoState.lastError || "",
+              watermarkLabel: UI2().formatSyncWatermarkLabel(linuxdoState.watermark),
+              statsLabel: UI2().buildSyncStatsText("linuxdo", linuxdoState.lastStats),
+              scheduleLabel: "\u5B9A\u65F6\u8F6E\u8BE2\u5BFC\u5165 Linux.do \u65B0\u6536\u85CF",
+              detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA\u6700\u8FD1\u6536\u85CF\u65F6\u95F4 + \u8FB9\u754C ID"
+            },
+            {
+              key: "github",
+              label: "GitHub",
+              enabled: !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.githubAutoImportEnabled),
+              intervalMinutes: parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.githubAutoImportInterval), 10) || 0,
+              outcome: githubMeta.lastOutcome,
+              lastSuccessAt: githubMeta.lastSuccessAt || 0,
+              lastAttemptAt: githubMeta.lastAttemptAt || 0,
+              lastError: githubMeta.lastError || "",
+              watermarkLabel: githubStates.length > 0 ? githubStates.map((item) => `${item.label}\uFF1A${UI2().formatSyncWatermarkLabel(item.state.watermark)}`).join("\uFF1B") : "\u672A\u9009\u62E9\u5BFC\u5165\u7C7B\u578B",
+              statsLabel: UI2().buildSyncStatsText("github", githubMeta.lastStats),
+              scheduleLabel: githubTypes.length > 0 ? `\u542F\u7528\u7C7B\u578B\uFF1A${githubTypes.map((type) => githubTypeLabelMap[type] || type).join(" / ")}` : "\u672A\u9009\u62E9\u5BFC\u5165\u7C7B\u578B",
+              detailLabel: "\u6BCF\u79CD GitHub \u7C7B\u578B\u90FD\u7EF4\u62A4\u72EC\u7ACB\u589E\u91CF\u57FA\u7EBF"
+            },
+            {
+              key: "bookmarks",
+              label: "\u6D4F\u89C8\u5668\u4E66\u7B7E",
+              enabled: !!Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.bookmarkAutoImportEnabled),
+              intervalMinutes: parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.bookmarkAutoImportInterval), 10) || 0,
+              outcome: bookmarkState.lastOutcome,
+              lastSuccessAt: bookmarkState.lastSuccessAt || 0,
+              lastAttemptAt: bookmarkState.lastAttemptAt || 0,
+              lastError: bookmarkState.lastError || "",
+              watermarkLabel: UI2().formatSyncWatermarkLabel(bookmarkState.watermark),
+              statsLabel: UI2().buildSyncStatsText("bookmarks", bookmarkState.lastStats),
+              scheduleLabel: `\u8DDF\u8E2A ${Object.keys(bookmarkState.snapshot || {}).length} \u4E2A\u5DF2\u77E5\u4E66\u7B7E\u6620\u5C04`,
+              detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA\u4E66\u7B7E\u65F6\u95F4 + \u5F53\u524D\u5FEB\u7167\u6620\u5C04"
+            },
+            {
+              key: "rss",
+              label: "RSS",
+              enabled: !!Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.rssAutoImportEnabled),
+              intervalMinutes: parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.rssAutoImportInterval), 10) || 0,
+              outcome: rssState.lastOutcome,
+              lastSuccessAt: rssState.lastSuccessAt || 0,
+              lastAttemptAt: rssState.lastAttemptAt || 0,
+              lastError: rssState.lastError || "",
+              watermarkLabel: UI2().formatSyncWatermarkLabel(rssState.watermark),
+              statsLabel: UI2().buildSyncStatsText("rss", rssState.lastStats),
+              scheduleLabel: rssFeedCount > 0 ? `\u76D1\u63A7 ${rssFeedCount} \u4E2A Feed` : "\u672A\u914D\u7F6E Feed URL",
+              detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA Feed \u53D1\u5E03\u65F6\u95F4 + \u5F53\u524D\u5FEB\u7167\u6620\u5C04"
+            }
+          ].map((row) => {
+            const outcomeMeta = UI2().getSyncOutcomeMeta(row.outcome);
+            const intervalLabel = row.enabled ? row.intervalMinutes > 0 ? `${row.intervalMinutes} \u5206\u949F\u8F6E\u8BE2` : "\u4EC5\u9875\u9762\u6253\u5F00\u65F6\u8865\u8DD1" : "\u672A\u542F\u7528";
+            return {
+              ...row,
+              outcomeLabel: outcomeMeta.label,
+              outcomeTone: outcomeMeta.tone,
+              intervalLabel,
+              lastSuccessLabel: UI2().formatSyncDateTime(row.lastSuccessAt, "\u672A\u6210\u529F\u540C\u6B65"),
+              lastAttemptLabel: UI2().formatSyncDateTime(row.lastAttemptAt, "\u672A\u5C1D\u8BD5")
+            };
+          });
+          const latestSuccessRow = sourceRows.filter((row) => row.lastSuccessAt > 0).sort((a, b) => b.lastSuccessAt - a.lastSuccessAt)[0] || null;
+          return {
+            sourceRows,
+            enabledCount: sourceRows.filter((row) => row.enabled).length,
+            runningCount: sourceRows.filter((row) => row.outcome === "running").length,
+            issueCount: sourceRows.filter((row) => row.enabled && (row.outcome === "error" || row.outcome === "partial")).length,
+            latestSuccessSource: latestSuccessRow ? latestSuccessRow.label : "\u5C1A\u672A\u5EFA\u7ACB",
+            latestSuccessLabel: latestSuccessRow ? latestSuccessRow.lastSuccessLabel : "\u6682\u65E0\u6210\u529F\u8BB0\u5F55"
+          };
+        },
+        renderSyncCenterSummary: () => {
+          var _a;
+          const container = (_a = UI2().refs) == null ? void 0 : _a.viewSyncSummary;
+          if (!container) return;
+          const model = UI2().buildUnifiedSyncModel();
+          if (!model.sourceRows.length) {
+            container.innerHTML = `
+                <div class="ldb-view-empty">
+                    <div class="ldb-view-empty-title">\u7EDF\u4E00\u540C\u6B65\u4E2D\u5FC3\u8FD8\u6CA1\u6709\u6765\u6E90</div>
+                    <div class="ldb-view-empty-text">\u542F\u7528\u81EA\u52A8\u540C\u6B65\u540E\uFF0C\u8FD9\u91CC\u4F1A\u805A\u5408\u5C55\u793A\u5404\u6765\u6E90\u7684\u8F6E\u8BE2\u72B6\u6001\u548C\u589E\u91CF\u57FA\u7EBF\u3002</div>
+                </div>
+            `;
+            return;
+          }
+          const sourceCards = model.sourceRows.map((row) => {
+            const highlights = [
+              `<span class="ldb-view-pill">${Utils2.escapeHtml(row.intervalLabel)}</span>`,
+              `<span class="ldb-view-pill">${Utils2.escapeHtml(row.outcomeLabel)}</span>`
+            ].join("");
+            const errorMarkup = row.lastError ? `<div class="ldb-view-empty-text" style="margin-top: var(--ldb-ui-spacing-md); color: var(--ldb-ui-danger);">\u6700\u8FD1\u5F02\u5E38\uFF1A${Utils2.escapeHtml(row.lastError)}</div>` : "";
+            return `
+                <div class="ldb-view-card">
+                    <div class="ldb-view-card-title">${Utils2.escapeHtml(row.label)}</div>
+                    <div class="ldb-view-metric-value">${Utils2.escapeHtml(row.outcomeLabel)}</div>
+                    <div class="ldb-view-metric-meta">${Utils2.escapeHtml(row.scheduleLabel)}</div>
+                    <div class="ldb-view-highlight">${highlights}</div>
+                    <div class="ldb-view-link-graph">
+                        <div class="ldb-view-link-row">
+                            <div class="ldb-view-link-path">\u6700\u8FD1\u6210\u529F</div>
+                            <div class="ldb-view-link-count">${Utils2.escapeHtml(row.lastSuccessLabel)}</div>
+                        </div>
+                        <div class="ldb-view-link-row">
+                            <div class="ldb-view-link-path">\u6700\u8FD1\u5C1D\u8BD5</div>
+                            <div class="ldb-view-link-count">${Utils2.escapeHtml(row.lastAttemptLabel)}</div>
+                        </div>
+                        <div class="ldb-view-link-row">
+                            <div class="ldb-view-link-path">\u589E\u91CF\u57FA\u7EBF</div>
+                            <div class="ldb-view-link-count">${Utils2.escapeHtml(row.watermarkLabel)}</div>
+                        </div>
+                        <div class="ldb-view-link-row">
+                            <div class="ldb-view-link-path">\u6700\u8FD1\u7EDF\u8BA1</div>
+                            <div class="ldb-view-link-count">${Utils2.escapeHtml(row.statsLabel)}</div>
+                        </div>
+                    </div>
+                    <div class="ldb-view-empty-text" style="margin-top: var(--ldb-ui-spacing-md);">${Utils2.escapeHtml(row.detailLabel)}</div>
+                    ${errorMarkup}
+                </div>
+            `;
+          }).join("");
+          container.innerHTML = `
+            <div class="ldb-view-grid">
+                <div class="ldb-view-card">
+                    <div class="ldb-view-card-title">\u5DF2\u542F\u7528\u6765\u6E90</div>
+                    <div class="ldb-view-metric-value">${model.enabledCount}</div>
+                    <div class="ldb-view-metric-meta">\u5171 ${model.sourceRows.length} \u6761\u591A\u6E90\u540C\u6B65\u94FE</div>
+                </div>
+                <div class="ldb-view-card">
+                    <div class="ldb-view-card-title">\u6700\u8FD1\u6210\u529F</div>
+                    <div class="ldb-view-metric-value">${Utils2.escapeHtml(model.latestSuccessSource)}</div>
+                    <div class="ldb-view-metric-meta">${Utils2.escapeHtml(model.latestSuccessLabel)}</div>
+                </div>
+                <div class="ldb-view-card">
+                    <div class="ldb-view-card-title">\u8FD0\u884C\u4E2D / \u9700\u5173\u6CE8</div>
+                    <div class="ldb-view-metric-value">${model.runningCount} / ${model.issueCount}</div>
+                    <div class="ldb-view-metric-meta">\u8FD0\u884C\u4E2D\u6765\u6E90 / \u90E8\u5206\u6210\u529F\u6216\u5931\u8D25\u6765\u6E90</div>
+                </div>
+                ${sourceCards}
+            </div>
+        `;
+        },
+        runUnifiedSyncNow: async () => {
+          const refs = UI2().refs || {};
+          const btn = refs.viewSyncNowBtn;
+          const tasks = [];
+          if (Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.autoImportEnabled)) {
+            tasks.push({ label: "Linux.do", run: () => AutoImporter2.run() });
+          }
+          if (Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.githubAutoImportEnabled)) {
+            tasks.push({ label: "GitHub", run: () => GitHubAutoImporter2.run() });
+          }
+          if (Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.bookmarkAutoImportEnabled)) {
+            tasks.push({ label: "\u6D4F\u89C8\u5668\u4E66\u7B7E", run: () => BookmarkAutoImporter2.run() });
+          }
+          if (Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.rssAutoImportEnabled)) {
+            tasks.push({ label: "RSS", run: () => RSSAutoImporter2.run() });
+          }
+          if (tasks.length === 0) {
+            throw new Error("\u81F3\u5C11\u5148\u542F\u7528\u4E00\u4E2A\u81EA\u52A8\u540C\u6B65\u6765\u6E90\u3002");
+          }
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = "\u540C\u6B65\u4E2D...";
+          }
+          try {
+            for (const task of tasks) {
+              await task.run();
+            }
+            UI2().renderSyncCenterSummary();
+            const model = UI2().buildUnifiedSyncModel();
+            UI2().showStatus(
+              `\u7EDF\u4E00\u540C\u6B65\u5B8C\u6210\uFF1A\u5DF2\u6267\u884C ${tasks.map((task) => task.label).join("\u3001")}\uFF0C\u5F53\u524D\u9700\u5173\u6CE8\u6765\u6E90 ${model.issueCount} \u4E2A\u3002`,
+              model.issueCount > 0 ? "error" : "success"
+            );
+            return model;
+          } finally {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = "\u7ACB\u5373\u540C\u6B65\u5168\u90E8";
+            }
+          }
+        },
+        setWorkspaceVisualStatus: (message, tone = "") => {
+          var _a;
+          const statusEl = (_a = UI2().refs) == null ? void 0 : _a.viewWorkspaceStatus;
+          if (!statusEl) return;
+          statusEl.textContent = message || "\u5C1A\u672A\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002";
+          if (statusEl.dataset) {
+            if (tone) statusEl.dataset.tone = tone;
+            else delete statusEl.dataset.tone;
+          }
+        },
+        refreshWorkspaceVisualization: async (apiKey = NotionOAuth2.getAccessToken(((_b) => (_b = ((_a) => (_a = UI2().refs) == null ? void 0 : _a.apiKeyInput)()) == null ? void 0 : _b.value.trim())())) => {
+          var _a2, _b2, _c;
+          if (!apiKey) {
+            UI2().setWorkspaceVisualStatus(MSG2.NO_NOTION_KEY, "error");
+            throw new Error(MSG2.NO_NOTION_KEY);
+          }
+          const maxPages = parseInt((_b2 = (_a2 = UI2().refs) == null ? void 0 : _a2.workspaceMaxPagesSelect) == null ? void 0 : _b2.value, 10) || parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
+          const refreshBtn = (_c = UI2().refs) == null ? void 0 : _c.viewRefreshWorkspaceBtn;
+          if (refreshBtn) {
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = "\u626B\u63CF\u4E2D...";
+          }
+          UI2().setWorkspaceVisualStatus("\u6B63\u5728\u626B\u63CF\u5DE5\u4F5C\u533A\u6570\u636E\u5E93...", "");
+          try {
+            const { databases, workspaceData } = await WorkspaceService2.refreshWorkspaceSnapshot(apiKey, {
+              includePages: false,
+              maxPages,
+              onProgress: (progress) => {
+                if (progress.phase === "databases") {
+                  UI2().setWorkspaceVisualStatus(`\u6B63\u5728\u626B\u63CF\u5DE5\u4F5C\u533A\u6570\u636E\u5E93... \u5DF2\u52A0\u8F7D ${progress.loaded} \u4E2A\u6570\u636E\u5E93`, "");
+                }
+              },
+              onWorkspaceData: (partialData) => {
+                UI2().updateWorkspaceSelect(partialData);
+                UI2().updateAITargetDbOptions(partialData.databases || []);
+              }
+            });
+            UI2().setWorkspaceVisualStatus("\u6570\u636E\u5E93\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u5206\u6790\u9875\u9762\u5C5E\u6027...", "");
+            const pageObjects = await WorkspaceService2.fetchWorkspacePageObjects(apiKey, {
+              maxPages,
+              phase: "workspace_visual_pages",
+              onProgress: (progress) => {
+                UI2().setWorkspaceVisualStatus(`\u6B63\u5728\u5206\u6790\u9875\u9762\u5C5E\u6027... \u5DF2\u626B\u63CF ${progress.loaded} \u4E2A\u9875\u9762`, "");
+              }
+            });
+            const databasesMap = new Map(databases.map((d) => [d.id, d]));
+            const pages = [];
+            const records = [];
+            pageObjects.forEach((page) => {
+              const summary = UI2().mapWorkspacePageSummary(page);
+              if (summary.id) {
+                pages.push(summary);
+                records.push(UI2().extractWorkspaceVisualRecord(page, databasesMap));
+              }
+            });
+            const finalWorkspaceData = WorkspaceService2.persistWorkspaceData(apiKey, {
+              databases,
+              pages
+            });
+            UI2().updateWorkspaceSelect(finalWorkspaceData);
+            UI2().updateAITargetDbOptions(finalWorkspaceData.databases || []);
+            UI2().workspaceVisualSnapshot = {
+              databases,
+              pages,
+              records,
+              scannedAt: Date.now(),
+              maxPages
+            };
+            UI2().workspaceInsightSummary = "";
+            UI2().workspaceInsightMarkdown = UI2().buildWorkspaceInsightMarkdown(UI2().buildWorkspaceVisualizationModel(UI2().workspaceVisualSnapshot), "");
+            UI2().workspaceInsightUpdatedAt = Date.now();
+            UI2().renderWorkspaceVisualSummary();
+            const model = UI2().buildWorkspaceVisualizationModel();
+            UI2().setWorkspaceVisualStatus(
+              `\u5DF2\u626B\u63CF ${model.totalPages} \u4E2A\u9875\u9762\uFF0C\u8986\u76D6 ${model.totalDatabases} \u4E2A\u6570\u636E\u5E93\u3002`,
+              "success"
+            );
+            return model;
+          } catch (error) {
+            UI2().setWorkspaceVisualStatus(`\u5DE5\u4F5C\u533A\u89C6\u56FE\u5237\u65B0\u5931\u8D25\uFF1A${error.message}`, "error");
+            throw error;
+          } finally {
+            if (refreshBtn) {
+              refreshBtn.disabled = false;
+              refreshBtn.textContent = "\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE";
+            }
+          }
+        },
+        renderWorkspaceVisualSummary: () => {
+          var _a;
+          const container = (_a = UI2().refs) == null ? void 0 : _a.viewWorkspaceSummary;
+          if (!container) return;
+          const model = UI2().buildWorkspaceVisualizationModel();
+          if (!model.scannedAt) {
+            container.innerHTML = `
+                <div class="ldb-view-empty">
+                    <div class="ldb-view-empty-title">\u5DE5\u4F5C\u533A\u603B\u89C8\u8FD8\u6CA1\u6709\u6570\u636E</div>
+                    <div class="ldb-view-empty-text">\u70B9\u51FB\u4E0A\u65B9\u6309\u94AE\u540E\uFF0C\u4F1A\u626B\u63CF\u5F53\u524D\u5DE5\u4F5C\u533A\u6570\u636E\u5E93\u91CC\u7684\u9875\u9762\u5C5E\u6027\uFF0C\u751F\u6210\u5168\u5C40\u65F6\u95F4\u7EBF\u3001\u6765\u6E90\u5173\u7CFB\u56FE\u548C\u5BFC\u51FA\u6F0F\u6597\u3002</div>
+                </div>
+            `;
+            return;
+          }
+          if (model.totalPages === 0) {
+            container.innerHTML = `
+                <div class="ldb-view-empty">
+                    <div class="ldb-view-empty-title">\u672C\u6B21\u626B\u63CF\u6CA1\u6709\u53EF\u7EDF\u8BA1\u9875\u9762</div>
+                    <div class="ldb-view-empty-text">\u5DF2\u5B8C\u6210\u5DE5\u4F5C\u533A\u626B\u63CF\uFF0C\u4F46\u5F53\u524D\u8303\u56F4\u5185\u6CA1\u6709\u53EF\u7528\u4E8E\u805A\u5408\u7684\u9875\u9762\u5C5E\u6027\u3002</div>
+                </div>
+            `;
+            return;
+          }
+          const timelineMarkup = model.timeline.length > 0 ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
+                <div class="ldb-view-timeline-item">
+                    <div class="ldb-view-timeline-label">${item.label}</div>
+                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, item.pct || UI2().getViewPct(item.count, model.totalPages))}%;"></div></div>
+                    <div class="ldb-view-timeline-value">${item.count} \u9875</div>
+                </div>
+            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u5DE5\u4F5C\u533A\u9875\u9762\u91CC\u8FD8\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u65F6\u95F4\u5B57\u6BB5\u3002</div>`;
+          const relationshipMarkup = model.relationships.length > 0 ? `<div class="ldb-view-link-graph">${model.relationships.map((item) => `
+                <div class="ldb-view-link-row">
+                    <div class="ldb-view-link-path">${Utils2.escapeHtml(item.label)}</div>
+                    <div class="ldb-view-link-count">${item.count} \u9875 \xB7 ${item.pct}%</div>
+                </div>
+            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u5DE5\u4F5C\u533A\u9875\u9762\u91CC\u8FD8\u6CA1\u6709\u53EF\u5C55\u793A\u7684\u6765\u6E90\u5173\u7CFB\u3002</div>`;
+          const funnelMarkup = model.funnel.length > 0 ? `<div class="ldb-view-funnel">${model.funnel.map((item) => `
+                <div class="ldb-view-funnel-row">
+                    <div class="ldb-view-funnel-label">${Utils2.escapeHtml(item.label)}</div>
+                    <div class="ldb-view-funnel-value">${item.count} \u9875 \xB7 ${item.pct}%</div>
+                </div>
+            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u6CA1\u6709\u53EF\u5C55\u793A\u7684\u6F0F\u6597\u6570\u636E\u3002</div>`;
+          const highlights = [
+            `\u672A\u6807\u8BB0 ${model.missingSourcePages}`,
+            `\u7F3A\u65F6\u95F4 ${model.missingDatePages}`,
+            `\u672A\u5206\u7C7B ${model.missingCategoryPages}`
+          ].map((text) => `<span class="ldb-view-pill">${Utils2.escapeHtml(text)}</span>`).join("");
+          const duplicateMarkup = model.duplicateCandidates.length > 0 ? `<div class="ldb-view-link-graph">${model.duplicateCandidates.map((item) => `
+                <div class="ldb-view-link-row">
+                    <div class="ldb-view-link-path">${Utils2.escapeHtml(item.label)}</div>
+                    <div class="ldb-view-link-count">${item.count} \u9875 \xB7 ${Utils2.escapeHtml(item.sources.join(" + ") || "\u672A\u6807\u8BB0")}</div>
+                </div>
+            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u8FD8\u6CA1\u6709\u8BC6\u522B\u5230\u660E\u663E\u7684\u540C\u6807\u9898\u91CD\u590D\u5019\u9009\u3002</div>`;
+          const connectionMarkup = model.connectionCandidates.length > 0 ? `<div class="ldb-view-link-graph">${model.connectionCandidates.map((item) => `
+                <div class="ldb-view-link-row">
+                    <div class="ldb-view-link-path">${Utils2.escapeHtml(item.label)}</div>
+                    <div class="ldb-view-link-count">${item.count} \u9875 \xB7 ${Utils2.escapeHtml(item.reason)}</div>
+                </div>
+            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u8FD8\u6CA1\u6709\u8DE8\u6E90\u5173\u8054\u5019\u9009\uFF0C\u7EE7\u7EED\u8865\u9F50\u6765\u6E90\u5B57\u6BB5\u540E\u4F1A\u66F4\u5BB9\u6613\u53D1\u73B0\u7EDF\u4E00\u6761\u76EE\u3002</div>`;
+          const insightSummary = String(UI2().workspaceInsightSummary || "").trim();
+          const reportPreview = Utils2.escapeHtml(
+            UI2().workspaceInsightMarkdown || UI2().buildWorkspaceInsightMarkdown(model, insightSummary)
+          );
+          container.innerHTML = `
+            <div class="ldb-view-grid">
+                <div class="ldb-view-card">
+                    <div class="ldb-view-card-title">\u5DF2\u626B\u63CF\u9875\u9762</div>
+                    <div class="ldb-view-metric-value">${model.totalPages}</div>
+                    <div class="ldb-view-metric-meta">\u8986\u76D6 ${model.totalDatabases} \u4E2A\u6570\u636E\u5E93</div>
+                </div>
+                <div class="ldb-view-card">
+                    <div class="ldb-view-card-title">\u7ED3\u6784\u5B8C\u6574</div>
+                    <div class="ldb-view-metric-value">${model.structuredPages}</div>
+                    <div class="ldb-view-metric-meta">\u6765\u6E90\u3001\u65F6\u95F4\u3001\u5206\u7C7B\u4E09\u9879\u9F50\u5907</div>
+                </div>
+                <div class="ldb-view-card full">
+                    <div class="ldb-view-card-title">\u5168\u5C40\u65F6\u95F4\u7EBF</div>
+                    ${timelineMarkup}
+                    ${highlights ? `<div class="ldb-view-highlight">${highlights}</div>` : ""}
+                </div>
+                <div class="ldb-view-card full">
+                    <div class="ldb-view-card-title">\u6765\u6E90\u5173\u7CFB\u56FE</div>
+                    ${relationshipMarkup}
+                </div>
+                <div class="ldb-view-card full">
+                    <div class="ldb-view-card-title">\u5BFC\u51FA\u6F0F\u6597</div>
+                    ${funnelMarkup}
+                </div>
+                <div class="ldb-view-card full">
+                    <div class="ldb-view-card-title">\u91CD\u590D\u5019\u9009</div>
+                    ${duplicateMarkup}
+                </div>
+                <div class="ldb-view-card full">
+                    <div class="ldb-view-card-title">\u8DE8\u6E90\u5173\u8054\u5019\u9009</div>
+                    ${connectionMarkup}
+                </div>
+                <div class="ldb-view-card full">
+                    <div class="ldb-view-card-title">\u6D1E\u5BDF\u6458\u8981</div>
+                    <div class="ldb-view-empty-text">${ChatUI2.safeMarkdown(insightSummary || UI2().buildWorkspaceInsightFallbackSummary(model))}</div>
+                </div>
+                <div class="ldb-view-card full">
+                    <div class="ldb-view-card-title">Markdown \u62A5\u544A\u9884\u89C8</div>
+                    <div class="ldb-view-report-preview">${reportPreview}</div>
+                </div>
+            </div>
+        `;
+        }
+      };
+      module.exports = { WorkspaceInsight };
+    }
+  });
+
   // src/ui/main-ui.js
   var require_main_ui = __commonJS({
     "src/ui/main-ui.js"(exports, module) {
@@ -14962,682 +15857,6 @@ ${insight.summary || ""}`,
             select.value = savedValue;
           }
         },
-        buildWorkspaceInsightMarkdown: (model = UI2.buildWorkspaceVisualizationModel(), aiSummary = UI2.workspaceInsightSummary || "") => {
-          if (!(model == null ? void 0 : model.scannedAt)) {
-            return "# \u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\n\n\u5C1A\u672A\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\uFF0C\u6682\u65E0\u53EF\u5206\u4EAB\u7684\u6570\u636E\u3002";
-          }
-          const scannedAt = new Date(model.scannedAt).toLocaleString("zh-CN", { hour12: false });
-          const structuredPct = UI2.getViewPct(model.structuredPages, model.totalPages);
-          const sourceLines = model.sourceBreakdown.length > 0 ? model.sourceBreakdown.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF08${item.pct}%\uFF09`) : ["- \u6682\u65E0\u6765\u6E90\u5206\u5E03\u6570\u636E"];
-          const categoryLines = model.categoryBreakdown.length > 0 ? model.categoryBreakdown.slice(0, 8).map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF08${item.pct}%\uFF09`) : ["- \u6682\u65E0\u5206\u7C7B\u7EDF\u8BA1"];
-          const timelineLines = model.timeline.length > 0 ? model.timeline.map((item) => `- ${item.label}\uFF1A${item.count} \u9875`) : ["- \u6682\u65E0\u65F6\u95F4\u7EBF\u6570\u636E"];
-          const relationshipLines = model.relationships.length > 0 ? model.relationships.slice(0, 8).map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF08${item.pct}%\uFF09`) : ["- \u6682\u65E0\u6765\u6E90\u5173\u7CFB\u6570\u636E"];
-          const funnelLines = model.funnel.length > 0 ? model.funnel.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF08${item.pct}%\uFF09`) : ["- \u6682\u65E0\u6F0F\u6597\u6570\u636E"];
-          const duplicateLines = model.duplicateCandidates.length > 0 ? model.duplicateCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF0C\u6765\u6E90 ${item.sources.join(" + ") || "\u672A\u6807\u8BB0"}`) : ["- \u6682\u65E0\u540C\u6807\u9898\u91CD\u590D\u5019\u9009"];
-          const connectionLines = model.connectionCandidates.length > 0 ? model.connectionCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u9875\uFF0C\u539F\u56E0\uFF1A${item.reason}`) : ["- \u6682\u65E0\u8DE8\u6E90\u5173\u8054\u5019\u9009"];
-          const summaryBlock = String(aiSummary || "").trim() || UI2.buildWorkspaceInsightFallbackSummary(model);
-          return [
-            "# \u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A",
-            "",
-            `- \u626B\u63CF\u65F6\u95F4\uFF1A${scannedAt}`,
-            `- \u9875\u9762\u603B\u6570\uFF1A${model.totalPages}`,
-            `- \u8986\u76D6\u6570\u636E\u5E93\uFF1A${model.totalDatabases}`,
-            `- \u5DF2\u8BC6\u522B\u6765\u6E90\uFF1A${model.sourcedPages}`,
-            `- \u7ED3\u6784\u5B8C\u6574\u7387\uFF1A${structuredPct}%`,
-            "",
-            "## \u6D1E\u5BDF\u6458\u8981",
-            summaryBlock,
-            "",
-            "## \u5BFC\u51FA\u6F0F\u6597",
-            ...funnelLines,
-            "",
-            "## \u6765\u6E90\u5206\u5E03",
-            ...sourceLines,
-            "",
-            "## \u5206\u7C7B\u5206\u5E03",
-            ...categoryLines,
-            "",
-            "## \u5168\u5C40\u65F6\u95F4\u7EBF",
-            ...timelineLines,
-            "",
-            "## \u6765\u6E90\u5173\u7CFB\u56FE",
-            ...relationshipLines,
-            "",
-            "## \u91CD\u590D\u5019\u9009",
-            ...duplicateLines,
-            "",
-            "## \u8DE8\u6E90\u5173\u8054\u5019\u9009",
-            ...connectionLines,
-            "",
-            "## \u5F85\u8865\u9F50\u7F3A\u53E3",
-            `- \u672A\u6807\u8BB0\u6765\u6E90\uFF1A${model.missingSourcePages}`,
-            `- \u7F3A\u5C11\u65F6\u95F4\u5B57\u6BB5\uFF1A${model.missingDatePages}`,
-            `- \u672A\u5B8C\u6210\u5206\u7C7B\uFF1A${model.missingCategoryPages}`
-          ].join("\n");
-        },
-        buildWorkspaceConnectionCandidateActionLabel: (action) => {
-          const normalized = String(action || "").trim().toLowerCase();
-          if (normalized === "merge") return "\u5408\u5E76\u6574\u7406";
-          if (normalized === "enrich") return "\u8865\u5145\u4FE1\u606F";
-          if (normalized === "archive") return "\u6682\u7F13\u5F52\u6863";
-          return "\u4EBA\u5DE5\u590D\u6838";
-        },
-        buildWorkspaceConnectionCandidateWorkflow: (candidate, aiDraft = null) => {
-          const normalized = String((aiDraft == null ? void 0 : aiDraft.recommendedAction) || "review").trim().toLowerCase();
-          const presets = {
-            merge: {
-              actionLabel: "\u5408\u5E76\u6574\u7406",
-              actionNames: ["\u5408\u5E76\u6574\u7406", "\u5408\u5E76", "Merge"],
-              statusLabel: "\u5F85\u5904\u7406",
-              statusNames: ["\u5F85\u5904\u7406", "\u5F85\u5408\u5E76", "\u5F85\u529E", "\u672A\u5F00\u59CB", "Not started", "Backlog", "Inbox", "To do"],
-              defaultNextStep: "\u786E\u8BA4\u4E3B\u6761\u76EE\u540E\u5408\u5E76\u91CD\u590D\u6765\u6E90\uFF0C\u5E76\u8865\u5145\u7EDF\u4E00\u6458\u8981\u3002"
-            },
-            review: {
-              actionLabel: "\u4EBA\u5DE5\u590D\u6838",
-              actionNames: ["\u4EBA\u5DE5\u590D\u6838", "\u590D\u6838", "Review"],
-              statusLabel: "\u5F85\u590D\u6838",
-              statusNames: ["\u5F85\u590D\u6838", "\u5F85\u5904\u7406", "\u5F85\u529E", "\u672A\u5F00\u59CB", "Not started", "Backlog", "Inbox", "To do"],
-              defaultNextStep: "\u4EBA\u5DE5\u786E\u8BA4\u8FD9\u4E9B\u6765\u6E90\u662F\u5426\u5C5E\u4E8E\u540C\u4E00\u77E5\u8BC6\u6761\u76EE\u3002"
-            },
-            enrich: {
-              actionLabel: "\u8865\u5145\u4FE1\u606F",
-              actionNames: ["\u8865\u5145\u4FE1\u606F", "\u8865\u5145", "Enrich"],
-              statusLabel: "\u5F85\u8865\u5145",
-              statusNames: ["\u5F85\u8865\u5145", "\u5F85\u5904\u7406", "\u5F85\u529E", "\u672A\u5F00\u59CB", "Not started", "Backlog", "Inbox", "To do"],
-              defaultNextStep: "\u5148\u8865\u5145\u7F3A\u5931\u6765\u6E90\u4E0A\u4E0B\u6587\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u5408\u5E76\u3002"
-            },
-            archive: {
-              actionLabel: "\u6682\u7F13\u5F52\u6863",
-              actionNames: ["\u6682\u7F13\u5F52\u6863", "\u5F52\u6863", "Archive"],
-              statusLabel: "\u5DF2\u6401\u7F6E",
-              statusNames: ["\u5DF2\u6401\u7F6E", "\u6682\u7F13", "\u5F52\u6863", "Not started", "Backlog"],
-              defaultNextStep: "\u6682\u7F13\u5904\u7406\uFF0C\u4FDD\u7559\u5019\u9009\u4EE5\u5907\u540E\u7EED\u590D\u6838\u3002"
-            }
-          };
-          const preset = presets[normalized] || presets.review;
-          return {
-            recommendedAction: normalized || "review",
-            actionLabel: preset.actionLabel,
-            actionNames: preset.actionNames,
-            statusLabel: preset.statusLabel,
-            statusNames: preset.statusNames,
-            nextStep: String((aiDraft == null ? void 0 : aiDraft.nextStep) || preset.defaultNextStep).trim().slice(0, 200),
-            mergeReason: String((aiDraft == null ? void 0 : aiDraft.mergeReason) || `${(candidate == null ? void 0 : candidate.reason) || "\u8DE8\u6E90\u5019\u9009"}\uFF0C\u5EFA\u8BAE\u4FDD\u7559\u4E3A\u7EDF\u4E00\u77E5\u8BC6\u6761\u76EE\u7684\u6574\u7406\u5165\u53E3\u3002`).trim().slice(0, 200)
-          };
-        },
-        buildWorkspaceConnectionCandidateAIPrompt: (candidate) => {
-          const items = Array.isArray(candidate == null ? void 0 : candidate.items) ? candidate.items : [];
-          return [
-            "\u4F60\u662F\u77E5\u8BC6\u6574\u7406\u52A9\u624B\u3002\u8BF7\u57FA\u4E8E\u4EE5\u4E0B\u8DE8\u6E90\u5173\u8054\u5019\u9009\uFF0C\u8F93\u51FA\u4E00\u4E2A\u9002\u5408\u5199\u56DE Notion \u7684\u7EDF\u4E00\u77E5\u8BC6\u6761\u76EE\u6574\u7406\u5EFA\u8BAE\u3002",
-            "\u8981\u6C42\uFF1A",
-            "1. \u53EA\u8FD4\u56DE JSON\uFF0C\u4E0D\u8981\u5305\u542B\u4EFB\u4F55\u989D\u5916\u8BF4\u660E\u3002",
-            "2. canonicalTitle \u4F7F\u7528\u4E2D\u6587\uFF0C20 \u5B57\u4EE5\u5185\uFF0C\u9002\u5408\u4F5C\u4E3A\u7EDF\u4E00\u77E5\u8BC6\u6761\u76EE\u6807\u9898\u3002",
-            "3. summary \u4F7F\u7528\u4E2D\u6587\uFF0C80 \u5B57\u4EE5\u5185\uFF0C\u6982\u62EC\u8FD9\u4E9B\u5019\u9009\u7684\u5171\u540C\u4E3B\u9898\u4E0E\u4EF7\u503C\u3002",
-            "4. recommendedAction \u53EA\u80FD\u662F merge\u3001review\u3001enrich\u3001archive \u4E4B\u4E00\u3002",
-            "5. nextStep \u4F7F\u7528\u4E00\u53E5\u4E2D\u6587\uFF0C\u7ED9\u51FA\u4E0B\u4E00\u6B65\u6574\u7406\u52A8\u4F5C\u3002",
-            "6. mergeReason \u4F7F\u7528\u4E00\u53E5\u4E2D\u6587\uFF0C\u8BF4\u660E\u4E3A\u4EC0\u4E48\u5B83\u4EEC\u5E94\u8BE5\u5408\u5E76\u6216\u5173\u8054\u3002",
-            "7. tags \u8FD4\u56DE 1-5 \u4E2A\u77ED\u6807\u7B7E\u3002",
-            "",
-            "JSON Schema:",
-            '{"canonicalTitle":"","summary":"","recommendedAction":"merge|review|enrich|archive","nextStep":"","mergeReason":"","tags":[""]}',
-            "",
-            JSON.stringify({
-              label: (candidate == null ? void 0 : candidate.label) || "",
-              reason: (candidate == null ? void 0 : candidate.reason) || "",
-              count: Number((candidate == null ? void 0 : candidate.count) || items.length || 0),
-              sources: Array.isArray(candidate == null ? void 0 : candidate.sources) ? candidate.sources : [],
-              url: (candidate == null ? void 0 : candidate.url) || "",
-              items: items.map((item) => ({
-                title: (item == null ? void 0 : item.title) || "",
-                source: (item == null ? void 0 : item.source) || "",
-                parentLabel: (item == null ? void 0 : item.parentLabel) || "",
-                url: (item == null ? void 0 : item.url) || ""
-              }))
-            }, null, 2)
-          ].join("\n");
-        },
-        buildWorkspaceConnectionCandidateAIDraft: async (candidate, settings) => {
-          if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService)) return null;
-          try {
-            const prompt2 = UI2.buildWorkspaceConnectionCandidateAIPrompt(candidate);
-            const raw = String(await AIService2.requestChat(prompt2, settings, 700) || "").trim();
-            const jsonMatch = raw.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-              throw new Error("AI \u672A\u8FD4\u56DE\u6709\u6548 JSON\u3002");
-            }
-            const parsed = JSON.parse(jsonMatch[0]);
-            const canonicalTitle = String((parsed == null ? void 0 : parsed.canonicalTitle) || (parsed == null ? void 0 : parsed.title) || "").trim();
-            const summary = String((parsed == null ? void 0 : parsed.summary) || "").trim();
-            const recommendedAction = String((parsed == null ? void 0 : parsed.recommendedAction) || "review").trim().toLowerCase();
-            const nextStep = String((parsed == null ? void 0 : parsed.nextStep) || "").trim();
-            const mergeReason = String((parsed == null ? void 0 : parsed.mergeReason) || "").trim();
-            const tags = Array.from(new Set(
-              (Array.isArray(parsed == null ? void 0 : parsed.tags) ? parsed.tags : []).map((item) => String(item || "").trim()).filter(Boolean)
-            )).slice(0, 5);
-            return {
-              canonicalTitle: canonicalTitle.slice(0, 80),
-              summary: summary.slice(0, 200),
-              recommendedAction,
-              actionLabel: UI2.buildWorkspaceConnectionCandidateActionLabel(recommendedAction),
-              nextStep: nextStep.slice(0, 200),
-              mergeReason: mergeReason.slice(0, 200),
-              tags
-            };
-          } catch (error) {
-            console.warn("[LD-Notion] \u7EDF\u4E00\u5019\u9009 AI \u6574\u7406\u5931\u8D25\uFF0C\u5DF2\u56DE\u9000\u89C4\u5219\u7248\uFF1A", error);
-            return null;
-          }
-        },
-        buildWorkspaceConnectionCandidateTitle: (candidate, index = 0, aiDraft = null) => {
-          var _a, _b;
-          const firstTitle = String(((_b = (_a = candidate == null ? void 0 : candidate.items) == null ? void 0 : _a[0]) == null ? void 0 : _b.title) || "").trim();
-          const fallbackLabel = String((candidate == null ? void 0 : candidate.label) || "").trim();
-          const aiTitle = String((aiDraft == null ? void 0 : aiDraft.canonicalTitle) || "").trim();
-          const baseTitle = aiTitle || firstTitle || fallbackLabel || `\u5019\u9009 ${index + 1}`;
-          const reason = String((candidate == null ? void 0 : candidate.reason) || "").trim();
-          const fullTitle = reason ? `\u7EDF\u4E00\u5019\u9009 \xB7 ${baseTitle} \xB7 ${reason}` : `\u7EDF\u4E00\u5019\u9009 \xB7 ${baseTitle}`;
-          return fullTitle.slice(0, 200);
-        },
-        buildWorkspaceConnectionCandidateMarkdown: (candidate, savedAt = Date.now(), aiDraft = null) => {
-          const items = Array.isArray(candidate == null ? void 0 : candidate.items) ? candidate.items : [];
-          const sourceList = Array.isArray(candidate == null ? void 0 : candidate.sources) ? candidate.sources.filter(Boolean) : [];
-          const exportedAt = new Date(savedAt).toLocaleString("zh-CN", { hour12: false });
-          const workflow = UI2.buildWorkspaceConnectionCandidateWorkflow(candidate, aiDraft);
-          const lines = [
-            "# \u7EDF\u4E00\u5019\u9009\u6761\u76EE",
-            "",
-            `- \u5019\u9009\u6807\u7B7E\uFF1A${(candidate == null ? void 0 : candidate.label) || "\u672A\u547D\u540D\u5019\u9009"}`,
-            `- \u539F\u56E0\uFF1A${(candidate == null ? void 0 : candidate.reason) || "\u672A\u6807\u8BB0"}`,
-            `- \u6765\u6E90\u7EC4\u5408\uFF1A${sourceList.join(" + ") || "\u672A\u6807\u8BB0"}`,
-            `- \u5019\u9009\u6570\u91CF\uFF1A${items.length}`,
-            `- \u5BFC\u51FA\u65F6\u95F4\uFF1A${exportedAt}`
-          ];
-          if (candidate == null ? void 0 : candidate.url) {
-            lines.push(`- \u5019\u9009\u94FE\u63A5\uFF1A${candidate.url}`);
-          }
-          if (candidate == null ? void 0 : candidate.key) {
-            lines.push(`- \u5019\u9009\u952E\uFF1A${candidate.key}`);
-          }
-          lines.push("", "## \u5904\u7406\u72B6\u6001");
-          lines.push(`- \u5F53\u524D\u72B6\u6001\uFF1A${workflow.statusLabel}`);
-          lines.push(`- \u5EFA\u8BAE\u52A8\u4F5C\uFF1A${workflow.actionLabel}`);
-          lines.push(`- \u4E0B\u4E00\u6B65\uFF1A${workflow.nextStep}`);
-          lines.push(`- \u5408\u5E76\u7406\u7531\uFF1A${workflow.mergeReason}`);
-          if (aiDraft) {
-            lines.push("", "## AI \u6574\u7406\u5EFA\u8BAE");
-            if (aiDraft.canonicalTitle) {
-              lines.push(`- \u7EDF\u4E00\u6807\u9898\uFF1A${aiDraft.canonicalTitle}`);
-            }
-            if (aiDraft.summary) {
-              lines.push(`- \u6458\u8981\uFF1A${aiDraft.summary}`);
-            }
-            if (Array.isArray(aiDraft.tags) && aiDraft.tags.length > 0) {
-              lines.push(`- AI \u6807\u7B7E\uFF1A${aiDraft.tags.join(" / ")}`);
-            }
-          }
-          lines.push("", "## \u5019\u9009\u6761\u76EE\u660E\u7EC6");
-          if (items.length === 0) {
-            lines.push("- \u5F53\u524D\u5019\u9009\u6CA1\u6709\u53EF\u5199\u5165\u7684\u6761\u76EE\u660E\u7EC6\u3002");
-          } else {
-            items.forEach((item, index) => {
-              lines.push(`### \u6761\u76EE ${index + 1}`);
-              lines.push(`- \u6807\u9898\uFF1A${(item == null ? void 0 : item.title) || "\u672A\u547D\u540D\u9875\u9762"}`);
-              lines.push(`- \u6765\u6E90\uFF1A${(item == null ? void 0 : item.source) || "\u672A\u6807\u8BB0"}`);
-              lines.push(`- \u4E0A\u7EA7\u5F52\u5C5E\uFF1A${(item == null ? void 0 : item.parentLabel) || "\u672A\u6807\u8BB0"}`);
-              lines.push(`- \u9875\u9762 ID\uFF1A${(item == null ? void 0 : item.id) || ""}`);
-              if (item == null ? void 0 : item.url) {
-                lines.push(`- URL\uFF1A${item.url}`);
-              }
-              lines.push("");
-            });
-          }
-          return lines.join("\n").trim();
-        },
-        buildWorkspaceConnectionCandidateDatabaseProperties: (database, titlePropertyName, candidate, candidateTitle, aiDraft = null) => {
-          const databaseProperties = (database == null ? void 0 : database.properties) || {};
-          const workflow = UI2.buildWorkspaceConnectionCandidateWorkflow(candidate, aiDraft);
-          const properties = {
-            [titlePropertyName]: {
-              title: [{ text: { content: String(candidateTitle || "\u7EDF\u4E00\u5019\u9009").slice(0, 2e3) } }]
-            }
-          };
-          const addTextProperty = (propertyName, value) => {
-            var _a;
-            const property = databaseProperties[propertyName];
-            const text = String(value || "").trim();
-            if (!property || !text) return;
-            if (property.type === "rich_text") {
-              properties[propertyName] = {
-                rich_text: [{ text: { content: text.slice(0, 2e3) } }]
-              };
-              return;
-            }
-            if (property.type === "select") {
-              const options = Array.isArray((_a = property.select) == null ? void 0 : _a.options) ? property.select.options : [];
-              if (options.some((option) => (option == null ? void 0 : option.name) === text)) {
-                properties[propertyName] = { select: { name: text } };
-              }
-              return;
-            }
-            if (property.type === "url" && /^https?:\/\//i.test(text)) {
-              properties[propertyName] = { url: text };
-            }
-          };
-          const addChoiceProperty = (propertyName, preferredNames, fallbackText = "") => {
-            var _a, _b;
-            const property = databaseProperties[propertyName];
-            if (!property) return;
-            const names = Array.isArray(preferredNames) ? preferredNames.map((item) => String(item || "").trim()).filter(Boolean) : [];
-            const fallback = String(fallbackText || "").trim();
-            if (property.type === "status") {
-              const options = Array.isArray((_a = property.status) == null ? void 0 : _a.options) ? property.status.options : [];
-              const matched = names.find((name) => options.some((option) => (option == null ? void 0 : option.name) === name));
-              if (matched) {
-                properties[propertyName] = { status: { name: matched } };
-              }
-              return;
-            }
-            if (property.type === "select") {
-              const options = Array.isArray((_b = property.select) == null ? void 0 : _b.options) ? property.select.options : [];
-              const matched = names.find((name) => options.some((option) => (option == null ? void 0 : option.name) === name));
-              if (matched) {
-                properties[propertyName] = { select: { name: matched } };
-              }
-              return;
-            }
-            if (property.type === "rich_text") {
-              const content = fallback || names[0] || "";
-              if (content) {
-                properties[propertyName] = {
-                  rich_text: [{ text: { content: content.slice(0, 2e3) } }]
-                };
-              }
-            }
-          };
-          const addTagProperty = (propertyName, values) => {
-            var _a;
-            const property = databaseProperties[propertyName];
-            const tags = Array.from(new Set((values || []).map((item) => String(item || "").trim()).filter(Boolean))).slice(0, 20);
-            if (!property || tags.length === 0) return;
-            if (property.type === "multi_select") {
-              const options = Array.isArray((_a = property.multi_select) == null ? void 0 : _a.options) ? property.multi_select.options : [];
-              const optionNames = new Set(options.map((option) => option == null ? void 0 : option.name).filter(Boolean));
-              const matchedTags = tags.filter((tag) => optionNames.has(tag));
-              if (matchedTags.length > 0) {
-                properties[propertyName] = {
-                  multi_select: matchedTags.map((tag) => ({ name: tag }))
-                };
-              }
-              return;
-            }
-            if (property.type === "rich_text") {
-              properties[propertyName] = {
-                rich_text: [{ text: { content: tags.join(", ").slice(0, 2e3) } }]
-              };
-            }
-          };
-          const sourceList = Array.isArray(candidate == null ? void 0 : candidate.sources) ? candidate.sources : [];
-          const aiTags = Array.isArray(aiDraft == null ? void 0 : aiDraft.tags) ? aiDraft.tags : [];
-          const summaryText = String((aiDraft == null ? void 0 : aiDraft.summary) || `${(candidate == null ? void 0 : candidate.reason) || "\u8DE8\u6E90\u5019\u9009"}\uFF1A${sourceList.join(" + ") || "\u672A\u6807\u8BB0"}`).trim();
-          addTextProperty("\u6765\u6E90", "\u7EDF\u4E00\u5019\u9009");
-          addTextProperty("\u6765\u6E90\u7C7B\u578B", "\u8DE8\u6E90\u5173\u8054\u5019\u9009");
-          addTextProperty("\u5206\u7C7B", "\u7EDF\u4E00\u5019\u9009");
-          addChoiceProperty("\u72B6\u6001", workflow.statusNames, workflow.statusLabel);
-          addChoiceProperty("\u5904\u7406\u72B6\u6001", workflow.statusNames, workflow.statusLabel);
-          addChoiceProperty("\u5019\u9009\u72B6\u6001", workflow.statusNames, workflow.statusLabel);
-          addChoiceProperty("\u5EFA\u8BAE\u52A8\u4F5C", workflow.actionNames, workflow.actionLabel);
-          addChoiceProperty("\u5904\u7406\u52A8\u4F5C", workflow.actionNames, workflow.actionLabel);
-          addTagProperty("\u6807\u7B7E", ["\u5019\u9009", candidate == null ? void 0 : candidate.reason, ...sourceList, ...aiTags]);
-          addTextProperty("\u94FE\u63A5", (candidate == null ? void 0 : candidate.url) || "");
-          addTextProperty("\u63CF\u8FF0", summaryText);
-          addTextProperty("\u6458\u8981", summaryText);
-          addTextProperty("AI\u6458\u8981", summaryText);
-          addTextProperty("\u4E0B\u4E00\u6B65", workflow.nextStep);
-          addTextProperty("\u5408\u5E76\u7406\u7531", workflow.mergeReason);
-          addTextProperty("\u7EDF\u4E00\u6807\u9898", String((aiDraft == null ? void 0 : aiDraft.canonicalTitle) || "").trim());
-          return properties;
-        },
-        getWorkspaceConnectionCandidateSchemaDefinition: () => {
-          const statusOptions = [
-            "\u5F85\u5904\u7406",
-            "\u5F85\u590D\u6838",
-            "\u5F85\u8865\u5145",
-            "\u5F85\u5408\u5E76",
-            "\u5F85\u529E",
-            "\u672A\u5F00\u59CB",
-            "\u5DF2\u6401\u7F6E",
-            "\u6682\u7F13",
-            "\u5F52\u6863"
-          ].map((name) => ({ name }));
-          const actionOptions = [
-            "\u5408\u5E76\u6574\u7406",
-            "\u4EBA\u5DE5\u590D\u6838",
-            "\u8865\u5145\u4FE1\u606F",
-            "\u6682\u7F13\u5F52\u6863",
-            "\u5408\u5E76",
-            "\u590D\u6838",
-            "\u8865\u5145",
-            "\u5F52\u6863"
-          ].map((name) => ({ name }));
-          return {
-            "\u6765\u6E90": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u6765\u6E90\u7C7B\u578B": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u5206\u7C7B": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u6807\u7B7E": { typeName: "multi_select", schema: { multi_select: { options: [] } } },
-            "\u94FE\u63A5": { typeName: "url", schema: { url: {} } },
-            "\u63CF\u8FF0": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u6458\u8981": { typeName: "rich_text", schema: { rich_text: {} } },
-            "AI\u6458\u8981": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u72B6\u6001": { typeName: "select", schema: { select: { options: statusOptions } } },
-            "\u5904\u7406\u72B6\u6001": { typeName: "select", schema: { select: { options: statusOptions } } },
-            "\u5019\u9009\u72B6\u6001": { typeName: "select", schema: { select: { options: statusOptions } } },
-            "\u5EFA\u8BAE\u52A8\u4F5C": { typeName: "select", schema: { select: { options: actionOptions } } },
-            "\u5904\u7406\u52A8\u4F5C": { typeName: "select", schema: { select: { options: actionOptions } } },
-            "\u4E0B\u4E00\u6B65": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u5408\u5E76\u7406\u7531": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u7EDF\u4E00\u6807\u9898": { typeName: "rich_text", schema: { rich_text: {} } }
-          };
-        },
-        ensureWorkspaceConnectionCandidateDatabaseSchema: async (databaseId, apiKey, database = null) => {
-          const currentDatabase = database || await NotionAPI2.fetchDatabase(databaseId, apiKey);
-          const existingProps = (currentDatabase == null ? void 0 : currentDatabase.properties) || {};
-          const requiredProperties = UI2.getWorkspaceConnectionCandidateSchemaDefinition();
-          const propsToAdd = {};
-          const typeConflicts = [];
-          for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
-            const existingProp = existingProps[name];
-            if (!existingProp) {
-              propsToAdd[name] = schema;
-              continue;
-            }
-            if (existingProp.type !== typeName) {
-              typeConflicts.push({
-                name,
-                expected: typeName,
-                actual: existingProp.type
-              });
-            }
-          }
-          if (typeConflicts.length > 0) {
-            const detail = typeConflicts.map((item) => `\u300C${item.name}\u300D\u671F\u671B ${item.expected}\uFF0C\u5F53\u524D\u4E3A ${item.actual}`).join("\uFF1B");
-            throw new Error(`\u7EDF\u4E00\u5019\u9009\u76EE\u6807\u6570\u636E\u5E93\u5C5E\u6027\u7C7B\u578B\u4E0D\u5339\u914D\uFF1A${detail}`);
-          }
-          if (Object.keys(propsToAdd).length === 0) {
-            return currentDatabase;
-          }
-          await AIAssistant2._executeGuardedDatabaseWrite(
-            "updateDatabase",
-            databaseId,
-            () => NotionAPI2.updateDatabase(databaseId, propsToAdd, apiKey),
-            apiKey,
-            {
-              itemName: "\u7EDF\u4E00\u5019\u9009 schema",
-              databaseId,
-              source: "ui",
-              surface: "workspace-visualization",
-              propertyNames: Object.keys(propsToAdd)
-            }
-          );
-          return {
-            ...currentDatabase,
-            properties: {
-              ...existingProps,
-              ...Object.fromEntries(
-                Object.entries(requiredProperties).filter(([name]) => propsToAdd[name]).map(([name, { typeName, schema }]) => [
-                  name,
-                  { type: typeName, ...schema }
-                ])
-              )
-            }
-          };
-        },
-        formatSyncDateTime: (timestamp, emptyText = "\u672A\u8BB0\u5F55") => {
-          const numeric = Number(timestamp);
-          if (!Number.isFinite(numeric) || numeric <= 0) return emptyText;
-          return new Date(numeric).toLocaleString("zh-CN", { hour12: false });
-        },
-        formatSyncWatermarkLabel: (watermark, emptyText = "\u672A\u5EFA\u7ACB") => {
-          if (!(watermark == null ? void 0 : watermark.time)) return emptyText;
-          const timeLabel = new Date(watermark.time).toLocaleString("zh-CN", { hour12: false });
-          const boundaryCount = Array.isArray(watermark.ids) ? watermark.ids.length : 0;
-          return boundaryCount > 0 ? `${timeLabel} \xB7 ${boundaryCount} \u4E2A\u8FB9\u754C ID` : timeLabel;
-        },
-        getSyncOutcomeMeta: (outcome) => {
-          const normalized = String(outcome || "idle");
-          if (normalized === "running") return { label: "\u540C\u6B65\u4E2D", tone: "running" };
-          if (normalized === "success") return { label: "\u6B63\u5E38", tone: "success" };
-          if (normalized === "partial") return { label: "\u90E8\u5206\u6210\u529F", tone: "partial" };
-          if (normalized === "error") return { label: "\u5931\u8D25", tone: "error" };
-          return { label: "\u5F85\u673A", tone: "idle" };
-        },
-        buildSyncStatsText: (sourceKey, stats = {}) => {
-          if (!stats || typeof stats !== "object") return "\u6682\u65E0\u7EDF\u8BA1";
-          if (sourceKey === "linuxdo") {
-            if (!stats.scanned && !stats.pending && !stats.success && !stats.failed) return "\u6682\u65E0\u7EDF\u8BA1";
-            return `\u626B\u63CF ${stats.scanned || 0}\uFF0C\u5F85\u5904\u7406 ${stats.pending || 0}\uFF0C\u6210\u529F ${stats.success || 0}${stats.failed ? `\uFF0C\u5931\u8D25 ${stats.failed}` : ""}`;
-          }
-          if (sourceKey === "github") {
-            if (!stats.enabledTypes && !stats.exported && !stats.failed && !stats.syncErrors) return "\u6682\u65E0\u7EDF\u8BA1";
-            return `\u542F\u7528 ${stats.enabledTypes || 0} \u7C7B\uFF0C\u6210\u529F ${stats.exported || 0}${stats.failed ? `\uFF0C\u5931\u8D25 ${stats.failed}` : ""}${stats.syncErrors ? `\uFF0C\u5F02\u5E38 ${stats.syncErrors}` : ""}`;
-          }
-          if (sourceKey === "bookmarks") {
-            if (!stats.created && !stats.updated && !stats.archived && !stats.failed && !stats.unchanged) return "\u6682\u65E0\u7EDF\u8BA1";
-            return `\u65B0\u589E ${stats.created || 0}\uFF0C\u66F4\u65B0 ${stats.updated || 0}\uFF0C\u5F52\u6863 ${stats.archived || 0}\uFF0C\u65E0\u53D8\u66F4 ${stats.unchanged || 0}${stats.failed ? `\uFF0C\u5931\u8D25 ${stats.failed}` : ""}`;
-          }
-          if (sourceKey === "rss") {
-            if (!stats.feeds && !stats.scanned && !stats.created && !stats.updated && !stats.failed && !stats.unchanged) return "\u6682\u65E0\u7EDF\u8BA1";
-            return `Feed ${stats.feeds || 0}\uFF0C\u626B\u63CF ${stats.scanned || 0}\uFF0C\u65B0\u589E ${stats.created || 0}\uFF0C\u66F4\u65B0 ${stats.updated || 0}\uFF0C\u65E0\u53D8\u66F4 ${stats.unchanged || 0}${stats.failed ? `\uFF0C\u5931\u8D25 ${stats.failed}` : ""}`;
-          }
-          return "\u6682\u65E0\u7EDF\u8BA1";
-        },
-        buildUnifiedSyncModel: () => {
-          const githubTypeLabelMap = {
-            stars: "Stars",
-            repos: "Repos",
-            forks: "Forks",
-            gists: "Gists"
-          };
-          const linuxdoState = SyncState2.getLinuxDoState();
-          const githubMeta = SyncState2.getGitHubMeta();
-          const githubTypes = Array.from(new Set((GitHubAPI2.getImportTypes() || []).filter(Boolean)));
-          const githubStates = githubTypes.map((type) => ({
-            type,
-            label: githubTypeLabelMap[type] || type,
-            state: SyncState2.getGitHubState(type)
-          }));
-          const bookmarkState = SyncState2.getBookmarkState();
-          const rssState = SyncState2.getRssState();
-          const rssFeedCount = RSSAutoImporter2.getFeedUrls().length;
-          const sourceRows = [
-            {
-              key: "linuxdo",
-              label: "Linux.do",
-              enabled: !!Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.autoImportEnabled),
-              intervalMinutes: parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.autoImportInterval), 10) || 0,
-              outcome: linuxdoState.lastOutcome,
-              lastSuccessAt: linuxdoState.lastSuccessAt || 0,
-              lastAttemptAt: linuxdoState.lastAttemptAt || 0,
-              lastError: linuxdoState.lastError || "",
-              watermarkLabel: UI2.formatSyncWatermarkLabel(linuxdoState.watermark),
-              statsLabel: UI2.buildSyncStatsText("linuxdo", linuxdoState.lastStats),
-              scheduleLabel: "\u5B9A\u65F6\u8F6E\u8BE2\u5BFC\u5165 Linux.do \u65B0\u6536\u85CF",
-              detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA\u6700\u8FD1\u6536\u85CF\u65F6\u95F4 + \u8FB9\u754C ID"
-            },
-            {
-              key: "github",
-              label: "GitHub",
-              enabled: !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.githubAutoImportEnabled),
-              intervalMinutes: parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.githubAutoImportInterval), 10) || 0,
-              outcome: githubMeta.lastOutcome,
-              lastSuccessAt: githubMeta.lastSuccessAt || 0,
-              lastAttemptAt: githubMeta.lastAttemptAt || 0,
-              lastError: githubMeta.lastError || "",
-              watermarkLabel: githubStates.length > 0 ? githubStates.map((item) => `${item.label}\uFF1A${UI2.formatSyncWatermarkLabel(item.state.watermark)}`).join("\uFF1B") : "\u672A\u9009\u62E9\u5BFC\u5165\u7C7B\u578B",
-              statsLabel: UI2.buildSyncStatsText("github", githubMeta.lastStats),
-              scheduleLabel: githubTypes.length > 0 ? `\u542F\u7528\u7C7B\u578B\uFF1A${githubTypes.map((type) => githubTypeLabelMap[type] || type).join(" / ")}` : "\u672A\u9009\u62E9\u5BFC\u5165\u7C7B\u578B",
-              detailLabel: "\u6BCF\u79CD GitHub \u7C7B\u578B\u90FD\u7EF4\u62A4\u72EC\u7ACB\u589E\u91CF\u57FA\u7EBF"
-            },
-            {
-              key: "bookmarks",
-              label: "\u6D4F\u89C8\u5668\u4E66\u7B7E",
-              enabled: !!Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.bookmarkAutoImportEnabled),
-              intervalMinutes: parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.bookmarkAutoImportInterval), 10) || 0,
-              outcome: bookmarkState.lastOutcome,
-              lastSuccessAt: bookmarkState.lastSuccessAt || 0,
-              lastAttemptAt: bookmarkState.lastAttemptAt || 0,
-              lastError: bookmarkState.lastError || "",
-              watermarkLabel: UI2.formatSyncWatermarkLabel(bookmarkState.watermark),
-              statsLabel: UI2.buildSyncStatsText("bookmarks", bookmarkState.lastStats),
-              scheduleLabel: `\u8DDF\u8E2A ${Object.keys(bookmarkState.snapshot || {}).length} \u4E2A\u5DF2\u77E5\u4E66\u7B7E\u6620\u5C04`,
-              detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA\u4E66\u7B7E\u65F6\u95F4 + \u5F53\u524D\u5FEB\u7167\u6620\u5C04"
-            },
-            {
-              key: "rss",
-              label: "RSS",
-              enabled: !!Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.rssAutoImportEnabled),
-              intervalMinutes: parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.rssAutoImportInterval), 10) || 0,
-              outcome: rssState.lastOutcome,
-              lastSuccessAt: rssState.lastSuccessAt || 0,
-              lastAttemptAt: rssState.lastAttemptAt || 0,
-              lastError: rssState.lastError || "",
-              watermarkLabel: UI2.formatSyncWatermarkLabel(rssState.watermark),
-              statsLabel: UI2.buildSyncStatsText("rss", rssState.lastStats),
-              scheduleLabel: rssFeedCount > 0 ? `\u76D1\u63A7 ${rssFeedCount} \u4E2A Feed` : "\u672A\u914D\u7F6E Feed URL",
-              detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA Feed \u53D1\u5E03\u65F6\u95F4 + \u5F53\u524D\u5FEB\u7167\u6620\u5C04"
-            }
-          ].map((row) => {
-            const outcomeMeta = UI2.getSyncOutcomeMeta(row.outcome);
-            const intervalLabel = row.enabled ? row.intervalMinutes > 0 ? `${row.intervalMinutes} \u5206\u949F\u8F6E\u8BE2` : "\u4EC5\u9875\u9762\u6253\u5F00\u65F6\u8865\u8DD1" : "\u672A\u542F\u7528";
-            return {
-              ...row,
-              outcomeLabel: outcomeMeta.label,
-              outcomeTone: outcomeMeta.tone,
-              intervalLabel,
-              lastSuccessLabel: UI2.formatSyncDateTime(row.lastSuccessAt, "\u672A\u6210\u529F\u540C\u6B65"),
-              lastAttemptLabel: UI2.formatSyncDateTime(row.lastAttemptAt, "\u672A\u5C1D\u8BD5")
-            };
-          });
-          const latestSuccessRow = sourceRows.filter((row) => row.lastSuccessAt > 0).sort((a, b) => b.lastSuccessAt - a.lastSuccessAt)[0] || null;
-          return {
-            sourceRows,
-            enabledCount: sourceRows.filter((row) => row.enabled).length,
-            runningCount: sourceRows.filter((row) => row.outcome === "running").length,
-            issueCount: sourceRows.filter((row) => row.enabled && (row.outcome === "error" || row.outcome === "partial")).length,
-            latestSuccessSource: latestSuccessRow ? latestSuccessRow.label : "\u5C1A\u672A\u5EFA\u7ACB",
-            latestSuccessLabel: latestSuccessRow ? latestSuccessRow.lastSuccessLabel : "\u6682\u65E0\u6210\u529F\u8BB0\u5F55"
-          };
-        },
-        renderSyncCenterSummary: () => {
-          var _a;
-          const container = (_a = UI2.refs) == null ? void 0 : _a.viewSyncSummary;
-          if (!container) return;
-          const model = UI2.buildUnifiedSyncModel();
-          if (!model.sourceRows.length) {
-            container.innerHTML = `
-                <div class="ldb-view-empty">
-                    <div class="ldb-view-empty-title">\u7EDF\u4E00\u540C\u6B65\u4E2D\u5FC3\u8FD8\u6CA1\u6709\u6765\u6E90</div>
-                    <div class="ldb-view-empty-text">\u542F\u7528\u81EA\u52A8\u540C\u6B65\u540E\uFF0C\u8FD9\u91CC\u4F1A\u805A\u5408\u5C55\u793A\u5404\u6765\u6E90\u7684\u8F6E\u8BE2\u72B6\u6001\u548C\u589E\u91CF\u57FA\u7EBF\u3002</div>
-                </div>
-            `;
-            return;
-          }
-          const sourceCards = model.sourceRows.map((row) => {
-            const highlights = [
-              `<span class="ldb-view-pill">${Utils2.escapeHtml(row.intervalLabel)}</span>`,
-              `<span class="ldb-view-pill">${Utils2.escapeHtml(row.outcomeLabel)}</span>`
-            ].join("");
-            const errorMarkup = row.lastError ? `<div class="ldb-view-empty-text" style="margin-top: var(--ldb-ui-spacing-md); color: var(--ldb-ui-danger);">\u6700\u8FD1\u5F02\u5E38\uFF1A${Utils2.escapeHtml(row.lastError)}</div>` : "";
-            return `
-                <div class="ldb-view-card">
-                    <div class="ldb-view-card-title">${Utils2.escapeHtml(row.label)}</div>
-                    <div class="ldb-view-metric-value">${Utils2.escapeHtml(row.outcomeLabel)}</div>
-                    <div class="ldb-view-metric-meta">${Utils2.escapeHtml(row.scheduleLabel)}</div>
-                    <div class="ldb-view-highlight">${highlights}</div>
-                    <div class="ldb-view-link-graph">
-                        <div class="ldb-view-link-row">
-                            <div class="ldb-view-link-path">\u6700\u8FD1\u6210\u529F</div>
-                            <div class="ldb-view-link-count">${Utils2.escapeHtml(row.lastSuccessLabel)}</div>
-                        </div>
-                        <div class="ldb-view-link-row">
-                            <div class="ldb-view-link-path">\u6700\u8FD1\u5C1D\u8BD5</div>
-                            <div class="ldb-view-link-count">${Utils2.escapeHtml(row.lastAttemptLabel)}</div>
-                        </div>
-                        <div class="ldb-view-link-row">
-                            <div class="ldb-view-link-path">\u589E\u91CF\u57FA\u7EBF</div>
-                            <div class="ldb-view-link-count">${Utils2.escapeHtml(row.watermarkLabel)}</div>
-                        </div>
-                        <div class="ldb-view-link-row">
-                            <div class="ldb-view-link-path">\u6700\u8FD1\u7EDF\u8BA1</div>
-                            <div class="ldb-view-link-count">${Utils2.escapeHtml(row.statsLabel)}</div>
-                        </div>
-                    </div>
-                    <div class="ldb-view-empty-text" style="margin-top: var(--ldb-ui-spacing-md);">${Utils2.escapeHtml(row.detailLabel)}</div>
-                    ${errorMarkup}
-                </div>
-            `;
-          }).join("");
-          container.innerHTML = `
-            <div class="ldb-view-grid">
-                <div class="ldb-view-card">
-                    <div class="ldb-view-card-title">\u5DF2\u542F\u7528\u6765\u6E90</div>
-                    <div class="ldb-view-metric-value">${model.enabledCount}</div>
-                    <div class="ldb-view-metric-meta">\u5171 ${model.sourceRows.length} \u6761\u591A\u6E90\u540C\u6B65\u94FE</div>
-                </div>
-                <div class="ldb-view-card">
-                    <div class="ldb-view-card-title">\u6700\u8FD1\u6210\u529F</div>
-                    <div class="ldb-view-metric-value">${Utils2.escapeHtml(model.latestSuccessSource)}</div>
-                    <div class="ldb-view-metric-meta">${Utils2.escapeHtml(model.latestSuccessLabel)}</div>
-                </div>
-                <div class="ldb-view-card">
-                    <div class="ldb-view-card-title">\u8FD0\u884C\u4E2D / \u9700\u5173\u6CE8</div>
-                    <div class="ldb-view-metric-value">${model.runningCount} / ${model.issueCount}</div>
-                    <div class="ldb-view-metric-meta">\u8FD0\u884C\u4E2D\u6765\u6E90 / \u90E8\u5206\u6210\u529F\u6216\u5931\u8D25\u6765\u6E90</div>
-                </div>
-                ${sourceCards}
-            </div>
-        `;
-        },
-        runUnifiedSyncNow: async () => {
-          const refs = UI2.refs || {};
-          const btn = refs.viewSyncNowBtn;
-          const tasks = [];
-          if (Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.autoImportEnabled)) {
-            tasks.push({ label: "Linux.do", run: () => AutoImporter2.run() });
-          }
-          if (Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.githubAutoImportEnabled)) {
-            tasks.push({ label: "GitHub", run: () => GitHubAutoImporter2.run() });
-          }
-          if (Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.bookmarkAutoImportEnabled)) {
-            tasks.push({ label: "\u6D4F\u89C8\u5668\u4E66\u7B7E", run: () => BookmarkAutoImporter2.run() });
-          }
-          if (Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.rssAutoImportEnabled)) {
-            tasks.push({ label: "RSS", run: () => RSSAutoImporter2.run() });
-          }
-          if (tasks.length === 0) {
-            throw new Error("\u81F3\u5C11\u5148\u542F\u7528\u4E00\u4E2A\u81EA\u52A8\u540C\u6B65\u6765\u6E90\u3002");
-          }
-          if (btn) {
-            btn.disabled = true;
-            btn.textContent = "\u540C\u6B65\u4E2D...";
-          }
-          try {
-            for (const task of tasks) {
-              await task.run();
-            }
-            UI2.renderSyncCenterSummary();
-            const model = UI2.buildUnifiedSyncModel();
-            UI2.showStatus(
-              `\u7EDF\u4E00\u540C\u6B65\u5B8C\u6210\uFF1A\u5DF2\u6267\u884C ${tasks.map((task) => task.label).join("\u3001")}\uFF0C\u5F53\u524D\u9700\u5173\u6CE8\u6765\u6E90 ${model.issueCount} \u4E2A\u3002`,
-              model.issueCount > 0 ? "error" : "success"
-            );
-            return model;
-          } finally {
-            if (btn) {
-              btn.disabled = false;
-              btn.textContent = "\u7ACB\u5373\u540C\u6B65\u5168\u90E8";
-            }
-          }
-        },
         buildWorkspaceCollaborationPackage: (model = UI2.buildWorkspaceVisualizationModel(), syncModel = UI2.buildUnifiedSyncModel()) => {
           if (!(model == null ? void 0 : model.scannedAt)) {
             throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
@@ -16147,201 +16366,6 @@ ${insight.summary || ""}`,
               btn.textContent = "\u751F\u6210\u6D1E\u5BDF";
             }
           }
-        },
-        setWorkspaceVisualStatus: (message, tone = "") => {
-          var _a;
-          const statusEl = (_a = UI2.refs) == null ? void 0 : _a.viewWorkspaceStatus;
-          if (!statusEl) return;
-          statusEl.textContent = message || "\u5C1A\u672A\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002";
-          if (statusEl.dataset) {
-            if (tone) statusEl.dataset.tone = tone;
-            else delete statusEl.dataset.tone;
-          }
-        },
-        refreshWorkspaceVisualization: async (apiKey = NotionOAuth2.getAccessToken(((_b) => (_b = ((_a) => (_a = UI2.refs) == null ? void 0 : _a.apiKeyInput)()) == null ? void 0 : _b.value.trim())())) => {
-          var _a2, _b2, _c;
-          if (!apiKey) {
-            UI2.setWorkspaceVisualStatus(MSG2.NO_NOTION_KEY, "error");
-            throw new Error(MSG2.NO_NOTION_KEY);
-          }
-          const maxPages = parseInt((_b2 = (_a2 = UI2.refs) == null ? void 0 : _a2.workspaceMaxPagesSelect) == null ? void 0 : _b2.value, 10) || parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
-          const refreshBtn = (_c = UI2.refs) == null ? void 0 : _c.viewRefreshWorkspaceBtn;
-          if (refreshBtn) {
-            refreshBtn.disabled = true;
-            refreshBtn.textContent = "\u626B\u63CF\u4E2D...";
-          }
-          UI2.setWorkspaceVisualStatus("\u6B63\u5728\u626B\u63CF\u5DE5\u4F5C\u533A\u6570\u636E\u5E93...", "");
-          try {
-            const { databases, workspaceData } = await WorkspaceService2.refreshWorkspaceSnapshot(apiKey, {
-              includePages: false,
-              maxPages,
-              onProgress: (progress) => {
-                if (progress.phase === "databases") {
-                  UI2.setWorkspaceVisualStatus(`\u6B63\u5728\u626B\u63CF\u5DE5\u4F5C\u533A\u6570\u636E\u5E93... \u5DF2\u52A0\u8F7D ${progress.loaded} \u4E2A\u6570\u636E\u5E93`, "");
-                }
-              },
-              onWorkspaceData: (partialData) => {
-                UI2.updateWorkspaceSelect(partialData);
-                UI2.updateAITargetDbOptions(partialData.databases || []);
-              }
-            });
-            UI2.setWorkspaceVisualStatus("\u6570\u636E\u5E93\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u5206\u6790\u9875\u9762\u5C5E\u6027...", "");
-            const pageObjects = await WorkspaceService2.fetchWorkspacePageObjects(apiKey, {
-              maxPages,
-              phase: "workspace_visual_pages",
-              onProgress: (progress) => {
-                UI2.setWorkspaceVisualStatus(`\u6B63\u5728\u5206\u6790\u9875\u9762\u5C5E\u6027... \u5DF2\u626B\u63CF ${progress.loaded} \u4E2A\u9875\u9762`, "");
-              }
-            });
-            const databasesMap = new Map(databases.map((d) => [d.id, d]));
-            const pages = [];
-            const records = [];
-            pageObjects.forEach((page) => {
-              const summary = UI2.mapWorkspacePageSummary(page);
-              if (summary.id) {
-                pages.push(summary);
-                records.push(UI2.extractWorkspaceVisualRecord(page, databasesMap));
-              }
-            });
-            const finalWorkspaceData = WorkspaceService2.persistWorkspaceData(apiKey, {
-              databases,
-              pages
-            });
-            UI2.updateWorkspaceSelect(finalWorkspaceData);
-            UI2.updateAITargetDbOptions(finalWorkspaceData.databases || []);
-            UI2.workspaceVisualSnapshot = {
-              databases,
-              pages,
-              records,
-              scannedAt: Date.now(),
-              maxPages
-            };
-            UI2.workspaceInsightSummary = "";
-            UI2.workspaceInsightMarkdown = UI2.buildWorkspaceInsightMarkdown(UI2.buildWorkspaceVisualizationModel(UI2.workspaceVisualSnapshot), "");
-            UI2.workspaceInsightUpdatedAt = Date.now();
-            UI2.renderWorkspaceVisualSummary();
-            const model = UI2.buildWorkspaceVisualizationModel();
-            UI2.setWorkspaceVisualStatus(
-              `\u5DF2\u626B\u63CF ${model.totalPages} \u4E2A\u9875\u9762\uFF0C\u8986\u76D6 ${model.totalDatabases} \u4E2A\u6570\u636E\u5E93\u3002`,
-              "success"
-            );
-            return model;
-          } catch (error) {
-            UI2.setWorkspaceVisualStatus(`\u5DE5\u4F5C\u533A\u89C6\u56FE\u5237\u65B0\u5931\u8D25\uFF1A${error.message}`, "error");
-            throw error;
-          } finally {
-            if (refreshBtn) {
-              refreshBtn.disabled = false;
-              refreshBtn.textContent = "\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE";
-            }
-          }
-        },
-        renderWorkspaceVisualSummary: () => {
-          var _a;
-          const container = (_a = UI2.refs) == null ? void 0 : _a.viewWorkspaceSummary;
-          if (!container) return;
-          const model = UI2.buildWorkspaceVisualizationModel();
-          if (!model.scannedAt) {
-            container.innerHTML = `
-                <div class="ldb-view-empty">
-                    <div class="ldb-view-empty-title">\u5DE5\u4F5C\u533A\u603B\u89C8\u8FD8\u6CA1\u6709\u6570\u636E</div>
-                    <div class="ldb-view-empty-text">\u70B9\u51FB\u4E0A\u65B9\u6309\u94AE\u540E\uFF0C\u4F1A\u626B\u63CF\u5F53\u524D\u5DE5\u4F5C\u533A\u6570\u636E\u5E93\u91CC\u7684\u9875\u9762\u5C5E\u6027\uFF0C\u751F\u6210\u5168\u5C40\u65F6\u95F4\u7EBF\u3001\u6765\u6E90\u5173\u7CFB\u56FE\u548C\u5BFC\u51FA\u6F0F\u6597\u3002</div>
-                </div>
-            `;
-            return;
-          }
-          if (model.totalPages === 0) {
-            container.innerHTML = `
-                <div class="ldb-view-empty">
-                    <div class="ldb-view-empty-title">\u672C\u6B21\u626B\u63CF\u6CA1\u6709\u53EF\u7EDF\u8BA1\u9875\u9762</div>
-                    <div class="ldb-view-empty-text">\u5DF2\u5B8C\u6210\u5DE5\u4F5C\u533A\u626B\u63CF\uFF0C\u4F46\u5F53\u524D\u8303\u56F4\u5185\u6CA1\u6709\u53EF\u7528\u4E8E\u805A\u5408\u7684\u9875\u9762\u5C5E\u6027\u3002</div>
-                </div>
-            `;
-            return;
-          }
-          const timelineMarkup = model.timeline.length > 0 ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
-                <div class="ldb-view-timeline-item">
-                    <div class="ldb-view-timeline-label">${item.label}</div>
-                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, item.pct || UI2.getViewPct(item.count, model.totalPages))}%;"></div></div>
-                    <div class="ldb-view-timeline-value">${item.count} \u9875</div>
-                </div>
-            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u5DE5\u4F5C\u533A\u9875\u9762\u91CC\u8FD8\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u65F6\u95F4\u5B57\u6BB5\u3002</div>`;
-          const relationshipMarkup = model.relationships.length > 0 ? `<div class="ldb-view-link-graph">${model.relationships.map((item) => `
-                <div class="ldb-view-link-row">
-                    <div class="ldb-view-link-path">${Utils2.escapeHtml(item.label)}</div>
-                    <div class="ldb-view-link-count">${item.count} \u9875 \xB7 ${item.pct}%</div>
-                </div>
-            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u5DE5\u4F5C\u533A\u9875\u9762\u91CC\u8FD8\u6CA1\u6709\u53EF\u5C55\u793A\u7684\u6765\u6E90\u5173\u7CFB\u3002</div>`;
-          const funnelMarkup = model.funnel.length > 0 ? `<div class="ldb-view-funnel">${model.funnel.map((item) => `
-                <div class="ldb-view-funnel-row">
-                    <div class="ldb-view-funnel-label">${Utils2.escapeHtml(item.label)}</div>
-                    <div class="ldb-view-funnel-value">${item.count} \u9875 \xB7 ${item.pct}%</div>
-                </div>
-            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u6CA1\u6709\u53EF\u5C55\u793A\u7684\u6F0F\u6597\u6570\u636E\u3002</div>`;
-          const highlights = [
-            `\u672A\u6807\u8BB0 ${model.missingSourcePages}`,
-            `\u7F3A\u65F6\u95F4 ${model.missingDatePages}`,
-            `\u672A\u5206\u7C7B ${model.missingCategoryPages}`
-          ].map((text) => `<span class="ldb-view-pill">${Utils2.escapeHtml(text)}</span>`).join("");
-          const duplicateMarkup = model.duplicateCandidates.length > 0 ? `<div class="ldb-view-link-graph">${model.duplicateCandidates.map((item) => `
-                <div class="ldb-view-link-row">
-                    <div class="ldb-view-link-path">${Utils2.escapeHtml(item.label)}</div>
-                    <div class="ldb-view-link-count">${item.count} \u9875 \xB7 ${Utils2.escapeHtml(item.sources.join(" + ") || "\u672A\u6807\u8BB0")}</div>
-                </div>
-            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u8FD8\u6CA1\u6709\u8BC6\u522B\u5230\u660E\u663E\u7684\u540C\u6807\u9898\u91CD\u590D\u5019\u9009\u3002</div>`;
-          const connectionMarkup = model.connectionCandidates.length > 0 ? `<div class="ldb-view-link-graph">${model.connectionCandidates.map((item) => `
-                <div class="ldb-view-link-row">
-                    <div class="ldb-view-link-path">${Utils2.escapeHtml(item.label)}</div>
-                    <div class="ldb-view-link-count">${item.count} \u9875 \xB7 ${Utils2.escapeHtml(item.reason)}</div>
-                </div>
-            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u8FD8\u6CA1\u6709\u8DE8\u6E90\u5173\u8054\u5019\u9009\uFF0C\u7EE7\u7EED\u8865\u9F50\u6765\u6E90\u5B57\u6BB5\u540E\u4F1A\u66F4\u5BB9\u6613\u53D1\u73B0\u7EDF\u4E00\u6761\u76EE\u3002</div>`;
-          const insightSummary = String(UI2.workspaceInsightSummary || "").trim();
-          const reportPreview = Utils2.escapeHtml(
-            UI2.workspaceInsightMarkdown || UI2.buildWorkspaceInsightMarkdown(model, insightSummary)
-          );
-          container.innerHTML = `
-            <div class="ldb-view-grid">
-                <div class="ldb-view-card">
-                    <div class="ldb-view-card-title">\u5DF2\u626B\u63CF\u9875\u9762</div>
-                    <div class="ldb-view-metric-value">${model.totalPages}</div>
-                    <div class="ldb-view-metric-meta">\u8986\u76D6 ${model.totalDatabases} \u4E2A\u6570\u636E\u5E93</div>
-                </div>
-                <div class="ldb-view-card">
-                    <div class="ldb-view-card-title">\u7ED3\u6784\u5B8C\u6574</div>
-                    <div class="ldb-view-metric-value">${model.structuredPages}</div>
-                    <div class="ldb-view-metric-meta">\u6765\u6E90\u3001\u65F6\u95F4\u3001\u5206\u7C7B\u4E09\u9879\u9F50\u5907</div>
-                </div>
-                <div class="ldb-view-card full">
-                    <div class="ldb-view-card-title">\u5168\u5C40\u65F6\u95F4\u7EBF</div>
-                    ${timelineMarkup}
-                    ${highlights ? `<div class="ldb-view-highlight">${highlights}</div>` : ""}
-                </div>
-                <div class="ldb-view-card full">
-                    <div class="ldb-view-card-title">\u6765\u6E90\u5173\u7CFB\u56FE</div>
-                    ${relationshipMarkup}
-                </div>
-                <div class="ldb-view-card full">
-                    <div class="ldb-view-card-title">\u5BFC\u51FA\u6F0F\u6597</div>
-                    ${funnelMarkup}
-                </div>
-                <div class="ldb-view-card full">
-                    <div class="ldb-view-card-title">\u91CD\u590D\u5019\u9009</div>
-                    ${duplicateMarkup}
-                </div>
-                <div class="ldb-view-card full">
-                    <div class="ldb-view-card-title">\u8DE8\u6E90\u5173\u8054\u5019\u9009</div>
-                    ${connectionMarkup}
-                </div>
-                <div class="ldb-view-card full">
-                    <div class="ldb-view-card-title">\u6D1E\u5BDF\u6458\u8981</div>
-                    <div class="ldb-view-empty-text">${ChatUI2.safeMarkdown(insightSummary || UI2.buildWorkspaceInsightFallbackSummary(model))}</div>
-                </div>
-                <div class="ldb-view-card full">
-                    <div class="ldb-view-card-title">Markdown \u62A5\u544A\u9884\u89C8</div>
-                    <div class="ldb-view-report-preview">${reportPreview}</div>
-                </div>
-            </div>
-        `;
         },
         renderVisualSummary: () => {
           var _a, _b;
@@ -16888,6 +16912,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       };
       Object.assign(UI2, require_workspace_visual().WorkspaceVisual);
       Object.assign(UI2, require_bookmark_list().BookmarkList);
+      Object.assign(UI2, require_workspace_insight().WorkspaceInsight);
       ;
       module.exports = { UI: UI2 };
     }
