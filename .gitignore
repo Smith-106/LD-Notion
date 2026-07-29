@@ -38,3 +38,4 @@ Thumbs.db
 # Data
 data/
 chrome-extension-full-*.zip
+node_modules/.vite/
