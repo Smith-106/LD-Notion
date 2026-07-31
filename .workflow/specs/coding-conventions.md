@@ -155,3 +155,16 @@ AI Agent 调用链（runAgentLoop）须持久化 per-invocation trace 用于 obs
 LD-Notion 实例：PERF-003 (BookmarkExporter.exportBookmarks) + DISCOVER P3 跨阶段延伸 (GitHubAPI markExported/markGistExported + BookmarkExporter.markExported + BookmarkAutoImporter processBookmark + GitHubExporter._exportItems) 共收敛 4 路径。
 
 </spec-entry>
+<spec-entry category="coding" keywords="TTL,存储上限,GM存储,淘汰,无界增长" date="2026-07-31" sid="S-20260731-k3tv" title="持久化存储键必须有TTL或容量上限" description="GM 存储 JSON 集合必须有 TTL 淘汰或容量截断，禁止无界增长">
+### 持久化存储键必须有TTL或容量上限
+
+持久化存储键（GM_setValue/Storage.set 的 JSON 集合）必须有 TTL 或容量上限，禁止无界增长。已处理/已导出集合类 map 在 flush 回写前调用 _evictExpired()（90 天 cutoff）；日志/历史类数组用 MAX_ENTRIES 截断（如 OPERATION_LOG=100、CHAT_HISTORY=50）。
+
+反模式：markSeen 只增不减，集合随 sync 周期持续膨胀，单键 JSON 达数百 KB，每次 sync 全量 parse/stringify 延迟线性增加。
+
+正模式：flush/endBatch 回写前就地淘汰过期条目（for key: if set[key] < Date.now()-TTL delete）。
+
+检查方法：grep 'Storage.set.*JSON.stringify' 与 GM_setValue 写路径，确认有 _evictExpired 或 MAX_ENTRIES 守卫。
+
+LD-Notion 实例：PERF-001 (DedupStore.endBatch) 泛化到 GitHubAPI.flushExported/flushGistsExported + BookmarkExporter.flushExported 共 4 路径，统一 90 天 TTL。
+</spec-entry>

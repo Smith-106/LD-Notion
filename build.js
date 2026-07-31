@@ -57,6 +57,10 @@ const USERSCRIPT_HEADER = `// ==UserScript==
 // ==/UserScript==
 `;
 
+// --minify 标志：发布版压缩输出（PERF-003）。
+// 默认不压缩便于 userscript 审查和调试；CI/发布流程传 --minify 生成压缩版。
+const MINIFY = process.argv.includes("--minify");
+
 async function build() {
     const outDir = path.join(__dirname, "dist");
     if (!fs.existsSync(outDir)) {
@@ -72,7 +76,7 @@ async function build() {
         outfile: tempFile,
         format: "iife",
         target: ["chrome80"],
-        minify: false,
+        minify: MINIFY,
         legalComments: "inline",
         treeShaking: false,
         logLevel: "info",

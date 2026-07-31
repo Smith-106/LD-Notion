@@ -491,14 +491,17 @@ const ChatState = {
         return ChatState.messages[ChatState.messages.length - 1];
     },
 
-    // 更新最后一条消息
+    // 更新最后一条消息（增量 DOM 更新，避免全量重渲染）（PERF-006）
     updateLastMessage: (content, status) => {
         if (ChatState.messages.length === 0) return;
         const lastMsg = ChatState.messages[ChatState.messages.length - 1];
         if (content !== undefined) lastMsg.content = content;
         if (status !== undefined) lastMsg.status = status;
         ChatState.save();
-        ChatUI.renderMessages();
+        // 快速路径：仅更新最后一个气泡的 DOM，不重建整棵消息树
+        if (!ChatUI._patchLastBubble()) {
+            ChatUI.renderMessages();
+        }
     },
 
     // 保存到存储
@@ -2094,6 +2097,28 @@ const ChatUI = {
         return escaped
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/\n/g, '<br>');
+    },
+
+    // 增量更新最后一个气泡 DOM（PERF-006）。
+    // 返回 true 表示已成功 patch，false 表示需要回退到全量 renderMessages。
+    _patchLastBubble: () => {
+        const container = document.querySelector("#ldb-chat-messages");
+        if (!container) return false;
+        const bubbles = container.querySelectorAll(".ldb-chat-message");
+        if (bubbles.length !== ChatState.messages.length) return false;
+        const lastMsg = ChatState.messages[ChatState.messages.length - 1];
+        const lastBubble = bubbles[bubbles.length - 1]?.querySelector(".ldb-chat-bubble");
+        if (!lastBubble) return false;
+
+        const statusClass = lastMsg.status === "processing" ? "processing" : (lastMsg.status === "error" ? "error" : "");
+        const content = lastMsg.status === "processing"
+            ? '思考中<span class="ldb-typing-dots"><span></span><span></span><span></span></span>'
+            : ChatUI.safeMarkdown(AIAssistant._resultToText(lastMsg.content));
+
+        lastBubble.className = `ldb-chat-bubble ${lastMsg.role === "user" ? "user" : "assistant"} ${statusClass}`.trim();
+        lastBubble.innerHTML = content;
+        container.scrollTop = container.scrollHeight;
+        return true;
     },
 
     // 渲染消息列表

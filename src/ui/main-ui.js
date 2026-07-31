@@ -1101,22 +1101,20 @@ const UI = {
         }
         UI.renderSelfCheckResult();
 
-        // 加载 AI 查询目标数据库设置
-        const cachedWorkspaceForDb = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
+        // 加载工作区缓存（单次解析，复用于 AI 目标库 + 工作区选择）（PERF-007）
+        let workspaceData = null;
         try {
-            const wsData = JSON.parse(cachedWorkspaceForDb);
-            UI.updateAITargetDbOptions(wsData.databases || []);
-        } catch {
-            UI.updateAITargetDbOptions([]);
-        }
+            workspaceData = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
+        } catch { /* workspace cache invalid */ }
+
+        // 加载 AI 查询目标数据库设置
+        UI.updateAITargetDbOptions(workspaceData?.databases || []);
 
         // 初始化日志面板
         UI.updateLogPanel();
 
         // 加载缓存的工作区页面列表（校验 API Key）
-        const cachedWorkspace = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
-        try {
-            const workspaceData = JSON.parse(cachedWorkspace);
+        if (workspaceData) {
             const currentApiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
             const currentKeyHash = currentApiKey ? Utils.apiKeyHash(currentApiKey) : "";
             // 仅当 API Key 匹配时才显示缓存
@@ -1124,7 +1122,7 @@ const UI = {
                 (workspaceData.databases?.length > 0 || workspaceData.pages?.length > 0)) {
                 UI.updateWorkspaceSelect(workspaceData);
             }
-        } catch { /* workspace cache invalid, will refresh */ }
+        }
 
         // 加载自动导入设置
         const savedSource = Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG.DEFAULTS.bookmarkSource);

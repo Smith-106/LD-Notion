@@ -155,8 +155,10 @@ const GitHubAPI = {
 
     // 批量导出循环末尾单次回写已导出映射（DISCOVER P3 同类修复）：循环内仅 mutate 内存缓存，
     // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。与 BookmarkExporter.flushExported 同构。
+    // 回写前淘汰超过 90 天的过期条目（PERF-001 泛化）。
     flushExported: () => {
         if (GitHubAPI._exportedCache) {
+            GitHubAPI._evictExpired(GitHubAPI._exportedCache);
             Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(GitHubAPI._exportedCache));
         }
     },
@@ -173,7 +175,17 @@ const GitHubAPI = {
 
     flushGistsExported: () => {
         if (GitHubAPI._exportedGistsCache) {
+            GitHubAPI._evictExpired(GitHubAPI._exportedGistsCache);
             Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(GitHubAPI._exportedGistsCache));
+        }
+    },
+
+    // 淘汰超过 90 天的过期条目（PERF-001 泛化，与 DedupStore._evictExpired 同构）
+    _EXPORT_TTL_MS: 90 * 24 * 60 * 60 * 1000,
+    _evictExpired: (set) => {
+        const cutoff = Date.now() - GitHubAPI._EXPORT_TTL_MS;
+        for (const key of Object.keys(set)) {
+            if (set[key] < cutoff) delete set[key];
         }
     },
 

@@ -198,7 +198,7 @@
   },
   "transition_history": [],
   "milestone_history": [],
-  "last_updated": "2026-07-29T21:38:25+08:00",
+  "last_updated": "2026-07-31T21:25:00+08:00"
   "artifact_archive": [
     {
       "id": "ANL-001",
@@ -327,7 +327,7 @@
       "summary": "Verification passed: 24 must-haves, coverage=1.0, 349/349 tests"
     }
   ],
-  "last_codebase_rebuild": "2026-07-27T11:50:00+08:00",
+  "last_codebase_rebuild": "2026-07-31T21:25:00+08:00"
   "last_pruned": "2026-06-20T12:00:00+08:00",
   "last_drift_realign": "2026-07-28T12:45:00+08:00",
   "sessions": [
@@ -346,7 +346,32 @@
       "depends_on": [],
       "roadmap_artifact_id": null,
       "seed_ref": null
+    },
+    {
+      "session_id": "20260731-refactor-api-domain",
+      "intent": "拆分 src/api/index.js (1801 LOC) 为职责单一模块，NotionAPI 契约零破坏",
+      "status": "planned",
+      "depends_on": [],
+      "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
+      "seed_ref": ".workflow/scratch/20260731-roadmap-f4f5-refactor/outputs/roadmap.json"
+    },
+    {
+      "session_id": "20260731-refactor-ai-domain",
+      "intent": "拆分 ai/index.js(2503)/Handlers(2282)/AgentTools(1715) 含 AIAssistant 核心，消除 ai 内部循环",
+      "status": "active",
+      "depends_on": [],
+      "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
+      "seed_ref": ".workflow/scratch/20260731-roadmap-f4f5-refactor/outputs/roadmap.json"
+    },
+    {
+      "session_id": "20260731-refactor-ui-eventbus",
+      "intent": "事件总线消除 security/import/bridge↔ui 循环 + 拆分 main-ui(2697)/events(1732) 巨石",
+      "status": "planned",
+      "depends_on": [],
+      "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
+      "seed_ref": ".workflow/scratch/20260731-roadmap-f4f5-refactor/outputs/roadmap.json"
     }
   ],
-  "active_session_id": null
+  "active_session_id": "20260731-refactor-ai-domain",
+  "codebase_last_refreshed": "2026-07-31T21:25:00+08:00"
 }
