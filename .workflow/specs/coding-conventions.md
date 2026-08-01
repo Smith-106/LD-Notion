@@ -54,7 +54,16 @@ keywords:
 
 ### esbuild 闭包自由变量：跨模块引用须 import 或 lazy require
 
-esbuild 将每个 CommonJS 模块打包为独立 __commonJS 闭包，闭包间不共享自由变量。模块内引用一个顶部未 require import 的跨模块标识符（如 UI、AIService、AIAssistant、CredentialVault、GenericExtractor、BookmarkExporter）时，该标识符在运行时为 undefined（或 typeof 返回 'undefined'），导致：(1) 直接属性访问抛 TypeError；(2) typeof-guard 静默早退使功能静默降级（如状态栏不更新、操作日志脱敏失效、AI 分类中断、Notion 页面创建中断）。\n\n判据（补充 coding-conventions-001 循环依赖消除）：\n- 可提取的纯工具依赖（如 UrlValidator）→ 提取到独立模块，A/B 都 require C（spec 原方案）。\n- 有状态、跨多模块、加载时序敏感的对象（如 UI）→ 提取独立模块不现实，用运行时延迟 require：const _resolveUI = () => { try { return require('../ui').UI; } catch { return undefined; } }，方法执行时整张模块图已加载完成。\n- 循环依赖（A↔B 互 require）顶部 require 会让一方拿到 partial export → 用 lazy require 内方法体，或 ensureAdaptersRegistered() 单次 flag-guard 延迟注册。\n\n反模式（必须修）：typeof X !== "undefined" && X.method() 对跨闭包自由变量恒为 false → 静默降级。修复：顶部 import 或 _resolveUI() lazy require。\n\nLD-Notion 实例：fix/legacy-test-infrastructure-and-bundle-sync 分支修复 GitHubAutoImporter.updateStatus、security/index.js（OperationLog.add/clear + UndoManager.showToast）、UpdateChecker、export/index.js（GenericExtractor+AIAssistant）、GitHubExporter（AIService）、BookmarkAdapter（BookmarkExporter）共 7 处 sibling。
+esbuild 将每个 CommonJS 模块打包为独立 __commonJS 闭包，闭包间不共享自由变量。模块内引用一个顶部未 require import 的跨模块标识符（如 UI、AIService、AIAssistant、CredentialVault、GenericExtractor、BookmarkExporter）时，该标识符在运行时为 undefined（或 typeof 返回 'undefined'），导致：(1) 直接属性访问抛 TypeError；(2) typeof-guard 静默早退使功能静默降级（如状态栏不更新、操作日志脱敏失效、AI 分类中断、Notion 页面创建中断）。
+
+判据（补充 coding-conventions-001 循环依赖消除）：
+- 可提取的纯工具依赖（如 UrlValidator）→ 提取到独立模块，A/B 都 require C（spec 原方案）。
+- 有状态、跨多模块、加载时序敏感的对象（如 UI）→ 提取独立模块不现实，用运行时延迟 require：const _resolveUI = () => { try { return require('../ui').UI; } catch { return undefined; } }，方法执行时整张模块图已加载完成。
+- 循环依赖（A↔B 互 require）顶部 require 会让一方拿到 partial export → 用 lazy require 内方法体，或 ensureAdaptersRegistered() 单次 flag-guard 延迟注册。
+
+反模式（必须修）：typeof X !== "undefined" && X.method() 对跨闭包自由变量恒为 false → 静默降级。修复：顶部 import 或 _resolveUI() lazy require。
+
+LD-Notion 实例：fix/legacy-test-infrastructure-and-bundle-sync 分支修复 GitHubAutoImporter.updateStatus、security/index.js（OperationLog.add/clear + UndoManager.showToast）、UpdateChecker、export/index.js（GenericExtractor+AIAssistant）、GitHubExporter（AIService）、BookmarkAdapter（BookmarkExporter）共 7 处 sibling。
 
 </spec-entry>
 
@@ -167,4 +176,28 @@ LD-Notion 实例：PERF-003 (BookmarkExporter.exportBookmarks) + DISCOVER P3 跨
 检查方法：grep 'Storage.set.*JSON.stringify' 与 GM_setValue 写路径，确认有 _evictExpired 或 MAX_ENTRIES 守卫。
 
 LD-Notion 实例：PERF-001 (DedupStore.endBatch) 泛化到 GitHubAPI.flushExported/flushGistsExported + BookmarkExporter.flushExported 共 4 路径，统一 90 天 TTL。
+</spec-entry>
+
+<spec-entry category="coding" keywords="batch-ops,contract-test,handler,template,handleBatch" date="2026-07-31" sid="S-20260731-batch" title="批量操作 handler 必须补契约测试" description="handleBatchClassify/BatchTranslate 等批量操作 handler 须补契约测试覆盖输入空间" source="harvest:P1-F4F5-refactor">
+
+### 批量操作 handler 必须补契约测试
+
+批量操作 handler（`handleBatchClassify`/`handleBatchTranslate`/`ExtractToDatabase`/`GeneratePages`/`BatchAnalyze`/`GitHubImport`/`BookmarkImport` 等）拆分到域模块后，必须补契约测试覆盖输入空间（正常/边界/异常）。契约测试模板：(1) 构造典型输入（含空数组/单条/多条/异常参数）；(2) mock 外部依赖（deps.js getter 注入 stub）；(3) 断言输出结构 + 副作用（调用次数/参数形状）。
+
+判据：每个 handler 至少覆盖 happy path + empty input + error propagation 三类用例。
+
+LD-Notion 实例：F4/F5（v3.8.0）Handlers 四域拆分后，batch.js 批量操作 handler 待补契约测试（已列入技术债）。
+
+</spec-entry>
+
+<spec-entry category="coding" keywords="forwarding-shell,getAISettings,explicit-api,migration,ui-caller" date="2026-07-31" sid="S-20260731-fwdsh" title="UI 调用方迁移至显式 API 表面（转发壳模式）" description="UI getSettings() 等隐式依赖调用方须迁移到显式 API 如 getAISettings()" source="harvest:P1-F4F5-refactor">
+
+### UI 调用方迁移至显式 API 表面（转发壳模式）
+
+当聚合层（如 ai/index.js）拆分后，外部调用方（特别是 UI 层）原先通过 `AIAssistant.getSettings()` 等隐式路径获取的配置，应迁移到显式 API 表面（如 `ai/index.js` 导出的 `getAISettings()`）。转发壳在聚合层保留同名方法委托到新模块，但新代码应直接引用显式 API。
+
+判据：grep 拆分后聚合层 shell 的转发方法，确认 UI 层调用点是否已迁移到显式 API。未迁移的保留转发壳兼容，新代码禁止再走隐式路径。
+
+LD-Notion 实例：F4/F5（v3.8.0）UI getSettings() callers 迁移到 `getAISettings()` in ai/index.js，转发壳保留向后兼容。
+
 </spec-entry>
