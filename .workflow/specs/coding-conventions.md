@@ -201,3 +201,27 @@ LD-Notion 实例：F4/F5（v3.8.0）Handlers 四域拆分后，batch.js 批量�
 LD-Notion 实例：F4/F5（v3.8.0）UI getSettings() callers 迁移到 `getAISettings()` in ai/index.js，转发壳保留向后兼容。
 
 </spec-entry>
+
+<spec-entry category="coding" keywords="minify,bundle,esbuild,cli-flag,userscript,reviewability" date="2026-07-31" sid="S-20260731-minfy" title="Bundle minification 应为 CLI opt-in 而非默认" description="esbuild --minify 通过 CLI 标志控制，保持 userscript 可审查性" source="harvest:20260731-full-scan">
+
+### Bundle minification 应为 CLI opt-in 而非默认
+
+Userscript 产物保持未压缩（可读）作为默认构建，minification 通过 `--minify` CLI 标志 opt-in。原因：(1) GreasyFork 审核需要可读源码；(2) 用户调试时可读产物更友好；(3) 压缩版仅用于 Chrome Extension ZIP 分发（体积敏感）。
+
+判据：`build.js` 中 `process.argv.includes("--minify")` 控制 esbuild minify 选项，禁止硬编码 `minify: true`。
+
+LD-Notion 实例：odyssey-improve full-scan F3，默认 1337.8 KB → `--minify` 785.1 KB (-41%)。
+
+</spec-entry>
+
+<spec-entry category="coding" keywords="dom-patch,incremental,chat,renderMessages,innerhtml,performance" date="2026-07-31" sid="S-20260731-dompt" title="聊天消息更新用增量 DOM patch 而非全量 innerHTML 重建" description="updateLastMessage 场景用 _patchLastBubble 增量更新，避免 O(n) DOM 重建" source="harvest:20260731-full-scan">
+
+### 聊天消息更新用增量 DOM patch 而非全量 innerHTML 重建
+
+AI 对话处理中 `updateLastMessage` 高频调用（流式输出），若每次都 `container.innerHTML = messages.map(...)` 全量重建，则 O(n) DOM 操作随消息数线性增长。正确模式：当仅最后一条消息变化时，用 `_patchLastBubble()` 增量更新最后一个气泡节点的 innerHTML，其仙消息节点不动。
+
+判据：消息数未变 + 仅末尾消息 content 更新 → 增量 patch；消息数变化（新增/删除）→ 全量重建。
+
+LD-Notion 实例：odyssey-improve full-scan F6，`renderMessages` 全量 innerHTML → `_patchLastBubble` 增量路径，AI 流式输出时 DOM 操作 O(n)→O(1)。
+
+</spec-entry>

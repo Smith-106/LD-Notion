@@ -14,3 +14,5 @@
 {"fragment_id":"S-CODE-004","target":"spec","category":"coding","title":"Path Adjustment After Split","action":"skipped-duplicate","reason":"已有路径调整 learned skill","routed_at":"2026-07-31T12:00:00+08:00"}
 {"fragment_id":"ISS-F4F5-002","target":"issue","title":"34 Dependent Functions Need Future Refactoring","action":"skipped-duplicate","reason":"已有 ISS-20260728-016","routed_at":"2026-07-31T12:00:00+08:00"}
 {"fragment_id":"ISS-F4F5-003","target":"issue","title":"BookmarkAdapter Dual Require Fix","action":"skipped-resolved","reason":"已 resolved (commit ec3b8d4)","routed_at":"2026-07-31T12:00:00+08:00"}
+{"fragment_id":"S-20260731-minfy","target":"spec","category":"coding","title":"Bundle minification 应为 CLI opt-in 而非默认","source_type":"scratchpad","source_id":"20260731-improve-odyssey-full-scan","routed_at":"2026-07-31T14:00:00+08:00"}
+{"fragment_id":"S-20260731-dompt","target":"spec","category":"coding","title":"聊天消息更新用增量 DOM patch 而非全量 innerHTML 重建","source_type":"scratchpad","source_id":"20260731-improve-odyssey-full-scan","routed_at":"2026-07-31T14:00:00+08:00"}
