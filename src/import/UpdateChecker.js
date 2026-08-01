@@ -3,14 +3,7 @@
 const { CONFIG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage } = require("../storage");
-
-// UI 由 ui 模块定义；import↔ui 互引用构成循环依赖（ui 顶层 require import 含 UpdateChecker），
-// 顶部 require 会让 ui 加载时拿不到 import 的导出。改用运行时延迟 require：
-// 方法执行时整张模块图已加载完成，可安全取 UI。裸引用 UI 在生产 bundle 里永远 undefined，
-// 导致 updateStatusText/renderLastStatus 抛 ReferenceError、更新检查状态不显示。
-const _resolveUI = () => {
-    try { return require("../ui").UI; } catch { return undefined; }
-};
+const { emit } = require("../coordination/event-bus");
 
 const UpdateChecker = {
     timerId: null,
@@ -90,8 +83,7 @@ const UpdateChecker = {
     },
 
     updateStatusText: (text) => {
-        const UI = _resolveUI();
-        const el = (UI && UI.refs && UI.refs.updateCheckStatus) || document.querySelector("#ldb-update-check-status");
+        const el = document.querySelector("#ldb-update-check-status");
         if (el) el.textContent = text;
     },
 
@@ -125,10 +117,9 @@ const UpdateChecker = {
     check: async ({ manual = false } = {}) => {
         if (UpdateChecker.isChecking) return;
         UpdateChecker.isChecking = true;
-        const UI = _resolveUI();
 
-        if (manual && UI) {
-            UI.showStatus("正在检查更新...", "info");
+        if (manual) {
+            emit("notify", { message: "正在检查更新...", type: "info" });
         }
 
         try {
@@ -145,7 +136,7 @@ const UpdateChecker = {
                     message,
                 });
                 UpdateChecker.renderLastStatus();
-                if (manual && UI) UI.showStatus(message, "info");
+                if (manual) emit("notify", { message, type: "info" });
             } else {
                 const message = `当前已是最新版本 v${currentVersion}`;
                 UpdateChecker.saveResult({
@@ -155,13 +146,13 @@ const UpdateChecker = {
                     message,
                 });
                 UpdateChecker.renderLastStatus();
-                if (manual && UI) UI.showStatus(message, "success");
+                if (manual) emit("notify", { message, type: "success" });
             }
         } catch (error) {
             const message = error?.message || "更新检查失败";
             UpdateChecker.saveResult({ status: "error", message });
             UpdateChecker.renderLastStatus();
-            if (manual && UI) UI.showStatus(message, "error");
+            if (manual) emit("notify", { message, type: "error" });
         } finally {
             UpdateChecker.isChecking = false;
         }

@@ -6,14 +6,9 @@ const { Storage } = require("../storage");
 const { NotionAPI } = require("../api");
 const { CredentialVault } = require("../auth");
 
-// UI 由 ui 模块定义；security↔ui 互引用构成循环依赖（ui 多模块顶层 require security），
-// 顶部 require 会让 ui 加载时拿不到 security 的导出。改用运行时延迟 require：
-// 方法执行时整张模块图已加载完成，可安全取 UI。
-// 此前用 `typeof UI` 防护裸引用，在生产 bundle 里 UI 永远 undefined，
-// 导致 UI.updateLogPanel 永不触发、操作日志面板不自动刷新。
-const _resolveUI = () => {
-    try { return require("../ui").UI; } catch { return undefined; }
-};
+// 事件总线解耦：security 不再直接 require("../ui")，改由 emit 通知 UI 层订阅响应。
+// coordination/event-bus.js 零依赖，不引入新循环。
+const { emit } = require("../coordination/event-bus");
 
 const OperationGuard = {
     _getPermissionName: (level) => {
@@ -506,11 +501,8 @@ const OperationLog = {
 
         Storage.set(CONFIG.STORAGE_KEYS.OPERATION_LOG, JSON.stringify(logs));
 
-        // 触发UI更新
-        const UI = _resolveUI();
-        if (UI && UI.updateLogPanel) {
-            UI.updateLogPanel();
-        }
+        // 触发UI更新（通过事件总线，消除 security→ui 循环依赖）
+        emit("oplog:changed", JSON.parse(JSON.stringify(logs)));
 
         return logEntry;
     },
@@ -518,10 +510,7 @@ const OperationLog = {
     // 清空日志
     clear: () => {
         Storage.set(CONFIG.STORAGE_KEYS.OPERATION_LOG, "[]");
-        const UI = _resolveUI();
-        if (UI && UI.updateLogPanel) {
-            UI.updateLogPanel();
-        }
+        emit("oplog:changed", []);
     },
 
     // 获取最近N条日志
@@ -809,14 +798,13 @@ const UndoManager = {
         document.body.appendChild(toast);
         UndoManager.toastElement = toast;
 
-        // 绑定撤销按钮
+        // 绑定撤销按钮（通过事件总线通知 UI，消除 security→ui 循环依赖）
         toast.querySelector("#ldb-undo-action").onclick = async () => {
-            const UI = _resolveUI();
             const success = await UndoManager.execute();
             if (success) {
-                if (UI) UI.showStatus("撤销成功", "success");
+                emit("notify", { message: "撤销成功", type: "success" });
             } else {
-                if (UI) UI.showStatus("撤销失败，请手动检查 Notion 中的变更", "error");
+                emit("notify", { message: "撤销失败，请手动检查 Notion 中的变更", type: "error" });
             }
         };
 

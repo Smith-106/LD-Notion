@@ -5,14 +5,7 @@ const { Utils } = require("../utils");
 const { Storage, SyncState } = require("../storage");
 const { GitHubAPI } = require("./GitHubAPI");
 const { NotionAPI } = require("../api");
-
-// UI 由 ui 模块定义；import↔ui 互引用构成循环依赖，顶部 require 会让 ui 加载时拿不到
-// import 的导出。改用运行时延迟 require：方法执行时整张模块图已加载完成，可安全取 UI。
-// 此前 GitHubAutoImporter 用 `typeof UI` 防护裸引用，在生产 bundle 里 UI 永远 undefined，
-// 导致 UI 导出路径（exportGitHubSelected / mapGitHubItemsToBookmarks）始终走降级分支。
-const _resolveUI = () => {
-    try { return require("../ui").UI; } catch { return undefined; }
-};
+const { emit } = require("../coordination/event-bus");
 
 const GitHubAutoImporter = {
     isRunning: false,
@@ -33,9 +26,7 @@ const GitHubAutoImporter = {
     },
 
     updateStatus: (text) => {
-        const UI = _resolveUI();
-        if (!UI) return;
-        const el = (UI.refs && UI.refs.autoImportStatus) || document.querySelector("#ldb-auto-import-status");
+        const el = document.querySelector("#ldb-auto-import-status");
         if (el) el.textContent = text;
     },
 
@@ -137,11 +128,8 @@ const GitHubAutoImporter = {
 
 // 将 GitHub item 映射为统一 bookmark 结构（MNT-001 提取自 run）
 GitHubAutoImporter._mapItemsToBookmarks = (incrementalItems, type, meta) => {
-    const UI = _resolveUI();
-    if (UI && typeof UI.mapGitHubItemsToBookmarks === "function") {
-        return UI.mapGitHubItemsToBookmarks(incrementalItems, type)
-            .filter((item) => UI && typeof UI.isBookmarkExported === "function" ? !UI.isBookmarkExported(item) : true);
-    }
+    // 事件总线解耦：不再通过 _resolveUI 取 UI.mapGitHubItemsToBookmarks，
+    // 统一使用本地映射逻辑（与 UI 层 mapGitHubItemsToBookmarks 等价）。
     return incrementalItems.map((item) => ({
         itemKey: meta.getId(item),
         raw: item,
@@ -225,18 +213,8 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
     return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
 };
 
-// 导出映射后的 items（优先 UI，降级 GitHubExporter）（MNT-001 提取自 run）
+// 导出映射后的 items（统一走 GitHubExporter 降级路径，事件总线解耦）（MNT-001 提取自 run）
 GitHubAutoImporter._exportMappedItems = async (mappedItems, type, meta, settings) => {
-    const UI = _resolveUI();
-    if (UI && typeof UI.exportGitHubSelected === "function") {
-        return await UI.exportGitHubSelected(mappedItems, {
-            apiKey: settings.apiKey,
-            databaseId: settings.databaseId,
-            token: settings.token,
-        }, (current, total, title) => {
-            GitHubAutoImporter.updateStatus(`📬 GitHub ${meta.label} 导入中 (${current}/${total}): ${title}`);
-        });
-    }
     return await GitHubAutoImporter._exportViaGitHubExporter(mappedItems, type, meta, settings);
 };
 
@@ -476,10 +454,7 @@ GitHubAutoImporter.run = async () => {
         GitHubAutoImporter.updateStatus(`❌ GitHub 自动导入出错: ${error.message}`);
     } finally {
         GitHubAutoImporter.isRunning = false;
-        const UI = _resolveUI();
-        if (UI && typeof UI.renderSyncCenterSummary === "function") {
-            try { UI.renderSyncCenterSummary(); } catch (e) { console.warn("[LD-Notion] 同步中心面板渲染失败:", e); }
-        }
+        emit("sync:center-summary-updated");
     }
 };
 

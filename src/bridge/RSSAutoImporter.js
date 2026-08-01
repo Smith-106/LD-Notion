@@ -10,13 +10,7 @@ const { SyncCoordinator } = require("../adapter/SyncCoordinator");
 
 const { BookmarkExporter } = require("./BookmarkExporter");
 const { BookmarkAutoImporter } = require("./BookmarkAutoImporter");
-
-// UI 由 ui 模块定义；bridge↔ui 互引用构成循环依赖，顶部 require 会让 ui 加载时拿不到
-// bridge 的导出。改用运行时延迟 require：方法执行时整张模块图已加载完成，可安全取 UI。
-// 裸引用 UI 在生产 bundle 里永远 undefined，导致 updateStatus 抛 ReferenceError。
-const _resolveUI = () => {
-    try { return require("../ui").UI; } catch { return undefined; }
-};
+const { emit } = require("../coordination/event-bus");
 
 const RSSAutoImporter = {
     isRunning: false,
@@ -27,9 +21,7 @@ const RSSAutoImporter = {
     minimumRunGapMs: 60 * 1000,
 
     updateStatus: (text) => {
-        const UI = _resolveUI();
-        const refs = UI ? UI.refs : null;
-        const el = (refs && refs.rssAutoImportStatus) || document.querySelector("#ldb-rss-auto-import-status");
+        const el = document.querySelector("#ldb-rss-auto-import-status");
         if (el) el.textContent = text;
     },
 
@@ -756,10 +748,7 @@ const RSSAutoImporter = {
             RSSAutoImporter.updateStatus(`RSS 自动同步出错: ${error.message}`);
         } finally {
             RSSAutoImporter.isRunning = false;
-            const UI = _resolveUI();
-            if (UI && typeof UI.renderSyncCenterSummary === "function") {
-                try { UI.renderSyncCenterSummary(); } catch (e) { console.warn("[LD-Notion] 同步中心面板渲染失败:", e); }
-            }
+            emit("sync:center-summary-updated");
         }
     },
 

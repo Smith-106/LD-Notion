@@ -2202,280 +2202,27 @@ const UI = {
     },
 
     sanitizeObsidianFileName: (name, fallback = "untitled") => {
-        const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
-        return base || fallback;
+        return require("../import/github-obsidian-service").sanitizeObsidianFileName(name, fallback);
     },
 
     buildGitHubObsidianMarkdown: async (item, settings = {}) => {
-        if (!item?.raw) {
-            throw new Error("GitHub 条目数据不完整");
-        }
-        const sourceTypeMap = {
-            stars: "Stars",
-            repos: "Repos",
-            forks: "Forks",
-            gists: "Gists",
-        };
-        const sourceTypeLabel = sourceTypeMap[item.sourceType] || "GitHub";
-        const bookmark = item.raw;
-        const isGist = item.sourceType === "gists";
-        const owner = isGist
-            ? String(bookmark.owner?.login || "")
-            : String(bookmark.owner?.login || String(bookmark.full_name || "").split("/")[0] || "");
-        const inferredTags = Array.isArray(bookmark.inferredTags) ? bookmark.inferredTags : [];
-        const topicTags = Array.isArray(bookmark.topics) ? bookmark.topics : [];
-        const tags = Array.from(new Set([...topicTags, ...inferredTags].filter(Boolean))).slice(0, 20);
-
-        if (isGist) {
-            const files = Object.values(bookmark.files || {});
-            const primaryFile = files[0] || {};
-            const fileNames = Object.keys(bookmark.files || {});
-            const title = item.title || bookmark.description || fileNames[0] || `Gist ${bookmark.id || ""}`;
-            const language = primaryFile.language || "";
-            const meta = {
-                title,
-                url: bookmark.html_url || "https://gist.github.com",
-                author: owner || "未知",
-                owner,
-                gistId: String(bookmark.id || item.itemKey || ""),
-                source: "GitHub",
-                sourceType: sourceTypeLabel,
-                category: "Gist",
-                language,
-                updatedAt: bookmark.updated_at || bookmark.created_at || "",
-                tags,
-            };
-            let md = HTMLToMarkdown.buildFrontmatter(meta);
-            md += `> [!info] GitHub Gist\n`;
-            md += `> - **原始链接**: [${title}](${meta.url})\n`;
-            md += `> - **作者**: ${owner || "未知"}\n`;
-            md += `> - **类型**: ${sourceTypeLabel}\n`;
-            md += `> - **语言**: ${language || "未知"}\n`;
-            md += `> - **文件数**: ${fileNames.length}\n`;
-            md += `> - **标签**: ${tags.join(", ") || "无"}\n`;
-            md += `> - **更新时间**: ${bookmark.updated_at ? new Date(bookmark.updated_at).toLocaleString("zh-CN") : "未知"}\n`;
-            md += `> - **导出时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
-
-            if (bookmark.description) {
-                md += `## 描述\n\n${bookmark.description}\n\n`;
-            }
-            if (fileNames.length > 0) {
-                md += "## 文件列表\n\n";
-                fileNames.forEach((fileName) => {
-                    const file = bookmark.files?.[fileName] || {};
-                    md += `- \`${fileName}\``;
-                    if (file.language) md += ` · ${file.language}`;
-                    if (Number.isFinite(file.size)) md += ` · ${file.size} bytes`;
-                    md += "\n";
-                });
-                md += "\n";
-            }
-            return {
-                title,
-                fileName: UI.sanitizeObsidianFileName(title, `gist-${bookmark.id || "untitled"}`),
-                markdown: md,
-                url: meta.url,
-            };
-        }
-
-        const enriched = await GitHubExporter.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
-        const title = enriched.generatedTitle || item.title || enriched.full_name || enriched.name || "未命名仓库";
-        const meta = {
-            title,
-            url: enriched.html_url || "https://github.com",
-            author: owner || "未知",
-            owner,
-            repo: enriched.full_name || enriched.name || item.itemKey || "",
-            source: "GitHub",
-            sourceType: sourceTypeLabel,
-            category: enriched.inferredCategory || "Repo",
-            language: enriched.language || "",
-            stars: enriched.stargazers_count || 0,
-            updatedAt: enriched.pushed_at || enriched.updated_at || "",
-            tags,
-        };
-        let md = HTMLToMarkdown.buildFrontmatter(meta);
-        md += `> [!info] GitHub 项目\n`;
-        md += `> - **原始链接**: [${enriched.full_name || title}](${meta.url})\n`;
-        md += `> - **作者**: ${owner || "未知"}\n`;
-        md += `> - **类型**: ${sourceTypeLabel}\n`;
-        md += `> - **语言**: ${enriched.language || "未知"}\n`;
-        md += `> - **Stars**: ${enriched.stargazers_count || 0}\n`;
-        md += `> - **分类**: ${enriched.inferredCategory || "未分类"}\n`;
-        md += `> - **标签**: ${tags.join(", ") || "无"}\n`;
-        md += `> - **更新时间**: ${(enriched.pushed_at || enriched.updated_at) ? new Date(enriched.pushed_at || enriched.updated_at).toLocaleString("zh-CN") : "未知"}\n`;
-        md += `> - **导出时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
-
-        if (enriched.description) {
-            md += `## 项目描述\n\n${enriched.description}\n\n`;
-        }
-        if (enriched.readmeSummary) {
-            md += `## README 摘要\n\n${enriched.readmeSummary}\n\n`;
-        }
-        if (Array.isArray(enriched.topics) && enriched.topics.length > 0) {
-            md += `## Topics\n\n${enriched.topics.map((topic) => `- ${topic}`).join("\n")}\n\n`;
-        }
-
-        return {
-            title,
-            fileName: UI.sanitizeObsidianFileName(enriched.full_name || title, "github-repo"),
-            markdown: md,
-            url: meta.url,
-        };
+        return require("../import/github-obsidian-service").buildGitHubObsidianMarkdown(item, settings);
     },
 
     exportGitHubSelectedToObsidian: async (selectedItems, settings, onProgress) => {
-        const { obsUrl, obsKey, obsDir } = settings;
-        if (!obsUrl || !obsKey) {
-            throw new Error("请先配置 Obsidian API 地址和 Key");
-        }
-        if (!selectedItems || selectedItems.length === 0) {
-            return { success: [], failed: [], skipped: [] };
-        }
-
-        const success = [];
-        const failed = [];
-        const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
-
-        for (let i = 0; i < selectedItems.length; i++) {
-            if (Exporter.isCancelled) break;
-            while (Exporter.isPaused) {
-                await Utils.sleep(200);
-                if (Exporter.isCancelled) break;
-            }
-            if (Exporter.isCancelled) break;
-
-            const item = selectedItems[i];
-            onProgress?.(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
-
-            try {
-                const note = await UI.buildGitHubObsidianMarkdown(item, settings);
-                const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
-                if (!noteResult.ok) throw new Error(noteResult.error);
-                success.push({
-                    title: note.title,
-                    url: note.url,
-                });
-            } catch (error) {
-                console.warn(`[UI] GitHub -> Obsidian 导出失败: ${item.itemKey}`, error);
-                failed.push({
-                    title: item.title || item.itemKey || "GitHub",
-                    error: error.message,
-                });
-            }
-
-            if (i < selectedItems.length - 1 && delay > 0) {
-                await Utils.sleep(delay);
-            }
-        }
-
-        return {
-            success,
-            failed,
-            skipped: Exporter.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
-                title: item.title || item.itemKey || "GitHub",
-            })) : [],
-        };
+        const { exportGitHubSelectedToObsidian } = require("../import/github-obsidian-service");
+        return exportGitHubSelectedToObsidian(selectedItems, settings, onProgress, {
+            get isCancelled() { return Exporter.isCancelled; },
+            get isPaused() { return Exporter.isPaused; },
+        });
     },
 
     mapGitHubItemsToBookmarks: (items, sourceType) => {
-        return (items || []).map((item) => {
-            const isGist = sourceType === "gists";
-            const itemKey = isGist ? String(item.id || "") : String(item.full_name || item.name || "");
-            const title = isGist
-                ? (item.description || Object.keys(item.files || {})[0] || `Gist ${item.id || ""}`)
-                : (item.full_name || item.name || "未命名仓库");
-            return {
-                source: "github",
-                sourceType,
-                itemKey,
-                title,
-                raw: item,
-            };
-        }).filter(item => !!item.itemKey);
+        return require("../import/github-obsidian-service").mapGitHubItemsToBookmarks(items, sourceType);
     },
 
     exportGitHubSelected: async (selectedItems, settings, onProgress) => {
-        const { apiKey, databaseId } = settings;
-        if (!apiKey || !databaseId) {
-            throw new Error("请先配置 Notion API Key 和数据库 ID");
-        }
-        if (!selectedItems || selectedItems.length === 0) {
-            return { success: [], failed: [], skipped: [] };
-        }
-
-        const setupResult = await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
-        if (!setupResult.success) {
-            throw new Error(`数据库配置失败: ${setupResult.error}`);
-        }
-
-        const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
-        const success = [];
-        const failed = [];
-
-        for (let i = 0; i < selectedItems.length; i++) {
-            const item = selectedItems[i];
-            const bookmark = item.raw;
-            const sourceType = item.sourceType;
-            const label = item.title || item.itemKey;
-            onProgress?.(i + 1, selectedItems.length, label);
-
-            try {
-                let properties;
-                if (sourceType === "gists") {
-                    properties = GitHubExporter.buildGistProperties(bookmark);
-                } else {
-                    const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
-                    const enriched = await GitHubExporter.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
-                    properties = GitHubExporter.buildRepoProperties(enriched, sourceMap[sourceType] || "Star");
-                }
-                for (const key of Object.keys(properties)) {
-                    if (properties[key] === undefined) delete properties[key];
-                }
-                // createDatabasePage 是 level 1 写操作，用户触发的手动选导出不可裸调 NotionAPI（ISS-20260724-011 SEC-007）。
-                // canExecute 非阻塞闸门 + GitHubExporter._auditExport 三态审计（与 _exportItems 路径对称）。
-                if (!OperationGuard.canExecute("createDatabasePage")) {
-                    GitHubExporter._auditExport("createDatabasePage", "denied",
-                        { itemKey: item.itemKey, sourceType, itemName: item.title || item.itemKey, reason: "权限不足：手动导出建页需 level≥1" });
-                    failed.push({ title: item.title, error: "权限不足（需 level≥1）", itemKey: item.itemKey, sourceType });
-                    continue;
-                }
-                const page = await NotionAPI.request("POST", "/pages", {
-                    parent: { database_id: databaseId },
-                    properties,
-                }, apiKey);
-
-                if (sourceType === "gists") {
-                    GitHubAPI.markGistExportedAndFlush(item.itemKey);
-                } else {
-                    GitHubAPI.markExportedAndFlush(item.itemKey);
-                }
-                GitHubExporter._auditExport("createDatabasePage", "success",
-                    { pageId: String(page?.id || ""), itemKey: item.itemKey, sourceType, databaseId });
-                success.push({
-                    title: item.title,
-                    url: bookmark?.html_url || "https://github.com",
-                    itemKey: item.itemKey,
-                    sourceType,
-                });
-            } catch (error) {
-                console.warn(`[UI] GitHub 手动导出失败: ${item.itemKey}`, error);
-                GitHubExporter._auditExport("createDatabasePage", "failed",
-                    { itemKey: item.itemKey, sourceType, reason: String(error?.message || error) });
-                failed.push({
-                    title: item.title,
-                    error: error.message,
-                    itemKey: item.itemKey,
-                    sourceType,
-                });
-            }
-
-            if (i < selectedItems.length - 1 && delay > 0) {
-                await Utils.sleep(delay);
-            }
-        }
-
-        return { success, failed, skipped: [] };
+        return require("../import/github-obsidian-service").exportGitHubSelectedToNotion(selectedItems, settings, onProgress);
     },
 
     // 重算导出统计（在列表变更后调用）
@@ -2658,6 +2405,27 @@ const UI = {
         UI.injectStyles();
         UI.createPanel();
         UI.miniBtn = UI.createMiniButton();
+
+        // 事件总线订阅（security 解耦后，oplog/notify 通过总线触达 UI）
+        const { on } = require("../coordination/event-bus");
+        on("oplog:changed", () => {
+            if (UI.refs?.logPanel && !UI.refs.logPanel.classList.contains("collapsed")) {
+                UI.updateLogPanel();
+            }
+        });
+        on("notify", ({ message, type }) => {
+            UI.showStatus(message, type);
+        });
+        on("sync:center-summary-updated", () => {
+            if (typeof UI.renderSyncCenterSummary === "function") {
+                try { UI.renderSyncCenterSummary(); } catch (e) { console.warn("[LD-Notion] 同步中心面板渲染失败:", e); }
+            }
+        });
+        on("bookmarks:updated", () => {
+            if (typeof UI.renderBookmarkList === "function") {
+                try { UI.renderBookmarkList(); } catch (e) { console.warn("[LD-Notion] 书签列表渲染失败:", e); }
+            }
+        });
 
         // 面板可拉伸（左边+上边+下边+左上角+左下角）
         PanelResize.makeResizable(UI.panel, {
