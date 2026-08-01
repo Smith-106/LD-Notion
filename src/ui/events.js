@@ -24,6 +24,10 @@ const UIEvents = {
         const panel = UI.panel;
         const refs = UI.refs || {};
         const body = panel.querySelector(".ldb-body");
+
+        // === ctx 共享变量（T9: 闭包分段标记，保持整体传递） ===
+        // 以下 helper 函数在整个 bindEvents 闭包内共享，
+        // 不拆散为独立文件以避免可变引用失效风险。
         const getInputValue = (input) => String(input?.value || "").trim();
         const getSensitiveValue = (input, key, defaultValue = "") => {
             const liveValue = getInputValue(input);
@@ -92,6 +96,7 @@ const UIEvents = {
             DesignSystem.toggleTheme();
         };
 
+        // === Section 1: Tab 切换 + 面板操作 (L95-1437) ===
         // Tab 切换
         refs.tabs.forEach(tab => {
             tab.onclick = () => {
@@ -1435,6 +1440,7 @@ const UIEvents = {
             }
         };
 
+        // === Section 2: AI 对话事件绑定 (L1438-1732) ===
         // ===========================================
         // AI 对话事件绑定
         // ===========================================

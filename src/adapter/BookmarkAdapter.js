@@ -8,6 +8,10 @@ const { SourceAdapter } = require("./SourceAdapter");
 // 改由 adapter/index.js 注册时注入 lazy bridge accessor（运行时整张模块图已加载）。
 // _bridgeAccessor 未注入时（如契约测试只取对象不注册）走 fallback 顶层 require，
 // 保证向后兼容。
+//
+// T10 (F5 循环依赖修复): 双 require 已统一为 _bridgeAccessor lazy 模式。
+// ensureAdaptersRegistered() 在 adapter/index.js 中调用，确保所有适配器
+// 在首次使用前已注册到 AdapterRegistry。调用时机：main.js init 阶段。
 const BookmarkAdapter = Object.assign(Object.create(SourceAdapter), {
     sourceType: "bookmark",
 
