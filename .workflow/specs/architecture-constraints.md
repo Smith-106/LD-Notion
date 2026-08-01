@@ -16,11 +16,33 @@ keywords:
 
 ## Module Structure
 
+模块化源码位于 `src/`，经 esbuild 打包为单文件 `.user.js`。主要分层：
+- **UI 层**: `src/ui/`（main-ui/events/notion-site-ui/generic-ui/workspace-visual）
+- **服务层**: `src/ai/`、`src/api/`、`src/extract/`、`src/export/`、`src/import/`、`src/bridge/`
+- **安全层**: `src/security/`（OperationGuard/UrlValidator）
+- **协调层**: `src/coordination/`（UICommandService/event-bus）
+- **存储层**: `src/storage/`（SyncState/DedupStore）
+- **适配层**: `src/adapter/`（AdapterRegistry + 6 个 SourceAdapter）
+
 ## Layer Boundaries
+
+- UI 层可调用服务层，禁止反向（服务层不 require UI）
+- 安全层被服务层调用，不主动依赖上层
+- 跨层通知走 event-bus（零依赖），禁止底层 require 上层
 
 ## Dependency Rules
 
+- 新模块间依赖优先走 `deps.js` getter，禁止新增 lazy closure
+- 循环依赖消除三解法：提取共享依赖 / lazy accessor / 事件总线
+- 提取模块需挂载回源对象时用 `installXxxMethods(Obj)` 注入模式
+
 ## Technology Constraints
+
+- 纯客户端架构，无服务端依赖
+- 零生产依赖（dev: esbuild/vitepress/vitest）
+- CommonJS 模块系统（esbuild 打包）
+- 单文件输出不变（Locked）
+- Chrome Extension 双形态（Locked）
 
 ## Entries
 
