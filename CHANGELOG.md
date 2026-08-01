@@ -1,5 +1,36 @@
 # 更新日志
 
+## [3.8.0] - 2026-08-01
+
+### 架构重构（F4/F5）
+
+**巨石文件拆分**:
+- `src/ai/Handlers.js`: 2277 LOC → 48 LOC shell + 4 域文件 (query/pageCrud/content/batch)
+- `src/ai/AgentTools.js`: 1712 LOC → 21 LOC shell + 3 域文件 (read/write/meta)
+- `src/api/index.js`: 1801 LOC → 696 LOC + 4 新模块 (constants/DOMToNotion/obsidian/notion-upload)
+- `src/ui/main-ui.js`: -292 行（部分提取到 workspace-insight/github-obsidian-export）
+
+**循环依赖消除**:
+- 新增 `src/coordination/event-bus.js`（零依赖事件总线）
+- `security/index.js`: 删除 `_resolveUI`，OperationLog/UndoManager 改走事件总线
+- `import/bridge`: 5 个文件 Pattern A 通知类调用迁移到事件总线
+- `adapter/BookmarkAdapter`: 双 require 统一为 lazy accessor
+
+**新增模块**:
+- `src/ai/deps.js`: 中央依赖访问器（消除 ai 内部循环）
+- `src/ai/utils/`: 4 个纯函数工具集 (payload-builders/format-helpers/block-helpers/result-helpers)
+- `src/import/github-obsidian-service.js`: GitHubAutoImporter 服务调用提取
+
+### 测试
+- 新增 41 个基线测试（api-modules.test.js + main-ui-baseline.test.js）
+- 总计: 556 tests passed
+
+### 验证
+- Build: 1351.9 KB
+- verify:delivery: Chrome Extension + Userscript 双形态通过
+
+---
+
 ## [3.7.8] - 2026-07-24
 
 ### 新增（安全加固 — ISS-20260723-009, CWE-94/918）
