@@ -62,6 +62,12 @@ let nextId = 1;
 
 // 全局 SSE 客户端列表 — 用于广播响应
 const sseClients = [];
+const MAX_SSE_CONNECTIONS = 100;
+
+// 简单内存限流：每 IP 每分钟最多 60 次 POST 请求
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW_MS = 60000;
+const RATE_LIMIT_MAX_REQUESTS = 60;
 
 function sendSSE(res, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
