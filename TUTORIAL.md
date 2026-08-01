@@ -23,11 +23,11 @@
 - **方式 A：Tampermonkey 脚本版（推荐）**：更新方便，适合大多数人
 - **方式 B：Chrome 扩展独立版（进阶）**：不依赖 Tampermonkey，书签能力内置
 
-### 下载链接（仓库当前 v3.6.7 / 最近已发布 v3.6.7）
+### 下载链接（仓库当前 v3.8.0 / 最近已发布 v3.8.0）
 
 - 脚本安装：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装直链：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
-- 最近已发布扩展 ZIP 直链（v3.6.7）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.6.7/LD-Notion-chrome-extension-full-v3.6.7.zip>
+- 最近已发布扩展 ZIP 直链（v3.8.0）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.8.0/ld-notion-extension-v3.8.0.zip>
 - 安装浏览器扩展（Release）：<https://github.com/Smith-106/LD-Notion/releases/latest>
 
 ### 方式 A：Tampermonkey 脚本版

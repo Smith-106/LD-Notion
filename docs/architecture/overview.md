@@ -92,10 +92,14 @@ flowchart TB
 | 书签桥接扩展 | `chrome-extension/` |
 | 独立扩展构建 | `scripts/build-extension.js` 输出 `chrome-extension-full/` |
 | 协调层（UI 命令分发） | `src/coordination/UICommandService.js` |
+| 事件总线（解耦循环依赖） | `src/coordination/event-bus.js`（零依赖，security/import/bridge → ui 通知） |
+| AI 中央依赖访问器 | `src/ai/deps.js`（getAI/getState/getService 三件套） |
+| AI 域模块 | `src/ai/handlers/`（4 域）+ `src/ai/tools/`（3 域）+ `src/ai/utils/`（4 纯函数集） |
 | AI 输出 schema 校验 | `src/ai/schema.js`（`AISchema`，校验 AI 返回的 URL/属性名/值/结构） |
+| API 域模块 | `src/api/`（核心 696 LOC + constants/DOMToNotion/obsidian/notion-upload） |
 | URL 安全原语 | `src/security/UrlValidator.js`（`validateAiBaseUrl`/`validateObsidianUrl`/`validatePageExternalUrl`） |
 | 多源适配器注册表 | `src/adapter/`（`AdapterRegistry` + 各 `*Adapter`，bridge 经 lazy accessor 注入） |
-| 自动化测试 | `tests/` |
+| 自动化测试 | `tests/`（29 文件 556 用例） |
 | UI 手工回归 | `docs/ui-regression-checklist.md` |
 
 ## 设计取舍
