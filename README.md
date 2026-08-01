@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.7.8`
+- 当前仓库源码版本：`v3.8.0`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -359,7 +359,10 @@ A: 请检查：
 - 跨源工具支持 Linux.do / GitHub / 浏览器书签统一搜索和推荐
 - SyncState V1/V2 迁移（v3.7.0）：消除双写，V1 facade 代理 V2，自动迁移幂等安全
 - DedupStore 批量优化（v3.7.0）：`beginBatch/endBatch` 减少同步循环 IPC，`queueMicrotask` 合并写入
-- 模块化源码（`src/`）经 esbuild 打包为单文件 `.user.js`（1.2MB），同时生成 Chrome Extension 变体
+- 模块化源码（`src/`）经 esbuild 打包为单文件 `.user.js`（1.35MB），同时生成 Chrome Extension 变体
+- AI 域采用 Shell + Domain Modules 架构：`Handlers.js`（48 LOC shell）+ 4 域文件、`AgentTools.js`（21 LOC shell）+ 3 域文件，通过 `deps.js` 中央依赖访问器注入
+- API 域拆分为核心（696 LOC）+ 4 独立模块（constants/DOMToNotion/obsidian/notion-upload），上传簇通过 `installUploadMethods` 注入避免循环依赖
+- 事件总线（`event-bus.js`）解耦 security/import/bridge ↔ ui 循环依赖
 
 ## 开发与验证
 
@@ -371,7 +374,7 @@ A: 请检查：
   5. 如涉及扩展交付：`node scripts/build-extension.js`
   6. 最后按 `docs/ui-regression-checklist.md` 做 Linux.do / Notion / 通用网页 / `chrome-extension-full` 手工 smoke
 - 一键交付验证：`npm run verify:delivery`（包含 baseline、`bounded_hosts` smoke、bridge runtime smoke 与默认扩展构建）
-- `npm test`：17 个测试文件、349 个用例，覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、RSS/Atom 解析、GitHub/书签/通用导出等模块
+- `npm test`：29 个测试文件、556 个用例，覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、AI Schema/Trace/Handlers、API 模块、RSS/Atom 解析、GitHub/书签/通用导出、UI 基线等模块
 - Node 测试会直接读取并执行当前 `LinuxDo-Bookmarks-to-Notion.user.js` 的核心代码，并复用 `scripts/build-extension.js` 的提取/构建 seam，而不是维护一份单独的测试副本
 - 当前自动化验证重点覆盖：Utils 辅助函数、OAuth 回调与 refresh fallback、`TargetState`、`quickParseIntent` 正/反例、`assistant_result v1` 输出契约，以及 `scripts/build-extension.js` 的锚点、builder seam、manifest profile、bridge runtime 边界与构建冒烟
 - 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）
@@ -383,6 +386,30 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.8.0
+
+本次版本聚焦「F4/F5 架构级重构」，消除 3 个巨石文件违反 SRP 问题并消除循环依赖，属 M3 规模独立 milestone。
+
+**巨石文件拆分**:
+- `src/ai/Handlers.js`: 2277 LOC → 48 LOC shell + 4 域文件 (query/pageCrud/content/batch)
+- `src/ai/AgentTools.js`: 1712 LOC → 21 LOC shell + 3 域文件 (read/write/meta)
+- `src/api/index.js`: 1801 LOC → 696 LOC + 4 新模块 (constants/DOMToNotion/obsidian/notion-upload)
+
+**循环依赖消除**:
+- 新增 `src/coordination/event-bus.js`（零依赖事件总线）
+- `security/index.js` 删除 `_resolveUI`，OperationLog/UndoManager 改走事件总线
+- `import/bridge` 5 个文件迁移到事件总线，消除 `_resolveUI` ×6 处反向引用
+
+**新增模块**:
+- `src/ai/deps.js`: 中央依赖访问器（getAI/getState/getService 三件套）
+- `src/ai/utils/`: 4 个纯函数工具集（33 pure functions 提取）
+- `src/import/github-obsidian-service.js`: 服务调用提取
+
+**测试**: 新增 41 个基线测试，总计 29 文件 556 用例全通过
+**验证**: Build 1351.9 KB，verify:delivery Chrome Extension + Userscript 双形态通过
+
+- Tag：`v3.8.0`
 
 ### v3.7.2
 
