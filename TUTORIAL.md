@@ -478,6 +478,15 @@ GM_setValue("ldb_exported_topics", "{}")
 
 ## 更新日志
 
+### v3.8.0
+
+- 架构：AI 域巨石拆分——Handlers.js 2277 行拆为 48 行壳 + 4 个域文件，AgentTools.js 1712 行拆为 21 行壳 + 3 个域文件
+- 架构：API 域拆分——api/index.js 1801 行拆为 696 行核心 + 4 个独立模块
+- 架构：新增事件总线解耦 security/import/bridge 与 UI 的循环依赖
+- 架构：新增 deps.js 中央依赖访问器，消除 AI 内部 lazy closure 散落
+- 测试：新增 41 个基线测试，总计 29 文件 556 用例全通过
+- 验证：Build 1351.9 KB，verify:delivery 双形态通过
+
 ### v3.6.7
 
 - 新增：工作区级可视化闭环，补齐工作区视图刷新、全局时间线、来源关系图、导出漏斗，以及可复制的 Markdown 洞察报告

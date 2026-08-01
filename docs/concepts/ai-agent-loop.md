@@ -133,7 +133,7 @@ src/ai/
 
 2. **Dependency injection via deps.js**: Circular dependencies are eliminated by centralizing lazy getters (`getAI()`, `getState()`, `getService()`) in `deps.js`. CommonJS require cache provides equivalent safety to the previous Proxy-based approach.
 
-3. **Pure function extraction**: 11 pure functions (no `AIAssistant.xxx` self-references) are extracted to `utils/` modules. The remaining 34 dependent functions retain their original location for backward compatibility. Future phases can gradually migrate them with dependency injection.
+3. **Pure function extraction**: 33 pure functions (no `AIAssistant.xxx` self-references) are extracted to `utils/` modules (4 files: payload-builders/format-helpers/block-helpers/result-helpers). The remaining 34 dependent functions retain their original location for backward compatibility. Future phases can gradually migrate them with dependency injection.
 
 4. **Domain separation**:
    - **Handlers**: Business logic organized by operation type (query/pageCrud/content/batch)
