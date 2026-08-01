@@ -349,7 +349,7 @@
     {
       "session_id": "20260731-refactor-api-domain",
       "intent": "鎷嗗垎 src/api/index.js (1801 LOC) 涓鸿亴璐ｅ崟涓€妯″潡锛孨otionAPI 濂戠害闆剁牬鍧?,
-      "status": "planned",
+      "status": "sealed",
       "depends_on": [],
       "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
       "seed_ref": ".workflow/scratch/20260731-roadmap-f4f5-refactor/outputs/roadmap.json"
@@ -357,7 +357,7 @@
     {
       "session_id": "20260731-refactor-ai-domain",
       "intent": "鎷嗗垎 ai/index.js(2503)/Handlers(2282)/AgentTools(1715) 鍚?AIAssistant 鏍稿績锛屾秷闄?ai 鍐呴儴寰幆",
-      "status": "active",
+      "status": "sealed",
       "depends_on": [],
       "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
       "seed_ref": ".workflow/scratch/20260731-roadmap-f4f5-refactor/outputs/roadmap.json"
@@ -365,13 +365,13 @@
     {
       "session_id": "20260731-refactor-ui-eventbus",
       "intent": "浜嬩欢鎬荤嚎娑堥櫎 security/import/bridge鈫攗i 寰幆 + 鎷嗗垎 main-ui(2697)/events(1732) 宸ㄧ煶",
-      "status": "planned",
+      "status": "sealed",
       "depends_on": [],
       "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
       "seed_ref": ".workflow/scratch/20260731-roadmap-f4f5-refactor/outputs/roadmap.json"
     }
   ],
-  "active_session_id": "20260731-refactor-ai-domain",
+  "active_session_id": null,
   "codebase_last_refreshed": "2026-07-31T21:25:00+08:00"
 }
 
