@@ -1,4 +1,4 @@
-﻿{
+{
   "version": "2.0",
   "project_name": "LD-Notion Hub",
   "status": "idle",
@@ -142,63 +142,64 @@
   ],
   "accumulated_context": {
     "key_decisions": [
-      "v3.5.0: 鏂囦欢澶勭悊绯荤粺鍏ㄩ潰鍗囩骇锛?4绉嶆枃浠剁被鍨嬨€佸幓閲嶄笂浼犮€佸鍒嗙墖銆乿ideo/audio block锛?,
-      "璁よ瘉: 鏀寔 Manual API Key + OAuth 鍙屾ā寮?,
-      "AI: 澶氭湇鍔″晢锛圤penAI/Anthropic/Gemini锛夌粺涓€鎺ュ彛"
+      "v3.5.0: File handling system upgrade - 14 file types, dedup upload, multi-part, video/audio block",
+      "Auth: Manual API Key + OAuth dual mode",
+      "AI: Multi-provider (OpenAI/Anthropic/Gemini) unified interface"
     ],
     "blockers": [],
     "deferred": [
       {
-        "title": "澶氭簮缁熶竴绠＄悊鏋舵瀯",
+        "title": "Multi-source unified management architecture",
         "status": "deferred",
-        "reason": "渚濊禆妯″潡鎷嗗垎瀹屾垚"
+        "reason": "Depends on module split completion"
       },
       {
-        "title": "AI椹卞姩鐭ヨ瘑鏁寸悊",
+        "title": "AI-driven knowledge management",
         "status": "deferred",
-        "reason": "渚濊禆澶氭簮缁熶竴绠＄悊"
+        "reason": "Depends on multi-source unified management"
       },
       {
-        "title": "鏂扮煡璇嗘簮鎺ュ叆",
+        "title": "New knowledge source integration",
         "status": "partial",
-        "reason": "SourceAdapter 鎶借薄灞?+ 6 adapters 宸插疄鐜帮紙Bookmark/Generic/GitHub/LinuxDo/RSS/Zhihu锛夛紝RSS 婧愬凡鎺ュ叆锛圧SSAdapter+RSSAutoImporter+rss-importer.test.js锛寁3.7.x锛夛紱Twitter/X銆丠acker News銆丷eddit 浠?deferred"
+        "reason": "SourceAdapter abstraction + 6 adapters done (Bookmark/Generic/GitHub/LinuxDo/RSS/Zhihu); RSS source connected (RSSAdapter+RSSAutoImporter+rss-importer.test.js, v3.7.x); Twitter/X, Hacker News, Reddit still deferred"
       },
       {
-        "title": "鐭ヨ瘑鍒嗕韩涓庡崗浣?,
+        "title": "Knowledge sharing & collaboration",
         "status": "deferred",
-        "reason": "鏈€浣庝紭鍏堢骇锛岃繙鏈熻鍒?
+        "reason": "Lowest priority, long-term plan"
       }
     ],
     "pruned_log": [
       {
         "field": "key_decisions",
-        "pruned": "鏋舵瀯: 鍗曟枃浠?Userscript + Chrome Extension 鍙屽舰鎬?,
-        "reason": "deduplicated to spec: 鍗曟枃浠惰緭鍑轰笉鍙?Locked) + 绾鎴风鏋舵瀯(Locked)",
+        "pruned": "Arch: Single-file Userscript + Chrome Extension dual form",
+        "reason": "deduplicated to spec",
         "pruned_at": "2026-06-20T12:00:00+08:00"
       },
       {
         "field": "key_decisions",
-        "pruned": "鍒嗘瀽: 鏋勫缓绯荤粺鍗囩骇浼樺厛浜庡姛鑳藉崌绾э紙2026-06-13锛?,
-        "reason": "deduplicated to spec: 鏋勫缓绯荤粺鍗囩骇浼樺厛浜庡姛鑳藉崌绾?,
+        "pruned": "Analysis: Build system upgrade prioritized over feature upgrade (2026-06-13)",
+        "reason": "deduplicated to spec",
         "pruned_at": "2026-06-20T12:00:00+08:00"
       },
       {
         "field": "key_decisions",
-        "pruned": "瀹夊叏: @connect鐧藉悕鍗曞寲+API Key鍔犲瘑绔嬪嵆鎵ц锛?026-06-13锛?,
-        "reason": "deduplicated to spec: 瀹夊叏鍔犲浐绔嬪嵆鎵ц",
+        "pruned": "Security: @connect whitelist + API Key encryption immediate (2026-06-13)",
+        "reason": "deduplicated to spec",
         "pruned_at": "2026-06-20T12:00:00+08:00"
       },
       {
         "field": "key_decisions",
-        "pruned": "M1 瀹屾垚: critical/high 璇勫闂娓呴浂锛寁3.7.0 宸插彂甯冨苟 push锛?026-06-18锛?,
-        "reason": "deduplicated to spec: M1 鏉′欢鎬?PASS 鍏抽棴",
+        "pruned": "M1 complete: critical/high review issues cleared, v3.7.0 released and pushed (2026-06-18)",
+        "reason": "deduplicated to spec",
         "pruned_at": "2026-06-20T12:00:00+08:00"
       }
     ]
   },
   "transition_history": [],
   "milestone_history": [],
-  "last_updated": "2026-07-31T21:25:00+08:00","artifact_archive": [
+  "last_updated": "2026-08-01T12:00:00+08:00",
+  "artifact_archive": [
     {
       "id": "ANL-001",
       "type": "analyze",
@@ -326,13 +327,13 @@
       "summary": "Verification passed: 24 must-haves, coverage=1.0, 349/349 tests"
     }
   ],
-  "last_codebase_rebuild": "2026-07-31T21:25:00+08:00"
+  "last_codebase_rebuild": "2026-08-01T12:00:00+08:00",
   "last_pruned": "2026-06-20T12:00:00+08:00",
   "last_drift_realign": "2026-07-28T12:45:00+08:00",
   "sessions": [
     {
       "session_id": "20260728-maestro-fix-iss019-binary-upload-20260728-133132",
-      "intent": "渚濇淇 ISS-019 (critical): Notion 澶氬垎鐗囦笂浼?base64鈫掍簩杩涘埗",
+      "intent": "Fix ISS-019 (critical): Notion multi-part upload base64 to binary",
       "status": "sealed",
       "depends_on": [],
       "roadmap_artifact_id": null,
@@ -340,7 +341,7 @@
     },
     {
       "session_id": "20260729-odyssey-planex-split-monoliths",
-      "intent": "鎸変繚瀹堢墿鐞嗘媶鍒嗘柟妗堥噸鏋?main-ui.js(4489琛?鍜?ai/index.js(2923+2281琛? 宸ㄧ煶鏂囦欢",
+      "intent": "Split main-ui.js(4489 LOC) and ai/index.js(2923+2281 LOC) monolith files",
       "status": "sealed",
       "depends_on": [],
       "roadmap_artifact_id": null,
@@ -348,7 +349,7 @@
     },
     {
       "session_id": "20260731-refactor-api-domain",
-      "intent": "鎷嗗垎 src/api/index.js (1801 LOC) 涓鸿亴璐ｅ崟涓€妯″潡锛孨otionAPI 濂戠害闆剁牬鍧?,
+      "intent": "Split src/api/index.js (1801 LOC) into single-responsibility modules, zero NotionAPI contract breakage",
       "status": "sealed",
       "depends_on": [],
       "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
@@ -356,7 +357,7 @@
     },
     {
       "session_id": "20260731-refactor-ai-domain",
-      "intent": "鎷嗗垎 ai/index.js(2503)/Handlers(2282)/AgentTools(1715) 鍚?AIAssistant 鏍稿績锛屾秷闄?ai 鍐呴儴寰幆",
+      "intent": "Split ai/index.js(2503)/Handlers(2282)/AgentTools(1715) into AIAssistant core, eliminate ai internal cycles",
       "status": "sealed",
       "depends_on": [],
       "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
@@ -364,7 +365,7 @@
     },
     {
       "session_id": "20260731-refactor-ui-eventbus",
-      "intent": "浜嬩欢鎬荤嚎娑堥櫎 security/import/bridge鈫攗i 寰幆 + 鎷嗗垎 main-ui(2697)/events(1732) 宸ㄧ煶",
+      "intent": "EventBus eliminates security/import/bridge->ui cycles + split main-ui(2697)/events(1732) monoliths",
       "status": "sealed",
       "depends_on": [],
       "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
@@ -372,6 +373,5 @@
     }
   ],
   "active_session_id": null,
-  "codebase_last_refreshed": "2026-07-31T21:25:00+08:00"
+  "codebase_last_refreshed": "2026-08-01T12:00:00+08:00"
 }
-

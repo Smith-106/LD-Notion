@@ -1,55 +1,81 @@
 # Tech Registry Index
 
 | ID | Name | Type | Locations |
-|----|------|------|----------|
-| TC-001 | Main Entry | Core | src/main.js |
-| TC-002 | Sync Lock | Service | src/sync-lock.js |
-| TC-003 | Source Adapter Base | Core | src/adapter/SourceAdapter.js, src/adapter/index.js |
-| TC-004 | Adapter Registry | Core | src/adapter/AdapterRegistry.js |
-| TC-005 | Bookmark Adapter | Service | src/adapter/BookmarkAdapter.js |
-| TC-006 | Generic Adapter | Service | src/adapter/GenericAdapter.js |
-| TC-007 | GitHub Adapter | Service | src/adapter/GitHubAdapter.js |
-| TC-008 | LinuxDo Adapter | Service | src/adapter/LinuxDoAdapter.js |
-| TC-009 | RSS Adapter | Service | src/adapter/RSSAdapter.js |
-| TC-010 | Zhihu Adapter | Service | src/adapter/ZhihuAdapter.js |
-| TC-011 | Sync Coordinator | Service | src/adapter/SyncCoordinator.js |
-| TC-012 | Sync Scheduler | Service | src/adapter/SyncScheduler.js |
-| TC-013 | AI Service Core | Service | src/ai/index.js |
-| TC-014 | AI Handlers | Controller | src/ai/Handlers.js |
-| TC-015 | Agent Executor | Service | src/ai/agent-executor.js |
-| TC-016 | Agent Tools | Utils | src/ai/AgentTools.js |
-| TC-017 | Agent Trace | Utils | src/ai/AgentTrace.js |
-| TC-018 | AI Schema | Type | src/ai/schema.js |
-| TC-019 | Block Converter | Utils | src/ai/BlockConverter.js |
-| TC-020 | Name Resolver | Utils | src/ai/NameResolver.js |
-| TC-021 | Guarded Write | Middleware | src/ai/guarded-write.js |
-| TC-022 | Notion API | Service | src/api/index.js |
-| TC-023 | Credential Vault | Service | src/auth/index.js |
-| TC-024 | Bookmark Bridge | Service | src/bridge/index.js |
-| TC-025 | Bookmark Auto Importer | Service | src/bridge/BookmarkAutoImporter.js |
-| TC-026 | RSS Auto Importer | Service | src/bridge/RSSAutoImporter.js |
-| TC-027 | Global Config | Config | src/config/index.js |
-| TC-028 | UI Command Service | Service | src/coordination/UICommandService.js |
-| TC-029 | Generic Exporter | Service | src/export/index.js |
-| TC-030 | Generic Extractor | Service | src/extract/index.js |
-| TC-031 | GitHub Import Pipeline | Service | src/import/index.js, src/import/GitHubAPI.js, src/import/GitHubExporter.js, src/import/GitHubAutoImporter.js, src/import/UpdateChecker.js |
-| TC-032 | Operation Guard | Middleware | src/security/index.js |
-| TC-033 | URL Validator | Utils | src/security/UrlValidator.js |
-| TC-034 | Storage Service | Service | src/storage/index.js |
-| TC-035 | Dedup Store | Service | src/storage/DedupStore.js |
-| TC-036 | Sync State V2 | Service | src/storage/SyncState.js |
-| TC-037 | Utils | Utils | src/utils/index.js |
-| TC-038 | Main UI | Controller | src/ui/main-ui.js, src/ui/index.js |
-| TC-039 | UI Events | Controller | src/ui/events.js |
-| TC-040 | Notion Site UI | Controller | src/ui/notion-site-ui.js |
-| TC-041 | Generic UI | Controller | src/ui/generic-ui.js |
-| TC-042 | Design System | Utils | src/ui/design-system.js |
-| TC-043 | UI Styles | Config | src/ui/styles.js, src/ui/style-manager.js |
-| TC-044 | Panel Resize | Utils | src/ui/panel-resize.js |
-| TC-045 | Workspace Visual | Controller | src/ui/workspace-visual.js |
-| TC-046 | Workspace Insight | Controller | src/ui/workspace-insight.js |
-| TC-047 | Bookmark List UI | Controller | src/ui/bookmark-list.js |
+| --- | --- | --- | --- |
+| TC-001 | Main | Core | src/main.js |
+| TC-002 | SyncLock | Core | src/sync-lock.js |
+| TC-003 | Config | Config | src/config/index.js |
+| TC-004 | Utils | Util | src/utils/index.js |
+| TC-005 | Auth | Service | src/auth/index.js |
+| TC-006 | Storage | Service | src/storage/index.js |
+| TC-007 | UICommandService | Service | src/coordination/UICommandService.js |
+| TC-008 | EventBus | Core | src/coordination/event-bus.js |
+| TC-009 | NotionAPI | API | src/api/index.js |
+| TC-010 | DOMToNotion | Util | src/api/DOMToNotion.js |
+| TC-011 | APIConstants | Util | src/api/constants.js |
+| TC-012 | NotionUpload | Service | src/api/notion-upload.js |
+| TC-013 | ObsidianAPI | API | src/api/obsidian.js |
+| TC-014 | UrlValidator | Security | src/security/UrlValidator.js |
+| TC-015 | SecurityIndex | Security | src/security/index.js |
+| TC-016 | EventBus | Core | src/coordination/event-bus.js |
+| TC-017 | SourceAdapter | Core | src/adapter/SourceAdapter.js |
+| TC-018 | AdapterRegistry | Core | src/adapter/AdapterRegistry.js |
+| TC-019 | BookmarkAdapter | Adapter | src/adapter/BookmarkAdapter.js |
+| TC-020 | GenericAdapter | Adapter | src/adapter/GenericAdapter.js |
+| TC-021 | GitHubAdapter | Adapter | src/adapter/GitHubAdapter.js |
+| TC-022 | LinuxDoAdapter | Adapter | src/adapter/LinuxDoAdapter.js |
+| TC-023 | RSSAdapter | Adapter | src/adapter/RSSAdapter.js |
+| TC-024 | ZhihuAdapter | Adapter | src/adapter/ZhihuAdapter.js |
+| TC-025 | SyncCoordinator | Core | src/adapter/SyncCoordinator.js |
+| TC-026 | SyncScheduler | Service | src/adapter/SyncScheduler.js |
+| TC-027 | AdapterIndex | Core | src/adapter/index.js |
+| TC-028 | LinuxDoAPI | Service | src/extract/LinuxDoAPI.js |
+| TC-029 | ExtractIndex | Service | src/extract/index.js |
+| TC-030 | GenericExporter | Service | src/export/index.js |
+| TC-031 | GitHubAPI | Service | src/import/GitHubAPI.js |
+| TC-032 | GitHubAutoImporter | Service | src/import/GitHubAutoImporter.js |
+| TC-033 | GitHubExporter | Service | src/import/GitHubExporter.js |
+| TC-034 | GitHubObsidianService | Service | src/import/github-obsidian-service.js |
+| TC-035 | UpdateChecker | Service | src/import/UpdateChecker.js |
+| TC-036 | AutoImporter | Service | src/import/index.js |
+| TC-037 | DedupStore | Model | src/storage/DedupStore.js |
+| TC-038 | SyncStateV2 | Model | src/storage/SyncState.js |
+| TC-039 | StorageService | Service | src/storage/index.js |
+| TC-040 | BookmarkBridge | Service | src/bridge/index.js |
+| TC-041 | BookmarkAutoImporter | Service | src/bridge/BookmarkAutoImporter.js |
+| TC-042 | BookmarkExporter | Service | src/bridge/BookmarkExporter.js |
+| TC-043 | RSSAutoImporter | Service | src/bridge/RSSAutoImporter.js |
+| TC-044 | AIAssistant | Service | src/ai/index.js |
+| TC-045 | AgentExecutor | Service | src/ai/agent-executor.js |
+| TC-046 | AgentTools | Service | src/ai/AgentTools.js |
+| TC-047 | AIHandlers | Service | src/ai/Handlers.js |
+| TC-048 | BlockConverter | Util | src/ai/BlockConverter.js |
+| TC-049 | NameResolver | Service | src/ai/NameResolver.js |
+| TC-050 | AgentTrace | Util | src/ai/AgentTrace.js |
+| TC-051 | AIDeps | Util | src/ai/deps.js |
+| TC-052 | GuardedWrite | Security | src/ai/guarded-write.js |
+| TC-053 | AISchema | Security | src/ai/schema.js |
+| TC-054 | QueryHandlers | Service | src/ai/handlers/query.js |
+| TC-055 | PageCrudHandlers | Service | src/ai/handlers/pageCrud.js |
+| TC-056 | ContentHandlers | Service | src/ai/handlers/content.js |
+| TC-057 | BatchHandlers | Service | src/ai/handlers/batch.js |
+| TC-058 | ReadTools | Service | src/ai/tools/read-tools.js |
+| TC-059 | WriteTools | Service | src/ai/tools/write-tools.js |
+| TC-060 | MetaTools | Service | src/ai/tools/meta-tools.js |
+| TC-061 | BlockHelpers | Util | src/ai/utils/block-helpers.js |
+| TC-062 | FormatHelpers | Util | src/ai/utils/format-helpers.js |
+| TC-063 | PayloadBuilders | Util | src/ai/utils/payload-builders.js |
+| TC-064 | ResultHelpers | Util | src/ai/utils/result-helpers.js |
+| TC-065 | MainUI | UI | src/ui/main-ui.js |
+| TC-066 | NotionSiteUI | UI | src/ui/notion-site-ui.js |
+| TC-067 | GenericUI | UI | src/ui/generic-ui.js |
+| TC-068 | BookmarkList | UI | src/ui/bookmark-list.js |
+| TC-069 | DesignSystem | UI | src/ui/design-system.js |
+| TC-070 | UIEvents | UI | src/ui/events.js |
+| TC-071 | PanelResize | Util | src/ui/panel-resize.js |
+| TC-072 | StyleManager | Util | src/ui/style-manager.js |
+| TC-073 | UI_CSS | Util | src/ui/styles.js |
+| TC-074 | WorkspaceInsight | UI | src/ui/workspace-insight.js |
+| TC-075 | WorkspaceVisual | Util | src/ui/workspace-visual.js |
 
-**Total components: 47**
-
-*Auto-generated by codebase-rebuild at 2026-07-31T13:22:47.916Z*
+*75 components total. Auto-generated by codebase-rebuild at 2026-08-01T08:44:32+00:00*
