@@ -11,7 +11,7 @@ const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { UICommandService } = require("../coordination/UICommandService");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
-const { AIAssistant } = require("../ai");
+const { AIAssistant, getAISettings } = require("../ai");
 const { StyleManager } = require("./style-manager");
 const { DesignSystem } = require("./design-system");
 const { PanelResize } = require("./panel-resize");
@@ -676,7 +676,7 @@ const GenericUI = {
             const apiKey = NotionOAuth.getAccessToken();
             const exportState = TargetState.getExportState();
             const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
-            const aiSettings = AIAssistant.getSettings();
+            const aiSettings = getAISettings();
 
             const settings = {
                 apiKey,

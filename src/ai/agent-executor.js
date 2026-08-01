@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 const { CONFIG } = require("../config");
 const { Storage } = require("../storage");
@@ -7,10 +7,9 @@ const { OperationGuard } = require("../security");
 const { AgentTrace } = require("./AgentTrace");
 const { AI_AGENT_TOOLS } = require("./AgentTools");
 
-let _AI = null;
-const AI = () => { if (!_AI) _AI = require("./index").AIAssistant; return _AI; };
-const ChatState = new Proxy({}, { get: (_, prop) => require("./index").ChatState[prop] });
-const AIService = new Proxy({}, { get: (_, prop) => require("./index").AIService[prop] });
+// TASK-004: 中央依赖访问器（替代原 lazy closure + Proxy，消除循环依赖）。
+// ChatState/AIService 不再使用 Proxy，改用 deps.js 的简单 getter（CommonJS require 缓存已提供安全）。
+const { getAI: AI, getState: ChatState, getService: AIService } = require("./deps");
 
 const AgentExecutor = {
 

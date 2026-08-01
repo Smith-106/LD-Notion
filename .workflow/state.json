@@ -1,4 +1,4 @@
-{
+﻿{
   "version": "2.0",
   "project_name": "LD-Notion Hub",
   "status": "idle",
@@ -7,7 +7,7 @@
   "milestones": [
     {
       "id": "M1",
-      "title": "基础设施+核心功能升级",
+      "title": "鍩虹璁炬柦+鏍稿績鍔熻兘鍗囩骇",
       "version": "v3.7.0",
       "status": "completed",
       "phase_slugs": [
@@ -17,7 +17,7 @@
         {
           "id": 1,
           "slug": "01-arch-upgrade",
-          "title": "架构升级全量",
+          "title": "鏋舵瀯鍗囩骇鍏ㄩ噺",
           "status": "completed",
           "tasks": [
             "TASK-001",
@@ -39,7 +39,7 @@
     },
     {
       "id": "M2",
-      "title": "持续质量改进",
+      "title": "鎸佺画璐ㄩ噺鏀硅繘",
       "version": "v3.7.8",
       "status": "completed",
       "phase_slugs": [
@@ -49,7 +49,7 @@
         {
           "id": 1,
           "slug": "02-odyssey-improve",
-          "title": "odyssey-improve W1-W8 + 收尾",
+          "title": "odyssey-improve W1-W8 + 鏀跺熬",
           "status": "completed",
           "tasks": [],
           "waves": [
@@ -123,7 +123,7 @@
       "harvested": true,
       "created_at": "2026-06-24T12:45:00+08:00",
       "completed_at": "2026-06-24T12:45:00+08:00",
-      "summary": "UI/UX and frontend/backend consistency optimization plan — 5 tasks across 3 waves: CSS token unification, interaction state + accessibility, error handling + form validation, data contract alignment, state management"
+      "summary": "UI/UX and frontend/backend consistency optimization plan 鈥?5 tasks across 3 waves: CSS token unification, interaction state + accessibility, error handling + form validation, data contract alignment, state management"
     },
     {
       "id": "EXC-003",
@@ -137,69 +137,68 @@
       "harvested": true,
       "created_at": "2026-06-24T12:50:00+08:00",
       "completed_at": "2026-06-24T23:00:00+08:00",
-      "summary": "Executed UI/UX and frontend/backend consistency optimization — 5 tasks across 3 waves: TASK-001 CSS token unification (325 replacements), TASK-002 interaction state + accessibility (disabled tokenization + 12 aria-label + 2 aria-live), TASK-003 error display unification (10 inline-color → semantic classes), TASK-004/005 verified already-satisfied (data contract + state management). 349/349 tests pass throughout."
+      "summary": "Executed UI/UX and frontend/backend consistency optimization 鈥?5 tasks across 3 waves: TASK-001 CSS token unification (325 replacements), TASK-002 interaction state + accessibility (disabled tokenization + 12 aria-label + 2 aria-live), TASK-003 error display unification (10 inline-color 鈫?semantic classes), TASK-004/005 verified already-satisfied (data contract + state management). 349/349 tests pass throughout."
     }
   ],
   "accumulated_context": {
     "key_decisions": [
-      "v3.5.0: 文件处理系统全面升级（54种文件类型、去重上传、多分片、video/audio block）",
-      "认证: 支持 Manual API Key + OAuth 双模式",
-      "AI: 多服务商（OpenAI/Anthropic/Gemini）统一接口"
+      "v3.5.0: 鏂囦欢澶勭悊绯荤粺鍏ㄩ潰鍗囩骇锛?4绉嶆枃浠剁被鍨嬨€佸幓閲嶄笂浼犮€佸鍒嗙墖銆乿ideo/audio block锛?,
+      "璁よ瘉: 鏀寔 Manual API Key + OAuth 鍙屾ā寮?,
+      "AI: 澶氭湇鍔″晢锛圤penAI/Anthropic/Gemini锛夌粺涓€鎺ュ彛"
     ],
     "blockers": [],
     "deferred": [
       {
-        "title": "多源统一管理架构",
+        "title": "澶氭簮缁熶竴绠＄悊鏋舵瀯",
         "status": "deferred",
-        "reason": "依赖模块拆分完成"
+        "reason": "渚濊禆妯″潡鎷嗗垎瀹屾垚"
       },
       {
-        "title": "AI驱动知识整理",
+        "title": "AI椹卞姩鐭ヨ瘑鏁寸悊",
         "status": "deferred",
-        "reason": "依赖多源统一管理"
+        "reason": "渚濊禆澶氭簮缁熶竴绠＄悊"
       },
       {
-        "title": "新知识源接入",
+        "title": "鏂扮煡璇嗘簮鎺ュ叆",
         "status": "partial",
-        "reason": "SourceAdapter 抽象层 + 6 adapters 已实现（Bookmark/Generic/GitHub/LinuxDo/RSS/Zhihu），RSS 源已接入（RSSAdapter+RSSAutoImporter+rss-importer.test.js，v3.7.x）；Twitter/X、Hacker News、Reddit 仍 deferred"
+        "reason": "SourceAdapter 鎶借薄灞?+ 6 adapters 宸插疄鐜帮紙Bookmark/Generic/GitHub/LinuxDo/RSS/Zhihu锛夛紝RSS 婧愬凡鎺ュ叆锛圧SSAdapter+RSSAutoImporter+rss-importer.test.js锛寁3.7.x锛夛紱Twitter/X銆丠acker News銆丷eddit 浠?deferred"
       },
       {
-        "title": "知识分享与协作",
+        "title": "鐭ヨ瘑鍒嗕韩涓庡崗浣?,
         "status": "deferred",
-        "reason": "最低优先级，远期规划"
+        "reason": "鏈€浣庝紭鍏堢骇锛岃繙鏈熻鍒?
       }
     ],
     "pruned_log": [
       {
         "field": "key_decisions",
-        "pruned": "架构: 单文件 Userscript + Chrome Extension 双形态",
-        "reason": "deduplicated to spec: 单文件输出不变(Locked) + 纯客户端架构(Locked)",
+        "pruned": "鏋舵瀯: 鍗曟枃浠?Userscript + Chrome Extension 鍙屽舰鎬?,
+        "reason": "deduplicated to spec: 鍗曟枃浠惰緭鍑轰笉鍙?Locked) + 绾鎴风鏋舵瀯(Locked)",
         "pruned_at": "2026-06-20T12:00:00+08:00"
       },
       {
         "field": "key_decisions",
-        "pruned": "分析: 构建系统升级优先于功能升级（2026-06-13）",
-        "reason": "deduplicated to spec: 构建系统升级优先于功能升级",
+        "pruned": "鍒嗘瀽: 鏋勫缓绯荤粺鍗囩骇浼樺厛浜庡姛鑳藉崌绾э紙2026-06-13锛?,
+        "reason": "deduplicated to spec: 鏋勫缓绯荤粺鍗囩骇浼樺厛浜庡姛鑳藉崌绾?,
         "pruned_at": "2026-06-20T12:00:00+08:00"
       },
       {
         "field": "key_decisions",
-        "pruned": "安全: @connect白名单化+API Key加密立即执行（2026-06-13）",
-        "reason": "deduplicated to spec: 安全加固立即执行",
+        "pruned": "瀹夊叏: @connect鐧藉悕鍗曞寲+API Key鍔犲瘑绔嬪嵆鎵ц锛?026-06-13锛?,
+        "reason": "deduplicated to spec: 瀹夊叏鍔犲浐绔嬪嵆鎵ц",
         "pruned_at": "2026-06-20T12:00:00+08:00"
       },
       {
         "field": "key_decisions",
-        "pruned": "M1 完成: critical/high 评审问题清零，v3.7.0 已发布并 push（2026-06-18）",
-        "reason": "deduplicated to spec: M1 条件性 PASS 关闭",
+        "pruned": "M1 瀹屾垚: critical/high 璇勫闂娓呴浂锛寁3.7.0 宸插彂甯冨苟 push锛?026-06-18锛?,
+        "reason": "deduplicated to spec: M1 鏉′欢鎬?PASS 鍏抽棴",
         "pruned_at": "2026-06-20T12:00:00+08:00"
       }
     ]
   },
   "transition_history": [],
   "milestone_history": [],
-  "last_updated": "2026-07-31T21:25:00+08:00"
-  "artifact_archive": [
+  "last_updated": "2026-07-31T21:25:00+08:00","artifact_archive": [
     {
       "id": "ANL-001",
       "type": "analyze",
@@ -207,7 +206,7 @@
       "path": "scratch/20260613-analyze-ldnotion",
       "graduated_at": "2026-06-20T12:00:00+08:00",
       "knowhow_ref": "graduated-analyze-ANL-001",
-      "summary": "Codebase analysis — 18 fragments → 5 spec, 6 wiki, 7 issue"
+      "summary": "Codebase analysis 鈥?18 fragments 鈫?5 spec, 6 wiki, 7 issue"
     },
     {
       "id": "BRN-001",
@@ -216,7 +215,7 @@
       "path": "scratch/20260613-brainstorm-active-reqs",
       "graduated_at": "2026-06-20T12:00:00+08:00",
       "knowhow_ref": "graduated-brainstorm-BRN-001",
-      "summary": "Active requirements brainstorm — 6 fragments → 3 spec, 3 wiki"
+      "summary": "Active requirements brainstorm 鈥?6 fragments 鈫?3 spec, 3 wiki"
     },
     {
       "id": "PLN-001",
@@ -225,7 +224,7 @@
       "path": "scratch/20260613-plan-ldnotion-upgrade",
       "graduated_at": "2026-06-20T12:00:00+08:00",
       "knowhow_ref": "graduated-plan-PLN-001",
-      "summary": "P1 upgrade plan — merged into existing issues"
+      "summary": "P1 upgrade plan 鈥?merged into existing issues"
     },
     {
       "id": "DBG-001",
@@ -234,7 +233,7 @@
       "path": "scratch/20260613-debug-risk-scan",
       "graduated_at": "2026-06-20T12:00:00+08:00",
       "knowhow_ref": "graduated-debug-DBG-001",
-      "summary": "Risk scan — 5 fragments → 3 issue, 2 wiki"
+      "summary": "Risk scan 鈥?5 fragments 鈫?3 issue, 2 wiki"
     },
     {
       "id": "REV-001",
@@ -243,7 +242,7 @@
       "path": "scratch/20260616-review-P1-arch-upgrade",
       "graduated_at": "2026-06-20T12:00:00+08:00",
       "knowhow_ref": "graduated-review-REV-001",
-      "summary": "P1 deep review 99 findings (8C+24H+56M+11L) — all fixed F1-F29"
+      "summary": "P1 deep review 99 findings (8C+24H+56M+11L) 鈥?all fixed F1-F29"
     },
     {
       "id": "TST-001",
@@ -261,7 +260,7 @@
       "path": "scratch/20260618-milestone-audit-M1",
       "graduated_at": "2026-06-20T12:00:00+08:00",
       "knowhow_ref": "graduated-audit-AUD-001",
-      "summary": "M1 milestone audit — conditional PASS, 9 legacy items"
+      "summary": "M1 milestone audit 鈥?conditional PASS, 9 legacy items"
     },
     {
       "id": "REV-002",
@@ -288,7 +287,7 @@
       "path": "scratch/20260618-test-P1-pre-delivery",
       "graduated_at": "2026-06-20T12:00:00+08:00",
       "knowhow_ref": "graduated-test-TST-003",
-      "summary": "UAT 4 pass / 6 pending (diagnosed+fixed via DBG-002→VRF-001)"
+      "summary": "UAT 4 pass / 6 pending (diagnosed+fixed via DBG-002鈫扸RF-001)"
     },
     {
       "id": "DBG-002",
@@ -333,7 +332,7 @@
   "sessions": [
     {
       "session_id": "20260728-maestro-fix-iss019-binary-upload-20260728-133132",
-      "intent": "依次修复 ISS-019 (critical): Notion 多分片上传 base64→二进制",
+      "intent": "渚濇淇 ISS-019 (critical): Notion 澶氬垎鐗囦笂浼?base64鈫掍簩杩涘埗",
       "status": "sealed",
       "depends_on": [],
       "roadmap_artifact_id": null,
@@ -341,7 +340,7 @@
     },
     {
       "session_id": "20260729-odyssey-planex-split-monoliths",
-      "intent": "按保守物理拆分方案重构 main-ui.js(4489行)和 ai/index.js(2923+2281行) 巨石文件",
+      "intent": "鎸変繚瀹堢墿鐞嗘媶鍒嗘柟妗堥噸鏋?main-ui.js(4489琛?鍜?ai/index.js(2923+2281琛? 宸ㄧ煶鏂囦欢",
       "status": "sealed",
       "depends_on": [],
       "roadmap_artifact_id": null,
@@ -349,7 +348,7 @@
     },
     {
       "session_id": "20260731-refactor-api-domain",
-      "intent": "拆分 src/api/index.js (1801 LOC) 为职责单一模块，NotionAPI 契约零破坏",
+      "intent": "鎷嗗垎 src/api/index.js (1801 LOC) 涓鸿亴璐ｅ崟涓€妯″潡锛孨otionAPI 濂戠害闆剁牬鍧?,
       "status": "planned",
       "depends_on": [],
       "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
@@ -357,7 +356,7 @@
     },
     {
       "session_id": "20260731-refactor-ai-domain",
-      "intent": "拆分 ai/index.js(2503)/Handlers(2282)/AgentTools(1715) 含 AIAssistant 核心，消除 ai 内部循环",
+      "intent": "鎷嗗垎 ai/index.js(2503)/Handlers(2282)/AgentTools(1715) 鍚?AIAssistant 鏍稿績锛屾秷闄?ai 鍐呴儴寰幆",
       "status": "active",
       "depends_on": [],
       "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
@@ -365,7 +364,7 @@
     },
     {
       "session_id": "20260731-refactor-ui-eventbus",
-      "intent": "事件总线消除 security/import/bridge↔ui 循环 + 拆分 main-ui(2697)/events(1732) 巨石",
+      "intent": "浜嬩欢鎬荤嚎娑堥櫎 security/import/bridge鈫攗i 寰幆 + 鎷嗗垎 main-ui(2697)/events(1732) 宸ㄧ煶",
       "status": "planned",
       "depends_on": [],
       "roadmap_artifact_id": "roadmap-20260731-f4f5-refactor",
@@ -375,3 +374,4 @@
   "active_session_id": "20260731-refactor-ai-domain",
   "codebase_last_refreshed": "2026-07-31T21:25:00+08:00"
 }
+

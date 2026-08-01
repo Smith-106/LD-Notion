@@ -11,7 +11,7 @@ const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
 const { BookmarkBridge, BookmarkAutoImporter, RSSAutoImporter } = require("../bridge");
-const { AIAssistant, AIService, AIWelcomeUI, ChatUI } = require("../ai");
+const { AIAssistant, AIService, AIWelcomeUI, ChatUI, getAISettings } = require("../ai");
 const { StyleManager } = require("./style-manager");
 const { DesignSystem } = require("./design-system");
 const { PanelResize } = require("./panel-resize");
@@ -1953,7 +1953,7 @@ const UI = {
         const savedAt = Date.now();
         const createdPages = [];
         const failedCandidates = [];
-        const aiSettings = AIAssistant.getSettings();
+        const aiSettings = getAISettings();
         let database = null;
         let titlePropertyName = null;
 
@@ -2065,7 +2065,7 @@ const UI = {
 
         try {
             let aiSummary = "";
-            const settings = AIAssistant.getSettings();
+            const settings = getAISettings();
             if (settings?.aiApiKey) {
                 const prompt = [
                     "你是知识工作区分析师。请基于以下工作区快照输出一段简洁的 Markdown 洞察摘要。",

@@ -2500,5 +2500,9 @@ const AIClassifier = {
 
 Object.assign(AIAssistant, require("./guarded-write").GuardedWrite);
 
-module.exports = { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier };
+// TASK-003: 独立导出 getAISettings，UI 模块直接解构导入，
+// 不再经 AIAssistant.getSettings() 字面调用（为 TASK-007 拆分 settings 簇做准备）。
+const getAISettings = () => AIAssistant.getSettings();
+
+module.exports = { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier, getAISettings };
 Object.assign(AIAssistant, require("./agent-executor").AgentExecutor);

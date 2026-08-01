@@ -101,6 +101,45 @@ sequenceDiagram
 | Notion API fails | 返回 API 错误摘要，不伪造成功。 |
 | Audit write fails | 不重复远端写入；提示本地审计状态异常。 |
 
+## Module architecture (P1 AI Domain Refactor)
+
+After the P1 refactor, the AI domain is organized into modular files:
+
+```
+src/ai/
+├── index.js              # AIAssistant core (2509 LOC, 67 methods)
+├── deps.js               # Central dependency accessor (eliminates circular deps)
+├── Handlers.js           # Shell (48 LOC) → imports 4 domain files
+├── AgentTools.js         # Shell (21 LOC) → imports 3 domain files
+├── handlers/
+│   ├── query.js          # 3 handlers (handleQuery/Search/WorkspaceSearch)
+│   ├── pageCrud.js       # 7 handlers (CRUD + compound operations)
+│   ├── content.js        # 14 handlers (write/edit/translate/AI generation)
+│   └── batch.js          # 8 handlers (batch ops + imports)
+├── tools/
+│   ├── read-tools.js     # 15 read-only tools (Level 0)
+│   ├── write-tools.js    # 19 write tools (Level 1-2)
+│   └── meta-tools.js     # 9 meta tools (delegate to intent execution)
+└── utils/
+    ├── payload-builders.js   # 4 pure functions (Notion API payloads)
+    ├── format-helpers.js     # 2 pure functions (user/comment formatting)
+    ├── block-helpers.js      # 2 pure functions (block tree processing)
+    └── result-helpers.js     # 3 pure functions (structured results)
+```
+
+### Key design decisions
+
+1. **Shell pattern**: `Handlers.js` and `AgentTools.js` are thin shells that import domain modules and re-export merged objects. This preserves backward compatibility — consumers still import `{ AIHandlers }` from `./Handlers` and `{ AI_AGENT_TOOLS }` from `./AgentTools`.
+
+2. **Dependency injection via deps.js**: Circular dependencies are eliminated by centralizing lazy getters (`getAI()`, `getState()`, `getService()`) in `deps.js`. CommonJS require cache provides equivalent safety to the previous Proxy-based approach.
+
+3. **Pure function extraction**: 11 pure functions (no `AIAssistant.xxx` self-references) are extracted to `utils/` modules. The remaining 34 dependent functions retain their original location for backward compatibility. Future phases can gradually migrate them with dependency injection.
+
+4. **Domain separation**:
+   - **Handlers**: Business logic organized by operation type (query/pageCrud/content/batch)
+   - **Tools**: Agent tool registry organized by permission level (read/write/meta)
+   - **Utils**: Pure helper functions with no dependencies on AIAssistant state
+
 ## Contract
 
 - AI Agent 必须通过工具层访问 Notion API。

@@ -69,3 +69,73 @@ describe("AT-008: AIHandlers 前置校验契约（MAINT-001 子集）", () => {
         });
     });
 });
+
+// TASK-001 (P1_baseline): batch_ops 集群前置校验契约测试。
+// 覆盖 handleBatchTranslate/handleExtractToDatabase/handleGeneratePages/handleBatchAnalyze
+// 4 个 handler 的纯逻辑前置校验分支（checkConfig + OperationGuard + 参数缺失），
+// 锁定拆分前行为基线。handleBatchClassify 已在上方覆盖。
+describe("AT-008b: batch_ops 集群前置校验契约（TASK-001 基线）", () => {
+    // 通过 checkConfig 的最小 settings（notionApiKey + aiApiKey）
+    const validSettings = { notionApiKey: "test-key", aiApiKey: "test-ai-key" };
+
+    describe("handleBatchTranslate — checkConfig + 参数校验", () => {
+        it("空 settings 返回 API Key 配置提示", async () => {
+            const result = await AIHandlers.handleBatchTranslate({}, {}, "");
+            expect(result).toContain("请先配置 Notion API Key");
+        });
+
+        it("有 notionApiKey 但缺 aiApiKey 返回 AI Key 配置提示", async () => {
+            const result = await AIHandlers.handleBatchTranslate({}, { notionApiKey: "k" }, "");
+            expect(result).toContain("请先配置 AI API Key");
+        });
+
+        it("配置完整但缺 database_name 和 database_id 返回数据库指定提示", async () => {
+            const result = await AIHandlers.handleBatchTranslate({}, validSettings, "");
+            expect(result).toContain("❌");
+            expect(result).toContain("请指定要翻译的数据库");
+        });
+    });
+
+    describe("handleExtractToDatabase — checkConfig + 权限 + 参数校验", () => {
+        it("空 settings 返回 API Key 配置提示", async () => {
+            const result = await AIHandlers.handleExtractToDatabase({}, {}, "");
+            expect(result).toContain("请先配置 Notion API Key");
+        });
+
+        it("配置完整但权限不足（默认 level 1 < createDatabase 所需 level 2）", async () => {
+            const result = await AIHandlers.handleExtractToDatabase({}, validSettings, "");
+            expect(result).toContain("❌");
+            expect(result).toContain("权限不足");
+        });
+    });
+
+    describe("handleGeneratePages — checkConfig + 权限 + 参数校验", () => {
+        it("空 settings 返回 API Key 配置提示", async () => {
+            const result = await AIHandlers.handleGeneratePages({}, {}, "");
+            expect(result).toContain("请先配置 Notion API Key");
+        });
+
+        it("配置完整但权限不足（默认 level 1 < createDatabase 所需 level 2）", async () => {
+            const result = await AIHandlers.handleGeneratePages({}, validSettings, "");
+            expect(result).toContain("❌");
+            expect(result).toContain("权限不足");
+        });
+    });
+
+    describe("handleBatchAnalyze — checkConfig + 参数校验", () => {
+        it("空 settings 返回 API Key 配置提示", async () => {
+            const result = await AIHandlers.handleBatchAnalyze({}, {}, "");
+            expect(result).toContain("请先配置 Notion API Key");
+        });
+
+        it("配置完整但缺 database_name/database_id 且无默认数据库返回指定提示", async () => {
+            const result = await AIHandlers.handleBatchAnalyze({}, validSettings, "");
+            expect(result).toContain("❌");
+            expect(result).toContain("请指定要分析的数据库");
+        });
+
+        // 注：有默认 notionDatabaseId 时跳过参数校验进入网络调用阶段，
+        // 超出纯前置校验测试范围（GM_xmlhttpRequest mock 不 resolve），
+        // 该路径由 verify:equivalence + 集成测试兜底。
+    });
+});
