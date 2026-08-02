@@ -131,7 +131,7 @@ function main() {
             } else if (typeof GenericUI !== "undefined" && typeof GenericUI.showStatus === "function") {
                 GenericUI.showStatus(`LD-Notion 初始化失败: ${e?.message || e}`, "error");
             }
-        } catch {}
+        } catch (_) { /* 错误展示自身失败不二次抛出，外层 console.error 已落诊断 */ }
       }
     };
 

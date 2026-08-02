@@ -65,7 +65,7 @@ const Utils = {
             if (matches && matches.length > 0) {
                 return matches[matches.length - 1].toLowerCase();
             }
-        } catch {}
+        } catch (_) { /* URL 解析失败→落入下方通用正则回退 */ }
 
         const genericMatch = raw.match(/[0-9a-f]{32}/i);
         return genericMatch ? genericMatch[0].toLowerCase() : "";
@@ -184,7 +184,7 @@ const Utils = {
             if (!changed) return;
             const nextUrl = `${current.pathname}${current.search}${current.hash}`;
             window.history.replaceState({}, document.title, nextUrl);
-        } catch {}
+        } catch (_) { /* 非关键操作：URL 参数清理失败不影响核心功能 */ }
     },
 
     // HTML 转义，防止 XSS 攻击
