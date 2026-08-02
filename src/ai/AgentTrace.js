@@ -58,7 +58,7 @@ const AgentTrace = {
         const ts = new Date().toISOString();
         const trimmedInput = String(userInput || "").slice(0, this.MAX_USER_INPUT);
         return {
-            id: `trace-${ts}-${Math.random().toString(36).slice(2, 6)}`,
+            id: `trace-${ts}-${Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(16).padStart(2, '0')).join('')}`,
             timestamp: ts,
             userInput: trimmedInput,
             iterations: 0,

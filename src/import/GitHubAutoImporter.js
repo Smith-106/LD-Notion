@@ -146,7 +146,8 @@ GitHubAutoImporter._mapItemsToBookmarks = (incrementalItems, type, meta) => {
 GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, settings) => {
     const { GitHubExporter } = require("./GitHubExporter");
     const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
-    let success = 0, failed = 0;
+    const successEntries = [];
+    const failedEntries = [];
     const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
     for (let i = 0; i < mappedItems.length; i++) {
         const item = mappedItems[i];
@@ -162,7 +163,7 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
                     operationName: "createDatabasePage", status: "denied",
                     context: { itemKey, itemName: meta.getId(raw), reason: "权限不足：GitHub 自动同步建页需 level≥1" },
                 });
-                failed++;
+                failedEntries.push({ itemKey, title: item.title || itemKey });
                 continue;
             }
             const enriched = await GitHubExporter.enrichRepo(raw, settings, enrichContext);
@@ -188,7 +189,7 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
             } else {
                 GitHubAPI.markExported(meta.getId(raw));
             }
-            success++;
+            successEntries.push({ itemKey });
         } catch (e) {
             console.warn(`[GitHubAutoImporter] 导出失败: ${itemKey}`, e);
             try {
@@ -200,7 +201,7 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
                     context: { itemKey, reason: String(e?.message || e) },
                 });
             } catch (_) { /* 审计失败不阻断降级 */ }
-            failed++;
+            failedEntries.push({ itemKey, title: item.title || itemKey });
         }
         if (i < mappedItems.length - 1) {
             await Utils.sleep(delay);
@@ -210,7 +211,7 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
     // 循环末单次 flush，写侧从 O(N²)→O(N)。flush 内有 if(cache) 守卫，未 mutate 的缓存为 null 不写。
     GitHubAPI.flushExported();
     GitHubAPI.flushGistsExported();
-    return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
+    return { success: successEntries, failed: failedEntries };
 };
 
 // 导出映射后的 items（统一走 GitHubExporter 降级路径，事件总线解耦）（MNT-001 提取自 run）

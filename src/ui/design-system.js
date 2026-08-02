@@ -154,12 +154,12 @@ const DesignSystem = {
             /* Neutral overlay token - replaces rgba(148,163,184,α) everywhere (slate-400) */
             --ldb-ui-neutral-overlay: 148, 163, 184;
 
-            --ldb-ui-warning-bright: var(--ldb-ui-warning-bright);
+            --ldb-ui-warning-bright: #f59e0b;
             --ldb-ui-success-bright: #10b981;
-            --ldb-ui-danger-bright: var(--ldb-ui-danger-bright);
+            --ldb-ui-danger-bright: #ef4444;
 
-            --ldb-ui-disabled-opacity: var(--ldb-ui-disabled-opacity);
-            --ldb-ui-disabled-cursor: var(--ldb-ui-disabled-cursor);
+            --ldb-ui-disabled-opacity: 0.5;
+            --ldb-ui-disabled-cursor: not-allowed;
 
             font-family: var(--ldb-ui-font);
             -webkit-font-smoothing: antialiased;

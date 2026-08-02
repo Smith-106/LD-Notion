@@ -9,6 +9,7 @@ const { WorkspaceService } = require("../extract");
 const { AutoImporter, GitHubAutoImporter, GitHubAPI } = require("../import");
 const { BookmarkAutoImporter, RSSAutoImporter } = require("../bridge");
 const { AIAssistant, AIService, ChatUI } = require("../ai");
+const { AISchema } = require("../ai/schema");
 
 // 工作区洞察/同步中心/可视化渲染相关方法，引用 UI 自身方法与状态（如 UI.refs、
 // UI.workspaceVisualSnapshot、UI.buildWorkspaceVisualizationModel 等）。
@@ -182,12 +183,12 @@ const WorkspaceInsight = {
         try {
             const prompt = UI().buildWorkspaceConnectionCandidateAIPrompt(candidate);
             const raw = String(await AIService.requestChat(prompt, settings, 700) || "").trim();
-            const jsonMatch = raw.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-                throw new Error("AI 未返回有效 JSON。");
+            const parseResult = AISchema.parseAIJson("workspaceConnection", raw);
+            if (!parseResult.ok) {
+                throw new Error(parseResult.reason);
             }
 
-            const parsed = JSON.parse(jsonMatch[0]);
+            const parsed = parseResult.value;
             const canonicalTitle = String(parsed?.canonicalTitle || parsed?.title || "").trim();
             const summary = String(parsed?.summary || "").trim();
             const recommendedAction = String(parsed?.recommendedAction || "review").trim().toLowerCase();
@@ -764,15 +765,29 @@ const WorkspaceInsight = {
         }
 
         try {
+            const syncErrors = [];
             for (const task of tasks) {
-                await task.run();
+                try {
+                    await task.run();
+                } catch (error) {
+                    syncErrors.push({ source: task.label, error: error.message });
+                }
             }
             UI().renderSyncCenterSummary();
             const model = UI().buildUnifiedSyncModel();
-            UI().showStatus(
-                `统一同步完成：已执行 ${tasks.map((task) => task.label).join("、")}，当前需关注来源 ${model.issueCount} 个。`,
-                model.issueCount > 0 ? "error" : "success"
-            );
+            const successCount = tasks.length - syncErrors.length;
+            if (syncErrors.length > 0) {
+                UI().showStatus(
+                    `统一同步完成：${successCount}/${tasks.length} 个源成功（${syncErrors.map(e => e.source).join("、")} 失败），当前需关注来源 ${model.issueCount} 个。`,
+                    successCount > 0 ? "info" : "error"
+                );
+                console.warn("[LD-Notion] Sync partial failures:", syncErrors);
+            } else {
+                UI().showStatus(
+                    `统一同步完成：已执行 ${tasks.map((task) => task.label).join("、")}，当前需关注来源 ${model.issueCount} 个。`,
+                    model.issueCount > 0 ? "error" : "success"
+                );
+            }
             return model;
         } finally {
             if (btn) {

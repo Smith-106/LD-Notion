@@ -52,7 +52,45 @@ const PanelResize = {
         edges.forEach(edge => {
             const handle = document.createElement("div");
             handle.className = `ldb-resize-handle ldb-resize-handle-${edge}`;
+            handle.setAttribute("tabindex", "0");
+            handle.setAttribute("role", "slider");
+            handle.setAttribute("aria-label", "调整面板宽度");
+            handle.setAttribute("aria-valuemin", minWidth);
+            handle.setAttribute("aria-valuemax", maxWidth);
             element.appendChild(handle);
+
+            // Add keyboard support
+            handle.addEventListener("keydown", (e) => {
+                const step = 10;
+                let newWidth = element.offsetWidth;
+                let handled = false;
+
+                if (e.key === 'ArrowRight') {
+                    newWidth = Math.min(maxWidth, element.offsetWidth + step);
+                    handled = true;
+                } else if (e.key === 'ArrowLeft') {
+                    newWidth = Math.max(minWidth, element.offsetWidth - step);
+                    handled = true;
+                } else if (e.key === 'Home') {
+                    newWidth = minWidth;
+                    handled = true;
+                } else if (e.key === 'End') {
+                    newWidth = maxWidth;
+                    handled = true;
+                }
+
+                if (handled) {
+                    e.preventDefault();
+                    element.style.width = newWidth + 'px';
+                    handle.setAttribute('aria-valuenow', newWidth);
+                    if (storageKey) {
+                        Storage.set(storageKey, JSON.stringify({
+                            width: element.style.width,
+                            maxHeight: element.style.maxHeight,
+                        }));
+                    }
+                }
+            });
 
             handle.addEventListener("mousedown", (e) => {
                 e.preventDefault();

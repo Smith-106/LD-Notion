@@ -117,6 +117,38 @@ const UIEvents = {
             };
         });
 
+        // Add arrow key navigation for tabs
+        const tabContainer = panel.querySelector('.ldb-tabs');
+        if (tabContainer) {
+            tabContainer.addEventListener('keydown', (e) => {
+                const tabs = Array.from(tabContainer.querySelectorAll('[role="tab"]'));
+                const currentIndex = tabs.indexOf(document.activeElement);
+                
+                if (currentIndex === -1) return;
+                
+                let newIndex = currentIndex;
+                
+                if (e.key === 'ArrowRight') {
+                    newIndex = (currentIndex + 1) % tabs.length;
+                    e.preventDefault();
+                } else if (e.key === 'ArrowLeft') {
+                    newIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+                    e.preventDefault();
+                } else if (e.key === 'Home') {
+                    newIndex = 0;
+                    e.preventDefault();
+                } else if (e.key === 'End') {
+                    newIndex = tabs.length - 1;
+                    e.preventDefault();
+                }
+                
+                if (newIndex !== currentIndex) {
+                    tabs[newIndex].focus();
+                    tabs[newIndex].click();
+                }
+            });
+        }
+
         // 恢复上次选择的 tab
         const savedTab = Storage.get(CONFIG.STORAGE_KEYS.ACTIVE_TAB, CONFIG.DEFAULTS.activeTab);
         const tabBtn = panel.querySelector(`.ldb-tab[data-tab="${savedTab}"]`);
@@ -756,19 +788,13 @@ const UIEvents = {
                 }
             }
 
-            btn.disabled = true;
-            btn.innerHTML = '<span class="ldb-spin">🔄</span> 导入中...';
-            try {
-                const chatInput = panel.querySelector("#ldb-chat-input");
-                if (chatInput && typeof ChatUI !== "undefined" && ChatUI.sendMessage) {
-                    chatInput.value = "导入浏览器书签";
-                    ChatUI.sendMessage();
-                } else {
-                    UI.showStatus("AI 面板未就绪，请稍后重试", "error");
-                }
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = "📖 导入浏览器书签";
+            const chatInput = panel.querySelector("#ldb-chat-input");
+            if (chatInput && ChatUI.sendMessage) {
+                UI.showStatus("正在导入浏览器书签，请耐心等待...", "info");
+                chatInput.value = "导入浏览器书签";
+                ChatUI.sendMessage();
+            } else {
+                UI.showStatus("AI 面板未就绪，请稍后重试", "error");
             }
         };
 
@@ -995,6 +1021,7 @@ const UIEvents = {
             UI.refs.reportContainer.innerHTML = "";
 
             const results = { success: [], failed: [], skipped: [] };
+            let imageFailures = 0;
 
             try {
                 if (UI.isActiveGitHubSource()) {
@@ -1105,6 +1132,7 @@ const UIEvents = {
                                         md = md.replace(img.full, `![${img.alt}](${encodeURI(imgPath)})`);
                                     } catch {
                                         // 图片下载失败，保留原始链接
+                                        imageFailures++;
                                     }
                                 }
                             } else if (obsImgMode === "base64") {
@@ -1138,6 +1166,7 @@ const UIEvents = {
                                         md = md.replace(match[0], `![${match[1]}](${b64})`);
                                     } catch {
                                         // 跳过失败的图片
+                                        imageFailures++;
                                     }
                                 }
                             }
@@ -1166,8 +1195,8 @@ const UIEvents = {
                 UI.showReport(results);
                 UI.renderBookmarkList();
 
-                const msg = `Obsidian 导出完成：成功 ${results.success.length} 个${results.failed.length ? `，失败 ${results.failed.length} 个` : ""}`;
-                UI.showStatus(msg, results.failed.length > 0 ? "warning" : "success");
+                const msg = `Obsidian 导出完成：成功 ${results.success.length} 个${results.failed.length ? `，失败 ${results.failed.length} 个` : ""}${imageFailures > 0 ? `，${imageFailures} 张图片下载失败` : ""}`;
+                UI.showStatus(msg, (results.failed.length > 0 || imageFailures > 0) ? "warning" : "success");
             } catch (error) {
                 UI.showStatus(`Obsidian 导出出错: ${error.message}`, "error");
             } finally {
@@ -1360,7 +1389,7 @@ const UIEvents = {
                 try {
                     await UI.downloadWorkspaceInsightReport();
                 } catch (error) {
-                    UI.showStatus(`涓嬭浇宸ヤ綔鍖烘姤鍛婂け璐ワ細${error.message}`, "error");
+                    UI.showStatus(`下载工作区报告失败：${error.message}`, "error");
                 }
             };
         }
@@ -1529,6 +1558,10 @@ const UIEvents = {
                 const source = [...refs.githubTypeCheckboxes].filter(c => c.checked);
                 const types = [...source].filter(c => c.checked).map(c => c.value);
                 GitHubAPI.setImportTypes(types.length > 0 ? types : ["stars"]);
+                // 取消全选时同步 UI 状态，避免显示与实际存储不一致
+                if (types.length === 0) {
+                    refs.githubTypeCheckboxes.forEach(c => { c.checked = c.value === "stars"; });
+                }
             };
         });
 
@@ -1672,11 +1705,18 @@ const UIEvents = {
             list.querySelectorAll("[data-template-delete]").forEach(btn => {
                 btn.onclick = () => {
                     const idx = parseInt(btn.dataset.templateDelete);
-                    const ts = UI._loadTemplates();
-                    ts.splice(idx, 1);
-                    UI._saveTemplates(ts);
-                    UI.renderTemplateList();
-                    UI.showStatus("模板已删除", "success");
+                    ConfirmationDialog.show({
+                        title: '确认删除',
+                        message: '确定要删除此模板吗？此操作无法撤销。',
+                        confirmText: '删除',
+                        onConfirm: () => {
+                            const ts = UI._loadTemplates();
+                            ts.splice(idx, 1);
+                            UI._saveTemplates(ts);
+                            UI.renderTemplateList();
+                            UI.showStatus("模板已删除", "success");
+                        }
+                    });
                 };
             });
         };

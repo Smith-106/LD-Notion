@@ -37,7 +37,7 @@ window.addEventListener("ld-notion-popup-action", (event) => {
     if (action === "set-bookmark-source") {
         const source = event.detail?.source === "github" ? "github" : "linuxdo";
         Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, source);
-        if (typeof UI !== "undefined" && UI.panel && UI.refs) {
+        if (UI.panel && UI.refs) {
             if (typeof UI.switchBookmarkSource === "function") {
                 UI.switchBookmarkSource(source);
             } else {
@@ -64,7 +64,7 @@ window.addEventListener("ld-notion-popup-action", (event) => {
     if (!cmd) return;
 
     const input = document.querySelector("#ldb-chat-input");
-    if (input && typeof ChatUI !== "undefined" && ChatUI.sendMessage) {
+    if (input && ChatUI.sendMessage) {
         input.value = cmd;
         ChatUI.sendMessage();
     }

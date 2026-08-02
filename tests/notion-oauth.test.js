@@ -5873,12 +5873,13 @@ function createWorkspaceVisualizationFixture(harness) {
 
     await runTest('GitHubAutoImporter.run: writes per-type state and github meta', async () => {
         const harness = createHarness();
-        const exportedBatches = [];
+        const notionPostBodies = [];
 
         harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
         harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID] = 'db-github';
         harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_USERNAME] = 'smith';
         harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
+        harness.store[harness.CONFIG.STORAGE_KEYS.REQUEST_DELAY] = 0;
         harness.GitHubAutoImporter.minimumRunGapMs = 0;
         harness.GitHubAutoImporter.lastRunAt = 0;
         harness.GitHubAutoImporter.isRunning = false;
@@ -5892,26 +5893,23 @@ function createWorkspaceVisualizationFixture(harness) {
             if (type === 'gists') return [];
             return [];
         };
-        harness.UI.mapGitHubItemsToBookmarks = (items, type) => items.map((item) => ({
-            source: 'github',
-            sourceType: type,
-            itemKey: type === 'gists' ? item.id : item.full_name,
-            title: item.full_name || item.description || item.id,
-            raw: item
-        }));
-        harness.UI.isBookmarkExported = () => false;
-        harness.UI.exportGitHubSelected = async (items, settings, onProgress) => {
-            exportedBatches.push(items.map((item) => item.itemKey));
-            assert.strictEqual(settings.apiKey, 'manual_api_key');
-            assert.strictEqual(settings.databaseId, 'db-github');
-            assert.strictEqual(settings.token, '');
-            onProgress(1, items.length, items[0].title);
-            return {
-                success: [{ itemKey: 'smith/repo-a' }],
-                failed: [{ itemKey: 'smith/repo-b', title: 'smith/repo-b' }],
-                skipped: []
-            };
-        };
+        // 事件总线解耦后，导出走 _exportViaGitHubExporter → NotionAPI.request → GM_xmlhttpRequest
+        harness.setRequestHandler((options) => {
+            if (options.url.includes('api.github.com') && options.url.includes('/readme')) {
+                respondJson(options, 404, { message: 'Not Found' });
+            } else if (options.method === 'POST' && options.url.includes('api.notion.com')) {
+                const body = JSON.parse(options.data || '{}');
+                notionPostBodies.push(body);
+                const title = body.properties?.['\u6807\u9898']?.title?.[0]?.text?.content || '';
+                if (title.includes('repo-a')) {
+                    respondJson(options, 200, { id: 'page-001' });
+                } else {
+                    respondJson(options, 500, { message: 'Internal Server Error' });
+                }
+            } else {
+                respondJson(options, 404, { message: 'Not Found' });
+            }
+        });
 
         await harness.GitHubAutoImporter.run();
 
@@ -5919,7 +5917,7 @@ function createWorkspaceVisualizationFixture(harness) {
         const starsState = harness.SyncState.getGitHubState('stars');
         const gistsState = harness.SyncState.getGitHubState('gists');
 
-        assert.deepStrictEqual(exportedBatches, [['smith/repo-a', 'smith/repo-b']]);
+        assert.strictEqual(notionPostBodies.length, 2, 'should attempt 2 Notion page creations');
         assert.ok(githubMeta.lastAttemptAt > 0);
         assert.ok(githubMeta.lastSuccessAt > 0);
         assert.strictEqual(githubMeta.lastOutcome, 'partial');

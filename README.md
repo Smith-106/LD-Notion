@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.9.0`
+- 当前仓库源码版本：`v3.10.0`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -386,6 +386,31 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.10.0
+
+本次版本为「全量 UI/UX 改进循环」，通过完整 UX 管线扫描 12 个 UI 文件，识别 27 个交互/体验问题并修复 26 个。
+
+**运行时缺陷修复（Critical）**:
+- 修复 `BookmarkBridge` 未导入导致的面板初始化 `ReferenceError`
+- 修复 4 个 CSS 变量自引用（禁用按钮不变灰、warning/danger 按钮背景透明）
+- 修复乱码错误提示（UTF-8/GBK 编码损坏）
+
+**交互与健壮性**:
+- 浮动按钮拖拽新增 4px 阈值，消除微抖动吞点击
+- 统一同步改为每源独立容错 + 聚合报告，单源失败不中断其余源
+- GitHub 复选框、图片迁移失败、错误引导文案等多项状态/反馈修复
+
+**可访问性（7 项）**:
+- 状态容器 `aria-live` 播报、设置折叠区/Tabs/resize 手柄键盘导航、`:focus-visible` 焦点环、触控目标 ≥44px
+
+**错误预防与反馈**:
+- 破坏性操作新增确认对话框；Escape 键关闭面板；保存/空状态/禁用态反馈打磨
+
+**安全与契约**:
+- `AgentTrace` trace ID 迁移到 `crypto.getRandomValues`；`GitHubAutoImporter` 返回值携带 `itemKey`/`title` 标识字段
+
+验证：556/556 测试全绿，单文件 Userscript 输出不变，无新增循环依赖。
 
 ### v3.9.0
 

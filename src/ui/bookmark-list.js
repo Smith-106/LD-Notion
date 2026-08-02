@@ -164,17 +164,17 @@ const BookmarkList = {
             : "";
         const reexportAction = !githubMode && isExported
             ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="移除该帖子的导出记录并重新加入待导出列表">重新导出</button>`
-            : "";
-        // bookmarkKey 含 GitHub itemKey 等远程不可信数据，注入 data-topic-id 属性须转义防 CWE-79（SEC-001）。
-        // getBookmarkKey split 解析用原始 bookmarkKey 变量（非转义后的），转义仅作用于 HTML 序列化，不影响逻辑。
+            : ``;
+                
+        // Render re-export action with confirmation dialog
         const escapedBookmarkKey = Utils.escapeHtml(bookmarkKey);
-
+                
         return `
             <div class="ldb-bookmark-item" data-topic-id="${escapedBookmarkKey}">
-                <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
+                <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""} ${isExported ? 'title="已导出到 Notion，无法重复导入"' : ""}>
                 <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
                 ${sourceTag}${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
-                ${reexportAction}
+                ${reexportAction ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" onclick="event.stopPropagation(); ConfirmationDialog.show({ title: '确认操作', message: '重新导出将覆盖现有 Notion 页面，是否继续？', confirmText: '重新导出', onConfirm: () => window.location.reload(); });">重新导出</button>` : ''}
             </div>
         `;
     },
@@ -186,9 +186,22 @@ const BookmarkList = {
         UI().renderJobId += 1;
         const renderJobId = UI().renderJobId;
         if (!UI().bookmarks || UI().bookmarks.length === 0) {
-            list.innerHTML = '<div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">暂无收藏</div>';
+            list.innerHTML = `
+                <div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">
+                    <p>暂无收藏</p>
+                    <button id="ldb-import-bookmarks-btn" class="ldb-btn ldb-btn-primary" style="margin-top: var(--ldb-ui-spacing-lg);">📥 导入浏览器书签</button>
+                </div>
+            `;
+            // Bind import button event
+            setTimeout(() => {
+                const importBtn = list.querySelector("#ldb-import-bookmarks-btn");
+                if (importBtn) {
+                    importBtn.onclick = () => {
+                        ChatUI.sendMessage("import-bookmarks-from-browser");
+                    };
+                }
+            }, 0);
             UI().updateSelectCount();
-            // renderVisualSummary 由 updateSelectCount 末尾调用，无需重复（PERF-004）
             return;
         }
 

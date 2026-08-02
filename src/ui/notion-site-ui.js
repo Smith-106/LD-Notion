@@ -11,6 +11,7 @@ const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { UICommandService } = require("../coordination/UICommandService");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
+const { BookmarkBridge } = require("../bridge");
 const { StyleManager } = require("./style-manager");
 const { AIAssistant, AIService, AIWelcomeUI, ChatState, ChatUI } = require("../ai");
 const { DesignSystem } = require("./design-system");
@@ -129,10 +130,13 @@ const NotionSiteUI = {
         let isDragging = false;
         let hasMoved = false;
         let offsetX, offsetY;
+        let startX, startY;
 
         btn.addEventListener("mousedown", (e) => {
             isDragging = true;
             hasMoved = false;
+            startX = e.clientX;
+            startY = e.clientY;
             offsetX = e.clientX - btn.getBoundingClientRect().left;
             offsetY = e.clientY - btn.getBoundingClientRect().top;
             btn.classList.add("dragging");
@@ -142,6 +146,9 @@ const NotionSiteUI = {
 
         NotionSiteUI._floatDragMove = (e) => {
                 if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            if (!hasMoved && Math.sqrt(dx * dx + dy * dy) <= 4) return;
             hasMoved = true;
             const x = Math.max(0, Math.min(window.innerWidth - btn.offsetWidth, e.clientX - offsetX));
             const y = Math.max(0, Math.min(window.innerHeight - btn.offsetHeight, e.clientY - offsetY));
@@ -203,7 +210,7 @@ const NotionSiteUI = {
             <div class="ldb-notion-header">
                 <h3>🤖 AI 助手</h3>
                 <div class="ldb-notion-header-btns">
-                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="切换主题" aria-label="切换主题" style="width:26px;height:26px;border-radius:var(--ldb-ui-radius-xs);font-size:var(--ldb-ui-font-size-md);">🌙</button>
+                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="切换主题" aria-label="切换主题" style="width:44px;height:44px;border-radius:var(--ldb-ui-radius-xs);font-size:var(--ldb-ui-font-size-md);">🌙</button>
                     <button class="ldb-notion-header-btn" id="ldb-notion-close" title="关闭" aria-label="关闭 AI 助手面板">×</button>
                 </div>
             </div>
@@ -232,10 +239,16 @@ const NotionSiteUI = {
                 <div class="ldb-divider"></div>
 
                 <!-- 设置折叠区 -->
-                <div class="ldb-notion-toggle-section" id="ldb-notion-settings-toggle">
+                <button 
+                    class="ldb-notion-toggle-section" 
+                    id="ldb-notion-settings-toggle"
+                    aria-expanded="true"
+                    tabindex="0"
+                    role="button"
+                >
                     <span>⚙️ 设置</span>
-                    <span id="ldb-notion-settings-arrow">▶</span>
-                </div>
+                    <span id="ldb-notion-settings-arrow" aria-hidden="true">▶</span>
+                </button>
                 <div class="ldb-notion-toggle-content collapsed" id="ldb-notion-settings-content">
                     <div class="ldb-input-group ldb-mt-12">
                         <label class="ldb-label">Notion API Key</label>
@@ -370,7 +383,7 @@ const NotionSiteUI = {
                 </div>
 
                 <!-- 状态显示 -->
-                <div id="ldb-notion-status-container"></div>
+                <div id="ldb-notion-status-container" aria-live="polite" aria-atomic="true"></div>
             </div>
         `;
 
@@ -379,7 +392,10 @@ const NotionSiteUI = {
         NotionSiteUI._abortController = new AbortController();
 
         // 阻止面板内的键盘和剪贴板事件冒泡到 Notion
-        const stopPropagation = (e) => e.stopPropagation();
+        const stopPropagation = (e) => {
+            if (e.key === 'Escape') return;  // Allow Escape to propagate for global panel close
+            e.stopPropagation();
+        };
         panel.addEventListener("copy", stopPropagation);
         panel.addEventListener("paste", stopPropagation);
         panel.addEventListener("cut", stopPropagation);
@@ -454,15 +470,31 @@ const NotionSiteUI = {
         };
 
         // 设置折叠
-        panel.querySelector("#ldb-notion-settings-toggle").onclick = () => {
+        const settingsToggle = panel.querySelector("#ldb-notion-settings-toggle");
+        settingsToggle.onclick = () => {
             const content = panel.querySelector("#ldb-notion-settings-content");
             const arrow = panel.querySelector("#ldb-notion-settings-arrow");
             content.classList.toggle("collapsed");
-            arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            const isCollapsed = content.classList.contains("collapsed");
+            arrow.textContent = isCollapsed ? "▶" : "▼";
+            settingsToggle.setAttribute("aria-expanded", !isCollapsed);
+        };
+
+        // Add keyboard support (Enter/Space)
+        settingsToggle.onkeydown = (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                settingsToggle.click();
+            }
         };
 
         // 保存设置
         panel.querySelector("#ldb-notion-save-settings").onclick = async () => {
+            const saveBtn = panel.querySelector("#ldb-notion-save-settings");
+            const originalText = saveBtn.textContent;
+            saveBtn.textContent = '保存中...';
+            saveBtn.disabled = true;
+                    
             try {
                 await UICommandService.execute("save_command_boundary_settings", {
                     scope: "notion-site",
@@ -486,9 +518,12 @@ const NotionSiteUI = {
                 NotionOAuth.syncApiKeyInputs();
                 CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
                 CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
-                NotionSiteUI.showStatus("设置已保存", "success");
+                NotionSiteUI.showStatus('设置已保存', 'success');
             } catch (error) {
-                NotionSiteUI.showStatus(`设置保存失败: ${error.message}`, "error");
+                NotionSiteUI.showStatus(`设置保存失败：${error.message}`, "error");
+            } finally {
+                saveBtn.textContent = originalText;
+                saveBtn.disabled = false;
             }
         };
 

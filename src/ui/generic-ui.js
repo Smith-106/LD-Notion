@@ -606,7 +606,7 @@ const GenericUI = {
             const obsDir = Storage.get(CONFIG.STORAGE_KEYS.OBS_DIR, CONFIG.DEFAULTS.obsDir);
 
             if (!obsUrl || !obsKey) {
-                GenericUI.showStatus("请先配置 Obsidian API（在 LinuxDo 页面设置面板中）", "error");
+                GenericUI.showStatus("请先配置 Obsidian API（请前往 Linux.do 论坛页面，通过浮动按钮打开设置面板进行配置）", "error");
                 GenericUI.isExporting = false;
                 return;
             }
@@ -651,13 +651,13 @@ const GenericUI = {
                 const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
                 if (!noteResult.ok) throw new Error(noteResult.error);
 
-                GenericUI.showStatus(`导出到 Obsidian 成功: ${title}`, "success");
+                GenericUI.showStatus(`Obsidian 导出成功：${title}`, "success");
             } catch (error) {
                 GenericUI.showStatus(`Obsidian 导出失败: ${error.message}`, "error");
             } finally {
                 GenericUI.isExporting = false;
                 btn.disabled = false;
-                btn.textContent = " 导出到 Obsidian";
+                btn.textContent = "导出到 Obsidian";
             }
         });
     },
@@ -719,8 +719,23 @@ const GenericUI = {
     // 显示状态
     showStatus: (message, type = "info") => {
         const el = GenericUI.panel.querySelector("#gclip-status");
+        el.setAttribute("aria-live", "polite");
+        el.setAttribute("aria-atomic", "true");
         el.textContent = message;
         el.className = `gclip-status ${type}`;
+        
+        // Auto-clear after timeout
+        if (el._statusTimer) clearTimeout(el._statusTimer);
+        const timeout = type === "error" ? 10000 : 3000;
+        el._statusTimer = setTimeout(() => {
+            if (el && !el.dataset.closing) {
+                el.classList.add("ldb-fade-out");
+                el.dataset.closing = "true";
+                setTimeout(() => {
+                    if (el) el.remove();
+                }, 300);
+            }
+        }, timeout);
     },
 
     // 切换面板显示
@@ -733,11 +748,23 @@ const GenericUI = {
             // 触发 reflow 使 transition 生效
             GenericUI.panel.offsetHeight;
             GenericUI.panel.classList.add("visible");
+            // Add escape key handler to close panel
+            GenericUI._escHandler = (e) => {
+                if (e.key === 'Escape') {
+                    GenericUI.close();
+                }
+            };
+            document.addEventListener('keydown', GenericUI._escHandler);
         } else {
             GenericUI.panel.classList.remove("visible");
             GenericUI.panel.addEventListener("transitionend", function handler() {
                 if (!GenericUI.panel.classList.contains("visible")) {
                     GenericUI.panel.style.display = "none";
+                    // Remove escape handler when panel is fully closed
+                    if (GenericUI._escHandler) {
+                        document.removeEventListener('keydown', GenericUI._escHandler);
+                        GenericUI._escHandler = null;
+                    }
                 }
                 GenericUI.panel.removeEventListener("transitionend", handler);
             });

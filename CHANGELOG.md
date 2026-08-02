@@ -1,5 +1,57 @@
 # 更新日志
 
+## [3.10.0] - 2026-08-02
+
+### 新增（全量 UI/UX 改进循环）
+
+本轮通过完整的 UX 改进管线（scan → diagnose → implement → test）扫描 12 个 UI 文件，识别 27 个交互/体验问题并修复 26 个。
+
+**运行时缺陷修复（Critical）**:
+- 修复 `notion-site-ui.js` 中 `BookmarkBridge` 未导入导致的 `ReferenceError`（面板初始化崩溃）
+- 修复 `design-system.js` 中 4 个 CSS 变量自引用（`--x: var(--x)`）→ 禁用按钮不变灰、warning/danger 按钮背景透明
+- 修复 `events.js` 中乱码错误提示（UTF-8/GBK 编码损坏）
+
+**交互与状态**:
+- 浮动按钮拖拽新增 4px 距离阈值，消除微抖动吞没点击（「按钮无响应」假象）
+- GitHub 类型复选框取消全选后自动回同步「stars」，消除 UI 与实际存储状态失同步
+- 浏览器书签导入移除误导性 loading 按钮态，改用状态栏提示
+
+**错误健壮性**:
+- 统一同步改为每源独立 try/catch + 聚合报告，单源失败不再中断其余源
+- 导出时图片下载失败计入汇总（不再静默吞掉）
+- 修正通用面板错误引导文案指向正确位置
+
+**可访问性（7 项）**:
+- 状态容器新增 `aria-live="polite"` + `aria-atomic`（Notion/通用/工作区面板）
+- 设置折叠区改为 `<button>` + `aria-expanded` + Enter/Space 键盘支持
+- Tabs 新增 `role="tablist"` + 方向键/Home/End 导航
+- 面板 resize 手柄新增键盘调整（ARIA slider）
+- Toggle switch 新增 `:focus-visible` 焦点环
+- 触控目标优化至 ≥44px
+
+**错误预防与用户控制**:
+- 重新导出、删除模板等破坏性操作新增 `ConfirmationDialog` 确认
+- 修复 Escape 键被 `stopPropagation` 阻断；通用面板新增 Esc 关闭
+
+**反馈打磨**:
+- 保存设置新增 loading 态 + 成功 toast
+- 空书签状态新增「导入浏览器书签」CTA
+- 已导出复选框禁用时新增原因 tooltip
+
+### 变更
+
+- `AgentTrace`：trace ID 生成从 `Math.random()` 迁移到 `crypto.getRandomValues`（安全随机值规范）
+- `GitHubAutoImporter._exportViaGitHubExporter`：返回值从填充空对象数组改为携带 `itemKey`/`title` 的条目数组（返回值标识字段契约）
+- `main.js`：移除 `typeof UI !== "undefined"` 跨闭包反模式检查（esbuild 打包后恒 false）
+
+### 验证
+
+- 556/556 vitest 用例 + legacy 三件套全部通过
+- 单文件 Userscript 输出保持不变（零部署）
+- 无新增跨模块循环依赖；构建产物经 grep 逐项核验修复生效
+
+---
+
 ## [3.9.0] - 2026-08-02
 
 ### 新增（UI 设计系统增强）

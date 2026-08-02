@@ -438,7 +438,7 @@ const UI = {
                                 <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-download-workspace-package" type="button">下载协作包</button>
                             </div>
                         </div>
-                        <div class="ldb-view-status" id="ldb-view-workspace-status">尚未刷新工作区视图。</div>
+                        <div class="ldb-view-status" id="ldb-view-workspace-status" aria-live="polite" aria-atomic="true">尚未刷新工作区视图。</div>
                         <div class="ldb-view-summary" id="ldb-view-workspace-summary">
                             <div class="ldb-view-empty">
                                 <div class="ldb-view-empty-title">工作区总览还没有数据</div>

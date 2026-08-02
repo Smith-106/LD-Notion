@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.9.0
+// @version      3.10.0
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -5676,7 +5676,7 @@ Content-Type: ${contentType}\r
           const ts = (/* @__PURE__ */ new Date()).toISOString();
           const trimmedInput = String(userInput || "").slice(0, this.MAX_USER_INPUT);
           return {
-            id: `trace-${ts}-${Math.random().toString(36).slice(2, 6)}`,
+            id: `trace-${ts}-${Array.from(crypto.getRandomValues(new Uint8Array(4))).map((b) => b.toString(16).padStart(2, "0")).join("")}`,
             timestamp: ts,
             userInput: trimmedInput,
             iterations: 0,
@@ -10179,10 +10179,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return `bookmark:${item.id}`;
         },
         async _fetchAndFilter(watermark) {
-          const { BookmarkBridge: BookmarkBridge3, BookmarkExporter: BookmarkExporter2 } = this._getBridge();
-          if (!BookmarkBridge3 || !BookmarkBridge3.isExtensionAvailable()) return [];
-          const tree = await BookmarkBridge3.getBookmarkTree();
-          const flat = BookmarkBridge3.flattenTree ? BookmarkBridge3.flattenTree(tree) : this._flattenTree(tree);
+          const { BookmarkBridge: BookmarkBridge2, BookmarkExporter: BookmarkExporter2 } = this._getBridge();
+          if (!BookmarkBridge2 || !BookmarkBridge2.isExtensionAvailable()) return [];
+          const tree = await BookmarkBridge2.getBookmarkTree();
+          const flat = BookmarkBridge2.flattenTree ? BookmarkBridge2.flattenTree(tree) : this._flattenTree(tree);
           const isHttpUrl = (url) => {
             var _a;
             return ((_a = BookmarkExporter2 == null ? void 0 : BookmarkExporter2.isHttpUrl) == null ? void 0 : _a.call(BookmarkExporter2, url)) ?? /^https?:\/\//i.test(url || "");
@@ -11844,7 +11844,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       "use strict";
       var { InstallHelper: InstallHelper2 } = require_api();
       // [LD-NOTION-BUILD:BOOKMARK_BRIDGE_START]
-      var BookmarkBridge3 = {
+      var BookmarkBridge2 = {
         _requestId: 0,
         _pendingRequests: {},
         // 检测配套 Chrome 扩展是否已安装
@@ -11854,17 +11854,17 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 发起书签请求
         _request: (eventName, detail = {}) => {
           return new Promise((resolve, reject) => {
-            if (!BookmarkBridge3.isExtensionAvailable()) {
+            if (!BookmarkBridge2.isExtensionAvailable()) {
               const installUrl = InstallHelper2.getBookmarkExtensionUrl();
               reject(new Error(`\u672A\u68C0\u6D4B\u5230 LD-Notion \u4E66\u7B7E\u6865\u63A5\u6269\u5C55\u3002\u8BF7\u5148\u5B89\u88C5\uFF1A${installUrl}`));
               return;
             }
-            const requestId = `req_${++BookmarkBridge3._requestId}_${Date.now()}`;
+            const requestId = `req_${++BookmarkBridge2._requestId}_${Date.now()}`;
             const timeout = setTimeout(() => {
-              delete BookmarkBridge3._pendingRequests[requestId];
+              delete BookmarkBridge2._pendingRequests[requestId];
               reject(new Error("\u4E66\u7B7E\u8BF7\u6C42\u8D85\u65F6\uFF0C\u8BF7\u68C0\u67E5\u6269\u5C55\u662F\u5426\u6B63\u5E38\u8FD0\u884C\u3002"));
             }, 1e4);
-            BookmarkBridge3._pendingRequests[requestId] = { resolve, reject, timeout };
+            BookmarkBridge2._pendingRequests[requestId] = { resolve, reject, timeout };
             window.dispatchEvent(new CustomEvent(eventName, {
               detail: { requestId, ...detail }
             }));
@@ -11872,24 +11872,24 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         // 获取书签树
         getBookmarkTree: () => {
-          return BookmarkBridge3._request("ld-notion-request-bookmarks");
+          return BookmarkBridge2._request("ld-notion-request-bookmarks");
         },
         // 获取指定文件夹的书签
         getBookmarks: (folderId) => {
-          return BookmarkBridge3._request("ld-notion-request-bookmarks", { folderId });
+          return BookmarkBridge2._request("ld-notion-request-bookmarks", { folderId });
         },
         // 搜索书签
         searchBookmarks: (query) => {
-          return BookmarkBridge3._request("ld-notion-search-bookmarks", { query });
+          return BookmarkBridge2._request("ld-notion-search-bookmarks", { query });
         },
         // 初始化响应监听器
         init: () => {
           window.addEventListener("ld-notion-bookmarks-data", (event) => {
             const { requestId, success, data, error } = event.detail || {};
-            const pending = BookmarkBridge3._pendingRequests[requestId];
+            const pending = BookmarkBridge2._pendingRequests[requestId];
             if (!pending) return;
             clearTimeout(pending.timeout);
-            delete BookmarkBridge3._pendingRequests[requestId];
+            delete BookmarkBridge2._pendingRequests[requestId];
             if (success) {
               pending.resolve(data);
             } else {
@@ -11902,7 +11902,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { BookmarkExporter: BookmarkExporter2 } = require_BookmarkExporter();
       var { BookmarkAutoImporter: BookmarkAutoImporter2 } = require_BookmarkAutoImporter();
       var { RSSAutoImporter: RSSAutoImporter2 } = require_RSSAutoImporter();
-      module.exports = { BookmarkBridge: BookmarkBridge3, BookmarkExporter: BookmarkExporter2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 };
+      module.exports = { BookmarkBridge: BookmarkBridge2, BookmarkExporter: BookmarkExporter2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 };
     }
   });
 
@@ -13760,7 +13760,8 @@ ${insight.summary || ""}`,
       GitHubAutoImporter2._exportViaGitHubExporter = async (mappedItems, type, meta, settings) => {
         const { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
         const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-        let success = 0, failed = 0;
+        const successEntries = [];
+        const failedEntries = [];
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
         for (let i = 0; i < mappedItems.length; i++) {
           const item = mappedItems[i];
@@ -13777,7 +13778,7 @@ ${insight.summary || ""}`,
                 status: "denied",
                 context: { itemKey, itemName: meta.getId(raw), reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AGitHub \u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
               });
-              failed++;
+              failedEntries.push({ itemKey, title: item.title || itemKey });
               continue;
             }
             const enriched = await GitHubExporter2.enrichRepo(raw, settings, enrichContext);
@@ -13803,7 +13804,7 @@ ${insight.summary || ""}`,
             } else {
               GitHubAPI2.markExported(meta.getId(raw));
             }
-            success++;
+            successEntries.push({ itemKey });
           } catch (e) {
             console.warn(`[GitHubAutoImporter] \u5BFC\u51FA\u5931\u8D25: ${itemKey}`, e);
             try {
@@ -13818,7 +13819,7 @@ ${insight.summary || ""}`,
               });
             } catch (_) {
             }
-            failed++;
+            failedEntries.push({ itemKey, title: item.title || itemKey });
           }
           if (i < mappedItems.length - 1) {
             await Utils2.sleep(delay);
@@ -13826,7 +13827,7 @@ ${insight.summary || ""}`,
         }
         GitHubAPI2.flushExported();
         GitHubAPI2.flushGistsExported();
-        return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
+        return { success: successEntries, failed: failedEntries };
       };
       GitHubAutoImporter2._exportMappedItems = async (mappedItems, type, meta, settings) => {
         return await GitHubAutoImporter2._exportViaGitHubExporter(mappedItems, type, meta, settings);
@@ -15178,12 +15179,12 @@ ${report}
             /* Neutral overlay token - replaces rgba(148,163,184,\u03B1) everywhere (slate-400) */
             --ldb-ui-neutral-overlay: 148, 163, 184;
 
-            --ldb-ui-warning-bright: var(--ldb-ui-warning-bright);
+            --ldb-ui-warning-bright: #f59e0b;
             --ldb-ui-success-bright: #10b981;
-            --ldb-ui-danger-bright: var(--ldb-ui-danger-bright);
+            --ldb-ui-danger-bright: #ef4444;
 
-            --ldb-ui-disabled-opacity: var(--ldb-ui-disabled-opacity);
-            --ldb-ui-disabled-cursor: var(--ldb-ui-disabled-cursor);
+            --ldb-ui-disabled-opacity: 0.5;
+            --ldb-ui-disabled-cursor: not-allowed;
 
             font-family: var(--ldb-ui-font);
             -webkit-font-smoothing: antialiased;
@@ -15980,7 +15981,41 @@ ${report}
           edges.forEach((edge) => {
             const handle = document.createElement("div");
             handle.className = `ldb-resize-handle ldb-resize-handle-${edge}`;
+            handle.setAttribute("tabindex", "0");
+            handle.setAttribute("role", "slider");
+            handle.setAttribute("aria-label", "\u8C03\u6574\u9762\u677F\u5BBD\u5EA6");
+            handle.setAttribute("aria-valuemin", minWidth);
+            handle.setAttribute("aria-valuemax", maxWidth);
             element.appendChild(handle);
+            handle.addEventListener("keydown", (e) => {
+              const step = 10;
+              let newWidth = element.offsetWidth;
+              let handled = false;
+              if (e.key === "ArrowRight") {
+                newWidth = Math.min(maxWidth, element.offsetWidth + step);
+                handled = true;
+              } else if (e.key === "ArrowLeft") {
+                newWidth = Math.max(minWidth, element.offsetWidth - step);
+                handled = true;
+              } else if (e.key === "Home") {
+                newWidth = minWidth;
+                handled = true;
+              } else if (e.key === "End") {
+                newWidth = maxWidth;
+                handled = true;
+              }
+              if (handled) {
+                e.preventDefault();
+                element.style.width = newWidth + "px";
+                handle.setAttribute("aria-valuenow", newWidth);
+                if (storageKey) {
+                  Storage2.set(storageKey, JSON.stringify({
+                    width: element.style.width,
+                    maxHeight: element.style.maxHeight
+                  }));
+                }
+              }
+            });
             handle.addEventListener("mousedown", (e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -16519,6 +16554,12 @@ ${report}
                 border: 1px solid var(--ldb-ui-border);
                 transition: background var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), border-color var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out);
                 border-radius: var(--ldb-ui-radius-pill);
+            }
+
+            .ldb-toggle-switch input:focus-visible + .ldb-toggle-slider {
+                box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.4);
+                outline: 2px solid transparent;
+                outline-offset: 2px;
             }
 
             .ldb-toggle-slider:before {
@@ -17184,8 +17225,9 @@ ${report}
       var { UICommandService } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
+      var { BookmarkBridge: BookmarkBridge2 } = require_bridge();
       var { StyleManager: StyleManager2 } = require_style_manager();
-      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatState: ChatState2, ChatUI: ChatUI2 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatState: ChatState2, ChatUI: ChatUI3 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
       var { UI_CSS: UI_CSS2 } = require_styles();
@@ -17297,9 +17339,12 @@ ${report}
           let isDragging = false;
           let hasMoved = false;
           let offsetX, offsetY;
+          let startX, startY;
           btn.addEventListener("mousedown", (e) => {
             isDragging = true;
             hasMoved = false;
+            startX = e.clientX;
+            startY = e.clientY;
             offsetX = e.clientX - btn.getBoundingClientRect().left;
             offsetY = e.clientY - btn.getBoundingClientRect().top;
             btn.classList.add("dragging");
@@ -17308,6 +17353,9 @@ ${report}
           });
           NotionSiteUI2._floatDragMove = (e) => {
             if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            if (!hasMoved && Math.sqrt(dx * dx + dy * dy) <= 4) return;
             hasMoved = true;
             const x = Math.max(0, Math.min(window.innerWidth - btn.offsetWidth, e.clientX - offsetX));
             const y = Math.max(0, Math.min(window.innerHeight - btn.offsetHeight, e.clientY - offsetY));
@@ -17364,7 +17412,7 @@ ${report}
             <div class="ldb-notion-header">
                 <h3>\u{1F916} AI \u52A9\u624B</h3>
                 <div class="ldb-notion-header-btns">
-                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="\u5207\u6362\u4E3B\u9898" aria-label="\u5207\u6362\u4E3B\u9898" style="width:26px;height:26px;border-radius:var(--ldb-ui-radius-xs);font-size:var(--ldb-ui-font-size-md);">\u{1F319}</button>
+                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="\u5207\u6362\u4E3B\u9898" aria-label="\u5207\u6362\u4E3B\u9898" style="width:44px;height:44px;border-radius:var(--ldb-ui-radius-xs);font-size:var(--ldb-ui-font-size-md);">\u{1F319}</button>
                     <button class="ldb-notion-header-btn" id="ldb-notion-close" title="\u5173\u95ED" aria-label="\u5173\u95ED AI \u52A9\u624B\u9762\u677F">\xD7</button>
                 </div>
             </div>
@@ -17393,10 +17441,16 @@ ${report}
                 <div class="ldb-divider"></div>
 
                 <!-- \u8BBE\u7F6E\u6298\u53E0\u533A -->
-                <div class="ldb-notion-toggle-section" id="ldb-notion-settings-toggle">
+                <button 
+                    class="ldb-notion-toggle-section" 
+                    id="ldb-notion-settings-toggle"
+                    aria-expanded="true"
+                    tabindex="0"
+                    role="button"
+                >
                     <span>\u2699\uFE0F \u8BBE\u7F6E</span>
-                    <span id="ldb-notion-settings-arrow">\u25B6</span>
-                </div>
+                    <span id="ldb-notion-settings-arrow" aria-hidden="true">\u25B6</span>
+                </button>
                 <div class="ldb-notion-toggle-content collapsed" id="ldb-notion-settings-content">
                     <div class="ldb-input-group ldb-mt-12">
                         <label class="ldb-label">Notion API Key</label>
@@ -17531,13 +17585,16 @@ ${report}
                 </div>
 
                 <!-- \u72B6\u6001\u663E\u793A -->
-                <div id="ldb-notion-status-container"></div>
+                <div id="ldb-notion-status-container" aria-live="polite" aria-atomic="true"></div>
             </div>
         `;
           document.body.appendChild(panel);
           NotionSiteUI2.panel = panel;
           NotionSiteUI2._abortController = new AbortController();
-          const stopPropagation = (e) => e.stopPropagation();
+          const stopPropagation = (e) => {
+            if (e.key === "Escape") return;
+            e.stopPropagation();
+          };
           panel.addEventListener("copy", stopPropagation);
           panel.addEventListener("paste", stopPropagation);
           panel.addEventListener("cut", stopPropagation);
@@ -17558,8 +17615,8 @@ ${report}
             minHeight: 250
           });
           ChatState2.load();
-          ChatUI2.renderMessages();
-          ChatUI2.bindEvents();
+          ChatUI3.renderMessages();
+          ChatUI3.bindEvents();
           NotionSiteUI2.isPanelReady = true;
         },
         // 切换面板显示
@@ -17583,7 +17640,7 @@ ${report}
               const input = panel.querySelector("#ldb-chat-input");
               if (input && cmd) {
                 input.value = cmd;
-                ChatUI2.sendMessage();
+                ChatUI3.sendMessage();
               }
             };
           });
@@ -17593,13 +17650,26 @@ ${report}
           panel.querySelector("#ldb-notion-theme-toggle").onclick = () => {
             DesignSystem2.toggleTheme();
           };
-          panel.querySelector("#ldb-notion-settings-toggle").onclick = () => {
+          const settingsToggle = panel.querySelector("#ldb-notion-settings-toggle");
+          settingsToggle.onclick = () => {
             const content = panel.querySelector("#ldb-notion-settings-content");
             const arrow = panel.querySelector("#ldb-notion-settings-arrow");
             content.classList.toggle("collapsed");
-            arrow.textContent = content.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
+            const isCollapsed = content.classList.contains("collapsed");
+            arrow.textContent = isCollapsed ? "\u25B6" : "\u25BC";
+            settingsToggle.setAttribute("aria-expanded", !isCollapsed);
+          };
+          settingsToggle.onkeydown = (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              settingsToggle.click();
+            }
           };
           panel.querySelector("#ldb-notion-save-settings").onclick = async () => {
+            const saveBtn = panel.querySelector("#ldb-notion-save-settings");
+            const originalText = saveBtn.textContent;
+            saveBtn.textContent = "\u4FDD\u5B58\u4E2D...";
+            saveBtn.disabled = true;
             try {
               await UICommandService.execute("save_command_boundary_settings", {
                 scope: "notion-site",
@@ -17625,7 +17695,10 @@ ${report}
               CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
               NotionSiteUI2.showStatus("\u8BBE\u7F6E\u5DF2\u4FDD\u5B58", "success");
             } catch (error) {
-              NotionSiteUI2.showStatus(`\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25: ${error.message}`, "error");
+              NotionSiteUI2.showStatus(`\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25\uFF1A${error.message}`, "error");
+            } finally {
+              saveBtn.textContent = originalText;
+              saveBtn.disabled = false;
             }
           };
           panel.querySelector("#ldb-notion-refresh-workspace").onclick = async () => {
@@ -17766,7 +17839,7 @@ ${report}
           });
           const bmStatus = panel.querySelector("#ldb-notion-bookmark-status");
           if (bmStatus) {
-            if (BookmarkBridge.isExtensionAvailable()) {
+            if (BookmarkBridge2.isExtensionAvailable()) {
               bmStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--success">\u2705 \u6269\u5C55\u5DF2\u5B89\u88C5</span> \u2014 \u5728 AI \u5BF9\u8BDD\u4E2D\u8F93\u5165\u300C\u5BFC\u5165\u4E66\u7B7E\u300D\u5373\u53EF';
             } else {
               bmStatus.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">\u274C \u6269\u5C55\u672A\u5B89\u88C5</span> \u2014 ${InstallHelper2.renderInstallLink("\u4E00\u952E\u5B89\u88C5\u6D4F\u89C8\u5668\u6269\u5C55")}`;
@@ -19040,14 +19113,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const isExported = UI2().isBookmarkKeyExported(bookmarkKey);
           const isSelected = (_a = UI2().selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
           const sourceTag = githubMode ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${Utils2.escapeHtml((bookmark.sourceType || "stars").toUpperCase())}</span>` : "";
-          const reexportAction = !githubMode && isExported ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868">\u91CD\u65B0\u5BFC\u51FA</button>` : "";
+          const reexportAction = !githubMode && isExported ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868">\u91CD\u65B0\u5BFC\u51FA</button>` : ``;
           const escapedBookmarkKey = Utils2.escapeHtml(bookmarkKey);
           return `
             <div class="ldb-bookmark-item" data-topic-id="${escapedBookmarkKey}">
-                <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""}>
+                <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""} ${isExported ? 'title="\u5DF2\u5BFC\u51FA\u5230 Notion\uFF0C\u65E0\u6CD5\u91CD\u590D\u5BFC\u5165"' : ""}>
                 <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
                 ${sourceTag}${isExported ? '<span class="status exported">\u5DF2\u5BFC\u51FA</span>' : '<span class="status pending">\u5F85\u5BFC\u51FA</span>'}
-                ${reexportAction}
+                ${reexportAction ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" onclick="event.stopPropagation(); ConfirmationDialog.show({ title: '\u786E\u8BA4\u64CD\u4F5C', message: '\u91CD\u65B0\u5BFC\u51FA\u5C06\u8986\u76D6\u73B0\u6709 Notion \u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F', confirmText: '\u91CD\u65B0\u5BFC\u51FA', onConfirm: () => window.location.reload(); });">\u91CD\u65B0\u5BFC\u51FA</button>` : ""}
             </div>
         `;
         },
@@ -19058,7 +19131,20 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           UI2().renderJobId += 1;
           const renderJobId = UI2().renderJobId;
           if (!UI2().bookmarks || UI2().bookmarks.length === 0) {
-            list.innerHTML = '<div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">\u6682\u65E0\u6536\u85CF</div>';
+            list.innerHTML = `
+                <div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">
+                    <p>\u6682\u65E0\u6536\u85CF</p>
+                    <button id="ldb-import-bookmarks-btn" class="ldb-btn ldb-btn-primary" style="margin-top: var(--ldb-ui-spacing-lg);">\u{1F4E5} \u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E</button>
+                </div>
+            `;
+            setTimeout(() => {
+              const importBtn = list.querySelector("#ldb-import-bookmarks-btn");
+              if (importBtn) {
+                importBtn.onclick = () => {
+                  ChatUI.sendMessage("import-bookmarks-from-browser");
+                };
+              }
+            }, 0);
             UI2().updateSelectCount();
             return;
           }
@@ -19130,7 +19216,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { WorkspaceService: WorkspaceService2 } = require_extract();
       var { AutoImporter: AutoImporter2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2 } = require_import();
       var { BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIAssistant: AIAssistant2, AIService: AIService2, ChatUI: ChatUI2 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, ChatUI: ChatUI3 } = require_ai();
+      var { AISchema: AISchema2 } = require_schema();
       var _UI = null;
       var UI2 = () => {
         if (!_UI) _UI = require_main_ui().UI;
@@ -19276,11 +19363,11 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           try {
             const prompt2 = UI2().buildWorkspaceConnectionCandidateAIPrompt(candidate);
             const raw = String(await AIService2.requestChat(prompt2, settings, 700) || "").trim();
-            const jsonMatch = raw.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-              throw new Error("AI \u672A\u8FD4\u56DE\u6709\u6548 JSON\u3002");
+            const parseResult = AISchema2.parseAIJson("workspaceConnection", raw);
+            if (!parseResult.ok) {
+              throw new Error(parseResult.reason);
             }
-            const parsed = JSON.parse(jsonMatch[0]);
+            const parsed = parseResult.value;
             const canonicalTitle = String((parsed == null ? void 0 : parsed.canonicalTitle) || (parsed == null ? void 0 : parsed.title) || "").trim();
             const summary = String((parsed == null ? void 0 : parsed.summary) || "").trim();
             const recommendedAction = String((parsed == null ? void 0 : parsed.recommendedAction) || "review").trim().toLowerCase();
@@ -19796,15 +19883,29 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             btn.textContent = "\u540C\u6B65\u4E2D...";
           }
           try {
+            const syncErrors = [];
             for (const task of tasks) {
-              await task.run();
+              try {
+                await task.run();
+              } catch (error) {
+                syncErrors.push({ source: task.label, error: error.message });
+              }
             }
             UI2().renderSyncCenterSummary();
             const model = UI2().buildUnifiedSyncModel();
-            UI2().showStatus(
-              `\u7EDF\u4E00\u540C\u6B65\u5B8C\u6210\uFF1A\u5DF2\u6267\u884C ${tasks.map((task) => task.label).join("\u3001")}\uFF0C\u5F53\u524D\u9700\u5173\u6CE8\u6765\u6E90 ${model.issueCount} \u4E2A\u3002`,
-              model.issueCount > 0 ? "error" : "success"
-            );
+            const successCount = tasks.length - syncErrors.length;
+            if (syncErrors.length > 0) {
+              UI2().showStatus(
+                `\u7EDF\u4E00\u540C\u6B65\u5B8C\u6210\uFF1A${successCount}/${tasks.length} \u4E2A\u6E90\u6210\u529F\uFF08${syncErrors.map((e) => e.source).join("\u3001")} \u5931\u8D25\uFF09\uFF0C\u5F53\u524D\u9700\u5173\u6CE8\u6765\u6E90 ${model.issueCount} \u4E2A\u3002`,
+                successCount > 0 ? "info" : "error"
+              );
+              console.warn("[LD-Notion] Sync partial failures:", syncErrors);
+            } else {
+              UI2().showStatus(
+                `\u7EDF\u4E00\u540C\u6B65\u5B8C\u6210\uFF1A\u5DF2\u6267\u884C ${tasks.map((task) => task.label).join("\u3001")}\uFF0C\u5F53\u524D\u9700\u5173\u6CE8\u6765\u6E90 ${model.issueCount} \u4E2A\u3002`,
+                model.issueCount > 0 ? "error" : "success"
+              );
+            }
             return model;
           } finally {
             if (btn) {
@@ -19999,7 +20100,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 </div>
                 <div class="ldb-view-card full">
                     <div class="ldb-view-card-title">\u6D1E\u5BDF\u6458\u8981</div>
-                    <div class="ldb-view-empty-text">${ChatUI2.safeMarkdown(insightSummary || UI2().buildWorkspaceInsightFallbackSummary(model))}</div>
+                    <div class="ldb-view-empty-text">${ChatUI3.safeMarkdown(insightSummary || UI2().buildWorkspaceInsightFallbackSummary(model))}</div>
                 </div>
                 <div class="ldb-view-card full">
                     <div class="ldb-view-card-title">Markdown \u62A5\u544A\u9884\u89C8</div>
@@ -20026,8 +20127,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
-      var { BookmarkBridge: BookmarkBridge3, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, getAISettings } = require_ai();
+      var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI3, getAISettings } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -20449,7 +20550,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                                 <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-download-workspace-package" type="button">\u4E0B\u8F7D\u534F\u4F5C\u5305</button>
                             </div>
                         </div>
-                        <div class="ldb-view-status" id="ldb-view-workspace-status">\u5C1A\u672A\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002</div>
+                        <div class="ldb-view-status" id="ldb-view-workspace-status" aria-live="polite" aria-atomic="true">\u5C1A\u672A\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002</div>
                         <div class="ldb-view-summary" id="ldb-view-workspace-summary">
                             <div class="ldb-view-empty">
                                 <div class="ldb-view-empty-title">\u5DE5\u4F5C\u533A\u603B\u89C8\u8FD8\u6CA1\u6709\u6570\u636E</div>
@@ -21062,7 +21163,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           UI2.applyBookmarkSourceUI(source);
           const bmStatusMain = refs.bookmarkExtStatus;
           if (bmStatusMain) {
-            if (BookmarkBridge3.isExtensionAvailable()) {
+            if (BookmarkBridge2.isExtensionAvailable()) {
               const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
               if (isUserscriptMode) {
                 bmStatusMain.innerHTML = '<span class="ldb-status-text ldb-status-text--success">\u2705 \u6865\u63A5\u5DF2\u5C31\u7EEA\uFF08Userscript \u6A21\u5F0F\uFF09</span> \u2014 \u53EF\u7528\u300C\u{1F4D6} \u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E\u300D\u6309\u94AE';
@@ -21200,7 +21301,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const resultEl = refs.selfCheckResult;
           if (!resultEl) return;
           const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
-          const hasBridgeMarker = BookmarkBridge3.isExtensionAvailable();
+          const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           const bookmarkSource = UI2.getActiveBookmarkSource();
           const hasGitHubUsername = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
           const hasGitHubToken = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "").trim();
@@ -21256,7 +21357,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         copyDiagnostics: async () => {
           var _a;
           const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
-          const hasBridgeMarker = BookmarkBridge3.isExtensionAvailable();
+          const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           const bookmarkSource = UI2.getActiveBookmarkSource();
           const hasGitHubUsername = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
           const hasGitHubToken = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "").trim();
@@ -22200,7 +22301,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         maybePromptBookmarkExtensionInstall: () => {
           const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
           if (!isUserscriptMode) return;
-          if (BookmarkBridge3.isExtensionAvailable()) return;
+          if (BookmarkBridge2.isExtensionAvailable()) return;
           if (Storage2.get(CONFIG2.STORAGE_KEYS.EXT_INSTALL_PROMPT_SHOWN, false)) return;
           Storage2.set(CONFIG2.STORAGE_KEYS.EXT_INSTALL_PROMPT_SHOWN, true);
           const shouldInstallNow = window.confirm("\u68C0\u6D4B\u5230\u4F60\u5C1A\u672A\u5B89\u88C5\u4E66\u7B7E\u6865\u63A5\u6269\u5C55\u3002\n\n\u662F\u5426\u73B0\u5728\u6253\u5F00\u5B89\u88C5\u9875\u9762\uFF1F");
@@ -22287,8 +22388,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { UICommandService } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
-      var { BookmarkBridge: BookmarkBridge3, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIService: AIService2, ChatUI: ChatUI2 } = require_ai();
+      var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
+      var { AIService: AIService2, ChatUI: ChatUI3 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var UIEvents2 = {
         bindEvents: () => {
@@ -22319,7 +22420,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             CredentialVault2.syncSensitiveInput(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
           };
           const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
-          const hasBridgeMarker = BookmarkBridge3.isExtensionAvailable();
+          const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           if (refs.runtimeBadge) {
             refs.runtimeBadge.textContent = isUserscriptMode ? "Userscript" : "Extension";
             refs.runtimeBadge.classList.toggle("mode-userscript", isUserscriptMode);
@@ -22367,6 +22468,32 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               Storage2.set(CONFIG2.STORAGE_KEYS.ACTIVE_TAB, tabName);
             };
           });
+          const tabContainer = panel.querySelector(".ldb-tabs");
+          if (tabContainer) {
+            tabContainer.addEventListener("keydown", (e) => {
+              const tabs = Array.from(tabContainer.querySelectorAll('[role="tab"]'));
+              const currentIndex = tabs.indexOf(document.activeElement);
+              if (currentIndex === -1) return;
+              let newIndex = currentIndex;
+              if (e.key === "ArrowRight") {
+                newIndex = (currentIndex + 1) % tabs.length;
+                e.preventDefault();
+              } else if (e.key === "ArrowLeft") {
+                newIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+                e.preventDefault();
+              } else if (e.key === "Home") {
+                newIndex = 0;
+                e.preventDefault();
+              } else if (e.key === "End") {
+                newIndex = tabs.length - 1;
+                e.preventDefault();
+              }
+              if (newIndex !== currentIndex) {
+                tabs[newIndex].focus();
+                tabs[newIndex].click();
+              }
+            });
+          }
           const savedTab = Storage2.get(CONFIG2.STORAGE_KEYS.ACTIVE_TAB, CONFIG2.DEFAULTS.activeTab);
           const tabBtn = panel.querySelector(`.ldb-tab[data-tab="${savedTab}"]`);
           if (tabBtn) tabBtn.click();
@@ -22653,7 +22780,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             if (enabled) {
               const apiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
               const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
-              if (!BookmarkBridge3.isExtensionAvailable()) {
+              if (!BookmarkBridge2.isExtensionAvailable()) {
                 BookmarkAutoImporter2.updateStatus("\u26A0\uFE0F \u8BF7\u5148\u5B89\u88C5\u5E76\u542F\u7528\u4E66\u7B7E\u6865\u63A5\u6269\u5C55");
                 return;
               }
@@ -22914,19 +23041,13 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 toggle.click();
               }
             }
-            btn.disabled = true;
-            btn.innerHTML = '<span class="ldb-spin">\u{1F504}</span> \u5BFC\u5165\u4E2D...';
-            try {
-              const chatInput = panel.querySelector("#ldb-chat-input");
-              if (chatInput && typeof ChatUI2 !== "undefined" && ChatUI2.sendMessage) {
-                chatInput.value = "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E";
-                ChatUI2.sendMessage();
-              } else {
-                UI2.showStatus("AI \u9762\u677F\u672A\u5C31\u7EEA\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5", "error");
-              }
-            } finally {
-              btn.disabled = false;
-              btn.innerHTML = "\u{1F4D6} \u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E";
+            const chatInput = panel.querySelector("#ldb-chat-input");
+            if (chatInput && ChatUI3.sendMessage) {
+              UI2.showStatus("\u6B63\u5728\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E\uFF0C\u8BF7\u8010\u5FC3\u7B49\u5F85...", "info");
+              chatInput.value = "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E";
+              ChatUI3.sendMessage();
+            } else {
+              UI2.showStatus("AI \u9762\u677F\u672A\u5C31\u7EEA\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5", "error");
             }
           };
           refs.selectAll.onchange = (e) => {
@@ -23115,6 +23236,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             refs.controlBtns.style.display = "flex";
             UI2.refs.reportContainer.innerHTML = "";
             const results = { success: [], failed: [], skipped: [] };
+            let imageFailures = 0;
             try {
               if (UI2.isActiveGitHubSource()) {
                 const githubResults = await UI2.exportGitHubSelectedToObsidian(selected, {
@@ -23222,6 +23344,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                           if (!imgResult.ok) throw new Error(imgResult.error);
                           md = md.replace(img.full, `![${img.alt}](${encodeURI(imgPath)})`);
                         } catch {
+                          imageFailures++;
                         }
                       }
                     } else if (obsImgMode === "base64") {
@@ -23253,6 +23376,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                           });
                           md = md.replace(match[0], `![${match[1]}](${b64})`);
                         } catch {
+                          imageFailures++;
                         }
                       }
                     }
@@ -23277,8 +23401,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               UI2.hideProgress();
               UI2.showReport(results);
               UI2.renderBookmarkList();
-              const msg = `Obsidian \u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${results.success.length} \u4E2A${results.failed.length ? `\uFF0C\u5931\u8D25 ${results.failed.length} \u4E2A` : ""}`;
-              UI2.showStatus(msg, results.failed.length > 0 ? "warning" : "success");
+              const msg = `Obsidian \u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${results.success.length} \u4E2A${results.failed.length ? `\uFF0C\u5931\u8D25 ${results.failed.length} \u4E2A` : ""}${imageFailures > 0 ? `\uFF0C${imageFailures} \u5F20\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25` : ""}`;
+              UI2.showStatus(msg, results.failed.length > 0 || imageFailures > 0 ? "warning" : "success");
             } catch (error) {
               UI2.showStatus(`Obsidian \u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
             } finally {
@@ -23446,7 +23570,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               try {
                 await UI2.downloadWorkspaceInsightReport();
               } catch (error) {
-                UI2.showStatus(`\u6D93\u5B2D\u6D47\u5BB8\u30E4\u7D94\u9356\u70D8\u59E4\u935B\u5A42\u3051\u7490\u30EF\u7D30${error.message}`, "error");
+                UI2.showStatus(`\u4E0B\u8F7D\u5DE5\u4F5C\u533A\u62A5\u544A\u5931\u8D25\uFF1A${error.message}`, "error");
               }
             };
           }
@@ -23516,7 +23640,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               }
             }
           };
-          ChatUI2.init();
+          ChatUI3.init();
           refs.aiServiceSelect.onchange = (e) => {
             const newService = e.target.value;
             const availableModels = AIService2.getAvailableModels(newService);
@@ -23588,6 +23712,11 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               const source = [...refs.githubTypeCheckboxes].filter((c) => c.checked);
               const types = [...source].filter((c) => c.checked).map((c) => c.value);
               GitHubAPI2.setImportTypes(types.length > 0 ? types : ["stars"]);
+              if (types.length === 0) {
+                refs.githubTypeCheckboxes.forEach((c) => {
+                  c.checked = c.value === "stars";
+                });
+              }
             };
           });
           refs.aiRefreshDbsBtn.onclick = async () => {
@@ -23708,11 +23837,18 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             list.querySelectorAll("[data-template-delete]").forEach((btn) => {
               btn.onclick = () => {
                 const idx = parseInt(btn.dataset.templateDelete);
-                const ts = UI2._loadTemplates();
-                ts.splice(idx, 1);
-                UI2._saveTemplates(ts);
-                UI2.renderTemplateList();
-                UI2.showStatus("\u6A21\u677F\u5DF2\u5220\u9664", "success");
+                ConfirmationDialog3.show({
+                  title: "\u786E\u8BA4\u5220\u9664",
+                  message: "\u786E\u5B9A\u8981\u5220\u9664\u6B64\u6A21\u677F\u5417\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002",
+                  confirmText: "\u5220\u9664",
+                  onConfirm: () => {
+                    const ts = UI2._loadTemplates();
+                    ts.splice(idx, 1);
+                    UI2._saveTemplates(ts);
+                    UI2.renderTemplateList();
+                    UI2.showStatus("\u6A21\u677F\u5DF2\u5220\u9664", "success");
+                  }
+                });
               };
             });
           };
@@ -24315,7 +24451,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const obsKey = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_API_KEY, CONFIG2.DEFAULTS.obsApiKey);
             const obsDir = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_DIR, CONFIG2.DEFAULTS.obsDir);
             if (!obsUrl || !obsKey) {
-              GenericUI2.showStatus("\u8BF7\u5148\u914D\u7F6E Obsidian API\uFF08\u5728 LinuxDo \u9875\u9762\u8BBE\u7F6E\u9762\u677F\u4E2D\uFF09", "error");
+              GenericUI2.showStatus("\u8BF7\u5148\u914D\u7F6E Obsidian API\uFF08\u8BF7\u524D\u5F80 Linux.do \u8BBA\u575B\u9875\u9762\uFF0C\u901A\u8FC7\u6D6E\u52A8\u6309\u94AE\u6253\u5F00\u8BBE\u7F6E\u9762\u677F\u8FDB\u884C\u914D\u7F6E\uFF09", "error");
               GenericUI2.isExporting = false;
               return;
             }
@@ -24362,13 +24498,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               const fileName = title.replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
               const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
               if (!noteResult.ok) throw new Error(noteResult.error);
-              GenericUI2.showStatus(`\u5BFC\u51FA\u5230 Obsidian \u6210\u529F: ${title}`, "success");
+              GenericUI2.showStatus(`Obsidian \u5BFC\u51FA\u6210\u529F\uFF1A${title}`, "success");
             } catch (error) {
               GenericUI2.showStatus(`Obsidian \u5BFC\u51FA\u5931\u8D25: ${error.message}`, "error");
             } finally {
               GenericUI2.isExporting = false;
               btn.disabled = false;
-              btn.textContent = " \u5BFC\u51FA\u5230 Obsidian";
+              btn.textContent = "\u5BFC\u51FA\u5230 Obsidian";
             }
           });
         },
@@ -24421,8 +24557,21 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         // 显示状态
         showStatus: (message, type = "info") => {
           const el = GenericUI2.panel.querySelector("#gclip-status");
+          el.setAttribute("aria-live", "polite");
+          el.setAttribute("aria-atomic", "true");
           el.textContent = message;
           el.className = `gclip-status ${type}`;
+          if (el._statusTimer) clearTimeout(el._statusTimer);
+          const timeout = type === "error" ? 1e4 : 3e3;
+          el._statusTimer = setTimeout(() => {
+            if (el && !el.dataset.closing) {
+              el.classList.add("ldb-fade-out");
+              el.dataset.closing = "true";
+              setTimeout(() => {
+                if (el) el.remove();
+              }, 300);
+            }
+          }, timeout);
         },
         // 切换面板显示
         togglePanel: (show) => {
@@ -24433,11 +24582,21 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             GenericUI2.panel.style.display = "block";
             GenericUI2.panel.offsetHeight;
             GenericUI2.panel.classList.add("visible");
+            GenericUI2._escHandler = (e) => {
+              if (e.key === "Escape") {
+                GenericUI2.close();
+              }
+            };
+            document.addEventListener("keydown", GenericUI2._escHandler);
           } else {
             GenericUI2.panel.classList.remove("visible");
             GenericUI2.panel.addEventListener("transitionend", function handler() {
               if (!GenericUI2.panel.classList.contains("visible")) {
                 GenericUI2.panel.style.display = "none";
+                if (GenericUI2._escHandler) {
+                  document.removeEventListener("keydown", GenericUI2._escHandler);
+                  GenericUI2._escHandler = null;
+                }
               }
               GenericUI2.panel.removeEventListener("transitionend", handler);
             });
@@ -25331,7 +25490,7 @@ ${systemPrompt}
             ChatState2.messages = ChatState2.messages.slice(-ChatState2.MAX_HISTORY);
           }
           ChatState2.save();
-          ChatUI2.renderMessages();
+          ChatUI3.renderMessages();
           return ChatState2.messages[ChatState2.messages.length - 1];
         },
         // 更新最后一条消息（增量 DOM 更新，避免全量重渲染）（PERF-006）
@@ -25341,8 +25500,8 @@ ${systemPrompt}
           if (content !== void 0) lastMsg.content = content;
           if (status !== void 0) lastMsg.status = status;
           ChatState2.save();
-          if (!ChatUI2._patchLastBubble()) {
-            ChatUI2.renderMessages();
+          if (!ChatUI3._patchLastBubble()) {
+            ChatUI3.renderMessages();
           }
         },
         // 保存到存储
@@ -25364,7 +25523,7 @@ ${systemPrompt}
           ChatState2.messages = [];
           ChatState2.context = {};
           ChatState2.save();
-          ChatUI2.renderMessages();
+          ChatUI3.renderMessages();
         }
       };
       var QUICK_INTENT_PATTERNS2 = Object.freeze({
@@ -26746,7 +26905,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         },
         getInputPlaceholder: () => AI_WELCOME_ENTRY_POINTS.inputPlaceholder
       };
-      var ChatUI2 = {
+      var ChatUI3 = {
         // HTML 转义函数，防止 XSS 攻击
         escapeHtml: (text) => {
           const div = document.createElement("div");
@@ -26770,7 +26929,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           const lastBubble = (_a = bubbles[bubbles.length - 1]) == null ? void 0 : _a.querySelector(".ldb-chat-bubble");
           if (!lastBubble) return false;
           const statusClass = lastMsg.status === "processing" ? "processing" : lastMsg.status === "error" ? "error" : "";
-          const content = lastMsg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI2.safeMarkdown(AIAssistant2._resultToText(lastMsg.content));
+          const content = lastMsg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI3.safeMarkdown(AIAssistant2._resultToText(lastMsg.content));
           lastBubble.className = `ldb-chat-bubble ${lastMsg.role === "user" ? "user" : "assistant"} ${statusClass}`.trim();
           lastBubble.innerHTML = content;
           container.scrollTop = container.scrollHeight;
@@ -26788,7 +26947,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
                 const input = document.querySelector("#ldb-chat-input");
                 if (input) {
                   input.value = chip.getAttribute("data-cmd");
-                  ChatUI2.sendMessage();
+                  ChatUI3.sendMessage();
                 }
               };
             });
@@ -26797,7 +26956,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           container.innerHTML = ChatState2.messages.map((msg) => {
             const isUser = msg.role === "user";
             const statusClass = msg.status === "processing" ? "processing" : msg.status === "error" ? "error" : "";
-            const content = msg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI2.safeMarkdown(AIAssistant2._resultToText(msg.content));
+            const content = msg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI3.safeMarkdown(AIAssistant2._resultToText(msg.content));
             return `
                 <div class="ldb-chat-message ${isUser ? "user" : "assistant"}">
                     <div class="ldb-chat-bubble ${isUser ? "user" : "assistant"} ${statusClass}">
@@ -26839,7 +26998,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         bindEvents: () => {
           const sendBtn = document.querySelector("#ldb-chat-send");
           if (sendBtn) {
-            sendBtn.onclick = ChatUI2.sendMessage;
+            sendBtn.onclick = ChatUI3.sendMessage;
           }
           const input = document.querySelector("#ldb-chat-input");
           if (input) {
@@ -26847,7 +27006,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
               e.stopPropagation();
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                ChatUI2.sendMessage();
+                ChatUI3.sendMessage();
               }
             };
             input.onpaste = (e) => e.stopPropagation();
@@ -26884,8 +27043,8 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         // 初始化
         init: () => {
           ChatState2.load();
-          ChatUI2.renderMessages();
-          ChatUI2.bindEvents();
+          ChatUI3.renderMessages();
+          ChatUI3.bindEvents();
         }
       };
       var AIClassifier3 = {
@@ -27075,7 +27234,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       };
       Object.assign(AIAssistant2, require_guarded_write().GuardedWrite);
       var getAISettings = () => AIAssistant2.getSettings();
-      module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier3, getAISettings };
+      module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI3, AIClassifier: AIClassifier3, getAISettings };
       Object.assign(AIAssistant2, require_agent_executor().AgentExecutor);
     }
   });
@@ -27086,22 +27245,22 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { Storage, SyncState } = require_storage();
   var { CredentialVault, TargetState, NotionOAuth } = require_auth();
   var { SiteDetector, InstallHelper, EMOJI_MAP, NOTION_LANGUAGES, normalizeLanguage, DOMToNotion, NotionTransport, NotionAPI, ObsidianAPI, HTMLToMarkdown } = require_api();
-  var { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier: AIClassifier2 } = require_ai();
+  var { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI: ChatUI2, AIClassifier: AIClassifier2 } = require_ai();
   var { OperationGuard, OperationLog, ConfirmationDialog: ConfirmationDialog2, UndoManager } = require_security();
   var { ZhihuAPI, GenericExtractor, WorkspaceService } = require_extract();
   var { GenericExporter, LinuxDoAPI, Exporter } = require_export();
   var { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require_import();
-  var { BookmarkBridge: BookmarkBridge2, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter } = require_bridge();
+  var { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter } = require_bridge();
   var { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI, GenericUI } = require_ui();
   Storage.CredentialVault = CredentialVault;
-  BookmarkBridge2.init();
+  BookmarkBridge.init();
   window.addEventListener("ld-notion-popup-action", (event) => {
     var _a;
     const { action } = event.detail || {};
     if (action === "set-bookmark-source") {
       const source = ((_a = event.detail) == null ? void 0 : _a.source) === "github" ? "github" : "linuxdo";
       Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, source);
-      if (typeof UI !== "undefined" && UI.panel && UI.refs) {
+      if (UI.panel && UI.refs) {
         if (typeof UI.switchBookmarkSource === "function") {
           UI.switchBookmarkSource(source);
         } else {
@@ -27126,9 +27285,9 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
     const cmd = cmdMap[action];
     if (!cmd) return;
     const input = document.querySelector("#ldb-chat-input");
-    if (input && typeof ChatUI !== "undefined" && ChatUI.sendMessage) {
+    if (input && ChatUI2.sendMessage) {
       input.value = cmd;
-      ChatUI.sendMessage();
+      ChatUI2.sendMessage();
     }
   });
   function main() {

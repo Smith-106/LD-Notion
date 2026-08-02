@@ -226,6 +226,12 @@ const UI_CSS = `
                 border-radius: var(--ldb-ui-radius-pill);
             }
 
+            .ldb-toggle-switch input:focus-visible + .ldb-toggle-slider {
+                box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.4);
+                outline: 2px solid transparent;
+                outline-offset: 2px;
+            }
+
             .ldb-toggle-slider:before {
                 position: absolute;
                 content: "";
