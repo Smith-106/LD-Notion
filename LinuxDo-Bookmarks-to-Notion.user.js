@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.7.8
+// @version      3.9.0
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -2113,15 +2113,10 @@
     }
   });
 
-  // src/api/index.js
-  var require_api = __commonJS({
-    "src/api/index.js"(exports, module) {
+  // src/api/constants.js
+  var require_constants = __commonJS({
+    "src/api/constants.js"(exports, module) {
       "use strict";
-      var { CONFIG: CONFIG2, MSG: MSG2, SUPPORTED_FILE_TYPES: SUPPORTED_FILE_TYPES2, MULTI_PART_THRESHOLD: MULTI_PART_THRESHOLD2, getMimeType: getMimeType3, getFileCategory: getFileCategory2, isSupportedFileType: isSupportedFileType2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var { NotionOAuth: NotionOAuth2 } = require_auth();
-      var { UrlValidator } = require_UrlValidator();
       var SiteDetector2 = {
         SITES: {
           LINUX_DO: "linux_do",
@@ -2427,6 +2422,18 @@
         };
         return aliases[lower] || "plain text";
       };
+      module.exports = { SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, EMOJI_MAP: EMOJI_MAP2, NOTION_LANGUAGES: NOTION_LANGUAGES2, normalizeLanguage: normalizeLanguage2 };
+    }
+  });
+
+  // src/api/DOMToNotion.js
+  var require_DOMToNotion = __commonJS({
+    "src/api/DOMToNotion.js"(exports, module) {
+      "use strict";
+      var { isSupportedFileType: isSupportedFileType2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { UrlValidator } = require_UrlValidator();
+      var { normalizeLanguage: normalizeLanguage2, EMOJI_MAP: EMOJI_MAP2 } = require_constants();
       var DOMToNotion2 = {
         // ===== cookedToBlocks 各元素处理器（MNT-003 提取，保持 if 顺序与逻辑等价）=====
         // 过滤导入页面（帖子 HTML）中的外部 URL：复用 UrlValidator.validatePageExternalUrl
@@ -2829,6 +2836,711 @@
           return blocks;
         }
       };
+      module.exports = { DOMToNotion: DOMToNotion2 };
+    }
+  });
+
+  // src/api/obsidian.js
+  var require_obsidian = __commonJS({
+    "src/api/obsidian.js"(exports, module) {
+      "use strict";
+      var { UrlValidator } = require_UrlValidator();
+      var ObsidianAPI2 = {
+        testConnection: async (apiUrl, apiKey) => {
+          if (!UrlValidator.validateObsidianUrl(apiUrl)) {
+            return { ok: false, error: "Obsidian API URL \u5B89\u5168\u6821\u9A8C\u5931\u8D25\uFF1A\u4EC5\u5141\u8BB8\u672C\u5730\u5730\u5740 (127.0.0.1/localhost)" };
+          }
+          const resp = await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+              method: "GET",
+              url: `${apiUrl}/vault/`,
+              headers: { Authorization: `Bearer ${apiKey}` },
+              responseType: "json",
+              timeout: 1e4,
+              onload: (r) => resolve(r),
+              onerror: (e) => reject(e),
+              ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
+            });
+          });
+          if (resp.status === 200 || resp.status === 204) return { ok: true };
+          return { ok: false, error: `HTTP ${resp.status}: ${resp.statusText}` };
+        },
+        writeNote: async (apiUrl, apiKey, path, content) => {
+          if (!UrlValidator.validateObsidianUrl(apiUrl)) {
+            return { ok: false, error: "Obsidian API URL \u5B89\u5168\u6821\u9A8C\u5931\u8D25\uFF1A\u4EC5\u5141\u8BB8\u672C\u5730\u5730\u5740 (127.0.0.1/localhost)" };
+          }
+          const resp = await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+              method: "PUT",
+              url: `${apiUrl}/vault/${encodeURIComponent(path)}`,
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "text/markdown"
+              },
+              data: content,
+              timeout: 3e4,
+              onload: (r) => resolve(r),
+              onerror: (e) => reject(e),
+              ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
+            });
+          });
+          if (resp.status === 200 || resp.status === 204 || resp.status === 201) {
+            return { ok: true };
+          }
+          return { ok: false, error: `HTTP ${resp.status}: ${resp.statusText}` };
+        },
+        writeImage: async (apiUrl, apiKey, path, blob, contentType) => {
+          if (!UrlValidator.validateObsidianUrl(apiUrl)) {
+            return { ok: false, error: "Obsidian API URL \u5B89\u5168\u6821\u9A8C\u5931\u8D25\uFF1A\u4EC5\u5141\u8BB8\u672C\u5730\u5730\u5740 (127.0.0.1/localhost)" };
+          }
+          const resp = await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+              method: "PUT",
+              url: `${apiUrl}/vault/${encodeURIComponent(path)}`,
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": contentType || "application/octet-stream"
+              },
+              data: blob,
+              timeout: 6e4,
+              onload: (r) => resolve(r),
+              onerror: (e) => reject(e),
+              ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
+            });
+          });
+          if (resp.status === 200 || resp.status === 204 || resp.status === 201) {
+            return { ok: true };
+          }
+          return { ok: false, error: `HTTP ${resp.status}: ${resp.statusText}` };
+        }
+      };
+      var HTMLToMarkdown2 = {
+        convert: (html) => {
+          const doc = new DOMParser().parseFromString(html, "text/html");
+          return HTMLToMarkdown2._convertNode(doc.body);
+        },
+        _convertNode: (node) => {
+          var _a, _b, _c;
+          if (node.nodeType === Node.TEXT_NODE) {
+            return node.textContent || "";
+          }
+          if (node.nodeType !== Node.ELEMENT_NODE) return "";
+          const tag = node.tagName.toLowerCase();
+          const children = HTMLToMarkdown2._convertChildren(node);
+          switch (tag) {
+            case "h1":
+              return `# ${children}
+
+`;
+            case "h2":
+              return `## ${children}
+
+`;
+            case "h3":
+              return `### ${children}
+
+`;
+            case "h4":
+              return `#### ${children}
+
+`;
+            case "h5":
+              return `##### ${children}
+
+`;
+            case "h6":
+              return `###### ${children}
+
+`;
+            case "p":
+              return `${children}
+
+`;
+            case "br":
+              return "\n";
+            case "hr":
+              return "---\n\n";
+            case "strong":
+            case "b":
+              return `**${children}**`;
+            case "em":
+            case "i":
+              return `*${children}*`;
+            case "del":
+            case "s":
+              return `~~${children}~~`;
+            case "code": {
+              const parent = node.parentElement;
+              if (parent && parent.tagName.toLowerCase() === "pre") return children;
+              return `\`${children}\``;
+            }
+            case "pre": {
+              const codeEl = node.querySelector("code");
+              const lang = ((_b = (_a = codeEl == null ? void 0 : codeEl.className) == null ? void 0 : _a.match(/language-(\w+)/)) == null ? void 0 : _b[1]) || "";
+              const text = codeEl ? codeEl.textContent : node.textContent;
+              return "```" + lang + "\n" + text + "\n```\n\n";
+            }
+            case "blockquote": {
+              const lines = children.trim().split("\n");
+              return lines.map((l) => `> ${l}`).join("\n") + "\n\n";
+            }
+            case "a": {
+              const href = node.getAttribute("href") || "";
+              if (href.startsWith("http")) return `[${children}](${href})`;
+              return children;
+            }
+            case "img": {
+              const src = node.getAttribute("src") || "";
+              const alt = node.getAttribute("alt") || "";
+              return `![${alt}](${src})`;
+            }
+            case "ul":
+              return children;
+            case "ol": {
+              const items = node.querySelectorAll(":scope > li");
+              let idx = 1;
+              return Array.from(items).map((li) => {
+                const md = HTMLToMarkdown2._convertNode(li).trim();
+                const result = `${idx}. ${md}
+`;
+                idx++;
+                return result;
+              }).join("") + "\n";
+            }
+            case "li":
+              return `- ${children}
+`;
+            case "table":
+              return HTMLToMarkdown2._convertTable(node) + "\n\n";
+            case "iframe": {
+              const src = node.getAttribute("src") || "";
+              return `[\u5D4C\u5165\u5185\u5BB9](${src})
+
+`;
+            }
+            case "video": {
+              const src = node.getAttribute("src") || ((_c = node.querySelector("source")) == null ? void 0 : _c.getAttribute("src")) || "";
+              return `[\u89C6\u9891](${src})
+
+`;
+            }
+            case "audio": {
+              const src = node.getAttribute("src") || "";
+              return `[\u97F3\u9891](${src})
+
+`;
+            }
+            case "div": {
+              const cls = node.className || "";
+              if (cls.includes("onebox")) {
+                return `> [!quote]
+> ${children.trim()}
+
+`;
+              }
+              return children;
+            }
+            default:
+              return children;
+          }
+        },
+        _convertChildren: (node) => {
+          return Array.from(node.childNodes).map(HTMLToMarkdown2._convertNode).join("");
+        },
+        _convertTable: (table) => {
+          const rows = table.querySelectorAll("tr");
+          if (rows.length === 0) return "";
+          const result = [];
+          rows.forEach((row, i) => {
+            const cells = Array.from(row.querySelectorAll("th, td")).map((c) => {
+              return HTMLToMarkdown2._convertChildren(c).replace(/\n/g, " ").trim();
+            });
+            result.push(`| ${cells.join(" | ")} |`);
+            if (i === 0) {
+              result.push(`| ${cells.map(() => "---").join(" | ")} |`);
+            }
+          });
+          return result.join("\n");
+        },
+        buildFrontmatter: (meta) => {
+          const lines = ["---"];
+          const esc = (s) => String(s || "").replace(/"/g, '\\"');
+          if (meta.title) lines.push(`title: "${esc(meta.title)}"`);
+          if (meta.url) lines.push(`url: "${esc(meta.url)}"`);
+          if (meta.author) lines.push(`author: "${esc(meta.author)}"`);
+          if (meta.source) lines.push(`source: "${esc(meta.source)}"`);
+          if (meta.sourceType) lines.push(`source_type: "${esc(meta.sourceType)}"`);
+          if (meta.topicId) lines.push(`topic_id: ${meta.topicId}`);
+          if (meta.owner) lines.push(`owner: "${esc(meta.owner)}"`);
+          if (meta.repo) lines.push(`repo: "${esc(meta.repo)}"`);
+          if (meta.gistId) lines.push(`gist_id: "${esc(meta.gistId)}"`);
+          if (meta.category) lines.push(`category: "${esc(meta.category)}"`);
+          if (meta.language) lines.push(`language: "${esc(meta.language)}"`);
+          if (Number.isFinite(Number(meta.stars))) lines.push(`stars: ${Number(meta.stars)}`);
+          if (meta.updatedAt) lines.push(`updated_at: "${esc(meta.updatedAt)}"`);
+          if (meta.tags && meta.tags.length > 0) {
+            lines.push("tags:");
+            meta.tags.forEach((t) => lines.push(`  - "${esc(t)}"`));
+          }
+          lines.push(`export_time: "${(/* @__PURE__ */ new Date()).toISOString()}"`);
+          if (meta.floors !== void 0) lines.push(`floors: ${meta.floors}`);
+          lines.push("---");
+          return lines.join("\n") + "\n\n";
+        },
+        buildPostCallout: (post, index, isOp) => {
+          const type = isOp ? "success" : "note";
+          const collapsed = index > 0 ? "+" : "";
+          const username = post.username || "\u672A\u77E5";
+          const postNum = post.post_number || index + 1;
+          const date = post.created_at ? new Date(post.created_at).toLocaleString("zh-CN") : "\u672A\u77E5\u65F6\u95F4";
+          const header = `#${postNum} ${username}${post.username ? ` (@${post.username})` : ""}${isOp ? " \u697C\u4E3B" : ""} \xB7 ${date}`;
+          const content = HTMLToMarkdown2.convert(post.cooked || "");
+          const lines = content.trim().split("\n");
+          const quoted = lines.map((l) => `> ${l}`).join("\n");
+          return `> [!${type}]${collapsed} ${header}
+${quoted}
+> ^floor-${postNum}
+
+`;
+        }
+      };
+      module.exports = { ObsidianAPI: ObsidianAPI2, HTMLToMarkdown: HTMLToMarkdown2 };
+    }
+  });
+
+  // src/api/notion-upload.js
+  var require_notion_upload = __commonJS({
+    "src/api/notion-upload.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { NotionOAuth: NotionOAuth2 } = require_auth();
+      var SUPPORTED_EXTENSIONS = {
+        image: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "tiff", "tif", "avif", "heic", "heif"],
+        video: ["mp4", "webm", "mov", "avi", "mkv", "m4v", "wmv", "flv", "mpeg", "mpg", "3gp", "ogv"],
+        audio: ["mp3", "wav", "ogg", "m4a", "aac", "flac", "wma", "aiff", "opus", "weba"],
+        file: [
+          "pdf",
+          "txt",
+          "md",
+          "csv",
+          "json",
+          "xml",
+          "html",
+          "css",
+          "js",
+          "ts",
+          "py",
+          "java",
+          "c",
+          "cpp",
+          "h",
+          "hpp",
+          "doc",
+          "docx",
+          "xls",
+          "xlsx",
+          "ppt",
+          "pptx",
+          "zip",
+          "rar",
+          "7z",
+          "tar",
+          "gz",
+          "bin",
+          "exe",
+          "dll",
+          "so",
+          "yaml",
+          "yml",
+          "toml",
+          "ini",
+          "cfg",
+          "conf",
+          "sh",
+          "bat",
+          "ps1",
+          "rb",
+          "go",
+          "rs",
+          "swift",
+          "kt",
+          "scala"
+        ]
+      };
+      var MIME_TYPES = {
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        gif: "image/gif",
+        webp: "image/webp",
+        svg: "image/svg+xml",
+        bmp: "image/bmp",
+        ico: "image/x-icon",
+        tiff: "image/tiff",
+        tif: "image/tiff",
+        avif: "image/avif",
+        heic: "image/heic",
+        heif: "image/heif",
+        mp4: "video/mp4",
+        webm: "video/webm",
+        mov: "video/quicktime",
+        avi: "video/x-msvideo",
+        mkv: "video/x-matroska",
+        m4v: "video/x-m4v",
+        wmv: "video/x-ms-wmv",
+        flv: "video/x-flv",
+        mpeg: "video/mpeg",
+        mpg: "video/mpeg",
+        "3gp": "video/3gpp",
+        ogv: "video/ogg",
+        mp3: "audio/mpeg",
+        wav: "audio/wav",
+        ogg: "audio/ogg",
+        m4a: "audio/mp4",
+        aac: "audio/aac",
+        flac: "audio/flac",
+        wma: "audio/x-ms-wma",
+        aiff: "audio/aiff",
+        opus: "audio/opus",
+        weba: "audio/webm",
+        pdf: "application/pdf",
+        txt: "text/plain",
+        md: "text/markdown",
+        csv: "text/csv",
+        json: "application/json",
+        xml: "application/xml",
+        html: "text/html",
+        css: "text/css",
+        js: "application/javascript",
+        ts: "application/typescript",
+        py: "text/x-python",
+        java: "text/x-java-source",
+        c: "text/x-c",
+        cpp: "text/x-c++",
+        h: "text/x-c",
+        hpp: "text/x-c++",
+        doc: "application/msword",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        xls: "application/vnd.ms-excel",
+        xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ppt: "application/vnd.ms-powerpoint",
+        pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        zip: "application/zip",
+        rar: "application/vnd.rar",
+        "7z": "application/x-7z-compressed",
+        tar: "application/x-tar",
+        gz: "application/gzip",
+        bin: "application/octet-stream",
+        yaml: "text/yaml",
+        yml: "text/yaml",
+        toml: "text/toml",
+        ini: "text/plain",
+        sh: "application/x-sh",
+        bat: "application/x-bat",
+        ps1: "application/x-powershell",
+        rb: "text/x-ruby",
+        go: "text/x-go",
+        rs: "text/x-rust",
+        swift: "text/x-swift",
+        kt: "text/x-kotlin",
+        scala: "text/x-scala"
+      };
+      var MULTI_PART_THRESHOLD2 = 20 * 1024 * 1024;
+      function isSupportedFileType2(ext) {
+        const e = (ext || "").toLowerCase();
+        return Object.values(SUPPORTED_EXTENSIONS).some((arr) => arr.includes(e));
+      }
+      function getFileCategory2(ext) {
+        const e = (ext || "").toLowerCase();
+        for (const [cat, exts] of Object.entries(SUPPORTED_EXTENSIONS)) {
+          if (exts.includes(e)) return cat;
+        }
+        return "file";
+      }
+      function getMimeType3(ext) {
+        return MIME_TYPES[(ext || "").toLowerCase()] || "application/octet-stream";
+      }
+      function installUploadMethods(NotionAPI2) {
+        Object.assign(NotionAPI2, {
+          // 创建文件上传 (single_part ≤ 20MB)
+          createFileUpload: async (filename, contentType, apiKey) => {
+            return await NotionAPI2.request("POST", "/file_uploads", {
+              mode: "single_part",
+              filename,
+              content_type: contentType
+            }, apiKey);
+          },
+          // 创建多分片上传 (>20MB)
+          // numberOfParts (ISS-019/F2)：Notion API multi_part 契约要求声明 number_of_parts(1-10000)，
+          // 须与最终 part_number 匹配。Context7 OpenAPI /file_uploads POST mode=multi_part。
+          createMultiPartUpload: async (filename, contentType, fileSize, apiKey, numberOfParts) => {
+            return await NotionAPI2.request("POST", "/file_uploads", {
+              mode: "multi_part",
+              filename,
+              content_type: contentType,
+              file_size: fileSize,
+              number_of_parts: numberOfParts
+            }, apiKey);
+          },
+          // 发送分片（ISS-019/F1：multipart/form-data 二进制，对齐 Notion send endpoint 契约）
+          // Context7 /websites/developers_notion_reference: send endpoint 用 multipart/form-data（unique to this endpoint），
+          // file field 放原始二进制，part_number field(1-1000)。原 base64+JSON 实现违反契约且体积膨胀 33%。
+          // 仿 uploadFileContent:931 multipart 模式，但走 Notion API endpoint + Authorization Bearer（非 S3 预签名 URL）。
+          sendFilePart: (uploadId, partBlob, partNumber, apiKey, filename) => {
+            return new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const boundaryBytes = new Uint8Array(8);
+                if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                  crypto.getRandomValues(boundaryBytes);
+                } else {
+                  reject(new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 multipart boundary"));
+                  return;
+                }
+                const boundary = "----LDNotionFormBoundary" + Array.from(boundaryBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+                const partName = filename || `part-${partNumber}.bin`;
+                const uint8Array = new Uint8Array(reader.result);
+                const fileHeader = `--${boundary}\r
+Content-Disposition: form-data; name="file"; filename="${partName}"\r
+Content-Type: application/octet-stream\r
+\r
+`;
+                const partNumberField = `\r
+--${boundary}\r
+Content-Disposition: form-data; name="part_number"\r
+\r
+${partNumber}\r
+`;
+                const footer = `--${boundary}--\r
+`;
+                const headerBytes = new TextEncoder().encode(fileHeader);
+                const partNumberBytes = new TextEncoder().encode(partNumberField);
+                const footerBytes = new TextEncoder().encode(footer);
+                const body = new Uint8Array(headerBytes.length + uint8Array.length + partNumberBytes.length + footerBytes.length);
+                body.set(headerBytes, 0);
+                body.set(uint8Array, headerBytes.length);
+                body.set(partNumberBytes, headerBytes.length + uint8Array.length);
+                body.set(footerBytes, headerBytes.length + uint8Array.length + partNumberBytes.length);
+                GM_xmlhttpRequest({
+                  method: "POST",
+                  url: NotionAPI2.Transport.buildUrl(`/file_uploads/${uploadId}/send`),
+                  headers: {
+                    "Authorization": `Bearer ${NotionOAuth2.getAccessToken(apiKey)}`,
+                    "Notion-Version": CONFIG2.API.NOTION_VERSION,
+                    "Content-Type": `multipart/form-data; boundary=${boundary}`
+                  },
+                  data: body.buffer,
+                  binary: true,
+                  timeout: 12e4,
+                  onload: (response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                      try {
+                        resolve(Utils2.safeJsonParse(response.responseText, {}));
+                      } catch {
+                        resolve({});
+                      }
+                    } else {
+                      reject(new Error(`\u53D1\u9001\u5206\u7247\u5931\u8D25: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
+                    }
+                  },
+                  onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
+                  ontimeout: () => reject(new Error("\u53D1\u9001\u5206\u7247\u8D85\u65F6"))
+                });
+              };
+              reader.onerror = () => reject(new Error("\u8BFB\u53D6\u5206\u7247\u6570\u636E\u5931\u8D25"));
+              reader.readAsArrayBuffer(partBlob);
+            });
+          },
+          // 完成多分片上传
+          completeFileUpload: async (uploadId, apiKey) => {
+            return await NotionAPI2.request("POST", `/file_uploads/${uploadId}/complete`, {}, apiKey);
+          },
+          // 获取工作区文件大小限制
+          getWorkspaceLimits: async (apiKey) => {
+            var _a, _b;
+            try {
+              const user = await NotionAPI2.request("GET", "/users/me", null, apiKey);
+              return ((_b = (_a = user == null ? void 0 : user.bot) == null ? void 0 : _a.workspace_limits) == null ? void 0 : _b.max_file_upload_size_in_bytes) || 5 * 1024 * 1024;
+            } catch (e) {
+              console.warn("[LD-Notion] \u83B7\u53D6\u5DE5\u4F5C\u533A\u6587\u4EF6\u5927\u5C0F\u9650\u5236\u5931\u8D25\uFF0C\u56DE\u9000\u5230 5MB:", e);
+              return 5 * 1024 * 1024;
+            }
+          },
+          // 上传文件内容到预签名 URL
+          uploadFileContent: (uploadUrl, blob, contentType, filename) => {
+            return new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const bytes = new Uint8Array(8);
+                if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                  crypto.getRandomValues(bytes);
+                } else {
+                  throw new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 multipart boundary");
+                }
+                const boundary = "----WebKitFormBoundary" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+                const uint8Array = new Uint8Array(reader.result);
+                const header = `--${boundary}\r
+Content-Disposition: form-data; name="file"; filename="${filename}"\r
+Content-Type: ${contentType}\r
+\r
+`;
+                const headerBytes = new TextEncoder().encode(header);
+                const footerBytes = new TextEncoder().encode(`\r
+--${boundary}--\r
+`);
+                const body = new Uint8Array(headerBytes.length + uint8Array.length + footerBytes.length);
+                body.set(headerBytes, 0);
+                body.set(uint8Array, headerBytes.length);
+                body.set(footerBytes, headerBytes.length + uint8Array.length);
+                GM_xmlhttpRequest({
+                  method: "POST",
+                  url: uploadUrl,
+                  headers: {
+                    // 预签名 URL 已包含授权信息，发送 API Key 会造成安全泄露
+                    "Content-Type": `multipart/form-data; boundary=${boundary}`
+                  },
+                  data: body.buffer,
+                  binary: true,
+                  onload: (response) => {
+                    if (response.status === 200 || response.status === 204) {
+                      resolve();
+                    } else {
+                      reject(new Error(`\u4E0A\u4F20\u6587\u4EF6\u5931\u8D25: ${response.status}`));
+                    }
+                  },
+                  onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
+                  timeout: 6e4,
+                  ontimeout: () => reject(new Error("\u6587\u4EF6\u4E0A\u4F20\u8D85\u65F6"))
+                });
+              };
+              reader.onerror = () => reject(new Error("\u8BFB\u53D6\u6587\u4EF6\u6570\u636E\u5931\u8D25"));
+              reader.readAsArrayBuffer(blob);
+            });
+          },
+          // 通用文件上传（支持所有类型：图片/视频/音频/附件）
+          // 自动判断 single_part / multi_part，自动识别 block 类型
+          uploadFileToNotion: async (fileUrl, apiKey, originalFileName = null) => {
+            var _a;
+            const urlObj = new URL(fileUrl);
+            let ext = (urlObj.pathname.split(".").pop() || "").split("?")[0].toLowerCase();
+            if (originalFileName) {
+              const origExt = (_a = originalFileName.split(".").pop()) == null ? void 0 : _a.toLowerCase();
+              if (origExt && origExt.length <= 10 && /^[a-z0-9]+$/i.test(origExt)) {
+                ext = origExt;
+              }
+            }
+            if (!ext || ext.length > 10 || !/^[a-z0-9]+$/i.test(ext)) ext = "bin";
+            if (!isSupportedFileType2(ext)) {
+              throw new Error(`\u4E0D\u652F\u6301\u7684\u6587\u4EF6\u7C7B\u578B: .${ext}`);
+            }
+            const blob = await new Promise((resolve, reject) => {
+              GM_xmlhttpRequest({
+                method: "GET",
+                url: fileUrl,
+                responseType: "blob",
+                timeout: 6e4,
+                onload: (r) => {
+                  if (r.status >= 200 && r.status < 300) resolve(r.response);
+                  else reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${r.status}`));
+                },
+                onerror: (e) => reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${e}`)),
+                ontimeout: () => reject(new Error("\u4E0B\u8F7D\u8D85\u65F6"))
+              });
+            });
+            const contentType = blob.type || getMimeType3(ext);
+            const category = getFileCategory2(ext);
+            let blockType = "image";
+            if (category === "video") blockType = "video";
+            else if (category === "audio") blockType = "audio";
+            else if (category === "file") blockType = "file";
+            const filename = originalFileName || `${blockType}-${Date.now()}.${ext}`;
+            if (blob.size > MULTI_PART_THRESHOLD2) {
+              const PART_SIZE = 20 * 1024 * 1024;
+              const totalParts = Math.ceil(blob.size / PART_SIZE);
+              const multiUpload = await NotionAPI2.createMultiPartUpload(
+                filename,
+                contentType,
+                blob.size,
+                apiKey,
+                totalParts
+              );
+              if (!(multiUpload == null ? void 0 : multiUpload.id)) throw new Error("\u521B\u5EFA\u591A\u5206\u7247\u4E0A\u4F20\u5931\u8D25");
+              for (let i = 0; i < totalParts; i++) {
+                const start = i * PART_SIZE;
+                const end = Math.min(start + PART_SIZE, blob.size);
+                const partBlob = blob.slice(start, end);
+                await NotionAPI2.sendFilePart(multiUpload.id, partBlob, i + 1, apiKey, filename);
+              }
+              await NotionAPI2.completeFileUpload(multiUpload.id, apiKey);
+              return { fileId: multiUpload.id, blockType };
+            }
+            const typedBlob = new Blob([blob], { type: contentType });
+            const fileUpload = await NotionAPI2.createFileUpload(filename, contentType, apiKey);
+            if (!(fileUpload == null ? void 0 : fileUpload.upload_url) || !(fileUpload == null ? void 0 : fileUpload.id)) throw new Error("\u521B\u5EFA\u4E0A\u4F20\u5931\u8D25");
+            await NotionAPI2.uploadFileContent(fileUpload.upload_url, typedBlob, contentType, filename);
+            return { fileId: fileUpload.id, blockType };
+          },
+          // 下载并上传图片到 Notion（保留向后兼容，内部委托给 uploadFileToNotion）
+          uploadImageToNotion: async (imageUrl, apiKey, returnDetails = false) => {
+            var _a;
+            try {
+              const result = await NotionAPI2.uploadFileToNotion(imageUrl, apiKey);
+              if (!returnDetails) return result.fileId;
+              return result;
+            } catch (error) {
+              if ((_a = error.message) == null ? void 0 : _a.includes("\u4E0D\u652F\u6301")) {
+                console.warn("[LD-Notion] \u56FE\u7247\u7C7B\u578B\u4E0D\u652F\u6301\uFF0C\u8DF3\u8FC7:", imageUrl);
+                return null;
+              }
+              console.warn("[LD-Notion] \u56FE\u7247\u4E0A\u4F20\u5931\u8D25:", imageUrl, error.message);
+              try {
+                const blob = await new Promise((resolve, reject) => {
+                  GM_xmlhttpRequest({
+                    method: "GET",
+                    url: imageUrl,
+                    responseType: "blob",
+                    timeout: 6e4,
+                    onload: (r) => {
+                      if (r.status >= 200 && r.status < 300) resolve(r.response);
+                      else reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${r.status}`));
+                    },
+                    onerror: (e) => reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${e}`)),
+                    ontimeout: () => reject(new Error("\u4E0B\u8F7D\u8D85\u65F6"))
+                  });
+                });
+                const filename = `file-${Date.now()}.bin`;
+                const fileUpload = await NotionAPI2.createFileUpload(filename, "application/octet-stream", apiKey);
+                if (!(fileUpload == null ? void 0 : fileUpload.upload_url) || !(fileUpload == null ? void 0 : fileUpload.id)) throw new Error("\u521B\u5EFA\u4E0A\u4F20\u5931\u8D25");
+                await NotionAPI2.uploadFileContent(fileUpload.upload_url, blob, "application/octet-stream", filename);
+                const result = { fileId: fileUpload.id, blockType: "file" };
+                if (!returnDetails) return result.fileId;
+                return result;
+              } catch (fallbackError) {
+                console.error("[LD-Notion] \u6587\u4EF6\u56DE\u9000\u4E0A\u4F20\u5931\u8D25:", fallbackError);
+                return null;
+              }
+            }
+          }
+        });
+      }
+      module.exports = { installUploadMethods, isSupportedFileType: isSupportedFileType2, getFileCategory: getFileCategory2, getMimeType: getMimeType3, MULTI_PART_THRESHOLD: MULTI_PART_THRESHOLD2 };
+    }
+  });
+
+  // src/api/index.js
+  var require_api = __commonJS({
+    "src/api/index.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2, MSG: MSG2, SUPPORTED_FILE_TYPES: SUPPORTED_FILE_TYPES2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { NotionOAuth: NotionOAuth2 } = require_auth();
+      var { UrlValidator } = require_UrlValidator();
+      var { SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, EMOJI_MAP: EMOJI_MAP2, NOTION_LANGUAGES: NOTION_LANGUAGES2, normalizeLanguage: normalizeLanguage2 } = require_constants();
+      var { DOMToNotion: DOMToNotion2 } = require_DOMToNotion();
+      var { ObsidianAPI: ObsidianAPI2, HTMLToMarkdown: HTMLToMarkdown2 } = require_obsidian();
+      var { installUploadMethods } = require_notion_upload();
       var NotionTransport2 = Object.freeze({
         buildUrl: (endpoint) => `https://api.notion.com/v1${endpoint}`,
         buildHeaders: ({ token, notionVersion }) => ({
@@ -3040,265 +3752,6 @@
             const chunk = blocks.slice(i, i + 100);
             await NotionAPI2.request("PATCH", `/blocks/${pageId}/children`, { children: chunk }, apiKey);
             await Utils2.sleep(300);
-          }
-        },
-        // 创建文件上传 (single_part ≤ 20MB)
-        createFileUpload: async (filename, contentType, apiKey) => {
-          return await NotionAPI2.request("POST", "/file_uploads", {
-            mode: "single_part",
-            filename,
-            content_type: contentType
-          }, apiKey);
-        },
-        // 创建多分片上传 (>20MB)
-        // numberOfParts (ISS-019/F2)：Notion API multi_part 契约要求声明 number_of_parts(1-10000)，
-        // 须与最终 part_number 匹配。Context7 OpenAPI /file_uploads POST mode=multi_part。
-        createMultiPartUpload: async (filename, contentType, fileSize, apiKey, numberOfParts) => {
-          return await NotionAPI2.request("POST", "/file_uploads", {
-            mode: "multi_part",
-            filename,
-            content_type: contentType,
-            file_size: fileSize,
-            number_of_parts: numberOfParts
-          }, apiKey);
-        },
-        // 发送分片（ISS-019/F1：multipart/form-data 二进制，对齐 Notion send endpoint 契约）
-        // Context7 /websites/developers_notion_reference: send endpoint 用 multipart/form-data（unique to this endpoint），
-        // file field 放原始二进制，part_number field(1-1000)。原 base64+JSON 实现违反契约且体积膨胀 33%。
-        // 仿 uploadFileContent:931 multipart 模式，但走 Notion API endpoint + Authorization Bearer（非 S3 预签名 URL）。
-        sendFilePart: (uploadId, partBlob, partNumber, apiKey, filename) => {
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const boundaryBytes = new Uint8Array(8);
-              if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-                crypto.getRandomValues(boundaryBytes);
-              } else {
-                reject(new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 multipart boundary"));
-                return;
-              }
-              const boundary = "----LDNotionFormBoundary" + Array.from(boundaryBytes, (b) => b.toString(16).padStart(2, "0")).join("");
-              const partName = filename || `part-${partNumber}.bin`;
-              const uint8Array = new Uint8Array(reader.result);
-              const fileHeader = `--${boundary}\r
-Content-Disposition: form-data; name="file"; filename="${partName}"\r
-Content-Type: application/octet-stream\r
-\r
-`;
-              const partNumberField = `\r
---${boundary}\r
-Content-Disposition: form-data; name="part_number"\r
-\r
-${partNumber}\r
-`;
-              const footer = `--${boundary}--\r
-`;
-              const headerBytes = new TextEncoder().encode(fileHeader);
-              const partNumberBytes = new TextEncoder().encode(partNumberField);
-              const footerBytes = new TextEncoder().encode(footer);
-              const body = new Uint8Array(headerBytes.length + uint8Array.length + partNumberBytes.length + footerBytes.length);
-              body.set(headerBytes, 0);
-              body.set(uint8Array, headerBytes.length);
-              body.set(partNumberBytes, headerBytes.length + uint8Array.length);
-              body.set(footerBytes, headerBytes.length + uint8Array.length + partNumberBytes.length);
-              GM_xmlhttpRequest({
-                method: "POST",
-                url: NotionAPI2.Transport.buildUrl(`/file_uploads/${uploadId}/send`),
-                headers: {
-                  "Authorization": `Bearer ${NotionOAuth2.getAccessToken(apiKey)}`,
-                  "Notion-Version": CONFIG2.API.NOTION_VERSION,
-                  "Content-Type": `multipart/form-data; boundary=${boundary}`
-                },
-                data: body.buffer,
-                binary: true,
-                timeout: 12e4,
-                onload: (response) => {
-                  if (response.status >= 200 && response.status < 300) {
-                    try {
-                      resolve(Utils2.safeJsonParse(response.responseText, {}));
-                    } catch {
-                      resolve({});
-                    }
-                  } else {
-                    reject(new Error(`\u53D1\u9001\u5206\u7247\u5931\u8D25: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
-                  }
-                },
-                onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
-                ontimeout: () => reject(new Error("\u53D1\u9001\u5206\u7247\u8D85\u65F6"))
-              });
-            };
-            reader.onerror = () => reject(new Error("\u8BFB\u53D6\u5206\u7247\u6570\u636E\u5931\u8D25"));
-            reader.readAsArrayBuffer(partBlob);
-          });
-        },
-        // 完成多分片上传
-        completeFileUpload: async (uploadId, apiKey) => {
-          return await NotionAPI2.request("POST", `/file_uploads/${uploadId}/complete`, {}, apiKey);
-        },
-        // 获取工作区文件大小限制
-        getWorkspaceLimits: async (apiKey) => {
-          var _a, _b;
-          try {
-            const user = await NotionAPI2.request("GET", "/users/me", null, apiKey);
-            return ((_b = (_a = user == null ? void 0 : user.bot) == null ? void 0 : _a.workspace_limits) == null ? void 0 : _b.max_file_upload_size_in_bytes) || 5 * 1024 * 1024;
-          } catch (e) {
-            console.warn("[LD-Notion] \u83B7\u53D6\u5DE5\u4F5C\u533A\u6587\u4EF6\u5927\u5C0F\u9650\u5236\u5931\u8D25\uFF0C\u56DE\u9000\u5230 5MB:", e);
-            return 5 * 1024 * 1024;
-          }
-        },
-        // 上传文件内容到预签名 URL
-        uploadFileContent: (uploadUrl, blob, contentType, filename) => {
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const bytes = new Uint8Array(8);
-              if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-                crypto.getRandomValues(bytes);
-              } else {
-                throw new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 multipart boundary");
-              }
-              const boundary = "----WebKitFormBoundary" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-              const uint8Array = new Uint8Array(reader.result);
-              const header = `--${boundary}\r
-Content-Disposition: form-data; name="file"; filename="${filename}"\r
-Content-Type: ${contentType}\r
-\r
-`;
-              const headerBytes = new TextEncoder().encode(header);
-              const footerBytes = new TextEncoder().encode(`\r
---${boundary}--\r
-`);
-              const body = new Uint8Array(headerBytes.length + uint8Array.length + footerBytes.length);
-              body.set(headerBytes, 0);
-              body.set(uint8Array, headerBytes.length);
-              body.set(footerBytes, headerBytes.length + uint8Array.length);
-              GM_xmlhttpRequest({
-                method: "POST",
-                url: uploadUrl,
-                headers: {
-                  // 预签名 URL 已包含授权信息，发送 API Key 会造成安全泄露
-                  "Content-Type": `multipart/form-data; boundary=${boundary}`
-                },
-                data: body.buffer,
-                binary: true,
-                onload: (response) => {
-                  if (response.status === 200 || response.status === 204) {
-                    resolve();
-                  } else {
-                    reject(new Error(`\u4E0A\u4F20\u6587\u4EF6\u5931\u8D25: ${response.status}`));
-                  }
-                },
-                onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
-                timeout: 6e4,
-                ontimeout: () => reject(new Error("\u6587\u4EF6\u4E0A\u4F20\u8D85\u65F6"))
-              });
-            };
-            reader.onerror = () => reject(new Error("\u8BFB\u53D6\u6587\u4EF6\u6570\u636E\u5931\u8D25"));
-            reader.readAsArrayBuffer(blob);
-          });
-        },
-        // 通用文件上传（支持所有类型：图片/视频/音频/附件）
-        // 自动判断 single_part / multi_part，自动识别 block 类型
-        uploadFileToNotion: async (fileUrl, apiKey, originalFileName = null) => {
-          var _a;
-          const urlObj = new URL(fileUrl);
-          let ext = (urlObj.pathname.split(".").pop() || "").split("?")[0].toLowerCase();
-          if (originalFileName) {
-            const origExt = (_a = originalFileName.split(".").pop()) == null ? void 0 : _a.toLowerCase();
-            if (origExt && origExt.length <= 10 && /^[a-z0-9]+$/i.test(origExt)) {
-              ext = origExt;
-            }
-          }
-          if (!ext || ext.length > 10 || !/^[a-z0-9]+$/i.test(ext)) ext = "bin";
-          if (!isSupportedFileType2(ext)) {
-            throw new Error(`\u4E0D\u652F\u6301\u7684\u6587\u4EF6\u7C7B\u578B: .${ext}`);
-          }
-          const blob = await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "GET",
-              url: fileUrl,
-              responseType: "blob",
-              timeout: 6e4,
-              onload: (r) => {
-                if (r.status >= 200 && r.status < 300) resolve(r.response);
-                else reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${r.status}`));
-              },
-              onerror: (e) => reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${e}`)),
-              ontimeout: () => reject(new Error("\u4E0B\u8F7D\u8D85\u65F6"))
-            });
-          });
-          const contentType = blob.type || getMimeType3(ext);
-          const category = getFileCategory2(ext);
-          let blockType = "image";
-          if (category === "video") blockType = "video";
-          else if (category === "audio") blockType = "audio";
-          else if (category === "file") blockType = "file";
-          const filename = originalFileName || `${blockType}-${Date.now()}.${ext}`;
-          if (blob.size > MULTI_PART_THRESHOLD2) {
-            const PART_SIZE = 20 * 1024 * 1024;
-            const totalParts = Math.ceil(blob.size / PART_SIZE);
-            const multiUpload = await NotionAPI2.createMultiPartUpload(
-              filename,
-              contentType,
-              blob.size,
-              apiKey,
-              totalParts
-            );
-            if (!(multiUpload == null ? void 0 : multiUpload.id)) throw new Error("\u521B\u5EFA\u591A\u5206\u7247\u4E0A\u4F20\u5931\u8D25");
-            for (let i = 0; i < totalParts; i++) {
-              const start = i * PART_SIZE;
-              const end = Math.min(start + PART_SIZE, blob.size);
-              const partBlob = blob.slice(start, end);
-              await NotionAPI2.sendFilePart(multiUpload.id, partBlob, i + 1, apiKey, filename);
-            }
-            await NotionAPI2.completeFileUpload(multiUpload.id, apiKey);
-            return { fileId: multiUpload.id, blockType };
-          }
-          const typedBlob = new Blob([blob], { type: contentType });
-          const fileUpload = await NotionAPI2.createFileUpload(filename, contentType, apiKey);
-          if (!(fileUpload == null ? void 0 : fileUpload.upload_url) || !(fileUpload == null ? void 0 : fileUpload.id)) throw new Error("\u521B\u5EFA\u4E0A\u4F20\u5931\u8D25");
-          await NotionAPI2.uploadFileContent(fileUpload.upload_url, typedBlob, contentType, filename);
-          return { fileId: fileUpload.id, blockType };
-        },
-        // 下载并上传图片到 Notion（保留向后兼容，内部委托给 uploadFileToNotion）
-        uploadImageToNotion: async (imageUrl, apiKey, returnDetails = false) => {
-          var _a;
-          try {
-            const result = await NotionAPI2.uploadFileToNotion(imageUrl, apiKey);
-            if (!returnDetails) return result.fileId;
-            return result;
-          } catch (error) {
-            if ((_a = error.message) == null ? void 0 : _a.includes("\u4E0D\u652F\u6301")) {
-              console.warn("[LD-Notion] \u56FE\u7247\u7C7B\u578B\u4E0D\u652F\u6301\uFF0C\u8DF3\u8FC7:", imageUrl);
-              return null;
-            }
-            console.warn("[LD-Notion] \u56FE\u7247\u4E0A\u4F20\u5931\u8D25:", imageUrl, error.message);
-            try {
-              const blob = await new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                  method: "GET",
-                  url: imageUrl,
-                  responseType: "blob",
-                  timeout: 6e4,
-                  onload: (r) => {
-                    if (r.status >= 200 && r.status < 300) resolve(r.response);
-                    else reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${r.status}`));
-                  },
-                  onerror: (e) => reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${e}`)),
-                  ontimeout: () => reject(new Error("\u4E0B\u8F7D\u8D85\u65F6"))
-                });
-              });
-              const filename = `file-${Date.now()}.bin`;
-              const fileUpload = await NotionAPI2.createFileUpload(filename, "application/octet-stream", apiKey);
-              if (!(fileUpload == null ? void 0 : fileUpload.upload_url) || !(fileUpload == null ? void 0 : fileUpload.id)) throw new Error("\u521B\u5EFA\u4E0A\u4F20\u5931\u8D25");
-              await NotionAPI2.uploadFileContent(fileUpload.upload_url, blob, "application/octet-stream", filename);
-              const result = { fileId: fileUpload.id, blockType: "file" };
-              if (!returnDetails) return result.fileId;
-              return result;
-            } catch (fallbackError) {
-              console.error("[LD-Notion] \u6587\u4EF6\u56DE\u9000\u4E0A\u4F20\u5931\u8D25:", fallbackError);
-              return null;
-            }
           }
         },
         // ========== 搜索和读取操作 (READONLY) ==========
@@ -3634,1267 +4087,790 @@ Content-Type: ${contentType}\r
           }, apiKey);
         }
       };
-      var ObsidianAPI2 = {
-        testConnection: async (apiUrl, apiKey) => {
-          if (!UrlValidator.validateObsidianUrl(apiUrl)) {
-            return { ok: false, error: "Obsidian API URL \u5B89\u5168\u6821\u9A8C\u5931\u8D25\uFF1A\u4EC5\u5141\u8BB8\u672C\u5730\u5730\u5740 (127.0.0.1/localhost)" };
-          }
-          const resp = await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "GET",
-              url: `${apiUrl}/vault/`,
-              headers: { Authorization: `Bearer ${apiKey}` },
-              responseType: "json",
-              timeout: 1e4,
-              onload: (r) => resolve(r),
-              onerror: (e) => reject(e),
-              ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
-            });
-          });
-          if (resp.status === 200 || resp.status === 204) return { ok: true };
-          return { ok: false, error: `HTTP ${resp.status}: ${resp.statusText}` };
-        },
-        writeNote: async (apiUrl, apiKey, path, content) => {
-          if (!UrlValidator.validateObsidianUrl(apiUrl)) {
-            return { ok: false, error: "Obsidian API URL \u5B89\u5168\u6821\u9A8C\u5931\u8D25\uFF1A\u4EC5\u5141\u8BB8\u672C\u5730\u5730\u5740 (127.0.0.1/localhost)" };
-          }
-          const resp = await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "PUT",
-              url: `${apiUrl}/vault/${encodeURIComponent(path)}`,
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "Content-Type": "text/markdown"
-              },
-              data: content,
-              timeout: 3e4,
-              onload: (r) => resolve(r),
-              onerror: (e) => reject(e),
-              ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
-            });
-          });
-          if (resp.status === 200 || resp.status === 204 || resp.status === 201) {
-            return { ok: true };
-          }
-          return { ok: false, error: `HTTP ${resp.status}: ${resp.statusText}` };
-        },
-        writeImage: async (apiUrl, apiKey, path, blob, contentType) => {
-          if (!UrlValidator.validateObsidianUrl(apiUrl)) {
-            return { ok: false, error: "Obsidian API URL \u5B89\u5168\u6821\u9A8C\u5931\u8D25\uFF1A\u4EC5\u5141\u8BB8\u672C\u5730\u5730\u5740 (127.0.0.1/localhost)" };
-          }
-          const resp = await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "PUT",
-              url: `${apiUrl}/vault/${encodeURIComponent(path)}`,
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "Content-Type": contentType || "application/octet-stream"
-              },
-              data: blob,
-              timeout: 6e4,
-              onload: (r) => resolve(r),
-              onerror: (e) => reject(e),
-              ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
-            });
-          });
-          if (resp.status === 200 || resp.status === 204 || resp.status === 201) {
-            return { ok: true };
-          }
-          return { ok: false, error: `HTTP ${resp.status}: ${resp.statusText}` };
-        }
-      };
-      var HTMLToMarkdown2 = {
-        convert: (html) => {
-          const doc = new DOMParser().parseFromString(html, "text/html");
-          return HTMLToMarkdown2._convertNode(doc.body);
-        },
-        _convertNode: (node) => {
-          var _a, _b, _c;
-          if (node.nodeType === Node.TEXT_NODE) {
-            return node.textContent || "";
-          }
-          if (node.nodeType !== Node.ELEMENT_NODE) return "";
-          const tag = node.tagName.toLowerCase();
-          const children = HTMLToMarkdown2._convertChildren(node);
-          switch (tag) {
-            case "h1":
-              return `# ${children}
-
-`;
-            case "h2":
-              return `## ${children}
-
-`;
-            case "h3":
-              return `### ${children}
-
-`;
-            case "h4":
-              return `#### ${children}
-
-`;
-            case "h5":
-              return `##### ${children}
-
-`;
-            case "h6":
-              return `###### ${children}
-
-`;
-            case "p":
-              return `${children}
-
-`;
-            case "br":
-              return "\n";
-            case "hr":
-              return "---\n\n";
-            case "strong":
-            case "b":
-              return `**${children}**`;
-            case "em":
-            case "i":
-              return `*${children}*`;
-            case "del":
-            case "s":
-              return `~~${children}~~`;
-            case "code": {
-              const parent = node.parentElement;
-              if (parent && parent.tagName.toLowerCase() === "pre") return children;
-              return `\`${children}\``;
-            }
-            case "pre": {
-              const codeEl = node.querySelector("code");
-              const lang = ((_b = (_a = codeEl == null ? void 0 : codeEl.className) == null ? void 0 : _a.match(/language-(\w+)/)) == null ? void 0 : _b[1]) || "";
-              const text = codeEl ? codeEl.textContent : node.textContent;
-              return `\`\`\`${lang}
-${text}
-\`\`\`
-
-`;
-            }
-            case "blockquote": {
-              const lines = children.trim().split("\n");
-              return lines.map((l) => `> ${l}`).join("\n") + "\n\n";
-            }
-            case "a": {
-              const href = node.getAttribute("href") || "";
-              if (href.startsWith("http")) return `[${children}](${href})`;
-              return children;
-            }
-            case "img": {
-              const src = node.getAttribute("src") || "";
-              const alt = node.getAttribute("alt") || "";
-              return `![${alt}](${src})`;
-            }
-            case "ul":
-              return children;
-            case "ol": {
-              const items = node.querySelectorAll(":scope > li");
-              let idx = 1;
-              return Array.from(items).map((li) => {
-                const md = HTMLToMarkdown2._convertNode(li).trim();
-                const result = `${idx}. ${md}
-`;
-                idx++;
-                return result;
-              }).join("") + "\n";
-            }
-            case "li":
-              return `- ${children}
-`;
-            case "table":
-              return HTMLToMarkdown2._convertTable(node) + "\n\n";
-            case "iframe": {
-              const src = node.getAttribute("src") || "";
-              return `[\u5D4C\u5165\u5185\u5BB9](${src})
-
-`;
-            }
-            case "video": {
-              const src = node.getAttribute("src") || ((_c = node.querySelector("source")) == null ? void 0 : _c.getAttribute("src")) || "";
-              return `[\u89C6\u9891](${src})
-
-`;
-            }
-            case "audio": {
-              const src = node.getAttribute("src") || "";
-              return `[\u97F3\u9891](${src})
-
-`;
-            }
-            case "div": {
-              const cls = node.className || "";
-              if (cls.includes("onebox")) {
-                return `> [!quote]
-> ${children.trim()}
-
-`;
-              }
-              return children;
-            }
-            default:
-              return children;
-          }
-        },
-        _convertChildren: (node) => {
-          return Array.from(node.childNodes).map(HTMLToMarkdown2._convertNode).join("");
-        },
-        _convertTable: (table) => {
-          const rows = table.querySelectorAll("tr");
-          if (rows.length === 0) return "";
-          const result = [];
-          rows.forEach((row, i) => {
-            const cells = Array.from(row.querySelectorAll("th, td")).map((c) => {
-              return HTMLToMarkdown2._convertChildren(c).replace(/\n/g, " ").trim();
-            });
-            result.push(`| ${cells.join(" | ")} |`);
-            if (i === 0) {
-              result.push(`| ${cells.map(() => "---").join(" | ")} |`);
-            }
-          });
-          return result.join("\n");
-        },
-        buildFrontmatter: (meta) => {
-          const lines = ["---"];
-          const esc = (s) => String(s || "").replace(/"/g, '\\"');
-          if (meta.title) lines.push(`title: "${esc(meta.title)}"`);
-          if (meta.url) lines.push(`url: "${esc(meta.url)}"`);
-          if (meta.author) lines.push(`author: "${esc(meta.author)}"`);
-          if (meta.source) lines.push(`source: "${esc(meta.source)}"`);
-          if (meta.sourceType) lines.push(`source_type: "${esc(meta.sourceType)}"`);
-          if (meta.topicId) lines.push(`topic_id: ${meta.topicId}`);
-          if (meta.owner) lines.push(`owner: "${esc(meta.owner)}"`);
-          if (meta.repo) lines.push(`repo: "${esc(meta.repo)}"`);
-          if (meta.gistId) lines.push(`gist_id: "${esc(meta.gistId)}"`);
-          if (meta.category) lines.push(`category: "${esc(meta.category)}"`);
-          if (meta.language) lines.push(`language: "${esc(meta.language)}"`);
-          if (Number.isFinite(Number(meta.stars))) lines.push(`stars: ${Number(meta.stars)}`);
-          if (meta.updatedAt) lines.push(`updated_at: "${esc(meta.updatedAt)}"`);
-          if (meta.tags && meta.tags.length > 0) {
-            lines.push("tags:");
-            meta.tags.forEach((t) => lines.push(`  - "${esc(t)}"`));
-          }
-          lines.push(`export_time: "${(/* @__PURE__ */ new Date()).toISOString()}"`);
-          if (meta.floors !== void 0) lines.push(`floors: ${meta.floors}`);
-          lines.push("---");
-          return lines.join("\n") + "\n\n";
-        },
-        buildPostCallout: (post, index, isOp) => {
-          const type = isOp ? "success" : "note";
-          const collapsed = index > 0 ? "+" : "";
-          const username = post.username || "\u672A\u77E5";
-          const postNum = post.post_number || index + 1;
-          const date = post.created_at ? new Date(post.created_at).toLocaleString("zh-CN") : "\u672A\u77E5\u65F6\u95F4";
-          const header = `#${postNum} ${username}${post.username ? ` (@${post.username})` : ""}${isOp ? " \u697C\u4E3B" : ""} \xB7 ${date}`;
-          const content = HTMLToMarkdown2.convert(post.cooked || "");
-          const lines = content.trim().split("\n");
-          const quoted = lines.map((l) => `> ${l}`).join("\n");
-          return `> [!${type}]${collapsed} ${header}
-${quoted}
-> ^floor-${postNum}
-
-`;
-        }
-      };
+      installUploadMethods(NotionAPI2);
       module.exports = { SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, EMOJI_MAP: EMOJI_MAP2, NOTION_LANGUAGES: NOTION_LANGUAGES2, normalizeLanguage: normalizeLanguage2, DOMToNotion: DOMToNotion2, NotionTransport: NotionTransport2, NotionAPI: NotionAPI2, ObsidianAPI: ObsidianAPI2, HTMLToMarkdown: HTMLToMarkdown2 };
     }
   });
 
-  // src/ui/style-manager.js
-  var require_style_manager = __commonJS({
-    "src/ui/style-manager.js"(exports, module) {
+  // src/coordination/event-bus.js
+  var require_event_bus = __commonJS({
+    "src/coordination/event-bus.js"(exports, module) {
       "use strict";
-      var StyleManager2 = {
-        injectOnce: (styleId, cssText) => {
-          if (!styleId || !cssText) return null;
-          const root = document.head || document.documentElement;
-          if (!root) return null;
-          const existing = document.getElementById(styleId);
-          if (existing) return existing;
-          const style = document.createElement("style");
-          style.id = styleId;
-          style.setAttribute("data-ldb-style", styleId);
-          style.textContent = cssText;
-          root.appendChild(style);
-          return style;
+      var subscribers = /* @__PURE__ */ Object.create(null);
+      var on = (event, handler) => {
+        if (!subscribers[event]) {
+          subscribers[event] = [];
+        }
+        if (!subscribers[event].includes(handler)) {
+          subscribers[event].push(handler);
         }
       };
-      ;
-      module.exports = { StyleManager: StyleManager2 };
-    }
-  });
-
-  // src/ui/design-system.js
-  var require_design_system = __commonJS({
-    "src/ui/design-system.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Storage: Storage2 } = require_storage();
-      var { StyleManager: StyleManager2 } = require_style_manager();
-      var DesignSystem2 = {
-        STYLE_IDS: {
-          BASE: "ldb-ui-base",
-          CHAT: "ldb-ui-chat",
-          NOTION: "ldb-ui-notion",
-          LINUX_DO: "ldb-ui-linux-do",
-          GENERIC: "ldb-ui-generic"
-        },
-        // 主题管理
-        _theme: "auto",
-        _mediaQuery: null,
-        initTheme: () => {
-          DesignSystem2._theme = Storage2.get(CONFIG2.STORAGE_KEYS.THEME_PREFERENCE, CONFIG2.DEFAULTS.themePreference);
-          DesignSystem2._applyTheme();
-          DesignSystem2._mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-          DesignSystem2._mediaQuery.addEventListener("change", () => {
-            if (DesignSystem2._theme === "auto") DesignSystem2._applyTheme();
+      var off = (event, handler) => {
+        if (!event) {
+          Object.keys(subscribers).forEach((key) => {
+            delete subscribers[key];
           });
-        },
-        setTheme: (theme) => {
-          DesignSystem2._theme = theme;
-          Storage2.set(CONFIG2.STORAGE_KEYS.THEME_PREFERENCE, theme);
-          DesignSystem2._applyTheme();
-        },
-        getEffectiveTheme: () => {
-          if (DesignSystem2._theme === "auto") {
-            return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          return;
+        }
+        const handlers = subscribers[event];
+        if (!handlers) return;
+        if (!handler) {
+          delete subscribers[event];
+        } else {
+          const idx = handlers.indexOf(handler);
+          if (idx > -1) {
+            handlers.splice(idx, 1);
+            if (handlers.length === 0) {
+              delete subscribers[event];
+            }
           }
-          return DesignSystem2._theme;
-        },
-        _applyTheme: () => {
-          const effective = DesignSystem2.getEffectiveTheme();
-          document.querySelectorAll("[data-ldb-root]").forEach((el) => {
-            el.setAttribute("data-ldb-theme", effective);
-          });
-          document.querySelectorAll(".ldb-theme-btn").forEach((btn) => {
-            btn.textContent = effective === "dark" ? "\u2600\uFE0F" : "\u{1F319}";
-            btn.title = effective === "dark" ? "\u5207\u6362\u4EAE\u8272\u6A21\u5F0F" : "\u5207\u6362\u6697\u8272\u6A21\u5F0F";
-          });
-        },
-        toggleTheme: () => {
-          const effective = DesignSystem2.getEffectiveTheme();
-          DesignSystem2.setTheme(effective === "dark" ? "light" : "dark");
-        },
-        ensureBase: () => {
-          StyleManager2.injectOnce(DesignSystem2.STYLE_IDS.BASE, DesignSystem2.getBaseCSS());
-        },
-        ensureChat: () => {
-          StyleManager2.injectOnce(DesignSystem2.STYLE_IDS.CHAT, DesignSystem2.getChatCSS());
-        },
-        getBaseCSS: () => `
-        /* LDB_UI_TOKENS */
-        .ldb-panel,
-        .ldb-notion-panel,
-        .gclip-panel,
-        .ldb-notion-float-btn,
-        .ldb-mini-btn,
-        .gclip-float-btn,
-        .ldb-undo-toast {
-            --ldb-ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-
-            --ldb-ui-radius: 14px;
-            --ldb-ui-radius-sm: 10px;
-            --ldb-ui-radius-xs: 8px;
-
-            --ldb-ui-shadow: 0 18px 55px rgba(2, 6, 23, 0.22);
-            --ldb-ui-shadow-sm: 0 10px 26px rgba(2, 6, 23, 0.16);
-
-            --ldb-ui-text: #0f172a;
-            --ldb-ui-muted: #64748b;
-            --ldb-ui-border: rgba(15, 23, 42, 0.14);
-
-            --ldb-ui-surface: rgba(255, 255, 255, 0.94);
-            --ldb-ui-surface-2: rgba(248, 250, 252, 0.94);
-            --ldb-ui-surface-3: rgba(241, 245, 249, 0.94);
-
-            --ldb-ui-accent: #2563eb;
-            --ldb-ui-accent-2: #7c3aed;
-
-            --ldb-ui-success: #16a34a;
-            --ldb-ui-warning: #d97706;
-            --ldb-ui-danger: #dc2626;
-
-            --ldb-ui-badge-teal: #0f766e;
-            --ldb-ui-badge-blue: #1d4ed8;
-
-            --ldb-ui-focus-ring: rgba(37, 99, 235, 0.35);
-            --ldb-ui-backdrop: rgba(2, 6, 23, 0.35);
-
-            --ldb-ui-white: #fff;
-
-            --ldb-ui-radius-2xs: 6px;
-            --ldb-ui-radius-md: 12px;
-            --ldb-ui-radius-pill: 999px;
-
-            --ldb-ui-spacing-3xs: 2px;
-            --ldb-ui-spacing-xs: 4px;
-            --ldb-ui-spacing-sm: 6px;
-            --ldb-ui-spacing-md: 8px;
-            --ldb-ui-spacing-lg: 10px;
-            --ldb-ui-spacing-xl: 12px;
-            --ldb-ui-spacing-2xl: 14px;
-            --ldb-ui-spacing-3xl: 18px;
-
-            --ldb-ui-font-size-xs: 11px;
-            --ldb-ui-font-size-sm: 12px;
-            --ldb-ui-font-size-md: 13px;
-            --ldb-ui-font-size-lg: 14px;
-            --ldb-ui-font-size-xl: 20px;
-            --ldb-ui-font-size-2xl: 22px;
-
-            --ldb-ui-z-index-panel: 2147483640;
-            --ldb-ui-z-index-panel-top: 2147483641;
-            --ldb-ui-z-index-overlay: 2147483646;
-            --ldb-ui-z-index-float: 2147483647;
-
-            --ldb-ui-warning-bright: var(--ldb-ui-warning-bright);
-            --ldb-ui-success-bright: #10b981;
-            --ldb-ui-danger-bright: var(--ldb-ui-danger-bright);
-
-            --ldb-ui-disabled-opacity: var(--ldb-ui-disabled-opacity);
-            --ldb-ui-disabled-cursor: var(--ldb-ui-disabled-cursor);
-
-            font-family: var(--ldb-ui-font);
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
         }
-
-        /* \u6697\u8272\u4E3B\u9898 \u2014 \u901A\u8FC7 data-ldb-theme \u5C5E\u6027\u89E6\u53D1 */
-        [data-ldb-theme="dark"].ldb-panel,
-        [data-ldb-theme="dark"].ldb-notion-panel,
-        [data-ldb-theme="dark"].gclip-panel,
-        [data-ldb-theme="dark"].ldb-notion-float-btn,
-        [data-ldb-theme="dark"].ldb-mini-btn,
-        [data-ldb-theme="dark"].gclip-float-btn,
-        [data-ldb-theme="dark"].ldb-undo-toast,
-        [data-ldb-theme="dark"] .ldb-panel,
-        [data-ldb-theme="dark"] .ldb-notion-panel,
-        [data-ldb-theme="dark"] .gclip-panel,
-        [data-ldb-theme="dark"] .ldb-notion-float-btn,
-        [data-ldb-theme="dark"] .ldb-mini-btn,
-        [data-ldb-theme="dark"] .gclip-float-btn,
-        [data-ldb-theme="dark"] .ldb-undo-toast {
-            --ldb-ui-text: #e5e7eb;
-            --ldb-ui-muted: #9ca3af;
-            --ldb-ui-border: rgba(148, 163, 184, 0.22);
-
-            --ldb-ui-surface: rgba(17, 24, 39, 0.92);
-            --ldb-ui-surface-2: rgba(15, 23, 42, 0.92);
-            --ldb-ui-surface-3: rgba(2, 6, 23, 0.60);
-
-            --ldb-ui-accent: #60a5fa;
-            --ldb-ui-accent-2: #c4b5fd;
-
-            --ldb-ui-badge-teal: #2dd4bf;
-            --ldb-ui-badge-blue: #93c5fd;
-
-            --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
-            --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
-        }
-
-        /* \u4FDD\u7559 prefers-color-scheme \u4F5C\u4E3A auto \u6A21\u5F0F\u7684\u56DE\u9000 */
-        @media (prefers-color-scheme: dark) {
-            .ldb-panel:not([data-ldb-theme]),
-            .ldb-notion-panel:not([data-ldb-theme]),
-            .gclip-panel:not([data-ldb-theme]),
-            .ldb-notion-float-btn:not([data-ldb-theme]),
-            .ldb-mini-btn:not([data-ldb-theme]),
-            .gclip-float-btn:not([data-ldb-theme]),
-            .ldb-undo-toast:not([data-ldb-theme]) {
-                --ldb-ui-text: #e5e7eb;
-                --ldb-ui-muted: #9ca3af;
-                --ldb-ui-border: rgba(148, 163, 184, 0.22);
-
-                --ldb-ui-surface: rgba(17, 24, 39, 0.92);
-                --ldb-ui-surface-2: rgba(15, 23, 42, 0.92);
-                --ldb-ui-surface-3: rgba(2, 6, 23, 0.60);
-
-                --ldb-ui-accent: #60a5fa;
-                --ldb-ui-accent-2: #c4b5fd;
-
-                --ldb-ui-badge-teal: #2dd4bf;
-                --ldb-ui-badge-blue: #93c5fd;
-
-                --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
-                --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
-            }
-        }
-
-        .ldb-panel,
-        .ldb-notion-panel,
-        .gclip-panel,
-        .ldb-undo-toast {
-            color: var(--ldb-ui-text);
-        }
-
-        .ldb-panel *,
-        .ldb-notion-panel *,
-        .gclip-panel *,
-        .ldb-undo-toast * {
-            box-sizing: border-box;
-        }
-
-        .ldb-panel a,
-        .ldb-notion-panel a,
-        .gclip-panel a {
-            color: var(--ldb-ui-accent);
-            text-decoration: none;
-        }
-        .ldb-panel a:hover,
-        .ldb-notion-panel a:hover,
-        .gclip-panel a:hover {
-            text-decoration: underline;
-        }
-
-        .ldb-panel button,
-        .ldb-notion-panel button,
-        .gclip-panel button,
-        .ldb-notion-float-btn,
-        .ldb-mini-btn,
-        .gclip-float-btn {
-            font-family: inherit;
-        }
-
-        .ldb-panel input,
-        .ldb-panel select,
-        .ldb-panel textarea,
-        .ldb-notion-panel input,
-        .ldb-notion-panel select,
-        .ldb-notion-panel textarea,
-        .gclip-panel input,
-        .gclip-panel select,
-        .gclip-panel textarea {
-            font-family: inherit;
-            color: var(--ldb-ui-text);
-            background: var(--ldb-ui-surface-2);
-            border: 1px solid var(--ldb-ui-border);
-            border-radius: var(--ldb-ui-radius-xs);
-            padding: 8px 10px;
-            outline: none;
-        }
-
-        .ldb-panel input::placeholder,
-        .ldb-panel textarea::placeholder,
-        .ldb-notion-panel input::placeholder,
-        .ldb-notion-panel textarea::placeholder,
-        .gclip-panel input::placeholder,
-        .gclip-panel textarea::placeholder {
-            color: var(--ldb-ui-muted);
-        }
-
-        .ldb-panel button:focus-visible,
-        .ldb-panel input:focus-visible,
-        .ldb-panel select:focus-visible,
-        .ldb-panel textarea:focus-visible,
-        .ldb-notion-panel button:focus-visible,
-        .ldb-notion-panel input:focus-visible,
-        .ldb-notion-panel select:focus-visible,
-        .ldb-notion-panel textarea:focus-visible,
-        .gclip-panel button:focus-visible,
-        .gclip-panel input:focus-visible,
-        .gclip-panel select:focus-visible,
-        .gclip-panel textarea:focus-visible,
-        .ldb-notion-float-btn:focus-visible,
-        .ldb-mini-btn:focus-visible,
-        .gclip-float-btn:focus-visible {
-            outline: none;
-            box-shadow: 0 0 0 3px var(--ldb-ui-focus-ring);
-        }
-
-        .ldb-panel,
-        .ldb-notion-panel,
-        .gclip-panel {
-            background: var(--ldb-ui-surface);
-            border: 1px solid var(--ldb-ui-border);
-            border-radius: var(--ldb-ui-radius);
-            box-shadow: var(--ldb-ui-shadow);
-            backdrop-filter: blur(10px);
-        }
-
-        .ldb-header,
-        .ldb-notion-header,
-        .gclip-panel-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-            padding: 12px 14px;
-            background: rgba(148, 163, 184, 0.10);
-            border-bottom: 1px solid var(--ldb-ui-border);
-        }
-
-        .ldb-header h3,
-        .ldb-notion-header h3 {
-            margin: 0;
-            font-size: 14px;
-            font-weight: 700;
-            color: var(--ldb-ui-text);
-            letter-spacing: 0.2px;
-        }
-
-        .ldb-header-btn,
-        .ldb-notion-header-btn,
-        .gclip-panel-header .close-btn {
-            width: 30px;
-            height: 30px;
-            border-radius: 10px;
-            border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.12);
-            color: var(--ldb-ui-text);
-            cursor: pointer;
-            user-select: none;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0;
-            line-height: 1;
-        }
-
-        .ldb-header-btn:hover,
-        .ldb-notion-header-btn:hover,
-        .gclip-panel-header .close-btn:hover {
-            background: rgba(148, 163, 184, 0.18);
-        }
-
-        .ldb-btn,
-        .gclip-btn {
-            border: 1px solid rgba(37, 99, 235, 0.35);
-            background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
-            color: var(--ldb-ui-white);
-            border-radius: 12px;
-            padding: 8px 12px;
-            cursor: pointer;
-            user-select: none;
-            font-weight: 650;
-            transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
-        }
-
-        .ldb-btn:hover,
-        .gclip-btn:hover {
-            filter: brightness(1.08);
-            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.18);
-        }
-
-        .ldb-btn:active,
-        .gclip-btn:active {
-            transform: scale(0.97);
-            filter: brightness(0.96);
-        }
-
-        .ldb-btn:disabled,
-        .gclip-btn:disabled {
-            opacity: var(--ldb-ui-disabled-opacity);
-            cursor: var(--ldb-ui-disabled-cursor);
-        }
-
-        .ldb-btn-secondary,
-        .gclip-btn-secondary {
-            border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.12);
-            color: var(--ldb-ui-text);
-            font-weight: 600;
-            transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-        }
-
-        .ldb-btn-secondary:hover,
-        .gclip-btn-secondary:hover {
-            background: rgba(148, 163, 184, 0.18);
-        }
-
-        .ldb-btn-secondary:active,
-        .gclip-btn-secondary:active {
-            background: rgba(148, 163, 184, 0.22);
-            transform: scale(0.97);
-        }
-
-        .ldb-btn-secondary:disabled,
-        .gclip-btn-secondary:disabled {
-            opacity: var(--ldb-ui-disabled-opacity);
-            cursor: var(--ldb-ui-disabled-cursor);
-        }
-
-        .ldb-btn-warning {
-            border: 1px solid rgba(217, 119, 6, 0.35);
-            background: linear-gradient(135deg, var(--ldb-ui-warning-bright) 0%, var(--ldb-ui-warning) 100%);
-            color: var(--ldb-ui-white);
-            transition: filter 0.15s ease, transform 0.15s ease;
-        }
-
-        .ldb-btn-warning:hover {
-            filter: brightness(1.08);
-        }
-
-        .ldb-btn-warning:active {
-            transform: scale(0.97);
-        }
-
-        .ldb-btn-warning:disabled {
-            opacity: var(--ldb-ui-disabled-opacity);
-            cursor: var(--ldb-ui-disabled-cursor);
-        }
-
-        .ldb-btn-danger {
-            border: 1px solid rgba(220, 38, 38, 0.35);
-            background: linear-gradient(135deg, var(--ldb-ui-danger-bright) 0%, var(--ldb-ui-danger) 100%);
-            color: var(--ldb-ui-white);
-            transition: filter 0.15s ease, transform 0.15s ease;
-        }
-
-        .ldb-btn-danger:hover {
-            filter: brightness(1.08);
-        }
-
-        .ldb-btn-danger:active {
-            transform: scale(0.97);
-        }
-
-        .ldb-btn-danger:disabled {
-            opacity: var(--ldb-ui-disabled-opacity);
-            cursor: var(--ldb-ui-disabled-cursor);
-        }
-
-        .ldb-section-title {
-            font-size: 13px;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: var(--ldb-ui-text);
-        }
-
-        .ldb-flex-1 { flex: 1; }
-        .ldb-mt-8 { margin-top: 8px; }
-        .ldb-mt-12 { margin-top: 12px; }
-        .ldb-mb-8 { margin-bottom: 8px; }
-        .ldb-flex-gap { display: flex; gap: 8px; }
-        .ldb-nowrap-badge { padding: 6px 12px; white-space: nowrap; }
-        .ldb-hint { font-size: 12px; color: var(--ldb-ui-muted); }
-        .ldb-text-success { color: var(--ldb-ui-success); }
-        .ldb-text-danger { color: var(--ldb-ui-danger); }
-        .ldb-text-info { color: var(--ldb-ui-accent); }
-        .ldb-text-muted { color: var(--ldb-ui-muted); }
-        .ldb-section-divider { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ldb-ui-border); }
-        .ldb-flex-center-gap { display: flex; align-items: center; gap: 8px; }
-
-        .ldb-section {
-            padding: 12px 0;
-        }
-
-        .ldb-body,
-        .ldb-notion-body,
-        .gclip-panel-body {
-            padding: 14px;
-        }
-
-        .ldb-input-group,
-        .gclip-field,
-        .ldb-form-group {
-            margin-bottom: 12px;
-        }
-
-        .ldb-label,
-        .gclip-field label,
-        .ldb-form-group label {
-            display: block;
-            margin-bottom: 6px;
-            font-size: 12px;
-            font-weight: 650;
-            color: var(--ldb-ui-muted);
-        }
-
-        .ldb-input,
-        .ldb-select {
-            width: 100%;
-        }
-
-        .ldb-tip {
-            margin-top: 6px;
-            font-size: 12px;
-            color: var(--ldb-ui-muted);
-        }
-
-        .ldb-divider {
-            height: 1px;
-            background: var(--ldb-ui-border);
-            margin: 12px 0;
-        }
-
-        .ldb-status {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 10px;
-            padding: 10px 12px;
-            border-radius: 12px;
-            border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.10);
-            color: var(--ldb-ui-text);
-            font-size: 12px;
-            line-height: 1.5;
-        }
-
-        .ldb-status.success {
-            border-color: rgba(22, 163, 74, 0.35);
-            background: rgba(22, 163, 74, 0.12);
-        }
-        .ldb-status.error {
-            border-color: rgba(220, 38, 38, 0.35);
-            background: rgba(220, 38, 38, 0.12);
-        }
-        .ldb-status.info {
-            border-color: rgba(37, 99, 235, 0.30);
-            background: rgba(37, 99, 235, 0.10);
-        }
-
-        /* \u5C31\u5730\u72B6\u6001\u6587\u672C \u2014 \u66FF\u4EE3\u5185\u8054 color \u6837\u5F0F\uFF0C\u7528\u4E8E\u6D4B\u8BD5\u6309\u94AE\u65C1\u7B49\u6301\u4E45\u72B6\u6001\u663E\u793A */
-        .ldb-status-text {
-            font-weight: 500;
-        }
-        .ldb-status-text--danger { color: var(--ldb-ui-danger); }
-        .ldb-status-text--success { color: var(--ldb-ui-success); }
-        .ldb-status-text--warning { color: var(--ldb-ui-warning); }
-        .ldb-status-text--accent { color: var(--ldb-ui-accent); }
-        .ldb-status-text--muted { color: var(--ldb-ui-muted); }
-
-        .ldb-status-close {
-            width: 26px;
-            height: 26px;
-            border-radius: 10px;
-            border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.10);
-            color: var(--ldb-ui-text);
-            cursor: pointer;
-            flex: 0 0 auto;
-            line-height: 1;
-        }
-
-        .ldb-status-close:hover {
-            background: rgba(148, 163, 184, 0.18);
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-            .ldb-panel,
-            .ldb-notion-panel,
-            .gclip-panel,
-            .ldb-undo-toast,
-            .ldb-panel *,
-            .ldb-notion-panel *,
-            .gclip-panel *,
-            .ldb-notion-float-btn,
-            .ldb-mini-btn,
-            .gclip-float-btn,
-            .ldb-spin,
-            .ldb-btn,
-            .ldb-btn-secondary,
-            .ldb-btn-warning,
-            .ldb-btn-danger,
-            .gclip-btn,
-            .gclip-btn-secondary,
-            .ldb-chat-chip,
-            .ldb-source-option,
-            .ldb-tab,
-            .ldb-toggle-slider,
-            .ldb-toggle-slider::before,
-            .ldb-progress-fill,
-            .ldb-status,
-            .ldb-status-close {
-                transition: none !important;
-                animation: none !important;
-                scroll-behavior: auto !important;
-            }
-        }
-    `,
-        getChatCSS: () => `
-        /* LDB_UI_CHAT */
-        .ldb-panel .ldb-chat-container,
-        .ldb-notion-panel .ldb-chat-container {
-            height: 280px;
-            overflow-y: auto;
-            background: var(--ldb-ui-surface-3);
-            border: 1px solid var(--ldb-ui-border);
-            border-radius: var(--ldb-ui-radius-sm);
-            padding: 12px;
-            margin-bottom: 12px;
-        }
-
-        .ldb-panel .ldb-chat-container::-webkit-scrollbar,
-        .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar {
-            width: 6px;
-        }
-        .ldb-panel .ldb-chat-container::-webkit-scrollbar-track,
-        .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.06);
-            border-radius: 3px;
-        }
-        .ldb-panel .ldb-chat-container::-webkit-scrollbar-thumb,
-        .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar-thumb {
-            background: rgba(148, 163, 184, 0.35);
-            border-radius: 3px;
-        }
-
-        @media (prefers-color-scheme: dark) {
-            .ldb-panel:not([data-ldb-theme]) .ldb-chat-container::-webkit-scrollbar-track,
-            .ldb-notion-panel:not([data-ldb-theme]) .ldb-chat-container::-webkit-scrollbar-track {
-                background: rgba(255, 255, 255, 0.06);
-            }
-            .ldb-panel:not([data-ldb-theme]) .ldb-chat-container::-webkit-scrollbar-thumb,
-            .ldb-notion-panel:not([data-ldb-theme]) .ldb-chat-container::-webkit-scrollbar-thumb {
-                background: rgba(148, 163, 184, 0.30);
-            }
-        }
-
-        [data-ldb-theme="dark"] .ldb-chat-container::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.06);
-        }
-        [data-ldb-theme="dark"] .ldb-chat-container::-webkit-scrollbar-thumb {
-            background: rgba(148, 163, 184, 0.30);
-        }
-
-        .ldb-panel .ldb-chat-welcome,
-        .ldb-notion-panel .ldb-chat-welcome {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            text-align: center;
-            color: var(--ldb-ui-muted);
-            gap: 10px;
-        }
-
-        .ldb-panel .ldb-chat-welcome-icon,
-        .ldb-notion-panel .ldb-chat-welcome-icon {
-            font-size: 44px;
-            line-height: 1;
-        }
-
-        .ldb-panel .ldb-chat-welcome-text,
-        .ldb-notion-panel .ldb-chat-welcome-text {
-            font-size: 13px;
-            line-height: 1.6;
-        }
-
-        .ldb-panel .ldb-chat-welcome-text small,
-        .ldb-notion-panel .ldb-chat-welcome-text small {
-            color: var(--ldb-ui-muted);
-            opacity: 0.9;
-        }
-
-        .ldb-panel .ldb-chat-chips,
-        .ldb-notion-panel .ldb-chat-chips {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 4px;
-            justify-content: center;
-        }
-
-        .ldb-panel .ldb-chat-chip,
-        .ldb-notion-panel .ldb-chat-chip {
-            padding: 6px 12px;
-            background: rgba(148, 163, 184, 0.14);
-            border: 1px solid var(--ldb-ui-border);
-            border-radius: 999px;
-            color: var(--ldb-ui-text);
-            font-size: 12px;
-            cursor: pointer;
-            transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
-        }
-
-        .ldb-panel .ldb-chat-chip:hover,
-        .ldb-notion-panel .ldb-chat-chip:hover {
-            background: rgba(37, 99, 235, 0.16);
-            border-color: rgba(37, 99, 235, 0.28);
-        }
-
-        .ldb-panel .ldb-chat-chip:active,
-        .ldb-notion-panel .ldb-chat-chip:active {
-            transform: scale(0.96);
-            background: rgba(37, 99, 235, 0.22);
-        }
-
-        .ldb-panel .ldb-chat-message,
-        .ldb-notion-panel .ldb-chat-message {
-            margin-bottom: 12px;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .ldb-panel .ldb-chat-message.user,
-        .ldb-notion-panel .ldb-chat-message.user {
-            align-items: flex-end;
-        }
-
-        .ldb-panel .ldb-chat-message.assistant,
-        .ldb-notion-panel .ldb-chat-message.assistant {
-            align-items: flex-start;
-        }
-
-        .ldb-panel .ldb-chat-bubble,
-        .ldb-notion-panel .ldb-chat-bubble {
-            max-width: 85%;
-            padding: 10px 12px;
-            border-radius: 12px;
-            font-size: 13px;
-            line-height: 1.6;
-            word-break: break-word;
-            border: 1px solid transparent;
-        }
-
-        .ldb-panel .ldb-chat-bubble.user,
-        .ldb-notion-panel .ldb-chat-bubble.user {
-            background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
-            color: var(--ldb-ui-white);
-            border-bottom-right-radius: 6px;
-        }
-
-        .ldb-panel .ldb-chat-bubble.assistant,
-        .ldb-notion-panel .ldb-chat-bubble.assistant {
-            background: var(--ldb-ui-surface-2);
-            color: var(--ldb-ui-text);
-            border: 1px solid var(--ldb-ui-border);
-            border-bottom-left-radius: 6px;
-        }
-
-        .ldb-panel .ldb-chat-bubble.processing,
-        .ldb-notion-panel .ldb-chat-bubble.processing {
-            opacity: 0.85;
-        }
-
-        .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots,
-        .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots {
-            display: inline-flex;
-            gap: 4px;
-            margin-left: 6px;
-            vertical-align: middle;
-        }
-
-        .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots span,
-        .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots span {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: rgba(148, 163, 184, 0.9);
-            display: inline-block;
-            animation: ldb-typing 1.1s infinite ease-in-out;
-        }
-
-        .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(2),
-        .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-        .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(3),
-        .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(3) {
-            animation-delay: 0.4s;
-        }
-
-        @keyframes ldb-typing {
-            0%, 80%, 100% { transform: translateY(0); opacity: 0.6; }
-            40% { transform: translateY(-3px); opacity: 1; }
-        }
-
-        @keyframes ldb-spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-
-        .ldb-spin {
-            display: inline-block;
-            animation: ldb-spin 0.8s linear infinite;
-        }
-
-        .ldb-panel .ldb-chat-input-container,
-        .ldb-notion-panel .ldb-chat-input-container {
-            display: flex;
-            gap: 8px;
-            align-items: flex-end;
-            margin-top: 10px;
-        }
-
-        .ldb-panel .ldb-chat-input,
-        .ldb-notion-panel .ldb-chat-input {
-            flex: 1;
-            resize: none;
-            min-height: 36px;
-            max-height: 80px;
-            line-height: 1.5;
-        }
-
-        .ldb-panel .ldb-chat-send-btn,
-        .ldb-notion-panel .ldb-chat-send-btn {
-            padding: 8px 12px;
-            border-radius: 10px;
-            border: 1px solid rgba(37, 99, 235, 0.35);
-            background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
-            color: var(--ldb-ui-white);
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .ldb-panel .ldb-chat-send-btn:disabled,
-        .ldb-notion-panel .ldb-chat-send-btn:disabled {
-            opacity: var(--ldb-ui-disabled-opacity);
-            cursor: var(--ldb-ui-disabled-cursor);
-        }
-
-        .ldb-panel .ldb-chat-actions,
-        .ldb-notion-panel .ldb-chat-actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 10px;
-        }
-
-        .ldb-panel .ldb-chat-action-btn,
-        .ldb-notion-panel .ldb-chat-action-btn {
-            padding: 6px 10px;
-            border-radius: 10px;
-            border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.12);
-            color: var(--ldb-ui-text);
-            cursor: pointer;
-            user-select: none;
-            font-size: 12px;
-        }
-
-        .ldb-panel .ldb-chat-action-btn:hover,
-        .ldb-notion-panel .ldb-chat-action-btn:hover {
-            background: rgba(148, 163, 184, 0.18);
-        }
-
-        .ldb-panel .ldb-chat-settings-toggle,
-        .ldb-notion-panel .ldb-chat-settings-toggle {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: pointer;
-            user-select: none;
-            margin-top: 10px;
-            padding: 8px 10px;
-            border-radius: 10px;
-            border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.10);
-        }
-
-        .ldb-panel .ldb-chat-settings-content.collapsed,
-        .ldb-notion-panel .ldb-chat-settings-content.collapsed {
-            display: none;
-        }
-    `
       };
-      ;
-      module.exports = { DesignSystem: DesignSystem2 };
+      var emit = (event, ...args) => {
+        const handlers = subscribers[event];
+        if (!handlers || handlers.length === 0) {
+          return;
+        }
+        handlers.slice().forEach((handler) => {
+          try {
+            handler(...args);
+          } catch (error) {
+            console.error(`[EventBus] Handler error for "${event}":`, error);
+          }
+        });
+      };
+      module.exports = { on, off, emit };
     }
   });
 
-  // src/ui/panel-resize.js
-  var require_panel_resize = __commonJS({
-    "src/ui/panel-resize.js"(exports, module) {
+  // src/security/index.js
+  var require_security = __commonJS({
+    "src/security/index.js"(exports, module) {
       "use strict";
+      var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
-      var PanelResize2 = {
-        _stylesInjected: false,
-        injectStyles: () => {
-          if (PanelResize2._stylesInjected) return;
-          PanelResize2._stylesInjected = true;
-          const style = document.createElement("style");
-          style.textContent = `
-            .ldb-resize-handle {
-                position: absolute;
-                z-index: 10;
-            }
-            .ldb-resize-handle-l {
-                left: -3px; top: 0; width: 6px; height: 100%;
-                cursor: ew-resize;
-            }
-            .ldb-resize-handle-t {
-                left: 0; top: -3px; width: 100%; height: 6px;
-                cursor: ns-resize;
-            }
-            .ldb-resize-handle-b {
-                left: 0; bottom: -3px; width: 100%; height: 6px;
-                cursor: ns-resize;
-            }
-            .ldb-resize-handle-tl {
-                left: -3px; top: -3px; width: 12px; height: 12px;
-                cursor: nwse-resize;
-            }
-            .ldb-resize-handle-bl {
-                left: -3px; bottom: -3px; width: 12px; height: 12px;
-                cursor: nesw-resize;
-            }
-        `;
-          document.head.appendChild(style);
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { CredentialVault: CredentialVault2 } = require_auth();
+      var { emit } = require_event_bus();
+      var OperationGuard2 = {
+        _getPermissionName: (level) => {
+          return CONFIG2.PERMISSION_NAMES[level] || `level_${level}`;
         },
-        makeResizable: (element, options = {}) => {
-          const {
-            edges = ["l", "t"],
-            storageKey = null,
-            minWidth = 280,
-            minHeight = 200,
-            maxWidth = 800
-          } = options;
-          PanelResize2.injectStyles();
-          edges.forEach((edge) => {
-            const handle = document.createElement("div");
-            handle.className = `ldb-resize-handle ldb-resize-handle-${edge}`;
-            element.appendChild(handle);
-            handle.addEventListener("mousedown", (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              const startX = e.clientX;
-              const startY = e.clientY;
-              const startWidth = element.offsetWidth;
-              const startHeight = element.offsetHeight;
-              document.body.style.userSelect = "none";
-              element.style.transition = "none";
-              const onMove = (ev) => {
-                if (edge.includes("l")) {
-                  const dx = startX - ev.clientX;
-                  element.style.width = Math.max(minWidth, Math.min(maxWidth, startWidth + dx)) + "px";
-                }
-                if (edge.includes("t")) {
-                  const dy = startY - ev.clientY;
-                  const maxH = window.innerHeight * 0.9;
-                  element.style.maxHeight = Math.max(minHeight, Math.min(maxH, startHeight + dy)) + "px";
-                }
-                if (edge.includes("b")) {
-                  const dy = ev.clientY - startY;
-                  const maxH = window.innerHeight * 0.9;
-                  element.style.maxHeight = Math.max(minHeight, Math.min(maxH, startHeight + dy)) + "px";
-                }
-              };
-              const onUp = () => {
-                document.removeEventListener("mousemove", onMove);
-                document.removeEventListener("mouseup", onUp);
-                document.body.style.userSelect = "";
-                element.style.transition = "";
-                if (storageKey) {
-                  Storage2.set(storageKey, JSON.stringify({
-                    width: element.style.width,
-                    maxHeight: element.style.maxHeight
-                  }));
-                }
-              };
-              document.addEventListener("mousemove", onMove);
-              document.addEventListener("mouseup", onUp);
+        _inferActor: (context = {}) => {
+          if (context.actor === "ai" || context.source === "ai-agent-loop" || context.source === "tool") {
+            return "ai";
+          }
+          if (context.actor === "system" || context.source === "system") {
+            return "system";
+          }
+          return "user";
+        },
+        _inferSource: (context = {}) => {
+          return context.source || context.surface || context.origin || "ui";
+        },
+        _buildGuardSnapshot: (operation, decision, context = {}, extras = {}) => {
+          const currentLevel = OperationGuard2.getLevel();
+          const requiredLevel = OperationGuard2.OPERATION_LEVELS[operation];
+          return {
+            decision,
+            permissionLevel: OperationGuard2._getPermissionName(currentLevel),
+            requiredLevel: requiredLevel === void 0 ? "undefined" : OperationGuard2._getPermissionName(requiredLevel),
+            confirmation: extras.confirmation || (OperationGuard2.isDangerous(operation) && OperationGuard2.requiresConfirm() ? "required" : "not_required")
+          };
+        },
+        // 获取当前权限级别
+        getLevel: () => {
+          return Storage2.get(CONFIG2.STORAGE_KEYS.PERMISSION_LEVEL, CONFIG2.DEFAULTS.permissionLevel);
+        },
+        // 设置权限级别
+        setLevel: (level) => {
+          if (!Number.isFinite(level) || !Number.isInteger(level) || level < 0 || level > 3) {
+            throw new Error(`\u65E0\u6548\u7684\u6743\u9650\u7EA7\u522B: ${level}\uFF0C\u5E94\u4E3A 0-3 \u7684\u6574\u6570`);
+          }
+          Storage2.set(CONFIG2.STORAGE_KEYS.PERMISSION_LEVEL, level);
+        },
+        // 是否需要确认
+        requiresConfirm: () => {
+          return Storage2.get(CONFIG2.STORAGE_KEYS.REQUIRE_CONFIRM, CONFIG2.DEFAULTS.requireConfirm);
+        },
+        // 操作所需的最低权限级别
+        OPERATION_LEVELS: {
+          // 只读操作
+          search: 0,
+          fetchPage: 0,
+          fetchBlocks: 0,
+          fetchDatabase: 0,
+          queryDatabase: 0,
+          getUsers: 0,
+          getSelf: 0,
+          getUser: 0,
+          // 标准操作
+          createDatabasePage: 1,
+          updatePage: 1,
+          updateBlock: 1,
+          appendBlocks: 1,
+          updatePageMarkdown: 1,
+          updateDatabase: 1,
+          // 高级操作
+          movePage: 2,
+          duplicatePage: 2,
+          createDatabase: 2,
+          replacePageMarkdown: 2,
+          deletePage: 2,
+          restorePage: 2,
+          deleteBlock: 2,
+          createComment: 1,
+          agentTask: 2
+        },
+        // 危险操作列表（需要额外确认）
+        DANGEROUS_OPERATIONS: ["deletePage", "deleteBlock"],
+        // 检查是否有权限执行操作
+        canExecute: (operation) => {
+          const currentLevel = OperationGuard2.getLevel();
+          const requiredLevel = OperationGuard2.OPERATION_LEVELS[operation];
+          if (requiredLevel === void 0) {
+            console.warn(`OperationGuard: \u64CD\u4F5C "${operation}" \u672A\u5B9A\u4E49\u6743\u9650\u7EA7\u522B\uFF0C\u9ED8\u8BA4\u62D2\u7EDD`);
+            return false;
+          }
+          return currentLevel >= requiredLevel;
+        },
+        // 检查是否为危险操作
+        isDangerous: (operation) => {
+          return OperationGuard2.DANGEROUS_OPERATIONS.includes(operation);
+        },
+        // 执行受保护的操作
+        execute: async (operation, executor, context = {}) => {
+          const actor = OperationGuard2._inferActor(context);
+          const source = OperationGuard2._inferSource(context);
+          const requiredLevelForOp = OperationGuard2.OPERATION_LEVELS[operation];
+          const startedAt = Date.now();
+          if (!OperationGuard2.canExecute(operation)) {
+            const requiredName = CONFIG2.PERMISSION_NAMES[requiredLevelForOp];
+            const denialReason = requiredLevelForOp === void 0 ? `\u672A\u5B9A\u4E49\u6743\u9650\u7EA7\u522B: ${operation}` : `\u6743\u9650\u4E0D\u8DB3\uFF1A\u9700\u8981"${requiredName}"\u53CA\u4EE5\u4E0A\u6743\u9650\u624D\u80FD\u6267\u884C\u6B64\u64CD\u4F5C`;
+            OperationLog2.add({
+              audit_event: "guard.denied",
+              actor,
+              source,
+              guard: OperationGuard2._buildGuardSnapshot(operation, "deny", context, {
+                confirmation: "not_allowed"
+              }),
+              operation: {
+                name: operation,
+                risk: requiredLevelForOp === void 0 ? "unknown" : OperationGuard2._getPermissionName(requiredLevelForOp),
+                trigger: context.trigger || "user_requested_write"
+              },
+              target: OperationLog2.buildTarget(context),
+              payload: OperationLog2.buildPayload(context),
+              result: {
+                status: "denied",
+                reason: denialReason
+              },
+              redaction: OperationLog2.collectRedactionHints(context),
+              operationName: operation,
+              context,
+              status: "failed",
+              error: denialReason,
+              startTime: startedAt,
+              endTime: Date.now()
             });
+            throw new Error(denialReason);
+          }
+          if (OperationGuard2.isDangerous(operation) && OperationGuard2.requiresConfirm()) {
+            const isPermanent = operation === "deleteBlock";
+            const confirmed = await ConfirmationDialog3.show({
+              title: isPermanent ? "\u26A0\uFE0F \u6C38\u4E45\u5220\u9664\u786E\u8BA4" : "\u5371\u9669\u64CD\u4F5C\u786E\u8BA4",
+              message: isPermanent ? `\u60A8\u5373\u5C06\u6C38\u4E45\u5220\u9664\u5757\uFF0C\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\uFF01` : `\u60A8\u5373\u5C06\u6267\u884C\u5371\u9669\u64CD\u4F5C: ${operation}`,
+              itemName: context.itemName || "\u672A\u77E5\u9879\u76EE",
+              countdown: isPermanent ? 8 : 5,
+              // 永久删除需要更长倒计时
+              requireNameInput: true
+            });
+            if (!confirmed) {
+              OperationLog2.add({
+                audit_event: "guard.denied",
+                actor,
+                source,
+                guard: OperationGuard2._buildGuardSnapshot(operation, "deny", context, {
+                  confirmation: "cancelled"
+                }),
+                operation: {
+                  name: operation,
+                  risk: OperationGuard2._getPermissionName(requiredLevelForOp),
+                  trigger: context.trigger || "user_requested_write"
+                },
+                target: OperationLog2.buildTarget(context),
+                payload: OperationLog2.buildPayload(context),
+                result: {
+                  status: "cancelled",
+                  reason: "user_cancelled_confirmation"
+                },
+                redaction: OperationLog2.collectRedactionHints(context),
+                operationName: operation,
+                context,
+                status: "failed",
+                error: "\u64CD\u4F5C\u5DF2\u53D6\u6D88",
+                startTime: startedAt,
+                endTime: Date.now()
+              });
+              throw new Error("\u64CD\u4F5C\u5DF2\u53D6\u6D88");
+            }
+          }
+          OperationLog2.add({
+            audit_event: "guard.decision",
+            actor,
+            source,
+            guard: OperationGuard2._buildGuardSnapshot(operation, "allow", context),
+            operation: {
+              name: operation,
+              risk: OperationGuard2._getPermissionName(requiredLevelForOp),
+              trigger: context.trigger || "user_requested_write"
+            },
+            target: OperationLog2.buildTarget(context),
+            payload: OperationLog2.buildPayload(context),
+            result: {
+              status: "allow"
+            },
+            redaction: OperationLog2.collectRedactionHints(context),
+            operationName: operation,
+            context,
+            status: "success",
+            startTime: startedAt,
+            endTime: Date.now()
           });
-          if (storageKey) {
-            const saved = Storage2.get(storageKey, null);
-            if (saved) {
-              try {
-                const size = JSON.parse(saved);
-                if (size.width) element.style.width = size.width;
-                if (size.maxHeight) element.style.maxHeight = size.maxHeight;
-              } catch (e) {
-                console.warn("[LD-Notion] corrupted panel size, resetting:", storageKey);
-                Storage2.remove(storageKey);
+          const logEntry = {
+            operationName: operation,
+            context,
+            startTime: startedAt,
+            status: "pending"
+          };
+          try {
+            const result = await executor();
+            logEntry.status = "success";
+            logEntry.endTime = Date.now();
+            OperationLog2.add({
+              audit_event: OperationLog2.inferAuditEvent(operation, "success"),
+              actor,
+              source,
+              guard: OperationGuard2._buildGuardSnapshot(operation, "allow", context),
+              operation: {
+                name: operation,
+                risk: OperationGuard2._getPermissionName(requiredLevelForOp),
+                trigger: context.trigger || "user_requested_write"
+              },
+              target: OperationLog2.buildTarget(context),
+              payload: OperationLog2.buildPayload(context),
+              result: {
+                status: "success"
+              },
+              redaction: OperationLog2.collectRedactionHints(context),
+              ...logEntry
+            });
+            if (OperationGuard2.isDangerous(operation)) {
+              if (operation === "deletePage") {
+                UndoManager2.register({
+                  operation,
+                  undoAction: () => NotionAPI2.restorePage(context.pageId, context.apiKey),
+                  description: `\u6062\u590D\u9875\u9762: ${context.itemName || context.pageId}`
+                });
+              } else if (operation === "deleteBlock") {
+                console.warn(`OperationGuard: deleteBlock \u662F\u6C38\u4E45\u64CD\u4F5C\uFF0C\u65E0\u6CD5\u64A4\u9500`);
               }
             }
+            return result;
+          } catch (error) {
+            logEntry.status = "failed";
+            logEntry.error = error.message;
+            logEntry.endTime = Date.now();
+            OperationLog2.add({
+              audit_event: OperationLog2.inferAuditEvent(operation, "failed"),
+              actor,
+              source,
+              guard: OperationGuard2._buildGuardSnapshot(operation, "allow", context),
+              operation: {
+                name: operation,
+                risk: OperationGuard2._getPermissionName(requiredLevelForOp),
+                trigger: context.trigger || "user_requested_write"
+              },
+              target: OperationLog2.buildTarget(context),
+              payload: OperationLog2.buildPayload(context),
+              result: {
+                status: "failed",
+                reason: error.message
+              },
+              redaction: OperationLog2.collectRedactionHints(context),
+              ...logEntry
+            });
+            throw error;
           }
         }
       };
-      ;
-      module.exports = { PanelResize: PanelResize2 };
+      var OperationLog2 = {
+        AUDIT_EVENT_BY_OPERATION: Object.freeze({
+          createDatabasePage: "write.page.created",
+          createComment: "write.page.created",
+          appendBlocks: "write.block.inserted",
+          updateBlock: "write.block.inserted",
+          updatePage: "write.property.updated",
+          updatePageMarkdown: "write.property.updated",
+          updateDatabase: "write.property.updated",
+          createDatabase: "write.page.created",
+          movePage: "write.property.updated",
+          duplicatePage: "write.page.created",
+          replacePageMarkdown: "write.block.inserted",
+          deletePage: "page.archived",
+          restorePage: "page.restored",
+          deleteBlock: "block.deleted",
+          undo: "write.property.updated"
+        }),
+        SENSITIVE_KEY_HINTS: Object.freeze([
+          { pattern: /token/i, label: "token" },
+          { pattern: /api[_-]?key/i, label: "apiKey" },
+          { pattern: /secret/i, label: "clientSecret" },
+          { pattern: /refresh/i, label: "refreshToken" },
+          { pattern: /passphrase/i, label: "passphrase" }
+        ]),
+        // 获取是否启用日志
+        isEnabled: () => {
+          return Storage2.get(CONFIG2.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG2.DEFAULTS.enableAuditLog);
+        },
+        createEventId: () => {
+          const bytes = new Uint8Array(4);
+          if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+            crypto.getRandomValues(bytes);
+          }
+          const randomPart = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+          return `evt_${Date.now().toString(36)}_${randomPart}`;
+        },
+        appendRedaction: (list, label) => {
+          if (!label) return;
+          if (!list.includes(label)) list.push(label);
+        },
+        collectRedactionHints: (context = {}) => {
+          const redaction = [];
+          Object.entries(context || {}).forEach(([key, value]) => {
+            if (value == null || value === "") return;
+            OperationLog2.SENSITIVE_KEY_HINTS.forEach(({ pattern, label }) => {
+              if (pattern.test(key)) OperationLog2.appendRedaction(redaction, label);
+            });
+          });
+          ["pageId", "databaseId", "blockId", "commentId", "targetId", "parentPageId", "folderId"].forEach((key) => {
+            if (context == null ? void 0 : context[key]) OperationLog2.appendRedaction(redaction, "target.id");
+          });
+          return redaction;
+        },
+        redactTargetId: (value, redaction = []) => {
+          if (!value) return "";
+          OperationLog2.appendRedaction(redaction, "target.id");
+          const normalized = String(value).trim();
+          if (normalized.length <= 8) return "<redacted>";
+          return `${normalized.slice(0, 4)}\u2026${normalized.slice(-4)}`;
+        },
+        buildTarget: (context = {}, redaction = OperationLog2.collectRedactionHints(context)) => {
+          if (context.blockId) {
+            return {
+              type: "notion_block",
+              id: OperationLog2.redactTargetId(context.blockId, redaction),
+              title: context.itemName || ""
+            };
+          }
+          if (context.pageId || context.parentPageId) {
+            return {
+              type: "notion_page",
+              id: OperationLog2.redactTargetId(context.pageId || context.parentPageId, redaction),
+              title: context.itemName || ""
+            };
+          }
+          if (context.databaseId) {
+            return {
+              type: "notion_database",
+              id: OperationLog2.redactTargetId(context.databaseId, redaction),
+              title: context.itemName || ""
+            };
+          }
+          if (context.commentId) {
+            return {
+              type: "notion_comment",
+              id: OperationLog2.redactTargetId(context.commentId, redaction),
+              title: context.itemName || ""
+            };
+          }
+          return context.itemName ? { type: "generic", title: context.itemName } : null;
+        },
+        buildPayload: (context = {}, redaction = OperationLog2.collectRedactionHints(context)) => {
+          const payload = {};
+          if (context.query) payload.query = Utils2.truncateText(String(context.query), 120);
+          if (context.content) payload.contentPreview = Utils2.truncateText(String(context.content), 120);
+          if (context.description) payload.description = Utils2.truncateText(String(context.description), 120);
+          if (context.folderId) payload.folderId = OperationLog2.redactTargetId(context.folderId, redaction);
+          if (context.targetType) payload.targetType = context.targetType;
+          if (context.blockCount != null) payload.blockCount = context.blockCount;
+          if (Array.isArray(context.propertyNames)) payload.propertyNames = context.propertyNames.slice(0, 12);
+          return Object.keys(payload).length > 0 ? payload : null;
+        },
+        inferAuditEvent: (operation, status = "success") => {
+          const mapped = OperationLog2.AUDIT_EVENT_BY_OPERATION[operation];
+          if (mapped) return mapped;
+          return status === "failed" ? "import.failed" : "import.completed";
+        },
+        normalizeAuditEntry: (entry = {}) => {
+          var _a, _b, _c;
+          const context = entry.context || {};
+          const redaction = Array.isArray(entry.redaction) ? [...entry.redaction] : OperationLog2.collectRedactionHints(context);
+          const operationName = entry.operationName || (typeof entry.operation === "string" ? entry.operation : ((_a = entry.operation) == null ? void 0 : _a.name) || "");
+          return {
+            audit_event: entry.audit_event || (operationName ? OperationLog2.inferAuditEvent(operationName, entry.status) : "operation.logged"),
+            event_id: entry.event_id || OperationLog2.createEventId(),
+            at: entry.at || (/* @__PURE__ */ new Date()).toISOString(),
+            actor: entry.actor || context.actor || "user",
+            source: entry.source || context.source || "ui",
+            guard: entry.guard || null,
+            operation: typeof entry.operation === "string" ? {
+              name: entry.operation,
+              risk: "unknown",
+              trigger: context.trigger || "manual"
+            } : entry.operation || (operationName ? {
+              name: operationName,
+              risk: "unknown",
+              trigger: context.trigger || "manual"
+            } : null),
+            target: entry.target === void 0 ? OperationLog2.buildTarget(context, redaction) : entry.target,
+            payload: entry.payload === void 0 ? OperationLog2.buildPayload(context, redaction) : entry.payload,
+            result: entry.result || {
+              status: entry.status || "success",
+              reason: entry.error || ""
+            },
+            redaction,
+            id: entry.id || OperationLog2.createEventId(),
+            timestamp: entry.timestamp || (/* @__PURE__ */ new Date()).toISOString(),
+            operationName,
+            status: entry.status || ((_b = entry.result) == null ? void 0 : _b.status) || "success",
+            error: entry.error || ((_c = entry.result) == null ? void 0 : _c.reason) || "",
+            context,
+            startTime: entry.startTime || Date.now(),
+            endTime: entry.endTime || entry.startTime || Date.now()
+          };
+        },
+        // 敏感字段脱敏：将所有 SENSITIVE_KEYS 对应的值替换为 ***REDACTED***
+        redactSensitiveFields: (entry) => {
+          if (!entry || typeof entry !== "object") return entry;
+          const redacted = { ...entry };
+          const context = redacted.context || {};
+          const sensitiveKeys = CredentialVault2 && CredentialVault2.SENSITIVE_KEYS ? CredentialVault2.SENSITIVE_KEYS : /* @__PURE__ */ new Set();
+          for (const key of sensitiveKeys) {
+            if (Object.prototype.hasOwnProperty.call(context, key)) {
+              context[key] = "***REDACTED***";
+            }
+          }
+          redacted.context = context;
+          return redacted;
+        },
+        // 获取所有日志
+        getAll: () => {
+          const data = Storage2.get(CONFIG2.STORAGE_KEYS.OPERATION_LOG, "[]");
+          try {
+            return JSON.parse(data);
+          } catch {
+            return [];
+          }
+        },
+        // 添加日志条目
+        add: (entry, options = {}) => {
+          const { force = false } = options;
+          if (!force && !OperationLog2.isEnabled()) return;
+          const logs = OperationLog2.getAll();
+          const logEntry = OperationLog2.redactSensitiveFields(OperationLog2.normalizeAuditEntry(entry));
+          logs.unshift(logEntry);
+          if (logs.length > CONFIG2.API.MAX_LOG_ENTRIES) {
+            logs.length = CONFIG2.API.MAX_LOG_ENTRIES;
+          }
+          Storage2.set(CONFIG2.STORAGE_KEYS.OPERATION_LOG, JSON.stringify(logs));
+          emit("oplog:changed", JSON.parse(JSON.stringify(logs)));
+          return logEntry;
+        },
+        // 清空日志
+        clear: () => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.OPERATION_LOG, "[]");
+          emit("oplog:changed", []);
+        },
+        // 获取最近N条日志
+        getRecent: (count = 10) => {
+          return OperationLog2.getAll().slice(0, count);
+        },
+        // 格式化日志条目用于显示
+        formatEntry: (entry) => {
+          var _a, _b, _c;
+          const time = new Date(entry.at || entry.timestamp).toLocaleString("zh-CN");
+          const status = ((_a = entry.result) == null ? void 0 : _a.status) || entry.status;
+          const statusIcon = status === "success" || status === "allow" ? "\u2705" : status === "failed" || status === "denied" || status === "cancelled" ? "\u274C" : "\u23F3";
+          const duration = entry.endTime ? `${entry.endTime - entry.startTime}ms` : "-";
+          return {
+            time,
+            statusIcon,
+            operation: entry.audit_event || entry.operationName || ((_b = entry.operation) == null ? void 0 : _b.name) || entry.operation,
+            status,
+            duration,
+            error: entry.error || ((_c = entry.result) == null ? void 0 : _c.reason),
+            context: entry.context
+          };
+        }
+      };
+      var ConfirmationDialog3 = {
+        dialogElement: null,
+        // 显示确认对话框
+        show: (options) => {
+          return new Promise((resolve) => {
+            const {
+              title = "\u786E\u8BA4\u64CD\u4F5C",
+              message = "\u786E\u5B9A\u8981\u6267\u884C\u6B64\u64CD\u4F5C\u5417\uFF1F",
+              itemName = "",
+              countdown = 5,
+              requireNameInput = false
+            } = options;
+            const escapeHtml = Utils2.escapeHtml;
+            const dialog = document.createElement("div");
+            dialog.className = "ldb-confirm-overlay";
+            dialog.innerHTML = `
+                <div class="ldb-confirm-dialog">
+                    <div class="ldb-confirm-header">
+                        <span class="ldb-confirm-icon">\u26A0\uFE0F</span>
+                        <span class="ldb-confirm-title">${escapeHtml(title)}</span>
+                    </div>
+                    <div class="ldb-confirm-body">
+                        <p class="ldb-confirm-message">${escapeHtml(message)}</p>
+                        ${itemName ? `<p class="ldb-confirm-item">\u76EE\u6807: <strong>${escapeHtml(itemName)}</strong></p>` : ""}
+                        ${requireNameInput ? `
+                            <div class="ldb-confirm-input-group">
+                                <label>\u8BF7\u8F93\u5165\u540D\u79F0\u786E\u8BA4:</label>
+                                <input type="text" class="ldb-confirm-input" placeholder="${escapeHtml(itemName)}" id="ldb-confirm-name-input">
+                                <div class="ldb-confirm-hint">\u8BF7\u8F93\u5165 "${escapeHtml(itemName)}" \u4EE5\u786E\u8BA4\u64CD\u4F5C</div>
+                            </div>
+                        ` : ""}
+                    </div>
+                    <div class="ldb-confirm-footer">
+                        <div class="ldb-confirm-countdown-bar" id="ldb-confirm-countdown-bar">
+                            <div class="ldb-confirm-countdown-fill" id="ldb-confirm-countdown-fill"></div>
+                        </div>
+                        <button class="ldb-btn ldb-btn-secondary" id="ldb-confirm-cancel">\u53D6\u6D88</button>
+                        <button class="ldb-btn ldb-btn-danger" id="ldb-confirm-ok" disabled>
+                            \u786E\u8BA4 (<span id="ldb-confirm-countdown">${countdown}</span>)
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(dialog);
+            ConfirmationDialog3.dialogElement = dialog;
+            const okBtn = dialog.querySelector("#ldb-confirm-ok");
+            const cancelBtn = dialog.querySelector("#ldb-confirm-cancel");
+            const countdownEl = dialog.querySelector("#ldb-confirm-countdown");
+            const nameInput = dialog.querySelector("#ldb-confirm-name-input");
+            let remaining = countdown;
+            let canConfirm = !requireNameInput;
+            const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
+            if (countdownFill) {
+              requestAnimationFrame(() => {
+                countdownFill.style.width = "0%";
+                countdownFill.style.transition = `width ${countdown}s linear`;
+              });
+            }
+            const timer = setInterval(() => {
+              remaining--;
+              countdownEl.textContent = remaining;
+              if (remaining <= 0) {
+                clearInterval(timer);
+                countdownEl.parentElement.textContent = "\u786E\u8BA4";
+                if (canConfirm) {
+                  okBtn.disabled = false;
+                }
+              }
+            }, 1e3);
+            dialog._countdownTimer = timer;
+            if (nameInput) {
+              nameInput.oninput = () => {
+                canConfirm = nameInput.value.trim() === itemName;
+                if (remaining <= 0 && canConfirm) {
+                  okBtn.disabled = false;
+                } else {
+                  okBtn.disabled = true;
+                }
+              };
+              nameInput.focus();
+            }
+            cancelBtn.onclick = () => {
+              clearInterval(timer);
+              dialog.remove();
+              ConfirmationDialog3.dialogElement = null;
+              resolve(false);
+            };
+            okBtn.onclick = () => {
+              if (okBtn.disabled) return;
+              clearInterval(timer);
+              dialog.remove();
+              ConfirmationDialog3.dialogElement = null;
+              resolve(true);
+            };
+            const escHandler = (e) => {
+              if (e.key === "Escape") {
+                clearInterval(timer);
+                dialog.remove();
+                ConfirmationDialog3.dialogElement = null;
+                document.removeEventListener("keydown", escHandler);
+                resolve(false);
+              }
+            };
+            document.addEventListener("keydown", escHandler);
+          });
+        },
+        // 关闭对话框
+        close: () => {
+          if (ConfirmationDialog3.dialogElement) {
+            if (ConfirmationDialog3.dialogElement._countdownTimer) {
+              clearInterval(ConfirmationDialog3.dialogElement._countdownTimer);
+            }
+            ConfirmationDialog3.dialogElement.remove();
+            ConfirmationDialog3.dialogElement = null;
+          }
+        }
+      };
+      var UndoManager2 = {
+        pendingUndo: null,
+        toastElement: null,
+        timeoutId: null,
+        // 注册可撤销的操作
+        register: (undoAction) => {
+          UndoManager2.clear();
+          UndoManager2.pendingUndo = {
+            ...undoAction,
+            registeredAt: Date.now()
+          };
+          UndoManager2.showToast(undoAction.description);
+          UndoManager2.timeoutId = setTimeout(() => {
+            UndoManager2.clear();
+          }, CONFIG2.API.UNDO_TIMEOUT);
+        },
+        // 执行撤销
+        execute: async () => {
+          var _a, _b;
+          if (!UndoManager2.pendingUndo) return false;
+          try {
+            const description = ((_a = UndoManager2.pendingUndo) == null ? void 0 : _a.description) || "";
+            await UndoManager2.pendingUndo.undoAction();
+            UndoManager2.hideToast();
+            UndoManager2.clear();
+            OperationLog2.add({
+              audit_event: OperationLog2.inferAuditEvent("undo", "success"),
+              actor: "user",
+              source: "undo-manager",
+              operation: {
+                name: "undo",
+                risk: "standard",
+                trigger: "user_requested_undo"
+              },
+              payload: {
+                description: Utils2.truncateText(description, 120)
+              },
+              result: {
+                status: "success"
+              },
+              redaction: [],
+              operationName: "undo",
+              context: { description },
+              startTime: Date.now(),
+              endTime: Date.now(),
+              status: "success"
+            });
+            return true;
+          } catch (error) {
+            console.error("[LD-Notion] \u64A4\u9500\u5931\u8D25:", error);
+            const description = ((_b = UndoManager2.pendingUndo) == null ? void 0 : _b.description) || "";
+            OperationLog2.add({
+              audit_event: OperationLog2.inferAuditEvent("undo", "failed"),
+              actor: "user",
+              source: "undo-manager",
+              operation: {
+                name: "undo",
+                risk: "standard",
+                trigger: "user_requested_undo"
+              },
+              payload: {
+                description: Utils2.truncateText(description, 120)
+              },
+              result: {
+                status: "failed",
+                reason: error.message
+              },
+              redaction: [],
+              operationName: "undo",
+              context: { description },
+              startTime: Date.now(),
+              endTime: Date.now(),
+              status: "failed",
+              error: error.message
+            });
+            return false;
+          }
+        },
+        // 清除待撤销操作
+        clear: () => {
+          if (UndoManager2.timeoutId) {
+            clearTimeout(UndoManager2.timeoutId);
+            UndoManager2.timeoutId = null;
+          }
+          UndoManager2.pendingUndo = null;
+          UndoManager2.hideToast();
+        },
+        // 显示撤销提示 toast
+        showToast: (message) => {
+          UndoManager2.hideToast();
+          const toast = document.createElement("div");
+          toast.className = "ldb-undo-toast";
+          const escapedMsg = Utils2.escapeHtml(message);
+          toast.innerHTML = `
+            <span class="ldb-undo-message">${escapedMsg}</span>
+            <button class="ldb-undo-btn" id="ldb-undo-action">\u64A4\u9500</button>
+            <div class="ldb-undo-progress">
+                <div class="ldb-undo-progress-bar"></div>
+            </div>
+        `;
+          document.body.appendChild(toast);
+          UndoManager2.toastElement = toast;
+          toast.querySelector("#ldb-undo-action").onclick = async () => {
+            const success = await UndoManager2.execute();
+            if (success) {
+              emit("notify", { message: "\u64A4\u9500\u6210\u529F", type: "success" });
+            } else {
+              emit("notify", { message: "\u64A4\u9500\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u68C0\u67E5 Notion \u4E2D\u7684\u53D8\u66F4", type: "error" });
+            }
+          };
+          requestAnimationFrame(() => {
+            toast.classList.add("visible");
+          });
+        },
+        // 隐藏撤销提示
+        hideToast: () => {
+          if (UndoManager2._hideTimeout) clearTimeout(UndoManager2._hideTimeout);
+          if (UndoManager2.toastElement) {
+            UndoManager2.toastElement.classList.remove("visible");
+            UndoManager2._hideTimeout = setTimeout(() => {
+              if (UndoManager2.toastElement) {
+                UndoManager2.toastElement.remove();
+                UndoManager2.toastElement = null;
+              }
+            }, 300);
+          }
+        },
+        // 检查是否有待撤销操作
+        hasPending: () => {
+          return UndoManager2.pendingUndo !== null;
+        },
+        // 获取剩余撤销时间
+        getRemainingTime: () => {
+          if (!UndoManager2.pendingUndo) return 0;
+          const elapsed = Date.now() - UndoManager2.pendingUndo.registeredAt;
+          return Math.max(0, CONFIG2.API.UNDO_TIMEOUT - elapsed);
+        }
+      };
+      module.exports = { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 };
     }
   });
 
@@ -5666,6 +5642,3605 @@ ${quoted}
     }
   });
 
+  // src/ai/AgentTrace.js
+  var require_AgentTrace = __commonJS({
+    "src/ai/AgentTrace.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var AgentTrace = {
+        MAX_TRACES: 50,
+        MAX_USER_INPUT: 500,
+        MAX_RESULT_PREVIEW: 200,
+        MAX_FINAL_RESPONSE: 1e3,
+        _key() {
+          return CONFIG2.STORAGE_KEYS.AI_TRACE_LOG;
+        },
+        _load() {
+          const raw = GM_getValue(this._key(), "[]");
+          try {
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr : [];
+          } catch {
+            return [];
+          }
+        },
+        _save(traces) {
+          GM_setValue(this._key(), JSON.stringify(traces));
+        },
+        /**
+         * 创建一条新 trace（runAgentLoop 入口调用）。
+         * @param {string} userInput
+         * @returns {object} trace 对象（尚未持久化，调 persist 落盘）
+         */
+        create(userInput) {
+          const ts = (/* @__PURE__ */ new Date()).toISOString();
+          const trimmedInput = String(userInput || "").slice(0, this.MAX_USER_INPUT);
+          return {
+            id: `trace-${ts}-${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: ts,
+            userInput: trimmedInput,
+            iterations: 0,
+            toolCalls: [],
+            results: [],
+            finalResponse: "",
+            latencyMs: 0,
+            errors: [],
+            status: "in_progress",
+            _startedAt: Date.now()
+          };
+        },
+        /**
+         * 记录一次工具调用（_executeAgentToolCall 前后调用）。
+         */
+        recordToolCall(trace, toolCall, iter) {
+          if (!trace) return;
+          trace.toolCalls.push({
+            tool: (toolCall == null ? void 0 : toolCall.tool) || "unknown",
+            thought: (toolCall == null ? void 0 : toolCall.thought) ? String(toolCall.thought).slice(0, 200) : void 0,
+            iter
+          });
+        },
+        /**
+         * 记录一次工具结果（截断预览，不存原始大对象防存储膨胀）。
+         */
+        recordResult(trace, toolCall, result, iter) {
+          if (!trace) return;
+          const status = result && result.status || "ok";
+          let preview = "";
+          if (result && result.message != null) {
+            preview = String(result.message).slice(0, this.MAX_RESULT_PREVIEW);
+          } else if (typeof result === "string") {
+            preview = result.slice(0, this.MAX_RESULT_PREVIEW);
+          }
+          trace.results.push({ tool: (toolCall == null ? void 0 : toolCall.tool) || "unknown", status, preview, iter });
+        },
+        /**
+         * 记录错误（AI 调用失败/工具异常）。
+         */
+        recordError(trace, error) {
+          if (!trace) return;
+          const msg = (error == null ? void 0 : error.message) ? String(error.message).slice(0, 300) : String(error).slice(0, 300);
+          trace.errors.push(msg);
+        },
+        /**
+         * 持久化 trace（runAgentLoop 出口调用），rotate 超限丢弃最旧。
+         * @param {object} trace — create() 返回的 trace，已填充 toolCalls/results/finalResponse/status
+         * @param {string} status — "completed" | "failed" | "max_iterations"
+         * @param {string} finalResponse — 最终 AI 回复
+         * @returns {object} 持久化后的 trace（去 _startedAt，补 latencyMs）
+         */
+        persist(trace, status, finalResponse) {
+          if (!trace) return null;
+          trace.status = status || "completed";
+          trace.finalResponse = String(finalResponse || "").slice(0, this.MAX_FINAL_RESPONSE);
+          trace.latencyMs = trace._startedAt ? Date.now() - trace._startedAt : 0;
+          delete trace._startedAt;
+          const traces = this._load();
+          traces.push(trace);
+          while (traces.length > this.MAX_TRACES) {
+            traces.shift();
+          }
+          this._save(traces);
+          return trace;
+        },
+        /**
+         * 读取全部 trace（诊断/测试用）。
+         */
+        list() {
+          return this._load();
+        },
+        /**
+         * 清空所有 trace（测试/重置用）。
+         */
+        clear() {
+          this._save([]);
+        }
+      };
+      module.exports = { AgentTrace };
+    }
+  });
+
+  // src/ai/BlockConverter.js
+  var require_BlockConverter = __commonJS({
+    "src/ai/BlockConverter.js"(exports, module) {
+      "use strict";
+      var { Utils: Utils2 } = require_utils();
+      var BlockConverter = {
+        // markdown 文本 → Notion blocks 数组
+        textToBlocks: (text) => {
+          const blocks = [];
+          const lines = text.split("\n");
+          let inCodeBlock = false;
+          let codeLines = [];
+          let codeLang = "plain text";
+          const LANG_MAP = {
+            js: "javascript",
+            ts: "typescript",
+            py: "python",
+            rb: "ruby",
+            sh: "shell",
+            bash: "shell",
+            zsh: "shell",
+            yml: "yaml",
+            md: "markdown",
+            cs: "c#",
+            cpp: "c++",
+            objc: "objective-c",
+            kt: "kotlin",
+            rs: "rust",
+            go: "go",
+            java: "java",
+            html: "html",
+            css: "css",
+            json: "json",
+            xml: "xml",
+            sql: "sql",
+            r: "r",
+            swift: "swift",
+            scala: "scala",
+            php: "php",
+            perl: "perl",
+            lua: "lua",
+            dart: "dart",
+            dockerfile: "docker",
+            makefile: "makefile",
+            toml: "toml",
+            graphql: "graphql",
+            protobuf: "protobuf",
+            sass: "sass",
+            scss: "scss",
+            less: "less",
+            jsx: "javascript",
+            tsx: "typescript"
+          };
+          const NOTION_LANGS = /* @__PURE__ */ new Set([
+            "abap",
+            "arduino",
+            "bash",
+            "basic",
+            "c",
+            "clojure",
+            "coffeescript",
+            "c++",
+            "c#",
+            "css",
+            "dart",
+            "diff",
+            "docker",
+            "elixir",
+            "elm",
+            "erlang",
+            "flow",
+            "fortran",
+            "f#",
+            "gherkin",
+            "glsl",
+            "go",
+            "graphql",
+            "groovy",
+            "haskell",
+            "html",
+            "java",
+            "javascript",
+            "json",
+            "julia",
+            "kotlin",
+            "latex",
+            "less",
+            "lisp",
+            "livescript",
+            "lua",
+            "makefile",
+            "markdown",
+            "markup",
+            "matlab",
+            "mermaid",
+            "nix",
+            "objective-c",
+            "ocaml",
+            "pascal",
+            "perl",
+            "php",
+            "plain text",
+            "powershell",
+            "prolog",
+            "protobuf",
+            "python",
+            "r",
+            "reason",
+            "ruby",
+            "rust",
+            "sass",
+            "scala",
+            "scheme",
+            "scss",
+            "shell",
+            "sql",
+            "swift",
+            "typescript",
+            "vb.net",
+            "verilog",
+            "vhdl",
+            "visual basic",
+            "webassembly",
+            "xml",
+            "yaml",
+            "java/c/c++/c#"
+          ]);
+          const normalizeLanguage2 = (lang) => {
+            const lower = (lang || "").toLowerCase().trim();
+            if (!lower) return "plain text";
+            if (LANG_MAP[lower]) return LANG_MAP[lower];
+            if (NOTION_LANGS.has(lower)) return lower;
+            return "plain text";
+          };
+          const splitLongText = (str) => {
+            const maxLen = 2e3;
+            const chunks = [];
+            if (str.length <= maxLen) {
+              chunks.push({ type: "text", text: { content: str } });
+            } else {
+              let remaining = str;
+              while (remaining.length > 0) {
+                chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
+                remaining = remaining.substring(maxLen);
+              }
+            }
+            return chunks;
+          };
+          for (const line of lines) {
+            if (line.startsWith("```")) {
+              if (inCodeBlock) {
+                const code = codeLines.join("\n");
+                blocks.push({
+                  type: "code",
+                  code: { rich_text: splitLongText(code), language: codeLang }
+                });
+                codeLines = [];
+                inCodeBlock = false;
+              } else {
+                inCodeBlock = true;
+                codeLang = normalizeLanguage2(line.slice(3).trim());
+              }
+              continue;
+            }
+            if (inCodeBlock) {
+              codeLines.push(line);
+              continue;
+            }
+            if (!line.trim()) continue;
+            if (line.startsWith("### ")) {
+              blocks.push({ type: "heading_3", heading_3: { rich_text: splitLongText(line.slice(4)) } });
+            } else if (line.startsWith("## ")) {
+              blocks.push({ type: "heading_2", heading_2: { rich_text: splitLongText(line.slice(3)) } });
+            } else if (line.startsWith("# ")) {
+              blocks.push({ type: "heading_1", heading_1: { rich_text: splitLongText(line.slice(2)) } });
+            } else if (line.trim() === "---" || line.trim() === "***") {
+              blocks.push({ type: "divider", divider: {} });
+            } else if (line.startsWith("> ")) {
+              blocks.push({ type: "quote", quote: { rich_text: splitLongText(line.slice(2)) } });
+            } else if (/^[-*]\s/.test(line)) {
+              blocks.push({ type: "bulleted_list_item", bulleted_list_item: { rich_text: splitLongText(line.replace(/^[-*]\s/, "")) } });
+            } else if (/^\d+\.\s/.test(line)) {
+              blocks.push({ type: "numbered_list_item", numbered_list_item: { rich_text: splitLongText(line.replace(/^\d+\.\s/, "")) } });
+            } else {
+              blocks.push({ type: "paragraph", paragraph: { rich_text: splitLongText(line) } });
+            }
+          }
+          if (inCodeBlock && codeLines.length > 0) {
+            const code = codeLines.join("\n");
+            blocks.push({
+              type: "code",
+              code: { rich_text: splitLongText(code), language: codeLang }
+            });
+          }
+          return blocks;
+        },
+        // Notion block + 新内容 → 更新 payload（按 block 类型分发）
+        buildBlockUpdatePayload: (block, content, options = {}) => {
+          if (!block || !block.type) {
+            throw new Error("\u65E0\u6CD5\u8BC6\u522B\u5757\u7C7B\u578B");
+          }
+          const rawContent = String(content || "");
+          const richText = [{ type: "text", text: { content: String(content || "") } }];
+          const type = block.type;
+          const current = block[type] || {};
+          switch (type) {
+            case "paragraph":
+            case "heading_1":
+            case "heading_2":
+            case "heading_3":
+            case "bulleted_list_item":
+            case "numbered_list_item":
+            case "quote":
+            case "toggle":
+              return {
+                [type]: {
+                  ...current,
+                  rich_text: richText,
+                  color: options.color || current.color
+                }
+              };
+            case "to_do":
+              return {
+                to_do: {
+                  ...current,
+                  rich_text: richText,
+                  checked: typeof options.checked === "boolean" ? options.checked : !!current.checked,
+                  color: options.color || current.color
+                }
+              };
+            case "callout":
+              return {
+                callout: {
+                  ...current,
+                  rich_text: richText,
+                  icon: options.icon || current.icon,
+                  color: options.color || current.color
+                }
+              };
+            case "code":
+              return {
+                code: {
+                  ...current,
+                  rich_text: richText,
+                  caption: Array.isArray(current.caption) ? current.caption : [],
+                  language: current.language || "plain text"
+                }
+              };
+            case "template":
+              return {
+                template: {
+                  ...current,
+                  rich_text: richText
+                }
+              };
+            case "equation":
+              return {
+                equation: {
+                  ...current,
+                  expression: rawContent
+                }
+              };
+            case "bookmark":
+              if (!Utils2.isHttpUrl(rawContent)) {
+                throw new Error("bookmark \u5757\u4EC5\u652F\u6301\u66F4\u65B0\u4E3A http/https URL\u3002");
+              }
+              return {
+                bookmark: {
+                  ...current,
+                  url: rawContent,
+                  caption: Array.isArray(current.caption) ? current.caption : []
+                }
+              };
+            case "embed":
+              if (!Utils2.isHttpUrl(rawContent)) {
+                throw new Error("embed \u5757\u4EC5\u652F\u6301\u66F4\u65B0\u4E3A http/https URL\u3002");
+              }
+              return {
+                embed: {
+                  ...current,
+                  url: rawContent,
+                  caption: Array.isArray(current.caption) ? current.caption : []
+                }
+              };
+            case "link_preview":
+              throw new Error("link_preview \u5757\u662F Notion API \u7684\u53EA\u8BFB\u8FD4\u56DE\u7C7B\u578B\uFF0C\u4E0D\u80FD\u76F4\u63A5\u66F4\u65B0\uFF1B\u8BF7\u6539\u7528 bookmark \u6216 embed \u5757\u3002");
+            case "table_row":
+              throw new Error("table_row \u5757\u5F53\u524D\u65E0\u6CD5\u901A\u8FC7\u5355\u4E00 content \u53C2\u6570\u5B89\u5168\u66F4\u65B0\u5355\u5143\u683C\uFF1B\u8BF7\u6539\u7528\u9875\u9762 Markdown \u7F16\u8F91\u6216\u91CD\u65B0\u63D2\u5165\u8868\u683C\u884C\u3002");
+            default:
+              throw new Error(`\u6682\u4E0D\u652F\u6301\u66F4\u65B0\u5757\u7C7B\u578B\u300C${type}\u300D`);
+          }
+        }
+      };
+      module.exports = { BlockConverter };
+    }
+  });
+
+  // src/ai/NameResolver.js
+  var require_NameResolver = __commonJS({
+    "src/ai/NameResolver.js"(exports, module) {
+      "use strict";
+      var { Utils: Utils2 } = require_utils();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var NameResolver = {
+        // 数据库名称/ID → { id, name } | { error } | null
+        resolveDatabaseId: async (name, id, apiKey) => {
+          if (id) {
+            const parsedId = Utils2.extractNotionId(id) || String(id).replace(/-/g, "");
+            return { id: parsedId, name: name || id };
+          }
+          const refId = Utils2.extractNotionId(name);
+          if (refId) return { id: refId, name: name || refId };
+          if (!name) return null;
+          const response = await NotionAPI2.search(
+            name,
+            { property: "object", value: "database" },
+            apiKey
+          );
+          const databases = response.results || [];
+          let exactMatch = null;
+          const partialMatches = [];
+          for (const db of databases) {
+            const titleProp = db.title || [];
+            const dbTitle = titleProp.map((t) => t.plain_text).join("");
+            if (!dbTitle) continue;
+            if (dbTitle === name) {
+              exactMatch = { id: db.id.replace(/-/g, ""), name: dbTitle };
+              break;
+            }
+            if (dbTitle.includes(name)) {
+              partialMatches.push({ id: db.id.replace(/-/g, ""), name: dbTitle });
+            }
+          }
+          if (exactMatch) return exactMatch;
+          if (partialMatches.length === 1) return partialMatches[0];
+          if (partialMatches.length > 1) {
+            const names = partialMatches.map((m) => `\u300C${m.name}\u300D`).join("\u3001");
+            return { error: `\u627E\u5230\u591A\u4E2A\u5339\u914D\u7684\u6570\u636E\u5E93: ${names}\uFF0C\u8BF7\u4F7F\u7528\u66F4\u7CBE\u786E\u7684\u540D\u79F0\u3002` };
+          }
+          return null;
+        },
+        // 页面名称/ID → { id, name } | { error } | null
+        resolvePageId: async (name, id, apiKey) => {
+          if (id) {
+            const parsedId = Utils2.extractNotionId(id) || String(id).replace(/-/g, "");
+            return { id: parsedId, name: name || id };
+          }
+          const refId = Utils2.extractNotionId(name);
+          if (refId) return { id: refId, name: name || refId };
+          if (!name) return null;
+          const response = await NotionAPI2.search(
+            name,
+            { property: "object", value: "page" },
+            apiKey
+          );
+          const pages = (response.results || []).filter((p) => !p.archived);
+          let exactMatch = null;
+          const partialMatches = [];
+          for (const page of pages) {
+            const title = Utils2.getPageTitle(page);
+            if (!title) continue;
+            if (title === name) {
+              exactMatch = { id: page.id.replace(/-/g, ""), name: title };
+              break;
+            }
+            if (title.includes(name)) {
+              partialMatches.push({ id: page.id.replace(/-/g, ""), name: title });
+            }
+          }
+          if (exactMatch) return exactMatch;
+          if (partialMatches.length === 1) return partialMatches[0];
+          if (partialMatches.length > 1) {
+            const names = partialMatches.map((m) => `\u300C${m.name}\u300D`).join("\u3001");
+            return { error: `\u627E\u5230\u591A\u4E2A\u5339\u914D\u7684\u9875\u9762: ${names}\uFF0C\u8BF7\u4F7F\u7528\u66F4\u7CBE\u786E\u7684\u540D\u79F0\u3002` };
+          }
+          return null;
+        }
+      };
+      module.exports = { NameResolver };
+    }
+  });
+
+  // src/ai/deps.js
+  var require_deps = __commonJS({
+    "src/ai/deps.js"(exports, module) {
+      "use strict";
+      var _AI = null;
+      var _state = null;
+      var _svc = null;
+      var getAI = () => _AI || (_AI = require_ai().AIAssistant);
+      var getState = () => _state || (_state = require_ai().ChatState);
+      var getService = () => _svc || (_svc = require_ai().AIService);
+      module.exports = { getAI, getState, getService };
+    }
+  });
+
+  // src/ai/tools/read-tools.js
+  var require_read_tools = __commonJS({
+    "src/ai/tools/read-tools.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { TargetState: TargetState2 } = require_auth();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { OperationGuard: OperationGuard2 } = require_security();
+      var { getAI: AI, getService: svc } = require_deps();
+      module.exports = {
+        search_workspace: {
+          description: "\u641C\u7D22 Notion \u5DE5\u4F5C\u533A\u4E2D\u7684\u9875\u9762\u6216\u6570\u636E\u5E93",
+          params: "query(\u641C\u7D22\u8BCD), type(\u53EF\u9009:'page'\u6216'database')",
+          level: 0,
+          execute: async (args, settings) => {
+            var _a, _b, _c, _d;
+            const { query = "", type } = args;
+            let filter = null;
+            if (type === "page") filter = { property: "object", value: "page" };
+            else if (type === "database") filter = { property: "object", value: "database" };
+            let allResults = [];
+            let cursor = void 0;
+            let pageCount = 0;
+            do {
+              const response = await NotionAPI2.search(query, filter, settings.notionApiKey, cursor);
+              allResults = allResults.concat(response.results || []);
+              cursor = response.has_more ? response.next_cursor : void 0;
+              pageCount++;
+            } while (cursor && pageCount < 10);
+            const results = allResults;
+            if (results.length === 0) {
+              return query ? `\u6CA1\u6709\u627E\u5230\u5305\u542B\u300C${query}\u300D\u7684\u5185\u5BB9\u3002` : "\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u5185\u5BB9\u3002";
+            }
+            const lines = [];
+            for (const item of results.slice(0, 15)) {
+              if (item.object === "database") {
+                const title = ((_b = (_a = item.title) == null ? void 0 : _a[0]) == null ? void 0 : _b.plain_text) || "\u65E0\u6807\u9898\u6570\u636E\u5E93";
+                const id = ((_c = item.id) == null ? void 0 : _c.replace(/-/g, "")) || "";
+                lines.push(`[\u6570\u636E\u5E93] ${title} (ID: ${id})`);
+              } else {
+                const title = Utils2.getPageTitle(item);
+                const id = ((_d = item.id) == null ? void 0 : _d.replace(/-/g, "")) || "";
+                const url = item.url || "";
+                lines.push(`[\u9875\u9762] ${title} (ID: ${id}, URL: ${url})`);
+              }
+            }
+            return AI()._formatToolResult({
+              title: "\u5DE5\u4F5C\u533A\u641C\u7D22\u7ED3\u679C",
+              fields: [
+                { label: "\u603B\u6570", value: results.length },
+                { label: "\u663E\u793A", value: Math.min(15, results.length) },
+                { label: "\u5BF9\u8C61\u7C7B\u578B", value: type || "all" }
+              ],
+              bullets: lines
+            });
+          }
+        },
+        fetch_notion_object: {
+          description: "\u6839\u636E\u9875\u9762/\u6570\u636E\u5E93\u540D\u79F0\u3001URL \u6216 ID \u83B7\u53D6\u5BF9\u8C61\u8BE6\u60C5",
+          params: "reference(\u540D\u79F0/URL/ID), type(\u53EF\u9009:'page'|'database')",
+          level: 0,
+          execute: async (args, settings) => {
+            var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+            const { reference, type } = args;
+            if (!reference) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B reference\u3002";
+            if (type === "database") {
+              const resolved2 = await AI()._resolveDatabaseId(reference, null, settings.notionApiKey);
+              if (resolved2 == null ? void 0 : resolved2.error) return `\u9519\u8BEF: ${resolved2.error}`;
+              if (!resolved2) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${reference}\u300D\u3002`;
+              const database = await NotionAPI2.fetchDatabase(resolved2.id, settings.notionApiKey);
+              const title2 = ((_a = database.title) == null ? void 0 : _a.map((t) => t.plain_text).join("")) || resolved2.name || "\u672A\u547D\u540D\u6570\u636E\u5E93";
+              const propertyNames = Object.keys(database.properties || {});
+              return AI()._formatToolResult({
+                title: "Notion \u5BF9\u8C61\u8BE6\u60C5",
+                fields: [
+                  { label: "\u5BF9\u8C61\u7C7B\u578B", value: "database" },
+                  { label: "\u6807\u9898", value: title2 },
+                  { label: "ID", value: ((_b = database.id) == null ? void 0 : _b.replace(/-/g, "")) || resolved2.id },
+                  { label: "URL", value: database.url || "-" },
+                  { label: "\u5C5E\u6027\u6570", value: propertyNames.length },
+                  { label: "\u5C5E\u6027", value: propertyNames.join(", ") || "-" }
+                ]
+              });
+            }
+            const resolved = await AI()._resolvePageId(reference, null, settings.notionApiKey);
+            if (resolved == null ? void 0 : resolved.error) return `\u9519\u8BEF: ${resolved.error}`;
+            if (!resolved) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${reference}\u300D\u3002`;
+            const page = await NotionAPI2.fetchPage(resolved.id, settings.notionApiKey);
+            const title = Utils2.getPageTitle(page, resolved.name || "\u672A\u547D\u540D\u9875\u9762");
+            const parentType = ((_c = page.parent) == null ? void 0 : _c.type) || "-";
+            const iconText = ((_d = page.icon) == null ? void 0 : _d.emoji) || ((_f = (_e = page.icon) == null ? void 0 : _e.external) == null ? void 0 : _f.url) || "-";
+            const coverText = ((_h = (_g = page.cover) == null ? void 0 : _g.external) == null ? void 0 : _h.url) || "-";
+            return AI()._formatToolResult({
+              title: "Notion \u5BF9\u8C61\u8BE6\u60C5",
+              fields: [
+                { label: "\u5BF9\u8C61\u7C7B\u578B", value: "page" },
+                { label: "\u6807\u9898", value: title },
+                { label: "ID", value: ((_i = page.id) == null ? void 0 : _i.replace(/-/g, "")) || resolved.id },
+                { label: "URL", value: page.url || "-" },
+                { label: "parent", value: parentType },
+                { label: "icon", value: iconText },
+                { label: "cover", value: coverText },
+                { label: "archived", value: page.archived ? "yes" : "no" }
+              ]
+            });
+          }
+        },
+        fetch_page_blocks: {
+          description: "\u8BFB\u53D6\u9875\u9762\u6216\u5757\u7684\u5757\u7EA7\u7ED3\u6784\uFF0C\u652F\u6301\u6709\u9650\u9012\u5F52\u5C55\u5F00\u5B50\u5757",
+          params: "page_name/page_id(\u9875\u9762,\u53EF\u9009), block_id(\u5757ID,\u53EF\u9009), max_depth(\u9ED8\u8BA42), limit(\u9ED8\u8BA450)",
+          level: 0,
+          execute: async (args, settings) => {
+            const { page_name, page_id, block_id, max_depth = 2, limit = 50 } = args;
+            let rootId = block_id;
+            let targetName = block_id || "";
+            if (!rootId) {
+              const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+              if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
+              if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+              rootId = page.id;
+              targetName = page.name;
+            } else {
+              try {
+                const block = await NotionAPI2.fetchBlock(rootId, settings.notionApiKey);
+                targetName = block.type || rootId;
+              } catch (error) {
+                console.warn("[LD-Notion] \u83B7\u53D6\u5757\u7C7B\u578B\u5931\u8D25:", error);
+                targetName = rootId;
+              }
+            }
+            const depth = Math.max(1, Math.min(Number(max_depth) || 2, 5));
+            const maxNodes = Math.max(1, Math.min(Number(limit) || 50, 200));
+            const blocks = await AI()._collectBlockTree(rootId, settings.notionApiKey, maxNodes, depth);
+            if (blocks.length === 0) {
+              return `\u9875\u9762\u6216\u5757\u300C${targetName}\u300D\u6CA1\u6709\u53EF\u8BFB\u53D6\u7684\u5B50\u5757\u3002`;
+            }
+            return AI()._formatToolResult({
+              title: "\u5757\u7ED3\u6784",
+              fields: [
+                { label: "\u76EE\u6807", value: targetName },
+                { label: "\u5757\u6570", value: blocks.length }
+              ],
+              bullets: blocks.map((block) => AI()._formatBlockSummary(block, block._depth || 0).replace(/^- /, ""))
+            });
+          }
+        },
+        get_comment: {
+          description: "\u6839\u636E\u8BC4\u8BBA ID \u83B7\u53D6\u5355\u6761\u8BC4\u8BBA\u8BE6\u60C5",
+          params: "comment_id(\u8BC4\u8BBAID)",
+          level: 0,
+          execute: async (args, settings) => {
+            var _a, _b, _c, _d, _e, _f;
+            const { comment_id } = args;
+            if (!comment_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B comment_id\u3002";
+            const comment = await NotionAPI2.getComment(comment_id.replace(/-/g, ""), settings.notionApiKey);
+            const text = (comment.rich_text || []).map((rt) => rt.plain_text || "").join("").trim() || "(\u7A7A\u8BC4\u8BBA)";
+            const author = ((_a = comment.created_by) == null ? void 0 : _a.name) || ((_c = (_b = comment.created_by) == null ? void 0 : _b.person) == null ? void 0 : _c.email) || ((_d = comment.created_by) == null ? void 0 : _d.id) || "\u672A\u77E5\u7528\u6237";
+            const discussionId = ((_e = comment.discussion_id) == null ? void 0 : _e.replace(/-/g, "")) || "";
+            return AI()._formatToolResult({
+              title: "\u8BC4\u8BBA\u8BE6\u60C5",
+              fields: [
+                { label: "\u8BC4\u8BBAID", value: ((_f = comment.id) == null ? void 0 : _f.replace(/-/g, "")) || comment_id },
+                { label: "\u8BA8\u8BBAID", value: discussionId || "-" },
+                { label: "\u4F5C\u8005", value: author },
+                { label: "\u521B\u5EFA\u65F6\u95F4", value: comment.created_time || "-" },
+                { label: "\u5185\u5BB9", value: text }
+              ]
+            });
+          }
+        },
+        query_database: {
+          description: "\u67E5\u8BE2\u6570\u636E\u5E93\u7684\u9875\u9762\uFF0C\u652F\u6301\u7B5B\u9009\u548C\u6392\u5E8F\uFF08\u6839\u636EAI\u8BBE\u7F6E\u4E2D\u7684\u76EE\u6807\u6570\u636E\u5E93\u51B3\u5B9A\u67E5\u8BE2\u8303\u56F4\uFF09",
+          params: "filter_field(\u7B5B\u9009\u5B57\u6BB5,\u53EF\u9009), filter_value(\u7B5B\u9009\u503C,\u53EF\u9009), limit(\u6570\u91CF,\u9ED8\u8BA410)",
+          level: 0,
+          execute: async (args, settings) => {
+            const aiTargetState = TargetState2.getEffectiveAITargetState({
+              fallbackDatabaseId: settings.notionDatabaseId
+            });
+            const { filter_field, filter_value, limit = 10 } = args;
+            let filter = null;
+            if (filter_field && filter_value) {
+              const fieldConfig = {
+                "\u4F5C\u8005": { name: "\u4F5C\u8005", type: "rich_text" },
+                "\u5206\u7C7B": { name: "\u5206\u7C7B", type: "rich_text" },
+                "\u6807\u7B7E": { name: "\u6807\u7B7E", type: "multi_select" },
+                "AI\u5206\u7C7B": { name: "AI\u5206\u7C7B", type: "select" }
+              };
+              const config = fieldConfig[filter_field] || { name: filter_field, type: "rich_text" };
+              if (config.type === "select") {
+                filter = { property: config.name, select: { equals: filter_value } };
+              } else if (config.type === "multi_select") {
+                filter = { property: config.name, multi_select: { contains: filter_value } };
+              } else {
+                filter = { property: config.name, rich_text: { contains: filter_value } };
+              }
+            }
+            const queryOneDb = async (dbId) => {
+              const pages = [];
+              let cursor = null;
+              let hasMore = true;
+              let pageCount = 0;
+              while (hasMore && pageCount < 10) {
+                let response;
+                try {
+                  response = await NotionAPI2.queryDatabase(
+                    dbId,
+                    filter,
+                    pageCount === 0 ? [{ property: "\u6536\u85CF\u65F6\u95F4", direction: "descending" }] : null,
+                    cursor,
+                    settings.notionApiKey
+                  );
+                } catch (error) {
+                  console.warn("[LD-Notion] \u6309\u6536\u85CF\u65F6\u95F4\u6392\u5E8F\u67E5\u8BE2\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u521B\u5EFA\u65F6\u95F4\u6392\u5E8F:", error);
+                  response = await NotionAPI2.queryDatabase(
+                    dbId,
+                    filter,
+                    [{ timestamp: "created_time", direction: "descending" }],
+                    cursor,
+                    settings.notionApiKey
+                  );
+                }
+                pages.push(...response.results || []);
+                hasMore = response.has_more;
+                cursor = response.next_cursor;
+                pageCount++;
+              }
+              return pages;
+            };
+            let allPages = [];
+            if (aiTargetState.mode === "all") {
+              let cached;
+              try {
+                cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
+              } catch (error) {
+                console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
+                cached = {};
+              }
+              const databases = cached.databases || [];
+              if (databases.length === 0) return "\u9519\u8BEF: \u8BF7\u5148\u5728 AI \u8BBE\u7F6E\u4E2D\u70B9\u51FB\u300C\u{1F504}\u300D\u5237\u65B0\u6570\u636E\u5E93\u5217\u8868\u3002";
+              const currentKeyHash = settings.notionApiKey ? Utils2.apiKeyHash(settings.notionApiKey) : "";
+              if (cached.apiKeyHash && cached.apiKeyHash !== currentKeyHash) {
+                return "\u9519\u8BEF: \u6570\u636E\u5E93\u5217\u8868\u7F13\u5B58\u4E0E\u5F53\u524D API Key \u4E0D\u5339\u914D\uFF0C\u8BF7\u91CD\u65B0\u70B9\u51FB\u300C\u{1F504}\u300D\u5237\u65B0\u3002";
+              }
+              for (const db of databases) {
+                try {
+                  const pages = await queryOneDb(db.id);
+                  pages.forEach((p) => {
+                    p._sourceDb = db.title;
+                  });
+                  allPages.push(...pages);
+                } catch (error) {
+                  console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25\uFF0C\u8DF3\u8FC7\u65E0\u6743\u9650\u6570\u636E\u5E93:", error);
+                }
+              }
+            } else {
+              const dbId = TargetState2.getEffectiveAIDatabaseId({
+                fallbackDatabaseId: settings.notionDatabaseId,
+                targetValue: aiTargetState.value
+              });
+              if (!dbId) return "\u9519\u8BEF: \u672A\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
+              allPages = await queryOneDb(dbId);
+            }
+            if (allPages.length === 0) {
+              return filter ? `\u6CA1\u6709\u627E\u5230\u5339\u914D ${filter_field}="${filter_value}" \u7684\u9875\u9762\u3002` : "\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u9875\u9762\u3002";
+            }
+            const total = allPages.length;
+            const showCount = Math.min(limit, total);
+            const categoryCount = {};
+            allPages.forEach((page) => {
+              var _a, _b, _c, _d, _e;
+              const cat = ((_b = (_a = page.properties["AI\u5206\u7C7B"]) == null ? void 0 : _a.select) == null ? void 0 : _b.name) || ((_e = (_d = (_c = page.properties["\u5206\u7C7B"]) == null ? void 0 : _c.rich_text) == null ? void 0 : _d[0]) == null ? void 0 : _e.plain_text) || "\u672A\u5206\u7C7B";
+              categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+            });
+            const bullets = allPages.slice(0, showCount).map((page, i) => {
+              var _a, _b, _c, _d;
+              const title = Utils2.getPageTitle(page);
+              const id = ((_a = page.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
+              const author = ((_d = (_c = (_b = page.properties["\u4F5C\u8005"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.plain_text) || "";
+              const sourceDb = page._sourceDb ? ` [\u6765\u6E90: ${page._sourceDb}]` : "";
+              return `${i + 1}. ${title}${author ? ` (\u4F5C\u8005: ${author})` : ""}${sourceDb} [ID: ${id}]`;
+            });
+            return AI()._formatToolResult({
+              title: "\u6570\u636E\u5E93\u67E5\u8BE2\u7ED3\u679C",
+              fields: [
+                { label: "\u603B\u6570", value: total },
+                { label: "\u663E\u793A", value: showCount },
+                { label: "\u5206\u7C7B\u7EDF\u8BA1", value: Object.entries(categoryCount).map(([k, v]) => `${k}(${v})`).join(", ") }
+              ],
+              bullets
+            });
+          }
+        },
+        get_page_content: {
+          description: "\u8BFB\u53D6\u6307\u5B9A\u9875\u9762\u7684\u6587\u5B57\u5185\u5BB9",
+          params: "page_name(\u9875\u9762\u540D) \u6216 page_id(\u9875\u9762ID)",
+          level: 0,
+          execute: async (args, settings) => {
+            const { page_name, page_id } = args;
+            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
+            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
+            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 4e3);
+            return content.trim() ? AI()._formatToolResult({
+              title: "\u9875\u9762\u5185\u5BB9",
+              fields: [
+                { label: "\u76EE\u6807", value: page.name }
+              ],
+              bullets: content.split("\n").filter(Boolean)
+            }) : `\u9875\u9762\u300C${page.name}\u300D\u6CA1\u6709\u6587\u5B57\u5185\u5BB9\u3002`;
+          }
+        },
+        fetch_page_markdown: {
+          description: "\u83B7\u53D6\u6307\u5B9A\u9875\u9762\u7684\u5B8C\u6574 Markdown \u5185\u5BB9",
+          params: "page_name(\u9875\u9762\u540D) \u6216 page_id(\u9875\u9762ID)",
+          level: 0,
+          execute: async (args, settings) => {
+            const { page_name, page_id } = args;
+            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
+            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
+            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            try {
+              const response = await NotionAPI2.fetchPageMarkdown(page.id, settings.notionApiKey);
+              const markdown = String(response.markdown || "").trim();
+              return markdown ? AI()._formatToolResult({
+                title: "\u9875\u9762 Markdown",
+                fields: [
+                  { label: "\u76EE\u6807", value: page.name },
+                  { label: "\u6765\u6E90", value: "Notion Markdown API" }
+                ],
+                bullets: markdown.length > 2e3 ? [`\u5185\u5BB9\u8FC7\u957F\uFF0C\u5DF2\u622A\u65AD\u663E\u793A\u524D 2000 \u5B57\u7B26`, markdown.slice(0, 2e3)] : markdown.split("\n").filter(Boolean)
+              }) : `\u9875\u9762\u300C${page.name}\u300D\u5F53\u524D\u6CA1\u6709 Markdown \u5185\u5BB9\u3002`;
+            } catch (error) {
+              const fallback = await AI()._extractPageContent(page.id, settings.notionApiKey, 6e3);
+              if (!fallback.trim()) {
+                return `\u9875\u9762\u300C${page.name}\u300D\u6CA1\u6709\u53EF\u8BFB\u53D6\u7684\u5185\u5BB9\u3002`;
+              }
+              return AI()._formatToolResult({
+                title: "\u9875\u9762 Markdown",
+                fields: [
+                  { label: "\u76EE\u6807", value: page.name },
+                  { label: "\u6765\u6E90", value: "\u6587\u672C\u56DE\u9000\u63D0\u53D6" }
+                ],
+                bullets: fallback.length > 2e3 ? [`\u5185\u5BB9\u8FC7\u957F\uFF0C\u5DF2\u622A\u65AD\u663E\u793A\u524D 2000 \u5B57\u7B26`, fallback.slice(0, 2e3)] : fallback.split("\n").filter(Boolean)
+              });
+            }
+          }
+        },
+        get_database_schema: {
+          description: "\u83B7\u53D6\u6570\u636E\u5E93\u7684\u5C5E\u6027\u7ED3\u6784",
+          params: "database_name(\u6570\u636E\u5E93\u540D) \u6216 database_id(\u6570\u636E\u5E93ID)",
+          level: 0,
+          execute: async (args, settings) => {
+            var _a, _b, _c, _d, _e, _f;
+            let dbId = args.database_id;
+            let dbName = args.database_name;
+            if (!dbId && !dbName) {
+              dbId = settings.notionDatabaseId;
+              if (!dbId) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B database_name \u6216 database_id\uFF0C\u6216\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
+              dbName = "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93";
+            }
+            if (!dbId && dbName) {
+              const resolved = await AI()._resolveDatabaseId(dbName, null, settings.notionApiKey);
+              if (resolved == null ? void 0 : resolved.error) return `\u9519\u8BEF: ${resolved.error}`;
+              if (!resolved) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${dbName}\u300D\u3002`;
+              dbId = resolved.id;
+              dbName = resolved.name;
+            }
+            const database = await NotionAPI2.fetchDatabase(dbId, settings.notionApiKey);
+            const props = database.properties || {};
+            const title = ((_b = (_a = database.title) == null ? void 0 : _a[0]) == null ? void 0 : _b.plain_text) || dbName || "\u672A\u547D\u540D";
+            const bullets = [];
+            for (const [name, prop] of Object.entries(props)) {
+              let extra = "";
+              if (prop.type === "select" && ((_d = (_c = prop.select) == null ? void 0 : _c.options) == null ? void 0 : _d.length)) {
+                extra = ` (\u9009\u9879: ${prop.select.options.map((o) => o.name).join(", ")})`;
+              } else if (prop.type === "multi_select" && ((_f = (_e = prop.multi_select) == null ? void 0 : _e.options) == null ? void 0 : _f.length)) {
+                extra = ` (\u9009\u9879: ${prop.multi_select.options.map((o) => o.name).join(", ")})`;
+              }
+              bullets.push(`${name}: ${prop.type}${extra}`);
+            }
+            return AI()._formatToolResult({
+              title: "\u6570\u636E\u5E93\u7ED3\u6784",
+              fields: [
+                { label: "\u6807\u9898", value: title },
+                { label: "\u5C5E\u6027\u6570", value: Object.keys(props).length }
+              ],
+              bullets
+            });
+          }
+        },
+        get_comments: {
+          description: "\u83B7\u53D6\u9875\u9762\u6216\u5757\u4E0A\u7684\u672A\u89E3\u51B3\u8BC4\u8BBA",
+          params: "page_name/page_id(\u9875\u9762,\u53EF\u9009), block_id(\u5757ID,\u53EF\u9009), limit(\u6570\u91CF,\u9ED8\u8BA420)",
+          level: 0,
+          execute: async (args, settings) => {
+            const { page_name, page_id, block_id, limit = 20 } = args;
+            let blockId = block_id;
+            let targetName = block_id || "";
+            if (!blockId) {
+              const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+              if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
+              if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+              blockId = page.id;
+              targetName = page.name;
+            }
+            const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 50));
+            const comments = [];
+            let cursor = null;
+            while (comments.length < safeLimit) {
+              const response = await NotionAPI2.listComments(blockId, cursor, Math.min(100, safeLimit), settings.notionApiKey);
+              comments.push(...response.results || []);
+              if (!response.has_more || !response.next_cursor) break;
+              cursor = response.next_cursor;
+            }
+            if (comments.length === 0) {
+              return `\u9875\u9762\u6216\u5757\u300C${targetName || blockId}\u300D\u76EE\u524D\u6CA1\u6709\u672A\u89E3\u51B3\u8BC4\u8BBA\u3002`;
+            }
+            const shown = comments.slice(0, safeLimit).map(AI()._formatCommentSummary);
+            return AI()._formatToolResult({
+              title: "\u8BC4\u8BBA\u5217\u8868",
+              fields: [
+                { label: "\u76EE\u6807", value: targetName || blockId },
+                { label: "\u603B\u6570", value: comments.length },
+                { label: "\u663E\u793A", value: shown.length }
+              ],
+              bullets: shown.map((line) => line.replace(/^- /, ""))
+            });
+          }
+        },
+        list_workspace_users: {
+          description: "\u5217\u51FA\u5F53\u524D\u5DE5\u4F5C\u533A\u4E2D\u96C6\u6210\u53EF\u89C1\u7684\u7528\u6237",
+          params: "limit(\u6570\u91CF,\u9ED8\u8BA420), query(\u6309\u540D\u79F0\u6216\u90AE\u7BB1\u8FC7\u6EE4,\u53EF\u9009)",
+          level: 0,
+          execute: async (args, settings) => {
+            const { limit = 20, query = "" } = args;
+            const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 50));
+            let users = await AI()._collectWorkspaceUsers(settings.notionApiKey, safeLimit);
+            const keyword = String(query || "").trim().toLowerCase();
+            if (keyword) {
+              users = users.filter((user) => {
+                var _a;
+                const name = String(user.name || "").toLowerCase();
+                const email = String(((_a = user.person) == null ? void 0 : _a.email) || "").toLowerCase();
+                return name.includes(keyword) || email.includes(keyword);
+              });
+            }
+            if (users.length === 0) {
+              return keyword ? `\u6CA1\u6709\u627E\u5230\u540D\u79F0\u6216\u90AE\u7BB1\u5305\u542B\u300C${query}\u300D\u7684\u7528\u6237\u3002` : "\u5F53\u524D\u5DE5\u4F5C\u533A\u6CA1\u6709\u53EF\u89C1\u7528\u6237\u3002";
+            }
+            return AI()._formatToolResult({
+              title: "\u5DE5\u4F5C\u533A\u7528\u6237\u5217\u8868",
+              fields: [
+                { label: "\u4EBA\u6570", value: users.length },
+                { label: "\u7B5B\u9009", value: keyword || "-" }
+              ],
+              bullets: users.map(AI()._formatUserSummary)
+            });
+          }
+        },
+        get_current_user: {
+          description: "\u83B7\u53D6\u5F53\u524D Notion \u96C6\u6210\u5BF9\u5E94\u7684 bot / \u5F53\u524D\u7528\u6237\u4FE1\u606F",
+          params: "\u65E0\u9700\u53C2\u6570",
+          level: 0,
+          execute: async (args, settings) => {
+            const user = await NotionAPI2.getSelf(settings.notionApiKey);
+            return AI()._formatToolResult({
+              title: "\u5F53\u524D\u8EAB\u4EFD",
+              fields: [
+                { label: "\u7528\u6237", value: AI()._formatUserSummary(user) }
+              ]
+            });
+          }
+        },
+        get_workspace_user: {
+          description: "\u6839\u636E\u7528\u6237 ID\u3001\u540D\u79F0\u6216\u90AE\u7BB1\u83B7\u53D6\u5DE5\u4F5C\u533A\u7528\u6237\u8BE6\u60C5",
+          params: "user_id(\u7528\u6237ID,\u53EF\u9009), query(\u540D\u79F0\u6216\u90AE\u7BB1,\u53EF\u9009)",
+          level: 0,
+          execute: async (args, settings) => {
+            var _a, _b, _c, _d;
+            const { user_id, query } = args;
+            if (!user_id && !query) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B user_id \u6216 query\u3002";
+            const user = await AI()._resolveUserIdentity(user_id, query, settings.notionApiKey);
+            if (!user) {
+              return `\u6CA1\u6709\u627E\u5230\u7528\u6237\u300C${query || user_id}\u300D\u3002`;
+            }
+            const details = [
+              { label: "\u7528\u6237", value: AI()._formatUserSummary(user) },
+              { label: "bot \u6240\u6709\u8005\u7C7B\u578B", value: ((_b = (_a = user.bot) == null ? void 0 : _a.owner) == null ? void 0 : _b.type) || "-" },
+              { label: "workspace", value: ((_d = (_c = user.bot) == null ? void 0 : _c.owner) == null ? void 0 : _d.workspace_name) || "-" }
+            ];
+            return AI()._formatToolResult({
+              title: "\u5DE5\u4F5C\u533A\u7528\u6237\u8BE6\u60C5",
+              fields: details
+            });
+          }
+        },
+        // === 跨源工具 (Level 0) ===
+        cross_source_search: {
+          description: "\u8DE8\u6E90\u641C\u7D22\uFF1A\u5728 Linux.do\u3001GitHub\u3001\u6D4F\u89C8\u5668\u4E66\u7B7E\u7B49\u591A\u4E2A\u6765\u6E90\u4E2D\u7EDF\u4E00\u641C\u7D22",
+          params: "query(\u641C\u7D22\u8BCD), source(\u53EF\u9009:'linux.do'|'github'|'\u4E66\u7B7E'|'all', \u9ED8\u8BA4all), limit(\u6570\u91CF,\u9ED8\u8BA410)",
+          level: 0,
+          execute: async (args, settings) => {
+            const { query = "", source = "all", limit = 10 } = args;
+            const aiTargetState = TargetState2.getEffectiveAITargetState({
+              fallbackDatabaseId: settings.notionDatabaseId
+            });
+            let sourceFilter = null;
+            if (source !== "all") {
+              const sourceMap = { "linux.do": "Linux.do", "github": "GitHub", "\u4E66\u7B7E": "\u6D4F\u89C8\u5668\u4E66\u7B7E" };
+              const sourceValue = sourceMap[source.toLowerCase()] || source;
+              sourceFilter = { property: "\u6765\u6E90", rich_text: { contains: sourceValue } };
+            }
+            const filters = [];
+            if (sourceFilter) filters.push(sourceFilter);
+            const queryOneDb = async (dbId) => {
+              const body = { page_size: Math.min(limit, 100) };
+              if (filters.length > 0) {
+                body.filter = filters.length === 1 ? filters[0] : { and: filters };
+              }
+              try {
+                const response = await NotionAPI2.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
+                return response.results || [];
+              } catch (error) {
+                console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
+                return [];
+              }
+            };
+            let results = [];
+            const targetDb = TargetState2.getEffectiveAIDatabaseId({
+              fallbackDatabaseId: settings.notionDatabaseId,
+              targetValue: aiTargetState.value
+            });
+            if (aiTargetState.mode !== "all" && targetDb) {
+              results = await queryOneDb(targetDb);
+            } else {
+              const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
+              for (const db of (allDbs.results || []).slice(0, 5)) {
+                const dbResults = await queryOneDb(db.id);
+                results.push(...dbResults);
+              }
+            }
+            if (query) {
+              results = results.filter((page) => {
+                var _a, _b, _c, _d, _e, _f;
+                const title = Utils2.getPageTitle(page).toLowerCase();
+                const desc = ((_f = (_e = (_d = (_c = (_b = (_a = page.properties) == null ? void 0 : _a["\u63CF\u8FF0"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) == null ? void 0 : _f.toLowerCase()) || "";
+                return title.includes(query.toLowerCase()) || desc.includes(query.toLowerCase());
+              });
+            }
+            results = results.slice(0, limit);
+            if (results.length === 0) {
+              return `\u6CA1\u6709\u627E\u5230${source !== "all" ? `\u6765\u6E90\u4E3A\u300C${source}\u300D\u7684` : ""}\u5305\u542B\u300C${query}\u300D\u7684\u5185\u5BB9\u3002`;
+            }
+            const lines = results.map((page) => {
+              var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+              const title = Utils2.getPageTitle(page);
+              const src = ((_e = (_d = (_c = (_b = (_a = page.properties) == null ? void 0 : _a["\u6765\u6E90"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) || "\u672A\u77E5";
+              const srcType = ((_j = (_i = (_h = (_g = (_f = page.properties) == null ? void 0 : _f["\u6765\u6E90\u7C7B\u578B"]) == null ? void 0 : _g.rich_text) == null ? void 0 : _h[0]) == null ? void 0 : _i.text) == null ? void 0 : _j.content) || "";
+              const url = ((_l = (_k = page.properties) == null ? void 0 : _k["\u94FE\u63A5"]) == null ? void 0 : _l.url) || "";
+              return `[${src}${srcType ? "/" + srcType : ""}] ${title}${url ? ` (${url})` : ""}`;
+            });
+            return AI()._formatToolResult({
+              title: "\u8DE8\u6E90\u641C\u7D22\u7ED3\u679C",
+              fields: [
+                { label: "\u603B\u6570", value: results.length },
+                { label: "\u6765\u6E90", value: source },
+                { label: "\u5173\u952E\u8BCD", value: query || "-" }
+              ],
+              bullets: lines
+            });
+          }
+        },
+        unified_stats: {
+          description: "\u8DE8\u6E90\u7EDF\u8BA1\uFF1A\u7EDF\u8BA1\u5404\u6765\u6E90\uFF08Linux.do/GitHub/\u6D4F\u89C8\u5668\u4E66\u7B7E\uFF09\u7684\u6570\u636E\u91CF\u3001\u5206\u7C7B\u5206\u5E03",
+          params: "\u65E0\u9700\u53C2\u6570",
+          level: 0,
+          execute: async (args, settings) => {
+            var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+            const aiTargetState = TargetState2.getEffectiveAITargetState({
+              fallbackDatabaseId: settings.notionDatabaseId
+            });
+            const queryOneDb = async (dbId) => {
+              try {
+                const response = await NotionAPI2.request("POST", `/databases/${dbId}/query`, { page_size: 100 }, settings.notionApiKey);
+                return response.results || [];
+              } catch (error) {
+                console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
+                return [];
+              }
+            };
+            let allPages = [];
+            const targetDb = TargetState2.getEffectiveAIDatabaseId({
+              fallbackDatabaseId: settings.notionDatabaseId,
+              targetValue: aiTargetState.value
+            });
+            if (aiTargetState.mode !== "all" && targetDb) {
+              allPages = await queryOneDb(targetDb);
+            } else {
+              const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
+              for (const db of (allDbs.results || []).slice(0, 5)) {
+                allPages.push(...await queryOneDb(db.id));
+              }
+            }
+            const sourceStats = {};
+            const categoryStats = {};
+            for (const page of allPages) {
+              const src = ((_e = (_d = (_c = (_b = (_a = page.properties) == null ? void 0 : _a["\u6765\u6E90"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) || "\u672A\u6807\u8BB0";
+              const cat = ((_j = (_i = (_h = (_g = (_f = page.properties) == null ? void 0 : _f["\u5206\u7C7B"]) == null ? void 0 : _g.rich_text) == null ? void 0 : _h[0]) == null ? void 0 : _i.text) == null ? void 0 : _j.content) || "\u672A\u5206\u7C7B";
+              sourceStats[src] = (sourceStats[src] || 0) + 1;
+              categoryStats[cat] = (categoryStats[cat] || 0) + 1;
+            }
+            const topCats = Object.entries(categoryStats).sort((a, b) => b[1] - a[1]).slice(0, 5);
+            const bullets = [];
+            for (const [src, count] of Object.entries(sourceStats).sort((a, b) => b[1] - a[1]).slice(0, 5)) {
+              bullets.push(`\u6765\u6E90 ${src}: ${count} \u6761`);
+            }
+            for (const [cat, count] of topCats) {
+              bullets.push(`\u5206\u7C7B ${cat}: ${count} \u6761`);
+            }
+            return AI()._formatToolResult({
+              title: "\u8DE8\u6E90\u6570\u636E\u7EDF\u8BA1",
+              fields: [
+                { label: "\u603B\u6570", value: allPages.length },
+                { label: "\u6765\u6E90\u79CD\u7C7B", value: Object.keys(sourceStats).length },
+                { label: "\u5206\u7C7B\u79CD\u7C7B", value: Object.keys(categoryStats).length }
+              ],
+              bullets
+            });
+          }
+        },
+        recommend_similar: {
+          description: "\u667A\u80FD\u63A8\u8350\uFF1A\u6839\u636E\u6307\u5B9A\u9875\u9762\uFF0C\u4ECE\u6240\u6709\u6765\u6E90\u4E2D\u627E\u5230\u76F8\u4F3C\u5185\u5BB9",
+          params: "page_name/page_id(\u53C2\u8003\u9875\u9762)",
+          level: 0,
+          execute: async (args, settings) => {
+            var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
+            const { page_name, page_id } = args;
+            let refPage = null;
+            if (page_id) {
+              try {
+                refPage = await NotionAPI2.request("GET", `/pages/${page_id}`, null, settings.notionApiKey);
+              } catch (error) {
+                console.warn("[LD-Notion] \u53C2\u8003\u9875\u9762\u83B7\u53D6\u5931\u8D25:", error);
+              }
+            }
+            if (!refPage && page_name) {
+              const searchResult = await NotionAPI2.search(page_name, null, settings.notionApiKey);
+              refPage = (searchResult.results || []).find((r) => r.object === "page");
+            }
+            if (!refPage) {
+              return "\u274C \u672A\u627E\u5230\u53C2\u8003\u9875\u9762\uFF0C\u8BF7\u63D0\u4F9B\u9875\u9762\u540D\u79F0\u6216 ID\u3002";
+            }
+            const refTitle = Utils2.getPageTitle(refPage);
+            const refDesc = ((_e = (_d = (_c = (_b = (_a = refPage.properties) == null ? void 0 : _a["\u63CF\u8FF0"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) || "";
+            const refTags = (((_g = (_f = refPage.properties) == null ? void 0 : _f["\u6807\u7B7E"]) == null ? void 0 : _g.multi_select) || []).map((t) => t.name);
+            if (!settings.aiApiKey) {
+              return "\u274C \u9700\u8981\u914D\u7F6E AI API Key \u624D\u80FD\u4F7F\u7528\u667A\u80FD\u63A8\u8350\u529F\u80FD\u3002";
+            }
+            const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
+            let candidates = [];
+            for (const db of (allDbs.results || []).slice(0, 5)) {
+              try {
+                const res = await NotionAPI2.request("POST", `/databases/${db.id}/query`, { page_size: 50 }, settings.notionApiKey);
+                candidates.push(...res.results || []);
+              } catch (error) {
+                console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
+              }
+            }
+            candidates = candidates.filter((p) => p.id !== refPage.id);
+            if (candidates.length === 0) {
+              return "\u6CA1\u6709\u627E\u5230\u5176\u4ED6\u9875\u9762\u8FDB\u884C\u6BD4\u8F83\u3002";
+            }
+            const candidateList = candidates.slice(0, 30).map((p, i) => {
+              var _a2, _b2, _c2, _d2, _e2, _f2, _g2, _h2, _i2, _j2, _k2, _l2;
+              const t = Utils2.getPageTitle(p);
+              const d = ((_e2 = (_d2 = (_c2 = (_b2 = (_a2 = p.properties) == null ? void 0 : _a2["\u63CF\u8FF0"]) == null ? void 0 : _b2.rich_text) == null ? void 0 : _c2[0]) == null ? void 0 : _d2.text) == null ? void 0 : _e2.content) || "";
+              const tags = (((_g2 = (_f2 = p.properties) == null ? void 0 : _f2["\u6807\u7B7E"]) == null ? void 0 : _g2.multi_select) || []).map((tag) => tag.name).join(", ");
+              const src = ((_l2 = (_k2 = (_j2 = (_i2 = (_h2 = p.properties) == null ? void 0 : _h2["\u6765\u6E90"]) == null ? void 0 : _i2.rich_text) == null ? void 0 : _j2[0]) == null ? void 0 : _k2.text) == null ? void 0 : _l2.content) || "";
+              return `${i + 1}. [${src}] ${t} | ${d} | \u6807\u7B7E: ${tags}`;
+            }).join("\n");
+            const prompt2 = `\u53C2\u8003\u5185\u5BB9\uFF1A
+\u6807\u9898: ${refTitle}
+\u63CF\u8FF0: ${refDesc}
+\u6807\u7B7E: ${refTags.join(", ")}
+
+\u5019\u9009\u5217\u8868:
+${candidateList}
+
+\u8BF7\u4ECE\u5019\u9009\u5217\u8868\u4E2D\u9009\u51FA\u6700\u76F8\u4F3C\u7684 5 \u4E2A\uFF08\u6309\u76F8\u4F3C\u5EA6\u6392\u5E8F\uFF09\uFF0C\u53EA\u56DE\u590D\u7F16\u53F7\uFF0C\u7528\u9017\u53F7\u5206\u9694\u3002`;
+            try {
+              const aiResult = await svc().request(prompt2, settings);
+              const indices = ((_h = aiResult.match(/\d+/g)) == null ? void 0 : _h.map((n) => parseInt(n) - 1).filter((i) => i >= 0 && i < candidates.length)) || [];
+              if (indices.length === 0) {
+                return "AI \u672A\u80FD\u8BC6\u522B\u76F8\u4F3C\u5185\u5BB9\u3002";
+              }
+              const bullets = [];
+              for (const idx of indices.slice(0, 3)) {
+                const p = candidates[idx];
+                const t = Utils2.getPageTitle(p);
+                const src = ((_m = (_l = (_k = (_j = (_i = p.properties) == null ? void 0 : _i["\u6765\u6E90"]) == null ? void 0 : _j.rich_text) == null ? void 0 : _k[0]) == null ? void 0 : _l.text) == null ? void 0 : _m.content) || "";
+                const url = ((_o = (_n = p.properties) == null ? void 0 : _n["\u94FE\u63A5"]) == null ? void 0 : _o.url) || "";
+                bullets.push(`[${src}] ${t}${url ? ` (${url})` : ""}`);
+              }
+              return AI()._formatToolResult({
+                title: "\u76F8\u4F3C\u5185\u5BB9\u63A8\u8350",
+                fields: [
+                  { label: "\u53C2\u8003\u9875\u9762", value: refTitle },
+                  { label: "\u63A8\u8350\u6570", value: bullets.length }
+                ],
+                bullets
+              });
+            } catch (e) {
+              return `\u274C \u63A8\u8350\u5931\u8D25: ${e.message}`;
+            }
+          }
+        }
+      };
+    }
+  });
+
+  // src/ai/tools/write-tools.js
+  var require_write_tools = __commonJS({
+    "src/ai/tools/write-tools.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { TargetState: TargetState2 } = require_auth();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { OperationGuard: OperationGuard2 } = require_security();
+      var { getAI: AI, getService: svc } = require_deps();
+      module.exports = {
+        batch_tag: {
+          description: "\u6279\u91CF\u6253\u6807\u7B7E\uFF1A\u7528 AI \u4E3A\u6307\u5B9A\u6765\u6E90\u7684\u6240\u6709\u672A\u6807\u8BB0\u9875\u9762\u81EA\u52A8\u6DFB\u52A0\u6807\u7B7E",
+          params: "source(\u53EF\u9009:'linux.do'|'github'|'\u4E66\u7B7E'|'all'), tag_count(\u6BCF\u9875\u6807\u7B7E\u6570,\u9ED8\u8BA43)",
+          level: 1,
+          execute: async (args, settings) => {
+            var _a, _b, _c, _d, _e;
+            if (!OperationGuard2.canExecute("updatePage")) {
+              return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6279\u91CF\u6253\u6807\u7B7E\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+            }
+            if (!settings.aiApiKey) {
+              return "\u274C \u9700\u8981\u914D\u7F6E AI API Key\u3002";
+            }
+            const { source = "all", tag_count = 3 } = args;
+            const aiTargetState = TargetState2.getEffectiveAITargetState({
+              fallbackDatabaseId: settings.notionDatabaseId
+            });
+            const queryOneDb = async (dbId) => {
+              const body = {
+                filter: { property: "\u6807\u7B7E", multi_select: { is_empty: true } },
+                page_size: 50
+              };
+              try {
+                const response = await NotionAPI2.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
+                return response.results || [];
+              } catch (error) {
+                console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
+                return [];
+              }
+            };
+            let pages = [];
+            const targetDb = TargetState2.getEffectiveAIDatabaseId({
+              fallbackDatabaseId: settings.notionDatabaseId,
+              targetValue: aiTargetState.value
+            });
+            if (aiTargetState.mode !== "all" && targetDb) {
+              pages = await queryOneDb(targetDb);
+            } else {
+              const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
+              for (const db of (allDbs.results || []).slice(0, 3)) {
+                pages.push(...await queryOneDb(db.id));
+              }
+            }
+            if (source !== "all") {
+              const sourceMap = { "linux.do": "Linux.do", "github": "GitHub", "\u4E66\u7B7E": "\u6D4F\u89C8\u5668\u4E66\u7B7E" };
+              const sourceValue = sourceMap[source.toLowerCase()] || source;
+              pages = pages.filter((p) => {
+                var _a2, _b2, _c2, _d2, _e2;
+                const s = ((_e2 = (_d2 = (_c2 = (_b2 = (_a2 = p.properties) == null ? void 0 : _a2["\u6765\u6E90"]) == null ? void 0 : _b2.rich_text) == null ? void 0 : _c2[0]) == null ? void 0 : _d2.text) == null ? void 0 : _e2.content) || "";
+                return s.includes(sourceValue);
+              });
+            }
+            if (pages.length === 0) {
+              return "\u6CA1\u6709\u627E\u5230\u9700\u8981\u6253\u6807\u7B7E\u7684\u9875\u9762\u3002";
+            }
+            let tagged = 0;
+            for (const page of pages) {
+              const title = Utils2.getPageTitle(page);
+              const desc = ((_e = (_d = (_c = (_b = (_a = page.properties) == null ? void 0 : _a["\u63CF\u8FF0"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) || "";
+              try {
+                const prompt2 = `\u4E3A\u4EE5\u4E0B\u5185\u5BB9\u751F\u6210 ${tag_count} \u4E2A\u7B80\u77ED\u6807\u7B7E\uFF08\u6BCF\u4E2A\u6807\u7B7E 2-4 \u4E2A\u5B57\uFF09\uFF0C\u7528\u9017\u53F7\u5206\u9694\uFF0C\u53EA\u56DE\u590D\u6807\u7B7E\uFF1A
+\u6807\u9898: ${title}
+\u63CF\u8FF0: ${desc}`;
+                const result = await svc().request(prompt2, settings);
+                const tags = result.split(/[,，]/).map((t) => t.trim()).filter((t) => t.length > 0 && t.length <= 20).slice(0, tag_count);
+                if (tags.length > 0) {
+                  await AI()._executeGuardedPageWrite(
+                    "updatePage",
+                    { id: page.id, name: title || page.id },
+                    () => NotionAPI2.request("PATCH", `/pages/${page.id}`, {
+                      properties: {
+                        "\u6807\u7B7E": { multi_select: tags.map((t) => ({ name: t })) }
+                      }
+                    }, settings.notionApiKey),
+                    settings
+                  );
+                  tagged++;
+                }
+              } catch (e) {
+                console.warn(`[batch_tag] \u5931\u8D25: ${title}`, e);
+              }
+              await Utils2.sleep(500);
+            }
+            return `\u2705 \u6279\u91CF\u6253\u6807\u7B7E\u5B8C\u6210\uFF1A\u5DF2\u4E3A ${tagged}/${pages.length} \u4E2A\u9875\u9762\u6DFB\u52A0\u6807\u7B7E\u3002`;
+          }
+        },
+        // === 写入工具 (Level 1) ===
+        append_content: {
+          description: "\u5411\u9875\u9762\u8FFD\u52A0\u5185\u5BB9\uFF08\u652F\u6301 Markdown \u683C\u5F0F\uFF09",
+          params: "page_name/page_id(\u76EE\u6807\u9875\u9762), content(Markdown\u5185\u5BB9)",
+          level: 1,
+          execute: async (args, settings) => {
+            const { page_name, page_id, content } = args;
+            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
+            if (!content) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B\u8981\u8FFD\u52A0\u7684 content\u3002";
+            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
+            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            await AI()._executeGuardedPageWrite(
+              "appendBlocks",
+              page,
+              async () => {
+                try {
+                  await NotionAPI2.appendPageMarkdown(page.id, content, settings.notionApiKey);
+                } catch (error) {
+                  console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
+                  const blocks = AI()._textToBlocks(content);
+                  await NotionAPI2.appendBlocks(page.id, blocks, settings.notionApiKey);
+                }
+              },
+              settings
+            );
+            return AI()._formatToolResult({
+              title: "\u9875\u9762\u5185\u5BB9\u8FFD\u52A0\u5B8C\u6210",
+              fields: [
+                { label: "\u76EE\u6807", value: page.name },
+                { label: "\u5B57\u7B26\u6570", value: String(content).length }
+              ]
+            });
+          }
+        },
+        append_block_children: {
+          description: "\u5411\u9875\u9762\u6216\u5757\u63D2\u5165\u5B50\u5757\uFF0C\u652F\u6301\u672B\u5C3E\u6216\u6307\u5B9A\u5757\u540E\u63D2\u5165",
+          params: "content(Markdown\u5185\u5BB9), page_name/page_id(\u9875\u9762,\u53EF\u9009), block_id(\u5757ID,\u53EF\u9009), insert_position(end/after_block,\u9ED8\u8BA4end), after_block_id(\u5F53 insert_position=after_block \u65F6\u5FC5\u586B)",
+          level: 1,
+          execute: async (args, settings) => {
+            const { content, page_name, page_id, block_id, insert_position = "end", after_block_id } = args;
+            if (!content) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B content\u3002";
+            let parentId = block_id;
+            let targetName = block_id || "";
+            if (!parentId) {
+              const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+              if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
+              if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+              parentId = page.id;
+              targetName = page.name;
+            }
+            const blocks = AI()._textToBlocks(String(content));
+            if (blocks.length === 0) return "\u9519\u8BEF: \u672A\u80FD\u4ECE content \u751F\u6210\u6709\u6548\u5757\u3002";
+            const options = {};
+            if (insert_position === "after_block") {
+              if (!after_block_id) return "\u9519\u8BEF: insert_position=after_block \u65F6\u5FC5\u987B\u63D0\u4F9B after_block_id\u3002";
+              options.after = String(after_block_id).replace(/-/g, "");
+            } else if (insert_position !== "end") {
+              return "\u9519\u8BEF: insert_position \u4EC5\u652F\u6301 end \u6216 after_block\u3002";
+            }
+            await AI()._executeGuardedWrite(
+              "appendBlocks",
+              () => NotionAPI2.appendBlockChildren(parentId, blocks, settings.notionApiKey, options),
+              { itemName: targetName || parentId, pageId: parentId },
+              settings
+            );
+            return AI()._formatToolResult({
+              title: "\u5757\u63D2\u5165\u5B8C\u6210",
+              fields: [
+                { label: "\u76EE\u6807", value: targetName || parentId },
+                { label: "\u5757\u6570", value: blocks.length },
+                { label: "\u63D2\u5165\u4F4D\u7F6E", value: insert_position }
+              ]
+            });
+          }
+        },
+        search_replace_page_markdown: {
+          description: "\u5BF9\u9875\u9762 Markdown \u505A\u7CBE\u786E\u67E5\u627E\u66FF\u6362\uFF0C\u9002\u5408\u5C40\u90E8\u6539\u5199",
+          params: "page_name/page_id(\u76EE\u6807\u9875\u9762), updates([{old_str,new_str,replace_all_matches?}])",
+          level: 1,
+          execute: async (args, settings) => {
+            const { page_name, page_id, updates } = args;
+            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
+            if (!Array.isArray(updates) || updates.length === 0) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B updates \u6570\u7EC4\u3002";
+            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
+            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            await AI()._executeGuardedPageWrite(
+              "updatePageMarkdown",
+              page,
+              () => NotionAPI2.searchReplacePageMarkdown(page.id, updates, settings.notionApiKey),
+              settings
+            );
+            return AI()._formatToolResult({
+              title: "Markdown \u7CBE\u786E\u66FF\u6362\u5B8C\u6210",
+              fields: [
+                { label: "\u76EE\u6807", value: page.name },
+                { label: "\u66FF\u6362\u6761\u6570", value: updates.length }
+              ]
+            });
+          }
+        },
+        replace_page_markdown: {
+          description: "\u7528\u65B0\u7684 Markdown \u5B8C\u6574\u66FF\u6362\u9875\u9762\u5185\u5BB9",
+          params: "page_name/page_id(\u76EE\u6807\u9875\u9762), new_markdown(\u65B0\u7684\u5B8C\u6574 Markdown \u5185\u5BB9)",
+          level: 2,
+          execute: async (args, settings) => {
+            const { page_name, page_id, new_markdown } = args;
+            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
+            if (!new_markdown) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B new_markdown\u3002";
+            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
+            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            await AI()._executeGuardedPageWrite(
+              "replacePageMarkdown",
+              page,
+              () => NotionAPI2.replacePageMarkdown(page.id, new_markdown, settings.notionApiKey, true),
+              settings
+            );
+            return AI()._formatToolResult({
+              title: "Markdown \u6574\u9875\u66FF\u6362\u5B8C\u6210",
+              fields: [
+                { label: "\u76EE\u6807", value: page.name },
+                { label: "\u5B57\u7B26\u6570", value: String(new_markdown).length }
+              ]
+            });
+          }
+        },
+        create_comment: {
+          description: "\u5411\u9875\u9762\u3001\u5757\u6216\u73B0\u6709\u8BA8\u8BBA\u6DFB\u52A0\u8BC4\u8BBA",
+          params: "content(\u8BC4\u8BBA\u5185\u5BB9), page_name/page_id(\u9875\u9762,\u53EF\u9009), block_id(\u5757ID,\u53EF\u9009), discussion_id(\u8BA8\u8BBAID,\u53EF\u9009), comment_id(\u8BC4\u8BBAID,\u53EF\u9009\uFF0C\u7528\u4E8E\u56DE\u590D\u8BE5\u8BC4\u8BBA\u6240\u5C5E\u8BA8\u8BBA)",
+          level: 1,
+          execute: async (args, settings) => {
+            var _a;
+            const { page_name, page_id, block_id, discussion_id, comment_id, content } = args;
+            if (!content) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B\u8BC4\u8BBA\u5185\u5BB9 content\u3002";
+            let resolvedDiscussionId = discussion_id;
+            if (!resolvedDiscussionId && comment_id) {
+              const sourceComment = await NotionAPI2.getComment(String(comment_id).replace(/-/g, ""), settings.notionApiKey);
+              resolvedDiscussionId = (sourceComment == null ? void 0 : sourceComment.discussion_id) || "";
+              if (!resolvedDiscussionId) {
+                return `\u9519\u8BEF: \u8BC4\u8BBA ${comment_id} \u6CA1\u6709\u53EF\u7528\u7684 discussion_id\uFF0C\u65E0\u6CD5\u4F5C\u4E3A\u56DE\u590D\u76EE\u6807\u3002`;
+              }
+            }
+            const targets = [page_id || page_name ? "page" : null, block_id ? "block" : null, resolvedDiscussionId ? "discussion" : null].filter(Boolean);
+            if (targets.length !== 1) {
+              return "\u9519\u8BEF: \u8BF7\u4E14\u4EC5\u8BF7\u63D0\u4F9B page_name/page_id\u3001block_id\u3001discussion_id \u6216 comment_id \u5176\u4E2D\u4E00\u79CD\u76EE\u6807\u3002";
+            }
+            let page = null;
+            let targetName = block_id || resolvedDiscussionId || comment_id || "";
+            if (!block_id && !resolvedDiscussionId) {
+              page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+              if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
+              if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+              targetName = page.name;
+            }
+            const result = await AI()._executeGuardedWrite(
+              "createComment",
+              () => NotionAPI2.createComment({
+                pageId: page == null ? void 0 : page.id,
+                blockId: block_id,
+                discussionId: resolvedDiscussionId,
+                content
+              }, settings.notionApiKey),
+              { itemName: targetName || "\u8BC4\u8BBA\u76EE\u6807", pageId: page == null ? void 0 : page.id },
+              settings
+            );
+            const newCommentId = ((_a = result.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
+            return AI()._formatToolResult({
+              title: "\u8BC4\u8BBA\u5DF2\u521B\u5EFA",
+              fields: [
+                { label: "\u76EE\u6807", value: targetName || "\u8BC4\u8BBA\u76EE\u6807" },
+                { label: "\u8BC4\u8BBAID", value: newCommentId || "-" }
+              ]
+            });
+          }
+        },
+        update_page_property: {
+          description: "\u66F4\u65B0\u9875\u9762\u7684\u5C5E\u6027\u503C",
+          params: "page_id(\u9875\u9762ID), property(\u5C5E\u6027\u540D), value(\u65B0\u503C), type(\u5C5E\u6027\u7C7B\u578B:text/select/multi_select/number/date)",
+          level: 1,
+          execute: async (args, settings) => {
+            const { page_id, property, value, type = "text" } = args;
+            if (!page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_id\u3002";
+            if (!property) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B property\uFF08\u5C5E\u6027\u540D\uFF09\u3002";
+            if (value === void 0 || value === null) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B value\uFF08\u65B0\u503C\uFF09\u3002";
+            const updateProps = {};
+            switch (type) {
+              case "select":
+                updateProps[property] = { select: { name: String(value) } };
+                break;
+              case "multi_select":
+                const tags = String(value).split(/[,，]/).map((t) => ({ name: t.trim() })).filter((t) => t.name);
+                updateProps[property] = { multi_select: tags };
+                break;
+              case "number":
+                updateProps[property] = { number: Number(value) };
+                break;
+              case "date":
+                updateProps[property] = { date: { start: String(value) } };
+                break;
+              default:
+                updateProps[property] = { rich_text: [{ type: "text", text: { content: String(value) } }] };
+                break;
+            }
+            await AI()._executeGuardedPageWrite(
+              "updatePage",
+              { id: page_id.replace(/-/g, ""), name: page_id },
+              () => NotionAPI2.updatePage(page_id.replace(/-/g, ""), updateProps, settings.notionApiKey),
+              settings
+            );
+            return `\u5DF2\u66F4\u65B0\u9875\u9762\u5C5E\u6027\u300C${property}\u300D\u4E3A\u300C${value}\u300D\u3002`;
+          }
+        },
+        create_page: {
+          description: "\u521B\u5EFA\u9875\u9762\uFF0C\u53EF\u521B\u5EFA\u5230\u6570\u636E\u5E93\u6216\u4F5C\u4E3A\u5B50\u9875\u9762\uFF0C\u5E76\u652F\u6301 icon/cover",
+          params: "title(\u6807\u9898), database_name/database_id(\u76EE\u6807\u6570\u636E\u5E93,\u53EF\u9009), parent_page_name/parent_page_id(\u7236\u9875\u9762,\u53EF\u9009), properties(\u53EF\u9009), content(\u53EF\u9009Markdown), icon_emoji/icon_url(\u53EF\u9009), cover_url(\u53EF\u9009)",
+          level: 1,
+          execute: async (args, settings) => {
+            var _a;
+            const { database_name, database_id, parent_page_name, parent_page_id, title, content } = args;
+            if (!title) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B title\uFF08\u9875\u9762\u6807\u9898\uFF09\u3002";
+            let parent = null;
+            let parentDesc = "";
+            let dbId = database_id;
+            if (dbId || database_name) {
+              const resolved = await AI()._resolveDatabaseId(database_name, null, settings.notionApiKey);
+              const targetDb = dbId ? { id: Utils2.extractNotionId(dbId) || String(dbId).replace(/-/g, ""), name: database_name || dbId } : resolved;
+              if (!dbId && (resolved == null ? void 0 : resolved.error)) return `\u9519\u8BEF: ${resolved.error}`;
+              if (!targetDb) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${database_name || database_id}\u300D\u3002`;
+              parent = { database_id: targetDb.id };
+              parentDesc = `\u6570\u636E\u5E93\u300C${targetDb.name}\u300D`;
+            } else if (parent_page_id || parent_page_name) {
+              const targetPage = await AI()._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
+              if (targetPage == null ? void 0 : targetPage.error) return `\u9519\u8BEF: ${targetPage.error}`;
+              if (!targetPage) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u7236\u9875\u9762\u300C${parent_page_name || parent_page_id}\u300D\u3002`;
+              parent = { page_id: targetPage.id };
+              parentDesc = `\u9875\u9762\u300C${targetPage.name}\u300D`;
+            } else if (settings.notionDatabaseId) {
+              parent = { database_id: settings.notionDatabaseId.replace(/-/g, "") };
+              parentDesc = "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93";
+            }
+            if (!parent) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B database_name/database_id \u6216 parent_page_name/parent_page_id\uFF0C\u6216\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
+            const properties = AI()._normalizeNotionProperties(args.properties);
+            if (parent.database_id) {
+              properties["\u6807\u9898"] = { title: [{ text: { content: title } }] };
+            } else {
+              properties.title = { title: [{ text: { content: title } }] };
+            }
+            const children = content ? AI()._textToBlocks(String(content)) : [];
+            const icon = AI()._buildPageIconPayload(args);
+            const cover = AI()._buildPageCoverPayload(args);
+            const page = await AI()._executeGuardedWrite(
+              "createDatabasePage",
+              () => NotionAPI2.createPageObject(parent, properties, children, settings.notionApiKey, { icon, cover }),
+              { itemName: title },
+              settings
+            );
+            const newId = ((_a = page.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
+            return AI()._formatToolResult({
+              title: "\u9875\u9762\u521B\u5EFA\u5B8C\u6210",
+              fields: [
+                { label: "\u6807\u9898", value: title },
+                { label: "ID", value: newId || "-" },
+                { label: "\u7236\u7EA7", value: parentDesc }
+              ]
+            });
+          }
+        },
+        batch_create_pages: {
+          description: "\u6279\u91CF\u521B\u5EFA\u9875\u9762\uFF0C\u53EF\u521B\u5EFA\u5230\u6570\u636E\u5E93\u6216\u67D0\u4E2A\u7236\u9875\u9762\u4E0B",
+          params: "pages([{title,properties?,content?,icon_emoji?,icon_url?,cover_url?}]), database_name/database_id(\u53EF\u9009), parent_page_name/parent_page_id(\u53EF\u9009)",
+          level: 1,
+          execute: async (args, settings) => {
+            const pages = Array.isArray(args.pages) ? args.pages : [];
+            if (pages.length === 0) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B pages \u6570\u7EC4\u3002";
+            let parent = null;
+            if (args.database_id || args.database_name) {
+              const targetDb = args.database_id ? { id: Utils2.extractNotionId(args.database_id) || String(args.database_id).replace(/-/g, ""), name: args.database_name || args.database_id } : await AI()._resolveDatabaseId(args.database_name, null, settings.notionApiKey);
+              if (targetDb == null ? void 0 : targetDb.error) return `\u9519\u8BEF: ${targetDb.error}`;
+              if (!targetDb) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${args.database_name || args.database_id}\u300D\u3002`;
+              parent = { database_id: targetDb.id };
+            } else if (args.parent_page_id || args.parent_page_name) {
+              const targetPage = await AI()._resolvePageId(args.parent_page_name, args.parent_page_id, settings.notionApiKey);
+              if (targetPage == null ? void 0 : targetPage.error) return `\u9519\u8BEF: ${targetPage.error}`;
+              if (!targetPage) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u7236\u9875\u9762\u300C${args.parent_page_name || args.parent_page_id}\u300D\u3002`;
+              parent = { page_id: targetPage.id };
+            } else if (settings.notionDatabaseId) {
+              parent = { database_id: settings.notionDatabaseId.replace(/-/g, "") };
+            }
+            if (!parent) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B\u6570\u636E\u5E93\u6216\u7236\u9875\u9762\u76EE\u6807\uFF0C\u6216\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            let success = 0;
+            let failed = 0;
+            for (let i = 0; i < pages.length; i++) {
+              const item = pages[i] || {};
+              const title = String(item.title || "").trim();
+              if (!title) {
+                failed++;
+                continue;
+              }
+              try {
+                const properties = AI()._normalizeNotionProperties(item.properties);
+                if (parent.database_id) {
+                  properties["\u6807\u9898"] = { title: [{ text: { content: title } }] };
+                } else {
+                  properties.title = { title: [{ text: { content: title } }] };
+                }
+                const children = item.content ? AI()._textToBlocks(String(item.content)) : [];
+                const icon = AI()._buildPageIconPayload(item);
+                const cover = AI()._buildPageCoverPayload(item);
+                await AI()._executeGuardedWrite(
+                  "createDatabasePage",
+                  () => NotionAPI2.createPageObject(parent, properties, children, settings.notionApiKey, { icon, cover }),
+                  { itemName: title },
+                  settings
+                );
+                success++;
+              } catch (error) {
+                console.warn("[LD-Notion] \u9875\u9762\u521B\u5EFA\u5931\u8D25:", error);
+                failed++;
+              }
+              if (i < pages.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            }
+            return AI()._formatToolResult({
+              title: "\u6279\u91CF\u9875\u9762\u521B\u5EFA\u5B8C\u6210",
+              fields: [
+                { label: "\u6210\u529F", value: success },
+                { label: "\u5931\u8D25", value: failed },
+                { label: "\u76EE\u6807\u6570", value: pages.length }
+              ]
+            });
+          }
+        },
+        update_page_metadata: {
+          description: "\u66F4\u65B0\u9875\u9762\u5143\u6570\u636E\uFF0C\u5982 icon / cover / lock",
+          params: "page_name/page_id(\u76EE\u6807\u9875\u9762), icon_emoji/icon_url(\u53EF\u9009), cover_url(\u53EF\u9009), clear_icon(\u53EF\u9009), clear_cover(\u53EF\u9009), is_locked(\u53EF\u9009)",
+          level: 1,
+          execute: async (args, settings) => {
+            const { page_name, page_id, is_locked } = args;
+            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
+            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
+            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            const payload = {};
+            const icon = AI()._buildPageIconPayload(args);
+            const cover = AI()._buildPageCoverPayload(args);
+            if (icon !== void 0) payload.icon = icon;
+            if (cover !== void 0) payload.cover = cover;
+            if (typeof is_locked === "boolean") payload.is_locked = is_locked;
+            if (Object.keys(payload).length === 0) {
+              return "\u9519\u8BEF: \u8BF7\u81F3\u5C11\u63D0\u4F9B\u4E00\u4E2A\u53EF\u66F4\u65B0\u5B57\u6BB5\uFF0C\u5982 icon_emoji\u3001icon_url\u3001cover_url\u3001clear_icon\u3001clear_cover\u3001is_locked\u3002";
+            }
+            await AI()._executeGuardedPageWrite(
+              "updatePage",
+              page,
+              () => NotionAPI2.updatePageMeta(page.id, payload, settings.notionApiKey),
+              settings
+            );
+            return AI()._formatToolResult({
+              title: "\u9875\u9762\u5143\u6570\u636E\u66F4\u65B0\u5B8C\u6210",
+              fields: [
+                { label: "\u76EE\u6807", value: page.name },
+                { label: "\u5B57\u6BB5\u6570", value: Object.keys(payload).length }
+              ]
+            });
+          }
+        },
+        update_page: {
+          description: "\u7EDF\u4E00\u66F4\u65B0\u9875\u9762\u5C5E\u6027\u6216\u5143\u6570\u636E",
+          params: "page_name/page_id/page_ids, property/value/type(\u5C5E\u6027), updates(\u5C5E\u6027\u5BF9\u8C61), icon_emoji/icon_url/cover_url/clear_icon/clear_cover/is_locked",
+          level: 1,
+          execute: async (args, settings) => {
+            const targets = await AI()._resolvePageTargets(args, settings);
+            if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
+            if (!targets || targets.length === 0) {
+              return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u66F4\u65B0\u7684\u9875\u9762\u3002";
+            }
+            if (targets.length > 1) {
+              return "\u9519\u8BEF: update_page \u4EC5\u652F\u6301\u5355\u9875\u9762\uFF0C\u8BF7\u6539\u7528 batch_update_pages\u3002";
+            }
+            const result = await AI()._applyPageUpdatesToTargets(targets, args, settings);
+            if (result.failed > 0) {
+              return `\u66F4\u65B0\u9875\u9762\u300C${targets[0].name}\u300D\u5931\u8D25\u3002`;
+            }
+            return AI()._formatToolResult({
+              title: "\u9875\u9762\u66F4\u65B0\u5B8C\u6210",
+              fields: [
+                { label: "\u76EE\u6807", value: targets[0].name },
+                { label: "\u5C5E\u6027\u66F4\u65B0\u6570", value: Object.keys(result.propertyUpdates || {}).length },
+                { label: "\u5143\u6570\u636E\u66F4\u65B0\u6570", value: Object.keys(result.metaPayload || {}).length }
+              ]
+            });
+          }
+        },
+        batch_update_pages: {
+          description: "\u6279\u91CF\u66F4\u65B0\u9875\u9762\u5C5E\u6027\u6216\u5143\u6570\u636E\uFF0C\u53EF\u901A\u8FC7\u9875\u9762\u5217\u8868\u6216\u6570\u636E\u5E93+\u6807\u9898\u7B5B\u9009\u5B9A\u4F4D",
+          params: "page_ids(\u53EF\u9009), page_title(\u53EF\u9009), database_name/database_id(\u53EF\u9009), property/value/type(\u5C5E\u6027\u66F4\u65B0), updates(\u5C5E\u6027\u5BF9\u8C61), icon_emoji/icon_url/cover_url/clear_icon/clear_cover/is_locked(\u5143\u6570\u636E), limit(\u9ED8\u8BA420)",
+          level: 1,
+          execute: async (args, settings) => {
+            const targets = await AI()._resolvePageTargets(args, settings);
+            if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
+            if (!targets || targets.length === 0) {
+              return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u66F4\u65B0\u7684\u9875\u9762\u3002\u8BF7\u63D0\u4F9B page_id/page_name/page_ids\uFF0C\u6216\u63D0\u4F9B database_name/database_id + page_title\u3002";
+            }
+            const { success, failed } = await AI()._applyPageUpdatesToTargets(targets, args, settings);
+            return AI()._formatToolResult({
+              title: "\u6279\u91CF\u9875\u9762\u66F4\u65B0\u5B8C\u6210",
+              fields: [
+                { label: "\u6210\u529F", value: success },
+                { label: "\u5931\u8D25", value: failed },
+                { label: "\u76EE\u6807\u6570", value: targets.length }
+              ]
+            });
+          }
+        },
+        update_block_content: {
+          description: "\u66F4\u65B0\u5E38\u89C1\u53EF\u7F16\u8F91\u5757\u7684\u5185\u5BB9\uFF0C\u5982 paragraph/heading/todo/code/callout/equation/embed/bookmark",
+          params: "block_id(\u5757ID), content(\u65B0\u5185\u5BB9/\u516C\u5F0F/URL), checked(\u4EC5to_do,\u53EF\u9009), color(\u53EF\u9009)",
+          level: 1,
+          execute: async (args, settings) => {
+            const { block_id, content, checked, color } = args;
+            if (!block_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B block_id\u3002";
+            if (content === void 0 || content === null) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B content\u3002";
+            const block = await NotionAPI2.fetchBlock(block_id, settings.notionApiKey);
+            const payload = AI()._buildBlockUpdatePayload(block, content, { checked, color });
+            await AI()._executeGuardedWrite(
+              "updateBlock",
+              () => NotionAPI2.updateBlock(block_id.replace(/-/g, ""), payload, settings.notionApiKey),
+              { itemName: String(block_id).replace(/-/g, "") },
+              settings
+            );
+            return AI()._formatToolResult({
+              title: "\u5757\u5185\u5BB9\u66F4\u65B0\u5B8C\u6210",
+              fields: [
+                { label: "\u5757ID", value: String(block_id).replace(/-/g, "") },
+                { label: "\u5757\u7C7B\u578B", value: block.type }
+              ]
+            });
+          }
+        },
+        classify_pages: {
+          description: "AI \u81EA\u52A8\u5206\u7C7B\u6570\u636E\u5E93\u4E2D\u672A\u5206\u7C7B\u7684\u9875\u9762",
+          params: "limit(\u6700\u591A\u5904\u7406\u6570\u91CF,\u9ED8\u8BA4\u5168\u90E8)",
+          level: 1,
+          execute: async (args, settings) => {
+            const dbId = settings.notionDatabaseId;
+            if (!dbId) return "\u9519\u8BEF: \u672A\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
+            if (settings.categories.length < 2) return "\u9519\u8BEF: \u8BF7\u5148\u914D\u7F6E\u81F3\u5C11\u4E24\u4E2A\u5206\u7C7B\u9009\u9879\u3002";
+            await AIClassifier.ensureAICategoryProperty(settings);
+            const pages = await AIClassifier.fetchAllPages(settings);
+            if (pages.length === 0) return "\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u9875\u9762\u3002";
+            const unclassified = pages.filter((p) => {
+              var _a, _b;
+              return !((_b = (_a = p.properties["AI\u5206\u7C7B"]) == null ? void 0 : _a.select) == null ? void 0 : _b.name);
+            });
+            if (unclassified.length === 0) return `\u6240\u6709 ${pages.length} \u4E2A\u9875\u9762\u90FD\u5DF2\u5206\u7C7B\u3002`;
+            const maxLimit = args.limit ? Math.min(args.limit, unclassified.length) : unclassified.length;
+            const toClassify = unclassified.slice(0, maxLimit);
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            let success = 0, failed = 0;
+            for (let i = 0; i < toClassify.length; i++) {
+              try {
+                await AIClassifier.classifyPage(toClassify[i], settings);
+                success++;
+              } catch (error) {
+                console.warn("[LD-Notion] \u9875\u9762\u5206\u7C7B\u5931\u8D25:", error);
+                failed++;
+              }
+              if (i < toClassify.length - 1) await Utils2.sleep(delay);
+            }
+            return `\u5206\u7C7B\u5B8C\u6210: \u603B\u8BA1 ${pages.length} \u4E2A\u9875\u9762\uFF0C\u672C\u6B21\u5206\u7C7B ${success} \u4E2A${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed} \u4E2A` : ""}\u3002`;
+          }
+        },
+        // === 高级工具 (Level 2) ===
+        move_page: {
+          description: "\u5C06\u9875\u9762\u79FB\u52A8\u5230\u53E6\u4E00\u4E2A\u6570\u636E\u5E93",
+          params: "page_id(\u9875\u9762ID), target_database_name/target_database_id(\u76EE\u6807\u6570\u636E\u5E93)",
+          level: 2,
+          execute: async (args, settings) => {
+            const { page_id, target_database_name, target_database_id } = args;
+            if (!page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_id\u3002";
+            const target = await AI()._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+            if (target == null ? void 0 : target.error) return `\u9519\u8BEF: ${target.error}`;
+            if (!target) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002`;
+            await AI()._executeGuardedPageWrite(
+              "movePage",
+              { id: page_id.replace(/-/g, ""), name: page_id },
+              () => NotionAPI2.movePage(page_id.replace(/-/g, ""), target.id, "database", settings.notionApiKey),
+              settings
+            );
+            return `\u5DF2\u5C06\u9875\u9762 ${page_id} \u79FB\u52A8\u5230\u6570\u636E\u5E93\u300C${target.name}\u300D\u3002`;
+          }
+        },
+        copy_page: {
+          description: "\u590D\u5236\u9875\u9762\u5230\u53E6\u4E00\u4E2A\u6570\u636E\u5E93",
+          params: "page_id(\u9875\u9762ID), target_database_name/target_database_id(\u76EE\u6807\u6570\u636E\u5E93)",
+          level: 2,
+          execute: async (args, settings) => {
+            const { page_id, target_database_name, target_database_id } = args;
+            if (!page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_id\u3002";
+            const target = await AI()._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+            if (target == null ? void 0 : target.error) return `\u9519\u8BEF: ${target.error}`;
+            if (!target) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002`;
+            await AI()._executeGuardedPageWrite(
+              "duplicatePage",
+              { id: page_id.replace(/-/g, ""), name: page_id },
+              () => NotionAPI2.duplicatePage(page_id.replace(/-/g, ""), target.id, "database", settings.notionApiKey),
+              settings
+            );
+            return `\u5DF2\u5C06\u9875\u9762 ${page_id} \u590D\u5236\u5230\u6570\u636E\u5E93\u300C${target.name}\u300D\u3002`;
+          }
+        },
+        archive_page: {
+          description: "\u5F52\u6863\u9875\u9762\uFF08\u8F6F\u5220\u9664\uFF0C\u53EF\u6062\u590D\uFF09",
+          params: "page_id/page_name/page_ids(\u53EF\u9009), page_title + database_name/database_id(\u6279\u91CF\u5F52\u6863,\u53EF\u9009), limit(\u9ED8\u8BA420)",
+          level: 2,
+          execute: async (args, settings) => {
+            const targets = await AI()._resolvePageTargets(args, settings);
+            if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
+            if (!targets || targets.length === 0) {
+              return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u5F52\u6863\u7684\u9875\u9762\u3002";
+            }
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            let success = 0;
+            let failed = 0;
+            for (let i = 0; i < targets.length; i++) {
+              const target = targets[i];
+              try {
+                await AI()._executeGuardedPageWrite(
+                  "deletePage",
+                  target,
+                  () => NotionAPI2.deletePage(target.id, settings.notionApiKey),
+                  settings
+                );
+                success++;
+              } catch (error) {
+                console.warn("[LD-Notion] \u9875\u9762\u5220\u9664\u5931\u8D25:", error);
+                failed++;
+              }
+              if (i < targets.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            }
+            return AI()._formatToolResult({
+              title: "\u9875\u9762\u5F52\u6863\u5B8C\u6210",
+              fields: [
+                { label: "\u6210\u529F", value: success },
+                { label: "\u5931\u8D25", value: failed },
+                { label: "\u76EE\u6807\u6570", value: targets.length }
+              ]
+            });
+          }
+        },
+        restore_page: {
+          description: "\u6062\u590D\u5DF2\u5F52\u6863\u9875\u9762",
+          params: "page_id/page_name/page_ids(\u53EF\u9009), page_title + database_name/database_id(\u6279\u91CF\u6062\u590D,\u53EF\u9009), limit(\u9ED8\u8BA420)",
+          level: 2,
+          execute: async (args, settings) => {
+            const targets = await AI()._resolvePageTargets(args, settings);
+            if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
+            if (!targets || targets.length === 0) {
+              return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u6062\u590D\u7684\u9875\u9762\u3002";
+            }
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            let success = 0;
+            let failed = 0;
+            for (let i = 0; i < targets.length; i++) {
+              const target = targets[i];
+              try {
+                await AI()._executeGuardedPageWrite(
+                  "restorePage",
+                  target,
+                  () => NotionAPI2.restorePage(target.id, settings.notionApiKey),
+                  settings
+                );
+                success++;
+              } catch (error) {
+                console.warn("[LD-Notion] \u9875\u9762\u6062\u590D\u5931\u8D25:", error);
+                failed++;
+              }
+              if (i < targets.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            }
+            return AI()._formatToolResult({
+              title: "\u9875\u9762\u6062\u590D\u5B8C\u6210",
+              fields: [
+                { label: "\u6210\u529F", value: success },
+                { label: "\u5931\u8D25", value: failed },
+                { label: "\u76EE\u6807\u6570", value: targets.length }
+              ]
+            });
+          }
+        },
+        create_database: {
+          description: "\u521B\u5EFA\u65B0\u6570\u636E\u5E93",
+          params: "name(\u6570\u636E\u5E93\u540D), parent_page_name/parent_page_id(\u7236\u9875\u9762)",
+          level: 2,
+          execute: async (args, settings) => {
+            var _a;
+            const { name, parent_page_name, parent_page_id } = args;
+            if (!name) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B name\uFF08\u6570\u636E\u5E93\u540D\u79F0\uFF09\u3002";
+            let parentPage = null;
+            if (parent_page_id || parent_page_name) {
+              parentPage = await AI()._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
+              if (parentPage == null ? void 0 : parentPage.error) return `\u9519\u8BEF: ${parentPage.error}`;
+              if (!parentPage) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u7236\u9875\u9762\u300C${parent_page_name || parent_page_id}\u300D\u3002`;
+            } else {
+              const response = await NotionAPI2.search("", { property: "object", value: "page" }, settings.notionApiKey);
+              const pages = (response.results || []).filter((p) => {
+                var _a2;
+                return !p.archived && ((_a2 = p.parent) == null ? void 0 : _a2.type) === "workspace";
+              });
+              if (pages.length === 0) return "\u9519\u8BEF: \u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u53EF\u7528\u7684\u9875\u9762\u4F5C\u4E3A\u7236\u9875\u9762\u3002";
+              parentPage = { id: pages[0].id.replace(/-/g, ""), name: Utils2.getPageTitle(pages[0]) };
+            }
+            const properties = {
+              "\u6807\u9898": { title: {} },
+              "\u94FE\u63A5": { url: {} },
+              "\u5206\u7C7B": { rich_text: {} },
+              "\u6807\u7B7E": { multi_select: { options: [] } },
+              "\u4F5C\u8005": { rich_text: {} }
+            };
+            const result = await AI()._executeGuardedWrite(
+              "createDatabase",
+              () => NotionAPI2.createDatabase(parentPage.id, name, properties, settings.notionApiKey),
+              { itemName: name },
+              settings
+            );
+            const newDbId = ((_a = result.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
+            return `\u5DF2\u521B\u5EFA\u6570\u636E\u5E93\u300C${name}\u300D(ID: ${newDbId})\uFF0C\u7236\u9875\u9762: ${parentPage.name}\u3002`;
+          }
+        }
+        // === 深度研究工具 (Level 0) ===
+      };
+    }
+  });
+
+  // src/ai/tools/meta-tools.js
+  var require_meta_tools = __commonJS({
+    "src/ai/tools/meta-tools.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { TargetState: TargetState2 } = require_auth();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { OperationGuard: OperationGuard2 } = require_security();
+      var { getAI: AI, getService: svc } = require_deps();
+      module.exports = {
+        research_report: {
+          description: "\u6DF1\u5165\u7814\u7A76\u6307\u5B9A\u4E3B\u9898\uFF0C\u591A\u5173\u952E\u8BCD\u641C\u7D22\u5E76\u751F\u6210\u7ED3\u6784\u5316\u7814\u7A76\u62A5\u544A",
+          params: "research_topic(\u7814\u7A76\u4E3B\u9898), scope(\u8303\u56F4:workspace/database,\u9ED8\u8BA4workspace)",
+          level: 0,
+          execute: async (args, settings) => {
+            return await AI().handleDeepResearch(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+          }
+        },
+        // === 公式编写辅助 (Level 1) ===
+        generate_formula: {
+          description: "\u6839\u636E\u81EA\u7136\u8BED\u8A00\u63CF\u8FF0\u751F\u6210 Notion \u6570\u636E\u5E93\u516C\u5F0F",
+          params: "description(\u529F\u80FD\u63CF\u8FF0), database_name/database_id(\u76EE\u6807\u6570\u636E\u5E93,\u53EF\u9009), property_name(\u76EE\u6807\u5C5E\u6027\u540D,\u53EF\u9009)",
+          level: 1,
+          execute: async (args, settings) => {
+            const { description, database_name, database_id, property_name } = args;
+            if (!description) return "\u9519\u8BEF: \u8BF7\u63CF\u8FF0\u4F60\u60F3\u8981\u7684\u516C\u5F0F\u529F\u80FD\u3002";
+            let schemaDesc = "";
+            const dbId = database_id || settings.notionDatabaseId;
+            if (dbId) {
+              try {
+                const database = await NotionAPI2.fetchDatabase(dbId, settings.notionApiKey);
+                const props = Object.entries(database.properties || {}).map(([name, prop]) => `${name}(${prop.type})`).join(", ");
+                schemaDesc = `\u6570\u636E\u5E93\u5C5E\u6027: ${props}`;
+              } catch (error) {
+                console.warn("[LD-Notion] \u6570\u636E\u5E93\u5C5E\u6027\u83B7\u53D6\u5931\u8D25:", error);
+                schemaDesc = "";
+              }
+            }
+            const prompt2 = `\u4F60\u662F Notion \u516C\u5F0F\u4E13\u5BB6\u3002\u6839\u636E\u4EE5\u4E0B\u4FE1\u606F\u751F\u6210 Notion \u516C\u5F0F\u3002
+
+${schemaDesc ? schemaDesc + "\n" : ""}\u7528\u6237\u9700\u6C42: ${description}
+
+\u8BF7\u8FD4\u56DE\u4EE5\u4E0B\u683C\u5F0F:
+\u516C\u5F0F: <Notion\u516C\u5F0F\u8868\u8FBE\u5F0F>
+\u8BF4\u660E: <\u516C\u5F0F\u529F\u80FD\u7B80\u8FF0>
+\u793A\u4F8B: <\u516C\u5F0F\u8FD4\u56DE\u503C\u793A\u4F8B>
+
+\u6CE8\u610F\uFF1A\u4F7F\u7528 Notion \u7684\u516C\u5F0F\u8BED\u6CD5\uFF08prop(), if(), contains() \u7B49\u51FD\u6570\uFF09\u3002`;
+            const result = await svc().requestChat(prompt2, settings, 500);
+            let response = `\u{1F4D0} **Notion \u516C\u5F0F\u751F\u6210**
+
+${result}`;
+            if (property_name) {
+              response += `
+
+\u{1F4A1} \u8BF7\u5C06\u6B64\u516C\u5F0F\u624B\u52A8\u8BBE\u7F6E\u5230\u6570\u636E\u5E93\u5C5E\u6027\u300C${property_name}\u300D\u4E2D\uFF08Notion API \u6682\u4E0D\u652F\u6301\u76F4\u63A5\u5199\u5165\u516C\u5F0F\u5C5E\u6027\uFF09\u3002`;
+            }
+            return response;
+          }
+        },
+        summarize_page: {
+          description: "\u603B\u7ED3\u6307\u5B9A\u9875\u9762\u7684\u5185\u5BB9\uFF0C\u751F\u6210\u5173\u952E\u4FE1\u606F\u6458\u8981",
+          params: "page_name/page_id(\u76EE\u6807\u9875\u9762), style(\u6458\u8981\u98CE\u683C:brief/detailed/bullet,\u9ED8\u8BA4brief)",
+          level: 0,
+          execute: async (args, settings) => {
+            return await AI().handleSummarize(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+          }
+        },
+        brainstorm_ideas: {
+          description: "\u6839\u636E\u4E3B\u9898\u8FDB\u884C\u5934\u8111\u98CE\u66B4\uFF0C\u751F\u6210\u521B\u610F\u5217\u8868\u6216\u65B9\u6848\u5EFA\u8BAE",
+          params: "topic(\u4E3B\u9898), count(\u751F\u6210\u6570\u91CF,\u9ED8\u8BA410), style(\u98CE\u683C:practical/creative/wild,\u9ED8\u8BA4practical)",
+          level: 0,
+          execute: async (args, settings) => {
+            return await AI().handleBrainstorm(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+          }
+        },
+        proofread_content: {
+          description: "\u6821\u5BF9\u9875\u9762\u5185\u5BB9\uFF0C\u7EA0\u6B63\u62FC\u5199\u3001\u8BED\u6CD5\u548C\u8868\u8FBE\u95EE\u9898",
+          params: "page_name/page_id(\u76EE\u6807\u9875\u9762)",
+          level: 0,
+          execute: async (args, settings) => {
+            return await AI().handleProofread(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+          }
+        },
+        batch_translate_database: {
+          description: "\u6279\u91CF\u7FFB\u8BD1\u6570\u636E\u5E93\u4E2D\u6240\u6709\u9875\u9762\u7684\u5185\u5BB9",
+          params: "database_name/database_id(\u76EE\u6807\u6570\u636E\u5E93), target_language(\u76EE\u6807\u8BED\u8A00,\u5982\u82F1\u6587/\u65E5\u6587)",
+          level: 1,
+          execute: async (args, settings) => {
+            return await AI().handleBatchTranslate(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+          }
+        },
+        extract_to_database: {
+          description: "\u4ECE\u9875\u9762\u5185\u5BB9\u4E2D\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\uFF0C\u521B\u5EFA\u6570\u636E\u5E93\u5E76\u586B\u5145\u6761\u76EE",
+          params: "page_name/page_id(\u6E90\u9875\u9762), database_name(\u65B0\u6570\u636E\u5E93\u540D\u79F0), extraction_prompt(\u63D0\u53D6\u8981\u6C42\u63CF\u8FF0)",
+          level: 2,
+          execute: async (args, settings) => {
+            return await AI().handleExtractToDatabase(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+          }
+        },
+        generate_structured_pages: {
+          description: "\u6839\u636E\u9700\u6C42\u751F\u6210\u591A\u9875\u9762\u7ED3\u6784\u5316\u5185\u5BB9\uFF08\u5982\u5165\u804C\u6307\u5357\u3001\u7ADE\u54C1\u5206\u6790\u62A5\u544A\uFF09",
+          params: "topic(\u4E3B\u9898), structure_prompt(\u7ED3\u6784\u63CF\u8FF0), parent_page_name/parent_page_id(\u7236\u9875\u9762,\u53EF\u9009)",
+          level: 2,
+          execute: async (args, settings) => {
+            return await AI().handleGeneratePages(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+          }
+        },
+        batch_analyze_pages: {
+          description: "\u6279\u91CF\u5206\u6790\u6570\u636E\u5E93\u4E2D\u7684\u9875\u9762\uFF0C\u751F\u6210\u8DE8\u9875\u9762\u7EFC\u5408\u5206\u6790\u62A5\u544A",
+          params: "database_name/database_id(\u76EE\u6807\u6570\u636E\u5E93), analysis_prompt(\u5206\u6790\u8981\u6C42), limit(\u5206\u6790\u9875\u6570,\u9ED8\u8BA410)",
+          level: 0,
+          execute: async (args, settings) => {
+            return await AI().handleBatchAnalyze(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
+          }
+        }
+      };
+    }
+  });
+
+  // src/ai/AgentTools.js
+  var require_AgentTools = __commonJS({
+    "src/ai/AgentTools.js"(exports, module) {
+      "use strict";
+      var readTools = require_read_tools();
+      var writeTools = require_write_tools();
+      var metaTools = require_meta_tools();
+      var AI_AGENT_TOOLS2 = {
+        ...readTools,
+        ...writeTools,
+        ...metaTools
+      };
+      module.exports = { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 };
+    }
+  });
+
+  // src/ai/handlers/query.js
+  var require_query = __commonJS({
+    "src/ai/handlers/query.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { TargetState: TargetState2 } = require_auth();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
+      var { AISchema: AISchema2 } = require_schema();
+      var { BlockConverter } = require_BlockConverter();
+      var { NameResolver } = require_NameResolver();
+      var { AgentTrace } = require_AgentTrace();
+      var { getAI: AI, getState: state, getService: svc } = require_deps();
+      module.exports = {
+        handleQuery: async (params, settings, explanation) => {
+          var _a, _b, _c;
+          if (!settings.notionDatabaseId) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
+          }
+          state().updateLastMessage(`\u6B63\u5728\u67E5\u8BE2\u6570\u636E\u5E93...`, "processing");
+          try {
+            const { limit = 10, filter_field, filter_value } = params;
+            let filter = null;
+            if (filter_field && filter_value) {
+              const fieldConfig = {
+                "\u4F5C\u8005": { name: "\u4F5C\u8005", type: "rich_text" },
+                "\u5206\u7C7B": { name: "\u5206\u7C7B", type: "rich_text" },
+                "\u6807\u7B7E": { name: "\u6807\u7B7E", type: "multi_select" },
+                "AI\u5206\u7C7B": { name: "AI\u5206\u7C7B", type: "select" }
+              };
+              const config = fieldConfig[filter_field] || { name: filter_field, type: "rich_text" };
+              if (config.type === "select") {
+                filter = {
+                  property: config.name,
+                  select: { equals: filter_value }
+                };
+              } else if (config.type === "multi_select") {
+                filter = {
+                  property: config.name,
+                  multi_select: { contains: filter_value }
+                };
+              } else {
+                filter = {
+                  property: config.name,
+                  rich_text: { contains: filter_value }
+                };
+              }
+            }
+            const allPages = [];
+            let cursor = null;
+            let hasMore = true;
+            const maxPages = 10;
+            let pageCount = 0;
+            let querySorts = [];
+            while (hasMore && pageCount < maxPages) {
+              let response;
+              try {
+                response = await NotionAPI2.queryDatabase(
+                  settings.notionDatabaseId,
+                  filter,
+                  pageCount === 0 ? [{ property: "\u6536\u85CF\u65F6\u95F4", direction: "descending" }] : querySorts,
+                  cursor,
+                  settings.notionApiKey
+                );
+                if (pageCount === 0) querySorts = [{ property: "\u6536\u85CF\u65F6\u95F4", direction: "descending" }];
+              } catch (sortError) {
+                if (pageCount === 0 && ((_a = sortError.message) == null ? void 0 : _a.includes("\u6536\u85CF\u65F6\u95F4"))) {
+                  querySorts = [{ timestamp: "created_time", direction: "descending" }];
+                  response = await NotionAPI2.queryDatabase(
+                    settings.notionDatabaseId,
+                    filter,
+                    querySorts,
+                    cursor,
+                    settings.notionApiKey
+                  );
+                } else {
+                  throw sortError;
+                }
+              }
+              allPages.push(...response.results || []);
+              hasMore = response.has_more;
+              cursor = response.next_cursor;
+              pageCount++;
+              if (hasMore) {
+                state().updateLastMessage(`\u6B63\u5728\u67E5\u8BE2\u6570\u636E\u5E93... (\u5DF2\u83B7\u53D6 ${allPages.length} \u6761)`, "processing");
+              }
+            }
+            const pages = allPages;
+            const total = pages.length;
+            const isTruncated = hasMore;
+            if (total === 0) {
+              return `\u{1F4CA} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u7B26\u5408\u6761\u4EF6\u7684\u5E16\u5B50\u3002${filter ? `
+\u7B5B\u9009\u6761\u4EF6\uFF1A${filter_field} \u5305\u542B "${filter_value}"` : ""}`;
+            }
+            let result = `\u{1F4CA} **\u67E5\u8BE2\u7ED3\u679C**
+
+`;
+            result += `\u5171\u627E\u5230 **${total}** \u4E2A\u5E16\u5B50`;
+            if (isTruncated) {
+              result += ` (\u5DF2\u8FBE\u67E5\u8BE2\u4E0A\u9650\uFF0C\u53EF\u80FD\u8FD8\u6709\u66F4\u591A)`;
+            }
+            if (((_b = params.keyword) == null ? void 0 : _b.includes("\u7EDF\u8BA1")) || ((_c = params.keyword) == null ? void 0 : _c.includes("\u5206\u7C7B"))) {
+              const categoryCount = {};
+              pages.forEach((page) => {
+                var _a2, _b2, _c2, _d, _e;
+                const cat = ((_b2 = (_a2 = page.properties["AI\u5206\u7C7B"]) == null ? void 0 : _a2.select) == null ? void 0 : _b2.name) || ((_e = (_d = (_c2 = page.properties["\u5206\u7C7B"]) == null ? void 0 : _c2.rich_text) == null ? void 0 : _d[0]) == null ? void 0 : _e.plain_text) || "\u672A\u5206\u7C7B";
+                categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+              });
+              result += `
+
+**\u5206\u7C7B\u7EDF\u8BA1\uFF1A**
+`;
+              Object.entries(categoryCount).sort((a, b) => b[1] - a[1]).forEach(([cat, count]) => {
+                result += `- ${cat}: ${count} \u4E2A
+`;
+              });
+            } else {
+              const showLimit = Math.min(limit, total);
+              result += `\uFF08\u663E\u793A\u524D ${showLimit} \u6761\uFF09
+
+`;
+              pages.slice(0, showLimit).forEach((page, i) => {
+                var _a2, _b2, _c2;
+                const title = Utils2.getPageTitle(page);
+                const author = ((_c2 = (_b2 = (_a2 = page.properties["\u4F5C\u8005"]) == null ? void 0 : _a2.rich_text) == null ? void 0 : _b2[0]) == null ? void 0 : _c2.plain_text) || "\u672A\u77E5";
+                result += `${i + 1}. **${title}**
+   \u4F5C\u8005: ${author}
+`;
+              });
+            }
+            return result;
+          } catch (error) {
+            return `\u274C \u67E5\u8BE2\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleSearch: async (params, settings, explanation) => {
+          if (!settings.notionDatabaseId) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22 xxx\u300D\u6765\u641C\u7D22\u6574\u4E2A\u5DE5\u4F5C\u533A\uFF0C\u6216\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
+          }
+          state().updateLastMessage(`\u6B63\u5728\u641C\u7D22...`, "processing");
+          try {
+            const { keyword, limit = 10 } = params;
+            if (!keyword) {
+              return "\u8BF7\u544A\u8BC9\u6211\u4F60\u60F3\u641C\u7D22\u4EC0\u4E48\u5173\u952E\u8BCD\uFF1F";
+            }
+            const response = await NotionAPI2.search(
+              keyword,
+              { property: "object", value: "page" },
+              settings.notionApiKey
+            );
+            const pages = (response.results || []).filter((p) => {
+              var _a, _b;
+              return ((_b = (_a = p.parent) == null ? void 0 : _a.database_id) == null ? void 0 : _b.replace(/-/g, "")) === settings.notionDatabaseId.replace(/-/g, "");
+            });
+            if (pages.length === 0) {
+              return `\u{1F50D} \u6CA1\u6709\u627E\u5230\u5305\u542B\u300C${keyword}\u300D\u7684\u5E16\u5B50\u3002`;
+            }
+            let result = `\u{1F50D} **\u641C\u7D22\u7ED3\u679C**
+
+`;
+            result += `\u627E\u5230 **${pages.length}** \u4E2A\u5305\u542B\u300C${keyword}\u300D\u7684\u5E16\u5B50\uFF1A
+
+`;
+            pages.slice(0, limit).forEach((page, i) => {
+              const title = Utils2.getPageTitle(page);
+              const url = page.url || "";
+              result += `${i + 1}. [${title}](${url})
+`;
+            });
+            if (pages.length > limit) {
+              result += `
+... \u8FD8\u6709 ${pages.length - limit} \u6761\u7ED3\u679C`;
+            }
+            return result;
+          } catch (error) {
+            return `\u274C \u641C\u7D22\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleWorkspaceSearch: async (params, settings, explanation) => {
+          state().updateLastMessage(`\u6B63\u5728\u641C\u7D22\u6574\u4E2A\u5DE5\u4F5C\u533A...`, "processing");
+          try {
+            const { keyword = "", limit = 10, object_type } = params;
+            let filter = null;
+            if (object_type === "page") {
+              filter = { property: "object", value: "page" };
+            } else if (object_type === "database") {
+              filter = { property: "object", value: "database" };
+            }
+            let allResults = [];
+            let cursor = void 0;
+            let searchPageCount = 0;
+            do {
+              const response = await NotionAPI2.search(keyword, filter, settings.notionApiKey, cursor);
+              allResults = allResults.concat(response.results || []);
+              cursor = response.has_more ? response.next_cursor : void 0;
+              searchPageCount++;
+            } while (cursor && searchPageCount < 10);
+            const results = allResults;
+            if (results.length === 0) {
+              const typeLabel = object_type === "page" ? "\u9875\u9762" : object_type === "database" ? "\u6570\u636E\u5E93" : "\u5185\u5BB9";
+              return keyword ? `\u{1F310} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u5305\u542B\u300C${keyword}\u300D\u7684${typeLabel}\u3002` : `\u{1F310} \u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230${typeLabel}\u3002`;
+            }
+            const pages = results.filter((r) => r.object === "page");
+            const databases = results.filter((r) => r.object === "database");
+            let result = `\u{1F310} **\u5DE5\u4F5C\u533A\u641C\u7D22\u7ED3\u679C**
+
+`;
+            if (keyword) {
+              result += `\u641C\u7D22\u5173\u952E\u8BCD\uFF1A\u300C${keyword}\u300D
+`;
+            }
+            result += `\u5171\u627E\u5230 **${results.length}** \u4E2A\u7ED3\u679C`;
+            if (pages.length > 0 && databases.length > 0) {
+              result += `\uFF08${pages.length} \u4E2A\u9875\u9762\uFF0C${databases.length} \u4E2A\u6570\u636E\u5E93\uFF09`;
+            }
+            result += `
+
+`;
+            if (databases.length > 0 && (!object_type || object_type === "database")) {
+              result += `\u{1F4C1} **\u6570\u636E\u5E93** (${databases.length})
+`;
+              databases.slice(0, limit).forEach((db, i) => {
+                var _a, _b, _c;
+                const title = ((_b = (_a = db.title) == null ? void 0 : _a[0]) == null ? void 0 : _b.plain_text) || "\u65E0\u6807\u9898\u6570\u636E\u5E93";
+                const url = db.url || "";
+                const id = ((_c = db.id) == null ? void 0 : _c.replace(/-/g, "")) || "";
+                result += `${i + 1}. [${title}](${url})
+`;
+                result += `   ID: \`${id}\`
+`;
+              });
+              if (databases.length > limit) {
+                result += `   ... \u8FD8\u6709 ${databases.length - limit} \u4E2A\u6570\u636E\u5E93
+`;
+              }
+              result += `
+`;
+            }
+            if (pages.length > 0 && (!object_type || object_type === "page")) {
+              result += `\u{1F4C4} **\u9875\u9762** (${pages.length})
+`;
+              pages.slice(0, limit).forEach((page, i) => {
+                var _a;
+                const title = Utils2.getPageTitle(page);
+                const url = page.url || "";
+                const parentType = ((_a = page.parent) == null ? void 0 : _a.type) || "";
+                let parentLabel = "";
+                if (parentType === "database_id") {
+                  parentLabel = "\u{1F4C1} \u6570\u636E\u5E93\u6761\u76EE";
+                } else if (parentType === "page_id") {
+                  parentLabel = "\u{1F4C4} \u5B50\u9875\u9762";
+                } else if (parentType === "workspace") {
+                  parentLabel = "\u{1F310} \u5DE5\u4F5C\u533A\u9875\u9762";
+                }
+                result += `${i + 1}. [${title}](${url})`;
+                if (parentLabel) {
+                  result += ` - ${parentLabel}`;
+                }
+                result += `
+`;
+              });
+              if (pages.length > limit) {
+                result += `   ... \u8FD8\u6709 ${pages.length - limit} \u4E2A\u9875\u9762
+`;
+              }
+            }
+            result += `
+\u{1F4A1} \u63D0\u793A\uFF1A\u590D\u5236\u6570\u636E\u5E93 ID \u53EF\u4EE5\u914D\u7F6E\u5230\u8BBE\u7F6E\u4E2D\u4F7F\u7528\u66F4\u591A\u529F\u80FD\u3002`;
+            return result;
+          } catch (error) {
+            return `\u274C \u5DE5\u4F5C\u533A\u641C\u7D22\u5931\u8D25: ${error.message}`;
+          }
+        }
+      };
+    }
+  });
+
+  // src/ai/handlers/pageCrud.js
+  var require_pageCrud = __commonJS({
+    "src/ai/handlers/pageCrud.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { TargetState: TargetState2 } = require_auth();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
+      var { AISchema: AISchema2 } = require_schema();
+      var { BlockConverter } = require_BlockConverter();
+      var { NameResolver } = require_NameResolver();
+      var { AgentTrace } = require_AgentTrace();
+      var { getAI: AI, getState: state, getService: svc } = require_deps();
+      module.exports = {
+        handleUpdate: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("updatePage")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u66F4\u65B0\u9875\u9762\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          state().updateLastMessage("\u6B63\u5728\u5B9A\u4F4D\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targets = await AI()._resolvePageTargets({
+              ...params,
+              page_name: params.page_name || params.keyword
+            }, settings);
+            if (targets == null ? void 0 : targets.error) return `\u274C ${targets.error}`;
+            if (!targets || targets.length === 0) {
+              return "\u274C \u6CA1\u6709\u627E\u5230\u53EF\u66F4\u65B0\u7684\u9875\u9762\u3002\u8BF7\u63D0\u4F9B page_name/page_id/page_ids\uFF0C\u6216\u63D0\u4F9B\u6570\u636E\u5E93 + page_title\u3002";
+            }
+            const batchMode = !!params.batch || Array.isArray(params.page_ids) || !!params.page_title || targets.length > 1;
+            if (!batchMode && targets.length > 1) {
+              const names = targets.map((t) => `\u300C${t.name}\u300D`).join("\u3001");
+              return `\u274C \u627E\u5230\u591A\u4E2A\u9875\u9762\uFF1A${names}\u3002\u8BF7\u63D0\u4F9B\u66F4\u7CBE\u786E\u7684 page_name \u6216\u76F4\u63A5\u63D0\u4F9B page_id\u3002`;
+            }
+            const { success, failed } = await AI()._applyPageUpdatesToTargets(targets, params, settings);
+            if (!batchMode && success === 1 && failed === 0) {
+              return `\u2705 \u5DF2\u66F4\u65B0\u9875\u9762\u300C${targets[0].name}\u300D\u3002`;
+            }
+            return `\u2705 \u6279\u91CF\u66F4\u65B0\u5B8C\u6210\uFF1A\u6210\u529F ${success} \u4E2A\uFF0C\u5931\u8D25 ${failed} \u4E2A\u3002`;
+          } catch (error) {
+            return `\u274C \u66F4\u65B0\u9875\u9762\u5931\u8D25: ${error.message}`;
+          }
+        },
+        _resolveDatabaseId: async (name, id, apiKey) => {
+          return NameResolver.resolveDatabaseId(name, id, apiKey);
+        },
+        _fetchSourcePages: async (databaseId, apiKey, pageTitle) => {
+          const allPages = [];
+          let cursor = null;
+          do {
+            const response = await NotionAPI2.queryDatabase(databaseId, null, null, cursor, apiKey);
+            allPages.push(...response.results || []);
+            cursor = response.has_more ? response.next_cursor : null;
+          } while (cursor);
+          if (pageTitle) {
+            return allPages.filter((page) => {
+              const title = Utils2.getPageTitle(page);
+              return title.includes(pageTitle);
+            });
+          }
+          return allPages;
+        },
+        handleMove: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("movePage")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u79FB\u52A8\u9875\u9762\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
+          }
+          const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u6570\u636E\u5E93\u4FE1\u606F...", "processing");
+          try {
+            let source = await AI()._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
+            if (source == null ? void 0 : source.error) return `\u274C \u6E90\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${source.error}`;
+            if (!source && settings.notionDatabaseId) {
+              source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93" };
+            }
+            if (!source) {
+              return "\u274C \u65E0\u6CD5\u786E\u5B9A\u6E90\u6570\u636E\u5E93\u3002\u8BF7\u6307\u5B9A\u6E90\u6570\u636E\u5E93\u540D\u79F0\uFF0C\u6216\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002";
+            }
+            const target = await AI()._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+            if (target == null ? void 0 : target.error) return `\u274C \u76EE\u6807\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${target.error}`;
+            if (!target) {
+              return `\u274C \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002
+
+\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002`;
+            }
+            if (source.id === target.id) {
+              return "\u274C \u6E90\u6570\u636E\u5E93\u548C\u76EE\u6807\u6570\u636E\u5E93\u76F8\u540C\uFF0C\u65E0\u9700\u79FB\u52A8\u3002";
+            }
+            state().updateLastMessage(`\u6B63\u5728\u4ECE\u300C${source.name}\u300D\u83B7\u53D6\u9875\u9762...`, "processing");
+            const pages = await AI()._fetchSourcePages(source.id, settings.notionApiKey, page_title);
+            if (pages.length === 0) {
+              return page_title ? `\u{1F4ED} \u5728\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u6807\u9898\u5305\u542B\u300C${page_title}\u300D\u7684\u9875\u9762\u3002` : `\u{1F4ED}\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u9875\u9762\u3002`;
+            }
+            const results = { success: 0, failed: 0 };
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            for (let i = 0; i < pages.length; i++) {
+              const page = pages[i];
+              const title = Utils2.getPageTitle(page);
+              state().updateLastMessage(
+                `\u{1F4E6} \u6B63\u5728\u79FB\u52A8 (${i + 1}/${pages.length})
+
+\u5F53\u524D: ${title}
+\u2192 \u76EE\u6807: ${target.name}`,
+                "processing"
+              );
+              try {
+                await AI()._executeGuardedPageWrite(
+                  "movePage",
+                  { id: page.id, name: title },
+                  () => NotionAPI2.movePage(page.id, target.id, "database", settings.notionApiKey),
+                  settings
+                );
+                results.success++;
+              } catch (error) {
+                console.error(`[LD-Notion] \u79FB\u52A8\u5931\u8D25: ${title}`, error);
+                results.failed++;
+              }
+              if (i < pages.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            }
+            let resultMsg = `\u2705 **\u79FB\u52A8\u5B8C\u6210**
+
+`;
+            resultMsg += `- \u6E90\u6570\u636E\u5E93: ${source.name}
+`;
+            resultMsg += `- \u76EE\u6807\u6570\u636E\u5E93: ${target.name}
+`;
+            resultMsg += `- \u6210\u529F: ${results.success} \u4E2A
+`;
+            if (results.failed > 0) {
+              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
+`;
+            }
+            return resultMsg;
+          } catch (error) {
+            return `\u274C \u79FB\u52A8\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleCopy: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("duplicatePage")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u590D\u5236\u9875\u9762\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
+          }
+          const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u6570\u636E\u5E93\u4FE1\u606F...", "processing");
+          try {
+            let source = await AI()._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
+            if (source == null ? void 0 : source.error) return `\u274C \u6E90\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${source.error}`;
+            if (!source && settings.notionDatabaseId) {
+              source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93" };
+            }
+            if (!source) {
+              return "\u274C \u65E0\u6CD5\u786E\u5B9A\u6E90\u6570\u636E\u5E93\u3002\u8BF7\u6307\u5B9A\u6E90\u6570\u636E\u5E93\u540D\u79F0\uFF0C\u6216\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002";
+            }
+            const target = await AI()._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
+            if (target == null ? void 0 : target.error) return `\u274C \u76EE\u6807\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${target.error}`;
+            if (!target) {
+              return `\u274C \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002
+
+\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002`;
+            }
+            if (source.id === target.id) {
+              return "\u274C \u6E90\u6570\u636E\u5E93\u548C\u76EE\u6807\u6570\u636E\u5E93\u76F8\u540C\uFF0C\u65E0\u9700\u590D\u5236\u3002";
+            }
+            state().updateLastMessage(`\u6B63\u5728\u4ECE\u300C${source.name}\u300D\u83B7\u53D6\u9875\u9762...`, "processing");
+            const pages = await AI()._fetchSourcePages(source.id, settings.notionApiKey, page_title);
+            if (pages.length === 0) {
+              return page_title ? `\u{1F4ED} \u5728\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u6807\u9898\u5305\u542B\u300C${page_title}\u300D\u7684\u9875\u9762\u3002` : `\u{1F4ED}\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u9875\u9762\u3002`;
+            }
+            const results = { success: 0, failed: 0 };
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            for (let i = 0; i < pages.length; i++) {
+              const page = pages[i];
+              const title = Utils2.getPageTitle(page);
+              state().updateLastMessage(
+                `\u{1F4CB} \u6B63\u5728\u590D\u5236 (${i + 1}/${pages.length})
+
+\u5F53\u524D: ${title}
+\u2192 \u76EE\u6807: ${target.name}`,
+                "processing"
+              );
+              try {
+                await AI()._executeGuardedPageWrite(
+                  "duplicatePage",
+                  { id: page.id, name: title },
+                  () => NotionAPI2.duplicatePage(page.id, target.id, "database", settings.notionApiKey),
+                  settings
+                );
+                results.success++;
+              } catch (error) {
+                console.error(`[LD-Notion] \u590D\u5236\u5931\u8D25: ${title}`, error);
+                results.failed++;
+              }
+              if (i < pages.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            }
+            let resultMsg = `\u2705 **\u590D\u5236\u5B8C\u6210**
+
+`;
+            resultMsg += `- \u6E90\u6570\u636E\u5E93: ${source.name}
+`;
+            resultMsg += `- \u76EE\u6807\u6570\u636E\u5E93: ${target.name}
+`;
+            resultMsg += `- \u6210\u529F: ${results.success} \u4E2A
+`;
+            if (results.failed > 0) {
+              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
+`;
+            }
+            return resultMsg;
+          } catch (error) {
+            return `\u274C \u590D\u5236\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleCompound: async (intentResult, settings) => {
+          const { steps, explanation } = intentResult;
+          if (!steps || steps.length === 0) {
+            return "\u274C \u7EC4\u5408\u6307\u4EE4\u89E3\u6790\u5931\u8D25\uFF1A\u672A\u8BC6\u522B\u5230\u6709\u6548\u7684\u6267\u884C\u6B65\u9AA4\u3002";
+          }
+          let planMsg = `\u{1F517} **\u7EC4\u5408\u6307\u4EE4** \u2014 ${explanation}
+
+\u{1F4CB} \u6267\u884C\u8BA1\u5212\uFF1A
+`;
+          steps.forEach((step, i) => {
+            planMsg += `${i + 1}. ${step.explanation}
+`;
+          });
+          state().updateLastMessage(planMsg, "processing");
+          const results = [];
+          let aborted = false;
+          for (let i = 0; i < steps.length; i++) {
+            const step = steps[i];
+            state().updateLastMessage(
+              `${planMsg}
+\u23F3 \u6B65\u9AA4 ${i + 1}/${steps.length}: ${step.explanation}`,
+              "processing"
+            );
+            try {
+              const stepResult = await AI().executeIntent(step, settings);
+              const normalizedStepResult = AI()._normalizeExecutionResult(stepResult);
+              if (AI()._isErrorResult(normalizedStepResult)) {
+                results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
+                aborted = true;
+                break;
+              }
+              results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
+            } catch (error) {
+              results.push({
+                index: i + 1,
+                explanation: step.explanation,
+                success: false,
+                result: AI()._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
+              });
+              aborted = true;
+              break;
+            }
+          }
+          let report = `\u{1F517} **\u7EC4\u5408\u6307\u4EE4\u6267\u884C${aborted ? "\u4E2D\u65AD" : "\u5B8C\u6210"}**
+
+`;
+          for (const r of results) {
+            report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.index}: ${r.explanation}
+`;
+          }
+          if (aborted) {
+            const skipped = steps.slice(results.length);
+            if (skipped.length > 0) {
+              report += `
+\u23ED\uFE0F \u5DF2\u8DF3\u8FC7\uFF1A
+`;
+              skipped.forEach((step, i) => {
+                report += `${results.length + i + 1}. ${step.explanation}
+`;
+              });
+            }
+          }
+          report += `
+---
+`;
+          for (const r of results) {
+            report += `
+**\u6B65\u9AA4 ${r.index}**: ${r.explanation}
+${AI()._resultToText(r.result)}
+`;
+          }
+          return report;
+        },
+        handleCreateDatabase: async (params, settings, explanation) => {
+          var _a;
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("createDatabase")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u521B\u5EFA\u6570\u636E\u5E93\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
+          }
+          const { database_name, parent_page_name, parent_page_id } = params;
+          if (!database_name) {
+            return "\u274C \u8BF7\u6307\u5B9A\u8981\u521B\u5EFA\u7684\u6570\u636E\u5E93\u540D\u79F0\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u521B\u5EFA\u4E00\u4E2A\u53EB\u6280\u672F\u6587\u6863\u7684\u6570\u636E\u5E93\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u7236\u9875\u9762\u4FE1\u606F...", "processing");
+          try {
+            let parentPage = null;
+            if (parent_page_id || parent_page_name) {
+              parentPage = await AI()._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
+              if (parentPage == null ? void 0 : parentPage.error) return `\u274C \u7236\u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${parentPage.error}`;
+              if (!parentPage) {
+                return `\u274C \u627E\u4E0D\u5230\u540D\u4E3A\u300C${parent_page_name}\u300D\u7684\u9875\u9762\u3002
+
+\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22\u6240\u6709\u9875\u9762\u300D\u67E5\u770B\u53EF\u7528\u9875\u9762\u3002`;
+              }
+            } else {
+              state().updateLastMessage("\u672A\u6307\u5B9A\u7236\u9875\u9762\uFF0C\u6B63\u5728\u641C\u7D22\u5DE5\u4F5C\u533A\u9875\u9762...", "processing");
+              const response = await NotionAPI2.search(
+                "",
+                { property: "object", value: "page" },
+                settings.notionApiKey
+              );
+              const pages = (response.results || []).filter((p) => {
+                var _a2;
+                return !p.archived && ((_a2 = p.parent) == null ? void 0 : _a2.type) === "workspace";
+              });
+              if (pages.length === 0) {
+                return "\u274C \u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u53EF\u7528\u7684\u9875\u9762\u4F5C\u4E3A\u7236\u9875\u9762\u3002\n\n\u{1F4A1} \u8BF7\u5148\u5728 Notion \u4E2D\u521B\u5EFA\u4E00\u4E2A\u9875\u9762\uFF0C\u6216\u6307\u5B9A\u7236\u9875\u9762\u540D\u79F0\u3002\n\n\u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u4E0B\u521B\u5EFA\u4E00\u4E2A\u53EB\u6280\u672F\u6587\u6863\u7684\u6570\u636E\u5E93\u300D";
+              }
+              const firstPage = pages[0];
+              parentPage = { id: firstPage.id.replace(/-/g, ""), name: Utils2.getPageTitle(firstPage) || "\u672A\u547D\u540D\u9875\u9762" };
+            }
+            state().updateLastMessage(`\u6B63\u5728\u521B\u5EFA\u6570\u636E\u5E93\u300C${database_name}\u300D...`, "processing");
+            const properties = {
+              "\u6807\u9898": { title: {} },
+              "\u94FE\u63A5": { url: {} },
+              "\u5206\u7C7B": { rich_text: {} },
+              "\u6807\u7B7E": { multi_select: { options: [] } },
+              "\u4F5C\u8005": { rich_text: {} },
+              "\u6536\u85CF\u65F6\u95F4": { date: {} },
+              "\u5E16\u5B50\u6570": { number: { format: "number" } },
+              "\u6D4F\u89C8\u6570": { number: { format: "number" } },
+              "\u70B9\u8D5E\u6570": { number: { format: "number" } }
+            };
+            const result = await AI()._executeGuardedWrite(
+              "createDatabase",
+              () => NotionAPI2.createDatabase(parentPage.id, database_name, properties, settings.notionApiKey),
+              { itemName: database_name },
+              settings
+            );
+            const newDbId = ((_a = result.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
+            let msg = `\u2705 **\u6570\u636E\u5E93\u521B\u5EFA\u6210\u529F**
+
+`;
+            msg += `- \u6570\u636E\u5E93\u540D\u79F0: ${database_name}
+`;
+            msg += `- \u6570\u636E\u5E93 ID: \`${newDbId}\`
+`;
+            msg += `- \u7236\u9875\u9762: ${parentPage.name}
+`;
+            msg += `
+\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u5C06\u6B64 ID \u586B\u5165\u8BBE\u7F6E\u4E2D\u7684\u300C\u6570\u636E\u5E93 ID\u300D\u5B57\u6BB5\u6765\u4F7F\u7528\u8BE5\u6570\u636E\u5E93\u3002`;
+            return msg;
+          } catch (error) {
+            return `\u274C \u521B\u5EFA\u6570\u636E\u5E93\u5931\u8D25: ${error.message}`;
+          }
+        }
+      };
+    }
+  });
+
+  // src/ai/handlers/content.js
+  var require_content = __commonJS({
+    "src/ai/handlers/content.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { TargetState: TargetState2 } = require_auth();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
+      var { AISchema: AISchema2 } = require_schema();
+      var { BlockConverter } = require_BlockConverter();
+      var { NameResolver } = require_NameResolver();
+      var { AgentTrace } = require_AgentTrace();
+      var { getAI: AI, getState: state, getService: svc } = require_deps();
+      module.exports = {
+        _resolvePageId: async (name, id, apiKey) => {
+          return NameResolver.resolvePageId(name, id, apiKey);
+        },
+        _textToBlocks: (text) => {
+          return BlockConverter.textToBlocks(text);
+        },
+        _extractPageContent: async (pageId, apiKey, maxChars = 4e3) => {
+          try {
+            const markdownResponse = await NotionAPI2.fetchPageMarkdown(pageId, apiKey);
+            const markdown = String(markdownResponse.markdown || "").trim();
+            if (markdown) {
+              return markdown.slice(0, maxChars);
+            }
+          } catch (error) {
+            console.warn("[LD-Notion] Markdown API \u4E0D\u53EF\u7528\uFF0C\u56DE\u9000\u5230 blocks \u63D0\u53D6:", error);
+          }
+          const allBlocks = [];
+          let cursor = null;
+          do {
+            const data = await NotionAPI2.fetchBlocks(pageId, cursor, apiKey);
+            allBlocks.push(...data.results || []);
+            cursor = data.has_more ? data.next_cursor : null;
+          } while (cursor);
+          return AIClassifier.extractText(allBlocks).slice(0, maxChars);
+        },
+        handleWriteContent: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("appendBlocks")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u751F\u6210\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { content_prompt, page_name, page_id } = params;
+          if (!content_prompt) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u60F3\u751F\u6210\u7684\u5185\u5BB9\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u5199\u4E00\u6BB5\u5173\u4E8E Docker \u7684\u4ECB\u7ECD\u300D";
+          }
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u5199\u4E00\u6BB5\u5173\u4E8E Docker \u7684\u4ECB\u7ECD\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002
+
+\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22\u6240\u6709\u9875\u9762\u300D\u67E5\u770B\u53EF\u7528\u9875\u9762\u3002`;
+            state().updateLastMessage("\u6B63\u5728\u751F\u6210\u5185\u5BB9...", "processing");
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u751F\u6210\u52A9\u624B\u3002\u6839\u636E\u7528\u6237\u8981\u6C42\u751F\u6210\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u3002
+
+\u7528\u6237\u8981\u6C42\uFF1A${content_prompt}`;
+            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
+            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
+            try {
+              await AI()._executeGuardedPageWrite(
+                "appendBlocks",
+                targetPage,
+                async () => {
+                  try {
+                    await NotionAPI2.appendPageMarkdown(targetPage.id, aiResponse, settings.notionApiKey);
+                  } catch (error) {
+                    console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
+                    const blocks = AI()._textToBlocks(aiResponse);
+                    await NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
+                  }
+                },
+                settings
+              );
+            } catch (error) {
+              return `\u274C \u5185\u5BB9\u751F\u6210\u5931\u8D25: ${error.message}`;
+            }
+            return `\u2705 **\u5185\u5BB9\u5DF2\u751F\u6210\u5E76\u8FFD\u52A0\u5230\u9875\u9762**
+
+- \u76EE\u6807\u9875\u9762: ${targetPage.name}
+- \u751F\u6210\u5185\u5BB9: ${aiResponse.length} \u5B57
+
+\u{1F4A1} \u5185\u5BB9\u5DF2\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\u3002`;
+          } catch (error) {
+            return `\u274C \u5185\u5BB9\u751F\u6210\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleEditContent: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("appendBlocks")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u7F16\u8F91\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { content_prompt, page_name, page_id } = params;
+          if (!content_prompt) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u7F16\u8F91\u8981\u6C42\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u5185\u5BB9\u6539\u5F97\u66F4\u7B80\u6D01\u300D";
+          }
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u5185\u5BB9\u6539\u5F97\u66F4\u7B80\u6D01\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
+            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey);
+            if (!existingContent.trim()) {
+              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u7F16\u8F91\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage("\u6B63\u5728\u89C4\u5212\u7CBE\u786E\u7F16\u8F91...", "processing");
+            const editPlanPrompt = `\u4F60\u662F\u4E00\u4E2A\u7CBE\u786E\u7684 Notion Markdown \u7F16\u8F91\u5668\u3002\u8BF7\u6839\u636E\u7F16\u8F91\u6307\u4EE4\uFF0C\u4F18\u5148\u7ED9\u51FA\u5C40\u90E8\u66FF\u6362\u65B9\u6848\uFF0C\u800C\u4E0D\u662F\u91CD\u5199\u6574\u9875\u3002
+
+\u8F93\u51FA JSON\uFF0C\u4E14\u53EA\u80FD\u8FD4\u56DE JSON\uFF1A
+{
+  "mode": "update_content" | "append_version",
+  "content_updates": [
+{
+  "old_str": "\u9700\u8981\u88AB\u7CBE\u786E\u66FF\u6362\u7684\u539F\u6587\u7247\u6BB5",
+  "new_str": "\u66FF\u6362\u540E\u7684\u65B0\u5185\u5BB9",
+  "replace_all_matches": false
+}
+  ],
+  "append_markdown": "\u4EC5\u5F53 mode=append_version \u65F6\u63D0\u4F9B\uFF0C\u8FD4\u56DE\u5B8C\u6574\u6539\u5199\u7248\u672C"
+}
+
+\u89C4\u5219\uFF1A
+1. \u5982\u679C\u80FD\u901A\u8FC7 1-5 \u6761\u7CBE\u786E\u66FF\u6362\u5B8C\u6210\uFF0C\u5C31\u7528 update_content\u3002
+2. old_str \u5FC5\u987B\u9010\u5B57\u51FA\u81EA\u539F\u6587\u3002
+3. \u53EA\u6709\u5728\u9700\u8981\u5927\u5E45\u6539\u5199\u3001\u91CD\u7EC4\u7ED3\u6784\u6216\u65E0\u6CD5\u7A33\u5B9A\u5B9A\u4F4D\u539F\u6587\u65F6\uFF0C\u624D\u7528 append_version\u3002
+4. append_markdown \u5FC5\u987B\u662F Markdown\u3002
+
+\u539F\u6587\uFF1A
+${existingContent}
+
+\u7F16\u8F91\u6307\u4EE4\uFF1A
+${content_prompt}`;
+            const editPlanRaw = await svc().requestChat(editPlanPrompt, settings, 2200);
+            const editPlanResult = AISchema2.parseAIJson("editPlan", editPlanRaw);
+            let editPlan = null;
+            if (editPlanResult.ok) {
+              editPlan = editPlanResult.value;
+            } else {
+              console.warn("[LD-Notion] \u7F16\u8F91\u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", editPlanResult.reason);
+            }
+            let exactUpdateError = null;
+            let inPlaceSkippedReason = null;
+            const hasValidContentUpdates = (editPlan == null ? void 0 : editPlan.mode) === "update_content" && Array.isArray(editPlan.content_updates) && editPlan.content_updates.length > 0 && editPlan.content_updates.every((u) => u && typeof u.old_str === "string" && typeof u.new_str === "string");
+            if ((editPlan == null ? void 0 : editPlan.mode) === "update_content" && !hasValidContentUpdates) {
+              inPlaceSkippedReason = "\u539F\u4F4D\u7F16\u8F91\u7ED3\u6784\u6821\u9A8C\u5931\u8D25\uFF08content_updates \u7F3A\u5931\u6216\u65E0\u6548\uFF09";
+              console.warn("[LD-Notion] editPlan content_updates \u7ED3\u6784\u65E0\u6548\uFF0C\u964D\u7EA7\u4E3A\u5168\u6587\u8FFD\u52A0:", inPlaceSkippedReason);
+            }
+            if (hasValidContentUpdates) {
+              state().updateLastMessage("\u6B63\u5728\u6267\u884C\u539F\u4F4D\u7CBE\u786E\u7F16\u8F91...", "processing");
+              try {
+                await AI()._executeGuardedPageWrite(
+                  "updatePageMarkdown",
+                  targetPage,
+                  () => NotionAPI2.searchReplacePageMarkdown(
+                    targetPage.id,
+                    editPlan.content_updates,
+                    settings.notionApiKey
+                  ),
+                  settings
+                );
+                return `\u2705 **\u9875\u9762\u5DF2\u539F\u4F4D\u66F4\u65B0**
+
+- \u76EE\u6807\u9875\u9762: ${targetPage.name}
+- \u7F16\u8F91\u6307\u4EE4: ${content_prompt}
+- \u7CBE\u786E\u66FF\u6362: ${editPlan.content_updates.length} \u5904`;
+              } catch (error) {
+                exactUpdateError = error;
+              }
+            }
+            state().updateLastMessage("\u6B63\u5728\u751F\u6210\u7F16\u8F91\u7248\u672C...", "processing");
+            const fallbackMarkdown = String((editPlan == null ? void 0 : editPlan.append_markdown) || "").trim();
+            let aiResponse = fallbackMarkdown;
+            if (!aiResponse) {
+              const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u7F16\u8F91\u52A9\u624B\u3002\u6839\u636E\u7F16\u8F91\u6307\u4EE4\u6539\u5199\u4EE5\u4E0B\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u6539\u5199\u540E\u7684\u5B8C\u6574\u5185\u5BB9\u3002
+
+\u539F\u6587\uFF1A
+${existingContent}
+
+\u7F16\u8F91\u6307\u4EE4\uFF1A${content_prompt}`;
+              aiResponse = await svc().requestChat(prompt2, settings, 2e3);
+            }
+            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u7F16\u8F91\u7248\u672C...", "processing");
+            const versionMarkdown = `---
+
+## \u270F\uFE0F AI \u7F16\u8F91\u7248\u672C
+
+${aiResponse}`;
+            await AI()._executeGuardedPageWrite(
+              "appendBlocks",
+              targetPage,
+              async () => {
+                try {
+                  await NotionAPI2.appendPageMarkdown(targetPage.id, versionMarkdown, settings.notionApiKey);
+                } catch (error) {
+                  console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
+                  const contentBlocks = AI()._textToBlocks(aiResponse);
+                  const blocks = [
+                    { type: "divider", divider: {} },
+                    { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: "\u270F\uFE0F AI \u7F16\u8F91\u7248\u672C" } }] } },
+                    ...contentBlocks
+                  ];
+                  await NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
+                }
+              },
+              settings
+            );
+            const fallbackReason = (exactUpdateError == null ? void 0 : exactUpdateError.message) ? `
+
+\u{1F4A1} \u539F\u4F4D\u7CBE\u786E\u66FF\u6362\u5931\u8D25\uFF1A${exactUpdateError.message}\uFF1B\u5DF2\u81EA\u52A8\u8FFD\u52A0\u5B8C\u6574\u7F16\u8F91\u7248\u672C\uFF0C\u539F\u5185\u5BB9\u4FDD\u7559\u3002` : inPlaceSkippedReason ? `
+
+\u{1F4A1} ${inPlaceSkippedReason}\uFF1B\u5DF2\u5C06\u5B8C\u6574\u7F16\u8F91\u7248\u672C\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002` : "\n\n\u{1F4A1} \u672C\u6B21\u672A\u6267\u884C\u539F\u4F4D\u66FF\u6362\uFF0C\u5DF2\u5C06\u5B8C\u6574\u7F16\u8F91\u7248\u672C\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002";
+            return `\u2705 **\u7F16\u8F91\u7248\u672C\u5DF2\u8FFD\u52A0\u5230\u9875\u9762**
+
+- \u76EE\u6807\u9875\u9762: ${targetPage.name}
+- \u7F16\u8F91\u6307\u4EE4: ${content_prompt}${fallbackReason}`;
+          } catch (error) {
+            return `\u274C \u5185\u5BB9\u7F16\u8F91\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleTranslateContent: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("appendBlocks")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u7FFB\u8BD1\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { page_name, page_id, target_language } = params;
+          const lang = target_language || "\u82F1\u6587";
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u8981\u7FFB\u8BD1\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7FFB\u8BD1\u6210\u82F1\u6587\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
+            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey);
+            if (!existingContent.trim()) {
+              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage(`\u6B63\u5728\u7FFB\u8BD1\u4E3A${lang}...`, "processing");
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7FFB\u8BD1\u3002\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\u4E3A${lang}\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\uFF0C\u4FDD\u6301\u539F\u6587\u7ED3\u6784\u3002
+
+\u539F\u6587\uFF1A
+${existingContent}`;
+            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
+            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u7FFB\u8BD1\u7248\u672C...", "processing");
+            const contentBlocks = AI()._textToBlocks(aiResponse);
+            const blocks = [
+              { type: "divider", divider: {} },
+              { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `\u{1F310} AI \u7FFB\u8BD1\uFF08${lang}\uFF09` } }] } },
+              ...contentBlocks
+            ];
+            await AI()._executeGuardedPageWrite(
+              "appendBlocks",
+              targetPage,
+              () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
+              settings
+            );
+            return `\u2705 **\u7FFB\u8BD1\u5DF2\u8FFD\u52A0\u5230\u9875\u9762**
+
+- \u76EE\u6807\u9875\u9762: ${targetPage.name}
+- \u7FFB\u8BD1\u8BED\u8A00: ${lang}
+- \u7FFB\u8BD1\u5185\u5BB9: ${aiResponse.length} \u5B57
+
+\u{1F4A1} \u7FFB\u8BD1\u7248\u672C\u5DF2\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002`;
+          } catch (error) {
+            return `\u274C \u7FFB\u8BD1\u5931\u8D25: ${error.message}`;
+          }
+        },
+        _ensureAIProperty: async (databaseId, propertyName, propertyType, apiKey) => {
+          const database = await NotionAPI2.fetchDatabase(databaseId, apiKey);
+          const properties = database.properties || {};
+          if (properties[propertyName]) return;
+          const propDef = {};
+          if (propertyType === "multi_select") {
+            propDef[propertyName] = { multi_select: { options: [] } };
+          } else {
+            propDef[propertyName] = { rich_text: {} };
+          }
+          await AI()._executeGuardedDatabaseWrite(
+            "updateDatabase",
+            databaseId,
+            () => NotionAPI2.updateDatabase(databaseId, propDef, apiKey),
+            apiKey
+          );
+        },
+        handleAIAutofill: async (params, settings, explanation) => {
+          if (!OperationGuard2.canExecute("updatePage")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1AAI \u5C5E\u6027\u586B\u5145\u9700\u8981\u300C\u6807\u51C6\u300D\u53CA\u4EE5\u4E0A\u6743\u9650\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u63D0\u5347\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const configCheck = AI().checkConfig(settings, true);
+          if (!configCheck.valid) return configCheck.error;
+          const { autofill_type, property_name } = params;
+          if (!autofill_type) {
+            return "\u274C \u8BF7\u6307\u5B9A\u586B\u5145\u7C7B\u578B\u3002\n\n\u{1F4A1} \u652F\u6301\u7684\u7C7B\u578B\uFF1A\n- \u6458\u8981\uFF1A\u300C\u7ED9\u6240\u6709\u5E16\u5B50\u751F\u6210 AI \u6458\u8981\u300D\n- \u5173\u952E\u8BCD\uFF1A\u300C\u63D0\u53D6\u6240\u6709\u5E16\u5B50\u7684\u5173\u952E\u8BCD\u300D\n- \u7FFB\u8BD1\uFF1A\u300C\u628A\u6240\u6709\u5E16\u5B50\u6807\u9898\u7FFB\u8BD1\u6210\u82F1\u6587\u300D";
+          }
+          let propName, propType, aiPromptTemplate;
+          switch (autofill_type) {
+            case "summary":
+              propName = "AI\u6458\u8981";
+              propType = "rich_text";
+              aiPromptTemplate = "\u8BF7\u75282-3\u53E5\u8BDD\u7B80\u6D01\u6982\u62EC\u4EE5\u4E0B\u5185\u5BB9\u7684\u8981\u70B9\uFF1A\n\n";
+              break;
+            case "keywords":
+              propName = "AI\u5173\u952E\u8BCD";
+              propType = "multi_select";
+              aiPromptTemplate = "\u8BF7\u4ECE\u4EE5\u4E0B\u5185\u5BB9\u4E2D\u63D0\u53D63-5\u4E2A\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694\uFF0C\u53EA\u8FD4\u56DE\u5173\u952E\u8BCD\uFF1A\n\n";
+              break;
+            case "translation":
+              propName = "AI\u7FFB\u8BD1";
+              propType = "rich_text";
+              aiPromptTemplate = "\u8BF7\u5C06\u4EE5\u4E0B\u6807\u9898\u7FFB\u8BD1\u4E3A\u82F1\u6587\uFF0C\u53EA\u8FD4\u56DE\u7FFB\u8BD1\u7ED3\u679C\uFF1A\n\n";
+              break;
+            case "custom":
+              propName = property_name || "AI\u81EA\u5B9A\u4E49";
+              propType = "rich_text";
+              aiPromptTemplate = "\u8BF7\u6839\u636E\u4EE5\u4E0B\u5185\u5BB9\u751F\u6210\u5BF9\u5E94\u7684\u5C5E\u6027\u503C\uFF1A\n\n";
+              break;
+            default:
+              return `\u274C \u4E0D\u652F\u6301\u7684\u586B\u5145\u7C7B\u578B\u300C${autofill_type}\u300D\u3002\u652F\u6301\uFF1Asummary/keywords/translation/custom`;
+          }
+          state().updateLastMessage(`\u6B63\u5728\u51C6\u5907 AI \u5C5E\u6027\u586B\u5145\uFF08${propName}\uFF09...`, "processing");
+          try {
+            await AI()._ensureAIProperty(settings.notionDatabaseId, propName, propType, settings.notionApiKey);
+            state().updateLastMessage("\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...", "processing");
+            const allPages = [];
+            let cursor = null;
+            do {
+              const response = await NotionAPI2.queryDatabase(settings.notionDatabaseId, null, null, cursor, settings.notionApiKey);
+              allPages.push(...response.results || []);
+              cursor = response.has_more ? response.next_cursor : null;
+            } while (cursor);
+            if (allPages.length === 0) {
+              return "\u{1F4ED} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762\u3002";
+            }
+            const needFill = allPages.filter((page) => {
+              const prop = page.properties[propName];
+              if (!prop) return true;
+              if (propType === "multi_select") {
+                return !prop.multi_select || prop.multi_select.length === 0;
+              }
+              return !prop.rich_text || prop.rich_text.length === 0;
+            });
+            if (needFill.length === 0) {
+              return `\u2705 \u6240\u6709 ${allPages.length} \u4E2A\u9875\u9762\u7684\u300C${propName}\u300D\u5C5E\u6027\u90FD\u5DF2\u586B\u5145\u3002`;
+            }
+            const results = { success: 0, failed: 0 };
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            for (let i = 0; i < needFill.length; i++) {
+              const page = needFill[i];
+              const title = Utils2.getPageTitle(page);
+              state().updateLastMessage(
+                `\u{1F504} \u6B63\u5728\u586B\u5145\u300C${propName}\u300D(${i + 1}/${needFill.length})
+
+\u5F53\u524D: ${title}`,
+                "processing"
+              );
+              try {
+                let inputText = title;
+                if (autofill_type !== "translation") {
+                  try {
+                    const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 2e3);
+                    inputText = content || title;
+                  } catch (error) {
+                    console.warn("[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25:", error);
+                    inputText = title;
+                  }
+                }
+                const aiResult = await svc().requestChat(
+                  aiPromptTemplate + inputText,
+                  settings,
+                  500
+                );
+                const updateProps = {};
+                if (propType === "multi_select") {
+                  const keywords = aiResult.split(/[,，]/).map((k) => k.trim()).filter(Boolean).slice(0, 10);
+                  updateProps[propName] = { multi_select: keywords.map((k) => ({ name: k })) };
+                } else {
+                  const trimmed = aiResult.slice(0, 2e3);
+                  updateProps[propName] = { rich_text: [{ type: "text", text: { content: trimmed } }] };
+                }
+                await AI()._executeGuardedPageWrite(
+                  "updatePage",
+                  { id: page.id, name: title },
+                  () => NotionAPI2.request("PATCH", `/pages/${page.id}`, { properties: updateProps }, settings.notionApiKey),
+                  settings
+                );
+                results.success++;
+              } catch (error) {
+                console.error(`[LD-Notion] AI \u586B\u5145\u5931\u8D25: ${title}`, error);
+                results.failed++;
+              }
+              if (i < needFill.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            }
+            let resultMsg = `\u2705 **AI \u5C5E\u6027\u586B\u5145\u5B8C\u6210**
+
+`;
+            resultMsg += `- \u5C5E\u6027\u540D: ${propName}
+`;
+            resultMsg += `- \u603B\u8BA1: ${allPages.length} \u4E2A\u9875\u9762
+`;
+            resultMsg += `- \u5DF2\u586B\u5145: ${allPages.length - needFill.length} \u4E2A
+`;
+            resultMsg += `- \u672C\u6B21\u586B\u5145: ${results.success} \u4E2A
+`;
+            if (results.failed > 0) {
+              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
+`;
+            }
+            return resultMsg;
+          } catch (error) {
+            return `\u274C AI \u5C5E\u6027\u586B\u5145\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleAsk: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { question, keyword } = params;
+          const searchTerm = question || keyword;
+          if (!searchTerm) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u7684\u95EE\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5173\u4E8E Docker \u7684\u5E16\u5B50\u90FD\u8BF4\u4E86\u4EC0\u4E48\uFF1F\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u641C\u7D22\u76F8\u5173\u5185\u5BB9...", "processing");
+          try {
+            const response = await NotionAPI2.search(searchTerm, null, settings.notionApiKey);
+            const results = (response.results || []).filter((r) => !r.archived && r.object === "page").slice(0, 5);
+            if (results.length === 0) {
+              return `\u{1F4ED} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${searchTerm}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage(`\u627E\u5230 ${results.length} \u4E2A\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5728\u63D0\u53D6...`, "processing");
+            const contextParts = [];
+            const sourceList = [];
+            for (let i = 0; i < results.length; i++) {
+              const item = results[i];
+              const title = Utils2.getPageTitle(item, item.object === "database" ? "\u672A\u547D\u540D\u6570\u636E\u5E93" : "\u672A\u547D\u540D\u9875\u9762");
+              const url = item.url || "";
+              sourceList.push({ title, url });
+              try {
+                const content = await AI()._extractPageContent(item.id, settings.notionApiKey, 2e3);
+                contextParts.push(`[${i + 1}] ${title}:
+${content || "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09"}`);
+              } catch (error) {
+                console.warn(`[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25: ${title}`, error);
+                contextParts.push(`[${i + 1}] ${title}:
+\uFF08\u65E0\u6CD5\u8BFB\u53D6\u5185\u5BB9\uFF09`);
+              }
+            }
+            state().updateLastMessage("\u6B63\u5728\u5206\u6790\u5E76\u751F\u6210\u56DE\u7B54...", "processing");
+            const ragPrompt = `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u95EE\u7B54\u52A9\u624B\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA Notion \u5DE5\u4F5C\u533A\u7684\u5185\u5BB9\u56DE\u7B54\u7528\u6237\u7684\u95EE\u9898\u3002
+\u5982\u679C\u5185\u5BB9\u4E2D\u6CA1\u6709\u76F8\u5173\u4FE1\u606F\uFF0C\u8BF7\u5982\u5B9E\u8BF4\u660E\u3002\u56DE\u7B54\u540E\u5217\u51FA\u4FE1\u606F\u6765\u6E90\u3002
+
+--- \u53C2\u8003\u5185\u5BB9 ---
+${contextParts.join("\n\n")}
+
+--- \u7528\u6237\u95EE\u9898 ---
+${searchTerm}`;
+            const aiAnswer = await svc().requestChat(ragPrompt, settings, 2e3);
+            let sourceText = "\n\n\u{1F4DA} **\u4FE1\u606F\u6765\u6E90**\uFF1A\n";
+            sourceList.forEach((s, i) => {
+              sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
+`;
+            });
+            return aiAnswer + sourceText;
+          } catch (error) {
+            return `\u274C \u95EE\u7B54\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleDeepResearch: async (params, settings, explanation) => {
+          var _a;
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { research_topic, scope = "workspace" } = params;
+          if (!research_topic) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u7684\u7814\u7A76\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u6DF1\u5165\u7814\u7A76\u4E00\u4E0B\u5173\u4E8E Docker \u7684\u6240\u6709\u5185\u5BB9\u300D";
+          }
+          try {
+            state().updateLastMessage("\u{1F52C} \u6B63\u5728\u62C6\u89E3\u7814\u7A76\u4E3B\u9898...", "processing");
+            const keywordsPrompt = `\u5C06\u4EE5\u4E0B\u7814\u7A76\u4E3B\u9898\u62C6\u5206\u4E3A3-5\u4E2A\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u6BCF\u884C\u4E00\u4E2A\u5173\u952E\u8BCD\uFF0C\u53EA\u8FD4\u56DE\u5173\u952E\u8BCD\uFF1A
+${research_topic}`;
+            const keywordsRaw = await svc().requestChat(keywordsPrompt, settings, 200);
+            const keywords = keywordsRaw.split("\n").map((k) => k.trim().replace(/^[-•\d.]+\s*/, "")).filter(Boolean).slice(0, 5);
+            if (keywords.length === 0) keywords.push(research_topic);
+            state().updateLastMessage(`\u{1F50D} \u641C\u7D22\u4E2D... (${keywords.length} \u4E2A\u5173\u952E\u8BCD: ${keywords.join(", ")})`, "processing");
+            const allResults = [];
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            const normalizedScope = String(scope || "workspace").toLowerCase();
+            const useDatabaseScope = normalizedScope === "database";
+            let scopedDatabaseInfo = null;
+            let scopedTitleProperty = null;
+            let scopedRichTextProperties = [];
+            if (useDatabaseScope) {
+              const scopedDatabaseId = TargetState2.getEffectiveAIDatabaseId({
+                fallbackDatabaseId: settings.notionDatabaseId
+              });
+              if (!scopedDatabaseId) {
+                return "\u274C \u5F53\u524D\u672A\u914D\u7F6E\u53EF\u7528\u4E8E\u6DF1\u5EA6\u7814\u7A76\u7684\u6570\u636E\u5E93\u3002\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u9ED8\u8BA4\u6570\u636E\u5E93\uFF0C\u6216\u5C06 AI \u76EE\u6807\u5207\u6362\u5230\u67D0\u4E2A\u6570\u636E\u5E93\u3002";
+              }
+              const scopedDatabase = await NotionAPI2.fetchDatabase(scopedDatabaseId, settings.notionApiKey);
+              scopedDatabaseInfo = {
+                id: scopedDatabaseId,
+                title: (scopedDatabase.title || []).map((item) => item.plain_text || "").join("") || "\u76EE\u6807\u6570\u636E\u5E93"
+              };
+              scopedTitleProperty = ((_a = Object.entries(scopedDatabase.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _a[0]) || null;
+              scopedRichTextProperties = Object.entries(scopedDatabase.properties || {}).filter(([_, prop]) => (prop == null ? void 0 : prop.type) === "rich_text").map(([name]) => name).filter((name) => ["\u63CF\u8FF0", "\u6458\u8981", "\u603B\u7ED3", "\u8BF4\u660E", "\u5185\u5BB9"].includes(name));
+            }
+            for (let i = 0; i < keywords.length; i++) {
+              const keyword = keywords[i];
+              let pages = [];
+              if (useDatabaseScope) {
+                const filterConditions = [];
+                if (scopedTitleProperty) {
+                  filterConditions.push({
+                    property: scopedTitleProperty,
+                    title: { contains: keyword }
+                  });
+                }
+                scopedRichTextProperties.forEach((propertyName) => {
+                  filterConditions.push({
+                    property: propertyName,
+                    rich_text: { contains: keyword }
+                  });
+                });
+                const filter = filterConditions.length === 1 ? filterConditions[0] : filterConditions.length > 1 ? { or: filterConditions } : null;
+                const response = await NotionAPI2.queryDatabase(
+                  scopedDatabaseInfo.id,
+                  filter,
+                  null,
+                  null,
+                  settings.notionApiKey,
+                  25
+                );
+                pages = (response.results || []).filter((item) => {
+                  if (item.archived || item.object !== "page") return false;
+                  const loweredKeyword = keyword.toLowerCase();
+                  const title = Utils2.getPageTitle(item, "").toLowerCase();
+                  const richTextMatches = scopedRichTextProperties.some((propertyName) => {
+                    var _a2, _b, _c;
+                    const value = ((_c = (_b = (_a2 = item.properties) == null ? void 0 : _a2[propertyName]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c.map((part) => {
+                      var _a3;
+                      return part.plain_text || ((_a3 = part.text) == null ? void 0 : _a3.content) || "";
+                    }).join("").toLowerCase()) || "";
+                    return value.includes(loweredKeyword);
+                  });
+                  return title.includes(loweredKeyword) || richTextMatches;
+                });
+              } else {
+                const response = await NotionAPI2.search(keyword, null, settings.notionApiKey);
+                pages = (response.results || []).filter((r) => !r.archived && r.object === "page");
+              }
+              allResults.push(...pages);
+              if (i < keywords.length - 1) await Utils2.sleep(delay);
+            }
+            const uniquePages = [...new Map(allResults.map((r) => [r.id, r])).values()];
+            if (uniquePages.length === 0) {
+              if (useDatabaseScope) {
+                return `\u{1F4ED} \u5728\u6570\u636E\u5E93\u300C${(scopedDatabaseInfo == null ? void 0 : scopedDatabaseInfo.title) || "\u76EE\u6807\u6570\u636E\u5E93"}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${research_topic}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002
+
+\u5C1D\u8BD5\u7528\u66F4\u5BBD\u6CDB\u7684\u5173\u952E\u8BCD\uFF0C\u6216\u786E\u8BA4\u8BE5\u6570\u636E\u5E93\u4E2D\u5305\u542B\u76F8\u5173\u9875\u9762\u3002`;
+              }
+              return `\u{1F4ED} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${research_topic}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002
+
+\u5C1D\u8BD5\u7528\u66F4\u5BBD\u6CDB\u7684\u5173\u952E\u8BCD\uFF0C\u6216\u786E\u4FDD\u5DE5\u4F5C\u533A\u4E2D\u6709\u76F8\u5173\u9875\u9762\u3002`;
+            }
+            const maxPages = Math.min(10, uniquePages.length);
+            state().updateLastMessage(`\u{1F4C4} \u63D0\u53D6 ${maxPages}/${uniquePages.length} \u4E2A\u9875\u9762\u5185\u5BB9...`, "processing");
+            const contentParts = [];
+            const sourceList = [];
+            for (let i = 0; i < maxPages; i++) {
+              const page = uniquePages[i];
+              const title = Utils2.getPageTitle(page);
+              const url = page.url || "";
+              sourceList.push({ title, url });
+              try {
+                const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 3e3);
+                contentParts.push(`[${i + 1}] ${title}:
+${content || "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09"}`);
+              } catch (error) {
+                console.warn(`[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25: ${title}`, error);
+                contentParts.push(`[${i + 1}] ${title}:
+\uFF08\u65E0\u6CD5\u8BFB\u53D6\u5185\u5BB9\uFF09`);
+              }
+              if (i < maxPages - 1) await Utils2.sleep(delay);
+            }
+            state().updateLastMessage("\u{1F4CA} \u6B63\u5728\u751F\u6210\u7814\u7A76\u62A5\u544A...", "processing");
+            const reportPrompt = `\u4F60\u662F\u4E00\u4E2A\u7814\u7A76\u5206\u6790\u5E08\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA Notion \u5DE5\u4F5C\u533A\u7684\u5185\u5BB9\uFF0C\u9488\u5BF9\u4E3B\u9898\u300C${research_topic}\u300D\u751F\u6210\u4E00\u4EFD\u7ED3\u6784\u5316\u7814\u7A76\u62A5\u544A\u3002
+
+\u62A5\u544A\u683C\u5F0F\u8981\u6C42\uFF08\u4F7F\u7528 Markdown\uFF09:
+# \u7814\u7A76\u62A5\u544A: ${research_topic}
+## \u6458\u8981
+\uFF082-3\u53E5\u8BDD\u6982\u62EC\u6838\u5FC3\u53D1\u73B0\uFF09
+## \u4E3B\u8981\u53D1\u73B0
+\uFF083-5\u4E2A\u8981\u70B9\uFF0C\u6BCF\u4E2A\u8981\u70B9\u4E00\u53E5\u8BDD\uFF09
+## \u8BE6\u7EC6\u5206\u6790
+\uFF08\u6309\u4E3B\u9898\u5206\u6BB5\u8BBA\u8FF0\uFF0C\u5F15\u7528\u5177\u4F53\u6765\u6E90\u7F16\u53F7\u5982[1][2]\uFF09
+## \u5EFA\u8BAE\u4E0E\u884C\u52A8\u9879
+\uFF08\u53EF\u6267\u884C\u7684\u5EFA\u8BAE\uFF0C\u6BCF\u6761\u4E00\u53E5\u8BDD\uFF09
+## \u4FE1\u606F\u6765\u6E90
+\uFF08\u5217\u51FA\u5F15\u7528\u7684\u9875\u9762\uFF09
+
+--- \u53C2\u8003\u5185\u5BB9 ---
+${contentParts.join("\n\n---\n\n")}`;
+            const report = await svc().requestChat(reportPrompt, settings, 4e3);
+            let sourceText = "\n\n\u{1F4DA} **\u5206\u6790\u57FA\u7840**\uFF1A\n";
+            sourceList.forEach((s, i) => {
+              sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
+`;
+            });
+            const scopeLabel = useDatabaseScope ? `\u6570\u636E\u5E93\u300C${(scopedDatabaseInfo == null ? void 0 : scopedDatabaseInfo.title) || "\u76EE\u6807\u6570\u636E\u5E93"}\u300D` : "\u5DE5\u4F5C\u533A";
+            const summary = `\u{1F52C} \u8303\u56F4\uFF1A${scopeLabel}\u3002\u5171\u4F7F\u7528 ${keywords.length} \u4E2A\u5173\u952E\u8BCD\uFF0C\u627E\u5230 ${uniquePages.length} \u4E2A\u76F8\u5173\u9875\u9762\uFF0C\u6DF1\u5165\u5206\u6790\u4E86 ${maxPages} \u4E2A\u3002`;
+            return `${report}${sourceText}
+---
+${summary}`;
+          } catch (error) {
+            return `\u274C \u6DF1\u5EA6\u7814\u7A76\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleSummarize: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { page_name, page_id, summary_style } = params;
+          const style = summary_style || "brief";
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u8981\u603B\u7ED3\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u603B\u7ED3\u4E00\u4E0B xxx \u9875\u9762\u7684\u5185\u5BB9\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
+            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 6e3);
+            if (!existingContent.trim()) {
+              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u603B\u7ED3\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage("\u{1F4DD} \u6B63\u5728\u751F\u6210\u6458\u8981...", "processing");
+            const styleInstructions = {
+              brief: "\u751F\u6210\u7B80\u77ED\u6458\u8981\uFF082-3\u53E5\u8BDD\uFF09\uFF0C\u63D0\u70BC\u6838\u5FC3\u8981\u70B9\u3002",
+              detailed: "\u751F\u6210\u8BE6\u7EC6\u6458\u8981\uFF0C\u5305\u542B\uFF1A\u6838\u5FC3\u4E3B\u9898\u3001\u4E3B\u8981\u8BBA\u70B9\u3001\u5173\u952E\u7EC6\u8282\u548C\u7ED3\u8BBA\u3002",
+              bullet: "\u4EE5\u8981\u70B9\u5217\u8868\u5F62\u5F0F\u603B\u7ED3\uFF0C\u6BCF\u4E2A\u8981\u70B9\u4E00\u884C\uFF0C\u63D0\u70BC\u5173\u952E\u4FE1\u606F\u3002"
+            };
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u6458\u8981\u52A9\u624B\u3002${styleInstructions[style] || styleInstructions.brief}
+
+\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002
+
+\u4EE5\u4E0B\u662F\u9700\u8981\u603B\u7ED3\u7684\u5185\u5BB9\uFF1A
+${existingContent}`;
+            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
+            return `\u{1F4DD} **\u9875\u9762\u6458\u8981\uFF1A${targetPage.name}**
+
+${aiResponse}
+
+---
+\u{1F4C4} \u6458\u8981\u98CE\u683C: ${style === "brief" ? "\u7B80\u77ED" : style === "detailed" ? "\u8BE6\u7EC6" : "\u8981\u70B9\u5217\u8868"}`;
+          } catch (error) {
+            return `\u274C \u5185\u5BB9\u603B\u7ED3\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleBrainstorm: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { brainstorm_topic, page_name, page_id } = params;
+          const count = Math.min(Math.max(parseInt(params.brainstorm_count) || 10, 3), 30);
+          const topic = brainstorm_topic || page_name || explanation;
+          if (!topic) {
+            return "\u274C \u8BF7\u6307\u5B9A\u5934\u8111\u98CE\u66B4\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u56F4\u7ED5\u8FDC\u7A0B\u529E\u516C\u7ED9\u6211\u4E00\u4E9B\u521B\u610F\u5EFA\u8BAE\u300D";
+          }
+          let pageContext = "";
+          if (page_name || page_id) {
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9\u4F5C\u4E3A\u53C2\u8003...", "processing");
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage) {
+              pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 3e3);
+            }
+          }
+          state().updateLastMessage("\u{1F4A1} \u6B63\u5728\u5934\u8111\u98CE\u66B4...", "processing");
+          try {
+            const contextBlock = pageContext ? `
+
+\u4EE5\u4E0B\u662F\u76F8\u5173\u53C2\u8003\u5185\u5BB9\uFF1A
+${pageContext}` : "";
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u521B\u610F\u987E\u95EE\u3002\u56F4\u7ED5\u4E3B\u9898\u300C${topic}\u300D\u8FDB\u884C\u5934\u8111\u98CE\u66B4\uFF0C\u751F\u6210 ${count} \u4E2A\u521B\u610F\u60F3\u6CD5\u6216\u5EFA\u8BAE\u3002
+
+\u8981\u6C42\uFF1A
+- \u60F3\u6CD5\u8981\u591A\u6837\u5316\uFF0C\u6DB5\u76D6\u4E0D\u540C\u89D2\u5EA6\u548C\u7EF4\u5EA6
+- \u6BCF\u4E2A\u60F3\u6CD5\u5305\u542B\u7B80\u77ED\u6807\u9898\u548C\u4E00\u53E5\u8BDD\u8BF4\u660E
+- \u4ECE\u5B9E\u7528\u5230\u5927\u80C6\u521B\u65B0\uFF0C\u7531\u8FD1\u53CA\u8FDC\u6392\u5217
+- \u4F7F\u7528 Markdown \u7F16\u53F7\u5217\u8868\u683C\u5F0F\u8F93\u51FA${contextBlock}`;
+            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
+            return `\u{1F4A1} **\u5934\u8111\u98CE\u66B4\uFF1A${topic}**
+
+${aiResponse}
+
+---
+\u{1F3AF} \u5171\u751F\u6210 ${count} \u4E2A\u521B\u610F\u60F3\u6CD5`;
+          } catch (error) {
+            return `\u274C \u5934\u8111\u98CE\u66B4\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleProofread: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { page_name, page_id } = params;
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u8981\u6821\u5BF9\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u6821\u5BF9\u4E00\u4E0B xxx \u9875\u9762\u7684\u62FC\u5199\u548C\u8BED\u6CD5\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
+          try {
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
+            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey);
+            if (!existingContent.trim()) {
+              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u6821\u5BF9\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage("\u2705 \u6B63\u5728\u6821\u5BF9\u4E2D...", "processing");
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u6821\u5BF9\u7F16\u8F91\u3002\u8BF7\u4ED4\u7EC6\u68C0\u67E5\u4EE5\u4E0B\u5185\u5BB9\u7684\u62FC\u5199\u3001\u8BED\u6CD5\u548C\u8868\u8FBE\u95EE\u9898\u3002
+
+\u8F93\u51FA\u683C\u5F0F\uFF1A
+1. \u5148\u5217\u51FA\u53D1\u73B0\u7684\u6240\u6709\u95EE\u9898\uFF08\u6BCF\u4E2A\u95EE\u9898\u6807\u6CE8\u4F4D\u7F6E\u548C\u7C7B\u578B\uFF1A\u62FC\u5199/\u8BED\u6CD5/\u6807\u70B9/\u8868\u8FBE\uFF09
+2. \u7136\u540E\u7ED9\u51FA\u4FEE\u6B63\u540E\u7684\u5B8C\u6574\u5185\u5BB9
+
+\u5982\u679C\u6CA1\u6709\u53D1\u73B0\u4EFB\u4F55\u95EE\u9898\uFF0C\u8BF7\u8BF4\u660E\u5185\u5BB9\u65E0\u8BEF\u3002
+
+\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002
+
+\u4EE5\u4E0B\u662F\u9700\u8981\u6821\u5BF9\u7684\u5185\u5BB9\uFF1A
+${existingContent}`;
+            const aiResponse = await svc().requestChat(prompt2, settings, 3e3);
+            return `\u2705 **\u6821\u5BF9\u7ED3\u679C\uFF1A${targetPage.name}**
+
+${aiResponse}`;
+          } catch (error) {
+            return `\u274C \u6821\u5BF9\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleTemplateOutput: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("appendBlocks")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6A21\u677F\u8F93\u51FA\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { template_name, page_name, page_id, custom_context } = params;
+          let templates;
+          try {
+            templates = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, CONFIG2.DEFAULTS.aiTemplates));
+          } catch (error) {
+            console.warn("[LD-Notion] AI \u6A21\u677F\u52A0\u8F7D\u5931\u8D25\uFF0C\u4F7F\u7528\u9ED8\u8BA4\u6A21\u677F:", error);
+            templates = JSON.parse(CONFIG2.DEFAULTS.aiTemplates);
+          }
+          if (!template_name) {
+            const list = templates.map((t) => `${t.icon} **${t.name}**`).join("\n");
+            return `\u{1F4CB} **\u53EF\u7528\u7684 AI \u8F93\u51FA\u6A21\u677F**
+
+${list}
+
+\u{1F4A1} \u4F7F\u7528\u65B9\u5F0F\uFF1A\u300C\u7528\u5468\u62A5\u6A21\u677F\u603B\u7ED3 xxx \u9875\u9762\u300D\u6216\u300C\u7528\u6458\u8981\u63D0\u7EB2\u6A21\u677F\u6574\u7406 xxx\u300D`;
+          }
+          const template = templates.find(
+            (t) => t.name === template_name || t.name.includes(template_name) || template_name.includes(t.name)
+          );
+          if (!template) {
+            const list = templates.map((t) => `${t.icon} ${t.name}`).join(", ");
+            return `\u274C \u627E\u4E0D\u5230\u6A21\u677F\u300C${template_name}\u300D\u3002
+
+\u53EF\u7528\u6A21\u677F: ${list}`;
+          }
+          let pageContext = "";
+          let targetPage = null;
+          if (page_name || page_id) {
+            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
+            targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+            if (targetPage) {
+              pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 4e3);
+            }
+          }
+          state().updateLastMessage(`${template.icon} \u6B63\u5728\u4F7F\u7528\u300C${template.name}\u300D\u6A21\u677F\u751F\u6210...`, "processing");
+          const contextBlock = pageContext ? `
+
+\u4EE5\u4E0B\u662F\u53C2\u8003\u5185\u5BB9\uFF1A
+${pageContext}` : "";
+          const customBlock = custom_context ? `
+
+\u7528\u6237\u8865\u5145\u8BF4\u660E\uFF1A${custom_context}` : "";
+          const fullPrompt = `${template.prompt}${contextBlock}${customBlock}
+
+\u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002`;
+          const aiResponse = await svc().requestChat(fullPrompt, settings, 3e3);
+          if (targetPage) {
+            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
+            const contentBlocks = AI()._textToBlocks(aiResponse);
+            const blocks = [
+              { type: "divider", divider: {} },
+              { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `${template.icon} ${template.name}` } }] } },
+              ...contentBlocks
+            ];
+            await AI()._executeGuardedPageWrite(
+              "appendBlocks",
+              targetPage,
+              () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
+              settings,
+              { itemName: targetPage.name }
+            );
+            return `\u2705 **${template.icon} ${template.name}** \u5DF2\u751F\u6210\u5E76\u5199\u5165\u9875\u9762\u300C${targetPage.name}\u300D
+
+${aiResponse}`;
+          }
+          return `${template.icon} **${template.name}**
+
+${aiResponse}
+
+\u{1F4A1} \u5982\u9700\u5199\u5165\u9875\u9762\uFF0C\u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\uFF1A\u300C\u7528${template.name}\u6A21\u677F\u5904\u7406 xxx \u9875\u9762\u300D`;
+        }
+      };
+    }
+  });
+
   // src/bridge/BookmarkExporter.js
   var require_BookmarkExporter = __commonJS({
     "src/bridge/BookmarkExporter.js"(exports, module) {
@@ -6121,9 +9696,19 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         // 批量导出循环末尾单次回写已导出映射（PERF-003）：循环内仅 mutate 内存缓存，
         // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。语义与逐条 markExported 等价。
+        // 回写前淘汰超过 90 天的过期条目（PERF-001 泛化）。
         flushExported: () => {
           if (BookmarkExporter2._exportedCache) {
+            BookmarkExporter2._evictExpired(BookmarkExporter2._exportedCache);
             Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(BookmarkExporter2._exportedCache));
+          }
+        },
+        // 淘汰超过 90 天的过期条目（PERF-001 泛化，与 DedupStore._evictExpired 同构）
+        _EXPORT_TTL_MS: 90 * 24 * 60 * 60 * 1e3,
+        _evictExpired: (set) => {
+          const cutoff = Date.now() - BookmarkExporter2._EXPORT_TTL_MS;
+          for (const key of Object.keys(set)) {
+            if (set[key] < cutoff) delete set[key];
           }
         },
         isExported: (bookmarkUrl) => {
@@ -6331,7 +9916,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     "src/storage/DedupStore.js"(exports, module) {
       "use strict";
       var { CONFIG: CONFIG2 } = require_config();
+      var DEDUP_TTL_MS = 90 * 24 * 60 * 60 * 1e3;
       var DedupStore = {
+        DEDUP_TTL_MS,
         _keyFor(sourceType) {
           return `${CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`;
         },
@@ -6359,14 +9946,32 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           this._batchCache = { set: this._loadSet(sourceType), dirty: false };
         },
         /**
-         * 结束批量模式，如有变更则一次写回
+         * 结束批量模式，如有变更则一次写回。
+         * 写回前自动淘汰超过 TTL 的过期条目（PERF-001）。
          */
         endBatch() {
           if (this._batchCache && this._batchCache.dirty && this._batchSourceType) {
+            this._evictExpired(this._batchCache.set);
             this._saveSet(this._batchSourceType, this._batchCache.set);
           }
           this._batchCache = null;
           this._batchSourceType = null;
+        },
+        /**
+         * 淘汰超过 TTL 的过期条目（就地修改）
+         * @param {Object} set - dedup 集合 {key: timestamp}
+         * @returns {number} 淘汰的条目数
+         */
+        _evictExpired(set) {
+          const cutoff = Date.now() - DEDUP_TTL_MS;
+          let evicted = 0;
+          for (const key of Object.keys(set)) {
+            if (set[key] < cutoff) {
+              delete set[key];
+              evicted++;
+            }
+          }
+          return evicted;
         },
         /**
          * 检查条目是否已存在
@@ -7064,13 +10669,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { SyncLock } = require_sync_lock();
       var { SyncCoordinator } = require_SyncCoordinator();
       var { BookmarkExporter: BookmarkExporter2 } = require_BookmarkExporter();
-      var _resolveUI = () => {
-        try {
-          return require_ui().UI;
-        } catch {
-          return void 0;
-        }
-      };
+      var { emit } = require_event_bus();
       var BookmarkAutoImporter2 = {
         isRunning: false,
         timerId: null,
@@ -7079,9 +10678,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         lastRunAt: 0,
         minimumRunGapMs: 60 * 1e3,
         updateStatus: (text) => {
-          const UI2 = _resolveUI();
-          const refs = UI2 ? UI2.refs : null;
-          const el = refs && refs.bookmarkAutoImportStatus || document.querySelector("#ldb-bookmark-auto-import-status");
+          const el = document.querySelector("#ldb-bookmark-auto-import-status");
           if (el) el.textContent = text;
         },
         buildSettings: () => ({
@@ -7540,14 +11137,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           BookmarkAutoImporter2.updateStatus(`\u274C \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u51FA\u9519: ${error.message}`);
         } finally {
           BookmarkAutoImporter2.isRunning = false;
-          const UI2 = _resolveUI();
-          if (UI2 && typeof UI2.renderSyncCenterSummary === "function") {
-            try {
-              UI2.renderSyncCenterSummary();
-            } catch (e) {
-              console.warn("[LD-Notion] \u540C\u6B65\u4E2D\u5FC3\u9762\u677F\u6E32\u67D3\u5931\u8D25:", e);
-            }
-          }
+          emit("sync:center-summary-updated");
         }
       };
       module.exports = { BookmarkAutoImporter: BookmarkAutoImporter2 };
@@ -7567,13 +11157,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { SyncCoordinator } = require_SyncCoordinator();
       var { BookmarkExporter: BookmarkExporter2 } = require_BookmarkExporter();
       var { BookmarkAutoImporter: BookmarkAutoImporter2 } = require_BookmarkAutoImporter();
-      var _resolveUI = () => {
-        try {
-          return require_ui().UI;
-        } catch {
-          return void 0;
-        }
-      };
+      var { emit } = require_event_bus();
       var RSSAutoImporter2 = {
         isRunning: false,
         timerId: null,
@@ -7582,9 +11166,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         lastRunAt: 0,
         minimumRunGapMs: 60 * 1e3,
         updateStatus: (text) => {
-          const UI2 = _resolveUI();
-          const refs = UI2 ? UI2.refs : null;
-          const el = refs && refs.rssAutoImportStatus || document.querySelector("#ldb-rss-auto-import-status");
+          const el = document.querySelector("#ldb-rss-auto-import-status");
           if (el) el.textContent = text;
         },
         buildSettings: () => ({
@@ -8236,14 +11818,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             RSSAutoImporter2.updateStatus(`RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519: ${error.message}`);
           } finally {
             RSSAutoImporter2.isRunning = false;
-            const UI2 = _resolveUI();
-            if (UI2 && typeof UI2.renderSyncCenterSummary === "function") {
-              try {
-                UI2.renderSyncCenterSummary();
-              } catch (e) {
-                console.warn("[LD-Notion] \u540C\u6B65\u4E2D\u5FC3\u9762\u677F\u6E32\u67D3\u5931\u8D25:", e);
-              }
-            }
+            emit("sync:center-summary-updated");
           }
         },
         init: () => {
@@ -9083,13 +12658,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { CONFIG: CONFIG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
-      var _resolveUI = () => {
-        try {
-          return require_ui().UI;
-        } catch {
-          return void 0;
-        }
-      };
+      var { emit } = require_event_bus();
       var UpdateChecker2 = {
         timerId: null,
         isChecking: false,
@@ -9160,8 +12729,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
         },
         updateStatusText: (text) => {
-          const UI2 = _resolveUI();
-          const el = UI2 && UI2.refs && UI2.refs.updateCheckStatus || document.querySelector("#ldb-update-check-status");
+          const el = document.querySelector("#ldb-update-check-status");
           if (el) el.textContent = text;
         },
         renderLastStatus: () => {
@@ -9190,9 +12758,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         check: async ({ manual = false } = {}) => {
           if (UpdateChecker2.isChecking) return;
           UpdateChecker2.isChecking = true;
-          const UI2 = _resolveUI();
-          if (manual && UI2) {
-            UI2.showStatus("\u6B63\u5728\u68C0\u67E5\u66F4\u65B0...", "info");
+          if (manual) {
+            emit("notify", { message: "\u6B63\u5728\u68C0\u67E5\u66F4\u65B0...", type: "info" });
           }
           try {
             const currentVersion = UpdateChecker2.getCurrentVersion();
@@ -9207,7 +12774,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 message
               });
               UpdateChecker2.renderLastStatus();
-              if (manual && UI2) UI2.showStatus(message, "info");
+              if (manual) emit("notify", { message, type: "info" });
             } else {
               const message = `\u5F53\u524D\u5DF2\u662F\u6700\u65B0\u7248\u672C v${currentVersion}`;
               UpdateChecker2.saveResult({
@@ -9217,13 +12784,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 message
               });
               UpdateChecker2.renderLastStatus();
-              if (manual && UI2) UI2.showStatus(message, "success");
+              if (manual) emit("notify", { message, type: "success" });
             }
           } catch (error) {
             const message = (error == null ? void 0 : error.message) || "\u66F4\u65B0\u68C0\u67E5\u5931\u8D25";
             UpdateChecker2.saveResult({ status: "error", message });
             UpdateChecker2.renderLastStatus();
-            if (manual && UI2) UI2.showStatus(message, "error");
+            if (manual) emit("notify", { message, type: "error" });
           } finally {
             UpdateChecker2.isChecking = false;
           }
@@ -9402,8 +12969,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         // 批量导出循环末尾单次回写已导出映射（DISCOVER P3 同类修复）：循环内仅 mutate 内存缓存，
         // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。与 BookmarkExporter.flushExported 同构。
+        // 回写前淘汰超过 90 天的过期条目（PERF-001 泛化）。
         flushExported: () => {
           if (GitHubAPI2._exportedCache) {
+            GitHubAPI2._evictExpired(GitHubAPI2._exportedCache);
             Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(GitHubAPI2._exportedCache));
           }
         },
@@ -9417,7 +12986,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         flushGistsExported: () => {
           if (GitHubAPI2._exportedGistsCache) {
+            GitHubAPI2._evictExpired(GitHubAPI2._exportedGistsCache);
             Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(GitHubAPI2._exportedGistsCache));
+          }
+        },
+        // 淘汰超过 90 天的过期条目（PERF-001 泛化，与 DedupStore._evictExpired 同构）
+        _EXPORT_TTL_MS: 90 * 24 * 60 * 60 * 1e3,
+        _evictExpired: (set) => {
+          const cutoff = Date.now() - GitHubAPI2._EXPORT_TTL_MS;
+          for (const key of Object.keys(set)) {
+            if (set[key] < cutoff) delete set[key];
           }
         },
         isExported: (repoFullName) => {
@@ -10063,13 +13641,7 @@ ${insight.summary || ""}`,
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
       var { NotionAPI: NotionAPI2 } = require_api();
-      var _resolveUI = () => {
-        try {
-          return require_ui().UI;
-        } catch {
-          return void 0;
-        }
-      };
+      var { emit } = require_event_bus();
       var GitHubAutoImporter2 = {
         isRunning: false,
         timerId: null,
@@ -10087,9 +13659,7 @@ ${insight.summary || ""}`,
           return !!(apiKey && databaseId);
         },
         updateStatus: (text) => {
-          const UI2 = _resolveUI();
-          if (!UI2) return;
-          const el = UI2.refs && UI2.refs.autoImportStatus || document.querySelector("#ldb-auto-import-status");
+          const el = document.querySelector("#ldb-auto-import-status");
           if (el) el.textContent = text;
         },
         buildSettings: () => {
@@ -10176,10 +13746,6 @@ ${insight.summary || ""}`,
         }
       };
       GitHubAutoImporter2._mapItemsToBookmarks = (incrementalItems, type, meta) => {
-        const UI2 = _resolveUI();
-        if (UI2 && typeof UI2.mapGitHubItemsToBookmarks === "function") {
-          return UI2.mapGitHubItemsToBookmarks(incrementalItems, type).filter((item) => UI2 && typeof UI2.isBookmarkExported === "function" ? !UI2.isBookmarkExported(item) : true);
-        }
         return incrementalItems.map((item) => ({
           itemKey: meta.getId(item),
           raw: item,
@@ -10263,16 +13829,6 @@ ${insight.summary || ""}`,
         return { success: new Array(success).fill({}), failed: new Array(failed).fill({}) };
       };
       GitHubAutoImporter2._exportMappedItems = async (mappedItems, type, meta, settings) => {
-        const UI2 = _resolveUI();
-        if (UI2 && typeof UI2.exportGitHubSelected === "function") {
-          return await UI2.exportGitHubSelected(mappedItems, {
-            apiKey: settings.apiKey,
-            databaseId: settings.databaseId,
-            token: settings.token
-          }, (current, total, title) => {
-            GitHubAutoImporter2.updateStatus(`\u{1F4EC} GitHub ${meta.label} \u5BFC\u5165\u4E2D (${current}/${total}): ${title}`);
-          });
-        }
         return await GitHubAutoImporter2._exportViaGitHubExporter(mappedItems, type, meta, settings);
       };
       GitHubAutoImporter2._syncSingleType = async (type, settings, attemptAt) => {
@@ -10475,14 +14031,7 @@ ${insight.summary || ""}`,
           GitHubAutoImporter2.updateStatus(`\u274C GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
         } finally {
           GitHubAutoImporter2.isRunning = false;
-          const UI2 = _resolveUI();
-          if (UI2 && typeof UI2.renderSyncCenterSummary === "function") {
-            try {
-              UI2.renderSyncCenterSummary();
-            } catch (e) {
-              console.warn("[LD-Notion] \u540C\u6B65\u4E2D\u5FC3\u9762\u677F\u6E32\u67D3\u5931\u8D25:", e);
-            }
-          }
+          emit("sync:center-summary-updated");
         }
       };
       module.exports = { GitHubAutoImporter: GitHubAutoImporter2 };
@@ -10503,13 +14052,7 @@ ${insight.summary || ""}`,
       var { GitHubAutoImporter: GitHubAutoImporter2 } = require_GitHubAutoImporter();
       var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
       var { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
-      var _resolveUI = () => {
-        try {
-          return require_ui().UI;
-        } catch {
-          return void 0;
-        }
-      };
+      var { emit } = require_event_bus();
       var AutoImporter2 = {
         isRunning: false,
         timerId: null,
@@ -10552,9 +14095,7 @@ ${insight.summary || ""}`,
         },
         // 更新状态栏
         updateStatus: (text) => {
-          const UI2 = _resolveUI();
-          const refs = UI2 ? UI2.refs : null;
-          const el = refs && refs.autoImportStatus || document.querySelector("#ldb-auto-import-status");
+          const el = document.querySelector("#ldb-auto-import-status");
           if (el) el.textContent = text;
         },
         getWatermark: (bookmarks = []) => SyncState2.buildWatermark(
@@ -10702,14 +14243,8 @@ ${insight.summary || ""}`,
             if (w < workerCount - 1) await Utils2.sleep(100);
           }
           await Promise.all(workers);
-          const uiRef = _resolveUI();
-          if (uiRef && uiRef.renderBookmarkList) {
-            try {
-              uiRef.renderBookmarkList();
-            } catch (e) {
-              console.warn("[LD-Notion] \u4E66\u7B7E\u5217\u8868\u6E32\u67D3\u5931\u8D25:", e);
-            }
-          }
+          const uiRef = null;
+          emit("bookmarks:updated");
           const statePatch = {
             lastAttemptAt: attemptAt,
             lastOutcome: failed > 0 ? "partial" : "success",
@@ -10755,17 +14290,1755 @@ ${insight.summary || ""}`,
           if (exportBtn) exportBtn.disabled = false;
           const obsExportBtn2 = document.querySelector("#ldb-obs-export");
           if (obsExportBtn2) obsExportBtn2.disabled = false;
-          const uiFinally = _resolveUI();
-          if (uiFinally && typeof uiFinally.renderSyncCenterSummary === "function") {
-            try {
-              uiFinally.renderSyncCenterSummary();
-            } catch (e) {
-              console.warn("[LD-Notion] \u540C\u6B65\u4E2D\u5FC3\u9762\u677F\u6E32\u67D3\u5931\u8D25:", e);
+          emit("sync:center-summary-updated");
+        }
+      };
+      module.exports = { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 };
+    }
+  });
+
+  // src/ai/handlers/batch.js
+  var require_batch = __commonJS({
+    "src/ai/handlers/batch.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { TargetState: TargetState2 } = require_auth();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
+      var { AISchema: AISchema2 } = require_schema();
+      var { BlockConverter } = require_BlockConverter();
+      var { NameResolver } = require_NameResolver();
+      var { AgentTrace } = require_AgentTrace();
+      var { getAI: AI, getState: state, getService: svc } = require_deps();
+      module.exports = {
+        handleClassify: async (params, settings, explanation) => {
+          return "\u{1F4DD} \u5355\u4E2A\u5206\u7C7B\u529F\u80FD\u5F00\u53D1\u4E2D...\n\n\u76EE\u524D\u53EF\u4EE5\u4F7F\u7528\u300C\u81EA\u52A8\u5206\u7C7B\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50\u300D\u6765\u6279\u91CF\u5206\u7C7B\u3002";
+        },
+        handleBatchClassify: async (params, settings, explanation) => {
+          if (!settings.notionDatabaseId) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
+          }
+          if (settings.categories.length < 2) {
+            return "\u274C \u8BF7\u5148\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u914D\u7F6E\u81F3\u5C11\u4E24\u4E2A\u5206\u7C7B\u9009\u9879\u3002";
+          }
+          state().updateLastMessage(`\u6B63\u5728\u51C6\u5907\u6279\u91CF\u5206\u7C7B...
+\u5206\u7C7B\u9009\u9879: ${settings.categories.join(", ")}`, "processing");
+          try {
+            await AIClassifier.ensureAICategoryProperty(settings);
+            state().updateLastMessage(`\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...`, "processing");
+            const pages = await AIClassifier.fetchAllPages(settings);
+            if (pages.length === 0) {
+              return "\u{1F4ED} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762\u3002";
+            }
+            const unclassified = pages.filter((p) => {
+              var _a;
+              const aiCategory = p.properties["AI\u5206\u7C7B"];
+              return !((_a = aiCategory == null ? void 0 : aiCategory.select) == null ? void 0 : _a.name);
+            });
+            if (unclassified.length === 0) {
+              return `\u2705 \u6240\u6709 ${pages.length} \u4E2A\u9875\u9762\u90FD\u5DF2\u5206\u7C7B\u5B8C\u6210\uFF01`;
+            }
+            const results = { success: 0, failed: 0 };
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+            for (let i = 0; i < unclassified.length; i++) {
+              const page = unclassified[i];
+              const title = AIClassifier.getPageTitle(page);
+              state().updateLastMessage(
+                `\u{1F504} \u6B63\u5728\u5206\u7C7B (${i + 1}/${unclassified.length})
+
+\u5F53\u524D: ${title}`,
+                "processing"
+              );
+              try {
+                await AIClassifier.classifyPage(page, settings);
+                results.success++;
+              } catch (error) {
+                console.error(`[LD-Notion] \u5206\u7C7B\u5931\u8D25: ${title}`, error);
+                results.failed++;
+              }
+              if (i < unclassified.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            }
+            let resultMsg = `\u2705 **\u6279\u91CF\u5206\u7C7B\u5B8C\u6210**
+
+`;
+            resultMsg += `- \u603B\u8BA1: ${pages.length} \u4E2A\u9875\u9762
+`;
+            resultMsg += `- \u5DF2\u5206\u7C7B: ${pages.length - unclassified.length} \u4E2A
+`;
+            resultMsg += `- \u672C\u6B21\u5206\u7C7B: ${results.success} \u4E2A
+`;
+            if (results.failed > 0) {
+              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
+`;
+            }
+            return resultMsg;
+          } catch (error) {
+            return `\u274C \u6279\u91CF\u5206\u7C7B\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleBatchTranslate: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("appendBlocks")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6279\u91CF\u7FFB\u8BD1\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { database_name, database_id, target_language } = params;
+          const lang = target_language || "\u82F1\u6587";
+          if (!database_name && !database_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u8981\u7FFB\u8BD1\u7684\u6570\u636E\u5E93\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u6570\u636E\u5E93\u7FFB\u8BD1\u6210\u65E5\u6587\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u67E5\u627E\u6570\u636E\u5E93...", "processing");
+          try {
+            let dbId = database_id;
+            if (!dbId && database_name) {
+              const searchResp = await NotionAPI2.search(database_name, "database", settings.notionApiKey);
+              const db = (searchResp.results || []).find((r) => !r.archived);
+              if (!db) return `\u274C \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${database_name}\u300D\u3002`;
+              dbId = db.id;
+            }
+            state().updateLastMessage("\u6B63\u5728\u83B7\u53D6\u9875\u9762\u5217\u8868...", "processing");
+            const queryResp = await NotionAPI2.queryDatabase(dbId, null, null, null, settings.notionApiKey, 20);
+            const pages = (queryResp.results || []).filter((p) => !p.archived);
+            if (pages.length === 0) {
+              return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u9875\u9762\u3002`;
+            }
+            const confirmed = await ConfirmationDialog3.show({
+              title: `\u{1F310} \u6279\u91CF\u7FFB\u8BD1\u786E\u8BA4`,
+              message: `\u5373\u5C06\u7FFB\u8BD1 ${pages.length} \u4E2A\u9875\u9762\u4E3A${lang}\u3002
+\u7FFB\u8BD1\u540E\u7684\u5185\u5BB9\u5C06\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002`,
+              confirmText: "\u5F00\u59CB\u7FFB\u8BD1",
+              cancelText: "\u53D6\u6D88"
+            });
+            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u6279\u91CF\u7FFB\u8BD1\u3002";
+            let successCount = 0;
+            let failCount = 0;
+            for (let i = 0; i < pages.length; i++) {
+              const page = pages[i];
+              const title = Utils2.getPageTitle(page);
+              state().updateLastMessage(`\u{1F310} \u7FFB\u8BD1\u4E2D (${i + 1}/${pages.length}): ${title}...`, "processing");
+              try {
+                const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 4e3);
+                if (!content.trim()) {
+                  failCount++;
+                  continue;
+                }
+                const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7FFB\u8BD1\u3002\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\u4E3A${lang}\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\uFF0C\u4FDD\u6301\u539F\u6587\u7ED3\u6784\u3002
+
+\u539F\u6587\uFF1A
+${content}`;
+                const translated = await svc().requestChat(prompt2, settings, 2e3);
+                const blocks = [
+                  { type: "divider", divider: {} },
+                  { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `\u{1F310} ${lang}\u7FFB\u8BD1` } }] } },
+                  ...AI()._textToBlocks(translated)
+                ];
+                await AI()._executeGuardedPageWrite(
+                  "appendBlocks",
+                  page,
+                  () => NotionAPI2.appendBlocks(page.id, blocks, settings.notionApiKey),
+                  settings,
+                  { itemName: title }
+                );
+                successCount++;
+              } catch (error) {
+                console.warn(`[LD-Notion] \u9875\u9762\u521B\u5EFA\u5931\u8D25: ${title}`, error);
+                failCount++;
+              }
+            }
+            return `\u{1F310} **\u6279\u91CF\u7FFB\u8BD1\u5B8C\u6210**
+
+- \u76EE\u6807\u8BED\u8A00: ${lang}
+- \u6210\u529F: ${successCount} \u9875
+- \u5931\u8D25: ${failCount} \u9875
+- \u603B\u8BA1: ${pages.length} \u9875
+
+\u{1F4A1} \u7FFB\u8BD1\u5185\u5BB9\u5DF2\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\u3002`;
+          } catch (error) {
+            return `\u274C \u6279\u91CF\u7FFB\u8BD1\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleExtractToDatabase: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("createDatabase")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u521B\u5EFA\u6570\u636E\u5E93\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { page_name, page_id, database_name, extraction_prompt } = params;
+          if (!page_name && !page_id) {
+            return "\u274C \u8BF7\u6307\u5B9A\u6E90\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u7B14\u8BB0\u63D0\u53D6\u4E3A\u4EFB\u52A1\u6570\u636E\u5E93\u300D";
+          }
+          state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u6E90\u9875\u9762...", "processing");
+          try {
+            const sourcePage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (sourcePage == null ? void 0 : sourcePage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${sourcePage.error}`;
+            if (!sourcePage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
+            const content = await AI()._extractPageContent(sourcePage.id, settings.notionApiKey, 6e3);
+            if (!content.trim()) {
+              return `\u274C \u9875\u9762\u300C${sourcePage.name}\u300D\u6CA1\u6709\u53EF\u63D0\u53D6\u7684\u5185\u5BB9\u3002`;
+            }
+            state().updateLastMessage("\u{1F50D} \u6B63\u5728\u5206\u6790\u5185\u5BB9\u7ED3\u6784...", "processing");
+            const dbName = database_name || `${sourcePage.name} - \u63D0\u53D6\u6570\u636E`;
+            const extractHint = extraction_prompt || explanation || "\u63D0\u53D6\u6240\u6709\u7ED3\u6784\u5316\u6761\u76EE";
+            const analyzePrompt = `\u4F60\u662F\u4E00\u4E2A\u6570\u636E\u63D0\u53D6\u4E13\u5BB6\u3002\u5206\u6790\u4EE5\u4E0B\u9875\u9762\u5185\u5BB9\uFF0C\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002
+
+\u63D0\u53D6\u8981\u6C42\uFF1A${extractHint}
+
+\u8BF7\u8FD4\u56DE JSON \u683C\u5F0F\uFF08\u53EA\u8FD4\u56DE JSON\uFF09\uFF1A
+{
+  "properties": [
+{ "name": "\u5C5E\u6027\u540D", "type": "title|rich_text|select|number|checkbox", "description": "\u5C5E\u6027\u8BF4\u660E" }
+  ],
+  "entries": [
+{ "\u5C5E\u6027\u540D1": "\u503C1", "\u5C5E\u6027\u540D2": "\u503C2" }
+  ]
+}
+
+\u5C5E\u6027\u7C7B\u578B\u8BF4\u660E\uFF1A
+- \u7B2C\u4E00\u4E2A\u5C5E\u6027\u5FC5\u987B\u662F title \u7C7B\u578B
+- \u5206\u7C7B/\u72B6\u6001 \u2192 select\uFF0C\u6570\u91CF/\u91D1\u989D \u2192 number\uFF0C\u662F\u5426 \u2192 checkbox\uFF0C\u5176\u4ED6 \u2192 rich_text
+
+\u9875\u9762\u5185\u5BB9\uFF1A
+${content}`;
+            const aiResponse = await svc().requestChat(analyzePrompt, settings, 3e3);
+            const parsedResult = AISchema2.parseAIJson("extractToDatabase", aiResponse);
+            if (!parsedResult.ok) {
+              return `\u274C ${parsedResult.reason}`;
+            }
+            const extractedData = parsedResult.value;
+            const validProps = extractedData.properties.filter((prop) => {
+              const nameOk = AISchema2.validatePropertyName(prop.name);
+              const typeOk = AISchema2.validatePropertyType(prop.type);
+              if (!nameOk || !typeOk.valid) {
+                console.warn(`[LD-Notion] AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5DF2\u8DF3\u8FC7\uFF08name=${prop.name}, type=${prop.type}\uFF09`);
+                return false;
+              }
+              prop.name = nameOk;
+              prop.type = typeOk.type;
+              return true;
+            });
+            if (validProps.length === 0) {
+              return `\u274C AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5747\u65E0\u6548\uFF0C\u65E0\u6CD5\u521B\u5EFA\u6570\u636E\u5E93\u3002`;
+            }
+            extractedData.properties = validProps;
+            const confirmed = await ConfirmationDialog3.show({
+              title: "\u{1F4CA} \u521B\u5EFA\u6570\u636E\u5E93\u786E\u8BA4",
+              message: `\u5C06\u4ECE\u300C${sourcePage.name}\u300D\u63D0\u53D6 ${extractedData.entries.length} \u4E2A\u6761\u76EE\u3002
+\u6570\u636E\u5E93\u540D\u79F0: ${dbName}
+\u5C5E\u6027: ${extractedData.properties.map((p) => p.name).join(", ")}`,
+              confirmText: "\u521B\u5EFA",
+              cancelText: "\u53D6\u6D88"
+            });
+            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u3002";
+            state().updateLastMessage("\u{1F4CA} \u6B63\u5728\u521B\u5EFA\u6570\u636E\u5E93...", "processing");
+            const dbProperties = {};
+            for (const prop of extractedData.properties) {
+              if (prop.type === "title") {
+                dbProperties[prop.name] = { title: {} };
+              } else if (prop.type === "select") {
+                dbProperties[prop.name] = { select: {} };
+              } else if (prop.type === "number") {
+                dbProperties[prop.name] = { number: {} };
+              } else if (prop.type === "checkbox") {
+                dbProperties[prop.name] = { checkbox: {} };
+              } else {
+                dbProperties[prop.name] = { rich_text: {} };
+              }
+            }
+            const newDb = await AI()._executeGuardedPageWrite(
+              "createDatabase",
+              sourcePage,
+              () => NotionAPI2.createDatabase(sourcePage.id, dbName, dbProperties, settings.notionApiKey),
+              settings,
+              { itemName: dbName }
+            );
+            state().updateLastMessage(`\u{1F4DD} \u6B63\u5728\u586B\u5145 ${extractedData.entries.length} \u4E2A\u6761\u76EE...`, "processing");
+            let addedCount = 0;
+            let failedCount = 0;
+            const titleProp = extractedData.properties.find((p) => p.type === "title");
+            const titleKey = titleProp ? titleProp.name : extractedData.properties[0].name;
+            for (const entry of extractedData.entries) {
+              try {
+                const pageProperties = {};
+                for (const prop of extractedData.properties) {
+                  const val = entry[prop.name];
+                  if (val === void 0 || val === null) continue;
+                  pageProperties[prop.name] = AI()._buildPropertyValuePayload(val, prop.type);
+                }
+                const entryName = String(entry[titleKey] || `\u6761\u76EE ${addedCount + 1}`).trim() || `\u6761\u76EE ${addedCount + 1}`;
+                await AI()._executeGuardedDatabaseWrite(
+                  "createDatabasePage",
+                  newDb.id,
+                  () => NotionAPI2.createPage(newDb.id, pageProperties, settings.notionApiKey),
+                  settings,
+                  { itemName: entryName }
+                );
+                addedCount++;
+              } catch (error) {
+                failedCount++;
+                console.warn(`[LD-Notion] \u6761\u76EE\u521B\u5EFA\u5931\u8D25 (#${failedCount}):`, error.message);
+              }
+            }
+            const failedLine = failedCount > 0 ? `
+- \u5931\u8D25: ${failedCount}\uFF08\u89C1\u63A7\u5236\u53F0\u8B66\u544A\uFF09` : "";
+            return `\u{1F4CA} **\u6570\u636E\u5E93\u521B\u5EFA\u5B8C\u6210**
+
+- \u6570\u636E\u5E93: ${dbName}
+- \u6765\u6E90: ${sourcePage.name}
+- \u5C5E\u6027: ${extractedData.properties.map((p) => p.name).join(", ")}
+- \u6761\u76EE: ${addedCount}/${extractedData.entries.length}${failedLine}
+
+\u{1F4A1} \u6570\u636E\u5E93\u5DF2\u521B\u5EFA\u5728\u6E90\u9875\u9762\u4E0B\u65B9\u3002`;
+          } catch (error) {
+            return `\u274C \u63D0\u53D6\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleGeneratePages: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          if (!OperationGuard2.canExecute("createDatabase")) {
+            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u591A\u9875\u9762\u751F\u6210\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002";
+          }
+          const { page_name, page_id, parent_page_name, parent_page_id, structure_prompt } = params;
+          const topic = page_name || structure_prompt || explanation;
+          if (!topic) {
+            return "\u274C \u8BF7\u63CF\u8FF0\u8981\u751F\u6210\u7684\u5185\u5BB9\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u4E3A\u65B0\u5458\u5DE5\u521B\u5EFA\u5165\u804C\u6307\u5357\uFF0C\u5305\u542B\u5DE5\u5177\u6E05\u5355\u3001\u56E2\u961F\u4ECB\u7ECD\u3001\u5E38\u89C1\u95EE\u9898\u300D";
+          }
+          state().updateLastMessage("\u{1F4D1} \u6B63\u5728\u89C4\u5212\u9875\u9762\u7ED3\u6784...", "processing");
+          try {
+            const planPrompt = `\u4F60\u662F\u4E00\u4E2A Notion \u5185\u5BB9\u67B6\u6784\u5E08\u3002\u6839\u636E\u7528\u6237\u9700\u6C42\u89C4\u5212\u591A\u9875\u9762\u5185\u5BB9\u7ED3\u6784\u3002
+
+\u7528\u6237\u9700\u6C42\uFF1A${topic}
+${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
+
+\u8FD4\u56DE JSON \u683C\u5F0F\uFF08\u53EA\u8FD4\u56DE JSON\uFF09\uFF1A
+{
+  "parent_title": "\u7236\u9875\u9762\u6807\u9898",
+  "parent_summary": "\u7236\u9875\u9762\u7B80\u4ECB\uFF081-2\u53E5\u8BDD\uFF09",
+  "children": [
+{
+  "title": "\u5B50\u9875\u9762\u6807\u9898",
+  "description": "\u5B50\u9875\u9762\u5185\u5BB9\u63CF\u8FF0\uFF08\u7528\u4E8E\u751F\u6210\u6B63\u6587\uFF09",
+  "icon": "emoji\u56FE\u6807"
+}
+  ]
+}
+
+\u8981\u6C42\uFF1A
+- \u5B50\u9875\u9762\u6570\u91CF\u63A7\u5236\u5728 3-8 \u4E2A
+- \u6BCF\u4E2A\u5B50\u9875\u9762\u5E94\u6709\u660E\u786E\u7684\u4E3B\u9898\u548C\u8FB9\u754C
+- \u7236\u9875\u9762\u4F5C\u4E3A\u76EE\u5F55/\u6982\u89C8\u9875`;
+            const planResponse = await svc().requestChat(planPrompt, settings, 1500);
+            const planResult = AISchema2.parseAIJson("generatePages", planResponse);
+            if (!planResult.ok) {
+              console.warn("[LD-Notion] AI \u751F\u6210\u7ED3\u6784 JSON \u89E3\u6790\u5931\u8D25:", planResult.reason);
+              return `\u274C AI \u751F\u6210\u7684\u7ED3\u6784\u65E0\u6548\u3002\u8BF7\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u3002`;
+            }
+            const plan = planResult.value;
+            if (!Array.isArray(plan.children) || plan.children.length === 0) {
+              return `\u274C AI \u672A\u80FD\u89C4\u5212\u51FA\u6709\u6548\u7684\u5B50\u9875\u9762\u7ED3\u6784\u3002`;
+            }
+            const MAX_CHILD_DESC = 2e3;
+            plan.children = plan.children.map((c) => ({
+              ...c,
+              title: AISchema2.validatePropertyValue(c == null ? void 0 : c.title, "title"),
+              icon: AISchema2.validateEmoji(c == null ? void 0 : c.icon),
+              description: AISchema2.validatePropertyValue(c == null ? void 0 : c.description, "rich_text").slice(0, MAX_CHILD_DESC)
+            })).filter((c) => c.title);
+            if (plan.children.length === 0) {
+              return `\u274C AI \u89C4\u5212\u7684\u5B50\u9875\u9762\u6807\u9898\u65E0\u6548\u3002`;
+            }
+            plan.parent_title = AISchema2.validatePropertyValue(plan.parent_title, "title");
+            plan.parent_summary = AISchema2.validatePropertyValue(plan.parent_summary, "rich_text");
+            const pageList = plan.children.map((c) => `${c.icon || "\u{1F4C4}"} ${c.title}`).join("\n");
+            const confirmed = await ConfirmationDialog3.show({
+              title: "\u{1F4D1} \u591A\u9875\u9762\u751F\u6210\u786E\u8BA4",
+              message: `\u5C06\u521B\u5EFA\u4EE5\u4E0B\u9875\u9762\u7ED3\u6784\uFF1A
+
+\u{1F4C1} ${plan.parent_title}
+${pageList}
+
+\u5171 ${plan.children.length + 1} \u4E2A\u9875\u9762\u3002`,
+              confirmText: "\u5F00\u59CB\u751F\u6210",
+              cancelText: "\u53D6\u6D88"
+            });
+            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u3002";
+            let parentPageId = parent_page_id;
+            if (!parentPageId && parent_page_name) {
+              const parentPage2 = await AI()._resolvePageId(parent_page_name, null, settings.notionApiKey);
+              if (parentPage2) parentPageId = parentPage2.id;
+            }
+            state().updateLastMessage(`\u{1F4C1} \u6B63\u5728\u521B\u5EFA\u7236\u9875\u9762: ${plan.parent_title}...`, "processing");
+            const parentProps = {
+              title: { title: [{ text: { content: plan.parent_title } }] }
+            };
+            let parentPage;
+            if (parentPageId) {
+              parentPage = await AI()._executeGuardedPageWrite(
+                "createDatabasePage",
+                { id: parentPageId, name: parent_page_name || parentPageId },
+                () => NotionAPI2.createPageInPage(parentPageId, parentProps, settings.notionApiKey),
+                settings,
+                { itemName: plan.parent_title, pageId: parentPageId }
+              );
+            } else {
+              return `\u274C \u8BF7\u6307\u5B9A\u7236\u9875\u9762\u3002Notion API \u8981\u6C42\u9875\u9762\u5FC5\u987B\u521B\u5EFA\u5728\u67D0\u4E2A\u7236\u9875\u9762\u4E0B\u3002
+
+\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u4E0B\u521B\u5EFA\u5165\u804C\u6307\u5357\u300D`;
+            }
+            const overviewBlocks = AI()._textToBlocks(`${plan.parent_summary || ""}
+
+## \u{1F4CB} \u76EE\u5F55
+
+${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}** - ${c.description}`).join("\n")}`);
+            await AI()._executeGuardedPageWrite(
+              "appendBlocks",
+              parentPage,
+              () => NotionAPI2.appendBlocks(parentPage.id, overviewBlocks, settings.notionApiKey),
+              settings,
+              { itemName: plan.parent_title }
+            );
+            let createdCount = 0;
+            for (let i = 0; i < plan.children.length; i++) {
+              const child = plan.children[i];
+              state().updateLastMessage(`\u{1F4DD} \u751F\u6210\u5B50\u9875\u9762 (${i + 1}/${plan.children.length}): ${child.title}...`, "processing");
+              try {
+                const childProps = {
+                  title: { title: [{ text: { content: `${child.icon || ""} ${child.title}`.trim() } }] }
+                };
+                const childPage = await AI()._executeGuardedPageWrite(
+                  "createDatabasePage",
+                  parentPage,
+                  () => NotionAPI2.createPageInPage(parentPage.id, childProps, settings.notionApiKey),
+                  settings,
+                  { itemName: child.title }
+                );
+                const contentPrompt = `\u4E3A\u4EE5\u4E0B\u4E3B\u9898\u751F\u6210\u8BE6\u7EC6\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u3002
+
+\u4E3B\u9898\uFF1A${child.title}
+\u63CF\u8FF0\uFF1A${child.description}
+\u4E0A\u4E0B\u6587\uFF1A\u8FD9\u662F\u300C${plan.parent_title}\u300D\u7684\u5B50\u9875\u9762
+
+\u8BF7\u751F\u6210\u5B9E\u7528\u3001\u5177\u4F53\u7684\u5185\u5BB9\uFF0C\u5305\u542B\u5408\u9002\u7684\u6807\u9898\u5C42\u7EA7\u548C\u7ED3\u6784\u5316\u4FE1\u606F\u3002`;
+                const content = await svc().requestChat(contentPrompt, settings, 2e3);
+                const contentBlocks = AI()._textToBlocks(content);
+                await AI()._executeGuardedPageWrite(
+                  "appendBlocks",
+                  childPage,
+                  () => NotionAPI2.appendBlocks(childPage.id, contentBlocks, settings.notionApiKey),
+                  settings,
+                  { itemName: child.title }
+                );
+                createdCount++;
+              } catch (error) {
+                console.warn(`[LD-Notion] \u5B50\u9875\u9762\u521B\u5EFA\u5931\u8D25: ${child.title}`, error);
+              }
+            }
+            return `\u{1F4D1} **\u591A\u9875\u9762\u5185\u5BB9\u751F\u6210\u5B8C\u6210**
+
+- \u7236\u9875\u9762: ${plan.parent_title}
+- \u5B50\u9875\u9762: ${createdCount}/${plan.children.length} \u521B\u5EFA\u6210\u529F
+
+\u{1F4A1} \u6240\u6709\u9875\u9762\u5DF2\u521B\u5EFA\u5E76\u586B\u5145\u5185\u5BB9\u3002`;
+          } catch (error) {
+            return `\u274C \u9875\u9762\u751F\u6210\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleBatchAnalyze: async (params, settings, explanation) => {
+          const configCheck = AI().checkConfig(settings, false);
+          if (!configCheck.valid) return configCheck.error;
+          const { database_name, database_id, analysis_prompt } = params;
+          const limit = Math.min(Math.max(parseInt(params.limit) || 10, 1), 20);
+          if (!database_name && !database_id) {
+            if (!settings.notionDatabaseId) {
+              return "\u274C \u8BF7\u6307\u5B9A\u8981\u5206\u6790\u7684\u6570\u636E\u5E93\uFF0C\u6216\u5148\u914D\u7F6E\u9ED8\u8BA4\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5206\u6790 xxx \u6570\u636E\u5E93\u7684\u6240\u6709\u9875\u9762\u300D";
+            }
+          }
+          state().updateLastMessage("\u6B63\u5728\u67E5\u627E\u6570\u636E\u5E93...", "processing");
+          try {
+            let dbId = database_id || settings.notionDatabaseId;
+            if (!dbId && database_name) {
+              const searchResp = await NotionAPI2.search(database_name, "database", settings.notionApiKey);
+              const db = (searchResp.results || []).find((r) => !r.archived);
+              if (!db) return `\u274C \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${database_name}\u300D\u3002`;
+              dbId = db.id;
+            }
+            state().updateLastMessage("\u6B63\u5728\u83B7\u53D6\u9875\u9762...", "processing");
+            const queryResp = await NotionAPI2.queryDatabase(dbId, null, null, null, settings.notionApiKey, limit);
+            const pages = (queryResp.results || []).filter((p) => !p.archived);
+            if (pages.length === 0) {
+              return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u5206\u6790\u7684\u9875\u9762\u3002`;
+            }
+            state().updateLastMessage(`\u{1F50E} \u6B63\u5728\u63D0\u53D6 ${pages.length} \u4E2A\u9875\u9762\u5185\u5BB9...`, "processing");
+            const contentParts = [];
+            for (let i = 0; i < pages.length; i++) {
+              const page = pages[i];
+              const title = Utils2.getPageTitle(page);
+              state().updateLastMessage(`\u{1F50E} \u63D0\u53D6\u4E2D (${i + 1}/${pages.length}): ${title}...`, "processing");
+              const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 2e3);
+              contentParts.push(`## ${title}
+${content || "\uFF08\u65E0\u5185\u5BB9\uFF09"}`);
+            }
+            state().updateLastMessage("\u{1F4CA} \u6B63\u5728\u751F\u6210\u7EFC\u5408\u5206\u6790...", "processing");
+            const analysisGoal = analysis_prompt || explanation || "\u7EFC\u5408\u5206\u6790\u6240\u6709\u9875\u9762\u5185\u5BB9\uFF0C\u627E\u51FA\u5173\u952E\u4E3B\u9898\u3001\u8D8B\u52BF\u548C\u5EFA\u8BAE";
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u6570\u636E\u5206\u6790\u5E08\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA\u6570\u636E\u5E93\u7684\u591A\u4E2A\u9875\u9762\u5185\u5BB9\u8FDB\u884C\u7EFC\u5408\u5206\u6790\u3002
+
+\u5206\u6790\u8981\u6C42\uFF1A${analysisGoal}
+
+\u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u5206\u6790\u62A5\u544A\uFF0C\u5305\u542B\uFF1A
+1. \u6982\u8FF0\uFF08\u603B\u4F53\u60C5\u51B5\u6458\u8981\uFF09
+2. \u5173\u952E\u53D1\u73B0\uFF08\u4E3B\u8981\u4E3B\u9898\u548C\u6A21\u5F0F\uFF09
+3. \u8BE6\u7EC6\u5206\u6790\uFF08\u6309\u4E3B\u9898/\u7C7B\u522B\u5206\u7EC4\uFF09
+4. \u8D8B\u52BF\u4E0E\u6D1E\u5BDF
+5. \u5EFA\u8BAE\u4E0E\u884C\u52A8\u9879
+
+--- \u4EE5\u4E0B\u662F ${pages.length} \u4E2A\u9875\u9762\u7684\u5185\u5BB9 ---
+
+${contentParts.join("\n\n---\n\n")}`;
+            const report = await svc().requestChat(prompt2, settings, 4e3);
+            return `\u{1F4CA} **\u6279\u91CF\u5206\u6790\u62A5\u544A**
+
+${report}
+
+---
+\u{1F50E} \u5171\u5206\u6790 ${pages.length} \u4E2A\u9875\u9762`;
+          } catch (error) {
+            return `\u274C \u6279\u91CF\u5206\u6790\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleGitHubImport: async (params, settings, explanation) => {
+          const username = params.username || Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
+          const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
+          const databaseId = settings.notionDatabaseId;
+          if (!username) {
+            return "\u274C \u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E GitHub \u7528\u6237\u540D\u3002\n\n\u{1F4A1} \u5728 Notion \u9762\u677F\u7684\u8BBE\u7F6E\u4E2D\u627E\u5230\u300CGitHub \u6536\u85CF\u5BFC\u5165\u300D\u90E8\u5206\u586B\u5199\u7528\u6237\u540D\u3002";
+          }
+          if (!settings.notionApiKey) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion API Key\u3002";
+          }
+          if (!databaseId) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E GitHub \u6536\u85CF\u7684\u76EE\u6807\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u53EF\u4EE5\u5728\u8BBE\u7F6E\u4E2D\u4E13\u95E8\u6307\u5B9A\uFF0C\u6216\u4F7F\u7528\u9ED8\u8BA4\u6570\u636E\u5E93\u3002";
+          }
+          const classify = params.classify || false;
+          const importTypes = require_import().GitHubAPI.getImportTypes();
+          try {
+            const allResults = await require_import().GitHubExporter.exportAll({
+              apiKey: settings.notionApiKey,
+              databaseId,
+              username,
+              token,
+              aiApiKey: settings.aiApiKey,
+              aiService: settings.aiService,
+              aiModel: settings.aiModel,
+              aiBaseUrl: settings.aiBaseUrl,
+              categories: settings.categories
+            }, (msg, pct) => {
+              state().updateLastMessage(`\u{1F419} ${msg}`, "processing");
+            });
+            let response = `\u2705 **GitHub \u5BFC\u5165\u5B8C\u6210**
+
+`;
+            let totalExported = 0;
+            let totalFailed = 0;
+            const typeNames = { stars: "Stars", repos: "Repos", forks: "Forks", gists: "Gists" };
+            for (const type of importTypes) {
+              const r = allResults[type];
+              if (!r) continue;
+              if (r.error) {
+                response += `\u274C ${typeNames[type]}: ${r.error}
+`;
+              } else {
+                response += `\u{1F4CA} ${typeNames[type]}: \u5171 ${r.total} \u4E2A\uFF0C\u5BFC\u51FA ${r.exported} \u4E2A`;
+                if (r.failed > 0) response += `\uFF0C\u5931\u8D25 ${r.failed} \u4E2A`;
+                response += `
+`;
+                totalExported += r.exported || 0;
+                totalFailed += r.failed || 0;
+              }
+            }
+            if (totalExported === 0 && totalFailed === 0) {
+              response += `
+\u6240\u6709\u5185\u5BB9\u5DF2\u662F\u6700\u65B0\u72B6\u6001\u3002`;
+            }
+            if (classify && totalExported > 0 && settings.aiApiKey) {
+              state().updateLastMessage("\u{1F3F7}\uFE0F \u6B63\u5728\u8FDB\u884C AI \u5206\u7C7B...", "processing");
+              try {
+                const classifyResult = await require_import().GitHubExporter.classifyRepos({
+                  ...settings,
+                  databaseId
+                }, (msg, pct) => {
+                  state().updateLastMessage(`\u{1F3F7}\uFE0F ${msg}`, "processing");
+                });
+                response += `
+
+\u{1F3F7}\uFE0F **AI \u5206\u7C7B\u5B8C\u6210**: \u5DF2\u5206\u7C7B ${classifyResult.classified}/${classifyResult.total} \u4E2A`;
+              } catch (e) {
+                response += `
+
+\u26A0\uFE0F AI \u5206\u7C7B\u51FA\u9519: ${e.message}`;
+              }
+            } else if (classify && !settings.aiApiKey) {
+              response += `
+
+\u26A0\uFE0F \u672A\u914D\u7F6E AI API Key\uFF0C\u8DF3\u8FC7\u81EA\u52A8\u5206\u7C7B\u3002`;
+            }
+            return response;
+          } catch (error) {
+            return `\u274C GitHub \u5BFC\u5165\u5931\u8D25: ${error.message}`;
+          }
+        },
+        handleBookmarkImport: async (params, settings, explanation) => {
+          const databaseId = settings.notionDatabaseId;
+          if (!settings.notionApiKey) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion API Key\u3002";
+          }
+          if (!databaseId) {
+            return "\u274C \u8BF7\u5148\u914D\u7F6E\u76EE\u6807\u6570\u636E\u5E93 ID\u3002";
+          }
+          if (!require_bridge().BookmarkBridge.isExtensionAvailable()) {
+            const installUrl = require_api().InstallHelper.getBookmarkExtensionUrl();
+            return `\u274C \u672A\u68C0\u6D4B\u5230 LD-Notion \u4E66\u7B7E\u6865\u63A5\u6269\u5C55\u3002
+
+\u{1F4A1} \u8BF7\u70B9\u51FB\u5B89\u88C5\uFF1A${installUrl}
+
+\u624B\u52A8\u5B89\u88C5\u6B65\u9AA4\uFF1A
+1. \u6253\u5F00 chrome://extensions/
+2. \u5F00\u542F\u300C\u5F00\u53D1\u8005\u6A21\u5F0F\u300D
+3. \u70B9\u51FB\u300C\u52A0\u8F7D\u5DF2\u89E3\u538B\u7684\u6269\u5C55\u300D
+4. \u9009\u62E9\u9879\u76EE\u4E2D\u7684 chrome-extension \u6587\u4EF6\u5939
+5. \u5237\u65B0\u5F53\u524D\u9875\u9762
+
+\u{1F50E} \u8BCA\u65AD\u5EFA\u8BAE\uFF1A
+- \u82E5\u4F60\u5F53\u524D\u4F7F\u7528\u7684\u662F chrome-extension-full \u72EC\u7ACB\u7248\uFF0C\u8BF7\u5173\u95ED userscript\uFF0C\u907F\u514D\u53CC\u6A21\u5F0F\u6DF7\u7528
+- \u82E5\u4F60\u575A\u6301 userscript \u6A21\u5F0F\uFF0C\u8BF7\u4EC5\u5B89\u88C5 chrome-extension\uFF08\u6865\u63A5\u7248\uFF09`;
+          }
+          try {
+            state().updateLastMessage("\u{1F4D6} \u6B63\u5728\u8BFB\u53D6\u6D4F\u89C8\u5668\u4E66\u7B7E...", "processing");
+            const tree = await require_bridge().BookmarkBridge.getBookmarkTree();
+            const allBookmarks = require_bridge().BookmarkExporter.flattenTree(tree);
+            if (allBookmarks.length === 0) {
+              return "\u{1F4ED} \u6CA1\u6709\u627E\u5230\u6D4F\u89C8\u5668\u4E66\u7B7E\u3002";
+            }
+            const dedupStrict = Utils2.isBookmarkDedupStrict();
+            const newCount = dedupStrict ? allBookmarks.filter((b) => !require_bridge().BookmarkExporter.isExported(b.url)).length : allBookmarks.length;
+            state().updateLastMessage(`\u{1F4D6} \u627E\u5230 ${allBookmarks.length} \u4E2A\u4E66\u7B7E (${newCount} \u4E2A\u65B0\u4E66\u7B7E)\uFF0C\u6B63\u5728\u5BFC\u51FA...`, "processing");
+            const result = await require_bridge().BookmarkExporter.exportBookmarks({
+              apiKey: settings.notionApiKey,
+              databaseId,
+              bookmarks: allBookmarks,
+              aiApiKey: settings.aiApiKey,
+              aiService: settings.aiService,
+              aiModel: settings.aiModel,
+              aiBaseUrl: settings.aiBaseUrl
+            }, (msg, pct) => {
+              state().updateLastMessage(`\u{1F4D6} ${msg}`, "processing");
+            });
+            let response = `\u2705 **\u6D4F\u89C8\u5668\u4E66\u7B7E\u5BFC\u5165\u5B8C\u6210**
+
+`;
+            response += `\u{1F4CA} \u5171 ${result.total} \u4E2A\u4E66\u7B7E
+`;
+            response += `\u{1F4E5} \u672C\u6B21\u5BFC\u51FA ${result.exported} \u4E2A
+`;
+            if (result.failed > 0) response += `\u274C \u5931\u8D25 ${result.failed} \u4E2A
+`;
+            if (result.exported === 0 && result.failed === 0) response += `
+\u6240\u6709\u4E66\u7B7E\u5DF2\u662F\u6700\u65B0\u72B6\u6001\u3002`;
+            if (result.exported > 0 && settings.aiApiKey) {
+              response += `
+
+\u{1F4A1} \u53EF\u4EE5\u8F93\u5165\u300C\u5206\u7C7B\u4E66\u7B7E\u300D\u8BA9 AI \u81EA\u52A8\u4E3A\u5BFC\u5165\u7684\u4E66\u7B7E\u5206\u7C7B\u3002`;
+            }
+            return response;
+          } catch (error) {
+            return `\u274C \u4E66\u7B7E\u5BFC\u5165\u5931\u8D25: ${error.message}`;
+          }
+        }
+      };
+    }
+  });
+
+  // src/ai/Handlers.js
+  var require_Handlers = __commonJS({
+    "src/ai/Handlers.js"(exports, module) {
+      "use strict";
+      var { handleQuery, handleSearch, handleWorkspaceSearch } = require_query();
+      var { handleUpdate, _resolveDatabaseId, _fetchSourcePages, handleMove, handleCopy, handleCompound, handleCreateDatabase } = require_pageCrud();
+      var { _resolvePageId, _textToBlocks, _extractPageContent, handleWriteContent, handleEditContent, handleTranslateContent, _ensureAIProperty, handleAIAutofill, handleAsk, handleDeepResearch, handleSummarize, handleBrainstorm, handleProofread, handleTemplateOutput } = require_content();
+      var { handleClassify, handleBatchClassify, handleBatchTranslate, handleExtractToDatabase, handleGeneratePages, handleBatchAnalyze, handleGitHubImport, handleBookmarkImport } = require_batch();
+      var AIHandlers2 = {
+        handleQuery,
+        handleSearch,
+        handleWorkspaceSearch,
+        handleUpdate,
+        _resolveDatabaseId,
+        _fetchSourcePages,
+        handleMove,
+        handleCopy,
+        handleCompound,
+        handleCreateDatabase,
+        _resolvePageId,
+        _textToBlocks,
+        _extractPageContent,
+        handleWriteContent,
+        handleEditContent,
+        handleTranslateContent,
+        _ensureAIProperty,
+        handleAIAutofill,
+        handleAsk,
+        handleDeepResearch,
+        handleSummarize,
+        handleBrainstorm,
+        handleProofread,
+        handleTemplateOutput,
+        handleClassify,
+        handleBatchClassify,
+        handleBatchTranslate,
+        handleExtractToDatabase,
+        handleGeneratePages,
+        handleBatchAnalyze,
+        handleGitHubImport,
+        handleBookmarkImport
+      };
+      module.exports = { AIHandlers: AIHandlers2 };
+    }
+  });
+
+  // src/ui/style-manager.js
+  var require_style_manager = __commonJS({
+    "src/ui/style-manager.js"(exports, module) {
+      "use strict";
+      var StyleManager2 = {
+        injectOnce: (styleId, cssText) => {
+          if (!styleId || !cssText) return null;
+          const root = document.head || document.documentElement;
+          if (!root) return null;
+          const existing = document.getElementById(styleId);
+          if (existing) return existing;
+          const style = document.createElement("style");
+          style.id = styleId;
+          style.setAttribute("data-ldb-style", styleId);
+          style.textContent = cssText;
+          root.appendChild(style);
+          return style;
+        }
+      };
+      ;
+      module.exports = { StyleManager: StyleManager2 };
+    }
+  });
+
+  // src/ui/design-system.js
+  var require_design_system = __commonJS({
+    "src/ui/design-system.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Storage: Storage2 } = require_storage();
+      var { StyleManager: StyleManager2 } = require_style_manager();
+      var DesignSystem2 = {
+        STYLE_IDS: {
+          BASE: "ldb-ui-base",
+          CHAT: "ldb-ui-chat",
+          NOTION: "ldb-ui-notion",
+          LINUX_DO: "ldb-ui-linux-do",
+          GENERIC: "ldb-ui-generic"
+        },
+        // 主题管理
+        _theme: "auto",
+        _mediaQuery: null,
+        initTheme: () => {
+          DesignSystem2._theme = Storage2.get(CONFIG2.STORAGE_KEYS.THEME_PREFERENCE, CONFIG2.DEFAULTS.themePreference);
+          DesignSystem2._applyTheme();
+          DesignSystem2._mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+          DesignSystem2._mediaQuery.addEventListener("change", () => {
+            if (DesignSystem2._theme === "auto") DesignSystem2._applyTheme();
+          });
+        },
+        setTheme: (theme) => {
+          DesignSystem2._theme = theme;
+          Storage2.set(CONFIG2.STORAGE_KEYS.THEME_PREFERENCE, theme);
+          DesignSystem2._applyTheme();
+        },
+        getEffectiveTheme: () => {
+          if (DesignSystem2._theme === "auto") {
+            return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          }
+          return DesignSystem2._theme;
+        },
+        _applyTheme: () => {
+          const effective = DesignSystem2.getEffectiveTheme();
+          document.querySelectorAll("[data-ldb-root]").forEach((el) => {
+            el.setAttribute("data-ldb-theme", effective);
+          });
+          document.querySelectorAll(".ldb-theme-btn").forEach((btn) => {
+            btn.textContent = effective === "dark" ? "\u2600\uFE0F" : "\u{1F319}";
+            btn.title = effective === "dark" ? "\u5207\u6362\u4EAE\u8272\u6A21\u5F0F" : "\u5207\u6362\u6697\u8272\u6A21\u5F0F";
+          });
+        },
+        toggleTheme: () => {
+          const effective = DesignSystem2.getEffectiveTheme();
+          DesignSystem2.setTheme(effective === "dark" ? "light" : "dark");
+        },
+        ensureBase: () => {
+          StyleManager2.injectOnce(DesignSystem2.STYLE_IDS.BASE, DesignSystem2.getBaseCSS());
+        },
+        ensureChat: () => {
+          StyleManager2.injectOnce(DesignSystem2.STYLE_IDS.CHAT, DesignSystem2.getChatCSS());
+        },
+        getBaseCSS: () => `
+        /* LDB_UI_TOKENS */
+        .ldb-panel,
+        .ldb-notion-panel,
+        .gclip-panel,
+        .ldb-notion-float-btn,
+        .ldb-mini-btn,
+        .gclip-float-btn,
+        .ldb-undo-toast {
+            --ldb-ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+            --ldb-ui-radius: 14px;
+            --ldb-ui-radius-sm: 10px;
+            --ldb-ui-radius-xs: 8px;
+
+            --ldb-ui-shadow: 0 18px 55px rgba(2, 6, 23, 0.22);
+            --ldb-ui-shadow-sm: 0 10px 26px rgba(2, 6, 23, 0.16);
+
+            --ldb-ui-text: #0f172a;
+            --ldb-ui-muted: #64748b;
+            --ldb-ui-border: rgba(15, 23, 42, 0.14);
+
+            --ldb-ui-surface: rgba(255, 255, 255, 0.94);
+            --ldb-ui-surface-2: rgba(248, 250, 252, 0.94);
+            --ldb-ui-surface-3: rgba(241, 245, 249, 0.94);
+
+            --ldb-ui-accent: #2563eb;
+            --ldb-ui-accent-2: #7c3aed;
+            
+            /* Accent alpha variants for borders, hover backgrounds */
+            --ldb-ui-accent-alpha-08: rgba(37, 99, 235, 0.08);
+            --ldb-ui-accent-alpha-10: rgba(37, 99, 235, 0.10);
+            --ldb-ui-accent-alpha-14: rgba(37, 99, 235, 0.14);
+            --ldb-ui-accent-alpha-18: rgba(37, 99, 235, 0.18);
+            --ldb-ui-accent-alpha-22: rgba(37, 99, 235, 0.22);
+            --ldb-ui-accent-alpha-28: rgba(37, 99, 235, 0.28);
+            --ldb-ui-accent-alpha-30: rgba(37, 99, 235, 0.30);
+            --ldb-ui-accent-alpha-35: rgba(37, 99, 235, 0.35);
+            --ldb-ui-accent-alpha-45: rgba(37, 99, 235, 0.45);
+
+            --ldb-ui-success: #16a34a;
+            --ldb-ui-warning: #d97706;
+            --ldb-ui-danger: #dc2626;
+
+            --ldb-ui-badge-teal: #0f766e;
+            --ldb-ui-badge-blue: #1d4ed8;
+
+            --ldb-ui-focus-ring: rgba(37, 99, 235, 0.35);
+            --ldb-ui-backdrop: rgba(2, 6, 23, 0.35);
+
+            /* Tinted white toward brand hue (light blue) - preserves visual 1:1 */
+            --ldb-ui-white: rgb(253, 253, 255);
+
+            --ldb-ui-radius-2xs: 6px;
+            --ldb-ui-radius-md: 12px;
+            --ldb-ui-radius-pill: 999px;
+
+            --ldb-ui-spacing-3xs: 2px;
+            --ldb-ui-spacing-xs: 4px;
+            --ldb-ui-spacing-sm: 6px;
+            --ldb-ui-spacing-md: 8px;
+            --ldb-ui-spacing-lg: 10px;
+            --ldb-ui-spacing-xl: 12px;
+            --ldb-ui-spacing-2xl: 14px;
+            --ldb-ui-spacing-3xl: 18px;
+
+            --ldb-ui-font-size-xs: 11px;
+            --ldb-ui-font-size-sm: 12px;
+            --ldb-ui-font-size-md: 13px;
+            --ldb-ui-font-size-lg: 14px;
+            --ldb-ui-font-size-xl: 20px;
+            --ldb-ui-font-size-2xl: 22px;
+
+            --ldb-ui-z-index-panel: 2147483640;
+            --ldb-ui-z-index-panel-top: 2147483641;
+            --ldb-ui-z-index-overlay: 2147483646;
+            --ldb-ui-z-index-float: 2147483647;
+
+            /* Motion tokens */
+            --ldb-ui-ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+            --ldb-ui-ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+            --ldb-ui-duration-instant: 100ms;
+            --ldb-ui-duration-fast: 150ms;
+            --ldb-ui-duration-normal: 250ms;
+            --ldb-ui-duration-slow: 400ms;
+            --ldb-ui-duration-entrance: 500ms;
+
+            /* Neutral overlay token - replaces rgba(148,163,184,\u03B1) everywhere (slate-400) */
+            --ldb-ui-neutral-overlay: 148, 163, 184;
+
+            --ldb-ui-warning-bright: var(--ldb-ui-warning-bright);
+            --ldb-ui-success-bright: #10b981;
+            --ldb-ui-danger-bright: var(--ldb-ui-danger-bright);
+
+            --ldb-ui-disabled-opacity: var(--ldb-ui-disabled-opacity);
+            --ldb-ui-disabled-cursor: var(--ldb-ui-disabled-cursor);
+
+            font-family: var(--ldb-ui-font);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* \u6697\u8272\u4E3B\u9898 \u2014 \u901A\u8FC7 data-ldb-theme \u5C5E\u6027\u89E6\u53D1 */
+        [data-ldb-theme="dark"].ldb-panel,
+        [data-ldb-theme="dark"].ldb-notion-panel,
+        [data-ldb-theme="dark"].gclip-panel,
+        [data-ldb-theme="dark"].ldb-notion-float-btn,
+        [data-ldb-theme="dark"].ldb-mini-btn,
+        [data-ldb-theme="dark"].gclip-float-btn,
+        [data-ldb-theme="dark"].ldb-undo-toast,
+        [data-ldb-theme="dark"] .ldb-panel,
+        [data-ldb-theme="dark"] .ldb-notion-panel,
+        [data-ldb-theme="dark"] .gclip-panel,
+        [data-ldb-theme="dark"] .ldb-notion-float-btn,
+        [data-ldb-theme="dark"] .ldb-mini-btn,
+        [data-ldb-theme="dark"] .gclip-float-btn,
+        [data-ldb-theme="dark"] .ldb-undo-toast {
+            --ldb-ui-text: #e5e7eb;
+            --ldb-ui-muted: #9ca3af;
+            --ldb-ui-border: rgba(148, 163, 184, 0.22);
+
+            --ldb-ui-surface: rgba(17, 24, 39, 0.92);
+            --ldb-ui-surface-2: rgba(15, 23, 42, 0.92);
+            --ldb-ui-surface-3: rgba(2, 6, 23, 0.60);
+
+            --ldb-ui-accent: #60a5fa;
+            --ldb-ui-accent-2: #c4b5fd;
+
+            --ldb-ui-badge-teal: #2dd4bf;
+            --ldb-ui-badge-blue: #93c5fd;
+
+            --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
+            /* Tinted near-black toward brand hue for dark backdrop */
+            --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
+
+            /* Dark mode accent alpha variants */
+            --ldb-ui-accent-dark-alpha-10: rgba(96, 165, 250, 0.10);
+            --ldb-ui-accent-dark-alpha-14: rgba(96, 165, 250, 0.14);
+            --ldb-ui-accent-dark-alpha-18: rgba(96, 165, 250, 0.18);
+            --ldb-ui-accent-dark-alpha-22: rgba(96, 165, 250, 0.22);
+        }
+
+        /* \u4FDD\u7559 prefers-color-scheme \u4F5C\u4E3A auto \u6A21\u5F0F\u7684\u56DE\u9000 */
+        @media (prefers-color-scheme: dark) {
+            .ldb-panel:not([data-ldb-theme]),
+            .ldb-notion-panel:not([data-ldb-theme]),
+            .gclip-panel:not([data-ldb-theme]),
+            .ldb-notion-float-btn:not([data-ldb-theme]),
+            .ldb-mini-btn:not([data-ldb-theme]),
+            .gclip-float-btn:not([data-ldb-theme]),
+            .ldb-undo-toast:not([data-ldb-theme]) {
+                --ldb-ui-text: #e5e7eb;
+                --ldb-ui-muted: #9ca3af;
+                --ldb-ui-border: rgba(148, 163, 184, 0.22);
+
+                --ldb-ui-surface: rgba(17, 24, 39, 0.92);
+                --ldb-ui-surface-2: rgba(15, 23, 42, 0.92);
+                --ldb-ui-surface-3: rgba(2, 6, 23, 0.60);
+
+                --ldb-ui-accent: #60a5fa;
+                --ldb-ui-accent-2: #c4b5fd;
+
+                --ldb-ui-badge-teal: #2dd4bf;
+                --ldb-ui-badge-blue: #93c5fd;
+
+                --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
+                /* Tinted near-black toward brand hue for dark backdrop */
+                --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
+            }
+        }
+
+        /* Dark mode accent alpha variants (also used in prefers-color-scheme) */
+        --ldb-ui-accent-dark-alpha-10: rgba(96, 165, 250, 0.10);
+        --ldb-ui-accent-dark-alpha-14: rgba(96, 165, 250, 0.14);
+        --ldb-ui-accent-dark-alpha-18: rgba(96, 165, 250, 0.18);
+        --ldb-ui-accent-dark-alpha-22: rgba(96, 165, 250, 0.22);
+
+        .ldb-panel,
+        .ldb-notion-panel,
+        .gclip-panel,
+        .ldb-undo-toast {
+            color: var(--ldb-ui-text);
+        }
+
+        .ldb-panel *,
+        .ldb-notion-panel *,
+        .gclip-panel *,
+        .ldb-undo-toast * {
+            box-sizing: border-box;
+        }
+
+        .ldb-panel a,
+        .ldb-notion-panel a,
+        .gclip-panel a {
+            color: var(--ldb-ui-accent);
+            text-decoration: none;
+        }
+        .ldb-panel a:hover,
+        .ldb-notion-panel a:hover,
+        .gclip-panel a:hover {
+            text-decoration: underline;
+        }
+
+        .ldb-panel button,
+        .ldb-notion-panel button,
+        .gclip-panel button,
+        .ldb-notion-float-btn,
+        .ldb-mini-btn,
+        .gclip-float-btn {
+            font-family: inherit;
+        }
+
+        .ldb-panel input,
+        .ldb-panel select,
+        .ldb-panel textarea,
+        .ldb-notion-panel input,
+        .ldb-notion-panel select,
+        .ldb-notion-panel textarea,
+        .gclip-panel input,
+        .gclip-panel select,
+        .gclip-panel textarea {
+            font-family: inherit;
+            color: var(--ldb-ui-text);
+            background: var(--ldb-ui-surface-2);
+            border: 1px solid var(--ldb-ui-border);
+            border-radius: var(--ldb-ui-radius-xs);
+            padding: 8px 10px;
+            outline: none;
+        }
+
+        .ldb-panel input::placeholder,
+        .ldb-panel textarea::placeholder,
+        .ldb-notion-panel input::placeholder,
+        .ldb-notion-panel textarea::placeholder,
+        .gclip-panel input::placeholder,
+        .gclip-panel textarea::placeholder {
+            color: var(--ldb-ui-muted);
+        }
+
+        .ldb-panel button:focus-visible,
+        .ldb-panel input:focus-visible,
+        .ldb-panel select:focus-visible,
+        .ldb-panel textarea:focus-visible,
+        .ldb-notion-panel button:focus-visible,
+        .ldb-notion-panel input:focus-visible,
+        .ldb-notion-panel select:focus-visible,
+        .ldb-notion-panel textarea:focus-visible,
+        .gclip-panel button:focus-visible,
+        .gclip-panel input:focus-visible,
+        .gclip-panel select:focus-visible,
+        .gclip-panel textarea:focus-visible,
+        .ldb-notion-float-btn:focus-visible,
+        .ldb-mini-btn:focus-visible,
+        .gclip-float-btn:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px var(--ldb-ui-focus-ring);
+        }
+
+        .ldb-panel,
+        .ldb-notion-panel,
+        .gclip-panel {
+            background: var(--ldb-ui-surface);
+            border: 1px solid var(--ldb-ui-border);
+            border-radius: var(--ldb-ui-radius);
+            box-shadow: var(--ldb-ui-shadow);
+            backdrop-filter: blur(10px);
+        }
+
+        .ldb-header,
+        .ldb-notion-header,
+        .gclip-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
+            border-bottom: 1px solid var(--ldb-ui-border);
+        }
+
+        .ldb-header h3,
+        .ldb-notion-header h3 {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--ldb-ui-text);
+            letter-spacing: 0.2px;
+        }
+
+        .ldb-header-btn,
+        .ldb-notion-header-btn,
+        .gclip-panel-header .close-btn {
+            width: 30px;
+            height: 30px;
+            border-radius: 10px;
+            border: 1px solid var(--ldb-ui-border);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
+            color: var(--ldb-ui-text);
+            cursor: pointer;
+            user-select: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .ldb-header-btn:hover,
+        .ldb-notion-header-btn:hover,
+        .gclip-panel-header .close-btn:hover {
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
+        }
+
+        .ldb-btn,
+        .gclip-btn {
+            border: 1px solid var(--ldb-ui-accent-alpha-35);
+            background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
+            color: var(--ldb-ui-white);
+            border-radius: 12px;
+            padding: 8px 12px;
+            cursor: pointer;
+            user-select: none;
+            font-weight: 650;
+            transition: transform var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), box-shadow var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), filter var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
+        }
+
+        .ldb-btn:hover,
+        .gclip-btn:hover {
+            filter: brightness(1.08);
+            box-shadow: 0 2px 8px var(--ldb-ui-accent-alpha-18);
+        }
+
+        .ldb-btn:active,
+        .gclip-btn:active {
+            transform: scale(0.97);
+            filter: brightness(0.96);
+        }
+
+        .ldb-btn:disabled,
+        .gclip-btn:disabled {
+            opacity: var(--ldb-ui-disabled-opacity);
+            cursor: var(--ldb-ui-disabled-cursor);
+        }
+
+        .ldb-btn-secondary,
+        .gclip-btn-secondary {
+            border: 1px solid var(--ldb-ui-border);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
+            color: var(--ldb-ui-text);
+            font-weight: 600;
+            transition: background var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), border-color var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), transform var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
+        }
+
+        .ldb-btn-secondary:hover,
+        .gclip-btn-secondary:hover {
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
+        }
+
+        .ldb-btn-secondary:active,
+        .gclip-btn-secondary:active {
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 78%);
+            transform: scale(0.97);
+        }
+
+        .ldb-btn-secondary:disabled,
+        .gclip-btn-secondary:disabled {
+            opacity: var(--ldb-ui-disabled-opacity);
+            cursor: var(--ldb-ui-disabled-cursor);
+        }
+
+        .ldb-btn-warning {
+            border: 1px solid rgba(217, 119, 6, 0.35);
+            background: linear-gradient(135deg, var(--ldb-ui-warning-bright) 0%, var(--ldb-ui-warning) 100%);
+            color: var(--ldb-ui-white);
+            transition: filter var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), transform var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
+        }
+
+        .ldb-btn-warning:hover {
+            filter: brightness(1.08);
+        }
+
+        .ldb-btn-warning:active {
+            transform: scale(0.97);
+        }
+
+        .ldb-btn-warning:disabled {
+            opacity: var(--ldb-ui-disabled-opacity);
+            cursor: var(--ldb-ui-disabled-cursor);
+        }
+
+        .ldb-btn-danger {
+            border: 1px solid rgba(220, 38, 38, 0.35);
+            background: linear-gradient(135deg, var(--ldb-ui-danger-bright) 0%, var(--ldb-ui-danger) 100%);
+            color: var(--ldb-ui-white);
+            transition: filter var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), transform var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
+        }
+
+        .ldb-btn-danger:hover {
+            filter: brightness(1.08);
+        }
+
+        .ldb-btn-danger:active {
+            transform: scale(0.97);
+        }
+
+        .ldb-btn-danger:disabled {
+            opacity: var(--ldb-ui-disabled-opacity);
+            cursor: var(--ldb-ui-disabled-cursor);
+        }
+
+        .ldb-section-title {
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: var(--ldb-ui-text);
+        }
+
+        .ldb-flex-1 { flex: 1; }
+        .ldb-mt-8 { margin-top: 8px; }
+        .ldb-mt-12 { margin-top: 12px; }
+        .ldb-mb-8 { margin-bottom: 8px; }
+        .ldb-flex-gap { display: flex; gap: 8px; }
+        .ldb-nowrap-badge { padding: 6px 12px; white-space: nowrap; }
+        .ldb-hint { font-size: 12px; color: var(--ldb-ui-muted); }
+        .ldb-text-success { color: var(--ldb-ui-success); }
+        .ldb-text-danger { color: var(--ldb-ui-danger); }
+        .ldb-text-info { color: var(--ldb-ui-accent); }
+        .ldb-text-muted { color: var(--ldb-ui-muted); }
+        .ldb-section-divider { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ldb-ui-border); }
+        .ldb-flex-center-gap { display: flex; align-items: center; gap: 8px; }
+
+        .ldb-section {
+            padding: 12px 0;
+        }
+
+        .ldb-body,
+        .ldb-notion-body,
+        .gclip-panel-body {
+            padding: 14px;
+        }
+
+        .ldb-input-group,
+        .gclip-field,
+        .ldb-form-group {
+            margin-bottom: 12px;
+        }
+
+        .ldb-label,
+        .gclip-field label,
+        .ldb-form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 12px;
+            font-weight: 650;
+            color: var(--ldb-ui-muted);
+        }
+
+        .ldb-input,
+        .ldb-select {
+            width: 100%;
+        }
+
+        .ldb-tip {
+            margin-top: 6px;
+            font-size: 12px;
+            color: var(--ldb-ui-muted);
+        }
+
+        .ldb-divider {
+            height: 1px;
+            background: var(--ldb-ui-border);
+            margin: 12px 0;
+        }
+
+        .ldb-status {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid var(--ldb-ui-border);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
+            color: var(--ldb-ui-text);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .ldb-status.success {
+            border-color: rgba(22, 163, 74, 0.35);
+            background: rgba(22, 163, 74, 0.12);
+        }
+        .ldb-status.error {
+            border-color: rgba(220, 38, 38, 0.35);
+            background: rgba(220, 38, 38, 0.12);
+        }
+        .ldb-status.info {
+            border-color: rgba(37, 99, 235, 0.30);
+            background: rgba(37, 99, 235, 0.10);
+        }
+
+        /* \u5C31\u5730\u72B6\u6001\u6587\u672C \u2014 \u66FF\u4EE3\u5185\u8054 color \u6837\u5F0F\uFF0C\u7528\u4E8E\u6D4B\u8BD5\u6309\u94AE\u65C1\u7B49\u6301\u4E45\u72B6\u6001\u663E\u793A */
+        .ldb-status-text {
+            font-weight: 500;
+        }
+        .ldb-status-text--danger { color: var(--ldb-ui-danger); }
+        .ldb-status-text--success { color: var(--ldb-ui-success); }
+        .ldb-status-text--warning { color: var(--ldb-ui-warning); }
+        .ldb-status-text--accent { color: var(--ldb-ui-accent); }
+        .ldb-status-text--muted { color: var(--ldb-ui-muted); }
+
+        .ldb-status-close {
+            width: 26px;
+            height: 26px;
+            border-radius: 10px;
+            border: 1px solid var(--ldb-ui-border);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
+            color: var(--ldb-ui-text);
+            cursor: pointer;
+            flex: 0 0 auto;
+            line-height: 1;
+        }
+
+        .ldb-status-close:hover {
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .ldb-panel,
+            .ldb-notion-panel,
+            .gclip-panel,
+            .ldb-undo-toast,
+            .ldb-panel *,
+            .ldb-notion-panel *,
+            .gclip-panel *,
+            .ldb-notion-float-btn,
+            .ldb-mini-btn,
+            .gclip-float-btn,
+            .ldb-spin,
+            .ldb-btn,
+            .ldb-btn-secondary,
+            .ldb-btn-warning,
+            .ldb-btn-danger,
+            .gclip-btn,
+            .gclip-btn-secondary,
+            .ldb-chat-chip,
+            .ldb-source-option,
+            .ldb-tab,
+            .ldb-toggle-slider,
+            .ldb-toggle-slider::before,
+            .ldb-progress-fill,
+            .ldb-status,
+            .ldb-status-close {
+                transition: none !important;
+                animation: none !important;
+                scroll-behavior: auto !important;
+            }
+        }
+    `,
+        getChatCSS: () => `
+        /* LDB_UI_CHAT */
+        .ldb-panel .ldb-chat-container,
+        .ldb-notion-panel .ldb-chat-container {
+            height: 280px;
+            overflow-y: auto;
+            background: var(--ldb-ui-surface-3);
+            border: 1px solid var(--ldb-ui-border);
+            border-radius: var(--ldb-ui-radius-sm);
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .ldb-panel .ldb-chat-container::-webkit-scrollbar,
+        .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        .ldb-panel .ldb-chat-container::-webkit-scrollbar-track,
+        .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 3px;
+        }
+        .ldb-panel .ldb-chat-container::-webkit-scrollbar-thumb,
+        .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar-thumb {
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 65%);
+            border-radius: 3px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .ldb-panel:not([data-ldb-theme]) .ldb-chat-container::-webkit-scrollbar-track,
+            .ldb-notion-panel:not([data-ldb-theme]) .ldb-chat-container::-webkit-scrollbar-track {
+                background: rgba(255, 255, 255, 0.06);
+            }
+            .ldb-panel:not([data-ldb-theme]) .ldb-chat-container::-webkit-scrollbar-thumb,
+            .ldb-notion-panel:not([data-ldb-theme]) .ldb-chat-container::-webkit-scrollbar-thumb {
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 70%);
+            }
+        }
+
+        [data-ldb-theme="dark"] .ldb-chat-container::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.06);
+        }
+        [data-ldb-theme="dark"] .ldb-chat-container::-webkit-scrollbar-thumb {
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 70%);
+        }
+
+        .ldb-panel .ldb-chat-welcome,
+        .ldb-notion-panel .ldb-chat-welcome {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+            color: var(--ldb-ui-muted);
+            gap: 10px;
+        }
+
+        .ldb-panel .ldb-chat-welcome-icon,
+        .ldb-notion-panel .ldb-chat-welcome-icon {
+            font-size: 44px;
+            line-height: 1;
+        }
+
+        .ldb-panel .ldb-chat-welcome-text,
+        .ldb-notion-panel .ldb-chat-welcome-text {
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .ldb-panel .ldb-chat-welcome-text small,
+        .ldb-notion-panel .ldb-chat-welcome-text small {
+            color: var(--ldb-ui-muted);
+            opacity: 0.9;
+        }
+
+        .ldb-panel .ldb-chat-chips,
+        .ldb-notion-panel .ldb-chat-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 4px;
+            justify-content: center;
+        }
+
+        .ldb-panel .ldb-chat-chip,
+        .ldb-notion-panel .ldb-chat-chip {
+            padding: 6px 12px;
+            background: rgba(148, 163, 184, 0.14);
+            border: 1px solid var(--ldb-ui-border);
+            border-radius: 999px;
+            color: var(--ldb-ui-text);
+            font-size: 12px;
+            cursor: pointer;
+            transition: background var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), border-color var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), transform var(--ldb-ui-duration-instant) var(--ldb-ui-ease-out);
+        }
+
+        .ldb-panel .ldb-chat-chip:hover,
+        .ldb-notion-panel .ldb-chat-chip:hover {
+            background: rgba(37, 99, 235, 0.16);
+            border-color: rgba(37, 99, 235, 0.28);
+        }
+
+        .ldb-panel .ldb-chat-chip:active,
+        .ldb-notion-panel .ldb-chat-chip:active {
+            transform: scale(0.96);
+            background: rgba(37, 99, 235, 0.22);
+        }
+
+        .ldb-panel .ldb-chat-message,
+        .ldb-notion-panel .ldb-chat-message {
+            margin-bottom: 12px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .ldb-panel .ldb-chat-message.user,
+        .ldb-notion-panel .ldb-chat-message.user {
+            align-items: flex-end;
+        }
+
+        .ldb-panel .ldb-chat-message.assistant,
+        .ldb-notion-panel .ldb-chat-message.assistant {
+            align-items: flex-start;
+        }
+
+        .ldb-panel .ldb-chat-bubble,
+        .ldb-notion-panel .ldb-chat-bubble {
+            max-width: 85%;
+            padding: 10px 12px;
+            border-radius: 12px;
+            font-size: 13px;
+            line-height: 1.6;
+            word-break: break-word;
+            border: 1px solid transparent;
+        }
+
+        .ldb-panel .ldb-chat-bubble.user,
+        .ldb-notion-panel .ldb-chat-bubble.user {
+            background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
+            color: var(--ldb-ui-white);
+            border-bottom-right-radius: 6px;
+        }
+
+        .ldb-panel .ldb-chat-bubble.assistant,
+        .ldb-notion-panel .ldb-chat-bubble.assistant {
+            background: var(--ldb-ui-surface-2);
+            color: var(--ldb-ui-text);
+            border: 1px solid var(--ldb-ui-border);
+            border-bottom-left-radius: 6px;
+        }
+
+        .ldb-panel .ldb-chat-bubble.processing,
+        .ldb-notion-panel .ldb-chat-bubble.processing {
+            opacity: 0.85;
+        }
+
+        .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots,
+        .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots {
+            display: inline-flex;
+            gap: 4px;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots span,
+        .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots span {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: rgba(148, 163, 184, 0.9);
+            display: inline-block;
+            animation: ldb-typing 1.1s infinite ease-in-out;
+        }
+
+        .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(2),
+        .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .ldb-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(3),
+        .ldb-notion-panel .ldb-chat-bubble.processing .ldb-typing-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes ldb-typing {
+            0%, 80%, 100% { transform: translateY(0); opacity: 0.6; }
+            40% { transform: translateY(-3px); opacity: 1; }
+        }
+
+        @keyframes ldb-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .ldb-spin {
+            display: inline-block;
+            animation: ldb-spin 0.8s linear infinite;
+        }
+
+        .ldb-panel .ldb-chat-input-container,
+        .ldb-notion-panel .ldb-chat-input-container {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+            margin-top: 10px;
+        }
+
+        .ldb-panel .ldb-chat-input,
+        .ldb-notion-panel .ldb-chat-input {
+            flex: 1;
+            resize: none;
+            min-height: 36px;
+            max-height: 80px;
+            line-height: 1.5;
+        }
+
+        .ldb-panel .ldb-chat-send-btn,
+        .ldb-notion-panel .ldb-chat-send-btn {
+            padding: 8px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(37, 99, 235, 0.35);
+            background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
+            color: var(--ldb-ui-white);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .ldb-panel .ldb-chat-send-btn:disabled,
+        .ldb-notion-panel .ldb-chat-send-btn:disabled {
+            opacity: var(--ldb-ui-disabled-opacity);
+            cursor: var(--ldb-ui-disabled-cursor);
+        }
+
+        .ldb-panel .ldb-chat-actions,
+        .ldb-notion-panel .ldb-chat-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .ldb-panel .ldb-chat-action-btn,
+        .ldb-notion-panel .ldb-chat-action-btn {
+            padding: 6px 10px;
+            border-radius: 10px;
+            border: 1px solid var(--ldb-ui-border);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
+            color: var(--ldb-ui-text);
+            cursor: pointer;
+            user-select: none;
+            font-size: 12px;
+        }
+
+        .ldb-panel .ldb-chat-action-btn:hover,
+        .ldb-notion-panel .ldb-chat-action-btn:hover {
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
+        }
+
+        .ldb-panel .ldb-chat-settings-toggle,
+        .ldb-notion-panel .ldb-chat-settings-toggle {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+            margin-top: 10px;
+            padding: 8px 10px;
+            border-radius: 10px;
+            border: 1px solid var(--ldb-ui-border);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
+        }
+
+        .ldb-panel .ldb-chat-settings-content.collapsed,
+        .ldb-notion-panel .ldb-chat-settings-content.collapsed {
+            display: none;
+        }
+    `
+      };
+      ;
+      module.exports = { DesignSystem: DesignSystem2 };
+    }
+  });
+
+  // src/ui/panel-resize.js
+  var require_panel_resize = __commonJS({
+    "src/ui/panel-resize.js"(exports, module) {
+      "use strict";
+      var { Storage: Storage2 } = require_storage();
+      var PanelResize2 = {
+        _stylesInjected: false,
+        injectStyles: () => {
+          if (PanelResize2._stylesInjected) return;
+          PanelResize2._stylesInjected = true;
+          const style = document.createElement("style");
+          style.textContent = `
+            .ldb-resize-handle {
+                position: absolute;
+                z-index: 10;
+            }
+            .ldb-resize-handle-l {
+                left: -3px; top: 0; width: 6px; height: 100%;
+                cursor: ew-resize;
+            }
+            .ldb-resize-handle-t {
+                left: 0; top: -3px; width: 100%; height: 6px;
+                cursor: ns-resize;
+            }
+            .ldb-resize-handle-b {
+                left: 0; bottom: -3px; width: 100%; height: 6px;
+                cursor: ns-resize;
+            }
+            .ldb-resize-handle-tl {
+                left: -3px; top: -3px; width: 12px; height: 12px;
+                cursor: nwse-resize;
+            }
+            .ldb-resize-handle-bl {
+                left: -3px; bottom: -3px; width: 12px; height: 12px;
+                cursor: nesw-resize;
+            }
+        `;
+          document.head.appendChild(style);
+        },
+        makeResizable: (element, options = {}) => {
+          const {
+            edges = ["l", "t"],
+            storageKey = null,
+            minWidth = 280,
+            minHeight = 200,
+            maxWidth = 800
+          } = options;
+          PanelResize2.injectStyles();
+          edges.forEach((edge) => {
+            const handle = document.createElement("div");
+            handle.className = `ldb-resize-handle ldb-resize-handle-${edge}`;
+            element.appendChild(handle);
+            handle.addEventListener("mousedown", (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const startX = e.clientX;
+              const startY = e.clientY;
+              const startWidth = element.offsetWidth;
+              const startHeight = element.offsetHeight;
+              document.body.style.userSelect = "none";
+              element.style.transition = "none";
+              const onMove = (ev) => {
+                if (edge.includes("l")) {
+                  const dx = startX - ev.clientX;
+                  element.style.width = Math.max(minWidth, Math.min(maxWidth, startWidth + dx)) + "px";
+                }
+                if (edge.includes("t")) {
+                  const dy = startY - ev.clientY;
+                  const maxH = window.innerHeight * 0.9;
+                  element.style.maxHeight = Math.max(minHeight, Math.min(maxH, startHeight + dy)) + "px";
+                }
+                if (edge.includes("b")) {
+                  const dy = ev.clientY - startY;
+                  const maxH = window.innerHeight * 0.9;
+                  element.style.maxHeight = Math.max(minHeight, Math.min(maxH, startHeight + dy)) + "px";
+                }
+              };
+              const onUp = () => {
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+                document.body.style.userSelect = "";
+                element.style.transition = "";
+                if (storageKey) {
+                  Storage2.set(storageKey, JSON.stringify({
+                    width: element.style.width,
+                    maxHeight: element.style.maxHeight
+                  }));
+                }
+              };
+              document.addEventListener("mousemove", onMove);
+              document.addEventListener("mouseup", onUp);
+            });
+          });
+          if (storageKey) {
+            const saved = Storage2.get(storageKey, null);
+            if (saved) {
+              try {
+                const size = JSON.parse(saved);
+                if (size.width) element.style.width = size.width;
+                if (size.maxHeight) element.style.maxHeight = size.maxHeight;
+              } catch (e) {
+                console.warn("[LD-Notion] corrupted panel size, resetting:", storageKey);
+                Storage2.remove(storageKey);
+              }
             }
           }
         }
       };
-      module.exports = { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 };
+      ;
+      module.exports = { PanelResize: PanelResize2 };
     }
   });
 
@@ -11061,7 +16334,7 @@ ${insight.summary || ""}`,
                 font-weight: 700;
                 line-height: 1.8;
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.12);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
                 color: var(--ldb-ui-muted);
                 vertical-align: middle;
             }
@@ -11092,7 +16365,7 @@ ${insight.summary || ""}`,
             }
 
             .ldb-body::-webkit-scrollbar-thumb {
-                background: rgba(148, 163, 184, 0.25);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 75%);
                 border-radius: var(--ldb-ui-radius-pill);
             }
 
@@ -11114,7 +16387,7 @@ ${insight.summary || ""}`,
                 align-items: center;
                 justify-content: center;
                 user-select: none;
-                transition: transform 0.18s ease, box-shadow 0.18s ease;
+                transition: transform var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), box-shadow var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out);
             }
 
             .ldb-mini-btn:hover {
@@ -11175,17 +16448,22 @@ ${insight.summary || ""}`,
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
                 cursor: pointer;
-                transition: background 0.15s ease;
+                transition: background var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
             }
 
             .ldb-toggle-section:hover {
-                background: rgba(148, 163, 184, 0.14);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 86%);
             }
 
             .ldb-toggle-section:active {
-                background: rgba(148, 163, 184, 0.20);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 80%);
+            }
+
+            .ldb-toggle-section:focus-visible {
+                outline: none;
+                box-shadow: 0 0 0 3px var(--ldb-ui-focus-ring);
             }
 
             .ldb-source-option-group {
@@ -11197,26 +16475,26 @@ ${insight.summary || ""}`,
 
             .ldb-source-option {
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.12);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
                 color: var(--ldb-ui-text);
                 font-size: var(--ldb-ui-font-size-sm);
                 font-weight: 600;
                 border-radius: var(--ldb-ui-radius-sm);
                 padding: var(--ldb-ui-spacing-md) var(--ldb-ui-spacing-lg);
                 cursor: pointer;
-                transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+                transition: border-color var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), background var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), color var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out);
                 text-align: center;
                 font-family: inherit;
             }
 
             .ldb-source-option:hover {
-                border-color: rgba(37, 99, 235, 0.45);
-                background: rgba(37, 99, 235, 0.14);
+                border-color: var(--ldb-ui-accent-alpha-45);
+                background: var(--ldb-ui-accent-alpha-14);
             }
 
             .ldb-source-option.active {
                 border-color: var(--ldb-ui-accent);
-                background: rgba(37, 99, 235, 0.18);
+                background: var(--ldb-ui-accent-alpha-18);
                 color: var(--ldb-ui-accent);
             }
 
@@ -11237,9 +16515,9 @@ ${insight.summary || ""}`,
                 position: absolute;
                 cursor: pointer;
                 inset: 0;
-                background: rgba(148, 163, 184, 0.28);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 72%);
                 border: 1px solid var(--ldb-ui-border);
-                transition: background 0.2s ease, border-color 0.2s ease;
+                transition: background var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), border-color var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out);
                 border-radius: var(--ldb-ui-radius-pill);
             }
 
@@ -11252,7 +16530,7 @@ ${insight.summary || ""}`,
                 top: 50%;
                 transform: translateY(-50%);
                 background: var(--ldb-ui-white);
-                transition: transform 0.2s ease;
+                transition: transform var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out);
                 border-radius: 50%;
                 box-shadow: 0 6px 16px rgba(2, 6, 23, 0.18);
             }
@@ -11274,12 +16552,12 @@ ${insight.summary || ""}`,
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
             }
 
             .ldb-progress-bar {
                 height: 10px;
-                background: rgba(148, 163, 184, 0.20);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 80%);
                 border-radius: var(--ldb-ui-radius-pill);
                 overflow: hidden;
             }
@@ -11288,7 +16566,7 @@ ${insight.summary || ""}`,
                 height: 100%;
                 background: linear-gradient(90deg, var(--ldb-ui-accent), var(--ldb-ui-accent-2));
                 border-radius: var(--ldb-ui-radius-pill);
-                transition: width 0.3s ease;
+                transition: width var(--ldb-ui-duration-slow) var(--ldb-ui-ease-out);
             }
 
             .ldb-progress-text {
@@ -11353,7 +16631,7 @@ ${insight.summary || ""}`,
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
             }
 
             .ldb-bookmarks-count {
@@ -11414,7 +16692,7 @@ ${insight.summary || ""}`,
             .ldb-view-subsection {
                 margin-top: var(--ldb-ui-spacing-2xl);
                 padding-top: var(--ldb-ui-spacing-2xl);
-                border-top: 1px solid rgba(148, 163, 184, 0.18);
+                border-top: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
             }
 
             .ldb-view-section-title {
@@ -11434,7 +16712,7 @@ ${insight.summary || ""}`,
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
                 padding: var(--ldb-ui-spacing-xl);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
             }
 
             .ldb-view-card.full {
@@ -11488,7 +16766,7 @@ ${insight.summary || ""}`,
                 height: 8px;
                 border-radius: var(--ldb-ui-radius-pill);
                 overflow: hidden;
-                background: rgba(148, 163, 184, 0.20);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 80%);
             }
 
             .ldb-view-bar-fill {
@@ -11543,10 +16821,10 @@ ${insight.summary || ""}`,
             }
 
             .ldb-view-empty {
-                border: 1px dashed rgba(148, 163, 184, 0.35);
+                border: 1px dashed color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 65%);
                 border-radius: var(--ldb-ui-radius-md);
                 padding: var(--ldb-ui-spacing-3xl) var(--ldb-ui-spacing-2xl);
-                background: rgba(148, 163, 184, 0.05);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 95%);
             }
 
             .ldb-view-empty-title {
@@ -11572,8 +16850,8 @@ ${insight.summary || ""}`,
             .ldb-view-pill {
                 padding: var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-md);
                 border-radius: var(--ldb-ui-radius-pill);
-                border: 1px solid rgba(148, 163, 184, 0.25);
-                background: rgba(148, 163, 184, 0.08);
+                border: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 75%);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
                 font-size: var(--ldb-ui-font-size-xs);
                 color: var(--ldb-ui-muted);
             }
@@ -11585,7 +16863,7 @@ ${insight.summary || ""}`,
                 line-height: 1.6;
                 color: var(--ldb-ui-text);
                 border-radius: var(--ldb-ui-radius-sm);
-                border: 1px dashed rgba(148, 163, 184, 0.25);
+                border: 1px dashed color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 75%);
                 background: rgba(15, 23, 42, 0.04);
                 padding: var(--ldb-ui-spacing-xl);
                 max-height: 280px;
@@ -11597,7 +16875,7 @@ ${insight.summary || ""}`,
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
                 overflow: hidden;
-                background: rgba(148, 163, 184, 0.06);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 94%);
                 max-height: 260px;
                 overflow-y: auto;
             }
@@ -11607,12 +16885,12 @@ ${insight.summary || ""}`,
                 align-items: flex-start;
                 gap: var(--ldb-ui-spacing-lg);
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
-                border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+                border-bottom: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
                 cursor: pointer;
             }
 
             .ldb-bookmark-item:hover {
-                background: rgba(37, 99, 235, 0.08);
+                background: var(--ldb-ui-accent-alpha-08);
             }
 
             .ldb-bookmark-item:last-child {
@@ -11647,7 +16925,7 @@ ${insight.summary || ""}`,
             .ldb-permission-panel {
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
                 overflow: hidden;
             }
 
@@ -11657,7 +16935,7 @@ ${insight.summary || ""}`,
                 justify-content: space-between;
                 gap: var(--ldb-ui-spacing-lg);
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
-                border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+                border-bottom: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
             }
 
             .ldb-permission-row:last-child {
@@ -11677,7 +16955,7 @@ ${insight.summary || ""}`,
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
                 overflow: hidden;
-                background: rgba(148, 163, 184, 0.06);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 94%);
             }
 
             .ldb-log-header {
@@ -11687,8 +16965,8 @@ ${insight.summary || ""}`,
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
                 cursor: pointer;
                 user-select: none;
-                background: rgba(148, 163, 184, 0.10);
-                border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
+                border-bottom: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
             }
 
             .ldb-log-title {
@@ -11704,7 +16982,7 @@ ${insight.summary || ""}`,
                 padding: 1px var(--ldb-ui-spacing-md);
                 border-radius: var(--ldb-ui-radius-pill);
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.10);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
                 font-size: var(--ldb-ui-font-size-xs);
                 color: var(--ldb-ui-muted);
             }
@@ -11722,7 +17000,7 @@ ${insight.summary || ""}`,
                 grid-template-columns: 18px 1fr;
                 gap: var(--ldb-ui-spacing-lg);
                 padding: var(--ldb-ui-spacing-md) 0;
-                border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+                border-bottom: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 86%);
             }
 
             .ldb-log-item:last-child {
@@ -11773,7 +17051,7 @@ ${insight.summary || ""}`,
 
             .ldb-log-clear-btn {
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.10);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
                 color: var(--ldb-ui-text);
                 border-radius: var(--ldb-ui-radius-sm);
                 padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);
@@ -11782,7 +17060,7 @@ ${insight.summary || ""}`,
             }
 
             .ldb-log-clear-btn:hover {
-                background: rgba(148, 163, 184, 0.16);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 84%);
             }
 
             .ldb-control-btns {
@@ -11795,7 +17073,7 @@ ${insight.summary || ""}`,
             .ldb-tabs {
                 display: flex;
                 border-bottom: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.06);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 94%);
                 padding: 0 var(--ldb-ui-spacing-xs);
             }
 
@@ -11810,7 +17088,8 @@ ${insight.summary || ""}`,
                 cursor: pointer;
                 text-align: center;
                 border-bottom: 2px solid transparent;
-                transition: color 0.2s ease, border-color 0.2s ease;
+                /* Intentional: tab hover timing per design spec v3.1 */
+                transition: color 0.2s var(--ldb-ui-ease-out), border-color 0.2s var(--ldb-ui-ease-out);
                 user-select: none;
                 font-family: inherit;
                 white-space: nowrap;
@@ -11818,12 +17097,17 @@ ${insight.summary || ""}`,
 
             .ldb-tab:hover {
                 color: var(--ldb-ui-text);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
             }
 
             .ldb-tab.active {
                 color: var(--ldb-ui-accent);
                 border-bottom-color: var(--ldb-ui-accent);
+            }
+
+            .ldb-tab:active {
+                transform: scale(0.98);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
             }
 
             .ldb-tab-content {
@@ -11836,11 +17120,13 @@ ${insight.summary || ""}`,
 
             /* \u4E3B\u9898\u5207\u6362\u6309\u94AE */
             .ldb-theme-btn {
-                width: 30px;
-                height: 30px;
+                width: 44px;
+                height: 44px;
+                min-width: 44px;
+                min-height: 44px;
                 border-radius: var(--ldb-ui-radius-sm);
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.12);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
                 cursor: pointer;
                 user-select: none;
                 display: inline-flex;
@@ -11849,11 +17135,11 @@ ${insight.summary || ""}`,
                 padding: 0;
                 line-height: 1;
                 font-size: var(--ldb-ui-font-size-lg);
-                transition: background 0.2s ease;
+                transition: background 0.2s ease-out;
             }
 
             .ldb-theme-btn:hover {
-                background: rgba(148, 163, 184, 0.22);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 78%);
             }
 
             /* \u54CD\u5E94\u5F0F */
@@ -11932,7 +17218,8 @@ ${insight.summary || ""}`,
                 align-items: center;
                 justify-content: center;
                 user-select: none;
-                transition: transform 0.18s ease, box-shadow 0.18s ease;
+                /* Intentional: float button timing per design spec v3.1 */
+                transition: transform 0.18s var(--ldb-ui-ease-out), box-shadow 0.18s var(--ldb-ui-ease-out);
             }
 
             .ldb-notion-float-btn:hover {
@@ -11986,7 +17273,7 @@ ${insight.summary || ""}`,
                 padding: var(--ldb-ui-spacing-md) var(--ldb-ui-spacing-lg);
                 border-radius: var(--ldb-ui-radius-sm);
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.10);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
                 color: var(--ldb-ui-text);
             }
 
@@ -12779,6 +18066,323 @@ ${insight.summary || ""}`,
       };
       ;
       module.exports = { NotionSiteUI: NotionSiteUI2 };
+    }
+  });
+
+  // src/import/github-obsidian-service.js
+  var require_github_obsidian_service = __commonJS({
+    "src/import/github-obsidian-service.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { NotionAPI: NotionAPI2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2 } = require_api();
+      var { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
+      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
+      var { OperationGuard: OperationGuard2 } = require_security();
+      var sanitizeObsidianFileName = (name, fallback = "untitled") => {
+        const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
+        return base || fallback;
+      };
+      var mapGitHubItemsToBookmarks = (items, sourceType) => {
+        return (items || []).map((item) => {
+          const isGist = sourceType === "gists";
+          const itemKey = isGist ? String(item.id || "") : String(item.full_name || item.name || "");
+          const title = isGist ? item.description || Object.keys(item.files || {})[0] || `Gist ${item.id || ""}` : item.full_name || item.name || "\u672A\u547D\u540D\u4ED3\u5E93";
+          return {
+            source: "github",
+            sourceType,
+            itemKey,
+            title,
+            raw: item
+          };
+        }).filter((item) => !!item.itemKey);
+      };
+      var buildGitHubObsidianMarkdown = async (item, settings = {}) => {
+        var _a, _b;
+        if (!(item == null ? void 0 : item.raw)) {
+          throw new Error("GitHub \u6761\u76EE\u6570\u636E\u4E0D\u5B8C\u6574");
+        }
+        const sourceTypeMap = {
+          stars: "Stars",
+          repos: "Repos",
+          forks: "Forks",
+          gists: "Gists"
+        };
+        const sourceTypeLabel = sourceTypeMap[item.sourceType] || "GitHub";
+        const bookmark = item.raw;
+        const isGist = item.sourceType === "gists";
+        const owner = isGist ? String(((_a = bookmark.owner) == null ? void 0 : _a.login) || "") : String(((_b = bookmark.owner) == null ? void 0 : _b.login) || String(bookmark.full_name || "").split("/")[0] || "");
+        const inferredTags = Array.isArray(bookmark.inferredTags) ? bookmark.inferredTags : [];
+        const topicTags = Array.isArray(bookmark.topics) ? bookmark.topics : [];
+        const tags = Array.from(new Set([...topicTags, ...inferredTags].filter(Boolean))).slice(0, 20);
+        if (isGist) {
+          const files = Object.values(bookmark.files || {});
+          const primaryFile = files[0] || {};
+          const fileNames = Object.keys(bookmark.files || {});
+          const title2 = item.title || bookmark.description || fileNames[0] || `Gist ${bookmark.id || ""}`;
+          const language = primaryFile.language || "";
+          const meta2 = {
+            title: title2,
+            url: bookmark.html_url || "https://gist.github.com",
+            author: owner || "\u672A\u77E5",
+            owner,
+            gistId: String(bookmark.id || item.itemKey || ""),
+            source: "GitHub",
+            sourceType: sourceTypeLabel,
+            category: "Gist",
+            language,
+            updatedAt: bookmark.updated_at || bookmark.created_at || "",
+            tags
+          };
+          let md2 = HTMLToMarkdown2.buildFrontmatter(meta2);
+          md2 += `> [!info] GitHub Gist
+`;
+          md2 += `> - **\u539F\u59CB\u94FE\u63A5**: [${title2}](${meta2.url})
+`;
+          md2 += `> - **\u4F5C\u8005**: ${owner || "\u672A\u77E5"}
+`;
+          md2 += `> - **\u7C7B\u578B**: ${sourceTypeLabel}
+`;
+          md2 += `> - **\u8BED\u8A00**: ${language || "\u672A\u77E5"}
+`;
+          md2 += `> - **\u6587\u4EF6\u6570**: ${fileNames.length}
+`;
+          md2 += `> - **\u6807\u7B7E**: ${tags.join(", ") || "\u65E0"}
+`;
+          md2 += `> - **\u66F4\u65B0\u65F6\u95F4**: ${bookmark.updated_at ? new Date(bookmark.updated_at).toLocaleString("zh-CN") : "\u672A\u77E5"}
+`;
+          md2 += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+          if (bookmark.description) {
+            md2 += `## \u63CF\u8FF0
+
+${bookmark.description}
+
+`;
+          }
+          if (fileNames.length > 0) {
+            md2 += "## \u6587\u4EF6\u5217\u8868\n\n";
+            fileNames.forEach((fileName) => {
+              var _a2;
+              const file = ((_a2 = bookmark.files) == null ? void 0 : _a2[fileName]) || {};
+              md2 += `- \`${fileName}\``;
+              if (file.language) md2 += ` \xB7 ${file.language}`;
+              if (Number.isFinite(file.size)) md2 += ` \xB7 ${file.size} bytes`;
+              md2 += "\n";
+            });
+            md2 += "\n";
+          }
+          return {
+            title: title2,
+            fileName: sanitizeObsidianFileName(title2, `gist-${bookmark.id || "untitled"}`),
+            markdown: md2,
+            url: meta2.url
+          };
+        }
+        const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
+        const title = enriched.generatedTitle || item.title || enriched.full_name || enriched.name || "\u672A\u547D\u540D\u4ED3\u5E93";
+        const meta = {
+          title,
+          url: enriched.html_url || "https://github.com",
+          author: owner || "\u672A\u77E5",
+          owner,
+          repo: enriched.full_name || enriched.name || item.itemKey || "",
+          source: "GitHub",
+          sourceType: sourceTypeLabel,
+          category: enriched.inferredCategory || "Repo",
+          language: enriched.language || "",
+          stars: enriched.stargazers_count || 0,
+          updatedAt: enriched.pushed_at || enriched.updated_at || "",
+          tags
+        };
+        let md = HTMLToMarkdown2.buildFrontmatter(meta);
+        md += `> [!info] GitHub \u9879\u76EE
+`;
+        md += `> - **\u539F\u59CB\u94FE\u63A5**: [${enriched.full_name || title}](${meta.url})
+`;
+        md += `> - **\u4F5C\u8005**: ${owner || "\u672A\u77E5"}
+`;
+        md += `> - **\u7C7B\u578B**: ${sourceTypeLabel}
+`;
+        md += `> - **\u8BED\u8A00**: ${enriched.language || "\u672A\u77E5"}
+`;
+        md += `> - **Stars**: ${enriched.stargazers_count || 0}
+`;
+        md += `> - **\u5206\u7C7B**: ${enriched.inferredCategory || "\u672A\u5206\u7C7B"}
+`;
+        md += `> - **\u6807\u7B7E**: ${tags.join(", ") || "\u65E0"}
+`;
+        md += `> - **\u66F4\u65B0\u65F6\u95F4**: ${enriched.pushed_at || enriched.updated_at ? new Date(enriched.pushed_at || enriched.updated_at).toLocaleString("zh-CN") : "\u672A\u77E5"}
+`;
+        md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+        if (enriched.description) {
+          md += `## \u9879\u76EE\u63CF\u8FF0
+
+${enriched.description}
+
+`;
+        }
+        if (enriched.readmeSummary) {
+          md += `## README \u6458\u8981
+
+${enriched.readmeSummary}
+
+`;
+        }
+        if (Array.isArray(enriched.topics) && enriched.topics.length > 0) {
+          md += `## Topics
+
+${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
+
+`;
+        }
+        return {
+          title,
+          fileName: sanitizeObsidianFileName(enriched.full_name || title, "github-repo"),
+          markdown: md,
+          url: meta.url
+        };
+      };
+      var exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgress, control = {}) => {
+        const { obsUrl, obsKey, obsDir } = settings;
+        if (!obsUrl || !obsKey) {
+          throw new Error("\u8BF7\u5148\u914D\u7F6E Obsidian API \u5730\u5740\u548C Key");
+        }
+        if (!selectedItems || selectedItems.length === 0) {
+          return { success: [], failed: [], skipped: [] };
+        }
+        const success = [];
+        const failed = [];
+        const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+        for (let i = 0; i < selectedItems.length; i++) {
+          if (control.isCancelled) break;
+          while (control.isPaused) {
+            await Utils2.sleep(200);
+            if (control.isCancelled) break;
+          }
+          if (control.isCancelled) break;
+          const item = selectedItems[i];
+          onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
+          try {
+            const note = await buildGitHubObsidianMarkdown(item, settings);
+            const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
+            if (!noteResult.ok) throw new Error(noteResult.error);
+            success.push({
+              title: note.title,
+              url: note.url
+            });
+          } catch (error) {
+            console.warn(`[GitHubObsidianService] Export failed: ${item.itemKey}`, error);
+            failed.push({
+              title: item.title || item.itemKey || "GitHub",
+              error: error.message
+            });
+          }
+          if (i < selectedItems.length - 1 && delay > 0) {
+            await Utils2.sleep(delay);
+          }
+        }
+        return {
+          success,
+          failed,
+          skipped: control.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
+            title: item.title || item.itemKey || "GitHub"
+          })) : []
+        };
+      };
+      var exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress) => {
+        const { apiKey, databaseId } = settings;
+        if (!apiKey || !databaseId) {
+          throw new Error("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
+        }
+        if (!selectedItems || selectedItems.length === 0) {
+          return { success: [], failed: [], skipped: [] };
+        }
+        const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+        if (!setupResult.success) {
+          throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+        }
+        const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+        const success = [];
+        const failed = [];
+        for (let i = 0; i < selectedItems.length; i++) {
+          const item = selectedItems[i];
+          const bookmark = item.raw;
+          const sourceType = item.sourceType;
+          const label = item.title || item.itemKey;
+          onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, label);
+          try {
+            let properties;
+            if (sourceType === "gists") {
+              properties = GitHubExporter2.buildGistProperties(bookmark);
+            } else {
+              const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
+              const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
+              properties = GitHubExporter2.buildRepoProperties(enriched, sourceMap[sourceType] || "Star");
+            }
+            for (const key of Object.keys(properties)) {
+              if (properties[key] === void 0) delete properties[key];
+            }
+            if (!OperationGuard2.canExecute("createDatabasePage")) {
+              GitHubExporter2._auditExport(
+                "createDatabasePage",
+                "denied",
+                { itemKey: item.itemKey, sourceType, itemName: item.title || item.itemKey, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u624B\u52A8\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
+              );
+              failed.push({ title: item.title, error: "\u6743\u9650\u4E0D\u8DB3\uFF08\u9700 level\u22651\uFF09", itemKey: item.itemKey, sourceType });
+              continue;
+            }
+            const page = await NotionAPI2.request("POST", "/pages", {
+              parent: { database_id: databaseId },
+              properties
+            }, apiKey);
+            if (sourceType === "gists") {
+              GitHubAPI2.markGistExportedAndFlush(item.itemKey);
+            } else {
+              GitHubAPI2.markExportedAndFlush(item.itemKey);
+            }
+            GitHubExporter2._auditExport(
+              "createDatabasePage",
+              "success",
+              { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: item.itemKey, sourceType, databaseId }
+            );
+            success.push({
+              title: item.title,
+              url: (bookmark == null ? void 0 : bookmark.html_url) || "https://github.com",
+              itemKey: item.itemKey,
+              sourceType
+            });
+          } catch (error) {
+            console.warn(`[GitHubObsidianService] Notion export failed: ${item.itemKey}`, error);
+            GitHubExporter2._auditExport(
+              "createDatabasePage",
+              "failed",
+              { itemKey: item.itemKey, sourceType, reason: String((error == null ? void 0 : error.message) || error) }
+            );
+            failed.push({
+              title: item.title,
+              error: error.message,
+              itemKey: item.itemKey,
+              sourceType
+            });
+          }
+          if (i < selectedItems.length - 1 && delay > 0) {
+            await Utils2.sleep(delay);
+          }
+        }
+        return { success, failed, skipped: [] };
+      };
+      module.exports = {
+        sanitizeObsidianFileName,
+        mapGitHubItemsToBookmarks,
+        buildGitHubObsidianMarkdown,
+        exportGitHubSelectedToObsidian,
+        exportGitHubSelectedToNotion
+      };
     }
   });
 
@@ -14423,7 +20027,7 @@ ${insight.summary || ""}`,
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge3, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, getAISettings } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -15470,23 +21074,19 @@ ${insight.summary || ""}`,
             }
           }
           UI2.renderSelfCheckResult();
-          const cachedWorkspaceForDb = Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
+          let workspaceData = null;
           try {
-            const wsData = JSON.parse(cachedWorkspaceForDb);
-            UI2.updateAITargetDbOptions(wsData.databases || []);
+            workspaceData = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
           } catch {
-            UI2.updateAITargetDbOptions([]);
           }
+          UI2.updateAITargetDbOptions((workspaceData == null ? void 0 : workspaceData.databases) || []);
           UI2.updateLogPanel();
-          const cachedWorkspace = Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}");
-          try {
-            const workspaceData = JSON.parse(cachedWorkspace);
+          if (workspaceData) {
             const currentApiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
             const currentKeyHash = currentApiKey ? Utils2.apiKeyHash(currentApiKey) : "";
             if (workspaceData.apiKeyHash === currentKeyHash && (((_a = workspaceData.databases) == null ? void 0 : _a.length) > 0 || ((_b = workspaceData.pages) == null ? void 0 : _b.length) > 0)) {
               UI2.updateWorkspaceSelect(workspaceData);
             }
-          } catch {
           }
           const savedSource = Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG2.DEFAULTS.bookmarkSource);
           const resolvedSource = savedSource === "github" ? "github" : "linuxdo";
@@ -16215,7 +21815,7 @@ ${insight.summary || ""}`,
           const savedAt = Date.now();
           const createdPages = [];
           const failedCandidates = [];
-          const aiSettings = AIAssistant2.getSettings();
+          const aiSettings = getAISettings();
           let database = null;
           let titlePropertyName = null;
           if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.DATABASE) {
@@ -16315,7 +21915,7 @@ ${insight.summary || ""}`,
           }
           try {
             let aiSummary = "";
-            const settings = AIAssistant2.getSettings();
+            const settings = getAISettings();
             if (settings == null ? void 0 : settings.aiApiKey) {
               const prompt2 = [
                 "\u4F60\u662F\u77E5\u8BC6\u5DE5\u4F5C\u533A\u5206\u6790\u5E08\u3002\u8BF7\u57FA\u4E8E\u4EE5\u4E0B\u5DE5\u4F5C\u533A\u5FEB\u7167\u8F93\u51FA\u4E00\u6BB5\u7B80\u6D01\u7684 Markdown \u6D1E\u5BDF\u6458\u8981\u3002",
@@ -16436,300 +22036,27 @@ ${insight.summary || ""}`,
         `;
         },
         sanitizeObsidianFileName: (name, fallback = "untitled") => {
-          const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
-          return base || fallback;
+          return require_github_obsidian_service().sanitizeObsidianFileName(name, fallback);
         },
         buildGitHubObsidianMarkdown: async (item, settings = {}) => {
-          var _a, _b;
-          if (!(item == null ? void 0 : item.raw)) {
-            throw new Error("GitHub \u6761\u76EE\u6570\u636E\u4E0D\u5B8C\u6574");
-          }
-          const sourceTypeMap = {
-            stars: "Stars",
-            repos: "Repos",
-            forks: "Forks",
-            gists: "Gists"
-          };
-          const sourceTypeLabel = sourceTypeMap[item.sourceType] || "GitHub";
-          const bookmark = item.raw;
-          const isGist = item.sourceType === "gists";
-          const owner = isGist ? String(((_a = bookmark.owner) == null ? void 0 : _a.login) || "") : String(((_b = bookmark.owner) == null ? void 0 : _b.login) || String(bookmark.full_name || "").split("/")[0] || "");
-          const inferredTags = Array.isArray(bookmark.inferredTags) ? bookmark.inferredTags : [];
-          const topicTags = Array.isArray(bookmark.topics) ? bookmark.topics : [];
-          const tags = Array.from(new Set([...topicTags, ...inferredTags].filter(Boolean))).slice(0, 20);
-          if (isGist) {
-            const files = Object.values(bookmark.files || {});
-            const primaryFile = files[0] || {};
-            const fileNames = Object.keys(bookmark.files || {});
-            const title2 = item.title || bookmark.description || fileNames[0] || `Gist ${bookmark.id || ""}`;
-            const language = primaryFile.language || "";
-            const meta2 = {
-              title: title2,
-              url: bookmark.html_url || "https://gist.github.com",
-              author: owner || "\u672A\u77E5",
-              owner,
-              gistId: String(bookmark.id || item.itemKey || ""),
-              source: "GitHub",
-              sourceType: sourceTypeLabel,
-              category: "Gist",
-              language,
-              updatedAt: bookmark.updated_at || bookmark.created_at || "",
-              tags
-            };
-            let md2 = HTMLToMarkdown2.buildFrontmatter(meta2);
-            md2 += `> [!info] GitHub Gist
-`;
-            md2 += `> - **\u539F\u59CB\u94FE\u63A5**: [${title2}](${meta2.url})
-`;
-            md2 += `> - **\u4F5C\u8005**: ${owner || "\u672A\u77E5"}
-`;
-            md2 += `> - **\u7C7B\u578B**: ${sourceTypeLabel}
-`;
-            md2 += `> - **\u8BED\u8A00**: ${language || "\u672A\u77E5"}
-`;
-            md2 += `> - **\u6587\u4EF6\u6570**: ${fileNames.length}
-`;
-            md2 += `> - **\u6807\u7B7E**: ${tags.join(", ") || "\u65E0"}
-`;
-            md2 += `> - **\u66F4\u65B0\u65F6\u95F4**: ${bookmark.updated_at ? new Date(bookmark.updated_at).toLocaleString("zh-CN") : "\u672A\u77E5"}
-`;
-            md2 += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
-
-`;
-            if (bookmark.description) {
-              md2 += `## \u63CF\u8FF0
-
-${bookmark.description}
-
-`;
-            }
-            if (fileNames.length > 0) {
-              md2 += "## \u6587\u4EF6\u5217\u8868\n\n";
-              fileNames.forEach((fileName) => {
-                var _a2;
-                const file = ((_a2 = bookmark.files) == null ? void 0 : _a2[fileName]) || {};
-                md2 += `- \`${fileName}\``;
-                if (file.language) md2 += ` \xB7 ${file.language}`;
-                if (Number.isFinite(file.size)) md2 += ` \xB7 ${file.size} bytes`;
-                md2 += "\n";
-              });
-              md2 += "\n";
-            }
-            return {
-              title: title2,
-              fileName: UI2.sanitizeObsidianFileName(title2, `gist-${bookmark.id || "untitled"}`),
-              markdown: md2,
-              url: meta2.url
-            };
-          }
-          const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
-          const title = enriched.generatedTitle || item.title || enriched.full_name || enriched.name || "\u672A\u547D\u540D\u4ED3\u5E93";
-          const meta = {
-            title,
-            url: enriched.html_url || "https://github.com",
-            author: owner || "\u672A\u77E5",
-            owner,
-            repo: enriched.full_name || enriched.name || item.itemKey || "",
-            source: "GitHub",
-            sourceType: sourceTypeLabel,
-            category: enriched.inferredCategory || "Repo",
-            language: enriched.language || "",
-            stars: enriched.stargazers_count || 0,
-            updatedAt: enriched.pushed_at || enriched.updated_at || "",
-            tags
-          };
-          let md = HTMLToMarkdown2.buildFrontmatter(meta);
-          md += `> [!info] GitHub \u9879\u76EE
-`;
-          md += `> - **\u539F\u59CB\u94FE\u63A5**: [${enriched.full_name || title}](${meta.url})
-`;
-          md += `> - **\u4F5C\u8005**: ${owner || "\u672A\u77E5"}
-`;
-          md += `> - **\u7C7B\u578B**: ${sourceTypeLabel}
-`;
-          md += `> - **\u8BED\u8A00**: ${enriched.language || "\u672A\u77E5"}
-`;
-          md += `> - **Stars**: ${enriched.stargazers_count || 0}
-`;
-          md += `> - **\u5206\u7C7B**: ${enriched.inferredCategory || "\u672A\u5206\u7C7B"}
-`;
-          md += `> - **\u6807\u7B7E**: ${tags.join(", ") || "\u65E0"}
-`;
-          md += `> - **\u66F4\u65B0\u65F6\u95F4**: ${enriched.pushed_at || enriched.updated_at ? new Date(enriched.pushed_at || enriched.updated_at).toLocaleString("zh-CN") : "\u672A\u77E5"}
-`;
-          md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
-
-`;
-          if (enriched.description) {
-            md += `## \u9879\u76EE\u63CF\u8FF0
-
-${enriched.description}
-
-`;
-          }
-          if (enriched.readmeSummary) {
-            md += `## README \u6458\u8981
-
-${enriched.readmeSummary}
-
-`;
-          }
-          if (Array.isArray(enriched.topics) && enriched.topics.length > 0) {
-            md += `## Topics
-
-${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
-
-`;
-          }
-          return {
-            title,
-            fileName: UI2.sanitizeObsidianFileName(enriched.full_name || title, "github-repo"),
-            markdown: md,
-            url: meta.url
-          };
+          return require_github_obsidian_service().buildGitHubObsidianMarkdown(item, settings);
         },
         exportGitHubSelectedToObsidian: async (selectedItems, settings, onProgress) => {
-          const { obsUrl, obsKey, obsDir } = settings;
-          if (!obsUrl || !obsKey) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E Obsidian API \u5730\u5740\u548C Key");
-          }
-          if (!selectedItems || selectedItems.length === 0) {
-            return { success: [], failed: [], skipped: [] };
-          }
-          const success = [];
-          const failed = [];
-          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-          for (let i = 0; i < selectedItems.length; i++) {
-            if (Exporter2.isCancelled) break;
-            while (Exporter2.isPaused) {
-              await Utils2.sleep(200);
-              if (Exporter2.isCancelled) break;
+          const { exportGitHubSelectedToObsidian } = require_github_obsidian_service();
+          return exportGitHubSelectedToObsidian(selectedItems, settings, onProgress, {
+            get isCancelled() {
+              return Exporter2.isCancelled;
+            },
+            get isPaused() {
+              return Exporter2.isPaused;
             }
-            if (Exporter2.isCancelled) break;
-            const item = selectedItems[i];
-            onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
-            try {
-              const note = await UI2.buildGitHubObsidianMarkdown(item, settings);
-              const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
-              if (!noteResult.ok) throw new Error(noteResult.error);
-              success.push({
-                title: note.title,
-                url: note.url
-              });
-            } catch (error) {
-              console.warn(`[UI] GitHub -> Obsidian \u5BFC\u51FA\u5931\u8D25: ${item.itemKey}`, error);
-              failed.push({
-                title: item.title || item.itemKey || "GitHub",
-                error: error.message
-              });
-            }
-            if (i < selectedItems.length - 1 && delay > 0) {
-              await Utils2.sleep(delay);
-            }
-          }
-          return {
-            success,
-            failed,
-            skipped: Exporter2.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
-              title: item.title || item.itemKey || "GitHub"
-            })) : []
-          };
+          });
         },
         mapGitHubItemsToBookmarks: (items, sourceType) => {
-          return (items || []).map((item) => {
-            const isGist = sourceType === "gists";
-            const itemKey = isGist ? String(item.id || "") : String(item.full_name || item.name || "");
-            const title = isGist ? item.description || Object.keys(item.files || {})[0] || `Gist ${item.id || ""}` : item.full_name || item.name || "\u672A\u547D\u540D\u4ED3\u5E93";
-            return {
-              source: "github",
-              sourceType,
-              itemKey,
-              title,
-              raw: item
-            };
-          }).filter((item) => !!item.itemKey);
+          return require_github_obsidian_service().mapGitHubItemsToBookmarks(items, sourceType);
         },
         exportGitHubSelected: async (selectedItems, settings, onProgress) => {
-          const { apiKey, databaseId } = settings;
-          if (!apiKey || !databaseId) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
-          }
-          if (!selectedItems || selectedItems.length === 0) {
-            return { success: [], failed: [], skipped: [] };
-          }
-          const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
-          if (!setupResult.success) {
-            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
-          }
-          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-          const success = [];
-          const failed = [];
-          for (let i = 0; i < selectedItems.length; i++) {
-            const item = selectedItems[i];
-            const bookmark = item.raw;
-            const sourceType = item.sourceType;
-            const label = item.title || item.itemKey;
-            onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, label);
-            try {
-              let properties;
-              if (sourceType === "gists") {
-                properties = GitHubExporter2.buildGistProperties(bookmark);
-              } else {
-                const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
-                const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
-                properties = GitHubExporter2.buildRepoProperties(enriched, sourceMap[sourceType] || "Star");
-              }
-              for (const key of Object.keys(properties)) {
-                if (properties[key] === void 0) delete properties[key];
-              }
-              if (!OperationGuard2.canExecute("createDatabasePage")) {
-                GitHubExporter2._auditExport(
-                  "createDatabasePage",
-                  "denied",
-                  { itemKey: item.itemKey, sourceType, itemName: item.title || item.itemKey, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u624B\u52A8\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
-                );
-                failed.push({ title: item.title, error: "\u6743\u9650\u4E0D\u8DB3\uFF08\u9700 level\u22651\uFF09", itemKey: item.itemKey, sourceType });
-                continue;
-              }
-              const page = await NotionAPI2.request("POST", "/pages", {
-                parent: { database_id: databaseId },
-                properties
-              }, apiKey);
-              if (sourceType === "gists") {
-                GitHubAPI2.markGistExportedAndFlush(item.itemKey);
-              } else {
-                GitHubAPI2.markExportedAndFlush(item.itemKey);
-              }
-              GitHubExporter2._auditExport(
-                "createDatabasePage",
-                "success",
-                { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: item.itemKey, sourceType, databaseId }
-              );
-              success.push({
-                title: item.title,
-                url: (bookmark == null ? void 0 : bookmark.html_url) || "https://github.com",
-                itemKey: item.itemKey,
-                sourceType
-              });
-            } catch (error) {
-              console.warn(`[UI] GitHub \u624B\u52A8\u5BFC\u51FA\u5931\u8D25: ${item.itemKey}`, error);
-              GitHubExporter2._auditExport(
-                "createDatabasePage",
-                "failed",
-                { itemKey: item.itemKey, sourceType, reason: String((error == null ? void 0 : error.message) || error) }
-              );
-              failed.push({
-                title: item.title,
-                error: error.message,
-                itemKey: item.itemKey,
-                sourceType
-              });
-            }
-            if (i < selectedItems.length - 1 && delay > 0) {
-              await Utils2.sleep(delay);
-            }
-          }
-          return { success, failed, skipped: [] };
+          return require_github_obsidian_service().exportGitHubSelectedToNotion(selectedItems, settings, onProgress);
         },
         // 重算导出统计（在列表变更后调用）
         recomputeExportStats: () => {
@@ -16886,6 +22213,34 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           UI2.injectStyles();
           UI2.createPanel();
           UI2.miniBtn = UI2.createMiniButton();
+          const { on } = require_event_bus();
+          on("oplog:changed", () => {
+            var _a;
+            if (((_a = UI2.refs) == null ? void 0 : _a.logPanel) && !UI2.refs.logPanel.classList.contains("collapsed")) {
+              UI2.updateLogPanel();
+            }
+          });
+          on("notify", ({ message, type }) => {
+            UI2.showStatus(message, type);
+          });
+          on("sync:center-summary-updated", () => {
+            if (typeof UI2.renderSyncCenterSummary === "function") {
+              try {
+                UI2.renderSyncCenterSummary();
+              } catch (e) {
+                console.warn("[LD-Notion] \u540C\u6B65\u4E2D\u5FC3\u9762\u677F\u6E32\u67D3\u5931\u8D25:", e);
+              }
+            }
+          });
+          on("bookmarks:updated", () => {
+            if (typeof UI2.renderBookmarkList === "function") {
+              try {
+                UI2.renderBookmarkList();
+              } catch (e) {
+                console.warn("[LD-Notion] \u4E66\u7B7E\u5217\u8868\u6E32\u67D3\u5931\u8D25:", e);
+              }
+            }
+          });
           PanelResize2.makeResizable(UI2.panel, {
             edges: ["l", "t", "b", "tl", "bl"],
             storageKey: CONFIG2.STORAGE_KEYS.PANEL_SIZE_MAIN,
@@ -18345,9 +23700,9 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               const icon = Utils2.escapeHtml(t.icon || "\u{1F4DD}");
               const name = Utils2.escapeHtml(t.name || "\u672A\u547D\u540D");
               const prompt2 = Utils2.escapeHtml((t.prompt || "").substring(0, 50));
-              return `<div class="ldb-setting-row" style="justify-content: space-between; padding: 4px 0;">
+              return `<div class="ldb-setting-row" style="justify-content: space-between; padding: var(--ldb-ui-spacing-3xs) 0;">
                     <span style="font-size: 12px;">${icon} <strong>${name}</strong> <span style="color: var(--ldb-ui-muted);">${prompt2}${t.prompt && t.prompt.length > 50 ? "..." : ""}</span></span>
-                    <button class="ldb-btn ldb-btn-secondary" data-template-delete="${i}" style="padding: 2px 6px; font-size: 11px;">\u5220\u9664</button>
+                    <button class="ldb-btn ldb-btn-secondary" data-template-delete="${i}" style="padding: var(--ldb-ui-spacing-3xs) var(--ldb-ui-spacing-sm); font-size: var(--ldb-ui-font-size-xs);">\u5220\u9664</button>
                 </div>`;
             }).join("");
             list.querySelectorAll("[data-template-delete]").forEach((btn) => {
@@ -18426,7 +23781,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { UICommandService } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
-      var { AIAssistant: AIAssistant2 } = require_ai();
+      var { AIAssistant: AIAssistant2, getAISettings } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -18457,7 +23812,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 align-items: center;
                 justify-content: center;
                 font-size: var(--ldb-ui-font-size-2xl);
-                transition: transform 0.18s ease, box-shadow 0.18s ease;
+                /* Intentional: panel entrance timing per design spec v3.1 */
+                transition: transform 0.18s var(--ldb-ui-ease-out), box-shadow 0.18s var(--ldb-ui-ease-out);
                 user-select: none;
             }
 
@@ -18498,7 +23854,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 overflow: hidden;
                 transform: translateY(12px);
                 opacity: 0;
-                transition: transform 0.22s ease, opacity 0.22s ease;
+                /* Intentional: panel exit timing per design spec v3.1 */
+                transition: transform 0.22s var(--ldb-ui-ease-in), opacity 0.22s var(--ldb-ui-ease-in);
             }
 
             .gclip-panel.visible {
@@ -18526,7 +23883,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
                 margin-bottom: var(--ldb-ui-spacing-xl);
             }
 
@@ -18579,7 +23936,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
 
             .gclip-btn-setup {
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.12);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
                 color: var(--ldb-ui-text);
                 font-weight: 650;
             }
@@ -19029,7 +24386,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const apiKey = NotionOAuth2.getAccessToken();
             const exportState = TargetState2.getExportState();
             const imgMode = Storage2.get(CONFIG2.STORAGE_KEYS.IMG_MODE, CONFIG2.DEFAULTS.imgMode);
-            const aiSettings = AIAssistant2.getSettings();
+            const aiSettings = getAISettings();
             const settings = {
               apiKey,
               exportTargetType: exportState.targetType,
@@ -19121,4902 +24478,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
     }
   });
 
-  // src/security/index.js
-  var require_security = __commonJS({
-    "src/security/index.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var { NotionAPI: NotionAPI2 } = require_api();
-      var { CredentialVault: CredentialVault2 } = require_auth();
-      var _resolveUI = () => {
-        try {
-          return require_ui().UI;
-        } catch {
-          return void 0;
-        }
-      };
-      var OperationGuard2 = {
-        _getPermissionName: (level) => {
-          return CONFIG2.PERMISSION_NAMES[level] || `level_${level}`;
-        },
-        _inferActor: (context = {}) => {
-          if (context.actor === "ai" || context.source === "ai-agent-loop" || context.source === "tool") {
-            return "ai";
-          }
-          if (context.actor === "system" || context.source === "system") {
-            return "system";
-          }
-          return "user";
-        },
-        _inferSource: (context = {}) => {
-          return context.source || context.surface || context.origin || "ui";
-        },
-        _buildGuardSnapshot: (operation, decision, context = {}, extras = {}) => {
-          const currentLevel = OperationGuard2.getLevel();
-          const requiredLevel = OperationGuard2.OPERATION_LEVELS[operation];
-          return {
-            decision,
-            permissionLevel: OperationGuard2._getPermissionName(currentLevel),
-            requiredLevel: requiredLevel === void 0 ? "undefined" : OperationGuard2._getPermissionName(requiredLevel),
-            confirmation: extras.confirmation || (OperationGuard2.isDangerous(operation) && OperationGuard2.requiresConfirm() ? "required" : "not_required")
-          };
-        },
-        // 获取当前权限级别
-        getLevel: () => {
-          return Storage2.get(CONFIG2.STORAGE_KEYS.PERMISSION_LEVEL, CONFIG2.DEFAULTS.permissionLevel);
-        },
-        // 设置权限级别
-        setLevel: (level) => {
-          if (!Number.isFinite(level) || !Number.isInteger(level) || level < 0 || level > 3) {
-            throw new Error(`\u65E0\u6548\u7684\u6743\u9650\u7EA7\u522B: ${level}\uFF0C\u5E94\u4E3A 0-3 \u7684\u6574\u6570`);
-          }
-          Storage2.set(CONFIG2.STORAGE_KEYS.PERMISSION_LEVEL, level);
-        },
-        // 是否需要确认
-        requiresConfirm: () => {
-          return Storage2.get(CONFIG2.STORAGE_KEYS.REQUIRE_CONFIRM, CONFIG2.DEFAULTS.requireConfirm);
-        },
-        // 操作所需的最低权限级别
-        OPERATION_LEVELS: {
-          // 只读操作
-          search: 0,
-          fetchPage: 0,
-          fetchBlocks: 0,
-          fetchDatabase: 0,
-          queryDatabase: 0,
-          getUsers: 0,
-          getSelf: 0,
-          getUser: 0,
-          // 标准操作
-          createDatabasePage: 1,
-          updatePage: 1,
-          updateBlock: 1,
-          appendBlocks: 1,
-          updatePageMarkdown: 1,
-          updateDatabase: 1,
-          // 高级操作
-          movePage: 2,
-          duplicatePage: 2,
-          createDatabase: 2,
-          replacePageMarkdown: 2,
-          deletePage: 2,
-          restorePage: 2,
-          deleteBlock: 2,
-          createComment: 1,
-          agentTask: 2
-        },
-        // 危险操作列表（需要额外确认）
-        DANGEROUS_OPERATIONS: ["deletePage", "deleteBlock"],
-        // 检查是否有权限执行操作
-        canExecute: (operation) => {
-          const currentLevel = OperationGuard2.getLevel();
-          const requiredLevel = OperationGuard2.OPERATION_LEVELS[operation];
-          if (requiredLevel === void 0) {
-            console.warn(`OperationGuard: \u64CD\u4F5C "${operation}" \u672A\u5B9A\u4E49\u6743\u9650\u7EA7\u522B\uFF0C\u9ED8\u8BA4\u62D2\u7EDD`);
-            return false;
-          }
-          return currentLevel >= requiredLevel;
-        },
-        // 检查是否为危险操作
-        isDangerous: (operation) => {
-          return OperationGuard2.DANGEROUS_OPERATIONS.includes(operation);
-        },
-        // 执行受保护的操作
-        execute: async (operation, executor, context = {}) => {
-          const actor = OperationGuard2._inferActor(context);
-          const source = OperationGuard2._inferSource(context);
-          const requiredLevelForOp = OperationGuard2.OPERATION_LEVELS[operation];
-          const startedAt = Date.now();
-          if (!OperationGuard2.canExecute(operation)) {
-            const requiredName = CONFIG2.PERMISSION_NAMES[requiredLevelForOp];
-            const denialReason = requiredLevelForOp === void 0 ? `\u672A\u5B9A\u4E49\u6743\u9650\u7EA7\u522B: ${operation}` : `\u6743\u9650\u4E0D\u8DB3\uFF1A\u9700\u8981"${requiredName}"\u53CA\u4EE5\u4E0A\u6743\u9650\u624D\u80FD\u6267\u884C\u6B64\u64CD\u4F5C`;
-            OperationLog2.add({
-              audit_event: "guard.denied",
-              actor,
-              source,
-              guard: OperationGuard2._buildGuardSnapshot(operation, "deny", context, {
-                confirmation: "not_allowed"
-              }),
-              operation: {
-                name: operation,
-                risk: requiredLevelForOp === void 0 ? "unknown" : OperationGuard2._getPermissionName(requiredLevelForOp),
-                trigger: context.trigger || "user_requested_write"
-              },
-              target: OperationLog2.buildTarget(context),
-              payload: OperationLog2.buildPayload(context),
-              result: {
-                status: "denied",
-                reason: denialReason
-              },
-              redaction: OperationLog2.collectRedactionHints(context),
-              operationName: operation,
-              context,
-              status: "failed",
-              error: denialReason,
-              startTime: startedAt,
-              endTime: Date.now()
-            });
-            throw new Error(denialReason);
-          }
-          if (OperationGuard2.isDangerous(operation) && OperationGuard2.requiresConfirm()) {
-            const isPermanent = operation === "deleteBlock";
-            const confirmed = await ConfirmationDialog3.show({
-              title: isPermanent ? "\u26A0\uFE0F \u6C38\u4E45\u5220\u9664\u786E\u8BA4" : "\u5371\u9669\u64CD\u4F5C\u786E\u8BA4",
-              message: isPermanent ? `\u60A8\u5373\u5C06\u6C38\u4E45\u5220\u9664\u5757\uFF0C\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\uFF01` : `\u60A8\u5373\u5C06\u6267\u884C\u5371\u9669\u64CD\u4F5C: ${operation}`,
-              itemName: context.itemName || "\u672A\u77E5\u9879\u76EE",
-              countdown: isPermanent ? 8 : 5,
-              // 永久删除需要更长倒计时
-              requireNameInput: true
-            });
-            if (!confirmed) {
-              OperationLog2.add({
-                audit_event: "guard.denied",
-                actor,
-                source,
-                guard: OperationGuard2._buildGuardSnapshot(operation, "deny", context, {
-                  confirmation: "cancelled"
-                }),
-                operation: {
-                  name: operation,
-                  risk: OperationGuard2._getPermissionName(requiredLevelForOp),
-                  trigger: context.trigger || "user_requested_write"
-                },
-                target: OperationLog2.buildTarget(context),
-                payload: OperationLog2.buildPayload(context),
-                result: {
-                  status: "cancelled",
-                  reason: "user_cancelled_confirmation"
-                },
-                redaction: OperationLog2.collectRedactionHints(context),
-                operationName: operation,
-                context,
-                status: "failed",
-                error: "\u64CD\u4F5C\u5DF2\u53D6\u6D88",
-                startTime: startedAt,
-                endTime: Date.now()
-              });
-              throw new Error("\u64CD\u4F5C\u5DF2\u53D6\u6D88");
-            }
-          }
-          OperationLog2.add({
-            audit_event: "guard.decision",
-            actor,
-            source,
-            guard: OperationGuard2._buildGuardSnapshot(operation, "allow", context),
-            operation: {
-              name: operation,
-              risk: OperationGuard2._getPermissionName(requiredLevelForOp),
-              trigger: context.trigger || "user_requested_write"
-            },
-            target: OperationLog2.buildTarget(context),
-            payload: OperationLog2.buildPayload(context),
-            result: {
-              status: "allow"
-            },
-            redaction: OperationLog2.collectRedactionHints(context),
-            operationName: operation,
-            context,
-            status: "success",
-            startTime: startedAt,
-            endTime: Date.now()
-          });
-          const logEntry = {
-            operationName: operation,
-            context,
-            startTime: startedAt,
-            status: "pending"
-          };
-          try {
-            const result = await executor();
-            logEntry.status = "success";
-            logEntry.endTime = Date.now();
-            OperationLog2.add({
-              audit_event: OperationLog2.inferAuditEvent(operation, "success"),
-              actor,
-              source,
-              guard: OperationGuard2._buildGuardSnapshot(operation, "allow", context),
-              operation: {
-                name: operation,
-                risk: OperationGuard2._getPermissionName(requiredLevelForOp),
-                trigger: context.trigger || "user_requested_write"
-              },
-              target: OperationLog2.buildTarget(context),
-              payload: OperationLog2.buildPayload(context),
-              result: {
-                status: "success"
-              },
-              redaction: OperationLog2.collectRedactionHints(context),
-              ...logEntry
-            });
-            if (OperationGuard2.isDangerous(operation)) {
-              if (operation === "deletePage") {
-                UndoManager2.register({
-                  operation,
-                  undoAction: () => NotionAPI2.restorePage(context.pageId, context.apiKey),
-                  description: `\u6062\u590D\u9875\u9762: ${context.itemName || context.pageId}`
-                });
-              } else if (operation === "deleteBlock") {
-                console.warn(`OperationGuard: deleteBlock \u662F\u6C38\u4E45\u64CD\u4F5C\uFF0C\u65E0\u6CD5\u64A4\u9500`);
-              }
-            }
-            return result;
-          } catch (error) {
-            logEntry.status = "failed";
-            logEntry.error = error.message;
-            logEntry.endTime = Date.now();
-            OperationLog2.add({
-              audit_event: OperationLog2.inferAuditEvent(operation, "failed"),
-              actor,
-              source,
-              guard: OperationGuard2._buildGuardSnapshot(operation, "allow", context),
-              operation: {
-                name: operation,
-                risk: OperationGuard2._getPermissionName(requiredLevelForOp),
-                trigger: context.trigger || "user_requested_write"
-              },
-              target: OperationLog2.buildTarget(context),
-              payload: OperationLog2.buildPayload(context),
-              result: {
-                status: "failed",
-                reason: error.message
-              },
-              redaction: OperationLog2.collectRedactionHints(context),
-              ...logEntry
-            });
-            throw error;
-          }
-        }
-      };
-      var OperationLog2 = {
-        AUDIT_EVENT_BY_OPERATION: Object.freeze({
-          createDatabasePage: "write.page.created",
-          createComment: "write.page.created",
-          appendBlocks: "write.block.inserted",
-          updateBlock: "write.block.inserted",
-          updatePage: "write.property.updated",
-          updatePageMarkdown: "write.property.updated",
-          updateDatabase: "write.property.updated",
-          createDatabase: "write.page.created",
-          movePage: "write.property.updated",
-          duplicatePage: "write.page.created",
-          replacePageMarkdown: "write.block.inserted",
-          deletePage: "page.archived",
-          restorePage: "page.restored",
-          deleteBlock: "block.deleted",
-          undo: "write.property.updated"
-        }),
-        SENSITIVE_KEY_HINTS: Object.freeze([
-          { pattern: /token/i, label: "token" },
-          { pattern: /api[_-]?key/i, label: "apiKey" },
-          { pattern: /secret/i, label: "clientSecret" },
-          { pattern: /refresh/i, label: "refreshToken" },
-          { pattern: /passphrase/i, label: "passphrase" }
-        ]),
-        // 获取是否启用日志
-        isEnabled: () => {
-          return Storage2.get(CONFIG2.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG2.DEFAULTS.enableAuditLog);
-        },
-        createEventId: () => {
-          const bytes = new Uint8Array(4);
-          if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-            crypto.getRandomValues(bytes);
-          }
-          const randomPart = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-          return `evt_${Date.now().toString(36)}_${randomPart}`;
-        },
-        appendRedaction: (list, label) => {
-          if (!label) return;
-          if (!list.includes(label)) list.push(label);
-        },
-        collectRedactionHints: (context = {}) => {
-          const redaction = [];
-          Object.entries(context || {}).forEach(([key, value]) => {
-            if (value == null || value === "") return;
-            OperationLog2.SENSITIVE_KEY_HINTS.forEach(({ pattern, label }) => {
-              if (pattern.test(key)) OperationLog2.appendRedaction(redaction, label);
-            });
-          });
-          ["pageId", "databaseId", "blockId", "commentId", "targetId", "parentPageId", "folderId"].forEach((key) => {
-            if (context == null ? void 0 : context[key]) OperationLog2.appendRedaction(redaction, "target.id");
-          });
-          return redaction;
-        },
-        redactTargetId: (value, redaction = []) => {
-          if (!value) return "";
-          OperationLog2.appendRedaction(redaction, "target.id");
-          const normalized = String(value).trim();
-          if (normalized.length <= 8) return "<redacted>";
-          return `${normalized.slice(0, 4)}\u2026${normalized.slice(-4)}`;
-        },
-        buildTarget: (context = {}, redaction = OperationLog2.collectRedactionHints(context)) => {
-          if (context.blockId) {
-            return {
-              type: "notion_block",
-              id: OperationLog2.redactTargetId(context.blockId, redaction),
-              title: context.itemName || ""
-            };
-          }
-          if (context.pageId || context.parentPageId) {
-            return {
-              type: "notion_page",
-              id: OperationLog2.redactTargetId(context.pageId || context.parentPageId, redaction),
-              title: context.itemName || ""
-            };
-          }
-          if (context.databaseId) {
-            return {
-              type: "notion_database",
-              id: OperationLog2.redactTargetId(context.databaseId, redaction),
-              title: context.itemName || ""
-            };
-          }
-          if (context.commentId) {
-            return {
-              type: "notion_comment",
-              id: OperationLog2.redactTargetId(context.commentId, redaction),
-              title: context.itemName || ""
-            };
-          }
-          return context.itemName ? { type: "generic", title: context.itemName } : null;
-        },
-        buildPayload: (context = {}, redaction = OperationLog2.collectRedactionHints(context)) => {
-          const payload = {};
-          if (context.query) payload.query = Utils2.truncateText(String(context.query), 120);
-          if (context.content) payload.contentPreview = Utils2.truncateText(String(context.content), 120);
-          if (context.description) payload.description = Utils2.truncateText(String(context.description), 120);
-          if (context.folderId) payload.folderId = OperationLog2.redactTargetId(context.folderId, redaction);
-          if (context.targetType) payload.targetType = context.targetType;
-          if (context.blockCount != null) payload.blockCount = context.blockCount;
-          if (Array.isArray(context.propertyNames)) payload.propertyNames = context.propertyNames.slice(0, 12);
-          return Object.keys(payload).length > 0 ? payload : null;
-        },
-        inferAuditEvent: (operation, status = "success") => {
-          const mapped = OperationLog2.AUDIT_EVENT_BY_OPERATION[operation];
-          if (mapped) return mapped;
-          return status === "failed" ? "import.failed" : "import.completed";
-        },
-        normalizeAuditEntry: (entry = {}) => {
-          var _a, _b, _c;
-          const context = entry.context || {};
-          const redaction = Array.isArray(entry.redaction) ? [...entry.redaction] : OperationLog2.collectRedactionHints(context);
-          const operationName = entry.operationName || (typeof entry.operation === "string" ? entry.operation : ((_a = entry.operation) == null ? void 0 : _a.name) || "");
-          return {
-            audit_event: entry.audit_event || (operationName ? OperationLog2.inferAuditEvent(operationName, entry.status) : "operation.logged"),
-            event_id: entry.event_id || OperationLog2.createEventId(),
-            at: entry.at || (/* @__PURE__ */ new Date()).toISOString(),
-            actor: entry.actor || context.actor || "user",
-            source: entry.source || context.source || "ui",
-            guard: entry.guard || null,
-            operation: typeof entry.operation === "string" ? {
-              name: entry.operation,
-              risk: "unknown",
-              trigger: context.trigger || "manual"
-            } : entry.operation || (operationName ? {
-              name: operationName,
-              risk: "unknown",
-              trigger: context.trigger || "manual"
-            } : null),
-            target: entry.target === void 0 ? OperationLog2.buildTarget(context, redaction) : entry.target,
-            payload: entry.payload === void 0 ? OperationLog2.buildPayload(context, redaction) : entry.payload,
-            result: entry.result || {
-              status: entry.status || "success",
-              reason: entry.error || ""
-            },
-            redaction,
-            id: entry.id || OperationLog2.createEventId(),
-            timestamp: entry.timestamp || (/* @__PURE__ */ new Date()).toISOString(),
-            operationName,
-            status: entry.status || ((_b = entry.result) == null ? void 0 : _b.status) || "success",
-            error: entry.error || ((_c = entry.result) == null ? void 0 : _c.reason) || "",
-            context,
-            startTime: entry.startTime || Date.now(),
-            endTime: entry.endTime || entry.startTime || Date.now()
-          };
-        },
-        // 敏感字段脱敏：将所有 SENSITIVE_KEYS 对应的值替换为 ***REDACTED***
-        redactSensitiveFields: (entry) => {
-          if (!entry || typeof entry !== "object") return entry;
-          const redacted = { ...entry };
-          const context = redacted.context || {};
-          const sensitiveKeys = CredentialVault2 && CredentialVault2.SENSITIVE_KEYS ? CredentialVault2.SENSITIVE_KEYS : /* @__PURE__ */ new Set();
-          for (const key of sensitiveKeys) {
-            if (Object.prototype.hasOwnProperty.call(context, key)) {
-              context[key] = "***REDACTED***";
-            }
-          }
-          redacted.context = context;
-          return redacted;
-        },
-        // 获取所有日志
-        getAll: () => {
-          const data = Storage2.get(CONFIG2.STORAGE_KEYS.OPERATION_LOG, "[]");
-          try {
-            return JSON.parse(data);
-          } catch {
-            return [];
-          }
-        },
-        // 添加日志条目
-        add: (entry, options = {}) => {
-          const { force = false } = options;
-          if (!force && !OperationLog2.isEnabled()) return;
-          const logs = OperationLog2.getAll();
-          const logEntry = OperationLog2.redactSensitiveFields(OperationLog2.normalizeAuditEntry(entry));
-          logs.unshift(logEntry);
-          if (logs.length > CONFIG2.API.MAX_LOG_ENTRIES) {
-            logs.length = CONFIG2.API.MAX_LOG_ENTRIES;
-          }
-          Storage2.set(CONFIG2.STORAGE_KEYS.OPERATION_LOG, JSON.stringify(logs));
-          const UI2 = _resolveUI();
-          if (UI2 && UI2.updateLogPanel) {
-            UI2.updateLogPanel();
-          }
-          return logEntry;
-        },
-        // 清空日志
-        clear: () => {
-          Storage2.set(CONFIG2.STORAGE_KEYS.OPERATION_LOG, "[]");
-          const UI2 = _resolveUI();
-          if (UI2 && UI2.updateLogPanel) {
-            UI2.updateLogPanel();
-          }
-        },
-        // 获取最近N条日志
-        getRecent: (count = 10) => {
-          return OperationLog2.getAll().slice(0, count);
-        },
-        // 格式化日志条目用于显示
-        formatEntry: (entry) => {
-          var _a, _b, _c;
-          const time = new Date(entry.at || entry.timestamp).toLocaleString("zh-CN");
-          const status = ((_a = entry.result) == null ? void 0 : _a.status) || entry.status;
-          const statusIcon = status === "success" || status === "allow" ? "\u2705" : status === "failed" || status === "denied" || status === "cancelled" ? "\u274C" : "\u23F3";
-          const duration = entry.endTime ? `${entry.endTime - entry.startTime}ms` : "-";
-          return {
-            time,
-            statusIcon,
-            operation: entry.audit_event || entry.operationName || ((_b = entry.operation) == null ? void 0 : _b.name) || entry.operation,
-            status,
-            duration,
-            error: entry.error || ((_c = entry.result) == null ? void 0 : _c.reason),
-            context: entry.context
-          };
-        }
-      };
-      var ConfirmationDialog3 = {
-        dialogElement: null,
-        // 显示确认对话框
-        show: (options) => {
-          return new Promise((resolve) => {
-            const {
-              title = "\u786E\u8BA4\u64CD\u4F5C",
-              message = "\u786E\u5B9A\u8981\u6267\u884C\u6B64\u64CD\u4F5C\u5417\uFF1F",
-              itemName = "",
-              countdown = 5,
-              requireNameInput = false
-            } = options;
-            const escapeHtml = Utils2.escapeHtml;
-            const dialog = document.createElement("div");
-            dialog.className = "ldb-confirm-overlay";
-            dialog.innerHTML = `
-                <div class="ldb-confirm-dialog">
-                    <div class="ldb-confirm-header">
-                        <span class="ldb-confirm-icon">\u26A0\uFE0F</span>
-                        <span class="ldb-confirm-title">${escapeHtml(title)}</span>
-                    </div>
-                    <div class="ldb-confirm-body">
-                        <p class="ldb-confirm-message">${escapeHtml(message)}</p>
-                        ${itemName ? `<p class="ldb-confirm-item">\u76EE\u6807: <strong>${escapeHtml(itemName)}</strong></p>` : ""}
-                        ${requireNameInput ? `
-                            <div class="ldb-confirm-input-group">
-                                <label>\u8BF7\u8F93\u5165\u540D\u79F0\u786E\u8BA4:</label>
-                                <input type="text" class="ldb-confirm-input" placeholder="${escapeHtml(itemName)}" id="ldb-confirm-name-input">
-                                <div class="ldb-confirm-hint">\u8BF7\u8F93\u5165 "${escapeHtml(itemName)}" \u4EE5\u786E\u8BA4\u64CD\u4F5C</div>
-                            </div>
-                        ` : ""}
-                    </div>
-                    <div class="ldb-confirm-footer">
-                        <div class="ldb-confirm-countdown-bar" id="ldb-confirm-countdown-bar">
-                            <div class="ldb-confirm-countdown-fill" id="ldb-confirm-countdown-fill"></div>
-                        </div>
-                        <button class="ldb-btn ldb-btn-secondary" id="ldb-confirm-cancel">\u53D6\u6D88</button>
-                        <button class="ldb-btn ldb-btn-danger" id="ldb-confirm-ok" disabled>
-                            \u786E\u8BA4 (<span id="ldb-confirm-countdown">${countdown}</span>)
-                        </button>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(dialog);
-            ConfirmationDialog3.dialogElement = dialog;
-            const okBtn = dialog.querySelector("#ldb-confirm-ok");
-            const cancelBtn = dialog.querySelector("#ldb-confirm-cancel");
-            const countdownEl = dialog.querySelector("#ldb-confirm-countdown");
-            const nameInput = dialog.querySelector("#ldb-confirm-name-input");
-            let remaining = countdown;
-            let canConfirm = !requireNameInput;
-            const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
-            if (countdownFill) {
-              requestAnimationFrame(() => {
-                countdownFill.style.width = "0%";
-                countdownFill.style.transition = `width ${countdown}s linear`;
-              });
-            }
-            const timer = setInterval(() => {
-              remaining--;
-              countdownEl.textContent = remaining;
-              if (remaining <= 0) {
-                clearInterval(timer);
-                countdownEl.parentElement.textContent = "\u786E\u8BA4";
-                if (canConfirm) {
-                  okBtn.disabled = false;
-                }
-              }
-            }, 1e3);
-            dialog._countdownTimer = timer;
-            if (nameInput) {
-              nameInput.oninput = () => {
-                canConfirm = nameInput.value.trim() === itemName;
-                if (remaining <= 0 && canConfirm) {
-                  okBtn.disabled = false;
-                } else {
-                  okBtn.disabled = true;
-                }
-              };
-              nameInput.focus();
-            }
-            cancelBtn.onclick = () => {
-              clearInterval(timer);
-              dialog.remove();
-              ConfirmationDialog3.dialogElement = null;
-              resolve(false);
-            };
-            okBtn.onclick = () => {
-              if (okBtn.disabled) return;
-              clearInterval(timer);
-              dialog.remove();
-              ConfirmationDialog3.dialogElement = null;
-              resolve(true);
-            };
-            const escHandler = (e) => {
-              if (e.key === "Escape") {
-                clearInterval(timer);
-                dialog.remove();
-                ConfirmationDialog3.dialogElement = null;
-                document.removeEventListener("keydown", escHandler);
-                resolve(false);
-              }
-            };
-            document.addEventListener("keydown", escHandler);
-          });
-        },
-        // 关闭对话框
-        close: () => {
-          if (ConfirmationDialog3.dialogElement) {
-            if (ConfirmationDialog3.dialogElement._countdownTimer) {
-              clearInterval(ConfirmationDialog3.dialogElement._countdownTimer);
-            }
-            ConfirmationDialog3.dialogElement.remove();
-            ConfirmationDialog3.dialogElement = null;
-          }
-        }
-      };
-      var UndoManager2 = {
-        pendingUndo: null,
-        toastElement: null,
-        timeoutId: null,
-        // 注册可撤销的操作
-        register: (undoAction) => {
-          UndoManager2.clear();
-          UndoManager2.pendingUndo = {
-            ...undoAction,
-            registeredAt: Date.now()
-          };
-          UndoManager2.showToast(undoAction.description);
-          UndoManager2.timeoutId = setTimeout(() => {
-            UndoManager2.clear();
-          }, CONFIG2.API.UNDO_TIMEOUT);
-        },
-        // 执行撤销
-        execute: async () => {
-          var _a, _b;
-          if (!UndoManager2.pendingUndo) return false;
-          try {
-            const description = ((_a = UndoManager2.pendingUndo) == null ? void 0 : _a.description) || "";
-            await UndoManager2.pendingUndo.undoAction();
-            UndoManager2.hideToast();
-            UndoManager2.clear();
-            OperationLog2.add({
-              audit_event: OperationLog2.inferAuditEvent("undo", "success"),
-              actor: "user",
-              source: "undo-manager",
-              operation: {
-                name: "undo",
-                risk: "standard",
-                trigger: "user_requested_undo"
-              },
-              payload: {
-                description: Utils2.truncateText(description, 120)
-              },
-              result: {
-                status: "success"
-              },
-              redaction: [],
-              operationName: "undo",
-              context: { description },
-              startTime: Date.now(),
-              endTime: Date.now(),
-              status: "success"
-            });
-            return true;
-          } catch (error) {
-            console.error("[LD-Notion] \u64A4\u9500\u5931\u8D25:", error);
-            const description = ((_b = UndoManager2.pendingUndo) == null ? void 0 : _b.description) || "";
-            OperationLog2.add({
-              audit_event: OperationLog2.inferAuditEvent("undo", "failed"),
-              actor: "user",
-              source: "undo-manager",
-              operation: {
-                name: "undo",
-                risk: "standard",
-                trigger: "user_requested_undo"
-              },
-              payload: {
-                description: Utils2.truncateText(description, 120)
-              },
-              result: {
-                status: "failed",
-                reason: error.message
-              },
-              redaction: [],
-              operationName: "undo",
-              context: { description },
-              startTime: Date.now(),
-              endTime: Date.now(),
-              status: "failed",
-              error: error.message
-            });
-            return false;
-          }
-        },
-        // 清除待撤销操作
-        clear: () => {
-          if (UndoManager2.timeoutId) {
-            clearTimeout(UndoManager2.timeoutId);
-            UndoManager2.timeoutId = null;
-          }
-          UndoManager2.pendingUndo = null;
-          UndoManager2.hideToast();
-        },
-        // 显示撤销提示 toast
-        showToast: (message) => {
-          UndoManager2.hideToast();
-          const toast = document.createElement("div");
-          toast.className = "ldb-undo-toast";
-          const escapedMsg = Utils2.escapeHtml(message);
-          toast.innerHTML = `
-            <span class="ldb-undo-message">${escapedMsg}</span>
-            <button class="ldb-undo-btn" id="ldb-undo-action">\u64A4\u9500</button>
-            <div class="ldb-undo-progress">
-                <div class="ldb-undo-progress-bar"></div>
-            </div>
-        `;
-          document.body.appendChild(toast);
-          UndoManager2.toastElement = toast;
-          toast.querySelector("#ldb-undo-action").onclick = async () => {
-            const UI2 = _resolveUI();
-            const success = await UndoManager2.execute();
-            if (success) {
-              if (UI2) UI2.showStatus("\u64A4\u9500\u6210\u529F", "success");
-            } else {
-              if (UI2) UI2.showStatus("\u64A4\u9500\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u68C0\u67E5 Notion \u4E2D\u7684\u53D8\u66F4", "error");
-            }
-          };
-          requestAnimationFrame(() => {
-            toast.classList.add("visible");
-          });
-        },
-        // 隐藏撤销提示
-        hideToast: () => {
-          if (UndoManager2._hideTimeout) clearTimeout(UndoManager2._hideTimeout);
-          if (UndoManager2.toastElement) {
-            UndoManager2.toastElement.classList.remove("visible");
-            UndoManager2._hideTimeout = setTimeout(() => {
-              if (UndoManager2.toastElement) {
-                UndoManager2.toastElement.remove();
-                UndoManager2.toastElement = null;
-              }
-            }, 300);
-          }
-        },
-        // 检查是否有待撤销操作
-        hasPending: () => {
-          return UndoManager2.pendingUndo !== null;
-        },
-        // 获取剩余撤销时间
-        getRemainingTime: () => {
-          if (!UndoManager2.pendingUndo) return 0;
-          const elapsed = Date.now() - UndoManager2.pendingUndo.registeredAt;
-          return Math.max(0, CONFIG2.API.UNDO_TIMEOUT - elapsed);
-        }
-      };
-      module.exports = { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 };
-    }
-  });
-
-  // src/ai/AgentTrace.js
-  var require_AgentTrace = __commonJS({
-    "src/ai/AgentTrace.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var AgentTrace = {
-        MAX_TRACES: 50,
-        MAX_USER_INPUT: 500,
-        MAX_RESULT_PREVIEW: 200,
-        MAX_FINAL_RESPONSE: 1e3,
-        _key() {
-          return CONFIG2.STORAGE_KEYS.AI_TRACE_LOG;
-        },
-        _load() {
-          const raw = GM_getValue(this._key(), "[]");
-          try {
-            const arr = JSON.parse(raw);
-            return Array.isArray(arr) ? arr : [];
-          } catch {
-            return [];
-          }
-        },
-        _save(traces) {
-          GM_setValue(this._key(), JSON.stringify(traces));
-        },
-        /**
-         * 创建一条新 trace（runAgentLoop 入口调用）。
-         * @param {string} userInput
-         * @returns {object} trace 对象（尚未持久化，调 persist 落盘）
-         */
-        create(userInput) {
-          const ts = (/* @__PURE__ */ new Date()).toISOString();
-          const trimmedInput = String(userInput || "").slice(0, this.MAX_USER_INPUT);
-          return {
-            id: `trace-${ts}-${Math.random().toString(36).slice(2, 6)}`,
-            timestamp: ts,
-            userInput: trimmedInput,
-            iterations: 0,
-            toolCalls: [],
-            results: [],
-            finalResponse: "",
-            latencyMs: 0,
-            errors: [],
-            status: "in_progress",
-            _startedAt: Date.now()
-          };
-        },
-        /**
-         * 记录一次工具调用（_executeAgentToolCall 前后调用）。
-         */
-        recordToolCall(trace, toolCall, iter) {
-          if (!trace) return;
-          trace.toolCalls.push({
-            tool: (toolCall == null ? void 0 : toolCall.tool) || "unknown",
-            thought: (toolCall == null ? void 0 : toolCall.thought) ? String(toolCall.thought).slice(0, 200) : void 0,
-            iter
-          });
-        },
-        /**
-         * 记录一次工具结果（截断预览，不存原始大对象防存储膨胀）。
-         */
-        recordResult(trace, toolCall, result, iter) {
-          if (!trace) return;
-          const status = result && result.status || "ok";
-          let preview = "";
-          if (result && result.message != null) {
-            preview = String(result.message).slice(0, this.MAX_RESULT_PREVIEW);
-          } else if (typeof result === "string") {
-            preview = result.slice(0, this.MAX_RESULT_PREVIEW);
-          }
-          trace.results.push({ tool: (toolCall == null ? void 0 : toolCall.tool) || "unknown", status, preview, iter });
-        },
-        /**
-         * 记录错误（AI 调用失败/工具异常）。
-         */
-        recordError(trace, error) {
-          if (!trace) return;
-          const msg = (error == null ? void 0 : error.message) ? String(error.message).slice(0, 300) : String(error).slice(0, 300);
-          trace.errors.push(msg);
-        },
-        /**
-         * 持久化 trace（runAgentLoop 出口调用），rotate 超限丢弃最旧。
-         * @param {object} trace — create() 返回的 trace，已填充 toolCalls/results/finalResponse/status
-         * @param {string} status — "completed" | "failed" | "max_iterations"
-         * @param {string} finalResponse — 最终 AI 回复
-         * @returns {object} 持久化后的 trace（去 _startedAt，补 latencyMs）
-         */
-        persist(trace, status, finalResponse) {
-          if (!trace) return null;
-          trace.status = status || "completed";
-          trace.finalResponse = String(finalResponse || "").slice(0, this.MAX_FINAL_RESPONSE);
-          trace.latencyMs = trace._startedAt ? Date.now() - trace._startedAt : 0;
-          delete trace._startedAt;
-          const traces = this._load();
-          traces.push(trace);
-          while (traces.length > this.MAX_TRACES) {
-            traces.shift();
-          }
-          this._save(traces);
-          return trace;
-        },
-        /**
-         * 读取全部 trace（诊断/测试用）。
-         */
-        list() {
-          return this._load();
-        },
-        /**
-         * 清空所有 trace（测试/重置用）。
-         */
-        clear() {
-          this._save([]);
-        }
-      };
-      module.exports = { AgentTrace };
-    }
-  });
-
-  // src/ai/BlockConverter.js
-  var require_BlockConverter = __commonJS({
-    "src/ai/BlockConverter.js"(exports, module) {
-      "use strict";
-      var { Utils: Utils2 } = require_utils();
-      var BlockConverter = {
-        // markdown 文本 → Notion blocks 数组
-        textToBlocks: (text) => {
-          const blocks = [];
-          const lines = text.split("\n");
-          let inCodeBlock = false;
-          let codeLines = [];
-          let codeLang = "plain text";
-          const LANG_MAP = {
-            js: "javascript",
-            ts: "typescript",
-            py: "python",
-            rb: "ruby",
-            sh: "shell",
-            bash: "shell",
-            zsh: "shell",
-            yml: "yaml",
-            md: "markdown",
-            cs: "c#",
-            cpp: "c++",
-            objc: "objective-c",
-            kt: "kotlin",
-            rs: "rust",
-            go: "go",
-            java: "java",
-            html: "html",
-            css: "css",
-            json: "json",
-            xml: "xml",
-            sql: "sql",
-            r: "r",
-            swift: "swift",
-            scala: "scala",
-            php: "php",
-            perl: "perl",
-            lua: "lua",
-            dart: "dart",
-            dockerfile: "docker",
-            makefile: "makefile",
-            toml: "toml",
-            graphql: "graphql",
-            protobuf: "protobuf",
-            sass: "sass",
-            scss: "scss",
-            less: "less",
-            jsx: "javascript",
-            tsx: "typescript"
-          };
-          const NOTION_LANGS = /* @__PURE__ */ new Set([
-            "abap",
-            "arduino",
-            "bash",
-            "basic",
-            "c",
-            "clojure",
-            "coffeescript",
-            "c++",
-            "c#",
-            "css",
-            "dart",
-            "diff",
-            "docker",
-            "elixir",
-            "elm",
-            "erlang",
-            "flow",
-            "fortran",
-            "f#",
-            "gherkin",
-            "glsl",
-            "go",
-            "graphql",
-            "groovy",
-            "haskell",
-            "html",
-            "java",
-            "javascript",
-            "json",
-            "julia",
-            "kotlin",
-            "latex",
-            "less",
-            "lisp",
-            "livescript",
-            "lua",
-            "makefile",
-            "markdown",
-            "markup",
-            "matlab",
-            "mermaid",
-            "nix",
-            "objective-c",
-            "ocaml",
-            "pascal",
-            "perl",
-            "php",
-            "plain text",
-            "powershell",
-            "prolog",
-            "protobuf",
-            "python",
-            "r",
-            "reason",
-            "ruby",
-            "rust",
-            "sass",
-            "scala",
-            "scheme",
-            "scss",
-            "shell",
-            "sql",
-            "swift",
-            "typescript",
-            "vb.net",
-            "verilog",
-            "vhdl",
-            "visual basic",
-            "webassembly",
-            "xml",
-            "yaml",
-            "java/c/c++/c#"
-          ]);
-          const normalizeLanguage2 = (lang) => {
-            const lower = (lang || "").toLowerCase().trim();
-            if (!lower) return "plain text";
-            if (LANG_MAP[lower]) return LANG_MAP[lower];
-            if (NOTION_LANGS.has(lower)) return lower;
-            return "plain text";
-          };
-          const splitLongText = (str) => {
-            const maxLen = 2e3;
-            const chunks = [];
-            if (str.length <= maxLen) {
-              chunks.push({ type: "text", text: { content: str } });
-            } else {
-              let remaining = str;
-              while (remaining.length > 0) {
-                chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
-                remaining = remaining.substring(maxLen);
-              }
-            }
-            return chunks;
-          };
-          for (const line of lines) {
-            if (line.startsWith("```")) {
-              if (inCodeBlock) {
-                const code = codeLines.join("\n");
-                blocks.push({
-                  type: "code",
-                  code: { rich_text: splitLongText(code), language: codeLang }
-                });
-                codeLines = [];
-                inCodeBlock = false;
-              } else {
-                inCodeBlock = true;
-                codeLang = normalizeLanguage2(line.slice(3).trim());
-              }
-              continue;
-            }
-            if (inCodeBlock) {
-              codeLines.push(line);
-              continue;
-            }
-            if (!line.trim()) continue;
-            if (line.startsWith("### ")) {
-              blocks.push({ type: "heading_3", heading_3: { rich_text: splitLongText(line.slice(4)) } });
-            } else if (line.startsWith("## ")) {
-              blocks.push({ type: "heading_2", heading_2: { rich_text: splitLongText(line.slice(3)) } });
-            } else if (line.startsWith("# ")) {
-              blocks.push({ type: "heading_1", heading_1: { rich_text: splitLongText(line.slice(2)) } });
-            } else if (line.trim() === "---" || line.trim() === "***") {
-              blocks.push({ type: "divider", divider: {} });
-            } else if (line.startsWith("> ")) {
-              blocks.push({ type: "quote", quote: { rich_text: splitLongText(line.slice(2)) } });
-            } else if (/^[-*]\s/.test(line)) {
-              blocks.push({ type: "bulleted_list_item", bulleted_list_item: { rich_text: splitLongText(line.replace(/^[-*]\s/, "")) } });
-            } else if (/^\d+\.\s/.test(line)) {
-              blocks.push({ type: "numbered_list_item", numbered_list_item: { rich_text: splitLongText(line.replace(/^\d+\.\s/, "")) } });
-            } else {
-              blocks.push({ type: "paragraph", paragraph: { rich_text: splitLongText(line) } });
-            }
-          }
-          if (inCodeBlock && codeLines.length > 0) {
-            const code = codeLines.join("\n");
-            blocks.push({
-              type: "code",
-              code: { rich_text: splitLongText(code), language: codeLang }
-            });
-          }
-          return blocks;
-        },
-        // Notion block + 新内容 → 更新 payload（按 block 类型分发）
-        buildBlockUpdatePayload: (block, content, options = {}) => {
-          if (!block || !block.type) {
-            throw new Error("\u65E0\u6CD5\u8BC6\u522B\u5757\u7C7B\u578B");
-          }
-          const rawContent = String(content || "");
-          const richText = [{ type: "text", text: { content: String(content || "") } }];
-          const type = block.type;
-          const current = block[type] || {};
-          switch (type) {
-            case "paragraph":
-            case "heading_1":
-            case "heading_2":
-            case "heading_3":
-            case "bulleted_list_item":
-            case "numbered_list_item":
-            case "quote":
-            case "toggle":
-              return {
-                [type]: {
-                  ...current,
-                  rich_text: richText,
-                  color: options.color || current.color
-                }
-              };
-            case "to_do":
-              return {
-                to_do: {
-                  ...current,
-                  rich_text: richText,
-                  checked: typeof options.checked === "boolean" ? options.checked : !!current.checked,
-                  color: options.color || current.color
-                }
-              };
-            case "callout":
-              return {
-                callout: {
-                  ...current,
-                  rich_text: richText,
-                  icon: options.icon || current.icon,
-                  color: options.color || current.color
-                }
-              };
-            case "code":
-              return {
-                code: {
-                  ...current,
-                  rich_text: richText,
-                  caption: Array.isArray(current.caption) ? current.caption : [],
-                  language: current.language || "plain text"
-                }
-              };
-            case "template":
-              return {
-                template: {
-                  ...current,
-                  rich_text: richText
-                }
-              };
-            case "equation":
-              return {
-                equation: {
-                  ...current,
-                  expression: rawContent
-                }
-              };
-            case "bookmark":
-              if (!Utils2.isHttpUrl(rawContent)) {
-                throw new Error("bookmark \u5757\u4EC5\u652F\u6301\u66F4\u65B0\u4E3A http/https URL\u3002");
-              }
-              return {
-                bookmark: {
-                  ...current,
-                  url: rawContent,
-                  caption: Array.isArray(current.caption) ? current.caption : []
-                }
-              };
-            case "embed":
-              if (!Utils2.isHttpUrl(rawContent)) {
-                throw new Error("embed \u5757\u4EC5\u652F\u6301\u66F4\u65B0\u4E3A http/https URL\u3002");
-              }
-              return {
-                embed: {
-                  ...current,
-                  url: rawContent,
-                  caption: Array.isArray(current.caption) ? current.caption : []
-                }
-              };
-            case "link_preview":
-              throw new Error("link_preview \u5757\u662F Notion API \u7684\u53EA\u8BFB\u8FD4\u56DE\u7C7B\u578B\uFF0C\u4E0D\u80FD\u76F4\u63A5\u66F4\u65B0\uFF1B\u8BF7\u6539\u7528 bookmark \u6216 embed \u5757\u3002");
-            case "table_row":
-              throw new Error("table_row \u5757\u5F53\u524D\u65E0\u6CD5\u901A\u8FC7\u5355\u4E00 content \u53C2\u6570\u5B89\u5168\u66F4\u65B0\u5355\u5143\u683C\uFF1B\u8BF7\u6539\u7528\u9875\u9762 Markdown \u7F16\u8F91\u6216\u91CD\u65B0\u63D2\u5165\u8868\u683C\u884C\u3002");
-            default:
-              throw new Error(`\u6682\u4E0D\u652F\u6301\u66F4\u65B0\u5757\u7C7B\u578B\u300C${type}\u300D`);
-          }
-        }
-      };
-      module.exports = { BlockConverter };
-    }
-  });
-
-  // src/ai/NameResolver.js
-  var require_NameResolver = __commonJS({
-    "src/ai/NameResolver.js"(exports, module) {
-      "use strict";
-      var { Utils: Utils2 } = require_utils();
-      var { NotionAPI: NotionAPI2 } = require_api();
-      var NameResolver = {
-        // 数据库名称/ID → { id, name } | { error } | null
-        resolveDatabaseId: async (name, id, apiKey) => {
-          if (id) {
-            const parsedId = Utils2.extractNotionId(id) || String(id).replace(/-/g, "");
-            return { id: parsedId, name: name || id };
-          }
-          const refId = Utils2.extractNotionId(name);
-          if (refId) return { id: refId, name: name || refId };
-          if (!name) return null;
-          const response = await NotionAPI2.search(
-            name,
-            { property: "object", value: "database" },
-            apiKey
-          );
-          const databases = response.results || [];
-          let exactMatch = null;
-          const partialMatches = [];
-          for (const db of databases) {
-            const titleProp = db.title || [];
-            const dbTitle = titleProp.map((t) => t.plain_text).join("");
-            if (!dbTitle) continue;
-            if (dbTitle === name) {
-              exactMatch = { id: db.id.replace(/-/g, ""), name: dbTitle };
-              break;
-            }
-            if (dbTitle.includes(name)) {
-              partialMatches.push({ id: db.id.replace(/-/g, ""), name: dbTitle });
-            }
-          }
-          if (exactMatch) return exactMatch;
-          if (partialMatches.length === 1) return partialMatches[0];
-          if (partialMatches.length > 1) {
-            const names = partialMatches.map((m) => `\u300C${m.name}\u300D`).join("\u3001");
-            return { error: `\u627E\u5230\u591A\u4E2A\u5339\u914D\u7684\u6570\u636E\u5E93: ${names}\uFF0C\u8BF7\u4F7F\u7528\u66F4\u7CBE\u786E\u7684\u540D\u79F0\u3002` };
-          }
-          return null;
-        },
-        // 页面名称/ID → { id, name } | { error } | null
-        resolvePageId: async (name, id, apiKey) => {
-          if (id) {
-            const parsedId = Utils2.extractNotionId(id) || String(id).replace(/-/g, "");
-            return { id: parsedId, name: name || id };
-          }
-          const refId = Utils2.extractNotionId(name);
-          if (refId) return { id: refId, name: name || refId };
-          if (!name) return null;
-          const response = await NotionAPI2.search(
-            name,
-            { property: "object", value: "page" },
-            apiKey
-          );
-          const pages = (response.results || []).filter((p) => !p.archived);
-          let exactMatch = null;
-          const partialMatches = [];
-          for (const page of pages) {
-            const title = Utils2.getPageTitle(page);
-            if (!title) continue;
-            if (title === name) {
-              exactMatch = { id: page.id.replace(/-/g, ""), name: title };
-              break;
-            }
-            if (title.includes(name)) {
-              partialMatches.push({ id: page.id.replace(/-/g, ""), name: title });
-            }
-          }
-          if (exactMatch) return exactMatch;
-          if (partialMatches.length === 1) return partialMatches[0];
-          if (partialMatches.length > 1) {
-            const names = partialMatches.map((m) => `\u300C${m.name}\u300D`).join("\u3001");
-            return { error: `\u627E\u5230\u591A\u4E2A\u5339\u914D\u7684\u9875\u9762: ${names}\uFF0C\u8BF7\u4F7F\u7528\u66F4\u7CBE\u786E\u7684\u540D\u79F0\u3002` };
-          }
-          return null;
-        }
-      };
-      module.exports = { NameResolver };
-    }
-  });
-
-  // src/ai/AgentTools.js
-  var require_AgentTools = __commonJS({
-    "src/ai/AgentTools.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var { TargetState: TargetState2 } = require_auth();
-      var { NotionAPI: NotionAPI2 } = require_api();
-      var { OperationGuard: OperationGuard2 } = require_security();
-      var _AI = null;
-      var AI = () => _AI || (_AI = require_ai().AIAssistant);
-      var _svc = null;
-      var svc = () => _svc || (_svc = require_ai().AIService);
-      var AI_AGENT_TOOLS2 = {
-        // === 读取工具 (Level 0) ===
-        search_workspace: {
-          description: "\u641C\u7D22 Notion \u5DE5\u4F5C\u533A\u4E2D\u7684\u9875\u9762\u6216\u6570\u636E\u5E93",
-          params: "query(\u641C\u7D22\u8BCD), type(\u53EF\u9009:'page'\u6216'database')",
-          level: 0,
-          execute: async (args, settings) => {
-            var _a, _b, _c, _d;
-            const { query = "", type } = args;
-            let filter = null;
-            if (type === "page") filter = { property: "object", value: "page" };
-            else if (type === "database") filter = { property: "object", value: "database" };
-            let allResults = [];
-            let cursor = void 0;
-            let pageCount = 0;
-            do {
-              const response = await NotionAPI2.search(query, filter, settings.notionApiKey, cursor);
-              allResults = allResults.concat(response.results || []);
-              cursor = response.has_more ? response.next_cursor : void 0;
-              pageCount++;
-            } while (cursor && pageCount < 10);
-            const results = allResults;
-            if (results.length === 0) {
-              return query ? `\u6CA1\u6709\u627E\u5230\u5305\u542B\u300C${query}\u300D\u7684\u5185\u5BB9\u3002` : "\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u5185\u5BB9\u3002";
-            }
-            const lines = [];
-            for (const item of results.slice(0, 15)) {
-              if (item.object === "database") {
-                const title = ((_b = (_a = item.title) == null ? void 0 : _a[0]) == null ? void 0 : _b.plain_text) || "\u65E0\u6807\u9898\u6570\u636E\u5E93";
-                const id = ((_c = item.id) == null ? void 0 : _c.replace(/-/g, "")) || "";
-                lines.push(`[\u6570\u636E\u5E93] ${title} (ID: ${id})`);
-              } else {
-                const title = Utils2.getPageTitle(item);
-                const id = ((_d = item.id) == null ? void 0 : _d.replace(/-/g, "")) || "";
-                const url = item.url || "";
-                lines.push(`[\u9875\u9762] ${title} (ID: ${id}, URL: ${url})`);
-              }
-            }
-            return AI()._formatToolResult({
-              title: "\u5DE5\u4F5C\u533A\u641C\u7D22\u7ED3\u679C",
-              fields: [
-                { label: "\u603B\u6570", value: results.length },
-                { label: "\u663E\u793A", value: Math.min(15, results.length) },
-                { label: "\u5BF9\u8C61\u7C7B\u578B", value: type || "all" }
-              ],
-              bullets: lines
-            });
-          }
-        },
-        fetch_notion_object: {
-          description: "\u6839\u636E\u9875\u9762/\u6570\u636E\u5E93\u540D\u79F0\u3001URL \u6216 ID \u83B7\u53D6\u5BF9\u8C61\u8BE6\u60C5",
-          params: "reference(\u540D\u79F0/URL/ID), type(\u53EF\u9009:'page'|'database')",
-          level: 0,
-          execute: async (args, settings) => {
-            var _a, _b, _c, _d, _e, _f, _g, _h, _i;
-            const { reference, type } = args;
-            if (!reference) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B reference\u3002";
-            if (type === "database") {
-              const resolved2 = await AI()._resolveDatabaseId(reference, null, settings.notionApiKey);
-              if (resolved2 == null ? void 0 : resolved2.error) return `\u9519\u8BEF: ${resolved2.error}`;
-              if (!resolved2) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${reference}\u300D\u3002`;
-              const database = await NotionAPI2.fetchDatabase(resolved2.id, settings.notionApiKey);
-              const title2 = ((_a = database.title) == null ? void 0 : _a.map((t) => t.plain_text).join("")) || resolved2.name || "\u672A\u547D\u540D\u6570\u636E\u5E93";
-              const propertyNames = Object.keys(database.properties || {});
-              return AI()._formatToolResult({
-                title: "Notion \u5BF9\u8C61\u8BE6\u60C5",
-                fields: [
-                  { label: "\u5BF9\u8C61\u7C7B\u578B", value: "database" },
-                  { label: "\u6807\u9898", value: title2 },
-                  { label: "ID", value: ((_b = database.id) == null ? void 0 : _b.replace(/-/g, "")) || resolved2.id },
-                  { label: "URL", value: database.url || "-" },
-                  { label: "\u5C5E\u6027\u6570", value: propertyNames.length },
-                  { label: "\u5C5E\u6027", value: propertyNames.join(", ") || "-" }
-                ]
-              });
-            }
-            const resolved = await AI()._resolvePageId(reference, null, settings.notionApiKey);
-            if (resolved == null ? void 0 : resolved.error) return `\u9519\u8BEF: ${resolved.error}`;
-            if (!resolved) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${reference}\u300D\u3002`;
-            const page = await NotionAPI2.fetchPage(resolved.id, settings.notionApiKey);
-            const title = Utils2.getPageTitle(page, resolved.name || "\u672A\u547D\u540D\u9875\u9762");
-            const parentType = ((_c = page.parent) == null ? void 0 : _c.type) || "-";
-            const iconText = ((_d = page.icon) == null ? void 0 : _d.emoji) || ((_f = (_e = page.icon) == null ? void 0 : _e.external) == null ? void 0 : _f.url) || "-";
-            const coverText = ((_h = (_g = page.cover) == null ? void 0 : _g.external) == null ? void 0 : _h.url) || "-";
-            return AI()._formatToolResult({
-              title: "Notion \u5BF9\u8C61\u8BE6\u60C5",
-              fields: [
-                { label: "\u5BF9\u8C61\u7C7B\u578B", value: "page" },
-                { label: "\u6807\u9898", value: title },
-                { label: "ID", value: ((_i = page.id) == null ? void 0 : _i.replace(/-/g, "")) || resolved.id },
-                { label: "URL", value: page.url || "-" },
-                { label: "parent", value: parentType },
-                { label: "icon", value: iconText },
-                { label: "cover", value: coverText },
-                { label: "archived", value: page.archived ? "yes" : "no" }
-              ]
-            });
-          }
-        },
-        fetch_page_blocks: {
-          description: "\u8BFB\u53D6\u9875\u9762\u6216\u5757\u7684\u5757\u7EA7\u7ED3\u6784\uFF0C\u652F\u6301\u6709\u9650\u9012\u5F52\u5C55\u5F00\u5B50\u5757",
-          params: "page_name/page_id(\u9875\u9762,\u53EF\u9009), block_id(\u5757ID,\u53EF\u9009), max_depth(\u9ED8\u8BA42), limit(\u9ED8\u8BA450)",
-          level: 0,
-          execute: async (args, settings) => {
-            const { page_name, page_id, block_id, max_depth = 2, limit = 50 } = args;
-            let rootId = block_id;
-            let targetName = block_id || "";
-            if (!rootId) {
-              const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-              if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
-              if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-              rootId = page.id;
-              targetName = page.name;
-            } else {
-              try {
-                const block = await NotionAPI2.fetchBlock(rootId, settings.notionApiKey);
-                targetName = block.type || rootId;
-              } catch (error) {
-                console.warn("[LD-Notion] \u83B7\u53D6\u5757\u7C7B\u578B\u5931\u8D25:", error);
-                targetName = rootId;
-              }
-            }
-            const depth = Math.max(1, Math.min(Number(max_depth) || 2, 5));
-            const maxNodes = Math.max(1, Math.min(Number(limit) || 50, 200));
-            const blocks = await AI()._collectBlockTree(rootId, settings.notionApiKey, maxNodes, depth);
-            if (blocks.length === 0) {
-              return `\u9875\u9762\u6216\u5757\u300C${targetName}\u300D\u6CA1\u6709\u53EF\u8BFB\u53D6\u7684\u5B50\u5757\u3002`;
-            }
-            return AI()._formatToolResult({
-              title: "\u5757\u7ED3\u6784",
-              fields: [
-                { label: "\u76EE\u6807", value: targetName },
-                { label: "\u5757\u6570", value: blocks.length }
-              ],
-              bullets: blocks.map((block) => AI()._formatBlockSummary(block, block._depth || 0).replace(/^- /, ""))
-            });
-          }
-        },
-        get_comment: {
-          description: "\u6839\u636E\u8BC4\u8BBA ID \u83B7\u53D6\u5355\u6761\u8BC4\u8BBA\u8BE6\u60C5",
-          params: "comment_id(\u8BC4\u8BBAID)",
-          level: 0,
-          execute: async (args, settings) => {
-            var _a, _b, _c, _d, _e, _f;
-            const { comment_id } = args;
-            if (!comment_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B comment_id\u3002";
-            const comment = await NotionAPI2.getComment(comment_id.replace(/-/g, ""), settings.notionApiKey);
-            const text = (comment.rich_text || []).map((rt) => rt.plain_text || "").join("").trim() || "(\u7A7A\u8BC4\u8BBA)";
-            const author = ((_a = comment.created_by) == null ? void 0 : _a.name) || ((_c = (_b = comment.created_by) == null ? void 0 : _b.person) == null ? void 0 : _c.email) || ((_d = comment.created_by) == null ? void 0 : _d.id) || "\u672A\u77E5\u7528\u6237";
-            const discussionId = ((_e = comment.discussion_id) == null ? void 0 : _e.replace(/-/g, "")) || "";
-            return AI()._formatToolResult({
-              title: "\u8BC4\u8BBA\u8BE6\u60C5",
-              fields: [
-                { label: "\u8BC4\u8BBAID", value: ((_f = comment.id) == null ? void 0 : _f.replace(/-/g, "")) || comment_id },
-                { label: "\u8BA8\u8BBAID", value: discussionId || "-" },
-                { label: "\u4F5C\u8005", value: author },
-                { label: "\u521B\u5EFA\u65F6\u95F4", value: comment.created_time || "-" },
-                { label: "\u5185\u5BB9", value: text }
-              ]
-            });
-          }
-        },
-        query_database: {
-          description: "\u67E5\u8BE2\u6570\u636E\u5E93\u7684\u9875\u9762\uFF0C\u652F\u6301\u7B5B\u9009\u548C\u6392\u5E8F\uFF08\u6839\u636EAI\u8BBE\u7F6E\u4E2D\u7684\u76EE\u6807\u6570\u636E\u5E93\u51B3\u5B9A\u67E5\u8BE2\u8303\u56F4\uFF09",
-          params: "filter_field(\u7B5B\u9009\u5B57\u6BB5,\u53EF\u9009), filter_value(\u7B5B\u9009\u503C,\u53EF\u9009), limit(\u6570\u91CF,\u9ED8\u8BA410)",
-          level: 0,
-          execute: async (args, settings) => {
-            const aiTargetState = TargetState2.getEffectiveAITargetState({
-              fallbackDatabaseId: settings.notionDatabaseId
-            });
-            const { filter_field, filter_value, limit = 10 } = args;
-            let filter = null;
-            if (filter_field && filter_value) {
-              const fieldConfig = {
-                "\u4F5C\u8005": { name: "\u4F5C\u8005", type: "rich_text" },
-                "\u5206\u7C7B": { name: "\u5206\u7C7B", type: "rich_text" },
-                "\u6807\u7B7E": { name: "\u6807\u7B7E", type: "multi_select" },
-                "AI\u5206\u7C7B": { name: "AI\u5206\u7C7B", type: "select" }
-              };
-              const config = fieldConfig[filter_field] || { name: filter_field, type: "rich_text" };
-              if (config.type === "select") {
-                filter = { property: config.name, select: { equals: filter_value } };
-              } else if (config.type === "multi_select") {
-                filter = { property: config.name, multi_select: { contains: filter_value } };
-              } else {
-                filter = { property: config.name, rich_text: { contains: filter_value } };
-              }
-            }
-            const queryOneDb = async (dbId) => {
-              const pages = [];
-              let cursor = null;
-              let hasMore = true;
-              let pageCount = 0;
-              while (hasMore && pageCount < 10) {
-                let response;
-                try {
-                  response = await NotionAPI2.queryDatabase(
-                    dbId,
-                    filter,
-                    pageCount === 0 ? [{ property: "\u6536\u85CF\u65F6\u95F4", direction: "descending" }] : null,
-                    cursor,
-                    settings.notionApiKey
-                  );
-                } catch (error) {
-                  console.warn("[LD-Notion] \u6309\u6536\u85CF\u65F6\u95F4\u6392\u5E8F\u67E5\u8BE2\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u521B\u5EFA\u65F6\u95F4\u6392\u5E8F:", error);
-                  response = await NotionAPI2.queryDatabase(
-                    dbId,
-                    filter,
-                    [{ timestamp: "created_time", direction: "descending" }],
-                    cursor,
-                    settings.notionApiKey
-                  );
-                }
-                pages.push(...response.results || []);
-                hasMore = response.has_more;
-                cursor = response.next_cursor;
-                pageCount++;
-              }
-              return pages;
-            };
-            let allPages = [];
-            if (aiTargetState.mode === "all") {
-              let cached;
-              try {
-                cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
-              } catch (error) {
-                console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
-                cached = {};
-              }
-              const databases = cached.databases || [];
-              if (databases.length === 0) return "\u9519\u8BEF: \u8BF7\u5148\u5728 AI \u8BBE\u7F6E\u4E2D\u70B9\u51FB\u300C\u{1F504}\u300D\u5237\u65B0\u6570\u636E\u5E93\u5217\u8868\u3002";
-              const currentKeyHash = settings.notionApiKey ? Utils2.apiKeyHash(settings.notionApiKey) : "";
-              if (cached.apiKeyHash && cached.apiKeyHash !== currentKeyHash) {
-                return "\u9519\u8BEF: \u6570\u636E\u5E93\u5217\u8868\u7F13\u5B58\u4E0E\u5F53\u524D API Key \u4E0D\u5339\u914D\uFF0C\u8BF7\u91CD\u65B0\u70B9\u51FB\u300C\u{1F504}\u300D\u5237\u65B0\u3002";
-              }
-              for (const db of databases) {
-                try {
-                  const pages = await queryOneDb(db.id);
-                  pages.forEach((p) => {
-                    p._sourceDb = db.title;
-                  });
-                  allPages.push(...pages);
-                } catch (error) {
-                  console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25\uFF0C\u8DF3\u8FC7\u65E0\u6743\u9650\u6570\u636E\u5E93:", error);
-                }
-              }
-            } else {
-              const dbId = TargetState2.getEffectiveAIDatabaseId({
-                fallbackDatabaseId: settings.notionDatabaseId,
-                targetValue: aiTargetState.value
-              });
-              if (!dbId) return "\u9519\u8BEF: \u672A\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
-              allPages = await queryOneDb(dbId);
-            }
-            if (allPages.length === 0) {
-              return filter ? `\u6CA1\u6709\u627E\u5230\u5339\u914D ${filter_field}="${filter_value}" \u7684\u9875\u9762\u3002` : "\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u9875\u9762\u3002";
-            }
-            const total = allPages.length;
-            const showCount = Math.min(limit, total);
-            const categoryCount = {};
-            allPages.forEach((page) => {
-              var _a, _b, _c, _d, _e;
-              const cat = ((_b = (_a = page.properties["AI\u5206\u7C7B"]) == null ? void 0 : _a.select) == null ? void 0 : _b.name) || ((_e = (_d = (_c = page.properties["\u5206\u7C7B"]) == null ? void 0 : _c.rich_text) == null ? void 0 : _d[0]) == null ? void 0 : _e.plain_text) || "\u672A\u5206\u7C7B";
-              categoryCount[cat] = (categoryCount[cat] || 0) + 1;
-            });
-            const bullets = allPages.slice(0, showCount).map((page, i) => {
-              var _a, _b, _c, _d;
-              const title = Utils2.getPageTitle(page);
-              const id = ((_a = page.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
-              const author = ((_d = (_c = (_b = page.properties["\u4F5C\u8005"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.plain_text) || "";
-              const sourceDb = page._sourceDb ? ` [\u6765\u6E90: ${page._sourceDb}]` : "";
-              return `${i + 1}. ${title}${author ? ` (\u4F5C\u8005: ${author})` : ""}${sourceDb} [ID: ${id}]`;
-            });
-            return AI()._formatToolResult({
-              title: "\u6570\u636E\u5E93\u67E5\u8BE2\u7ED3\u679C",
-              fields: [
-                { label: "\u603B\u6570", value: total },
-                { label: "\u663E\u793A", value: showCount },
-                { label: "\u5206\u7C7B\u7EDF\u8BA1", value: Object.entries(categoryCount).map(([k, v]) => `${k}(${v})`).join(", ") }
-              ],
-              bullets
-            });
-          }
-        },
-        get_page_content: {
-          description: "\u8BFB\u53D6\u6307\u5B9A\u9875\u9762\u7684\u6587\u5B57\u5185\u5BB9",
-          params: "page_name(\u9875\u9762\u540D) \u6216 page_id(\u9875\u9762ID)",
-          level: 0,
-          execute: async (args, settings) => {
-            const { page_name, page_id } = args;
-            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
-            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
-            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 4e3);
-            return content.trim() ? AI()._formatToolResult({
-              title: "\u9875\u9762\u5185\u5BB9",
-              fields: [
-                { label: "\u76EE\u6807", value: page.name }
-              ],
-              bullets: content.split("\n").filter(Boolean)
-            }) : `\u9875\u9762\u300C${page.name}\u300D\u6CA1\u6709\u6587\u5B57\u5185\u5BB9\u3002`;
-          }
-        },
-        fetch_page_markdown: {
-          description: "\u83B7\u53D6\u6307\u5B9A\u9875\u9762\u7684\u5B8C\u6574 Markdown \u5185\u5BB9",
-          params: "page_name(\u9875\u9762\u540D) \u6216 page_id(\u9875\u9762ID)",
-          level: 0,
-          execute: async (args, settings) => {
-            const { page_name, page_id } = args;
-            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
-            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
-            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            try {
-              const response = await NotionAPI2.fetchPageMarkdown(page.id, settings.notionApiKey);
-              const markdown = String(response.markdown || "").trim();
-              return markdown ? AI()._formatToolResult({
-                title: "\u9875\u9762 Markdown",
-                fields: [
-                  { label: "\u76EE\u6807", value: page.name },
-                  { label: "\u6765\u6E90", value: "Notion Markdown API" }
-                ],
-                bullets: markdown.length > 2e3 ? [`\u5185\u5BB9\u8FC7\u957F\uFF0C\u5DF2\u622A\u65AD\u663E\u793A\u524D 2000 \u5B57\u7B26`, markdown.slice(0, 2e3)] : markdown.split("\n").filter(Boolean)
-              }) : `\u9875\u9762\u300C${page.name}\u300D\u5F53\u524D\u6CA1\u6709 Markdown \u5185\u5BB9\u3002`;
-            } catch (error) {
-              const fallback = await AI()._extractPageContent(page.id, settings.notionApiKey, 6e3);
-              if (!fallback.trim()) {
-                return `\u9875\u9762\u300C${page.name}\u300D\u6CA1\u6709\u53EF\u8BFB\u53D6\u7684\u5185\u5BB9\u3002`;
-              }
-              return AI()._formatToolResult({
-                title: "\u9875\u9762 Markdown",
-                fields: [
-                  { label: "\u76EE\u6807", value: page.name },
-                  { label: "\u6765\u6E90", value: "\u6587\u672C\u56DE\u9000\u63D0\u53D6" }
-                ],
-                bullets: fallback.length > 2e3 ? [`\u5185\u5BB9\u8FC7\u957F\uFF0C\u5DF2\u622A\u65AD\u663E\u793A\u524D 2000 \u5B57\u7B26`, fallback.slice(0, 2e3)] : fallback.split("\n").filter(Boolean)
-              });
-            }
-          }
-        },
-        get_database_schema: {
-          description: "\u83B7\u53D6\u6570\u636E\u5E93\u7684\u5C5E\u6027\u7ED3\u6784",
-          params: "database_name(\u6570\u636E\u5E93\u540D) \u6216 database_id(\u6570\u636E\u5E93ID)",
-          level: 0,
-          execute: async (args, settings) => {
-            var _a, _b, _c, _d, _e, _f;
-            let dbId = args.database_id;
-            let dbName = args.database_name;
-            if (!dbId && !dbName) {
-              dbId = settings.notionDatabaseId;
-              if (!dbId) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B database_name \u6216 database_id\uFF0C\u6216\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
-              dbName = "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93";
-            }
-            if (!dbId && dbName) {
-              const resolved = await AI()._resolveDatabaseId(dbName, null, settings.notionApiKey);
-              if (resolved == null ? void 0 : resolved.error) return `\u9519\u8BEF: ${resolved.error}`;
-              if (!resolved) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${dbName}\u300D\u3002`;
-              dbId = resolved.id;
-              dbName = resolved.name;
-            }
-            const database = await NotionAPI2.fetchDatabase(dbId, settings.notionApiKey);
-            const props = database.properties || {};
-            const title = ((_b = (_a = database.title) == null ? void 0 : _a[0]) == null ? void 0 : _b.plain_text) || dbName || "\u672A\u547D\u540D";
-            const bullets = [];
-            for (const [name, prop] of Object.entries(props)) {
-              let extra = "";
-              if (prop.type === "select" && ((_d = (_c = prop.select) == null ? void 0 : _c.options) == null ? void 0 : _d.length)) {
-                extra = ` (\u9009\u9879: ${prop.select.options.map((o) => o.name).join(", ")})`;
-              } else if (prop.type === "multi_select" && ((_f = (_e = prop.multi_select) == null ? void 0 : _e.options) == null ? void 0 : _f.length)) {
-                extra = ` (\u9009\u9879: ${prop.multi_select.options.map((o) => o.name).join(", ")})`;
-              }
-              bullets.push(`${name}: ${prop.type}${extra}`);
-            }
-            return AI()._formatToolResult({
-              title: "\u6570\u636E\u5E93\u7ED3\u6784",
-              fields: [
-                { label: "\u6807\u9898", value: title },
-                { label: "\u5C5E\u6027\u6570", value: Object.keys(props).length }
-              ],
-              bullets
-            });
-          }
-        },
-        get_comments: {
-          description: "\u83B7\u53D6\u9875\u9762\u6216\u5757\u4E0A\u7684\u672A\u89E3\u51B3\u8BC4\u8BBA",
-          params: "page_name/page_id(\u9875\u9762,\u53EF\u9009), block_id(\u5757ID,\u53EF\u9009), limit(\u6570\u91CF,\u9ED8\u8BA420)",
-          level: 0,
-          execute: async (args, settings) => {
-            const { page_name, page_id, block_id, limit = 20 } = args;
-            let blockId = block_id;
-            let targetName = block_id || "";
-            if (!blockId) {
-              const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-              if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
-              if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-              blockId = page.id;
-              targetName = page.name;
-            }
-            const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 50));
-            const comments = [];
-            let cursor = null;
-            while (comments.length < safeLimit) {
-              const response = await NotionAPI2.listComments(blockId, cursor, Math.min(100, safeLimit), settings.notionApiKey);
-              comments.push(...response.results || []);
-              if (!response.has_more || !response.next_cursor) break;
-              cursor = response.next_cursor;
-            }
-            if (comments.length === 0) {
-              return `\u9875\u9762\u6216\u5757\u300C${targetName || blockId}\u300D\u76EE\u524D\u6CA1\u6709\u672A\u89E3\u51B3\u8BC4\u8BBA\u3002`;
-            }
-            const shown = comments.slice(0, safeLimit).map(AI()._formatCommentSummary);
-            return AI()._formatToolResult({
-              title: "\u8BC4\u8BBA\u5217\u8868",
-              fields: [
-                { label: "\u76EE\u6807", value: targetName || blockId },
-                { label: "\u603B\u6570", value: comments.length },
-                { label: "\u663E\u793A", value: shown.length }
-              ],
-              bullets: shown.map((line) => line.replace(/^- /, ""))
-            });
-          }
-        },
-        list_workspace_users: {
-          description: "\u5217\u51FA\u5F53\u524D\u5DE5\u4F5C\u533A\u4E2D\u96C6\u6210\u53EF\u89C1\u7684\u7528\u6237",
-          params: "limit(\u6570\u91CF,\u9ED8\u8BA420), query(\u6309\u540D\u79F0\u6216\u90AE\u7BB1\u8FC7\u6EE4,\u53EF\u9009)",
-          level: 0,
-          execute: async (args, settings) => {
-            const { limit = 20, query = "" } = args;
-            const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 50));
-            let users = await AI()._collectWorkspaceUsers(settings.notionApiKey, safeLimit);
-            const keyword = String(query || "").trim().toLowerCase();
-            if (keyword) {
-              users = users.filter((user) => {
-                var _a;
-                const name = String(user.name || "").toLowerCase();
-                const email = String(((_a = user.person) == null ? void 0 : _a.email) || "").toLowerCase();
-                return name.includes(keyword) || email.includes(keyword);
-              });
-            }
-            if (users.length === 0) {
-              return keyword ? `\u6CA1\u6709\u627E\u5230\u540D\u79F0\u6216\u90AE\u7BB1\u5305\u542B\u300C${query}\u300D\u7684\u7528\u6237\u3002` : "\u5F53\u524D\u5DE5\u4F5C\u533A\u6CA1\u6709\u53EF\u89C1\u7528\u6237\u3002";
-            }
-            return AI()._formatToolResult({
-              title: "\u5DE5\u4F5C\u533A\u7528\u6237\u5217\u8868",
-              fields: [
-                { label: "\u4EBA\u6570", value: users.length },
-                { label: "\u7B5B\u9009", value: keyword || "-" }
-              ],
-              bullets: users.map(AI()._formatUserSummary)
-            });
-          }
-        },
-        get_current_user: {
-          description: "\u83B7\u53D6\u5F53\u524D Notion \u96C6\u6210\u5BF9\u5E94\u7684 bot / \u5F53\u524D\u7528\u6237\u4FE1\u606F",
-          params: "\u65E0\u9700\u53C2\u6570",
-          level: 0,
-          execute: async (args, settings) => {
-            const user = await NotionAPI2.getSelf(settings.notionApiKey);
-            return AI()._formatToolResult({
-              title: "\u5F53\u524D\u8EAB\u4EFD",
-              fields: [
-                { label: "\u7528\u6237", value: AI()._formatUserSummary(user) }
-              ]
-            });
-          }
-        },
-        get_workspace_user: {
-          description: "\u6839\u636E\u7528\u6237 ID\u3001\u540D\u79F0\u6216\u90AE\u7BB1\u83B7\u53D6\u5DE5\u4F5C\u533A\u7528\u6237\u8BE6\u60C5",
-          params: "user_id(\u7528\u6237ID,\u53EF\u9009), query(\u540D\u79F0\u6216\u90AE\u7BB1,\u53EF\u9009)",
-          level: 0,
-          execute: async (args, settings) => {
-            var _a, _b, _c, _d;
-            const { user_id, query } = args;
-            if (!user_id && !query) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B user_id \u6216 query\u3002";
-            const user = await AI()._resolveUserIdentity(user_id, query, settings.notionApiKey);
-            if (!user) {
-              return `\u6CA1\u6709\u627E\u5230\u7528\u6237\u300C${query || user_id}\u300D\u3002`;
-            }
-            const details = [
-              { label: "\u7528\u6237", value: AI()._formatUserSummary(user) },
-              { label: "bot \u6240\u6709\u8005\u7C7B\u578B", value: ((_b = (_a = user.bot) == null ? void 0 : _a.owner) == null ? void 0 : _b.type) || "-" },
-              { label: "workspace", value: ((_d = (_c = user.bot) == null ? void 0 : _c.owner) == null ? void 0 : _d.workspace_name) || "-" }
-            ];
-            return AI()._formatToolResult({
-              title: "\u5DE5\u4F5C\u533A\u7528\u6237\u8BE6\u60C5",
-              fields: details
-            });
-          }
-        },
-        // === 跨源工具 (Level 0) ===
-        cross_source_search: {
-          description: "\u8DE8\u6E90\u641C\u7D22\uFF1A\u5728 Linux.do\u3001GitHub\u3001\u6D4F\u89C8\u5668\u4E66\u7B7E\u7B49\u591A\u4E2A\u6765\u6E90\u4E2D\u7EDF\u4E00\u641C\u7D22",
-          params: "query(\u641C\u7D22\u8BCD), source(\u53EF\u9009:'linux.do'|'github'|'\u4E66\u7B7E'|'all', \u9ED8\u8BA4all), limit(\u6570\u91CF,\u9ED8\u8BA410)",
-          level: 0,
-          execute: async (args, settings) => {
-            const { query = "", source = "all", limit = 10 } = args;
-            const aiTargetState = TargetState2.getEffectiveAITargetState({
-              fallbackDatabaseId: settings.notionDatabaseId
-            });
-            let sourceFilter = null;
-            if (source !== "all") {
-              const sourceMap = { "linux.do": "Linux.do", "github": "GitHub", "\u4E66\u7B7E": "\u6D4F\u89C8\u5668\u4E66\u7B7E" };
-              const sourceValue = sourceMap[source.toLowerCase()] || source;
-              sourceFilter = { property: "\u6765\u6E90", rich_text: { contains: sourceValue } };
-            }
-            const filters = [];
-            if (sourceFilter) filters.push(sourceFilter);
-            const queryOneDb = async (dbId) => {
-              const body = { page_size: Math.min(limit, 100) };
-              if (filters.length > 0) {
-                body.filter = filters.length === 1 ? filters[0] : { and: filters };
-              }
-              try {
-                const response = await NotionAPI2.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
-                return response.results || [];
-              } catch (error) {
-                console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
-                return [];
-              }
-            };
-            let results = [];
-            const targetDb = TargetState2.getEffectiveAIDatabaseId({
-              fallbackDatabaseId: settings.notionDatabaseId,
-              targetValue: aiTargetState.value
-            });
-            if (aiTargetState.mode !== "all" && targetDb) {
-              results = await queryOneDb(targetDb);
-            } else {
-              const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
-              for (const db of (allDbs.results || []).slice(0, 5)) {
-                const dbResults = await queryOneDb(db.id);
-                results.push(...dbResults);
-              }
-            }
-            if (query) {
-              results = results.filter((page) => {
-                var _a, _b, _c, _d, _e, _f;
-                const title = Utils2.getPageTitle(page).toLowerCase();
-                const desc = ((_f = (_e = (_d = (_c = (_b = (_a = page.properties) == null ? void 0 : _a["\u63CF\u8FF0"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) == null ? void 0 : _f.toLowerCase()) || "";
-                return title.includes(query.toLowerCase()) || desc.includes(query.toLowerCase());
-              });
-            }
-            results = results.slice(0, limit);
-            if (results.length === 0) {
-              return `\u6CA1\u6709\u627E\u5230${source !== "all" ? `\u6765\u6E90\u4E3A\u300C${source}\u300D\u7684` : ""}\u5305\u542B\u300C${query}\u300D\u7684\u5185\u5BB9\u3002`;
-            }
-            const lines = results.map((page) => {
-              var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
-              const title = Utils2.getPageTitle(page);
-              const src = ((_e = (_d = (_c = (_b = (_a = page.properties) == null ? void 0 : _a["\u6765\u6E90"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) || "\u672A\u77E5";
-              const srcType = ((_j = (_i = (_h = (_g = (_f = page.properties) == null ? void 0 : _f["\u6765\u6E90\u7C7B\u578B"]) == null ? void 0 : _g.rich_text) == null ? void 0 : _h[0]) == null ? void 0 : _i.text) == null ? void 0 : _j.content) || "";
-              const url = ((_l = (_k = page.properties) == null ? void 0 : _k["\u94FE\u63A5"]) == null ? void 0 : _l.url) || "";
-              return `[${src}${srcType ? "/" + srcType : ""}] ${title}${url ? ` (${url})` : ""}`;
-            });
-            return AI()._formatToolResult({
-              title: "\u8DE8\u6E90\u641C\u7D22\u7ED3\u679C",
-              fields: [
-                { label: "\u603B\u6570", value: results.length },
-                { label: "\u6765\u6E90", value: source },
-                { label: "\u5173\u952E\u8BCD", value: query || "-" }
-              ],
-              bullets: lines
-            });
-          }
-        },
-        unified_stats: {
-          description: "\u8DE8\u6E90\u7EDF\u8BA1\uFF1A\u7EDF\u8BA1\u5404\u6765\u6E90\uFF08Linux.do/GitHub/\u6D4F\u89C8\u5668\u4E66\u7B7E\uFF09\u7684\u6570\u636E\u91CF\u3001\u5206\u7C7B\u5206\u5E03",
-          params: "\u65E0\u9700\u53C2\u6570",
-          level: 0,
-          execute: async (args, settings) => {
-            var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
-            const aiTargetState = TargetState2.getEffectiveAITargetState({
-              fallbackDatabaseId: settings.notionDatabaseId
-            });
-            const queryOneDb = async (dbId) => {
-              try {
-                const response = await NotionAPI2.request("POST", `/databases/${dbId}/query`, { page_size: 100 }, settings.notionApiKey);
-                return response.results || [];
-              } catch (error) {
-                console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
-                return [];
-              }
-            };
-            let allPages = [];
-            const targetDb = TargetState2.getEffectiveAIDatabaseId({
-              fallbackDatabaseId: settings.notionDatabaseId,
-              targetValue: aiTargetState.value
-            });
-            if (aiTargetState.mode !== "all" && targetDb) {
-              allPages = await queryOneDb(targetDb);
-            } else {
-              const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
-              for (const db of (allDbs.results || []).slice(0, 5)) {
-                allPages.push(...await queryOneDb(db.id));
-              }
-            }
-            const sourceStats = {};
-            const categoryStats = {};
-            for (const page of allPages) {
-              const src = ((_e = (_d = (_c = (_b = (_a = page.properties) == null ? void 0 : _a["\u6765\u6E90"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) || "\u672A\u6807\u8BB0";
-              const cat = ((_j = (_i = (_h = (_g = (_f = page.properties) == null ? void 0 : _f["\u5206\u7C7B"]) == null ? void 0 : _g.rich_text) == null ? void 0 : _h[0]) == null ? void 0 : _i.text) == null ? void 0 : _j.content) || "\u672A\u5206\u7C7B";
-              sourceStats[src] = (sourceStats[src] || 0) + 1;
-              categoryStats[cat] = (categoryStats[cat] || 0) + 1;
-            }
-            const topCats = Object.entries(categoryStats).sort((a, b) => b[1] - a[1]).slice(0, 5);
-            const bullets = [];
-            for (const [src, count] of Object.entries(sourceStats).sort((a, b) => b[1] - a[1]).slice(0, 5)) {
-              bullets.push(`\u6765\u6E90 ${src}: ${count} \u6761`);
-            }
-            for (const [cat, count] of topCats) {
-              bullets.push(`\u5206\u7C7B ${cat}: ${count} \u6761`);
-            }
-            return AI()._formatToolResult({
-              title: "\u8DE8\u6E90\u6570\u636E\u7EDF\u8BA1",
-              fields: [
-                { label: "\u603B\u6570", value: allPages.length },
-                { label: "\u6765\u6E90\u79CD\u7C7B", value: Object.keys(sourceStats).length },
-                { label: "\u5206\u7C7B\u79CD\u7C7B", value: Object.keys(categoryStats).length }
-              ],
-              bullets
-            });
-          }
-        },
-        recommend_similar: {
-          description: "\u667A\u80FD\u63A8\u8350\uFF1A\u6839\u636E\u6307\u5B9A\u9875\u9762\uFF0C\u4ECE\u6240\u6709\u6765\u6E90\u4E2D\u627E\u5230\u76F8\u4F3C\u5185\u5BB9",
-          params: "page_name/page_id(\u53C2\u8003\u9875\u9762)",
-          level: 0,
-          execute: async (args, settings) => {
-            var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
-            const { page_name, page_id } = args;
-            let refPage = null;
-            if (page_id) {
-              try {
-                refPage = await NotionAPI2.request("GET", `/pages/${page_id}`, null, settings.notionApiKey);
-              } catch (error) {
-                console.warn("[LD-Notion] \u53C2\u8003\u9875\u9762\u83B7\u53D6\u5931\u8D25:", error);
-              }
-            }
-            if (!refPage && page_name) {
-              const searchResult = await NotionAPI2.search(page_name, null, settings.notionApiKey);
-              refPage = (searchResult.results || []).find((r) => r.object === "page");
-            }
-            if (!refPage) {
-              return "\u274C \u672A\u627E\u5230\u53C2\u8003\u9875\u9762\uFF0C\u8BF7\u63D0\u4F9B\u9875\u9762\u540D\u79F0\u6216 ID\u3002";
-            }
-            const refTitle = Utils2.getPageTitle(refPage);
-            const refDesc = ((_e = (_d = (_c = (_b = (_a = refPage.properties) == null ? void 0 : _a["\u63CF\u8FF0"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) || "";
-            const refTags = (((_g = (_f = refPage.properties) == null ? void 0 : _f["\u6807\u7B7E"]) == null ? void 0 : _g.multi_select) || []).map((t) => t.name);
-            if (!settings.aiApiKey) {
-              return "\u274C \u9700\u8981\u914D\u7F6E AI API Key \u624D\u80FD\u4F7F\u7528\u667A\u80FD\u63A8\u8350\u529F\u80FD\u3002";
-            }
-            const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
-            let candidates = [];
-            for (const db of (allDbs.results || []).slice(0, 5)) {
-              try {
-                const res = await NotionAPI2.request("POST", `/databases/${db.id}/query`, { page_size: 50 }, settings.notionApiKey);
-                candidates.push(...res.results || []);
-              } catch (error) {
-                console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
-              }
-            }
-            candidates = candidates.filter((p) => p.id !== refPage.id);
-            if (candidates.length === 0) {
-              return "\u6CA1\u6709\u627E\u5230\u5176\u4ED6\u9875\u9762\u8FDB\u884C\u6BD4\u8F83\u3002";
-            }
-            const candidateList = candidates.slice(0, 30).map((p, i) => {
-              var _a2, _b2, _c2, _d2, _e2, _f2, _g2, _h2, _i2, _j2, _k2, _l2;
-              const t = Utils2.getPageTitle(p);
-              const d = ((_e2 = (_d2 = (_c2 = (_b2 = (_a2 = p.properties) == null ? void 0 : _a2["\u63CF\u8FF0"]) == null ? void 0 : _b2.rich_text) == null ? void 0 : _c2[0]) == null ? void 0 : _d2.text) == null ? void 0 : _e2.content) || "";
-              const tags = (((_g2 = (_f2 = p.properties) == null ? void 0 : _f2["\u6807\u7B7E"]) == null ? void 0 : _g2.multi_select) || []).map((tag) => tag.name).join(", ");
-              const src = ((_l2 = (_k2 = (_j2 = (_i2 = (_h2 = p.properties) == null ? void 0 : _h2["\u6765\u6E90"]) == null ? void 0 : _i2.rich_text) == null ? void 0 : _j2[0]) == null ? void 0 : _k2.text) == null ? void 0 : _l2.content) || "";
-              return `${i + 1}. [${src}] ${t} | ${d} | \u6807\u7B7E: ${tags}`;
-            }).join("\n");
-            const prompt2 = `\u53C2\u8003\u5185\u5BB9\uFF1A
-\u6807\u9898: ${refTitle}
-\u63CF\u8FF0: ${refDesc}
-\u6807\u7B7E: ${refTags.join(", ")}
-
-\u5019\u9009\u5217\u8868:
-${candidateList}
-
-\u8BF7\u4ECE\u5019\u9009\u5217\u8868\u4E2D\u9009\u51FA\u6700\u76F8\u4F3C\u7684 5 \u4E2A\uFF08\u6309\u76F8\u4F3C\u5EA6\u6392\u5E8F\uFF09\uFF0C\u53EA\u56DE\u590D\u7F16\u53F7\uFF0C\u7528\u9017\u53F7\u5206\u9694\u3002`;
-            try {
-              const aiResult = await svc().request(prompt2, settings);
-              const indices = ((_h = aiResult.match(/\d+/g)) == null ? void 0 : _h.map((n) => parseInt(n) - 1).filter((i) => i >= 0 && i < candidates.length)) || [];
-              if (indices.length === 0) {
-                return "AI \u672A\u80FD\u8BC6\u522B\u76F8\u4F3C\u5185\u5BB9\u3002";
-              }
-              const bullets = [];
-              for (const idx of indices.slice(0, 3)) {
-                const p = candidates[idx];
-                const t = Utils2.getPageTitle(p);
-                const src = ((_m = (_l = (_k = (_j = (_i = p.properties) == null ? void 0 : _i["\u6765\u6E90"]) == null ? void 0 : _j.rich_text) == null ? void 0 : _k[0]) == null ? void 0 : _l.text) == null ? void 0 : _m.content) || "";
-                const url = ((_o = (_n = p.properties) == null ? void 0 : _n["\u94FE\u63A5"]) == null ? void 0 : _o.url) || "";
-                bullets.push(`[${src}] ${t}${url ? ` (${url})` : ""}`);
-              }
-              return AI()._formatToolResult({
-                title: "\u76F8\u4F3C\u5185\u5BB9\u63A8\u8350",
-                fields: [
-                  { label: "\u53C2\u8003\u9875\u9762", value: refTitle },
-                  { label: "\u63A8\u8350\u6570", value: bullets.length }
-                ],
-                bullets
-              });
-            } catch (e) {
-              return `\u274C \u63A8\u8350\u5931\u8D25: ${e.message}`;
-            }
-          }
-        },
-        batch_tag: {
-          description: "\u6279\u91CF\u6253\u6807\u7B7E\uFF1A\u7528 AI \u4E3A\u6307\u5B9A\u6765\u6E90\u7684\u6240\u6709\u672A\u6807\u8BB0\u9875\u9762\u81EA\u52A8\u6DFB\u52A0\u6807\u7B7E",
-          params: "source(\u53EF\u9009:'linux.do'|'github'|'\u4E66\u7B7E'|'all'), tag_count(\u6BCF\u9875\u6807\u7B7E\u6570,\u9ED8\u8BA43)",
-          level: 1,
-          execute: async (args, settings) => {
-            var _a, _b, _c, _d, _e;
-            if (!OperationGuard2.canExecute("updatePage")) {
-              return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6279\u91CF\u6253\u6807\u7B7E\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-            }
-            if (!settings.aiApiKey) {
-              return "\u274C \u9700\u8981\u914D\u7F6E AI API Key\u3002";
-            }
-            const { source = "all", tag_count = 3 } = args;
-            const aiTargetState = TargetState2.getEffectiveAITargetState({
-              fallbackDatabaseId: settings.notionDatabaseId
-            });
-            const queryOneDb = async (dbId) => {
-              const body = {
-                filter: { property: "\u6807\u7B7E", multi_select: { is_empty: true } },
-                page_size: 50
-              };
-              try {
-                const response = await NotionAPI2.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
-                return response.results || [];
-              } catch (error) {
-                console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
-                return [];
-              }
-            };
-            let pages = [];
-            const targetDb = TargetState2.getEffectiveAIDatabaseId({
-              fallbackDatabaseId: settings.notionDatabaseId,
-              targetValue: aiTargetState.value
-            });
-            if (aiTargetState.mode !== "all" && targetDb) {
-              pages = await queryOneDb(targetDb);
-            } else {
-              const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
-              for (const db of (allDbs.results || []).slice(0, 3)) {
-                pages.push(...await queryOneDb(db.id));
-              }
-            }
-            if (source !== "all") {
-              const sourceMap = { "linux.do": "Linux.do", "github": "GitHub", "\u4E66\u7B7E": "\u6D4F\u89C8\u5668\u4E66\u7B7E" };
-              const sourceValue = sourceMap[source.toLowerCase()] || source;
-              pages = pages.filter((p) => {
-                var _a2, _b2, _c2, _d2, _e2;
-                const s = ((_e2 = (_d2 = (_c2 = (_b2 = (_a2 = p.properties) == null ? void 0 : _a2["\u6765\u6E90"]) == null ? void 0 : _b2.rich_text) == null ? void 0 : _c2[0]) == null ? void 0 : _d2.text) == null ? void 0 : _e2.content) || "";
-                return s.includes(sourceValue);
-              });
-            }
-            if (pages.length === 0) {
-              return "\u6CA1\u6709\u627E\u5230\u9700\u8981\u6253\u6807\u7B7E\u7684\u9875\u9762\u3002";
-            }
-            let tagged = 0;
-            for (const page of pages) {
-              const title = Utils2.getPageTitle(page);
-              const desc = ((_e = (_d = (_c = (_b = (_a = page.properties) == null ? void 0 : _a["\u63CF\u8FF0"]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) || "";
-              try {
-                const prompt2 = `\u4E3A\u4EE5\u4E0B\u5185\u5BB9\u751F\u6210 ${tag_count} \u4E2A\u7B80\u77ED\u6807\u7B7E\uFF08\u6BCF\u4E2A\u6807\u7B7E 2-4 \u4E2A\u5B57\uFF09\uFF0C\u7528\u9017\u53F7\u5206\u9694\uFF0C\u53EA\u56DE\u590D\u6807\u7B7E\uFF1A
-\u6807\u9898: ${title}
-\u63CF\u8FF0: ${desc}`;
-                const result = await svc().request(prompt2, settings);
-                const tags = result.split(/[,，]/).map((t) => t.trim()).filter((t) => t.length > 0 && t.length <= 20).slice(0, tag_count);
-                if (tags.length > 0) {
-                  await AI()._executeGuardedPageWrite(
-                    "updatePage",
-                    { id: page.id, name: title || page.id },
-                    () => NotionAPI2.request("PATCH", `/pages/${page.id}`, {
-                      properties: {
-                        "\u6807\u7B7E": { multi_select: tags.map((t) => ({ name: t })) }
-                      }
-                    }, settings.notionApiKey),
-                    settings
-                  );
-                  tagged++;
-                }
-              } catch (e) {
-                console.warn(`[batch_tag] \u5931\u8D25: ${title}`, e);
-              }
-              await Utils2.sleep(500);
-            }
-            return `\u2705 \u6279\u91CF\u6253\u6807\u7B7E\u5B8C\u6210\uFF1A\u5DF2\u4E3A ${tagged}/${pages.length} \u4E2A\u9875\u9762\u6DFB\u52A0\u6807\u7B7E\u3002`;
-          }
-        },
-        // === 写入工具 (Level 1) ===
-        append_content: {
-          description: "\u5411\u9875\u9762\u8FFD\u52A0\u5185\u5BB9\uFF08\u652F\u6301 Markdown \u683C\u5F0F\uFF09",
-          params: "page_name/page_id(\u76EE\u6807\u9875\u9762), content(Markdown\u5185\u5BB9)",
-          level: 1,
-          execute: async (args, settings) => {
-            const { page_name, page_id, content } = args;
-            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
-            if (!content) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B\u8981\u8FFD\u52A0\u7684 content\u3002";
-            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
-            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            await AI()._executeGuardedPageWrite(
-              "appendBlocks",
-              page,
-              async () => {
-                try {
-                  await NotionAPI2.appendPageMarkdown(page.id, content, settings.notionApiKey);
-                } catch (error) {
-                  console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
-                  const blocks = AI()._textToBlocks(content);
-                  await NotionAPI2.appendBlocks(page.id, blocks, settings.notionApiKey);
-                }
-              },
-              settings
-            );
-            return AI()._formatToolResult({
-              title: "\u9875\u9762\u5185\u5BB9\u8FFD\u52A0\u5B8C\u6210",
-              fields: [
-                { label: "\u76EE\u6807", value: page.name },
-                { label: "\u5B57\u7B26\u6570", value: String(content).length }
-              ]
-            });
-          }
-        },
-        append_block_children: {
-          description: "\u5411\u9875\u9762\u6216\u5757\u63D2\u5165\u5B50\u5757\uFF0C\u652F\u6301\u672B\u5C3E\u6216\u6307\u5B9A\u5757\u540E\u63D2\u5165",
-          params: "content(Markdown\u5185\u5BB9), page_name/page_id(\u9875\u9762,\u53EF\u9009), block_id(\u5757ID,\u53EF\u9009), insert_position(end/after_block,\u9ED8\u8BA4end), after_block_id(\u5F53 insert_position=after_block \u65F6\u5FC5\u586B)",
-          level: 1,
-          execute: async (args, settings) => {
-            const { content, page_name, page_id, block_id, insert_position = "end", after_block_id } = args;
-            if (!content) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B content\u3002";
-            let parentId = block_id;
-            let targetName = block_id || "";
-            if (!parentId) {
-              const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-              if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
-              if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-              parentId = page.id;
-              targetName = page.name;
-            }
-            const blocks = AI()._textToBlocks(String(content));
-            if (blocks.length === 0) return "\u9519\u8BEF: \u672A\u80FD\u4ECE content \u751F\u6210\u6709\u6548\u5757\u3002";
-            const options = {};
-            if (insert_position === "after_block") {
-              if (!after_block_id) return "\u9519\u8BEF: insert_position=after_block \u65F6\u5FC5\u987B\u63D0\u4F9B after_block_id\u3002";
-              options.after = String(after_block_id).replace(/-/g, "");
-            } else if (insert_position !== "end") {
-              return "\u9519\u8BEF: insert_position \u4EC5\u652F\u6301 end \u6216 after_block\u3002";
-            }
-            await AI()._executeGuardedWrite(
-              "appendBlocks",
-              () => NotionAPI2.appendBlockChildren(parentId, blocks, settings.notionApiKey, options),
-              { itemName: targetName || parentId, pageId: parentId },
-              settings
-            );
-            return AI()._formatToolResult({
-              title: "\u5757\u63D2\u5165\u5B8C\u6210",
-              fields: [
-                { label: "\u76EE\u6807", value: targetName || parentId },
-                { label: "\u5757\u6570", value: blocks.length },
-                { label: "\u63D2\u5165\u4F4D\u7F6E", value: insert_position }
-              ]
-            });
-          }
-        },
-        search_replace_page_markdown: {
-          description: "\u5BF9\u9875\u9762 Markdown \u505A\u7CBE\u786E\u67E5\u627E\u66FF\u6362\uFF0C\u9002\u5408\u5C40\u90E8\u6539\u5199",
-          params: "page_name/page_id(\u76EE\u6807\u9875\u9762), updates([{old_str,new_str,replace_all_matches?}])",
-          level: 1,
-          execute: async (args, settings) => {
-            const { page_name, page_id, updates } = args;
-            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
-            if (!Array.isArray(updates) || updates.length === 0) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B updates \u6570\u7EC4\u3002";
-            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
-            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            await AI()._executeGuardedPageWrite(
-              "updatePageMarkdown",
-              page,
-              () => NotionAPI2.searchReplacePageMarkdown(page.id, updates, settings.notionApiKey),
-              settings
-            );
-            return AI()._formatToolResult({
-              title: "Markdown \u7CBE\u786E\u66FF\u6362\u5B8C\u6210",
-              fields: [
-                { label: "\u76EE\u6807", value: page.name },
-                { label: "\u66FF\u6362\u6761\u6570", value: updates.length }
-              ]
-            });
-          }
-        },
-        replace_page_markdown: {
-          description: "\u7528\u65B0\u7684 Markdown \u5B8C\u6574\u66FF\u6362\u9875\u9762\u5185\u5BB9",
-          params: "page_name/page_id(\u76EE\u6807\u9875\u9762), new_markdown(\u65B0\u7684\u5B8C\u6574 Markdown \u5185\u5BB9)",
-          level: 2,
-          execute: async (args, settings) => {
-            const { page_name, page_id, new_markdown } = args;
-            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
-            if (!new_markdown) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B new_markdown\u3002";
-            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
-            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            await AI()._executeGuardedPageWrite(
-              "replacePageMarkdown",
-              page,
-              () => NotionAPI2.replacePageMarkdown(page.id, new_markdown, settings.notionApiKey, true),
-              settings
-            );
-            return AI()._formatToolResult({
-              title: "Markdown \u6574\u9875\u66FF\u6362\u5B8C\u6210",
-              fields: [
-                { label: "\u76EE\u6807", value: page.name },
-                { label: "\u5B57\u7B26\u6570", value: String(new_markdown).length }
-              ]
-            });
-          }
-        },
-        create_comment: {
-          description: "\u5411\u9875\u9762\u3001\u5757\u6216\u73B0\u6709\u8BA8\u8BBA\u6DFB\u52A0\u8BC4\u8BBA",
-          params: "content(\u8BC4\u8BBA\u5185\u5BB9), page_name/page_id(\u9875\u9762,\u53EF\u9009), block_id(\u5757ID,\u53EF\u9009), discussion_id(\u8BA8\u8BBAID,\u53EF\u9009), comment_id(\u8BC4\u8BBAID,\u53EF\u9009\uFF0C\u7528\u4E8E\u56DE\u590D\u8BE5\u8BC4\u8BBA\u6240\u5C5E\u8BA8\u8BBA)",
-          level: 1,
-          execute: async (args, settings) => {
-            var _a;
-            const { page_name, page_id, block_id, discussion_id, comment_id, content } = args;
-            if (!content) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B\u8BC4\u8BBA\u5185\u5BB9 content\u3002";
-            let resolvedDiscussionId = discussion_id;
-            if (!resolvedDiscussionId && comment_id) {
-              const sourceComment = await NotionAPI2.getComment(String(comment_id).replace(/-/g, ""), settings.notionApiKey);
-              resolvedDiscussionId = (sourceComment == null ? void 0 : sourceComment.discussion_id) || "";
-              if (!resolvedDiscussionId) {
-                return `\u9519\u8BEF: \u8BC4\u8BBA ${comment_id} \u6CA1\u6709\u53EF\u7528\u7684 discussion_id\uFF0C\u65E0\u6CD5\u4F5C\u4E3A\u56DE\u590D\u76EE\u6807\u3002`;
-              }
-            }
-            const targets = [page_id || page_name ? "page" : null, block_id ? "block" : null, resolvedDiscussionId ? "discussion" : null].filter(Boolean);
-            if (targets.length !== 1) {
-              return "\u9519\u8BEF: \u8BF7\u4E14\u4EC5\u8BF7\u63D0\u4F9B page_name/page_id\u3001block_id\u3001discussion_id \u6216 comment_id \u5176\u4E2D\u4E00\u79CD\u76EE\u6807\u3002";
-            }
-            let page = null;
-            let targetName = block_id || resolvedDiscussionId || comment_id || "";
-            if (!block_id && !resolvedDiscussionId) {
-              page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-              if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
-              if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-              targetName = page.name;
-            }
-            const result = await AI()._executeGuardedWrite(
-              "createComment",
-              () => NotionAPI2.createComment({
-                pageId: page == null ? void 0 : page.id,
-                blockId: block_id,
-                discussionId: resolvedDiscussionId,
-                content
-              }, settings.notionApiKey),
-              { itemName: targetName || "\u8BC4\u8BBA\u76EE\u6807", pageId: page == null ? void 0 : page.id },
-              settings
-            );
-            const newCommentId = ((_a = result.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
-            return AI()._formatToolResult({
-              title: "\u8BC4\u8BBA\u5DF2\u521B\u5EFA",
-              fields: [
-                { label: "\u76EE\u6807", value: targetName || "\u8BC4\u8BBA\u76EE\u6807" },
-                { label: "\u8BC4\u8BBAID", value: newCommentId || "-" }
-              ]
-            });
-          }
-        },
-        update_page_property: {
-          description: "\u66F4\u65B0\u9875\u9762\u7684\u5C5E\u6027\u503C",
-          params: "page_id(\u9875\u9762ID), property(\u5C5E\u6027\u540D), value(\u65B0\u503C), type(\u5C5E\u6027\u7C7B\u578B:text/select/multi_select/number/date)",
-          level: 1,
-          execute: async (args, settings) => {
-            const { page_id, property, value, type = "text" } = args;
-            if (!page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_id\u3002";
-            if (!property) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B property\uFF08\u5C5E\u6027\u540D\uFF09\u3002";
-            if (value === void 0 || value === null) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B value\uFF08\u65B0\u503C\uFF09\u3002";
-            const updateProps = {};
-            switch (type) {
-              case "select":
-                updateProps[property] = { select: { name: String(value) } };
-                break;
-              case "multi_select":
-                const tags = String(value).split(/[,，]/).map((t) => ({ name: t.trim() })).filter((t) => t.name);
-                updateProps[property] = { multi_select: tags };
-                break;
-              case "number":
-                updateProps[property] = { number: Number(value) };
-                break;
-              case "date":
-                updateProps[property] = { date: { start: String(value) } };
-                break;
-              default:
-                updateProps[property] = { rich_text: [{ type: "text", text: { content: String(value) } }] };
-                break;
-            }
-            await AI()._executeGuardedPageWrite(
-              "updatePage",
-              { id: page_id.replace(/-/g, ""), name: page_id },
-              () => NotionAPI2.updatePage(page_id.replace(/-/g, ""), updateProps, settings.notionApiKey),
-              settings
-            );
-            return `\u5DF2\u66F4\u65B0\u9875\u9762\u5C5E\u6027\u300C${property}\u300D\u4E3A\u300C${value}\u300D\u3002`;
-          }
-        },
-        create_page: {
-          description: "\u521B\u5EFA\u9875\u9762\uFF0C\u53EF\u521B\u5EFA\u5230\u6570\u636E\u5E93\u6216\u4F5C\u4E3A\u5B50\u9875\u9762\uFF0C\u5E76\u652F\u6301 icon/cover",
-          params: "title(\u6807\u9898), database_name/database_id(\u76EE\u6807\u6570\u636E\u5E93,\u53EF\u9009), parent_page_name/parent_page_id(\u7236\u9875\u9762,\u53EF\u9009), properties(\u53EF\u9009), content(\u53EF\u9009Markdown), icon_emoji/icon_url(\u53EF\u9009), cover_url(\u53EF\u9009)",
-          level: 1,
-          execute: async (args, settings) => {
-            var _a;
-            const { database_name, database_id, parent_page_name, parent_page_id, title, content } = args;
-            if (!title) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B title\uFF08\u9875\u9762\u6807\u9898\uFF09\u3002";
-            let parent = null;
-            let parentDesc = "";
-            let dbId = database_id;
-            if (dbId || database_name) {
-              const resolved = await AI()._resolveDatabaseId(database_name, null, settings.notionApiKey);
-              const targetDb = dbId ? { id: Utils2.extractNotionId(dbId) || String(dbId).replace(/-/g, ""), name: database_name || dbId } : resolved;
-              if (!dbId && (resolved == null ? void 0 : resolved.error)) return `\u9519\u8BEF: ${resolved.error}`;
-              if (!targetDb) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${database_name || database_id}\u300D\u3002`;
-              parent = { database_id: targetDb.id };
-              parentDesc = `\u6570\u636E\u5E93\u300C${targetDb.name}\u300D`;
-            } else if (parent_page_id || parent_page_name) {
-              const targetPage = await AI()._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
-              if (targetPage == null ? void 0 : targetPage.error) return `\u9519\u8BEF: ${targetPage.error}`;
-              if (!targetPage) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u7236\u9875\u9762\u300C${parent_page_name || parent_page_id}\u300D\u3002`;
-              parent = { page_id: targetPage.id };
-              parentDesc = `\u9875\u9762\u300C${targetPage.name}\u300D`;
-            } else if (settings.notionDatabaseId) {
-              parent = { database_id: settings.notionDatabaseId.replace(/-/g, "") };
-              parentDesc = "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93";
-            }
-            if (!parent) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B database_name/database_id \u6216 parent_page_name/parent_page_id\uFF0C\u6216\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
-            const properties = AI()._normalizeNotionProperties(args.properties);
-            if (parent.database_id) {
-              properties["\u6807\u9898"] = { title: [{ text: { content: title } }] };
-            } else {
-              properties.title = { title: [{ text: { content: title } }] };
-            }
-            const children = content ? AI()._textToBlocks(String(content)) : [];
-            const icon = AI()._buildPageIconPayload(args);
-            const cover = AI()._buildPageCoverPayload(args);
-            const page = await AI()._executeGuardedWrite(
-              "createDatabasePage",
-              () => NotionAPI2.createPageObject(parent, properties, children, settings.notionApiKey, { icon, cover }),
-              { itemName: title },
-              settings
-            );
-            const newId = ((_a = page.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
-            return AI()._formatToolResult({
-              title: "\u9875\u9762\u521B\u5EFA\u5B8C\u6210",
-              fields: [
-                { label: "\u6807\u9898", value: title },
-                { label: "ID", value: newId || "-" },
-                { label: "\u7236\u7EA7", value: parentDesc }
-              ]
-            });
-          }
-        },
-        batch_create_pages: {
-          description: "\u6279\u91CF\u521B\u5EFA\u9875\u9762\uFF0C\u53EF\u521B\u5EFA\u5230\u6570\u636E\u5E93\u6216\u67D0\u4E2A\u7236\u9875\u9762\u4E0B",
-          params: "pages([{title,properties?,content?,icon_emoji?,icon_url?,cover_url?}]), database_name/database_id(\u53EF\u9009), parent_page_name/parent_page_id(\u53EF\u9009)",
-          level: 1,
-          execute: async (args, settings) => {
-            const pages = Array.isArray(args.pages) ? args.pages : [];
-            if (pages.length === 0) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B pages \u6570\u7EC4\u3002";
-            let parent = null;
-            if (args.database_id || args.database_name) {
-              const targetDb = args.database_id ? { id: Utils2.extractNotionId(args.database_id) || String(args.database_id).replace(/-/g, ""), name: args.database_name || args.database_id } : await AI()._resolveDatabaseId(args.database_name, null, settings.notionApiKey);
-              if (targetDb == null ? void 0 : targetDb.error) return `\u9519\u8BEF: ${targetDb.error}`;
-              if (!targetDb) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${args.database_name || args.database_id}\u300D\u3002`;
-              parent = { database_id: targetDb.id };
-            } else if (args.parent_page_id || args.parent_page_name) {
-              const targetPage = await AI()._resolvePageId(args.parent_page_name, args.parent_page_id, settings.notionApiKey);
-              if (targetPage == null ? void 0 : targetPage.error) return `\u9519\u8BEF: ${targetPage.error}`;
-              if (!targetPage) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u7236\u9875\u9762\u300C${args.parent_page_name || args.parent_page_id}\u300D\u3002`;
-              parent = { page_id: targetPage.id };
-            } else if (settings.notionDatabaseId) {
-              parent = { database_id: settings.notionDatabaseId.replace(/-/g, "") };
-            }
-            if (!parent) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B\u6570\u636E\u5E93\u6216\u7236\u9875\u9762\u76EE\u6807\uFF0C\u6216\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            let success = 0;
-            let failed = 0;
-            for (let i = 0; i < pages.length; i++) {
-              const item = pages[i] || {};
-              const title = String(item.title || "").trim();
-              if (!title) {
-                failed++;
-                continue;
-              }
-              try {
-                const properties = AI()._normalizeNotionProperties(item.properties);
-                if (parent.database_id) {
-                  properties["\u6807\u9898"] = { title: [{ text: { content: title } }] };
-                } else {
-                  properties.title = { title: [{ text: { content: title } }] };
-                }
-                const children = item.content ? AI()._textToBlocks(String(item.content)) : [];
-                const icon = AI()._buildPageIconPayload(item);
-                const cover = AI()._buildPageCoverPayload(item);
-                await AI()._executeGuardedWrite(
-                  "createDatabasePage",
-                  () => NotionAPI2.createPageObject(parent, properties, children, settings.notionApiKey, { icon, cover }),
-                  { itemName: title },
-                  settings
-                );
-                success++;
-              } catch (error) {
-                console.warn("[LD-Notion] \u9875\u9762\u521B\u5EFA\u5931\u8D25:", error);
-                failed++;
-              }
-              if (i < pages.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-            return AI()._formatToolResult({
-              title: "\u6279\u91CF\u9875\u9762\u521B\u5EFA\u5B8C\u6210",
-              fields: [
-                { label: "\u6210\u529F", value: success },
-                { label: "\u5931\u8D25", value: failed },
-                { label: "\u76EE\u6807\u6570", value: pages.length }
-              ]
-            });
-          }
-        },
-        update_page_metadata: {
-          description: "\u66F4\u65B0\u9875\u9762\u5143\u6570\u636E\uFF0C\u5982 icon / cover / lock",
-          params: "page_name/page_id(\u76EE\u6807\u9875\u9762), icon_emoji/icon_url(\u53EF\u9009), cover_url(\u53EF\u9009), clear_icon(\u53EF\u9009), clear_cover(\u53EF\u9009), is_locked(\u53EF\u9009)",
-          level: 1,
-          execute: async (args, settings) => {
-            const { page_name, page_id, is_locked } = args;
-            if (!page_name && !page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_name \u6216 page_id\u3002";
-            const page = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (page == null ? void 0 : page.error) return `\u9519\u8BEF: ${page.error}`;
-            if (!page) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            const payload = {};
-            const icon = AI()._buildPageIconPayload(args);
-            const cover = AI()._buildPageCoverPayload(args);
-            if (icon !== void 0) payload.icon = icon;
-            if (cover !== void 0) payload.cover = cover;
-            if (typeof is_locked === "boolean") payload.is_locked = is_locked;
-            if (Object.keys(payload).length === 0) {
-              return "\u9519\u8BEF: \u8BF7\u81F3\u5C11\u63D0\u4F9B\u4E00\u4E2A\u53EF\u66F4\u65B0\u5B57\u6BB5\uFF0C\u5982 icon_emoji\u3001icon_url\u3001cover_url\u3001clear_icon\u3001clear_cover\u3001is_locked\u3002";
-            }
-            await AI()._executeGuardedPageWrite(
-              "updatePage",
-              page,
-              () => NotionAPI2.updatePageMeta(page.id, payload, settings.notionApiKey),
-              settings
-            );
-            return AI()._formatToolResult({
-              title: "\u9875\u9762\u5143\u6570\u636E\u66F4\u65B0\u5B8C\u6210",
-              fields: [
-                { label: "\u76EE\u6807", value: page.name },
-                { label: "\u5B57\u6BB5\u6570", value: Object.keys(payload).length }
-              ]
-            });
-          }
-        },
-        update_page: {
-          description: "\u7EDF\u4E00\u66F4\u65B0\u9875\u9762\u5C5E\u6027\u6216\u5143\u6570\u636E",
-          params: "page_name/page_id/page_ids, property/value/type(\u5C5E\u6027), updates(\u5C5E\u6027\u5BF9\u8C61), icon_emoji/icon_url/cover_url/clear_icon/clear_cover/is_locked",
-          level: 1,
-          execute: async (args, settings) => {
-            const targets = await AI()._resolvePageTargets(args, settings);
-            if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
-            if (!targets || targets.length === 0) {
-              return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u66F4\u65B0\u7684\u9875\u9762\u3002";
-            }
-            if (targets.length > 1) {
-              return "\u9519\u8BEF: update_page \u4EC5\u652F\u6301\u5355\u9875\u9762\uFF0C\u8BF7\u6539\u7528 batch_update_pages\u3002";
-            }
-            const result = await AI()._applyPageUpdatesToTargets(targets, args, settings);
-            if (result.failed > 0) {
-              return `\u66F4\u65B0\u9875\u9762\u300C${targets[0].name}\u300D\u5931\u8D25\u3002`;
-            }
-            return AI()._formatToolResult({
-              title: "\u9875\u9762\u66F4\u65B0\u5B8C\u6210",
-              fields: [
-                { label: "\u76EE\u6807", value: targets[0].name },
-                { label: "\u5C5E\u6027\u66F4\u65B0\u6570", value: Object.keys(result.propertyUpdates || {}).length },
-                { label: "\u5143\u6570\u636E\u66F4\u65B0\u6570", value: Object.keys(result.metaPayload || {}).length }
-              ]
-            });
-          }
-        },
-        batch_update_pages: {
-          description: "\u6279\u91CF\u66F4\u65B0\u9875\u9762\u5C5E\u6027\u6216\u5143\u6570\u636E\uFF0C\u53EF\u901A\u8FC7\u9875\u9762\u5217\u8868\u6216\u6570\u636E\u5E93+\u6807\u9898\u7B5B\u9009\u5B9A\u4F4D",
-          params: "page_ids(\u53EF\u9009), page_title(\u53EF\u9009), database_name/database_id(\u53EF\u9009), property/value/type(\u5C5E\u6027\u66F4\u65B0), updates(\u5C5E\u6027\u5BF9\u8C61), icon_emoji/icon_url/cover_url/clear_icon/clear_cover/is_locked(\u5143\u6570\u636E), limit(\u9ED8\u8BA420)",
-          level: 1,
-          execute: async (args, settings) => {
-            const targets = await AI()._resolvePageTargets(args, settings);
-            if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
-            if (!targets || targets.length === 0) {
-              return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u66F4\u65B0\u7684\u9875\u9762\u3002\u8BF7\u63D0\u4F9B page_id/page_name/page_ids\uFF0C\u6216\u63D0\u4F9B database_name/database_id + page_title\u3002";
-            }
-            const { success, failed } = await AI()._applyPageUpdatesToTargets(targets, args, settings);
-            return AI()._formatToolResult({
-              title: "\u6279\u91CF\u9875\u9762\u66F4\u65B0\u5B8C\u6210",
-              fields: [
-                { label: "\u6210\u529F", value: success },
-                { label: "\u5931\u8D25", value: failed },
-                { label: "\u76EE\u6807\u6570", value: targets.length }
-              ]
-            });
-          }
-        },
-        update_block_content: {
-          description: "\u66F4\u65B0\u5E38\u89C1\u53EF\u7F16\u8F91\u5757\u7684\u5185\u5BB9\uFF0C\u5982 paragraph/heading/todo/code/callout/equation/embed/bookmark",
-          params: "block_id(\u5757ID), content(\u65B0\u5185\u5BB9/\u516C\u5F0F/URL), checked(\u4EC5to_do,\u53EF\u9009), color(\u53EF\u9009)",
-          level: 1,
-          execute: async (args, settings) => {
-            const { block_id, content, checked, color } = args;
-            if (!block_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B block_id\u3002";
-            if (content === void 0 || content === null) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B content\u3002";
-            const block = await NotionAPI2.fetchBlock(block_id, settings.notionApiKey);
-            const payload = AI()._buildBlockUpdatePayload(block, content, { checked, color });
-            await AI()._executeGuardedWrite(
-              "updateBlock",
-              () => NotionAPI2.updateBlock(block_id.replace(/-/g, ""), payload, settings.notionApiKey),
-              { itemName: String(block_id).replace(/-/g, "") },
-              settings
-            );
-            return AI()._formatToolResult({
-              title: "\u5757\u5185\u5BB9\u66F4\u65B0\u5B8C\u6210",
-              fields: [
-                { label: "\u5757ID", value: String(block_id).replace(/-/g, "") },
-                { label: "\u5757\u7C7B\u578B", value: block.type }
-              ]
-            });
-          }
-        },
-        classify_pages: {
-          description: "AI \u81EA\u52A8\u5206\u7C7B\u6570\u636E\u5E93\u4E2D\u672A\u5206\u7C7B\u7684\u9875\u9762",
-          params: "limit(\u6700\u591A\u5904\u7406\u6570\u91CF,\u9ED8\u8BA4\u5168\u90E8)",
-          level: 1,
-          execute: async (args, settings) => {
-            const dbId = settings.notionDatabaseId;
-            if (!dbId) return "\u9519\u8BEF: \u672A\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
-            if (settings.categories.length < 2) return "\u9519\u8BEF: \u8BF7\u5148\u914D\u7F6E\u81F3\u5C11\u4E24\u4E2A\u5206\u7C7B\u9009\u9879\u3002";
-            await AIClassifier.ensureAICategoryProperty(settings);
-            const pages = await AIClassifier.fetchAllPages(settings);
-            if (pages.length === 0) return "\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u9875\u9762\u3002";
-            const unclassified = pages.filter((p) => {
-              var _a, _b;
-              return !((_b = (_a = p.properties["AI\u5206\u7C7B"]) == null ? void 0 : _a.select) == null ? void 0 : _b.name);
-            });
-            if (unclassified.length === 0) return `\u6240\u6709 ${pages.length} \u4E2A\u9875\u9762\u90FD\u5DF2\u5206\u7C7B\u3002`;
-            const maxLimit = args.limit ? Math.min(args.limit, unclassified.length) : unclassified.length;
-            const toClassify = unclassified.slice(0, maxLimit);
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            let success = 0, failed = 0;
-            for (let i = 0; i < toClassify.length; i++) {
-              try {
-                await AIClassifier.classifyPage(toClassify[i], settings);
-                success++;
-              } catch (error) {
-                console.warn("[LD-Notion] \u9875\u9762\u5206\u7C7B\u5931\u8D25:", error);
-                failed++;
-              }
-              if (i < toClassify.length - 1) await Utils2.sleep(delay);
-            }
-            return `\u5206\u7C7B\u5B8C\u6210: \u603B\u8BA1 ${pages.length} \u4E2A\u9875\u9762\uFF0C\u672C\u6B21\u5206\u7C7B ${success} \u4E2A${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed} \u4E2A` : ""}\u3002`;
-          }
-        },
-        // === 高级工具 (Level 2) ===
-        move_page: {
-          description: "\u5C06\u9875\u9762\u79FB\u52A8\u5230\u53E6\u4E00\u4E2A\u6570\u636E\u5E93",
-          params: "page_id(\u9875\u9762ID), target_database_name/target_database_id(\u76EE\u6807\u6570\u636E\u5E93)",
-          level: 2,
-          execute: async (args, settings) => {
-            const { page_id, target_database_name, target_database_id } = args;
-            if (!page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_id\u3002";
-            const target = await AI()._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
-            if (target == null ? void 0 : target.error) return `\u9519\u8BEF: ${target.error}`;
-            if (!target) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002`;
-            await AI()._executeGuardedPageWrite(
-              "movePage",
-              { id: page_id.replace(/-/g, ""), name: page_id },
-              () => NotionAPI2.movePage(page_id.replace(/-/g, ""), target.id, "database", settings.notionApiKey),
-              settings
-            );
-            return `\u5DF2\u5C06\u9875\u9762 ${page_id} \u79FB\u52A8\u5230\u6570\u636E\u5E93\u300C${target.name}\u300D\u3002`;
-          }
-        },
-        copy_page: {
-          description: "\u590D\u5236\u9875\u9762\u5230\u53E6\u4E00\u4E2A\u6570\u636E\u5E93",
-          params: "page_id(\u9875\u9762ID), target_database_name/target_database_id(\u76EE\u6807\u6570\u636E\u5E93)",
-          level: 2,
-          execute: async (args, settings) => {
-            const { page_id, target_database_name, target_database_id } = args;
-            if (!page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_id\u3002";
-            const target = await AI()._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
-            if (target == null ? void 0 : target.error) return `\u9519\u8BEF: ${target.error}`;
-            if (!target) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002`;
-            await AI()._executeGuardedPageWrite(
-              "duplicatePage",
-              { id: page_id.replace(/-/g, ""), name: page_id },
-              () => NotionAPI2.duplicatePage(page_id.replace(/-/g, ""), target.id, "database", settings.notionApiKey),
-              settings
-            );
-            return `\u5DF2\u5C06\u9875\u9762 ${page_id} \u590D\u5236\u5230\u6570\u636E\u5E93\u300C${target.name}\u300D\u3002`;
-          }
-        },
-        archive_page: {
-          description: "\u5F52\u6863\u9875\u9762\uFF08\u8F6F\u5220\u9664\uFF0C\u53EF\u6062\u590D\uFF09",
-          params: "page_id/page_name/page_ids(\u53EF\u9009), page_title + database_name/database_id(\u6279\u91CF\u5F52\u6863,\u53EF\u9009), limit(\u9ED8\u8BA420)",
-          level: 2,
-          execute: async (args, settings) => {
-            const targets = await AI()._resolvePageTargets(args, settings);
-            if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
-            if (!targets || targets.length === 0) {
-              return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u5F52\u6863\u7684\u9875\u9762\u3002";
-            }
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            let success = 0;
-            let failed = 0;
-            for (let i = 0; i < targets.length; i++) {
-              const target = targets[i];
-              try {
-                await AI()._executeGuardedPageWrite(
-                  "deletePage",
-                  target,
-                  () => NotionAPI2.deletePage(target.id, settings.notionApiKey),
-                  settings
-                );
-                success++;
-              } catch (error) {
-                console.warn("[LD-Notion] \u9875\u9762\u5220\u9664\u5931\u8D25:", error);
-                failed++;
-              }
-              if (i < targets.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-            return AI()._formatToolResult({
-              title: "\u9875\u9762\u5F52\u6863\u5B8C\u6210",
-              fields: [
-                { label: "\u6210\u529F", value: success },
-                { label: "\u5931\u8D25", value: failed },
-                { label: "\u76EE\u6807\u6570", value: targets.length }
-              ]
-            });
-          }
-        },
-        restore_page: {
-          description: "\u6062\u590D\u5DF2\u5F52\u6863\u9875\u9762",
-          params: "page_id/page_name/page_ids(\u53EF\u9009), page_title + database_name/database_id(\u6279\u91CF\u6062\u590D,\u53EF\u9009), limit(\u9ED8\u8BA420)",
-          level: 2,
-          execute: async (args, settings) => {
-            const targets = await AI()._resolvePageTargets(args, settings);
-            if (targets == null ? void 0 : targets.error) return `\u9519\u8BEF: ${targets.error}`;
-            if (!targets || targets.length === 0) {
-              return "\u9519\u8BEF: \u6CA1\u6709\u627E\u5230\u53EF\u6062\u590D\u7684\u9875\u9762\u3002";
-            }
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            let success = 0;
-            let failed = 0;
-            for (let i = 0; i < targets.length; i++) {
-              const target = targets[i];
-              try {
-                await AI()._executeGuardedPageWrite(
-                  "restorePage",
-                  target,
-                  () => NotionAPI2.restorePage(target.id, settings.notionApiKey),
-                  settings
-                );
-                success++;
-              } catch (error) {
-                console.warn("[LD-Notion] \u9875\u9762\u6062\u590D\u5931\u8D25:", error);
-                failed++;
-              }
-              if (i < targets.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-            return AI()._formatToolResult({
-              title: "\u9875\u9762\u6062\u590D\u5B8C\u6210",
-              fields: [
-                { label: "\u6210\u529F", value: success },
-                { label: "\u5931\u8D25", value: failed },
-                { label: "\u76EE\u6807\u6570", value: targets.length }
-              ]
-            });
-          }
-        },
-        create_database: {
-          description: "\u521B\u5EFA\u65B0\u6570\u636E\u5E93",
-          params: "name(\u6570\u636E\u5E93\u540D), parent_page_name/parent_page_id(\u7236\u9875\u9762)",
-          level: 2,
-          execute: async (args, settings) => {
-            var _a;
-            const { name, parent_page_name, parent_page_id } = args;
-            if (!name) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B name\uFF08\u6570\u636E\u5E93\u540D\u79F0\uFF09\u3002";
-            let parentPage = null;
-            if (parent_page_id || parent_page_name) {
-              parentPage = await AI()._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
-              if (parentPage == null ? void 0 : parentPage.error) return `\u9519\u8BEF: ${parentPage.error}`;
-              if (!parentPage) return `\u9519\u8BEF: \u627E\u4E0D\u5230\u7236\u9875\u9762\u300C${parent_page_name || parent_page_id}\u300D\u3002`;
-            } else {
-              const response = await NotionAPI2.search("", { property: "object", value: "page" }, settings.notionApiKey);
-              const pages = (response.results || []).filter((p) => {
-                var _a2;
-                return !p.archived && ((_a2 = p.parent) == null ? void 0 : _a2.type) === "workspace";
-              });
-              if (pages.length === 0) return "\u9519\u8BEF: \u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u53EF\u7528\u7684\u9875\u9762\u4F5C\u4E3A\u7236\u9875\u9762\u3002";
-              parentPage = { id: pages[0].id.replace(/-/g, ""), name: Utils2.getPageTitle(pages[0]) };
-            }
-            const properties = {
-              "\u6807\u9898": { title: {} },
-              "\u94FE\u63A5": { url: {} },
-              "\u5206\u7C7B": { rich_text: {} },
-              "\u6807\u7B7E": { multi_select: { options: [] } },
-              "\u4F5C\u8005": { rich_text: {} }
-            };
-            const result = await AI()._executeGuardedWrite(
-              "createDatabase",
-              () => NotionAPI2.createDatabase(parentPage.id, name, properties, settings.notionApiKey),
-              { itemName: name },
-              settings
-            );
-            const newDbId = ((_a = result.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
-            return `\u5DF2\u521B\u5EFA\u6570\u636E\u5E93\u300C${name}\u300D(ID: ${newDbId})\uFF0C\u7236\u9875\u9762: ${parentPage.name}\u3002`;
-          }
-        },
-        // === 深度研究工具 (Level 0) ===
-        research_report: {
-          description: "\u6DF1\u5165\u7814\u7A76\u6307\u5B9A\u4E3B\u9898\uFF0C\u591A\u5173\u952E\u8BCD\u641C\u7D22\u5E76\u751F\u6210\u7ED3\u6784\u5316\u7814\u7A76\u62A5\u544A",
-          params: "research_topic(\u7814\u7A76\u4E3B\u9898), scope(\u8303\u56F4:workspace/database,\u9ED8\u8BA4workspace)",
-          level: 0,
-          execute: async (args, settings) => {
-            return await AI().handleDeepResearch(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
-          }
-        },
-        // === 公式编写辅助 (Level 1) ===
-        generate_formula: {
-          description: "\u6839\u636E\u81EA\u7136\u8BED\u8A00\u63CF\u8FF0\u751F\u6210 Notion \u6570\u636E\u5E93\u516C\u5F0F",
-          params: "description(\u529F\u80FD\u63CF\u8FF0), database_name/database_id(\u76EE\u6807\u6570\u636E\u5E93,\u53EF\u9009), property_name(\u76EE\u6807\u5C5E\u6027\u540D,\u53EF\u9009)",
-          level: 1,
-          execute: async (args, settings) => {
-            const { description, database_name, database_id, property_name } = args;
-            if (!description) return "\u9519\u8BEF: \u8BF7\u63CF\u8FF0\u4F60\u60F3\u8981\u7684\u516C\u5F0F\u529F\u80FD\u3002";
-            let schemaDesc = "";
-            const dbId = database_id || settings.notionDatabaseId;
-            if (dbId) {
-              try {
-                const database = await NotionAPI2.fetchDatabase(dbId, settings.notionApiKey);
-                const props = Object.entries(database.properties || {}).map(([name, prop]) => `${name}(${prop.type})`).join(", ");
-                schemaDesc = `\u6570\u636E\u5E93\u5C5E\u6027: ${props}`;
-              } catch (error) {
-                console.warn("[LD-Notion] \u6570\u636E\u5E93\u5C5E\u6027\u83B7\u53D6\u5931\u8D25:", error);
-                schemaDesc = "";
-              }
-            }
-            const prompt2 = `\u4F60\u662F Notion \u516C\u5F0F\u4E13\u5BB6\u3002\u6839\u636E\u4EE5\u4E0B\u4FE1\u606F\u751F\u6210 Notion \u516C\u5F0F\u3002
-
-${schemaDesc ? schemaDesc + "\n" : ""}\u7528\u6237\u9700\u6C42: ${description}
-
-\u8BF7\u8FD4\u56DE\u4EE5\u4E0B\u683C\u5F0F:
-\u516C\u5F0F: <Notion\u516C\u5F0F\u8868\u8FBE\u5F0F>
-\u8BF4\u660E: <\u516C\u5F0F\u529F\u80FD\u7B80\u8FF0>
-\u793A\u4F8B: <\u516C\u5F0F\u8FD4\u56DE\u503C\u793A\u4F8B>
-
-\u6CE8\u610F\uFF1A\u4F7F\u7528 Notion \u7684\u516C\u5F0F\u8BED\u6CD5\uFF08prop(), if(), contains() \u7B49\u51FD\u6570\uFF09\u3002`;
-            const result = await svc().requestChat(prompt2, settings, 500);
-            let response = `\u{1F4D0} **Notion \u516C\u5F0F\u751F\u6210**
-
-${result}`;
-            if (property_name) {
-              response += `
-
-\u{1F4A1} \u8BF7\u5C06\u6B64\u516C\u5F0F\u624B\u52A8\u8BBE\u7F6E\u5230\u6570\u636E\u5E93\u5C5E\u6027\u300C${property_name}\u300D\u4E2D\uFF08Notion API \u6682\u4E0D\u652F\u6301\u76F4\u63A5\u5199\u5165\u516C\u5F0F\u5C5E\u6027\uFF09\u3002`;
-            }
-            return response;
-          }
-        },
-        summarize_page: {
-          description: "\u603B\u7ED3\u6307\u5B9A\u9875\u9762\u7684\u5185\u5BB9\uFF0C\u751F\u6210\u5173\u952E\u4FE1\u606F\u6458\u8981",
-          params: "page_name/page_id(\u76EE\u6807\u9875\u9762), style(\u6458\u8981\u98CE\u683C:brief/detailed/bullet,\u9ED8\u8BA4brief)",
-          level: 0,
-          execute: async (args, settings) => {
-            return await AI().handleSummarize(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
-          }
-        },
-        brainstorm_ideas: {
-          description: "\u6839\u636E\u4E3B\u9898\u8FDB\u884C\u5934\u8111\u98CE\u66B4\uFF0C\u751F\u6210\u521B\u610F\u5217\u8868\u6216\u65B9\u6848\u5EFA\u8BAE",
-          params: "topic(\u4E3B\u9898), count(\u751F\u6210\u6570\u91CF,\u9ED8\u8BA410), style(\u98CE\u683C:practical/creative/wild,\u9ED8\u8BA4practical)",
-          level: 0,
-          execute: async (args, settings) => {
-            return await AI().handleBrainstorm(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
-          }
-        },
-        proofread_content: {
-          description: "\u6821\u5BF9\u9875\u9762\u5185\u5BB9\uFF0C\u7EA0\u6B63\u62FC\u5199\u3001\u8BED\u6CD5\u548C\u8868\u8FBE\u95EE\u9898",
-          params: "page_name/page_id(\u76EE\u6807\u9875\u9762)",
-          level: 0,
-          execute: async (args, settings) => {
-            return await AI().handleProofread(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
-          }
-        },
-        batch_translate_database: {
-          description: "\u6279\u91CF\u7FFB\u8BD1\u6570\u636E\u5E93\u4E2D\u6240\u6709\u9875\u9762\u7684\u5185\u5BB9",
-          params: "database_name/database_id(\u76EE\u6807\u6570\u636E\u5E93), target_language(\u76EE\u6807\u8BED\u8A00,\u5982\u82F1\u6587/\u65E5\u6587)",
-          level: 1,
-          execute: async (args, settings) => {
-            return await AI().handleBatchTranslate(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
-          }
-        },
-        extract_to_database: {
-          description: "\u4ECE\u9875\u9762\u5185\u5BB9\u4E2D\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\uFF0C\u521B\u5EFA\u6570\u636E\u5E93\u5E76\u586B\u5145\u6761\u76EE",
-          params: "page_name/page_id(\u6E90\u9875\u9762), database_name(\u65B0\u6570\u636E\u5E93\u540D\u79F0), extraction_prompt(\u63D0\u53D6\u8981\u6C42\u63CF\u8FF0)",
-          level: 2,
-          execute: async (args, settings) => {
-            return await AI().handleExtractToDatabase(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
-          }
-        },
-        generate_structured_pages: {
-          description: "\u6839\u636E\u9700\u6C42\u751F\u6210\u591A\u9875\u9762\u7ED3\u6784\u5316\u5185\u5BB9\uFF08\u5982\u5165\u804C\u6307\u5357\u3001\u7ADE\u54C1\u5206\u6790\u62A5\u544A\uFF09",
-          params: "topic(\u4E3B\u9898), structure_prompt(\u7ED3\u6784\u63CF\u8FF0), parent_page_name/parent_page_id(\u7236\u9875\u9762,\u53EF\u9009)",
-          level: 2,
-          execute: async (args, settings) => {
-            return await AI().handleGeneratePages(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
-          }
-        },
-        batch_analyze_pages: {
-          description: "\u6279\u91CF\u5206\u6790\u6570\u636E\u5E93\u4E2D\u7684\u9875\u9762\uFF0C\u751F\u6210\u8DE8\u9875\u9762\u7EFC\u5408\u5206\u6790\u62A5\u544A",
-          params: "database_name/database_id(\u76EE\u6807\u6570\u636E\u5E93), analysis_prompt(\u5206\u6790\u8981\u6C42), limit(\u5206\u6790\u9875\u6570,\u9ED8\u8BA410)",
-          level: 0,
-          execute: async (args, settings) => {
-            return await AI().handleBatchAnalyze(args, settings, "Agent\u5DE5\u5177\u8C03\u7528");
-          }
-        }
-      };
-      module.exports = { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 };
-    }
-  });
-
-  // src/ai/Handlers.js
-  var require_Handlers = __commonJS({
-    "src/ai/Handlers.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var { TargetState: TargetState2 } = require_auth();
-      var { NotionAPI: NotionAPI2 } = require_api();
-      var { OperationGuard: OperationGuard2 } = require_security();
-      var { ConfirmationDialog: ConfirmationDialog3 } = require_security();
-      var { AISchema: AISchema2 } = require_schema();
-      var { BlockConverter } = require_BlockConverter();
-      var { NameResolver } = require_NameResolver();
-      var _AI = null;
-      var AI = () => _AI || (_AI = require_ai().AIAssistant);
-      var _state = null;
-      var state = () => _state || (_state = require_ai().ChatState);
-      var _svc = null;
-      var svc = () => _svc || (_svc = require_ai().AIService);
-      var AIHandlers2 = {
-        handleQuery: async (params, settings, explanation) => {
-          var _a, _b, _c;
-          if (!settings.notionDatabaseId) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
-          }
-          state().updateLastMessage(`\u6B63\u5728\u67E5\u8BE2\u6570\u636E\u5E93...`, "processing");
-          try {
-            const { limit = 10, filter_field, filter_value } = params;
-            let filter = null;
-            if (filter_field && filter_value) {
-              const fieldConfig = {
-                "\u4F5C\u8005": { name: "\u4F5C\u8005", type: "rich_text" },
-                "\u5206\u7C7B": { name: "\u5206\u7C7B", type: "rich_text" },
-                "\u6807\u7B7E": { name: "\u6807\u7B7E", type: "multi_select" },
-                "AI\u5206\u7C7B": { name: "AI\u5206\u7C7B", type: "select" }
-              };
-              const config = fieldConfig[filter_field] || { name: filter_field, type: "rich_text" };
-              if (config.type === "select") {
-                filter = {
-                  property: config.name,
-                  select: { equals: filter_value }
-                };
-              } else if (config.type === "multi_select") {
-                filter = {
-                  property: config.name,
-                  multi_select: { contains: filter_value }
-                };
-              } else {
-                filter = {
-                  property: config.name,
-                  rich_text: { contains: filter_value }
-                };
-              }
-            }
-            const allPages = [];
-            let cursor = null;
-            let hasMore = true;
-            const maxPages = 10;
-            let pageCount = 0;
-            let querySorts = [];
-            while (hasMore && pageCount < maxPages) {
-              let response;
-              try {
-                response = await NotionAPI2.queryDatabase(
-                  settings.notionDatabaseId,
-                  filter,
-                  pageCount === 0 ? [{ property: "\u6536\u85CF\u65F6\u95F4", direction: "descending" }] : querySorts,
-                  cursor,
-                  settings.notionApiKey
-                );
-                if (pageCount === 0) querySorts = [{ property: "\u6536\u85CF\u65F6\u95F4", direction: "descending" }];
-              } catch (sortError) {
-                if (pageCount === 0 && ((_a = sortError.message) == null ? void 0 : _a.includes("\u6536\u85CF\u65F6\u95F4"))) {
-                  querySorts = [{ timestamp: "created_time", direction: "descending" }];
-                  response = await NotionAPI2.queryDatabase(
-                    settings.notionDatabaseId,
-                    filter,
-                    querySorts,
-                    cursor,
-                    settings.notionApiKey
-                  );
-                } else {
-                  throw sortError;
-                }
-              }
-              allPages.push(...response.results || []);
-              hasMore = response.has_more;
-              cursor = response.next_cursor;
-              pageCount++;
-              if (hasMore) {
-                state().updateLastMessage(`\u6B63\u5728\u67E5\u8BE2\u6570\u636E\u5E93... (\u5DF2\u83B7\u53D6 ${allPages.length} \u6761)`, "processing");
-              }
-            }
-            const pages = allPages;
-            const total = pages.length;
-            const isTruncated = hasMore;
-            if (total === 0) {
-              return `\u{1F4CA} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u7B26\u5408\u6761\u4EF6\u7684\u5E16\u5B50\u3002${filter ? `
-\u7B5B\u9009\u6761\u4EF6\uFF1A${filter_field} \u5305\u542B "${filter_value}"` : ""}`;
-            }
-            let result = `\u{1F4CA} **\u67E5\u8BE2\u7ED3\u679C**
-
-`;
-            result += `\u5171\u627E\u5230 **${total}** \u4E2A\u5E16\u5B50`;
-            if (isTruncated) {
-              result += ` (\u5DF2\u8FBE\u67E5\u8BE2\u4E0A\u9650\uFF0C\u53EF\u80FD\u8FD8\u6709\u66F4\u591A)`;
-            }
-            if (((_b = params.keyword) == null ? void 0 : _b.includes("\u7EDF\u8BA1")) || ((_c = params.keyword) == null ? void 0 : _c.includes("\u5206\u7C7B"))) {
-              const categoryCount = {};
-              pages.forEach((page) => {
-                var _a2, _b2, _c2, _d, _e;
-                const cat = ((_b2 = (_a2 = page.properties["AI\u5206\u7C7B"]) == null ? void 0 : _a2.select) == null ? void 0 : _b2.name) || ((_e = (_d = (_c2 = page.properties["\u5206\u7C7B"]) == null ? void 0 : _c2.rich_text) == null ? void 0 : _d[0]) == null ? void 0 : _e.plain_text) || "\u672A\u5206\u7C7B";
-                categoryCount[cat] = (categoryCount[cat] || 0) + 1;
-              });
-              result += `
-
-**\u5206\u7C7B\u7EDF\u8BA1\uFF1A**
-`;
-              Object.entries(categoryCount).sort((a, b) => b[1] - a[1]).forEach(([cat, count]) => {
-                result += `- ${cat}: ${count} \u4E2A
-`;
-              });
-            } else {
-              const showLimit = Math.min(limit, total);
-              result += `\uFF08\u663E\u793A\u524D ${showLimit} \u6761\uFF09
-
-`;
-              pages.slice(0, showLimit).forEach((page, i) => {
-                var _a2, _b2, _c2;
-                const title = Utils2.getPageTitle(page);
-                const author = ((_c2 = (_b2 = (_a2 = page.properties["\u4F5C\u8005"]) == null ? void 0 : _a2.rich_text) == null ? void 0 : _b2[0]) == null ? void 0 : _c2.plain_text) || "\u672A\u77E5";
-                result += `${i + 1}. **${title}**
-   \u4F5C\u8005: ${author}
-`;
-              });
-            }
-            return result;
-          } catch (error) {
-            return `\u274C \u67E5\u8BE2\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleSearch: async (params, settings, explanation) => {
-          if (!settings.notionDatabaseId) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22 xxx\u300D\u6765\u641C\u7D22\u6574\u4E2A\u5DE5\u4F5C\u533A\uFF0C\u6216\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
-          }
-          state().updateLastMessage(`\u6B63\u5728\u641C\u7D22...`, "processing");
-          try {
-            const { keyword, limit = 10 } = params;
-            if (!keyword) {
-              return "\u8BF7\u544A\u8BC9\u6211\u4F60\u60F3\u641C\u7D22\u4EC0\u4E48\u5173\u952E\u8BCD\uFF1F";
-            }
-            const response = await NotionAPI2.search(
-              keyword,
-              { property: "object", value: "page" },
-              settings.notionApiKey
-            );
-            const pages = (response.results || []).filter((p) => {
-              var _a, _b;
-              return ((_b = (_a = p.parent) == null ? void 0 : _a.database_id) == null ? void 0 : _b.replace(/-/g, "")) === settings.notionDatabaseId.replace(/-/g, "");
-            });
-            if (pages.length === 0) {
-              return `\u{1F50D} \u6CA1\u6709\u627E\u5230\u5305\u542B\u300C${keyword}\u300D\u7684\u5E16\u5B50\u3002`;
-            }
-            let result = `\u{1F50D} **\u641C\u7D22\u7ED3\u679C**
-
-`;
-            result += `\u627E\u5230 **${pages.length}** \u4E2A\u5305\u542B\u300C${keyword}\u300D\u7684\u5E16\u5B50\uFF1A
-
-`;
-            pages.slice(0, limit).forEach((page, i) => {
-              const title = Utils2.getPageTitle(page);
-              const url = page.url || "";
-              result += `${i + 1}. [${title}](${url})
-`;
-            });
-            if (pages.length > limit) {
-              result += `
-... \u8FD8\u6709 ${pages.length - limit} \u6761\u7ED3\u679C`;
-            }
-            return result;
-          } catch (error) {
-            return `\u274C \u641C\u7D22\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleWorkspaceSearch: async (params, settings, explanation) => {
-          state().updateLastMessage(`\u6B63\u5728\u641C\u7D22\u6574\u4E2A\u5DE5\u4F5C\u533A...`, "processing");
-          try {
-            const { keyword = "", limit = 10, object_type } = params;
-            let filter = null;
-            if (object_type === "page") {
-              filter = { property: "object", value: "page" };
-            } else if (object_type === "database") {
-              filter = { property: "object", value: "database" };
-            }
-            let allResults = [];
-            let cursor = void 0;
-            let searchPageCount = 0;
-            do {
-              const response = await NotionAPI2.search(keyword, filter, settings.notionApiKey, cursor);
-              allResults = allResults.concat(response.results || []);
-              cursor = response.has_more ? response.next_cursor : void 0;
-              searchPageCount++;
-            } while (cursor && searchPageCount < 10);
-            const results = allResults;
-            if (results.length === 0) {
-              const typeLabel = object_type === "page" ? "\u9875\u9762" : object_type === "database" ? "\u6570\u636E\u5E93" : "\u5185\u5BB9";
-              return keyword ? `\u{1F310} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u5305\u542B\u300C${keyword}\u300D\u7684${typeLabel}\u3002` : `\u{1F310} \u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230${typeLabel}\u3002`;
-            }
-            const pages = results.filter((r) => r.object === "page");
-            const databases = results.filter((r) => r.object === "database");
-            let result = `\u{1F310} **\u5DE5\u4F5C\u533A\u641C\u7D22\u7ED3\u679C**
-
-`;
-            if (keyword) {
-              result += `\u641C\u7D22\u5173\u952E\u8BCD\uFF1A\u300C${keyword}\u300D
-`;
-            }
-            result += `\u5171\u627E\u5230 **${results.length}** \u4E2A\u7ED3\u679C`;
-            if (pages.length > 0 && databases.length > 0) {
-              result += `\uFF08${pages.length} \u4E2A\u9875\u9762\uFF0C${databases.length} \u4E2A\u6570\u636E\u5E93\uFF09`;
-            }
-            result += `
-
-`;
-            if (databases.length > 0 && (!object_type || object_type === "database")) {
-              result += `\u{1F4C1} **\u6570\u636E\u5E93** (${databases.length})
-`;
-              databases.slice(0, limit).forEach((db, i) => {
-                var _a, _b, _c;
-                const title = ((_b = (_a = db.title) == null ? void 0 : _a[0]) == null ? void 0 : _b.plain_text) || "\u65E0\u6807\u9898\u6570\u636E\u5E93";
-                const url = db.url || "";
-                const id = ((_c = db.id) == null ? void 0 : _c.replace(/-/g, "")) || "";
-                result += `${i + 1}. [${title}](${url})
-`;
-                result += `   ID: \`${id}\`
-`;
-              });
-              if (databases.length > limit) {
-                result += `   ... \u8FD8\u6709 ${databases.length - limit} \u4E2A\u6570\u636E\u5E93
-`;
-              }
-              result += `
-`;
-            }
-            if (pages.length > 0 && (!object_type || object_type === "page")) {
-              result += `\u{1F4C4} **\u9875\u9762** (${pages.length})
-`;
-              pages.slice(0, limit).forEach((page, i) => {
-                var _a;
-                const title = Utils2.getPageTitle(page);
-                const url = page.url || "";
-                const parentType = ((_a = page.parent) == null ? void 0 : _a.type) || "";
-                let parentLabel = "";
-                if (parentType === "database_id") {
-                  parentLabel = "\u{1F4C1} \u6570\u636E\u5E93\u6761\u76EE";
-                } else if (parentType === "page_id") {
-                  parentLabel = "\u{1F4C4} \u5B50\u9875\u9762";
-                } else if (parentType === "workspace") {
-                  parentLabel = "\u{1F310} \u5DE5\u4F5C\u533A\u9875\u9762";
-                }
-                result += `${i + 1}. [${title}](${url})`;
-                if (parentLabel) {
-                  result += ` - ${parentLabel}`;
-                }
-                result += `
-`;
-              });
-              if (pages.length > limit) {
-                result += `   ... \u8FD8\u6709 ${pages.length - limit} \u4E2A\u9875\u9762
-`;
-              }
-            }
-            result += `
-\u{1F4A1} \u63D0\u793A\uFF1A\u590D\u5236\u6570\u636E\u5E93 ID \u53EF\u4EE5\u914D\u7F6E\u5230\u8BBE\u7F6E\u4E2D\u4F7F\u7528\u66F4\u591A\u529F\u80FD\u3002`;
-            return result;
-          } catch (error) {
-            return `\u274C \u5DE5\u4F5C\u533A\u641C\u7D22\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleClassify: async (params, settings, explanation) => {
-          return "\u{1F4DD} \u5355\u4E2A\u5206\u7C7B\u529F\u80FD\u5F00\u53D1\u4E2D...\n\n\u76EE\u524D\u53EF\u4EE5\u4F7F\u7528\u300C\u81EA\u52A8\u5206\u7C7B\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50\u300D\u6765\u6279\u91CF\u5206\u7C7B\u3002";
-        },
-        handleBatchClassify: async (params, settings, explanation) => {
-          if (!settings.notionDatabaseId) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
-          }
-          if (settings.categories.length < 2) {
-            return "\u274C \u8BF7\u5148\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u914D\u7F6E\u81F3\u5C11\u4E24\u4E2A\u5206\u7C7B\u9009\u9879\u3002";
-          }
-          state().updateLastMessage(`\u6B63\u5728\u51C6\u5907\u6279\u91CF\u5206\u7C7B...
-\u5206\u7C7B\u9009\u9879: ${settings.categories.join(", ")}`, "processing");
-          try {
-            await AIClassifier.ensureAICategoryProperty(settings);
-            state().updateLastMessage(`\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...`, "processing");
-            const pages = await AIClassifier.fetchAllPages(settings);
-            if (pages.length === 0) {
-              return "\u{1F4ED} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762\u3002";
-            }
-            const unclassified = pages.filter((p) => {
-              var _a;
-              const aiCategory = p.properties["AI\u5206\u7C7B"];
-              return !((_a = aiCategory == null ? void 0 : aiCategory.select) == null ? void 0 : _a.name);
-            });
-            if (unclassified.length === 0) {
-              return `\u2705 \u6240\u6709 ${pages.length} \u4E2A\u9875\u9762\u90FD\u5DF2\u5206\u7C7B\u5B8C\u6210\uFF01`;
-            }
-            const results = { success: 0, failed: 0 };
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            for (let i = 0; i < unclassified.length; i++) {
-              const page = unclassified[i];
-              const title = AIClassifier.getPageTitle(page);
-              state().updateLastMessage(
-                `\u{1F504} \u6B63\u5728\u5206\u7C7B (${i + 1}/${unclassified.length})
-
-\u5F53\u524D: ${title}`,
-                "processing"
-              );
-              try {
-                await AIClassifier.classifyPage(page, settings);
-                results.success++;
-              } catch (error) {
-                console.error(`[LD-Notion] \u5206\u7C7B\u5931\u8D25: ${title}`, error);
-                results.failed++;
-              }
-              if (i < unclassified.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-            let resultMsg = `\u2705 **\u6279\u91CF\u5206\u7C7B\u5B8C\u6210**
-
-`;
-            resultMsg += `- \u603B\u8BA1: ${pages.length} \u4E2A\u9875\u9762
-`;
-            resultMsg += `- \u5DF2\u5206\u7C7B: ${pages.length - unclassified.length} \u4E2A
-`;
-            resultMsg += `- \u672C\u6B21\u5206\u7C7B: ${results.success} \u4E2A
-`;
-            if (results.failed > 0) {
-              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
-`;
-            }
-            return resultMsg;
-          } catch (error) {
-            return `\u274C \u6279\u91CF\u5206\u7C7B\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleUpdate: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("updatePage")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u66F4\u65B0\u9875\u9762\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          state().updateLastMessage("\u6B63\u5728\u5B9A\u4F4D\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targets = await AI()._resolvePageTargets({
-              ...params,
-              page_name: params.page_name || params.keyword
-            }, settings);
-            if (targets == null ? void 0 : targets.error) return `\u274C ${targets.error}`;
-            if (!targets || targets.length === 0) {
-              return "\u274C \u6CA1\u6709\u627E\u5230\u53EF\u66F4\u65B0\u7684\u9875\u9762\u3002\u8BF7\u63D0\u4F9B page_name/page_id/page_ids\uFF0C\u6216\u63D0\u4F9B\u6570\u636E\u5E93 + page_title\u3002";
-            }
-            const batchMode = !!params.batch || Array.isArray(params.page_ids) || !!params.page_title || targets.length > 1;
-            if (!batchMode && targets.length > 1) {
-              const names = targets.map((t) => `\u300C${t.name}\u300D`).join("\u3001");
-              return `\u274C \u627E\u5230\u591A\u4E2A\u9875\u9762\uFF1A${names}\u3002\u8BF7\u63D0\u4F9B\u66F4\u7CBE\u786E\u7684 page_name \u6216\u76F4\u63A5\u63D0\u4F9B page_id\u3002`;
-            }
-            const { success, failed } = await AI()._applyPageUpdatesToTargets(targets, params, settings);
-            if (!batchMode && success === 1 && failed === 0) {
-              return `\u2705 \u5DF2\u66F4\u65B0\u9875\u9762\u300C${targets[0].name}\u300D\u3002`;
-            }
-            return `\u2705 \u6279\u91CF\u66F4\u65B0\u5B8C\u6210\uFF1A\u6210\u529F ${success} \u4E2A\uFF0C\u5931\u8D25 ${failed} \u4E2A\u3002`;
-          } catch (error) {
-            return `\u274C \u66F4\u65B0\u9875\u9762\u5931\u8D25: ${error.message}`;
-          }
-        },
-        _resolveDatabaseId: async (name, id, apiKey) => {
-          return NameResolver.resolveDatabaseId(name, id, apiKey);
-        },
-        _fetchSourcePages: async (databaseId, apiKey, pageTitle) => {
-          const allPages = [];
-          let cursor = null;
-          do {
-            const response = await NotionAPI2.queryDatabase(databaseId, null, null, cursor, apiKey);
-            allPages.push(...response.results || []);
-            cursor = response.has_more ? response.next_cursor : null;
-          } while (cursor);
-          if (pageTitle) {
-            return allPages.filter((page) => {
-              const title = Utils2.getPageTitle(page);
-              return title.includes(pageTitle);
-            });
-          }
-          return allPages;
-        },
-        handleMove: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("movePage")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u79FB\u52A8\u9875\u9762\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
-          }
-          const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
-          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u6570\u636E\u5E93\u4FE1\u606F...", "processing");
-          try {
-            let source = await AI()._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
-            if (source == null ? void 0 : source.error) return `\u274C \u6E90\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${source.error}`;
-            if (!source && settings.notionDatabaseId) {
-              source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93" };
-            }
-            if (!source) {
-              return "\u274C \u65E0\u6CD5\u786E\u5B9A\u6E90\u6570\u636E\u5E93\u3002\u8BF7\u6307\u5B9A\u6E90\u6570\u636E\u5E93\u540D\u79F0\uFF0C\u6216\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002";
-            }
-            const target = await AI()._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
-            if (target == null ? void 0 : target.error) return `\u274C \u76EE\u6807\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${target.error}`;
-            if (!target) {
-              return `\u274C \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002
-
-\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002`;
-            }
-            if (source.id === target.id) {
-              return "\u274C \u6E90\u6570\u636E\u5E93\u548C\u76EE\u6807\u6570\u636E\u5E93\u76F8\u540C\uFF0C\u65E0\u9700\u79FB\u52A8\u3002";
-            }
-            state().updateLastMessage(`\u6B63\u5728\u4ECE\u300C${source.name}\u300D\u83B7\u53D6\u9875\u9762...`, "processing");
-            const pages = await AI()._fetchSourcePages(source.id, settings.notionApiKey, page_title);
-            if (pages.length === 0) {
-              return page_title ? `\u{1F4ED} \u5728\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u6807\u9898\u5305\u542B\u300C${page_title}\u300D\u7684\u9875\u9762\u3002` : `\u{1F4ED}\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u9875\u9762\u3002`;
-            }
-            const results = { success: 0, failed: 0 };
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            for (let i = 0; i < pages.length; i++) {
-              const page = pages[i];
-              const title = Utils2.getPageTitle(page);
-              state().updateLastMessage(
-                `\u{1F4E6} \u6B63\u5728\u79FB\u52A8 (${i + 1}/${pages.length})
-
-\u5F53\u524D: ${title}
-\u2192 \u76EE\u6807: ${target.name}`,
-                "processing"
-              );
-              try {
-                await AI()._executeGuardedPageWrite(
-                  "movePage",
-                  { id: page.id, name: title },
-                  () => NotionAPI2.movePage(page.id, target.id, "database", settings.notionApiKey),
-                  settings
-                );
-                results.success++;
-              } catch (error) {
-                console.error(`[LD-Notion] \u79FB\u52A8\u5931\u8D25: ${title}`, error);
-                results.failed++;
-              }
-              if (i < pages.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-            let resultMsg = `\u2705 **\u79FB\u52A8\u5B8C\u6210**
-
-`;
-            resultMsg += `- \u6E90\u6570\u636E\u5E93: ${source.name}
-`;
-            resultMsg += `- \u76EE\u6807\u6570\u636E\u5E93: ${target.name}
-`;
-            resultMsg += `- \u6210\u529F: ${results.success} \u4E2A
-`;
-            if (results.failed > 0) {
-              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
-`;
-            }
-            return resultMsg;
-          } catch (error) {
-            return `\u274C \u79FB\u52A8\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleCopy: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("duplicatePage")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u590D\u5236\u9875\u9762\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
-          }
-          const { source_database_name, source_database_id, target_database_name, target_database_id, page_title } = params;
-          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u6570\u636E\u5E93\u4FE1\u606F...", "processing");
-          try {
-            let source = await AI()._resolveDatabaseId(source_database_name, source_database_id, settings.notionApiKey);
-            if (source == null ? void 0 : source.error) return `\u274C \u6E90\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${source.error}`;
-            if (!source && settings.notionDatabaseId) {
-              source = { id: settings.notionDatabaseId.replace(/-/g, ""), name: "\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93" };
-            }
-            if (!source) {
-              return "\u274C \u65E0\u6CD5\u786E\u5B9A\u6E90\u6570\u636E\u5E93\u3002\u8BF7\u6307\u5B9A\u6E90\u6570\u636E\u5E93\u540D\u79F0\uFF0C\u6216\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002";
-            }
-            const target = await AI()._resolveDatabaseId(target_database_name, target_database_id, settings.notionApiKey);
-            if (target == null ? void 0 : target.error) return `\u274C \u76EE\u6807\u6570\u636E\u5E93\u89E3\u6790\u5931\u8D25\uFF1A${target.error}`;
-            if (!target) {
-              return `\u274C \u627E\u4E0D\u5230\u76EE\u6807\u6570\u636E\u5E93\u300C${target_database_name || target_database_id}\u300D\u3002
-
-\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u3002`;
-            }
-            if (source.id === target.id) {
-              return "\u274C \u6E90\u6570\u636E\u5E93\u548C\u76EE\u6807\u6570\u636E\u5E93\u76F8\u540C\uFF0C\u65E0\u9700\u590D\u5236\u3002";
-            }
-            state().updateLastMessage(`\u6B63\u5728\u4ECE\u300C${source.name}\u300D\u83B7\u53D6\u9875\u9762...`, "processing");
-            const pages = await AI()._fetchSourcePages(source.id, settings.notionApiKey, page_title);
-            if (pages.length === 0) {
-              return page_title ? `\u{1F4ED} \u5728\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u6807\u9898\u5305\u542B\u300C${page_title}\u300D\u7684\u9875\u9762\u3002` : `\u{1F4ED}\u300C${source.name}\u300D\u4E2D\u6CA1\u6709\u9875\u9762\u3002`;
-            }
-            const results = { success: 0, failed: 0 };
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            for (let i = 0; i < pages.length; i++) {
-              const page = pages[i];
-              const title = Utils2.getPageTitle(page);
-              state().updateLastMessage(
-                `\u{1F4CB} \u6B63\u5728\u590D\u5236 (${i + 1}/${pages.length})
-
-\u5F53\u524D: ${title}
-\u2192 \u76EE\u6807: ${target.name}`,
-                "processing"
-              );
-              try {
-                await AI()._executeGuardedPageWrite(
-                  "duplicatePage",
-                  { id: page.id, name: title },
-                  () => NotionAPI2.duplicatePage(page.id, target.id, "database", settings.notionApiKey),
-                  settings
-                );
-                results.success++;
-              } catch (error) {
-                console.error(`[LD-Notion] \u590D\u5236\u5931\u8D25: ${title}`, error);
-                results.failed++;
-              }
-              if (i < pages.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-            let resultMsg = `\u2705 **\u590D\u5236\u5B8C\u6210**
-
-`;
-            resultMsg += `- \u6E90\u6570\u636E\u5E93: ${source.name}
-`;
-            resultMsg += `- \u76EE\u6807\u6570\u636E\u5E93: ${target.name}
-`;
-            resultMsg += `- \u6210\u529F: ${results.success} \u4E2A
-`;
-            if (results.failed > 0) {
-              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
-`;
-            }
-            return resultMsg;
-          } catch (error) {
-            return `\u274C \u590D\u5236\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleCompound: async (intentResult, settings) => {
-          const { steps, explanation } = intentResult;
-          if (!steps || steps.length === 0) {
-            return "\u274C \u7EC4\u5408\u6307\u4EE4\u89E3\u6790\u5931\u8D25\uFF1A\u672A\u8BC6\u522B\u5230\u6709\u6548\u7684\u6267\u884C\u6B65\u9AA4\u3002";
-          }
-          let planMsg = `\u{1F517} **\u7EC4\u5408\u6307\u4EE4** \u2014 ${explanation}
-
-\u{1F4CB} \u6267\u884C\u8BA1\u5212\uFF1A
-`;
-          steps.forEach((step, i) => {
-            planMsg += `${i + 1}. ${step.explanation}
-`;
-          });
-          state().updateLastMessage(planMsg, "processing");
-          const results = [];
-          let aborted = false;
-          for (let i = 0; i < steps.length; i++) {
-            const step = steps[i];
-            state().updateLastMessage(
-              `${planMsg}
-\u23F3 \u6B65\u9AA4 ${i + 1}/${steps.length}: ${step.explanation}`,
-              "processing"
-            );
-            try {
-              const stepResult = await AI().executeIntent(step, settings);
-              const normalizedStepResult = AI()._normalizeExecutionResult(stepResult);
-              if (AI()._isErrorResult(normalizedStepResult)) {
-                results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
-                aborted = true;
-                break;
-              }
-              results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
-            } catch (error) {
-              results.push({
-                index: i + 1,
-                explanation: step.explanation,
-                success: false,
-                result: AI()._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
-              });
-              aborted = true;
-              break;
-            }
-          }
-          let report = `\u{1F517} **\u7EC4\u5408\u6307\u4EE4\u6267\u884C${aborted ? "\u4E2D\u65AD" : "\u5B8C\u6210"}**
-
-`;
-          for (const r of results) {
-            report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.index}: ${r.explanation}
-`;
-          }
-          if (aborted) {
-            const skipped = steps.slice(results.length);
-            if (skipped.length > 0) {
-              report += `
-\u23ED\uFE0F \u5DF2\u8DF3\u8FC7\uFF1A
-`;
-              skipped.forEach((step, i) => {
-                report += `${results.length + i + 1}. ${step.explanation}
-`;
-              });
-            }
-          }
-          report += `
----
-`;
-          for (const r of results) {
-            report += `
-**\u6B65\u9AA4 ${r.index}**: ${r.explanation}
-${AI()._resultToText(r.result)}
-`;
-          }
-          return report;
-        },
-        handleCreateDatabase: async (params, settings, explanation) => {
-          var _a;
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("createDatabase")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u521B\u5EFA\u6570\u636E\u5E93\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u9762\u677F\u4E2D\u5C06\u6743\u9650\u7EA7\u522B\u8C03\u6574\u4E3A\u300C\u9AD8\u7EA7\u300D\u6216\u66F4\u9AD8\u3002";
-          }
-          const { database_name, parent_page_name, parent_page_id } = params;
-          if (!database_name) {
-            return "\u274C \u8BF7\u6307\u5B9A\u8981\u521B\u5EFA\u7684\u6570\u636E\u5E93\u540D\u79F0\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u521B\u5EFA\u4E00\u4E2A\u53EB\u6280\u672F\u6587\u6863\u7684\u6570\u636E\u5E93\u300D";
-          }
-          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u7236\u9875\u9762\u4FE1\u606F...", "processing");
-          try {
-            let parentPage = null;
-            if (parent_page_id || parent_page_name) {
-              parentPage = await AI()._resolvePageId(parent_page_name, parent_page_id, settings.notionApiKey);
-              if (parentPage == null ? void 0 : parentPage.error) return `\u274C \u7236\u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${parentPage.error}`;
-              if (!parentPage) {
-                return `\u274C \u627E\u4E0D\u5230\u540D\u4E3A\u300C${parent_page_name}\u300D\u7684\u9875\u9762\u3002
-
-\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22\u6240\u6709\u9875\u9762\u300D\u67E5\u770B\u53EF\u7528\u9875\u9762\u3002`;
-              }
-            } else {
-              state().updateLastMessage("\u672A\u6307\u5B9A\u7236\u9875\u9762\uFF0C\u6B63\u5728\u641C\u7D22\u5DE5\u4F5C\u533A\u9875\u9762...", "processing");
-              const response = await NotionAPI2.search(
-                "",
-                { property: "object", value: "page" },
-                settings.notionApiKey
-              );
-              const pages = (response.results || []).filter((p) => {
-                var _a2;
-                return !p.archived && ((_a2 = p.parent) == null ? void 0 : _a2.type) === "workspace";
-              });
-              if (pages.length === 0) {
-                return "\u274C \u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u53EF\u7528\u7684\u9875\u9762\u4F5C\u4E3A\u7236\u9875\u9762\u3002\n\n\u{1F4A1} \u8BF7\u5148\u5728 Notion \u4E2D\u521B\u5EFA\u4E00\u4E2A\u9875\u9762\uFF0C\u6216\u6307\u5B9A\u7236\u9875\u9762\u540D\u79F0\u3002\n\n\u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u4E0B\u521B\u5EFA\u4E00\u4E2A\u53EB\u6280\u672F\u6587\u6863\u7684\u6570\u636E\u5E93\u300D";
-              }
-              const firstPage = pages[0];
-              parentPage = { id: firstPage.id.replace(/-/g, ""), name: Utils2.getPageTitle(firstPage) || "\u672A\u547D\u540D\u9875\u9762" };
-            }
-            state().updateLastMessage(`\u6B63\u5728\u521B\u5EFA\u6570\u636E\u5E93\u300C${database_name}\u300D...`, "processing");
-            const properties = {
-              "\u6807\u9898": { title: {} },
-              "\u94FE\u63A5": { url: {} },
-              "\u5206\u7C7B": { rich_text: {} },
-              "\u6807\u7B7E": { multi_select: { options: [] } },
-              "\u4F5C\u8005": { rich_text: {} },
-              "\u6536\u85CF\u65F6\u95F4": { date: {} },
-              "\u5E16\u5B50\u6570": { number: { format: "number" } },
-              "\u6D4F\u89C8\u6570": { number: { format: "number" } },
-              "\u70B9\u8D5E\u6570": { number: { format: "number" } }
-            };
-            const result = await AI()._executeGuardedWrite(
-              "createDatabase",
-              () => NotionAPI2.createDatabase(parentPage.id, database_name, properties, settings.notionApiKey),
-              { itemName: database_name },
-              settings
-            );
-            const newDbId = ((_a = result.id) == null ? void 0 : _a.replace(/-/g, "")) || "";
-            let msg = `\u2705 **\u6570\u636E\u5E93\u521B\u5EFA\u6210\u529F**
-
-`;
-            msg += `- \u6570\u636E\u5E93\u540D\u79F0: ${database_name}
-`;
-            msg += `- \u6570\u636E\u5E93 ID: \`${newDbId}\`
-`;
-            msg += `- \u7236\u9875\u9762: ${parentPage.name}
-`;
-            msg += `
-\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u5C06\u6B64 ID \u586B\u5165\u8BBE\u7F6E\u4E2D\u7684\u300C\u6570\u636E\u5E93 ID\u300D\u5B57\u6BB5\u6765\u4F7F\u7528\u8BE5\u6570\u636E\u5E93\u3002`;
-            return msg;
-          } catch (error) {
-            return `\u274C \u521B\u5EFA\u6570\u636E\u5E93\u5931\u8D25: ${error.message}`;
-          }
-        },
-        _resolvePageId: async (name, id, apiKey) => {
-          return NameResolver.resolvePageId(name, id, apiKey);
-        },
-        _textToBlocks: (text) => {
-          return BlockConverter.textToBlocks(text);
-        },
-        _extractPageContent: async (pageId, apiKey, maxChars = 4e3) => {
-          try {
-            const markdownResponse = await NotionAPI2.fetchPageMarkdown(pageId, apiKey);
-            const markdown = String(markdownResponse.markdown || "").trim();
-            if (markdown) {
-              return markdown.slice(0, maxChars);
-            }
-          } catch (error) {
-            console.warn("[LD-Notion] Markdown API \u4E0D\u53EF\u7528\uFF0C\u56DE\u9000\u5230 blocks \u63D0\u53D6:", error);
-          }
-          const allBlocks = [];
-          let cursor = null;
-          do {
-            const data = await NotionAPI2.fetchBlocks(pageId, cursor, apiKey);
-            allBlocks.push(...data.results || []);
-            cursor = data.has_more ? data.next_cursor : null;
-          } while (cursor);
-          return AIClassifier.extractText(allBlocks).slice(0, maxChars);
-        },
-        handleWriteContent: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("appendBlocks")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u751F\u6210\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { content_prompt, page_name, page_id } = params;
-          if (!content_prompt) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u60F3\u751F\u6210\u7684\u5185\u5BB9\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u5199\u4E00\u6BB5\u5173\u4E8E Docker \u7684\u4ECB\u7ECD\u300D";
-          }
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u5199\u4E00\u6BB5\u5173\u4E8E Docker \u7684\u4ECB\u7ECD\u300D";
-          }
-          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002
-
-\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5728\u5DE5\u4F5C\u533A\u641C\u7D22\u6240\u6709\u9875\u9762\u300D\u67E5\u770B\u53EF\u7528\u9875\u9762\u3002`;
-            state().updateLastMessage("\u6B63\u5728\u751F\u6210\u5185\u5BB9...", "processing");
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u751F\u6210\u52A9\u624B\u3002\u6839\u636E\u7528\u6237\u8981\u6C42\u751F\u6210\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u3002
-
-\u7528\u6237\u8981\u6C42\uFF1A${content_prompt}`;
-            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
-            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
-            try {
-              await AI()._executeGuardedPageWrite(
-                "appendBlocks",
-                targetPage,
-                async () => {
-                  try {
-                    await NotionAPI2.appendPageMarkdown(targetPage.id, aiResponse, settings.notionApiKey);
-                  } catch (error) {
-                    console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
-                    const blocks = AI()._textToBlocks(aiResponse);
-                    await NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
-                  }
-                },
-                settings
-              );
-            } catch (error) {
-              return `\u274C \u5185\u5BB9\u751F\u6210\u5931\u8D25: ${error.message}`;
-            }
-            return `\u2705 **\u5185\u5BB9\u5DF2\u751F\u6210\u5E76\u8FFD\u52A0\u5230\u9875\u9762**
-
-- \u76EE\u6807\u9875\u9762: ${targetPage.name}
-- \u751F\u6210\u5185\u5BB9: ${aiResponse.length} \u5B57
-
-\u{1F4A1} \u5185\u5BB9\u5DF2\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\u3002`;
-          } catch (error) {
-            return `\u274C \u5185\u5BB9\u751F\u6210\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleEditContent: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("appendBlocks")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u7F16\u8F91\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { content_prompt, page_name, page_id } = params;
-          if (!content_prompt) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u7F16\u8F91\u8981\u6C42\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u5185\u5BB9\u6539\u5F97\u66F4\u7B80\u6D01\u300D";
-          }
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u5185\u5BB9\u6539\u5F97\u66F4\u7B80\u6D01\u300D";
-          }
-          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey);
-            if (!existingContent.trim()) {
-              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u7F16\u8F91\u7684\u5185\u5BB9\u3002`;
-            }
-            state().updateLastMessage("\u6B63\u5728\u89C4\u5212\u7CBE\u786E\u7F16\u8F91...", "processing");
-            const editPlanPrompt = `\u4F60\u662F\u4E00\u4E2A\u7CBE\u786E\u7684 Notion Markdown \u7F16\u8F91\u5668\u3002\u8BF7\u6839\u636E\u7F16\u8F91\u6307\u4EE4\uFF0C\u4F18\u5148\u7ED9\u51FA\u5C40\u90E8\u66FF\u6362\u65B9\u6848\uFF0C\u800C\u4E0D\u662F\u91CD\u5199\u6574\u9875\u3002
-
-\u8F93\u51FA JSON\uFF0C\u4E14\u53EA\u80FD\u8FD4\u56DE JSON\uFF1A
-{
-  "mode": "update_content" | "append_version",
-  "content_updates": [
-{
-  "old_str": "\u9700\u8981\u88AB\u7CBE\u786E\u66FF\u6362\u7684\u539F\u6587\u7247\u6BB5",
-  "new_str": "\u66FF\u6362\u540E\u7684\u65B0\u5185\u5BB9",
-  "replace_all_matches": false
-}
-  ],
-  "append_markdown": "\u4EC5\u5F53 mode=append_version \u65F6\u63D0\u4F9B\uFF0C\u8FD4\u56DE\u5B8C\u6574\u6539\u5199\u7248\u672C"
-}
-
-\u89C4\u5219\uFF1A
-1. \u5982\u679C\u80FD\u901A\u8FC7 1-5 \u6761\u7CBE\u786E\u66FF\u6362\u5B8C\u6210\uFF0C\u5C31\u7528 update_content\u3002
-2. old_str \u5FC5\u987B\u9010\u5B57\u51FA\u81EA\u539F\u6587\u3002
-3. \u53EA\u6709\u5728\u9700\u8981\u5927\u5E45\u6539\u5199\u3001\u91CD\u7EC4\u7ED3\u6784\u6216\u65E0\u6CD5\u7A33\u5B9A\u5B9A\u4F4D\u539F\u6587\u65F6\uFF0C\u624D\u7528 append_version\u3002
-4. append_markdown \u5FC5\u987B\u662F Markdown\u3002
-
-\u539F\u6587\uFF1A
-${existingContent}
-
-\u7F16\u8F91\u6307\u4EE4\uFF1A
-${content_prompt}`;
-            const editPlanRaw = await svc().requestChat(editPlanPrompt, settings, 2200);
-            const editPlanResult = AISchema2.parseAIJson("editPlan", editPlanRaw);
-            let editPlan = null;
-            if (editPlanResult.ok) {
-              editPlan = editPlanResult.value;
-            } else {
-              console.warn("[LD-Notion] \u7F16\u8F91\u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", editPlanResult.reason);
-            }
-            let exactUpdateError = null;
-            let inPlaceSkippedReason = null;
-            const hasValidContentUpdates = (editPlan == null ? void 0 : editPlan.mode) === "update_content" && Array.isArray(editPlan.content_updates) && editPlan.content_updates.length > 0 && editPlan.content_updates.every((u) => u && typeof u.old_str === "string" && typeof u.new_str === "string");
-            if ((editPlan == null ? void 0 : editPlan.mode) === "update_content" && !hasValidContentUpdates) {
-              inPlaceSkippedReason = "\u539F\u4F4D\u7F16\u8F91\u7ED3\u6784\u6821\u9A8C\u5931\u8D25\uFF08content_updates \u7F3A\u5931\u6216\u65E0\u6548\uFF09";
-              console.warn("[LD-Notion] editPlan content_updates \u7ED3\u6784\u65E0\u6548\uFF0C\u964D\u7EA7\u4E3A\u5168\u6587\u8FFD\u52A0:", inPlaceSkippedReason);
-            }
-            if (hasValidContentUpdates) {
-              state().updateLastMessage("\u6B63\u5728\u6267\u884C\u539F\u4F4D\u7CBE\u786E\u7F16\u8F91...", "processing");
-              try {
-                await AI()._executeGuardedPageWrite(
-                  "updatePageMarkdown",
-                  targetPage,
-                  () => NotionAPI2.searchReplacePageMarkdown(
-                    targetPage.id,
-                    editPlan.content_updates,
-                    settings.notionApiKey
-                  ),
-                  settings
-                );
-                return `\u2705 **\u9875\u9762\u5DF2\u539F\u4F4D\u66F4\u65B0**
-
-- \u76EE\u6807\u9875\u9762: ${targetPage.name}
-- \u7F16\u8F91\u6307\u4EE4: ${content_prompt}
-- \u7CBE\u786E\u66FF\u6362: ${editPlan.content_updates.length} \u5904`;
-              } catch (error) {
-                exactUpdateError = error;
-              }
-            }
-            state().updateLastMessage("\u6B63\u5728\u751F\u6210\u7F16\u8F91\u7248\u672C...", "processing");
-            const fallbackMarkdown = String((editPlan == null ? void 0 : editPlan.append_markdown) || "").trim();
-            let aiResponse = fallbackMarkdown;
-            if (!aiResponse) {
-              const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u7F16\u8F91\u52A9\u624B\u3002\u6839\u636E\u7F16\u8F91\u6307\u4EE4\u6539\u5199\u4EE5\u4E0B\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u6539\u5199\u540E\u7684\u5B8C\u6574\u5185\u5BB9\u3002
-
-\u539F\u6587\uFF1A
-${existingContent}
-
-\u7F16\u8F91\u6307\u4EE4\uFF1A${content_prompt}`;
-              aiResponse = await svc().requestChat(prompt2, settings, 2e3);
-            }
-            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u7F16\u8F91\u7248\u672C...", "processing");
-            const versionMarkdown = `---
-
-## \u270F\uFE0F AI \u7F16\u8F91\u7248\u672C
-
-${aiResponse}`;
-            await AI()._executeGuardedPageWrite(
-              "appendBlocks",
-              targetPage,
-              async () => {
-                try {
-                  await NotionAPI2.appendPageMarkdown(targetPage.id, versionMarkdown, settings.notionApiKey);
-                } catch (error) {
-                  console.warn("[LD-Notion] Markdown \u8FFD\u52A0\u5931\u8D25\uFF0C\u56DE\u9000\u5230\u5757\u8FFD\u52A0:", error);
-                  const contentBlocks = AI()._textToBlocks(aiResponse);
-                  const blocks = [
-                    { type: "divider", divider: {} },
-                    { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: "\u270F\uFE0F AI \u7F16\u8F91\u7248\u672C" } }] } },
-                    ...contentBlocks
-                  ];
-                  await NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey);
-                }
-              },
-              settings
-            );
-            const fallbackReason = (exactUpdateError == null ? void 0 : exactUpdateError.message) ? `
-
-\u{1F4A1} \u539F\u4F4D\u7CBE\u786E\u66FF\u6362\u5931\u8D25\uFF1A${exactUpdateError.message}\uFF1B\u5DF2\u81EA\u52A8\u8FFD\u52A0\u5B8C\u6574\u7F16\u8F91\u7248\u672C\uFF0C\u539F\u5185\u5BB9\u4FDD\u7559\u3002` : inPlaceSkippedReason ? `
-
-\u{1F4A1} ${inPlaceSkippedReason}\uFF1B\u5DF2\u5C06\u5B8C\u6574\u7F16\u8F91\u7248\u672C\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002` : "\n\n\u{1F4A1} \u672C\u6B21\u672A\u6267\u884C\u539F\u4F4D\u66FF\u6362\uFF0C\u5DF2\u5C06\u5B8C\u6574\u7F16\u8F91\u7248\u672C\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002";
-            return `\u2705 **\u7F16\u8F91\u7248\u672C\u5DF2\u8FFD\u52A0\u5230\u9875\u9762**
-
-- \u76EE\u6807\u9875\u9762: ${targetPage.name}
-- \u7F16\u8F91\u6307\u4EE4: ${content_prompt}${fallbackReason}`;
-          } catch (error) {
-            return `\u274C \u5185\u5BB9\u7F16\u8F91\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleTranslateContent: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("appendBlocks")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u5185\u5BB9\u7FFB\u8BD1\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { page_name, page_id, target_language } = params;
-          const lang = target_language || "\u82F1\u6587";
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u8981\u7FFB\u8BD1\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7FFB\u8BD1\u6210\u82F1\u6587\u300D";
-          }
-          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey);
-            if (!existingContent.trim()) {
-              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u5185\u5BB9\u3002`;
-            }
-            state().updateLastMessage(`\u6B63\u5728\u7FFB\u8BD1\u4E3A${lang}...`, "processing");
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7FFB\u8BD1\u3002\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\u4E3A${lang}\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\uFF0C\u4FDD\u6301\u539F\u6587\u7ED3\u6784\u3002
-
-\u539F\u6587\uFF1A
-${existingContent}`;
-            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
-            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u7FFB\u8BD1\u7248\u672C...", "processing");
-            const contentBlocks = AI()._textToBlocks(aiResponse);
-            const blocks = [
-              { type: "divider", divider: {} },
-              { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `\u{1F310} AI \u7FFB\u8BD1\uFF08${lang}\uFF09` } }] } },
-              ...contentBlocks
-            ];
-            await AI()._executeGuardedPageWrite(
-              "appendBlocks",
-              targetPage,
-              () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
-              settings
-            );
-            return `\u2705 **\u7FFB\u8BD1\u5DF2\u8FFD\u52A0\u5230\u9875\u9762**
-
-- \u76EE\u6807\u9875\u9762: ${targetPage.name}
-- \u7FFB\u8BD1\u8BED\u8A00: ${lang}
-- \u7FFB\u8BD1\u5185\u5BB9: ${aiResponse.length} \u5B57
-
-\u{1F4A1} \u7FFB\u8BD1\u7248\u672C\u5DF2\u8FFD\u52A0\u5230\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002`;
-          } catch (error) {
-            return `\u274C \u7FFB\u8BD1\u5931\u8D25: ${error.message}`;
-          }
-        },
-        _ensureAIProperty: async (databaseId, propertyName, propertyType, apiKey) => {
-          const database = await NotionAPI2.fetchDatabase(databaseId, apiKey);
-          const properties = database.properties || {};
-          if (properties[propertyName]) return;
-          const propDef = {};
-          if (propertyType === "multi_select") {
-            propDef[propertyName] = { multi_select: { options: [] } };
-          } else {
-            propDef[propertyName] = { rich_text: {} };
-          }
-          await AI()._executeGuardedDatabaseWrite(
-            "updateDatabase",
-            databaseId,
-            () => NotionAPI2.updateDatabase(databaseId, propDef, apiKey),
-            apiKey
-          );
-        },
-        handleAIAutofill: async (params, settings, explanation) => {
-          if (!OperationGuard2.canExecute("updatePage")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1AAI \u5C5E\u6027\u586B\u5145\u9700\u8981\u300C\u6807\u51C6\u300D\u53CA\u4EE5\u4E0A\u6743\u9650\u3002\n\n\u8BF7\u5728\u8BBE\u7F6E\u4E2D\u63D0\u5347\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const configCheck = AI().checkConfig(settings, true);
-          if (!configCheck.valid) return configCheck.error;
-          const { autofill_type, property_name } = params;
-          if (!autofill_type) {
-            return "\u274C \u8BF7\u6307\u5B9A\u586B\u5145\u7C7B\u578B\u3002\n\n\u{1F4A1} \u652F\u6301\u7684\u7C7B\u578B\uFF1A\n- \u6458\u8981\uFF1A\u300C\u7ED9\u6240\u6709\u5E16\u5B50\u751F\u6210 AI \u6458\u8981\u300D\n- \u5173\u952E\u8BCD\uFF1A\u300C\u63D0\u53D6\u6240\u6709\u5E16\u5B50\u7684\u5173\u952E\u8BCD\u300D\n- \u7FFB\u8BD1\uFF1A\u300C\u628A\u6240\u6709\u5E16\u5B50\u6807\u9898\u7FFB\u8BD1\u6210\u82F1\u6587\u300D";
-          }
-          let propName, propType, aiPromptTemplate;
-          switch (autofill_type) {
-            case "summary":
-              propName = "AI\u6458\u8981";
-              propType = "rich_text";
-              aiPromptTemplate = "\u8BF7\u75282-3\u53E5\u8BDD\u7B80\u6D01\u6982\u62EC\u4EE5\u4E0B\u5185\u5BB9\u7684\u8981\u70B9\uFF1A\n\n";
-              break;
-            case "keywords":
-              propName = "AI\u5173\u952E\u8BCD";
-              propType = "multi_select";
-              aiPromptTemplate = "\u8BF7\u4ECE\u4EE5\u4E0B\u5185\u5BB9\u4E2D\u63D0\u53D63-5\u4E2A\u5173\u952E\u8BCD\uFF0C\u7528\u9017\u53F7\u5206\u9694\uFF0C\u53EA\u8FD4\u56DE\u5173\u952E\u8BCD\uFF1A\n\n";
-              break;
-            case "translation":
-              propName = "AI\u7FFB\u8BD1";
-              propType = "rich_text";
-              aiPromptTemplate = "\u8BF7\u5C06\u4EE5\u4E0B\u6807\u9898\u7FFB\u8BD1\u4E3A\u82F1\u6587\uFF0C\u53EA\u8FD4\u56DE\u7FFB\u8BD1\u7ED3\u679C\uFF1A\n\n";
-              break;
-            case "custom":
-              propName = property_name || "AI\u81EA\u5B9A\u4E49";
-              propType = "rich_text";
-              aiPromptTemplate = "\u8BF7\u6839\u636E\u4EE5\u4E0B\u5185\u5BB9\u751F\u6210\u5BF9\u5E94\u7684\u5C5E\u6027\u503C\uFF1A\n\n";
-              break;
-            default:
-              return `\u274C \u4E0D\u652F\u6301\u7684\u586B\u5145\u7C7B\u578B\u300C${autofill_type}\u300D\u3002\u652F\u6301\uFF1Asummary/keywords/translation/custom`;
-          }
-          state().updateLastMessage(`\u6B63\u5728\u51C6\u5907 AI \u5C5E\u6027\u586B\u5145\uFF08${propName}\uFF09...`, "processing");
-          try {
-            await AI()._ensureAIProperty(settings.notionDatabaseId, propName, propType, settings.notionApiKey);
-            state().updateLastMessage("\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...", "processing");
-            const allPages = [];
-            let cursor = null;
-            do {
-              const response = await NotionAPI2.queryDatabase(settings.notionDatabaseId, null, null, cursor, settings.notionApiKey);
-              allPages.push(...response.results || []);
-              cursor = response.has_more ? response.next_cursor : null;
-            } while (cursor);
-            if (allPages.length === 0) {
-              return "\u{1F4ED} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762\u3002";
-            }
-            const needFill = allPages.filter((page) => {
-              const prop = page.properties[propName];
-              if (!prop) return true;
-              if (propType === "multi_select") {
-                return !prop.multi_select || prop.multi_select.length === 0;
-              }
-              return !prop.rich_text || prop.rich_text.length === 0;
-            });
-            if (needFill.length === 0) {
-              return `\u2705 \u6240\u6709 ${allPages.length} \u4E2A\u9875\u9762\u7684\u300C${propName}\u300D\u5C5E\u6027\u90FD\u5DF2\u586B\u5145\u3002`;
-            }
-            const results = { success: 0, failed: 0 };
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            for (let i = 0; i < needFill.length; i++) {
-              const page = needFill[i];
-              const title = Utils2.getPageTitle(page);
-              state().updateLastMessage(
-                `\u{1F504} \u6B63\u5728\u586B\u5145\u300C${propName}\u300D(${i + 1}/${needFill.length})
-
-\u5F53\u524D: ${title}`,
-                "processing"
-              );
-              try {
-                let inputText = title;
-                if (autofill_type !== "translation") {
-                  try {
-                    const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 2e3);
-                    inputText = content || title;
-                  } catch (error) {
-                    console.warn("[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25:", error);
-                    inputText = title;
-                  }
-                }
-                const aiResult = await svc().requestChat(
-                  aiPromptTemplate + inputText,
-                  settings,
-                  500
-                );
-                const updateProps = {};
-                if (propType === "multi_select") {
-                  const keywords = aiResult.split(/[,，]/).map((k) => k.trim()).filter(Boolean).slice(0, 10);
-                  updateProps[propName] = { multi_select: keywords.map((k) => ({ name: k })) };
-                } else {
-                  const trimmed = aiResult.slice(0, 2e3);
-                  updateProps[propName] = { rich_text: [{ type: "text", text: { content: trimmed } }] };
-                }
-                await AI()._executeGuardedPageWrite(
-                  "updatePage",
-                  { id: page.id, name: title },
-                  () => NotionAPI2.request("PATCH", `/pages/${page.id}`, { properties: updateProps }, settings.notionApiKey),
-                  settings
-                );
-                results.success++;
-              } catch (error) {
-                console.error(`[LD-Notion] AI \u586B\u5145\u5931\u8D25: ${title}`, error);
-                results.failed++;
-              }
-              if (i < needFill.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-            let resultMsg = `\u2705 **AI \u5C5E\u6027\u586B\u5145\u5B8C\u6210**
-
-`;
-            resultMsg += `- \u5C5E\u6027\u540D: ${propName}
-`;
-            resultMsg += `- \u603B\u8BA1: ${allPages.length} \u4E2A\u9875\u9762
-`;
-            resultMsg += `- \u5DF2\u586B\u5145: ${allPages.length - needFill.length} \u4E2A
-`;
-            resultMsg += `- \u672C\u6B21\u586B\u5145: ${results.success} \u4E2A
-`;
-            if (results.failed > 0) {
-              resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
-`;
-            }
-            return resultMsg;
-          } catch (error) {
-            return `\u274C AI \u5C5E\u6027\u586B\u5145\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleAsk: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { question, keyword } = params;
-          const searchTerm = question || keyword;
-          if (!searchTerm) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u7684\u95EE\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5173\u4E8E Docker \u7684\u5E16\u5B50\u90FD\u8BF4\u4E86\u4EC0\u4E48\uFF1F\u300D";
-          }
-          state().updateLastMessage("\u6B63\u5728\u641C\u7D22\u76F8\u5173\u5185\u5BB9...", "processing");
-          try {
-            const response = await NotionAPI2.search(searchTerm, null, settings.notionApiKey);
-            const results = (response.results || []).filter((r) => !r.archived && r.object === "page").slice(0, 5);
-            if (results.length === 0) {
-              return `\u{1F4ED} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${searchTerm}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002`;
-            }
-            state().updateLastMessage(`\u627E\u5230 ${results.length} \u4E2A\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5728\u63D0\u53D6...`, "processing");
-            const contextParts = [];
-            const sourceList = [];
-            for (let i = 0; i < results.length; i++) {
-              const item = results[i];
-              const title = Utils2.getPageTitle(item, item.object === "database" ? "\u672A\u547D\u540D\u6570\u636E\u5E93" : "\u672A\u547D\u540D\u9875\u9762");
-              const url = item.url || "";
-              sourceList.push({ title, url });
-              try {
-                const content = await AI()._extractPageContent(item.id, settings.notionApiKey, 2e3);
-                contextParts.push(`[${i + 1}] ${title}:
-${content || "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09"}`);
-              } catch (error) {
-                console.warn(`[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25: ${title}`, error);
-                contextParts.push(`[${i + 1}] ${title}:
-\uFF08\u65E0\u6CD5\u8BFB\u53D6\u5185\u5BB9\uFF09`);
-              }
-            }
-            state().updateLastMessage("\u6B63\u5728\u5206\u6790\u5E76\u751F\u6210\u56DE\u7B54...", "processing");
-            const ragPrompt = `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u95EE\u7B54\u52A9\u624B\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA Notion \u5DE5\u4F5C\u533A\u7684\u5185\u5BB9\u56DE\u7B54\u7528\u6237\u7684\u95EE\u9898\u3002
-\u5982\u679C\u5185\u5BB9\u4E2D\u6CA1\u6709\u76F8\u5173\u4FE1\u606F\uFF0C\u8BF7\u5982\u5B9E\u8BF4\u660E\u3002\u56DE\u7B54\u540E\u5217\u51FA\u4FE1\u606F\u6765\u6E90\u3002
-
---- \u53C2\u8003\u5185\u5BB9 ---
-${contextParts.join("\n\n")}
-
---- \u7528\u6237\u95EE\u9898 ---
-${searchTerm}`;
-            const aiAnswer = await svc().requestChat(ragPrompt, settings, 2e3);
-            let sourceText = "\n\n\u{1F4DA} **\u4FE1\u606F\u6765\u6E90**\uFF1A\n";
-            sourceList.forEach((s, i) => {
-              sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
-`;
-            });
-            return aiAnswer + sourceText;
-          } catch (error) {
-            return `\u274C \u95EE\u7B54\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleDeepResearch: async (params, settings, explanation) => {
-          var _a;
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { research_topic, scope = "workspace" } = params;
-          if (!research_topic) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u7684\u7814\u7A76\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u6DF1\u5165\u7814\u7A76\u4E00\u4E0B\u5173\u4E8E Docker \u7684\u6240\u6709\u5185\u5BB9\u300D";
-          }
-          try {
-            state().updateLastMessage("\u{1F52C} \u6B63\u5728\u62C6\u89E3\u7814\u7A76\u4E3B\u9898...", "processing");
-            const keywordsPrompt = `\u5C06\u4EE5\u4E0B\u7814\u7A76\u4E3B\u9898\u62C6\u5206\u4E3A3-5\u4E2A\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u6BCF\u884C\u4E00\u4E2A\u5173\u952E\u8BCD\uFF0C\u53EA\u8FD4\u56DE\u5173\u952E\u8BCD\uFF1A
-${research_topic}`;
-            const keywordsRaw = await svc().requestChat(keywordsPrompt, settings, 200);
-            const keywords = keywordsRaw.split("\n").map((k) => k.trim().replace(/^[-•\d.]+\s*/, "")).filter(Boolean).slice(0, 5);
-            if (keywords.length === 0) keywords.push(research_topic);
-            state().updateLastMessage(`\u{1F50D} \u641C\u7D22\u4E2D... (${keywords.length} \u4E2A\u5173\u952E\u8BCD: ${keywords.join(", ")})`, "processing");
-            const allResults = [];
-            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-            const normalizedScope = String(scope || "workspace").toLowerCase();
-            const useDatabaseScope = normalizedScope === "database";
-            let scopedDatabaseInfo = null;
-            let scopedTitleProperty = null;
-            let scopedRichTextProperties = [];
-            if (useDatabaseScope) {
-              const scopedDatabaseId = TargetState2.getEffectiveAIDatabaseId({
-                fallbackDatabaseId: settings.notionDatabaseId
-              });
-              if (!scopedDatabaseId) {
-                return "\u274C \u5F53\u524D\u672A\u914D\u7F6E\u53EF\u7528\u4E8E\u6DF1\u5EA6\u7814\u7A76\u7684\u6570\u636E\u5E93\u3002\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E\u9ED8\u8BA4\u6570\u636E\u5E93\uFF0C\u6216\u5C06 AI \u76EE\u6807\u5207\u6362\u5230\u67D0\u4E2A\u6570\u636E\u5E93\u3002";
-              }
-              const scopedDatabase = await NotionAPI2.fetchDatabase(scopedDatabaseId, settings.notionApiKey);
-              scopedDatabaseInfo = {
-                id: scopedDatabaseId,
-                title: (scopedDatabase.title || []).map((item) => item.plain_text || "").join("") || "\u76EE\u6807\u6570\u636E\u5E93"
-              };
-              scopedTitleProperty = ((_a = Object.entries(scopedDatabase.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _a[0]) || null;
-              scopedRichTextProperties = Object.entries(scopedDatabase.properties || {}).filter(([_, prop]) => (prop == null ? void 0 : prop.type) === "rich_text").map(([name]) => name).filter((name) => ["\u63CF\u8FF0", "\u6458\u8981", "\u603B\u7ED3", "\u8BF4\u660E", "\u5185\u5BB9"].includes(name));
-            }
-            for (let i = 0; i < keywords.length; i++) {
-              const keyword = keywords[i];
-              let pages = [];
-              if (useDatabaseScope) {
-                const filterConditions = [];
-                if (scopedTitleProperty) {
-                  filterConditions.push({
-                    property: scopedTitleProperty,
-                    title: { contains: keyword }
-                  });
-                }
-                scopedRichTextProperties.forEach((propertyName) => {
-                  filterConditions.push({
-                    property: propertyName,
-                    rich_text: { contains: keyword }
-                  });
-                });
-                const filter = filterConditions.length === 1 ? filterConditions[0] : filterConditions.length > 1 ? { or: filterConditions } : null;
-                const response = await NotionAPI2.queryDatabase(
-                  scopedDatabaseInfo.id,
-                  filter,
-                  null,
-                  null,
-                  settings.notionApiKey,
-                  25
-                );
-                pages = (response.results || []).filter((item) => {
-                  if (item.archived || item.object !== "page") return false;
-                  const loweredKeyword = keyword.toLowerCase();
-                  const title = Utils2.getPageTitle(item, "").toLowerCase();
-                  const richTextMatches = scopedRichTextProperties.some((propertyName) => {
-                    var _a2, _b, _c;
-                    const value = ((_c = (_b = (_a2 = item.properties) == null ? void 0 : _a2[propertyName]) == null ? void 0 : _b.rich_text) == null ? void 0 : _c.map((part) => {
-                      var _a3;
-                      return part.plain_text || ((_a3 = part.text) == null ? void 0 : _a3.content) || "";
-                    }).join("").toLowerCase()) || "";
-                    return value.includes(loweredKeyword);
-                  });
-                  return title.includes(loweredKeyword) || richTextMatches;
-                });
-              } else {
-                const response = await NotionAPI2.search(keyword, null, settings.notionApiKey);
-                pages = (response.results || []).filter((r) => !r.archived && r.object === "page");
-              }
-              allResults.push(...pages);
-              if (i < keywords.length - 1) await Utils2.sleep(delay);
-            }
-            const uniquePages = [...new Map(allResults.map((r) => [r.id, r])).values()];
-            if (uniquePages.length === 0) {
-              if (useDatabaseScope) {
-                return `\u{1F4ED} \u5728\u6570\u636E\u5E93\u300C${(scopedDatabaseInfo == null ? void 0 : scopedDatabaseInfo.title) || "\u76EE\u6807\u6570\u636E\u5E93"}\u300D\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${research_topic}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002
-
-\u5C1D\u8BD5\u7528\u66F4\u5BBD\u6CDB\u7684\u5173\u952E\u8BCD\uFF0C\u6216\u786E\u8BA4\u8BE5\u6570\u636E\u5E93\u4E2D\u5305\u542B\u76F8\u5173\u9875\u9762\u3002`;
-              }
-              return `\u{1F4ED} \u5728\u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u4E0E\u300C${research_topic}\u300D\u76F8\u5173\u7684\u5185\u5BB9\u3002
-
-\u5C1D\u8BD5\u7528\u66F4\u5BBD\u6CDB\u7684\u5173\u952E\u8BCD\uFF0C\u6216\u786E\u4FDD\u5DE5\u4F5C\u533A\u4E2D\u6709\u76F8\u5173\u9875\u9762\u3002`;
-            }
-            const maxPages = Math.min(10, uniquePages.length);
-            state().updateLastMessage(`\u{1F4C4} \u63D0\u53D6 ${maxPages}/${uniquePages.length} \u4E2A\u9875\u9762\u5185\u5BB9...`, "processing");
-            const contentParts = [];
-            const sourceList = [];
-            for (let i = 0; i < maxPages; i++) {
-              const page = uniquePages[i];
-              const title = Utils2.getPageTitle(page);
-              const url = page.url || "";
-              sourceList.push({ title, url });
-              try {
-                const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 3e3);
-                contentParts.push(`[${i + 1}] ${title}:
-${content || "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09"}`);
-              } catch (error) {
-                console.warn(`[LD-Notion] \u9875\u9762\u5185\u5BB9\u63D0\u53D6\u5931\u8D25: ${title}`, error);
-                contentParts.push(`[${i + 1}] ${title}:
-\uFF08\u65E0\u6CD5\u8BFB\u53D6\u5185\u5BB9\uFF09`);
-              }
-              if (i < maxPages - 1) await Utils2.sleep(delay);
-            }
-            state().updateLastMessage("\u{1F4CA} \u6B63\u5728\u751F\u6210\u7814\u7A76\u62A5\u544A...", "processing");
-            const reportPrompt = `\u4F60\u662F\u4E00\u4E2A\u7814\u7A76\u5206\u6790\u5E08\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA Notion \u5DE5\u4F5C\u533A\u7684\u5185\u5BB9\uFF0C\u9488\u5BF9\u4E3B\u9898\u300C${research_topic}\u300D\u751F\u6210\u4E00\u4EFD\u7ED3\u6784\u5316\u7814\u7A76\u62A5\u544A\u3002
-
-\u62A5\u544A\u683C\u5F0F\u8981\u6C42\uFF08\u4F7F\u7528 Markdown\uFF09:
-# \u7814\u7A76\u62A5\u544A: ${research_topic}
-## \u6458\u8981
-\uFF082-3\u53E5\u8BDD\u6982\u62EC\u6838\u5FC3\u53D1\u73B0\uFF09
-## \u4E3B\u8981\u53D1\u73B0
-\uFF083-5\u4E2A\u8981\u70B9\uFF0C\u6BCF\u4E2A\u8981\u70B9\u4E00\u53E5\u8BDD\uFF09
-## \u8BE6\u7EC6\u5206\u6790
-\uFF08\u6309\u4E3B\u9898\u5206\u6BB5\u8BBA\u8FF0\uFF0C\u5F15\u7528\u5177\u4F53\u6765\u6E90\u7F16\u53F7\u5982[1][2]\uFF09
-## \u5EFA\u8BAE\u4E0E\u884C\u52A8\u9879
-\uFF08\u53EF\u6267\u884C\u7684\u5EFA\u8BAE\uFF0C\u6BCF\u6761\u4E00\u53E5\u8BDD\uFF09
-## \u4FE1\u606F\u6765\u6E90
-\uFF08\u5217\u51FA\u5F15\u7528\u7684\u9875\u9762\uFF09
-
---- \u53C2\u8003\u5185\u5BB9 ---
-${contentParts.join("\n\n---\n\n")}`;
-            const report = await svc().requestChat(reportPrompt, settings, 4e3);
-            let sourceText = "\n\n\u{1F4DA} **\u5206\u6790\u57FA\u7840**\uFF1A\n";
-            sourceList.forEach((s, i) => {
-              sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
-`;
-            });
-            const scopeLabel = useDatabaseScope ? `\u6570\u636E\u5E93\u300C${(scopedDatabaseInfo == null ? void 0 : scopedDatabaseInfo.title) || "\u76EE\u6807\u6570\u636E\u5E93"}\u300D` : "\u5DE5\u4F5C\u533A";
-            const summary = `\u{1F52C} \u8303\u56F4\uFF1A${scopeLabel}\u3002\u5171\u4F7F\u7528 ${keywords.length} \u4E2A\u5173\u952E\u8BCD\uFF0C\u627E\u5230 ${uniquePages.length} \u4E2A\u76F8\u5173\u9875\u9762\uFF0C\u6DF1\u5165\u5206\u6790\u4E86 ${maxPages} \u4E2A\u3002`;
-            return `${report}${sourceText}
----
-${summary}`;
-          } catch (error) {
-            return `\u274C \u6DF1\u5EA6\u7814\u7A76\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleSummarize: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { page_name, page_id, summary_style } = params;
-          const style = summary_style || "brief";
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u8981\u603B\u7ED3\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u603B\u7ED3\u4E00\u4E0B xxx \u9875\u9762\u7684\u5185\u5BB9\u300D";
-          }
-          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 6e3);
-            if (!existingContent.trim()) {
-              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u603B\u7ED3\u7684\u5185\u5BB9\u3002`;
-            }
-            state().updateLastMessage("\u{1F4DD} \u6B63\u5728\u751F\u6210\u6458\u8981...", "processing");
-            const styleInstructions = {
-              brief: "\u751F\u6210\u7B80\u77ED\u6458\u8981\uFF082-3\u53E5\u8BDD\uFF09\uFF0C\u63D0\u70BC\u6838\u5FC3\u8981\u70B9\u3002",
-              detailed: "\u751F\u6210\u8BE6\u7EC6\u6458\u8981\uFF0C\u5305\u542B\uFF1A\u6838\u5FC3\u4E3B\u9898\u3001\u4E3B\u8981\u8BBA\u70B9\u3001\u5173\u952E\u7EC6\u8282\u548C\u7ED3\u8BBA\u3002",
-              bullet: "\u4EE5\u8981\u70B9\u5217\u8868\u5F62\u5F0F\u603B\u7ED3\uFF0C\u6BCF\u4E2A\u8981\u70B9\u4E00\u884C\uFF0C\u63D0\u70BC\u5173\u952E\u4FE1\u606F\u3002"
-            };
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u6458\u8981\u52A9\u624B\u3002${styleInstructions[style] || styleInstructions.brief}
-
-\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002
-
-\u4EE5\u4E0B\u662F\u9700\u8981\u603B\u7ED3\u7684\u5185\u5BB9\uFF1A
-${existingContent}`;
-            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
-            return `\u{1F4DD} **\u9875\u9762\u6458\u8981\uFF1A${targetPage.name}**
-
-${aiResponse}
-
----
-\u{1F4C4} \u6458\u8981\u98CE\u683C: ${style === "brief" ? "\u7B80\u77ED" : style === "detailed" ? "\u8BE6\u7EC6" : "\u8981\u70B9\u5217\u8868"}`;
-          } catch (error) {
-            return `\u274C \u5185\u5BB9\u603B\u7ED3\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleBrainstorm: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { brainstorm_topic, page_name, page_id } = params;
-          const count = Math.min(Math.max(parseInt(params.brainstorm_count) || 10, 3), 30);
-          const topic = brainstorm_topic || page_name || explanation;
-          if (!topic) {
-            return "\u274C \u8BF7\u6307\u5B9A\u5934\u8111\u98CE\u66B4\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u56F4\u7ED5\u8FDC\u7A0B\u529E\u516C\u7ED9\u6211\u4E00\u4E9B\u521B\u610F\u5EFA\u8BAE\u300D";
-          }
-          let pageContext = "";
-          if (page_name || page_id) {
-            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9\u4F5C\u4E3A\u53C2\u8003...", "processing");
-            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage) {
-              pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 3e3);
-            }
-          }
-          state().updateLastMessage("\u{1F4A1} \u6B63\u5728\u5934\u8111\u98CE\u66B4...", "processing");
-          try {
-            const contextBlock = pageContext ? `
-
-\u4EE5\u4E0B\u662F\u76F8\u5173\u53C2\u8003\u5185\u5BB9\uFF1A
-${pageContext}` : "";
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u521B\u610F\u987E\u95EE\u3002\u56F4\u7ED5\u4E3B\u9898\u300C${topic}\u300D\u8FDB\u884C\u5934\u8111\u98CE\u66B4\uFF0C\u751F\u6210 ${count} \u4E2A\u521B\u610F\u60F3\u6CD5\u6216\u5EFA\u8BAE\u3002
-
-\u8981\u6C42\uFF1A
-- \u60F3\u6CD5\u8981\u591A\u6837\u5316\uFF0C\u6DB5\u76D6\u4E0D\u540C\u89D2\u5EA6\u548C\u7EF4\u5EA6
-- \u6BCF\u4E2A\u60F3\u6CD5\u5305\u542B\u7B80\u77ED\u6807\u9898\u548C\u4E00\u53E5\u8BDD\u8BF4\u660E
-- \u4ECE\u5B9E\u7528\u5230\u5927\u80C6\u521B\u65B0\uFF0C\u7531\u8FD1\u53CA\u8FDC\u6392\u5217
-- \u4F7F\u7528 Markdown \u7F16\u53F7\u5217\u8868\u683C\u5F0F\u8F93\u51FA${contextBlock}`;
-            const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
-            return `\u{1F4A1} **\u5934\u8111\u98CE\u66B4\uFF1A${topic}**
-
-${aiResponse}
-
----
-\u{1F3AF} \u5171\u751F\u6210 ${count} \u4E2A\u521B\u610F\u60F3\u6CD5`;
-          } catch (error) {
-            return `\u274C \u5934\u8111\u98CE\u66B4\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleProofread: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { page_name, page_id } = params;
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u8981\u6821\u5BF9\u7684\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u6821\u5BF9\u4E00\u4E0B xxx \u9875\u9762\u7684\u62FC\u5199\u548C\u8BED\u6CD5\u300D";
-          }
-          state().updateLastMessage("\u6B63\u5728\u89E3\u6790\u76EE\u6807\u9875\u9762...", "processing");
-          try {
-            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (!targetPage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            const existingContent = await AI()._extractPageContent(targetPage.id, settings.notionApiKey);
-            if (!existingContent.trim()) {
-              return `\u274C \u9875\u9762\u300C${targetPage.name}\u300D\u6CA1\u6709\u53EF\u6821\u5BF9\u7684\u5185\u5BB9\u3002`;
-            }
-            state().updateLastMessage("\u2705 \u6B63\u5728\u6821\u5BF9\u4E2D...", "processing");
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u6821\u5BF9\u7F16\u8F91\u3002\u8BF7\u4ED4\u7EC6\u68C0\u67E5\u4EE5\u4E0B\u5185\u5BB9\u7684\u62FC\u5199\u3001\u8BED\u6CD5\u548C\u8868\u8FBE\u95EE\u9898\u3002
-
-\u8F93\u51FA\u683C\u5F0F\uFF1A
-1. \u5148\u5217\u51FA\u53D1\u73B0\u7684\u6240\u6709\u95EE\u9898\uFF08\u6BCF\u4E2A\u95EE\u9898\u6807\u6CE8\u4F4D\u7F6E\u548C\u7C7B\u578B\uFF1A\u62FC\u5199/\u8BED\u6CD5/\u6807\u70B9/\u8868\u8FBE\uFF09
-2. \u7136\u540E\u7ED9\u51FA\u4FEE\u6B63\u540E\u7684\u5B8C\u6574\u5185\u5BB9
-
-\u5982\u679C\u6CA1\u6709\u53D1\u73B0\u4EFB\u4F55\u95EE\u9898\uFF0C\u8BF7\u8BF4\u660E\u5185\u5BB9\u65E0\u8BEF\u3002
-
-\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002
-
-\u4EE5\u4E0B\u662F\u9700\u8981\u6821\u5BF9\u7684\u5185\u5BB9\uFF1A
-${existingContent}`;
-            const aiResponse = await svc().requestChat(prompt2, settings, 3e3);
-            return `\u2705 **\u6821\u5BF9\u7ED3\u679C\uFF1A${targetPage.name}**
-
-${aiResponse}`;
-          } catch (error) {
-            return `\u274C \u6821\u5BF9\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleBatchTranslate: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("appendBlocks")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6279\u91CF\u7FFB\u8BD1\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { database_name, database_id, target_language } = params;
-          const lang = target_language || "\u82F1\u6587";
-          if (!database_name && !database_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u8981\u7FFB\u8BD1\u7684\u6570\u636E\u5E93\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u6570\u636E\u5E93\u7FFB\u8BD1\u6210\u65E5\u6587\u300D";
-          }
-          state().updateLastMessage("\u6B63\u5728\u67E5\u627E\u6570\u636E\u5E93...", "processing");
-          try {
-            let dbId = database_id;
-            if (!dbId && database_name) {
-              const searchResp = await NotionAPI2.search(database_name, "database", settings.notionApiKey);
-              const db = (searchResp.results || []).find((r) => !r.archived);
-              if (!db) return `\u274C \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${database_name}\u300D\u3002`;
-              dbId = db.id;
-            }
-            state().updateLastMessage("\u6B63\u5728\u83B7\u53D6\u9875\u9762\u5217\u8868...", "processing");
-            const queryResp = await NotionAPI2.queryDatabase(dbId, null, null, null, settings.notionApiKey, 20);
-            const pages = (queryResp.results || []).filter((p) => !p.archived);
-            if (pages.length === 0) {
-              return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u9875\u9762\u3002`;
-            }
-            const confirmed = await ConfirmationDialog3.show({
-              title: `\u{1F310} \u6279\u91CF\u7FFB\u8BD1\u786E\u8BA4`,
-              message: `\u5373\u5C06\u7FFB\u8BD1 ${pages.length} \u4E2A\u9875\u9762\u4E3A${lang}\u3002
-\u7FFB\u8BD1\u540E\u7684\u5185\u5BB9\u5C06\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002`,
-              confirmText: "\u5F00\u59CB\u7FFB\u8BD1",
-              cancelText: "\u53D6\u6D88"
-            });
-            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u6279\u91CF\u7FFB\u8BD1\u3002";
-            let successCount = 0;
-            let failCount = 0;
-            for (let i = 0; i < pages.length; i++) {
-              const page = pages[i];
-              const title = Utils2.getPageTitle(page);
-              state().updateLastMessage(`\u{1F310} \u7FFB\u8BD1\u4E2D (${i + 1}/${pages.length}): ${title}...`, "processing");
-              try {
-                const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 4e3);
-                if (!content.trim()) {
-                  failCount++;
-                  continue;
-                }
-                const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7FFB\u8BD1\u3002\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\u4E3A${lang}\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\uFF0C\u4FDD\u6301\u539F\u6587\u7ED3\u6784\u3002
-
-\u539F\u6587\uFF1A
-${content}`;
-                const translated = await svc().requestChat(prompt2, settings, 2e3);
-                const blocks = [
-                  { type: "divider", divider: {} },
-                  { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `\u{1F310} ${lang}\u7FFB\u8BD1` } }] } },
-                  ...AI()._textToBlocks(translated)
-                ];
-                await AI()._executeGuardedPageWrite(
-                  "appendBlocks",
-                  page,
-                  () => NotionAPI2.appendBlocks(page.id, blocks, settings.notionApiKey),
-                  settings,
-                  { itemName: title }
-                );
-                successCount++;
-              } catch (error) {
-                console.warn(`[LD-Notion] \u9875\u9762\u521B\u5EFA\u5931\u8D25: ${title}`, error);
-                failCount++;
-              }
-            }
-            return `\u{1F310} **\u6279\u91CF\u7FFB\u8BD1\u5B8C\u6210**
-
-- \u76EE\u6807\u8BED\u8A00: ${lang}
-- \u6210\u529F: ${successCount} \u9875
-- \u5931\u8D25: ${failCount} \u9875
-- \u603B\u8BA1: ${pages.length} \u9875
-
-\u{1F4A1} \u7FFB\u8BD1\u5185\u5BB9\u5DF2\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\u3002`;
-          } catch (error) {
-            return `\u274C \u6279\u91CF\u7FFB\u8BD1\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleExtractToDatabase: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("createDatabase")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u521B\u5EFA\u6570\u636E\u5E93\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { page_name, page_id, database_name, extraction_prompt } = params;
-          if (!page_name && !page_id) {
-            return "\u274C \u8BF7\u6307\u5B9A\u6E90\u9875\u9762\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u628A xxx \u9875\u9762\u7684\u7B14\u8BB0\u63D0\u53D6\u4E3A\u4EFB\u52A1\u6570\u636E\u5E93\u300D";
-          }
-          state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u6E90\u9875\u9762...", "processing");
-          try {
-            const sourcePage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (sourcePage == null ? void 0 : sourcePage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${sourcePage.error}`;
-            if (!sourcePage) return `\u274C \u627E\u4E0D\u5230\u9875\u9762\u300C${page_name || page_id}\u300D\u3002`;
-            const content = await AI()._extractPageContent(sourcePage.id, settings.notionApiKey, 6e3);
-            if (!content.trim()) {
-              return `\u274C \u9875\u9762\u300C${sourcePage.name}\u300D\u6CA1\u6709\u53EF\u63D0\u53D6\u7684\u5185\u5BB9\u3002`;
-            }
-            state().updateLastMessage("\u{1F50D} \u6B63\u5728\u5206\u6790\u5185\u5BB9\u7ED3\u6784...", "processing");
-            const dbName = database_name || `${sourcePage.name} - \u63D0\u53D6\u6570\u636E`;
-            const extractHint = extraction_prompt || explanation || "\u63D0\u53D6\u6240\u6709\u7ED3\u6784\u5316\u6761\u76EE";
-            const analyzePrompt = `\u4F60\u662F\u4E00\u4E2A\u6570\u636E\u63D0\u53D6\u4E13\u5BB6\u3002\u5206\u6790\u4EE5\u4E0B\u9875\u9762\u5185\u5BB9\uFF0C\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002
-
-\u63D0\u53D6\u8981\u6C42\uFF1A${extractHint}
-
-\u8BF7\u8FD4\u56DE JSON \u683C\u5F0F\uFF08\u53EA\u8FD4\u56DE JSON\uFF09\uFF1A
-{
-  "properties": [
-{ "name": "\u5C5E\u6027\u540D", "type": "title|rich_text|select|number|checkbox", "description": "\u5C5E\u6027\u8BF4\u660E" }
-  ],
-  "entries": [
-{ "\u5C5E\u6027\u540D1": "\u503C1", "\u5C5E\u6027\u540D2": "\u503C2" }
-  ]
-}
-
-\u5C5E\u6027\u7C7B\u578B\u8BF4\u660E\uFF1A
-- \u7B2C\u4E00\u4E2A\u5C5E\u6027\u5FC5\u987B\u662F title \u7C7B\u578B
-- \u5206\u7C7B/\u72B6\u6001 \u2192 select\uFF0C\u6570\u91CF/\u91D1\u989D \u2192 number\uFF0C\u662F\u5426 \u2192 checkbox\uFF0C\u5176\u4ED6 \u2192 rich_text
-
-\u9875\u9762\u5185\u5BB9\uFF1A
-${content}`;
-            const aiResponse = await svc().requestChat(analyzePrompt, settings, 3e3);
-            const parsedResult = AISchema2.parseAIJson("extractToDatabase", aiResponse);
-            if (!parsedResult.ok) {
-              return `\u274C ${parsedResult.reason}`;
-            }
-            const extractedData = parsedResult.value;
-            const validProps = extractedData.properties.filter((prop) => {
-              const nameOk = AISchema2.validatePropertyName(prop.name);
-              const typeOk = AISchema2.validatePropertyType(prop.type);
-              if (!nameOk || !typeOk.valid) {
-                console.warn(`[LD-Notion] AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5DF2\u8DF3\u8FC7\uFF08name=${prop.name}, type=${prop.type}\uFF09`);
-                return false;
-              }
-              prop.name = nameOk;
-              prop.type = typeOk.type;
-              return true;
-            });
-            if (validProps.length === 0) {
-              return `\u274C AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5747\u65E0\u6548\uFF0C\u65E0\u6CD5\u521B\u5EFA\u6570\u636E\u5E93\u3002`;
-            }
-            extractedData.properties = validProps;
-            const confirmed = await ConfirmationDialog3.show({
-              title: "\u{1F4CA} \u521B\u5EFA\u6570\u636E\u5E93\u786E\u8BA4",
-              message: `\u5C06\u4ECE\u300C${sourcePage.name}\u300D\u63D0\u53D6 ${extractedData.entries.length} \u4E2A\u6761\u76EE\u3002
-\u6570\u636E\u5E93\u540D\u79F0: ${dbName}
-\u5C5E\u6027: ${extractedData.properties.map((p) => p.name).join(", ")}`,
-              confirmText: "\u521B\u5EFA",
-              cancelText: "\u53D6\u6D88"
-            });
-            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u3002";
-            state().updateLastMessage("\u{1F4CA} \u6B63\u5728\u521B\u5EFA\u6570\u636E\u5E93...", "processing");
-            const dbProperties = {};
-            for (const prop of extractedData.properties) {
-              if (prop.type === "title") {
-                dbProperties[prop.name] = { title: {} };
-              } else if (prop.type === "select") {
-                dbProperties[prop.name] = { select: {} };
-              } else if (prop.type === "number") {
-                dbProperties[prop.name] = { number: {} };
-              } else if (prop.type === "checkbox") {
-                dbProperties[prop.name] = { checkbox: {} };
-              } else {
-                dbProperties[prop.name] = { rich_text: {} };
-              }
-            }
-            const newDb = await AI()._executeGuardedPageWrite(
-              "createDatabase",
-              sourcePage,
-              () => NotionAPI2.createDatabase(sourcePage.id, dbName, dbProperties, settings.notionApiKey),
-              settings,
-              { itemName: dbName }
-            );
-            state().updateLastMessage(`\u{1F4DD} \u6B63\u5728\u586B\u5145 ${extractedData.entries.length} \u4E2A\u6761\u76EE...`, "processing");
-            let addedCount = 0;
-            let failedCount = 0;
-            const titleProp = extractedData.properties.find((p) => p.type === "title");
-            const titleKey = titleProp ? titleProp.name : extractedData.properties[0].name;
-            for (const entry of extractedData.entries) {
-              try {
-                const pageProperties = {};
-                for (const prop of extractedData.properties) {
-                  const val = entry[prop.name];
-                  if (val === void 0 || val === null) continue;
-                  pageProperties[prop.name] = AI()._buildPropertyValuePayload(val, prop.type);
-                }
-                const entryName = String(entry[titleKey] || `\u6761\u76EE ${addedCount + 1}`).trim() || `\u6761\u76EE ${addedCount + 1}`;
-                await AI()._executeGuardedDatabaseWrite(
-                  "createDatabasePage",
-                  newDb.id,
-                  () => NotionAPI2.createPage(newDb.id, pageProperties, settings.notionApiKey),
-                  settings,
-                  { itemName: entryName }
-                );
-                addedCount++;
-              } catch (error) {
-                failedCount++;
-                console.warn(`[LD-Notion] \u6761\u76EE\u521B\u5EFA\u5931\u8D25 (#${failedCount}):`, error.message);
-              }
-            }
-            const failedLine = failedCount > 0 ? `
-- \u5931\u8D25: ${failedCount}\uFF08\u89C1\u63A7\u5236\u53F0\u8B66\u544A\uFF09` : "";
-            return `\u{1F4CA} **\u6570\u636E\u5E93\u521B\u5EFA\u5B8C\u6210**
-
-- \u6570\u636E\u5E93: ${dbName}
-- \u6765\u6E90: ${sourcePage.name}
-- \u5C5E\u6027: ${extractedData.properties.map((p) => p.name).join(", ")}
-- \u6761\u76EE: ${addedCount}/${extractedData.entries.length}${failedLine}
-
-\u{1F4A1} \u6570\u636E\u5E93\u5DF2\u521B\u5EFA\u5728\u6E90\u9875\u9762\u4E0B\u65B9\u3002`;
-          } catch (error) {
-            return `\u274C \u63D0\u53D6\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleGeneratePages: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("createDatabase")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u591A\u9875\u9762\u751F\u6210\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { page_name, page_id, parent_page_name, parent_page_id, structure_prompt } = params;
-          const topic = page_name || structure_prompt || explanation;
-          if (!topic) {
-            return "\u274C \u8BF7\u63CF\u8FF0\u8981\u751F\u6210\u7684\u5185\u5BB9\u4E3B\u9898\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u4E3A\u65B0\u5458\u5DE5\u521B\u5EFA\u5165\u804C\u6307\u5357\uFF0C\u5305\u542B\u5DE5\u5177\u6E05\u5355\u3001\u56E2\u961F\u4ECB\u7ECD\u3001\u5E38\u89C1\u95EE\u9898\u300D";
-          }
-          state().updateLastMessage("\u{1F4D1} \u6B63\u5728\u89C4\u5212\u9875\u9762\u7ED3\u6784...", "processing");
-          try {
-            const planPrompt = `\u4F60\u662F\u4E00\u4E2A Notion \u5185\u5BB9\u67B6\u6784\u5E08\u3002\u6839\u636E\u7528\u6237\u9700\u6C42\u89C4\u5212\u591A\u9875\u9762\u5185\u5BB9\u7ED3\u6784\u3002
-
-\u7528\u6237\u9700\u6C42\uFF1A${topic}
-${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
-
-\u8FD4\u56DE JSON \u683C\u5F0F\uFF08\u53EA\u8FD4\u56DE JSON\uFF09\uFF1A
-{
-  "parent_title": "\u7236\u9875\u9762\u6807\u9898",
-  "parent_summary": "\u7236\u9875\u9762\u7B80\u4ECB\uFF081-2\u53E5\u8BDD\uFF09",
-  "children": [
-{
-  "title": "\u5B50\u9875\u9762\u6807\u9898",
-  "description": "\u5B50\u9875\u9762\u5185\u5BB9\u63CF\u8FF0\uFF08\u7528\u4E8E\u751F\u6210\u6B63\u6587\uFF09",
-  "icon": "emoji\u56FE\u6807"
-}
-  ]
-}
-
-\u8981\u6C42\uFF1A
-- \u5B50\u9875\u9762\u6570\u91CF\u63A7\u5236\u5728 3-8 \u4E2A
-- \u6BCF\u4E2A\u5B50\u9875\u9762\u5E94\u6709\u660E\u786E\u7684\u4E3B\u9898\u548C\u8FB9\u754C
-- \u7236\u9875\u9762\u4F5C\u4E3A\u76EE\u5F55/\u6982\u89C8\u9875`;
-            const planResponse = await svc().requestChat(planPrompt, settings, 1500);
-            const planResult = AISchema2.parseAIJson("generatePages", planResponse);
-            if (!planResult.ok) {
-              console.warn("[LD-Notion] AI \u751F\u6210\u7ED3\u6784 JSON \u89E3\u6790\u5931\u8D25:", planResult.reason);
-              return `\u274C AI \u751F\u6210\u7684\u7ED3\u6784\u65E0\u6548\u3002\u8BF7\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u3002`;
-            }
-            const plan = planResult.value;
-            if (!Array.isArray(plan.children) || plan.children.length === 0) {
-              return `\u274C AI \u672A\u80FD\u89C4\u5212\u51FA\u6709\u6548\u7684\u5B50\u9875\u9762\u7ED3\u6784\u3002`;
-            }
-            const MAX_CHILD_DESC = 2e3;
-            plan.children = plan.children.map((c) => ({
-              ...c,
-              title: AISchema2.validatePropertyValue(c == null ? void 0 : c.title, "title"),
-              icon: AISchema2.validateEmoji(c == null ? void 0 : c.icon),
-              description: AISchema2.validatePropertyValue(c == null ? void 0 : c.description, "rich_text").slice(0, MAX_CHILD_DESC)
-            })).filter((c) => c.title);
-            if (plan.children.length === 0) {
-              return `\u274C AI \u89C4\u5212\u7684\u5B50\u9875\u9762\u6807\u9898\u65E0\u6548\u3002`;
-            }
-            plan.parent_title = AISchema2.validatePropertyValue(plan.parent_title, "title");
-            plan.parent_summary = AISchema2.validatePropertyValue(plan.parent_summary, "rich_text");
-            const pageList = plan.children.map((c) => `${c.icon || "\u{1F4C4}"} ${c.title}`).join("\n");
-            const confirmed = await ConfirmationDialog3.show({
-              title: "\u{1F4D1} \u591A\u9875\u9762\u751F\u6210\u786E\u8BA4",
-              message: `\u5C06\u521B\u5EFA\u4EE5\u4E0B\u9875\u9762\u7ED3\u6784\uFF1A
-
-\u{1F4C1} ${plan.parent_title}
-${pageList}
-
-\u5171 ${plan.children.length + 1} \u4E2A\u9875\u9762\u3002`,
-              confirmText: "\u5F00\u59CB\u751F\u6210",
-              cancelText: "\u53D6\u6D88"
-            });
-            if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u3002";
-            let parentPageId = parent_page_id;
-            if (!parentPageId && parent_page_name) {
-              const parentPage2 = await AI()._resolvePageId(parent_page_name, null, settings.notionApiKey);
-              if (parentPage2) parentPageId = parentPage2.id;
-            }
-            state().updateLastMessage(`\u{1F4C1} \u6B63\u5728\u521B\u5EFA\u7236\u9875\u9762: ${plan.parent_title}...`, "processing");
-            const parentProps = {
-              title: { title: [{ text: { content: plan.parent_title } }] }
-            };
-            let parentPage;
-            if (parentPageId) {
-              parentPage = await AI()._executeGuardedPageWrite(
-                "createDatabasePage",
-                { id: parentPageId, name: parent_page_name || parentPageId },
-                () => NotionAPI2.createPageInPage(parentPageId, parentProps, settings.notionApiKey),
-                settings,
-                { itemName: plan.parent_title, pageId: parentPageId }
-              );
-            } else {
-              return `\u274C \u8BF7\u6307\u5B9A\u7236\u9875\u9762\u3002Notion API \u8981\u6C42\u9875\u9762\u5FC5\u987B\u521B\u5EFA\u5728\u67D0\u4E2A\u7236\u9875\u9762\u4E0B\u3002
-
-\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u4E0B\u521B\u5EFA\u5165\u804C\u6307\u5357\u300D`;
-            }
-            const overviewBlocks = AI()._textToBlocks(`${plan.parent_summary || ""}
-
-## \u{1F4CB} \u76EE\u5F55
-
-${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}** - ${c.description}`).join("\n")}`);
-            await AI()._executeGuardedPageWrite(
-              "appendBlocks",
-              parentPage,
-              () => NotionAPI2.appendBlocks(parentPage.id, overviewBlocks, settings.notionApiKey),
-              settings,
-              { itemName: plan.parent_title }
-            );
-            let createdCount = 0;
-            for (let i = 0; i < plan.children.length; i++) {
-              const child = plan.children[i];
-              state().updateLastMessage(`\u{1F4DD} \u751F\u6210\u5B50\u9875\u9762 (${i + 1}/${plan.children.length}): ${child.title}...`, "processing");
-              try {
-                const childProps = {
-                  title: { title: [{ text: { content: `${child.icon || ""} ${child.title}`.trim() } }] }
-                };
-                const childPage = await AI()._executeGuardedPageWrite(
-                  "createDatabasePage",
-                  parentPage,
-                  () => NotionAPI2.createPageInPage(parentPage.id, childProps, settings.notionApiKey),
-                  settings,
-                  { itemName: child.title }
-                );
-                const contentPrompt = `\u4E3A\u4EE5\u4E0B\u4E3B\u9898\u751F\u6210\u8BE6\u7EC6\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u3002
-
-\u4E3B\u9898\uFF1A${child.title}
-\u63CF\u8FF0\uFF1A${child.description}
-\u4E0A\u4E0B\u6587\uFF1A\u8FD9\u662F\u300C${plan.parent_title}\u300D\u7684\u5B50\u9875\u9762
-
-\u8BF7\u751F\u6210\u5B9E\u7528\u3001\u5177\u4F53\u7684\u5185\u5BB9\uFF0C\u5305\u542B\u5408\u9002\u7684\u6807\u9898\u5C42\u7EA7\u548C\u7ED3\u6784\u5316\u4FE1\u606F\u3002`;
-                const content = await svc().requestChat(contentPrompt, settings, 2e3);
-                const contentBlocks = AI()._textToBlocks(content);
-                await AI()._executeGuardedPageWrite(
-                  "appendBlocks",
-                  childPage,
-                  () => NotionAPI2.appendBlocks(childPage.id, contentBlocks, settings.notionApiKey),
-                  settings,
-                  { itemName: child.title }
-                );
-                createdCount++;
-              } catch (error) {
-                console.warn(`[LD-Notion] \u5B50\u9875\u9762\u521B\u5EFA\u5931\u8D25: ${child.title}`, error);
-              }
-            }
-            return `\u{1F4D1} **\u591A\u9875\u9762\u5185\u5BB9\u751F\u6210\u5B8C\u6210**
-
-- \u7236\u9875\u9762: ${plan.parent_title}
-- \u5B50\u9875\u9762: ${createdCount}/${plan.children.length} \u521B\u5EFA\u6210\u529F
-
-\u{1F4A1} \u6240\u6709\u9875\u9762\u5DF2\u521B\u5EFA\u5E76\u586B\u5145\u5185\u5BB9\u3002`;
-          } catch (error) {
-            return `\u274C \u9875\u9762\u751F\u6210\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleBatchAnalyze: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          const { database_name, database_id, analysis_prompt } = params;
-          const limit = Math.min(Math.max(parseInt(params.limit) || 10, 1), 20);
-          if (!database_name && !database_id) {
-            if (!settings.notionDatabaseId) {
-              return "\u274C \u8BF7\u6307\u5B9A\u8981\u5206\u6790\u7684\u6570\u636E\u5E93\uFF0C\u6216\u5148\u914D\u7F6E\u9ED8\u8BA4\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5206\u6790 xxx \u6570\u636E\u5E93\u7684\u6240\u6709\u9875\u9762\u300D";
-            }
-          }
-          state().updateLastMessage("\u6B63\u5728\u67E5\u627E\u6570\u636E\u5E93...", "processing");
-          try {
-            let dbId = database_id || settings.notionDatabaseId;
-            if (!dbId && database_name) {
-              const searchResp = await NotionAPI2.search(database_name, "database", settings.notionApiKey);
-              const db = (searchResp.results || []).find((r) => !r.archived);
-              if (!db) return `\u274C \u627E\u4E0D\u5230\u6570\u636E\u5E93\u300C${database_name}\u300D\u3002`;
-              dbId = db.id;
-            }
-            state().updateLastMessage("\u6B63\u5728\u83B7\u53D6\u9875\u9762...", "processing");
-            const queryResp = await NotionAPI2.queryDatabase(dbId, null, null, null, settings.notionApiKey, limit);
-            const pages = (queryResp.results || []).filter((p) => !p.archived);
-            if (pages.length === 0) {
-              return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u5206\u6790\u7684\u9875\u9762\u3002`;
-            }
-            state().updateLastMessage(`\u{1F50E} \u6B63\u5728\u63D0\u53D6 ${pages.length} \u4E2A\u9875\u9762\u5185\u5BB9...`, "processing");
-            const contentParts = [];
-            for (let i = 0; i < pages.length; i++) {
-              const page = pages[i];
-              const title = Utils2.getPageTitle(page);
-              state().updateLastMessage(`\u{1F50E} \u63D0\u53D6\u4E2D (${i + 1}/${pages.length}): ${title}...`, "processing");
-              const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 2e3);
-              contentParts.push(`## ${title}
-${content || "\uFF08\u65E0\u5185\u5BB9\uFF09"}`);
-            }
-            state().updateLastMessage("\u{1F4CA} \u6B63\u5728\u751F\u6210\u7EFC\u5408\u5206\u6790...", "processing");
-            const analysisGoal = analysis_prompt || explanation || "\u7EFC\u5408\u5206\u6790\u6240\u6709\u9875\u9762\u5185\u5BB9\uFF0C\u627E\u51FA\u5173\u952E\u4E3B\u9898\u3001\u8D8B\u52BF\u548C\u5EFA\u8BAE";
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u6570\u636E\u5206\u6790\u5E08\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA\u6570\u636E\u5E93\u7684\u591A\u4E2A\u9875\u9762\u5185\u5BB9\u8FDB\u884C\u7EFC\u5408\u5206\u6790\u3002
-
-\u5206\u6790\u8981\u6C42\uFF1A${analysisGoal}
-
-\u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u5206\u6790\u62A5\u544A\uFF0C\u5305\u542B\uFF1A
-1. \u6982\u8FF0\uFF08\u603B\u4F53\u60C5\u51B5\u6458\u8981\uFF09
-2. \u5173\u952E\u53D1\u73B0\uFF08\u4E3B\u8981\u4E3B\u9898\u548C\u6A21\u5F0F\uFF09
-3. \u8BE6\u7EC6\u5206\u6790\uFF08\u6309\u4E3B\u9898/\u7C7B\u522B\u5206\u7EC4\uFF09
-4. \u8D8B\u52BF\u4E0E\u6D1E\u5BDF
-5. \u5EFA\u8BAE\u4E0E\u884C\u52A8\u9879
-
---- \u4EE5\u4E0B\u662F ${pages.length} \u4E2A\u9875\u9762\u7684\u5185\u5BB9 ---
-
-${contentParts.join("\n\n---\n\n")}`;
-            const report = await svc().requestChat(prompt2, settings, 4e3);
-            return `\u{1F4CA} **\u6279\u91CF\u5206\u6790\u62A5\u544A**
-
-${report}
-
----
-\u{1F50E} \u5171\u5206\u6790 ${pages.length} \u4E2A\u9875\u9762`;
-          } catch (error) {
-            return `\u274C \u6279\u91CF\u5206\u6790\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleGitHubImport: async (params, settings, explanation) => {
-          const username = params.username || Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
-          const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
-          const databaseId = settings.notionDatabaseId;
-          if (!username) {
-            return "\u274C \u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E GitHub \u7528\u6237\u540D\u3002\n\n\u{1F4A1} \u5728 Notion \u9762\u677F\u7684\u8BBE\u7F6E\u4E2D\u627E\u5230\u300CGitHub \u6536\u85CF\u5BFC\u5165\u300D\u90E8\u5206\u586B\u5199\u7528\u6237\u540D\u3002";
-          }
-          if (!settings.notionApiKey) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion API Key\u3002";
-          }
-          if (!databaseId) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E GitHub \u6536\u85CF\u7684\u76EE\u6807\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u53EF\u4EE5\u5728\u8BBE\u7F6E\u4E2D\u4E13\u95E8\u6307\u5B9A\uFF0C\u6216\u4F7F\u7528\u9ED8\u8BA4\u6570\u636E\u5E93\u3002";
-          }
-          const classify = params.classify || false;
-          const importTypes = require_import().GitHubAPI.getImportTypes();
-          try {
-            const allResults = await require_import().GitHubExporter.exportAll({
-              apiKey: settings.notionApiKey,
-              databaseId,
-              username,
-              token,
-              aiApiKey: settings.aiApiKey,
-              aiService: settings.aiService,
-              aiModel: settings.aiModel,
-              aiBaseUrl: settings.aiBaseUrl,
-              categories: settings.categories
-            }, (msg, pct) => {
-              state().updateLastMessage(`\u{1F419} ${msg}`, "processing");
-            });
-            let response = `\u2705 **GitHub \u5BFC\u5165\u5B8C\u6210**
-
-`;
-            let totalExported = 0;
-            let totalFailed = 0;
-            const typeNames = { stars: "Stars", repos: "Repos", forks: "Forks", gists: "Gists" };
-            for (const type of importTypes) {
-              const r = allResults[type];
-              if (!r) continue;
-              if (r.error) {
-                response += `\u274C ${typeNames[type]}: ${r.error}
-`;
-              } else {
-                response += `\u{1F4CA} ${typeNames[type]}: \u5171 ${r.total} \u4E2A\uFF0C\u5BFC\u51FA ${r.exported} \u4E2A`;
-                if (r.failed > 0) response += `\uFF0C\u5931\u8D25 ${r.failed} \u4E2A`;
-                response += `
-`;
-                totalExported += r.exported || 0;
-                totalFailed += r.failed || 0;
-              }
-            }
-            if (totalExported === 0 && totalFailed === 0) {
-              response += `
-\u6240\u6709\u5185\u5BB9\u5DF2\u662F\u6700\u65B0\u72B6\u6001\u3002`;
-            }
-            if (classify && totalExported > 0 && settings.aiApiKey) {
-              state().updateLastMessage("\u{1F3F7}\uFE0F \u6B63\u5728\u8FDB\u884C AI \u5206\u7C7B...", "processing");
-              try {
-                const classifyResult = await require_import().GitHubExporter.classifyRepos({
-                  ...settings,
-                  databaseId
-                }, (msg, pct) => {
-                  state().updateLastMessage(`\u{1F3F7}\uFE0F ${msg}`, "processing");
-                });
-                response += `
-
-\u{1F3F7}\uFE0F **AI \u5206\u7C7B\u5B8C\u6210**: \u5DF2\u5206\u7C7B ${classifyResult.classified}/${classifyResult.total} \u4E2A`;
-              } catch (e) {
-                response += `
-
-\u26A0\uFE0F AI \u5206\u7C7B\u51FA\u9519: ${e.message}`;
-              }
-            } else if (classify && !settings.aiApiKey) {
-              response += `
-
-\u26A0\uFE0F \u672A\u914D\u7F6E AI API Key\uFF0C\u8DF3\u8FC7\u81EA\u52A8\u5206\u7C7B\u3002`;
-            }
-            return response;
-          } catch (error) {
-            return `\u274C GitHub \u5BFC\u5165\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleBookmarkImport: async (params, settings, explanation) => {
-          const databaseId = settings.notionDatabaseId;
-          if (!settings.notionApiKey) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion API Key\u3002";
-          }
-          if (!databaseId) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E\u76EE\u6807\u6570\u636E\u5E93 ID\u3002";
-          }
-          if (!require_bridge().BookmarkBridge.isExtensionAvailable()) {
-            const installUrl = require_api().InstallHelper.getBookmarkExtensionUrl();
-            return `\u274C \u672A\u68C0\u6D4B\u5230 LD-Notion \u4E66\u7B7E\u6865\u63A5\u6269\u5C55\u3002
-
-\u{1F4A1} \u8BF7\u70B9\u51FB\u5B89\u88C5\uFF1A${installUrl}
-
-\u624B\u52A8\u5B89\u88C5\u6B65\u9AA4\uFF1A
-1. \u6253\u5F00 chrome://extensions/
-2. \u5F00\u542F\u300C\u5F00\u53D1\u8005\u6A21\u5F0F\u300D
-3. \u70B9\u51FB\u300C\u52A0\u8F7D\u5DF2\u89E3\u538B\u7684\u6269\u5C55\u300D
-4. \u9009\u62E9\u9879\u76EE\u4E2D\u7684 chrome-extension \u6587\u4EF6\u5939
-5. \u5237\u65B0\u5F53\u524D\u9875\u9762
-
-\u{1F50E} \u8BCA\u65AD\u5EFA\u8BAE\uFF1A
-- \u82E5\u4F60\u5F53\u524D\u4F7F\u7528\u7684\u662F chrome-extension-full \u72EC\u7ACB\u7248\uFF0C\u8BF7\u5173\u95ED userscript\uFF0C\u907F\u514D\u53CC\u6A21\u5F0F\u6DF7\u7528
-- \u82E5\u4F60\u575A\u6301 userscript \u6A21\u5F0F\uFF0C\u8BF7\u4EC5\u5B89\u88C5 chrome-extension\uFF08\u6865\u63A5\u7248\uFF09`;
-          }
-          try {
-            state().updateLastMessage("\u{1F4D6} \u6B63\u5728\u8BFB\u53D6\u6D4F\u89C8\u5668\u4E66\u7B7E...", "processing");
-            const tree = await require_bridge().BookmarkBridge.getBookmarkTree();
-            const allBookmarks = require_bridge().BookmarkExporter.flattenTree(tree);
-            if (allBookmarks.length === 0) {
-              return "\u{1F4ED} \u6CA1\u6709\u627E\u5230\u6D4F\u89C8\u5668\u4E66\u7B7E\u3002";
-            }
-            const dedupStrict = Utils2.isBookmarkDedupStrict();
-            const newCount = dedupStrict ? allBookmarks.filter((b) => !require_bridge().BookmarkExporter.isExported(b.url)).length : allBookmarks.length;
-            state().updateLastMessage(`\u{1F4D6} \u627E\u5230 ${allBookmarks.length} \u4E2A\u4E66\u7B7E (${newCount} \u4E2A\u65B0\u4E66\u7B7E)\uFF0C\u6B63\u5728\u5BFC\u51FA...`, "processing");
-            const result = await require_bridge().BookmarkExporter.exportBookmarks({
-              apiKey: settings.notionApiKey,
-              databaseId,
-              bookmarks: allBookmarks,
-              aiApiKey: settings.aiApiKey,
-              aiService: settings.aiService,
-              aiModel: settings.aiModel,
-              aiBaseUrl: settings.aiBaseUrl
-            }, (msg, pct) => {
-              state().updateLastMessage(`\u{1F4D6} ${msg}`, "processing");
-            });
-            let response = `\u2705 **\u6D4F\u89C8\u5668\u4E66\u7B7E\u5BFC\u5165\u5B8C\u6210**
-
-`;
-            response += `\u{1F4CA} \u5171 ${result.total} \u4E2A\u4E66\u7B7E
-`;
-            response += `\u{1F4E5} \u672C\u6B21\u5BFC\u51FA ${result.exported} \u4E2A
-`;
-            if (result.failed > 0) response += `\u274C \u5931\u8D25 ${result.failed} \u4E2A
-`;
-            if (result.exported === 0 && result.failed === 0) response += `
-\u6240\u6709\u4E66\u7B7E\u5DF2\u662F\u6700\u65B0\u72B6\u6001\u3002`;
-            if (result.exported > 0 && settings.aiApiKey) {
-              response += `
-
-\u{1F4A1} \u53EF\u4EE5\u8F93\u5165\u300C\u5206\u7C7B\u4E66\u7B7E\u300D\u8BA9 AI \u81EA\u52A8\u4E3A\u5BFC\u5165\u7684\u4E66\u7B7E\u5206\u7C7B\u3002`;
-            }
-            return response;
-          } catch (error) {
-            return `\u274C \u4E66\u7B7E\u5BFC\u5165\u5931\u8D25: ${error.message}`;
-          }
-        },
-        handleTemplateOutput: async (params, settings, explanation) => {
-          const configCheck = AI().checkConfig(settings, false);
-          if (!configCheck.valid) return configCheck.error;
-          if (!OperationGuard2.canExecute("appendBlocks")) {
-            return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6A21\u677F\u8F93\u51FA\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
-          }
-          const { template_name, page_name, page_id, custom_context } = params;
-          let templates;
-          try {
-            templates = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, CONFIG2.DEFAULTS.aiTemplates));
-          } catch (error) {
-            console.warn("[LD-Notion] AI \u6A21\u677F\u52A0\u8F7D\u5931\u8D25\uFF0C\u4F7F\u7528\u9ED8\u8BA4\u6A21\u677F:", error);
-            templates = JSON.parse(CONFIG2.DEFAULTS.aiTemplates);
-          }
-          if (!template_name) {
-            const list = templates.map((t) => `${t.icon} **${t.name}**`).join("\n");
-            return `\u{1F4CB} **\u53EF\u7528\u7684 AI \u8F93\u51FA\u6A21\u677F**
-
-${list}
-
-\u{1F4A1} \u4F7F\u7528\u65B9\u5F0F\uFF1A\u300C\u7528\u5468\u62A5\u6A21\u677F\u603B\u7ED3 xxx \u9875\u9762\u300D\u6216\u300C\u7528\u6458\u8981\u63D0\u7EB2\u6A21\u677F\u6574\u7406 xxx\u300D`;
-          }
-          const template = templates.find(
-            (t) => t.name === template_name || t.name.includes(template_name) || template_name.includes(t.name)
-          );
-          if (!template) {
-            const list = templates.map((t) => `${t.icon} ${t.name}`).join(", ");
-            return `\u274C \u627E\u4E0D\u5230\u6A21\u677F\u300C${template_name}\u300D\u3002
-
-\u53EF\u7528\u6A21\u677F: ${list}`;
-          }
-          let pageContext = "";
-          let targetPage = null;
-          if (page_name || page_id) {
-            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (targetPage) {
-              pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 4e3);
-            }
-          }
-          state().updateLastMessage(`${template.icon} \u6B63\u5728\u4F7F\u7528\u300C${template.name}\u300D\u6A21\u677F\u751F\u6210...`, "processing");
-          const contextBlock = pageContext ? `
-
-\u4EE5\u4E0B\u662F\u53C2\u8003\u5185\u5BB9\uFF1A
-${pageContext}` : "";
-          const customBlock = custom_context ? `
-
-\u7528\u6237\u8865\u5145\u8BF4\u660E\uFF1A${custom_context}` : "";
-          const fullPrompt = `${template.prompt}${contextBlock}${customBlock}
-
-\u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002`;
-          const aiResponse = await svc().requestChat(fullPrompt, settings, 3e3);
-          if (targetPage) {
-            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
-            const contentBlocks = AI()._textToBlocks(aiResponse);
-            const blocks = [
-              { type: "divider", divider: {} },
-              { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `${template.icon} ${template.name}` } }] } },
-              ...contentBlocks
-            ];
-            await AI()._executeGuardedPageWrite(
-              "appendBlocks",
-              targetPage,
-              () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
-              settings,
-              { itemName: targetPage.name }
-            );
-            return `\u2705 **${template.icon} ${template.name}** \u5DF2\u751F\u6210\u5E76\u5199\u5165\u9875\u9762\u300C${targetPage.name}\u300D
-
-${aiResponse}`;
-          }
-          return `${template.icon} **${template.name}**
-
-${aiResponse}
-
-\u{1F4A1} \u5982\u9700\u5199\u5165\u9875\u9762\uFF0C\u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\uFF1A\u300C\u7528${template.name}\u6A21\u677F\u5904\u7406 xxx \u9875\u9762\u300D`;
-        }
-      };
-      module.exports = { AIHandlers: AIHandlers2 };
-    }
-  });
-
   // src/ai/guarded-write.js
   var require_guarded_write = __commonJS({
     "src/ai/guarded-write.js"(exports, module) {
@@ -24090,13 +24551,7 @@ ${aiResponse}
       var { OperationGuard: OperationGuard2 } = require_security();
       var { AgentTrace } = require_AgentTrace();
       var { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 } = require_AgentTools();
-      var _AI = null;
-      var AI = () => {
-        if (!_AI) _AI = require_ai().AIAssistant;
-        return _AI;
-      };
-      var ChatState2 = new Proxy({}, { get: (_, prop) => require_ai().ChatState[prop] });
-      var AIService2 = new Proxy({}, { get: (_, prop) => require_ai().AIService[prop] });
+      var { getAI: AI, getState: ChatState2, getService: AIService2 } = require_deps();
       var AgentExecutor = {
         _generateAgentPlan: async (params, settings) => {
           const { task_description } = params;
@@ -24879,14 +25334,16 @@ ${systemPrompt}
           ChatUI2.renderMessages();
           return ChatState2.messages[ChatState2.messages.length - 1];
         },
-        // 更新最后一条消息
+        // 更新最后一条消息（增量 DOM 更新，避免全量重渲染）（PERF-006）
         updateLastMessage: (content, status) => {
           if (ChatState2.messages.length === 0) return;
           const lastMsg = ChatState2.messages[ChatState2.messages.length - 1];
           if (content !== void 0) lastMsg.content = content;
           if (status !== void 0) lastMsg.status = status;
           ChatState2.save();
-          ChatUI2.renderMessages();
+          if (!ChatUI2._patchLastBubble()) {
+            ChatUI2.renderMessages();
+          }
         },
         // 保存到存储
         save: () => {
@@ -26301,6 +26758,24 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           let escaped = Utils2.escapeHtml(text);
           return escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>");
         },
+        // 增量更新最后一个气泡 DOM（PERF-006）。
+        // 返回 true 表示已成功 patch，false 表示需要回退到全量 renderMessages。
+        _patchLastBubble: () => {
+          var _a;
+          const container = document.querySelector("#ldb-chat-messages");
+          if (!container) return false;
+          const bubbles = container.querySelectorAll(".ldb-chat-message");
+          if (bubbles.length !== ChatState2.messages.length) return false;
+          const lastMsg = ChatState2.messages[ChatState2.messages.length - 1];
+          const lastBubble = (_a = bubbles[bubbles.length - 1]) == null ? void 0 : _a.querySelector(".ldb-chat-bubble");
+          if (!lastBubble) return false;
+          const statusClass = lastMsg.status === "processing" ? "processing" : lastMsg.status === "error" ? "error" : "";
+          const content = lastMsg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI2.safeMarkdown(AIAssistant2._resultToText(lastMsg.content));
+          lastBubble.className = `ldb-chat-bubble ${lastMsg.role === "user" ? "user" : "assistant"} ${statusClass}`.trim();
+          lastBubble.innerHTML = content;
+          container.scrollTop = container.scrollHeight;
+          return true;
+        },
         // 渲染消息列表
         renderMessages: () => {
           const container = document.querySelector("#ldb-chat-messages");
@@ -26599,7 +27074,8 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         }
       };
       Object.assign(AIAssistant2, require_guarded_write().GuardedWrite);
-      module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier3 };
+      var getAISettings = () => AIAssistant2.getSettings();
+      module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier3, getAISettings };
       Object.assign(AIAssistant2, require_agent_executor().AgentExecutor);
     }
   });

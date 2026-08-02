@@ -1,5 +1,32 @@
 # 更新日志
 
+## [3.9.0] - 2026-08-02
+
+### 新增（UI 设计系统增强）
+
+**Design Token 体系扩展**:
+- 新增 accent alpha 变体系列（`--ldb-ui-accent-alpha-08` ~ `--ldb-ui-accent-alpha-45`），替代硬编码 rgba 值
+- 新增 dark mode accent alpha 变体（`--ldb-ui-accent-dark-alpha-10` ~ `--ldb-ui-accent-dark-alpha-22`）
+- 新增 Motion tokens（`--ldb-ui-ease-out/in`、`--ldb-ui-duration-instant/fast/normal/slow/entrance`）
+- 新增 Neutral overlay token（`--ldb-ui-neutral-overlay: 148, 163, 184`），统一 slate-400 半透明用法
+
+### 变更
+
+- `styles.js`: 全部 `rgba(148,163,184,α)` 硬编码迁移到 `color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent N%)`
+- `styles.js`: 过渡动画统一使用 motion tokens（duration + easing）替代魔法数字
+- `--ldb-ui-white` 微调为品牌色调 `rgb(253, 253, 255)`（视觉 1:1 不变）
+- 新增 `:focus-visible` 样式（toggle-section 等交互元素），提升键盘可访问性
+- 触控目标尺寸优化（generic-ui / notion-site-ui）
+
+### 验证
+
+- Build: 单文件 Userscript 输出不变
+- 设计 token 向后兼容（纯 CSS 变量新增，无破坏性变更）
+
+[3.9.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.9.0
+
+---
+
 ## [3.8.0] - 2026-08-01
 
 ### 架构重构（F4/F5）
