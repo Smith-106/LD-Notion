@@ -1,208 +1,64 @@
 {
   "version": "1.0",
-  "schema_version": "1.0",
-  "project": "LD-Notion Hub",
-  "last_updated": "2026-08-01T12:00:00+08:00",
-  "features": [
+  "generated": "2026-08-02T04:15:00.000Z",
+  "documents": [
     {
-      "id": "FT-001",
-      "name": "Application Bootstrap",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-001", "TC-002", "TC-008"],
-      "phase": null
+      "path": "tech-stack.md",
+      "category": "tech-stack",
+      "size": 31,
+      "lastUpdated": "2026-08-02T04:15:00.000Z"
     },
     {
-      "id": "FT-002",
-      "name": "Global Configuration",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-003"],
-      "phase": null
+      "path": "architecture.md",
+      "category": "architecture",
+      "size": 77,
+      "lastUpdated": "2026-08-02T04:15:00.000Z"
     },
     {
-      "id": "FT-003",
-      "name": "Shared Utilities",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-004"],
-      "phase": null
+      "path": "features.md",
+      "category": "features",
+      "size": 88,
+      "lastUpdated": "2026-08-02T04:15:00.000Z"
     },
     {
-      "id": "FT-004",
-      "name": "Authentication & Credential Management",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-005"],
-      "phase": null
-    },
-    {
-      "id": "FT-005",
-      "name": "Persistent Storage Layer",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-006", "TC-037", "TC-038", "TC-039"],
-      "phase": null
-    },
-    {
-      "id": "FT-006",
-      "name": "Notion/Obsidian API Layer",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-009", "TC-010", "TC-011", "TC-012", "TC-013"],
-      "phase": null
-    },
-    {
-      "id": "FT-007",
-      "name": "Security Framework",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-014", "TC-015"],
-      "phase": null
-    },
-    {
-      "id": "FT-008",
-      "name": "UI Command Coordination",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-007", "TC-016"],
-      "phase": null
-    },
-    {
-      "id": "FT-009",
-      "name": "Multi-Source Adapter Framework",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-017", "TC-018", "TC-019", "TC-020", "TC-021", "TC-022", "TC-023", "TC-024", "TC-025", "TC-026", "TC-027"],
-      "phase": null
-    },
-    {
-      "id": "FT-010",
-      "name": "Data Extraction Layer",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-028", "TC-029"],
-      "phase": null
-    },
-    {
-      "id": "FT-011",
-      "name": "Data Export Pipeline",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-030"],
-      "phase": null
-    },
-    {
-      "id": "FT-012",
-      "name": "GitHub Import Pipeline",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-031", "TC-032", "TC-033", "TC-034", "TC-035", "TC-036"],
-      "phase": null
-    },
-    {
-      "id": "FT-013",
-      "name": "Bookmark & RSS Bridge",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-040", "TC-041", "TC-042", "TC-043"],
-      "phase": null
-    },
-    {
-      "id": "FT-014",
-      "name": "AI Assistant & Agent",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-044", "TC-045", "TC-046", "TC-047", "TC-048", "TC-049", "TC-050", "TC-051", "TC-052", "TC-053", "TC-054", "TC-055", "TC-056", "TC-057", "TC-058", "TC-059", "TC-060", "TC-061", "TC-062", "TC-063"],
-      "phase": null
-    },
-    {
-      "id": "FT-015",
-      "name": "User Interface System",
-      "status": "active",
-      "requirement_ids": [],
-      "component_ids": ["TC-064", "TC-065", "TC-066", "TC-067", "TC-068", "TC-069", "TC-070", "TC-071", "TC-072", "TC-073", "TC-074", "TC-075"],
-      "phase": null
+      "path": "concerns.md",
+      "category": "cross-cutting",
+      "size": 99,
+      "lastUpdated": "2026-08-02T04:15:00.000Z"
     }
   ],
-  "components": [
-    {"id":"TC-001","name":"Main","type":"Core","code_locations":["src/main.js"],"feature_ids":["FT-001"],"symbols":["main"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-002","name":"SyncLock","type":"Core","code_locations":["src/sync-lock.js"],"feature_ids":["FT-001"],"symbols":["SyncLock"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-003","name":"Config","type":"Config","code_locations":["src/config/index.js"],"feature_ids":["FT-002"],"symbols":["CONFIG","MSG","SUPPORTED_FILE_TYPES","EXT_TO_MIME","FILE_TYPE_CATEGORY","SUPPORTED_IMAGE_TYPES","MULTI_PART_THRESHOLD","isSupportedFileType","getMimeType","getFileCategory"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-004","name":"Utils","type":"Util","code_locations":["src/utils/index.js"],"feature_ids":["FT-003"],"symbols":["Utils"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-005","name":"Auth","type":"Service","code_locations":["src/auth/index.js"],"feature_ids":["FT-004"],"symbols":["CredentialVault","TargetState","NotionOAuth"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-006","name":"Storage","type":"Service","code_locations":["src/storage/index.js"],"feature_ids":["FT-005"],"symbols":["Storage","SyncState"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-007","name":"UICommandService","type":"Service","code_locations":["src/coordination/UICommandService.js"],"feature_ids":["FT-008"],"symbols":["UICommandService"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-008","name":"EventBus","type":"Core","code_locations":["src/coordination/event-bus.js"],"feature_ids":["FT-008"],"symbols":["on","off","emit"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-009","name":"NotionAPI","type":"API","code_locations":["src/api/index.js"],"feature_ids":["FT-006"],"symbols":["SiteDetector","InstallHelper","EMOJI_MAP","NOTION_LANGUAGES","normalizeLanguage","DOMToNotion","NotionTransport","NotionAPI","ObsidianAPI","HTMLToMarkdown"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-010","name":"DOMToNotion","type":"Util","code_locations":["src/api/DOMToNotion.js"],"feature_ids":["FT-006"],"symbols":["DOMToNotion"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-011","name":"APIConstants","type":"Util","code_locations":["src/api/constants.js"],"feature_ids":["FT-006"],"symbols":["SiteDetector","InstallHelper","EMOJI_MAP","NOTION_LANGUAGES","normalizeLanguage"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-012","name":"NotionUpload","type":"Service","code_locations":["src/api/notion-upload.js"],"feature_ids":["FT-006"],"symbols":["installUploadMethods","isSupportedFileType","getFileCategory","getMimeType","MULTI_PART_THRESHOLD"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-013","name":"ObsidianAPI","type":"API","code_locations":["src/api/obsidian.js"],"feature_ids":["FT-006"],"symbols":["ObsidianAPI","HTMLToMarkdown"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-014","name":"UrlValidator","type":"Security","code_locations":["src/security/UrlValidator.js"],"feature_ids":["FT-007"],"symbols":["UrlValidator"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-015","name":"SecurityIndex","type":"Security","code_locations":["src/security/index.js"],"feature_ids":["FT-007"],"symbols":["OperationGuard","OperationLog","ConfirmationDialog","UndoManager"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-016","name":"EventBus","type":"Core","code_locations":["src/coordination/event-bus.js"],"feature_ids":["FT-008"],"symbols":["on","off","emit"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-017","name":"SourceAdapter","type":"Core","code_locations":["src/adapter/SourceAdapter.js"],"feature_ids":["FT-009"],"symbols":["SourceAdapter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-018","name":"AdapterRegistry","type":"Core","code_locations":["src/adapter/AdapterRegistry.js"],"feature_ids":["FT-009"],"symbols":["AdapterRegistry"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-019","name":"BookmarkAdapter","type":"Adapter","code_locations":["src/adapter/BookmarkAdapter.js"],"feature_ids":["FT-009"],"symbols":["BookmarkAdapter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-020","name":"GenericAdapter","type":"Adapter","code_locations":["src/adapter/GenericAdapter.js"],"feature_ids":["FT-009"],"symbols":["GenericAdapter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-021","name":"GitHubAdapter","type":"Adapter","code_locations":["src/adapter/GitHubAdapter.js"],"feature_ids":["FT-009"],"symbols":["createGitHubAdapter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-022","name":"LinuxDoAdapter","type":"Adapter","code_locations":["src/adapter/LinuxDoAdapter.js"],"feature_ids":["FT-009"],"symbols":["LinuxDoAdapter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-023","name":"RSSAdapter","type":"Adapter","code_locations":["src/adapter/RSSAdapter.js"],"feature_ids":["FT-009"],"symbols":["RSSAdapter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-024","name":"ZhihuAdapter","type":"Adapter","code_locations":["src/adapter/ZhihuAdapter.js"],"feature_ids":["FT-009"],"symbols":["ZhihuAdapter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-025","name":"SyncCoordinator","type":"Core","code_locations":["src/adapter/SyncCoordinator.js"],"feature_ids":["FT-009"],"symbols":["SyncCoordinator"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-026","name":"SyncScheduler","type":"Service","code_locations":["src/adapter/SyncScheduler.js"],"feature_ids":["FT-009"],"symbols":["SyncScheduler"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-027","name":"AdapterIndex","type":"Core","code_locations":["src/adapter/index.js"],"feature_ids":["FT-009"],"symbols":["SourceAdapter","AdapterRegistry"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-028","name":"LinuxDoAPI","type":"Service","code_locations":["src/extract/LinuxDoAPI.js"],"feature_ids":["FT-010"],"symbols":["LinuxDoAPI"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-029","name":"ExtractIndex","type":"Service","code_locations":["src/extract/index.js"],"feature_ids":["FT-010"],"symbols":["ZhihuAPI","GenericExtractor","WorkspaceService","LinuxDoAPI"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-030","name":"GenericExporter","type":"Service","code_locations":["src/export/index.js"],"feature_ids":["FT-011"],"symbols":["GenericExporter","LinuxDoAPI","Exporter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-031","name":"GitHubAPI","type":"Service","code_locations":["src/import/GitHubAPI.js"],"feature_ids":["FT-012"],"symbols":["GitHubAPI"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-032","name":"GitHubAutoImporter","type":"Service","code_locations":["src/import/GitHubAutoImporter.js"],"feature_ids":["FT-012"],"symbols":["GitHubAutoImporter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-033","name":"GitHubExporter","type":"Service","code_locations":["src/import/GitHubExporter.js"],"feature_ids":["FT-012"],"symbols":["GitHubExporter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-034","name":"GitHubObsidianService","type":"Service","code_locations":["src/import/github-obsidian-service.js"],"feature_ids":["FT-012"],"symbols":["sanitizeObsidianFileName","mapGitHubItemsToBookmarks","buildGitHubObsidianMarkdown","exportGitHubSelectedToObsidian","exportGitHubSelectedToNotion"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-035","name":"UpdateChecker","type":"Service","code_locations":["src/import/UpdateChecker.js"],"feature_ids":["FT-012"],"symbols":["UpdateChecker"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-036","name":"AutoImporter","type":"Service","code_locations":["src/import/index.js"],"feature_ids":["FT-012"],"symbols":["AutoImporter","UpdateChecker","GitHubAutoImporter","GitHubAPI","GitHubExporter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-037","name":"DedupStore","type":"Model","code_locations":["src/storage/DedupStore.js"],"feature_ids":["FT-005"],"symbols":["DedupStore"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-038","name":"SyncStateV2","type":"Model","code_locations":["src/storage/SyncState.js"],"feature_ids":["FT-005"],"symbols":["SyncStateV2"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-039","name":"StorageService","type":"Service","code_locations":["src/storage/index.js"],"feature_ids":["FT-005"],"symbols":["Storage","SyncState"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-040","name":"BookmarkBridge","type":"Service","code_locations":["src/bridge/index.js"],"feature_ids":["FT-013"],"symbols":["BookmarkBridge","BookmarkExporter","BookmarkAutoImporter","RSSAutoImporter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-041","name":"BookmarkAutoImporter","type":"Service","code_locations":["src/bridge/BookmarkAutoImporter.js"],"feature_ids":["FT-013"],"symbols":["BookmarkAutoImporter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-042","name":"BookmarkExporter","type":"Service","code_locations":["src/bridge/BookmarkExporter.js"],"feature_ids":["FT-013"],"symbols":["BookmarkExporter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-043","name":"RSSAutoImporter","type":"Service","code_locations":["src/bridge/RSSAutoImporter.js"],"feature_ids":["FT-013"],"symbols":["RSSAutoImporter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-044","name":"AIAssistant","type":"Service","code_locations":["src/ai/index.js"],"feature_ids":["FT-014"],"symbols":["AIService","ChatState","QUICK_INTENT_PATTERNS","QUICK_INTENT_RULES","AI_AGENT_TOOLS","AIHandlers","AIAssistant","AIWelcomeUI","ChatUI","AIClassifier","getAISettings"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-045","name":"AgentExecutor","type":"Service","code_locations":["src/ai/agent-executor.js"],"feature_ids":["FT-014"],"symbols":["AgentExecutor"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-046","name":"AgentTools","type":"Service","code_locations":["src/ai/AgentTools.js"],"feature_ids":["FT-014"],"symbols":["AI_AGENT_TOOLS"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-047","name":"AIHandlers","type":"Service","code_locations":["src/ai/Handlers.js"],"feature_ids":["FT-014"],"symbols":["AIHandlers"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-048","name":"BlockConverter","type":"Util","code_locations":["src/ai/BlockConverter.js"],"feature_ids":["FT-014"],"symbols":["BlockConverter"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-049","name":"NameResolver","type":"Service","code_locations":["src/ai/NameResolver.js"],"feature_ids":["FT-014"],"symbols":["NameResolver"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-050","name":"AgentTrace","type":"Util","code_locations":["src/ai/AgentTrace.js"],"feature_ids":["FT-014"],"symbols":["AgentTrace"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-051","name":"AIDeps","type":"Util","code_locations":["src/ai/deps.js"],"feature_ids":["FT-014"],"symbols":["getAI","getState","getService"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-052","name":"GuardedWrite","type":"Security","code_locations":["src/ai/guarded-write.js"],"feature_ids":["FT-014"],"symbols":["GuardedWrite"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-053","name":"AISchema","type":"Security","code_locations":["src/ai/schema.js"],"feature_ids":["FT-014"],"symbols":["AISchema"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-054","name":"QueryHandlers","type":"Service","code_locations":["src/ai/handlers/query.js"],"feature_ids":["FT-014"],"symbols":["handleQuery","handleSearch","handleWorkspaceSearch"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-055","name":"PageCrudHandlers","type":"Service","code_locations":["src/ai/handlers/pageCrud.js"],"feature_ids":["FT-014"],"symbols":["handleUpdate","handleMove","handleCopy","handleCompound","handleCreateDatabase"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-056","name":"ContentHandlers","type":"Service","code_locations":["src/ai/handlers/content.js"],"feature_ids":["FT-014"],"symbols":["handleWriteContent","handleEditContent","handleTranslateContent","handleAIAutofill","handleAsk","handleDeepResearch","handleSummarize","handleBrainstorm","handleProofread","handleTemplateOutput"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-057","name":"BatchHandlers","type":"Service","code_locations":["src/ai/handlers/batch.js"],"feature_ids":["FT-014"],"symbols":["handleClassify","handleBatchClassify","handleBatchTranslate","handleExtractToDatabase","handleGeneratePages","handleBatchAnalyze","handleGitHubImport","handleBookmarkImport"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-058","name":"ReadTools","type":"Service","code_locations":["src/ai/tools/read-tools.js"],"feature_ids":["FT-014"],"symbols":["search_workspace","query_database","list_databases","get_page","get_page_content","get_block_children","get_database","get_comments","get_user_info","list_pages_in_database"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-059","name":"WriteTools","type":"Service","code_locations":["src/ai/tools/write-tools.js"],"feature_ids":["FT-014"],"symbols":["batch_tag","create_page","update_page","append_content","move_page","delete_page","create_database","set_page_icon","set_page_cover","update_property"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-060","name":"MetaTools","type":"Service","code_locations":["src/ai/tools/meta-tools.js"],"feature_ids":["FT-014"],"symbols":["research_report","generate_formula"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-061","name":"BlockHelpers","type":"Util","code_locations":["src/ai/utils/block-helpers.js"],"feature_ids":["FT-014"],"symbols":["_extractBlockPlainText","_collectBlockTree"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-062","name":"FormatHelpers","type":"Util","code_locations":["src/ai/utils/format-helpers.js"],"feature_ids":["FT-014"],"symbols":["_formatUserSummary","_formatCommentSummary"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-063","name":"PayloadBuilders","type":"Util","code_locations":["src/ai/utils/payload-builders.js"],"feature_ids":["FT-014"],"symbols":["_buildPageIconPayload","_buildPageCoverPayload","_buildPropertyValuePayload","_buildBlockUpdatePayload"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-064","name":"ResultHelpers","type":"Util","code_locations":["src/ai/utils/result-helpers.js"],"feature_ids":["FT-014"],"symbols":["_buildStructuredResultText","_isStructuredResult","_inferStructuredResultStatus"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-065","name":"MainUI","type":"UI","code_locations":["src/ui/main-ui.js"],"feature_ids":["FT-015"],"symbols":["UI"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-066","name":"NotionSiteUI","type":"UI","code_locations":["src/ui/notion-site-ui.js"],"feature_ids":["FT-015"],"symbols":["NotionSiteUI"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-067","name":"GenericUI","type":"UI","code_locations":["src/ui/generic-ui.js"],"feature_ids":["FT-015"],"symbols":["GenericUI"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-068","name":"BookmarkList","type":"UI","code_locations":["src/ui/bookmark-list.js"],"feature_ids":["FT-015"],"symbols":["BookmarkList"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-069","name":"DesignSystem","type":"UI","code_locations":["src/ui/design-system.js"],"feature_ids":["FT-015"],"symbols":["DesignSystem"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-070","name":"UIEvents","type":"UI","code_locations":["src/ui/events.js"],"feature_ids":["FT-015"],"symbols":["UIEvents"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-071","name":"PanelResize","type":"Util","code_locations":["src/ui/panel-resize.js"],"feature_ids":["FT-015"],"symbols":["PanelResize"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-072","name":"StyleManager","type":"Util","code_locations":["src/ui/style-manager.js"],"feature_ids":["FT-015"],"symbols":["StyleManager"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-073","name":"UI_CSS","type":"Util","code_locations":["src/ui/styles.js"],"feature_ids":["FT-015"],"symbols":["UI_CSS"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-074","name":"WorkspaceInsight","type":"UI","code_locations":["src/ui/workspace-insight.js"],"feature_ids":["FT-015"],"symbols":["WorkspaceInsight"],"last_updated":"2026-08-01T12:00:00+08:00"},
-    {"id":"TC-075","name":"WorkspaceVisual","type":"Util","code_locations":["src/ui/workspace-visual.js"],"feature_ids":["FT-015"],"symbols":["WorkspaceVisual"],"last_updated":"2026-08-01T12:00:00+08:00"}
-  ],
-  "requirements": [],
-  "architecture_decisions": [],
-  "actions": []
+  "sections": {
+    "tech-stack": [
+      "languages",
+      "frameworks",
+      "dependencies",
+      "security-primitives",
+      "documentation"
+    ],
+    "architecture": [
+      "module-structure",
+      "key-principles",
+      "data-flow",
+      "module-dependencies",
+      "security-boundaries"
+    ],
+    "features": [
+      "core-features",
+      "user-interfaces",
+      "api-surface",
+      "integration-points"
+    ],
+    "concerns": [
+      "security",
+      "testing",
+      "performance",
+      "configuration",
+      "maintenance"
+    ]
+  },
+  "metadata": {
+    "totalDocuments": 4,
+    "rebuildTriggeredBy": "manual-command",
+    "workspaceVersion": "3.8.0"
+  }
 }

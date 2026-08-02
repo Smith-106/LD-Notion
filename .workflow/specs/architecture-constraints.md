@@ -235,3 +235,28 @@ F4（6 个文件 >1500 LOC 违反 SRP：main-ui.js 2700 / ai/index.js 2483 / Han
 
 必须作为独立 milestone 规划，按既定流程执行：(1) 先补测试基线（契约用例覆盖输入空间）→ (2) 提取独立模块（原样移动不改逻辑）→ (3) 原位置保留转发壳（调用点零改动）→ (4) 全绿验证等价性。参照 BlockConverter 拆分先例（ISS-20260723-010）。
 </spec-entry>
+
+
+<spec-entry category="arch" keywords="event-bus,circular-dependency,decoupling,resolveui,emit,coordination" date="2026-08-02" sid="S-20260802-cppl" title="事件总线解耦模式：零依赖 event-bus 替代 _resolveUI lazy require" source="harvest:TLV4-sessions-20260801">
+
+### 事件总线解耦模式：零依赖 event-bus 替代 _resolveUI lazy require
+
+当 security/import/bridge 层需要通知 UI 层时，禁止 _resolveUI() lazy require 模式（运行时脆弱、时序敏感），改为零依赖事件总线：src/coordination/event-bus.js（65 LOC，无任何 require 调用）提供 on/off/emit API。写侧 emit(oplog:changed/notify/sync:center-summary-updated/bookmarks:updated)，UI 侧 main-ui.js 初始化后 on() 订阅。设计原则：(1) 零外部依赖确保不引入新循环；(2) 无订阅者时 emit 静默失败不抛错；(3) 同步阻塞调用；(4) handler 异常不中断其他 handler（try-catch + console.error）；(5) 订阅晚于 emit 安全（lazy subscription）。LD-Notion 实例：TLV4-ui-eventbus T3/T4 消除 security-ui + import/bridge-ui 共 7 处 _resolveUI，117/117 测试通过。
+
+</spec-entry>
+
+<spec-entry category="arch" keywords="api-split,module-extraction,forwarding-shell,task-ordering,monolith" date="2026-08-02" sid="S-20260802-7jrs" title="API 域拆分蓝图：巨石 index.js 到职责单一模块 + 转发壳" source="harvest:TLV4-sessions-20260801">
+
+### API 域拆分蓝图：巨石 index.js 到职责单一模块 + 转发壳
+
+api/index.js 1802 LOC 拆分为 5 模块的已验证实例：constants.js（SiteDetector/InstallHelper/EMOJI_MAP/NOTION_LANGUAGES，137 LOC 零依赖）、DOMToNotion.js（470 LOC）、obsidian.js（ObsidianAPI+HTMLToMarkdown 合并 221 LOC，同场景服务）、notion-upload.js（upload 簇 272 LOC，installUploadMethods 注入）、index.js 保留核心+转发壳（约717 LOC）。执行顺序依赖感知：T1 测试基线先行 - T5 constants 先于 T2 DOMToNotion（避免循环引用）- T3 可并行 - T4 upload 最后（与 request 核心耦合最紧）- T6 全量验证。约束：module.exports 名单 10 项不变，15 个外部引用文件零改动，legacy-harness FACTORY_NAMES require_api 保留。
+
+</spec-entry>
+
+<spec-entry category="arch" keywords="gm-xmlhttprequest,upload,binary,multipart,design-intent" date="2026-08-02" sid="S-20260802-579u" title="二进制上传保留 GM_xmlhttpRequest 直接调用（multipart 设计意图）" source="harvest:TLV4-sessions-20260801">
+
+### 二进制上传保留 GM_xmlhttpRequest 直接调用（multipart 设计意图）
+
+notion-upload.js 的 sendFilePart/uploadFileContent 绕过 NotionAPI.request 核心直接调用 GM_xmlhttpRequest 是设计意图而非技术债：multipart binary 传输需要精确控制 Content-Type（application/octet-stream + part boundary），request 核心的 JSON 封装不适用。提取时保留直接调用，仅将 NotionTransport.buildUrl + NotionOAuth.getAccessToken 作为依赖注入传入。判据：凡绕过统一请求层的直接网络调用，确认是否为二进制/流式场景设计意图；是则保留并文档化，否则收敛到统一层。
+
+</spec-entry>

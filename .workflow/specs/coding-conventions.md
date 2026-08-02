@@ -225,3 +225,12 @@ AI 对话处理中 `updateLastMessage` 高频调用（流式输出），若每�
 LD-Notion 实例：odyssey-improve full-scan F6，`renderMessages` 全量 innerHTML → `_patchLastBubble` 增量路径，AI 流式输出时 DOM 操作 O(n)→O(1)。
 
 </spec-entry>
+
+
+<spec-entry category="coding" keywords="verification,module-extraction,node-check,equivalence,delivery,regression" date="2026-08-02" sid="S-20260802-hmia" title="模块提取验证链：四层递进回归守护" source="harvest:TLV4-sessions-20260801">
+
+### 模块提取验证链：四层递进回归守护
+
+从巨石文件提取独立模块时，每步必须通过四层递进验证：(1) node --check 语法检查（快速反馈）；(2) npx vitest run 单元测试全绿（T1 基线先行守护行为契约）；(3) npm run verify:equivalence 产物语义等价（存储键字面量/导出名单不变）；(4) npm run verify:delivery 13 维度全链检查。每层提取后立即验证，不累积多步再验。提取前先扩展测试基线（cook 家族/upload 簇/常量函数用例），确保提取前后行为一致。LD-Notion 实例：TLV4-api-refactor T1-T6 六步全部通过此验证链。
+
+</spec-entry>
