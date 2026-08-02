@@ -6,6 +6,20 @@ __pycache__/
 output_post.html
 chrome-extension-full/
 
+# Tool-specific indexes & local artifacts
+.ccw/
+.claude/
+.tests/
+artifacts/
+poc/
+
+# Legacy/superseded extension (replaced by chrome-extension-full/)
+chrome-extension/
+
+# Rust remnants (not a Rust project)
+Cargo.toml
+Cargo.lock
+
 # Local packaging artifacts
 LD-Notion-chrome-extension-full-v*.zip
 LD-Notion-v*-extension.zip

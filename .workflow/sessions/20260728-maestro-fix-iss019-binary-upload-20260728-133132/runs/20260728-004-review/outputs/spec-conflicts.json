@@ -1,6 +1,0 @@
-{
-  "_meta": { "kind": "spec-conflicts", "schema": "spec-conflicts/1.0", "role": "primary", "alias": "iss019-spec-conflicts" },
-  "issue_id": "ISS-20260728-019",
-  "conflicts": [],
-  "summary": "ISS-019 改造未与现有 spec 冲突。sendFilePart multipart 二进制对齐 Notion 契约，未触碰既有编码规范约束。"
-}
