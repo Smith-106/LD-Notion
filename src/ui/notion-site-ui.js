@@ -47,7 +47,8 @@ const NotionSiteUI = {
                 align-items: center;
                 justify-content: center;
                 user-select: none;
-                transition: transform 0.18s ease, box-shadow 0.18s ease;
+                /* Intentional: float button timing per design spec v3.1 */
+                transition: transform 0.18s var(--ldb-ui-ease-out), box-shadow 0.18s var(--ldb-ui-ease-out);
             }
 
             .ldb-notion-float-btn:hover {
@@ -101,7 +102,7 @@ const NotionSiteUI = {
                 padding: var(--ldb-ui-spacing-md) var(--ldb-ui-spacing-lg);
                 border-radius: var(--ldb-ui-radius-sm);
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.10);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
                 color: var(--ldb-ui-text);
             }
 
@@ -139,15 +140,19 @@ const NotionSiteUI = {
             e.preventDefault();
         });
 
-        NotionSiteUI._floatDragMove = (e) => {                if (!isDragging) return;
+        NotionSiteUI._floatDragMove = (e) => {
+                if (!isDragging) return;
             hasMoved = true;
             const x = Math.max(0, Math.min(window.innerWidth - btn.offsetWidth, e.clientX - offsetX));
             const y = Math.max(0, Math.min(window.innerHeight - btn.offsetHeight, e.clientY - offsetY));
             btn.style.left = x + "px";
             btn.style.top = y + "px";
             btn.style.right = "auto";
-            btn.style.bottom = "auto";            };            document.addEventListener("mousemove", NotionSiteUI._floatDragMove);
-        NotionSiteUI._floatDragEnd = () => {                if (!isDragging) return;
+            btn.style.bottom = "auto";
+            };
+            document.addEventListener("mousemove", NotionSiteUI._floatDragMove);
+        NotionSiteUI._floatDragEnd = () => {
+                if (!isDragging) return;
             isDragging = false;
             btn.classList.remove("dragging");
             document.body.style.userSelect = "";
@@ -156,7 +161,9 @@ const NotionSiteUI = {
                 const right = window.innerWidth - rect.right;
                 const bottom = window.innerHeight - rect.bottom;
                 Storage.set(CONFIG.STORAGE_KEYS.FLOAT_BTN_POSITION, JSON.stringify({ right: right + "px", bottom: bottom + "px" }));
-            }            };            document.addEventListener("mouseup", NotionSiteUI._floatDragEnd);
+            }
+            };
+            document.addEventListener("mouseup", NotionSiteUI._floatDragEnd);
         btn.addEventListener("click", (e) => {
             if (hasMoved) {
                 // 拖拽结束，不触发点击

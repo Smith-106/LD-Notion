@@ -44,7 +44,8 @@ const GenericUI = {
                 align-items: center;
                 justify-content: center;
                 font-size: var(--ldb-ui-font-size-2xl);
-                transition: transform 0.18s ease, box-shadow 0.18s ease;
+                /* Intentional: panel entrance timing per design spec v3.1 */
+                transition: transform 0.18s var(--ldb-ui-ease-out), box-shadow 0.18s var(--ldb-ui-ease-out);
                 user-select: none;
             }
 
@@ -85,7 +86,8 @@ const GenericUI = {
                 overflow: hidden;
                 transform: translateY(12px);
                 opacity: 0;
-                transition: transform 0.22s ease, opacity 0.22s ease;
+                /* Intentional: panel exit timing per design spec v3.1 */
+                transition: transform 0.22s var(--ldb-ui-ease-in), opacity 0.22s var(--ldb-ui-ease-in);
             }
 
             .gclip-panel.visible {
@@ -113,7 +115,7 @@ const GenericUI = {
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
                 margin-bottom: var(--ldb-ui-spacing-xl);
             }
 
@@ -166,7 +168,7 @@ const GenericUI = {
 
             .gclip-btn-setup {
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.12);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
                 color: var(--ldb-ui-text);
                 font-weight: 650;
             }

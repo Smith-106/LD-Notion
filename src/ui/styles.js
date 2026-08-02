@@ -39,7 +39,7 @@ const UI_CSS = `
                 font-weight: 700;
                 line-height: 1.8;
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.12);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
                 color: var(--ldb-ui-muted);
                 vertical-align: middle;
             }
@@ -70,7 +70,7 @@ const UI_CSS = `
             }
 
             .ldb-body::-webkit-scrollbar-thumb {
-                background: rgba(148, 163, 184, 0.25);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 75%);
                 border-radius: var(--ldb-ui-radius-pill);
             }
 
@@ -92,7 +92,7 @@ const UI_CSS = `
                 align-items: center;
                 justify-content: center;
                 user-select: none;
-                transition: transform 0.18s ease, box-shadow 0.18s ease;
+                transition: transform var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), box-shadow var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out);
             }
 
             .ldb-mini-btn:hover {
@@ -153,17 +153,22 @@ const UI_CSS = `
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
                 cursor: pointer;
-                transition: background 0.15s ease;
+                transition: background var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
             }
 
             .ldb-toggle-section:hover {
-                background: rgba(148, 163, 184, 0.14);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 86%);
             }
 
             .ldb-toggle-section:active {
-                background: rgba(148, 163, 184, 0.20);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 80%);
+            }
+
+            .ldb-toggle-section:focus-visible {
+                outline: none;
+                box-shadow: 0 0 0 3px var(--ldb-ui-focus-ring);
             }
 
             .ldb-source-option-group {
@@ -175,26 +180,26 @@ const UI_CSS = `
 
             .ldb-source-option {
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.12);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
                 color: var(--ldb-ui-text);
                 font-size: var(--ldb-ui-font-size-sm);
                 font-weight: 600;
                 border-radius: var(--ldb-ui-radius-sm);
                 padding: var(--ldb-ui-spacing-md) var(--ldb-ui-spacing-lg);
                 cursor: pointer;
-                transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+                transition: border-color var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), background var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), color var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out);
                 text-align: center;
                 font-family: inherit;
             }
 
             .ldb-source-option:hover {
-                border-color: rgba(37, 99, 235, 0.45);
-                background: rgba(37, 99, 235, 0.14);
+                border-color: var(--ldb-ui-accent-alpha-45);
+                background: var(--ldb-ui-accent-alpha-14);
             }
 
             .ldb-source-option.active {
                 border-color: var(--ldb-ui-accent);
-                background: rgba(37, 99, 235, 0.18);
+                background: var(--ldb-ui-accent-alpha-18);
                 color: var(--ldb-ui-accent);
             }
 
@@ -215,9 +220,9 @@ const UI_CSS = `
                 position: absolute;
                 cursor: pointer;
                 inset: 0;
-                background: rgba(148, 163, 184, 0.28);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 72%);
                 border: 1px solid var(--ldb-ui-border);
-                transition: background 0.2s ease, border-color 0.2s ease;
+                transition: background var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), border-color var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out);
                 border-radius: var(--ldb-ui-radius-pill);
             }
 
@@ -230,7 +235,7 @@ const UI_CSS = `
                 top: 50%;
                 transform: translateY(-50%);
                 background: var(--ldb-ui-white);
-                transition: transform 0.2s ease;
+                transition: transform var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out);
                 border-radius: 50%;
                 box-shadow: 0 6px 16px rgba(2, 6, 23, 0.18);
             }
@@ -252,12 +257,12 @@ const UI_CSS = `
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
             }
 
             .ldb-progress-bar {
                 height: 10px;
-                background: rgba(148, 163, 184, 0.20);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 80%);
                 border-radius: var(--ldb-ui-radius-pill);
                 overflow: hidden;
             }
@@ -266,7 +271,7 @@ const UI_CSS = `
                 height: 100%;
                 background: linear-gradient(90deg, var(--ldb-ui-accent), var(--ldb-ui-accent-2));
                 border-radius: var(--ldb-ui-radius-pill);
-                transition: width 0.3s ease;
+                transition: width var(--ldb-ui-duration-slow) var(--ldb-ui-ease-out);
             }
 
             .ldb-progress-text {
@@ -331,7 +336,7 @@ const UI_CSS = `
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
             }
 
             .ldb-bookmarks-count {
@@ -392,7 +397,7 @@ const UI_CSS = `
             .ldb-view-subsection {
                 margin-top: var(--ldb-ui-spacing-2xl);
                 padding-top: var(--ldb-ui-spacing-2xl);
-                border-top: 1px solid rgba(148, 163, 184, 0.18);
+                border-top: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
             }
 
             .ldb-view-section-title {
@@ -412,7 +417,7 @@ const UI_CSS = `
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
                 padding: var(--ldb-ui-spacing-xl);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
             }
 
             .ldb-view-card.full {
@@ -466,7 +471,7 @@ const UI_CSS = `
                 height: 8px;
                 border-radius: var(--ldb-ui-radius-pill);
                 overflow: hidden;
-                background: rgba(148, 163, 184, 0.20);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 80%);
             }
 
             .ldb-view-bar-fill {
@@ -521,10 +526,10 @@ const UI_CSS = `
             }
 
             .ldb-view-empty {
-                border: 1px dashed rgba(148, 163, 184, 0.35);
+                border: 1px dashed color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 65%);
                 border-radius: var(--ldb-ui-radius-md);
                 padding: var(--ldb-ui-spacing-3xl) var(--ldb-ui-spacing-2xl);
-                background: rgba(148, 163, 184, 0.05);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 95%);
             }
 
             .ldb-view-empty-title {
@@ -550,8 +555,8 @@ const UI_CSS = `
             .ldb-view-pill {
                 padding: var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-md);
                 border-radius: var(--ldb-ui-radius-pill);
-                border: 1px solid rgba(148, 163, 184, 0.25);
-                background: rgba(148, 163, 184, 0.08);
+                border: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 75%);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
                 font-size: var(--ldb-ui-font-size-xs);
                 color: var(--ldb-ui-muted);
             }
@@ -563,7 +568,7 @@ const UI_CSS = `
                 line-height: 1.6;
                 color: var(--ldb-ui-text);
                 border-radius: var(--ldb-ui-radius-sm);
-                border: 1px dashed rgba(148, 163, 184, 0.25);
+                border: 1px dashed color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 75%);
                 background: rgba(15, 23, 42, 0.04);
                 padding: var(--ldb-ui-spacing-xl);
                 max-height: 280px;
@@ -575,7 +580,7 @@ const UI_CSS = `
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
                 overflow: hidden;
-                background: rgba(148, 163, 184, 0.06);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 94%);
                 max-height: 260px;
                 overflow-y: auto;
             }
@@ -585,12 +590,12 @@ const UI_CSS = `
                 align-items: flex-start;
                 gap: var(--ldb-ui-spacing-lg);
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
-                border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+                border-bottom: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
                 cursor: pointer;
             }
 
             .ldb-bookmark-item:hover {
-                background: rgba(37, 99, 235, 0.08);
+                background: var(--ldb-ui-accent-alpha-08);
             }
 
             .ldb-bookmark-item:last-child {
@@ -625,7 +630,7 @@ const UI_CSS = `
             .ldb-permission-panel {
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
                 overflow: hidden;
             }
 
@@ -635,7 +640,7 @@ const UI_CSS = `
                 justify-content: space-between;
                 gap: var(--ldb-ui-spacing-lg);
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
-                border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+                border-bottom: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
             }
 
             .ldb-permission-row:last-child {
@@ -655,7 +660,7 @@ const UI_CSS = `
                 border: 1px solid var(--ldb-ui-border);
                 border-radius: var(--ldb-ui-radius-md);
                 overflow: hidden;
-                background: rgba(148, 163, 184, 0.06);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 94%);
             }
 
             .ldb-log-header {
@@ -665,8 +670,8 @@ const UI_CSS = `
                 padding: var(--ldb-ui-spacing-lg) var(--ldb-ui-spacing-xl);
                 cursor: pointer;
                 user-select: none;
-                background: rgba(148, 163, 184, 0.10);
-                border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
+                border-bottom: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
             }
 
             .ldb-log-title {
@@ -682,7 +687,7 @@ const UI_CSS = `
                 padding: 1px var(--ldb-ui-spacing-md);
                 border-radius: var(--ldb-ui-radius-pill);
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.10);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
                 font-size: var(--ldb-ui-font-size-xs);
                 color: var(--ldb-ui-muted);
             }
@@ -700,7 +705,7 @@ const UI_CSS = `
                 grid-template-columns: 18px 1fr;
                 gap: var(--ldb-ui-spacing-lg);
                 padding: var(--ldb-ui-spacing-md) 0;
-                border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+                border-bottom: 1px solid color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 86%);
             }
 
             .ldb-log-item:last-child {
@@ -751,7 +756,7 @@ const UI_CSS = `
 
             .ldb-log-clear-btn {
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.10);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
                 color: var(--ldb-ui-text);
                 border-radius: var(--ldb-ui-radius-sm);
                 padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);
@@ -760,7 +765,7 @@ const UI_CSS = `
             }
 
             .ldb-log-clear-btn:hover {
-                background: rgba(148, 163, 184, 0.16);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 84%);
             }
 
             .ldb-control-btns {
@@ -773,7 +778,7 @@ const UI_CSS = `
             .ldb-tabs {
                 display: flex;
                 border-bottom: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.06);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 94%);
                 padding: 0 var(--ldb-ui-spacing-xs);
             }
 
@@ -788,7 +793,8 @@ const UI_CSS = `
                 cursor: pointer;
                 text-align: center;
                 border-bottom: 2px solid transparent;
-                transition: color 0.2s ease, border-color 0.2s ease;
+                /* Intentional: tab hover timing per design spec v3.1 */
+                transition: color 0.2s var(--ldb-ui-ease-out), border-color 0.2s var(--ldb-ui-ease-out);
                 user-select: none;
                 font-family: inherit;
                 white-space: nowrap;
@@ -796,12 +802,17 @@ const UI_CSS = `
 
             .ldb-tab:hover {
                 color: var(--ldb-ui-text);
-                background: rgba(148, 163, 184, 0.08);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 92%);
             }
 
             .ldb-tab.active {
                 color: var(--ldb-ui-accent);
                 border-bottom-color: var(--ldb-ui-accent);
+            }
+
+            .ldb-tab:active {
+                transform: scale(0.98);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
             }
 
             .ldb-tab-content {
@@ -814,11 +825,13 @@ const UI_CSS = `
 
             /* 主题切换按钮 */
             .ldb-theme-btn {
-                width: 30px;
-                height: 30px;
+                width: 44px;
+                height: 44px;
+                min-width: 44px;
+                min-height: 44px;
                 border-radius: var(--ldb-ui-radius-sm);
                 border: 1px solid var(--ldb-ui-border);
-                background: rgba(148, 163, 184, 0.12);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
                 cursor: pointer;
                 user-select: none;
                 display: inline-flex;
@@ -827,11 +840,11 @@ const UI_CSS = `
                 padding: 0;
                 line-height: 1;
                 font-size: var(--ldb-ui-font-size-lg);
-                transition: background 0.2s ease;
+                transition: background 0.2s ease-out;
             }
 
             .ldb-theme-btn:hover {
-                background: rgba(148, 163, 184, 0.22);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 78%);
             }
 
             /* 响应式 */

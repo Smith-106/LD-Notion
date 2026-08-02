@@ -1663,9 +1663,9 @@ const UIEvents = {
                 const icon = Utils.escapeHtml(t.icon || "📝");
                 const name = Utils.escapeHtml(t.name || "未命名");
                 const prompt = Utils.escapeHtml((t.prompt || "").substring(0, 50));
-                return `<div class="ldb-setting-row" style="justify-content: space-between; padding: 4px 0;">
+                return `<div class="ldb-setting-row" style="justify-content: space-between; padding: var(--ldb-ui-spacing-3xs) 0;">
                     <span style="font-size: 12px;">${icon} <strong>${name}</strong> <span style="color: var(--ldb-ui-muted);">${prompt}${t.prompt && t.prompt.length > 50 ? "..." : ""}</span></span>
-                    <button class="ldb-btn ldb-btn-secondary" data-template-delete="${i}" style="padding: 2px 6px; font-size: 11px;">删除</button>
+                    <button class="ldb-btn ldb-btn-secondary" data-template-delete="${i}" style="padding: var(--ldb-ui-spacing-3xs) var(--ldb-ui-spacing-sm); font-size: var(--ldb-ui-font-size-xs);">删除</button>
                 </div>`;
             }).join("");
 

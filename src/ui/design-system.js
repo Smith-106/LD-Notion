@@ -92,6 +92,17 @@ const DesignSystem = {
 
             --ldb-ui-accent: #2563eb;
             --ldb-ui-accent-2: #7c3aed;
+            
+            /* Accent alpha variants for borders, hover backgrounds */
+            --ldb-ui-accent-alpha-08: rgba(37, 99, 235, 0.08);
+            --ldb-ui-accent-alpha-10: rgba(37, 99, 235, 0.10);
+            --ldb-ui-accent-alpha-14: rgba(37, 99, 235, 0.14);
+            --ldb-ui-accent-alpha-18: rgba(37, 99, 235, 0.18);
+            --ldb-ui-accent-alpha-22: rgba(37, 99, 235, 0.22);
+            --ldb-ui-accent-alpha-28: rgba(37, 99, 235, 0.28);
+            --ldb-ui-accent-alpha-30: rgba(37, 99, 235, 0.30);
+            --ldb-ui-accent-alpha-35: rgba(37, 99, 235, 0.35);
+            --ldb-ui-accent-alpha-45: rgba(37, 99, 235, 0.45);
 
             --ldb-ui-success: #16a34a;
             --ldb-ui-warning: #d97706;
@@ -103,7 +114,8 @@ const DesignSystem = {
             --ldb-ui-focus-ring: rgba(37, 99, 235, 0.35);
             --ldb-ui-backdrop: rgba(2, 6, 23, 0.35);
 
-            --ldb-ui-white: #fff;
+            /* Tinted white toward brand hue (light blue) - preserves visual 1:1 */
+            --ldb-ui-white: rgb(253, 253, 255);
 
             --ldb-ui-radius-2xs: 6px;
             --ldb-ui-radius-md: 12px;
@@ -129,6 +141,18 @@ const DesignSystem = {
             --ldb-ui-z-index-panel-top: 2147483641;
             --ldb-ui-z-index-overlay: 2147483646;
             --ldb-ui-z-index-float: 2147483647;
+
+            /* Motion tokens */
+            --ldb-ui-ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+            --ldb-ui-ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+            --ldb-ui-duration-instant: 100ms;
+            --ldb-ui-duration-fast: 150ms;
+            --ldb-ui-duration-normal: 250ms;
+            --ldb-ui-duration-slow: 400ms;
+            --ldb-ui-duration-entrance: 500ms;
+
+            /* Neutral overlay token - replaces rgba(148,163,184,α) everywhere (slate-400) */
+            --ldb-ui-neutral-overlay: 148, 163, 184;
 
             --ldb-ui-warning-bright: var(--ldb-ui-warning-bright);
             --ldb-ui-success-bright: #10b981;
@@ -172,7 +196,14 @@ const DesignSystem = {
             --ldb-ui-badge-blue: #93c5fd;
 
             --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
+            /* Tinted near-black toward brand hue for dark backdrop */
             --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
+
+            /* Dark mode accent alpha variants */
+            --ldb-ui-accent-dark-alpha-10: rgba(96, 165, 250, 0.10);
+            --ldb-ui-accent-dark-alpha-14: rgba(96, 165, 250, 0.14);
+            --ldb-ui-accent-dark-alpha-18: rgba(96, 165, 250, 0.18);
+            --ldb-ui-accent-dark-alpha-22: rgba(96, 165, 250, 0.22);
         }
 
         /* 保留 prefers-color-scheme 作为 auto 模式的回退 */
@@ -199,9 +230,16 @@ const DesignSystem = {
                 --ldb-ui-badge-blue: #93c5fd;
 
                 --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
+                /* Tinted near-black toward brand hue for dark backdrop */
                 --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
             }
         }
+
+        /* Dark mode accent alpha variants (also used in prefers-color-scheme) */
+        --ldb-ui-accent-dark-alpha-10: rgba(96, 165, 250, 0.10);
+        --ldb-ui-accent-dark-alpha-14: rgba(96, 165, 250, 0.14);
+        --ldb-ui-accent-dark-alpha-18: rgba(96, 165, 250, 0.18);
+        --ldb-ui-accent-dark-alpha-22: rgba(96, 165, 250, 0.22);
 
         .ldb-panel,
         .ldb-notion-panel,
@@ -302,7 +340,7 @@ const DesignSystem = {
             align-items: center;
             gap: 10px;
             padding: 12px 14px;
-            background: rgba(148, 163, 184, 0.10);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
             border-bottom: 1px solid var(--ldb-ui-border);
         }
 
@@ -322,7 +360,7 @@ const DesignSystem = {
             height: 30px;
             border-radius: 10px;
             border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.12);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
             color: var(--ldb-ui-text);
             cursor: pointer;
             user-select: none;
@@ -336,12 +374,12 @@ const DesignSystem = {
         .ldb-header-btn:hover,
         .ldb-notion-header-btn:hover,
         .gclip-panel-header .close-btn:hover {
-            background: rgba(148, 163, 184, 0.18);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
         }
 
         .ldb-btn,
         .gclip-btn {
-            border: 1px solid rgba(37, 99, 235, 0.35);
+            border: 1px solid var(--ldb-ui-accent-alpha-35);
             background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
             color: var(--ldb-ui-white);
             border-radius: 12px;
@@ -349,13 +387,13 @@ const DesignSystem = {
             cursor: pointer;
             user-select: none;
             font-weight: 650;
-            transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+            transition: transform var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), box-shadow var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), filter var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
         }
 
         .ldb-btn:hover,
         .gclip-btn:hover {
             filter: brightness(1.08);
-            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.18);
+            box-shadow: 0 2px 8px var(--ldb-ui-accent-alpha-18);
         }
 
         .ldb-btn:active,
@@ -373,20 +411,20 @@ const DesignSystem = {
         .ldb-btn-secondary,
         .gclip-btn-secondary {
             border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.12);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
             color: var(--ldb-ui-text);
             font-weight: 600;
-            transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+            transition: background var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), border-color var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), transform var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
         }
 
         .ldb-btn-secondary:hover,
         .gclip-btn-secondary:hover {
-            background: rgba(148, 163, 184, 0.18);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
         }
 
         .ldb-btn-secondary:active,
         .gclip-btn-secondary:active {
-            background: rgba(148, 163, 184, 0.22);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 78%);
             transform: scale(0.97);
         }
 
@@ -400,7 +438,7 @@ const DesignSystem = {
             border: 1px solid rgba(217, 119, 6, 0.35);
             background: linear-gradient(135deg, var(--ldb-ui-warning-bright) 0%, var(--ldb-ui-warning) 100%);
             color: var(--ldb-ui-white);
-            transition: filter 0.15s ease, transform 0.15s ease;
+            transition: filter var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), transform var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
         }
 
         .ldb-btn-warning:hover {
@@ -420,7 +458,7 @@ const DesignSystem = {
             border: 1px solid rgba(220, 38, 38, 0.35);
             background: linear-gradient(135deg, var(--ldb-ui-danger-bright) 0%, var(--ldb-ui-danger) 100%);
             color: var(--ldb-ui-white);
-            transition: filter 0.15s ease, transform 0.15s ease;
+            transition: filter var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), transform var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
         }
 
         .ldb-btn-danger:hover {
@@ -508,7 +546,7 @@ const DesignSystem = {
             padding: 10px 12px;
             border-radius: 12px;
             border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.10);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
             color: var(--ldb-ui-text);
             font-size: 12px;
             line-height: 1.5;
@@ -542,7 +580,7 @@ const DesignSystem = {
             height: 26px;
             border-radius: 10px;
             border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.10);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
             color: var(--ldb-ui-text);
             cursor: pointer;
             flex: 0 0 auto;
@@ -550,7 +588,7 @@ const DesignSystem = {
         }
 
         .ldb-status-close:hover {
-            background: rgba(148, 163, 184, 0.18);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -610,7 +648,7 @@ const DesignSystem = {
         }
         .ldb-panel .ldb-chat-container::-webkit-scrollbar-thumb,
         .ldb-notion-panel .ldb-chat-container::-webkit-scrollbar-thumb {
-            background: rgba(148, 163, 184, 0.35);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 65%);
             border-radius: 3px;
         }
 
@@ -621,7 +659,7 @@ const DesignSystem = {
             }
             .ldb-panel:not([data-ldb-theme]) .ldb-chat-container::-webkit-scrollbar-thumb,
             .ldb-notion-panel:not([data-ldb-theme]) .ldb-chat-container::-webkit-scrollbar-thumb {
-                background: rgba(148, 163, 184, 0.30);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 70%);
             }
         }
 
@@ -629,7 +667,7 @@ const DesignSystem = {
             background: rgba(255, 255, 255, 0.06);
         }
         [data-ldb-theme="dark"] .ldb-chat-container::-webkit-scrollbar-thumb {
-            background: rgba(148, 163, 184, 0.30);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 70%);
         }
 
         .ldb-panel .ldb-chat-welcome,
@@ -680,7 +718,7 @@ const DesignSystem = {
             color: var(--ldb-ui-text);
             font-size: 12px;
             cursor: pointer;
-            transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+            transition: background var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), border-color var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out), transform var(--ldb-ui-duration-instant) var(--ldb-ui-ease-out);
         }
 
         .ldb-panel .ldb-chat-chip:hover,
@@ -831,7 +869,7 @@ const DesignSystem = {
             padding: 6px 10px;
             border-radius: 10px;
             border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.12);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
             color: var(--ldb-ui-text);
             cursor: pointer;
             user-select: none;
@@ -840,7 +878,7 @@ const DesignSystem = {
 
         .ldb-panel .ldb-chat-action-btn:hover,
         .ldb-notion-panel .ldb-chat-action-btn:hover {
-            background: rgba(148, 163, 184, 0.18);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
         }
 
         .ldb-panel .ldb-chat-settings-toggle,
@@ -854,7 +892,7 @@ const DesignSystem = {
             padding: 8px 10px;
             border-radius: 10px;
             border: 1px solid var(--ldb-ui-border);
-            background: rgba(148, 163, 184, 0.10);
+            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
         }
 
         .ldb-panel .ldb-chat-settings-content.collapsed,
