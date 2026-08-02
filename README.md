@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.8.0`
+- 当前仓库源码版本：`v3.9.0`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -386,6 +386,24 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.9.0
+
+本次版本聚焦「UI 设计系统增强」，通过两轮 UI Polish 管线（scan→diagnose→optimize→verify + GC 循环）将 UI 质量从 24/32 提升至 28.5/32（Excellent）。
+
+**Design Token 体系扩展**:
+- 新增 accent alpha 变体系列（`--ldb-ui-accent-alpha-08` ~ `--ldb-ui-accent-alpha-45`）
+- 新增 Motion tokens（`--ldb-ui-ease-out/in`、`--ldb-ui-duration-*`），全部过渡动画统一使用显式 cubic-bezier
+- 新增 Neutral overlay token（`--ldb-ui-neutral-overlay`），40+ 处硬编码 rgba 迁移到 color-mix() 模式
+
+**可访问性**:
+- `.ldb-toggle-section` 新增 `:focus-visible` 样式（P0 键盘导航问题修复）
+- 触控目标尺寸优化至 WCAG 2.1 AA 标准（44×44px）
+- Tab 按钮新增 `:active` 按压反馈
+
+**验证**: 556/556 测试全绿，零回归，Build 1358.1 KB
+
+- Tag：`v3.9.0`
 
 ### v3.8.0
 
