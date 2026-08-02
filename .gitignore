@@ -3,6 +3,7 @@
 .~lock.*
 __pycache__/
 *.pyc
+test_scripts/
 output_post.html
 chrome-extension-full/
 
