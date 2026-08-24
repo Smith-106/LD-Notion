@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.10.0
+// @version      3.11.0
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -957,7 +957,7 @@
             if (matches && matches.length > 0) {
               return matches[matches.length - 1].toLowerCase();
             }
-          } catch {
+          } catch (_) {
           }
           const genericMatch = raw.match(/[0-9a-f]{32}/i);
           return genericMatch ? genericMatch[0].toLowerCase() : "";
@@ -1061,7 +1061,7 @@
             if (!changed) return;
             const nextUrl = `${current.pathname}${current.search}${current.hash}`;
             window.history.replaceState({}, document.title, nextUrl);
-          } catch {
+          } catch (_) {
           }
         },
         // HTML 转义，防止 XSS 攻击
@@ -15223,12 +15223,6 @@ ${report}
             --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
             /* Tinted near-black toward brand hue for dark backdrop */
             --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
-
-            /* Dark mode accent alpha variants */
-            --ldb-ui-accent-dark-alpha-10: rgba(96, 165, 250, 0.10);
-            --ldb-ui-accent-dark-alpha-14: rgba(96, 165, 250, 0.14);
-            --ldb-ui-accent-dark-alpha-18: rgba(96, 165, 250, 0.18);
-            --ldb-ui-accent-dark-alpha-22: rgba(96, 165, 250, 0.22);
         }
 
         /* \u4FDD\u7559 prefers-color-scheme \u4F5C\u4E3A auto \u6A21\u5F0F\u7684\u56DE\u9000 */
@@ -15259,12 +15253,6 @@ ${report}
                 --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
             }
         }
-
-        /* Dark mode accent alpha variants (also used in prefers-color-scheme) */
-        --ldb-ui-accent-dark-alpha-10: rgba(96, 165, 250, 0.10);
-        --ldb-ui-accent-dark-alpha-14: rgba(96, 165, 250, 0.14);
-        --ldb-ui-accent-dark-alpha-18: rgba(96, 165, 250, 0.18);
-        --ldb-ui-accent-dark-alpha-22: rgba(96, 165, 250, 0.22);
 
         .ldb-panel,
         .ldb-notion-panel,
@@ -15299,6 +15287,16 @@ ${report}
         .ldb-mini-btn,
         .gclip-float-btn {
             font-family: inherit;
+        }
+
+        /* Odyssey Review F5: pointer \u62D6\u62FD\u8868\u9762\u7981\u7528\u6D4F\u89C8\u5668\u89E6\u6478\u624B\u52BF,
+           \u9632\u89E6\u5C4F\u4E0A pointerdown \u540E\u7ACB\u5373 pointercancel \u5BFC\u81F4\u62D6\u4E0D\u52A8 */
+        .ldb-header,
+        .ldb-notion-header,
+        .ldb-notion-float-btn,
+        .gclip-float-btn,
+        .ldb-resize-handle {
+            touch-action: none;
         }
 
         .ldb-panel input,
@@ -15386,6 +15384,7 @@ ${report}
             border-radius: 10px;
             border: 1px solid var(--ldb-ui-border);
             background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
+            transition: background var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
             color: var(--ldb-ui-text);
             cursor: pointer;
             user-select: none;
@@ -15415,14 +15414,14 @@ ${report}
             transition: transform var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), box-shadow var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), filter var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
         }
 
-        .ldb-btn:hover,
-        .gclip-btn:hover {
+        .ldb-btn:not(:disabled):hover,
+        .gclip-btn:not(:disabled):hover {
             filter: brightness(1.08);
             box-shadow: 0 2px 8px var(--ldb-ui-accent-alpha-18);
         }
 
-        .ldb-btn:active,
-        .gclip-btn:active {
+        .ldb-btn:not(:disabled):active,
+        .gclip-btn:not(:disabled):active {
             transform: scale(0.97);
             filter: brightness(0.96);
         }
@@ -15641,7 +15640,9 @@ ${report}
             .ldb-toggle-slider::before,
             .ldb-progress-fill,
             .ldb-status,
-            .ldb-status-close {
+            .ldb-status-close,
+            .ldb-typing-dots,
+            .ldb-typing-dots span {
                 transition: none !important;
                 animation: none !important;
                 scroll-behavior: auto !important;
@@ -15747,8 +15748,8 @@ ${report}
 
         .ldb-panel .ldb-chat-chip:hover,
         .ldb-notion-panel .ldb-chat-chip:hover {
-            background: rgba(37, 99, 235, 0.16);
-            border-color: rgba(37, 99, 235, 0.28);
+            background: var(--ldb-ui-accent-alpha-18);
+            border-color: var(--ldb-ui-accent-alpha-28);
         }
 
         .ldb-panel .ldb-chat-chip:active,
@@ -15966,6 +15967,11 @@ ${report}
                 left: -3px; bottom: -3px; width: 12px; height: 12px;
                 cursor: nesw-resize;
             }
+            /* Odyssey UI L: \u624B\u67C4\u4E3A div,\u5168\u5C40 button:focus-visible \u4E0D\u751F\u6548,\u9700\u81EA\u5E26\u7126\u70B9\u73AF */
+            .ldb-resize-handle:focus-visible {
+                outline: 2px solid var(--ldb-ui-focus-ring);
+                outline-offset: -2px;
+            }
         `;
           document.head.appendChild(style);
         },
@@ -15978,45 +15984,83 @@ ${report}
             maxWidth = 800
           } = options;
           PanelResize2.injectStyles();
+          const maxViewportHeight = () => Math.round(window.innerHeight * 0.9);
           edges.forEach((edge) => {
             const handle = document.createElement("div");
             handle.className = `ldb-resize-handle ldb-resize-handle-${edge}`;
             handle.setAttribute("tabindex", "0");
             handle.setAttribute("role", "slider");
-            handle.setAttribute("aria-label", "\u8C03\u6574\u9762\u677F\u5BBD\u5EA6");
-            handle.setAttribute("aria-valuemin", minWidth);
-            handle.setAttribute("aria-valuemax", maxWidth);
+            const vertical = edge === "t" || edge === "b";
+            handle.setAttribute("aria-label", vertical ? "\u8C03\u6574\u9762\u677F\u9AD8\u5EA6" : "\u8C03\u6574\u9762\u677F\u5BBD\u5EA6");
+            handle.setAttribute("aria-valuemin", vertical ? minHeight : minWidth);
+            handle.setAttribute("aria-valuemax", vertical ? maxViewportHeight() : maxWidth);
+            handle.setAttribute("aria-valuenow", String(vertical ? element.offsetHeight : element.offsetWidth));
             element.appendChild(handle);
+            const syncValueNow = () => {
+              if (vertical) {
+                const parsedMax = parseFloat(element.style.maxHeight);
+                handle.setAttribute("aria-valuenow", String(!Number.isNaN(parsedMax) && parsedMax > 0 ? Math.round(parsedMax) : element.offsetHeight));
+              } else {
+                handle.setAttribute("aria-valuenow", String(element.offsetWidth));
+              }
+            };
+            const persist = () => {
+              if (!storageKey) return;
+              Storage2.set(storageKey, JSON.stringify({
+                width: element.style.width,
+                maxHeight: element.style.maxHeight
+              }));
+            };
             handle.addEventListener("keydown", (e) => {
               const step = 10;
-              let newWidth = element.offsetWidth;
               let handled = false;
-              if (e.key === "ArrowRight") {
-                newWidth = Math.min(maxWidth, element.offsetWidth + step);
-                handled = true;
-              } else if (e.key === "ArrowLeft") {
-                newWidth = Math.max(minWidth, element.offsetWidth - step);
-                handled = true;
-              } else if (e.key === "Home") {
-                newWidth = minWidth;
-                handled = true;
-              } else if (e.key === "End") {
-                newWidth = maxWidth;
-                handled = true;
-              }
-              if (handled) {
-                e.preventDefault();
-                element.style.width = newWidth + "px";
-                handle.setAttribute("aria-valuenow", newWidth);
-                if (storageKey) {
-                  Storage2.set(storageKey, JSON.stringify({
-                    width: element.style.width,
-                    maxHeight: element.style.maxHeight
-                  }));
+              if (vertical) {
+                const liveMax = maxViewportHeight();
+                handle.setAttribute("aria-valuemax", String(liveMax));
+                let newHeight = element.offsetHeight;
+                if (e.key === "ArrowUp") {
+                  newHeight = Math.min(liveMax, newHeight + step);
+                  handled = true;
+                } else if (e.key === "ArrowDown") {
+                  newHeight = Math.max(minHeight, newHeight - step);
+                  handled = true;
+                } else if (e.key === "Home") {
+                  newHeight = minHeight;
+                  handled = true;
+                } else if (e.key === "End") {
+                  newHeight = liveMax;
+                  handled = true;
+                }
+                if (handled) {
+                  e.preventDefault();
+                  element.style.maxHeight = newHeight + "px";
+                  syncValueNow();
+                  persist();
+                }
+              } else {
+                let newWidth = element.offsetWidth;
+                if (e.key === "ArrowRight") {
+                  newWidth = Math.min(maxWidth, element.offsetWidth + step);
+                  handled = true;
+                } else if (e.key === "ArrowLeft") {
+                  newWidth = Math.max(minWidth, element.offsetWidth - step);
+                  handled = true;
+                } else if (e.key === "Home") {
+                  newWidth = minWidth;
+                  handled = true;
+                } else if (e.key === "End") {
+                  newWidth = maxWidth;
+                  handled = true;
+                }
+                if (handled) {
+                  e.preventDefault();
+                  element.style.width = newWidth + "px";
+                  syncValueNow();
+                  persist();
                 }
               }
             });
-            handle.addEventListener("mousedown", (e) => {
+            handle.addEventListener("pointerdown", (e) => {
               e.preventDefault();
               e.stopPropagation();
               const startX = e.clientX;
@@ -16025,6 +16069,10 @@ ${report}
               const startHeight = element.offsetHeight;
               document.body.style.userSelect = "none";
               element.style.transition = "none";
+              try {
+                handle.setPointerCapture(e.pointerId);
+              } catch (_) {
+              }
               const onMove = (ev) => {
                 if (edge.includes("l")) {
                   const dx = startX - ev.clientX;
@@ -16032,29 +16080,29 @@ ${report}
                 }
                 if (edge.includes("t")) {
                   const dy = startY - ev.clientY;
-                  const maxH = window.innerHeight * 0.9;
-                  element.style.maxHeight = Math.max(minHeight, Math.min(maxH, startHeight + dy)) + "px";
+                  element.style.maxHeight = Math.max(minHeight, Math.min(maxViewportHeight(), startHeight + dy)) + "px";
                 }
                 if (edge.includes("b")) {
                   const dy = ev.clientY - startY;
-                  const maxH = window.innerHeight * 0.9;
-                  element.style.maxHeight = Math.max(minHeight, Math.min(maxH, startHeight + dy)) + "px";
+                  element.style.maxHeight = Math.max(minHeight, Math.min(maxViewportHeight(), startHeight + dy)) + "px";
                 }
               };
-              const onUp = () => {
-                document.removeEventListener("mousemove", onMove);
-                document.removeEventListener("mouseup", onUp);
+              const endResize = (ev) => {
+                handle.removeEventListener("pointermove", onMove);
+                handle.removeEventListener("pointerup", endResize);
+                handle.removeEventListener("pointercancel", endResize);
                 document.body.style.userSelect = "";
                 element.style.transition = "";
-                if (storageKey) {
-                  Storage2.set(storageKey, JSON.stringify({
-                    width: element.style.width,
-                    maxHeight: element.style.maxHeight
-                  }));
+                try {
+                  handle.releasePointerCapture(ev.pointerId);
+                } catch (_) {
                 }
+                syncValueNow();
+                persist();
               };
-              document.addEventListener("mousemove", onMove);
-              document.addEventListener("mouseup", onUp);
+              handle.addEventListener("pointermove", onMove);
+              handle.addEventListener("pointerup", endResize);
+              handle.addEventListener("pointercancel", endResize);
             });
           });
           if (storageKey) {
@@ -16062,8 +16110,18 @@ ${report}
             if (saved) {
               try {
                 const size = JSON.parse(saved);
-                if (size.width) element.style.width = size.width;
-                if (size.maxHeight) element.style.maxHeight = size.maxHeight;
+                if (size.width) {
+                  const savedWidth = parseFloat(size.width);
+                  if (!Number.isNaN(savedWidth)) {
+                    element.style.width = Math.min(savedWidth, window.innerWidth - 16) + "px";
+                  }
+                }
+                if (size.maxHeight) {
+                  const savedMaxHeight = parseFloat(size.maxHeight);
+                  if (!Number.isNaN(savedMaxHeight)) {
+                    element.style.maxHeight = Math.min(savedMaxHeight, window.innerHeight * 0.9) + "px";
+                  }
+                }
               } catch (e) {
                 console.warn("[LD-Notion] corrupted panel size, resetting:", storageKey);
                 Storage2.remove(storageKey);
@@ -16344,12 +16402,6 @@ ${report}
                 overflow: hidden;
             }
 
-            .ldb-panel.minimized {
-                width: auto;
-                max-height: none;
-                overflow: visible;
-            }
-
             .ldb-header {
                 cursor: move;
                 border-top-left-radius: var(--ldb-ui-radius);
@@ -16557,7 +16609,7 @@ ${report}
             }
 
             .ldb-toggle-switch input:focus-visible + .ldb-toggle-slider {
-                box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.4);
+                box-shadow: 0 0 0 3px var(--ldb-ui-focus-ring);
                 outline: 2px solid transparent;
                 outline-offset: 2px;
             }
@@ -16577,7 +16629,7 @@ ${report}
             }
 
             .ldb-toggle-switch input:checked + .ldb-toggle-slider {
-                background: rgba(37, 99, 235, 0.45);
+                background: var(--ldb-ui-accent-alpha-45);
                 border-color: var(--ldb-ui-focus-ring);
             }
 
@@ -17161,10 +17213,10 @@ ${report}
 
             /* \u4E3B\u9898\u5207\u6362\u6309\u94AE */
             .ldb-theme-btn {
-                width: 44px;
-                height: 44px;
-                min-width: 44px;
-                min-height: 44px;
+                width: 30px;
+                height: 30px;
+                min-width: 30px;
+                min-height: 30px;
                 border-radius: var(--ldb-ui-radius-sm);
                 border: 1px solid var(--ldb-ui-border);
                 background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
@@ -17176,7 +17228,7 @@ ${report}
                 padding: 0;
                 line-height: 1;
                 font-size: var(--ldb-ui-font-size-lg);
-                transition: background 0.2s ease-out;
+                transition: background var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
             }
 
             .ldb-theme-btn:hover {
@@ -17184,6 +17236,17 @@ ${report}
             }
 
             /* \u54CD\u5E94\u5F0F */
+            /* Odyssey Review F4: \u5E73\u677F\u6863\u5728\u524D,\u624B\u673A\u6863\u5728\u540E \u2014 \u540C\u547D\u4E2D\u65F6\u540E\u8005\u83B7\u80DC,
+               \u4FEE\u6B63\u6E90\u987A\u5E8F\u5BFC\u81F4\u7684 \u2264480px \u65F6 48px \u8986\u76D6 44px \u7684\u7EA7\u8054\u9519\u8BEF */
+            @media (max-width: 768px) {
+                .ldb-notion-float-btn,
+                .gclip-float-btn,
+                .ldb-mini-btn {
+                    width: 48px;
+                    height: 48px;
+                }
+            }
+
             @media (max-width: 480px) {
                 .ldb-panel {
                     right: 0 !important;
@@ -17203,6 +17266,25 @@ ${report}
                 }
                 .ldb-view-card.full {
                     grid-column: auto;
+                }
+                /* Odyssey UI E: \u53E6\u4E24\u5957\u9762\u677F\u79FB\u52A8\u7AEF\u5E95\u90E8\u62BD\u5C49\u5316 + \u6D6E\u94AE\u7F29\u5C0F\u8D34\u8FB9 */
+                .ldb-notion-panel,
+                .gclip-panel {
+                    right: 0 !important;
+                    left: 0 !important;
+                    bottom: 0 !important;
+                    width: 100% !important;
+                    max-width: 100vw !important;
+                    max-height: 70vh !important;
+                    border-radius: var(--ldb-ui-radius) var(--ldb-ui-radius) 0 0;
+                }
+                .ldb-notion-float-btn,
+                .gclip-float-btn {
+                    right: 12px !important;
+                    bottom: 12px !important;
+                    width: 44px;
+                    height: 44px;
+                    font-size: var(--ldb-ui-font-size-xl);
                 }
             }
 `;
@@ -17227,7 +17309,7 @@ ${report}
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2 } = require_bridge();
       var { StyleManager: StyleManager2 } = require_style_manager();
-      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatState: ChatState2, ChatUI: ChatUI3 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatState: ChatState2, ChatUI: ChatUI2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
       var { UI_CSS: UI_CSS2 } = require_styles();
@@ -17340,7 +17422,7 @@ ${report}
           let hasMoved = false;
           let offsetX, offsetY;
           let startX, startY;
-          btn.addEventListener("mousedown", (e) => {
+          btn.addEventListener("pointerdown", (e) => {
             isDragging = true;
             hasMoved = false;
             startX = e.clientX;
@@ -17349,9 +17431,13 @@ ${report}
             offsetY = e.clientY - btn.getBoundingClientRect().top;
             btn.classList.add("dragging");
             document.body.style.userSelect = "none";
+            try {
+              btn.setPointerCapture(e.pointerId);
+            } catch (_) {
+            }
             e.preventDefault();
           });
-          NotionSiteUI2._floatDragMove = (e) => {
+          btn.addEventListener("pointermove", (e) => {
             if (!isDragging) return;
             const dx = e.clientX - startX;
             const dy = e.clientY - startY;
@@ -17363,9 +17449,8 @@ ${report}
             btn.style.top = y + "px";
             btn.style.right = "auto";
             btn.style.bottom = "auto";
-          };
-          document.addEventListener("mousemove", NotionSiteUI2._floatDragMove);
-          NotionSiteUI2._floatDragEnd = () => {
+          });
+          const endFloatDrag = (e) => {
             if (!isDragging) return;
             isDragging = false;
             btn.classList.remove("dragging");
@@ -17376,8 +17461,13 @@ ${report}
               const bottom = window.innerHeight - rect.bottom;
               Storage2.set(CONFIG2.STORAGE_KEYS.FLOAT_BTN_POSITION, JSON.stringify({ right: right + "px", bottom: bottom + "px" }));
             }
+            try {
+              btn.releasePointerCapture(e.pointerId);
+            } catch (_) {
+            }
           };
-          document.addEventListener("mouseup", NotionSiteUI2._floatDragEnd);
+          btn.addEventListener("pointerup", endFloatDrag);
+          btn.addEventListener("pointercancel", endFloatDrag);
           btn.addEventListener("click", (e) => {
             if (hasMoved) {
               e.preventDefault();
@@ -17391,8 +17481,12 @@ ${report}
           if (savedPosition) {
             try {
               const pos = JSON.parse(savedPosition);
-              btn.style.right = pos.right || "24px";
-              btn.style.bottom = pos.bottom || "24px";
+              const savedRight = parseFloat(pos.right) || 24;
+              const savedBottom = parseFloat(pos.bottom) || 24;
+              const maxRight = Math.max(0, window.innerWidth - btn.offsetWidth);
+              const maxBottom = Math.max(0, window.innerHeight - btn.offsetHeight);
+              btn.style.right = Math.min(savedRight, maxRight) + "px";
+              btn.style.bottom = Math.min(savedBottom, maxBottom) + "px";
             } catch (e) {
               console.warn("[LD-Notion] corrupted float btn position, resetting");
               Storage2.remove(CONFIG2.STORAGE_KEYS.FLOAT_BTN_POSITION);
@@ -17412,7 +17506,7 @@ ${report}
             <div class="ldb-notion-header">
                 <h3>\u{1F916} AI \u52A9\u624B</h3>
                 <div class="ldb-notion-header-btns">
-                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="\u5207\u6362\u4E3B\u9898" aria-label="\u5207\u6362\u4E3B\u9898" style="width:44px;height:44px;border-radius:var(--ldb-ui-radius-xs);font-size:var(--ldb-ui-font-size-md);">\u{1F319}</button>
+                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="\u5207\u6362\u4E3B\u9898" aria-label="\u5207\u6362\u4E3B\u9898">\u{1F319}</button>
                     <button class="ldb-notion-header-btn" id="ldb-notion-close" title="\u5173\u95ED" aria-label="\u5173\u95ED AI \u52A9\u624B\u9762\u677F">\xD7</button>
                 </div>
             </div>
@@ -17444,7 +17538,7 @@ ${report}
                 <button 
                     class="ldb-notion-toggle-section" 
                     id="ldb-notion-settings-toggle"
-                    aria-expanded="true"
+                    aria-expanded="false"
                     tabindex="0"
                     role="button"
                 >
@@ -17453,14 +17547,14 @@ ${report}
                 </button>
                 <div class="ldb-notion-toggle-content collapsed" id="ldb-notion-settings-content">
                     <div class="ldb-input-group ldb-mt-12">
-                        <label class="ldb-label">Notion API Key</label>
+                        <label class="ldb-label" for="ldb-notion-api-key">Notion API Key</label>
                         <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx...">
                     </div>
                     <div class="ldb-input-group">
                         <label class="ldb-label">Notion OAuth\uFF08\u516C\u5F00\u96C6\u6210\uFF09</label>
-                        <input type="text" class="ldb-input" id="ldb-notion-oauth-client-id" placeholder="Client ID">
-                        <input type="password" class="ldb-input" id="ldb-notion-oauth-client-secret" placeholder="Client Secret" class="ldb-mt-8">
-                        <input type="text" class="ldb-input" id="ldb-notion-oauth-redirect-uri" placeholder="Redirect URI" class="ldb-mt-8">
+                        <input type="text" class="ldb-input" id="ldb-notion-oauth-client-id" placeholder="Client ID" aria-label="OAuth Client ID">
+                        <input type="password" class="ldb-input ldb-mt-8" id="ldb-notion-oauth-client-secret" placeholder="Client Secret" aria-label="OAuth Client Secret">
+                        <input type="text" class="ldb-input ldb-mt-8" id="ldb-notion-oauth-redirect-uri" placeholder="Redirect URI" aria-label="OAuth Redirect URI">
                         <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
                             <button class="ldb-btn ldb-btn-primary" id="ldb-notion-oauth-authorize" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">\u{1F510} \u4E00\u952E\u6388\u6743</button>
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-oauth-clear" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">\u65AD\u5F00\u6388\u6743</button>
@@ -17474,18 +17568,18 @@ ${report}
                         <div class="ldb-tip">\u9002\u7528\u4E8E Notion \u516C\u5F00\u96C6\u6210\u3002\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u4EC5\u5728\u89E3\u9501\u540E\u7684\u5F53\u524D\u4F1A\u8BDD\u5185\u53EF\u7528\u3002</div>
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">\u6570\u636E\u5E93 / \u9875\u9762</label>
+                        <label class="ldb-label" for="ldb-notion-ai-target-db">\u6570\u636E\u5E93 / \u9875\u9762</label>
                         <div class="ldb-flex-gap">
-                            <select class="ldb-select" id="ldb-notion-ai-target-db" class="ldb-flex-1">
+                            <select class="ldb-select ldb-flex-1" id="ldb-notion-ai-target-db">
                                 <option value="">\u9ED8\u8BA4\uFF08\u8DDF\u968F\u5BFC\u51FA\u6570\u636E\u5E93\uFF09</option>
                                 <option value="__all__">\u6240\u6709\u5DE5\u4F5C\u533A\u6570\u636E\u5E93</option>
                             </select>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-refresh-workspace" class="ldb-nowrap-badge" title="\u5237\u65B0\u5DE5\u4F5C\u533A\u5217\u8868" aria-label="\u5237\u65B0\u5DE5\u4F5C\u533A\u5217\u8868">\u{1F504}</button>
+                            <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-notion-refresh-workspace" title="\u5237\u65B0\u5DE5\u4F5C\u533A\u5217\u8868" aria-label="\u5237\u65B0\u5DE5\u4F5C\u533A\u5217\u8868">\u{1F504}</button>
                         </div>
                         <div class="ldb-tip" id="ldb-notion-workspace-tip"></div>
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">AI \u670D\u52A1</label>
+                        <label class="ldb-label" for="ldb-notion-ai-service">AI \u670D\u52A1</label>
                         <select class="ldb-select" id="ldb-notion-ai-service">
                             <option value="openai">OpenAI</option>
                             <option value="claude">Claude</option>
@@ -17493,27 +17587,27 @@ ${report}
                         </select>
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">\u6A21\u578B</label>
+                        <label class="ldb-label" for="ldb-notion-ai-model">\u6A21\u578B</label>
                         <div class="ldb-flex-gap">
-                            <select class="ldb-select" id="ldb-notion-ai-model" class="ldb-flex-1"></select>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-ai-fetch-models" class="ldb-nowrap-badge">\u{1F504} \u83B7\u53D6</button>
+                            <select class="ldb-select ldb-flex-1" id="ldb-notion-ai-model"></select>
+                            <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-notion-ai-fetch-models">\u{1F504} \u83B7\u53D6</button>
                         </div>
                         <div class="ldb-tip" id="ldb-notion-ai-model-tip"></div>
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">AI API Key</label>
+                        <label class="ldb-label" for="ldb-notion-ai-api-key">AI API Key</label>
                         <input type="password" class="ldb-input" id="ldb-notion-ai-api-key" placeholder="AI \u670D\u52A1\u7684 API Key">
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">\u81EA\u5B9A\u4E49\u7AEF\u70B9 (\u53EF\u9009)</label>
+                        <label class="ldb-label" for="ldb-notion-ai-base-url">\u81EA\u5B9A\u4E49\u7AEF\u70B9 (\u53EF\u9009)</label>
                         <input type="text" class="ldb-input" id="ldb-notion-ai-base-url" placeholder="\u7559\u7A7A\u4F7F\u7528\u5B98\u65B9 API">
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">\u5206\u7C7B\u5217\u8868</label>
+                        <label class="ldb-label" for="ldb-notion-ai-categories">\u5206\u7C7B\u5217\u8868</label>
                         <input type="text" class="ldb-input" id="ldb-notion-ai-categories" placeholder="\u6280\u672F, \u751F\u6D3B, \u95EE\u7B54, \u5206\u4EAB, \u8D44\u6E90, \u5176\u4ED6">
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">\u5237\u65B0\u9875\u6570\u4E0A\u9650</label>
+                        <label class="ldb-label" for="ldb-notion-workspace-max-pages">\u5237\u65B0\u9875\u6570\u4E0A\u9650</label>
                         <select class="ldb-select" id="ldb-notion-workspace-max-pages">
                             <option value="5">5 \u9875 (500 \u6761)</option>
                             <option value="10">10 \u9875 (1000 \u6761)</option>
@@ -17527,11 +17621,11 @@ ${report}
                         <span class="ldb-hint">\u{1F916} Agent \u4E2A\u6027\u5316</span>
                     </div>
                     <div class="ldb-input-group ldb-mt-8">
-                        <label class="ldb-label">\u52A9\u624B\u540D\u5B57</label>
+                        <label class="ldb-label" for="ldb-notion-persona-name">\u52A9\u624B\u540D\u5B57</label>
                         <input type="text" class="ldb-input" id="ldb-notion-persona-name" placeholder="AI \u52A9\u624B">
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">\u8BED\u6C14\u98CE\u683C</label>
+                        <label class="ldb-label" for="ldb-notion-persona-tone">\u8BED\u6C14\u98CE\u683C</label>
                         <select class="ldb-select" id="ldb-notion-persona-tone">
                             <option value="\u53CB\u597D">\u53CB\u597D</option>
                             <option value="\u4E13\u4E1A">\u4E13\u4E1A</option>
@@ -17615,8 +17709,8 @@ ${report}
             minHeight: 250
           });
           ChatState2.load();
-          ChatUI3.renderMessages();
-          ChatUI3.bindEvents();
+          ChatUI2.renderMessages();
+          ChatUI2.bindEvents();
           NotionSiteUI2.isPanelReady = true;
         },
         // 切换面板显示
@@ -17640,7 +17734,7 @@ ${report}
               const input = panel.querySelector("#ldb-chat-input");
               if (input && cmd) {
                 input.value = cmd;
-                ChatUI3.sendMessage();
+                ChatUI2.sendMessage();
               }
             };
           });
@@ -18052,14 +18146,18 @@ ${report}
         // 拖拽功能
         makeDraggable: (element, handle) => {
           let offsetX, offsetY, isDragging = false;
-          handle.onmousedown = (e) => {
+          handle.addEventListener("pointerdown", (e) => {
             if (e.target.tagName === "BUTTON") return;
             isDragging = true;
             offsetX = e.clientX - element.offsetLeft;
             offsetY = e.clientY - element.offsetTop;
             document.body.style.userSelect = "none";
-          };
-          document.onmousemove = (e) => {
+            try {
+              handle.setPointerCapture(e.pointerId);
+            } catch (_) {
+            }
+          });
+          handle.addEventListener("pointermove", (e) => {
             if (!isDragging) return;
             const x = Math.max(0, Math.min(window.innerWidth - element.offsetWidth, e.clientX - offsetX));
             const y = Math.max(0, Math.min(window.innerHeight - element.offsetHeight, e.clientY - offsetY));
@@ -18067,8 +18165,9 @@ ${report}
             element.style.top = y + "px";
             element.style.right = "auto";
             element.style.bottom = "auto";
-          };
-          document.onmouseup = () => {
+          });
+          const endDrag = (e) => {
+            if (!isDragging) return;
             if (isDragging) {
               const rect = element.getBoundingClientRect();
               const right = window.innerWidth - rect.right;
@@ -18077,7 +18176,13 @@ ${report}
             }
             isDragging = false;
             document.body.style.userSelect = "";
+            try {
+              handle.releasePointerCapture(e.pointerId);
+            } catch (_) {
+            }
           };
+          handle.addEventListener("pointerup", endDrag);
+          handle.addEventListener("pointercancel", endDrag);
         },
         createAIAssistantSettingsAdapter: () => ({
           isActive: () => !!NotionSiteUI2.panel,
@@ -18126,8 +18231,6 @@ ${report}
         },
         destroy: () => {
           var _a, _b, _c;
-          if (NotionSiteUI2._floatDragMove) document.removeEventListener("mousemove", NotionSiteUI2._floatDragMove);
-          if (NotionSiteUI2._floatDragEnd) document.removeEventListener("mouseup", NotionSiteUI2._floatDragEnd);
           (_a = NotionSiteUI2._abortController) == null ? void 0 : _a.abort();
           NotionSiteUI2._abortController = null;
           (_b = NotionSiteUI2.panel) == null ? void 0 : _b.remove();
@@ -18979,6 +19082,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { Storage: Storage2 } = require_storage();
       var { SiteDetector: SiteDetector2 } = require_api();
       var { GitHubAPI: GitHubAPI2 } = require_import();
+      var { ChatUI: ChatUI2 } = require_ai();
       var _UI = null;
       var UI2 = () => {
         if (!_UI) _UI = require_main_ui().UI;
@@ -19120,7 +19224,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""} ${isExported ? 'title="\u5DF2\u5BFC\u51FA\u5230 Notion\uFF0C\u65E0\u6CD5\u91CD\u590D\u5BFC\u5165"' : ""}>
                 <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
                 ${sourceTag}${isExported ? '<span class="status exported">\u5DF2\u5BFC\u51FA</span>' : '<span class="status pending">\u5F85\u5BFC\u51FA</span>'}
-                ${reexportAction ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" onclick="event.stopPropagation(); ConfirmationDialog.show({ title: '\u786E\u8BA4\u64CD\u4F5C', message: '\u91CD\u65B0\u5BFC\u51FA\u5C06\u8986\u76D6\u73B0\u6709 Notion \u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F', confirmText: '\u91CD\u65B0\u5BFC\u51FA', onConfirm: () => window.location.reload(); });">\u91CD\u65B0\u5BFC\u51FA</button>` : ""}
+                ${reexportAction}
             </div>
         `;
         },
@@ -19141,7 +19245,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               const importBtn = list.querySelector("#ldb-import-bookmarks-btn");
               if (importBtn) {
                 importBtn.onclick = () => {
-                  ChatUI.sendMessage("import-bookmarks-from-browser");
+                  ChatUI2.sendMessage("import-bookmarks-from-browser");
                 };
               }
             }, 0);
@@ -19216,7 +19320,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { WorkspaceService: WorkspaceService2 } = require_extract();
       var { AutoImporter: AutoImporter2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2 } = require_import();
       var { BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIAssistant: AIAssistant2, AIService: AIService2, ChatUI: ChatUI3 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, ChatUI: ChatUI2 } = require_ai();
       var { AISchema: AISchema2 } = require_schema();
       var _UI = null;
       var UI2 = () => {
@@ -20100,7 +20204,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 </div>
                 <div class="ldb-view-card full">
                     <div class="ldb-view-card-title">\u6D1E\u5BDF\u6458\u8981</div>
-                    <div class="ldb-view-empty-text">${ChatUI3.safeMarkdown(insightSummary || UI2().buildWorkspaceInsightFallbackSummary(model))}</div>
+                    <div class="ldb-view-empty-text">${ChatUI2.safeMarkdown(insightSummary || UI2().buildWorkspaceInsightFallbackSummary(model))}</div>
                 </div>
                 <div class="ldb-view-card full">
                     <div class="ldb-view-card-title">Markdown \u62A5\u544A\u9884\u89C8</div>
@@ -20128,7 +20232,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI3, getAISettings } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, getAISettings } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -20334,7 +20438,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                     <button class="ldb-header-btn" id="ldb-close" title="\u5173\u95ED" aria-label="\u5173\u95ED\u9762\u677F">\xD7</button>
                 </div>
             </div>
-            <div class="ldb-tabs" role="tablist">
+            <div class="ldb-tabs" role="tablist" aria-orientation="horizontal">
                 <button class="ldb-tab active" data-tab="bookmarks" role="tab" aria-selected="true" aria-controls="ldb-tab-bookmarks">\u{1F4DA} \u6536\u85CF</button>
                 <button class="ldb-tab" data-tab="visuals" role="tab" aria-selected="false" aria-controls="ldb-tab-visuals">\u{1F4CA} \u89C6\u56FE</button>
                 <button class="ldb-tab" data-tab="ai" role="tab" aria-selected="false" aria-controls="ldb-tab-ai">\u{1F916} AI</button>
@@ -20618,7 +20722,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                     <div class="ldb-section">
                         <div class="ldb-section-title">Notion \u914D\u7F6E</div>
                         <div class="ldb-input-group">
-                            <label class="ldb-label">API Key</label>
+                                                        <label class="ldb-label" for="ldb-api-key">API Key</label>
                             <input type="password" class="ldb-input" id="ldb-api-key" placeholder="secret_xxx...">
                             <div class="ldb-tip">
                                 \u5728 <a href="https://www.notion.so/my-integrations" target="_blank" class="ldb-link">Notion Integrations</a> \u521B\u5EFA
@@ -20626,9 +20730,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label">\u516C\u5F00 OAuth \u6388\u6743\uFF08\u53EF\u9009\uFF09</label>
-                            <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID">
-                            <input type="password" class="ldb-input" id="ldb-oauth-client-secret" placeholder="Client Secret" class="ldb-mt-8">
-                            <input type="text" class="ldb-input" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" class="ldb-mt-8">
+                            <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID" aria-label="OAuth Client ID">
+                            <input type="password" class="ldb-input ldb-mt-8" id="ldb-oauth-client-secret" placeholder="Client Secret" aria-label="OAuth Client Secret">
+                            <input type="text" class="ldb-input ldb-mt-8" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" aria-label="OAuth Redirect URI">
                             <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
                                 <button class="ldb-btn ldb-btn-primary" id="ldb-oauth-authorize">\u{1F510} \u4E00\u952E\u6388\u6743</button>
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">\u65AD\u5F00\u6388\u6743</button>
@@ -20642,15 +20746,15 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                             <div class="ldb-tip">\u5982\u679C\u4F60\u4F7F\u7528 Notion \u516C\u5F00\u96C6\u6210\uFF0C\u8BF7\u5148\u628A Redirect URI \u52A0\u5230\u96C6\u6210\u914D\u7F6E\u91CC\uFF0C\u518D\u70B9\u51FB\u4E00\u952E\u6388\u6743\u3002\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\u3002</div>
                         </div>
                         <div class="ldb-input-group">
-                            <label class="ldb-label">\u6570\u636E\u5E93 / \u9875\u9762</label>
+                            <label class="ldb-label" for="ldb-workspace-select">\u6570\u636E\u5E93 / \u9875\u9762</label>
                             <div class="ldb-flex-gap">
-                                <select class="ldb-select" id="ldb-workspace-select" class="ldb-flex-1">
+                                <select class="ldb-select ldb-flex-1" id="ldb-workspace-select">
                                     <option value="">-- \u4ECE\u5DE5\u4F5C\u533A\u9009\u62E9 --</option>
                                 </select>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-refresh-workspace" class="ldb-nowrap-badge" title="\u5237\u65B0\u5DE5\u4F5C\u533A\u9875\u9762\u5217\u8868" aria-label="\u5237\u65B0\u5DE5\u4F5C\u533A\u9875\u9762\u5217\u8868">\u{1F504}</button>
+                                <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-refresh-workspace" title="\u5237\u65B0\u5DE5\u4F5C\u533A\u9875\u9762\u5217\u8868" aria-label="\u5237\u65B0\u5DE5\u4F5C\u533A\u9875\u9762\u5217\u8868">\u{1F504}</button>
                             </div>
                             <div class="ldb-input-group" id="ldb-manual-db-wrap" style="display: none; margin-top: var(--ldb-ui-spacing-md);">
-                                <input type="text" class="ldb-input" id="ldb-database-id" placeholder="\u624B\u52A8\u8F93\u5165 32 \u4F4D\u6570\u636E\u5E93 ID\uFF08\u9AD8\u7EA7\uFF09" class="ldb-flex-1">
+                                <input type="text" class="ldb-input ldb-flex-1" id="ldb-database-id" placeholder="\u624B\u52A8\u8F93\u5165 32 \u4F4D\u6570\u636E\u5E93 ID\uFF08\u9AD8\u7EA7\uFF09">
                             </div>
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-toggle-manual-db" style="margin-top: var(--ldb-ui-spacing-sm); padding: var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">\u9AD8\u7EA7\uFF1A\u624B\u52A8\u8F93\u5165\u6570\u636E\u5E93 ID</button>
                             <div class="ldb-tip" id="ldb-workspace-tip">
@@ -20678,7 +20782,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
 
                         <!-- \u7236\u9875\u9762 ID\uFF08\u9875\u9762\u6A21\u5F0F\u65F6\u663E\u793A\uFF09 -->
                         <div class="ldb-input-group" id="ldb-parent-page-group" style="display: none;">
-                            <label class="ldb-label">\u7236\u9875\u9762 ID</label>
+                            <label class="ldb-label" for="ldb-parent-page-id">\u7236\u9875\u9762 ID</label>
                             <input type="text" class="ldb-input" id="ldb-parent-page-id" placeholder="32\u4F4D\u9875\u9762ID">
                             <div class="ldb-tip">
                                 \u5E16\u5B50\u5C06\u4F5C\u4E3A\u5B50\u9875\u9762\u521B\u5EFA\u5728\u6B64\u9875\u9762\u4E0B
@@ -20743,13 +20847,13 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                             <div class="ldb-input-group">
                                 <label class="ldb-label">\u697C\u5C42\u8303\u56F4</label>
                                 <div class="ldb-range-group">
-                                    <input type="number" id="ldb-range-start" value="1" min="1">
+                                    <input type="number" id="ldb-range-start" value="1" min="1" aria-label="\u8D77\u59CB\u697C\u5C42">
                                     <span>\u81F3</span>
-                                    <input type="number" id="ldb-range-end" value="999999" min="1">
+                                    <input type="number" id="ldb-range-end" value="999999" min="1" aria-label="\u7ED3\u675F\u697C\u5C42">
                                 </div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">\u56FE\u7247\u5904\u7406</label>
+                                <label class="ldb-label" for="ldb-img-mode">\u56FE\u7247\u5904\u7406</label>
                                 <select class="ldb-select" id="ldb-img-mode">
                                     <option value="upload">\u4E0A\u4F20\u5230 Notion</option>
                                     <option value="external">\u5916\u94FE\u5F15\u7528</option>
@@ -20758,7 +20862,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                                 <div class="ldb-tip">Notion \u514D\u8D39\u5957\u9910\u6587\u4EF6\u9700\u5C0F\u4E8E 5MB\uFF1B\u4ED8\u8D39\u5957\u9910 PDF \u5C0F\u4E8E 20MB\u3001\u56FE\u7247\u5C0F\u4E8E 5MB\u3002\u82E5\u56FE\u7247\u4E0A\u4F20\u62A5\u9519\uFF0C\u811A\u672C\u4F1A\u81EA\u52A8\u5C1D\u8BD5\u6309\u6587\u4EF6\u4E0A\u4F20\u3002</div>
                             </div>
                             <div class="ldb-form-group">
-                                <label>\u8BF7\u6C42\u95F4\u9694</label>
+                                <label for="ldb-request-delay">\u8BF7\u6C42\u95F4\u9694</label>
                                 <select class="ldb-select" id="ldb-request-delay">
                                     <option value="200">\u5FEB\u901F (200ms)</option>
                                     <option value="500">\u6B63\u5E38 (500ms)</option>
@@ -20771,7 +20875,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                                 </select>
                             </div>
                             <div class="ldb-form-group">
-                                <label>\u5E76\u53D1\u6570</label>
+                                <label for="ldb-export-concurrency">\u5E76\u53D1\u6570</label>
                                 <select class="ldb-select" id="ldb-export-concurrency">
                                     <option value="1">\u4E32\u884C (1\u4E2A)</option>
                                     <option value="2">2 \u4E2A\u5E76\u53D1</option>
@@ -20780,7 +20884,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                                 </select>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">\u56FE\u7247\u7B5B\u9009</label>
+                                <label class="ldb-label" for="ldb-filter-img">\u56FE\u7247\u7B5B\u9009</label>
                                 <select class="ldb-select" id="ldb-filter-img">
                                     <option value="all">\u5168\u90E8</option>
                                     <option value="only_img">\u4EC5\u542B\u56FE\u697C\u5C42</option>
@@ -20788,22 +20892,22 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                                 </select>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">\u6307\u5B9A\u7528\u6237</label>
+                                <label class="ldb-label" for="ldb-filter-users">\u6307\u5B9A\u7528\u6237</label>
                                 <input type="text" class="ldb-input" id="ldb-filter-users" placeholder="user1, user2">
                                 <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u4EC5\u5BFC\u51FA\u8FD9\u4E9B\u7528\u6237\u7684\u56DE\u590D</div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">\u5305\u542B\u5173\u952E\u8BCD</label>
+                                <label class="ldb-label" for="ldb-filter-include">\u5305\u542B\u5173\u952E\u8BCD</label>
                                 <input type="text" class="ldb-input" id="ldb-filter-include" placeholder="\u6559\u7A0B, \u6307\u5357">
                                 <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u5FC5\u987B\u5305\u542B\u4EFB\u4E00\u5173\u952E\u8BCD</div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">\u6392\u9664\u5173\u952E\u8BCD</label>
+                                <label class="ldb-label" for="ldb-filter-exclude">\u6392\u9664\u5173\u952E\u8BCD</label>
                                 <input type="text" class="ldb-input" id="ldb-filter-exclude" placeholder="\u5E7F\u544A, \u6C34\u8D34">
                                 <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u6392\u9664\u5305\u542B\u5173\u952E\u8BCD\u7684\u697C\u5C42</div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">\u6700\u5C11\u5B57\u6570</label>
+                                <label class="ldb-label" for="ldb-filter-minlen">\u6700\u5C11\u5B57\u6570</label>
                                 <input type="number" class="ldb-input" id="ldb-filter-minlen" value="0" min="0" placeholder="0">
                                 <div class="ldb-tip">\u8FC7\u6EE4\u5B57\u6570\u4E0D\u8DB3\u7684\u697C\u5C42</div>
                             </div>
@@ -20820,7 +20924,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                         </div>
                         <div class="ldb-toggle-content collapsed" id="ldb-ai-settings-content">
                             <div class="ldb-input-group ldb-mt-12">
-                                <label class="ldb-label">AI \u670D\u52A1</label>
+                                <label class="ldb-label" for="ldb-ai-service">AI \u670D\u52A1</label>
                                 <select class="ldb-select" id="ldb-ai-service">
                                     <option value="openai">OpenAI</option>
                                     <option value="claude">Claude</option>
@@ -20828,35 +20932,35 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                                 </select>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">\u6A21\u578B</label>
+                                <label class="ldb-label" for="ldb-ai-model">\u6A21\u578B</label>
                                 <div class="ldb-flex-gap">
-                                    <select class="ldb-select" id="ldb-ai-model" class="ldb-flex-1"></select>
-                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-fetch-models" class="ldb-nowrap-badge">\u{1F504} \u83B7\u53D6</button>
+                                    <select class="ldb-select ldb-flex-1" id="ldb-ai-model"></select>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-ai-fetch-models">\u{1F504} \u83B7\u53D6</button>
                                 </div>
                                 <div class="ldb-tip" id="ldb-ai-model-tip"></div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">API Key</label>
+                                                            <label class="ldb-label" for="ldb-ai-api-key">API Key</label>
                                 <input type="password" class="ldb-input" id="ldb-ai-api-key" placeholder="AI \u670D\u52A1\u7684 API Key">
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">\u81EA\u5B9A\u4E49\u7AEF\u70B9 (\u53EF\u9009)</label>
+                                <label class="ldb-label" for="ldb-ai-base-url">\u81EA\u5B9A\u4E49\u7AEF\u70B9 (\u53EF\u9009)</label>
                                 <input type="text" class="ldb-input" id="ldb-ai-base-url" placeholder="\u7559\u7A7A\u4F7F\u7528\u5B98\u65B9 API">
                                 <div class="ldb-tip">\u652F\u6301\u7B2C\u4E09\u65B9 OpenAI \u517C\u5BB9 API</div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">\u5206\u7C7B\u5217\u8868</label>
+                                <label class="ldb-label" for="ldb-ai-categories">\u5206\u7C7B\u5217\u8868</label>
                                 <input type="text" class="ldb-input" id="ldb-ai-categories" placeholder="\u6280\u672F, \u751F\u6D3B, \u95EE\u7B54, \u5206\u4EAB, \u8D44\u6E90, \u5176\u4ED6">
                                 <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u7528\u4E8E\u81EA\u52A8\u5206\u7C7B\u529F\u80FD</div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">\u67E5\u8BE2\u6570\u636E\u5E93</label>
+                                <label class="ldb-label" for="ldb-ai-target-db">\u67E5\u8BE2\u6570\u636E\u5E93</label>
                                 <div class="ldb-flex-gap">
-                                    <select class="ldb-select" id="ldb-ai-target-db" class="ldb-flex-1">
+                                    <select class="ldb-select ldb-flex-1" id="ldb-ai-target-db">
                                         <option value="">\u5F53\u524D\u914D\u7F6E\u7684\u6570\u636E\u5E93</option>
                                         <option value="__all__">\u6240\u6709\u5DE5\u4F5C\u533A\u6570\u636E\u5E93</option>
                                     </select>
-                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-refresh-dbs" class="ldb-nowrap-badge">\u{1F504}</button>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-ai-refresh-dbs">\u{1F504}</button>
                                 </div>
                                 <div class="ldb-tip">AI \u67E5\u8BE2\u6570\u636E\u5E93\u65F6\u7684\u76EE\u6807\u8303\u56F4</div>
                             </div>
@@ -21072,7 +21176,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           btn.title = "\u6253\u5F00\u6536\u85CF\u5BFC\u51FA\u5DE5\u5177";
           btn.style.display = "none";
           btn.onclick = () => {
-            UI2.panel.style.display = "block";
+            UI2.panel.style.display = "flex";
             btn.style.display = "none";
             Storage2.set(CONFIG2.STORAGE_KEYS.PANEL_MINIMIZED, false);
           };
@@ -21464,12 +21568,12 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const percent = total > 0 ? Math.round(current / total * 100) : 0;
           container.innerHTML = `
             <div class="ldb-progress">
-                <div class="ldb-progress-bar">
+                <div class="ldb-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
                     <div class="ldb-progress-fill" style="width: ${percent}%"></div>
                 </div>
                 <div class="ldb-progress-text">
                     ${current}/${total} (${percent}%)<br>
-                    <small>${Utils2.escapeHtml(message)}</small>
+                    <small style="white-space: pre-line; word-break: break-word;">${Utils2.escapeHtml(message)}</small>
                 </div>
             </div>
         `;
@@ -22089,7 +22193,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const renderBarRows = (rows) => rows.length > 0 ? `<div class="ldb-view-bars">${rows.map((row) => `
                 <div class="ldb-view-bar-row">
                     <div class="ldb-view-bar-label">${Utils2.escapeHtml(row.label)}</div>
-                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, row.pct)}%;"></div></div>
+                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${row.pct > 0 ? Math.max(8, row.pct) : 0}%;"></div></div>
                     <div class="ldb-view-bar-value">${row.count} \xB7 ${row.pct}%</div>
                 </div>
             `).join("")}</div>` : `<div class="ldb-view-empty-text">\u6682\u65E0\u53EF\u5C55\u793A\u7684\u6570\u636E\u3002</div>`;
@@ -22101,7 +22205,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const timelineMarkup = model.timeline.length > 0 ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
                 <div class="ldb-view-timeline-item">
                     <div class="ldb-view-timeline-label">${item.label}</div>
-                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, UI2.getViewPct(item.count, model.total))}%;"></div></div>
+                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${item.count > 0 ? Math.max(8, UI2.getViewPct(item.count, model.total)) : 0}%;"></div></div>
                     <div class="ldb-view-timeline-value">${item.count} \u9879 / \u5DF2\u5BFC\u51FA ${item.exported}</div>
                 </div>
             `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u6570\u636E\u91CC\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u65F6\u95F4\u5B57\u6BB5\u3002</div>`;
@@ -22278,25 +22382,36 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         // 拖拽功能
         makeDraggable: (element, handle) => {
           let offsetX, offsetY, isDragging = false;
-          handle.onmousedown = (e) => {
+          handle.addEventListener("pointerdown", (e) => {
             if (e.target.tagName === "BUTTON") return;
             isDragging = true;
             offsetX = e.clientX - element.offsetLeft;
             offsetY = e.clientY - element.offsetTop;
             document.body.style.userSelect = "none";
-          };
-          document.onmousemove = (e) => {
+            try {
+              handle.setPointerCapture(e.pointerId);
+            } catch (_) {
+            }
+          });
+          handle.addEventListener("pointermove", (e) => {
             if (!isDragging) return;
             const x = Math.max(0, Math.min(window.innerWidth - element.offsetWidth, e.clientX - offsetX));
             const y = Math.max(0, Math.min(window.innerHeight - element.offsetHeight, e.clientY - offsetY));
             element.style.left = x + "px";
             element.style.top = y + "px";
             element.style.right = "auto";
-          };
-          document.onmouseup = () => {
+          });
+          const endDrag = (e) => {
+            if (!isDragging) return;
             isDragging = false;
             document.body.style.userSelect = "";
+            try {
+              handle.releasePointerCapture(e.pointerId);
+            } catch (_) {
+            }
           };
+          handle.addEventListener("pointerup", endDrag);
+          handle.addEventListener("pointercancel", endDrag);
         },
         maybePromptBookmarkExtensionInstall: () => {
           const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
@@ -22358,6 +22473,10 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           var _a, _b, _c;
           (_a = UI2._abortController) == null ? void 0 : _a.abort();
           UI2._abortController = null;
+          if (UI2._escMinimizeHandler) {
+            document.removeEventListener("keydown", UI2._escMinimizeHandler);
+            UI2._escMinimizeHandler = null;
+          }
           (_b = UI2.panel) == null ? void 0 : _b.remove();
           UI2.panel = null;
           (_c = UI2.miniBtn) == null ? void 0 : _c.remove();
@@ -22389,7 +22508,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIService: AIService2, ChatUI: ChatUI3 } = require_ai();
+      var { AIService: AIService2, ChatUI: ChatUI2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var UIEvents2 = {
         bindEvents: () => {
@@ -22446,6 +22565,20 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             UI2.miniBtn.style.display = "flex";
             Storage2.set(CONFIG2.STORAGE_KEYS.PANEL_MINIMIZED, true);
           };
+          if (!UI2._escMinimizeHandler) {
+            UI2._escMinimizeHandler = (e) => {
+              if (e.key !== "Escape") return;
+              if (e.isComposing || e.keyCode === 229) return;
+              const t = e.target;
+              if (t && t.closest && t.closest('input, textarea, select, [contenteditable="true"]')) return;
+              if (document.querySelector(".ldb-confirm-overlay")) return;
+              const p = UI2.panel;
+              if (!p || !document.body.contains(p) || p.style.display === "none") return;
+              if (!refs.minimizeBtn) return;
+              refs.minimizeBtn.onclick();
+            };
+            document.addEventListener("keydown", UI2._escMinimizeHandler);
+          }
           refs.closeBtn.onclick = () => {
             panel.remove();
             UI2.miniBtn.remove();
@@ -22938,7 +23071,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 const item2 = reexportBtn.closest(".ldb-bookmark-item");
                 const bookmarkKey = String((item2 == null ? void 0 : item2.dataset.topicId) || "");
                 if (bookmarkKey) {
-                  UI2.requeueLinuxDoBookmark(bookmarkKey);
+                  ConfirmationDialog3.show({
+                    title: "\u786E\u8BA4\u91CD\u65B0\u5BFC\u51FA",
+                    message: "\u91CD\u65B0\u5BFC\u51FA\u5C06\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868\uFF0C\u53EF\u80FD\u8986\u76D6\u73B0\u6709 Notion \u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
+                    confirmText: "\u91CD\u65B0\u5BFC\u51FA",
+                    onConfirm: () => {
+                      UI2.requeueLinuxDoBookmark(bookmarkKey);
+                    }
+                  });
                 }
                 return;
               }
@@ -23042,10 +23182,10 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               }
             }
             const chatInput = panel.querySelector("#ldb-chat-input");
-            if (chatInput && ChatUI3.sendMessage) {
+            if (chatInput && ChatUI2.sendMessage) {
               UI2.showStatus("\u6B63\u5728\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E\uFF0C\u8BF7\u8010\u5FC3\u7B49\u5F85...", "info");
               chatInput.value = "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E";
-              ChatUI3.sendMessage();
+              ChatUI2.sendMessage();
             } else {
               UI2.showStatus("AI \u9762\u677F\u672A\u5C31\u7EEA\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5", "error");
             }
@@ -23640,7 +23780,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               }
             }
           };
-          ChatUI3.init();
+          ChatUI2.init();
           refs.aiServiceSelect.onchange = (e) => {
             const newService = e.target.value;
             const availableModels = AIService2.getAvailableModels(newService);
@@ -23935,8 +24075,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 position: fixed;
                 bottom: 24px;
                 right: 24px;
-                width: 48px;
-                height: 48px;
+                width: 52px;
+                height: 52px;
                 border-radius: var(--ldb-ui-radius-pill);
                 background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
                 color: var(--ldb-ui-white);
@@ -23985,19 +24125,25 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 right: 24px;
                 width: 320px;
                 max-width: calc(100vw - 32px);
+                max-height: calc(100vh - 100px);
                 z-index: var(--ldb-ui-z-index-overlay);
                 display: none;
                 overflow: hidden;
                 transform: translateY(12px);
                 opacity: 0;
                 /* Intentional: panel exit timing per design spec v3.1 */
-                transition: transform 0.22s var(--ldb-ui-ease-in), opacity 0.22s var(--ldb-ui-ease-in);
+                transition: transform 0.22s var(--ldb-ui-ease-out), opacity 0.22s var(--ldb-ui-ease-out);
             }
 
             .gclip-panel.visible {
                 display: block;
                 transform: translateY(0);
                 opacity: 1;
+            }
+
+            .gclip-panel-body {
+                overflow-y: auto;
+                max-height: calc(100vh - 160px);
             }
 
             .gclip-panel-header {
@@ -24125,7 +24271,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
 
                 <div id="gclip-settings" style="display: ${isConfigured ? "none" : "block"};">
                     <div class="gclip-field">
-                        <label>Notion API Key</label>
+                        <label for="gclip-api-key-input">Notion API Key</label>
                         <div style="display:flex;align-items:center;gap:var(--ldb-ui-spacing-md);">
                             <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="${CredentialVault2.getFieldPlaceholder(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "secret_...")}" value="" style="flex:1;font-size:var(--ldb-ui-font-size-sm);" autocomplete="off" />
                             <button class="gclip-btn" id="gclip-save-api-key" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">\u4FDD\u5B58</button>
@@ -24133,9 +24279,9 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                     </div>
                     <div class="gclip-field">
                         <label>Notion OAuth\uFF08\u516C\u5F00\u96C6\u6210\uFF09</label>
-                        <input type="text" id="gclip-oauth-client-id" class="gclip-input" placeholder="Client ID">
-                        <input type="password" id="gclip-oauth-client-secret" class="gclip-input" placeholder="Client Secret" style="margin-top:var(--ldb-ui-spacing-md);">
-                        <input type="text" id="gclip-oauth-redirect-uri" class="gclip-input" placeholder="Redirect URI" style="margin-top:var(--ldb-ui-spacing-md);">
+                        <input type="text" id="gclip-oauth-client-id" class="gclip-input" placeholder="Client ID" aria-label="OAuth Client ID">
+                        <input type="password" id="gclip-oauth-client-secret" class="gclip-input" placeholder="Client Secret" aria-label="OAuth Client Secret" style="margin-top:var(--ldb-ui-spacing-md);">
+                        <input type="text" id="gclip-oauth-redirect-uri" class="gclip-input" placeholder="Redirect URI" aria-label="OAuth Redirect URI" style="margin-top:var(--ldb-ui-spacing-md);">
                         <div style="display:flex;gap:var(--ldb-ui-spacing-md);flex-wrap:wrap;margin-top:var(--ldb-ui-spacing-md);">
                             <button class="gclip-btn gclip-btn-primary" id="gclip-oauth-authorize" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">\u{1F510} \u4E00\u952E\u6388\u6743</button>
                             <button class="gclip-btn gclip-btn-secondary" id="gclip-oauth-clear" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">\u65AD\u5F00\u6388\u6743</button>
@@ -24149,14 +24295,14 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                         <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">\u516C\u5F00 OAuth \u9002\u5408\u4E2A\u4EBA\u81EA\u5EFA\u96C6\u6210\uFF1B\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\u3002</div>
                     </div>
                     <div class="gclip-field">
-                        <label>\u5BFC\u51FA\u76EE\u6807\u7C7B\u578B</label>
+                        <label for="gclip-export-type">\u5BFC\u51FA\u76EE\u6807\u7C7B\u578B</label>
                         <select id="gclip-export-type">
                             <option value="database" ${exportType === "database" ? "selected" : ""}>\u6570\u636E\u5E93</option>
                             <option value="page" ${exportType === "page" ? "selected" : ""}>\u9875\u9762\uFF08\u5B50\u9875\u9762\uFF09</option>
                         </select>
                     </div>
                     <div class="gclip-field">
-                        <label id="gclip-target-label">${exportType === "page" ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93"}</label>
+                        <label id="gclip-target-label" for="gclip-target-select">${exportType === "page" ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93"}</label>
                         <div style="display:flex;align-items:center;gap:var(--ldb-ui-spacing-md);">
                             <select id="gclip-target-select" class="gclip-input" style="flex:1;">
                                 <option value="">\u672A\u9009\u62E9</option>
@@ -24166,14 +24312,14 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                         <div id="gclip-target-tip" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">\u4F18\u5148\u4ECE\u5DE5\u4F5C\u533A\u5217\u8868\u9009\u62E9\uFF0C\u5931\u8D25\u65F6\u53EF\u624B\u52A8\u8F93\u5165 ID</div>
                     </div>
                     <div class="gclip-field" id="gclip-manual-target-wrap" style="display:none;">
-                        <label>\u624B\u52A8\u8F93\u5165 ID\uFF08\u9AD8\u7EA7\uFF09</label>
+                        <label for="gclip-target-id">\u624B\u52A8\u8F93\u5165 ID\uFF08\u9AD8\u7EA7\uFF09</label>
                         <input type="text" id="gclip-target-id" value="" placeholder="32\u4F4DID">
                     </div>
-                    <div class="gclip-field" style="margin-top:-var(--ldb-ui-spacing-xs);">
+                    <div class="gclip-field" style="margin-top:calc(-1 * var(--ldb-ui-spacing-xs));">
                         <button class="gclip-btn gclip-btn-secondary" id="gclip-toggle-manual-target" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-lg);font-size:var(--ldb-ui-font-size-sm);">\u9AD8\u7EA7\uFF1A\u624B\u52A8\u8F93\u5165 ID</button>
                     </div>
                     <div class="gclip-field">
-                        <label>\u56FE\u7247\u5904\u7406</label>
+                        <label for="gclip-img-mode">\u56FE\u7247\u5904\u7406</label>
                         <select id="gclip-img-mode">
                             <option value="external" ${imgMode === "external" ? "selected" : ""}>\u5916\u94FE\u5F15\u7528</option>
                             <option value="upload" ${imgMode === "upload" ? "selected" : ""}>\u4E0A\u4F20\u5230 Notion</option>
@@ -24555,8 +24701,12 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           }
         },
         // 显示状态
+        // 修复:原实现超时后 el.remove() 删除宿主 #gclip-status,后续 showStatus 在
+        // querySelector 返回 null 后抛 TypeError,导致 Zhihu/Generic 站点状态提示静默失效。
+        // 改为清空内容与类名(与 MainUI/NotionSiteUI 的持久容器语义对齐),保留宿主元素。
         showStatus: (message, type = "info") => {
           const el = GenericUI2.panel.querySelector("#gclip-status");
+          if (!el) return;
           el.setAttribute("aria-live", "polite");
           el.setAttribute("aria-atomic", "true");
           el.textContent = message;
@@ -24564,12 +24714,9 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           if (el._statusTimer) clearTimeout(el._statusTimer);
           const timeout = type === "error" ? 1e4 : 3e3;
           el._statusTimer = setTimeout(() => {
-            if (el && !el.dataset.closing) {
-              el.classList.add("ldb-fade-out");
-              el.dataset.closing = "true";
-              setTimeout(() => {
-                if (el) el.remove();
-              }, 300);
+            if (el) {
+              el.textContent = "";
+              el.className = "gclip-status";
             }
           }, timeout);
         },
@@ -24578,28 +24725,60 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           if (!GenericUI2.panel) return;
           const isVisible = GenericUI2.panel.classList.contains("visible");
           const shouldShow = show !== void 0 ? show : !isVisible;
+          if (GenericUI2._cancelPendingClose) {
+            GenericUI2._cancelPendingClose();
+            GenericUI2._cancelPendingClose = null;
+          }
           if (shouldShow) {
             GenericUI2.panel.style.display = "block";
+            GenericUI2.panel.setAttribute("aria-expanded", "true");
             GenericUI2.panel.offsetHeight;
             GenericUI2.panel.classList.add("visible");
-            GenericUI2._escHandler = (e) => {
-              if (e.key === "Escape") {
-                GenericUI2.close();
-              }
-            };
-            document.addEventListener("keydown", GenericUI2._escHandler);
+            if (!GenericUI2._escHandler) {
+              GenericUI2._escHandler = (e) => {
+                if (e.key === "Escape") {
+                  GenericUI2.togglePanel(false);
+                }
+              };
+              document.addEventListener("keydown", GenericUI2._escHandler);
+            }
           } else {
             GenericUI2.panel.classList.remove("visible");
-            GenericUI2.panel.addEventListener("transitionend", function handler() {
-              if (!GenericUI2.panel.classList.contains("visible")) {
-                GenericUI2.panel.style.display = "none";
-                if (GenericUI2._escHandler) {
-                  document.removeEventListener("keydown", GenericUI2._escHandler);
-                  GenericUI2._escHandler = null;
+            GenericUI2.panel.setAttribute("aria-expanded", "false");
+            const panel = GenericUI2.panel;
+            const escRef = GenericUI2._escHandler;
+            const cleanupClose = () => {
+              panel.style.display = "none";
+              if (escRef) document.removeEventListener("keydown", escRef);
+              GenericUI2._escHandler = null;
+              GenericUI2._cancelPendingClose = null;
+            };
+            const prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            if (prefersReduced) {
+              cleanupClose();
+            } else {
+              let closed = false;
+              let timer = null;
+              const onEnd = (e) => {
+                if (!closed && (e.propertyName === "opacity" || e.propertyName === "transform")) {
+                  finish();
                 }
-              }
-              GenericUI2.panel.removeEventListener("transitionend", handler);
-            });
+              };
+              const finish = () => {
+                if (closed) return;
+                closed = true;
+                panel.removeEventListener("transitionend", onEnd);
+                clearTimeout(timer);
+                cleanupClose();
+              };
+              panel.addEventListener("transitionend", onEnd);
+              timer = setTimeout(finish, 300);
+              GenericUI2._cancelPendingClose = () => {
+                closed = true;
+                panel.removeEventListener("transitionend", onEnd);
+                clearTimeout(timer);
+              };
+            }
           }
         },
         // 初始化
@@ -25490,7 +25669,7 @@ ${systemPrompt}
             ChatState2.messages = ChatState2.messages.slice(-ChatState2.MAX_HISTORY);
           }
           ChatState2.save();
-          ChatUI3.renderMessages();
+          ChatUI2.renderMessages();
           return ChatState2.messages[ChatState2.messages.length - 1];
         },
         // 更新最后一条消息（增量 DOM 更新，避免全量重渲染）（PERF-006）
@@ -25500,8 +25679,8 @@ ${systemPrompt}
           if (content !== void 0) lastMsg.content = content;
           if (status !== void 0) lastMsg.status = status;
           ChatState2.save();
-          if (!ChatUI3._patchLastBubble()) {
-            ChatUI3.renderMessages();
+          if (!ChatUI2._patchLastBubble()) {
+            ChatUI2.renderMessages();
           }
         },
         // 保存到存储
@@ -25523,7 +25702,7 @@ ${systemPrompt}
           ChatState2.messages = [];
           ChatState2.context = {};
           ChatState2.save();
-          ChatUI3.renderMessages();
+          ChatUI2.renderMessages();
         }
       };
       var QUICK_INTENT_PATTERNS2 = Object.freeze({
@@ -26905,7 +27084,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         },
         getInputPlaceholder: () => AI_WELCOME_ENTRY_POINTS.inputPlaceholder
       };
-      var ChatUI3 = {
+      var ChatUI2 = {
         // HTML 转义函数，防止 XSS 攻击
         escapeHtml: (text) => {
           const div = document.createElement("div");
@@ -26929,7 +27108,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           const lastBubble = (_a = bubbles[bubbles.length - 1]) == null ? void 0 : _a.querySelector(".ldb-chat-bubble");
           if (!lastBubble) return false;
           const statusClass = lastMsg.status === "processing" ? "processing" : lastMsg.status === "error" ? "error" : "";
-          const content = lastMsg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI3.safeMarkdown(AIAssistant2._resultToText(lastMsg.content));
+          const content = lastMsg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI2.safeMarkdown(AIAssistant2._resultToText(lastMsg.content));
           lastBubble.className = `ldb-chat-bubble ${lastMsg.role === "user" ? "user" : "assistant"} ${statusClass}`.trim();
           lastBubble.innerHTML = content;
           container.scrollTop = container.scrollHeight;
@@ -26947,7 +27126,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
                 const input = document.querySelector("#ldb-chat-input");
                 if (input) {
                   input.value = chip.getAttribute("data-cmd");
-                  ChatUI3.sendMessage();
+                  ChatUI2.sendMessage();
                 }
               };
             });
@@ -26956,7 +27135,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           container.innerHTML = ChatState2.messages.map((msg) => {
             const isUser = msg.role === "user";
             const statusClass = msg.status === "processing" ? "processing" : msg.status === "error" ? "error" : "";
-            const content = msg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI3.safeMarkdown(AIAssistant2._resultToText(msg.content));
+            const content = msg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI2.safeMarkdown(AIAssistant2._resultToText(msg.content));
             return `
                 <div class="ldb-chat-message ${isUser ? "user" : "assistant"}">
                     <div class="ldb-chat-bubble ${isUser ? "user" : "assistant"} ${statusClass}">
@@ -26998,7 +27177,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         bindEvents: () => {
           const sendBtn = document.querySelector("#ldb-chat-send");
           if (sendBtn) {
-            sendBtn.onclick = ChatUI3.sendMessage;
+            sendBtn.onclick = ChatUI2.sendMessage;
           }
           const input = document.querySelector("#ldb-chat-input");
           if (input) {
@@ -27006,7 +27185,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
               e.stopPropagation();
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                ChatUI3.sendMessage();
+                ChatUI2.sendMessage();
               }
             };
             input.onpaste = (e) => e.stopPropagation();
@@ -27043,8 +27222,8 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         // 初始化
         init: () => {
           ChatState2.load();
-          ChatUI3.renderMessages();
-          ChatUI3.bindEvents();
+          ChatUI2.renderMessages();
+          ChatUI2.bindEvents();
         }
       };
       var AIClassifier3 = {
@@ -27234,7 +27413,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       };
       Object.assign(AIAssistant2, require_guarded_write().GuardedWrite);
       var getAISettings = () => AIAssistant2.getSettings();
-      module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI3, AIClassifier: AIClassifier3, getAISettings };
+      module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier3, getAISettings };
       Object.assign(AIAssistant2, require_agent_executor().AgentExecutor);
     }
   });
@@ -27245,7 +27424,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { Storage, SyncState } = require_storage();
   var { CredentialVault, TargetState, NotionOAuth } = require_auth();
   var { SiteDetector, InstallHelper, EMOJI_MAP, NOTION_LANGUAGES, normalizeLanguage, DOMToNotion, NotionTransport, NotionAPI, ObsidianAPI, HTMLToMarkdown } = require_api();
-  var { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI: ChatUI2, AIClassifier: AIClassifier2 } = require_ai();
+  var { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier: AIClassifier2 } = require_ai();
   var { OperationGuard, OperationLog, ConfirmationDialog: ConfirmationDialog2, UndoManager } = require_security();
   var { ZhihuAPI, GenericExtractor, WorkspaceService } = require_extract();
   var { GenericExporter, LinuxDoAPI, Exporter } = require_export();
@@ -27285,9 +27464,9 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
     const cmd = cmdMap[action];
     if (!cmd) return;
     const input = document.querySelector("#ldb-chat-input");
-    if (input && ChatUI2.sendMessage) {
+    if (input && ChatUI.sendMessage) {
       input.value = cmd;
-      ChatUI2.sendMessage();
+      ChatUI.sendMessage();
     }
   });
   function main() {
@@ -27302,7 +27481,6 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           Utils.runWhenBrowserIdle(() => UpdateChecker.init());
           const isBookmarkPage = /\/u\/[^/]+\/activity\/bookmarks/.test(window.location.pathname);
           if (!isBookmarkPage) {
-            Utils.runWhenBrowserIdle(() => GenericUI.init());
             Utils.runWhenBrowserIdle(() => AutoImporter.init());
           }
           Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
@@ -27340,7 +27518,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           } else if (typeof GenericUI !== "undefined" && typeof GenericUI.showStatus === "function") {
             GenericUI.showStatus(`LD-Notion \u521D\u59CB\u5316\u5931\u8D25: ${(e == null ? void 0 : e.message) || e}`, "error");
           }
-        } catch {
+        } catch (_) {
         }
       }
     };

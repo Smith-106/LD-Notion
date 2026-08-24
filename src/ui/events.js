@@ -85,6 +85,24 @@ const UIEvents = {
             Storage.set(CONFIG.STORAGE_KEYS.PANEL_MINIMIZED, true);
         };
 
+        // Odyssey UI M: 主面板 Esc 关闭(最小化到 mini 按钮),与 GenericUI/NotionSiteUI 行为统一
+        if (!UI._escMinimizeHandler) {
+            UI._escMinimizeHandler = (e) => {
+                if (e.key !== "Escape") return;
+                // Odyssey Review F3(flash+ox): IME 组合中/输入控件内/确认弹窗打开时不最小化,
+                // 防止中文输入法取消组合、下拉框原生关闭、确认框取消连带收起面板。
+                if (e.isComposing || e.keyCode === 229) return;
+                const t = e.target;
+                if (t && t.closest && t.closest('input, textarea, select, [contenteditable="true"]')) return;
+                if (document.querySelector(".ldb-confirm-overlay")) return;
+                const p = UI.panel;
+                if (!p || !document.body.contains(p) || p.style.display === "none") return;
+                if (!refs.minimizeBtn) return;
+                refs.minimizeBtn.onclick();
+            };
+            document.addEventListener("keydown", UI._escMinimizeHandler);
+        }
+
         // 关闭
         refs.closeBtn.onclick = () => {
             panel.remove();
@@ -663,7 +681,16 @@ const UIEvents = {
                     const item = reexportBtn.closest(".ldb-bookmark-item");
                     const bookmarkKey = String(item?.dataset.topicId || "");
                     if (bookmarkKey) {
-                        UI.requeueLinuxDoBookmark(bookmarkKey);
+                        // Odyssey Review F2(flash+hy3): 恢复破坏性覆盖前的确认弹窗
+                        // (随坏内联 onclick 移除而丢失;旧内联因 ConfirmationDialog 非全局本就失效)
+                        ConfirmationDialog.show({
+                            title: "确认重新导出",
+                            message: "重新导出将移除该帖子的导出记录并重新加入待导出列表，可能覆盖现有 Notion 页面，是否继续？",
+                            confirmText: "重新导出",
+                            onConfirm: () => {
+                                UI.requeueLinuxDoBookmark(bookmarkKey);
+                            },
+                        });
                     }
                     return;
                 }

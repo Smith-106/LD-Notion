@@ -14,12 +14,6 @@ const UI_CSS = `
                 overflow: hidden;
             }
 
-            .ldb-panel.minimized {
-                width: auto;
-                max-height: none;
-                overflow: visible;
-            }
-
             .ldb-header {
                 cursor: move;
                 border-top-left-radius: var(--ldb-ui-radius);
@@ -227,7 +221,7 @@ const UI_CSS = `
             }
 
             .ldb-toggle-switch input:focus-visible + .ldb-toggle-slider {
-                box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.4);
+                box-shadow: 0 0 0 3px var(--ldb-ui-focus-ring);
                 outline: 2px solid transparent;
                 outline-offset: 2px;
             }
@@ -247,7 +241,7 @@ const UI_CSS = `
             }
 
             .ldb-toggle-switch input:checked + .ldb-toggle-slider {
-                background: rgba(37, 99, 235, 0.45);
+                background: var(--ldb-ui-accent-alpha-45);
                 border-color: var(--ldb-ui-focus-ring);
             }
 
@@ -831,10 +825,10 @@ const UI_CSS = `
 
             /* 主题切换按钮 */
             .ldb-theme-btn {
-                width: 44px;
-                height: 44px;
-                min-width: 44px;
-                min-height: 44px;
+                width: 30px;
+                height: 30px;
+                min-width: 30px;
+                min-height: 30px;
                 border-radius: var(--ldb-ui-radius-sm);
                 border: 1px solid var(--ldb-ui-border);
                 background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
@@ -846,7 +840,7 @@ const UI_CSS = `
                 padding: 0;
                 line-height: 1;
                 font-size: var(--ldb-ui-font-size-lg);
-                transition: background 0.2s ease-out;
+                transition: background var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
             }
 
             .ldb-theme-btn:hover {
@@ -854,6 +848,17 @@ const UI_CSS = `
             }
 
             /* 响应式 */
+            /* Odyssey Review F4: 平板档在前,手机档在后 — 同命中时后者获胜,
+               修正源顺序导致的 ≤480px 时 48px 覆盖 44px 的级联错误 */
+            @media (max-width: 768px) {
+                .ldb-notion-float-btn,
+                .gclip-float-btn,
+                .ldb-mini-btn {
+                    width: 48px;
+                    height: 48px;
+                }
+            }
+
             @media (max-width: 480px) {
                 .ldb-panel {
                     right: 0 !important;
@@ -873,6 +878,25 @@ const UI_CSS = `
                 }
                 .ldb-view-card.full {
                     grid-column: auto;
+                }
+                /* Odyssey UI E: 另两套面板移动端底部抽屉化 + 浮钮缩小贴边 */
+                .ldb-notion-panel,
+                .gclip-panel {
+                    right: 0 !important;
+                    left: 0 !important;
+                    bottom: 0 !important;
+                    width: 100% !important;
+                    max-width: 100vw !important;
+                    max-height: 70vh !important;
+                    border-radius: var(--ldb-ui-radius) var(--ldb-ui-radius) 0 0;
+                }
+                .ldb-notion-float-btn,
+                .gclip-float-btn {
+                    right: 12px !important;
+                    bottom: 12px !important;
+                    width: 44px;
+                    height: 44px;
+                    font-size: var(--ldb-ui-font-size-xl);
                 }
             }
 `;

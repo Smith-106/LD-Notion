@@ -23,11 +23,11 @@
 - **方式 A：Tampermonkey 脚本版（推荐）**：更新方便，适合大多数人
 - **方式 B：Chrome 扩展独立版（进阶）**：不依赖 Tampermonkey，书签能力内置
 
-### 下载链接（仓库当前 v3.8.0 / 最近已发布 v3.8.0）
+### 下载链接（最新版本见 [GitHub Releases](https://github.com/Smith-106/LD-Notion/releases/latest)）
 
 - 脚本安装：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
 - 脚本安装直链：<https://update.greasyfork.org/scripts/566681/LD-Notion%20Hub%20%E2%80%94%20AI%20%E5%A4%9A%E6%BA%90%E7%9F%A5%E8%AF%86%E4%B8%AD%E6%9E%A2.user.js>
-- 最近已发布扩展 ZIP 直链（v3.8.0）：<https://github.com/Smith-106/LD-Notion/releases/download/v3.8.0/ld-notion-extension-v3.8.0.zip>
+- 扩展 ZIP：前往 [Releases](https://github.com/Smith-106/LD-Notion/releases/latest) 下载对应版本的 `ld-notion-extension-vX.Y.Z.zip`
 - 安装浏览器扩展（Release）：<https://github.com/Smith-106/LD-Notion/releases/latest>
 
 ### 方式 A：Tampermonkey 脚本版
@@ -477,6 +477,12 @@ GM_setValue("ldb_exported_topics", "{}")
 ---
 
 ## 更新日志
+
+### v3.11.0
+
+- UI 六维审计修复 18 项：双浮动图标消除、重导出确认恢复、拖拽触屏化、480/768px 响应式断点、38 处可访问性关联等（完整清单见 [CHANGELOG.md](./CHANGELOG.md)）
+
+> 注：v3.9.0 / v3.10.0 的更新记录以 [CHANGELOG.md](./CHANGELOG.md) 为准，此处不再重复维护。
 
 ### v3.8.0
 

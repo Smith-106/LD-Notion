@@ -54,3 +54,6 @@ Thumbs.db
 data/
 chrome-extension-full-*.zip
 node_modules/.vite/
+
+# Session temp artifacts
+.tmp/

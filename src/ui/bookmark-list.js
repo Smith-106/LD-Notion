@@ -5,6 +5,7 @@ const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { SiteDetector } = require("../api");
 const { GitHubAPI } = require("../import");
+const { ChatUI } = require("../ai");
 
 // 因这些函数内部引用了 UI 自身方法与状态（如 UI.refs、UI.selectedBookmarks、
 // UI.renderBookmarkList 等），需在运行时获取 UI 引用。采用惰性 require 模式避免循环依赖。
@@ -174,7 +175,7 @@ const BookmarkList = {
                 <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""} ${isExported ? 'title="已导出到 Notion，无法重复导入"' : ""}>
                 <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
                 ${sourceTag}${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
-                ${reexportAction ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" onclick="event.stopPropagation(); ConfirmationDialog.show({ title: '确认操作', message: '重新导出将覆盖现有 Notion 页面，是否继续？', confirmText: '重新导出', onConfirm: () => window.location.reload(); });">重新导出</button>` : ''}
+                ${reexportAction}
             </div>
         `;
     },

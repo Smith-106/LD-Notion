@@ -198,12 +198,6 @@ const DesignSystem = {
             --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
             /* Tinted near-black toward brand hue for dark backdrop */
             --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
-
-            /* Dark mode accent alpha variants */
-            --ldb-ui-accent-dark-alpha-10: rgba(96, 165, 250, 0.10);
-            --ldb-ui-accent-dark-alpha-14: rgba(96, 165, 250, 0.14);
-            --ldb-ui-accent-dark-alpha-18: rgba(96, 165, 250, 0.18);
-            --ldb-ui-accent-dark-alpha-22: rgba(96, 165, 250, 0.22);
         }
 
         /* 保留 prefers-color-scheme 作为 auto 模式的回退 */
@@ -234,12 +228,6 @@ const DesignSystem = {
                 --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
             }
         }
-
-        /* Dark mode accent alpha variants (also used in prefers-color-scheme) */
-        --ldb-ui-accent-dark-alpha-10: rgba(96, 165, 250, 0.10);
-        --ldb-ui-accent-dark-alpha-14: rgba(96, 165, 250, 0.14);
-        --ldb-ui-accent-dark-alpha-18: rgba(96, 165, 250, 0.18);
-        --ldb-ui-accent-dark-alpha-22: rgba(96, 165, 250, 0.22);
 
         .ldb-panel,
         .ldb-notion-panel,
@@ -274,6 +262,16 @@ const DesignSystem = {
         .ldb-mini-btn,
         .gclip-float-btn {
             font-family: inherit;
+        }
+
+        /* Odyssey Review F5: pointer 拖拽表面禁用浏览器触摸手势,
+           防触屏上 pointerdown 后立即 pointercancel 导致拖不动 */
+        .ldb-header,
+        .ldb-notion-header,
+        .ldb-notion-float-btn,
+        .gclip-float-btn,
+        .ldb-resize-handle {
+            touch-action: none;
         }
 
         .ldb-panel input,
@@ -361,6 +359,7 @@ const DesignSystem = {
             border-radius: 10px;
             border: 1px solid var(--ldb-ui-border);
             background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 88%);
+            transition: background var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
             color: var(--ldb-ui-text);
             cursor: pointer;
             user-select: none;
@@ -390,14 +389,14 @@ const DesignSystem = {
             transition: transform var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), box-shadow var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out), filter var(--ldb-ui-duration-fast) var(--ldb-ui-ease-out);
         }
 
-        .ldb-btn:hover,
-        .gclip-btn:hover {
+        .ldb-btn:not(:disabled):hover,
+        .gclip-btn:not(:disabled):hover {
             filter: brightness(1.08);
             box-shadow: 0 2px 8px var(--ldb-ui-accent-alpha-18);
         }
 
-        .ldb-btn:active,
-        .gclip-btn:active {
+        .ldb-btn:not(:disabled):active,
+        .gclip-btn:not(:disabled):active {
             transform: scale(0.97);
             filter: brightness(0.96);
         }
@@ -616,7 +615,9 @@ const DesignSystem = {
             .ldb-toggle-slider::before,
             .ldb-progress-fill,
             .ldb-status,
-            .ldb-status-close {
+            .ldb-status-close,
+            .ldb-typing-dots,
+            .ldb-typing-dots span {
                 transition: none !important;
                 animation: none !important;
                 scroll-behavior: auto !important;
@@ -723,8 +724,8 @@ const DesignSystem = {
 
         .ldb-panel .ldb-chat-chip:hover,
         .ldb-notion-panel .ldb-chat-chip:hover {
-            background: rgba(37, 99, 235, 0.16);
-            border-color: rgba(37, 99, 235, 0.28);
+            background: var(--ldb-ui-accent-alpha-18);
+            border-color: var(--ldb-ui-accent-alpha-28);
         }
 
         .ldb-panel .ldb-chat-chip:active,

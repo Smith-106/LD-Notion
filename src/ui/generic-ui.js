@@ -31,8 +31,8 @@ const GenericUI = {
                 position: fixed;
                 bottom: 24px;
                 right: 24px;
-                width: 48px;
-                height: 48px;
+                width: 52px;
+                height: 52px;
                 border-radius: var(--ldb-ui-radius-pill);
                 background: linear-gradient(135deg, var(--ldb-ui-accent) 0%, var(--ldb-ui-accent-2) 100%);
                 color: var(--ldb-ui-white);
@@ -81,19 +81,25 @@ const GenericUI = {
                 right: 24px;
                 width: 320px;
                 max-width: calc(100vw - 32px);
+                max-height: calc(100vh - 100px);
                 z-index: var(--ldb-ui-z-index-overlay);
                 display: none;
                 overflow: hidden;
                 transform: translateY(12px);
                 opacity: 0;
                 /* Intentional: panel exit timing per design spec v3.1 */
-                transition: transform 0.22s var(--ldb-ui-ease-in), opacity 0.22s var(--ldb-ui-ease-in);
+                transition: transform 0.22s var(--ldb-ui-ease-out), opacity 0.22s var(--ldb-ui-ease-out);
             }
 
             .gclip-panel.visible {
                 display: block;
                 transform: translateY(0);
                 opacity: 1;
+            }
+
+            .gclip-panel-body {
+                overflow-y: auto;
+                max-height: calc(100vh - 160px);
             }
 
             .gclip-panel-header {
@@ -227,7 +233,7 @@ const GenericUI = {
 
                 <div id="gclip-settings" style="display: ${isConfigured ? 'none' : 'block'};">
                     <div class="gclip-field">
-                        <label>Notion API Key</label>
+                        <label for="gclip-api-key-input">Notion API Key</label>
                         <div style="display:flex;align-items:center;gap:var(--ldb-ui-spacing-md);">
                             <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="${CredentialVault.getFieldPlaceholder(CONFIG.STORAGE_KEYS.NOTION_API_KEY, 'secret_...')}" value="" style="flex:1;font-size:var(--ldb-ui-font-size-sm);" autocomplete="off" />
                             <button class="gclip-btn" id="gclip-save-api-key" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">保存</button>
@@ -235,9 +241,9 @@ const GenericUI = {
                     </div>
                     <div class="gclip-field">
                         <label>Notion OAuth（公开集成）</label>
-                        <input type="text" id="gclip-oauth-client-id" class="gclip-input" placeholder="Client ID">
-                        <input type="password" id="gclip-oauth-client-secret" class="gclip-input" placeholder="Client Secret" style="margin-top:var(--ldb-ui-spacing-md);">
-                        <input type="text" id="gclip-oauth-redirect-uri" class="gclip-input" placeholder="Redirect URI" style="margin-top:var(--ldb-ui-spacing-md);">
+                        <input type="text" id="gclip-oauth-client-id" class="gclip-input" placeholder="Client ID" aria-label="OAuth Client ID">
+                        <input type="password" id="gclip-oauth-client-secret" class="gclip-input" placeholder="Client Secret" aria-label="OAuth Client Secret" style="margin-top:var(--ldb-ui-spacing-md);">
+                        <input type="text" id="gclip-oauth-redirect-uri" class="gclip-input" placeholder="Redirect URI" aria-label="OAuth Redirect URI" style="margin-top:var(--ldb-ui-spacing-md);">
                         <div style="display:flex;gap:var(--ldb-ui-spacing-md);flex-wrap:wrap;margin-top:var(--ldb-ui-spacing-md);">
                             <button class="gclip-btn gclip-btn-primary" id="gclip-oauth-authorize" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">🔐 一键授权</button>
                             <button class="gclip-btn gclip-btn-secondary" id="gclip-oauth-clear" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">断开授权</button>
@@ -251,14 +257,14 @@ const GenericUI = {
                         <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">公开 OAuth 适合个人自建集成；敏感凭证会保存在本地加密保险箱中。</div>
                     </div>
                     <div class="gclip-field">
-                        <label>导出目标类型</label>
+                        <label for="gclip-export-type">导出目标类型</label>
                         <select id="gclip-export-type">
                             <option value="database" ${exportType === "database" ? "selected" : ""}>数据库</option>
                             <option value="page" ${exportType === "page" ? "selected" : ""}>页面（子页面）</option>
                         </select>
                     </div>
                     <div class="gclip-field">
-                        <label id="gclip-target-label">${exportType === "page" ? "父页面" : "数据库"}</label>
+                        <label id="gclip-target-label" for="gclip-target-select">${exportType === "page" ? "父页面" : "数据库"}</label>
                         <div style="display:flex;align-items:center;gap:var(--ldb-ui-spacing-md);">
                             <select id="gclip-target-select" class="gclip-input" style="flex:1;">
                                 <option value="">未选择</option>
@@ -268,14 +274,14 @@ const GenericUI = {
                         <div id="gclip-target-tip" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">优先从工作区列表选择，失败时可手动输入 ID</div>
                     </div>
                     <div class="gclip-field" id="gclip-manual-target-wrap" style="display:none;">
-                        <label>手动输入 ID（高级）</label>
+                        <label for="gclip-target-id">手动输入 ID（高级）</label>
                         <input type="text" id="gclip-target-id" value="" placeholder="32位ID">
                     </div>
-                    <div class="gclip-field" style="margin-top:-var(--ldb-ui-spacing-xs);">
+                    <div class="gclip-field" style="margin-top:calc(-1 * var(--ldb-ui-spacing-xs));">
                         <button class="gclip-btn gclip-btn-secondary" id="gclip-toggle-manual-target" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-lg);font-size:var(--ldb-ui-font-size-sm);">高级：手动输入 ID</button>
                     </div>
                     <div class="gclip-field">
-                        <label>图片处理</label>
+                        <label for="gclip-img-mode">图片处理</label>
                         <select id="gclip-img-mode">
                             <option value="external" ${imgMode === "external" ? "selected" : ""}>外链引用</option>
                             <option value="upload" ${imgMode === "upload" ? "selected" : ""}>上传到 Notion</option>
@@ -717,23 +723,24 @@ const GenericUI = {
     },
 
     // 显示状态
+    // 修复:原实现超时后 el.remove() 删除宿主 #gclip-status,后续 showStatus 在
+    // querySelector 返回 null 后抛 TypeError,导致 Zhihu/Generic 站点状态提示静默失效。
+    // 改为清空内容与类名(与 MainUI/NotionSiteUI 的持久容器语义对齐),保留宿主元素。
     showStatus: (message, type = "info") => {
         const el = GenericUI.panel.querySelector("#gclip-status");
+        if (!el) return;
         el.setAttribute("aria-live", "polite");
         el.setAttribute("aria-atomic", "true");
         el.textContent = message;
         el.className = `gclip-status ${type}`;
-        
-        // Auto-clear after timeout
+
+        // Auto-clear after timeout:仅清空文本,不移除宿主元素
         if (el._statusTimer) clearTimeout(el._statusTimer);
         const timeout = type === "error" ? 10000 : 3000;
         el._statusTimer = setTimeout(() => {
-            if (el && !el.dataset.closing) {
-                el.classList.add("ldb-fade-out");
-                el.dataset.closing = "true";
-                setTimeout(() => {
-                    if (el) el.remove();
-                }, 300);
+            if (el) {
+                el.textContent = "";
+                el.className = "gclip-status";
             }
         }, timeout);
     },
@@ -743,31 +750,68 @@ const GenericUI = {
         if (!GenericUI.panel) return;
         const isVisible = GenericUI.panel.classList.contains("visible");
         const shouldShow = show !== undefined ? show : !isVisible;
+        // Odyssey Review F1(三方共识 HIGH): 任何新转换先作废挂起的关闭操作,
+        // 防止 220ms 退出窗口内重开被残留 timer/onEnd 隐藏、Esc handler 孤儿化累积。
+        if (GenericUI._cancelPendingClose) {
+            GenericUI._cancelPendingClose();
+            GenericUI._cancelPendingClose = null;
+        }
         if (shouldShow) {
             GenericUI.panel.style.display = "block";
+            GenericUI.panel.setAttribute("aria-expanded", "true");
             // 触发 reflow 使 transition 生效
             GenericUI.panel.offsetHeight;
             GenericUI.panel.classList.add("visible");
-            // Add escape key handler to close panel
-            GenericUI._escHandler = (e) => {
-                if (e.key === 'Escape') {
-                    GenericUI.close();
-                }
-            };
-            document.addEventListener('keydown', GenericUI._escHandler);
+            // Esc 关闭面板(去重:重复打开不叠加监听)
+            if (!GenericUI._escHandler) {
+                GenericUI._escHandler = (e) => {
+                    if (e.key === 'Escape') {
+                        GenericUI.togglePanel(false);
+                    }
+                };
+                document.addEventListener('keydown', GenericUI._escHandler);
+            }
         } else {
             GenericUI.panel.classList.remove("visible");
-            GenericUI.panel.addEventListener("transitionend", function handler() {
-                if (!GenericUI.panel.classList.contains("visible")) {
-                    GenericUI.panel.style.display = "none";
-                    // Remove escape handler when panel is fully closed
-                    if (GenericUI._escHandler) {
-                        document.removeEventListener('keydown', GenericUI._escHandler);
-                        GenericUI._escHandler = null;
+            GenericUI.panel.setAttribute("aria-expanded", "false");
+            // reduced-motion 下 design-system 对 .gclip-panel 设 transition:none !important,
+            // transitionend 永不触发 → 同步隐藏;正常模式等 transitionend 再隐藏,保留退出动效。
+            const panel = GenericUI.panel;
+            const escRef = GenericUI._escHandler;
+            const cleanupClose = () => {
+                panel.style.display = "none";
+                if (escRef) document.removeEventListener('keydown', escRef);
+                GenericUI._escHandler = null;
+                GenericUI._cancelPendingClose = null;
+            };
+            const prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            if (prefersReduced) {
+                cleanupClose();
+            } else {
+                let closed = false;
+                let timer = null;
+                const onEnd = (e) => {
+                    if (!closed && (e.propertyName === "opacity" || e.propertyName === "transform")) {
+                        finish();
                     }
-                }
-                GenericUI.panel.removeEventListener("transitionend", handler);
-            });
+                };
+                const finish = () => {
+                    if (closed) return;
+                    closed = true;
+                    panel.removeEventListener("transitionend", onEnd);
+                    clearTimeout(timer);
+                    cleanupClose();
+                };
+                panel.addEventListener("transitionend", onEnd);
+                // 兑底:transitionend 未触发时 300ms 后强制隐藏
+                timer = setTimeout(finish, 300);
+                // Odyssey Review F1: 暴露取消闭包,重开/再关闭时作废本次挂起关闭
+                GenericUI._cancelPendingClose = () => {
+                    closed = true;
+                    panel.removeEventListener("transitionend", onEnd);
+                    clearTimeout(timer);
+                };
+            }
         }
     },
 

@@ -1,5 +1,41 @@
 # 更新日志
 
+## [3.11.0] - 2026-08-24
+
+### 新增（Odyssey UI 六维审计修复 · 三模型复审闭环）
+
+本轮完成桌面/平板/移动、键盘、触屏、动效六维审计，闭环 18 项问题（含三模型共识复审 F1–F8）。
+
+**运行时缺陷修复（High）**:
+- LinuxDo 页面移除 GenericUI 重复初始化，「双浮动图标」消失
+- 「重新导出」按钮内联 onclick 三重失效 → 改事件委托，并恢复破坏性覆盖前的确认弹窗
+- 最小化恢复误用 `display:block` 破坏面板 flex 布局 → 修正为 `flex`
+- 空书签 CTA 引用未导入的 `ChatUI` 致 ReferenceError → 补齐导入
+- gclip 面板新增 max-height 视口钳制，内容不再溢出屏幕
+
+**交互与触屏**:
+- 拖拽全面迁移 pointer events + setPointerCapture + touch-action（面板/浮钮/缩放手柄触屏可用），消除 document.onmousemove 相互覆盖
+- Esc 关闭统一走 togglePanel；主面板 Esc 最小化带输入法组合/输入控件/确认弹窗三重守卫
+- gclip 关闭过渡竞态以取消闭包兑底；reduced-motion 下同步隐藏
+- 面板 resize 重写：恢复视口钳制、分轴 ARIA slider；浮钮位置恢复钘制
+
+**响应式与可访问性**:
+- 新增 480px 抽屉式面板与 768px 平板断点；媒体查询源顺序级联修正
+- 38 处 label↔input 显式关联；aria-expanded 初始态、progressbar 数值属性、tablist 方向标注、typing-dots reduced-motion 适配
+- 浮钮统一 52px、主题按钮 30px 对齐头部按钮
+
+**清理与一致性**:
+- 删除死代码（dark-alpha 非法位置声明/.minimized）；硬编码色令牌化；重复 class 合并；非法负 var() 修正；零值条形渲染 0 宽
+
+### 验证
+
+- `npm test`：556 vitest + legacy 三件套全部通过
+- `npm run build`：单文件产物 1374.6 KB（较 v3.10.0 +0.66%，低于 5% 审查阈值）
+- Odyssey Review 三模型独立复审：Security/Performance 维度零发现
+
+[3.11.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.11.0
+[3.10.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.10.0
+
 ## [3.10.0] - 2026-08-02
 
 ### 新增（全量 UI/UX 改进循环）

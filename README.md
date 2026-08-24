@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.10.0`
+- 当前仓库源码版本：`v3.11.0`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -386,6 +386,15 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.11.0
+
+本次版本聚焦「Odyssey UI 审计修复」：18 项桌面/移动/触屏/键盘/动效问题全闭环（三模型共识复审 F1–F8）。
+- 修复重新导出按钮失效、最小化恢复破坏 flex 布局、空态 CTA ReferenceError 等 HIGH 缺陷；LinuxDo 双浮动图标消除
+- 拖拽迁移 pointer events 支持触屏；新增 480px 抽屉式面板与 768px 响应式断点
+- 可访问性强化：38 处表单关联、progressbar/tablist ARIA、reduced-motion 全量适配
+
+验证：556/556 测试全绿，单文件产物约 1374.6 KB（+0.66%）。
 
 ### v3.10.0
 

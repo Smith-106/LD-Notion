@@ -222,7 +222,7 @@ const UI = {
                     <button class="ldb-header-btn" id="ldb-close" title="关闭" aria-label="关闭面板">×</button>
                 </div>
             </div>
-            <div class="ldb-tabs" role="tablist">
+            <div class="ldb-tabs" role="tablist" aria-orientation="horizontal">
                 <button class="ldb-tab active" data-tab="bookmarks" role="tab" aria-selected="true" aria-controls="ldb-tab-bookmarks">📚 收藏</button>
                 <button class="ldb-tab" data-tab="visuals" role="tab" aria-selected="false" aria-controls="ldb-tab-visuals">📊 视图</button>
                 <button class="ldb-tab" data-tab="ai" role="tab" aria-selected="false" aria-controls="ldb-tab-ai">🤖 AI</button>
@@ -506,7 +506,7 @@ const UI = {
                     <div class="ldb-section">
                         <div class="ldb-section-title">Notion 配置</div>
                         <div class="ldb-input-group">
-                            <label class="ldb-label">API Key</label>
+                                                        <label class="ldb-label" for="ldb-api-key">API Key</label>
                             <input type="password" class="ldb-input" id="ldb-api-key" placeholder="secret_xxx...">
                             <div class="ldb-tip">
                                 在 <a href="https://www.notion.so/my-integrations" target="_blank" class="ldb-link">Notion Integrations</a> 创建
@@ -514,9 +514,9 @@ const UI = {
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label">公开 OAuth 授权（可选）</label>
-                            <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID">
-                            <input type="password" class="ldb-input" id="ldb-oauth-client-secret" placeholder="Client Secret" class="ldb-mt-8">
-                            <input type="text" class="ldb-input" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" class="ldb-mt-8">
+                            <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID" aria-label="OAuth Client ID">
+                            <input type="password" class="ldb-input ldb-mt-8" id="ldb-oauth-client-secret" placeholder="Client Secret" aria-label="OAuth Client Secret">
+                            <input type="text" class="ldb-input ldb-mt-8" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" aria-label="OAuth Redirect URI">
                             <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
                                 <button class="ldb-btn ldb-btn-primary" id="ldb-oauth-authorize">🔐 一键授权</button>
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">断开授权</button>
@@ -530,15 +530,15 @@ const UI = {
                             <div class="ldb-tip">如果你使用 Notion 公开集成，请先把 Redirect URI 加到集成配置里，再点击一键授权。敏感凭证会保存在本地加密保险箱中。</div>
                         </div>
                         <div class="ldb-input-group">
-                            <label class="ldb-label">数据库 / 页面</label>
+                            <label class="ldb-label" for="ldb-workspace-select">数据库 / 页面</label>
                             <div class="ldb-flex-gap">
-                                <select class="ldb-select" id="ldb-workspace-select" class="ldb-flex-1">
+                                <select class="ldb-select ldb-flex-1" id="ldb-workspace-select">
                                     <option value="">-- 从工作区选择 --</option>
                                 </select>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-refresh-workspace" class="ldb-nowrap-badge" title="刷新工作区页面列表" aria-label="刷新工作区页面列表">🔄</button>
+                                <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-refresh-workspace" title="刷新工作区页面列表" aria-label="刷新工作区页面列表">🔄</button>
                             </div>
                             <div class="ldb-input-group" id="ldb-manual-db-wrap" style="display: none; margin-top: var(--ldb-ui-spacing-md);">
-                                <input type="text" class="ldb-input" id="ldb-database-id" placeholder="手动输入 32 位数据库 ID（高级）" class="ldb-flex-1">
+                                <input type="text" class="ldb-input ldb-flex-1" id="ldb-database-id" placeholder="手动输入 32 位数据库 ID（高级）">
                             </div>
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-toggle-manual-db" style="margin-top: var(--ldb-ui-spacing-sm); padding: var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">高级：手动输入数据库 ID</button>
                             <div class="ldb-tip" id="ldb-workspace-tip">
@@ -566,7 +566,7 @@ const UI = {
 
                         <!-- 父页面 ID（页面模式时显示） -->
                         <div class="ldb-input-group" id="ldb-parent-page-group" style="display: none;">
-                            <label class="ldb-label">父页面 ID</label>
+                            <label class="ldb-label" for="ldb-parent-page-id">父页面 ID</label>
                             <input type="text" class="ldb-input" id="ldb-parent-page-id" placeholder="32位页面ID">
                             <div class="ldb-tip">
                                 帖子将作为子页面创建在此页面下
@@ -631,13 +631,13 @@ const UI = {
                             <div class="ldb-input-group">
                                 <label class="ldb-label">楼层范围</label>
                                 <div class="ldb-range-group">
-                                    <input type="number" id="ldb-range-start" value="1" min="1">
+                                    <input type="number" id="ldb-range-start" value="1" min="1" aria-label="起始楼层">
                                     <span>至</span>
-                                    <input type="number" id="ldb-range-end" value="999999" min="1">
+                                    <input type="number" id="ldb-range-end" value="999999" min="1" aria-label="结束楼层">
                                 </div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">图片处理</label>
+                                <label class="ldb-label" for="ldb-img-mode">图片处理</label>
                                 <select class="ldb-select" id="ldb-img-mode">
                                     <option value="upload">上传到 Notion</option>
                                     <option value="external">外链引用</option>
@@ -646,7 +646,7 @@ const UI = {
                                 <div class="ldb-tip">Notion 免费套餐文件需小于 5MB；付费套餐 PDF 小于 20MB、图片小于 5MB。若图片上传报错，脚本会自动尝试按文件上传。</div>
                             </div>
                             <div class="ldb-form-group">
-                                <label>请求间隔</label>
+                                <label for="ldb-request-delay">请求间隔</label>
                                 <select class="ldb-select" id="ldb-request-delay">
                                     <option value="200">快速 (200ms)</option>
                                     <option value="500">正常 (500ms)</option>
@@ -659,7 +659,7 @@ const UI = {
                                 </select>
                             </div>
                             <div class="ldb-form-group">
-                                <label>并发数</label>
+                                <label for="ldb-export-concurrency">并发数</label>
                                 <select class="ldb-select" id="ldb-export-concurrency">
                                     <option value="1">串行 (1个)</option>
                                     <option value="2">2 个并发</option>
@@ -668,7 +668,7 @@ const UI = {
                                 </select>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">图片筛选</label>
+                                <label class="ldb-label" for="ldb-filter-img">图片筛选</label>
                                 <select class="ldb-select" id="ldb-filter-img">
                                     <option value="all">全部</option>
                                     <option value="only_img">仅含图楼层</option>
@@ -676,22 +676,22 @@ const UI = {
                                 </select>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">指定用户</label>
+                                <label class="ldb-label" for="ldb-filter-users">指定用户</label>
                                 <input type="text" class="ldb-input" id="ldb-filter-users" placeholder="user1, user2">
                                 <div class="ldb-tip">逗号分隔，仅导出这些用户的回复</div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">包含关键词</label>
+                                <label class="ldb-label" for="ldb-filter-include">包含关键词</label>
                                 <input type="text" class="ldb-input" id="ldb-filter-include" placeholder="教程, 指南">
                                 <div class="ldb-tip">逗号分隔，必须包含任一关键词</div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">排除关键词</label>
+                                <label class="ldb-label" for="ldb-filter-exclude">排除关键词</label>
                                 <input type="text" class="ldb-input" id="ldb-filter-exclude" placeholder="广告, 水贴">
                                 <div class="ldb-tip">逗号分隔，排除包含关键词的楼层</div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">最少字数</label>
+                                <label class="ldb-label" for="ldb-filter-minlen">最少字数</label>
                                 <input type="number" class="ldb-input" id="ldb-filter-minlen" value="0" min="0" placeholder="0">
                                 <div class="ldb-tip">过滤字数不足的楼层</div>
                             </div>
@@ -708,7 +708,7 @@ const UI = {
                         </div>
                         <div class="ldb-toggle-content collapsed" id="ldb-ai-settings-content">
                             <div class="ldb-input-group ldb-mt-12">
-                                <label class="ldb-label">AI 服务</label>
+                                <label class="ldb-label" for="ldb-ai-service">AI 服务</label>
                                 <select class="ldb-select" id="ldb-ai-service">
                                     <option value="openai">OpenAI</option>
                                     <option value="claude">Claude</option>
@@ -716,35 +716,35 @@ const UI = {
                                 </select>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">模型</label>
+                                <label class="ldb-label" for="ldb-ai-model">模型</label>
                                 <div class="ldb-flex-gap">
-                                    <select class="ldb-select" id="ldb-ai-model" class="ldb-flex-1"></select>
-                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-fetch-models" class="ldb-nowrap-badge">🔄 获取</button>
+                                    <select class="ldb-select ldb-flex-1" id="ldb-ai-model"></select>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-ai-fetch-models">🔄 获取</button>
                                 </div>
                                 <div class="ldb-tip" id="ldb-ai-model-tip"></div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">API Key</label>
+                                                            <label class="ldb-label" for="ldb-ai-api-key">API Key</label>
                                 <input type="password" class="ldb-input" id="ldb-ai-api-key" placeholder="AI 服务的 API Key">
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">自定义端点 (可选)</label>
+                                <label class="ldb-label" for="ldb-ai-base-url">自定义端点 (可选)</label>
                                 <input type="text" class="ldb-input" id="ldb-ai-base-url" placeholder="留空使用官方 API">
                                 <div class="ldb-tip">支持第三方 OpenAI 兼容 API</div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">分类列表</label>
+                                <label class="ldb-label" for="ldb-ai-categories">分类列表</label>
                                 <input type="text" class="ldb-input" id="ldb-ai-categories" placeholder="技术, 生活, 问答, 分享, 资源, 其他">
                                 <div class="ldb-tip">逗号分隔，用于自动分类功能</div>
                             </div>
                             <div class="ldb-input-group">
-                                <label class="ldb-label">查询数据库</label>
+                                <label class="ldb-label" for="ldb-ai-target-db">查询数据库</label>
                                 <div class="ldb-flex-gap">
-                                    <select class="ldb-select" id="ldb-ai-target-db" class="ldb-flex-1">
+                                    <select class="ldb-select ldb-flex-1" id="ldb-ai-target-db">
                                         <option value="">当前配置的数据库</option>
                                         <option value="__all__">所有工作区数据库</option>
                                     </select>
-                                    <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-refresh-dbs" class="ldb-nowrap-badge">🔄</button>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-ai-refresh-dbs">🔄</button>
                                 </div>
                                 <div class="ldb-tip">AI 查询数据库时的目标范围</div>
                             </div>
@@ -967,7 +967,9 @@ const UI = {
         btn.style.display = "none";
 
         btn.onclick = () => {
-            UI.panel.style.display = "block";
+            // 修复:主面板 .ldb-panel 为 display:flex 布局,用 block 会破坏 flex 流
+            // 导致 .ldb-body 滚动失效、超过 90vh 的底部内容不可达。
+            UI.panel.style.display = "flex";
             btn.style.display = "none";
             Storage.set(CONFIG.STORAGE_KEYS.PANEL_MINIMIZED, false);
         };
@@ -1430,12 +1432,12 @@ const UI = {
 
         container.innerHTML = `
             <div class="ldb-progress">
-                <div class="ldb-progress-bar">
+                <div class="ldb-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
                     <div class="ldb-progress-fill" style="width: ${percent}%"></div>
                 </div>
                 <div class="ldb-progress-text">
                     ${current}/${total} (${percent}%)<br>
-                    <small>${Utils.escapeHtml(message)}</small>
+                    <small style="white-space: pre-line; word-break: break-word;">${Utils.escapeHtml(message)}</small>
                 </div>
             </div>
         `;
@@ -2146,7 +2148,7 @@ const UI = {
             ? `<div class="ldb-view-bars">${rows.map((row) => `
                 <div class="ldb-view-bar-row">
                     <div class="ldb-view-bar-label">${Utils.escapeHtml(row.label)}</div>
-                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, row.pct)}%;"></div></div>
+                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${row.pct > 0 ? Math.max(8, row.pct) : 0}%;"></div></div>
                     <div class="ldb-view-bar-value">${row.count} · ${row.pct}%</div>
                 </div>
             `).join("")}</div>`
@@ -2162,7 +2164,7 @@ const UI = {
             ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
                 <div class="ldb-view-timeline-item">
                     <div class="ldb-view-timeline-label">${item.label}</div>
-                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, UI.getViewPct(item.count, model.total))}%;"></div></div>
+                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${item.count > 0 ? Math.max(8, UI.getViewPct(item.count, model.total)) : 0}%;"></div></div>
                     <div class="ldb-view-timeline-value">${item.count} 项 / 已导出 ${item.exported}</div>
                 </div>
             `).join("")}</div>`
@@ -2364,27 +2366,35 @@ const UI = {
     makeDraggable: (element, handle) => {
         let offsetX, offsetY, isDragging = false;
 
-        handle.onmousedown = (e) => {
+        // Odyssey UI F+Q: pointer events + setPointerCapture 替代 document.onmouse*
+        // 解决:① 与 NotionSiteUI.makeDraggable 的全局 handler 互相覆盖;
+        // ② 触屏设备不可拖拽(mouse-only)。
+        handle.addEventListener("pointerdown", (e) => {
             if (e.target.tagName === "BUTTON") return;
             isDragging = true;
             offsetX = e.clientX - element.offsetLeft;
             offsetY = e.clientY - element.offsetTop;
             document.body.style.userSelect = "none";
-        };
+            try { handle.setPointerCapture(e.pointerId); } catch (_) { /* 旧浏览器降级 */ }
+        });
 
-        document.onmousemove = (e) => {
+        handle.addEventListener("pointermove", (e) => {
             if (!isDragging) return;
             const x = Math.max(0, Math.min(window.innerWidth - element.offsetWidth, e.clientX - offsetX));
             const y = Math.max(0, Math.min(window.innerHeight - element.offsetHeight, e.clientY - offsetY));
             element.style.left = x + "px";
             element.style.top = y + "px";
             element.style.right = "auto";
-        };
+        });
 
-        document.onmouseup = () => {
+        const endDrag = (e) => {
+            if (!isDragging) return;
             isDragging = false;
             document.body.style.userSelect = "";
+            try { handle.releasePointerCapture(e.pointerId); } catch (_) { /* 旧浏览器降级 */ }
         };
+        handle.addEventListener("pointerup", endDrag);
+        handle.addEventListener("pointercancel", endDrag);
     },
 
     maybePromptBookmarkExtensionInstall: () => {
@@ -2447,6 +2457,10 @@ const UI = {
     destroy: () => {
         UI._abortController?.abort();
         UI._abortController = null;
+        if (UI._escMinimizeHandler) {
+            document.removeEventListener("keydown", UI._escMinimizeHandler);
+            UI._escMinimizeHandler = null;
+        }
         UI.panel?.remove();
         UI.panel = null;
         UI.miniBtn?.remove();

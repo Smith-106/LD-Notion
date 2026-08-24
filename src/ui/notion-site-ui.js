@@ -132,7 +132,9 @@ const NotionSiteUI = {
         let offsetX, offsetY;
         let startX, startY;
 
-        btn.addEventListener("mousedown", (e) => {
+        // Odyssey UI N+Q: pointer events + setPointerCapture 替代 document mouse listener
+        // 解决 listener 累计未清理 + 触屏不可用。
+        btn.addEventListener("pointerdown", (e) => {
             isDragging = true;
             hasMoved = false;
             startX = e.clientX;
@@ -141,11 +143,12 @@ const NotionSiteUI = {
             offsetY = e.clientY - btn.getBoundingClientRect().top;
             btn.classList.add("dragging");
             document.body.style.userSelect = "none";
+            try { btn.setPointerCapture(e.pointerId); } catch (_) { /* 旧浏览器降级 */ }
             e.preventDefault();
         });
 
-        NotionSiteUI._floatDragMove = (e) => {
-                if (!isDragging) return;
+        btn.addEventListener("pointermove", (e) => {
+            if (!isDragging) return;
             const dx = e.clientX - startX;
             const dy = e.clientY - startY;
             if (!hasMoved && Math.sqrt(dx * dx + dy * dy) <= 4) return;
@@ -156,10 +159,10 @@ const NotionSiteUI = {
             btn.style.top = y + "px";
             btn.style.right = "auto";
             btn.style.bottom = "auto";
-            };
-            document.addEventListener("mousemove", NotionSiteUI._floatDragMove);
-        NotionSiteUI._floatDragEnd = () => {
-                if (!isDragging) return;
+        });
+
+        const endFloatDrag = (e) => {
+            if (!isDragging) return;
             isDragging = false;
             btn.classList.remove("dragging");
             document.body.style.userSelect = "";
@@ -169,8 +172,10 @@ const NotionSiteUI = {
                 const bottom = window.innerHeight - rect.bottom;
                 Storage.set(CONFIG.STORAGE_KEYS.FLOAT_BTN_POSITION, JSON.stringify({ right: right + "px", bottom: bottom + "px" }));
             }
-            };
-            document.addEventListener("mouseup", NotionSiteUI._floatDragEnd);
+            try { btn.releasePointerCapture(e.pointerId); } catch (_) { /* 旧浏览器降级 */ }
+        };
+        btn.addEventListener("pointerup", endFloatDrag);
+        btn.addEventListener("pointercancel", endFloatDrag);
         btn.addEventListener("click", (e) => {
             if (hasMoved) {
                 // 拖拽结束，不触发点击
@@ -182,13 +187,17 @@ const NotionSiteUI = {
             NotionSiteUI.togglePanel();
         });
 
-        // 恢复保存的位置
+        // Odyssey UI F5: 恢复位置时按当前视口钳制,避免缩小窗口后浮钮停在视口外
         const savedPosition = Storage.get(CONFIG.STORAGE_KEYS.FLOAT_BTN_POSITION, null);
         if (savedPosition) {
             try {
                 const pos = JSON.parse(savedPosition);
-                btn.style.right = pos.right || "24px";
-                btn.style.bottom = pos.bottom || "24px";
+                const savedRight = parseFloat(pos.right) || 24;
+                const savedBottom = parseFloat(pos.bottom) || 24;
+                const maxRight = Math.max(0, window.innerWidth - btn.offsetWidth);
+                const maxBottom = Math.max(0, window.innerHeight - btn.offsetHeight);
+                btn.style.right = Math.min(savedRight, maxRight) + "px";
+                btn.style.bottom = Math.min(savedBottom, maxBottom) + "px";
             } catch (e) {
                 console.warn("[LD-Notion] corrupted float btn position, resetting");
                 Storage.remove(CONFIG.STORAGE_KEYS.FLOAT_BTN_POSITION);
@@ -210,7 +219,7 @@ const NotionSiteUI = {
             <div class="ldb-notion-header">
                 <h3>🤖 AI 助手</h3>
                 <div class="ldb-notion-header-btns">
-                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="切换主题" aria-label="切换主题" style="width:44px;height:44px;border-radius:var(--ldb-ui-radius-xs);font-size:var(--ldb-ui-font-size-md);">🌙</button>
+                    <button class="ldb-theme-btn" id="ldb-notion-theme-toggle" title="切换主题" aria-label="切换主题">🌙</button>
                     <button class="ldb-notion-header-btn" id="ldb-notion-close" title="关闭" aria-label="关闭 AI 助手面板">×</button>
                 </div>
             </div>
@@ -242,7 +251,7 @@ const NotionSiteUI = {
                 <button 
                     class="ldb-notion-toggle-section" 
                     id="ldb-notion-settings-toggle"
-                    aria-expanded="true"
+                    aria-expanded="false"
                     tabindex="0"
                     role="button"
                 >
@@ -251,14 +260,14 @@ const NotionSiteUI = {
                 </button>
                 <div class="ldb-notion-toggle-content collapsed" id="ldb-notion-settings-content">
                     <div class="ldb-input-group ldb-mt-12">
-                        <label class="ldb-label">Notion API Key</label>
+                        <label class="ldb-label" for="ldb-notion-api-key">Notion API Key</label>
                         <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx...">
                     </div>
                     <div class="ldb-input-group">
                         <label class="ldb-label">Notion OAuth（公开集成）</label>
-                        <input type="text" class="ldb-input" id="ldb-notion-oauth-client-id" placeholder="Client ID">
-                        <input type="password" class="ldb-input" id="ldb-notion-oauth-client-secret" placeholder="Client Secret" class="ldb-mt-8">
-                        <input type="text" class="ldb-input" id="ldb-notion-oauth-redirect-uri" placeholder="Redirect URI" class="ldb-mt-8">
+                        <input type="text" class="ldb-input" id="ldb-notion-oauth-client-id" placeholder="Client ID" aria-label="OAuth Client ID">
+                        <input type="password" class="ldb-input ldb-mt-8" id="ldb-notion-oauth-client-secret" placeholder="Client Secret" aria-label="OAuth Client Secret">
+                        <input type="text" class="ldb-input ldb-mt-8" id="ldb-notion-oauth-redirect-uri" placeholder="Redirect URI" aria-label="OAuth Redirect URI">
                         <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
                             <button class="ldb-btn ldb-btn-primary" id="ldb-notion-oauth-authorize" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">🔐 一键授权</button>
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-oauth-clear" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">断开授权</button>
@@ -272,18 +281,18 @@ const NotionSiteUI = {
                         <div class="ldb-tip">适用于 Notion 公开集成。敏感凭证会保存在本地加密保险箱中，仅在解锁后的当前会话内可用。</div>
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">数据库 / 页面</label>
+                        <label class="ldb-label" for="ldb-notion-ai-target-db">数据库 / 页面</label>
                         <div class="ldb-flex-gap">
-                            <select class="ldb-select" id="ldb-notion-ai-target-db" class="ldb-flex-1">
+                            <select class="ldb-select ldb-flex-1" id="ldb-notion-ai-target-db">
                                 <option value="">默认（跟随导出数据库）</option>
                                 <option value="__all__">所有工作区数据库</option>
                             </select>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-refresh-workspace" class="ldb-nowrap-badge" title="刷新工作区列表" aria-label="刷新工作区列表">🔄</button>
+                            <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-notion-refresh-workspace" title="刷新工作区列表" aria-label="刷新工作区列表">🔄</button>
                         </div>
                         <div class="ldb-tip" id="ldb-notion-workspace-tip"></div>
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">AI 服务</label>
+                        <label class="ldb-label" for="ldb-notion-ai-service">AI 服务</label>
                         <select class="ldb-select" id="ldb-notion-ai-service">
                             <option value="openai">OpenAI</option>
                             <option value="claude">Claude</option>
@@ -291,27 +300,27 @@ const NotionSiteUI = {
                         </select>
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">模型</label>
+                        <label class="ldb-label" for="ldb-notion-ai-model">模型</label>
                         <div class="ldb-flex-gap">
-                            <select class="ldb-select" id="ldb-notion-ai-model" class="ldb-flex-1"></select>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-ai-fetch-models" class="ldb-nowrap-badge">🔄 获取</button>
+                            <select class="ldb-select ldb-flex-1" id="ldb-notion-ai-model"></select>
+                            <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-notion-ai-fetch-models">🔄 获取</button>
                         </div>
                         <div class="ldb-tip" id="ldb-notion-ai-model-tip"></div>
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">AI API Key</label>
+                        <label class="ldb-label" for="ldb-notion-ai-api-key">AI API Key</label>
                         <input type="password" class="ldb-input" id="ldb-notion-ai-api-key" placeholder="AI 服务的 API Key">
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">自定义端点 (可选)</label>
+                        <label class="ldb-label" for="ldb-notion-ai-base-url">自定义端点 (可选)</label>
                         <input type="text" class="ldb-input" id="ldb-notion-ai-base-url" placeholder="留空使用官方 API">
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">分类列表</label>
+                        <label class="ldb-label" for="ldb-notion-ai-categories">分类列表</label>
                         <input type="text" class="ldb-input" id="ldb-notion-ai-categories" placeholder="技术, 生活, 问答, 分享, 资源, 其他">
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">刷新页数上限</label>
+                        <label class="ldb-label" for="ldb-notion-workspace-max-pages">刷新页数上限</label>
                         <select class="ldb-select" id="ldb-notion-workspace-max-pages">
                             <option value="5">5 页 (500 条)</option>
                             <option value="10">10 页 (1000 条)</option>
@@ -325,11 +334,11 @@ const NotionSiteUI = {
                         <span class="ldb-hint">🤖 Agent 个性化</span>
                     </div>
                     <div class="ldb-input-group ldb-mt-8">
-                        <label class="ldb-label">助手名字</label>
+                        <label class="ldb-label" for="ldb-notion-persona-name">助手名字</label>
                         <input type="text" class="ldb-input" id="ldb-notion-persona-name" placeholder="AI 助手">
                     </div>
                     <div class="ldb-input-group">
-                        <label class="ldb-label">语气风格</label>
+                        <label class="ldb-label" for="ldb-notion-persona-tone">语气风格</label>
                         <select class="ldb-select" id="ldb-notion-persona-tone">
                             <option value="友好">友好</option>
                             <option value="专业">专业</option>
@@ -958,15 +967,17 @@ const NotionSiteUI = {
     makeDraggable: (element, handle) => {
         let offsetX, offsetY, isDragging = false;
 
-        handle.onmousedown = (e) => {
+        // Odyssey UI F+Q: pointer events + setPointerCapture 替代 document.onmouse*
+        handle.addEventListener("pointerdown", (e) => {
             if (e.target.tagName === "BUTTON") return;
             isDragging = true;
             offsetX = e.clientX - element.offsetLeft;
             offsetY = e.clientY - element.offsetTop;
             document.body.style.userSelect = "none";
-        };
+            try { handle.setPointerCapture(e.pointerId); } catch (_) { /* 旧浏览器降级 */ }
+        });
 
-        document.onmousemove = (e) => {
+        handle.addEventListener("pointermove", (e) => {
             if (!isDragging) return;
             const x = Math.max(0, Math.min(window.innerWidth - element.offsetWidth, e.clientX - offsetX));
             const y = Math.max(0, Math.min(window.innerHeight - element.offsetHeight, e.clientY - offsetY));
@@ -974,9 +985,10 @@ const NotionSiteUI = {
             element.style.top = y + "px";
             element.style.right = "auto";
             element.style.bottom = "auto";
-        };
+        });
 
-        document.onmouseup = () => {
+        const endDrag = (e) => {
+            if (!isDragging) return;
             if (isDragging) {
                 // 保存位置（使用 right 和 bottom）
                 const rect = element.getBoundingClientRect();
@@ -986,7 +998,10 @@ const NotionSiteUI = {
             }
             isDragging = false;
             document.body.style.userSelect = "";
+            try { handle.releasePointerCapture(e.pointerId); } catch (_) { /* 旧浏览器降级 */ }
         };
+        handle.addEventListener("pointerup", endDrag);
+        handle.addEventListener("pointercancel", endDrag);
     },
 
     createAIAssistantSettingsAdapter: () => ({
@@ -1042,8 +1057,7 @@ const NotionSiteUI = {
     },
 
     destroy: () => {
-        if (NotionSiteUI._floatDragMove) document.removeEventListener("mousemove", NotionSiteUI._floatDragMove);
-        if (NotionSiteUI._floatDragEnd) document.removeEventListener("mouseup", NotionSiteUI._floatDragEnd);
+        // Odyssey UI N: 浮钮改用 setPointerCapture,btn.remove() 自动清理,无需 document.removeEventListener
         NotionSiteUI._abortController?.abort();
         NotionSiteUI._abortController = null;
         NotionSiteUI.panel?.remove();

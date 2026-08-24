@@ -87,9 +87,11 @@ function main() {
         if (currentSite === SiteDetector.SITES.LINUX_DO) {
             UI.init();
             Utils.runWhenBrowserIdle(() => UpdateChecker.init());
+            // 双图标修复:LinuxDo 已有主面板(📚 收藏批量导出)作为单一浮动入口,
+            // 不再初始化 GenericUI(📎 当前页导出浮钮),避免最小化态两浮钮堆叠。
+            // GenericUI 仅用于 Zhihu/Generic 站点(见下方分支)。AutoImporter 独立,保留。
             const isBookmarkPage = /\/u\/[^/]+\/activity\/bookmarks/.test(window.location.pathname);
             if (!isBookmarkPage) {
-                Utils.runWhenBrowserIdle(() => GenericUI.init());
                 Utils.runWhenBrowserIdle(() => AutoImporter.init());
             }
             Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
