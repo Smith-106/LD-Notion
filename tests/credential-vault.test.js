@@ -5,10 +5,11 @@ import { Storage } from "../src/storage/index.js";
 
 describe("CredentialVault", () => {
     describe("SENSITIVE_KEYS", () => {
-        it("includes all expected sensitive keys", () => {
-            expect(CredentialVault.SENSITIVE_KEYS.has(CONFIG.STORAGE_KEYS.NOTION_API_KEY)).toBe(true);
-            expect(CredentialVault.SENSITIVE_KEYS.has(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET)).toBe(true);
-            expect(CredentialVault.SENSITIVE_KEYS.has(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN)).toBe(true);
+        it("includes all expected sensitive keys (vault-encrypted set)", () => {
+            // OAuth 三键已脱敏(改明文 GM 存储),不在此集
+            expect(CredentialVault.SENSITIVE_KEYS.has(CONFIG.STORAGE_KEYS.NOTION_API_KEY)).toBe(false);
+            expect(CredentialVault.SENSITIVE_KEYS.has(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET)).toBe(false);
+            expect(CredentialVault.SENSITIVE_KEYS.has(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN)).toBe(false);
             expect(CredentialVault.SENSITIVE_KEYS.has(CONFIG.STORAGE_KEYS.AI_API_KEY)).toBe(true);
             expect(CredentialVault.SENSITIVE_KEYS.has(CONFIG.STORAGE_KEYS.AI_BASE_URL)).toBe(true);
             expect(CredentialVault.SENSITIVE_KEYS.has(CONFIG.STORAGE_KEYS.GITHUB_TOKEN)).toBe(true);
@@ -16,14 +17,24 @@ describe("CredentialVault", () => {
             expect(CredentialVault.SENSITIVE_KEYS.has(CONFIG.STORAGE_KEYS.OBS_API_URL)).toBe(true);
         });
 
-        it("has 8 sensitive keys total", () => {
-            expect(CredentialVault.SENSITIVE_KEYS.size).toBe(8);
+        it("has 5 sensitive keys total (OAuth 三键脱敏后)", () => {
+            expect(CredentialVault.SENSITIVE_KEYS.size).toBe(5);
+        });
+
+        it("REDACT_IN_LOGS 超集覆盖 vault 敏感键 + OAuth 三键(审计不得泄漏)", () => {
+            expect(CredentialVault.REDACT_IN_LOGS.has(CONFIG.STORAGE_KEYS.NOTION_API_KEY)).toBe(true);
+            expect(CredentialVault.REDACT_IN_LOGS.has(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET)).toBe(true);
+            expect(CredentialVault.REDACT_IN_LOGS.has(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN)).toBe(true);
+            expect(CredentialVault.REDACT_IN_LOGS.has(CONFIG.STORAGE_KEYS.AI_API_KEY)).toBe(true);
+            expect(CredentialVault.REDACT_IN_LOGS.has(CONFIG.STORAGE_KEYS.GITHUB_TOKEN)).toBe(true);
+            expect(CredentialVault.REDACT_IN_LOGS.size).toBe(8);
         });
     });
 
     describe("isSensitiveKey", () => {
         it("returns true for sensitive keys", () => {
-            expect(CredentialVault.isSensitiveKey(CONFIG.STORAGE_KEYS.NOTION_API_KEY)).toBe(true);
+            // NOTION_API_KEY 已脱敏 → false
+            expect(CredentialVault.isSensitiveKey(CONFIG.STORAGE_KEYS.NOTION_API_KEY)).toBe(false);
             expect(CredentialVault.isSensitiveKey(CONFIG.STORAGE_KEYS.AI_API_KEY)).toBe(true);
             expect(CredentialVault.isSensitiveKey(CONFIG.STORAGE_KEYS.GITHUB_TOKEN)).toBe(true);
             expect(CredentialVault.isSensitiveKey(CONFIG.STORAGE_KEYS.OBS_API_KEY)).toBe(true);
@@ -50,9 +61,9 @@ describe("CredentialVault", () => {
             expect(status.unlocked).toBe(true);
             expect(status.hasVault).toBe(true);
 
-            // Set a sensitive key value
-            await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_notion_key_123");
-            expect(CredentialVault.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY)).toBe("secret_notion_key_123");
+            // Set a sensitive key value (AI_API_KEY 仍是 vault 敏感键)
+            await CredentialVault.set(CONFIG.STORAGE_KEYS.AI_API_KEY, "secret_ai_key_123");
+            expect(CredentialVault.get(CONFIG.STORAGE_KEYS.AI_API_KEY)).toBe("secret_ai_key_123");
 
             // Lock the vault
             CredentialVault.lock();
@@ -64,7 +75,7 @@ describe("CredentialVault", () => {
             expect(CredentialVault.isUnlocked()).toBe(true);
 
             // Retrieve the value after unlock
-            expect(CredentialVault.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY)).toBe("secret_notion_key_123");
+            expect(CredentialVault.get(CONFIG.STORAGE_KEYS.AI_API_KEY)).toBe("secret_ai_key_123");
         });
 
         it("fails to unlock with wrong passphrase", async () => {
@@ -81,10 +92,10 @@ describe("CredentialVault", () => {
 
         it("returns defaultValue when vault is locked", async () => {
             await CredentialVault.unlock("passphrase");
-            await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "my-key");
+            await CredentialVault.set(CONFIG.STORAGE_KEYS.AI_API_KEY, "my-key");
             CredentialVault.lock();
 
-            const value = CredentialVault.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "default");
+            const value = CredentialVault.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "default");
             expect(value).toBe("default");
         });
     });
@@ -100,15 +111,15 @@ describe("CredentialVault", () => {
 
         it("Storage.get routes sensitive keys through the injected vault after assignment", async () => {
             await CredentialVault.unlock("injection-pass");
-            await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_via_vault");
+            await CredentialVault.set(CONFIG.STORAGE_KEYS.AI_API_KEY, "secret_via_vault");
 
             // 注入前：Storage.get(sensitiveKey) 走 getRaw，返回 GM 原始（非解密）值或默认
             Storage.CredentialVault = null;
-            const beforeInject = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "fallback");
+            const beforeInject = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "fallback");
 
             // 注入：必须触发 setter，更新内部 _credentialVault
             Storage.CredentialVault = CredentialVault;
-            const afterInject = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "fallback");
+            const afterInject = Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "fallback");
 
             expect(beforeInject).toBe("fallback");
             expect(afterInject).toBe("secret_via_vault");

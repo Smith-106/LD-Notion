@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.11.0
+// @version      3.12.0
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -1125,15 +1125,26 @@
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var CredentialVault2 = {
         VERSION: 1,
+        // OAuth 三键(NOTION_API_KEY/CLIENT_SECRET/REFRESH_TOKEN)已移出敏感键集:
+        // vault 每次页面加载即重新锁定,而 OAuth 回调/续签天然发生在全新页面,
+        // 锁定态下读空导致授权必败(三模型共识诊断 R1/R2/R3)。改走 GM 明文存储。
         SENSITIVE_KEYS: Object.freeze(/* @__PURE__ */ new Set([
-          CONFIG2.STORAGE_KEYS.NOTION_API_KEY,
-          CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET,
-          CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN,
           CONFIG2.STORAGE_KEYS.AI_API_KEY,
           CONFIG2.STORAGE_KEYS.AI_BASE_URL,
           CONFIG2.STORAGE_KEYS.GITHUB_TOKEN,
           CONFIG2.STORAGE_KEYS.OBS_API_KEY,
           CONFIG2.STORAGE_KEYS.OBS_API_URL
+        ])),
+        // 审计日志脱敏超集:SENSITIVE_KEYS + OAuth 三键(虽改明文存储,仍不得出现在日志)
+        REDACT_IN_LOGS: Object.freeze(/* @__PURE__ */ new Set([
+          CONFIG2.STORAGE_KEYS.AI_API_KEY,
+          CONFIG2.STORAGE_KEYS.AI_BASE_URL,
+          CONFIG2.STORAGE_KEYS.GITHUB_TOKEN,
+          CONFIG2.STORAGE_KEYS.OBS_API_KEY,
+          CONFIG2.STORAGE_KEYS.OBS_API_URL,
+          CONFIG2.STORAGE_KEYS.NOTION_API_KEY,
+          CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET,
+          CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN
         ])),
         _sessionCache: /* @__PURE__ */ Object.create(null),
         _sessionPassphrase: "",
@@ -1201,7 +1212,15 @@
           return "\u5DF2\u914D\u7F6E\uFF08\u8F93\u5165\u65B0\u503C\u53EF\u66F4\u65B0\uFF09";
         },
         syncSensitiveInput: (input, key, emptyPlaceholder = "") => {
-          if (!input || !CredentialVault2.isSensitiveKey(key)) return;
+          if (!input) return;
+          if (!CredentialVault2.isSensitiveKey(key)) {
+            const hasLocal = !!String(Storage2.get(key, "") || "").trim();
+            if (document.activeElement !== input) {
+              input.value = "";
+            }
+            input.placeholder = hasLocal ? `${emptyPlaceholder}\uFF08\u5DF2\u4FDD\u5B58\u5728\u672C\u673A\uFF09` : emptyPlaceholder;
+            return;
+          }
           if (document.activeElement !== input) {
             input.value = "";
           }
@@ -1638,7 +1657,7 @@
           if (typeof clientSecret !== "undefined") {
             const normalizedClientSecret = String(clientSecret || "").trim();
             if (normalizedClientSecret) {
-              await CredentialVault2.set(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, normalizedClientSecret);
+              Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, normalizedClientSecret);
             }
           }
           if (typeof redirectUri !== "undefined") {
@@ -1661,7 +1680,7 @@
         },
         getRefreshToken: () => String(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "") || "").trim(),
         setRefreshToken: async (refreshToken = "") => {
-          await CredentialVault2.set(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, String(refreshToken || "").trim());
+          Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, String(refreshToken || "").trim());
         },
         getAccessToken: (liveValue = "") => {
           const manualValue = String(liveValue || "").trim();
@@ -1670,7 +1689,7 @@
         },
         setManualApiKey: async (apiKey = "") => {
           const normalized = String(apiKey || "").trim();
-          await CredentialVault2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, normalized);
+          Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, normalized);
           NotionOAuth2.setAuthMode("manual");
           NotionOAuth2.syncApiKeyInputs(normalized);
           NotionOAuth2.syncRegisteredControls();
@@ -1894,7 +1913,7 @@
         clearConnection: async () => {
           const shouldClearAccessToken = NotionOAuth2.getAuthMode() === "oauth";
           if (shouldClearAccessToken) {
-            await CredentialVault2.clear(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
+            Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "");
           }
           await NotionOAuth2.setRefreshToken("");
           NotionOAuth2.setMeta({});
@@ -1958,7 +1977,7 @@
         applyTokenResponse: async (result = {}) => {
           var _a;
           if (!(result == null ? void 0 : result.access_token)) throw new Error("Notion OAuth \u672A\u8FD4\u56DE access_token");
-          await CredentialVault2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, result.access_token);
+          Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, result.access_token);
           if (result.refresh_token) {
             await NotionOAuth2.setRefreshToken(result.refresh_token);
           }
@@ -2000,6 +2019,11 @@
         handleRedirectCallback: async () => {
           const pending = NotionOAuth2.getPendingState();
           if (!(pending == null ? void 0 : pending.state) || !(pending == null ? void 0 : pending.redirectUri)) return false;
+          if (pending.createdAt && Date.now() - pending.createdAt > 10 * 60 * 1e3) {
+            NotionOAuth2.clearPendingState();
+            Utils2.cleanupUrlParams(["code", "state", "error"]);
+            return false;
+          }
           let currentUrl;
           try {
             currentUrl = new URL(window.location.href);
@@ -4556,7 +4580,7 @@ Content-Type: ${contentType}\r
           if (!entry || typeof entry !== "object") return entry;
           const redacted = { ...entry };
           const context = redacted.context || {};
-          const sensitiveKeys = CredentialVault2 && CredentialVault2.SENSITIVE_KEYS ? CredentialVault2.SENSITIVE_KEYS : /* @__PURE__ */ new Set();
+          const sensitiveKeys = CredentialVault2 && CredentialVault2.REDACT_IN_LOGS ? CredentialVault2.REDACT_IN_LOGS : /* @__PURE__ */ new Set();
           for (const key of sensitiveKeys) {
             if (Object.prototype.hasOwnProperty.call(context, key)) {
               context[key] = "***REDACTED***";

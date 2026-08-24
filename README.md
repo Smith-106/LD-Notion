@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.11.0`
+- 当前仓库源码版本：`v3.12.0`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -120,7 +120,7 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 - **撤销支持**：危险操作提供 5 秒撤销窗口；常规写入默认记录审计，不承诺统一可撤销
 - **权限域收窄**（v3.7.0）：`@match` 从 `*://*/*` 收窄为 6 个显式站点，`@connect` 从 `*` 收窄为 9 个显式域名白名单，阻止向任意域名发起请求
 - **Prompt Injection 防御**（v3.7.0）：AI 输入用 XML 标签隔离用户内容与系统指令，输出经 `escapeHtml` + `safeMarkdown` 净化，UI 全局 50+ 处拼接点统一转义
-- **凭证保险箱**：敏感凭证（Notion Token、OAuth Secret、AI API Key、GitHub Token 等）使用 AES-256-GCM 加密存储，PBKDF2 200K 迭代派生密钥，会话内解锁后可用
+- **凭证保险箱**：AI API Key、Base URL、GitHub Token、Obsidian API Key/URL 等敏感凭证使用 AES-256-GCM 加密存储，PBKDF2 200K 迭代派生密钥，会话内解锁后可用；Notion OAuth 三键（Client Secret / Refresh Token / Access Token）自 v3.12.0 起改走浏览器本地明文存储（GM 存储）以保证跨页回调可读，审计日志仍由 `REDACT_IN_LOGS` 超集统一脱敏
 - **setLevel 验证**（v3.7.0）：权限等级设置强制校验 0-3 整数，拒绝 NaN/Infinity/超范围值
 
 ## 安装
@@ -217,14 +217,13 @@ node scripts/build-extension.js
    - 推荐填 `https://www.notion.so/`
    - LD-Notion 的 userscript 和 `chrome-extension-full` 都能在这个地址接住回调
 3. 复制该公开集成的 `Client ID` 和 `Client Secret`
-4. 先在 LD-Notion 面板里设置并解锁本地凭证保险箱
-5. 在 LD-Notion 面板里填写 `Client ID`、`Client Secret`、`Redirect URI`
-6. 点击 `🔐 一键授权`
-7. 完成 Notion 授权后，LD-Notion 会自动把 access token / refresh token 写入本地加密保险箱，后续功能继续按原来的 API Key 流工作
+4. 在 LD-Notion 面板里填写 `Client ID`、`Client Secret`、`Redirect URI`（无需预先初始化凭证保险箱）
+5. 点击 `🔐 一键授权`
+6. 完成 Notion 授权后，LD-Notion 会自动把 access token / refresh token 保存到浏览器本地（GM 存储），后续功能继续按原来的 API Key 流工作
 
 注意：
-- 当前项目是纯前端运行，没有单独后端，因此 `Client Secret`、手动 Token、OAuth token、AI API Key 等敏感凭证会保存在你的本地加密保险箱中
-- 保险箱需要你在本地设置口令；敏感凭证只有在当前会话解锁后才可直接使用
+- 当前项目是纯前端运行，没有单独后端；Notion OAuth 三键（Client Secret、access/refresh token）保存在你的浏览器本地 GM 存储中，以保证授权回调跨页面可读（v3.12.0 起的存储模型）
+- AI API Key、GitHub Token、Obsidian 等其它敏感凭证仍走本地加密保险箱，需设置口令并会话内解锁后才可使用
 - 这更适合个人自建公开集成，不建议把共享的生产级公开集成 secret 直接放进前端
 - 面板里的“断开授权”只会清除本地保存的 OAuth 凭据，不会撤销 Notion 后台已经批准的授权
 

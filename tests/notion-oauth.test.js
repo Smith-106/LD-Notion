@@ -502,13 +502,15 @@ function createWorkspaceVisualizationFixture(harness) {
 (async () => {
     console.log('Running tests for NotionOAuth...\n');
 
-    await runTest('CredentialVault.unlock: migrates legacy plaintext credentials into encrypted vault and removes raw keys', async () => {
+    await runTest('CredentialVault.unlock: migrates legacy plaintext SENSITIVE credentials into encrypted vault; OAuth 三键脱敏保留明文(修 R2\' 迁移陷阱)', async () => {
         const harness = createHarness();
         const apiKeyKey = harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY;
         const clientSecretKey = harness.CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET;
+        const githubTokenKey = harness.CONFIG.STORAGE_KEYS.GITHUB_TOKEN;
 
         harness.store[apiKeyKey] = 'legacy_manual_token';
         harness.store[clientSecretKey] = 'legacy_client_secret';
+        harness.store[githubTokenKey] = 'legacy_github_token';
 
         const status = await harness.CredentialVault.unlock('vault-passphrase', {
             initializeIfMissing: true,
@@ -520,26 +522,30 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(status.unlocked, true);
         assert.ok(payload && payload.ciphertext && payload.iv && payload.salt);
         assert.ok(Array.isArray(payload.keys));
-        assert.ok(payload.keys.includes(apiKeyKey));
-        assert.ok(payload.keys.includes(clientSecretKey));
-        assert.strictEqual(harness.store[apiKeyKey], undefined);
-        assert.strictEqual(harness.store[clientSecretKey], undefined);
-        assert.strictEqual(harness.CredentialVault.get(apiKeyKey, ''), 'legacy_manual_token');
-        assert.strictEqual(harness.CredentialVault.get(clientSecretKey, ''), 'legacy_client_secret');
-        assert.ok(!JSON.stringify(payload).includes('legacy_manual_token'));
-        assert.ok(!JSON.stringify(payload).includes('legacy_client_secret'));
+        // OAuth 三键已脱敏:不进保险箱,明文保留,保证跨页回调/刷新可读
+        assert.ok(!payload.keys.includes(apiKeyKey));
+        assert.ok(!payload.keys.includes(clientSecretKey));
+        assert.strictEqual(harness.store[apiKeyKey], 'legacy_manual_token');
+        assert.strictEqual(harness.store[clientSecretKey], 'legacy_client_secret');
+        // 仍敏感的键(如 GITHUB_TOKEN)正常迁移进加密 vault,明文删除
+        assert.ok(payload.keys.includes(githubTokenKey));
+        assert.strictEqual(harness.store[githubTokenKey], undefined);
+        assert.strictEqual(harness.CredentialVault.get(githubTokenKey, ''), 'legacy_github_token');
+        assert.ok(!JSON.stringify(payload).includes('legacy_github_token'));
 
         harness.CredentialVault.lock();
         assert.strictEqual(harness.CredentialVault.isUnlocked(), false);
-        assert.strictEqual(harness.CredentialVault.get(apiKeyKey, ''), '');
-        assert.strictEqual(harness.CredentialVault.hasPersistedValue(apiKeyKey), true);
+        // 锁定后 OAuth 键仍可读(明文),敏感键不可读
+        assert.strictEqual(harness.CredentialVault.get(apiKeyKey, ''), 'legacy_manual_token');
+        assert.strictEqual(harness.CredentialVault.get(clientSecretKey, ''), 'legacy_client_secret');
+        assert.strictEqual(harness.CredentialVault.get(githubTokenKey, ''), '');
+        assert.strictEqual(harness.CredentialVault.hasPersistedValue(githubTokenKey), true);
 
         await harness.CredentialVault.unlock('vault-passphrase', {
             initializeIfMissing: false,
             migrateLegacy: true
         });
-        assert.strictEqual(harness.CredentialVault.get(apiKeyKey, ''), 'legacy_manual_token');
-        assert.strictEqual(harness.CredentialVault.get(clientSecretKey, ''), 'legacy_client_secret');
+        assert.strictEqual(harness.CredentialVault.get(githubTokenKey, ''), 'legacy_github_token');
     });
 
     await runTest('CredentialVault.set: persists sensitive values only inside the encrypted vault and clears them cleanly', async () => {
@@ -721,7 +727,7 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.NotionOAuth.setPendingState({
             state: 'expected_state',
             redirectUri: 'https://www.notion.so/',
-            createdAt: 1
+            createdAt: Date.now()
         });
         harness.setRequestHandler((options) => {
             respondJson(options, 200, {
@@ -751,7 +757,7 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.NotionOAuth.setPendingState({
             state: 'expected_state',
             redirectUri: 'https://www.notion.so/',
-            createdAt: 1
+            createdAt: Date.now()
         });
 
         const handled = await harness.NotionOAuth.handleRedirectCallback();
@@ -761,6 +767,85 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_OAUTH_STATE], '');
         assert.strictEqual(notice.type, 'error');
         assert.ok(notice.message.includes('access_denied'));
+        assert.strictEqual(new URL(harness.getLocation()).search, '');
+    });
+
+    await runTest('OAuth 脱离保险箱回归:未初始化保险箱也能保存 Client Secret(修 R3 写门槛)', async () => {
+        const harness = createHarness();
+        // 不调用 unlockCredentialVault —— 模拟未初始化保险箱的新用户
+        await harness.NotionOAuth.saveConfig({
+            clientId: 'client_123',
+            clientSecret: 'secret_456',
+            redirectUri: 'https://www.notion.so/'
+        });
+        assert.strictEqual(
+            harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET],
+            'secret_456'
+        );
+        assert.strictEqual(harness.NotionOAuth.getConfig().clientSecret, 'secret_456');
+    });
+
+    await runTest('OAuth 脱离保险箱回归:保险箱锁定态下回调交换成功(修 R1 跨页必败)', async () => {
+        const harness = createHarness({
+            url: 'https://www.notion.so/?code=oauth_code&state=expected_state'
+        });
+        // 模拟发起页已配置(明文写入),回调页是全新加载且保险箱锁定
+        await harness.NotionOAuth.saveConfig({
+            clientId: 'client_123',
+            clientSecret: 'secret_456',
+            redirectUri: 'https://www.notion.so/'
+        });
+        harness.CredentialVault.lock(); // 回调页保险箱必然锁定
+        harness.NotionOAuth.setPendingState({
+            state: 'expected_state',
+            redirectUri: 'https://www.notion.so/',
+            createdAt: Date.now()
+        });
+        harness.setRequestHandler((options) => {
+            respondJson(options, 200, {
+                access_token: 'oauth_access',
+                refresh_token: 'oauth_refresh',
+                workspace_id: 'workspace_123',
+                workspace_name: 'Locked Workspace'
+            });
+        });
+
+        const handled = await harness.NotionOAuth.handleRedirectCallback();
+        const notice = harness.NotionOAuth.consumeNotice();
+
+        assert.strictEqual(handled, true);
+        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE], 'oauth');
+        assert.strictEqual(harness.NotionOAuth.getAccessToken(), 'oauth_access');
+        assert.strictEqual(harness.NotionOAuth.getRefreshToken(), 'oauth_refresh');
+        assert.strictEqual(notice.type, 'success');
+        assert.ok(notice.message.includes('Locked Workspace'));
+    });
+
+    await runTest('OAuth pendingState TTL:超过 10 分钟的陈旧 pending 不处理并清理(修次要项)', async () => {
+        const harness = createHarness({
+            url: 'https://www.notion.so/?code=stale_code&state=stale_state'
+        });
+        await harness.NotionOAuth.saveConfig({
+            clientId: 'client_123',
+            clientSecret: 'secret_456',
+            redirectUri: 'https://www.notion.so/'
+        });
+        harness.NotionOAuth.setPendingState({
+            state: 'stale_state',
+            redirectUri: 'https://www.notion.so/',
+            createdAt: Date.now() - 11 * 60 * 1000 // 11 分钟前,已过期
+        });
+        let exchangeAttempted = false;
+        harness.setRequestHandler((options) => {
+            exchangeAttempted = true;
+            respondJson(options, 200, { access_token: 'x', refresh_token: 'y' });
+        });
+
+        const handled = await harness.NotionOAuth.handleRedirectCallback();
+
+        assert.strictEqual(handled, false);
+        assert.strictEqual(exchangeAttempted, false);
+        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_OAUTH_STATE], '');
         assert.strictEqual(new URL(harness.getLocation()).search, '');
     });
 

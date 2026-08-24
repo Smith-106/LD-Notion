@@ -26,10 +26,9 @@ sequenceDiagram
   participant User as 用户
   participant Panel as LD-Notion 面板
   participant Notion as Notion OAuth
-  participant Store as 本地加密保险箱 + 本地配置存储
+  participant Store as 浏览器本地存储 + 加密保险箱 + 配置存储
 
   User->>Panel: 填写 Client ID / Secret / Redirect URI
-  User->>Panel: 初始化并解锁保险箱
   User->>Panel: 点击一键授权
   Panel->>Notion: 打开授权 URL
   Notion-->>Panel: 重定向回 Redirect URI 并携带 code/state

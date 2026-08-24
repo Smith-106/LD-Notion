@@ -462,8 +462,8 @@ const OperationLog = {
         if (!entry || typeof entry !== "object") return entry;
         const redacted = { ...entry };
         const context = redacted.context || {};
-        const sensitiveKeys = (CredentialVault && CredentialVault.SENSITIVE_KEYS)
-            ? CredentialVault.SENSITIVE_KEYS
+        const sensitiveKeys = (CredentialVault && CredentialVault.REDACT_IN_LOGS)
+            ? CredentialVault.REDACT_IN_LOGS
             : new Set();
         for (const key of sensitiveKeys) {
             if (Object.prototype.hasOwnProperty.call(context, key)) {

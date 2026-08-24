@@ -1,5 +1,29 @@
 # 更新日志
 
+## [3.12.0] - 2026-08-25
+
+### 修复（Notion OAuth 自动授权失效 · 三模型共识根因闭环）
+
+Notion OAuth 一键授权此前在回调页与自动续签场景必然失败：OAuth 三键（Client Secret / Refresh Token / Access Token）被锁入「每次页面加载即重新锁定」的凭证保险箱，而 OAuth 授权回调与续签天然发生在全新页面，锁定态下读空 → 用 code 换 token 必败。三模型共识诊断（R1/R2'/R3）后调整凭证存储模型。
+
+**根因与修复**:
+- **R1 跨页回调必败**：保险箱会话态（`_unlocked` / `_sessionCache`）为模块内存态，每次页面加载即重置为锁定；回调页读 `Client Secret` / `refresh_token` 恒为空 → `exchangeToken` 抛「缺少 Client Secret」。→ OAuth 三键移出 `CredentialVault.SENSITIVE_KEYS`（8 → 5 键），改走 GM 明文存储，跨页可读
+- **R2' 迁移陷阱**：旧 `migrateLegacy` 会把明文 OAuth 键吞入保险箱并删除明文副本，连兜底也被清掉。→ 脱敏后明文保留，不再二次迁移
+- **R3 新用户写门槛**：未初始化保险箱时 `CredentialVault.set()` 抛错，新用户连 Client Secret 都无法保存。→ 脱离后走 `Storage.set`，未初始化保险箱也能完成配置
+
+**安全与审计**:
+- 新增 `REDACT_IN_LOGS` 超集（原敏感键 + OAuth 三键，共 8 键）；`OperationLog.redactSensitiveFields` 从 `SENSITIVE_KEYS` 切换为 `REDACT_IN_LOGS`——OAuth 密钥虽改明文存储，审计日志仍一律 `***REDACTED***` 脱敏
+
+**健壮性**:
+- `handleRedirectCallback` 新增 pendingState 10 分钟 TTL：陈旧 code/state 残留不再重放干扰后续授权，超时自动清理 URL 参数
+
+**升级说明**：此前已迁入保险箱的 OAuth 凭据无法自动回读（vault 不再含 OAuth 键），升级后如遇 OAuth 字段为空，重新输入一次 Client Secret 并重新授权即可。
+
+### 验证
+
+- `npm test`：557/557 用例全绿（vitest + legacy 三件套），新增回归覆盖：保险箱锁定态下回调交换成功（R1）、未初始化保险箱可保存 Client Secret（R3）、legacy 迁移保留 OAuth 明文（R2'）、pending TTL 过期清理、`REDACT_IN_LOGS` 超集断言
+- `node build.js`：单文件产物同步（含 `REDACT_IN_LOGS` 与 TTL 逻辑）
+
 ## [3.11.0] - 2026-08-24
 
 ### 新增（Odyssey UI 六维审计修复 · 三模型复审闭环）
@@ -33,6 +57,7 @@
 - `npm run build`：单文件产物 1374.6 KB（较 v3.10.0 +0.66%，低于 5% 审查阈值）
 - Odyssey Review 三模型独立复审：Security/Performance 维度零发现
 
+[3.12.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.12.0
 [3.11.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.11.0
 [3.10.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.10.0
 

@@ -38,13 +38,15 @@ flowchart TD
 
 日志可在面板中查看和清除。
 
-## OAuth 与本地加密保险箱
+## OAuth 凭证存储模型（v3.12.0 调整）
 
-- Internal Integration Token、OAuth access token、refresh token、AI API Key、GitHub Token、Obsidian API Key 与 Public OAuth 的 `Client Secret` 都属于敏感凭证。
-- 这些敏感凭证现在默认写入本地加密保险箱，而不是继续以旧明文键长期保存在浏览器存储里。
-- 保险箱需要用户本地设置口令并在当前会话解锁；解锁后敏感凭证只在当前会话内可读，重新锁定后需要再次解锁。
+- 敏感凭证分两类存储：
+  - **OAuth 三键**（`Client Secret` / access token / refresh token / manual Integration Token）自 v3.12.0 起保存在浏览器本地 **GM 明文存储**。原因是 OAuth 授权回调与 refresh 续签天然发生在全新页面，而加密保险箱每次页面加载即重新锁定，锁定态下读空会导致授权必败；明文存储保证跨页可读。
+  - **其它敏感凭证**（AI API Key / Base URL、GitHub Token、Obsidian API Key / URL）仍默认写入本地**加密保险箱**（AES-256-GCM，PBKDF2 200K 迭代），需用户本地设置口令并在当前会话解锁后才可读。
+- 审计安全：`OperationLog.redactSensitiveFields` 使用 `REDACT_IN_LOGS` 超集（加密保险箱键 + OAuth 三键，共 8 键），所有敏感凭证在审计日志中一律 `***REDACTED***` 脱敏，明文存储不会泄漏到日志。
 - 非敏感配置仍保存在浏览器本地存储中，例如目标数据库 ID、面板位置、来源偏好和 OAuth 的 `Client ID` / `Redirect URI`。
 - 「断开授权」只清除本地 access token / refresh token，不会撤销 Notion 后台已经批准的授权，也不会自动删除你保留的 OAuth 基础配置。
+- **升级提示**：v3.12.0 之前已迁入加密保险箱的 OAuth 凭据无法自动回读，升级后如遇 OAuth 字段为空，重新输入一次 Client Secret 并重新授权即可。
 
 ## v3.7.0 安全加固
 
@@ -178,6 +180,6 @@ v3.7.2 通过 UI Odyssey 全维度审查修复了 UI 层面的安全问题：
 - 日常使用保持「标准」权限。
 - 危险操作确认保持开启。
 - 只在需要移动、归档、数据库结构操作时临时切到「高级」。
-- 首次保存 Notion Token、OAuth Client Secret、AI API Key 等敏感凭证前，先初始化并解锁本地保险箱。
+- 首次保存 AI API Key、GitHub Token、Obsidian 等敏感凭证前，先初始化并解锁本地保险箱（OAuth 三键自 v3.12.0 起走 GM 存储，无需此步）。
 - 不要把共享生产级 OAuth Client Secret 放进前端配置。
 - 在批量操作前先对少量数据试运行。

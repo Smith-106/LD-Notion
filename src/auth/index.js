@@ -6,15 +6,26 @@ const { Storage, SyncState } = require("../storage");
 
 const CredentialVault = {
     VERSION: 1,
+    // OAuth 三键(NOTION_API_KEY/CLIENT_SECRET/REFRESH_TOKEN)已移出敏感键集:
+    // vault 每次页面加载即重新锁定,而 OAuth 回调/续签天然发生在全新页面,
+    // 锁定态下读空导致授权必败(三模型共识诊断 R1/R2/R3)。改走 GM 明文存储。
     SENSITIVE_KEYS: Object.freeze(new Set([
-        CONFIG.STORAGE_KEYS.NOTION_API_KEY,
-        CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET,
-        CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN,
         CONFIG.STORAGE_KEYS.AI_API_KEY,
         CONFIG.STORAGE_KEYS.AI_BASE_URL,
         CONFIG.STORAGE_KEYS.GITHUB_TOKEN,
         CONFIG.STORAGE_KEYS.OBS_API_KEY,
         CONFIG.STORAGE_KEYS.OBS_API_URL,
+    ])),
+    // 审计日志脱敏超集:SENSITIVE_KEYS + OAuth 三键(虽改明文存储,仍不得出现在日志)
+    REDACT_IN_LOGS: Object.freeze(new Set([
+        CONFIG.STORAGE_KEYS.AI_API_KEY,
+        CONFIG.STORAGE_KEYS.AI_BASE_URL,
+        CONFIG.STORAGE_KEYS.GITHUB_TOKEN,
+        CONFIG.STORAGE_KEYS.OBS_API_KEY,
+        CONFIG.STORAGE_KEYS.OBS_API_URL,
+        CONFIG.STORAGE_KEYS.NOTION_API_KEY,
+        CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET,
+        CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN,
     ])),
     _sessionCache: Object.create(null),
     _sessionPassphrase: "",
@@ -91,7 +102,16 @@ const CredentialVault = {
     },
 
     syncSensitiveInput: (input, key, emptyPlaceholder = "") => {
-        if (!input || !CredentialVault.isSensitiveKey(key)) return;
+        if (!input) return;
+        if (!CredentialVault.isSensitiveKey(key)) {
+            // OAuth 三键已脱敏:无保险箱语义,按本地明文有无给同等视觉契约
+            const hasLocal = !!String(Storage.get(key, "") || "").trim();
+            if (document.activeElement !== input) {
+                input.value = "";
+            }
+            input.placeholder = hasLocal ? `${emptyPlaceholder}（已保存在本机）` : emptyPlaceholder;
+            return;
+        }
         if (document.activeElement !== input) {
             input.value = "";
         }
@@ -599,7 +619,8 @@ const NotionOAuth = {
         if (typeof clientSecret !== "undefined") {
             const normalizedClientSecret = String(clientSecret || "").trim();
             if (normalizedClientSecret) {
-                await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, normalizedClientSecret);
+                // OAuth 脱离保险箱(三模型共识修复):改走 GM 明文存储,保证回调页/刷新后可读
+                Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, normalizedClientSecret);
             }
         }
         if (typeof redirectUri !== "undefined") {
@@ -629,7 +650,7 @@ const NotionOAuth = {
     getRefreshToken: () => String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "") || "").trim(),
 
     setRefreshToken: async (refreshToken = "") => {
-        await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, String(refreshToken || "").trim());
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, String(refreshToken || "").trim());
     },
 
     getAccessToken: (liveValue = "") => {
@@ -640,7 +661,7 @@ const NotionOAuth = {
 
     setManualApiKey: async (apiKey = "") => {
         const normalized = String(apiKey || "").trim();
-        await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, normalized);
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, normalized);
         NotionOAuth.setAuthMode("manual");
         NotionOAuth.syncApiKeyInputs(normalized);
         NotionOAuth.syncRegisteredControls();
@@ -897,7 +918,7 @@ const NotionOAuth = {
     clearConnection: async () => {
         const shouldClearAccessToken = NotionOAuth.getAuthMode() === "oauth";
         if (shouldClearAccessToken) {
-            await CredentialVault.clear(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
+            Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
         }
         await NotionOAuth.setRefreshToken("");
         NotionOAuth.setMeta({});
@@ -967,7 +988,7 @@ const NotionOAuth = {
     applyTokenResponse: async (result = {}) => {
         if (!result?.access_token) throw new Error("Notion OAuth 未返回 access_token");
 
-        await CredentialVault.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, result.access_token);
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, result.access_token);
         if (result.refresh_token) {
             await NotionOAuth.setRefreshToken(result.refresh_token);
         }
@@ -1012,6 +1033,13 @@ const NotionOAuth = {
     handleRedirectCallback: async () => {
         const pending = NotionOAuth.getPendingState();
         if (!pending?.state || !pending?.redirectUri) return false;
+
+        // OAuth 修复·次要项(用户选定):pending 10 分钟 TTL,防陈旧 code/state 残留重放干扰后续授权
+        if (pending.createdAt && Date.now() - pending.createdAt > 10 * 60 * 1000) {
+            NotionOAuth.clearPendingState();
+            Utils.cleanupUrlParams(["code", "state", "error"]);
+            return false;
+        }
 
         let currentUrl;
         try {
