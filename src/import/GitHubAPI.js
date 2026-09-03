@@ -163,6 +163,14 @@ const GitHubAPI = {
         }
     },
 
+    // F-05 修复：清除已导出记录（清键 + 失效内存缓存，供数据管理 UI 调用）
+    clearExportedRecords: () => {
+        GitHubAPI._exportedCache = null;
+        GitHubAPI._exportedGistsCache = null;
+        Storage.remove(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS);
+        Storage.remove(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS);
+    },
+
     markGistExported: (gistId) => {
         const exported = GitHubAPI.getExportedGists();
         exported[gistId] = Date.now();

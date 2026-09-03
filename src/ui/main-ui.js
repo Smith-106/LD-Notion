@@ -124,6 +124,8 @@ const UI = {
             exportBtns: panel.querySelector("#ldb-export-btns"),
             controlBtns: panel.querySelector("#ldb-control-btns"),
             pauseBtn: panel.querySelector("#ldb-pause"),
+            classifyPauseBtn: panel.querySelector("#ldb-classify-pause"),
+            classifyCancelBtn: panel.querySelector("#ldb-classify-cancel"),
             autoImportEnabled: panel.querySelector("#ldb-auto-import-enabled"),
             autoImportOptions: panel.querySelector("#ldb-auto-import-options"),
             autoImportInterval: panel.querySelector("#ldb-auto-import-interval"),
@@ -187,6 +189,10 @@ const UI = {
             logContent: panel.querySelector("#ldb-log-content"),
             logArrow: panel.querySelector("#ldb-log-arrow"),
             logClearBtn: panel.querySelector("#ldb-log-clear"),
+            dedupSummary: panel.querySelector("#ldb-dedup-summary"),
+            clearLinuxdoDedupBtn: panel.querySelector("#ldb-clear-linuxdo-dedup"),
+            clearGithubExportedBtn: panel.querySelector("#ldb-clear-github-exported"),
+            clearBookmarkExportedBtn: panel.querySelector("#ldb-clear-bookmark-exported"),
             aiRefreshDbsBtn: panel.querySelector("#ldb-ai-refresh-dbs"),
             aiFetchModelsBtn: panel.querySelector("#ldb-ai-fetch-models"),
             aiModelTip: panel.querySelector("#ldb-ai-model-tip"),
@@ -496,6 +502,11 @@ const UI = {
                         <!-- 快捷操作 -->
                         <div class="ldb-chat-actions">
                             <button class="ldb-chat-action-btn" id="ldb-chat-clear">🗑️ 清空</button>
+                            <!-- F-03 修复：批量分类控制（与 Exporter 暂停/取消一致，常驻） -->
+                            <span id="ldb-classify-controls">
+                                <button class="ldb-chat-action-btn" id="ldb-classify-pause">⏸️ 暂停分类</button>
+                                <button class="ldb-chat-action-btn" id="ldb-classify-cancel">✕ 取消分类</button>
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -925,6 +936,18 @@ const UI = {
                     </div>
 
                     <div class="ldb-divider"></div>
+
+                    <!-- F-05 修复：数据管理（去重/已导出记录清理） -->
+                    <div class="ldb-section">
+                        <div class="ldb-section-title">数据管理</div>
+                        <div class="ldb-tip" id="ldb-dedup-summary"></div>
+                        <div class="ldb-input-group ldb-mt-12">
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-linuxdo-dedup">清除 Linux.do 去重</button>
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-github-exported">清除 GitHub 已导出记录</button>
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-bookmark-exported">清除书签已导出记录</button>
+                        </div>
+                        <div class="ldb-tip">仅清除本地去重/导出记录，不影响 Notion 中已有内容；清除后对应来源可再次导出。</div>
+                    </div>
 
                     <!-- 操作日志面板 -->
                     <div class="ldb-log-panel" id="ldb-log-panel">

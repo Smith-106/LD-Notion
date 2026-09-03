@@ -54,6 +54,10 @@ SyncState.updateGitHubState(subtype, data) → SyncStateV2.updateSourceState("gi
 
 `DedupStore` 支持 `beginBatch(sourceType)` / `endBatch()` 批量模式。批量模式下，`isDuplicate` 和 `markSeen` 只操作内存缓存，`endBatch()` 时一次性写入 `GM_setValue`。`SyncCoordinator.sync()` 在同步循环中使用批量模式，避免每条记录都触发 IPC。
 
+### 基线重置（v3.13.0）
+
+`SyncState.resetSourceState(sourceType)` 将指定源的增量基线恢复为默认（watermark=null、lastOutcome=idle），下次同步退化为全量扫描。工作区洞察（统一同步中心）每张来源卡提供「重置基线」按钮；GitHub 按子类型（stars/repos/forks/gists）逐个重置。
+
 ## 遗留问题
 
 V1 facade 代理了 V2 的私有方法（`_clone`、`_load`、`_save`），破坏了封装。外部代码可能通过 V1 facade 访问 V2 内部实现。建议：

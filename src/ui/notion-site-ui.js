@@ -243,6 +243,11 @@ const NotionSiteUI = {
                 <!-- 快捷操作 -->
                 <div class="ldb-chat-actions">
                     <button class="ldb-chat-action-btn" id="ldb-chat-clear">🗑️ 清空</button>
+                    <!-- F-03 修复：批量分类控制（与 MainUI 一致） -->
+                    <span id="ldb-classify-controls">
+                        <button class="ldb-chat-action-btn" id="ldb-classify-pause">⏸️ 暂停分类</button>
+                        <button class="ldb-chat-action-btn" id="ldb-classify-cancel">✕ 取消分类</button>
+                    </span>
                 </div>
 
                 <div class="ldb-divider"></div>

@@ -57,3 +57,14 @@ node_modules/.vite/
 
 # Session temp artifacts
 .tmp/
+
+# Windows 误创建的设备名文件(防再次出现)
+nul
+NUL
+
+# 构建/缓存产物双保险(与 .maestroignore 对齐)
+build/
+coverage/
+.cache/
+.codegraph/
+docs/.vitepress/cache/

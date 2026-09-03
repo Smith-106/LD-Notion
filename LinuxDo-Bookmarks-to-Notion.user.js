@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.12.0
+// @version      3.13.0
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -715,6 +715,19 @@
           return this._clone(state.sources[sourceType]);
         },
         // --- 通用 watermark/filter 方法 (与 V1 兼容) ---
+        /**
+         * 重置指定源的增量同步基线（F-04：基线不可重置的 UI 缺口）
+         * 清空 watermark/lastOutcome 等，使下次同步退化为全量扫描
+         * @param {string} sourceType
+         * @returns {Object} 重置后的状态
+         */
+        resetSourceState(sourceType) {
+          const state = this._load();
+          const withSnapshot = sourceType === "bookmark" || sourceType === "rss";
+          state.sources[sourceType] = this._makeSourceDefault(withSnapshot);
+          this._save(state);
+          return this.getSourceState(sourceType);
+        },
         buildWatermark(items = [], getTime, getId) {
           if (!Array.isArray(items) || items.length === 0) return null;
           let latestTime = "";
@@ -798,12 +811,131 @@
     }
   });
 
+  // src/storage/DedupStore.js
+  var require_DedupStore = __commonJS({
+    "src/storage/DedupStore.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var DEDUP_TTL_MS = 90 * 24 * 60 * 60 * 1e3;
+      var DedupStore = {
+        DEDUP_TTL_MS,
+        _keyFor(sourceType) {
+          return `${CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`;
+        },
+        _loadSet(sourceType) {
+          const raw = GM_getValue(this._keyFor(sourceType), "{}");
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return {};
+          }
+        },
+        _saveSet(sourceType, set) {
+          GM_setValue(this._keyFor(sourceType), JSON.stringify(set));
+        },
+        // --- batch 模式: 减少 IPC 调用 ---
+        _batchCache: null,
+        // sourceType → { set, dirty }
+        _batchSourceType: null,
+        /**
+         * 开始批量模式 (SyncCoordinator 在 sync 循环前后调用)
+         * @param {string} sourceType
+         */
+        beginBatch(sourceType) {
+          this._batchSourceType = sourceType;
+          this._batchCache = { set: this._loadSet(sourceType), dirty: false };
+        },
+        /**
+         * 结束批量模式，如有变更则一次写回。
+         * 写回前自动淘汰超过 TTL 的过期条目（PERF-001）。
+         */
+        endBatch() {
+          if (this._batchCache && this._batchCache.dirty && this._batchSourceType) {
+            this._evictExpired(this._batchCache.set);
+            this._saveSet(this._batchSourceType, this._batchCache.set);
+          }
+          this._batchCache = null;
+          this._batchSourceType = null;
+        },
+        /**
+         * 淘汰超过 TTL 的过期条目（就地修改）
+         * @param {Object} set - dedup 集合 {key: timestamp}
+         * @returns {number} 淘汰的条目数
+         */
+        _evictExpired(set) {
+          const cutoff = Date.now() - DEDUP_TTL_MS;
+          let evicted = 0;
+          for (const key of Object.keys(set)) {
+            if (set[key] < cutoff) {
+              delete set[key];
+              evicted++;
+            }
+          }
+          return evicted;
+        },
+        /**
+         * 检查条目是否已存在
+         * @param {string} sourceType - 源类型
+         * @param {string} dedupKey - 去重键
+         * @returns {boolean}
+         */
+        isDuplicate(sourceType, dedupKey) {
+          if (this._batchCache && this._batchSourceType === sourceType) {
+            return Object.prototype.hasOwnProperty.call(this._batchCache.set, dedupKey);
+          }
+          const set = this._loadSet(sourceType);
+          return Object.prototype.hasOwnProperty.call(set, dedupKey);
+        },
+        /**
+         * 标记条目为已见
+         * @param {string} sourceType
+         * @param {string} dedupKey
+         */
+        markSeen(sourceType, dedupKey) {
+          if (this._batchCache && this._batchSourceType === sourceType) {
+            this._batchCache.set[dedupKey] = Date.now();
+            this._batchCache.dirty = true;
+            return;
+          }
+          const set = this._loadSet(sourceType);
+          set[dedupKey] = Date.now();
+          this._saveSet(sourceType, set);
+        },
+        /**
+         * 获取源的完整去重集合
+         * @param {string} sourceType
+         * @returns {Object}
+         */
+        getSeen(sourceType) {
+          if (this._batchCache && this._batchSourceType === sourceType) {
+            return this._batchCache.set;
+          }
+          return this._loadSet(sourceType);
+        },
+        /**
+         * 清空源的已见集合
+         * @param {string} sourceType
+         */
+        clearSeen(sourceType) {
+          if (this._batchCache && this._batchSourceType === sourceType) {
+            this._batchCache.set = {};
+            this._batchCache.dirty = true;
+            return;
+          }
+          GM_deleteValue(this._keyFor(sourceType));
+        }
+      };
+      module.exports = { DedupStore };
+    }
+  });
+
   // src/storage/index.js
   var require_storage = __commonJS({
     "src/storage/index.js"(exports, module) {
       "use strict";
       var { CONFIG: CONFIG2 } = require_config();
       var { SyncStateV2 } = require_SyncState();
+      var { DedupStore } = require_DedupStore();
       var _credentialVault = null;
       var Storage2 = {
         _exportedTopicsCache: null,
@@ -887,12 +1019,14 @@
         updateBookmarkState: (patch) => SyncStateV2.updateSourceState("bookmark", patch),
         getRssState: () => SyncStateV2.getSourceState("rss"),
         updateRssState: (patch) => SyncStateV2.updateSourceState("rss", patch),
+        // F-04 修复：重置指定源增量基线（下次同步退化为全量）
+        resetSourceState: (sourceType) => SyncStateV2.resetSourceState(sourceType),
         // 内部方法代理 (供老代码调用)
         _clone: (value) => SyncStateV2._clone ? SyncStateV2._clone(value) : JSON.parse(JSON.stringify(value)),
         _load: () => SyncStateV2._load(),
         _save: (state) => SyncStateV2._save(state)
       };
-      module.exports = { Storage: Storage2, SyncState: SyncState2 };
+      module.exports = { Storage: Storage2, SyncState: SyncState2, DedupStore };
       Object.defineProperty(Storage2, "CredentialVault", {
         get: () => _credentialVault,
         set: (v) => {
@@ -6173,10 +6307,12 @@ Content-Type: ${contentType}\r
       var _AI = null;
       var _state = null;
       var _svc = null;
+      var _classifier = null;
       var getAI = () => _AI || (_AI = require_ai().AIAssistant);
       var getState = () => _state || (_state = require_ai().ChatState);
       var getService = () => _svc || (_svc = require_ai().AIService);
-      module.exports = { getAI, getState, getService };
+      var getClassifier = () => _classifier || (_classifier = require_ai().AIClassifier);
+      module.exports = { getAI, getState, getService, getClassifier };
     }
   });
 
@@ -6914,7 +7050,7 @@ ${candidateList}
       var { TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { OperationGuard: OperationGuard2 } = require_security();
-      var { getAI: AI, getService: svc } = require_deps();
+      var { getAI: AI, getService: svc, getClassifier } = require_deps();
       module.exports = {
         batch_tag: {
           description: "\u6279\u91CF\u6253\u6807\u7B7E\uFF1A\u7528 AI \u4E3A\u6307\u5B9A\u6765\u6E90\u7684\u6240\u6709\u672A\u6807\u8BB0\u9875\u9762\u81EA\u52A8\u6DFB\u52A0\u6807\u7B7E",
@@ -7449,11 +7585,12 @@ ${candidateList}
           params: "limit(\u6700\u591A\u5904\u7406\u6570\u91CF,\u9ED8\u8BA4\u5168\u90E8)",
           level: 1,
           execute: async (args, settings) => {
+            const AIClassifier2 = getClassifier();
             const dbId = settings.notionDatabaseId;
             if (!dbId) return "\u9519\u8BEF: \u672A\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
             if (settings.categories.length < 2) return "\u9519\u8BEF: \u8BF7\u5148\u914D\u7F6E\u81F3\u5C11\u4E24\u4E2A\u5206\u7C7B\u9009\u9879\u3002";
-            await AIClassifier.ensureAICategoryProperty(settings);
-            const pages = await AIClassifier.fetchAllPages(settings);
+            await AIClassifier2.ensureAICategoryProperty(settings);
+            const pages = await AIClassifier2.fetchAllPages(settings);
             if (pages.length === 0) return "\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u9875\u9762\u3002";
             const unclassified = pages.filter((p) => {
               var _a, _b;
@@ -7465,8 +7602,14 @@ ${candidateList}
             const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
             let success = 0, failed = 0;
             for (let i = 0; i < toClassify.length; i++) {
+              if (AIClassifier2.isCancelled) break;
+              while (AIClassifier2.isPaused) {
+                await Utils2.sleep(500);
+                if (AIClassifier2.isCancelled) break;
+              }
+              if (AIClassifier2.isCancelled) break;
               try {
-                await AIClassifier.classifyPage(toClassify[i], settings);
+                await AIClassifier2.classifyPage(toClassify[i], settings);
                 success++;
               } catch (error) {
                 console.warn("[LD-Notion] \u9875\u9762\u5206\u7C7B\u5931\u8D25:", error);
@@ -8445,7 +8588,7 @@ ${AI()._resultToText(r.result)}
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
       var { AgentTrace } = require_AgentTrace();
-      var { getAI: AI, getState: state, getService: svc } = require_deps();
+      var { getAI: AI, getState: state, getService: svc, getClassifier } = require_deps();
       module.exports = {
         _resolvePageId: async (name, id, apiKey) => {
           return NameResolver.resolvePageId(name, id, apiKey);
@@ -8454,6 +8597,7 @@ ${AI()._resultToText(r.result)}
           return BlockConverter.textToBlocks(text);
         },
         _extractPageContent: async (pageId, apiKey, maxChars = 4e3) => {
+          const AIClassifier2 = getClassifier();
           try {
             const markdownResponse = await NotionAPI2.fetchPageMarkdown(pageId, apiKey);
             const markdown = String(markdownResponse.markdown || "").trim();
@@ -8470,7 +8614,7 @@ ${AI()._resultToText(r.result)}
             allBlocks.push(...data.results || []);
             cursor = data.has_more ? data.next_cursor : null;
           } while (cursor);
-          return AIClassifier.extractText(allBlocks).slice(0, maxChars);
+          return AIClassifier2.extractText(allBlocks).slice(0, maxChars);
         },
         handleWriteContent: async (params, settings, explanation) => {
           const configCheck = AI().checkConfig(settings, false);
@@ -9727,6 +9871,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(BookmarkExporter2._exportedCache));
           }
         },
+        // F-05 修复：清除书签已导出记录（清键 + 失效内存缓存，供数据管理 UI 调用）
+        clearExportedRecords: () => {
+          BookmarkExporter2._exportedCache = null;
+          Storage2.remove(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED);
+        },
         // 淘汰超过 90 天的过期条目（PERF-001 泛化，与 DedupStore._evictExpired 同构）
         _EXPORT_TTL_MS: 90 * 24 * 60 * 60 * 1e3,
         _evictExpired: (set) => {
@@ -9932,124 +10081,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         }
       };
       module.exports = { AdapterRegistry };
-    }
-  });
-
-  // src/storage/DedupStore.js
-  var require_DedupStore = __commonJS({
-    "src/storage/DedupStore.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var DEDUP_TTL_MS = 90 * 24 * 60 * 60 * 1e3;
-      var DedupStore = {
-        DEDUP_TTL_MS,
-        _keyFor(sourceType) {
-          return `${CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`;
-        },
-        _loadSet(sourceType) {
-          const raw = GM_getValue(this._keyFor(sourceType), "{}");
-          try {
-            return JSON.parse(raw);
-          } catch {
-            return {};
-          }
-        },
-        _saveSet(sourceType, set) {
-          GM_setValue(this._keyFor(sourceType), JSON.stringify(set));
-        },
-        // --- batch 模式: 减少 IPC 调用 ---
-        _batchCache: null,
-        // sourceType → { set, dirty }
-        _batchSourceType: null,
-        /**
-         * 开始批量模式 (SyncCoordinator 在 sync 循环前后调用)
-         * @param {string} sourceType
-         */
-        beginBatch(sourceType) {
-          this._batchSourceType = sourceType;
-          this._batchCache = { set: this._loadSet(sourceType), dirty: false };
-        },
-        /**
-         * 结束批量模式，如有变更则一次写回。
-         * 写回前自动淘汰超过 TTL 的过期条目（PERF-001）。
-         */
-        endBatch() {
-          if (this._batchCache && this._batchCache.dirty && this._batchSourceType) {
-            this._evictExpired(this._batchCache.set);
-            this._saveSet(this._batchSourceType, this._batchCache.set);
-          }
-          this._batchCache = null;
-          this._batchSourceType = null;
-        },
-        /**
-         * 淘汰超过 TTL 的过期条目（就地修改）
-         * @param {Object} set - dedup 集合 {key: timestamp}
-         * @returns {number} 淘汰的条目数
-         */
-        _evictExpired(set) {
-          const cutoff = Date.now() - DEDUP_TTL_MS;
-          let evicted = 0;
-          for (const key of Object.keys(set)) {
-            if (set[key] < cutoff) {
-              delete set[key];
-              evicted++;
-            }
-          }
-          return evicted;
-        },
-        /**
-         * 检查条目是否已存在
-         * @param {string} sourceType - 源类型
-         * @param {string} dedupKey - 去重键
-         * @returns {boolean}
-         */
-        isDuplicate(sourceType, dedupKey) {
-          if (this._batchCache && this._batchSourceType === sourceType) {
-            return Object.prototype.hasOwnProperty.call(this._batchCache.set, dedupKey);
-          }
-          const set = this._loadSet(sourceType);
-          return Object.prototype.hasOwnProperty.call(set, dedupKey);
-        },
-        /**
-         * 标记条目为已见
-         * @param {string} sourceType
-         * @param {string} dedupKey
-         */
-        markSeen(sourceType, dedupKey) {
-          if (this._batchCache && this._batchSourceType === sourceType) {
-            this._batchCache.set[dedupKey] = Date.now();
-            this._batchCache.dirty = true;
-            return;
-          }
-          const set = this._loadSet(sourceType);
-          set[dedupKey] = Date.now();
-          this._saveSet(sourceType, set);
-        },
-        /**
-         * 获取源的完整去重集合
-         * @param {string} sourceType
-         * @returns {Object}
-         */
-        getSeen(sourceType) {
-          if (this._batchCache && this._batchSourceType === sourceType) {
-            return this._batchCache.set;
-          }
-          return this._loadSet(sourceType);
-        },
-        /**
-         * 清空源的已见集合
-         * @param {string} sourceType
-         */
-        clearSeen(sourceType) {
-          if (this._batchCache && this._batchSourceType === sourceType) {
-            this._batchCache.set = {};
-            this._batchCache.dirty = true;
-            return;
-          }
-          GM_deleteValue(this._keyFor(sourceType));
-        }
-      };
-      module.exports = { DedupStore };
     }
   });
 
@@ -13000,6 +13031,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(GitHubAPI2._exportedCache));
           }
         },
+        // F-05 修复：清除已导出记录（清键 + 失效内存缓存，供数据管理 UI 调用）
+        clearExportedRecords: () => {
+          GitHubAPI2._exportedCache = null;
+          GitHubAPI2._exportedGistsCache = null;
+          Storage2.remove(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS);
+          Storage2.remove(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS);
+        },
         markGistExported: (gistId) => {
           const exported = GitHubAPI2.getExportedGists();
           exported[gistId] = Date.now();
@@ -14336,12 +14374,13 @@ ${insight.summary || ""}`,
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
       var { AgentTrace } = require_AgentTrace();
-      var { getAI: AI, getState: state, getService: svc } = require_deps();
+      var { getAI: AI, getState: state, getService: svc, getClassifier } = require_deps();
       module.exports = {
         handleClassify: async (params, settings, explanation) => {
           return "\u{1F4DD} \u5355\u4E2A\u5206\u7C7B\u529F\u80FD\u5F00\u53D1\u4E2D...\n\n\u76EE\u524D\u53EF\u4EE5\u4F7F\u7528\u300C\u81EA\u52A8\u5206\u7C7B\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50\u300D\u6765\u6279\u91CF\u5206\u7C7B\u3002";
         },
         handleBatchClassify: async (params, settings, explanation) => {
+          const AIClassifier2 = getClassifier();
           if (!settings.notionDatabaseId) {
             return "\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u63D0\u793A\uFF1A\u53EF\u4EE5\u4F7F\u7528\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6765\u67E5\u770B\u5DE5\u4F5C\u533A\u4E2D\u7684\u6570\u636E\u5E93\u5E76\u83B7\u53D6 ID\u3002";
           }
@@ -14351,9 +14390,9 @@ ${insight.summary || ""}`,
           state().updateLastMessage(`\u6B63\u5728\u51C6\u5907\u6279\u91CF\u5206\u7C7B...
 \u5206\u7C7B\u9009\u9879: ${settings.categories.join(", ")}`, "processing");
           try {
-            await AIClassifier.ensureAICategoryProperty(settings);
+            await AIClassifier2.ensureAICategoryProperty(settings);
             state().updateLastMessage(`\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...`, "processing");
-            const pages = await AIClassifier.fetchAllPages(settings);
+            const pages = await AIClassifier2.fetchAllPages(settings);
             if (pages.length === 0) {
               return "\u{1F4ED} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762\u3002";
             }
@@ -14368,8 +14407,14 @@ ${insight.summary || ""}`,
             const results = { success: 0, failed: 0 };
             const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
             for (let i = 0; i < unclassified.length; i++) {
+              if (AIClassifier2.isCancelled) break;
+              while (AIClassifier2.isPaused) {
+                await Utils2.sleep(500);
+                if (AIClassifier2.isCancelled) break;
+              }
+              if (AIClassifier2.isCancelled) break;
               const page = unclassified[i];
-              const title = AIClassifier.getPageTitle(page);
+              const title = AIClassifier2.getPageTitle(page);
               state().updateLastMessage(
                 `\u{1F504} \u6B63\u5728\u5206\u7C7B (${i + 1}/${unclassified.length})
 
@@ -14377,7 +14422,7 @@ ${insight.summary || ""}`,
                 "processing"
               );
               try {
-                await AIClassifier.classifyPage(page, settings);
+                await AIClassifier2.classifyPage(page, settings);
                 results.success++;
               } catch (error) {
                 console.error(`[LD-Notion] \u5206\u7C7B\u5931\u8D25: ${title}`, error);
@@ -14396,6 +14441,13 @@ ${insight.summary || ""}`,
 `;
             resultMsg += `- \u672C\u6B21\u5206\u7C7B: ${results.success} \u4E2A
 `;
+            if (AIClassifier2.isCancelled) {
+              resultMsg = `\u23F9\uFE0F **\u6279\u91CF\u5206\u7C7B\u5DF2\u53D6\u6D88**
+
+`;
+              resultMsg += `- \u5DF2\u5206\u7C7B: ${results.success} \u4E2A
+`;
+            }
             if (results.failed > 0) {
               resultMsg += `- \u5931\u8D25: ${results.failed} \u4E2A
 `;
@@ -17554,6 +17606,11 @@ ${report}
                 <!-- \u5FEB\u6377\u64CD\u4F5C -->
                 <div class="ldb-chat-actions">
                     <button class="ldb-chat-action-btn" id="ldb-chat-clear">\u{1F5D1}\uFE0F \u6E05\u7A7A</button>
+                    <!-- F-03 \u4FEE\u590D\uFF1A\u6279\u91CF\u5206\u7C7B\u63A7\u5236\uFF08\u4E0E MainUI \u4E00\u81F4\uFF09 -->
+                    <span id="ldb-classify-controls">
+                        <button class="ldb-chat-action-btn" id="ldb-classify-pause">\u23F8\uFE0F \u6682\u505C\u5206\u7C7B</button>
+                        <button class="ldb-chat-action-btn" id="ldb-classify-cancel">\u2715 \u53D6\u6D88\u5206\u7C7B</button>
+                    </span>
                 </div>
 
                 <div class="ldb-divider"></div>
@@ -19269,7 +19326,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               const importBtn = list.querySelector("#ldb-import-bookmarks-btn");
               if (importBtn) {
                 importBtn.onclick = () => {
-                  ChatUI2.sendMessage("import-bookmarks-from-browser");
+                  const chatInput = document.querySelector("#ldb-chat-input");
+                  if (chatInput && ChatUI2.sendMessage) {
+                    UI2().showStatus("\u6B63\u5728\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E\uFF0C\u8BF7\u8010\u5FC3\u7B49\u5F85...", "info");
+                    chatInput.value = "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E";
+                    ChatUI2.sendMessage();
+                  } else {
+                    UI2().showStatus("AI \u9762\u677F\u672A\u5C31\u7EEA\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5", "error");
+                  }
                 };
               }
             }, 0);
@@ -19937,6 +20001,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               `<span class="ldb-view-pill">${Utils2.escapeHtml(row.outcomeLabel)}</span>`
             ].join("");
             const errorMarkup = row.lastError ? `<div class="ldb-view-empty-text" style="margin-top: var(--ldb-ui-spacing-md); color: var(--ldb-ui-danger);">\u6700\u8FD1\u5F02\u5E38\uFF1A${Utils2.escapeHtml(row.lastError)}</div>` : "";
+            const resetMarkup = `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-reset-baseline="${Utils2.escapeHtml(row.key)}" style="margin-top: var(--ldb-ui-spacing-md);">\u91CD\u7F6E\u57FA\u7EBF</button>`;
             return `
                 <div class="ldb-view-card">
                     <div class="ldb-view-card-title">${Utils2.escapeHtml(row.label)}</div>
@@ -19963,6 +20028,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                     </div>
                     <div class="ldb-view-empty-text" style="margin-top: var(--ldb-ui-spacing-md);">${Utils2.escapeHtml(row.detailLabel)}</div>
                     ${errorMarkup}
+                    ${resetMarkup}
                 </div>
             `;
           }).join("");
@@ -19986,6 +20052,24 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 ${sourceCards}
             </div>
         `;
+          container.querySelectorAll("[data-reset-baseline]").forEach((btn) => {
+            btn.onclick = () => {
+              const sourceKey = btn.getAttribute("data-reset-baseline");
+              const sourceLabel = sourceKey === "github" ? "GitHub" : sourceKey;
+              if (!confirm(`\u786E\u5B9A\u91CD\u7F6E\u300C${sourceLabel}\u300D\u7684\u589E\u91CF\u540C\u6B65\u57FA\u7EBF\u5417\uFF1F
+\u91CD\u7F6E\u540E\u4E0B\u6B21\u540C\u6B65\u5C06\u91CD\u65B0\u5168\u91CF\u626B\u63CF\u3002`)) {
+                return;
+              }
+              if (sourceKey === "github") {
+                const githubTypes = Array.from(new Set((GitHubAPI2.getImportTypes() || []).filter(Boolean)));
+                githubTypes.forEach((type) => SyncState2.resetSourceState(`github-${type}`));
+              } else {
+                SyncState2.resetSourceState(sourceKey === "bookmarks" ? "bookmark" : sourceKey);
+              }
+              WorkspaceInsight.renderSyncCenterSummary();
+              UI2().showStatus(`\u5DF2\u91CD\u7F6E\u300C${sourceLabel}\u300D\u589E\u91CF\u57FA\u7EBF\uFF0C\u4E0B\u6B21\u540C\u6B65\u5C06\u5168\u91CF\u626B\u63CF`, "success");
+            };
+          });
         },
         runUnifiedSyncNow: async () => {
           const refs = UI2().refs || {};
@@ -20366,6 +20450,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             exportBtns: panel.querySelector("#ldb-export-btns"),
             controlBtns: panel.querySelector("#ldb-control-btns"),
             pauseBtn: panel.querySelector("#ldb-pause"),
+            classifyPauseBtn: panel.querySelector("#ldb-classify-pause"),
+            classifyCancelBtn: panel.querySelector("#ldb-classify-cancel"),
             autoImportEnabled: panel.querySelector("#ldb-auto-import-enabled"),
             autoImportOptions: panel.querySelector("#ldb-auto-import-options"),
             autoImportInterval: panel.querySelector("#ldb-auto-import-interval"),
@@ -20429,6 +20515,10 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             logContent: panel.querySelector("#ldb-log-content"),
             logArrow: panel.querySelector("#ldb-log-arrow"),
             logClearBtn: panel.querySelector("#ldb-log-clear"),
+            dedupSummary: panel.querySelector("#ldb-dedup-summary"),
+            clearLinuxdoDedupBtn: panel.querySelector("#ldb-clear-linuxdo-dedup"),
+            clearGithubExportedBtn: panel.querySelector("#ldb-clear-github-exported"),
+            clearBookmarkExportedBtn: panel.querySelector("#ldb-clear-bookmark-exported"),
             aiRefreshDbsBtn: panel.querySelector("#ldb-ai-refresh-dbs"),
             aiFetchModelsBtn: panel.querySelector("#ldb-ai-fetch-models"),
             aiModelTip: panel.querySelector("#ldb-ai-model-tip"),
@@ -20736,6 +20826,11 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                         <!-- \u5FEB\u6377\u64CD\u4F5C -->
                         <div class="ldb-chat-actions">
                             <button class="ldb-chat-action-btn" id="ldb-chat-clear">\u{1F5D1}\uFE0F \u6E05\u7A7A</button>
+                            <!-- F-03 \u4FEE\u590D\uFF1A\u6279\u91CF\u5206\u7C7B\u63A7\u5236\uFF08\u4E0E Exporter \u6682\u505C/\u53D6\u6D88\u4E00\u81F4\uFF0C\u5E38\u9A7B\uFF09 -->
+                            <span id="ldb-classify-controls">
+                                <button class="ldb-chat-action-btn" id="ldb-classify-pause">\u23F8\uFE0F \u6682\u505C\u5206\u7C7B</button>
+                                <button class="ldb-chat-action-btn" id="ldb-classify-cancel">\u2715 \u53D6\u6D88\u5206\u7C7B</button>
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -21165,6 +21260,18 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                     </div>
 
                     <div class="ldb-divider"></div>
+
+                    <!-- F-05 \u4FEE\u590D\uFF1A\u6570\u636E\u7BA1\u7406\uFF08\u53BB\u91CD/\u5DF2\u5BFC\u51FA\u8BB0\u5F55\u6E05\u7406\uFF09 -->
+                    <div class="ldb-section">
+                        <div class="ldb-section-title">\u6570\u636E\u7BA1\u7406</div>
+                        <div class="ldb-tip" id="ldb-dedup-summary"></div>
+                        <div class="ldb-input-group ldb-mt-12">
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-linuxdo-dedup">\u6E05\u9664 Linux.do \u53BB\u91CD</button>
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-github-exported">\u6E05\u9664 GitHub \u5DF2\u5BFC\u51FA\u8BB0\u5F55</button>
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-bookmark-exported">\u6E05\u9664\u4E66\u7B7E\u5DF2\u5BFC\u51FA\u8BB0\u5F55</button>
+                        </div>
+                        <div class="ldb-tip">\u4EC5\u6E05\u9664\u672C\u5730\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u4E0D\u5F71\u54CD Notion \u4E2D\u5DF2\u6709\u5185\u5BB9\uFF1B\u6E05\u9664\u540E\u5BF9\u5E94\u6765\u6E90\u53EF\u518D\u6B21\u5BFC\u51FA\u3002</div>
+                    </div>
 
                     <!-- \u64CD\u4F5C\u65E5\u5FD7\u9762\u677F -->
                     <div class="ldb-log-panel" id="ldb-log-panel">
@@ -22523,7 +22630,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       "use strict";
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
+      var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
@@ -22531,8 +22638,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { UICommandService } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
-      var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIService: AIService2, ChatUI: ChatUI2 } = require_ai();
+      var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2, BookmarkExporter: BookmarkExporter2 } = require_bridge();
+      var { AIService: AIService2, ChatUI: ChatUI2, AIClassifier: AIClassifier2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var UIEvents2 = {
         bindEvents: () => {
@@ -23194,6 +23301,28 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               btn.innerHTML = "\u{1F504} \u52A0\u8F7D\u6536\u85CF\u5217\u8868";
             }
           };
+          const bindFilterPersistence = (el, key, parse) => {
+            if (!el) return;
+            el.addEventListener("change", () => {
+              Storage2.set(key, parse(el));
+            });
+          };
+          const numOr = (el, d) => {
+            const n = parseInt(el.value, 10);
+            return Number.isFinite(n) ? n : d;
+          };
+          bindFilterPersistence(refs.onlyFirstCheckbox, CONFIG2.STORAGE_KEYS.FILTER_ONLY_FIRST, (el) => !!el.checked);
+          bindFilterPersistence(refs.onlyOpCheckbox, CONFIG2.STORAGE_KEYS.FILTER_ONLY_OP, (el) => !!el.checked);
+          bindFilterPersistence(refs.rangeStartInput, CONFIG2.STORAGE_KEYS.FILTER_RANGE_START, (el) => numOr(el, CONFIG2.DEFAULTS.rangeStart));
+          bindFilterPersistence(refs.rangeEndInput, CONFIG2.STORAGE_KEYS.FILTER_RANGE_END, (el) => numOr(el, CONFIG2.DEFAULTS.rangeEnd));
+          bindFilterPersistence(refs.imgModeSelect, CONFIG2.STORAGE_KEYS.IMG_MODE, (el) => el.value);
+          bindFilterPersistence(refs.requestDelaySelect, CONFIG2.STORAGE_KEYS.REQUEST_DELAY, (el) => numOr(el, CONFIG2.DEFAULTS.requestDelay));
+          bindFilterPersistence(refs.exportConcurrencySelect, CONFIG2.STORAGE_KEYS.EXPORT_CONCURRENCY, (el) => numOr(el, CONFIG2.DEFAULTS.exportConcurrency));
+          bindFilterPersistence(refs.filterImgSelect, CONFIG2.STORAGE_KEYS.FILTER_IMG, (el) => el.value);
+          bindFilterPersistence(refs.filterUsersInput, CONFIG2.STORAGE_KEYS.FILTER_USERS, (el) => el.value.trim());
+          bindFilterPersistence(refs.filterIncludeInput, CONFIG2.STORAGE_KEYS.FILTER_INCLUDE, (el) => el.value.trim());
+          bindFilterPersistence(refs.filterExcludeInput, CONFIG2.STORAGE_KEYS.FILTER_EXCLUDE, (el) => el.value.trim());
+          bindFilterPersistence(refs.filterMinLenInput, CONFIG2.STORAGE_KEYS.FILTER_MINLEN, (el) => numOr(el, CONFIG2.DEFAULTS.filterMinLen));
           refs.importBrowserBookmarksBtn.onclick = async () => {
             const btn = refs.importBrowserBookmarksBtn;
             const source = UI2.getActiveBookmarkSource();
@@ -23635,6 +23764,25 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               UI2.showStatus("\u65E5\u5FD7\u5DF2\u6E05\u9664", "success");
             }
           };
+          const renderDedupSummary = () => {
+            const el = refs.dedupSummary;
+            if (!el) return;
+            const linuxdoCount = Object.keys(DedupStore.getSeen("linuxdo") || {}).length;
+            const githubCount = Object.keys(GitHubAPI2.getExported() || {}).length + Object.keys(GitHubAPI2.getExportedGists() || {}).length;
+            const bookmarkCount = Object.keys(BookmarkExporter2.getExported() || {}).length;
+            el.textContent = `\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55 \u2014\u2014 Linux.do: ${linuxdoCount} \u6761\uFF1BGitHub: ${githubCount} \u6761\uFF1B\u4E66\u7B7E: ${bookmarkCount} \u6761`;
+          };
+          const clearWithConfirm = (label, doClear) => {
+            if (!confirm(`\u786E\u5B9A\u6E05\u9664${label}\u8BB0\u5F55\u5417\uFF1F
+\u6E05\u9664\u540E\u8BE5\u6765\u6E90\u7684\u6240\u6709\u5185\u5BB9\u5C06\u53EF\u518D\u6B21\u5BFC\u51FA/\u5BFC\u5165\u3002`)) return;
+            doClear();
+            renderDedupSummary();
+            UI2.showStatus(`${label}\u8BB0\u5F55\u5DF2\u6E05\u9664`, "success");
+          };
+          refs.clearLinuxdoDedupBtn.onclick = () => clearWithConfirm("Linux.do \u53BB\u91CD", () => DedupStore.clearSeen("linuxdo"));
+          refs.clearGithubExportedBtn.onclick = () => clearWithConfirm("GitHub \u5DF2\u5BFC\u51FA", () => GitHubAPI2.clearExportedRecords());
+          refs.clearBookmarkExportedBtn.onclick = () => clearWithConfirm("\u4E66\u7B7E\u5DF2\u5BFC\u51FA", () => BookmarkExporter2.clearExportedRecords());
+          renderDedupSummary();
           refs.apiKeyInput.onchange = async (e) => {
             const value = e.target.value.trim();
             try {
@@ -27231,6 +27379,26 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
               }
             };
           }
+          const classifyPauseBtn = document.querySelector("#ldb-classify-pause");
+          if (classifyPauseBtn) {
+            classifyPauseBtn.onclick = () => {
+              if (AIClassifier2.isPaused) {
+                AIClassifier2.resume();
+                classifyPauseBtn.textContent = "\u23F8\uFE0F \u6682\u505C\u5206\u7C7B";
+              } else {
+                AIClassifier2.pause();
+                classifyPauseBtn.textContent = "\u25B6\uFE0F \u7EE7\u7EED\u5206\u7C7B";
+              }
+            };
+          }
+          const classifyCancelBtn = document.querySelector("#ldb-classify-cancel");
+          if (classifyCancelBtn) {
+            classifyCancelBtn.onclick = () => {
+              if (confirm("\u786E\u5B9A\u8981\u53D6\u6D88\u6279\u91CF\u5206\u7C7B\u5417\uFF1F\u5DF2\u5B8C\u6210\u7684\u90E8\u5206\u4E0D\u4F1A\u4E22\u5931\u3002")) {
+                AIClassifier2.cancel();
+              }
+            };
+          }
           const settingsToggle = document.querySelector("#ldb-chat-settings-toggle");
           if (settingsToggle) {
             settingsToggle.onclick = () => {
@@ -27250,14 +27418,14 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           ChatUI2.bindEvents();
         }
       };
-      var AIClassifier3 = {
+      var AIClassifier2 = {
         isPaused: false,
         isCancelled: false,
         // 批量分类
         classifyBatch: async (settings, onProgress) => {
-          AIClassifier3.reset();
-          await AIClassifier3.ensureAICategoryProperty(settings);
-          const pages = await AIClassifier3.fetchAllPages(settings);
+          AIClassifier2.reset();
+          await AIClassifier2.ensureAICategoryProperty(settings);
+          const pages = await AIClassifier2.fetchAllPages(settings);
           if (pages.length === 0) {
             throw new Error("\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762");
           }
@@ -27272,22 +27440,22 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           const results = { success: [], failed: [] };
           const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
           for (let i = 0; i < unclassified.length; i++) {
-            if (AIClassifier3.isCancelled) break;
-            while (AIClassifier3.isPaused) {
+            if (AIClassifier2.isCancelled) break;
+            while (AIClassifier2.isPaused) {
               await Utils2.sleep(500);
-              if (AIClassifier3.isCancelled) break;
+              if (AIClassifier2.isCancelled) break;
             }
-            if (AIClassifier3.isCancelled) break;
+            if (AIClassifier2.isCancelled) break;
             const page = unclassified[i];
-            const title = AIClassifier3.getPageTitle(page);
+            const title = AIClassifier2.getPageTitle(page);
             onProgress == null ? void 0 : onProgress({
               current: i + 1,
               total: unclassified.length,
               title,
-              isPaused: AIClassifier3.isPaused
+              isPaused: AIClassifier2.isPaused
             });
             try {
-              await AIClassifier3.classifyPage(page, settings);
+              await AIClassifier2.classifyPage(page, settings);
               results.success.push({ title });
             } catch (error) {
               results.failed.push({ title, error: error.message });
@@ -27327,9 +27495,9 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         },
         // 分类单个页面
         classifyPage: async (page, settings) => {
-          const title = AIClassifier3.getPageTitle(page);
-          const blocks = await AIClassifier3.fetchPageBlocks(page.id, settings.notionApiKey);
-          const content = AIClassifier3.extractText(blocks);
+          const title = AIClassifier2.getPageTitle(page);
+          const blocks = await AIClassifier2.fetchPageBlocks(page.id, settings.notionApiKey);
+          const content = AIClassifier2.extractText(blocks);
           const category = await AIService2.classify(
             title,
             content,
@@ -27422,22 +27590,22 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         },
         // 控制方法
         pause: () => {
-          AIClassifier3.isPaused = true;
+          AIClassifier2.isPaused = true;
         },
         resume: () => {
-          AIClassifier3.isPaused = false;
+          AIClassifier2.isPaused = false;
         },
         cancel: () => {
-          AIClassifier3.isCancelled = true;
+          AIClassifier2.isCancelled = true;
         },
         reset: () => {
-          AIClassifier3.isPaused = false;
-          AIClassifier3.isCancelled = false;
+          AIClassifier2.isPaused = false;
+          AIClassifier2.isCancelled = false;
         }
       };
       Object.assign(AIAssistant2, require_guarded_write().GuardedWrite);
       var getAISettings = () => AIAssistant2.getSettings();
-      module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier3, getAISettings };
+      module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, getAISettings };
       Object.assign(AIAssistant2, require_agent_executor().AgentExecutor);
     }
   });
@@ -27448,7 +27616,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { Storage, SyncState } = require_storage();
   var { CredentialVault, TargetState, NotionOAuth } = require_auth();
   var { SiteDetector, InstallHelper, EMOJI_MAP, NOTION_LANGUAGES, normalizeLanguage, DOMToNotion, NotionTransport, NotionAPI, ObsidianAPI, HTMLToMarkdown } = require_api();
-  var { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier: AIClassifier2 } = require_ai();
+  var { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier } = require_ai();
   var { OperationGuard, OperationLog, ConfirmationDialog: ConfirmationDialog2, UndoManager } = require_security();
   var { ZhihuAPI, GenericExtractor, WorkspaceService } = require_extract();
   var { GenericExporter, LinuxDoAPI, Exporter } = require_export();

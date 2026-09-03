@@ -2,6 +2,7 @@
 
 const { CONFIG } = require("../config");
 const { SyncStateV2 } = require("./SyncState");
+const { DedupStore } = require("./DedupStore");
 
 let _credentialVault = null;
 
@@ -112,13 +113,16 @@ const SyncState = {
     getRssState: () => SyncStateV2.getSourceState("rss"),
     updateRssState: (patch) => SyncStateV2.updateSourceState("rss", patch),
 
+    // F-04 修复：重置指定源增量基线（下次同步退化为全量）
+    resetSourceState: (sourceType) => SyncStateV2.resetSourceState(sourceType),
+
     // 内部方法代理 (供老代码调用)
     _clone: (value) => SyncStateV2._clone ? SyncStateV2._clone(value) : JSON.parse(JSON.stringify(value)),
     _load: () => SyncStateV2._load(),
     _save: (state) => SyncStateV2._save(state),
 };
 
-module.exports = { Storage, SyncState };
+module.exports = { Storage, SyncState, DedupStore };
 
 // CredentialVault will be set from auth module（main.js 通过 Storage.CredentialVault = CredentialVault 注入）。
 // setter 必须定义在 Storage 主对象上（而非 module.exports），这样 main.js 的直接赋值才能触发

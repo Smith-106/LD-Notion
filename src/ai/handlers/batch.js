@@ -13,7 +13,7 @@ const { AISchema } = require("../schema");
 const { BlockConverter } = require("../BlockConverter");
 const { NameResolver } = require("../NameResolver");
 const { AgentTrace } = require("../AgentTrace");
-const { getAI: AI, getState: state, getService: svc } = require("../deps");
+const { getAI: AI, getState: state, getService: svc, getClassifier } = require("../deps");
 
 module.exports = {
 handleClassify: async (params, settings, explanation) => {
@@ -21,6 +21,8 @@ handleClassify: async (params, settings, explanation) => {
 },
 
 handleBatchClassify: async (params, settings, explanation) => {
+    // F-03 修复：AIClassifier 为 ai/index.js 模块局部常量，须经 deps lazy 获取（跨闭包自由变量恒 ReferenceError）
+    const AIClassifier = getClassifier();
     // 检查数据库 ID 配置
     if (!settings.notionDatabaseId) {
         return "❌ 请先配置 Notion 数据库 ID。\n\n💡 提示：可以使用「列出所有数据库」来查看工作区中的数据库并获取 ID。";
@@ -59,6 +61,14 @@ handleBatchClassify: async (params, settings, explanation) => {
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
 
         for (let i = 0; i < unclassified.length; i++) {
+            // F-03: 支持暂停/取消（与 classifyBatch 标志位一致）
+            if (AIClassifier.isCancelled) break;
+            while (AIClassifier.isPaused) {
+                await Utils.sleep(500);
+                if (AIClassifier.isCancelled) break;
+            }
+            if (AIClassifier.isCancelled) break;
+
             const page = unclassified[i];
             const title = AIClassifier.getPageTitle(page);
 
@@ -84,6 +94,10 @@ handleBatchClassify: async (params, settings, explanation) => {
         resultMsg += `- 总计: ${pages.length} 个页面\n`;
         resultMsg += `- 已分类: ${pages.length - unclassified.length} 个\n`;
         resultMsg += `- 本次分类: ${results.success} 个\n`;
+        if (AIClassifier.isCancelled) {
+            resultMsg = `⏹️ **批量分类已取消**\n\n`;
+            resultMsg += `- 已分类: ${results.success} 个\n`;
+        }
         if (results.failed > 0) {
             resultMsg += `- 失败: ${results.failed} 个\n`;
         }

@@ -519,6 +519,12 @@ const BookmarkExporter = {
         }
     },
 
+    // F-05 修复：清除书签已导出记录（清键 + 失效内存缓存，供数据管理 UI 调用）
+    clearExportedRecords: () => {
+        BookmarkExporter._exportedCache = null;
+        Storage.remove(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED);
+    },
+
     // 淘汰超过 90 天的过期条目（PERF-001 泛化，与 DedupStore._evictExpired 同构）
     _EXPORT_TTL_MS: 90 * 24 * 60 * 60 * 1000,
     _evictExpired: (set) => {

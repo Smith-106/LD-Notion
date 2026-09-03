@@ -3,7 +3,7 @@
 // 依赖引入
 const { CONFIG, MSG } = require("../config");
 const { Utils } = require("../utils");
-const { Storage, SyncState } = require("../storage");
+const { Storage, SyncState, DedupStore } = require("../storage");
 const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
 const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, ObsidianAPI, EMOJI_MAP } = require("../api");
 const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = require("../security");
@@ -11,8 +11,8 @@ const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { UICommandService } = require("../coordination/UICommandService");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
-const { BookmarkBridge, BookmarkAutoImporter, RSSAutoImporter } = require("../bridge");
-const { AIService, ChatUI } = require("../ai");
+const { BookmarkBridge, BookmarkAutoImporter, RSSAutoImporter, BookmarkExporter } = require("../bridge");
+const { AIService, ChatUI, AIClassifier } = require("../ai");
 const { DesignSystem } = require("./design-system");
 
 const UIEvents = {
@@ -803,6 +803,25 @@ const UIEvents = {
             }
         };
 
+        // F-02 修复：筛选/参数控件变更即时持久化，避免未点导出丢失
+        const bindFilterPersistence = (el, key, parse) => {
+            if (!el) return;
+            el.addEventListener("change", () => { Storage.set(key, parse(el)); });
+        };
+        const numOr = (el, d) => { const n = parseInt(el.value, 10); return Number.isFinite(n) ? n : d; };
+        bindFilterPersistence(refs.onlyFirstCheckbox, CONFIG.STORAGE_KEYS.FILTER_ONLY_FIRST, (el) => !!el.checked);
+        bindFilterPersistence(refs.onlyOpCheckbox, CONFIG.STORAGE_KEYS.FILTER_ONLY_OP, (el) => !!el.checked);
+        bindFilterPersistence(refs.rangeStartInput, CONFIG.STORAGE_KEYS.FILTER_RANGE_START, (el) => numOr(el, CONFIG.DEFAULTS.rangeStart));
+        bindFilterPersistence(refs.rangeEndInput, CONFIG.STORAGE_KEYS.FILTER_RANGE_END, (el) => numOr(el, CONFIG.DEFAULTS.rangeEnd));
+        bindFilterPersistence(refs.imgModeSelect, CONFIG.STORAGE_KEYS.IMG_MODE, (el) => el.value);
+        bindFilterPersistence(refs.requestDelaySelect, CONFIG.STORAGE_KEYS.REQUEST_DELAY, (el) => numOr(el, CONFIG.DEFAULTS.requestDelay));
+        bindFilterPersistence(refs.exportConcurrencySelect, CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY, (el) => numOr(el, CONFIG.DEFAULTS.exportConcurrency));
+        bindFilterPersistence(refs.filterImgSelect, CONFIG.STORAGE_KEYS.FILTER_IMG, (el) => el.value);
+        bindFilterPersistence(refs.filterUsersInput, CONFIG.STORAGE_KEYS.FILTER_USERS, (el) => el.value.trim());
+        bindFilterPersistence(refs.filterIncludeInput, CONFIG.STORAGE_KEYS.FILTER_INCLUDE, (el) => el.value.trim());
+        bindFilterPersistence(refs.filterExcludeInput, CONFIG.STORAGE_KEYS.FILTER_EXCLUDE, (el) => el.value.trim());
+        bindFilterPersistence(refs.filterMinLenInput, CONFIG.STORAGE_KEYS.FILTER_MINLEN, (el) => numOr(el, CONFIG.DEFAULTS.filterMinLen));
+
         refs.importBrowserBookmarksBtn.onclick = async () => {
             const btn = refs.importBrowserBookmarksBtn
             const source = UI.getActiveBookmarkSource();
@@ -1302,6 +1321,26 @@ const UIEvents = {
                 UI.showStatus("日志已清除", "success");
             }
         };
+
+        // F-05 修复：数据管理（去重/已导出记录清理）
+        const renderDedupSummary = () => {
+            const el = refs.dedupSummary;
+            if (!el) return;
+            const linuxdoCount = Object.keys(DedupStore.getSeen("linuxdo") || {}).length;
+            const githubCount = Object.keys(GitHubAPI.getExported() || {}).length + Object.keys(GitHubAPI.getExportedGists() || {}).length;
+            const bookmarkCount = Object.keys(BookmarkExporter.getExported() || {}).length;
+            el.textContent = `去重/导出记录 —— Linux.do: ${linuxdoCount} 条；GitHub: ${githubCount} 条；书签: ${bookmarkCount} 条`;
+        };
+        const clearWithConfirm = (label, doClear) => {
+            if (!confirm(`确定清除${label}记录吗？\n清除后该来源的所有内容将可再次导出/导入。`)) return;
+            doClear();
+            renderDedupSummary();
+            UI.showStatus(`${label}记录已清除`, "success");
+        };
+        refs.clearLinuxdoDedupBtn.onclick = () => clearWithConfirm("Linux.do 去重", () => DedupStore.clearSeen("linuxdo"));
+        refs.clearGithubExportedBtn.onclick = () => clearWithConfirm("GitHub 已导出", () => GitHubAPI.clearExportedRecords());
+        refs.clearBookmarkExportedBtn.onclick = () => clearWithConfirm("书签已导出", () => BookmarkExporter.clearExportedRecords());
+        renderDedupSummary();
 
         // 输入框自动保存
         refs.apiKeyInput.onchange = async (e) => {

@@ -9,7 +9,7 @@ const { Storage } = require("../../storage");
 const { TargetState } = require("../../auth");
 const { NotionAPI } = require("../../api");
 const { OperationGuard } = require("../../security");
-const { getAI: AI, getService: svc } = require("../deps");
+const { getAI: AI, getService: svc, getClassifier } = require("../deps");
 
 module.exports = {
     batch_tag: {
@@ -596,6 +596,8 @@ module.exports = {
         params: "limit(最多处理数量,默认全部)",
         level: 1,
         execute: async (args, settings) => {
+            // F-03 修复：AIClassifier 经 deps lazy 获取（跨闭包自由变量恒 ReferenceError）
+            const AIClassifier = getClassifier();
             const dbId = settings.notionDatabaseId;
             if (!dbId) return "错误: 未配置数据库 ID。";
             if (settings.categories.length < 2) return "错误: 请先配置至少两个分类选项。";
@@ -613,6 +615,13 @@ module.exports = {
             let success = 0, failed = 0;
 
             for (let i = 0; i < toClassify.length; i++) {
+                // F-03: 支持暂停/取消
+                if (AIClassifier.isCancelled) break;
+                while (AIClassifier.isPaused) {
+                    await Utils.sleep(500);
+                    if (AIClassifier.isCancelled) break;
+                }
+                if (AIClassifier.isCancelled) break;
                 try {
                     await AIClassifier.classifyPage(toClassify[i], settings);
                     success++;

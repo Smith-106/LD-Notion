@@ -198,7 +198,15 @@ const BookmarkList = {
                 const importBtn = list.querySelector("#ldb-import-bookmarks-btn");
                 if (importBtn) {
                     importBtn.onclick = () => {
-                        ChatUI.sendMessage("import-bookmarks-from-browser");
+                        // F-01 修复:sendMessage 忽略入参,须先注入指令文本再发送
+                        const chatInput = document.querySelector("#ldb-chat-input");
+                        if (chatInput && ChatUI.sendMessage) {
+                            UI().showStatus("正在导入浏览器书签，请耐心等待...", "info");
+                            chatInput.value = "导入浏览器书签";
+                            ChatUI.sendMessage();
+                        } else {
+                            UI().showStatus("AI 面板未就绪，请稍后重试", "error");
+                        }
                     };
                 }
             }, 0);

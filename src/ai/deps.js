@@ -15,6 +15,7 @@
 let _AI = null;
 let _state = null;
 let _svc = null;
+let _classifier = null;
 
 /**
  * 获取 AIAssistant 实例（含 mixin 后的全部方法）
@@ -34,4 +35,11 @@ const getState = () => (_state || (_state = require("./index").ChatState));
  */
 const getService = () => (_svc || (_svc = require("./index").AIService));
 
-module.exports = { getAI, getState, getService };
+/**
+ * 获取 AIClassifier（批量分类器，含 isPaused/isCancelled 控制）
+ * 修复 F-03：handler 层跨模块自由变量裸引用 AIClassifier 恒为 ReferenceError
+ * @returns {Object} AIClassifier
+ */
+const getClassifier = () => (_classifier || (_classifier = require("./index").AIClassifier));
+
+module.exports = { getAI, getState, getService, getClassifier };

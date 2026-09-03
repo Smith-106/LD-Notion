@@ -685,6 +685,8 @@ const WorkspaceInsight = {
             const errorMarkup = row.lastError
                 ? `<div class="ldb-view-empty-text" style="margin-top: var(--ldb-ui-spacing-md); color: var(--ldb-ui-danger);">最近异常：${Utils.escapeHtml(row.lastError)}</div>`
                 : "";
+            // F-04 修复：每个来源卡片提供「重置增量基线」入口
+            const resetMarkup = `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-reset-baseline="${Utils.escapeHtml(row.key)}" style="margin-top: var(--ldb-ui-spacing-md);">重置基线</button>`;
             return `
                 <div class="ldb-view-card">
                     <div class="ldb-view-card-title">${Utils.escapeHtml(row.label)}</div>
@@ -711,6 +713,7 @@ const WorkspaceInsight = {
                     </div>
                     <div class="ldb-view-empty-text" style="margin-top: var(--ldb-ui-spacing-md);">${Utils.escapeHtml(row.detailLabel)}</div>
                     ${errorMarkup}
+                    ${resetMarkup}
                 </div>
             `;
         }).join("");
@@ -735,6 +738,25 @@ const WorkspaceInsight = {
                 ${sourceCards}
             </div>
         `;
+
+        // F-04 修复：重置基线按钮事件委托（gitHub 子类型独立基线，按子类型逐个重置）
+        container.querySelectorAll("[data-reset-baseline]").forEach((btn) => {
+            btn.onclick = () => {
+                const sourceKey = btn.getAttribute("data-reset-baseline");
+                const sourceLabel = sourceKey === "github" ? "GitHub" : sourceKey;
+                if (!confirm(`确定重置「${sourceLabel}」的增量同步基线吗？\n重置后下次同步将重新全量扫描。`)) {
+                    return;
+                }
+                if (sourceKey === "github") {
+                    const githubTypes = Array.from(new Set((GitHubAPI.getImportTypes() || []).filter(Boolean)));
+                    githubTypes.forEach((type) => SyncState.resetSourceState(`github-${type}`));
+                } else {
+                    SyncState.resetSourceState(sourceKey === "bookmarks" ? "bookmark" : sourceKey);
+                }
+                WorkspaceInsight.renderSyncCenterSummary();
+                UI().showStatus(`已重置「${sourceLabel}」增量基线，下次同步将全量扫描`, "success");
+            };
+        });
     },
 
     runUnifiedSyncNow: async () => {

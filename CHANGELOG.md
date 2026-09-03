@@ -1,5 +1,33 @@
 # 更新日志
 
+## [3.13.0] - 2026-09-04
+
+### 修复（F-01~F-05 五连修复 · 稳定性与数据管理闭环）
+
+本轮集中修复 5 类用户可见问题：空状态导入按钮失效、筛选设置丢失、AI 批分类崩溃、增量同步基线不可重置、本地去重/导出记录无法管理。三模型共识审计（deepseek-v4 / GLM-5.2 / hy3）发现并交叉验证，修复后经 browse 实机验证全部通过。
+
+**F-01 空状态导入按钮死控件**
+- 空书签列表「导入浏览器书签」按钮调用 `ChatUI.sendMessage("import-bookmarks-from-browser")`，但 `sendMessage` 忽略入参 → 点击无任何反应。→ 改为先向聊天输入框注入指令文本再发送，并新增「正在导入」状态提示；AI 面板未就绪时给出明确错误提示
+
+**F-02 筛选/参数控件即时持久化**
+- 12 个筛选与参数控件（仅主楼/仅楼主、楼层范围起止、图片模式、请求间隔、导出并发、图片筛选、用户/包含/排除关键词、最小长度）此前仅在点击导出时才写入存储，调整后未导出即丢失。→ 全部控件新增 `change` 事件即时持久化，改动即生效
+
+**F-03 AIClassifier 跨闭包裸引用崩溃 + 批分类暂停/取消**
+- `batch.js`/`content.js`/`write-tools.js` 三处 handler 层裸引用 `AIClassifier`（esbuild 闭包外自由变量恒为 `ReferenceError`）→ 批量分类/内容提取必然崩溃。→ 新增 `deps.getClassifier()` lazy 获取统一修复
+- 批分类循环新增 `isPaused`/`isCancelled` 标志位支持；主面板与 Notion 站点面板新增常驻「⏸️ 暂停分类 / ✕ 取消分类」按钮，取消时保留已完成部分并给出汇总
+
+**F-04 SyncState 基线重置**
+- 增量同步基线（watermark）此前无任何 UI 入口可重置，误同步/数据回退后无法恢复全量扫描。→ 新增 `SyncState.resetSourceState(sourceType)`（清空 watermark/lastOutcome，下次同步退化为全量）；工作区洞察每个来源卡片新增「重置基线」按钮，GitHub 按子类型逐个重置
+
+**F-05 数据管理区**
+- 去重/已导出记录此前只能靠控制台 `GM_setValue` 清理。→ 设置面板新增「数据管理」区：实时统计 Linux.do 去重、GitHub 已导出（仓库+Gist）、书签已导出记录数，三个按钮经确认后一键清除（清存储键 + 失效内存缓存），清除后对应来源可再次导出
+
+### 验证
+
+- `npm test`：26 个测试文件、557 个用例全部通过（vitest + legacy 三件套）
+- `node build.js`：单文件产物构建成功，产物版本标记 v3.13.0
+- browse 实机验证：F-01~F-05 六项 PASS（空态导入、筛选持久化、分类控制按钮、重置基线、数据管理区、Notion 配置链路）
+
 ## [3.12.0] - 2026-08-25
 
 ### 修复（Notion OAuth 自动授权失效 · 三模型共识根因闭环）
@@ -57,6 +85,7 @@ Notion OAuth 一键授权此前在回调页与自动续签场景必然失败：O
 - `npm run build`：单文件产物 1374.6 KB（较 v3.10.0 +0.66%，低于 5% 审查阈值）
 - Odyssey Review 三模型独立复审：Security/Performance 维度零发现
 
+[3.13.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.13.0
 [3.12.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.12.0
 [3.11.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.11.0
 [3.10.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.10.0

@@ -245,6 +245,20 @@ const SyncStateV2 = {
 
     // --- 通用 watermark/filter 方法 (与 V1 兼容) ---
 
+    /**
+     * 重置指定源的增量同步基线（F-04：基线不可重置的 UI 缺口）
+     * 清空 watermark/lastOutcome 等，使下次同步退化为全量扫描
+     * @param {string} sourceType
+     * @returns {Object} 重置后的状态
+     */
+    resetSourceState(sourceType) {
+        const state = this._load();
+        const withSnapshot = sourceType === "bookmark" || sourceType === "rss";
+        state.sources[sourceType] = this._makeSourceDefault(withSnapshot);
+        this._save(state);
+        return this.getSourceState(sourceType);
+    },
+
     buildWatermark(items = [], getTime, getId) {
         if (!Array.isArray(items) || items.length === 0) return null;
         let latestTime = "";

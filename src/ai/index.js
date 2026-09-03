@@ -2247,6 +2247,28 @@ const ChatUI = {
             };
         }
 
+        // F-03 修复：批量分类暂停/取消控制（三面板共享 ChatUI 在此统一绑定）
+        const classifyPauseBtn = document.querySelector("#ldb-classify-pause");
+        if (classifyPauseBtn) {
+            classifyPauseBtn.onclick = () => {
+                if (AIClassifier.isPaused) {
+                    AIClassifier.resume();
+                    classifyPauseBtn.textContent = "⏸️ 暂停分类";
+                } else {
+                    AIClassifier.pause();
+                    classifyPauseBtn.textContent = "▶️ 继续分类";
+                }
+            };
+        }
+        const classifyCancelBtn = document.querySelector("#ldb-classify-cancel");
+        if (classifyCancelBtn) {
+            classifyCancelBtn.onclick = () => {
+                if (confirm("确定要取消批量分类吗？已完成的部分不会丢失。")) {
+                    AIClassifier.cancel();
+                }
+            };
+        }
+
         // 设置折叠
         const settingsToggle = document.querySelector("#ldb-chat-settings-toggle");
         if (settingsToggle) {

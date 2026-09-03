@@ -13,7 +13,7 @@ const { AISchema } = require("../schema");
 const { BlockConverter } = require("../BlockConverter");
 const { NameResolver } = require("../NameResolver");
 const { AgentTrace } = require("../AgentTrace");
-const { getAI: AI, getState: state, getService: svc } = require("../deps");
+const { getAI: AI, getState: state, getService: svc, getClassifier } = require("../deps");
 
 module.exports = {
 _resolvePageId: async (name, id, apiKey) => {
@@ -27,6 +27,8 @@ _textToBlocks: (text) => {
 },
 
 _extractPageContent: async (pageId, apiKey, maxChars = 4000) => {
+    // F-03 修复：AIClassifier 经 deps lazy 获取（跨闭包自由变量恒 ReferenceError）
+    const AIClassifier = getClassifier();
     try {
         const markdownResponse = await NotionAPI.fetchPageMarkdown(pageId, apiKey);
         const markdown = String(markdownResponse.markdown || "").trim();

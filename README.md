@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.12.0`
+- 当前仓库源码版本：`v3.13.0`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -385,6 +385,15 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.13.0
+
+F-01~F-05 五连修复（三模型共识审计 + browse 实机验证）：
+- **F-01** 空状态「导入浏览器书签」按钮死控件修复（注入指令后发送，带状态提示）
+- **F-02** 12 个筛选/参数控件新增 `change` 即时持久化，改动即生效不再丢失
+- **F-03** 修复 AIClassifier 跨闭包裸引用 ReferenceError 崩溃（批量分类此前必然失败）；批分类新增「⏸️ 暂停 / ✕ 取消」控制按钮
+- **F-04** 新增 SyncState 基线重置：同步中心每张来源卡「重置基线」按钮，下次同步退化为全量扫描
+- **F-05** 设置面板新增「数据管理」区：去重/已导出记录计数与一键清除
 
 ### v3.11.0
 
