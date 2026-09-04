@@ -20,7 +20,7 @@ const assert = require("assert");
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const DIST_BUNDLE = path.join(PROJECT_ROOT, "dist", "LinuxDo-Bookmarks-to-Notion.user.js");
 const ORIGINAL_SCRIPT = path.join(PROJECT_ROOT, "LinuxDo-Bookmarks-to-Notion.user.js");
-const CHROME_MANIFEST = path.join(PROJECT_ROOT, "chrome-extension", "manifest.json");
+const CHROME_MANIFEST = path.join(PROJECT_ROOT, "chrome-extension-full", "manifest.json");
 
 // ===========================================
 // 1. 必需常量 — esbuild 打包后可能追加数字后缀 (如 Storage3, UI3)
@@ -165,7 +165,7 @@ function verifyBuildMarkers(bundleSource) {
 }
 
 function verifyChromeManifest() {
-    // 验证桥接扩展 manifest (chrome-extension/manifest.json)
+    // 验证桥接扩展 manifest (chrome-extension-full/manifest.json)
     const bridgeManifestSource = readIfExists(CHROME_MANIFEST);
     const bridgeManifest = JSON.parse(bridgeManifestSource);
 
