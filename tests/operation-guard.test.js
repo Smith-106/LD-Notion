@@ -35,7 +35,8 @@ describe("OperationGuard", () => {
             expect(OperationGuard.OPERATION_LEVELS.replacePageMarkdown).toBe(2);
             expect(OperationGuard.OPERATION_LEVELS.deletePage).toBe(2);
             expect(OperationGuard.OPERATION_LEVELS.restorePage).toBe(2);
-            expect(OperationGuard.OPERATION_LEVELS.deleteBlock).toBe(2);
+            // F-UI-20:deleteBlock 已从登记移除(NotionAPI.deleteBlock 无调用方)
+            expect(OperationGuard.OPERATION_LEVELS.deleteBlock).toBeUndefined();
             expect(OperationGuard.OPERATION_LEVELS.agentTask).toBe(2);
         });
     });
@@ -87,7 +88,8 @@ describe("OperationGuard", () => {
             try {
                 expect(OperationGuard.canExecute("search")).toBe(true);
                 expect(OperationGuard.canExecute("deletePage")).toBe(true);
-                expect(OperationGuard.canExecute("deleteBlock")).toBe(true);
+                // F-UI-20:未登记操作默认拒绝(未知操作 CWE-862/639)
+                expect(OperationGuard.canExecute("deleteBlock")).toBe(false);
             } finally {
                 OperationGuard.getLevel = origGetLevel;
             }
@@ -108,9 +110,9 @@ describe("OperationGuard", () => {
     });
 
     describe("DANGEROUS_OPERATIONS", () => {
-        it("marks deletePage and deleteBlock as dangerous", () => {
+        it("marks deletePage as dangerous (deleteBlock removed, F-UI-20)", () => {
             expect(OperationGuard.DANGEROUS_OPERATIONS).toContain("deletePage");
-            expect(OperationGuard.DANGEROUS_OPERATIONS).toContain("deleteBlock");
+            expect(OperationGuard.DANGEROUS_OPERATIONS).not.toContain("deleteBlock");
         });
 
         it("does not mark safe operations as dangerous", () => {
@@ -121,7 +123,8 @@ describe("OperationGuard", () => {
 
         it("isDangerous returns correct results", () => {
             expect(OperationGuard.isDangerous("deletePage")).toBe(true);
-            expect(OperationGuard.isDangerous("deleteBlock")).toBe(true);
+            // F-UI-20:deleteBlock 不再登记为危险操作
+            expect(OperationGuard.isDangerous("deleteBlock")).toBe(false);
             expect(OperationGuard.isDangerous("search")).toBe(false);
             expect(OperationGuard.isDangerous("updatePage")).toBe(false);
         });

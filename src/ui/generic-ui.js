@@ -211,6 +211,9 @@ const GenericUI = {
         const exportType = exportState.targetType;
         const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
         const meta = GenericExtractor.extractMeta();
+        // F-UI-08:Obsidian 配置预填
+        const obsUrl = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_URL, CONFIG.DEFAULTS.obsApiUrl);
+        const obsDir = Storage.get(CONFIG.STORAGE_KEYS.OBS_DIR, CONFIG.DEFAULTS.obsDir);
 
         // 根据导出类型判断是否已配置完成
         const targetId = exportType === "page" ? parentPageId : dbId;
@@ -288,6 +291,18 @@ const GenericUI = {
                             <option value="skip" ${imgMode === "skip" ? "selected" : ""}>跳过图片</option>
                         </select>
                     </div>
+                    <!-- F-UI-08:Obsidian 配置入口(此前仅提示去 Linux.do 页面配置,本站无法配置) -->
+                    <div class="gclip-field">
+                        <label>Obsidian（Local REST API）</label>
+                        <input type="text" id="gclip-obs-url" class="gclip-input" placeholder="http://127.0.0.1:27123" value="${Utils.escapeHtml(obsUrl)}" aria-label="Obsidian API 地址">
+                        <input type="password" id="gclip-obs-key" class="gclip-input" placeholder="API Key" aria-label="Obsidian API Key" style="margin-top:var(--ldb-ui-spacing-md);" autocomplete="off">
+                        <input type="text" id="gclip-obs-dir" class="gclip-input" placeholder="目标目录（如 notes）" value="${Utils.escapeHtml(obsDir)}" aria-label="Obsidian 目标目录" style="margin-top:var(--ldb-ui-spacing-md);">
+                        <div style="display:flex;gap:var(--ldb-ui-spacing-md);margin-top:var(--ldb-ui-spacing-md);">
+                            <button class="gclip-btn gclip-btn-primary" id="gclip-save-obs" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">保存 Obsidian 配置</button>
+                            <button class="gclip-btn gclip-btn-secondary" id="gclip-test-obs" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">测试连接</button>
+                        </div>
+                        <div id="gclip-obs-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);"></div>
+                    </div>
                     <button class="gclip-btn gclip-btn-primary" id="gclip-save-settings">保存配置</button>
                 </div>
 
@@ -302,6 +317,8 @@ const GenericUI = {
                 </button>
 
                 <div class="gclip-status" id="gclip-status"></div>
+                <!-- F-UI-07:权限级别只读指示 -->
+                <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);" id="gclip-permission-level"></div>
             </div>
         `;
 
@@ -504,6 +521,45 @@ const GenericUI = {
             }
         });
 
+        // F-UI-08:Obsidian 配置保存/测试(本站直接配置,不再要求跳转 Linux.do 页面)
+        const obsStatusEl = panel.querySelector("#gclip-obs-status");
+        panel.querySelector("#gclip-save-obs").addEventListener("click", () => {
+            const url = panel.querySelector("#gclip-obs-url").value.trim();
+            const key = panel.querySelector("#gclip-obs-key").value.trim();
+            const dir = panel.querySelector("#gclip-obs-dir").value.trim();
+            if (!url || !key) {
+                obsStatusEl.textContent = "请填写 Obsidian API 地址和 Key";
+                obsStatusEl.style.color = "var(--ldb-ui-danger)";
+                return;
+            }
+            Storage.set(CONFIG.STORAGE_KEYS.OBS_API_URL, url);
+            CredentialVault.setSecret(CONFIG.STORAGE_KEYS.OBS_API_KEY, key);
+            Storage.set(CONFIG.STORAGE_KEYS.OBS_DIR, dir || CONFIG.DEFAULTS.obsDir);
+            panel.querySelector("#gclip-obs-key").value = "";
+            obsStatusEl.textContent = "✅ Obsidian 配置已保存";
+            obsStatusEl.style.color = "var(--ldb-ui-success)";
+        });
+        panel.querySelector("#gclip-test-obs").addEventListener("click", async () => {
+            const url = panel.querySelector("#gclip-obs-url").value.trim();
+            const key = panel.querySelector("#gclip-obs-key").value.trim()
+                || Storage.get(CONFIG.STORAGE_KEYS.OBS_API_KEY, "");
+            if (!url || !key) {
+                obsStatusEl.textContent = "请填写 Obsidian API 地址和 Key";
+                obsStatusEl.style.color = "var(--ldb-ui-danger)";
+                return;
+            }
+            obsStatusEl.textContent = "连接中...";
+            obsStatusEl.style.color = "";
+            try {
+                const result = await ObsidianAPI.testConnection(url, key);
+                obsStatusEl.textContent = result.ok ? "✅ 连接成功" : `❌ ${result.error}`;
+                obsStatusEl.style.color = result.ok ? "var(--ldb-ui-success)" : "var(--ldb-ui-danger)";
+            } catch (e) {
+                obsStatusEl.textContent = `❌ ${e.message}`;
+                obsStatusEl.style.color = "var(--ldb-ui-danger)";
+            }
+        });
+
         // 保存配置
         panel.querySelector("#gclip-save-settings").addEventListener("click", async () => {
             // 仅当用户主动输入了新 key 时才更新（不从 DOM 预填，防止泄漏）
@@ -573,6 +629,14 @@ const GenericUI = {
             },
         });
         NotionOAuth.syncApiKeyInputs();
+
+        // F-UI-07:权限级别只读指示
+        const permEl = panel.querySelector("#gclip-permission-level");
+        if (permEl) {
+            const level = OperationGuard.getLevel();
+            const names = { 0: "只读", 1: "标准", 2: "高级", 3: "管理员" };
+            permEl.textContent = `🛡️ 权限级别 ${level}（${names[level] || "未知"}）`;
+        }
 
         // 显示设置（不在 DOM 中预填 API Key，防止第三方页面读取）
         panel.querySelector("#gclip-show-settings").addEventListener("click", () => {

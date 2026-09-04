@@ -2268,19 +2268,6 @@ const ChatUI = {
                 }
             };
         }
-
-        // 设置折叠
-        const settingsToggle = document.querySelector("#ldb-chat-settings-toggle");
-        if (settingsToggle) {
-            settingsToggle.onclick = () => {
-                const content = document.querySelector("#ldb-chat-settings-content");
-                const arrow = document.querySelector("#ldb-chat-settings-arrow");
-                if (content && arrow) {
-                    content.classList.toggle("collapsed");
-                    arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
-                }
-            };
-        }
     },
 
     // 初始化
@@ -2526,5 +2513,5 @@ Object.assign(AIAssistant, require("./guarded-write").GuardedWrite);
 // 不再经 AIAssistant.getSettings() 字面调用（为 TASK-007 拆分 settings 簇做准备）。
 const getAISettings = () => AIAssistant.getSettings();
 
-module.exports = { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier, getAISettings };
+module.exports = { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier, AgentTrace, getAISettings };
 Object.assign(AIAssistant, require("./agent-executor").AgentExecutor);

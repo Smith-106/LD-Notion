@@ -84,13 +84,14 @@ const OperationGuard = {
         replacePageMarkdown: 2,
         deletePage: 2,
         restorePage: 2,
-        deleteBlock: 2,
         createComment: 1,
         agentTask: 2,
     },
 
     // 危险操作列表（需要额外确认）
-    DANGEROUS_OPERATIONS: ["deletePage", "deleteBlock"],
+    // 注:deleteBlock 已从登记移除(F-UI-20)——NotionAPI.deleteBlock 无任何调用方
+    // (AI 工具表无 delete_block,UI 无按钮),保留登记会误导「块级删除可经本工具触发」。
+    DANGEROUS_OPERATIONS: ["deletePage"],
 
     // 检查是否有权限执行操作
     canExecute: (operation) => {
@@ -121,7 +122,7 @@ const OperationGuard = {
             const requiredName = CONFIG.PERMISSION_NAMES[requiredLevelForOp];
             const denialReason = requiredLevelForOp === undefined
                 ? `未定义权限级别: ${operation}`
-                : `权限不足：需要"${requiredName}"及以上权限才能执行此操作`;
+                : `权限不足：需要"${requiredName}"及以上权限才能执行此操作。可在主面板「权限控制」中调整权限级别。`;
             OperationLog.add({
                 audit_event: "guard.denied",
                 actor,
@@ -153,7 +154,7 @@ const OperationGuard = {
 
         // 危险操作需要确认
         if (OperationGuard.isDangerous(operation) && OperationGuard.requiresConfirm()) {
-            const isPermanent = operation === "deleteBlock";
+            const isPermanent = false; // deleteBlock 已从危险操作登记移除(F-UI-20)
             const confirmed = await ConfirmationDialog.show({
                 title: isPermanent ? "⚠️ 永久删除确认" : "危险操作确认",
                 message: isPermanent
@@ -260,10 +261,6 @@ const OperationGuard = {
                         undoAction: () => NotionAPI.restorePage(context.pageId, context.apiKey),
                         description: `恢复页面: ${context.itemName || context.pageId}`,
                     });
-                } else if (operation === "deleteBlock") {
-                    // deleteBlock 是永久删除，无法通过 API 恢复
-                    // 仅记录警告日志，不提供撤销选项
-                    console.warn(`OperationGuard: deleteBlock 是永久操作，无法撤销`);
                 }
             }
 
@@ -311,7 +308,6 @@ const OperationLog = {
         replacePageMarkdown: "write.block.inserted",
         deletePage: "page.archived",
         restorePage: "page.restored",
-        deleteBlock: "block.deleted",
         undo: "write.property.updated",
     }),
 
@@ -544,6 +540,8 @@ const ConfirmationDialog = {
     dialogElement: null,
 
     // 显示确认对话框
+    // 支持 onConfirm/confirmText(三模型共识 F-UI-01):确认时调用 onConfirm 回调,
+    // 按钮文案用 confirmText(默认「确认」),修复「重新导出/删除模板确认后零执行」瘫痪。
     show: (options) => {
         return new Promise((resolve) => {
             const {
@@ -552,6 +550,8 @@ const ConfirmationDialog = {
                 itemName = "",
                 countdown = 5,
                 requireNameInput = false,
+                confirmText = "确认",
+                onConfirm = null,
             } = options;
 
             const escapeHtml = Utils.escapeHtml;
@@ -615,7 +615,8 @@ const ConfirmationDialog = {
                 countdownEl.textContent = remaining;
                 if (remaining <= 0) {
                     clearInterval(timer);
-                    countdownEl.parentElement.textContent = "确认";
+                    // F-UI-01:按钮文案用 confirmText(默认「确认」)
+                    countdownEl.parentElement.textContent = confirmText;
                     if (canConfirm) {
                         okBtn.disabled = false;
                     }
@@ -651,6 +652,14 @@ const ConfirmationDialog = {
                 dialog.remove();
                 ConfirmationDialog.dialogElement = null;
                 resolve(true);
+                // F-UI-01:确认后执行调用方回调(重新导出/删除模板等),失败不吞错
+                if (typeof onConfirm === "function") {
+                    try {
+                        onConfirm();
+                    } catch (error) {
+                        console.error("[LD-Notion] ConfirmationDialog onConfirm 执行失败:", error);
+                    }
+                }
             };
 
             // ESC 关闭

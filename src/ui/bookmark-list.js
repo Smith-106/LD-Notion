@@ -107,9 +107,12 @@ const BookmarkList = {
 
         if (refs.sourceSelectLinuxdo) {
             refs.sourceSelectLinuxdo.classList.toggle("active", !isGitHub);
+            // P2:aria-pressed 同步切换状态
+            refs.sourceSelectLinuxdo.setAttribute("aria-pressed", String(!isGitHub));
         }
         if (refs.sourceSelectGithub) {
             refs.sourceSelectGithub.classList.toggle("active", isGitHub);
+            refs.sourceSelectGithub.setAttribute("aria-pressed", String(isGitHub));
         }
 
         const autoStatus = refs.autoImportStatus || UI().panel?.querySelector("#ldb-auto-import-status");
@@ -187,10 +190,13 @@ const BookmarkList = {
         UI().renderJobId += 1;
         const renderJobId = UI().renderJobId;
         if (!UI().bookmarks || UI().bookmarks.length === 0) {
+            // F-UI-15:空状态按钮按来源区分(GitHub 来源显示加载 GitHub 收藏,避免动作错配)
+            const isGitHub = UI().isActiveGitHubSource();
+            const emptyLabel = isGitHub ? "📥 加载 GitHub 收藏" : "📥 导入浏览器书签";
             list.innerHTML = `
                 <div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">
                     <p>暂无收藏</p>
-                    <button id="ldb-import-bookmarks-btn" class="ldb-btn ldb-btn-primary" style="margin-top: var(--ldb-ui-spacing-lg);">📥 导入浏览器书签</button>
+                    <button id="ldb-import-bookmarks-btn" class="ldb-btn ldb-btn-primary" style="margin-top: var(--ldb-ui-spacing-lg);">${emptyLabel}</button>
                 </div>
             `;
             // Bind import button event
@@ -198,6 +204,16 @@ const BookmarkList = {
                 const importBtn = list.querySelector("#ldb-import-bookmarks-btn");
                 if (importBtn) {
                     importBtn.onclick = () => {
+                        if (isGitHub) {
+                            // GitHub 来源:直接触发加载 GitHub 收藏(不依赖 AI)
+                            const loadBtn = document.querySelector("#ldb-load-bookmarks");
+                            if (loadBtn) {
+                                loadBtn.click();
+                            } else {
+                                UI().showStatus("请先在收藏区点击「加载收藏列表」", "info");
+                            }
+                            return;
+                        }
                         // F-01 修复:sendMessage 忽略入参,须先注入指令文本再发送
                         const chatInput = document.querySelector("#ldb-chat-input");
                         if (chatInput && ChatUI.sendMessage) {

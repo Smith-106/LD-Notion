@@ -71,8 +71,9 @@ const AutoImporter = {
 
     startPolling: (intervalMinutes) => {
         // 统一委托给 SyncScheduler (消除双定时器)
+        // F-UI-03:显式间隔传入,不再被存储键默认值覆盖
         const { SyncScheduler } = require("../adapter/SyncScheduler");
-        SyncScheduler.start("linuxdo");
+        SyncScheduler.start("linuxdo", intervalMinutes);
     },
 
     ensureVisibilityListener: () => {

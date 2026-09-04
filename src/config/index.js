@@ -16,6 +16,8 @@ const CONFIG = {
         NOTION_OAUTH_STATE: "ldb_notion_oauth_state",
         NOTION_OAUTH_META: "ldb_notion_oauth_meta",
         NOTION_OAUTH_NOTICE: "ldb_notion_oauth_notice",
+        // 授权后目标发现结果(跨页传递,TTL 10min 与 pending 对齐)
+        NOTION_OAUTH_POST_AUTH_TARGET: "ldb_notion_oauth_post_auth_target",
         CREDENTIAL_VAULT: "ldb_credential_vault",
         FILTER_ONLY_FIRST: "ldb_filter_only_first",
         FILTER_ONLY_OP: "ldb_filter_only_op",
@@ -28,6 +30,8 @@ const CONFIG = {
         FILTER_MINLEN: "ldb_filter_minlen",
         IMG_MODE: "ldb_img_mode",
         PANEL_MINIMIZED: "ldb_panel_minimized",
+        // 折叠区状态(F-UI-12:单键 JSON,容量有界)
+        COLLAPSE_STATE: "ldb_collapse_state",
         EXPORTED_TOPICS: "ldb_exported_topics",
         // 权限控制
         PERMISSION_LEVEL: "ldb_permission_level",
@@ -98,7 +102,6 @@ const CONFIG = {
         UPDATE_LAST_RESULT: "ldb_update_last_result",
         // 浏览器书签导入
         BOOKMARK_EXPORTED: "ldb_bookmark_exported",
-        BOOKMARK_IMPORT_FOLDERS: "ldb_bookmark_import_folders",
         EXT_INSTALL_PROMPT_SHOWN: "ldb_ext_install_prompt_shown",
         MODE_CONFLICT_TIP_SHOWN: "ldb_mode_conflict_tip_shown",
         // 跨源设置

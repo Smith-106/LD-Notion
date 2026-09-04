@@ -324,7 +324,8 @@ test('OperationGuard.canExecute: denies undefined operations', () => {
 
 test('OperationGuard.isDangerous: deletePage and deleteBlock', () => {
     assert.strictEqual(OperationGuard.isDangerous('deletePage'), true);
-    assert.strictEqual(OperationGuard.isDangerous('deleteBlock'), true);
+    // F-UI-20:deleteBlock 已从危险操作登记移除（方法保留但不可达）
+    assert.strictEqual(OperationGuard.isDangerous('deleteBlock'), false);
     assert.strictEqual(OperationGuard.isDangerous('updatePage'), false);
     assert.strictEqual(OperationGuard.isDangerous('search'), false);
 });

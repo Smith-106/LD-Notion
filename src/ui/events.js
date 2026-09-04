@@ -12,8 +12,9 @@ const { UICommandService } = require("../coordination/UICommandService");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
 const { BookmarkBridge, BookmarkAutoImporter, RSSAutoImporter, BookmarkExporter } = require("../bridge");
-const { AIService, ChatUI, AIClassifier } = require("../ai");
+const { AIService, ChatUI, AIClassifier, AgentTrace, ChatState } = require("../ai");
 const { DesignSystem } = require("./design-system");
+const { PanelResize } = require("./panel-resize");
 
 const UIEvents = {
     bindEvents: () => {
@@ -103,10 +104,14 @@ const UIEvents = {
             document.addEventListener("keydown", UI._escMinimizeHandler);
         }
 
-        // 关闭
+        // 关闭(F-UI-09:确认后走 UI.destroy() 完整清理,而非裸 panel.remove())
         refs.closeBtn.onclick = () => {
-            panel.remove();
-            UI.miniBtn.remove();
+            ConfirmationDialog.show({
+                title: "关闭面板",
+                message: "关闭后可通过右下角悬浮按钮重新打开。确定关闭吗？",
+                confirmText: "关闭",
+                onConfirm: () => UI.destroy(),
+            });
         };
 
         // 主题切换
@@ -173,40 +178,36 @@ const UIEvents = {
         if (tabBtn) tabBtn.click();
 
         // 折叠筛选设置
-        refs.filterToggle.onclick = () => {
-            const content = refs.filterContent
-            const arrow = refs.filterArrow
-            content.classList.toggle("collapsed");
-            arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
-            refs.filterToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
+        // F-UI-12:折叠状态持久化(单键 JSON,容量有界)
+        const collapseState = Storage.get(CONFIG.STORAGE_KEYS.COLLAPSE_STATE, {});
+        const collapseSections = [
+            { toggle: refs.filterToggle, content: refs.filterContent, arrow: refs.filterArrow, key: "filter" },
+            { toggle: refs.aiSettingsToggle, content: refs.aiSettingsContent, arrow: refs.aiSettingsArrow, key: "ai" },
+            { toggle: refs.githubSettingsToggle, content: refs.githubSettingsContent, arrow: refs.githubSettingsArrow, key: "github" },
+            { toggle: refs.obsSettingsToggle, content: refs.obsSettingsContent, arrow: refs.obsSettingsArrow, key: "obsidian" },
+            { toggle: refs.sourceSettingsToggle, content: refs.sourceSettingsContent, arrow: refs.sourceSettingsArrow, key: "source" },
+            { toggle: refs.sourcePartitionsToggle, content: refs.sourcePartitionsContent, arrow: refs.sourcePartitionsArrow, key: "partitions" },
+        ];
+        const applyCollapse = (section) => {
+            if (!section.toggle || !section.content) return;
+            const collapsed = !!collapseState[section.key];
+            section.content.classList.toggle("collapsed", collapsed);
+            if (section.arrow) section.arrow.textContent = collapsed ? "▶" : "▼";
+            section.toggle.setAttribute("aria-expanded", String(!collapsed));
         };
-
-        // 折叠 AI 设置
-        refs.aiSettingsToggle.onclick = () => {
-            const content = refs.aiSettingsContent
-            const arrow = refs.aiSettingsArrow
-            content.classList.toggle("collapsed");
-            arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
-            refs.aiSettingsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
+        const bindCollapse = (section) => {
+            if (!section.toggle) return;
+            section.toggle.onclick = () => {
+                section.content.classList.toggle("collapsed");
+                const collapsed = section.content.classList.contains("collapsed");
+                if (section.arrow) section.arrow.textContent = collapsed ? "▶" : "▼";
+                section.toggle.setAttribute("aria-expanded", String(!collapsed));
+                collapseState[section.key] = collapsed;
+                Storage.set(CONFIG.STORAGE_KEYS.COLLAPSE_STATE, collapseState);
+            };
         };
-
-        // 折叠 GitHub 设置
-        refs.githubSettingsToggle.onclick = () => {
-            const content = refs.githubSettingsContent
-            const arrow = refs.githubSettingsArrow
-            content.classList.toggle("collapsed");
-            arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
-            refs.githubSettingsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
-        };
-
-        // 折叠 Obsidian 设置
-        refs.obsSettingsToggle.onclick = () => {
-            const content = refs.obsSettingsContent;
-            const arrow = refs.obsSettingsArrow;
-            content.classList.toggle("collapsed");
-            arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
-            refs.obsSettingsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
-        };
+        collapseSections.forEach(applyCollapse);
+        collapseSections.forEach(bindCollapse);
 
         // Obsidian 测试连接
         refs.obsTestBtn.onclick = async () => {
@@ -257,6 +258,30 @@ const UIEvents = {
                 }
             });
         });
+
+        collapseSections.forEach(applyCollapse);
+        collapseSections.forEach(bindCollapse);
+
+        // Obsidian 测试连接
+        refs.obsTestBtn.onclick = async () => {
+            const url = refs.obsApiUrlInput.value.trim();
+            const key = getSensitiveValue(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
+            if (!url || !key) {
+                refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--danger">请填写 API 地址和 Key</span>';
+                return;
+            }
+            refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--accent">连接中...</span>';
+            try {
+                const result = await ObsidianAPI.testConnection(url, key);
+                if (result.ok) {
+                    refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--success">✅ 连接成功</span>';
+                } else {
+                    refs.obsTestStatus.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">❌ ${Utils.escapeHtml(result.error)}</span>`;
+                }
+            } catch (e) {
+                refs.obsTestStatus.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">❌ ${Utils.escapeHtml(e.message)}</span>`;
+            }
+        };
 
         refs.sourceSelectLinuxdo.onclick = () => {
             UI.switchBookmarkSource("linuxdo");
@@ -312,6 +337,8 @@ const UIEvents = {
             }
 
             void UICommandService.execute("set_export_target_state", { targetType });
+            updateExportButtonState();
+            UI.updateExportTargetSummary();
         };
 
         refs.exportTargetDatabaseRadio.onchange = handleExportTargetChange;
@@ -323,6 +350,8 @@ const UIEvents = {
                 targetType: CONFIG.EXPORT_TARGET_TYPES.PAGE,
                 parentPageId: e.target.value.trim(),
             });
+            updateExportButtonState();
+            UI.updateExportTargetSummary();
         };
 
         // 验证配置
@@ -369,15 +398,19 @@ const UIEvents = {
                 if (result.valid) {
                     statusSpan.textContent = "✅ 验证成功";
                     statusSpan.style.color = "var(--ldb-ui-success)";
+                    // F-UI-45:结果类反馈双写（就地 + 全局）
+                    UI.showStatus("✅ 配置验证成功", "success");
                 }
 
                 if (!result.valid) {
                     statusSpan.textContent = `❌ ${result.error}`;
                     statusSpan.style.color = "var(--ldb-ui-danger)";
+                    UI.showStatus(`❌ ${result.error}`, "error");
                 }
             } catch (error) {
                 statusSpan.textContent = `❌ ${error.message}`;
                 statusSpan.style.color = "var(--ldb-ui-danger)";
+                UI.showStatus(`❌ ${error.message}`, "error");
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = "验证配置";
@@ -418,13 +451,17 @@ const UIEvents = {
                 if (result.success) {
                     statusSpan.textContent = `✅ ${result.message}`;
                     statusSpan.style.color = "var(--ldb-ui-success)";
+                    // F-UI-45:结果类反馈双写（就地 + 全局）
+                    UI.showStatus(`✅ ${result.message}`, "success");
                 } else {
                     statusSpan.textContent = `❌ ${result.error}`;
                     statusSpan.style.color = "var(--ldb-ui-danger)";
+                    UI.showStatus(`❌ ${result.error}`, "error");
                 }
             } catch (error) {
                 statusSpan.textContent = `❌ ${error.message}`;
                 statusSpan.style.color = "var(--ldb-ui-danger)";
+                UI.showStatus(`❌ ${error.message}`, "error");
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = "自动设置数据库";
@@ -450,15 +487,25 @@ const UIEvents = {
                 const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
                 if (!apiKey) {
                     AutoImporter.updateStatus("⚠️ 请先配置 Notion API Key");
+                    // F-UI-10:配置不完整时回写开关,避免假启用
+                    e.target.checked = false;
+                    Storage.set(cfg.enabledKey, false);
+                    refs.autoImportOptions.style.display = "none";
                     return;
                 }
                 const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
                 if (exportTargetType === "database" && !refs.databaseIdInput.value.trim()) {
                     AutoImporter.updateStatus("⚠️ 请先配置 Notion 数据库 ID");
+                    e.target.checked = false;
+                    Storage.set(cfg.enabledKey, false);
+                    refs.autoImportOptions.style.display = "none";
                     return;
                 }
                 if (exportTargetType === "page" && !refs.parentPageIdInput.value.trim()) {
                     AutoImporter.updateStatus("⚠️ 请先配置父页面 ID");
+                    e.target.checked = false;
+                    Storage.set(cfg.enabledKey, false);
+                    refs.autoImportOptions.style.display = "none";
                     return;
                 }
                 AutoImporter.run();
@@ -504,18 +551,31 @@ const UIEvents = {
                 const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
                 if (!BookmarkBridge.isExtensionAvailable()) {
                     BookmarkAutoImporter.updateStatus("⚠️ 请先安装并启用书签桥接扩展");
+                    // F-UI-10:配置不完整时回写开关,避免假启用
+                    e.target.checked = false;
+                    Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, false);
+                    refs.bookmarkAutoImportOptions.style.display = "none";
                     return;
                 }
                 if (!apiKey) {
                     BookmarkAutoImporter.updateStatus("⚠️ 请先配置 Notion API Key");
+                    e.target.checked = false;
+                    Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, false);
+                    refs.bookmarkAutoImportOptions.style.display = "none";
                     return;
                 }
                 if (exportTargetType !== "database") {
                     BookmarkAutoImporter.updateStatus("⚠️ 浏览器书签自动同步仅支持导出到 Notion 数据库");
+                    e.target.checked = false;
+                    Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, false);
+                    refs.bookmarkAutoImportOptions.style.display = "none";
                     return;
                 }
                 if (!refs.databaseIdInput.value.trim()) {
                     BookmarkAutoImporter.updateStatus("⚠️ 请先配置 Notion 数据库 ID");
+                    e.target.checked = false;
+                    Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, false);
+                    refs.bookmarkAutoImportOptions.style.display = "none";
                     return;
                 }
 
@@ -552,18 +612,31 @@ const UIEvents = {
                 const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
                 if (!apiKey) {
                     RSSAutoImporter.updateStatus("❌ 请先配置 Notion API Key");
+                    // F-UI-10:配置不完整时回写开关,避免假启用
+                    e.target.checked = false;
+                    Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
+                    refs.rssAutoImportOptions.style.display = "none";
                     return;
                 }
                 if (exportTargetType !== "database") {
                     RSSAutoImporter.updateStatus("❌ RSS 自动同步仅支持导出到 Notion 数据库");
+                    e.target.checked = false;
+                    Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
+                    refs.rssAutoImportOptions.style.display = "none";
                     return;
                 }
                 if (!refs.databaseIdInput.value.trim()) {
                     RSSAutoImporter.updateStatus("❌ 请先配置 Notion 数据库 ID");
+                    e.target.checked = false;
+                    Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
+                    refs.rssAutoImportOptions.style.display = "none";
                     return;
                 }
                 if (RSSAutoImporter.getFeedUrls(refs.rssFeedUrlsInput.value).length === 0) {
                     RSSAutoImporter.updateStatus("❌ 请先配置至少一个 RSS Feed URL");
+                    e.target.checked = false;
+                    Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
+                    refs.rssAutoImportOptions.style.display = "none";
                     return;
                 }
 
@@ -590,6 +663,31 @@ const UIEvents = {
             const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
             Storage.set(CONFIG.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE, mode);
         };
+
+        // F-UI-05:各来源「立即导入」按钮(完整同步:拉取 + 写 Notion + 推进水位)
+        const bindImportNow = (btn, label, runner) => {
+            if (!btn) return;
+            btn.onclick = async () => {
+                if (btn.disabled) return;
+                const originalText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = "导入中...";
+                try {
+                    const result = await runner();
+                    const count = result?.importedCount ?? result?.count ?? 0;
+                    UI.showStatus(`${label}完成：新增 ${count} 条`, "success");
+                } catch (error) {
+                    UI.showStatus(`${label}失败：${error.message}`, "error");
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                }
+            };
+        };
+        bindImportNow(refs.importNowLinuxdoBtn, "Linux.do 导入", () => AutoImporter.run());
+        bindImportNow(refs.importNowGithubBtn, "GitHub 导入", () => GitHubAutoImporter.run());
+        bindImportNow(refs.importNowBookmarkBtn, "书签导入", () => BookmarkAutoImporter.run());
+        bindImportNow(refs.importNowRssBtn, "RSS 导入", () => RSSAutoImporter.run());
 
         refs.linuxdoDedupModeSelect.onchange = (e) => {
             const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
@@ -653,6 +751,8 @@ const UIEvents = {
             UI.refs.exportBtn.disabled = true;
             UI.refs.obsExportBtn.disabled = true;
             UI.refs.bookmarkListContainer.style.display = "none";
+            // F-UI-32:未加载时显示空状态引导
+            if (UI.refs.bookmarkEmptyState) UI.refs.bookmarkEmptyState.style.display = "block";
             UI.renderBookmarkList();
 
             const cfg = UI.getAutoImportConfigBySource();
@@ -731,6 +831,20 @@ const UIEvents = {
             UI.bookmarkListBound = true;
         }
 
+        // F-UI-42:设置 Tab 书签入口跳转收藏 Tab
+        const bookmarkJumpBtn = panel.querySelector("#ldb-bookmark-settings-jump");
+        if (bookmarkJumpBtn) {
+            bookmarkJumpBtn.onclick = () => {
+                const bookmarksTab = panel.querySelector('[data-tab="bookmarks"]');
+                if (bookmarksTab) bookmarksTab.click();
+            };
+        }
+
+        // F-UI-32:空状态 CTA 复用加载按钮
+        if (refs.bookmarkEmptyLoad) {
+            refs.bookmarkEmptyLoad.onclick = () => refs.loadBookmarksBtn.click();
+        }
+
         // 加载收藏
         refs.loadBookmarksBtn.onclick = async () => {
             const btn = refs.loadBookmarksBtn
@@ -792,6 +906,8 @@ const UIEvents = {
                 // 渲染收藏列表
                 UI.renderBookmarkList();
                 UI.refs.bookmarkListContainer.style.display = "block";
+                // F-UI-32:加载成功后隐藏空状态引导
+                if (UI.refs.bookmarkEmptyState) UI.refs.bookmarkEmptyState.style.display = "none";
 
                 const sourceText = UI.isActiveGitHubSource() ? "GitHub 收藏" : "Linux.do 收藏";
                 UI.showStatus(`成功加载 ${bookmarks.length} 个${sourceText}`, "success");
@@ -836,6 +952,11 @@ const UIEvents = {
 
             const chatInput = panel.querySelector("#ldb-chat-input");
             if (chatInput && ChatUI.sendMessage) {
+                // F-UI-33:AI 忙时不再给出误导性「正在导入」反馈
+                if (ChatState.isProcessing) {
+                    UI.showStatus("AI 正在处理上一条指令，请稍候再试", "info");
+                    return;
+                }
                 UI.showStatus("正在导入浏览器书签，请耐心等待...", "info");
                 chatInput.value = "导入浏览器书签";
                 ChatUI.sendMessage();
@@ -875,10 +996,26 @@ const UIEvents = {
 
         // 取消按钮
         refs.cancelBtn.onclick = () => {
-            if (confirm("确定要取消导出吗？已导出的内容不会被删除。")) {
-                Exporter.cancel();
-            }
+            // P2:原生 confirm 统一为 ConfirmationDialog
+            ConfirmationDialog.show({
+                title: "取消导出",
+                message: "确定要取消导出吗？已导出的内容不会被删除。",
+                confirmText: "取消导出",
+                onConfirm: () => Exporter.cancel(),
+            });
         };
+
+        // 导出按钮可用性：配置不完整时提前禁用（避免点击后才报错）
+        const updateExportButtonState = () => {
+            const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
+            const targetType = refs.exportTargetPageRadio.checked ? "page" : "database";
+            const databaseId = refs.databaseIdInput.value.trim();
+            const parentPageId = refs.parentPageIdInput.value.trim();
+            const ready = Boolean(apiKey) && (targetType === "page" ? Boolean(parentPageId) : Boolean(databaseId));
+            refs.exportBtn.disabled = !ready;
+            refs.exportBtn.title = ready ? "" : "请先完成 Notion 配置（API Key 与导出目标）";
+        };
+        updateExportButtonState();
 
         // 开始导出
         refs.exportBtn.onclick = async () => {
@@ -1308,18 +1445,32 @@ const UIEvents = {
             const arrow = refs.logArrow
             content.classList.toggle("collapsed");
             arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+            // P2:aria-expanded 同步 + 键盘可达(Enter/Space)
+            refs.logToggleBtn.setAttribute("aria-expanded", String(!content.classList.contains("collapsed")));
 
             // 展开时更新日志内容
             if (!content.classList.contains("collapsed")) {
                 UI.updateLogPanel();
             }
         };
+        refs.logToggleBtn.onkeydown = (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                refs.logToggleBtn.click();
+            }
+        };
 
         refs.logClearBtn.onclick = () => {
-            if (confirm("确定要清除所有操作日志吗？")) {
-                OperationLog.clear();
-                UI.showStatus("日志已清除", "success");
-            }
+            // P2:原生 confirm 统一为 ConfirmationDialog
+            ConfirmationDialog.show({
+                title: "清除操作日志",
+                message: "确定要清除所有操作日志吗？",
+                confirmText: "清除",
+                onConfirm: () => {
+                    OperationLog.clear();
+                    UI.showStatus("日志已清除", "success");
+                },
+            });
         };
 
         // F-05 修复：数据管理（去重/已导出记录清理）
@@ -1332,15 +1483,70 @@ const UIEvents = {
             el.textContent = `去重/导出记录 —— Linux.do: ${linuxdoCount} 条；GitHub: ${githubCount} 条；书签: ${bookmarkCount} 条`;
         };
         const clearWithConfirm = (label, doClear) => {
-            if (!confirm(`确定清除${label}记录吗？\n清除后该来源的所有内容将可再次导出/导入。`)) return;
-            doClear();
-            renderDedupSummary();
-            UI.showStatus(`${label}记录已清除`, "success");
+            // P2:原生 confirm 统一为 ConfirmationDialog
+            ConfirmationDialog.show({
+                title: `清除${label}记录`,
+                message: `确定清除${label}记录吗？\n清除后该来源的所有内容将可再次导出/导入。`,
+                confirmText: "清除",
+                onConfirm: () => {
+                    doClear();
+                    renderDedupSummary();
+                    UI.showStatus(`${label}记录已清除`, "success");
+                },
+            });
         };
         refs.clearLinuxdoDedupBtn.onclick = () => clearWithConfirm("Linux.do 去重", () => DedupStore.clearSeen("linuxdo"));
         refs.clearGithubExportedBtn.onclick = () => clearWithConfirm("GitHub 已导出", () => GitHubAPI.clearExportedRecords());
         refs.clearBookmarkExportedBtn.onclick = () => clearWithConfirm("书签已导出", () => BookmarkExporter.clearExportedRecords());
         renderDedupSummary();
+
+        // F-UI-04:AI 调用链追踪查看/清除(AgentTrace 落盘但此前 UI 零引用)
+        const renderAiTraces = () => {
+            const resultEl = refs.aiTracesResult;
+            if (!resultEl) return;
+            const traces = AgentTrace.list();
+            if (!traces.length) {
+                resultEl.innerHTML = '<span class="ldb-hint">暂无 AI 调用链记录。</span>';
+                return;
+            }
+            const rows = traces.slice(-10).reverse().map((t) => {
+                const ts = t?.ts ? new Date(t.ts).toLocaleString("zh-CN", { hour12: false }) : "";
+                const status = t?.status || "unknown";
+                const summary = (t?.summary || t?.error || "").slice(0, 80);
+                return `<div style="padding: 4px 0; border-bottom: 1px solid var(--ldb-ui-border); font-size: var(--ldb-ui-font-size-sm);">`
+                    + `<span style="color: var(--ldb-ui-muted);">${Utils.escapeHtml(ts)}</span> `
+                    + `<span class="ldb-status-text ldb-status-text--${status === "completed" ? "success" : "danger"}">${Utils.escapeHtml(status)}</span> `
+                    + `<span>${Utils.escapeHtml(summary)}</span></div>`;
+            }).join("");
+            resultEl.innerHTML = `<div style="max-height: 180px; overflow-y: auto;">${rows}</div>`
+                + `<div class="ldb-hint" style="margin-top: 4px;">共 ${traces.length} 条，显示最近 10 条。</div>`;
+        };
+        if (refs.viewAiTracesBtn) {
+            refs.viewAiTracesBtn.onclick = renderAiTraces;
+        }
+        if (refs.clearAiTracesBtn) {
+            refs.clearAiTracesBtn.onclick = () => {
+                // P2:原生 confirm 统一为 ConfirmationDialog
+                ConfirmationDialog.show({
+                    title: "清除 AI 调用链",
+                    message: "确定清除所有 AI 调用链记录吗？",
+                    confirmText: "清除",
+                    onConfirm: () => {
+                        AgentTrace.clear();
+                        renderAiTraces();
+                        UI.showStatus("AI 调用链记录已清除", "success");
+                    },
+                });
+            };
+        }
+
+        // F-UI-18:重置面板尺寸(清除持久化尺寸并恢复默认)
+        if (refs.resetPanelSizeBtn) {
+            refs.resetPanelSizeBtn.onclick = () => {
+                PanelResize.resetSize(CONFIG.STORAGE_KEYS.PANEL_SIZE_MAIN);
+                UI.showStatus("面板尺寸已重置", "success");
+            };
+        }
 
         // 输入框自动保存
         refs.apiKeyInput.onchange = async (e) => {
@@ -1354,9 +1560,13 @@ const UIEvents = {
             } catch (error) {
                 UI.showStatus(error.message || String(error), "error");
             }
+            updateExportButtonState();
+            UI.updateExportTargetSummary();
         };
         refs.databaseIdInput.onchange = (e) => {
             void UICommandService.execute("apply_workspace_selection", { selectedValue: `database:${e.target.value.trim()}` });
+            updateExportButtonState();
+            UI.updateExportTargetSummary();
         };
 
         // 手动输入数据库 ID 开关
@@ -1383,7 +1593,9 @@ const UIEvents = {
             workspaceTip.textContent = "正在获取数据库列表...";
 
             try {
-                const { workspaceData } = await WorkspaceService.refreshWorkspaceSnapshot(apiKey, {
+                // F-UI-13:统一走 UICommandService 命令边界(与 #ldb-ai-refresh-dbs 一致)
+                const { workspaceData } = await UICommandService.execute("refresh_workspace_targets", {
+                    apiKey,
                     includePages: true,
                     onProgress: (progress) => {
                         if (progress.phase === "databases") {
@@ -1472,30 +1684,54 @@ const UIEvents = {
 
         if (refs.viewSaveWorkspacePackageBtn) {
             refs.viewSaveWorkspacePackageBtn.onclick = async () => {
+                // F-UI-22:loading 态 + 重入保护(与 generateWorkspaceInsight 模式一致)
+                if (refs.viewSaveWorkspacePackageBtn.disabled) return;
+                const originalText = refs.viewSaveWorkspacePackageBtn.textContent;
+                refs.viewSaveWorkspacePackageBtn.disabled = true;
+                refs.viewSaveWorkspacePackageBtn.textContent = "保存中...";
                 try {
                     await UI.saveWorkspaceCollaborationPackageToNotion();
                 } catch (error) {
                     UI.showStatus(`保存工作区协作包失败：${error.message}`, "error");
+                } finally {
+                    refs.viewSaveWorkspacePackageBtn.disabled = false;
+                    refs.viewSaveWorkspacePackageBtn.textContent = originalText;
                 }
             };
         }
 
         if (refs.viewSaveWorkspaceReportBtn) {
             refs.viewSaveWorkspaceReportBtn.onclick = async () => {
+                // F-UI-22:loading 态 + 重入保护
+                if (refs.viewSaveWorkspaceReportBtn.disabled) return;
+                const originalText = refs.viewSaveWorkspaceReportBtn.textContent;
+                refs.viewSaveWorkspaceReportBtn.disabled = true;
+                refs.viewSaveWorkspaceReportBtn.textContent = "保存中...";
                 try {
                     await UI.saveWorkspaceInsightReportToNotion();
                 } catch (error) {
                     UI.showStatus(`保存工作区报告失败：${error.message}`, "error");
+                } finally {
+                    refs.viewSaveWorkspaceReportBtn.disabled = false;
+                    refs.viewSaveWorkspaceReportBtn.textContent = originalText;
                 }
             };
         }
 
         if (refs.viewSaveWorkspaceCandidatesBtn) {
             refs.viewSaveWorkspaceCandidatesBtn.onclick = async () => {
+                // F-UI-22:loading 态 + 重入保护
+                if (refs.viewSaveWorkspaceCandidatesBtn.disabled) return;
+                const originalText = refs.viewSaveWorkspaceCandidatesBtn.textContent;
+                refs.viewSaveWorkspaceCandidatesBtn.disabled = true;
+                refs.viewSaveWorkspaceCandidatesBtn.textContent = "保存中...";
                 try {
                     await UI.saveWorkspaceConnectionCandidatesToNotion();
                 } catch (error) {
                     UI.showStatus(`保存统一候选失败：${error.message}`, "error");
+                } finally {
+                    refs.viewSaveWorkspaceCandidatesBtn.disabled = false;
+                    refs.viewSaveWorkspaceCandidatesBtn.textContent = originalText;
                 }
             };
         }
@@ -1733,7 +1969,8 @@ const UIEvents = {
                 statusSpan.style.color = "var(--ldb-ui-danger)";
             } finally {
                 btn.disabled = false;
-                btn.innerHTML = "🧪 测试";
+                // F-UI-16:文案与初始模板一致(测试连接),避免漂移
+                btn.innerHTML = "测试连接";
             }
         };
 

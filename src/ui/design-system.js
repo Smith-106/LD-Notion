@@ -45,16 +45,24 @@ const DesignSystem = {
         document.querySelectorAll("[data-ldb-root]").forEach(el => {
             el.setAttribute("data-ldb-theme", effective);
         });
-        // 同步所有主题切换按钮
+        // 同步所有主题切换按钮(F-UI-11:三态 auto→light→dark→auto,按钮图标反映当前偏好)
         document.querySelectorAll(".ldb-theme-btn").forEach(btn => {
-            btn.textContent = effective === "dark" ? "☀️" : "🌙";
-            btn.title = effective === "dark" ? "切换亮色模式" : "切换暗色模式";
+            if (DesignSystem._theme === "auto") {
+                btn.textContent = "🌗";
+                btn.title = "跟随系统(自动)，点击切换亮色";
+            } else {
+                btn.textContent = effective === "dark" ? "☀️" : "🌙";
+                btn.title = effective === "dark" ? "切换亮色模式" : "切换暗色模式";
+            }
         });
     },
 
     toggleTheme: () => {
-        const effective = DesignSystem.getEffectiveTheme();
-        DesignSystem.setTheme(effective === "dark" ? "light" : "dark");
+        // F-UI-11:三态循环 auto → light → dark → auto(auto 是默认值,一经点击不可丢失)
+        const next = DesignSystem._theme === "auto"
+            ? "light"
+            : (DesignSystem._theme === "light" ? "dark" : "auto");
+        DesignSystem.setTheme(next);
     },
 
     ensureBase: () => {
@@ -559,6 +567,10 @@ const DesignSystem = {
             border-color: rgba(220, 38, 38, 0.35);
             background: rgba(220, 38, 38, 0.12);
         }
+        .ldb-status.warning {
+            border-color: rgba(245, 158, 11, 0.4);
+            background: rgba(245, 158, 11, 0.12);
+        }
         .ldb-status.info {
             border-color: rgba(37, 99, 235, 0.30);
             background: rgba(37, 99, 235, 0.10);
@@ -880,25 +892,6 @@ const DesignSystem = {
         .ldb-panel .ldb-chat-action-btn:hover,
         .ldb-notion-panel .ldb-chat-action-btn:hover {
             background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
-        }
-
-        .ldb-panel .ldb-chat-settings-toggle,
-        .ldb-notion-panel .ldb-chat-settings-toggle {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: pointer;
-            user-select: none;
-            margin-top: 10px;
-            padding: 8px 10px;
-            border-radius: 10px;
-            border: 1px solid var(--ldb-ui-border);
-            background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 90%);
-        }
-
-        .ldb-panel .ldb-chat-settings-content.collapsed,
-        .ldb-notion-panel .ldb-chat-settings-content.collapsed {
-            display: none;
         }
     `,
 };

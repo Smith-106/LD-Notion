@@ -393,6 +393,20 @@ const NotionSiteUI = {
                         <span class="ldb-hint">📖 浏览器书签导入</span>
                         <div id="ldb-notion-bookmark-status" style="font-size: var(--ldb-ui-font-size-xs); margin-top: var(--ldb-ui-spacing-xs);"></div>
                     </div>
+                    <div class="ldb-section-divider">
+                        <span class="ldb-hint">🛡️ 权限与审计</span>
+                    </div>
+                    <div class="ldb-input-group ldb-mt-8">
+                        <label class="ldb-label">当前权限级别（只读，主面板可调整）</label>
+                        <div class="ldb-tip" id="ldb-notion-permission-level"></div>
+                    </div>
+                    <div class="ldb-input-group">
+                        <label class="ldb-checkbox-item" style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
+                            <input type="checkbox" id="ldb-notion-audit-enabled">
+                            <span>启用操作审计日志</span>
+                        </label>
+                        <div class="ldb-tip">所有写入操作（含 AI 与自动同步）经 OperationGuard 记录审计日志。</div>
+                    </div>
                     <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-save-settings">💾 保存设置</button>
                 </div>
 
@@ -528,6 +542,7 @@ const NotionSiteUI = {
                     githubUsername: panel.querySelector("#ldb-notion-github-username").value.trim(),
                     githubToken: panel.querySelector("#ldb-notion-github-token").value.trim(),
                     githubImportTypes: [...panel.querySelectorAll(".ldb-notion-github-type:checked")].map(cb => cb.value),
+                    auditEnabled: panel.querySelector("#ldb-notion-audit-enabled").checked,
                 });
                 NotionOAuth.syncApiKeyInputs();
                 CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
@@ -596,23 +611,20 @@ const NotionSiteUI = {
             void UICommandService.execute("select_ai_target", { targetValue: e.target.value });
         };
 
-        // AI 服务切换 - 更新模型列表并保存（优先使用缓存）
+        // AI 服务切换 - 仅更新模型列表（F-UI-38:持久化统一走保存按钮）
         panel.querySelector("#ldb-notion-ai-service").onchange = (e) => {
             const newService = e.target.value;
-            Storage.set(CONFIG.STORAGE_KEYS.AI_SERVICE, newService);
-                const availableModels = AIService.getAvailableModels(newService);
-                NotionSiteUI.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : undefined);
-            // 重置模型为新服务的默认模型
+            const availableModels = AIService.getAvailableModels(newService);
+            NotionSiteUI.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : undefined);
+            // 重置模型选择为新服务的默认模型（仅 UI，保存时持久化）
             const provider = AIService.PROVIDERS[newService];
-            if (provider?.defaultModel) {
-                Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, provider.defaultModel);
+            const modelSelect = panel.querySelector("#ldb-notion-ai-model");
+            if (provider?.defaultModel && modelSelect) {
+                modelSelect.value = provider.defaultModel;
             }
         };
 
-        // AI 模型切换 - 保存选择
-        panel.querySelector("#ldb-notion-ai-model").onchange = (e) => {
-            Storage.set(CONFIG.STORAGE_KEYS.AI_MODEL, e.target.value);
-        };
+        // AI 模型切换 - 选择值由保存按钮统一持久化（F-UI-38）
 
         // 获取模型列表
         panel.querySelector("#ldb-notion-ai-fetch-models").onclick = async () => {
@@ -706,6 +718,18 @@ const NotionSiteUI = {
         panel.querySelectorAll(".ldb-notion-github-type").forEach(cb => {
             cb.checked = savedGHTypes.includes(cb.value);
         });
+
+        // F-UI-07:权限级别只读指示 + 审计开关回填
+        const permEl = panel.querySelector("#ldb-notion-permission-level");
+        if (permEl) {
+            const level = OperationGuard.getLevel();
+            const names = { 0: "只读", 1: "标准", 2: "高级", 3: "管理员" };
+            permEl.textContent = `级别 ${level}（${names[level] || "未知"}）— 在主面板「权限控制」中调整`;
+        }
+        const auditEl = panel.querySelector("#ldb-notion-audit-enabled");
+        if (auditEl) {
+            auditEl.checked = !!Storage.get(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG.DEFAULTS.enableAuditLog);
+        }
 
         // 书签扩展状态
         const bmStatus = panel.querySelector("#ldb-notion-bookmark-status");
@@ -966,6 +990,22 @@ const NotionSiteUI = {
         container._statusTimer = setTimeout(() => {
             container.innerHTML = "";
         }, timeout);
+    },
+
+    // 授权后目标发现结果消费(三模型共识):回调页(notion.so)无设置面板,以状态栏提示
+    applyPostAuthTarget: (payload = {}) => {
+        const action = payload.action || "";
+        if (action === "autofill") {
+            const title = payload.title ? Utils.escapeHtml(payload.title) : "";
+            NotionSiteUI.showStatus(`✅ 授权成功，已自动选择数据库${title ? `「${title}」` : ""}。回到 LinuxDo 页面即可开始导出。`, "success");
+        } else if (action === "needs_choice") {
+            const count = payload.count || (Array.isArray(payload.candidates) ? payload.candidates.length : 0);
+            NotionSiteUI.showStatus(`✅ 授权成功，发现 ${count} 个可访问数据库。请回到 LinuxDo 页面选择导出目标。`, "info");
+        } else if (action === "empty") {
+            NotionSiteUI.showStatus(`✅ 授权成功，但集成尚未获得数据库访问权。请在 Notion 目标库页面右上角 ⋯ → Connections → 添加本集成。`, "info");
+        } else if (action === "failed") {
+            NotionSiteUI.showStatus(`授权成功，但自动发现目标失败：${payload.message || payload.reason || "未知错误"}。可回到 LinuxDo 页面手动刷新工作区列表。`, "error");
+        }
     },
 
     // 拖拽功能

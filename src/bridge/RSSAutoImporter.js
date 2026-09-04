@@ -78,8 +78,9 @@ const RSSAutoImporter = {
 
     startPolling: (intervalMinutes) => {
         // 统一委托给 SyncScheduler (消除双定时器)
+        // F-UI-03:显式间隔传入,不再被存储键默认值覆盖
         const { SyncScheduler } = require("../adapter/SyncScheduler");
-        SyncScheduler.start("rss");
+        SyncScheduler.start("rss", intervalMinutes);
     },
 
     escapeRegExp: (text) => String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),

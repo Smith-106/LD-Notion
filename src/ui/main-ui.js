@@ -55,6 +55,8 @@ const UI = {
             exportBtn: panel.querySelector("#ldb-export"),
             obsExportBtn: panel.querySelector("#ldb-obs-export"),
             bookmarkListContainer: panel.querySelector("#ldb-bookmark-list-container"),
+            bookmarkEmptyState: panel.querySelector("#ldb-bookmark-empty-state"),
+            bookmarkEmptyLoad: panel.querySelector("#ldb-bookmark-empty-load"),
             reportContainer: panel.querySelector("#ldb-report-container"),
             viewSummary: panel.querySelector("#ldb-view-summary"),
             viewSubtitle: panel.querySelector("#ldb-view-subtitle"),
@@ -75,12 +77,14 @@ const UI = {
             rssAutoImportEnabled: panel.querySelector("#ldb-rss-auto-import-enabled"),
             rssAutoImportOptions: panel.querySelector("#ldb-rss-auto-import-options"),
             rssAutoImportInterval: panel.querySelector("#ldb-rss-auto-import-interval"),
-            rssAutoImportStatus: panel.querySelector("#ldb-rss-auto-import-status"),
             rssDedupModeSelect: panel.querySelector("#ldb-rss-dedup-mode"),
+            importNowLinuxdoBtn: panel.querySelector("#ldb-import-now-linuxdo"),
+            importNowGithubBtn: panel.querySelector("#ldb-import-now-github"),
+            importNowBookmarkBtn: panel.querySelector("#ldb-import-now-bookmark"),
+            importNowRssBtn: panel.querySelector("#ldb-import-now-rss"),
             bookmarkAutoImportEnabled: panel.querySelector("#ldb-bookmark-auto-import-enabled"),
             bookmarkAutoImportOptions: panel.querySelector("#ldb-bookmark-auto-import-options"),
             bookmarkAutoImportInterval: panel.querySelector("#ldb-bookmark-auto-import-interval"),
-            bookmarkAutoImportStatus: panel.querySelector("#ldb-bookmark-auto-import-status"),
             sourcePartitionsToggle: panel.querySelector("#ldb-source-partitions-toggle"),
             sourcePartitionsContent: panel.querySelector("#ldb-source-partitions-content"),
             sourcePartitionsArrow: panel.querySelector("#ldb-source-partitions-arrow"),
@@ -90,7 +94,6 @@ const UI = {
             updateAutoEnabled: panel.querySelector("#ldb-update-auto-enabled"),
             updateAutoOptions: panel.querySelector("#ldb-update-auto-options"),
             updateIntervalHours: panel.querySelector("#ldb-update-interval-hours"),
-            updateCheckStatus: panel.querySelector("#ldb-update-check-status"),
             minimizeBtn: panel.querySelector("#ldb-minimize"),
             closeBtn: panel.querySelector("#ldb-close"),
             themeToggleBtn: panel.querySelector("#ldb-theme-toggle"),
@@ -122,6 +125,7 @@ const UI = {
             loadBookmarksBtn: panel.querySelector("#ldb-load-bookmarks"),
             importBrowserBookmarksBtn: panel.querySelector("#ldb-import-browser-bookmarks"),
             exportBtns: panel.querySelector("#ldb-export-btns"),
+            exportTargetSummary: panel.querySelector("#ldb-export-target-summary"),
             controlBtns: panel.querySelector("#ldb-control-btns"),
             pauseBtn: panel.querySelector("#ldb-pause"),
             classifyPauseBtn: panel.querySelector("#ldb-classify-pause"),
@@ -149,6 +153,10 @@ const UI = {
             selfCheckBtn: panel.querySelector("#ldb-self-check-btn"),
             copyDiagBtn: panel.querySelector("#ldb-copy-diagnostics-btn"),
             selfCheckResult: panel.querySelector("#ldb-self-check-result"),
+            viewAiTracesBtn: panel.querySelector("#ldb-view-ai-traces"),
+            clearAiTracesBtn: panel.querySelector("#ldb-clear-ai-traces"),
+            aiTracesResult: panel.querySelector("#ldb-ai-traces-result"),
+            resetPanelSizeBtn: panel.querySelector("#ldb-reset-panel-size"),
             onlyFirstCheckbox: panel.querySelector("#ldb-only-first"),
             onlyOpCheckbox: panel.querySelector("#ldb-only-op"),
             rangeStartInput: panel.querySelector("#ldb-range-start"),
@@ -250,8 +258,8 @@ const UI = {
                         </div>
                         <div class="ldb-toggle-content collapsed ldb-mb-8" id="ldb-source-partitions-content">
                             <div class="ldb-source-option-group">
-                                <button class="ldb-source-option" id="ldb-source-select-linuxdo" type="button">Linux.do 收藏分区</button>
-                                <button class="ldb-source-option" id="ldb-source-select-github" type="button">GitHub 收藏分区</button>
+                                <button class="ldb-source-option" id="ldb-source-select-linuxdo" type="button" aria-pressed="true">Linux.do 收藏分区</button>
+                                <button class="ldb-source-option" id="ldb-source-select-github" type="button" aria-pressed="false">GitHub 收藏分区</button>
                             </div>
                         </div>
 
@@ -327,6 +335,14 @@ const UI = {
                                 </div>
                             </div>
                             <div id="ldb-rss-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
+                            <!-- F-UI-05:各来源「立即导入」按钮(不依赖 AI 指令,直接触发完整同步) -->
+                            <div class="ldb-input-group ldb-mt-12">
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-linuxdo">立即导入 Linux.do</button>
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-github">立即导入 GitHub</button>
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-bookmark">立即导入书签</button>
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-rss">立即导入 RSS</button>
+                            </div>
+                            <div class="ldb-tip">立即导入会执行完整同步（拉取 + 写入 Notion + 推进水位），与自动同步路径一致。</div>
                             <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <label for="ldb-linuxdo-dedup-mode" style="white-space: nowrap;">Linux.do 导入去重</label>
                                 <select id="ldb-linuxdo-dedup-mode" class="ldb-input ldb-flex-1">
@@ -385,6 +401,13 @@ const UI = {
                             </button>
                         </div>
 
+                        <!-- F-UI-32:未加载时的空状态引导 -->
+                        <div class="ldb-view-empty" id="ldb-bookmark-empty-state">
+                            <div class="ldb-view-empty-title">还没有加载收藏</div>
+                            <div class="ldb-view-empty-text">点击下方按钮加载当前来源的收藏列表，加载后可勾选并导出到 Notion。</div>
+                            <button class="ldb-btn ldb-btn-primary" id="ldb-bookmark-empty-load" type="button">🔄 加载收藏列表</button>
+                        </div>
+
                         <!-- 收藏列表 (加载后显示) -->
                         <div id="ldb-bookmark-list-container" style="display: none;">
                             <div class="ldb-select-all">
@@ -396,6 +419,9 @@ const UI = {
                             </div>
                             <div class="ldb-bookmark-list" id="ldb-bookmark-list"></div>
                         </div>
+
+                        <!-- F-UI-35:导出目标/授权/权限只读摘要 -->
+                        <div id="ldb-export-target-summary" style="font-size: var(--ldb-ui-font-size-xs); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-sm);"></div>
 
                         <!-- 导出按钮组 -->
                         <div class="ldb-btn-group" id="ldb-export-btns">
@@ -917,10 +943,13 @@ const UI = {
 
                     <div class="ldb-divider"></div>
 
-                    <!-- 浏览器书签导入 -->
+                    <!-- F-UI-42:浏览器书签入口（状态 + 跳转收藏 Tab，不再空壳） -->
                     <div class="ldb-section">
                         <div style="font-size: var(--ldb-ui-font-size-md); font-weight: 700; color: var(--ldb-ui-text);">📖 浏览器书签</div>
                         <div id="ldb-bookmark-ext-status" style="font-size: var(--ldb-ui-font-size-xs); margin-top: var(--ldb-ui-spacing-xs); color: var(--ldb-ui-muted);"></div>
+                        <div class="ldb-input-group ldb-mt-12">
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-bookmark-settings-jump" type="button">📚 前往收藏 Tab 配置</button>
+                        </div>
                     </div>
 
                     <div class="ldb-divider"></div>
@@ -947,11 +976,18 @@ const UI = {
                             <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-bookmark-exported">清除书签已导出记录</button>
                         </div>
                         <div class="ldb-tip">仅清除本地去重/导出记录，不影响 Notion 中已有内容；清除后对应来源可再次导出。</div>
+                        <!-- F-UI-04:AI 调用链追踪可观测入口 -->
+                        <div class="ldb-input-group ldb-mt-12">
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-view-ai-traces">查看 AI 调用链</button>
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-ai-traces">清除 AI 调用链</button>
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-reset-panel-size">重置面板尺寸</button>
+                        </div>
+                        <div id="ldb-ai-traces-result" class="ldb-hint" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
                     </div>
 
                     <!-- 操作日志面板 -->
                     <div class="ldb-log-panel" id="ldb-log-panel">
-                        <div class="ldb-log-header" id="ldb-log-toggle">
+                        <div class="ldb-log-header" id="ldb-log-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-log-content">
                             <span class="ldb-log-title">
                                 📋 操作日志
                                 <span class="ldb-log-badge" id="ldb-log-count">0</span>
@@ -1216,6 +1252,11 @@ const UI = {
             Storage.set(CONFIG.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE, CONFIG.DEFAULTS.rssImportDedupMode);
         }
 
+        // F-UI-31:三条自动同步链状态持久化回显（上次同步:时间·结果）
+        UI.renderSyncChainStatus();
+        // F-UI-35:收藏 Tab 导出目标摘要
+        UI.updateExportTargetSummary();
+
         const linuxdoDedupMode = Utils.getLinuxDoImportDedupMode();
         const linuxdoDedupSelect = refs.linuxdoDedupModeSelect
         linuxdoDedupSelect.value = linuxdoDedupMode;
@@ -1265,6 +1306,45 @@ const UI = {
         UpdateChecker.renderLastStatus();
     },
 
+    // F-UI-31:三条自动同步链状态持久化回显（上次同步:时间·结果）
+    renderSyncChainStatus: () => {
+        const panel = UI.panel;
+        if (!panel) return;
+        const OUTCOME_LABELS = { idle: "空闲", running: "同步中", success: "成功", partial: "部分成功", error: "失败" };
+        const chains = [
+            { source: "bookmark", selector: "#ldb-bookmark-auto-import-status" },
+            { source: "rss", selector: "#ldb-rss-auto-import-status" },
+            { source: "github-stars", selector: "#ldb-auto-import-status" },
+        ];
+        for (const chain of chains) {
+            const el = panel.querySelector(chain.selector);
+            if (!el) continue;
+            const state = SyncState.getSourceState(chain.source);
+            if (!state.lastAttemptAt) {
+                el.textContent = "尚未同步";
+                continue;
+            }
+            const time = new Date(state.lastAttemptAt).toLocaleTimeString();
+            const outcome = OUTCOME_LABELS[state.lastOutcome] || state.lastOutcome;
+            el.textContent = `上次同步:${time} · ${outcome}`;
+        }
+    },
+
+    // F-UI-35:收藏 Tab 导出目标/授权/权限只读摘要
+    updateExportTargetSummary: () => {
+        const panel = UI.panel;
+        if (!panel) return;
+        const el = panel.querySelector("#ldb-export-target-summary");
+        if (!el) return;
+        const exportState = TargetState.getExportState();
+        const targetType = exportState.targetType === "page" ? "父页面" : "数据库";
+        const targetId = targetType === "父页面" ? exportState.parentPageId : exportState.databaseId;
+        const level = Number(Storage.get(CONFIG.STORAGE_KEYS.PERMISSION_LEVEL, CONFIG.DEFAULTS.permissionLevel));
+        const levelLabels = { 0: "只读", 1: "标准", 2: "高级", 3: "管理员" };
+        const authMode = NotionOAuth.getAuthMode() === "oauth" ? "OAuth" : "Manual";
+        el.textContent = `导出目标:${targetType} ${targetId ? targetId.slice(0, 12) : "未配置"} · 权限:${levelLabels[level] || level} · 授权:${authMode}`;
+    },
+
     renderSelfCheckResult: () => {
         const panel = UI.panel;
         if (!panel) return;
@@ -1304,6 +1384,16 @@ const UI = {
                 ok: hasGitHubToken,
                 label: "GitHub Token",
                 value: hasGitHubToken ? "已配置" : "未配置",
+            },
+            {
+                ok: true,
+                label: "权限级别",
+                value: `级别 ${OperationGuard.getLevel()}`,
+            },
+            {
+                ok: true,
+                label: "审计日志",
+                value: Storage.get(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG.DEFAULTS.enableAuditLog) ? "已启用" : "未启用",
             },
         ];
 
@@ -1348,6 +1438,17 @@ const UI = {
         const autoImportEnabled = Storage.get(autoCfg.enabledKey, autoCfg.enabledDefault);
         const autoImportInterval = Storage.get(autoCfg.intervalKey, autoCfg.intervalDefault);
 
+        // F-UI-17:诊断补项(权限级别/授权模式/AI 服务/同步状态)
+        const permissionLevel = OperationGuard.getLevel();
+        const authMode = Storage.get(CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE, CONFIG.DEFAULTS.notionAuthMode);
+        const aiService = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
+        const aiModel = Storage.get(CONFIG.STORAGE_KEYS.AI_MODEL, CONFIG.DEFAULTS.aiModel);
+        const auditEnabled = Storage.get(CONFIG.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG.DEFAULTS.enableAuditLog);
+        const syncState = Storage.get(CONFIG.STORAGE_KEYS.AUTO_SYNC_STATE, {});
+        const syncStateSummary = (syncState && typeof syncState === "object")
+            ? Object.keys(syncState).map(k => `${k}=${syncState[k]?.lastSyncAt ? "synced" : "idle"}`).join(",")
+            : "";
+
         const issues = [];
         if (!hasBridgeMarker) {
             issues.push("missing_bookmark_bridge");
@@ -1383,6 +1484,12 @@ const UI = {
             `github_token=${hasGitHubToken ? "set" : "unset"}`,
             `auto_import_enabled=${autoImportEnabled ? "true" : "false"}`,
             `auto_import_interval=${String(autoImportInterval)}`,
+            `permission_level=${permissionLevel}`,
+            `auth_mode=${authMode}`,
+            `audit_log=${auditEnabled ? "enabled" : "disabled"}`,
+            `ai_service=${aiService}`,
+            `ai_model=${aiModel}`,
+            `sync_state=${syncStateSummary || "none"}`,
             `mode_conflict_tip_shown=${modeConflictTipShown ? "true" : "false"}`,
             "",
             "[update_checker]",
@@ -1543,6 +1650,57 @@ const UI = {
         select.innerHTML = options;
         if (restoreValue) {
             select.value = restoreValue;
+        }
+    },
+
+    // 授权后目标发现结果消费(三模型共识):复用 workspace select + tip,不新建控件
+    applyPostAuthTarget: async (payload = {}) => {
+        const refs = UI.refs || {};
+        const workspaceTip = refs.workspaceTip;
+        const action = payload.action || "";
+
+        if (action === "autofill") {
+            const title = payload.title ? Utils.escapeHtml(payload.title) : "";
+            if (workspaceTip) {
+                workspaceTip.textContent = `✅ 已自动选择数据库${title ? `「${title}」` : ""}，可点击「自动设置数据库」初始化属性`;
+                workspaceTip.style.color = "var(--ldb-ui-success)";
+            }
+            // 刷新下拉以回显已配置目标
+            const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput?.value?.trim() || "");
+            if (apiKey) {
+                try {
+                    const { workspaceData } = await WorkspaceService.refreshWorkspaceSnapshot(apiKey, {
+                        includePages: false,
+                        maxPages: 1,
+                    });
+                    UI.updateWorkspaceSelect(workspaceData);
+                } catch (_) { /* 回显失败不阻断,用户可手动刷新 */ }
+            }
+        } else if (action === "needs_choice") {
+            const count = payload.count || (Array.isArray(payload.candidates) ? payload.candidates.length : 0);
+            if (workspaceTip) {
+                workspaceTip.textContent = payload.warn
+                    ? `⚠️ ${payload.warn}，请重新选择导出目标`
+                    : `请选择导出目标（发现 ${count} 个可访问数据库）`;
+                workspaceTip.style.color = "var(--ldb-ui-warning)";
+            }
+            const select = refs.workspaceSelect;
+            if (select) {
+                select.classList.add("ldb-highlight");
+                setTimeout(() => select.classList.remove("ldb-highlight"), 3000);
+            }
+        } else if (action === "empty") {
+            if (workspaceTip) {
+                workspaceTip.textContent = payload.hint
+                    ? `⚠️ ${payload.hint}`
+                    : "⚠️ 集成未共享任何数据库：请在 Notion 目标库页面右上角 ⋯ → Connections → 连接你的集成";
+                workspaceTip.style.color = "var(--ldb-ui-warning)";
+            }
+        } else if (action === "failed") {
+            if (workspaceTip) {
+                workspaceTip.textContent = `❌ 自动发现目标失败：${payload.message || payload.reason || "未知错误"}（可手动刷新工作区列表）`;
+                workspaceTip.style.color = "var(--ldb-ui-danger)";
+            }
         }
     },
 
@@ -2281,7 +2439,8 @@ const UI = {
         const count = UI.selectedBookmarks?.size || 0;
         const pendingCount = UI.selectedUnexportedCount || 0;
 
-        UI.refs.selectCount.textContent = `已选 ${count} 个，待导出 ${Math.max(0, pendingCount)} 个`;
+        // F-UI-14:已选集合含已导出项(复选框 disabled),文案改为「已加载/待导出」避免误导
+        UI.refs.selectCount.textContent = `已加载 ${count} 个，待导出 ${Math.max(0, pendingCount)} 个`;
 
         // 更新全选框状态
         const selectAll = UI.refs.selectAll
@@ -2325,11 +2484,14 @@ const UI = {
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">❌ 失败 (${failed.length})</div>`;
             failed.slice(0, 20).forEach(item => {
-                html += `<div class="ldb-report-item failed">
+                // P2:失败项 title 悬停显示完整标题,错误详情可点击复制
+                const fullTitle = item.title || "";
+                const fullError = item.error || "";
+                html += `<div class="ldb-report-item failed" title="${Utils.escapeHtml(fullTitle)}">
                     <span>✗</span>
-                    <span>${Utils.escapeHtml(Utils.truncateText(item.title, 35))}</span>
+                    <span>${Utils.escapeHtml(Utils.truncateText(fullTitle, 35))}</span>
                 </div>`;
-                html += `<div class="ldb-report-error">${Utils.escapeHtml(Utils.truncateText(item.error, 120))}</div>`;
+                html += `<div class="ldb-report-error" title="点击复制完整错误" style="cursor:pointer;" onclick="navigator.clipboard?.writeText(${JSON.stringify(Utils.escapeHtml(fullError))})">${Utils.escapeHtml(Utils.truncateText(fullError, 120))}</div>`;
             });
             if (failed.length > 20) {
                 html += `<div class="ldb-report-item failed"><span>...</span> 还有 ${failed.length - 20} 个失败项</div>`;
@@ -2427,10 +2589,13 @@ const UI = {
         if (Storage.get(CONFIG.STORAGE_KEYS.EXT_INSTALL_PROMPT_SHOWN, false)) return;
 
         Storage.set(CONFIG.STORAGE_KEYS.EXT_INSTALL_PROMPT_SHOWN, true);
-        const shouldInstallNow = window.confirm("检测到你尚未安装书签桥接扩展。\n\n是否现在打开安装页面？");
-        if (shouldInstallNow) {
-            InstallHelper.openBookmarkExtensionInstall();
-        }
+        // P2:原生 confirm 统一为 ConfirmationDialog
+        ConfirmationDialog.show({
+            title: "安装书签桥接扩展",
+            message: "检测到你尚未安装书签桥接扩展。\n\n是否现在打开安装页面？",
+            confirmText: "打开安装页",
+            onConfirm: () => InstallHelper.openBookmarkExtensionInstall(),
+        });
     },
 
     // 初始化

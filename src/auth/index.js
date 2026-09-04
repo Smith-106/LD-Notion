@@ -3,6 +3,10 @@
 const { CONFIG, MSG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState } = require("../storage");
+const {
+    describeExchangeError,
+    describeRedirectUriMismatch,
+} = require("./target-discovery");
 
 const CredentialVault = {
     VERSION: 1,
@@ -593,6 +597,27 @@ const TargetState = {
 
 const NotionOAuth = {
     _syncHandlers: [],
+    _postAuthHandlers: [],
+    _refreshInFlight: null,
+
+    registerPostAuthHandler: (handler) => {
+        if (typeof handler !== "function") return () => {};
+        NotionOAuth._postAuthHandlers.push(handler);
+        return () => {
+            NotionOAuth._postAuthHandlers = NotionOAuth._postAuthHandlers.filter((h) => h !== handler);
+        };
+    },
+
+    _notifyPostAuth: async (context) => {
+        for (const handler of NotionOAuth._postAuthHandlers) {
+            try {
+                await handler(context);
+            } catch (error) {
+                // 发现失败绝不回滚授权成功(Routing 优先级 5:不静默丢弃,但也不阻断)
+                console.warn("[LD-Notion] 授权后目标发现失败:", error?.message || error);
+            }
+        }
+    },
 
     getAuthMode: () => {
         const mode = Storage.get(CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE, CONFIG.DEFAULTS.notionAuthMode);
@@ -782,6 +807,19 @@ const NotionOAuth = {
         return Utils.safeJsonParse(raw, null);
     },
 
+    // 授权后目标发现结果消费(三模型共识):跨页结果落存储,TTL 10min 与 pending 对齐,读后即清
+    consumePostAuthTarget: () => {
+        const raw = Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_POST_AUTH_TARGET, "");
+        if (!raw) return null;
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_POST_AUTH_TARGET, "");
+        const payload = Utils.safeJsonParse(raw, null);
+        if (!payload?.action) return null;
+        if (payload.timestamp && Date.now() - payload.timestamp > 10 * 60 * 1000) {
+            return null;
+        }
+        return payload;
+    },
+
     syncApiKeyInputs: () => {
         const status = NotionOAuth.getStatus();
         document.querySelectorAll("#ldb-api-key, #ldb-notion-api-key").forEach((input) => {
@@ -848,9 +886,22 @@ const NotionOAuth = {
                 fields.redirectUriInput.value = config.redirectUri || CONFIG.DEFAULTS.notionOauthRedirectUri;
             }
 
-            fields.statusEl.textContent = status.text;
-            if (fields.statusEl.style) {
-                fields.statusEl.style.color = status.color;
+            // 授权进行中状态可见(三模型共识 R4):pending 存在且未过期 → 提示等待回调
+            const pending = NotionOAuth.getPendingState();
+            if (pending?.state && pending?.createdAt && !status.connected) {
+                const remainingMs = pending.createdAt + 10 * 60 * 1000 - Date.now();
+                if (remainingMs > 0) {
+                    const remainingMin = Math.max(1, Math.ceil(remainingMs / 60000));
+                    fields.statusEl.textContent = `⏳ 已打开授权页，等待 Notion 回调（剩余约 ${remainingMin} 分钟）`;
+                    fields.statusEl.style.color = "#f59e0b";
+                } else {
+                    NotionOAuth.clearPendingState();
+                }
+            } else {
+                fields.statusEl.textContent = status.text;
+                if (fields.statusEl.style) {
+                    fields.statusEl.style.color = status.color;
+                }
             }
             fields.authorizeBtn.textContent = status.connected ? "🔄 重新授权" : "🔐 一键授权";
             fields.clearBtn.textContent = status.connected ? "断开并切回手动" : "清除本地授权";
@@ -947,7 +998,23 @@ const NotionOAuth = {
         });
 
         const authUrl = NotionOAuth.buildAuthorizeUrl(config, state);
-        const opened = window.open(authUrl, "_blank", "noopener,noreferrer");
+        // 修复(三模型共识 R2):window.open(...,"noopener,noreferrer") 恒返回 null(实测),
+        // 旧判定 if(!opened) 永远为真 → 永远整页跳转丢失上下文。
+        // 先尝试带 noopener 的打开(防反向 tabnabbing);返回 null 时降级无 noopener 重试;
+        // 仍失败才整页跳转(授权仍可完成,但丢失原页面)。
+        let opened = null;
+        try {
+            opened = window.open(authUrl, "_blank", "noopener,noreferrer");
+        } catch (_) {
+            opened = null;
+        }
+        if (!opened) {
+            try {
+                opened = window.open(authUrl, "_blank");
+            } catch (_) {
+                opened = null;
+            }
+        }
         if (!opened) {
             window.location.href = authUrl;
         }
@@ -976,7 +1043,8 @@ const NotionOAuth = {
                         resolve(result);
                         return;
                     }
-                    reject(new Error(result?.error_description || result?.message || result?.error || `OAuth 交换失败: ${response.status}`));
+                    // 诊断化(三模型共识 R3):错误分类映射,禁止回显请求体(REDACT_IN_LOGS 纪律)
+                    reject(new Error(describeExchangeError(result, response.status)));
                 },
                 onerror: (error) => reject(new Error(`OAuth 网络请求失败: ${error?.error || error}`)),
                 timeout: 30000,
@@ -985,7 +1053,7 @@ const NotionOAuth = {
         });
     },
 
-    applyTokenResponse: async (result = {}) => {
+    applyTokenResponse: async (result = {}, options = {}) => {
         if (!result?.access_token) throw new Error("Notion OAuth 未返回 access_token");
 
         Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, result.access_token);
@@ -1004,30 +1072,60 @@ const NotionOAuth = {
         });
         NotionOAuth.syncApiKeyInputs(result.access_token);
         NotionOAuth.syncRegisteredControls();
+
+        // 授权后目标发现钩子(三模型共识):source 门控 — 仅首次授权走完整发现,
+        // 静默续签(source="refresh")不触发目标重选(不打扰用户)
+        const source = options?.source || "unknown";
+        await NotionOAuth._notifyPostAuth({
+            accessToken: result.access_token,
+            meta: NotionOAuth.getMeta(),
+            source,
+        });
     },
 
     refreshAccessToken: async () => {
-        const refreshToken = NotionOAuth.getRefreshToken();
-        const config = NotionOAuth.getConfig();
-        if (!refreshToken) {
-            if (CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
-                throw new Error("Notion OAuth refresh token 已保存在保险箱中，请先解锁凭证保险箱后再刷新令牌。");
-            }
-            throw new Error("当前没有可刷新的 Notion OAuth refresh_token");
+        // 并发串行化(三模型共识,借鉴 MCP 令牌工程):多标签 401 同时续签时单飞,
+        // 避免 refresh_token 轮换竞争与重复交换
+        if (NotionOAuth._refreshInFlight) {
+            return NotionOAuth._refreshInFlight;
         }
-        if (!config.clientId || !config.clientSecret) {
-            if (CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
-                throw new Error("Notion OAuth Client Secret 已保存在保险箱中，请先解锁凭证保险箱后再刷新令牌。");
+        NotionOAuth._refreshInFlight = (async () => {
+            const refreshToken = NotionOAuth.getRefreshToken();
+            const config = NotionOAuth.getConfig();
+            if (!refreshToken) {
+                if (CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
+                    throw new Error("Notion OAuth refresh token 已保存在保险箱中，请先解锁凭证保险箱后再刷新令牌。");
+                }
+                throw new Error("当前没有可刷新的 Notion OAuth refresh_token");
             }
-            throw new Error("缺少 Notion OAuth Client 配置，无法刷新令牌");
-        }
+            if (!config.clientId || !config.clientSecret) {
+                if (CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
+                    throw new Error("Notion OAuth Client Secret 已保存在保险箱中，请先解锁凭证保险箱后再刷新令牌。");
+                }
+                throw new Error("缺少 Notion OAuth Client 配置，无法刷新令牌");
+            }
 
-        const result = await NotionOAuth.exchangeToken({
-            grant_type: "refresh_token",
-            refresh_token: refreshToken,
-        });
-        await NotionOAuth.applyTokenResponse(result);
-        return result.access_token;
+            try {
+                const result = await NotionOAuth.exchangeToken({
+                    grant_type: "refresh_token",
+                    refresh_token: refreshToken,
+                });
+                await NotionOAuth.applyTokenResponse(result, { source: "refresh" });
+                return result.access_token;
+            } catch (error) {
+                // invalid_grant 视为终态(三模型共识):清 token 提示重新授权,禁止重试循环
+                const message = String(error?.message || "");
+                if (message.includes("已使用或已过期") || message.includes("invalid_grant")) {
+                    await NotionOAuth.setRefreshToken("");
+                    NotionOAuth.setAuthMode("manual");
+                    NotionOAuth.pushNotice("Notion OAuth 登录已过期，请重新点击一键授权。", "error");
+                }
+                throw error;
+            } finally {
+                NotionOAuth._refreshInFlight = null;
+            }
+        })();
+        return NotionOAuth._refreshInFlight;
     },
 
     handleRedirectCallback: async () => {
@@ -1053,7 +1151,15 @@ const NotionOAuth = {
         const state = currentUrl.searchParams.get("state");
 
         if (!code && !error) return false;
-        if (!NotionOAuth.matchesRedirectUri(window.location.href, pending.redirectUri)) return false;
+        if (!NotionOAuth.matchesRedirectUri(window.location.href, pending.redirectUri)) {
+            // 诊断化(三模型共识 R1):仅当 URL 携带 code/error 时提示差异,普通页面加载不打扰
+            const diff = describeRedirectUriMismatch(window.location.href, pending.redirectUri);
+            NotionOAuth.pushNotice(
+                `回调地址与 Redirect URI 不一致: 期望 ${diff.expected?.origin || "?"}${diff.expected?.pathname || ""} / 实际 ${diff.actual?.origin || "?"}${diff.actual?.pathname || ""}。请检查 Notion 集成后台的 Redirect URI 配置。`,
+                "error"
+            );
+            return false;
+        }
 
         try {
             if (error) {
@@ -1068,7 +1174,7 @@ const NotionOAuth = {
                 code,
                 redirect_uri: pending.redirectUri,
             });
-            await NotionOAuth.applyTokenResponse(result);
+            await NotionOAuth.applyTokenResponse(result, { source: "oauth_callback" });
             const workspaceName = result.workspace_name || result.workspace_id || "";
             NotionOAuth.pushNotice(
                 workspaceName

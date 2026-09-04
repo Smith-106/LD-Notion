@@ -96,10 +96,11 @@ const GitHubAutoImporter = {
 
     startPolling: (intervalMinutes) => {
         // 统一委托给 SyncScheduler (消除双定时器)
+        // F-UI-03:显式间隔传入,不再被存储键默认值覆盖
         const { SyncScheduler } = require("../adapter/SyncScheduler");
         const types = GitHubAPI.getImportTypes();
         for (const type of types) {
-            SyncScheduler.start(`github-${type}`);
+            SyncScheduler.start(`github-${type}`, intervalMinutes);
         }
     },
 

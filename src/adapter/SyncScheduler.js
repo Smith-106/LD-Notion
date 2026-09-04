@@ -46,6 +46,20 @@ const RETRY_DELAYS = [5 * 60 * 1000, 15 * 60 * 1000, 60 * 60 * 1000];
 // 上限取 RETRY_DELAYS 长度 + 2（约 5 次），达上限后归零计数，待下次正常 interval 周期再试。
 const MAX_RETRIES = RETRY_DELAYS.length + 2;
 
+// 源类型到完整同步 runner 的映射(F-UI-02 修复):
+// 定时路径必须走各 AutoImporter.run()(fetch + 写 Notion + 推进水位),
+// 而非 SyncCoordinator.sync(仅拉取+去重+推进水位,不写 Notion → 增量永久丢失)。
+// lazy require 避免加载期耦合(import/bridge 不顶层 require adapter)。
+const SOURCE_RUNNERS = {
+    linuxdo: () => require("../import").AutoImporter.run(),
+    "github-stars": () => require("../import").GitHubAutoImporter.run(),
+    "github-repos": () => require("../import").GitHubAutoImporter.run(),
+    "github-forks": () => require("../import").GitHubAutoImporter.run(),
+    "github-gists": () => require("../import").GitHubAutoImporter.run(),
+    bookmark: () => require("../bridge").BookmarkAutoImporter.run(),
+    rss: () => require("../bridge").RSSAutoImporter.run(),
+};
+
 /**
  * SyncScheduler — 统一的定时同步调度器
  * 管理每个源的 setInterval 定时器和指数退避重试
@@ -58,7 +72,6 @@ const SyncScheduler = {
     /**
      * 获取源的同步间隔 (分钟)
      * @param {string} sourceType
-     * @returns {number}
      */
     getIntervalMinutes(sourceType) {
         const key = SOURCE_INTERVAL_KEYS[sourceType];
@@ -81,10 +94,14 @@ const SyncScheduler = {
     /**
      * 启动单个源的定时同步
      * @param {string} sourceType
+     * @param {number} [intervalMinutes] 显式间隔(分钟),优先于存储键(F-UI-03 修复:
+     *   UI 写入的 *_AUTO_IMPORT_INTERVAL 经 startPolling 传入,不再被默认值覆盖)
      */
-    start(sourceType) {
+    start(sourceType, intervalMinutes) {
         this.stop(sourceType);
-        const intervalMin = this.getIntervalMinutes(sourceType);
+        const intervalMin = Number.isFinite(intervalMinutes) && intervalMinutes > 0
+            ? intervalMinutes
+            : this.getIntervalMinutes(sourceType);
         if (intervalMin <= 0) return; // 0 = 仅手动同步
 
         const intervalMs = intervalMin * 60 * 1000;
@@ -158,6 +175,14 @@ const SyncScheduler = {
      */
     async _doSync(sourceType) {
         try {
+            // F-UI-02 修复:定时路径走完整同步 runner(写 Notion + 推进水位),
+            // 与手动路径一致;SyncCoordinator 保留给手动全量同步。
+            const runner = SOURCE_RUNNERS[sourceType];
+            if (typeof runner === "function") {
+                await runner();
+                this._retryCounts.set(sourceType, 0);
+                return;
+            }
             const result = await SyncCoordinator.sync(sourceType);
             if (result.error) {
                 this._scheduleRetry(sourceType);

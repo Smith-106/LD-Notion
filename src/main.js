@@ -17,6 +17,7 @@ const { GenericExporter, LinuxDoAPI, Exporter } = require("./export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("./import");
 const { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter } = require("./bridge");
 const { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI, GenericUI } = require("./ui");
+const { UICommandService } = require("./coordination");
 
 // ===========================================
 // 模块连接 — 注入跨模块依赖
@@ -75,6 +76,13 @@ window.addEventListener("ld-notion-popup-action", (event) => {
 // ===========================================
 
 function main() {
+    // 授权后目标发现(三模型共识):main.js 在启动编排层注册 postAuth handler,
+    // 经 UICommandService 执行(只读 search + 决策矩阵),避免 auth→api/extract 循环依赖边
+    NotionOAuth.registerPostAuthHandler(async ({ accessToken = "", source = "" } = {}) => {
+        if (!accessToken) return;
+        await UICommandService.execute("discover_export_target_after_auth", { accessToken, source });
+    });
+
     const initUI = async () => {
       try {
         // 初始化主题系统
@@ -120,6 +128,16 @@ function main() {
                 GenericUI.showStatus(notice.message, notice.type || "info");
             } else if (typeof UI.showStatus === "function") {
                 UI.showStatus(notice.message, notice.type || "info");
+            }
+        }
+
+        // 授权后目标发现结果消费(三模型共识):跨页结果落存储,目标页 UI 读取回显
+        const postAuthTarget = NotionOAuth.consumePostAuthTarget();
+        if (postAuthTarget) {
+            if (currentSite === SiteDetector.SITES.NOTION && typeof NotionSiteUI.applyPostAuthTarget === "function") {
+                NotionSiteUI.applyPostAuthTarget(postAuthTarget);
+            } else if (typeof UI.applyPostAuthTarget === "function") {
+                UI.applyPostAuthTarget(postAuthTarget);
             }
         }
       } catch (e) {

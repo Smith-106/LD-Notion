@@ -103,7 +103,8 @@ describe("AT-007: OperationLog 纯函数", () => {
         it("maps known operation names to their audit event types", () => {
             expect(OperationLog.inferAuditEvent("createDatabasePage")).toBe("write.page.created");
             expect(OperationLog.inferAuditEvent("deletePage")).toBe("page.archived");
-            expect(OperationLog.inferAuditEvent("deleteBlock")).toBe("block.deleted");
+            // F-UI-20:deleteBlock 已从审计映射移除,回退到默认事件
+            expect(OperationLog.inferAuditEvent("deleteBlock")).toBe("import.completed");
             expect(OperationLog.inferAuditEvent("updatePage")).toBe("write.property.updated");
             expect(OperationLog.inferAuditEvent("appendBlocks")).toBe("write.block.inserted");
             expect(OperationLog.inferAuditEvent("restorePage")).toBe("page.restored");

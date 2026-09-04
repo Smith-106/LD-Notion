@@ -5,6 +5,7 @@ const { Utils } = require("../utils");
 const { Storage, SyncState } = require("../storage");
 const { NotionOAuth } = require("../auth");
 const { NotionAPI } = require("../api");
+const { ConfirmationDialog } = require("../security");
 const { WorkspaceService } = require("../extract");
 const { AutoImporter, GitHubAutoImporter, GitHubAPI } = require("../import");
 const { BookmarkAutoImporter, RSSAutoImporter } = require("../bridge");
@@ -744,17 +745,22 @@ const WorkspaceInsight = {
             btn.onclick = () => {
                 const sourceKey = btn.getAttribute("data-reset-baseline");
                 const sourceLabel = sourceKey === "github" ? "GitHub" : sourceKey;
-                if (!confirm(`确定重置「${sourceLabel}」的增量同步基线吗？\n重置后下次同步将重新全量扫描。`)) {
-                    return;
-                }
-                if (sourceKey === "github") {
-                    const githubTypes = Array.from(new Set((GitHubAPI.getImportTypes() || []).filter(Boolean)));
-                    githubTypes.forEach((type) => SyncState.resetSourceState(`github-${type}`));
-                } else {
-                    SyncState.resetSourceState(sourceKey === "bookmarks" ? "bookmark" : sourceKey);
-                }
-                WorkspaceInsight.renderSyncCenterSummary();
-                UI().showStatus(`已重置「${sourceLabel}」增量基线，下次同步将全量扫描`, "success");
+                // P2:原生 confirm 统一为 ConfirmationDialog
+                ConfirmationDialog.show({
+                    title: `重置「${sourceLabel}」增量基线`,
+                    message: `确定重置「${sourceLabel}」的增量同步基线吗？\n重置后下次同步将重新全量扫描。`,
+                    confirmText: "重置基线",
+                    onConfirm: () => {
+                        if (sourceKey === "github") {
+                            const githubTypes = Array.from(new Set((GitHubAPI.getImportTypes() || []).filter(Boolean)));
+                            githubTypes.forEach((type) => SyncState.resetSourceState(`github-${type}`));
+                        } else {
+                            SyncState.resetSourceState(sourceKey === "bookmarks" ? "bookmark" : sourceKey);
+                        }
+                        WorkspaceInsight.renderSyncCenterSummary();
+                        UI().showStatus(`已重置「${sourceLabel}」增量基线，下次同步将全量扫描`, "success");
+                    },
+                });
             };
         });
     },

@@ -52,6 +52,15 @@ const PanelResize = {
             maxWidth = 800,
         } = options;
 
+        // F-UI-18:重置面板尺寸(清除持久化尺寸并恢复默认)
+        PanelResize.resetSize = (key) => {
+            if (key) Storage.remove(key);
+            if (element) {
+                element.style.width = "";
+                element.style.maxHeight = "";
+            }
+        };
+
         PanelResize.injectStyles();
 
         const maxViewportHeight = () => Math.round(window.innerHeight * 0.9);
