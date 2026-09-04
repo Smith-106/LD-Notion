@@ -166,6 +166,12 @@ function verifyBuildMarkers(bundleSource) {
 
 function verifyChromeManifest() {
     // 验证桥接扩展 manifest (chrome-extension-full/manifest.json)
+    // CI 链路中 verify:equivalence 先于 build:extension 执行,此时 chrome-extension-full/ 尚未生成;
+    // 该目录的 manifest 已由 verify:extension:surfaces(bounded/完整构建)覆盖验证,此处存在时复核。
+    if (!fs.existsSync(CHROME_MANIFEST)) {
+        console.log(`  [SKIP] chrome-extension-full/manifest.json 不存在(构建产物,由 verify:extension:surfaces 覆盖),跳过`);
+        return;
+    }
     const bridgeManifestSource = readIfExists(CHROME_MANIFEST);
     const bridgeManifest = JSON.parse(bridgeManifestSource);
 
