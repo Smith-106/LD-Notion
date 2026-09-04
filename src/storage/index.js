@@ -98,6 +98,11 @@ const SyncState = {
     isItemAfterWatermark: (...args) => SyncStateV2.isItemAfterWatermark(...args),
     takeLeadingItems: (...args) => SyncStateV2.takeLeadingItems(...args),
 
+    // 通用源状态访问（F-UI-31 同步链状态回显依赖，facade 此前缺失导致 renderSyncChainStatus 抛 TypeError）
+    getSourceState: (sourceType) => SyncStateV2.getSourceState(sourceType),
+    updateSourceState: (sourceType, patch) => SyncStateV2.updateSourceState(sourceType, patch),
+    forceFlush: () => SyncStateV2.forceFlush(),
+
     // V1 兼容 API 代理到 V2
     getLinuxDoState: () => SyncStateV2.getSourceState("linuxdo"),
     updateLinuxDoState: (patch) => SyncStateV2.updateSourceState("linuxdo", patch),

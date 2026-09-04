@@ -108,7 +108,7 @@ const UIEvents = {
         refs.closeBtn.onclick = () => {
             ConfirmationDialog.show({
                 title: "关闭面板",
-                message: "关闭后可通过右下角悬浮按钮重新打开。确定关闭吗？",
+                message: "关闭后可通过刷新页面重新打开。确定关闭吗？",
                 confirmText: "关闭",
                 onConfirm: () => UI.destroy(),
             });

@@ -1011,6 +1011,10 @@
         filterItems: (...args) => SyncStateV2.filterItems(...args),
         isItemAfterWatermark: (...args) => SyncStateV2.isItemAfterWatermark(...args),
         takeLeadingItems: (...args) => SyncStateV2.takeLeadingItems(...args),
+        // 通用源状态访问（F-UI-31 同步链状态回显依赖，facade 此前缺失导致 renderSyncChainStatus 抛 TypeError）
+        getSourceState: (sourceType) => SyncStateV2.getSourceState(sourceType),
+        updateSourceState: (sourceType, patch) => SyncStateV2.updateSourceState(sourceType, patch),
+        forceFlush: () => SyncStateV2.forceFlush(),
         // V1 兼容 API 代理到 V2
         getLinuxDoState: () => SyncStateV2.getSourceState("linuxdo"),
         updateLinuxDoState: (patch) => SyncStateV2.updateSourceState("linuxdo", patch),
@@ -23253,7 +23257,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           refs.closeBtn.onclick = () => {
             ConfirmationDialog3.show({
               title: "\u5173\u95ED\u9762\u677F",
-              message: "\u5173\u95ED\u540E\u53EF\u901A\u8FC7\u53F3\u4E0B\u89D2\u60AC\u6D6E\u6309\u94AE\u91CD\u65B0\u6253\u5F00\u3002\u786E\u5B9A\u5173\u95ED\u5417\uFF1F",
+              message: "\u5173\u95ED\u540E\u53EF\u901A\u8FC7\u5237\u65B0\u9875\u9762\u91CD\u65B0\u6253\u5F00\u3002\u786E\u5B9A\u5173\u95ED\u5417\uFF1F",
               confirmText: "\u5173\u95ED",
               onConfirm: () => UI2.destroy()
             });
