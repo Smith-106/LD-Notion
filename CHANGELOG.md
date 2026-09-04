@@ -1,5 +1,45 @@
 # 更新日志
 
+## [3.14.0] - 2026-09-04
+
+### 修复（UI 可控制能力审计 30 项 · 三模型共识 F-UI-01~45 + 同步链状态修复）
+
+本轮对 UI 全部可控制能力做三模型共识审计（deepseek-v4-flash / GLM-5.3-flash / hy3,共 45 项发现 F-UI-01~45），闭环 30 项，含 4 项 P0 功能瘫痪级缺陷；修复后经 browse 实机验证 12 项 PASS。其余 15 项（ARIA/键盘可达/Undo 多槽等 UX 债）列入后续版本。
+
+**P0（4 项,功能瘫痪级）**
+- **F-UI-01** ConfirmationDialog 不支持 onConfirm/confirmText →「重新导出」「删除模板」确认后静默失效 → 补齐回调与按钮文案支持
+- **F-UI-02** 定时轮询只推进增量水位不写 Notion,Linux.do/GitHub 新增项被永久跳过 → SyncScheduler 按源调 AutoImporter.run()
+- **F-UI-03** 自动同步间隔配置失效（UI 写 `*_AUTO_IMPORT_INTERVAL`,调度器读 `SYNC_INTERVAL_*`）→ start 显式传间隔
+- **F-UI-22** 视图页「保存到 Notion」按钮无 loading/重入保护,重复点击创建重复页面 → 禁用态 + 保存中提示
+
+**P1（18 项）**
+- F-UI-04 AgentTrace 调用链 UI 入口 / F-UI-05 各来源独立「立即导入」按钮 / F-UI-06 孤儿 ChatUI 折叠绑定清理
+- F-UI-07 权限指示 + 审计开关入口 / F-UI-08 Obsidian 配置 + 测试连接入口 / F-UI-09 关闭确认对话框
+- F-UI-10 假启用回写修正 / F-UI-11 主题三态 auto 入口 / F-UI-12 6 折叠区 + 日志面板展开持久化
+- F-UI-13 refresh 走 UICommandService 边界 / F-UI-14 已选计数剔除已导出项 / F-UI-15 空状态 CTA 按来源区分
+- F-UI-16 测试连接文案统一 / F-UI-17 诊断信息增强 / F-UI-18 面板尺寸/浮钮位置重置入口
+- F-UI-19 cacheRefs 孤儿引用清理 / F-UI-20 deleteBlock 死能力登记 / F-UI-21 BOOKMARK_IMPORT_FOLDERS 死存储键删除
+
+**P2（8 项）**
+- F-UI-23 主导出按钮禁用提前 / F-UI-31 同步链状态持久化回显 / F-UI-32 收藏 Tab 空状态引导
+- F-UI-33 AI 忙时提示 / F-UI-35 导出目标/授权/权限可见指示 / F-UI-36 书签跳转入口
+- F-UI-38 notion-site 配置统一保存 / F-UI-45 反馈双写
+
+**安全与鉴权（随本批提交）**
+- 一键授权 `normalizeCandidates` 双形状兼容、OperationGuard 权限缺口修复、新增 `target-discovery`/`coordination` 模块
+
+**收尾修复（随本版发布）**
+- SyncState facade 补 `getSourceState`/`updateSourceState`/`forceFlush` 委托,修复同步链状态回显 `renderSyncChainStatus` TypeError（F-UI-31 依赖）及同类委托完整性缺口;新增 facade 契约测试（tests/sync-state-facade.test.js）
+- 关闭面板确认文案改为「关闭后可通过刷新页面重新打开」（原文案承诺的悬浮按钮在 destroy 后不存在）
+
+### 验证
+
+- `npm test`:29 个测试文件 593 用例 + legacy 三件套 252 用例全部通过
+- `npm run verify:delivery`:13 维全链检查 EXIT=0
+- browse 实机验证:12 项 PASS（含 P0 四项、同步链状态回显、反馈双写等）
+
+[3.14.0]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.0
+
 ## [3.13.0] - 2026-09-04
 
 ### 修复（F-01~F-05 五连修复 · 稳定性与数据管理闭环）

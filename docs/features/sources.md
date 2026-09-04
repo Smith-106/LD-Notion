@@ -27,7 +27,7 @@ flowchart LR
 
 | 安装形态 | 书签读取方式 |
 | --- | --- |
-| 脚本版 | 通过 `chrome-extension/` 桥接扩展读取 |
+| 脚本版 | 通过 `chrome-extension-full/` 桥接扩展读取 |
 | 独立扩展版 | 直接使用内置 `chrome.bookmarks` 权限 |
 
 ## 跨源整理策略

@@ -6,7 +6,7 @@ Bookmarks adapter 读取浏览器书签树，把 URL、标题和文件夹路径�
 
 | Rule | Description |
 | --- | --- |
-| 脚本版 | 通过 `chrome-extension/` 桥接扩展读取 `chrome.bookmarks` |
+| 脚本版 | 通过 `chrome-extension-full/` 桥接扩展读取 `chrome.bookmarks` |
 | 独立扩展版 | 直接使用内置 `bookmarks` 权限 |
 | Folder path | 保留书签所在文件夹层级 |
 | Web insight | 可抽取网页标题、摘要和域名信息 |

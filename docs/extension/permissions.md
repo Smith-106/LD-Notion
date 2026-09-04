@@ -17,7 +17,7 @@
 
 当前仓库有两条扩展交付链，权限边界需要分开理解：
 
-- `chrome-extension/manifest.json` 是书签桥接扩展，只声明 `bookmarks` 权限，并在所有 `http/https` 页面注入 content script。
+- `chrome-extension-full/manifest.json` 是书签桥接扩展，只声明 `bookmarks` 权限，并在所有 `http/https` 页面注入 content script。
 - 书签桥接扩展虽然注入范围较宽，但运行时只有在页面上存在活动中的 LD-Notion 根节点时，才会响应书签桥接请求。
 - `scripts/build-extension.js` 生成的 `chrome-extension-full/` 默认使用 `bounded_hosts` profile：跨域网络 `host_permissions` 只覆盖 Linux.do、Notion API、GitHub API、AI provider 与必要的 AWS 资源。
 - 为了保持与 userscript 一致的 GitHub / Zhihu / 通用网页入口，`chrome-extension-full/` 的 `content_scripts.matches` 仍覆盖这些页面，并通过 `exclude_matches` 排除搜索引擎、邮箱与本地开发地址。

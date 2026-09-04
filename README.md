@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.13.0`
+- 当前仓库源码版本：`v3.14.0`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -56,7 +56,7 @@
 ### 3. 浏览器书签导入
 
 通过 Chrome 扩展读取浏览器书签，一键导入 Notion 进行整理。支持两种形态：
-- **脚本版 + 书签桥接扩展（`chrome-extension/`）**
+- **脚本版 + 书签桥接扩展（`chrome-extension-full/`）**
 - **独立扩展版（`chrome-extension-full/`，书签能力内置）**
 
 - **Chrome API 直接读取**：无需手动导出书签文件
@@ -379,12 +379,20 @@ A: 请检查：
 - 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）
 - 构建扩展版：`node scripts/build-extension.js`（输出到 `chrome-extension-full/`）
 - 自动化收敛权限 smoke：`npm run verify:extension:bounded`（写入临时目录并自动清理）；默认 release / README 安装流程仍以默认 profile 为准
-- Bridge 扩展运行时 smoke：`npm run verify:bridge-extension`（验证 `chrome-extension/content-script.js` 只在存在活动 LD-Notion 面板时响应书签桥接请求）
+- Bridge 扩展运行时 smoke：`npm run verify:bridge-extension`（验证 `chrome-extension-full/content.js` 只在存在活动 LD-Notion 面板时响应书签桥接请求）
 - UI 静态校验：`node scripts/validate-userscript-ui.js`（或 `python3 scripts/validate-userscript-ui.py`）
 - UI 手工回归：`docs/ui-regression-checklist.md`
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.0
+
+UI 可控制能力审计 30 项修复（三模型共识 F-UI-01~45 + browse 实机验证 12 项 PASS）：
+- **P0（4 项）** 确认对话框 onConfirm/confirmText 补齐、定时轮询按源调度写 Notion、同步间隔配置失效修复、保存按钮重入保护
+- **P1（18 项）** AgentTrace 入口、立即导入按钮、权限指示+审计开关、Obsidian 测试连接、主题三态、折叠持久化、面板重置等
+- **P2（8 项）** 同步链状态回显（修复 SyncState facade 缺 getSourceState 的 TypeError）、导出目标摘要、AI 忙时提示、反馈双写等
+- **收尾** 关闭面板确认文案修正；facade 委托完整性契约测试
 
 ### v3.13.0
 

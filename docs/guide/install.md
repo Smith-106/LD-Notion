@@ -12,7 +12,7 @@
    - `https://linux.do/u/你的用户名/activity/bookmarks`
    - `https://www.notion.so/`
    - `https://github.com/`
-4. 如需读取浏览器书签，继续安装 `chrome-extension/` 桥接扩展。
+4. 如需读取浏览器书签，继续安装 `chrome-extension-full/` 桥接扩展。
 
 ### 书签桥接扩展
 
@@ -30,7 +30,7 @@ flowchart LR
 1. 打开 `chrome://extensions/`。
 2. 开启「开发者模式」。
 3. 选择「加载已解压的扩展程序」。
-4. 选择项目中的 `chrome-extension/` 目录。
+4. 选择项目中的 `chrome-extension-full/` 目录。
 
 ## 方式 B：独立 Chrome 扩展版
 

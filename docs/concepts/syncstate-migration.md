@@ -44,6 +44,10 @@ SyncState.updateGitHubState(subtype, data) → SyncStateV2.updateSourceState("gi
 
 这样，旧代码无需修改即可自动使用 V2 存储。
 
+### facade 委托完整性（v3.14.0）
+
+facade 必须完整委托 V2 的**全部公共方法**。v3.14.0 曾因缺失 `getSourceState` 委托导致 `renderSyncChainStatus` 抛 `TypeError` → `loadConfig` 中断 → 同步链状态永不回显。修复后 facade 补全 `getSourceState`/`updateSourceState`/`forceFlush` 委托，并新增契约测试（`tests/sync-state-facade.test.js`）枚举 V2 公共方法断言 facade 存在——新增 V2 公共方法时若未同步委托，测试立即失败。
+
 ## 写入优化
 
 ### queueMicrotask 合并

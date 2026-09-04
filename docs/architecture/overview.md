@@ -89,7 +89,7 @@ flowchart TB
 | 模块 | 位置 |
 | --- | --- |
 | 用户脚本主体 | `LinuxDo-Bookmarks-to-Notion.user.js` |
-| 书签桥接扩展 | `chrome-extension/` |
+| 书签桥接扩展 | `chrome-extension-full/`（独立扩展形态,`scripts/build-extension.js` 输出） |
 | 独立扩展构建 | `scripts/build-extension.js` 输出 `chrome-extension-full/` |
 | 协调层（UI 命令分发） | `src/coordination/UICommandService.js` |
 | 事件总线（解耦循环依赖） | `src/coordination/event-bus.js`（零依赖，security/import/bridge → ui 通知） |
