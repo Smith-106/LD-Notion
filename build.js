@@ -79,6 +79,9 @@ async function build() {
         minify: MINIFY,
         legalComments: "inline",
         treeShaking: false,
+        // node 内置模块仅测试环境 fallback 使用(浏览器端 subtle 恒可用, 该分支永不执行),
+        // external 保留 require("crypto") 字面量, 避免打包解析失败。
+        external: ["crypto"],
         logLevel: "info",
     });
 

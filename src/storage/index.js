@@ -41,42 +41,104 @@ const Storage = {
         Storage.setRaw(key, value);
     },
 
+    // ---- 去重单一账本(F1 共识)----
+    // 全部去重记录收敛到 DedupStore 命名空间(ldb_exported_topics:<sourceType>,
+    // 90 天 TTL 自动淘汰)。legacy 键 ldb_exported_topics(无 sourceType 后缀)
+    // 首次访问时一次性迁移合并,此后双轨消除。
+    //
+    // F3 共识:GM storage 跨 tab 共享但模块缓存不共享,tab B 看不到 tab A 的
+    // mark → 可重复导出。注册 GM_addValueChangeListener 监听本键变化时置空缓存。
+    _registerExportedTopicsWatcher: () => {
+        if (Storage._exportedTopicsWatcherBound) return;
+        Storage._exportedTopicsWatcherBound = true;
+        if (typeof GM_addValueChangeListener !== "function") return;
+        try {
+            GM_addValueChangeListener(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, () => {
+                Storage._exportedTopicsCache = null;
+            });
+            // 派生键族(每个 sourceType 一个桶)同样监听,迁移/清除跨 tab 生效
+            for (const sourceType of ["linuxdo", "bookmark", "rss", "github-stars", "github-repos", "github-forks", "github-gists", "zhihu", "generic"]) {
+                GM_addValueChangeListener(
+                    `${CONFIG.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`,
+                    () => { Storage._exportedTopicsCache = null; }
+                );
+            }
+        } catch (e) {
+            // 监听失败不影响功能(仅缓存陈旧风险),静默降级
+        }
+    },
+
+    // 一次性迁移:legacy 键 → DedupStore 命名空间(取 max ts),成功后删除旧键。
+    // 幂等:迁移完成后旧键已删,重复调用无效果。
+    _migrateLegacyExportedTopics: () => {
+        if (Storage._exportedTopicsMigrated) return;
+        Storage._exportedTopicsMigrated = true;
+        try {
+            const raw = Storage.getRaw(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, "{}");
+            let legacy = {};
+            try { legacy = JSON.parse(raw); } catch { /* 损坏即忽略 */ }
+            const legacyKeys = Object.keys(legacy);
+            if (legacyKeys.length === 0) return;
+            const set = DedupStore.getSeen("linuxdo") || {};
+            let changed = false;
+            for (const k of legacyKeys) {
+                const ts = Number(legacy[k]) || 0;
+                if (!Object.prototype.hasOwnProperty.call(set, k) || (set[k] || 0) < ts) {
+                    set[k] = ts;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                DedupStore._saveSet("linuxdo", set);
+            }
+            Storage.remove(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS);
+        } catch (e) {
+            // 迁移失败不阻塞(下次访问重试)
+            Storage._exportedTopicsMigrated = false;
+        }
+    },
+
     getExportedTopics: () => {
+        Storage._registerExportedTopicsWatcher();
+        Storage._migrateLegacyExportedTopics();
         if (Storage._exportedTopicsCache) {
             return Storage._exportedTopicsCache;
         }
-
-        const data = Storage.getRaw(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, "{}");
-        try {
-            Storage._exportedTopicsCache = JSON.parse(data);
-        } catch {
-            Storage._exportedTopicsCache = {};
-        }
+        Storage._exportedTopicsCache = DedupStore.getSeen("linuxdo") || {};
         return Storage._exportedTopicsCache;
     },
 
     markTopicExported: (topicId) => {
+        const key = String(topicId);
         const exported = Storage.getExportedTopics();
-        exported[topicId] = Date.now();
+        exported[key] = Date.now();
         Storage._exportedTopicsCache = exported;
-        Storage.setRaw(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify(exported));
+        // DedupStore 内部维护批量缓存:非 batch 模式直接写回,带 TTL 淘汰
+        DedupStore.markSeen("linuxdo", key);
     },
 
     unmarkTopicExported: (topicId) => {
+        const key = String(topicId);
         const exported = Storage.getExportedTopics();
-        if (!Object.prototype.hasOwnProperty.call(exported, topicId)) {
+        if (!Object.prototype.hasOwnProperty.call(exported, key)) {
             return false;
         }
-
-        delete exported[topicId];
+        delete exported[key];
         Storage._exportedTopicsCache = exported;
-        Storage.setRaw(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify(exported));
+        // 同步到 DedupStore 账本(删除语义,双路径一致)
+        DedupStore.unmarkSeen("linuxdo", key);
         return true;
     },
 
     isTopicExported: (topicId) => {
+        const key = String(topicId);
         const exported = Storage.getExportedTopics();
-        return !!exported[topicId];
+        return Object.prototype.hasOwnProperty.call(exported, key);
+    },
+
+    clearExportedTopics: () => {
+        Storage._exportedTopicsCache = {};
+        DedupStore.clearSeen("linuxdo");
     },
 };
 

@@ -133,3 +133,33 @@ describe("NotionAPI", () => {
         });
     });
 });
+
+describe("NotionAPI request gate(F-SYNC-04)", () => {
+    it("gate 默认 null,行为不变", async () => {
+        expect(NotionAPI._requestGate).toBeNull();
+        const called = { n: 0 };
+        NotionAPI._requestGate = null;
+        NotionAPI.configureTransport({ request: async () => {
+            called.n++;
+            return { status: 200, responseText: JSON.stringify({ id: "x" }), responseHeaders: "" };
+        } });
+        await NotionAPI.request("GET", "/users/me", null, "k");
+        expect(called.n).toBe(1);
+        NotionAPI.resetTransport();
+    });
+
+    it("setRequestGate 后 request 先过 gate", async () => {
+        let gateHits = 0;
+        NotionAPI.setRequestGate(async () => { gateHits++; });
+        NotionAPI.configureTransport({ request: async () => ({ status: 200, responseText: JSON.stringify({ id: "x" }), responseHeaders: "" }) });
+        await NotionAPI.request("GET", "/users/me", null, "k");
+        expect(gateHits).toBe(1);
+        NotionAPI.setRequestGate(null);
+        NotionAPI.resetTransport();
+    });
+
+    it("setRequestGate 拒绝非函数", () => {
+        expect(() => NotionAPI.setRequestGate("x")).toThrow(/函数/);
+        NotionAPI.setRequestGate(null);
+    });
+});

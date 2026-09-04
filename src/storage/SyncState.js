@@ -1,6 +1,7 @@
 "use strict";
 
 const { CONFIG } = require("../config");
+const { emit } = require("../coordination/event-bus");
 
 // 直接使用 GM_* API 打破与 storage/index.js 的循环依赖
 const _getRaw = (key, defaultVal) => GM_getValue(key, defaultVal);
@@ -24,6 +25,9 @@ const SyncStateV2 = {
     _makeSourceDefault(withSnapshot = false) {
         const record = {
             watermark: null,
+            // F-SYNC-02/F-04 反冲保护: epoch 每重置一次 +1,远端仅接受 ≤ 本地+1,
+            // 防旧设备 watermark 覆盖新基线(H-5 epoch 通胀 DoS)。
+            epoch: 0,
             lastSuccessAt: 0,
             lastAttemptAt: 0,
             lastOutcome: "idle",
@@ -81,6 +85,11 @@ const SyncStateV2 = {
         const source = record && typeof record === "object" ? record : {};
         const normalized = {
             watermark: this.normalizeWatermark(source.watermark),
+            // LOW-1 共识: epoch 必须进字段白名单,否则 normalizeSyncRecord 每次
+            // _load/updateSourceState 后丢弃 → F-04 反冲保护静默失效。
+            epoch: Number.isFinite(Number(source.epoch)) && Number(source.epoch) >= 0
+                ? Math.floor(Number(source.epoch))
+                : 0,
             lastSuccessAt: Number.isFinite(Number(source.lastSuccessAt)) ? Number(source.lastSuccessAt) : 0,
             lastAttemptAt: Number.isFinite(Number(source.lastAttemptAt)) ? Number(source.lastAttemptAt) : 0,
             lastOutcome: this.OUTCOMES.includes(source.lastOutcome) ? source.lastOutcome : "idle",
@@ -195,6 +204,9 @@ const SyncStateV2 = {
         if (!this._dirty) return;
         this._dirty = false;
         _setRaw(CONFIG.STORAGE_KEYS.AUTO_SYNC_STATE, JSON.stringify(this._cache));
+        // F-SYNC-11: storage→event-bus 零依赖边(无订阅者时 emit 静默),多端同步引擎
+        // 订阅该事件感知本地状态变更(F1 的 DedupStore emit 在 DedupStore.endBatch 侧)。
+        emit("storage:state-committed", { kind: "watermark" });
     },
 
     /**
@@ -248,13 +260,16 @@ const SyncStateV2 = {
     /**
      * 重置指定源的增量同步基线（F-04：基线不可重置的 UI 缺口）
      * 清空 watermark/lastOutcome 等，使下次同步退化为全量扫描
+     * F-SYNC-02: epoch +1,远端旧 watermark 无法覆盖新基线
      * @param {string} sourceType
      * @returns {Object} 重置后的状态
      */
     resetSourceState(sourceType) {
         const state = this._load();
         const withSnapshot = sourceType === "bookmark" || sourceType === "rss";
+        const previous = state.sources[sourceType] || {};
         state.sources[sourceType] = this._makeSourceDefault(withSnapshot);
+        state.sources[sourceType].epoch = (Number(previous.epoch) || 0) + 1;
         this._save(state);
         return this.getSourceState(sourceType);
     },

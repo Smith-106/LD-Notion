@@ -157,10 +157,15 @@ AutoImporter.run = async () => {
         AutoImporter.updateStatus("📧 正在检查新收藏...");
         const syncState = SyncState.getLinuxDoState();
         const bookmarks = await LinuxDoAPI.fetchBookmarksSince(username, syncState.watermark);
-        const newBookmarks = bookmarks.filter((bookmark) => {
-            const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
-            return !Storage.isTopicExported(topicId);
-        });
+        // F4 共识(模式语义一致): allow_duplicates 时跳过本地去重过滤(watermark 照常推进),
+        // 与手动导入路径的 allow 语义对齐。
+        const dedupStrict = Utils.isLinuxDoDedupStrict();
+        const newBookmarks = dedupStrict
+            ? bookmarks.filter((bookmark) => {
+                const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
+                return !Storage.isTopicExported(topicId);
+            })
+            : bookmarks.slice();
 
         if (newBookmarks.length === 0) {
             const statePatch = {

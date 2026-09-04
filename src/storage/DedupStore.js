@@ -1,6 +1,7 @@
 "use strict";
 
 const { CONFIG } = require("../config");
+const { emit } = require("../coordination/event-bus");
 
 // 去重条目存活时间：90 天。超过此时间的条目在 batch 结束时自动淘汰，
 // 防止 GM storage 中单键 JSON 无界增长导致 sync 延迟线性增加（PERF-001）。
@@ -52,6 +53,8 @@ const DedupStore = {
         if (this._batchCache && this._batchCache.dirty && this._batchSourceType) {
             this._evictExpired(this._batchCache.set);
             this._saveSet(this._batchSourceType, this._batchCache.set);
+            // F-SYNC-11: 去重账本变更事件(零订阅者静默),多端同步引擎据此触发 push。
+            emit("storage:state-committed", { sourceType: this._batchSourceType, kind: "dedup" });
         }
         this._batchCache = null;
         this._batchSourceType = null;
@@ -104,6 +107,26 @@ const DedupStore = {
         const set = this._loadSet(sourceType);
         set[dedupKey] = Date.now();
         this._saveSet(sourceType, set);
+    },
+
+    /**
+     * 清除单个去重键(batch/非 batch 双路径,与 markSeen 对称)
+     * @param {string} sourceType
+     * @param {string} dedupKey
+     */
+    unmarkSeen(sourceType, dedupKey) {
+        if (this._batchCache && this._batchSourceType === sourceType) {
+            if (Object.prototype.hasOwnProperty.call(this._batchCache.set, dedupKey)) {
+                delete this._batchCache.set[dedupKey];
+                this._batchCache.dirty = true;
+            }
+            return;
+        }
+        const set = this._loadSet(sourceType);
+        if (Object.prototype.hasOwnProperty.call(set, dedupKey)) {
+            delete set[dedupKey];
+            this._saveSet(sourceType, set);
+        }
     },
 
     /**

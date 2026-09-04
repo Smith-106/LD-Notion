@@ -148,7 +148,10 @@ const BookmarkAutoImporter = {
         } while (cursor);
         return pages
             .map((page) => BookmarkAutoImporter.extractPageMeta(page))
-            .filter((page) => page.pageId && !page.archived);
+            // F8 共识(归档复活): archived 页必须保留于索引中,
+            // 否则用户在 Notion 归档的页面被当作不存在 → 下一轮自动同步重建页面。
+            // 是否重建由 processBookmark 的 archived 分支决定。
+            .filter((page) => page.pageId);
     },
 
     buildPageIndex: (pages = []) => {
@@ -315,6 +318,8 @@ BookmarkAutoImporter.run = async () => {
 
         // 分批并发处理（每批 3 个，避免 Notion API 速率限制）
         const CONCURRENCY = 3;
+        // F7 共识(watermark 只按成功项推进): 失败项不推进 → 下轮保留重试机会。
+        const successfulIds = new Set();
         const processInBatches = async (items, processor) => {
             for (let i = 0; i < items.length; i += CONCURRENCY) {
                 const batch = items.slice(i, i + CONCURRENCY);
@@ -335,7 +340,24 @@ BookmarkAutoImporter.run = async () => {
                 || (snapshotEntry?.pageId ? pageIndex.byPageId.get(snapshotEntry.pageId) : null);
 
             try {
+                // F8 共识(归档复活): 命中已归档页时跳过重建(用户主动归档 = 删除意图),
+                // 不创建新页、不更新,保留 snapshot 避免下轮再次命中。
+                if (pageMeta?.archived) {
+                    unchanged++;
+                    successfulIds.add(bookmarkId);
+                    nextSnapshot[bookmarkId] = BookmarkAutoImporter.buildSnapshotEntry(bookmark, pageMeta.pageId);
+                    return;
+                }
                 if (!pageMeta) {
+                    // F9 共识(同 URL 并发竞态): 批次内先完成者已回填 byUrl 索引,
+                    // 同 URL 不同 id 的第二书签不再建页(避免 id 乒乓双页),记 unchanged 并共用页面。
+                    const rivalByUrl = bookmark.url ? pageIndex.byUrl.get(bookmark.url) : null;
+                    if (rivalByUrl && rivalByUrl.bookmarkId !== bookmarkId && rivalByUrl.pageId) {
+                        unchanged++;
+                        successfulIds.add(bookmarkId);
+                        nextSnapshot[bookmarkId] = BookmarkAutoImporter.buildSnapshotEntry(bookmark, rivalByUrl.pageId);
+                        return;
+                    }
                     BookmarkAutoImporter.updateStatus(`📄 正在新增书签 (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
                     // createDatabasePage 是 level 1 写操作，自动同步不可裸调 NotionAPI（C1 审计完整性）。
                     // canExecute 非阻塞（只查 permissionLevel，不弹 dialog），权限不足跳过并记审计。
@@ -362,7 +384,11 @@ BookmarkAutoImporter.run = async () => {
                     };
                     BookmarkAutoImporter._auditAutoSync("createDatabasePage", "success",
                         { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, databaseId: settings.databaseId });
+                    // F10 共识(自动不污染手动): 仅新创建页才写入手动导入去重集合;
+                    // updated/unchanged 分支不标记 → 用户清除手动记录后不会被下一轮自动同步重新填满。
+                    BookmarkExporter.markExported(bookmark.url);
                     created++;
+                    successfulIds.add(bookmarkId);
                 } else if (BookmarkAutoImporter.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
                     BookmarkAutoImporter.updateStatus(`📧 正在更新书签 (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
                     // updatePage 是 level 1 写操作，同样过 canExecute 闸门 + 审计（C1）。
@@ -381,8 +407,10 @@ BookmarkAutoImporter.run = async () => {
                     BookmarkAutoImporter._auditAutoSync("updatePage", "success",
                         { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title });
                     updated++;
+                    successfulIds.add(bookmarkId);
                 } else {
                     unchanged++;
+                    successfulIds.add(bookmarkId);
                 }
 
                 const pageId = pageMeta?.pageId || snapshotEntry?.pageId || "";
@@ -397,7 +425,6 @@ BookmarkAutoImporter.run = async () => {
                 if (pageId) pageIndex.byPageId.set(pageId, syncedMeta);
                 pageIndex.byBookmarkId.set(bookmarkId, syncedMeta);
                 if (syncedMeta.url) pageIndex.byUrl.set(syncedMeta.url, syncedMeta);
-                BookmarkExporter.markExported(bookmark.url);
                 nextSnapshot[bookmarkId] = BookmarkAutoImporter.buildSnapshotEntry(bookmark, pageId);
             } catch (error) {
                 console.error(`[LD-Notion] 浏览器书签自动同步失败: ${bookmark.title || bookmark.url}`, error);
@@ -476,7 +503,13 @@ BookmarkAutoImporter.run = async () => {
 
         SyncState.updateBookmarkState({
             snapshot: nextSnapshot,
-            watermark: SyncState.buildWatermark(currentBookmarks, (bookmark) => bookmark.dateAdded, (bookmark) => bookmark.id),
+            // F7 共识: watermark 仅由成功项推进(created/updated/unchanged),
+            // 失败项保留在增量窗口内下轮重试。
+            watermark: SyncState.buildWatermark(
+                currentBookmarks.filter((b) => successfulIds.has(String(b.id))),
+                (bookmark) => bookmark.dateAdded,
+                (bookmark) => bookmark.id
+            ),
             lastAttemptAt: attemptAt,
             lastSuccessAt: (created + updated + archived) > 0
                 ? Date.now()

@@ -360,7 +360,7 @@ const BookmarkExporter = {
                 // SEC-008: AI 返回的 category 必须在用户配置白名单内才采用，否则保留 heuristic
                 // 的 inferredCategory（inferCategoryHeuristic 始终返回白名单项）。防 AI 自由文本
                 // 注入恶意字符串写入 Notion 分类字段（CWE-94）。
-                if (aiCategory && (settings?.categories || []).some(c => String(c) === String(aiCategory))) {
+                if (aiCategory && (settings?.categories || []).some(c => String(c).trim().toLowerCase() === String(aiCategory).trim().toLowerCase())) {
                     inferredCategory = aiCategory;
                 }
                 context.aiUsedCount = (context.aiUsedCount || 0) + 1;
@@ -487,13 +487,53 @@ const BookmarkExporter = {
     },
 
     // 获取已导出的书签集合
+    // F3 共识(缓存失效): 跨 tab GM storage 变更(清除/迁移/其他 tab 导出)
+    // 必须置空内存缓存,否则双 tab 并发误判 → 重复导入。
+    _registerExportedWatcher: () => {
+        if (BookmarkExporter._exportedWatcherBound) return;
+        BookmarkExporter._exportedWatcherBound = true;
+        if (typeof GM_addValueChangeListener !== "function") return;
+        try {
+            GM_addValueChangeListener(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, () => {
+                BookmarkExporter._exportedCache = null;
+            });
+        } catch (e) { /* 监听失败仅缓存陈旧风险 */ }
+    },
+
+    // R9 共识(存量键迁移): 旧键为未规范化 URL,新键规约归一后旧键成孤儿 →
+    // 已导出书签被重新导入。首次加载时重写旧键(同规范键取 max ts),写回并清理。
+    _migrateExportedKeys: () => {
+        if (BookmarkExporter._exportedKeysMigrated) return;
+        BookmarkExporter._exportedKeysMigrated = true;
+        const exported = BookmarkExporter._exportedCache;
+        if (!exported) return;
+        let changed = false;
+        const merged = {};
+        for (const key of Object.keys(exported)) {
+            const norm = Utils.normalizeDedupUrl(key);
+            const ts = Number(exported[key]) || Date.now();
+            if (norm !== key) {
+                changed = true;
+                if (!merged[norm] || (merged[norm] || 0) < ts) merged[norm] = ts;
+            } else {
+                merged[key] = ts;
+            }
+        }
+        if (changed) {
+            BookmarkExporter._exportedCache = merged;
+            BookmarkExporter.flushExported();
+        }
+    },
+
     getExported: () => {
         if (BookmarkExporter._exportedCache) return BookmarkExporter._exportedCache;
+        BookmarkExporter._registerExportedWatcher();
         try { BookmarkExporter._exportedCache = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}")); }
         catch (error) {
             console.warn("[LD-Notion] 已导出书签集合解析失败:", error);
             BookmarkExporter._exportedCache = {};
         }
+        BookmarkExporter._migrateExportedKeys();
         return BookmarkExporter._exportedCache;
     },
 
@@ -501,7 +541,7 @@ const BookmarkExporter = {
     // 单次调用场景须紧跟 flushExported() 持久化，或用 markExportedAndFlush。与 GitHubAPI.markExported 同构。
     markExported: (bookmarkUrl) => {
         const exported = BookmarkExporter.getExported();
-        exported[bookmarkUrl] = Date.now();
+        exported[Utils.normalizeDedupUrl(bookmarkUrl)] = Date.now();
     },
 
     markExportedAndFlush: (bookmarkUrl) => {
@@ -535,7 +575,7 @@ const BookmarkExporter = {
     },
 
     isExported: (bookmarkUrl) => {
-        return !!BookmarkExporter.getExported()[bookmarkUrl];
+        return !!BookmarkExporter.getExported()[Utils.normalizeDedupUrl(bookmarkUrl)];
     },
 
     // 导出书签到 Notion
@@ -589,7 +629,7 @@ const BookmarkExporter = {
                 // 循环内仅 mutate 内存缓存（getExported 返引用），避免逐条 JSON.stringify 写侧 O(N²)（PERF-003）。
                 // 循环末尾 BookmarkExporter.flushExported() 单次回写。
                 BookmarkExporter._exportedCache = BookmarkExporter._exportedCache || {};
-                BookmarkExporter._exportedCache[bm.url] = Date.now();
+                BookmarkExporter._exportedCache[Utils.normalizeDedupUrl(bm.url)] = Date.now();
                 BookmarkExporter._auditExport("createDatabasePage", "success",
                     { pageId: String(page?.id || ""), bookmarkUrl: bm.url, itemName: bm.title, databaseId });
                 success++;

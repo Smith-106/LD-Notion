@@ -130,3 +130,46 @@ describe("OperationGuard", () => {
         });
     });
 });
+
+describe("OperationGuard — 多端同步操作(HIGH-1 共识)", () => {
+    it("sync.state.pull 是只读(L0)", () => {
+        expect(OperationGuard.OPERATION_LEVELS["sync.state.pull"]).toBe(0);
+        OperationGuard.setLevel(0);
+        expect(OperationGuard.canExecute("sync.state.pull")).toBe(true);
+        expect(OperationGuard.canExecute("sync.state.push")).toBe(false);
+    });
+
+    it("sync.state.push 需 L1", () => {
+        expect(OperationGuard.OPERATION_LEVELS["sync.state.push"]).toBe(1);
+        OperationGuard.setLevel(1);
+        expect(OperationGuard.canExecute("sync.state.push")).toBe(true);
+        expect(OperationGuard.canExecute("sync.medium.provision")).toBe(false);
+    });
+
+    it("sync.medium.provision 需 L2, reset 需 L3", () => {
+        expect(OperationGuard.OPERATION_LEVELS["sync.medium.provision"]).toBe(2);
+        expect(OperationGuard.OPERATION_LEVELS["sync.medium.reset"]).toBe(3);
+        OperationGuard.setLevel(2);
+        expect(OperationGuard.canExecute("sync.medium.provision")).toBe(true);
+        expect(OperationGuard.canExecute("sync.medium.reset")).toBe(false);
+        OperationGuard.setLevel(3);
+        expect(OperationGuard.canExecute("sync.medium.reset")).toBe(true);
+    });
+
+    it("sync.medium.reset 登记为危险操作", () => {
+        expect(OperationGuard.isDangerous("sync.medium.reset")).toBe(true);
+    });
+
+    it("AUDIT_EVENT_BY_OPERATION 含四个 sync 映射(HIGH-2)", () => {
+        const { OperationLog } = require("../src/security");
+        expect(OperationLog.AUDIT_EVENT_BY_OPERATION["sync.state.pull"]).toBe("sync.state.pulled");
+        expect(OperationLog.AUDIT_EVENT_BY_OPERATION["sync.state.push"]).toBe("sync.state.pushed");
+        expect(OperationLog.AUDIT_EVENT_BY_OPERATION["sync.medium.provision"]).toBe("sync.medium.provisioned");
+        expect(OperationLog.AUDIT_EVENT_BY_OPERATION["sync.medium.reset"]).toBe("sync.medium.reset");
+    });
+
+    it("inferAuditEvent 不再回退 import.completed", () => {
+        const { OperationLog } = require("../src/security");
+        expect(OperationLog.inferAuditEvent("sync.state.push", "success")).toBe("sync.state.pushed");
+    });
+});

@@ -18,6 +18,9 @@ const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExport
 const { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter } = require("./bridge");
 const { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI, GenericUI } = require("./ui");
 const { UICommandService } = require("./coordination");
+// 多端同步(F-SYNC-11): 编译期 flag 默认 off → require 惰性(打包体积零新增? 否,
+// esbuild 仍会打进去; 但 flag off 时 init 不执行 = 零网络/零定时器/零 DOM)。
+const syncModule = CONFIG.MULTI_DEVICE_SYNC_ENABLED ? require("./sync") : null;
 
 // ===========================================
 // 模块连接 — 注入跨模块依赖
@@ -118,6 +121,32 @@ function main() {
             GenericUI.init();
         } else if (currentSite === SiteDetector.SITES.GENERIC) {
             GenericUI.init();
+        }
+
+        // 多端同步引擎初始化(F-SYNC-11 双重闸: 编译期 flag + 运行期 SyncConfig)
+        if (syncModule && syncModule.SyncConfig && syncModule.SyncConfig.isEnabled()) {
+            const { SyncEngine, SyncConfig: SC, SyncRateLimiter, SyncSerializer, SyncLedger, SyncPayload, SyncCrypto } = syncModule;
+            SyncEngine.init({
+                Storage,
+                SyncStateV2: SyncState,
+                DedupStore: require("./storage/DedupStore").DedupStore,
+                NotionAPI,
+                OperationGuard,
+                OperationLog,
+            });
+            // 共享请求预算(F-SYNC-04): gate 默认 null; 仅同步启用时注入, 导出路径共享 3 req/s 桶
+            NotionAPI.setRequestGate(() => SyncRateLimiter.gateAcquire());
+            Utils.runWhenBrowserIdle(() => SyncEngine.pull({ reason: "idle" }));
+            // 周期 pull(与自动导入节奏错峰, LOW-3: deviceId 哈希取模)
+            const hash = SC.getDeviceId().split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+            const phase = hash % 15; // 0-14 分钟偏移
+            setTimeout(() => {
+                const loop = () => {
+                    SyncEngine.pull({ reason: "periodic" });
+                    setTimeout(loop, 30 * 60 * 1000 + phase * 60000);
+                };
+                loop();
+            }, phase * 60000);
         }
 
         const notice = NotionOAuth.consumeNotice();

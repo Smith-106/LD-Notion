@@ -99,6 +99,7 @@ describe("SyncStateV2 — normalizeSyncRecord", () => {
         const result = SyncStateV2.normalizeSyncRecord(undefined);
         expect(result).toEqual({
             watermark: null,
+            epoch: 0,
             lastSuccessAt: 0,
             lastAttemptAt: 0,
             lastOutcome: "idle",
@@ -476,6 +477,7 @@ describe("SyncStateV2 — _makeSourceDefault", () => {
         const result = SyncStateV2._makeSourceDefault(false);
         expect(result).toEqual({
             watermark: null,
+            epoch: 0,
             lastSuccessAt: 0,
             lastAttemptAt: 0,
             lastOutcome: "idle",
@@ -494,5 +496,40 @@ describe("SyncStateV2 — _makeSourceDefault", () => {
     it("snapshot is empty object, not null", () => {
         const result = SyncStateV2._makeSourceDefault(true);
         expect(result.snapshot).toEqual({});
+    });
+});
+
+describe("SyncStateV2 — epoch 反冲保护 (F-SYNC-02/H-5)", () => {
+    it("normalizeSyncRecord 透传 epoch,不丢弃未知字段", () => {
+        const result = SyncStateV2.normalizeSyncRecord({ watermark: null, epoch: 3, lastOutcome: "success" });
+        expect(result.epoch).toBe(3);
+    });
+
+    it("非数字/负值 epoch 归一为 0", () => {
+        expect(SyncStateV2.normalizeSyncRecord({ epoch: "abc" }).epoch).toBe(0);
+        expect(SyncStateV2.normalizeSyncRecord({ epoch: -5 }).epoch).toBe(0);
+        expect(SyncStateV2.normalizeSyncRecord({ epoch: 2.7 }).epoch).toBe(2);
+    });
+
+    it("resetSourceState epoch+1,旧 watermark 被清空", () => {
+        SyncStateV2.updateSourceState("linuxdo", { watermark: { time: "2024-01-01T00:00:00.000Z", ids: ["1"] } });
+        const before = SyncStateV2.getSourceState("linuxdo");
+        expect(before.epoch).toBe(0);
+        const after = SyncStateV2.resetSourceState("linuxdo");
+        expect(after.epoch).toBe(1);
+        expect(after.watermark).toBeNull();
+        // 再次重置 → 2
+        expect(SyncStateV2.resetSourceState("linuxdo").epoch).toBe(2);
+    });
+
+    it("updateSourceState 后 epoch 保持不变", () => {
+        SyncStateV2.updateSourceState("rss", { epoch: 5, lastOutcome: "success" });
+        SyncStateV2.updateSourceState("rss", { lastSuccessAt: 123 });
+        expect(SyncStateV2.getSourceState("rss").epoch).toBe(5);
+    });
+
+    it("V1 迁移后 epoch 默认为 0", () => {
+        const migrated = SyncStateV2._migrateV1toV2({ linuxdo: { lastOutcome: "success" } });
+        expect(migrated.sources.linuxdo.epoch).toBe(0);
     });
 });

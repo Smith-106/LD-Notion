@@ -425,7 +425,16 @@ const RSSAutoImporter = {
                     settings
                 );
                 if (aiCategory) {
-                    enriched.inferredCategory = aiCategory;
+                    // F13 共识(RSS 白名单校验缺失): 与 BookmarkExporter SEC-008 同款,
+                    // AI 返回的分类必须命中用户配置白名单(大小写归一)才采用,否则保留启发式。
+                    const whitelisted = (settings?.categories || []).some(
+                        (c) => String(c).trim().toLowerCase() === String(aiCategory).trim().toLowerCase()
+                    );
+                    if (whitelisted) {
+                        enriched.inferredCategory = aiCategory;
+                    } else {
+                        console.warn(`[LD-Notion] RSS AI 分类不在白名单，使用启发式 fallback: ${aiCategory}`);
+                    }
                 }
                 context.aiUsedCount = (context.aiUsedCount || 0) + 1;
             } catch (e) {
@@ -523,6 +532,15 @@ const RSSAutoImporter = {
             : {};
 
         let currentItems = syncResult.newItems || [];
+        // F6 配套(RSS 派生缺陷⑤'): SyncCoordinator 增量路径的 newItems 无 itemKey 字段,
+        // 须按当前去重模式补齐,否则成功标记与 snapshot 写"undefined"垃圾键。
+        if (currentItems.length > 0) {
+            const dedupMode = RSSAutoImporter.getDedupMode();
+            currentItems = currentItems.map((item) => ({
+                ...item,
+                itemKey: item.itemKey || RSSAutoImporter.buildItemKey(item, dedupMode),
+            }));
+        }
         let feedCount = RSSAutoImporter.getFeedUrls().length;
         if (currentItems.length === 0) {
             const fallback = await RSSAutoImporter.loadCurrentItems();
@@ -614,6 +632,10 @@ const RSSAutoImporter = {
             if (pageId) index.byPageId.set(pageId, syncedMeta);
             if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
             if (syncedMeta.title) index.byTitle.set(syncedMeta.title, syncedMeta);
+            // F6 共识(标记后置): Notion 写入成功后条目才进去重账本,失败项不落账、下轮重试。
+            if (result.created || result.updated) {
+                SyncCoordinator.markItemSeen("rss", item.itemKey);
+            }
             nextSnapshot[item.itemKey] = RSSAutoImporter.buildSnapshotEntry(item, pageId);
             result.success = true;
             return result;

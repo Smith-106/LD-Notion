@@ -45,6 +45,10 @@ const NotionTransport = Object.freeze({
 const NotionAPI = {
     Transport: NotionTransport,
     _transportAdapter: null,
+    // F-SYNC-04: 共享请求预算 gate(默认 null = 行为与旧版一致)。
+    // 由 SyncEngine 注入 SyncRateLimiter.gateAcquire;多端同步开启时所有
+    // Notion 请求(含导出)共享 3 req/s 令牌桶。
+    _requestGate: null,
 
     configureTransport: (transport) => {
         if (!transport || typeof transport.request !== "function") {
@@ -61,8 +65,24 @@ const NotionAPI = {
 
     getTransport: () => NotionAPI._transportAdapter || NotionAPI.Transport,
 
+    /**
+     * 注入/移除请求 gate(校验必须是函数)
+     * @param {Function|null} gate - async () => void,进入 request 前 await
+     */
+    setRequestGate: (gate) => {
+        if (gate !== null && typeof gate !== "function") {
+            throw new Error("request gate 必须是函数或 null");
+        }
+        NotionAPI._requestGate = gate;
+    },
+
     request: async (method, endpoint, data, apiKey, retries = 3, options = {}) => {
         const notionVersion = options.notionVersion || CONFIG.API.NOTION_VERSION;
+
+        // F-SYNC-04: gate 为 null 时与旧版字节级一致
+        if (NotionAPI._requestGate) {
+            await NotionAPI._requestGate();
+        }
 
         const doRequest = async (attempt, token = NotionOAuth.getAccessToken(apiKey), allowRefresh = true) => {
             const response = await NotionAPI.getTransport().request({

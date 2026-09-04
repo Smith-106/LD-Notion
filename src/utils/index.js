@@ -201,6 +201,29 @@ const Utils = {
             .replace(/"/g, "&quot;");
     },
 
+    // R9 共识(URL 规范化去重键): 同一页面以不同 URL 形态收藏(http/https、尾斜杠、
+    // fragment、tracking 参数)此前各算一条 → 重复导入。规范化后读写对称,
+    // 存量旧键在 BookmarkExporter.getExported 内一次性迁移。
+    normalizeDedupUrl: (url) => {
+        const raw = String(url || "").trim();
+        if (!raw || !/^https?:\/\//i.test(raw)) return raw;
+        try {
+            const parsed = new URL(raw);
+            parsed.hash = "";
+            const trackingParams = [
+                "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+                "ref", "fbclid", "gclid", "mc_cid", "mc_eid", "spm", "from", "share_source",
+            ];
+            for (const p of trackingParams) parsed.searchParams.delete(p);
+            let normalized = parsed.toString();
+            // 去尾部斜杠(根路径 https://a.com/ → https://a.com)
+            normalized = normalized.replace(/\/+$/, "");
+            return normalized;
+        } catch {
+            return raw;
+        }
+    },
+
     // 从 Notion 页面对象提取标题
     getPageTitle: (page, fallback = "无标题") => {
         if (!page?.properties) return fallback;
@@ -241,10 +264,13 @@ const Utils = {
             .map(c => c.trim())
             .filter(Boolean);
         if (!autoDedupEnabled) return categories;
+        // F11 共识(大小写归一): 去重键用小写比较、保留首次出现的原样值,
+        // 与下游白名单小写匹配语义一致(AI/ai/Ai 不再并存)。
         const seen = new Set();
         return categories.filter((item) => {
-            if (seen.has(item)) return false;
-            seen.add(item);
+            const norm = item.toLowerCase();
+            if (seen.has(norm)) return false;
+            seen.add(norm);
             return true;
         });
     },

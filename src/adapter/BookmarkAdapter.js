@@ -42,13 +42,17 @@ const BookmarkAdapter = Object.assign(Object.create(SourceAdapter), {
             url: raw.url || "",
             author: "",
             tags: [],
-            createdAt: raw.dateAdded ? new Date(raw.dateAdded / 1000).toISOString() : "",
+            // F5 共识(R11 实证): Chrome bookmarks API dateAdded 为毫秒,
+            // 旧代码 /1000 把 2025 毫秒压成 1970 年 → 增量过滤恒 false →
+            // SyncCoordinator 首轮后冻结、去重层失效。毫秒直传即可。
+            createdAt: raw.dateAdded ? new Date(raw.dateAdded).toISOString() : "",
             raw,
         };
     },
 
     getDedupKey(item) {
-        return `bookmark:${item.id}`;
+        // F14 共识: 空 id 用 url 兜底, 防 bookmark: 空键碰撞误杀
+        return `bookmark:${item.id || item.url || ""}`;
     },
 
     async _fetchAndFilter(watermark) {

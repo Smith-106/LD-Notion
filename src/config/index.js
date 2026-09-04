@@ -4,6 +4,10 @@
 // 配置常量
 // ===========================================
 const CONFIG = {
+    // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
+    // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
+    MULTI_DEVICE_SYNC_ENABLED: false,
+
     // 存储键
     STORAGE_KEYS: {
         NOTION_API_KEY: "ldb_notion_api_key",
@@ -126,6 +130,16 @@ const CONFIG = {
         THEME_PREFERENCE: "ldb_theme_preference",
         // 面板 Tab 状态
         ACTIVE_TAB: "ldb_active_tab",
+        // 多端同步(F-SYNC-12)
+        SYNC_DEVICE_ID: "ldb_sync_device_id",
+        SYNC_ENABLED: "ldb_sync_enabled",
+        SYNC_MODE: "ldb_sync_mode",
+        SYNC_DATABASE_ID: "ldb_sync_database_id",
+        SYNC_PARENT_PAGE_ID: "ldb_sync_parent_page_id",
+        SYNC_LAST_PUSH_AT: "ldb_sync_last_push_at",
+        SYNC_LAST_PULL_AT: "ldb_sync_last_pull_at",
+        SYNC_LAST_OUTCOME: "ldb_sync_last_outcome",
+        SYNC_PASSPHRASE_SET: "ldb_sync_passphrase_set",
     },
     // 默认值
     DEFAULTS: {
@@ -201,6 +215,10 @@ const CONFIG = {
         obsDir: "Linux.do",
         obsImgMode: "file", // file / base64 / skip
         obsImgDir: "Linux.do/attachments",
+        // 多端同步默认值(F-SYNC-11)
+        syncEnabled: false,
+        syncMode: "personal", // personal / shared
+        syncPassphraseSet: false,
     },
     // 导出目标类型
     EXPORT_TARGET_TYPES: {

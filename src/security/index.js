@@ -86,12 +86,17 @@ const OperationGuard = {
         restorePage: 2,
         createComment: 1,
         agentTask: 2,
+        // 多端同步(F-SYNC-05, HIGH-1 共识: 必须 P0 静态注册,接线在后)
+        "sync.state.pull": 0,      // 只读拉取 payload
+        "sync.state.push": 1,      // 推送本地状态(写介质)
+        "sync.medium.provision": 2, // 创建同步库(复用 createDatabase 语义)
+        "sync.medium.reset": 3,    // 重置远程同步库(跨设备不可逆)
     },
 
     // 危险操作列表（需要额外确认）
     // 注:deleteBlock 已从登记移除(F-UI-20)——NotionAPI.deleteBlock 无任何调用方
     // (AI 工具表无 delete_block,UI 无按钮),保留登记会误导「块级删除可经本工具触发」。
-    DANGEROUS_OPERATIONS: ["deletePage"],
+    DANGEROUS_OPERATIONS: ["deletePage", "sync.medium.reset"],
 
     // 检查是否有权限执行操作
     canExecute: (operation) => {
@@ -309,6 +314,11 @@ const OperationLog = {
         deletePage: "page.archived",
         restorePage: "page.restored",
         undo: "write.property.updated",
+        // 多端同步(HIGH-2/M-3 共识): 无映射则 inferAuditEvent 回退 import.*,语义错位
+        "sync.state.pull": "sync.state.pulled",
+        "sync.state.push": "sync.state.pushed",
+        "sync.medium.provision": "sync.medium.provisioned",
+        "sync.medium.reset": "sync.medium.reset",
     }),
 
     SENSITIVE_KEY_HINTS: Object.freeze([

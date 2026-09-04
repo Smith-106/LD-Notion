@@ -125,9 +125,25 @@ const GitHubAPI = {
         return GitHubAPI._fetchPaginated(url, token, "GitHub Gists");
     },
 
+    // F3 共识(缓存失效): 跨 tab 清除/其他 tab 标记必须置空内存缓存
+    _registerExportedWatcher: () => {
+        if (GitHubAPI._exportedWatcherBound) return;
+        GitHubAPI._exportedWatcherBound = true;
+        if (typeof GM_addValueChangeListener !== "function") return;
+        try {
+            GM_addValueChangeListener(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, () => {
+                GitHubAPI._exportedCache = null;
+            });
+            GM_addValueChangeListener(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, () => {
+                GitHubAPI._exportedGistsCache = null;
+            });
+        } catch (e) { /* 监听失败仅缓存陈旧风险 */ }
+    },
+
     // 获取已导出的 repo 集合
     getExported: () => {
         if (GitHubAPI._exportedCache) return GitHubAPI._exportedCache;
+        GitHubAPI._registerExportedWatcher();
         try { GitHubAPI._exportedCache = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}")); }
         catch { GitHubAPI._exportedCache = {}; }
         return GitHubAPI._exportedCache;
@@ -136,6 +152,7 @@ const GitHubAPI = {
     // 获取已导出的 gist 集合
     getExportedGists: () => {
         if (GitHubAPI._exportedGistsCache) return GitHubAPI._exportedGistsCache;
+        GitHubAPI._registerExportedWatcher();
         try { GitHubAPI._exportedGistsCache = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}")); }
         catch { GitHubAPI._exportedGistsCache = {}; }
         return GitHubAPI._exportedGistsCache;
