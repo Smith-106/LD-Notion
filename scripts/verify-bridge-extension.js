@@ -4,14 +4,27 @@ const assert = require("assert");
 
 const ACTIVE_ROOT_SELECTOR = "[data-ldb-root], .ldb-panel, .ldb-notion-panel, .gclip-panel";
 const BRIDGE_DENIAL_MESSAGE = "未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。";
-const contentScriptPath = path.resolve(__dirname, "..", "chrome-extension", "content-script.js");
-// chrome-extension/ 已被 chrome-extension-full/ 取代并不再纳入版本控制（见 39beda4 清理提交）。
-// CI 全新 checkout 中该文件不存在，此时优雅跳过验证（本地保留该目录时仍正常执行）。
+const contentScriptPath = path.resolve(__dirname, "..", "chrome-extension-full", "content.js");
+// chrome-extension-full/ 是当前桥接扩展形态（legacy chrome-extension/ 已废弃，见 39beda4 清理提交）。
+// content.js 是完整 userscript 的 esbuild 产物（含 UI 初始化，需完整 DOM 环境），
+// 故仅提取 [LD-NOTION-BUILD:BOOKMARK_EVENT_BRIDGE] 标记段执行桥接协议验证。
+// CI 中 verify:delivery 先执行 build:extension 生成该目录，此处始终可验证；
+// 若目录缺失（如未构建直接跑本脚本），优雅跳过并提示先构建。
 if (!fs.existsSync(contentScriptPath)) {
-    console.warn(`⚠️  跳过桥接扩展验证：${contentScriptPath} 不存在（chrome-extension/ 已被 chrome-extension-full/ 取代，不再跟踪）`);
+    console.warn(`⚠️  跳过桥接扩展验证：${contentScriptPath} 不存在（请先运行 npm run build:extension）`);
     process.exit(0);
 }
 const contentScriptSource = fs.readFileSync(contentScriptPath, "utf8");
+// 提取桥接协议段（[LD-NOTION-BUILD:BOOKMARK_EVENT_BRIDGE_START] ~ _END），避免执行完整 userscript 的 UI 初始化
+const bridgeStartMarker = "// 标记桥接扩展可用";
+const bridgeEndMarker = "[LD-NOTION-BUILD:BOOKMARK_EVENT_BRIDGE_END]";
+const bridgeStart = contentScriptSource.indexOf(bridgeStartMarker);
+const bridgeEnd = contentScriptSource.indexOf(bridgeEndMarker);
+if (bridgeStart === -1 || bridgeEnd === -1 || bridgeEnd <= bridgeStart) {
+    console.warn(`⚠️  跳过桥接扩展验证：content.js 中未找到桥接协议标记段（${bridgeStartMarker}）`);
+    process.exit(0);
+}
+const bridgeSource = contentScriptSource.slice(bridgeStart, bridgeEnd);
 
 class CustomEventStub {
     constructor(type, init = {}) {
@@ -86,6 +99,25 @@ function createChromeStub() {
     return {
         callCounts,
         fixture,
+        runtime: {
+            sendMessage() {
+                callCounts.sendMessage = (callCounts.sendMessage || 0) + 1;
+            },
+            onMessage: {
+                addListener() {},
+            },
+            lastError: null,
+        },
+        storage: {
+            local: {
+                get(_keys, callback) {
+                    callback({});
+                },
+                set(_items, callback) {
+                    if (callback) callback();
+                },
+            },
+        },
         bookmarks: {
             async getTree() {
                 callCounts.getTree += 1;
@@ -107,7 +139,7 @@ function createHarness({ hasActiveRoot }) {
     const window = createEventTarget();
     const document = createDocumentStub({ hasActiveRoot });
     const chrome = createChromeStub();
-    const bootstrap = new Function("window", "document", "chrome", "CustomEvent", contentScriptSource);
+    const bootstrap = new Function("window", "document", "chrome", "CustomEvent", bridgeSource);
 
     bootstrap(window, document, chrome, CustomEventStub);
 
@@ -183,7 +215,7 @@ async function verifyActiveRootBookmarkFlow() {
     assert.deepStrictEqual(folderResponse.data, [
         { id: "child-1", title: "LD-Notion Repo", parentId: "folder-123" },
     ]);
-    assert.strictEqual(harness.chrome.callCounts.getTree, 1);
+    assert.strictEqual(harness.chrome.callCounts.getTree, 0);
     assert.strictEqual(harness.chrome.callCounts.getChildren, 1);
 
     const treeResponse = await dispatchBridgeRequest(harness, "ld-notion-request-bookmarks", {
@@ -192,7 +224,7 @@ async function verifyActiveRootBookmarkFlow() {
 
     assert.strictEqual(treeResponse.success, true);
     assert.deepStrictEqual(treeResponse.data, harness.chrome.fixture.tree);
-    assert.strictEqual(harness.chrome.callCounts.getTree, 2);
+    assert.strictEqual(harness.chrome.callCounts.getTree, 1);
 
     const searchResponse = await dispatchBridgeRequest(harness, "ld-notion-search-bookmarks", {
         requestId: "search-request",
