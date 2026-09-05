@@ -89,7 +89,9 @@ const Storage = {
                 }
             }
             if (changed) {
-                DedupStore._saveSet("linuxdo", set);
+                // 迁移是数据搬运而非新写入: 绕过 _saveSet 的 TTL 淘汰,
+                // 完整保留 legacy 数据(取 max 合并), 后续正常写回再自然淘汰。
+                GM_setValue(DedupStore._keyFor("linuxdo"), JSON.stringify(set));
             }
             Storage.remove(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS);
         } catch (e) {

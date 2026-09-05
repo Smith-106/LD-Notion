@@ -197,6 +197,9 @@ const SyncEngine = {
      */
     async pull({ reason = "manual" } = {}) {
         if (SyncEngine._running) return { ok: false, outcome: "busy" };
+        // 全盘审计修复(find 6): 运行期禁用后仍拉取并 applyRemote(写去重/watermark/settings),
+        // 违反用户禁用意图; 此处纵深防御(周期 loop 侧已停, 手动/防抖侧兜底)
+        if (!SyncConfig.isEnabled()) return { ok: false, outcome: "disabled" };
         const { OperationGuard, OperationLog, NotionAPI, SyncStateV2, DedupStore } = SyncEngine._getDeps();
         // pull 是只读(L0), canExecute 非阻塞; denied 仍审计(M-4 force)
         if (!OperationGuard.canExecute("sync.state.pull")) {
@@ -280,10 +283,8 @@ const SyncEngine = {
         const Dedup = DedupStore || deps.DedupStore;
 
         // ① dedup 胜出项 → 写回对应源集合(取 max, 保留本地已有)
-        const changedSources = new Set();
         for (const entry of winners.dedupEntries || []) {
             Dedup.markSeen(entry.source, entry.key);
-            changedSources.add(entry.source);
         }
 
         // ② watermark 胜出项(epoch 校验在 validateRemote 已做; 应用时再防一次)
@@ -304,7 +305,9 @@ const SyncEngine = {
         for (const { key, entry } of winners.settingsWinners || []) {
             const def = SyncSerializer.WHITELIST.settings[key];
             if (!def) continue;
-            if (def.confirmLevel && !OperationGuard.canExecute("updatePage")) {
+            // 全盘审计修复(find 9): 此前闸门用 canExecute("updatePage")(level 1), 与
+            // confirmLevel=2 声明不符 → 标准权限设备可被远端改写数据库配置。现按声明级别校验。
+            if (def.confirmLevel && OperationGuard.getLevel() < def.confirmLevel) {
                 continue; // 权限不足不应用高价值键(记审计由调用方)
             }
             const coerce = SyncSerializer._coerceSetting(entry.value, def.kind);
@@ -312,12 +315,8 @@ const SyncEngine = {
             Storage.set(key, coerce);
         }
 
-        // TTL 对称(读侧+写侧): 应用后跑一次淘汰
-        for (const src of changedSources) {
-            const set = Dedup.getSeen(src);
-            Dedup._evictExpired?.(set);
-            // 非 batch 模式已写回; batch 场景由 endBatch 兜底
-        }
+        // TTL 淘汰已由 DedupStore._saveSet 统一落盘(单点/批末双路径, 全盘审计修复:
+        // 此前此处只改内存副本不写回 → 90 天记录永存 + 旧 ts 随 push 出介质致对端校验拒绝)
 
         return {
             dedupEntries: (winners.dedupEntries || []).length,

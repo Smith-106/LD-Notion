@@ -284,8 +284,8 @@ BookmarkAutoImporter.run = async () => {
         });
         BookmarkAutoImporter.updateStatus("📧 正在同步浏览器书签...");
 
-        // 使用 SyncCoordinator 获取增量同步概要 (统一状态管理)
-        const syncResult = await SyncCoordinator.sync("bookmark");
+        // 使用 SyncCoordinator 获取增量同步概要 (统一状态管理; F7: watermark 由本函数按成功项提交)
+        const syncResult = await SyncCoordinator.sync("bookmark", { commitWatermark: false });
         if (syncResult.error) {
             throw new Error(syncResult.error);
         }
@@ -387,6 +387,9 @@ BookmarkAutoImporter.run = async () => {
                     // F10 共识(自动不污染手动): 仅新创建页才写入手动导入去重集合;
                     // updated/unchanged 分支不标记 → 用户清除手动记录后不会被下一轮自动同步重新填满。
                     BookmarkExporter.markExported(bookmark.url);
+                    // F6 落账补全(全盘审计 find 8): SyncCoordinator 过滤层查 DedupStore("bookmark")——
+                    // 此前 bookmarks 从不在此落账 → 过滤层恒空、每轮全量拉取。此处与手动集合解耦, 不污染手动语义。
+                    SyncCoordinator.markItemSeen("bookmark", `bookmark:${bookmarkId}`);
                     created++;
                     successfulIds.add(bookmarkId);
                 } else if (BookmarkAutoImporter.needsUpdate(bookmark, snapshotEntry, pageMeta)) {

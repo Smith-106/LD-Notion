@@ -292,15 +292,15 @@ handleCompound: async (intentResult, settings) => {
             const normalizedStepResult = AI()._normalizeExecutionResult(stepResult);
 
             if (AI()._isErrorResult(normalizedStepResult)) {
-                results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
+                results.push({ stepIndex: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
                 aborted = true;
                 break;
             }
 
-            results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
+            results.push({ stepIndex: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
         } catch (error) {
             results.push({
-                index: i + 1,
+                stepIndex: i + 1,
                 explanation: step.explanation,
                 success: false,
                 result: AI()._normalizeExecutionResult(`❌ ${error.message}`, { status: "error", name: step.intent })
@@ -313,7 +313,7 @@ handleCompound: async (intentResult, settings) => {
     // 汇总报告
     let report = `🔗 **组合指令执行${aborted ? "中断" : "完成"}**\n\n`;
     for (const r of results) {
-        report += `${r.success ? "✅" : "❌"} 步骤 ${r.index}: ${r.explanation}\n`;
+        report += `${r.success ? "✅" : "❌"} 步骤 ${r.stepIndex}: ${r.explanation}\n`;
     }
 
     if (aborted) {
@@ -329,7 +329,7 @@ handleCompound: async (intentResult, settings) => {
     // 附加各步骤详细结果
     report += `\n---\n`;
     for (const r of results) {
-        report += `\n**步骤 ${r.index}**: ${r.explanation}\n${AI()._resultToText(r.result)}\n`;
+        report += `\n**步骤 ${r.stepIndex}**: ${r.explanation}\n${AI()._resultToText(r.result)}\n`;
     }
 
     return report;

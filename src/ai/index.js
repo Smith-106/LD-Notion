@@ -73,8 +73,8 @@ const AIService = {
 可选分类：${categories.join(", ")}
 
 <user_content>
-<title>${title}</title>
-<body>${content.slice(0, 2000)}</body>
+<title>${String(title).replace(/<\/user_content>/gi, "&lt;$&gt;")}</title>
+<body>${String(content).slice(0, 2000).replace(/<\/user_content>/gi, "&lt;$&gt;")}</body>
 </user_content>
 
 分类：`;
@@ -1725,7 +1725,7 @@ compound 格式（仅当 intent 为 compound 时使用）：
 
         try {
             const response = await AIService.requestChat(
-                `${systemPrompt}\n\n<user_input>\n${userMessage}\n</user_input>`,
+                `${systemPrompt}\n\n<user_input>\n${String(userMessage).replace(/<\/user_input>/gi, "&lt;$&gt;")}\n</user_input>`,
                 settings,
                 800
             );

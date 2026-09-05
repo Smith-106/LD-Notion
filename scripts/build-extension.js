@@ -79,7 +79,13 @@ const MANIFEST_PROFILE_PRESETS = Object.freeze({
             "https://api.openai.com/*",
             "https://api.anthropic.com/*",
             "https://generativelanguage.googleapis.com/*",
-            "https://api.github.com/*"
+            "https://api.github.com/*",
+            // Obsidian Local REST API(全盘审计修复): background 白名单允许 localhost/127.0.0.1
+            // 但 manifest 缺 host_permissions → MV3 SW fetch 无授权, Obsidian 导出失败
+            "http://127.0.0.1/*",
+            "https://127.0.0.1/*",
+            "http://localhost/*",
+            "https://localhost/*",
         ]),
     }),
     bounded_hosts: Object.freeze({
@@ -91,7 +97,11 @@ const MANIFEST_PROFILE_PRESETS = Object.freeze({
             "https://api.openai.com/*",
             "https://api.anthropic.com/*",
             "https://generativelanguage.googleapis.com/*",
-            "https://api.github.com/*"
+            "https://api.github.com/*",
+            "http://127.0.0.1/*",
+            "https://127.0.0.1/*",
+            "http://localhost/*",
+            "https://localhost/*",
         ]),
     }),
 });
@@ -728,12 +738,22 @@ function buildManifest({ version, profile } = {}) {
     };
 }
 
-function buildGmShim() {
+function buildGmShim(scriptVersion = "") {
     return `${GENERATED_SECTION_MARKERS.gmShimStart}
 /**
  * GM_* API 垫片 — 将 Tampermonkey API 映射到 Chrome Extension API
  * 由 build-extension.js 自动生成
  */
+
+// GM_info 垫片(全盘审计修复): UpdateChecker.getCurrentVersion 依赖 GM_info.script.version,
+// 此前缺失 → 扩展形态每次更新检查都误报"发现新版本(当前 3.4.5)"
+const GM_info = {
+    script: {
+        version: ${JSON.stringify(scriptVersion || "0.0.0")},
+        scriptHandler: "chrome-extension",
+    },
+    platform: { name: "chrome" },
+};
 
 // Storage 垫片 — 同步封装异步 chrome.storage.local
 // 因为原脚本使用同步 GM_getValue/GM_setValue，
@@ -982,7 +1002,7 @@ function buildExtension({ src, outDir, source, manifestProfile } = {}) {
         fs.mkdirSync(paths.outDir, { recursive: true });
     }
 
-    const gmShim = buildGmShim();
+    const gmShim = buildGmShim(extractUserscriptVersion(resolvedSource));
     const contentScript = buildContentScript({ gmShim, patchedBody });
 
     const backgroundJs = buildBackgroundScript();

@@ -31,7 +31,9 @@ const SyncConfig = {
     },
 
     isEnabled() {
-        return GM_getValue(CONFIG.STORAGE_KEYS.SYNC_ENABLED, CONFIG.DEFAULTS.syncEnabled) === true;
+        // 兼容字符串 "true"(旧版/手动编辑存储), 全盘审计 find 22
+        const raw = GM_getValue(CONFIG.STORAGE_KEYS.SYNC_ENABLED, CONFIG.DEFAULTS.syncEnabled);
+        return raw === true || raw === "true";
     },
 
     setEnabled(v) {

@@ -145,6 +145,8 @@ function main() {
             const phase = hash % 15; // 0-14 分钟偏移
             setTimeout(() => {
                 const loop = () => {
+                    // 全盘审计修复(find 6): 禁用后停止周期 pull(不再拉取/应用远端状态)
+                    if (!SC.isEnabled()) return;
                     SyncEngine.pull({ reason: "periodic" });
                     setTimeout(loop, 30 * 60 * 1000 + phase * 60000);
                 };

@@ -2,6 +2,7 @@
 
 const { CONFIG } = require("../config");
 const { Storage } = require("../storage");
+const { sha256HexSync } = require("./sha256");
 
 // ===========================================
 // 工具函数
@@ -73,12 +74,11 @@ const Utils = {
 
     // 非可逆的 API Key 指纹：仅供缓存失效比较（apiKeyHash 持久化到 GM 存储，
     // 不可用 slice(-8) 等明文子串——会泄露密钥材料，CWE-312）。
-    // 32 位哈希 + base36 已足够做相等性比较，且无法逆推原 key。
+    // 升级为 SHA-256 前 16 位 hex(安全审计 hy3 LOW: djb2 32 位可枚举碰撞;
+    // SHA-256 与浏览器/Node 互通, 且保持相等性比较语义不变)。
     apiKeyHash: (apiKey) => {
         if (!apiKey) return "";
-        let h = 0;
-        for (const c of String(apiKey)) h = ((h << 5) - h + c.charCodeAt(0)) | 0;
-        return Math.abs(h).toString(36);
+        return sha256HexSync(apiKey).slice(0, 16);
     },
 
     extractQuotedText: (value) => {
@@ -243,6 +243,9 @@ const Utils = {
         }
         return fallback;
     },
+
+    // 同步 SHA-256 hex(实现见 ./sha256, 零依赖; 与 SyncCrypto.sha256Hex 互通, 去重键跨设备哈希用)
+    sha256HexSync,
 
     getLinuxDoImportDedupMode: () => {
         const mode = Storage.get(CONFIG.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE, CONFIG.DEFAULTS.linuxdoImportDedupMode);

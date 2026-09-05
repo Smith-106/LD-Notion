@@ -901,53 +901,240 @@
     }
   });
 
+  // src/utils/sha256.js
+  var require_sha256 = __commonJS({
+    "src/utils/sha256.js"(exports, module) {
+      "use strict";
+      var SHA256_K = new Uint32Array([
+        1116352408,
+        1899447441,
+        3049323471,
+        3921009573,
+        961987163,
+        1508970993,
+        2453635748,
+        2870763221,
+        3624381080,
+        310598401,
+        607225278,
+        1426881987,
+        1925078388,
+        2162078206,
+        2614888103,
+        3248222580,
+        3835390401,
+        4022224774,
+        264347078,
+        604807628,
+        770255983,
+        1249150122,
+        1555081692,
+        1996064986,
+        2554220882,
+        2821834349,
+        2952996808,
+        3210313671,
+        3336571891,
+        3584528711,
+        113926993,
+        338241895,
+        666307205,
+        773529912,
+        1294757372,
+        1396182291,
+        1695183700,
+        1986661051,
+        2177026350,
+        2456956037,
+        2730485921,
+        2820302411,
+        3259730800,
+        3345764771,
+        3516065817,
+        3600352804,
+        4094571909,
+        275423344,
+        430227734,
+        506948616,
+        659060556,
+        883997877,
+        958139571,
+        1322822218,
+        1537002063,
+        1747873779,
+        1955562222,
+        2024104815,
+        2227730452,
+        2361852424,
+        2428436474,
+        2756734187,
+        3204031479,
+        3329325298
+      ]);
+      function _utf8Bytes(str) {
+        const out = [];
+        for (let i = 0; i < str.length; i++) {
+          let code = str.charCodeAt(i);
+          if (code < 128) {
+            out.push(code);
+          } else if (code < 2048) {
+            out.push(192 | code >> 6, 128 | code & 63);
+          } else if (code >= 55296 && code <= 56319 && i + 1 < str.length) {
+            const low = str.charCodeAt(i + 1);
+            if (low >= 56320 && low <= 57343) {
+              code = 65536 + (code - 55296 << 10) + (low - 56320);
+              out.push(240 | code >> 18, 128 | code >> 12 & 63, 128 | code >> 6 & 63, 128 | code & 63);
+              i++;
+            } else {
+              out.push(224 | code >> 12, 128 | code >> 6 & 63, 128 | code & 63);
+            }
+          } else if (code >= 65536) {
+            out.push(240 | code >> 18, 128 | code >> 12 & 63, 128 | code >> 6 & 63, 128 | code & 63);
+          } else {
+            out.push(224 | code >> 12, 128 | code >> 6 & 63, 128 | code & 63);
+          }
+        }
+        return out;
+      }
+      function _sha256Rounds(blockBytes, state) {
+        const w = new Uint32Array(64);
+        for (let i = 0; i < 16; i++) {
+          w[i] = blockBytes[i * 4] << 24 | blockBytes[i * 4 + 1] << 16 | blockBytes[i * 4 + 2] << 8 | blockBytes[i * 4 + 3];
+        }
+        for (let i = 16; i < 64; i++) {
+          const s0 = (w[i - 15] >>> 7 | w[i - 15] << 25) ^ (w[i - 15] >>> 18 | w[i - 15] << 14) ^ w[i - 15] >>> 3;
+          const s1 = (w[i - 2] >>> 17 | w[i - 2] << 15) ^ (w[i - 2] >>> 19 | w[i - 2] << 13) ^ w[i - 2] >>> 10;
+          w[i] = w[i - 16] + s0 + w[i - 7] + s1 | 0;
+        }
+        let a, b, c, d, e, f, g, h, a0, b0, c0, d0, e0, f0, g0, h0;
+        if (state) {
+          [a0, b0, c0, d0, e0, f0, g0, h0] = state;
+        } else {
+          a0 = 1779033703;
+          b0 = 3144134277;
+          c0 = 1013904242;
+          d0 = 2773480762;
+          e0 = 1359893119;
+          f0 = 2600822924;
+          g0 = 528734635;
+          h0 = 1541459225;
+        }
+        a = a0;
+        b = b0;
+        c = c0;
+        d = d0;
+        e = e0;
+        f = f0;
+        g = g0;
+        h = h0;
+        for (let i = 0; i < 64; i++) {
+          const S1 = (e >>> 6 | e << 26) ^ (e >>> 11 | e << 21) ^ (e >>> 25 | e << 7);
+          const ch = e & f ^ ~e & g;
+          const temp1 = h + S1 + ch + SHA256_K[i] + w[i] | 0;
+          const S0 = (a >>> 2 | a << 30) ^ (a >>> 13 | a << 19) ^ (a >>> 22 | a << 10);
+          const maj = a & b ^ a & c ^ b & c;
+          const temp2 = S0 + maj | 0;
+          h = g;
+          g = f;
+          f = e;
+          e = d + temp1 | 0;
+          d = c;
+          c = b;
+          b = a;
+          a = temp1 + temp2 | 0;
+        }
+        return [a + a0 | 0, b + b0 | 0, c + c0 | 0, d + d0 | 0, e + e0 | 0, f + f0 | 0, g + g0 | 0, h + h0 | 0];
+      }
+      function sha256HexSync(str) {
+        const bytes = _utf8Bytes(String(str ?? ""));
+        const bitLen = bytes.length * 8;
+        const padded = bytes.slice();
+        padded.push(128);
+        while (padded.length % 64 !== 56) padded.push(0);
+        padded.push(0, 0, 0, 0, bitLen >>> 24 & 255, bitLen >>> 16 & 255, bitLen >>> 8 & 255, bitLen & 255);
+        let state = null;
+        for (let off = 0; off < padded.length; off += 64) {
+          state = _sha256Rounds(padded.slice(off, off + 64), state);
+        }
+        const hex = (n) => (n >>> 0).toString(16).padStart(8, "0");
+        return state.map(hex).join("");
+      }
+      module.exports = { sha256HexSync };
+    }
+  });
+
   // src/storage/DedupStore.js
   var require_DedupStore = __commonJS({
     "src/storage/DedupStore.js"(exports, module) {
       "use strict";
       var { CONFIG: CONFIG2 } = require_config();
+      var { sha256HexSync } = require_sha256();
       var { emit } = require_event_bus();
       var DEDUP_TTL_MS = 90 * 24 * 60 * 60 * 1e3;
+      var URL_KEYED_SOURCES = Object.freeze(["bookmark", "rss", "zhihu", "generic"]);
+      var HASH_PREFIX = "h:";
       var DedupStore = {
         DEDUP_TTL_MS,
+        URL_KEYED_SOURCES,
         _keyFor(sourceType) {
           return `${CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`;
+        },
+        /**
+         * 哈希化判定: urlKeyed 源且键非 h: 前缀 → 返回哈希变体键; 其余原样返回。
+         * (h: 前缀键来自同步 pull 应用, 防二次哈希)
+         */
+        _hashKeyFor(sourceType, dedupKey) {
+          if (!URL_KEYED_SOURCES.includes(sourceType)) return dedupKey;
+          if (String(dedupKey).startsWith(HASH_PREFIX)) return dedupKey;
+          return HASH_PREFIX + sha256HexSync(dedupKey);
         },
         _loadSet(sourceType) {
           const raw = GM_getValue(this._keyFor(sourceType), "{}");
           try {
-            return JSON.parse(raw);
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
           } catch {
             return {};
           }
         },
         _saveSet(sourceType, set) {
+          this._evictExpired(set);
           GM_setValue(this._keyFor(sourceType), JSON.stringify(set));
         },
-        // --- batch 模式: 减少 IPC 调用 ---
-        _batchCache: null,
+        // --- batch 模式: 减少 IPC 调用(全盘审计 find 7: 单槽 → 按 sourceType 分槽,
+        // 多导入器并发时 A 的缓存被 B 覆盖丢失, 现每源独立缓存) ---
+        _batchCaches: {},
         // sourceType → { set, dirty }
-        _batchSourceType: null,
         /**
          * 开始批量模式 (SyncCoordinator 在 sync 循环前后调用)
          * @param {string} sourceType
          */
         beginBatch(sourceType) {
-          this._batchSourceType = sourceType;
-          this._batchCache = { set: this._loadSet(sourceType), dirty: false };
+          this._batchCaches[sourceType] = { set: this._loadSet(sourceType), dirty: false };
         },
         /**
          * 结束批量模式，如有变更则一次写回。
          * 写回前自动淘汰超过 TTL 的过期条目（PERF-001）。
+         * @param {string} [sourceType] 指定源; 省略时 flush 全部缓存
          */
-        endBatch() {
-          if (this._batchCache && this._batchCache.dirty && this._batchSourceType) {
-            this._evictExpired(this._batchCache.set);
-            this._saveSet(this._batchSourceType, this._batchCache.set);
-            emit("storage:state-committed", { sourceType: this._batchSourceType, kind: "dedup" });
+        endBatch(sourceType) {
+          const targets = sourceType ? [sourceType] : Object.keys(this._batchCaches);
+          for (const src of targets) {
+            const cache = this._batchCaches[src];
+            if (cache && cache.dirty) {
+              this._evictExpired(cache.set);
+              this._saveSet(src, cache.set);
+              emit("storage:state-committed", { sourceType: src, kind: "dedup" });
+            }
           }
-          this._batchCache = null;
-          this._batchSourceType = null;
+          if (sourceType) {
+            delete this._batchCaches[sourceType];
+          } else {
+            this._batchCaches = {};
+          }
+        },
+        _batchGet(sourceType) {
+          return this._batchCaches[sourceType] || null;
         },
         /**
          * 淘汰超过 TTL 的过期条目（就地修改）
@@ -972,45 +1159,67 @@
          * @returns {boolean}
          */
         isDuplicate(sourceType, dedupKey) {
-          if (this._batchCache && this._batchSourceType === sourceType) {
-            return Object.prototype.hasOwnProperty.call(this._batchCache.set, dedupKey);
+          const batch = this._batchGet(sourceType);
+          if (batch) {
+            const set2 = batch.set;
+            if (Object.prototype.hasOwnProperty.call(set2, dedupKey)) return true;
+            const hashed2 = this._hashKeyFor(sourceType, dedupKey);
+            return hashed2 !== dedupKey && Object.prototype.hasOwnProperty.call(set2, hashed2);
           }
           const set = this._loadSet(sourceType);
-          return Object.prototype.hasOwnProperty.call(set, dedupKey);
+          if (Object.prototype.hasOwnProperty.call(set, dedupKey)) return true;
+          const hashed = this._hashKeyFor(sourceType, dedupKey);
+          return hashed !== dedupKey && Object.prototype.hasOwnProperty.call(set, hashed);
         },
         /**
-         * 标记条目为已见
+         * 标记条目为已见(urlKeyed 源双写哈希键, 与同步 payload 键空间一致)
          * @param {string} sourceType
          * @param {string} dedupKey
          */
         markSeen(sourceType, dedupKey) {
-          if (this._batchCache && this._batchSourceType === sourceType) {
-            this._batchCache.set[dedupKey] = Date.now();
-            this._batchCache.dirty = true;
+          const hashed = this._hashKeyFor(sourceType, dedupKey);
+          const batch = this._batchGet(sourceType);
+          if (batch) {
+            batch.set[dedupKey] = Date.now();
+            if (hashed !== dedupKey) batch.set[hashed] = Date.now();
+            batch.dirty = true;
             return;
           }
           const set = this._loadSet(sourceType);
           set[dedupKey] = Date.now();
+          if (hashed !== dedupKey) set[hashed] = Date.now();
           this._saveSet(sourceType, set);
         },
         /**
-         * 清除单个去重键(batch/非 batch 双路径,与 markSeen 对称)
+         * 清除单个去重键(batch/非 batch 双路径,与 markSeen 对称; urlKeyed 源双删哈希键)
          * @param {string} sourceType
          * @param {string} dedupKey
          */
         unmarkSeen(sourceType, dedupKey) {
-          if (this._batchCache && this._batchSourceType === sourceType) {
-            if (Object.prototype.hasOwnProperty.call(this._batchCache.set, dedupKey)) {
-              delete this._batchCache.set[dedupKey];
-              this._batchCache.dirty = true;
+          const hashed = this._hashKeyFor(sourceType, dedupKey);
+          const batch = this._batchGet(sourceType);
+          if (batch) {
+            if (Object.prototype.hasOwnProperty.call(batch.set, dedupKey)) {
+              delete batch.set[dedupKey];
+              batch.dirty = true;
+            }
+            if (hashed !== dedupKey && Object.prototype.hasOwnProperty.call(batch.set, hashed)) {
+              delete batch.set[hashed];
+              batch.dirty = true;
             }
             return;
           }
           const set = this._loadSet(sourceType);
+          let changed = false;
           if (Object.prototype.hasOwnProperty.call(set, dedupKey)) {
             delete set[dedupKey];
-            this._saveSet(sourceType, set);
+            changed = true;
           }
+          if (hashed !== dedupKey && Object.prototype.hasOwnProperty.call(set, hashed)) {
+            delete set[hashed];
+            changed = true;
+          }
+          if (changed) this._saveSet(sourceType, set);
         },
         /**
          * 获取源的完整去重集合
@@ -1018,8 +1227,9 @@
          * @returns {Object}
          */
         getSeen(sourceType) {
-          if (this._batchCache && this._batchSourceType === sourceType) {
-            return this._batchCache.set;
+          const batch = this._batchGet(sourceType);
+          if (batch) {
+            return batch.set;
           }
           return this._loadSet(sourceType);
         },
@@ -1028,9 +1238,10 @@
          * @param {string} sourceType
          */
         clearSeen(sourceType) {
-          if (this._batchCache && this._batchSourceType === sourceType) {
-            this._batchCache.set = {};
-            this._batchCache.dirty = true;
+          const batch = this._batchGet(sourceType);
+          if (batch) {
+            batch.set = {};
+            batch.dirty = true;
             return;
           }
           GM_deleteValue(this._keyFor(sourceType));
@@ -1124,7 +1335,7 @@
               }
             }
             if (changed) {
-              DedupStore._saveSet("linuxdo", set);
+              GM_setValue(DedupStore._keyFor("linuxdo"), JSON.stringify(set));
             }
             Storage2.remove(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS);
           } catch (e) {
@@ -1220,6 +1431,7 @@
       "use strict";
       var { CONFIG: CONFIG2 } = require_config();
       var { Storage: Storage2 } = require_storage();
+      var { sha256HexSync } = require_sha256();
       var QUOTE_CHARS = "[\\u0022\\u201C\\u201D]";
       var QUOTE_RE = new RegExp(QUOTE_CHARS + "([^" + QUOTE_CHARS.slice(1) + "+)" + QUOTE_CHARS);
       var QUOTE_RE_G = new RegExp(QUOTE_RE.source, "g");
@@ -1274,12 +1486,11 @@
         },
         // 非可逆的 API Key 指纹：仅供缓存失效比较（apiKeyHash 持久化到 GM 存储，
         // 不可用 slice(-8) 等明文子串——会泄露密钥材料，CWE-312）。
-        // 32 位哈希 + base36 已足够做相等性比较，且无法逆推原 key。
+        // 升级为 SHA-256 前 16 位 hex(安全审计 hy3 LOW: djb2 32 位可枚举碰撞;
+        // SHA-256 与浏览器/Node 互通, 且保持相等性比较语义不变)。
         apiKeyHash: (apiKey) => {
           if (!apiKey) return "";
-          let h = 0;
-          for (const c of String(apiKey)) h = (h << 5) - h + c.charCodeAt(0) | 0;
-          return Math.abs(h).toString(36);
+          return sha256HexSync(apiKey).slice(0, 16);
         },
         extractQuotedText: (value) => {
           const match = String(value || "").match(QUOTE_RE);
@@ -1433,6 +1644,8 @@
           }
           return fallback;
         },
+        // 同步 SHA-256 hex(实现见 ./sha256, 零依赖; 与 SyncCrypto.sha256Hex 互通, 去重键跨设备哈希用)
+        sha256HexSync,
         getLinuxDoImportDedupMode: () => {
           const mode = Storage2.get(CONFIG2.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE, CONFIG2.DEFAULTS.linuxdoImportDedupMode);
           return mode === "allow_duplicates" ? "allow_duplicates" : "strict";
@@ -1624,6 +1837,9 @@
           }
           if (Object.prototype.hasOwnProperty.call(CredentialVault2._sessionCache, key)) {
             return CredentialVault2._sessionCache[key];
+          }
+          if (CredentialVault2.hasVault() && !CredentialVault2.isUnlocked()) {
+            return defaultValue;
           }
           return Storage2.getRaw(key, defaultValue);
         },
@@ -2516,6 +2732,9 @@
           NotionOAuth2.setMeta({});
           NotionOAuth2.clearPendingState();
           NotionOAuth2.setAuthMode("manual");
+          Storage2.remove(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID);
+          Storage2.remove(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET);
+          Storage2.remove(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI);
           NotionOAuth2.syncApiKeyInputs("");
           NotionOAuth2.syncRegisteredControls();
         },
@@ -2584,7 +2803,9 @@
                   resolve(result);
                   return;
                 }
-                reject(new Error(describeExchangeError(result, response.status)));
+                const exchangeError = new Error(describeExchangeError(result, response.status));
+                exchangeError.code = String((result == null ? void 0 : result.error) || "").toLowerCase();
+                reject(exchangeError);
               },
               onerror: (error) => reject(new Error(`OAuth \u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${(error == null ? void 0 : error.error) || error}`)),
               timeout: 3e4,
@@ -2646,10 +2867,13 @@
               return result.access_token;
             } catch (error) {
               const message = String((error == null ? void 0 : error.message) || "");
-              if (message.includes("\u5DF2\u4F7F\u7528\u6216\u5DF2\u8FC7\u671F") || message.includes("invalid_grant")) {
+              const errorCode = String((error == null ? void 0 : error.code) || "").toLowerCase();
+              const isTerminal = errorCode === "invalid_grant" || errorCode === "invalid_client" || message.includes("\u5DF2\u4F7F\u7528\u6216\u5DF2\u8FC7\u671F") || message.includes("invalid_grant") || message.includes("invalid_client") || message.includes("Client \u914D\u7F6E\u65E0\u6548") || message.includes("Client ID \u4E0E Client Secret \u4E0D\u5339\u914D");
+              if (isTerminal) {
                 await NotionOAuth2.setRefreshToken("");
                 NotionOAuth2.setAuthMode("manual");
-                NotionOAuth2.pushNotice("Notion OAuth \u767B\u5F55\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u70B9\u51FB\u4E00\u952E\u6388\u6743\u3002", "error");
+                const hint = errorCode === "invalid_client" || message.includes("invalid_client") || message.includes("Client ID \u4E0E Client Secret \u4E0D\u5339\u914D") ? "Notion OAuth Client \u914D\u7F6E\u65E0\u6548\uFF0C\u5DF2\u5207\u6362\u624B\u52A8\u6A21\u5F0F\u3002\u8BF7\u91CD\u65B0\u4E00\u952E\u6388\u6743\u6216\u586B\u5199\u6709\u6548 Client ID\u3002" : "Notion OAuth \u767B\u5F55\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u70B9\u51FB\u4E00\u952E\u6388\u6743\u3002";
+                NotionOAuth2.pushNotice(hint, "error");
               }
               throw error;
             } finally {
@@ -2771,14 +2995,28 @@
         },
         // 判断是否为私有/内网主机
         _isPrivateHost: (hostname) => {
-          if (UrlValidator.LOCAL_HOSTS.has(hostname)) return true;
-          const m = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+          const normalized = String(hostname).replace(/\.$/, "").toLowerCase();
+          if (UrlValidator.LOCAL_HOSTS.has(normalized)) return true;
+          const m = normalized.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
           if (m) {
-            const [a, b] = [parseInt(m[1]), parseInt(m[2])];
+            const [a, b] = [parseInt(m[1], 10), parseInt(m[2], 10)];
+            if (a === 127 || a === 0 && b === 0) return true;
             if (a === 10) return true;
             if (a === 172 && b >= 16 && b <= 31) return true;
             if (a === 192 && b === 168) return true;
             if (a === 169 && b === 254) return true;
+          }
+          if (normalized.startsWith("[")) {
+            const bare = normalized.replace(/^\[|\]$/g, "");
+            if (bare === "::1" || bare === "::" || bare.startsWith("fe80:") || bare.startsWith("fc") || bare.startsWith("fd") || bare.startsWith("::ffff:127.")) return true;
+            const v4m = bare.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+            if (v4m) return UrlValidator._isPrivateHost(v4m.slice(1).join("."));
+            const v4mHex = bare.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+            if (v4mHex) {
+              const hi = parseInt(v4mHex[1], 16);
+              const lo = parseInt(v4mHex[2], 16);
+              return UrlValidator._isPrivateHost(`${hi >> 8 & 255}.${hi & 255}.${lo >> 8 & 255}.${lo & 255}`);
+            }
           }
           return false;
         }
@@ -5020,7 +5258,11 @@ Content-Type: ${contentType}\r
               if (operation === "deletePage") {
                 UndoManager2.register({
                   operation,
-                  undoAction: () => NotionAPI2.restorePage(context.pageId, context.apiKey),
+                  undoAction: () => OperationGuard2.execute(
+                    "restorePage",
+                    () => NotionAPI2.restorePage(context.pageId, context.apiKey),
+                    { ...context, trigger: "user_undo" }
+                  ),
                   description: `\u6062\u590D\u9875\u9762: ${context.itemName || context.pageId}`
                 });
               }
@@ -5214,14 +5456,21 @@ Content-Type: ${contentType}\r
               context[key] = "***REDACTED***";
             }
           }
+          for (const key of Object.keys(context)) {
+            if (/api[_-]?key|token|secret|passphrase|password/i.test(key)) {
+              context[key] = "***REDACTED***";
+            }
+          }
           redacted.context = context;
           return redacted;
         },
-        // 获取所有日志
+        // 获取所有日志(损坏存储兜底: JSON 解析成功但非数组时返回 [] ,
+        // 否则 add 中 logs.unshift 抛 TypeError → OperationGuard 放行前崩溃, 全盘审计修复)
         getAll: () => {
           const data = Storage2.get(CONFIG2.STORAGE_KEYS.OPERATION_LOG, "[]");
           try {
-            return JSON.parse(data);
+            const parsed = JSON.parse(data);
+            return Array.isArray(parsed) ? parsed : [];
           } catch {
             return [];
           }
@@ -5583,7 +5832,7 @@ Content-Type: ${contentType}\r
               return await res.json();
             } catch (e) {
               lastErr = e;
-              if (i < retries) await Utils2.sleep(250 * (i + 1));
+              if (i < retries) await Utils2.sleep(1e3 * Math.pow(2, i));
             } finally {
               clearTimeout(timer);
             }
@@ -5758,7 +6007,7 @@ Content-Type: ${contentType}\r
             const authorEl = el.querySelector(".AuthorInfo-name .UserLink-link");
             const voteEl = el.querySelector(".VoteButton--up");
             return {
-              index: i,
+              answerIndex: i,
               author: ((_a = authorEl == null ? void 0 : authorEl.textContent) == null ? void 0 : _a.trim()) || "\u533F\u540D",
               html: (contentEl == null ? void 0 : contentEl.innerHTML) || "",
               voteCount: ZhihuAPI2._parseVoteCount(voteEl == null ? void 0 : voteEl.textContent)
@@ -6072,7 +6321,7 @@ Content-Type: ${contentType}\r
     "src/ai/schema.js"(exports, module) {
       "use strict";
       var { UrlValidator } = require_UrlValidator();
-      var AISchema2 = {
+      var AISchema = {
         // 长度上限
         MAX_PROP_NAME: 64,
         MAX_TITLE: 2e3,
@@ -6131,15 +6380,15 @@ Content-Type: ${contentType}\r
         validatePropertyName: (name) => {
           let n = String(name || "").trim();
           if (!n) return "";
-          if (n.length > AISchema2.MAX_PROP_NAME) n = n.slice(0, AISchema2.MAX_PROP_NAME);
-          if (!AISchema2.PROP_NAME_RE.test(n)) return "";
-          if (AISchema2.NOTION_RESERVED_NAMES.has(n)) return "";
+          if (n.length > AISchema.MAX_PROP_NAME) n = n.slice(0, AISchema.MAX_PROP_NAME);
+          if (!AISchema.PROP_NAME_RE.test(n)) return "";
+          if (AISchema.NOTION_RESERVED_NAMES.has(n)) return "";
           return n;
         },
         // 校验属性类型。返回 { valid, type } 或 { valid: false }。
         validatePropertyType: (type) => {
           const t = String(type || "").trim();
-          if (AISchema2.ALLOWED_PROPERTY_TYPES.has(t)) return { valid: true, type: t };
+          if (AISchema.ALLOWED_PROPERTY_TYPES.has(t)) return { valid: true, type: t };
           return { valid: false };
         },
         // 校验属性值（按 type）。返回规范化值或 null（非法/应跳过）。
@@ -6148,36 +6397,36 @@ Content-Type: ${contentType}\r
           switch (type) {
             case "title":
             case "rich_text":
-              return String(val).slice(0, type === "title" ? AISchema2.MAX_TITLE : AISchema2.MAX_RICH_TEXT);
+              return String(val).slice(0, type === "title" ? AISchema.MAX_TITLE : AISchema.MAX_RICH_TEXT);
             case "select":
             case "status":
-              return String(val).trim().slice(0, AISchema2.MAX_SELECT_NAME);
+              return String(val).trim().slice(0, AISchema.MAX_SELECT_NAME);
             case "multi_select": {
               const arr = Array.isArray(val) ? val : [val];
-              return arr.map((v) => String(v || "").trim()).filter(Boolean).map((v) => v.slice(0, AISchema2.MAX_SELECT_NAME));
+              return arr.map((v) => String(v || "").trim()).filter(Boolean).map((v) => v.slice(0, AISchema.MAX_SELECT_NAME));
             }
             case "number": {
               const n = Number(val);
-              if (!isFinite(n) || Math.abs(n) > AISchema2.MAX_NUMBER) return null;
+              if (!isFinite(n) || Math.abs(n) > AISchema.MAX_NUMBER) return null;
               return n;
             }
             case "checkbox":
               return Boolean(val);
             case "date":
-              return AISchema2.ISO_DATE_RE.test(String(val).trim()) ? String(val).trim() : null;
+              return AISchema.ISO_DATE_RE.test(String(val).trim()) ? String(val).trim() : null;
             case "url":
             case "email":
             case "phone_number":
-              return String(val).trim().slice(0, AISchema2.MAX_RICH_TEXT);
+              return String(val).trim().slice(0, AISchema.MAX_RICH_TEXT);
             default:
-              return String(val).slice(0, AISchema2.MAX_RICH_TEXT);
+              return String(val).slice(0, AISchema.MAX_RICH_TEXT);
           }
         },
         // 校验 emoji（icon）。长度 + 拒控制字符。
         validateEmoji: (emoji) => {
           const e = String(emoji || "").trim();
           if (!e) return "";
-          if (e.length > AISchema2.MAX_EMOJI) return e.slice(0, AISchema2.MAX_EMOJI);
+          if (e.length > AISchema.MAX_EMOJI) return e.slice(0, AISchema.MAX_EMOJI);
           if (/[\x00-\x1f\x7f]/.test(e)) return "";
           return e;
         },
@@ -6189,7 +6438,7 @@ Content-Type: ${contentType}\r
           const cleaned = {};
           let hasValid = false;
           for (const key of Object.keys(value)) {
-            if (AISchema2.ALLOWED_OBJECT_VALUE_TYPES.has(key)) {
+            if (AISchema.ALLOWED_OBJECT_VALUE_TYPES.has(key)) {
               cleaned[key] = value[key];
               hasValid = true;
             }
@@ -6286,12 +6535,12 @@ Content-Type: ${contentType}\r
             return { ok: false, reason: `AI \u8FD4\u56DE\u7684 JSON \u683C\u5F0F\u65E0\u6548: ${error.message}` };
           }
           const validators = {
-            extractToDatabase: AISchema2.validateExtractToDatabaseSchema,
-            bookmarkSummary: AISchema2.validateBookmarkSummarySchema,
-            editPlan: AISchema2.validateEditPlanSchema,
-            generatePages: AISchema2.validateGeneratePagesSchema,
-            agentPlan: AISchema2.validateAgentPlanSchema,
-            intent: AISchema2.validateIntentSchema
+            extractToDatabase: AISchema.validateExtractToDatabaseSchema,
+            bookmarkSummary: AISchema.validateBookmarkSummarySchema,
+            editPlan: AISchema.validateEditPlanSchema,
+            generatePages: AISchema.validateGeneratePagesSchema,
+            agentPlan: AISchema.validateAgentPlanSchema,
+            intent: AISchema.validateIntentSchema
           };
           const validator = validators[name];
           if (validator) {
@@ -6301,7 +6550,7 @@ Content-Type: ${contentType}\r
           return { ok: true, value: parsed };
         }
       };
-      module.exports = { AISchema: AISchema2 };
+      module.exports = { AISchema };
     }
   });
 
@@ -8438,7 +8687,7 @@ ${result}`;
       var { TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
-      var { AISchema: AISchema2 } = require_schema();
+      var { AISchema } = require_schema();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
       var { AgentTrace } = require_AgentTrace();
@@ -8717,7 +8966,7 @@ ${result}`;
       var { TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
-      var { AISchema: AISchema2 } = require_schema();
+      var { AISchema } = require_schema();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
       var { AgentTrace } = require_AgentTrace();
@@ -8955,14 +9204,14 @@ ${result}`;
               const stepResult = await AI().executeIntent(step, settings);
               const normalizedStepResult = AI()._normalizeExecutionResult(stepResult);
               if (AI()._isErrorResult(normalizedStepResult)) {
-                results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
+                results.push({ stepIndex: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
                 aborted = true;
                 break;
               }
-              results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
+              results.push({ stepIndex: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
             } catch (error) {
               results.push({
-                index: i + 1,
+                stepIndex: i + 1,
                 explanation: step.explanation,
                 success: false,
                 result: AI()._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
@@ -8975,7 +9224,7 @@ ${result}`;
 
 `;
           for (const r of results) {
-            report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.index}: ${r.explanation}
+            report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.stepIndex}: ${r.explanation}
 `;
           }
           if (aborted) {
@@ -8995,7 +9244,7 @@ ${result}`;
 `;
           for (const r of results) {
             report += `
-**\u6B65\u9AA4 ${r.index}**: ${r.explanation}
+**\u6B65\u9AA4 ${r.stepIndex}**: ${r.explanation}
 ${AI()._resultToText(r.result)}
 `;
           }
@@ -9089,7 +9338,7 @@ ${AI()._resultToText(r.result)}
       var { TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
-      var { AISchema: AISchema2 } = require_schema();
+      var { AISchema } = require_schema();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
       var { AgentTrace } = require_AgentTrace();
@@ -9226,7 +9475,7 @@ ${existingContent}
 \u7F16\u8F91\u6307\u4EE4\uFF1A
 ${content_prompt}`;
             const editPlanRaw = await svc().requestChat(editPlanPrompt, settings, 2200);
-            const editPlanResult = AISchema2.parseAIJson("editPlan", editPlanRaw);
+            const editPlanResult = AISchema.parseAIJson("editPlan", editPlanRaw);
             let editPlan = null;
             if (editPlanResult.ok) {
               editPlan = editPlanResult.value;
@@ -9923,7 +10172,7 @@ ${aiResponse}
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { AIService: AIService2 } = require_ai();
-      var { AISchema: AISchema2 } = require_schema();
+      var { AISchema } = require_schema();
       var BookmarkExporter2 = {
         _pageInsightCache: {},
         // FIFO 上限（PERF-005）：_pageInsightCache 原为无界普通对象，长会话累积内存泄漏。
@@ -9960,7 +10209,11 @@ ${aiResponse}
                 title: node.title || node.url,
                 url: node.url,
                 folderPath: parentPath,
-                dateAdded: node.dateAdded ? new Date(node.dateAdded).toISOString() : null,
+                dateAdded: (() => {
+                  if (!node.dateAdded) return null;
+                  const d = new Date(node.dateAdded);
+                  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+                })(),
                 id: node.id
               });
             }
@@ -10123,7 +10376,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
 \u9875\u9762\u6458\u8981\uFF1A${insight.summary || ""}`;
           try {
             const response = await AIService2.requestChat(prompt2, settings, 220);
-            const parsed = AISchema2.parseAIJson("bookmarkSummary", response);
+            const parsed = AISchema.parseAIJson("bookmarkSummary", response);
             if (!parsed.ok) return null;
             const data = parsed.value;
             return {
@@ -10255,7 +10508,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               title: [{ text: { content: title } }]
             },
             "\u94FE\u63A5": {
-              url: bookmark.url
+              // 仅 http(s) 才写入 url 属性; javascript:/data: 等危险 scheme 置空
+              // (安全审计 hy3 LOW: 导出报告 UI 已过滤, 写入侧需对称处理)
+              url: /^https?:\/\//i.test(String(bookmark.url || "")) ? bookmark.url : null
             },
             "\u4E66\u7B7EID": {
               rich_text: bookmarkId ? [{ text: { content: bookmarkId } }] : []
@@ -10388,7 +10643,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (BookmarkExporter2._exportedCache) return BookmarkExporter2._exportedCache;
           BookmarkExporter2._registerExportedWatcher();
           try {
-            BookmarkExporter2._exportedCache = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}"));
+            const parsed = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}"));
+            BookmarkExporter2._exportedCache = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
           } catch (error) {
             console.warn("[LD-Notion] \u5DF2\u5BFC\u51FA\u4E66\u7B7E\u96C6\u5408\u89E3\u6790\u5931\u8D25:", error);
             BookmarkExporter2._exportedCache = {};
@@ -10773,7 +11029,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             // F5 共识(R11 实证): Chrome bookmarks API dateAdded 为毫秒,
             // 旧代码 /1000 把 2025 毫秒压成 1970 年 → 增量过滤恒 false →
             // SyncCoordinator 首轮后冻结、去重层失效。毫秒直传即可。
-            createdAt: raw.dateAdded ? new Date(raw.dateAdded).toISOString() : "",
+            // 非法日期兜底: toISOString 对 RangeError 输入抛错致整次同步失败(全盘审计 find 16)
+            createdAt: (() => {
+              if (!raw.dateAdded) return "";
+              const d = new Date(raw.dateAdded);
+              return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+            })(),
             raw
           };
         },
@@ -10842,7 +11103,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             url: raw.link || "",
             author: raw.creator || raw.author || "",
             tags: raw.categories || [],
-            createdAt: raw.pubDate || raw.isoDate || "",
+            // RSSAutoImporter.normalizeItem 输出 publishedAt(ISO), 适配器原读 pubDate/isoDate 恒空 →
+            // watermark 过滤死 + 每次全量拉取(全盘审计 find 14 修复)
+            createdAt: raw.pubDate || raw.isoDate || raw.publishedAt || "",
             raw
           };
         },
@@ -11020,6 +11283,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
          * @param {string} sourceType - 适配器注册类型
          * @param {Object} [options]
          * @param {boolean} [options.fullSync=false] - 强制全量拉取
+         * @param {boolean} [options.commitWatermark=true] - 是否在 sync 内推进 watermark。
+         *   F7 共识: 消费方自行按成功项提交时应传 false(避免 sync 推进后消费方抛错 →
+         *   watermark 已越过未导出项, 增量永久冻结; 全盘审计修复)。
          * @returns {Promise<{newItems: NormalizedItem[], skippedCount: number, watermark: Object|null, pendingKeys: string[], error?: string}>}
          *
          * F6 共识(标记后置): 本方法只过滤不标记。返回的 pendingKeys 由消费方在
@@ -11054,19 +11320,22 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 pendingKeys.push(dedupKey);
               }
             } finally {
-              DedupStore.endBatch();
+              DedupStore.endBatch(sourceType);
             }
             const newWatermark = SyncStateV2.buildWatermark(
               newItems,
               (item) => adapter.getItemTime(item),
               (item) => adapter.getItemId(item)
             );
-            SyncStateV2.updateSourceState(sourceType, {
+            const statePatch = {
               lastSuccessAt: Date.now(),
               lastOutcome: "success",
-              lastStats: { newCount: newItems.length, skippedCount },
-              watermark: newWatermark || currentState.watermark
-            });
+              lastStats: { newCount: newItems.length, skippedCount }
+            };
+            if (options.commitWatermark !== false) {
+              statePatch.watermark = newWatermark || currentState.watermark;
+            }
+            SyncStateV2.updateSourceState(sourceType, statePatch);
             return { newItems, skippedCount, watermark: newWatermark, pendingKeys };
           } catch (error) {
             SyncStateV2.updateSourceState(sourceType, {
@@ -11554,7 +11823,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             lastStats: {}
           });
           BookmarkAutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u540C\u6B65\u6D4F\u89C8\u5668\u4E66\u7B7E...");
-          const syncResult = await SyncCoordinator.sync("bookmark");
+          const syncResult = await SyncCoordinator.sync("bookmark", { commitWatermark: false });
           if (syncResult.error) {
             throw new Error(syncResult.error);
           }
@@ -11639,6 +11908,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, databaseId: settings.databaseId }
                 );
                 BookmarkExporter2.markExported(bookmark.url);
+                SyncCoordinator.markItemSeen("bookmark", `bookmark:${bookmarkId}`);
                 created++;
                 successfulIds.add(bookmarkId);
               } else if (BookmarkAutoImporter2.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
@@ -12251,7 +12521,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             lastStats: {}
           });
           RSSAutoImporter2.updateStatus("\u6B63\u5728\u540C\u6B65 RSS Feed...");
-          const syncResult = await SyncCoordinator.sync("rss");
+          const syncResult = await SyncCoordinator.sync("rss", { commitWatermark: false });
           if (syncResult.error) {
             throw new Error(syncResult.error);
           }
@@ -12364,7 +12634,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
             if (syncedMeta.title) index.byTitle.set(syncedMeta.title, syncedMeta);
             if (result.created || result.updated) {
-              SyncCoordinator.markItemSeen("rss", item.itemKey);
+              SyncCoordinator.markItemSeen("rss", `rss:${item.id || ""}`);
             }
             nextSnapshot[item.itemKey] = RSSAutoImporter2.buildSnapshotEntry(item, pageId);
             result.success = true;
@@ -13301,11 +13571,15 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           };
           const workerCount = Math.min(concurrency, bookmarks.length - startIndex);
           const workers = [];
-          for (let w = 0; w < workerCount; w++) {
-            workers.push(worker());
-            if (w < workerCount - 1) await Utils2.sleep(100);
+          try {
+            for (let w = 0; w < workerCount; w++) {
+              workers.push(worker());
+              if (w < workerCount - 1) await Utils2.sleep(100);
+            }
+            await Promise.all(workers);
+          } finally {
+            SyncLock.isExporting = false;
           }
-          await Promise.all(workers);
           if (Exporter2.isCancelled && remaining.length > 0) {
             for (const i of remaining) {
               const b = bookmarks[i];
@@ -13315,7 +13589,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               });
             }
           }
-          SyncLock.isExporting = false;
           return results;
         }
       };
@@ -13629,7 +13902,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (GitHubAPI2._exportedCache) return GitHubAPI2._exportedCache;
           GitHubAPI2._registerExportedWatcher();
           try {
-            GitHubAPI2._exportedCache = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}"));
+            const parsed = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}"));
+            GitHubAPI2._exportedCache = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
           } catch {
             GitHubAPI2._exportedCache = {};
           }
@@ -13640,7 +13914,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (GitHubAPI2._exportedGistsCache) return GitHubAPI2._exportedGistsCache;
           GitHubAPI2._registerExportedWatcher();
           try {
-            GitHubAPI2._exportedGistsCache = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}"));
+            const parsed = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}"));
+            GitHubAPI2._exportedGistsCache = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
           } catch {
             GitHubAPI2._exportedGistsCache = {};
           }
@@ -14338,6 +14613,7 @@ ${insight.summary || ""}`,
       var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { emit } = require_event_bus();
+      var { SyncLock } = require_sync_lock();
       var GitHubAutoImporter2 = {
         isRunning: false,
         timerId: null,
@@ -14669,6 +14945,7 @@ ${insight.summary || ""}`,
           return;
         }
         if (GitHubAutoImporter2.isRunning) return;
+        if (SyncLock.isExporting) return;
         const settings = GitHubAutoImporter2.buildSettings();
         if (!settings.apiKey || !settings.databaseId) {
           GitHubAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
@@ -15005,7 +15282,7 @@ ${insight.summary || ""}`,
       var { TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
-      var { AISchema: AISchema2 } = require_schema();
+      var { AISchema } = require_schema();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
       var { AgentTrace } = require_AgentTrace();
@@ -15216,14 +15493,14 @@ ${content}`;
 \u9875\u9762\u5185\u5BB9\uFF1A
 ${content}`;
             const aiResponse = await svc().requestChat(analyzePrompt, settings, 3e3);
-            const parsedResult = AISchema2.parseAIJson("extractToDatabase", aiResponse);
+            const parsedResult = AISchema.parseAIJson("extractToDatabase", aiResponse);
             if (!parsedResult.ok) {
               return `\u274C ${parsedResult.reason}`;
             }
             const extractedData = parsedResult.value;
             const validProps = extractedData.properties.filter((prop) => {
-              const nameOk = AISchema2.validatePropertyName(prop.name);
-              const typeOk = AISchema2.validatePropertyType(prop.type);
+              const nameOk = AISchema.validatePropertyName(prop.name);
+              const typeOk = AISchema.validatePropertyType(prop.type);
               if (!nameOk || !typeOk.valid) {
                 console.warn(`[LD-Notion] AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5DF2\u8DF3\u8FC7\uFF08name=${prop.name}, type=${prop.type}\uFF09`);
                 return false;
@@ -15344,7 +15621,7 @@ ${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
 - \u6BCF\u4E2A\u5B50\u9875\u9762\u5E94\u6709\u660E\u786E\u7684\u4E3B\u9898\u548C\u8FB9\u754C
 - \u7236\u9875\u9762\u4F5C\u4E3A\u76EE\u5F55/\u6982\u89C8\u9875`;
             const planResponse = await svc().requestChat(planPrompt, settings, 1500);
-            const planResult = AISchema2.parseAIJson("generatePages", planResponse);
+            const planResult = AISchema.parseAIJson("generatePages", planResponse);
             if (!planResult.ok) {
               console.warn("[LD-Notion] AI \u751F\u6210\u7ED3\u6784 JSON \u89E3\u6790\u5931\u8D25:", planResult.reason);
               return `\u274C AI \u751F\u6210\u7684\u7ED3\u6784\u65E0\u6548\u3002\u8BF7\u6362\u4E00\u79CD\u65B9\u5F0F\u63CF\u8FF0\u3002`;
@@ -15356,15 +15633,15 @@ ${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
             const MAX_CHILD_DESC = 2e3;
             plan.children = plan.children.map((c) => ({
               ...c,
-              title: AISchema2.validatePropertyValue(c == null ? void 0 : c.title, "title"),
-              icon: AISchema2.validateEmoji(c == null ? void 0 : c.icon),
-              description: AISchema2.validatePropertyValue(c == null ? void 0 : c.description, "rich_text").slice(0, MAX_CHILD_DESC)
+              title: AISchema.validatePropertyValue(c == null ? void 0 : c.title, "title"),
+              icon: AISchema.validateEmoji(c == null ? void 0 : c.icon),
+              description: AISchema.validatePropertyValue(c == null ? void 0 : c.description, "rich_text").slice(0, MAX_CHILD_DESC)
             })).filter((c) => c.title);
             if (plan.children.length === 0) {
               return `\u274C AI \u89C4\u5212\u7684\u5B50\u9875\u9762\u6807\u9898\u65E0\u6548\u3002`;
             }
-            plan.parent_title = AISchema2.validatePropertyValue(plan.parent_title, "title");
-            plan.parent_summary = AISchema2.validatePropertyValue(plan.parent_summary, "rich_text");
+            plan.parent_title = AISchema.validatePropertyValue(plan.parent_title, "title");
+            plan.parent_summary = AISchema.validatePropertyValue(plan.parent_summary, "rich_text");
             const pageList = plan.children.map((c) => `${c.icon || "\u{1F4C4}"} ${c.title}`).join("\n");
             const confirmed = await ConfirmationDialog3.show({
               title: "\u{1F4D1} \u591A\u9875\u9762\u751F\u6210\u786E\u8BA4",
@@ -20193,7 +20470,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { AutoImporter: AutoImporter2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2 } = require_import();
       var { BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
       var { AIAssistant: AIAssistant2, AIService: AIService2, ChatUI: ChatUI2 } = require_ai();
-      var { AISchema: AISchema2 } = require_schema();
+      var { AISchema } = require_schema();
       var _UI = null;
       var UI2 = () => {
         if (!_UI) _UI = require_main_ui().UI;
@@ -20339,7 +20616,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           try {
             const prompt2 = UI2().buildWorkspaceConnectionCandidateAIPrompt(candidate);
             const raw = String(await AIService2.requestChat(prompt2, settings, 700) || "").trim();
-            const parseResult = AISchema2.parseAIJson("workspaceConnection", raw);
+            const parseResult = AISchema.parseAIJson("workspaceConnection", raw);
             if (!parseResult.ok) {
               throw new Error(parseResult.reason);
             }
@@ -21027,7 +21304,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }
           const timelineMarkup = model.timeline.length > 0 ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
                 <div class="ldb-view-timeline-item">
-                    <div class="ldb-view-timeline-label">${item.label}</div>
+                    <div class="ldb-view-timeline-label">${Utils2.escapeHtml(String(item.label || ""))}</div>
                     <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, item.pct || UI2().getViewPct(item.count, model.totalPages))}%;"></div></div>
                     <div class="ldb-view-timeline-value">${item.count} \u9875</div>
                 </div>
@@ -23381,9 +23658,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">\u2705 \u6210\u529F (${success.length})</div>`;
             success.slice(0, 10).forEach((item) => {
+              const safeUrl = /^https?:\/\//i.test(String(item.url || "")) ? item.url : "";
               html += `<div class="ldb-report-item success">
-                    <span>\u2713</span>
-                    <a href="${Utils2.escapeHtml(item.url)}" target="_blank">${Utils2.escapeHtml(Utils2.truncateText(item.title, 40))}</a>
+                    ${safeUrl ? `<a href="${Utils2.escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${Utils2.escapeHtml(Utils2.truncateText(item.title, 40))}</a>` : `<span>${Utils2.escapeHtml(Utils2.truncateText(item.title, 40))}</span>`}
                 </div>`;
             });
             if (success.length > 10) {
@@ -23401,7 +23678,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                     <span>\u2717</span>
                     <span>${Utils2.escapeHtml(Utils2.truncateText(fullTitle, 35))}</span>
                 </div>`;
-              html += `<div class="ldb-report-error" title="\u70B9\u51FB\u590D\u5236\u5B8C\u6574\u9519\u8BEF" style="cursor:pointer;" onclick="navigator.clipboard?.writeText(${JSON.stringify(Utils2.escapeHtml(fullError))})">${Utils2.escapeHtml(Utils2.truncateText(fullError, 120))}</div>`;
+              html += `<div class="ldb-report-error" data-err="${Utils2.escapeHtml(fullError)}" title="\u70B9\u51FB\u590D\u5236\u5B8C\u6574\u9519\u8BEF" style="cursor:pointer;">${Utils2.escapeHtml(Utils2.truncateText(fullError, 120))}</div>`;
             });
             if (failed.length > 20) {
               html += `<div class="ldb-report-item failed"><span>...</span> \u8FD8\u6709 ${failed.length - 20} \u4E2A\u5931\u8D25\u9879</div>`;
@@ -23418,6 +23695,12 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }
           html += "</div>";
           container.innerHTML = html;
+          container.querySelectorAll(".ldb-report-error").forEach((el) => {
+            el.addEventListener("click", () => {
+              var _a;
+              (_a = navigator.clipboard) == null ? void 0 : _a.writeText(el.dataset.err || "");
+            });
+          });
         },
         // 更新操作日志面板
         updateLogPanel: () => {
@@ -24858,7 +25141,9 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               }
             });
           };
-          refs.clearLinuxdoDedupBtn.onclick = () => clearWithConfirm("Linux.do \u53BB\u91CD", () => DedupStore.clearSeen("linuxdo"));
+          refs.clearLinuxdoDedupBtn.onclick = () => clearWithConfirm("Linux.do \u53BB\u91CD", () => {
+            Storage2.clearExportedTopics();
+          });
           refs.clearGithubExportedBtn.onclick = () => clearWithConfirm("GitHub \u5DF2\u5BFC\u51FA", () => GitHubAPI2.clearExportedRecords());
           refs.clearBookmarkExportedBtn.onclick = () => clearWithConfirm("\u4E66\u7B7E\u5DF2\u5BFC\u51FA", () => BookmarkExporter2.clearExportedRecords());
           renderDedupSummary();
@@ -26262,6 +26547,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { TargetState: TargetState2 } = require_auth();
       var { OperationGuard: OperationGuard2 } = require_security();
       var { AgentTrace } = require_AgentTrace();
+      var { AISchema } = require_schema();
       var { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 } = require_AgentTools();
       var { getAI: AI, getState: ChatState2, getService: AIService2 } = require_deps();
       var AgentExecutor = {
@@ -26329,14 +26615,14 @@ ${plan.explanation || ""}
               const stepResult = await AI().executeIntent(step, settings);
               const normalizedStepResult = AI()._normalizeExecutionResult(stepResult);
               if (AI()._isErrorResult(normalizedStepResult)) {
-                results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
+                results.push({ stepIndex: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
                 aborted = true;
                 break;
               }
-              results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
+              results.push({ stepIndex: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
             } catch (error) {
               results.push({
-                index: i + 1,
+                stepIndex: i + 1,
                 explanation: step.explanation,
                 success: false,
                 result: AI()._normalizeExecutionResult(`\u274C ${error.message}`, { status: "error", name: step.intent })
@@ -26349,7 +26635,7 @@ ${plan.explanation || ""}
 
 `;
           for (const r of results) {
-            report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.index}: ${r.explanation}
+            report += `${r.success ? "\u2705" : "\u274C"} \u6B65\u9AA4 ${r.stepIndex}: ${r.explanation}
 `;
           }
           if (aborted) {
@@ -26369,7 +26655,7 @@ ${plan.explanation || ""}
 `;
           for (const r of results) {
             report += `
-**\u6B65\u9AA4 ${r.index}**: ${r.explanation}
+**\u6B65\u9AA4 ${r.stepIndex}**: ${r.explanation}
 ${AI()._resultToText(r.result)}
 `;
           }
@@ -26396,47 +26682,27 @@ ${AI()._resultToText(r.result)}
           }
         },
         // ======= Agent Loop (ReAct 模式) =======
-        // 尝试解析 AI 回复为工具调用 JSON
+        // 尝试解析 AI 回复为工具调用 JSON(ISS-013 铁律⑥: 统一走 parseAIJson 接缝,
+        // 消除内联 jsonMatch+JSON.parse+try-catch 三段式; toolCall 结构校验由本函数按白名单完成)
         _tryParseToolCall: (response) => {
           if (!response) return null;
-          const trimmed = response.trim();
-          let parsed = null;
-          try {
-            parsed = JSON.parse(trimmed);
-            if (parsed.tool && typeof parsed.tool === "string") {
-              const toolDef = AI_AGENT_TOOLS2[parsed.tool];
-              if (!toolDef) {
-                console.warn(`[LD-Notion] _tryParseToolCall: \u62D2\u7EDD\u672A\u77E5\u5DE5\u5177 "${parsed.tool}"`);
-                return null;
-              }
-              if (parsed.args !== void 0 && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
-                console.warn(`[LD-Notion] _tryParseToolCall: \u5DE5\u5177 "${parsed.tool}" \u7684\u53C2\u6570\u7C7B\u578B\u65E0\u6548`);
-                return null;
-              }
-              return parsed;
-            }
-          } catch (error) {
-            console.warn("[LD-Notion] \u5DE5\u5177\u8C03\u7528\u89E3\u6790\u5931\u8D25:", error);
+          const result = AISchema.parseAIJson("toolCall", response);
+          if (!result.ok || !result.value || typeof result.value !== "object") {
+            if (!result.ok) console.warn("[LD-Notion] \u5DE5\u5177\u8C03\u7528\u89E3\u6790\u5931\u8D25:", result.reason);
+            return null;
           }
-          const jsonMatch = trimmed.match(/\{[\s\S]*"tool"\s*:\s*"[\s\S]*\}/);
-          if (jsonMatch) {
-            try {
-              parsed = JSON.parse(jsonMatch[0]);
-              if (parsed.tool && typeof parsed.tool === "string") {
-                const toolDef = AI_AGENT_TOOLS2[parsed.tool];
-                if (!toolDef) {
-                  console.warn(`[LD-Notion] _tryParseToolCall: \u62D2\u7EDD\u672A\u77E5\u5DE5\u5177 "${parsed.tool}"`);
-                  return null;
-                }
-                if (parsed.args !== void 0 && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
-                  console.warn(`[LD-Notion] _tryParseToolCall: \u5DE5\u5177 "${parsed.tool}" \u7684\u53C2\u6570\u7C7B\u578B\u65E0\u6548`);
-                  return null;
-                }
-                return parsed;
-              }
-            } catch (error) {
-              console.warn("[LD-Notion] \u5DE5\u5177\u8C03\u7528\u89E3\u6790\u5931\u8D25:", error);
+          const parsed = result.value;
+          if (parsed.tool && typeof parsed.tool === "string") {
+            const toolDef = AI_AGENT_TOOLS2[parsed.tool];
+            if (!toolDef) {
+              console.warn(`[LD-Notion] _tryParseToolCall: \u62D2\u7EDD\u672A\u77E5\u5DE5\u5177 "${parsed.tool}"`);
+              return null;
             }
+            if (parsed.args !== void 0 && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
+              console.warn(`[LD-Notion] _tryParseToolCall: \u5DE5\u5177 "${parsed.tool}" \u7684\u53C2\u6570\u7C7B\u578B\u65E0\u6548`);
+              return null;
+            }
+            return parsed;
           }
           return null;
         },
@@ -26567,9 +26833,10 @@ ${availableTools}
           const trace = AgentTrace.create(userMessage);
           const availableTools = Object.entries(AI().AGENT_TOOLS).filter(([_, tool]) => tool.level <= permLevel).map(([name, tool]) => `- ${name}: ${tool.description} | \u53C2\u6570: ${tool.params}`).join("\n");
           const systemPrompt = AI()._buildAgentSystemPrompt(permLevel, availableTools, settings);
-          const messages = [{ role: "user", content: `<user_input>
-${userMessage}
-</user_input>` }];
+          const isolate = (content) => `<user_input>
+${String(content).replace(/<\/?user_input>/gi, "&lt;$&gt;")}
+</user_input>`;
+          const messages = [{ role: "user", content: isolate(userMessage) }];
           let iteration = 0;
           while (iteration < maxIterations) {
             iteration++;
@@ -26607,7 +26874,7 @@ ${userMessage}
             const result = await AI()._executeAgentToolCall(toolCall, settings, permLevel);
             AgentTrace.recordResult(trace, toolCall, result, iteration);
             messages.push({ role: "user", content: `[\u5DE5\u5177\u7ED3\u679C] ${toolCall.tool}:
-${AI()._resultToAgentPayload(result)}` });
+${isolate(AI()._resultToAgentPayload(result))}` });
           }
           const maxMsg = "\u{1F916} Agent \u8FBE\u5230\u6700\u5927\u6267\u884C\u6B65\u6570\uFF0C\u5DF2\u505C\u6B62\u3002\u5982\u679C\u4EFB\u52A1\u5C1A\u672A\u5B8C\u6210\uFF0C\u8BF7\u7EE7\u7EED\u63CF\u8FF0\u4F60\u7684\u9700\u6C42\u3002";
           AgentTrace.persist(trace, "max_iterations", maxMsg);
@@ -26631,7 +26898,7 @@ ${AI()._resultToAgentPayload(result)}` });
       var { GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UndoManager: UndoManager2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
       var { UrlValidator } = require_UrlValidator();
-      var { AISchema: AISchema2 } = require_schema();
+      var { AISchema } = require_schema();
       var { AgentTrace } = require_AgentTrace();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
@@ -26677,8 +26944,8 @@ ${AI()._resultToAgentPayload(result)}` });
 \u53EF\u9009\u5206\u7C7B\uFF1A${categories.join(", ")}
 
 <user_content>
-<title>${title}</title>
-<body>${content.slice(0, 2e3)}</body>
+<title>${String(title).replace(/<\/user_content>/gi, "&lt;$&gt;")}</title>
+<body>${String(content).slice(0, 2e3).replace(/<\/user_content>/gi, "&lt;$&gt;")}</body>
 </user_content>
 
 \u5206\u7C7B\uFF1A`;
@@ -27549,13 +27816,13 @@ ${systemPrompt}
         },
         _isErrorResult: (result) => AIAssistant2._normalizeExecutionResult(result).status === "error",
         _buildPageIconPayload: (args = {}) => {
-          const iconEmoji = AISchema2.validateEmoji(args.icon_emoji || "");
+          const iconEmoji = AISchema.validateEmoji(args.icon_emoji || "");
           const iconUrlRaw = String(args.icon_url || "").trim();
           const clearIcon = !!args.clear_icon;
           if (clearIcon) return null;
           if (iconEmoji) return { type: "emoji", emoji: iconEmoji };
           if (iconUrlRaw) {
-            if (!AISchema2.validatePageExternalUrl(iconUrlRaw)) {
+            if (!AISchema.validatePageExternalUrl(iconUrlRaw)) {
               console.warn("[LD-Notion] AI \u8FD4\u56DE\u7684 icon_url \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C\uFF0C\u5DF2\u8DF3\u8FC7:", iconUrlRaw.slice(0, 80));
               return void 0;
             }
@@ -27568,7 +27835,7 @@ ${systemPrompt}
           const clearCover = !!args.clear_cover;
           if (clearCover) return null;
           if (coverUrlRaw) {
-            if (!AISchema2.validatePageExternalUrl(coverUrlRaw)) {
+            if (!AISchema.validatePageExternalUrl(coverUrlRaw)) {
               console.warn("[LD-Notion] AI \u8FD4\u56DE\u7684 cover_url \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C\uFF0C\u5DF2\u8DF3\u8FC7:", coverUrlRaw.slice(0, 80));
               return void 0;
             }
@@ -27579,15 +27846,15 @@ ${systemPrompt}
         _normalizeNotionProperties: (rawProperties = {}) => {
           const properties = {};
           for (const [rawKey, value] of Object.entries(rawProperties || {})) {
-            const key = AISchema2.validatePropertyName(rawKey);
+            const key = AISchema.validatePropertyName(rawKey);
             if (!key || value === void 0) continue;
             if (value && typeof value === "object" && !Array.isArray(value)) {
-              const cleaned = AISchema2.sanitizeObjectValue(value);
+              const cleaned = AISchema.sanitizeObjectValue(value);
               if (cleaned) {
                 for (const propType of Object.keys(cleaned)) {
                   const scalar = cleaned[propType];
                   if (propType === "url" || propType === "email" || propType === "phone_number") {
-                    const validated = AISchema2.validatePropertyValue(scalar, propType);
+                    const validated = AISchema.validatePropertyValue(scalar, propType);
                     if (validated !== null && validated !== "") {
                       cleaned[propType] = validated;
                     } else {
@@ -27622,7 +27889,7 @@ ${systemPrompt}
           return properties;
         },
         _buildPropertyValuePayload: (value, type = "text") => {
-          const v = AISchema2.validatePropertyValue(value, type);
+          const v = AISchema.validatePropertyValue(value, type);
           switch (type) {
             case "title":
               return { title: [{ type: "text", text: { content: v !== null ? String(v) : "" } }] };
@@ -28197,12 +28464,12 @@ compound \u683C\u5F0F\uFF08\u4EC5\u5F53 intent \u4E3A compound \u65F6\u4F7F\u752
               `${systemPrompt}
 
 <user_input>
-${userMessage}
+${String(userMessage).replace(/<\/user_input>/gi, "&lt;$&gt;")}
 </user_input>`,
               settings,
               800
             );
-            const intentResult = AISchema2.parseAIJson("intent", response);
+            const intentResult = AISchema.parseAIJson("intent", response);
             if (intentResult.ok) {
               const parsed = intentResult.value;
               if (!AIAssistant2._resolveIntentExecutor(parsed.intent)) {
@@ -29067,9 +29334,10 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         return bytes;
       };
       var bytesToBase64 = (bytes) => {
-        if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
+        const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+        if (typeof Buffer !== "undefined") return Buffer.from(view).toString("base64");
         let binary = "";
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        for (let i = 0; i < view.length; i++) binary += String.fromCharCode(view[i]);
         return btoa(binary);
       };
       var SyncCrypto = {
@@ -29407,7 +29675,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
               const num = Number(ts);
               if (!Number.isFinite(num) || num <= 0) continue;
               if (++count > SyncConstants.MAX_DEDUP_ENTRIES_PER_SOURCE) break;
-              const key = meta.urlKeyed && hashUrls ? `h:${await SyncCrypto.sha256Hex(k)}` : k;
+              const key = meta.urlKeyed && hashUrls && !k.startsWith("h:") ? `h:${await SyncCrypto.sha256Hex(k)}` : k;
               clean[key] = num;
             }
             if (Object.keys(clean).length > 0) payload.dedup[src] = clean;
@@ -29630,15 +29898,16 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         },
         _drain() {
           if (this._waiters.length === 0) return;
-          const delay = Math.max(0, Math.ceil((1 - this._tokens) * 1e3));
-          setTimeout(() => {
-            this._refill();
-            while (this._waiters.length > 0 && this._tokens >= 1) {
-              this._tokens -= 1;
-              const resolve = this._waiters.shift();
-              resolve();
-            }
-          }, delay);
+          this._refill();
+          while (this._waiters.length > 0 && this._tokens >= 1) {
+            this._tokens -= 1;
+            const resolve = this._waiters.shift();
+            resolve();
+          }
+          if (this._waiters.length > 0) {
+            const delay = Math.max(100, Math.ceil((1 - this._tokens) * 1e3));
+            setTimeout(() => this._drain(), delay);
+          }
         },
         /**
          * 同步路径自限(≤2/s, 独立小桶)
@@ -29818,9 +30087,8 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
          */
         _rowToProperties(row) {
           const payloadText = JSON.stringify(row.payload || {});
-          const { rows } = SyncFragmenter.fragment(payloadText);
-          if (rows.length > 1) {
-            throw new Error(`\u884C payload \u8FC7\u5927(${payloadText.length} \u5B57\u7B26), \u9700\u5206\u7247\u4E3A\u591A\u884C`);
+          if (payloadText.length > 2e3) {
+            throw new Error(`\u884C payload \u8FC7\u5927(${payloadText.length} \u5B57\u7B26, Notion \u5355\u5C5E\u6027\u4E0A\u9650 2000), \u8BF7\u51CF\u5C11\u5355\u6E90\u53BB\u91CD\u6761\u76EE\u6216\u7B49\u5F85 TTL \u6DD8\u6C70\u540E\u91CD\u8BD5`);
           }
           return {
             [ROW_TITLE_PROP]: { title: [{ type: "text", text: { content: String(row.key || "").slice(0, 1900) } }] },
@@ -29828,7 +30096,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
             [ROW_VERSION_PROP]: { number: Number(row.version) || 0 },
             [ROW_UPDATED_AT_PROP]: { rich_text: [{ type: "text", text: { content: String(row.updatedAt || "").slice(0, 100) } }] },
             [ROW_DEVICE_PROP]: { rich_text: [{ type: "text", text: { content: String(row.deviceId || "").slice(0, 100) } }] },
-            [ROW_PAYLOAD_PROP]: { rich_text: [{ type: "text", text: { content: rows[0].slice(0, 2e3) } }] },
+            [ROW_PAYLOAD_PROP]: { rich_text: [{ type: "text", text: { content: payloadText } }] },
             \u6765\u6E90: { rich_text: [{ type: "text", text: { content: "LD-Sync" } }] }
           };
         },
@@ -29896,7 +30164,8 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           return id;
         },
         isEnabled() {
-          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_ENABLED, CONFIG2.DEFAULTS.syncEnabled) === true;
+          const raw = GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_ENABLED, CONFIG2.DEFAULTS.syncEnabled);
+          return raw === true || raw === "true";
         },
         setEnabled(v) {
           GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_ENABLED, !!v);
@@ -30125,6 +30394,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
          */
         async pull({ reason = "manual" } = {}) {
           if (SyncEngine._running) return { ok: false, outcome: "busy" };
+          if (!SyncConfig.isEnabled()) return { ok: false, outcome: "disabled" };
           const { OperationGuard: OperationGuard2, OperationLog: OperationLog2, NotionAPI: NotionAPI2, SyncStateV2, DedupStore } = SyncEngine._getDeps();
           if (!OperationGuard2.canExecute("sync.state.pull")) {
             OperationLog2.add({
@@ -30200,14 +30470,11 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
          * applyRemote — 仅写 diffWinners 胜出项(去重 union 写回 + watermark 应用 + settings 应用)
          */
         applyRemote(winners, { SyncStateV2, DedupStore } = {}) {
-          var _a;
           const deps = SyncEngine._getDeps();
           const State = SyncStateV2 || deps.SyncStateV2;
           const Dedup = DedupStore || deps.DedupStore;
-          const changedSources = /* @__PURE__ */ new Set();
           for (const entry of winners.dedupEntries || []) {
             Dedup.markSeen(entry.source, entry.key);
-            changedSources.add(entry.source);
           }
           for (const { source, watermark } of winners.watermarkWinners || []) {
             const local = State.getSourceState(source);
@@ -30224,16 +30491,12 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           for (const { key, entry } of winners.settingsWinners || []) {
             const def = SyncSerializer.WHITELIST.settings[key];
             if (!def) continue;
-            if (def.confirmLevel && !OperationGuard2.canExecute("updatePage")) {
+            if (def.confirmLevel && OperationGuard2.getLevel() < def.confirmLevel) {
               continue;
             }
             const coerce = SyncSerializer._coerceSetting(entry.value, def.kind);
             if (coerce === void 0) continue;
             Storage2.set(key, coerce);
-          }
-          for (const src of changedSources) {
-            const set = Dedup.getSeen(src);
-            (_a = Dedup._evictExpired) == null ? void 0 : _a.call(Dedup, set);
           }
           return {
             dedupEntries: (winners.dedupEntries || []).length,
@@ -30415,6 +30678,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           const phase = hash % 15;
           setTimeout(() => {
             const loop = () => {
+              if (!SC.isEnabled()) return;
               SyncEngine.pull({ reason: "periodic" });
               setTimeout(loop, 30 * 60 * 1e3 + phase * 6e4);
             };

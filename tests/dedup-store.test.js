@@ -6,13 +6,12 @@ const { DedupStore } = require("../src/storage/DedupStore");
 const SOURCE = "test-source";
 
 /**
- * DedupStore 是模块级单例对象，batch 状态 (_batchCache / _batchSourceType)
+ * DedupStore 是模块级单例对象，batch 状态 (_batchCaches)
  * 在测试间可能残留。每个 beforeEach 中重置 batch 状态 + GM mock 调用计数。
  */
 function resetDedupStore() {
     // 等效于 endBatch 但不触发 flush
-    DedupStore._batchCache = null;
-    DedupStore._batchSourceType = null;
+    DedupStore._batchCaches = {};
 }
 
 describe("AT-002: DedupStore 批量模式与单条模式", () => {
@@ -58,8 +57,8 @@ describe("AT-002: DedupStore 批量模式与单条模式", () => {
         globalThis.GM_setValue(preKey, JSON.stringify({ "existing-key": 1000 }));
 
         DedupStore.beginBatch(SOURCE);
-        expect(DedupStore._batchCache).not.toBeNull();
-        expect(DedupStore._batchCache.set).toEqual({ "existing-key": 1000 });
+        expect(DedupStore._batchCaches[SOURCE]).toBeTruthy();
+        expect(DedupStore._batchCaches[SOURCE].set).toEqual({ "existing-key": 1000 });
 
         DedupStore.endBatch();
     });
@@ -84,9 +83,9 @@ describe("AT-002: DedupStore 批量模式与单条模式", () => {
         DedupStore.markSeen(SOURCE, "batch-key");
 
         // 写入内存缓存
-        expect("batch-key" in DedupStore._batchCache.set).toBe(true);
+        expect("batch-key" in DedupStore._batchCaches[SOURCE].set).toBe(true);
         // dirty 标记置位
-        expect(DedupStore._batchCache.dirty).toBe(true);
+        expect(DedupStore._batchCaches[SOURCE].dirty).toBe(true);
         // 不应调用 GM_setValue
         expect(gmSetSpy).not.toHaveBeenCalled();
 

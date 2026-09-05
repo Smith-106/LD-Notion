@@ -48,7 +48,11 @@ const BookmarkExporter = {
                     title: node.title || node.url,
                     url: node.url,
                     folderPath: parentPath,
-                    dateAdded: node.dateAdded ? new Date(node.dateAdded).toISOString() : null,
+                    dateAdded: (() => {
+                        if (!node.dateAdded) return null;
+                        const d = new Date(node.dateAdded);
+                        return Number.isNaN(d.getTime()) ? null : d.toISOString();
+                    })(),
                     id: node.id,
                 });
             }
@@ -388,7 +392,9 @@ const BookmarkExporter = {
                 title: [{ text: { content: title } }]
             },
             "链接": {
-                url: bookmark.url
+                // 仅 http(s) 才写入 url 属性; javascript:/data: 等危险 scheme 置空
+                // (安全审计 hy3 LOW: 导出报告 UI 已过滤, 写入侧需对称处理)
+                url: /^https?:\/\//i.test(String(bookmark.url || "")) ? bookmark.url : null
             },
             "书签ID": {
                 rich_text: bookmarkId ? [{ text: { content: bookmarkId } }] : []
@@ -528,7 +534,11 @@ const BookmarkExporter = {
     getExported: () => {
         if (BookmarkExporter._exportedCache) return BookmarkExporter._exportedCache;
         BookmarkExporter._registerExportedWatcher();
-        try { BookmarkExporter._exportedCache = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}")); }
+        try {
+            const parsed = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}"));
+            // 损坏存储兜底: 非纯对象时 markExported 严格模式赋值会抛 TypeError(全盘审计修复)
+            BookmarkExporter._exportedCache = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+        }
         catch (error) {
             console.warn("[LD-Notion] 已导出书签集合解析失败:", error);
             BookmarkExporter._exportedCache = {};

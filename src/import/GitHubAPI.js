@@ -144,7 +144,11 @@ const GitHubAPI = {
     getExported: () => {
         if (GitHubAPI._exportedCache) return GitHubAPI._exportedCache;
         GitHubAPI._registerExportedWatcher();
-        try { GitHubAPI._exportedCache = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}")); }
+        try {
+            const parsed = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}"));
+            // 损坏存储兜底: 非纯对象时严格模式赋值抛 TypeError(全盘审计修复)
+            GitHubAPI._exportedCache = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+        }
         catch { GitHubAPI._exportedCache = {}; }
         return GitHubAPI._exportedCache;
     },
@@ -153,7 +157,10 @@ const GitHubAPI = {
     getExportedGists: () => {
         if (GitHubAPI._exportedGistsCache) return GitHubAPI._exportedGistsCache;
         GitHubAPI._registerExportedWatcher();
-        try { GitHubAPI._exportedGistsCache = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}")); }
+        try {
+            const parsed = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}"));
+            GitHubAPI._exportedGistsCache = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+        }
         catch { GitHubAPI._exportedGistsCache = {}; }
         return GitHubAPI._exportedGistsCache;
     },

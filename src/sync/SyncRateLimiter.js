@@ -43,15 +43,19 @@ const SyncRateLimiter = {
     _drain() {
         if (this._waiters.length === 0) return;
         // 使用 setTimeout 保证排队者按到达顺序拿桶(不忙等)
-        const delay = Math.max(0, Math.ceil((1 - this._tokens) * 1000));
-        setTimeout(() => {
-            this._refill();
-            while (this._waiters.length > 0 && this._tokens >= 1) {
-                this._tokens -= 1;
-                const resolve = this._waiters.shift();
-                resolve();
-            }
-        }, delay);
+        this._refill();
+        while (this._waiters.length > 0 && this._tokens >= 1) {
+            this._tokens -= 1;
+            const resolve = this._waiters.shift();
+            resolve();
+        }
+        // 仍有 waiter 未满足: 重新排班。修复 waiter 饥饿(此前一次性 timer 不再 re-arm,
+        // 同 tick 多 waiter 排队且桶只回 1 个 token 时, 第二个 waiter 永不 resolve →
+        // 对应 Notion 请求永久挂起; 全盘审计修复)。
+        if (this._waiters.length > 0) {
+            const delay = Math.max(100, Math.ceil((1 - this._tokens) * 1000));
+            setTimeout(() => this._drain(), delay);
+        }
     },
 
     /**

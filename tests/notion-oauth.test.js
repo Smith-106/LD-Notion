@@ -3664,10 +3664,13 @@ function createWorkspaceVisualizationFixture(harness) {
 
     await runTest('Storage.unmarkTopicExported: removes a single Linux.do export marker without clearing the rest', async () => {
         const harness = createHarness();
+        // TTL 淘汰阈值为 90 天: 构造数据须用真实时间戳, 否则写回即被自然淘汰
+        const t101 = Date.now() - 1000;
+        const t202 = Date.now() - 500;
 
         harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS] = JSON.stringify({
-            101: 1710000000000,
-            202: 1710000001000
+            101: t101,
+            202: t202
         });
 
         // F1 单一账本语义: legacy 键在首次访问时一次性迁移到 DedupStore 账本并删除
@@ -3680,9 +3683,9 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS], undefined);
         assert.deepStrictEqual(
             JSON.parse(harness.store['ldb_exported_topics:linuxdo']),
-            { 202: 1710000001000 }
+            { 202: t202 }
         );
-        assert.deepStrictEqual(harness.Storage.getExportedTopics(), { 202: 1710000001000 });
+        assert.deepStrictEqual(harness.Storage.getExportedTopics(), { 202: t202 });
         assert.strictEqual(harness.Storage.unmarkTopicExported('404'), false);
     });
 

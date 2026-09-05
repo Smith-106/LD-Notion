@@ -61,22 +61,27 @@ describe("F1 单一账本: Storage 委托 DedupStore", () => {
     });
 
     it("legacy 键迁移: 旧 ldb_exported_topics 合并入 DedupStore 并删除旧键", () => {
-        store.set(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify({ 777: 1000, 888: 2000 }));
+        // TTL 淘汰阈值为 90 天: 迁移测试须用真实时间戳, 否则迁移写回即被淘汰
+        const t1 = Date.now() - 1000;
+        const t2 = Date.now() - 500;
+        store.set(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify({ 777: t1, 888: t2 }));
         Storage.getExportedTopics();
         expect(Storage.isTopicExported(777)).toBe(true);
         expect(Storage.isTopicExported(888)).toBe(true);
         expect(store.has(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS)).toBe(false);
-        expect(DedupStore.getSeen("linuxdo")["777"]).toBe(1000);
+        expect(DedupStore.getSeen("linuxdo")["777"]).toBe(t1);
     });
 
     it("迁移取 max ts 合并不覆盖新值", () => {
         DedupStore.markSeen("linuxdo", "555");
-        store.set(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify({ 555: 1, 666: 999 }));
+        const tLegacy = Date.now() - 100;
+        store.set(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify({ 555: 1, 666: tLegacy }));
         Storage.getExportedTopics();
         expect(Storage.isTopicExported(555)).toBe(true);
         expect(Storage.isTopicExported(666)).toBe(true);
         // 555 已存在且 1 < 现有 ts, 保留新值
         expect(DedupStore.getSeen("linuxdo")["555"]).toBeGreaterThan(1);
+        expect(DedupStore.getSeen("linuxdo")["666"]).toBe(tLegacy);
     });
 
     it("clearExportedTopics 清空统一账本", () => {

@@ -5,6 +5,7 @@ const { Storage } = require("../storage");
 const { TargetState } = require("../auth");
 const { OperationGuard } = require("../security");
 const { AgentTrace } = require("./AgentTrace");
+const { AISchema } = require("./schema");
 const { AI_AGENT_TOOLS } = require("./AgentTools");
 
 // TASK-004: 中央依赖访问器（替代原 lazy closure + Proxy，消除循环依赖）。
@@ -90,15 +91,15 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
                 const normalizedStepResult = AI()._normalizeExecutionResult(stepResult);
 
                 if (AI()._isErrorResult(normalizedStepResult)) {
-                    results.push({ index: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
+                    results.push({ stepIndex: i + 1, explanation: step.explanation, success: false, result: normalizedStepResult });
                     aborted = true;
                     break;
                 }
 
-                results.push({ index: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
+                results.push({ stepIndex: i + 1, explanation: step.explanation, success: true, result: normalizedStepResult });
             } catch (error) {
                 results.push({
-                    index: i + 1,
+                    stepIndex: i + 1,
                     explanation: step.explanation,
                     success: false,
                     result: AI()._normalizeExecutionResult(`❌ ${error.message}`, { status: "error", name: step.intent })
@@ -111,7 +112,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
         // 汇总报告
         let report = `🤖 **Agent 任务${aborted ? "中断" : "完成"}**\n\n`;
         for (const r of results) {
-            report += `${r.success ? "✅" : "❌"} 步骤 ${r.index}: ${r.explanation}\n`;
+            report += `${r.success ? "✅" : "❌"} 步骤 ${r.stepIndex}: ${r.explanation}\n`;
         }
 
         if (aborted) {
@@ -126,7 +127,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
 
         report += `\n---\n`;
         for (const r of results) {
-            report += `\n**步骤 ${r.index}**: ${r.explanation}\n${AI()._resultToText(r.result)}\n`;
+            report += `\n**步骤 ${r.stepIndex}**: ${r.explanation}\n${AI()._resultToText(r.result)}\n`;
         }
 
         return report;
@@ -160,53 +161,29 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
 
     // ======= Agent Loop (ReAct 模式) =======
 
-    // 尝试解析 AI 回复为工具调用 JSON
+    // 尝试解析 AI 回复为工具调用 JSON(ISS-013 铁律⑥: 统一走 parseAIJson 接缝,
+    // 消除内联 jsonMatch+JSON.parse+try-catch 三段式; toolCall 结构校验由本函数按白名单完成)
     _tryParseToolCall: (response) => {
         if (!response) return null;
-        const trimmed = response.trim();
-        // 尝试直接解析整个响应为 JSON
-        let parsed = null;
-        try {
-            parsed = JSON.parse(trimmed);
-            if (parsed.tool && typeof parsed.tool === "string") {
-                // 白名单校验：tool 必须在 AI_AGENT_TOOLS 中定义
-                const toolDef = AI_AGENT_TOOLS[parsed.tool];
-                if (!toolDef) {
-                    console.warn(`[LD-Notion] _tryParseToolCall: 拒绝未知工具 "${parsed.tool}"`);
-                    return null;
-                }
-                // 参数类型校验：args 必须是对象
-                if (parsed.args !== undefined && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
-                    console.warn(`[LD-Notion] _tryParseToolCall: 工具 "${parsed.tool}" 的参数类型无效`);
-                    return null;
-                }
-                return parsed;
-            }
-        } catch (error) {
-            console.warn("[LD-Notion] 工具调用解析失败:", error);
+        const result = AISchema.parseAIJson("toolCall", response);
+        if (!result.ok || !result.value || typeof result.value !== "object") {
+            if (!result.ok) console.warn("[LD-Notion] 工具调用解析失败:", result.reason);
+            return null;
         }
-        // 尝试提取嵌入的 JSON
-        const jsonMatch = trimmed.match(/\{[\s\S]*"tool"\s*:\s*"[\s\S]*\}/);
-        if (jsonMatch) {
-            try {
-                parsed = JSON.parse(jsonMatch[0]);
-                if (parsed.tool && typeof parsed.tool === "string") {
-                    // 白名单校验：tool 必须在 AI_AGENT_TOOLS 中定义
-                    const toolDef = AI_AGENT_TOOLS[parsed.tool];
-                    if (!toolDef) {
-                        console.warn(`[LD-Notion] _tryParseToolCall: 拒绝未知工具 "${parsed.tool}"`);
-                        return null;
-                    }
-                    // 参数类型校验：args 必须是对象
-                    if (parsed.args !== undefined && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
-                        console.warn(`[LD-Notion] _tryParseToolCall: 工具 "${parsed.tool}" 的参数类型无效`);
-                        return null;
-                    }
-                    return parsed;
-                }
-            } catch (error) {
-                console.warn("[LD-Notion] 工具调用解析失败:", error);
+        const parsed = result.value;
+        if (parsed.tool && typeof parsed.tool === "string") {
+            // 白名单校验：tool 必须在 AI_AGENT_TOOLS 中定义
+            const toolDef = AI_AGENT_TOOLS[parsed.tool];
+            if (!toolDef) {
+                console.warn(`[LD-Notion] _tryParseToolCall: 拒绝未知工具 "${parsed.tool}"`);
+                return null;
             }
+            // 参数类型校验：args 必须是对象
+            if (parsed.args !== undefined && (typeof parsed.args !== "object" || parsed.args === null || Array.isArray(parsed.args))) {
+                console.warn(`[LD-Notion] _tryParseToolCall: 工具 "${parsed.tool}" 的参数类型无效`);
+                return null;
+            }
+            return parsed;
         }
         return null;
     },
@@ -349,7 +326,10 @@ ${availableTools}
         const systemPrompt = AI()._buildAgentSystemPrompt(permLevel, availableTools, settings);
 
         // 2. Agent 循环（<user_input> 包裹防 prompt injection，learnings-003）
-        const messages = [{ role: "user", content: `<user_input>\n${userMessage}\n</user_input>` }];
+        // 工具结果同属不可信输入(抓取的网页内容可携带指令), 同样包裹隔离标签;
+        // 内容做 XML 转义防 </user_input> 标签逃逸(安全审计 hy3 MEDIUM)。
+        const isolate = (content) => `<user_input>\n${String(content).replace(/<\/?user_input>/gi, "&lt;$&gt;")}\n</user_input>`;
+        const messages = [{ role: "user", content: isolate(userMessage) }];
         let iteration = 0;
 
         while (iteration < maxIterations) {
@@ -395,8 +375,8 @@ ${availableTools}
             const result = await AI()._executeAgentToolCall(toolCall, settings, permLevel);
             AgentTrace.recordResult(trace, toolCall, result, iteration);
 
-            // 将工具结果喂回 AI
-            messages.push({ role: "user", content: `[工具结果] ${toolCall.tool}:\n${AI()._resultToAgentPayload(result)}` });
+            // 将工具结果喂回 AI(不可信网页内容同样隔离, 防注入劫持 Agent 方向)
+            messages.push({ role: "user", content: `[工具结果] ${toolCall.tool}:\n${isolate(AI()._resultToAgentPayload(result))}` });
         }
 
         const maxMsg = "🤖 Agent 达到最大执行步数，已停止。如果任务尚未完成，请继续描述你的需求。";

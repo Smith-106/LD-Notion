@@ -2469,9 +2469,12 @@ const UI = {
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">✅ 成功 (${success.length})</div>`;
             success.slice(0, 10).forEach(item => {
+                // 全盘审计修复: escapeHtml 不拦 javascript:/data: scheme——非 http(s) 链接降级为纯文本
+                const safeUrl = /^https?:\/\//i.test(String(item.url || "")) ? item.url : "";
                 html += `<div class="ldb-report-item success">
-                    <span>✓</span>
-                    <a href="${Utils.escapeHtml(item.url)}" target="_blank">${Utils.escapeHtml(Utils.truncateText(item.title, 40))}</a>
+                    ${safeUrl
+                        ? `<a href="${Utils.escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${Utils.escapeHtml(Utils.truncateText(item.title, 40))}</a>`
+                        : `<span>${Utils.escapeHtml(Utils.truncateText(item.title, 40))}</span>`}
                 </div>`;
             });
             if (success.length > 10) {
@@ -2491,7 +2494,7 @@ const UI = {
                     <span>✗</span>
                     <span>${Utils.escapeHtml(Utils.truncateText(fullTitle, 35))}</span>
                 </div>`;
-                html += `<div class="ldb-report-error" title="点击复制完整错误" style="cursor:pointer;" onclick="navigator.clipboard?.writeText(${JSON.stringify(Utils.escapeHtml(fullError))})">${Utils.escapeHtml(Utils.truncateText(fullError, 120))}</div>`;
+                html += `<div class="ldb-report-error" data-err="${Utils.escapeHtml(fullError)}" title="点击复制完整错误" style="cursor:pointer;">${Utils.escapeHtml(Utils.truncateText(fullError, 120))}</div>`;
             });
             if (failed.length > 20) {
                 html += `<div class="ldb-report-item failed"><span>...</span> 还有 ${failed.length - 20} 个失败项</div>`;
@@ -2510,6 +2513,13 @@ const UI = {
 
         html += '</div>';
         container.innerHTML = html;
+        // 失败项错误复制: data-err 属性 + addEventListener(替代内联 onclick JSON 拼接——
+        // 首字符引号截断属性致按钮恒失效且可属性注入, 全盘审计修复)
+        container.querySelectorAll(".ldb-report-error").forEach((el) => {
+            el.addEventListener("click", () => {
+                navigator.clipboard?.writeText(el.dataset.err || "");
+            });
+        });
     },
 
     // 更新操作日志面板

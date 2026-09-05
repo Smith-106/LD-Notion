@@ -54,6 +54,11 @@ const CredentialVault = {
         if (Object.prototype.hasOwnProperty.call(CredentialVault._sessionCache, key)) {
             return CredentialVault._sessionCache[key];
         }
+        // 保险箱已初始化但未解锁: 禁止回退读取明文 legacy(安全审计 hy3 LOW),
+        // 与 getStatus「解锁后才能读取」承诺一致; 未初始化时才允许明文兼容(迁移前形态)。
+        if (CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
+            return defaultValue;
+        }
         return Storage.getRaw(key, defaultValue);
     },
 
@@ -1084,6 +1089,12 @@ const NotionOAuth = {
         NotionOAuth.setMeta({});
         NotionOAuth.clearPendingState();
         NotionOAuth.setAuthMode("manual");
+        // 全盘审计修复(交叉回归#4): 清除 OAuth 配置三键——此前仅 saveConfig 一个写点且空值不覆盖,
+        // clientId 永不可经 UI 清除, 与 invalid_client 无限重试叠加成"授权拦截+续签失败+无法清除"三锁死。
+        // 清空配置后重新授权需重填 Client ID(断开=摆脱 OAuth 的用户意图一致)。
+        Storage.remove(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID);
+        Storage.remove(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET);
+        Storage.remove(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI);
         NotionOAuth.syncApiKeyInputs("");
         NotionOAuth.syncRegisteredControls();
     },
@@ -1163,7 +1174,11 @@ const NotionOAuth = {
                         return;
                     }
                     // 诊断化(三模型共识 R3):错误分类映射,禁止回显请求体(REDACT_IN_LOGS 纪律)
-                    reject(new Error(describeExchangeError(result, response.status)));
+                    const exchangeError = new Error(describeExchangeError(result, response.status));
+                    // 附加原始 OAuth error code(安全审计 hy3 MEDIUM: 降级判断此前只匹配
+                    // 中文文案关键词, invalid_client 分支文案不含 "invalid_client" → 死代码)
+                    exchangeError.code = String(result?.error || "").toLowerCase();
+                    reject(exchangeError);
                 },
                 onerror: (error) => reject(new Error(`OAuth 网络请求失败: ${error?.error || error}`)),
                 timeout: 30000,
@@ -1232,12 +1247,23 @@ const NotionOAuth = {
                 await NotionOAuth.applyTokenResponse(result, { source: "refresh" });
                 return result.access_token;
             } catch (error) {
-                // invalid_grant 视为终态(三模型共识):清 token 提示重新授权,禁止重试循环
+                // invalid_grant/invalid_client 均视为终态(三模型共识 + 全盘审计交叉回归):
+                // invalid_grant=已使用/已过期; invalid_client=clientId 被污染/非法——
+                // 两者都清 token 降级 manual, 禁止无限重试(此前 invalid_client 永不降级,
+                // 与 clientId 无法清除叠加成死锁)。
                 const message = String(error?.message || "");
-                if (message.includes("已使用或已过期") || message.includes("invalid_grant")) {
+                const errorCode = String(error?.code || "").toLowerCase();
+                const isTerminal = errorCode === "invalid_grant" || errorCode === "invalid_client"
+                    || message.includes("已使用或已过期") || message.includes("invalid_grant")
+                    || message.includes("invalid_client") || message.includes("Client 配置无效")
+                    || message.includes("Client ID 与 Client Secret 不匹配");
+                if (isTerminal) {
                     await NotionOAuth.setRefreshToken("");
                     NotionOAuth.setAuthMode("manual");
-                    NotionOAuth.pushNotice("Notion OAuth 登录已过期，请重新点击一键授权。", "error");
+                    const hint = errorCode === "invalid_client" || message.includes("invalid_client") || message.includes("Client ID 与 Client Secret 不匹配")
+                        ? "Notion OAuth Client 配置无效，已切换手动模式。请重新一键授权或填写有效 Client ID。"
+                        : "Notion OAuth 登录已过期，请重新点击一键授权。";
+                    NotionOAuth.pushNotice(hint, "error");
                 }
                 throw error;
             } finally {

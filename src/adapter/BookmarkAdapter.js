@@ -45,7 +45,12 @@ const BookmarkAdapter = Object.assign(Object.create(SourceAdapter), {
             // F5 共识(R11 实证): Chrome bookmarks API dateAdded 为毫秒,
             // 旧代码 /1000 把 2025 毫秒压成 1970 年 → 增量过滤恒 false →
             // SyncCoordinator 首轮后冻结、去重层失效。毫秒直传即可。
-            createdAt: raw.dateAdded ? new Date(raw.dateAdded).toISOString() : "",
+            // 非法日期兜底: toISOString 对 RangeError 输入抛错致整次同步失败(全盘审计 find 16)
+            createdAt: (() => {
+                if (!raw.dateAdded) return "";
+                const d = new Date(raw.dateAdded);
+                return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+            })(),
             raw,
         };
     },

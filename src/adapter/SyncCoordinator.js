@@ -39,6 +39,9 @@ const SyncCoordinator = {
      * @param {string} sourceType - 适配器注册类型
      * @param {Object} [options]
      * @param {boolean} [options.fullSync=false] - 强制全量拉取
+     * @param {boolean} [options.commitWatermark=true] - 是否在 sync 内推进 watermark。
+     *   F7 共识: 消费方自行按成功项提交时应传 false(避免 sync 推进后消费方抛错 →
+     *   watermark 已越过未导出项, 增量永久冻结; 全盘审计修复)。
      * @returns {Promise<{newItems: NormalizedItem[], skippedCount: number, watermark: Object|null, pendingKeys: string[], error?: string}>}
      *
      * F6 共识(标记后置): 本方法只过滤不标记。返回的 pendingKeys 由消费方在
@@ -80,7 +83,7 @@ const SyncCoordinator = {
                     pendingKeys.push(dedupKey);
                 }
             } finally {
-                DedupStore.endBatch();
+                DedupStore.endBatch(sourceType);
             }
 
             // 计算新水位线 (仅基于 newItems; F7: 最终 watermark 由消费方按成功项推进)
@@ -90,13 +93,16 @@ const SyncCoordinator = {
                 (item) => adapter.getItemId(item)
             );
 
-            // 更新成功状态
-            SyncStateV2.updateSourceState(sourceType, {
+            // 更新成功状态 (F7: watermark 仅当消费方未自行提交时推进)
+            const statePatch = {
                 lastSuccessAt: Date.now(),
                 lastOutcome: "success",
                 lastStats: { newCount: newItems.length, skippedCount },
-                watermark: newWatermark || currentState.watermark,
-            });
+            };
+            if (options.commitWatermark !== false) {
+                statePatch.watermark = newWatermark || currentState.watermark;
+            }
+            SyncStateV2.updateSourceState(sourceType, statePatch);
 
             return { newItems, skippedCount, watermark: newWatermark, pendingKeys };
         } catch (error) {

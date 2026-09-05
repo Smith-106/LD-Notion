@@ -279,8 +279,13 @@ function createHarness(url, events) {
 async function verifySurfaceRuntime(contentSource, testCase) {
     const events = [];
     const harness = createHarness(testCase.url, events);
-    const runner = new Function(...Object.keys(harness.sandbox), contentSource);
-    runner(...Object.values(harness.sandbox));
+    // GM_info 已由 buildGmShim 在 content.js 内以 const 声明,
+    // 不能作为 Function 参数名传入(重复声明 SyntaxError);
+    // 改为注入 globalThis(函数体内 const 声明优先遮蔽, 不影响 shim 生效)。
+    const params = Object.keys(harness.sandbox).filter((k) => k !== "GM_info");
+    const gmInfoPrelude = `globalThis.GM_info = ${JSON.stringify(harness.sandbox.GM_info)};\n`;
+    const runner = new Function(...params, gmInfoPrelude + contentSource);
+    runner(...params.map((k) => harness.sandbox[k]));
 
     await harness.flush();
     await harness.flush();

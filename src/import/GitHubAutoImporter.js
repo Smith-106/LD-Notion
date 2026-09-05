@@ -6,6 +6,7 @@ const { Storage, SyncState } = require("../storage");
 const { GitHubAPI } = require("./GitHubAPI");
 const { NotionAPI } = require("../api");
 const { emit } = require("../coordination/event-bus");
+const { SyncLock } = require("../sync-lock");
 
 const GitHubAutoImporter = {
     isRunning: false,
@@ -389,6 +390,9 @@ GitHubAutoImporter.run = async () => {
         return;
     }
     if (GitHubAutoImporter.isRunning) return;
+    // 全盘审计修复(find 10): 其余三个自动导入器均有 SyncLock.isExporting 互斥,
+    // GitHub 手动导出(GitHubExporter 批量写)与自动导入并发打 Notion → 速率竞争+潜在重复写入
+    if (SyncLock.isExporting) return;
 
     const settings = GitHubAutoImporter.buildSettings();
     if (!settings.apiKey || !settings.databaseId) {

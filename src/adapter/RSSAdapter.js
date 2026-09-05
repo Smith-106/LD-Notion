@@ -38,7 +38,9 @@ const RSSAdapter = Object.assign(Object.create(SourceAdapter), {
             url: raw.link || "",
             author: raw.creator || raw.author || "",
             tags: raw.categories || [],
-            createdAt: raw.pubDate || raw.isoDate || "",
+            // RSSAutoImporter.normalizeItem 输出 publishedAt(ISO), 适配器原读 pubDate/isoDate 恒空 →
+            // watermark 过滤死 + 每次全量拉取(全盘审计 find 14 修复)
+            createdAt: raw.pubDate || raw.isoDate || raw.publishedAt || "",
             raw,
         };
     },

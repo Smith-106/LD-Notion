@@ -30,9 +30,12 @@ const base64ToBytes = (b64) => {
 };
 
 const bytesToBase64 = (bytes) => {
-    if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
+    // 浏览器 subtle.encrypt 返回 ArrayBuffer(无 length 迭代语义) —
+    // 先包 Uint8Array, 否则循环体不执行 → 空密文不可解(全盘审计修复, 对照 auth 侧 new Uint8Array 写法)
+    const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    if (typeof Buffer !== "undefined") return Buffer.from(view).toString("base64");
     let binary = "";
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    for (let i = 0; i < view.length; i++) binary += String.fromCharCode(view[i]);
     return btoa(binary);
 };
 

@@ -58,15 +58,35 @@ const UrlValidator = {
 
     // 判断是否为私有/内网主机
     _isPrivateHost: (hostname) => {
-        if (UrlValidator.LOCAL_HOSTS.has(hostname)) return true;
-        // 10.x / 172.16-31.x / 192.168.x / 169.254.x
-        const m = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+        // WHATWG URL 对 IPv4-mapped IPv6 归一化为十六进制(如 ::ffff:7f00:1),
+        // 且保留 localhost 尾点(localhost.)——两者均可能绕过字面匹配(安全审计 hy3 HIGH)。
+        const normalized = String(hostname).replace(/\.$/, "").toLowerCase();
+        if (UrlValidator.LOCAL_HOSTS.has(normalized)) return true;
+        // 127.x/8(此前仅 LOCAL_HOSTS 的 localhost/127.0.0.1 字面量)、0.0.0.0、
+        // 10.x / 172.16-31.x / 192.168.x / 169.254.x(全盘审计 find 21 补漏网段)
+        const m = normalized.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
         if (m) {
-            const [a, b] = [parseInt(m[1]), parseInt(m[2])];
+            const [a, b] = [parseInt(m[1], 10), parseInt(m[2], 10)];
+            if (a === 127 || (a === 0 && b === 0)) return true;
             if (a === 10) return true;
             if (a === 172 && b >= 16 && b <= 31) return true;
             if (a === 192 && b === 168) return true;
             if (a === 169 && b === 254) return true;
+        }
+        // IPv6 私有段/回环(new URL 可规范化的形式)
+        if (normalized.startsWith("[")) {
+            const bare = normalized.replace(/^\[|\]$/g, "");
+            if (bare === "::1" || bare === "::" || bare.startsWith("fe80:") || bare.startsWith("fc") || bare.startsWith("fd") || bare.startsWith("::ffff:127.")) return true;
+            // IPv4-mapped 私有段 ::ffff:a.b.c.d
+            const v4m = bare.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+            if (v4m) return UrlValidator._isPrivateHost(v4m.slice(1).join("."));
+            // IPv4-mapped 十六进制形态(WHATWG 规范化输出): ::ffff:7f00:1 / ::ffff:a9fe:a9fe
+            const v4mHex = bare.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+            if (v4mHex) {
+                const hi = parseInt(v4mHex[1], 16);
+                const lo = parseInt(v4mHex[2], 16);
+                return UrlValidator._isPrivateHost(`${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`);
+            }
         }
         return false;
     },

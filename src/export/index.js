@@ -848,12 +848,17 @@ const Exporter = {
         // 启动 N 个 worker
         const workerCount = Math.min(concurrency, bookmarks.length - startIndex);
         const workers = [];
-        for (let w = 0; w < workerCount; w++) {
-            workers.push(worker());
-            // 错开启动避免同时请求
-            if (w < workerCount - 1) await Utils.sleep(100);
+        try {
+            for (let w = 0; w < workerCount; w++) {
+                workers.push(worker());
+                // 错开启动避免同时请求
+                if (w < workerCount - 1) await Utils.sleep(100);
+            }
+            await Promise.all(workers);
+        } finally {
+            // worker 内 onProgress 抛错/任意异常都必须释放互斥锁, 否则自动同步永久瘫痪
+            SyncLock.isExporting = false;
         }
-        await Promise.all(workers);
 
         // 取消时收集剩余为 skipped
         if (Exporter.isCancelled && remaining.length > 0) {
@@ -866,7 +871,6 @@ const Exporter = {
             }
         }
 
-        SyncLock.isExporting = false;
         return results;
     },
 };

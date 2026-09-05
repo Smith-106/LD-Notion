@@ -60,7 +60,7 @@ const ZhihuAPI = {
             const authorEl = el.querySelector(".AuthorInfo-name .UserLink-link");
             const voteEl = el.querySelector(".VoteButton--up");
             return {
-                index: i,
+                answerIndex: i,
                 author: authorEl?.textContent?.trim() || "匿名",
                 html: contentEl?.innerHTML || "",
                 voteCount: ZhihuAPI._parseVoteCount(voteEl?.textContent),

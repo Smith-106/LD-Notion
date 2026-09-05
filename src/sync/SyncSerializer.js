@@ -222,7 +222,8 @@ const SyncSerializer = {
                 const num = Number(ts);
                 if (!Number.isFinite(num) || num <= 0) continue;
                 if (++count > SyncConstants.MAX_DEDUP_ENTRIES_PER_SOURCE) break;
-                const key = meta.urlKeyed && hashUrls ? `h:${await SyncCrypto.sha256Hex(k)}` : k;
+                // 本地账本含原文键与 h: 哈希键双条目(DedupStore 双写); 已哈希键跳过再哈希
+                const key = meta.urlKeyed && hashUrls && !k.startsWith("h:") ? `h:${await SyncCrypto.sha256Hex(k)}` : k;
                 clean[key] = num;
             }
             if (Object.keys(clean).length > 0) payload.dedup[src] = clean;

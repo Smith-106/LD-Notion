@@ -54,7 +54,8 @@ const LinuxDoAPI = {
                 return await res.json();
             } catch (e) {
                 lastErr = e;
-                if (i < retries) await Utils.sleep(250 * (i + 1));
+                // 铁律⑩: 指数退避 1000*2^attempt(此前线性 250*(i+1), 全盘审计 find 修正)
+                if (i < retries) await Utils.sleep(1000 * Math.pow(2, i));
             } finally {
                 clearTimeout(timer);
             }

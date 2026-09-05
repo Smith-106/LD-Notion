@@ -516,7 +516,7 @@ const RSSAutoImporter = {
         });
         RSSAutoImporter.updateStatus("正在同步 RSS Feed...");
 
-        const syncResult = await SyncCoordinator.sync("rss");
+        const syncResult = await SyncCoordinator.sync("rss", { commitWatermark: false });
         if (syncResult.error) {
             throw new Error(syncResult.error);
         }
@@ -633,8 +633,10 @@ const RSSAutoImporter = {
             if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
             if (syncedMeta.title) index.byTitle.set(syncedMeta.title, syncedMeta);
             // F6 共识(标记后置): Notion 写入成功后条目才进去重账本,失败项不落账、下轮重试。
+            // 全盘审计修复(find 8 键空间统一): 落账键用 adapter 过滤键 `rss:${id}`(此前用无前缀
+            // itemKey URL → SyncCoordinator 过滤层 isDuplicate 恒 false, 每轮全量重扫)。
             if (result.created || result.updated) {
-                SyncCoordinator.markItemSeen("rss", item.itemKey);
+                SyncCoordinator.markItemSeen("rss", `rss:${item.id || ""}`);
             }
             nextSnapshot[item.itemKey] = RSSAutoImporter.buildSnapshotEntry(item, pageId);
             result.success = true;

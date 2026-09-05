@@ -261,9 +261,15 @@ const OperationGuard = {
             if (OperationGuard.isDangerous(operation)) {
                 if (operation === "deletePage") {
                     // deletePage 使用软删除（归档），可以恢复
+                    // 撤销执行时经 Guard 复查(安全审计 hy3 LOW): 删除与撤销之间
+                    // 权限若被下调, restorePage(level 2)仍须过闸, 禁止裸调绕过
                     UndoManager.register({
                         operation,
-                        undoAction: () => NotionAPI.restorePage(context.pageId, context.apiKey),
+                        undoAction: () => OperationGuard.execute(
+                            "restorePage",
+                            () => NotionAPI.restorePage(context.pageId, context.apiKey),
+                            { ...context, trigger: "user_undo" }
+                        ),
                         description: `恢复页面: ${context.itemName || context.pageId}`,
                     });
                 }
@@ -476,15 +482,24 @@ const OperationLog = {
                 context[key] = "***REDACTED***";
             }
         }
+        // 通用敏感键名兜底(CWE-532): guard context 用 apiKey 而非存储键名,
+        // 仅按存储键名脱敏会漏掉真实 token 落盘(安全审计 hy3 CRITICAL)。
+        for (const key of Object.keys(context)) {
+            if (/api[_-]?key|token|secret|passphrase|password/i.test(key)) {
+                context[key] = "***REDACTED***";
+            }
+        }
         redacted.context = context;
         return redacted;
     },
 
-    // 获取所有日志
+    // 获取所有日志(损坏存储兜底: JSON 解析成功但非数组时返回 [] ,
+    // 否则 add 中 logs.unshift 抛 TypeError → OperationGuard 放行前崩溃, 全盘审计修复)
     getAll: () => {
         const data = Storage.get(CONFIG.STORAGE_KEYS.OPERATION_LOG, "[]");
         try {
-            return JSON.parse(data);
+            const parsed = JSON.parse(data);
+            return Array.isArray(parsed) ? parsed : [];
         } catch {
             return [];
         }

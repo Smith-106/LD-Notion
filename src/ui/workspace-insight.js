@@ -952,7 +952,7 @@ const WorkspaceInsight = {
         const timelineMarkup = model.timeline.length > 0
             ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
                 <div class="ldb-view-timeline-item">
-                    <div class="ldb-view-timeline-label">${item.label}</div>
+                    <div class="ldb-view-timeline-label">${Utils.escapeHtml(String(item.label || ""))}</div>
                     <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${Math.max(8, item.pct || UI().getViewPct(item.count, model.totalPages))}%;"></div></div>
                     <div class="ldb-view-timeline-value">${item.count} 页</div>
                 </div>

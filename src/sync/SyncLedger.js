@@ -102,10 +102,10 @@ const SyncLedger = {
      */
     _rowToProperties(row) {
         const payloadText = JSON.stringify(row.payload || {});
-        const { rows } = SyncFragmenter.fragment(payloadText);
-        // v1: 单行 payload 只允许 1 片(超限由引擎分片到多行)
-        if (rows.length > 1) {
-            throw new Error(`行 payload 过大(${payloadText.length} 字符), 需分片为多行`);
+        // Notion rich_text content 上限 2000 字符; v1 单行方案不做多行分片。
+        // 超限显式拒绝(此前 slice(0,2000) 静默截断 JSON → 远端数据损坏, 全盘审计修复)。
+        if (payloadText.length > 2000) {
+            throw new Error(`行 payload 过大(${payloadText.length} 字符, Notion 单属性上限 2000), 请减少单源去重条目或等待 TTL 淘汰后重试`);
         }
         return {
             [ROW_TITLE_PROP]: { title: [{ type: "text", text: { content: String(row.key || "").slice(0, 1900) } }] },
@@ -113,7 +113,7 @@ const SyncLedger = {
             [ROW_VERSION_PROP]: { number: Number(row.version) || 0 },
             [ROW_UPDATED_AT_PROP]: { rich_text: [{ type: "text", text: { content: String(row.updatedAt || "").slice(0, 100) } }] },
             [ROW_DEVICE_PROP]: { rich_text: [{ type: "text", text: { content: String(row.deviceId || "").slice(0, 100) } }] },
-            [ROW_PAYLOAD_PROP]: { rich_text: [{ type: "text", text: { content: rows[0].slice(0, 2000) } }] },
+            [ROW_PAYLOAD_PROP]: { rich_text: [{ type: "text", text: { content: payloadText } }] },
             来源: { rich_text: [{ type: "text", text: { content: "LD-Sync" } }] },
         };
     },

@@ -1495,7 +1495,11 @@ const UIEvents = {
                 },
             });
         };
-        refs.clearLinuxdoDedupBtn.onclick = () => clearWithConfirm("Linux.do 去重", () => DedupStore.clearSeen("linuxdo"));
+        refs.clearLinuxdoDedupBtn.onclick = () => clearWithConfirm("Linux.do 去重", () => {
+            // 全盘审计修复: 直调 DedupStore.clearSeen 绕过 Storage._exportedTopicsCache
+            // → 同 tab 内 isTopicExported 仍返回 true, 按钮实际无效(刷新后才生效)
+            Storage.clearExportedTopics();
+        });
         refs.clearGithubExportedBtn.onclick = () => clearWithConfirm("GitHub 已导出", () => GitHubAPI.clearExportedRecords());
         refs.clearBookmarkExportedBtn.onclick = () => clearWithConfirm("书签已导出", () => BookmarkExporter.clearExportedRecords());
         renderDedupSummary();

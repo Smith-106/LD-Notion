@@ -45,6 +45,26 @@ const REQUIRED_CONSTS = [
     "ZhihuAPI",
     "GenericExtractor",
     "UI",
+    // 全盘审计: 补登多端同步与后续拆分模块(此前 19 项名单对新模块失效, 等价性校验盲区)
+    "SyncEngine",
+    "SyncConfig",
+    "SyncCrypto",
+    "SyncSerializer",
+    "SyncPayload",
+    "SyncLedger",
+    "SyncRateLimiter",
+    "SyncFragmenter",
+    "DedupStore",
+    "UICommandService",
+    "NotionSiteUI",
+    "GenericUI",
+    "WorkspaceService",
+    "GenericExporter",
+    "UpdateChecker",
+    "SiteDetector",
+    "OperationLog",
+    "UndoManager",
+    "UrlValidator",
 ];
 
 // ===========================================
@@ -57,6 +77,8 @@ const REQUIRED_GM_APIS = [
     "GM_xmlhttpRequest",
     "GM_notification",
     "GM_addValueChangeListener",
+    // 全盘审计: UpdateChecker.getCurrentVersion 依赖 GM_info.script.version(src 13 处使用)
+    "GM_info",
 ];
 
 // ===========================================
@@ -76,7 +98,9 @@ const REQUIRED_BUILD_MARKERS = [
 function extractStorageKeyValues(source) {
     const keys = [];
     // 匹配 STORAGE_KEYS 对象中的字符串值: KEY_NAME: "ldb_xxx"
-    const re = /^\s*(?:NOTION_|CREDENTIAL_|FILTER_|IMG_|PANEL_|EXPORTED_|PERMISSION_|REQUIRE_|ENABLE_|OPERATION_|REQUEST_|AI_|CHAT_|EXPORT_|PARENT_|NOTION_PANEL_|NOTION_FLOAT_|FETCHED_|WORKSPACE_|AUTO_|GITHUB_|BOOKMARK_|RSS_|LINUXDO_|EXT_|MODE_|CROSS_|AUTO_SYNC_|OBS_|PANEL_SIZE_|THEME_|ACTIVE_|SYNC_)\w+:\s*"([^"]+)"/gm;
+    // 前缀白名单补 COLLAPSE_/FLOAT_BTN_/AGENT_/UPDATE_(全盘审计: 此前 98/105 漏检 12 键,
+    // NOTION_FLOAT_ 已无对应键, 移除死前缀)。
+    const re = /^\s*(?:NOTION_|CREDENTIAL_|FILTER_|IMG_|PANEL_|EXPORTED_|PERMISSION_|REQUIRE_|ENABLE_|OPERATION_|REQUEST_|AI_|CHAT_|EXPORT_|PARENT_|NOTION_PANEL_|FETCHED_|WORKSPACE_|AUTO_|GITHUB_|BOOKMARK_|RSS_|LINUXDO_|EXT_|MODE_|CROSS_|AUTO_SYNC_|OBS_|PANEL_SIZE_|THEME_|ACTIVE_|SYNC_|COLLAPSE_|FLOAT_BTN_|AGENT_|UPDATE_)\w+:\s*"([^"]+)"/gm;
     let match;
     while ((match = re.exec(source)) !== null) {
         keys.push(match[1]);
