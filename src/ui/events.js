@@ -1357,6 +1357,9 @@ const UIEvents = {
                             const fileName = UI.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
                             const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
                             if (!noteResult.ok) throw new Error(noteResult.error);
+                            // v3.14.3 修复: Obsidian 导出成功同样写入已导出账本(与 Notion 导出同构),
+                            // 否则 UI 恒显示“待导出”致重复导出。
+                            Storage.markTopicExported(topicId);
                             results.success.push({
                                 title: topic.title,
                                 url: topic.url,

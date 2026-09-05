@@ -561,10 +561,10 @@ const BookmarkExporter = {
 
     // 批量导出循环末尾单次回写已导出映射（PERF-003）：循环内仅 mutate 内存缓存，
     // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。语义与逐条 markExported 等价。
-    // 回写前淘汰超过 90 天的过期条目（PERF-001 泛化）。
+    // v3.14.3: 改容量上限淘汰（用户书签数天然有界），不再按 90 天时间 TTL 误删导出事实。
     flushExported: () => {
         if (BookmarkExporter._exportedCache) {
-            BookmarkExporter._evictExpired(BookmarkExporter._exportedCache);
+            BookmarkExporter._evictByCapacity(BookmarkExporter._exportedCache);
             Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(BookmarkExporter._exportedCache));
         }
     },
@@ -575,12 +575,16 @@ const BookmarkExporter = {
         Storage.remove(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED);
     },
 
-    // 淘汰超过 90 天的过期条目（PERF-001 泛化，与 DedupStore._evictExpired 同构）
-    _EXPORT_TTL_MS: 90 * 24 * 60 * 60 * 1000,
-    _evictExpired: (set) => {
-        const cutoff = Date.now() - BookmarkExporter._EXPORT_TTL_MS;
-        for (const key of Object.keys(set)) {
-            if (set[key] < cutoff) delete set[key];
+    // v3.14.3: 导出账本容量上限（书签 URL 数天然有界）——
+    // 仅在超过上限时淘汰最旧条目，避免 90 天时间窗误删导出事实致 UI 误判“待导出”。
+    _EXPORT_CAPACITY_LIMIT: 10000,
+    _evictByCapacity: (set) => {
+        const keys = Object.keys(set);
+        const excess = keys.length - BookmarkExporter._EXPORT_CAPACITY_LIMIT;
+        if (excess <= 0) return;
+        keys.sort((a, b) => Number(set[a] || 0) - Number(set[b] || 0));
+        for (let i = 0; i < excess && i < keys.length; i++) {
+            delete set[keys[i]];
         }
     },
 

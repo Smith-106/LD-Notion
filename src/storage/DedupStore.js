@@ -6,7 +6,12 @@ const { emit } = require("../coordination/event-bus");
 
 // 去重条目存活时间：90 天。超过此时间的条目在批量/单点写回时自动淘汰，
 // 防止 GM storage 中单键 JSON 无界增长导致 sync 延迟线性增加（PERF-001）。
+// v3.14.3 修复：时间 TTL 只用于 URL 键源（bookmark/rss/zhihu/generic，无界）；
+// id 键源（linuxdo/github-*，导出账本，天然有界）改容量上限淘汰，
+// 避免 90 天后已导出记录被静默遗忘、UI 误判“待导出”。
 const DEDUP_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+// id 键源容量上限：超过后淘汰最旧条目（导出账本防误删的时间 TTL 替代）
+const DEDUP_CAPACITY_LIMIT = 10000;
 
 // URL 键源：跨设备同步时 payload 哈希化(h:sha256)。本地账本同时保留原文键与
 // 哈希键双条目(双写), 保证同步 pull 应用后的哈希键可被原文键查询命中
@@ -23,6 +28,7 @@ const HASH_PREFIX = "h:";
  */
 const DedupStore = {
     DEDUP_TTL_MS,
+    DEDUP_CAPACITY_LIMIT,
     URL_KEYED_SOURCES,
     _keyFor(sourceType) {
         return `${CONFIG.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`;
@@ -50,8 +56,14 @@ const DedupStore = {
     },
 
     _saveSet(sourceType, set) {
-        // 单点写回同样淘汰过期条目(batch 路径由 endBatch 兜底, 双处幂等)
-        this._evictExpired(set);
+        // 单点写回同样淘汰过期条目(batch 路径由 endBatch 兜底, 双处幂等)。
+        // v3.14.3: URL 键源按时间 TTL 淘汰; id 键源(导出账本)按容量上限淘汰,
+        // 防止 90 天时间窗误删导出事实导致 UI 误判“待导出”。
+        if (URL_KEYED_SOURCES.includes(sourceType)) {
+            this._evictExpired(set);
+        } else {
+            this._evictByCapacity(set);
+        }
         GM_setValue(this._keyFor(sourceType), JSON.stringify(set));
     },
 
@@ -77,7 +89,12 @@ const DedupStore = {
         for (const src of targets) {
             const cache = this._batchCaches[src];
             if (cache && cache.dirty) {
-                this._evictExpired(cache.set);
+                // v3.14.3: 与 _saveSet 同规则——URL 键源时间 TTL, id 键源容量上限
+                if (URL_KEYED_SOURCES.includes(src)) {
+                    this._evictExpired(cache.set);
+                } else {
+                    this._evictByCapacity(cache.set);
+                }
                 this._saveSet(src, cache.set);
                 // F-SYNC-11: 去重账本变更事件(零订阅者静默),多端同步引擎据此触发 push。
                 emit("storage:state-committed", { sourceType: src, kind: "dedup" });
@@ -107,6 +124,26 @@ const DedupStore = {
                 delete set[key];
                 evicted++;
             }
+        }
+        return evicted;
+    },
+
+    /**
+     * 容量上限淘汰（v3.14.3，id 键源导出账本专用）：
+     * 仅当集合超过 DEDUP_CAPACITY_LIMIT 时淘汰最旧条目，
+     * 防止导出账本无界增长，同时不因 90 天时间窗误删导出事实。
+     * @param {Object} set - dedup 集合 {key: timestamp}
+     * @returns {number} 淘汰的条目数
+     */
+    _evictByCapacity(set) {
+        const keys = Object.keys(set);
+        const excess = keys.length - DEDUP_CAPACITY_LIMIT;
+        if (excess <= 0) return 0;
+        keys.sort((a, b) => Number(set[a] || 0) - Number(set[b] || 0));
+        let evicted = 0;
+        for (let i = 0; i < excess && i < keys.length; i++) {
+            delete set[keys[i]];
+            evicted++;
         }
         return evicted;
     },

@@ -1,5 +1,18 @@
 # 更新日志
 
+## [3.14.3] - 2026-09-05
+
+### 修复（导出账本 90 天 TTL 误删 · “已导出内容反复显示待导出”根因）
+
+**根因**：导出账本（LinuxDo 帖文 / GitHub 仓库与 Gist / 浏览器书签）在每次写回时按 90 天时间 TTL 全局淘汰，超过 90 天的已导出记录被静默遗忘；判定“是否已导出”只查本地账本、从不与 Notion 工作区页面核对 → 已导出的内容被 UI 重新判为“待导出”，列表反复显示（用户报告：Notion 已存在 837 页，本地仍显示 471 项待导出）。此外 Obsidian 导出路径（LinuxDo 帖文 / GitHub 仓库）成功写入后从不记录账本，导出的内容下次仍显示“待导出”。
+
+**修复**：
+- 导出账本淘汰策略由「90 天时间 TTL」改为「容量上限淘汰」：仅当单账本超过 10000 条时淘汰最旧条目，导出事实不再因时间流逝丢失；URL 键源去重账本（bookmark/rss/zhihu/generic）保留时间 TTL 防无界增长（DedupStore / GitHubAPI / BookmarkExporter 三处同构）
+- Obsidian 导出成功即写入已导出账本（LinuxDo 帖文 `markTopicExported`；GitHub 仓库/Gist `markExportedAndFlush`/`markGistExportedAndFlush`），与 Notion 导出路径对称
+- 工作区扫描后自动对账回填：Notion 页面“链接”属性与本地已加载项 URL 归一化精确匹配，命中即回写已导出账本（仅 strict 去重模式回填 LinuxDo，allow_duplicates 语义不被对账破坏）；扫描完成状态栏提示识别数量
+
+**升级说明**：安装后重新点击「刷新工作区」即可把 Notion 中已存在的内容与本地账本对齐，此前被 90 天窗口遗忘的导出记录恢复正常识别。
+
 ## [3.14.2] - 2026-09-05
 
 ### 修复（每次更新后 API Key 失效 · 保险箱会话锁定根因）

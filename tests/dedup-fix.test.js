@@ -215,3 +215,79 @@ describe("F6 标记后置(SyncCoordinator)", () => {
         }
     });
 });
+
+// ============ v3.14.3 导出账本 TTL 误删修复契约 ============
+
+describe("R-TTL-01 导出账本容量上限淘汰(替代 90 天时间 TTL)", () => {
+    it("id 键源(linuxdo 导出账本)超过 90 天的条目写回时不再被时间淘汰", () => {
+        const old = Date.now() - 91 * 24 * 60 * 60 * 1000;
+        const fresh = Date.now();
+        const set = { 101: old, 202: fresh };
+        const evicted = DedupStore._evictByCapacity(set);
+        expect(evicted).toBe(0);
+        expect(set).toEqual({ 101: old, 202: fresh });
+    });
+
+    it("id 键源写回路径(_saveSet)不再时间淘汰: 91 天前导出的键仍被识别为已导出", () => {
+        const old = Date.now() - 91 * 24 * 60 * 60 * 1000;
+        store.set(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS + ":linuxdo", JSON.stringify({ 101: old }));
+        Storage.markTopicExported(202);
+        // 101 未被 90 天窗口误删
+        expect(Storage.isTopicExported(101)).toBe(true);
+        expect(Storage.isTopicExported(202)).toBe(true);
+    });
+
+    it("id 键源超过容量上限(10000)时淘汰最旧条目", () => {
+        const set = {};
+        for (let i = 0; i < DedupStore.DEDUP_CAPACITY_LIMIT + 5; i++) {
+            set[`k${i}`] = Date.now() - (10000 - i); // 旧键时间戳更小
+        }
+        const evicted = DedupStore._evictByCapacity(set);
+        expect(evicted).toBe(5);
+        expect(Object.keys(set).length).toBe(DedupStore.DEDUP_CAPACITY_LIMIT);
+        // 最旧的 5 条被淘汰
+        expect(set.k0).toBeUndefined();
+        expect(set.k4).toBeUndefined();
+        // 最新的仍在
+        expect(set.k10004).toBeDefined();
+    });
+
+    it("URL 键源仍按 90 天时间 TTL 淘汰(去重账本防无界增长)", () => {
+        const old = Date.now() - 91 * 24 * 60 * 60 * 1000;
+        const set = { "https://a.com/x": old, "https://b.com/y": Date.now() };
+        const evicted = DedupStore._evictExpired(set);
+        expect(evicted).toBe(1);
+        expect(set["https://a.com/x"]).toBeUndefined();
+        expect(set["https://b.com/y"]).toBeDefined();
+    });
+
+    it("GitHubAPI.flushExported: 91 天前的 repo 导出记录不再被时间淘汰", () => {
+        const { GitHubAPI } = require("../src/import/GitHubAPI");
+        const old = Date.now() - 91 * 24 * 60 * 60 * 1000;
+        store.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify({ "owner/repo-old": old }));
+        GitHubAPI.markExportedAndFlush("owner/repo-new");
+        expect(GitHubAPI.isExported("owner/repo-old")).toBe(true);
+        expect(GitHubAPI.isExported("owner/repo-new")).toBe(true);
+    });
+
+    it("GitHubAPI 超过容量上限时淘汰最旧 repo 记录", () => {
+        const { GitHubAPI } = require("../src/import/GitHubAPI");
+        const set = {};
+        for (let i = 0; i < GitHubAPI._EXPORT_CAPACITY_LIMIT + 3; i++) {
+            set[`owner/repo-${i}`] = Date.now() - (10000 - i);
+        }
+        GitHubAPI._evictByCapacity(set);
+        expect(Object.keys(set).length).toBe(GitHubAPI._EXPORT_CAPACITY_LIMIT);
+        expect(set["owner/repo-0"]).toBeUndefined();
+        expect(set[`owner/repo-${GitHubAPI._EXPORT_CAPACITY_LIMIT + 2}`]).toBeDefined();
+    });
+
+    it("BookmarkExporter.flushExported: 91 天前的书签导出记录不再被时间淘汰", () => {
+        const { BookmarkExporter } = require("../src/bridge/BookmarkExporter");
+        const old = Date.now() - 91 * 24 * 60 * 60 * 1000;
+        store.set(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify({ "https://old.com/x": old }));
+        BookmarkExporter.markExportedAndFlush("https://new.com/y");
+        expect(BookmarkExporter.isExported("https://old.com/x")).toBe(true);
+        expect(BookmarkExporter.isExported("https://new.com/y")).toBe(true);
+    });
+});

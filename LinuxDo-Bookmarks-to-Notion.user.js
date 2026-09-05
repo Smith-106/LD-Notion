@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.2
+// @version      3.14.3
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -1071,10 +1071,12 @@
       var { sha256HexSync } = require_sha256();
       var { emit } = require_event_bus();
       var DEDUP_TTL_MS = 90 * 24 * 60 * 60 * 1e3;
+      var DEDUP_CAPACITY_LIMIT = 1e4;
       var URL_KEYED_SOURCES = Object.freeze(["bookmark", "rss", "zhihu", "generic"]);
       var HASH_PREFIX = "h:";
       var DedupStore = {
         DEDUP_TTL_MS,
+        DEDUP_CAPACITY_LIMIT,
         URL_KEYED_SOURCES,
         _keyFor(sourceType) {
           return `${CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`;
@@ -1098,7 +1100,11 @@
           }
         },
         _saveSet(sourceType, set) {
-          this._evictExpired(set);
+          if (URL_KEYED_SOURCES.includes(sourceType)) {
+            this._evictExpired(set);
+          } else {
+            this._evictByCapacity(set);
+          }
           GM_setValue(this._keyFor(sourceType), JSON.stringify(set));
         },
         // --- batch 模式: 减少 IPC 调用(全盘审计 find 7: 单槽 → 按 sourceType 分槽,
@@ -1122,7 +1128,11 @@
           for (const src of targets) {
             const cache = this._batchCaches[src];
             if (cache && cache.dirty) {
-              this._evictExpired(cache.set);
+              if (URL_KEYED_SOURCES.includes(src)) {
+                this._evictExpired(cache.set);
+              } else {
+                this._evictByCapacity(cache.set);
+              }
               this._saveSet(src, cache.set);
               emit("storage:state-committed", { sourceType: src, kind: "dedup" });
             }
@@ -1149,6 +1159,25 @@
               delete set[key];
               evicted++;
             }
+          }
+          return evicted;
+        },
+        /**
+         * 容量上限淘汰（v3.14.3，id 键源导出账本专用）：
+         * 仅当集合超过 DEDUP_CAPACITY_LIMIT 时淘汰最旧条目，
+         * 防止导出账本无界增长，同时不因 90 天时间窗误删导出事实。
+         * @param {Object} set - dedup 集合 {key: timestamp}
+         * @returns {number} 淘汰的条目数
+         */
+        _evictByCapacity(set) {
+          const keys = Object.keys(set);
+          const excess = keys.length - DEDUP_CAPACITY_LIMIT;
+          if (excess <= 0) return 0;
+          keys.sort((a, b) => Number(set[a] || 0) - Number(set[b] || 0));
+          let evicted = 0;
+          for (let i = 0; i < excess && i < keys.length; i++) {
+            delete set[keys[i]];
+            evicted++;
           }
           return evicted;
         },
@@ -10656,10 +10685,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         // 批量导出循环末尾单次回写已导出映射（PERF-003）：循环内仅 mutate 内存缓存，
         // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。语义与逐条 markExported 等价。
-        // 回写前淘汰超过 90 天的过期条目（PERF-001 泛化）。
+        // v3.14.3: 改容量上限淘汰（用户书签数天然有界），不再按 90 天时间 TTL 误删导出事实。
         flushExported: () => {
           if (BookmarkExporter2._exportedCache) {
-            BookmarkExporter2._evictExpired(BookmarkExporter2._exportedCache);
+            BookmarkExporter2._evictByCapacity(BookmarkExporter2._exportedCache);
             Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(BookmarkExporter2._exportedCache));
           }
         },
@@ -10668,12 +10697,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           BookmarkExporter2._exportedCache = null;
           Storage2.remove(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED);
         },
-        // 淘汰超过 90 天的过期条目（PERF-001 泛化，与 DedupStore._evictExpired 同构）
-        _EXPORT_TTL_MS: 90 * 24 * 60 * 60 * 1e3,
-        _evictExpired: (set) => {
-          const cutoff = Date.now() - BookmarkExporter2._EXPORT_TTL_MS;
-          for (const key of Object.keys(set)) {
-            if (set[key] < cutoff) delete set[key];
+        // v3.14.3: 导出账本容量上限（书签 URL 数天然有界）——
+        // 仅在超过上限时淘汰最旧条目，避免 90 天时间窗误删导出事实致 UI 误判“待导出”。
+        _EXPORT_CAPACITY_LIMIT: 1e4,
+        _evictByCapacity: (set) => {
+          const keys = Object.keys(set);
+          const excess = keys.length - BookmarkExporter2._EXPORT_CAPACITY_LIMIT;
+          if (excess <= 0) return;
+          keys.sort((a, b) => Number(set[a] || 0) - Number(set[b] || 0));
+          for (let i = 0; i < excess && i < keys.length; i++) {
+            delete set[keys[i]];
           }
         },
         isExported: (bookmarkUrl) => {
@@ -13925,10 +13958,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         // 批量导出循环末尾单次回写已导出映射（DISCOVER P3 同类修复）：循环内仅 mutate 内存缓存，
         // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。与 BookmarkExporter.flushExported 同构。
-        // 回写前淘汰超过 90 天的过期条目（PERF-001 泛化）。
+        // v3.14.3: 导出账本改容量上限淘汰（repo full_name 天然有界），不再按 90 天时间 TTL 误删导出事实。
         flushExported: () => {
           if (GitHubAPI2._exportedCache) {
-            GitHubAPI2._evictExpired(GitHubAPI2._exportedCache);
+            GitHubAPI2._evictByCapacity(GitHubAPI2._exportedCache);
             Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(GitHubAPI2._exportedCache));
           }
         },
@@ -13949,16 +13982,20 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         flushGistsExported: () => {
           if (GitHubAPI2._exportedGistsCache) {
-            GitHubAPI2._evictExpired(GitHubAPI2._exportedGistsCache);
+            GitHubAPI2._evictByCapacity(GitHubAPI2._exportedGistsCache);
             Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(GitHubAPI2._exportedGistsCache));
           }
         },
-        // 淘汰超过 90 天的过期条目（PERF-001 泛化，与 DedupStore._evictExpired 同构）
-        _EXPORT_TTL_MS: 90 * 24 * 60 * 60 * 1e3,
-        _evictExpired: (set) => {
-          const cutoff = Date.now() - GitHubAPI2._EXPORT_TTL_MS;
-          for (const key of Object.keys(set)) {
-            if (set[key] < cutoff) delete set[key];
+        // v3.14.3: 导出账本容量上限（repo full_name / gist id 天然有界）——
+        // 仅在超过上限时淘汰最旧条目，避免 90 天时间窗误删导出事实致 UI 误判“待导出”。
+        _EXPORT_CAPACITY_LIMIT: 1e4,
+        _evictByCapacity: (set) => {
+          const keys = Object.keys(set);
+          const excess = keys.length - GitHubAPI2._EXPORT_CAPACITY_LIMIT;
+          if (excess <= 0) return;
+          keys.sort((a, b) => Number(set[a] || 0) - Number(set[b] || 0));
+          for (let i = 0; i < excess && i < keys.length; i++) {
+            delete set[keys[i]];
           }
         },
         isExported: (repoFullName) => {
@@ -19551,6 +19588,11 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             const note = await buildGitHubObsidianMarkdown(item, settings);
             const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
             if (!noteResult.ok) throw new Error(noteResult.error);
+            if (item.sourceType === "gists") {
+              GitHubAPI2.markGistExportedAndFlush(item.itemKey);
+            } else {
+              GitHubAPI2.markExportedAndFlush(item.itemKey);
+            }
             success.push({
               title: note.title,
               url: note.url
@@ -21177,6 +21219,56 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             else delete statusEl.dataset.tone;
           }
         },
+        // v3.14.3 修复: 工作区扫描对账回填 —— 用 Notion 页面“链接”属性(导出时写入的原始 URL)
+        // 与本地已加载项 URL 精确匹配, 命中即回写已导出账本。
+        // 解决存量误判: 导出账本曾被 90 天 TTL 时间淘汰静默遗忘, Notion 已存在页面被 UI 判为“待导出”。
+        // 护栏: 仅 strict 模式回填 LinuxDo 账本(allow_duplicates 语义是允许重复导出, 不得被对账破坏);
+        // URL 非空且归一化精确相等才回写, 避免误标用户手工页面。
+        reconcileExportedFromWorkspace: (records = []) => {
+          const bookmarks = UI2().bookmarks || [];
+          if (!Array.isArray(bookmarks) || bookmarks.length === 0 || !Array.isArray(records) || records.length === 0) {
+            return 0;
+          }
+          const urlToBookmark = /* @__PURE__ */ new Map();
+          bookmarks.forEach((bookmark) => {
+            var _a;
+            const rawUrl = (bookmark == null ? void 0 : bookmark.source) === "github" ? (_a = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _a.html_url : bookmark == null ? void 0 : bookmark.url;
+            const url = UI2().normalizeWorkspaceInsightUrl(rawUrl || "");
+            if (url && !urlToBookmark.has(url)) urlToBookmark.set(url, bookmark);
+          });
+          if (urlToBookmark.size === 0) return 0;
+          const strictMode = Utils2.isLinuxDoDedupStrict();
+          let matched = 0;
+          records.forEach((record) => {
+            const recordUrl = UI2().normalizeWorkspaceInsightUrl((record == null ? void 0 : record.sourceUrl) || "");
+            if (!recordUrl) return;
+            const bookmark = urlToBookmark.get(recordUrl);
+            if (!bookmark) return;
+            if ((bookmark == null ? void 0 : bookmark.source) === "github") {
+              const itemKey = bookmark.itemKey;
+              if (!itemKey) return;
+              if (bookmark.sourceType === "gists") {
+                if (GitHubAPI2.isGistExported(itemKey)) return;
+                GitHubAPI2.markGistExportedAndFlush(itemKey);
+              } else {
+                if (GitHubAPI2.isExported(itemKey)) return;
+                GitHubAPI2.markExportedAndFlush(itemKey);
+              }
+              matched++;
+            } else if (strictMode) {
+              const topicId = String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
+              if (!topicId) return;
+              if (Storage2.isTopicExported(topicId)) return;
+              Storage2.markTopicExported(topicId);
+              matched++;
+            }
+          });
+          if (matched > 0) {
+            UI2().recomputeExportStats();
+            UI2().updateSelectCount();
+          }
+          return matched;
+        },
         refreshWorkspaceVisualization: async (apiKey = NotionOAuth2.getAccessToken(((_b) => (_b = ((_a) => (_a = UI2().refs) == null ? void 0 : _a.apiKeyInput)()) == null ? void 0 : _b.value.trim())())) => {
           var _a2, _b2, _c;
           if (!apiKey) {
@@ -21226,6 +21318,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               databases,
               pages
             });
+            const reconciled = WorkspaceInsight.reconcileExportedFromWorkspace(records);
             UI2().updateWorkspaceSelect(finalWorkspaceData);
             UI2().updateAITargetDbOptions(finalWorkspaceData.databases || []);
             UI2().workspaceVisualSnapshot = {
@@ -21241,7 +21334,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             UI2().renderWorkspaceVisualSummary();
             const model = UI2().buildWorkspaceVisualizationModel();
             UI2().setWorkspaceVisualStatus(
-              `\u5DF2\u626B\u63CF ${model.totalPages} \u4E2A\u9875\u9762\uFF0C\u8986\u76D6 ${model.totalDatabases} \u4E2A\u6570\u636E\u5E93\u3002`,
+              reconciled > 0 ? `\u5DF2\u626B\u63CF ${model.totalPages} \u4E2A\u9875\u9762\uFF0C\u8986\u76D6 ${model.totalDatabases} \u4E2A\u6570\u636E\u5E93\uFF1B\u5E76\u5728\u5DE5\u4F5C\u533A\u4E2D\u8BC6\u522B\u5230 ${reconciled} \u9879\u5DF2\u5BFC\u51FA\u7684\u5185\u5BB9\uFF0C\u5DF2\u540C\u6B65\u66F4\u65B0\u5BFC\u51FA\u72B6\u6001\u3002` : `\u5DF2\u626B\u63CF ${model.totalPages} \u4E2A\u9875\u9762\uFF0C\u8986\u76D6 ${model.totalDatabases} \u4E2A\u6570\u636E\u5E93\u3002`,
               "success"
             );
             return model;
@@ -24991,6 +25084,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                     const fileName = UI2.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
                     const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
                     if (!noteResult.ok) throw new Error(noteResult.error);
+                    Storage2.markTopicExported(topicId);
                     results.success.push({
                       title: topic.title,
                       url: topic.url

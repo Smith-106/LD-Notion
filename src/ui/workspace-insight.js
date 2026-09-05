@@ -835,6 +835,59 @@ const WorkspaceInsight = {
         }
     },
 
+    // v3.14.3 修复: 工作区扫描对账回填 —— 用 Notion 页面“链接”属性(导出时写入的原始 URL)
+    // 与本地已加载项 URL 精确匹配, 命中即回写已导出账本。
+    // 解决存量误判: 导出账本曾被 90 天 TTL 时间淘汰静默遗忘, Notion 已存在页面被 UI 判为“待导出”。
+    // 护栏: 仅 strict 模式回填 LinuxDo 账本(allow_duplicates 语义是允许重复导出, 不得被对账破坏);
+    // URL 非空且归一化精确相等才回写, 避免误标用户手工页面。
+    reconcileExportedFromWorkspace: (records = []) => {
+        const bookmarks = UI().bookmarks || [];
+        if (!Array.isArray(bookmarks) || bookmarks.length === 0 || !Array.isArray(records) || records.length === 0) {
+            return 0;
+        }
+        // 本地已加载项 → 归一化 URL 索引
+        const urlToBookmark = new Map();
+        bookmarks.forEach((bookmark) => {
+            const rawUrl = bookmark?.source === "github" ? bookmark?.raw?.html_url : bookmark?.url;
+            const url = UI().normalizeWorkspaceInsightUrl(rawUrl || "");
+            if (url && !urlToBookmark.has(url)) urlToBookmark.set(url, bookmark);
+        });
+        if (urlToBookmark.size === 0) return 0;
+
+        const strictMode = Utils.isLinuxDoDedupStrict();
+        let matched = 0;
+        records.forEach((record) => {
+            const recordUrl = UI().normalizeWorkspaceInsightUrl(record?.sourceUrl || "");
+            if (!recordUrl) return;
+            const bookmark = urlToBookmark.get(recordUrl);
+            if (!bookmark) return;
+
+            if (bookmark?.source === "github") {
+                const itemKey = bookmark.itemKey;
+                if (!itemKey) return;
+                if (bookmark.sourceType === "gists") {
+                    if (GitHubAPI.isGistExported(itemKey)) return;
+                    GitHubAPI.markGistExportedAndFlush(itemKey);
+                } else {
+                    if (GitHubAPI.isExported(itemKey)) return;
+                    GitHubAPI.markExportedAndFlush(itemKey);
+                }
+                matched++;
+            } else if (strictMode) {
+                const topicId = String(bookmark?.topic_id || bookmark?.bookmarkable_id || "");
+                if (!topicId) return;
+                if (Storage.isTopicExported(topicId)) return;
+                Storage.markTopicExported(topicId);
+                matched++;
+            }
+        });
+        if (matched > 0) {
+            UI().recomputeExportStats();
+            UI().updateSelectCount();
+        }
+        return matched;
+    },
+
     refreshWorkspaceVisualization: async (apiKey = NotionOAuth.getAccessToken(UI().refs?.apiKeyInput?.value.trim())) => {
         if (!apiKey) {
             UI().setWorkspaceVisualStatus(MSG.NO_NOTION_KEY, "error");
@@ -893,6 +946,10 @@ const WorkspaceInsight = {
                 pages,
             });
 
+            // v3.14.3: 扫描后对账回填 —— Notion 页面“链接”属性与本地已加载项 URL 匹配,
+            // 命中即回写已导出账本(仅 strict 模式回填 LinuxDo), 解决存量“待导出”误判。
+            const reconciled = WorkspaceInsight.reconcileExportedFromWorkspace(records);
+
             UI().updateWorkspaceSelect(finalWorkspaceData);
             UI().updateAITargetDbOptions(finalWorkspaceData.databases || []);
             UI().workspaceVisualSnapshot = {
@@ -909,7 +966,9 @@ const WorkspaceInsight = {
 
             const model = UI().buildWorkspaceVisualizationModel();
             UI().setWorkspaceVisualStatus(
-                `已扫描 ${model.totalPages} 个页面，覆盖 ${model.totalDatabases} 个数据库。`,
+                reconciled > 0
+                    ? `已扫描 ${model.totalPages} 个页面，覆盖 ${model.totalDatabases} 个数据库；并在工作区中识别到 ${reconciled} 项已导出的内容，已同步更新导出状态。`
+                    : `已扫描 ${model.totalPages} 个页面，覆盖 ${model.totalDatabases} 个数据库。`,
                 "success"
             );
             return model;

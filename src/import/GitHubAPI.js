@@ -179,10 +179,10 @@ const GitHubAPI = {
 
     // 批量导出循环末尾单次回写已导出映射（DISCOVER P3 同类修复）：循环内仅 mutate 内存缓存，
     // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。与 BookmarkExporter.flushExported 同构。
-    // 回写前淘汰超过 90 天的过期条目（PERF-001 泛化）。
+    // v3.14.3: 导出账本改容量上限淘汰（repo full_name 天然有界），不再按 90 天时间 TTL 误删导出事实。
     flushExported: () => {
         if (GitHubAPI._exportedCache) {
-            GitHubAPI._evictExpired(GitHubAPI._exportedCache);
+            GitHubAPI._evictByCapacity(GitHubAPI._exportedCache);
             Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(GitHubAPI._exportedCache));
         }
     },
@@ -207,17 +207,21 @@ const GitHubAPI = {
 
     flushGistsExported: () => {
         if (GitHubAPI._exportedGistsCache) {
-            GitHubAPI._evictExpired(GitHubAPI._exportedGistsCache);
+            GitHubAPI._evictByCapacity(GitHubAPI._exportedGistsCache);
             Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(GitHubAPI._exportedGistsCache));
         }
     },
 
-    // 淘汰超过 90 天的过期条目（PERF-001 泛化，与 DedupStore._evictExpired 同构）
-    _EXPORT_TTL_MS: 90 * 24 * 60 * 60 * 1000,
-    _evictExpired: (set) => {
-        const cutoff = Date.now() - GitHubAPI._EXPORT_TTL_MS;
-        for (const key of Object.keys(set)) {
-            if (set[key] < cutoff) delete set[key];
+    // v3.14.3: 导出账本容量上限（repo full_name / gist id 天然有界）——
+    // 仅在超过上限时淘汰最旧条目，避免 90 天时间窗误删导出事实致 UI 误判“待导出”。
+    _EXPORT_CAPACITY_LIMIT: 10000,
+    _evictByCapacity: (set) => {
+        const keys = Object.keys(set);
+        const excess = keys.length - GitHubAPI._EXPORT_CAPACITY_LIMIT;
+        if (excess <= 0) return;
+        keys.sort((a, b) => Number(set[a] || 0) - Number(set[b] || 0));
+        for (let i = 0; i < excess && i < keys.length; i++) {
+            delete set[keys[i]];
         }
     },
 

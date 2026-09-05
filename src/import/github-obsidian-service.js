@@ -202,6 +202,13 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
             const note = await buildGitHubObsidianMarkdown(item, settings);
             const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
             if (!noteResult.ok) throw new Error(noteResult.error);
+            // v3.14.3 修复: Obsidian 导出成功同样写入已导出账本(与 Notion 分支同构),
+            // 否则 UI 恒显示“待导出”致重复导出。
+            if (item.sourceType === "gists") {
+                GitHubAPI.markGistExportedAndFlush(item.itemKey);
+            } else {
+                GitHubAPI.markExportedAndFlush(item.itemKey);
+            }
             success.push({
                 title: note.title,
                 url: note.url,
