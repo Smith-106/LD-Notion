@@ -199,6 +199,7 @@ AutoImporter.run = async () => {
         const concurrency = settings.concurrency || 1;
         let success = 0;
         let failed = 0;
+        let autoImportAborted = false; // 认证终态中止标记(v3.14.5)
         const successfulBookmarks = [];
         // 显式任务队列 shift（项目并发安全锁定约束：不可用共享 nextIndex++）。
         // 与 export/index.js:976 对齐，单线程事件循环下 shift 原子取任务。
@@ -221,6 +222,13 @@ AutoImporter.run = async () => {
                 } catch (error) {
                     console.error(`[LD-Notion] 自动导入失败: ${title}`, error);
                     failed++;
+                    // 认证终态 fail-fast(v3.14.5):token 无效时中止批次,
+                    // 剩余项留待下次自动同步重试(不逐项重复注定失败的 401)
+                    if (Exporter.isAuthTerminalError && Exporter.isAuthTerminalError(error)) {
+                        remaining.unshift(i);
+                        autoImportAborted = true;
+                        break;
+                    }
                 }
 
                 if (delay > 0 && remaining.length > 0) {
@@ -242,8 +250,8 @@ AutoImporter.run = async () => {
 
         const statePatch = {
             lastAttemptAt: attemptAt,
-            lastOutcome: failed > 0 ? "partial" : "success",
-            lastError: "",
+            lastOutcome: autoImportAborted ? "aborted" : (failed > 0 ? "partial" : "success"),
+            lastError: autoImportAborted ? "认证失败，已中止本次自动导入（请检查 Notion API Key / OAuth 授权）" : "",
             lastStats: {
                 scanned: bookmarks.length,
                 pending: newBookmarks.length,
@@ -264,7 +272,11 @@ AutoImporter.run = async () => {
         }
         SyncState.updateLinuxDoState(statePatch);
 
-        AutoImporter.updateStatus(`✅ 自动导入完成: ${success} 个成功${failed > 0 ? `，${failed} 个失败` : ""} (${new Date().toLocaleTimeString()})`);
+        AutoImporter.updateStatus(
+            autoImportAborted
+                ? `⛔ 认证失败，已中止自动导入（成功 ${success} 个；剩余项将在下次同步重试。请检查 Notion API Key / OAuth 授权） (${new Date().toLocaleTimeString()})`
+                : `✅ 自动导入完成: ${success} 个成功${failed > 0 ? `，${failed} 个失败` : ""} (${new Date().toLocaleTimeString()})`
+        );
 
         if (success > 0 && typeof GM_notification === "function") {
             GM_notification({

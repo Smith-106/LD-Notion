@@ -1157,11 +1157,16 @@ const UIEvents = {
                 const failCount = results.failed.length;
                 const skippedCount = results.skipped?.length || 0;
 
-                let statusMsg = `导出完成：成功 ${successCount} 个`;
-                if (failCount > 0) statusMsg += `，失败 ${failCount} 个`;
-                if (skippedCount > 0) statusMsg += `，跳过 ${skippedCount} 个`;
+                let statusMsg;
+                if (results.authAborted || results.aborted === true) {
+                    statusMsg = `⛔ 导出已中止（Notion 认证失败）：成功 ${successCount} 个，未尝试 ${skippedCount} 个。请检查 API Key / OAuth 授权后重新导出`;
+                } else {
+                    statusMsg = `导出完成：成功 ${successCount} 个`;
+                    if (failCount > 0) statusMsg += `，失败 ${failCount} 个`;
+                    if (skippedCount > 0) statusMsg += `，跳过 ${skippedCount} 个`;
+                }
 
-                UI.showStatus(statusMsg, failCount > successCount ? "error" : "success");
+                UI.showStatus(statusMsg, (results.authAborted || results.aborted === true || failCount > successCount) ? "error" : "success");
 
                 // 通知
                 if (typeof GM_notification === "function") {
@@ -1373,6 +1378,20 @@ const UIEvents = {
                                 title: bookmark.title || `帖子 ${topicId}`,
                                 error: error.message,
                             });
+                            // 认证/连接终态 fail-fast(v3.14.5):Obsidian key 无效或连接拒绝是系统性错误,
+                            // 逐项重试只会重复注定失败的请求——中止批次,剩余项留待重试
+                            const msgText = String(error?.message || "");
+                            // 认证/连接终态(Obsidian HTTP 401/403 或本地服务拒绝):系统性错误 fail-fast
+                            if (/\bHTTP\s*40[13]\b/.test(msgText) || msgText.includes("invalid") || msgText.includes("Invalid") || msgText.includes("ECONNREFUSED") || msgText.includes("refused")) {
+                                results.authAborted = { reason: error.message, at: i + 1 };
+                                for (let k = i + 1; k < selected.length; k++) {
+                                    const skippedBm = selected[k];
+                                    results.skipped.push({
+                                        title: skippedBm.title || skippedBm.name || `帖子 ${skippedBm.topic_id || ""}`,
+                                    });
+                                }
+                                break;
+                            }
                         }
 
                         if (i < selected.length - 1) {
@@ -1385,8 +1404,10 @@ const UIEvents = {
                 UI.showReport(results);
                 UI.renderBookmarkList();
 
-                const msg = `Obsidian 导出完成：成功 ${results.success.length} 个${results.failed.length ? `，失败 ${results.failed.length} 个` : ""}${imageFailures > 0 ? `，${imageFailures} 张图片下载失败` : ""}`;
-                UI.showStatus(msg, (results.failed.length > 0 || imageFailures > 0) ? "warning" : "success");
+                const msg = results.authAborted
+                    ? `⛔ Obsidian 导出已中止（认证/连接失败）：成功 ${results.success.length} 个，未尝试 ${results.skipped.length} 个。请检查 Obsidian API 地址与 Key 后重试。`
+                    : `Obsidian 导出完成：成功 ${results.success.length} 个${results.failed.length ? `，失败 ${results.failed.length} 个` : ""}${imageFailures > 0 ? `，${imageFailures} 张图片下载失败` : ""}`;
+                UI.showStatus(msg, results.authAborted ? "error" : ((results.failed.length > 0 || imageFailures > 0) ? "warning" : "success"));
             } catch (error) {
                 UI.showStatus(`Obsidian 导出出错: ${error.message}`, "error");
             } finally {

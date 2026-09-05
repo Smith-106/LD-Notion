@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.4
+// @version      3.14.5
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -4474,6 +4474,13 @@ Content-Type: ${contentType}\r
       var { DOMToNotion: DOMToNotion2 } = require_DOMToNotion();
       var { ObsidianAPI: ObsidianAPI2, HTMLToMarkdown: HTMLToMarkdown2 } = require_obsidian();
       var { installUploadMethods } = require_notion_upload();
+      var isAuthTerminalStatus = (status, result = {}) => {
+        if (status === 401) return true;
+        const code = String((result == null ? void 0 : result.code) || "").toLowerCase();
+        if (code === "unauthorized" || code === "invalid_bearer_token") return true;
+        const msg = String((result == null ? void 0 : result.message) || "").toLowerCase();
+        return msg.includes("api token is invalid") || msg.includes("unauthorized");
+      };
       var NotionTransport2 = Object.freeze({
         buildUrl: (endpoint) => `https://api.notion.com/v1${endpoint}`,
         buildHeaders: ({ token, notionVersion }) => ({
@@ -4557,8 +4564,16 @@ Content-Type: ${contentType}\r
                 const refreshedToken = await NotionOAuth2.refreshAccessToken();
                 return doRequest(attempt, refreshedToken, false);
               } catch (refreshError) {
-                throw new Error(`Notion OAuth \u7EED\u7B7E\u5931\u8D25: ${refreshError.message}`);
+                const error = new Error(`Notion OAuth \u7EED\u7B7E\u5931\u8D25: ${refreshError.message}`);
+                error.isAuthTerminal = true;
+                throw error;
               }
+            }
+            if (isAuthTerminalStatus(response.status, result)) {
+              const authError = new Error(`Notion API \u9519\u8BEF: ${result.message || response.status}`);
+              authError.isAuthTerminal = true;
+              authError.statusCode = response.status;
+              throw authError;
             }
             throw new Error(`Notion API \u9519\u8BEF: ${result.message || response.status}`);
           };
@@ -10768,6 +10783,18 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 { bookmarkUrl: bm.url, itemName: bm.title, reason: String((e == null ? void 0 : e.message) || e) }
               );
               failed++;
+              if (e && (e.isAuthTerminal || String((e == null ? void 0 : e.message) || "").includes("Notion OAuth \u7EED\u7B7E\u5931\u8D25"))) {
+                BookmarkExporter2.flushExported();
+                const remainingCount = newBookmarks.length - i - 1;
+                return {
+                  total: bookmarks.length,
+                  exported: success,
+                  failed,
+                  skipped: remainingCount,
+                  aborted: true,
+                  message: `\u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF08\u6210\u529F ${success} \u4E2A\uFF0C\u5269\u4F59 ${remainingCount} \u4E2A\u672A\u5C1D\u8BD5\uFF09\u3002\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\u540E\u91CD\u8BD5\u3002`
+                };
+              }
             }
             if (i < newBookmarks.length - 1) {
               await Utils2.sleep(delay);
@@ -13542,6 +13569,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           Exporter2.isCancelled = false;
           Exporter2.currentIndex = 0;
         },
+        // 批量导出:认证终态错误(不可续签的 401)标记检测——系统性失败应中止批次而非逐项重试
+        isAuthTerminalError: (error) => !!(error && (error.isAuthTerminal || String((error == null ? void 0 : error.message) || "").includes("Notion OAuth \u7EED\u7B7E\u5931\u8D25"))),
+        // 认证中止时的剩余项收集:与取消路径同构,但保留原因说明供 UI 报告展示
+        _collectSkippedFrom: (bookmarks, remaining) => remaining.map((i) => {
+          const b = bookmarks[i];
+          return {
+            topicId: b.topic_id || b.bookmarkable_id,
+            title: b.title || b.name || `\u5E16\u5B50 ${b.topic_id || b.bookmarkable_id}`
+          };
+        }),
         exportBookmarks: async (bookmarks, settings, onProgress, startIndex = 0) => {
           const results = { success: [], failed: [], skipped: [] };
           Exporter2.reset();
@@ -13586,6 +13623,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               } catch (error) {
                 console.error(`[LD-Notion] \u5BFC\u51FA\u5931\u8D25: ${title}`, error);
                 results.failed.push({ topicId, title, error: error.message });
+                if (Exporter2.isAuthTerminalError(error)) {
+                  Exporter2.cancel();
+                  results.authAborted = {
+                    reason: error.message,
+                    at: completedCount + startIndex
+                  };
+                  return;
+                }
               }
               completedCount++;
               Exporter2.currentIndex = completedCount + startIndex;
@@ -15234,6 +15279,7 @@ ${insight.summary || ""}`,
           const concurrency = settings.concurrency || 1;
           let success = 0;
           let failed = 0;
+          let autoImportAborted = false;
           const successfulBookmarks = [];
           const remaining = Array.from({ length: newBookmarks.length }, (_, k) => k);
           const worker = async () => {
@@ -15251,6 +15297,11 @@ ${insight.summary || ""}`,
               } catch (error) {
                 console.error(`[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u5931\u8D25: ${title}`, error);
                 failed++;
+                if (Exporter2.isAuthTerminalError && Exporter2.isAuthTerminalError(error)) {
+                  remaining.unshift(i);
+                  autoImportAborted = true;
+                  break;
+                }
               }
               if (delay > 0 && remaining.length > 0) {
                 await Utils2.sleep(delay);
@@ -15268,8 +15319,8 @@ ${insight.summary || ""}`,
           emit("bookmarks:updated");
           const statePatch = {
             lastAttemptAt: attemptAt,
-            lastOutcome: failed > 0 ? "partial" : "success",
-            lastError: "",
+            lastOutcome: autoImportAborted ? "aborted" : failed > 0 ? "partial" : "success",
+            lastError: autoImportAborted ? "\u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u672C\u6B21\u81EA\u52A8\u5BFC\u5165\uFF08\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\uFF09" : "",
             lastStats: {
               scanned: bookmarks.length,
               pending: newBookmarks.length,
@@ -15289,7 +15340,9 @@ ${insight.summary || ""}`,
             statePatch.lastSuccessAt = Date.now();
           }
           SyncState2.updateLinuxDoState(statePatch);
-          AutoImporter2.updateStatus(`\u2705 \u81EA\u52A8\u5BFC\u5165\u5B8C\u6210: ${success} \u4E2A\u6210\u529F${failed > 0 ? `\uFF0C${failed} \u4E2A\u5931\u8D25` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
+          AutoImporter2.updateStatus(
+            autoImportAborted ? `\u26D4 \u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u6210\u529F ${success} \u4E2A\uFF1B\u5269\u4F59\u9879\u5C06\u5728\u4E0B\u6B21\u540C\u6B65\u91CD\u8BD5\u3002\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})` : `\u2705 \u81EA\u52A8\u5BFC\u5165\u5B8C\u6210: ${success} \u4E2A\u6210\u529F${failed > 0 ? `\uFF0C${failed} \u4E2A\u5931\u8D25` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
+          );
           if (success > 0 && typeof GM_notification === "function") {
             GM_notification({
               title: "\u81EA\u52A8\u5BFC\u5165\u5B8C\u6210",
@@ -19592,7 +19645,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         const success = [];
         const failed = [];
         const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-        let githubDirty = false;
+        let githubDirty2 = false;
+        let authAbortInfo = null;
         try {
           for (let i = 0; i < selectedItems.length; i++) {
             if (control.isCancelled) break;
@@ -19612,7 +19666,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               } else {
                 GitHubAPI2.markExported(item.itemKey);
               }
-              githubDirty = true;
+              githubDirty2 = true;
               success.push({
                 title: note.title,
                 url: note.url
@@ -19623,13 +19677,18 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 title: item.title || item.itemKey || "GitHub",
                 error: error.message
               });
+              const obsErrMsg = String((error == null ? void 0 : error.message) || "");
+              if (/\bHTTP\s*40[13]\b/.test(obsErrMsg) || obsErrMsg.includes("invalid") || obsErrMsg.includes("Invalid") || obsErrMsg.includes("ECONNREFUSED") || obsErrMsg.includes("refused")) {
+                authAbortInfo = { reason: error.message, at: i + 1 };
+                break;
+              }
             }
-            if (i < selectedItems.length - 1 && delay > 0) {
+            if (!authAbortInfo && i < selectedItems.length - 1 && delay > 0) {
               await Utils2.sleep(delay);
             }
           }
         } finally {
-          if (githubDirty) {
+          if (githubDirty2) {
             GitHubAPI2.flushExported();
             GitHubAPI2.flushGistsExported();
           }
@@ -19637,9 +19696,10 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         return {
           success,
           failed,
-          skipped: control.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
+          skipped: authAbortInfo || control.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
             title: item.title || item.itemKey || "GitHub"
-          })) : []
+          })) : [],
+          ...authAbortInfo ? { authAborted: authAbortInfo } : {}
         };
       };
       var exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress) => {
@@ -19717,6 +19777,16 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               itemKey: item.itemKey,
               sourceType
             });
+            if (error && (error.isAuthTerminal || String((error == null ? void 0 : error.message) || "").includes("Notion OAuth \u7EED\u7B7E\u5931\u8D25"))) {
+              const skipped = selectedItems.slice(i + 1).map((skippedItem) => ({
+                title: skippedItem.title || skippedItem.itemKey || "GitHub"
+              }));
+              if (githubDirty) {
+                GitHubAPI2.flushExported();
+                GitHubAPI2.flushGistsExported();
+              }
+              return { success, failed, skipped, authAborted: { reason: error.message, at: i + 1 } };
+            }
           }
           if (i < selectedItems.length - 1 && delay > 0) {
             await Utils2.sleep(delay);
@@ -21298,7 +21368,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           if (urlToBookmark.size === 0) return 0;
           const strictMode = Utils2.isLinuxDoDedupStrict();
           let matched = 0;
-          let githubDirty = false;
+          let githubDirty2 = false;
           let linuxdoDirty = false;
           if (strictMode) {
             try {
@@ -21321,7 +21391,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 if (GitHubAPI2.isExported(itemKey)) return;
                 GitHubAPI2.markExported(itemKey);
               }
-              githubDirty = true;
+              githubDirty2 = true;
               matched++;
             } else if (strictMode) {
               const topicId = String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
@@ -21332,7 +21402,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               matched++;
             }
           });
-          if (githubDirty) {
+          if (githubDirty2) {
             GitHubAPI2.flushExported();
             GitHubAPI2.flushGistsExported();
           }
@@ -23798,6 +23868,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const { success, failed, skipped } = results;
           let html = '<div class="ldb-report">';
           html += '<div class="ldb-report-title">\u{1F4CA} \u5BFC\u51FA\u62A5\u544A</div>';
+          const authAborted = results.authAborted || (results.aborted === true ? { reason: "\u8BA4\u8BC1\u5931\u8D25" } : null);
+          if (authAborted) {
+            html += `<div class="ldb-report-item failed" style="padding:8px 12px;margin-bottom:6px;border-radius:6px;background:rgba(239,68,68,0.12);">
+                <div>\u26D4 \u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF1ANotion \u8BA4\u8BC1\u5931\u8D25\uFF08API token \u65E0\u6548\u4E14\u65E0\u6CD5\u81EA\u52A8\u7EED\u7B7E\uFF09</div>
+                <div style="margin-top:4px;font-size:12px;opacity:.85;">${Utils2.escapeHtml(Utils2.truncateText(String(authAborted.reason || ""), 160))}</div>
+                <div style="margin-top:4px;font-size:12px;opacity:.85;">\u8BF7\u68C0\u67E5 Notion API Key \u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743\u540E\uFF0C\u518D\u6B21\u70B9\u51FB\u5BFC\u51FA\u5373\u53EF\u7EED\u4F20\u5269\u4F59\u9879\u3002</div>
+            </div>`;
+          }
           if (success.length > 0) {
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">\u2705 \u6210\u529F (${success.length})</div>`;
@@ -23833,7 +23911,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">\u23ED\uFE0F \u5DF2\u8DF3\u8FC7 (${skipped.length})</div>`;
             html += `<div class="ldb-report-item" style="color: var(--ldb-ui-muted);">
-                <span>\u7531\u4E8E\u53D6\u6D88\u64CD\u4F5C\uFF0C${skipped.length} \u4E2A\u6536\u85CF\u672A\u5BFC\u51FA</span>
+                <span>${authAborted ? "\u8BA4\u8BC1\u4E2D\u6B62\u540E\u672A\u5C1D\u8BD5" : "\u7531\u4E8E\u53D6\u6D88\u64CD\u4F5C"}\uFF0C${skipped.length} \u4E2A\u6536\u85CF\u672A\u5BFC\u51FA</span>
             </div>`;
             html += "</div>";
           }
@@ -24977,10 +25055,15 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               const successCount = results.success.length;
               const failCount = results.failed.length;
               const skippedCount = ((_a = results.skipped) == null ? void 0 : _a.length) || 0;
-              let statusMsg = `\u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${successCount} \u4E2A`;
-              if (failCount > 0) statusMsg += `\uFF0C\u5931\u8D25 ${failCount} \u4E2A`;
-              if (skippedCount > 0) statusMsg += `\uFF0C\u8DF3\u8FC7 ${skippedCount} \u4E2A`;
-              UI2.showStatus(statusMsg, failCount > successCount ? "error" : "success");
+              let statusMsg;
+              if (results.authAborted || results.aborted === true) {
+                statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08Notion \u8BA4\u8BC1\u5931\u8D25\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u68C0\u67E5 API Key / OAuth \u6388\u6743\u540E\u91CD\u65B0\u5BFC\u51FA`;
+              } else {
+                statusMsg = `\u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${successCount} \u4E2A`;
+                if (failCount > 0) statusMsg += `\uFF0C\u5931\u8D25 ${failCount} \u4E2A`;
+                if (skippedCount > 0) statusMsg += `\uFF0C\u8DF3\u8FC7 ${skippedCount} \u4E2A`;
+              }
+              UI2.showStatus(statusMsg, results.authAborted || results.aborted === true || failCount > successCount ? "error" : "success");
               if (typeof GM_notification === "function") {
                 GM_notification({
                   title: "\u5BFC\u51FA\u5B8C\u6210",
@@ -25175,6 +25258,17 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                       title: bookmark.title || `\u5E16\u5B50 ${topicId}`,
                       error: error.message
                     });
+                    const msgText = String((error == null ? void 0 : error.message) || "");
+                    if (/\bHTTP\s*40[13]\b/.test(msgText) || msgText.includes("invalid") || msgText.includes("Invalid") || msgText.includes("ECONNREFUSED") || msgText.includes("refused")) {
+                      results.authAborted = { reason: error.message, at: i + 1 };
+                      for (let k = i + 1; k < selected.length; k++) {
+                        const skippedBm = selected[k];
+                        results.skipped.push({
+                          title: skippedBm.title || skippedBm.name || `\u5E16\u5B50 ${skippedBm.topic_id || ""}`
+                        });
+                      }
+                      break;
+                    }
                   }
                   if (i < selected.length - 1) {
                     await Utils2.sleep(300);
@@ -25184,8 +25278,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               UI2.hideProgress();
               UI2.showReport(results);
               UI2.renderBookmarkList();
-              const msg = `Obsidian \u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${results.success.length} \u4E2A${results.failed.length ? `\uFF0C\u5931\u8D25 ${results.failed.length} \u4E2A` : ""}${imageFailures > 0 ? `\uFF0C${imageFailures} \u5F20\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25` : ""}`;
-              UI2.showStatus(msg, results.failed.length > 0 || imageFailures > 0 ? "warning" : "success");
+              const msg = results.authAborted ? `\u26D4 Obsidian \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08\u8BA4\u8BC1/\u8FDE\u63A5\u5931\u8D25\uFF09\uFF1A\u6210\u529F ${results.success.length} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${results.skipped.length} \u4E2A\u3002\u8BF7\u68C0\u67E5 Obsidian API \u5730\u5740\u4E0E Key \u540E\u91CD\u8BD5\u3002` : `Obsidian \u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${results.success.length} \u4E2A${results.failed.length ? `\uFF0C\u5931\u8D25 ${results.failed.length} \u4E2A` : ""}${imageFailures > 0 ? `\uFF0C${imageFailures} \u5F20\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25` : ""}`;
+              UI2.showStatus(msg, results.authAborted ? "error" : results.failed.length > 0 || imageFailures > 0 ? "warning" : "success");
             } catch (error) {
               UI2.showStatus(`Obsidian \u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
             } finally {

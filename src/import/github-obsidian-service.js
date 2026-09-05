@@ -189,6 +189,8 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
     // v3.14.4: 循环内仅 mutate 内存缓存, 循环末单次 flush —— 消除逐条全账本序列化的
     // 写侧 O(N²)(AGENTS.md 禁令; 与 GitHubExporter._exportItems PERF-003 模式同构)
     let githubDirty = false;
+    // v3.14.5: Obsidian 认证/连接终态中止标记
+    let authAbortInfo = null;
 
     try {
     for (let i = 0; i < selectedItems.length; i++) {
@@ -224,9 +226,15 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
                 title: item.title || item.itemKey || "GitHub",
                 error: error.message,
             });
+            // 认证/连接终态 fail-fast(v3.14.5):Obsidian HTTP 401/403 或 key 无效是系统性错误,中止剩余项
+            const obsErrMsg = String(error?.message || "");
+            if (/\bHTTP\s*40[13]\b/.test(obsErrMsg) || obsErrMsg.includes("invalid") || obsErrMsg.includes("Invalid") || obsErrMsg.includes("ECONNREFUSED") || obsErrMsg.includes("refused")) {
+                authAbortInfo = { reason: error.message, at: i + 1 };
+                break;
+            }
         }
 
-        if (i < selectedItems.length - 1 && delay > 0) {
+        if (!authAbortInfo && i < selectedItems.length - 1 && delay > 0) {
             await Utils.sleep(delay);
         }
     }
@@ -241,9 +249,10 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
     return {
         success,
         failed,
-        skipped: control.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
+        skipped: (authAbortInfo || control.isCancelled) ? selectedItems.slice(success.length + failed.length).map((item) => ({
             title: item.title || item.itemKey || "GitHub",
         })) : [],
+        ...(authAbortInfo ? { authAborted: authAbortInfo } : {}),
     };
 };
 
@@ -324,6 +333,18 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress)
                 itemKey: item.itemKey,
                 sourceType,
             });
+            // 认证终态 fail-fast(v3.14.5):中止剩余 GitHub 项导出,避免逐项重复注定失败的 401
+            if (error && (error.isAuthTerminal || String(error?.message || "").includes("Notion OAuth 续签失败"))) {
+                const skipped = selectedItems.slice(i + 1).map((skippedItem) => ({
+                    title: skippedItem.title || skippedItem.itemKey || "GitHub",
+                }));
+                // 已成功项的账本先落盘(与循环末 flush 对称, 中止不丢已导出事实)
+                if (githubDirty) {
+                    GitHubAPI.flushExported();
+                    GitHubAPI.flushGistsExported();
+                }
+                return { success, failed, skipped, authAborted: { reason: error.message, at: i + 1 } };
+            }
         }
 
         if (i < selectedItems.length - 1 && delay > 0) {

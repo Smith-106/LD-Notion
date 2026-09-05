@@ -2460,6 +2460,17 @@ const UI = {
         let html = '<div class="ldb-report">';
         html += '<div class="ldb-report-title">📊 导出报告</div>';
 
+        // 认证中止横幅(v3.14.5):系统性 token 失败时批次已自动中止,提示修复入口
+        const authAborted = results.authAborted
+            || (results.aborted === true ? { reason: "认证失败" } : null);
+        if (authAborted) {
+            html += `<div class="ldb-report-item failed" style="padding:8px 12px;margin-bottom:6px;border-radius:6px;background:rgba(239,68,68,0.12);">
+                <div>⛔ 已中止导出：Notion 认证失败（API token 无效且无法自动续签）</div>
+                <div style="margin-top:4px;font-size:12px;opacity:.85;">${Utils.escapeHtml(Utils.truncateText(String(authAborted.reason || ""), 160))}</div>
+                <div style="margin-top:4px;font-size:12px;opacity:.85;">请检查 Notion API Key 或重新 OAuth 一键授权后，再次点击导出即可续传剩余项。</div>
+            </div>`;
+        }
+
         if (success.length > 0) {
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">✅ 成功 (${success.length})</div>`;
@@ -2501,7 +2512,7 @@ const UI = {
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">⏭️ 已跳过 (${skipped.length})</div>`;
             html += `<div class="ldb-report-item" style="color: var(--ldb-ui-muted);">
-                <span>由于取消操作，${skipped.length} 个收藏未导出</span>
+                <span>${authAborted ? "认证中止后未尝试" : "由于取消操作"}，${skipped.length} 个收藏未导出</span>
             </div>`;
             html += '</div>';
         }

@@ -1,5 +1,21 @@
 # 更新日志
 
+## [3.14.5] - 2026-09-06
+
+### 修复（批量导出遇失效 Token 逐项全量失败 · 认证终态 fail-fast）
+
+**根因**：批量导出循环对每一项独立 try/catch,Notion 401（API token is invalid 且无法自动续签）作为普通错误逐项记录——系统性认证失败时批次不中止,464 个收藏逐个发出注定失败的请求,全部报「Notion API 错误: API token is invalid.」,既污染失败报告又浪费时间与请求配额,且报告无法区分「需要重新授权」与「个别项目失败」。
+
+**修复**：
+- **认证终态标记**：`NotionAPI.request` 对 401 终态（token 无效且不可续签、OAuth 续签失败如 invalid_grant/invalid_client、官方 unauthorized code）抛出带 `isAuthTerminal` 标记的错误；400 校验错误与 429 限流重试语义不变
+- **批量循环 fail-fast**：LinuxDo 批量导出（`Exporter.exportBookmarks`）、自动导入（`AutoImporter`）、浏览器书签导出（`BookmarkExporter.exportBookmarks`）、GitHub→Notion 导出、LinuxDo→Obsidian 导出、GitHub→Obsidian 导出共 6 处循环遇认证终态立即中止批次：已失败项保留在 failed,剩余项进 skipped（可续传）,已成功项的导出账本先落盘不丢失
+- **报告与状态引导**：导出报告顶部显示「⛔ 已中止导出：Notion 认证失败」横幅与修复指引（检查 API Key / 重新 OAuth 授权后再次导出即可续传剩余项）;Obsidian 导出中止提示检查 API 地址与 Key;自动导入状态与同步状态记录 lastOutcome=aborted
+- **测试**：新增 `tests/auth-failfast.test.js` 6 用例（401 终态标记/OAuth 续签失败标记/400 不误伤/429 重试不变/批量中止时 notion 请求次数=1 而非 N/锁释放）
+
+**升级说明**：遇到此报告后请在主面板检查 Notion API Key（或重新一键授权）,再点击导出——已成功项不会重复导出,仅续传剩余项。
+
+[3.14.5]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.5
+
 ## [3.14.4] - 2026-09-05
 
 ### 修复（v3.14.3 三模型共识审查发现：对账 LinuxDo 死代码 + 同步投影过期拒绝 + 写回 O(N²)）

@@ -780,6 +780,18 @@ const Exporter = {
     cancel: () => { Exporter.isCancelled = true; Exporter.isPaused = false; },
     reset: () => { Exporter.isPaused = false; Exporter.isCancelled = false; Exporter.currentIndex = 0; },
 
+    // 批量导出:认证终态错误(不可续签的 401)标记检测——系统性失败应中止批次而非逐项重试
+    isAuthTerminalError: (error) => !!(error && (error.isAuthTerminal || String(error?.message || "").includes("Notion OAuth 续签失败"))),
+
+    // 认证中止时的剩余项收集:与取消路径同构,但保留原因说明供 UI 报告展示
+    _collectSkippedFrom: (bookmarks, remaining) => remaining.map((i) => {
+        const b = bookmarks[i];
+        return {
+            topicId: b.topic_id || b.bookmarkable_id,
+            title: b.title || b.name || `帖子 ${b.topic_id || b.bookmarkable_id}`,
+        };
+    }),
+
     exportBookmarks: async (bookmarks, settings, onProgress, startIndex = 0) => {
         const results = { success: [], failed: [], skipped: [] };
         Exporter.reset();
@@ -833,6 +845,17 @@ const Exporter = {
                 } catch (error) {
                     console.error(`[LD-Notion] 导出失败: ${title}`, error);
                     results.failed.push({ topicId, title, error: error.message });
+                    // 认证终态 fail-fast(v3.14.5):token 无效且无法续签时,
+                    // 剩余项逐个请求只会重复注定失败的 401(此前 464 项全部报
+                    // "API token is invalid")。中止批次,剩余项进 skipped 供重试。
+                    if (Exporter.isAuthTerminalError(error)) {
+                        Exporter.cancel();
+                        results.authAborted = {
+                            reason: error.message,
+                            at: completedCount + startIndex,
+                        };
+                        return;
+                    }
                 }
 
                 completedCount++;
@@ -870,7 +893,6 @@ const Exporter = {
                 });
             }
         }
-
         return results;
     },
 };

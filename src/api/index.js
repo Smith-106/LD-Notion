@@ -13,6 +13,20 @@ const { ObsidianAPI, HTMLToMarkdown } = require("./obsidian");
 const { installUploadMethods } = require("./notion-upload");
 
 
+// 认证终态错误:401 且无法自动续签(或续签后仍 401)。
+// 标记 isAuthTerminal 供批量循环 fail-fast 中止(逐项重试只会重复注定失败的请求,
+// 464 项全部报 "API token is invalid" 的根因)。
+// 消息关键词表:Notion 官方错误 code(API token is invalid / unauthorized)
+// 与 OAuth 终态(invalid_grant / invalid_client)均视为认证终态。
+const isAuthTerminalStatus = (status, result = {}) => {
+    if (status === 401) return true;
+    const code = String(result?.code || "").toLowerCase();
+    if (code === "unauthorized" || code === "invalid_bearer_token") return true;
+    const msg = String(result?.message || "").toLowerCase();
+    return msg.includes("api token is invalid") || msg.includes("unauthorized");
+};
+
+
 const NotionTransport = Object.freeze({
     buildUrl: (endpoint) => `https://api.notion.com/v1${endpoint}`,
 
@@ -110,8 +124,18 @@ const NotionAPI = {
                     const refreshedToken = await NotionOAuth.refreshAccessToken();
                     return doRequest(attempt, refreshedToken, false);
                 } catch (refreshError) {
-                    throw new Error(`Notion OAuth 续签失败: ${refreshError.message}`);
+                    const error = new Error(`Notion OAuth 续签失败: ${refreshError.message}`);
+                    error.isAuthTerminal = true;
+                    throw error;
                 }
+            }
+            // 认证终态(401 不可续签/续签后仍 401/官方 unauthorized code):携带标记抛出,
+            // 供批量导出循环 fail-fast 中止批次(v3.14.5)
+            if (isAuthTerminalStatus(response.status, result)) {
+                const authError = new Error(`Notion API 错误: ${result.message || response.status}`);
+                authError.isAuthTerminal = true;
+                authError.statusCode = response.status;
+                throw authError;
             }
             throw new Error(`Notion API 错误: ${result.message || response.status}`);
         };

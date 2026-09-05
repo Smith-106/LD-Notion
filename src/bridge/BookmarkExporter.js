@@ -652,6 +652,20 @@ const BookmarkExporter = {
                 BookmarkExporter._auditExport("createDatabasePage", "failed",
                     { bookmarkUrl: bm.url, itemName: bm.title, reason: String(e?.message || e) });
                 failed++;
+                // 认证终态 fail-fast(v3.14.5):中止剩余书签导出,返回部分结果供重试
+                if (e && (e.isAuthTerminal || String(e?.message || "").includes("Notion OAuth 续签失败"))) {
+                    // 已成功项的导出事实必须先落盘(flushExported 幂等,与正常路径末次 flush 对称)
+                    BookmarkExporter.flushExported();
+                    const remainingCount = newBookmarks.length - i - 1;
+                    return {
+                        total: bookmarks.length,
+                        exported: success,
+                        failed,
+                        skipped: remainingCount,
+                        aborted: true,
+                        message: `认证失败，已中止导出（成功 ${success} 个，剩余 ${remainingCount} 个未尝试）。请检查 Notion API Key / OAuth 授权后重试。`,
+                    };
+                }
             }
 
             if (i < newBookmarks.length - 1) {
