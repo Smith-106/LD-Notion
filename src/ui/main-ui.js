@@ -559,12 +559,7 @@ const UI = {
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">断开授权</button>
                             </div>
                             <div class="ldb-tip" id="ldb-oauth-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                            <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-vault-unlock">解锁保险箱</button>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-vault-lock">锁定</button>
-                            </div>
-                            <div class="ldb-tip" id="ldb-vault-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                            <div class="ldb-tip">如果你使用 Notion 公开集成：① 在集成后台逐字符注册 Redirect URI（含末尾斜杠）；② Notion 要求公开集成<strong>提交审核并通过后</strong> Authorization URL 才会生效。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID（不是 Client Secret）、URI 已注册、集成已通过审核。敏感凭证会保存在本地加密保险箱中。</div>
+                            <div class="ldb-tip">如果你使用 Notion 公开集成：① 在集成后台逐字符注册 Redirect URI（含末尾斜杠）；② Notion 要求公开集成<strong>提交审核并通过后</strong> Authorization URL 才会生效。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID（不是 Client Secret）、URI 已注册、集成已通过审核。敏感凭证保存在浏览器本地（GM 存储），脚本更新后无需重新输入。</div>
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label" for="ldb-workspace-select">数据库 / 页面</label>

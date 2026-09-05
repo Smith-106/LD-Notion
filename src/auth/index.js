@@ -15,16 +15,12 @@ const CLIENT_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 
 const CredentialVault = {
     VERSION: 1,
-    // OAuth 三键(NOTION_API_KEY/CLIENT_SECRET/REFRESH_TOKEN)已移出敏感键集:
-    // vault 每次页面加载即重新锁定,而 OAuth 回调/续签天然发生在全新页面,
-    // 锁定态下读空导致授权必败(三模型共识诊断 R1/R2/R3)。改走 GM 明文存储。
-    SENSITIVE_KEYS: Object.freeze(new Set([
-        CONFIG.STORAGE_KEYS.AI_API_KEY,
-        CONFIG.STORAGE_KEYS.AI_BASE_URL,
-        CONFIG.STORAGE_KEYS.GITHUB_TOKEN,
-        CONFIG.STORAGE_KEYS.OBS_API_KEY,
-        CONFIG.STORAGE_KEYS.OBS_API_URL,
-    ])),
+    // 敏感键集已全部清空(v3.14.2):
+    // vault 解锁态(_unlocked/_sessionCache)为模块内存态,每次页面加载(含 Tampermonkey
+    // 脚本更新强制重载)即重置为锁定;锁定态下读取返回空,导致 AI/GitHub/Obsidian
+    // 敏感键在每次更新后看似失效。与 v3.12.0 OAuth 三键同根(R1),按同一先例改走
+    // GM 明文存储,审计日志仍由 REDACT_IN_LOGS 统一脱敏。
+    SENSITIVE_KEYS: Object.freeze(new Set()),
     // 审计日志脱敏超集:SENSITIVE_KEYS + OAuth 三键(虽改明文存储,仍不得出现在日志)
     REDACT_IN_LOGS: Object.freeze(new Set([
         CONFIG.STORAGE_KEYS.AI_API_KEY,
@@ -299,6 +295,12 @@ const CredentialVault = {
 
     set: async (key, value) => {
         if (!CredentialVault.isSensitiveKey(key)) {
+            // 非敏感键(含 v3.14.2 移出保险箱的全部敏感键)直接 GM 明文读写;
+            // 空值语义为删除键(与 clear 一致),避免残留空串
+            if (!String(value || "").trim()) {
+                Storage.remove(key);
+                return "";
+            }
             Storage.setRaw(key, value);
             return value;
         }
@@ -732,15 +734,6 @@ const NotionOAuth = {
         const hasStoredClientSecret = CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET);
         const hasStoredManualToken = CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
         const hasStoredRefreshToken = CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN);
-
-        if (CredentialVault.hasVault() && !CredentialVault.isUnlocked() && (hasStoredManualToken || hasStoredClientSecret || hasStoredRefreshToken)) {
-            return {
-                connected: false,
-                color: "#f59e0b",
-                text: "Notion 敏感凭证已保存在保险箱中。请先解锁保险箱，再使用已保存的 Token 或重新授权。",
-                apiKeyPlaceholder: "解锁保险箱后可使用已保存配置",
-            };
-        }
 
         if (NotionOAuth.isOAuthConnected()) {
             return {

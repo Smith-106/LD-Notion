@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.1
+// @version      3.14.2
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -1803,16 +1803,12 @@
       var CLIENT_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       var CredentialVault2 = {
         VERSION: 1,
-        // OAuth 三键(NOTION_API_KEY/CLIENT_SECRET/REFRESH_TOKEN)已移出敏感键集:
-        // vault 每次页面加载即重新锁定,而 OAuth 回调/续签天然发生在全新页面,
-        // 锁定态下读空导致授权必败(三模型共识诊断 R1/R2/R3)。改走 GM 明文存储。
-        SENSITIVE_KEYS: Object.freeze(/* @__PURE__ */ new Set([
-          CONFIG2.STORAGE_KEYS.AI_API_KEY,
-          CONFIG2.STORAGE_KEYS.AI_BASE_URL,
-          CONFIG2.STORAGE_KEYS.GITHUB_TOKEN,
-          CONFIG2.STORAGE_KEYS.OBS_API_KEY,
-          CONFIG2.STORAGE_KEYS.OBS_API_URL
-        ])),
+        // 敏感键集已全部清空(v3.14.2):
+        // vault 解锁态(_unlocked/_sessionCache)为模块内存态,每次页面加载(含 Tampermonkey
+        // 脚本更新强制重载)即重置为锁定;锁定态下读取返回空,导致 AI/GitHub/Obsidian
+        // 敏感键在每次更新后看似失效。与 v3.12.0 OAuth 三键同根(R1),按同一先例改走
+        // GM 明文存储,审计日志仍由 REDACT_IN_LOGS 统一脱敏。
+        SENSITIVE_KEYS: Object.freeze(/* @__PURE__ */ new Set()),
         // 审计日志脱敏超集:SENSITIVE_KEYS + OAuth 三键(虽改明文存储,仍不得出现在日志)
         REDACT_IN_LOGS: Object.freeze(/* @__PURE__ */ new Set([
           CONFIG2.STORAGE_KEYS.AI_API_KEY,
@@ -2050,6 +2046,10 @@
         },
         set: async (key, value) => {
           if (!CredentialVault2.isSensitiveKey(key)) {
+            if (!String(value || "").trim()) {
+              Storage2.remove(key);
+              return "";
+            }
             Storage2.setRaw(key, value);
             return value;
           }
@@ -2419,14 +2419,6 @@
           const hasStoredClientSecret = CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET);
           const hasStoredManualToken = CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
           const hasStoredRefreshToken = CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN);
-          if (CredentialVault2.hasVault() && !CredentialVault2.isUnlocked() && (hasStoredManualToken || hasStoredClientSecret || hasStoredRefreshToken)) {
-            return {
-              connected: false,
-              color: "#f59e0b",
-              text: "Notion \u654F\u611F\u51ED\u8BC1\u5DF2\u4FDD\u5B58\u5728\u4FDD\u9669\u7BB1\u4E2D\u3002\u8BF7\u5148\u89E3\u9501\u4FDD\u9669\u7BB1\uFF0C\u518D\u4F7F\u7528\u5DF2\u4FDD\u5B58\u7684 Token \u6216\u91CD\u65B0\u6388\u6743\u3002",
-              apiKeyPlaceholder: "\u89E3\u9501\u4FDD\u9669\u7BB1\u540E\u53EF\u4F7F\u7528\u5DF2\u4FDD\u5B58\u914D\u7F6E"
-            };
-          }
           if (NotionOAuth2.isOAuthConnected()) {
             return {
               connected: true,
@@ -18651,12 +18643,7 @@ ${report}
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-oauth-clear" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">\u65AD\u5F00\u6388\u6743</button>
                         </div>
                         <div class="ldb-tip" id="ldb-notion-oauth-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                        <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-unlock" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">\u89E3\u9501\u4FDD\u9669\u7BB1</button>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-lock" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">\u9501\u5B9A</button>
-                        </div>
-                        <div class="ldb-tip" id="ldb-notion-vault-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                        <div class="ldb-tip">\u9002\u7528\u4E8E Notion \u516C\u5F00\u96C6\u6210\u3002\u8BF7\u786E\u8BA4\u5DF2\u5728\u96C6\u6210\u540E\u53F0\u9010\u5B57\u7B26\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF0C\u4E14\u96C6\u6210\u5DF2\u63D0\u4EA4 Notion \u5BA1\u6838\uFF08Authorization URL \u5728\u5BA1\u6838\u901A\u8FC7\u540E\u624D\u751F\u6548\uFF09\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\u3002\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u4EC5\u5728\u89E3\u9501\u540E\u7684\u5F53\u524D\u4F1A\u8BDD\u5185\u53EF\u7528\u3002</div>
+                        <div class="ldb-tip">\u9002\u7528\u4E8E Notion \u516C\u5F00\u96C6\u6210\u3002\u8BF7\u786E\u8BA4\u5DF2\u5728\u96C6\u6210\u540E\u53F0\u9010\u5B57\u7B26\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF0C\u4E14\u96C6\u6210\u5DF2\u63D0\u4EA4 Notion \u5BA1\u6838\uFF08Authorization URL \u5728\u5BA1\u6838\u901A\u8FC7\u540E\u624D\u751F\u6548\uFF09\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\u3002\u654F\u611F\u51ED\u8BC1\u4FDD\u5B58\u5728\u6D4F\u89C8\u5668\u672C\u5730\uFF08GM \u5B58\u50A8\uFF09\uFF0C\u811A\u672C\u66F4\u65B0\u540E\u65E0\u9700\u91CD\u65B0\u8F93\u5165\u3002</div>
                     </div>
                     <div class="ldb-input-group">
                         <label class="ldb-label" for="ldb-notion-ai-target-db">\u6570\u636E\u5E93 / \u9875\u9762</label>
@@ -19000,20 +18987,9 @@ ${report}
             },
             notify: (message, type) => NotionSiteUI2.showStatus(message, type)
           });
-          CredentialVault2.attachControls({
-            root: panel,
-            selectors: {
-              statusEl: "#ldb-notion-vault-status",
-              unlockBtn: "#ldb-notion-vault-unlock",
-              lockBtn: "#ldb-notion-vault-lock"
-            },
-            notify: (message, type) => NotionSiteUI2.showStatus(message, type),
-            onAfterSync: () => {
-              NotionOAuth2.syncApiKeyInputs();
-              CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
-              CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
-            }
-          });
+          NotionOAuth2.syncApiKeyInputs();
+          CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
+          CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
         },
         // 加载配置
         loadConfig: () => {
@@ -21948,12 +21924,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">\u65AD\u5F00\u6388\u6743</button>
                             </div>
                             <div class="ldb-tip" id="ldb-oauth-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                            <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-vault-unlock">\u89E3\u9501\u4FDD\u9669\u7BB1</button>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-vault-lock">\u9501\u5B9A</button>
-                            </div>
-                            <div class="ldb-tip" id="ldb-vault-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                            <div class="ldb-tip">\u5982\u679C\u4F60\u4F7F\u7528 Notion \u516C\u5F00\u96C6\u6210\uFF1A\u2460 \u5728\u96C6\u6210\u540E\u53F0\u9010\u5B57\u7B26\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF1B\u2461 Notion \u8981\u6C42\u516C\u5F00\u96C6\u6210<strong>\u63D0\u4EA4\u5BA1\u6838\u5E76\u901A\u8FC7\u540E</strong> Authorization URL \u624D\u4F1A\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\uFF08\u4E0D\u662F Client Secret\uFF09\u3001URI \u5DF2\u6CE8\u518C\u3001\u96C6\u6210\u5DF2\u901A\u8FC7\u5BA1\u6838\u3002\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\u3002</div>
+                            <div class="ldb-tip">\u5982\u679C\u4F60\u4F7F\u7528 Notion \u516C\u5F00\u96C6\u6210\uFF1A\u2460 \u5728\u96C6\u6210\u540E\u53F0\u9010\u5B57\u7B26\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF1B\u2461 Notion \u8981\u6C42\u516C\u5F00\u96C6\u6210<strong>\u63D0\u4EA4\u5BA1\u6838\u5E76\u901A\u8FC7\u540E</strong> Authorization URL \u624D\u4F1A\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\uFF08\u4E0D\u662F Client Secret\uFF09\u3001URI \u5DF2\u6CE8\u518C\u3001\u96C6\u6210\u5DF2\u901A\u8FC7\u5BA1\u6838\u3002\u654F\u611F\u51ED\u8BC1\u4FDD\u5B58\u5728\u6D4F\u89C8\u5668\u672C\u5730\uFF08GM \u5B58\u50A8\uFF09\uFF0C\u811A\u672C\u66F4\u65B0\u540E\u65E0\u9700\u91CD\u65B0\u8F93\u5165\u3002</div>
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label" for="ldb-workspace-select">\u6570\u636E\u5E93 / \u9875\u9762</label>
@@ -25623,18 +25594,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             },
             notify: (message, type) => UI2.showStatus(message, type)
           });
-          CredentialVault2.attachControls({
-            root: panel,
-            selectors: {
-              statusEl: "#ldb-vault-status",
-              unlockBtn: "#ldb-vault-unlock",
-              lockBtn: "#ldb-vault-lock"
-            },
-            notify: (message, type) => UI2.showStatus(message, type),
-            onAfterSync: () => {
-              syncSensitiveInputs();
-            }
-          });
           syncSensitiveInputs();
           UI2.makeDraggable(panel, panel.querySelector(".ldb-header"));
         }
@@ -25890,12 +25849,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                             <button class="gclip-btn gclip-btn-secondary" id="gclip-oauth-clear" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">\u65AD\u5F00\u6388\u6743</button>
                         </div>
                         <div id="gclip-oauth-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);"></div>
-                        <div style="display:flex;gap:var(--ldb-ui-spacing-md);flex-wrap:wrap;margin-top:var(--ldb-ui-spacing-md);">
-                            <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-unlock" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">\u89E3\u9501\u4FDD\u9669\u7BB1</button>
-                            <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-lock" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">\u9501\u5B9A</button>
-                        </div>
-                        <div id="gclip-vault-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);"></div>
-                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">\u516C\u5F00 OAuth \u9002\u5408\u4E2A\u4EBA\u81EA\u5EFA\u96C6\u6210\uFF1B\u9700\u5728\u96C6\u6210\u540E\u53F0\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF0C\u4E14\u96C6\u6210\u901A\u8FC7 Notion \u5BA1\u6838\u540E\u6388\u6743\u94FE\u63A5\u624D\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\u3002\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\u3002</div>
+                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">\u516C\u5F00 OAuth \u9002\u5408\u4E2A\u4EBA\u81EA\u5EFA\u96C6\u6210\uFF1B\u9700\u5728\u96C6\u6210\u540E\u53F0\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF0C\u4E14\u96C6\u6210\u901A\u8FC7 Notion \u5BA1\u6838\u540E\u6388\u6743\u94FE\u63A5\u624D\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\u3002\u654F\u611F\u51ED\u8BC1\u4FDD\u5B58\u5728\u6D4F\u89C8\u5668\u672C\u5730\uFF08GM \u5B58\u50A8\uFF09\uFF0C\u811A\u672C\u66F4\u65B0\u540E\u65E0\u9700\u91CD\u65B0\u8F93\u5165\u3002</div>
                     </div>
                     <div class="gclip-field">
                         <label for="gclip-export-type">\u5BFC\u51FA\u76EE\u6807\u7C7B\u578B</label>
@@ -26208,18 +26162,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               statusEl: "#gclip-oauth-status"
             },
             notify: (message, type) => GenericUI2.showStatus(message, type)
-          });
-          CredentialVault2.attachControls({
-            root: panel,
-            selectors: {
-              statusEl: "#gclip-vault-status",
-              unlockBtn: "#gclip-vault-unlock",
-              lockBtn: "#gclip-vault-lock"
-            },
-            notify: (message, type) => GenericUI2.showStatus(message, type),
-            onAfterSync: () => {
-              NotionOAuth2.syncApiKeyInputs();
-            }
           });
           NotionOAuth2.syncApiKeyInputs();
           const permEl = panel.querySelector("#gclip-permission-level");

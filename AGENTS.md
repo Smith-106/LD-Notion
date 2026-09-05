@@ -66,7 +66,7 @@ LD-Notion Hub v3.7.8 是 **Tampermonkey 用户脚本 + Chrome 扩展**,统一连
 | `adapter/` | 多源适配器抽象层:`SourceAdapter` 基类 + `AdapterRegistry` + LinuxDo/GitHub/Bookmark/RSS/Zhihu/Generic 各适配器,新知识源接入标准接口 |
 | `ai/` | AI 助手与 Agent:ReAct Agent Loop、`AgentTools`、`Handlers`、`BlockConverter`、`NameResolver`、`AISchema` 输出校验、`AgentTrace` 调用链追踪 |
 | `api/` | Notion/Obsidian API 传输层:`NotionTransport`、`NotionAPI`、`DOMToNotion`、`ObsidianAPI`、`SiteDetector`、`HTMLToMarkdown` |
-| `auth/` | 鉴权:`NotionOAuth` + manual token + 本地加密保险箱 `CredentialVault` + `TargetState` |
+| `auth/` | 鉴权:`NotionOAuth` + manual token + `CredentialVault`(敏感键 GM 明文存储 + 审计脱敏,v3.14.2 起保险箱机制退役) + `TargetState` |
 | `bridge/` | 浏览器书签/RSS 桥接:`BookmarkBridge`、`BookmarkExporter`、`BookmarkAutoImporter`、`RSSAutoImporter` |
 | `config/` | 全局配置常量:`CONFIG`、`MSG` 消息、文件类型映射、MIME |
 | `coordination/` | UI 命令分发协调器 `UICommandService`(从 extract 层迁出,解耦多向耦合) |
@@ -118,7 +118,7 @@ v3.7.8 schema 校验拦截:icon/cover URL 指向 `169.254.169.254`(SSRF)、`rela
 ### Auth
 
 - OAuth 推荐路径,manual token 高级兜底。
-- 敏感凭证(token/Client Secret/AI Key/GitHub/Obsidian token)入本地 AES-256-GCM 加密保险箱。
+- 敏感凭证(token/Client Secret/AI Key/GitHub/Obsidian token)存 GM 明文存储,审计日志由 `REDACT_IN_LOGS` 超集脱敏(v3.14.2 起保险箱退役:解锁态为页面内存态,每次加载即锁定,锁定态读空致"更新后失效")。
 - 鉴权失败须在 Guard 前阻止写入;审计日志不得含真实 token。
 
 ### Routing 优先级

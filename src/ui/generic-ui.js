@@ -252,12 +252,7 @@ const GenericUI = {
                             <button class="gclip-btn gclip-btn-secondary" id="gclip-oauth-clear" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">断开授权</button>
                         </div>
                         <div id="gclip-oauth-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);"></div>
-                        <div style="display:flex;gap:var(--ldb-ui-spacing-md);flex-wrap:wrap;margin-top:var(--ldb-ui-spacing-md);">
-                            <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-unlock" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">解锁保险箱</button>
-                            <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-lock" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">锁定</button>
-                        </div>
-                        <div id="gclip-vault-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);"></div>
-                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">公开 OAuth 适合个人自建集成；需在集成后台注册 Redirect URI（含末尾斜杠），且集成通过 Notion 审核后授权链接才生效。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID。敏感凭证会保存在本地加密保险箱中。</div>
+                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">公开 OAuth 适合个人自建集成；需在集成后台注册 Redirect URI（含末尾斜杠），且集成通过 Notion 审核后授权链接才生效。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID。敏感凭证保存在浏览器本地（GM 存储），脚本更新后无需重新输入。</div>
                     </div>
                     <div class="gclip-field">
                         <label for="gclip-export-type">导出目标类型</label>
@@ -615,18 +610,6 @@ const GenericUI = {
                 statusEl: "#gclip-oauth-status",
             },
             notify: (message, type) => GenericUI.showStatus(message, type),
-        });
-        CredentialVault.attachControls({
-            root: panel,
-            selectors: {
-                statusEl: "#gclip-vault-status",
-                unlockBtn: "#gclip-vault-unlock",
-                lockBtn: "#gclip-vault-lock",
-            },
-            notify: (message, type) => GenericUI.showStatus(message, type),
-            onAfterSync: () => {
-                NotionOAuth.syncApiKeyInputs();
-            },
         });
         NotionOAuth.syncApiKeyInputs();
 

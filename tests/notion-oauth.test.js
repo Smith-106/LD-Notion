@@ -504,96 +504,74 @@ function createWorkspaceVisualizationFixture(harness) {
 (async () => {
     console.log('Running tests for NotionOAuth...\n');
 
-    await runTest('CredentialVault.unlock: migrates legacy plaintext SENSITIVE credentials into encrypted vault; OAuth 三键脱敏保留明文(修 R2\' 迁移陷阱)', async () => {
+    await runTest('CredentialVault: SENSITIVE_KEYS 清空后所有键 GM 明文读写, 解锁态无关(修"更新后 Key 失效" R1 同根)', async () => {
         const harness = createHarness();
         const apiKeyKey = harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY;
         const clientSecretKey = harness.CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET;
         const githubTokenKey = harness.CONFIG.STORAGE_KEYS.GITHUB_TOKEN;
+        const aiApiKeyKey = harness.CONFIG.STORAGE_KEYS.AI_API_KEY;
 
         harness.store[apiKeyKey] = 'legacy_manual_token';
         harness.store[clientSecretKey] = 'legacy_client_secret';
         harness.store[githubTokenKey] = 'legacy_github_token';
 
-        const status = await harness.CredentialVault.unlock('vault-passphrase', {
-            initializeIfMissing: true,
-            migrateLegacy: true
-        });
-        const payload = readVaultPayload(harness);
+        // 敏感键集已清空: 不再要求初始化/解锁保险箱
+        assert.strictEqual(harness.CredentialVault.SENSITIVE_KEYS.size, 0);
+        assert.strictEqual(harness.CredentialVault.isSensitiveKey(aiApiKeyKey), false);
+        assert.strictEqual(harness.CredentialVault.isSensitiveKey(githubTokenKey), false);
 
-        assert.strictEqual(status.hasVault, true);
-        assert.strictEqual(status.unlocked, true);
-        assert.ok(payload && payload.ciphertext && payload.iv && payload.salt);
-        assert.ok(Array.isArray(payload.keys));
-        // OAuth 三键已脱敏:不进保险箱,明文保留,保证跨页回调/刷新可读
-        assert.ok(!payload.keys.includes(apiKeyKey));
-        assert.ok(!payload.keys.includes(clientSecretKey));
-        assert.strictEqual(harness.store[apiKeyKey], 'legacy_manual_token');
-        assert.strictEqual(harness.store[clientSecretKey], 'legacy_client_secret');
-        // 仍敏感的键(如 GITHUB_TOKEN)正常迁移进加密 vault,明文删除
-        assert.ok(payload.keys.includes(githubTokenKey));
-        assert.strictEqual(harness.store[githubTokenKey], undefined);
-        assert.strictEqual(harness.CredentialVault.get(githubTokenKey, ''), 'legacy_github_token');
-        assert.ok(!JSON.stringify(payload).includes('legacy_github_token'));
+        // 锁定态(默认)下 get/set 直接读写 GM 明文 —— 页面重载/脚本更新后不再失效
+        await harness.CredentialVault.set(aiApiKeyKey, 'sk-ai-plaintext');
+        assert.strictEqual(harness.CredentialVault.get(aiApiKeyKey, ''), 'sk-ai-plaintext');
+        assert.strictEqual(harness.store[aiApiKeyKey], 'sk-ai-plaintext');
 
-        harness.CredentialVault.lock();
-        assert.strictEqual(harness.CredentialVault.isUnlocked(), false);
-        // 锁定后 OAuth 键仍可读(明文),敏感键不可读
+        // OAuth 三键继续明文保留(既有契约)
         assert.strictEqual(harness.CredentialVault.get(apiKeyKey, ''), 'legacy_manual_token');
         assert.strictEqual(harness.CredentialVault.get(clientSecretKey, ''), 'legacy_client_secret');
-        assert.strictEqual(harness.CredentialVault.get(githubTokenKey, ''), '');
-        assert.strictEqual(harness.CredentialVault.hasPersistedValue(githubTokenKey), true);
-
-        await harness.CredentialVault.unlock('vault-passphrase', {
-            initializeIfMissing: false,
-            migrateLegacy: true
-        });
         assert.strictEqual(harness.CredentialVault.get(githubTokenKey, ''), 'legacy_github_token');
+
+        // 锁定/解锁切换不影响明文读取(保险箱已无键可管)
+        harness.CredentialVault.lock();
+        assert.strictEqual(harness.CredentialVault.isUnlocked(), false);
+        assert.strictEqual(harness.CredentialVault.get(aiApiKeyKey, ''), 'sk-ai-plaintext');
+        assert.strictEqual(harness.CredentialVault.get(githubTokenKey, ''), 'legacy_github_token');
+        assert.strictEqual(harness.CredentialVault.hasPersistedValue(githubTokenKey), true);
     });
 
-    await runTest('CredentialVault.set: persists sensitive values only inside the encrypted vault and clears them cleanly', async () => {
+    await runTest('CredentialVault.set/clear: 敏感键 GM 明文读写, 不再写入加密 payload', async () => {
         const harness = createHarness();
         const githubTokenKey = harness.CONFIG.STORAGE_KEYS.GITHUB_TOKEN;
 
-        await unlockCredentialVault(harness, 'vault-passphrase');
         await harness.CredentialVault.set(githubTokenKey, 'ghp_secret_value');
 
         let payload = readVaultPayload(harness);
-        assert.ok(payload && Array.isArray(payload.keys) && payload.keys.includes(githubTokenKey));
-        assert.strictEqual(harness.store[githubTokenKey], undefined);
-        assert.ok(!JSON.stringify(payload).includes('ghp_secret_value'));
-
-        harness.CredentialVault.lock();
-        await harness.CredentialVault.unlock('vault-passphrase', {
-            initializeIfMissing: false,
-            migrateLegacy: true
-        });
+        // 明文存储, payload 不再包含任何敏感键
+        assert.ok(payload === null || (Array.isArray(payload.keys) && !payload.keys.includes(githubTokenKey)));
+        assert.strictEqual(harness.store[githubTokenKey], 'ghp_secret_value');
         assert.strictEqual(harness.CredentialVault.get(githubTokenKey, ''), 'ghp_secret_value');
 
         await harness.CredentialVault.clear(githubTokenKey);
-        payload = readVaultPayload(harness);
-        assert.ok(payload && Array.isArray(payload.keys) && !payload.keys.includes(githubTokenKey));
         assert.strictEqual(harness.CredentialVault.hasPersistedValue(githubTokenKey), false);
         assert.strictEqual(harness.CredentialVault.get(githubTokenKey, ''), '');
         assert.strictEqual(harness.store[githubTokenKey], undefined);
     });
 
-    await runTest('NotionOAuth.getStatus: reports locked vault guidance when sensitive credentials are persisted but not unlocked', async () => {
+    await runTest('NotionOAuth.getStatus: 不再要求解锁保险箱(明文凭证直接可用)', async () => {
         const harness = createHarness();
 
-        await unlockCredentialVault(harness, 'vault-passphrase');
         await harness.NotionOAuth.saveConfig({
             clientId: 'client_123',
             clientSecret: 'secret_456',
             redirectUri: 'https://www.notion.so/'
         });
         await harness.NotionOAuth.setRefreshToken('refresh_locked');
-        harness.CredentialVault.lock();
 
         const status = harness.NotionOAuth.getStatus();
 
         assert.strictEqual(status.connected, false);
-        assert.strictEqual(status.apiKeyPlaceholder, '解锁保险箱后可使用已保存配置');
-        assert.ok(status.text.includes('敏感凭证已保存在保险箱中'));
+        // 明文凭证直接可用, 不再出现"解锁保险箱"占位
+        assert.notStrictEqual(status.apiKeyPlaceholder, '解锁保险箱后可使用已保存配置');
+        assert.ok(!status.text.includes('解锁保险箱'));
     });
 
     await runTest('buildAuthorizeUrl: includes expected Notion OAuth query params', async () => {

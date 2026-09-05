@@ -278,12 +278,7 @@ const NotionSiteUI = {
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-oauth-clear" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">断开授权</button>
                         </div>
                         <div class="ldb-tip" id="ldb-notion-oauth-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                        <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-unlock" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">解锁保险箱</button>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-lock" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">锁定</button>
-                        </div>
-                        <div class="ldb-tip" id="ldb-notion-vault-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                        <div class="ldb-tip">适用于 Notion 公开集成。请确认已在集成后台逐字符注册 Redirect URI（含末尾斜杠），且集成已提交 Notion 审核（Authorization URL 在审核通过后才生效）。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID。敏感凭证会保存在本地加密保险箱中，仅在解锁后的当前会话内可用。</div>
+                        <div class="ldb-tip">适用于 Notion 公开集成。请确认已在集成后台逐字符注册 Redirect URI（含末尾斜杠），且集成已提交 Notion 审核（Authorization URL 在审核通过后才生效）。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID。敏感凭证保存在浏览器本地（GM 存储），脚本更新后无需重新输入。</div>
                     </div>
                     <div class="ldb-input-group">
                         <label class="ldb-label" for="ldb-notion-ai-target-db">数据库 / 页面</label>
@@ -677,20 +672,9 @@ const NotionSiteUI = {
             },
             notify: (message, type) => NotionSiteUI.showStatus(message, type),
         });
-        CredentialVault.attachControls({
-            root: panel,
-            selectors: {
-                statusEl: "#ldb-notion-vault-status",
-                unlockBtn: "#ldb-notion-vault-unlock",
-                lockBtn: "#ldb-notion-vault-lock",
-            },
-            notify: (message, type) => NotionSiteUI.showStatus(message, type),
-            onAfterSync: () => {
-                NotionOAuth.syncApiKeyInputs();
-                CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
-                CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
-            },
-        });
+        NotionOAuth.syncApiKeyInputs();
+        CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
+        CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
     },
 
     // 加载配置

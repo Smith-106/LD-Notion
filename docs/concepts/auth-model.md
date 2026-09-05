@@ -6,7 +6,7 @@ Auth Model 解释 LD-Notion 如何获得 Notion 访问能力。OAuth 是推荐�
 
 - OAuth 是推荐路径：用户在 Notion 授权页批准访问，LD-Notion 保存 access token 与 refresh token。
 - manual token 是高级兜底：用户手动复制 `secret_` Integration Token 到面板。
-- 两种方式都运行在纯前端环境；OAuth 三键（Client Secret / access token / refresh token）自 v3.12.0 起保存在浏览器本地 GM 存储以保证跨页回调可读，AI/GitHub/Obsidian 等其它敏感凭证走本地加密保险箱，解锁后仅在当前会话中可直接使用。
+- 两种方式都运行在纯前端环境；所有敏感凭证（OAuth 三键、AI/GitHub/Obsidian、Notion token）自 v3.14.2 起统一保存在浏览器本地 GM 存储（明文）——保险箱解锁态为页面内存态，每次页面加载（含脚本更新重载）即锁定，锁定态读空曾导致凭证在更新后看似失效（v3.12.0 先例移出 OAuth 三键，v3.14.2 移出全部剩余敏感键）。
 - 断开授权只清除本地凭据，不会撤销 Notion 后台已经批准的授权。
 - Token 可用不等于目标可写；目标数据库或页面还必须连接对应 Integration。
 
@@ -16,7 +16,7 @@ Auth Model 解释 LD-Notion 如何获得 Notion 访问能力。OAuth 是推荐�
 | --- | --- | --- |
 | Recommended status | 推荐路径，适合日常使用。 | advanced fallback，适合个人集成、调试和 OAuth 不可用时使用。 |
 | Setup | 配置 Client ID、Client Secret、Redirect URI 后点击一键授权。 | 在 Notion 创建 Internal Integration，复制 `secret_` token。 |
-| Stored locally | `Client ID`、`Redirect URI`、workspace meta 保存在本地配置；access token、refresh token、`Client Secret` 自 v3.12.0 起保存在浏览器本地 GM 存储（明文）以保证跨页回调可读，审计日志由 `REDACT_IN_LOGS` 统一脱敏。 | Integration token 自 v3.12.0 起同样保存在浏览器本地 GM 存储。 |
+| Stored locally | `Client ID`、`Redirect URI`、workspace meta 保存在本地配置；所有敏感凭证自 v3.14.2 起统一保存在浏览器本地 GM 存储（明文）以保证跨页/更新后可读，审计日志由 `REDACT_IN_LOGS` 统一脱敏。 | Integration token 同样保存在浏览器本地 GM 存储。 |
 | Refresh | access token 可通过 refresh token 续签。 | 不支持自动 refresh；失效后需要重新复制。 |
 | User effort | 初次配置稍多，后续较少。 | 每个用户都需要理解 Integration 与 Connections。 |
 | Security note | `Client Secret` 保存在浏览器本地 GM 存储（跨页可读必需），但项目仍是纯前端，不适合共享生产级 secret。 | token 本身就是长期密钥；泄露后仍应在 Notion 后台轮换。 |
@@ -24,7 +24,7 @@ Auth Model 解释 LD-Notion 如何获得 Notion 访问能力。OAuth 是推荐�
 | Failure fallback | 重新授权，或临时切换到 manual token。 | 检查 token、Capabilities、Connections，或改用 OAuth。 |
 
 ::: warning 本地凭据风险
-LD-Notion 没有独立后端。OAuth 三键（Client Secret、access/refresh token）与 manual token 自 v3.12.0 起保存在浏览器本地 GM 存储中——这是为了让 OAuth 授权回调（发生在全新页面）能读到凭据；AI API Key、GitHub Token、Obsidian 等其它敏感凭证仍走本地加密保险箱。所有敏感键在审计日志中一律由 `REDACT_IN_LOGS` 超集脱敏。该模式适合个人自用，不适合把共享生产级 secret 放进前端配置。
+LD-Notion 没有独立后端。所有敏感凭证（OAuth 三键、AI API Key、GitHub Token、Obsidian Key、Notion manual token）自 v3.14.2 起统一保存在浏览器本地 GM 存储（明文）——这是为了让页面加载（含脚本更新重载）后凭证立即可用，不再要求每次解锁保险箱。历史版本曾用 AES-256-GCM 加密保险箱（v3.12.0 起 OAuth 三键、v3.14.2 起全部敏感键先后移出），但保险箱解锁态为页面内存态、每次加载即锁定，锁定态读空导致“更新后凭证失效”。所有敏感键在审计日志中一律由 `REDACT_IN_LOGS` 超集脱敏。该模式适合个人自用，不适合把共享生产级 secret 放进前端配置。
 :::
 
 ## OAuth flow
@@ -34,7 +34,7 @@ sequenceDiagram
   participant User as 用户
   participant Panel as LD-Notion 面板
   participant NotionOAuth as Notion OAuth
-  participant Store as 浏览器本地存储 + 加密保险箱 + 配置存储
+  participant Store as 浏览器本地存储(GM) + 配置存储
   participant Guard as OperationGuard
   participant API as Notion API
 

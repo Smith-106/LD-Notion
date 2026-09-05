@@ -2060,18 +2060,6 @@ const UIEvents = {
             },
             notify: (message, type) => UI.showStatus(message, type),
         });
-        CredentialVault.attachControls({
-            root: panel,
-            selectors: {
-                statusEl: "#ldb-vault-status",
-                unlockBtn: "#ldb-vault-unlock",
-                lockBtn: "#ldb-vault-lock",
-            },
-            notify: (message, type) => UI.showStatus(message, type),
-            onAfterSync: () => {
-                syncSensitiveInputs();
-            },
-        });
         syncSensitiveInputs();
 
         // 拖拽
