@@ -8,6 +8,11 @@ const {
     describeRedirectUriMismatch,
 } = require("./target-discovery");
 
+// 隐形字符(零宽空格/连接符/BOM/词连接符/bidi 标记/软连字符)——复制粘贴时易混入,Notion 端无法解析
+const INVISIBLE_CHARS_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u00AD]/g;
+// Notion 公开集成 OAuth Client ID 为 UUID(版本无关,不钉死 version nibble)
+const CLIENT_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const CredentialVault = {
     VERSION: 1,
     // OAuth 三键(NOTION_API_KEY/CLIENT_SECRET/REFRESH_TOKEN)已移出敏感键集:
@@ -629,7 +634,8 @@ const NotionOAuth = {
     },
 
     getConfig: () => ({
-        clientId: String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "") || "").trim(),
+        // 纵深防御(三模型共识验证轮):存量脏值(隐形字符)在读取层剥离,续签/授权不再携带
+        clientId: String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "") || "").trim().replace(INVISIBLE_CHARS_RE, ""),
         clientSecret: String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "") || "").trim(),
         redirectUri: String(
             Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, CONFIG.DEFAULTS.notionOauthRedirectUri)
@@ -639,7 +645,11 @@ const NotionOAuth = {
 
     saveConfig: async ({ clientId, clientSecret, redirectUri } = {}) => {
         if (typeof clientId !== "undefined") {
-            Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, String(clientId || "").trim());
+            const normalizedClientId = String(clientId || "").trim();
+            if (normalizedClientId) {
+                // 空值不覆盖(三模型共识):陈旧面板/误清空输入不得摧毁已存好值,语义与 clientSecret 分支对称
+                Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, normalizedClientId);
+            }
         }
         if (typeof clientSecret !== "undefined") {
             const normalizedClientSecret = String(clientSecret || "").trim();
@@ -649,10 +659,14 @@ const NotionOAuth = {
             }
         }
         if (typeof redirectUri !== "undefined") {
-            Storage.set(
-                CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI,
-                String(redirectUri || "").trim() || CONFIG.DEFAULTS.notionOauthRedirectUri
-            );
+            const normalizedRedirectUri = String(redirectUri || "").trim();
+            if (normalizedRedirectUri) {
+                // 空值不覆盖(三模型共识验证轮,与 clientId/secret 分支对称):陈旧面板/误清空不得把自定义 URI 静默改回默认
+                Storage.set(
+                    CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI,
+                    normalizedRedirectUri
+                );
+            }
         }
     },
 
@@ -760,6 +774,34 @@ const NotionOAuth = {
         };
     },
 
+    // —— client_id/redirect_uri 本地校验(三模型共识:根因 = 非空但非法值直接进 URL) ——
+    validateOAuthClientId: (clientId) => {
+        const raw = String(clientId ?? "").trim();
+        if (!raw) return { valid: false, code: "EMPTY", value: "", message: "请先填写 Notion OAuth Client ID" };
+        const stripped = raw.replace(INVISIBLE_CHARS_RE, "");
+        if (!stripped) return { valid: false, code: "INVISIBLE_ONLY", value: "", message: "Notion OAuth Client ID 仅包含不可见字符，请重新从集成页面复制 OAuth client ID" };
+        if (/^secret_/i.test(stripped)) return { valid: false, code: "LOOKS_LIKE_SECRET", value: stripped, message: "这不是 Client ID：secret_ 开头的是 Client Secret，请粘贴到下方 Client Secret 输入框；Client ID 应为 UUID 格式" };
+        if (/^ntn_/i.test(stripped)) return { valid: false, code: "LOOKS_LIKE_TOKEN", value: stripped, message: "这不是 Client ID：ntn_ 开头的是 Notion API Token；Client ID 应为 UUID 格式（形如 12345678-1234-4234-8234-123456789012）" };
+        if (!CLIENT_ID_UUID_RE.test(stripped)) return { valid: false, code: "FORMAT", value: stripped, message: "Notion OAuth Client ID 格式不合法：应为 36 位 UUID（形如 12345678-1234-4234-8234-123456789012），请到 Notion 集成页面复制完整的 OAuth client ID（不是集成名称，也不是 Internal Integration Token）" };
+        return { valid: true, code: "OK", value: stripped, message: "" };
+    },
+
+    validateOAuthRedirectUri: (redirectUri) => {
+        const raw = String(redirectUri ?? "").trim();
+        if (!raw) return { valid: false, code: "EMPTY", value: "", message: "请先填写 Redirect URI" };
+        let url;
+        try {
+            url = new URL(raw);
+        } catch {
+            return { valid: false, code: "PARSE", value: "", message: "Redirect URI 格式不合法：必须是完整 URL（例如 https://www.notion.so/）" };
+        }
+        const isLocalhost = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+        if (url.protocol === "http:" && !isLocalhost) return { valid: false, code: "HTTP_NOT_LOCALHOST", value: raw, message: "Redirect URI 仅允许 https；http 仅限 http://localhost 本地调试，请勿使用公网 http 地址" };
+        if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalhost)) return { valid: false, code: "PROTOCOL", value: raw, message: "Redirect URI 协议不合法：仅支持 https 或 http://localhost" };
+        if (isLocalhost) return { valid: true, code: "LOCALHOST", value: url.toString(), message: "本地回调仅 Chrome 扩展形态可用：userscript 不运行于 localhost 页面，回调无法自动完成" };
+        return { valid: true, code: "OK", value: url.toString(), message: "" };
+    },
+
     buildAuthorizeUrl: (config, state) => {
         const normalized = {
             clientId: String(config?.clientId || "").trim(),
@@ -767,10 +809,16 @@ const NotionOAuth = {
         };
         if (!normalized.clientId) throw new Error("请先填写 Notion OAuth Client ID");
         if (!normalized.redirectUri) throw new Error("请先填写 Redirect URI");
+        // 严格校验(三模型共识):空值本地拦截后,能到 Notion 的错误只能是「非空但非法」,
+        // 必须在打开授权页前拦截并给出可行动的中文提示,而不是让 Notion 报模糊错误。
+        const clientIdCheck = NotionOAuth.validateOAuthClientId(normalized.clientId);
+        if (!clientIdCheck.valid) throw new Error(clientIdCheck.message);
+        const redirectCheck = NotionOAuth.validateOAuthRedirectUri(normalized.redirectUri);
+        if (!redirectCheck.valid) throw new Error(redirectCheck.message);
 
         const url = new URL("https://api.notion.com/v1/oauth/authorize");
-        url.searchParams.set("client_id", normalized.clientId);
-        url.searchParams.set("redirect_uri", normalized.redirectUri);
+        url.searchParams.set("client_id", clientIdCheck.value);
+        url.searchParams.set("redirect_uri", redirectCheck.value);
         url.searchParams.set("response_type", "code");
         url.searchParams.set("owner", "user");
         if (state) url.searchParams.set("state", state);
@@ -858,6 +906,35 @@ const NotionOAuth = {
         });
     },
 
+    // 跨页/跨 tab 刷新(三模型共识辅因修复):OAuth 三键注册 GM_addValueChangeListener,
+    // 其他页面修改配置后本页面板立即回填,避免陈旧面板把旧值写回 Storage。
+    _crossPageWatchersInstalled: false,
+
+    installCrossPageWatchers: () => {
+        if (NotionOAuth._crossPageWatchersInstalled) return;
+        NotionOAuth._crossPageWatchersInstalled = true;
+        if (typeof GM_addValueChangeListener !== "function") return;
+        const keys = [
+            CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID,
+            CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET,
+            CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI,
+        ];
+        try {
+            for (const key of keys) {
+                GM_addValueChangeListener(key, () => {
+                    try {
+                        NotionOAuth.syncRegisteredControls();
+                    } catch (error) {
+                        console.warn("[LD-Notion] OAuth 跨页同步失败", error?.message || error);
+                    }
+                });
+            }
+        } catch (error) {
+            // 注册失败静默降级(仅失去跨页刷新),与 storage/index.js 既有先例一致
+            console.warn("[LD-Notion] OAuth 跨页监听注册失败", error?.message || error);
+        }
+    },
+
     attachControls: ({ root, selectors, notify } = {}) => {
         if (!root || !selectors) return;
         const get = (name) => root.querySelector(selectors[name]);
@@ -911,12 +988,30 @@ const NotionOAuth = {
         };
 
         const saveFormConfig = async () => {
+            // 先校验再保存(三模型共识):非法 client_id/redirect_uri 在本地拦截,
+            // 携带 code 供 change handler 区分「部分填写」静默与真实错误。
+            const clientIdRaw = fields.clientIdInput.value.trim();
+            const redirectUriRaw = fields.redirectUriInput.value.trim() || CONFIG.DEFAULTS.notionOauthRedirectUri;
+            const clientIdCheck = NotionOAuth.validateOAuthClientId(clientIdRaw);
+            if (!clientIdCheck.valid) {
+                const err = new Error(clientIdCheck.message);
+                err.code = clientIdCheck.code;
+                throw err;
+            }
+            const redirectCheck = NotionOAuth.validateOAuthRedirectUri(redirectUriRaw);
+            if (!redirectCheck.valid) {
+                const err = new Error(redirectCheck.message);
+                err.code = redirectCheck.code;
+                throw err;
+            }
             await NotionOAuth.saveConfig({
-                clientId: fields.clientIdInput.value.trim(),
+                clientId: clientIdCheck.value,
                 clientSecret: fields.clientSecretInput.value.trim(),
-                redirectUri: fields.redirectUriInput.value.trim() || CONFIG.DEFAULTS.notionOauthRedirectUri,
+                redirectUri: redirectCheck.value,
             });
         };
+
+        let warnedDefaultRedirectUri = false;
 
         [fields.clientIdInput, fields.clientSecretInput, fields.redirectUriInput].forEach((input) => {
             input.addEventListener("change", async () => {
@@ -924,6 +1019,8 @@ const NotionOAuth = {
                     await saveFormConfig();
                     sync();
                 } catch (error) {
+                    // 部分填写(如先粘 Secret)时 EMPTY 静默,点击授权时统一报错
+                    if (error && error.code === "EMPTY") return;
                     if (typeof notify === "function") {
                         notify(error.message || String(error), "error");
                     }
@@ -934,6 +1031,18 @@ const NotionOAuth = {
         fields.authorizeBtn.addEventListener("click", async () => {
             try {
                 await saveFormConfig();
+                // 默认 Redirect URI 引导(三模型共识):未注册时 Notion 授权后无法回调
+                if (!warnedDefaultRedirectUri && NotionOAuth.getConfig().redirectUri === CONFIG.DEFAULTS.notionOauthRedirectUri) {
+                    warnedDefaultRedirectUri = true;
+                    if (typeof notify === "function") {
+                        notify("当前 Redirect URI 为默认值 https://www.notion.so/。请确认已在 Notion 集成后台（OAuth 域和 URI）逐字符注册该地址（含末尾斜杠）；未注册时 Notion 授权后会报错且无法回调。", "info");
+                    }
+                }
+                // localhost 回调提示(三模型共识验证轮):userscript 不运行于 localhost 页,回调无法自动完成
+                const redirectCheck = NotionOAuth.validateOAuthRedirectUri(NotionOAuth.getConfig().redirectUri);
+                if (redirectCheck.valid && redirectCheck.code === "LOCALHOST" && typeof notify === "function") {
+                    notify(redirectCheck.message, "info");
+                }
                 NotionOAuth.startAuthorization();
                 if (typeof notify === "function") {
                     notify("已打开 Notion OAuth 授权页", "info");
@@ -991,13 +1100,23 @@ const NotionOAuth = {
         if (!config.redirectUri) throw new Error("请先填写 Redirect URI");
 
         const state = Utils.randomToken("notion_oauth");
+        // 先构建 URL 再落 pending(三模型共识):校验失败时不残留幽灵 pending state
+        const authUrl = NotionOAuth.buildAuthorizeUrl(config, state);
         NotionOAuth.setPendingState({
             state,
             redirectUri: config.redirectUri,
             createdAt: Date.now(),
         });
 
-        const authUrl = NotionOAuth.buildAuthorizeUrl(config, state);
+        // 诊断日志(三模型共识):仅含 client_id/redirect_uri/state,无任何 secret,符合 REDACT_IN_LOGS 纪律
+        try {
+            const parsed = new URL(authUrl);
+            console.info("[LD-Notion] Notion OAuth 授权请求参数", {
+                client_id: parsed.searchParams.get("client_id"),
+                redirect_uri: parsed.searchParams.get("redirect_uri"),
+                state: parsed.searchParams.get("state"),
+            });
+        } catch (_) { /* 日志失败不影响授权 */ }
         // 修复(三模型共识 R2):window.open(...,"noopener,noreferrer") 恒返回 null(实测),
         // 旧判定 if(!opened) 永远为真 → 永远整页跳转丢失上下文。
         // 先尝试带 noopener 的打开(防反向 tabnabbing);返回 null 时降级无 noopener 重试;

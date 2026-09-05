@@ -31,6 +31,7 @@
 // @grant        GM_deleteValue
 // @grant        GM_xmlhttpRequest
 // @grant        GM_notification
+// @grant        GM_addValueChangeListener
 // @connect      api.notion.com
 // @connect      linux.do
 // @connect      *.amazonaws.com
@@ -48,7 +49,13 @@
     // [LD-NOTION-BUILD:USER_SCRIPT_BODY_START]
     "use strict";
   var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __commonJS = (cb, mod) => function __require() {
+  var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+    get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+  }) : x)(function(x) {
+    if (typeof require !== "undefined") return require.apply(this, arguments);
+    throw Error('Dynamic require of "' + x + '" is not supported');
+  });
+  var __commonJS = (cb, mod) => function __require2() {
     try {
       return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
     } catch (e) {
@@ -61,6 +68,9 @@
     "src/config/index.js"(exports, module) {
       "use strict";
       var CONFIG2 = {
+        // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
+        // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
+        MULTI_DEVICE_SYNC_ENABLED: false,
         // 存储键
         STORAGE_KEYS: {
           NOTION_API_KEY: "ldb_notion_api_key",
@@ -182,7 +192,17 @@
           // UI 主题
           THEME_PREFERENCE: "ldb_theme_preference",
           // 面板 Tab 状态
-          ACTIVE_TAB: "ldb_active_tab"
+          ACTIVE_TAB: "ldb_active_tab",
+          // 多端同步(F-SYNC-12)
+          SYNC_DEVICE_ID: "ldb_sync_device_id",
+          SYNC_ENABLED: "ldb_sync_enabled",
+          SYNC_MODE: "ldb_sync_mode",
+          SYNC_DATABASE_ID: "ldb_sync_database_id",
+          SYNC_PARENT_PAGE_ID: "ldb_sync_parent_page_id",
+          SYNC_LAST_PUSH_AT: "ldb_sync_last_push_at",
+          SYNC_LAST_PULL_AT: "ldb_sync_last_pull_at",
+          SYNC_LAST_OUTCOME: "ldb_sync_last_outcome",
+          SYNC_PASSPHRASE_SET: "ldb_sync_passphrase_set"
         },
         // 默认值
         DEFAULTS: {
@@ -269,7 +289,12 @@
           obsDir: "Linux.do",
           obsImgMode: "file",
           // file / base64 / skip
-          obsImgDir: "Linux.do/attachments"
+          obsImgDir: "Linux.do/attachments",
+          // 多端同步默认值(F-SYNC-11)
+          syncEnabled: false,
+          syncMode: "personal",
+          // personal / shared
+          syncPassphraseSet: false
         },
         // 导出目标类型
         EXPORT_TARGET_TYPES: {
@@ -514,11 +539,63 @@
     }
   });
 
+  // src/coordination/event-bus.js
+  var require_event_bus = __commonJS({
+    "src/coordination/event-bus.js"(exports, module) {
+      "use strict";
+      var subscribers = /* @__PURE__ */ Object.create(null);
+      var on = (event, handler) => {
+        if (!subscribers[event]) {
+          subscribers[event] = [];
+        }
+        if (!subscribers[event].includes(handler)) {
+          subscribers[event].push(handler);
+        }
+      };
+      var off = (event, handler) => {
+        if (!event) {
+          Object.keys(subscribers).forEach((key) => {
+            delete subscribers[key];
+          });
+          return;
+        }
+        const handlers = subscribers[event];
+        if (!handlers) return;
+        if (!handler) {
+          delete subscribers[event];
+        } else {
+          const idx = handlers.indexOf(handler);
+          if (idx > -1) {
+            handlers.splice(idx, 1);
+            if (handlers.length === 0) {
+              delete subscribers[event];
+            }
+          }
+        }
+      };
+      var emit = (event, ...args) => {
+        const handlers = subscribers[event];
+        if (!handlers || handlers.length === 0) {
+          return;
+        }
+        handlers.slice().forEach((handler) => {
+          try {
+            handler(...args);
+          } catch (error) {
+            console.error(`[EventBus] Handler error for "${event}":`, error);
+          }
+        });
+      };
+      module.exports = { on, off, emit };
+    }
+  });
+
   // src/storage/SyncState.js
   var require_SyncState = __commonJS({
     "src/storage/SyncState.js"(exports, module) {
       "use strict";
       var { CONFIG: CONFIG2 } = require_config();
+      var { emit } = require_event_bus();
       var _getRaw = (key, defaultVal) => GM_getValue(key, defaultVal);
       var _setRaw = (key, val) => GM_setValue(key, val);
       var SyncStateV2 = {
@@ -534,6 +611,9 @@
         _makeSourceDefault(withSnapshot = false) {
           const record = {
             watermark: null,
+            // F-SYNC-02/F-04 反冲保护: epoch 每重置一次 +1,远端仅接受 ≤ 本地+1,
+            // 防旧设备 watermark 覆盖新基线(H-5 epoch 通胀 DoS)。
+            epoch: 0,
             lastSuccessAt: 0,
             lastAttemptAt: 0,
             lastOutcome: "idle",
@@ -584,6 +664,9 @@
           const source = record && typeof record === "object" ? record : {};
           const normalized = {
             watermark: this.normalizeWatermark(source.watermark),
+            // LOW-1 共识: epoch 必须进字段白名单,否则 normalizeSyncRecord 每次
+            // _load/updateSourceState 后丢弃 → F-04 反冲保护静默失效。
+            epoch: Number.isFinite(Number(source.epoch)) && Number(source.epoch) >= 0 ? Math.floor(Number(source.epoch)) : 0,
             lastSuccessAt: Number.isFinite(Number(source.lastSuccessAt)) ? Number(source.lastSuccessAt) : 0,
             lastAttemptAt: Number.isFinite(Number(source.lastAttemptAt)) ? Number(source.lastAttemptAt) : 0,
             lastOutcome: this.OUTCOMES.includes(source.lastOutcome) ? source.lastOutcome : "idle",
@@ -673,6 +756,7 @@
           if (!this._dirty) return;
           this._dirty = false;
           _setRaw(CONFIG2.STORAGE_KEYS.AUTO_SYNC_STATE, JSON.stringify(this._cache));
+          emit("storage:state-committed", { kind: "watermark" });
         },
         /**
          * 强制立即写入 (用于 sync 结束后等关键节点)
@@ -721,13 +805,16 @@
         /**
          * 重置指定源的增量同步基线（F-04：基线不可重置的 UI 缺口）
          * 清空 watermark/lastOutcome 等，使下次同步退化为全量扫描
+         * F-SYNC-02: epoch +1,远端旧 watermark 无法覆盖新基线
          * @param {string} sourceType
          * @returns {Object} 重置后的状态
          */
         resetSourceState(sourceType) {
           const state = this._load();
           const withSnapshot = sourceType === "bookmark" || sourceType === "rss";
+          const previous = state.sources[sourceType] || {};
           state.sources[sourceType] = this._makeSourceDefault(withSnapshot);
+          state.sources[sourceType].epoch = (Number(previous.epoch) || 0) + 1;
           this._save(state);
           return this.getSourceState(sourceType);
         },
@@ -819,6 +906,7 @@
     "src/storage/DedupStore.js"(exports, module) {
       "use strict";
       var { CONFIG: CONFIG2 } = require_config();
+      var { emit } = require_event_bus();
       var DEDUP_TTL_MS = 90 * 24 * 60 * 60 * 1e3;
       var DedupStore = {
         DEDUP_TTL_MS,
@@ -856,6 +944,7 @@
           if (this._batchCache && this._batchCache.dirty && this._batchSourceType) {
             this._evictExpired(this._batchCache.set);
             this._saveSet(this._batchSourceType, this._batchCache.set);
+            emit("storage:state-committed", { sourceType: this._batchSourceType, kind: "dedup" });
           }
           this._batchCache = null;
           this._batchSourceType = null;
@@ -903,6 +992,25 @@
           const set = this._loadSet(sourceType);
           set[dedupKey] = Date.now();
           this._saveSet(sourceType, set);
+        },
+        /**
+         * 清除单个去重键(batch/非 batch 双路径,与 markSeen 对称)
+         * @param {string} sourceType
+         * @param {string} dedupKey
+         */
+        unmarkSeen(sourceType, dedupKey) {
+          if (this._batchCache && this._batchSourceType === sourceType) {
+            if (Object.prototype.hasOwnProperty.call(this._batchCache.set, dedupKey)) {
+              delete this._batchCache.set[dedupKey];
+              this._batchCache.dirty = true;
+            }
+            return;
+          }
+          const set = this._loadSet(sourceType);
+          if (Object.prototype.hasOwnProperty.call(set, dedupKey)) {
+            delete set[dedupKey];
+            this._saveSet(sourceType, set);
+          }
         },
         /**
          * 获取源的完整去重集合
@@ -966,37 +1074,98 @@
         set: (key, value) => {
           Storage2.setRaw(key, value);
         },
+        // ---- 去重单一账本(F1 共识)----
+        // 全部去重记录收敛到 DedupStore 命名空间(ldb_exported_topics:<sourceType>,
+        // 90 天 TTL 自动淘汰)。legacy 键 ldb_exported_topics(无 sourceType 后缀)
+        // 首次访问时一次性迁移合并,此后双轨消除。
+        //
+        // F3 共识:GM storage 跨 tab 共享但模块缓存不共享,tab B 看不到 tab A 的
+        // mark → 可重复导出。注册 GM_addValueChangeListener 监听本键变化时置空缓存。
+        _registerExportedTopicsWatcher: () => {
+          if (Storage2._exportedTopicsWatcherBound) return;
+          Storage2._exportedTopicsWatcherBound = true;
+          if (typeof GM_addValueChangeListener !== "function") return;
+          try {
+            GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS, () => {
+              Storage2._exportedTopicsCache = null;
+            });
+            for (const sourceType of ["linuxdo", "bookmark", "rss", "github-stars", "github-repos", "github-forks", "github-gists", "zhihu", "generic"]) {
+              GM_addValueChangeListener(
+                `${CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`,
+                () => {
+                  Storage2._exportedTopicsCache = null;
+                }
+              );
+            }
+          } catch (e) {
+          }
+        },
+        // 一次性迁移:legacy 键 → DedupStore 命名空间(取 max ts),成功后删除旧键。
+        // 幂等:迁移完成后旧键已删,重复调用无效果。
+        _migrateLegacyExportedTopics: () => {
+          if (Storage2._exportedTopicsMigrated) return;
+          Storage2._exportedTopicsMigrated = true;
+          try {
+            const raw = Storage2.getRaw(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS, "{}");
+            let legacy = {};
+            try {
+              legacy = JSON.parse(raw);
+            } catch {
+            }
+            const legacyKeys = Object.keys(legacy);
+            if (legacyKeys.length === 0) return;
+            const set = DedupStore.getSeen("linuxdo") || {};
+            let changed = false;
+            for (const k of legacyKeys) {
+              const ts = Number(legacy[k]) || 0;
+              if (!Object.prototype.hasOwnProperty.call(set, k) || (set[k] || 0) < ts) {
+                set[k] = ts;
+                changed = true;
+              }
+            }
+            if (changed) {
+              DedupStore._saveSet("linuxdo", set);
+            }
+            Storage2.remove(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS);
+          } catch (e) {
+            Storage2._exportedTopicsMigrated = false;
+          }
+        },
         getExportedTopics: () => {
+          Storage2._registerExportedTopicsWatcher();
+          Storage2._migrateLegacyExportedTopics();
           if (Storage2._exportedTopicsCache) {
             return Storage2._exportedTopicsCache;
           }
-          const data = Storage2.getRaw(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS, "{}");
-          try {
-            Storage2._exportedTopicsCache = JSON.parse(data);
-          } catch {
-            Storage2._exportedTopicsCache = {};
-          }
+          Storage2._exportedTopicsCache = DedupStore.getSeen("linuxdo") || {};
           return Storage2._exportedTopicsCache;
         },
         markTopicExported: (topicId) => {
+          const key = String(topicId);
           const exported = Storage2.getExportedTopics();
-          exported[topicId] = Date.now();
+          exported[key] = Date.now();
           Storage2._exportedTopicsCache = exported;
-          Storage2.setRaw(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify(exported));
+          DedupStore.markSeen("linuxdo", key);
         },
         unmarkTopicExported: (topicId) => {
+          const key = String(topicId);
           const exported = Storage2.getExportedTopics();
-          if (!Object.prototype.hasOwnProperty.call(exported, topicId)) {
+          if (!Object.prototype.hasOwnProperty.call(exported, key)) {
             return false;
           }
-          delete exported[topicId];
+          delete exported[key];
           Storage2._exportedTopicsCache = exported;
-          Storage2.setRaw(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS, JSON.stringify(exported));
+          DedupStore.unmarkSeen("linuxdo", key);
           return true;
         },
         isTopicExported: (topicId) => {
+          const key = String(topicId);
           const exported = Storage2.getExportedTopics();
-          return !!exported[topicId];
+          return Object.prototype.hasOwnProperty.call(exported, key);
+        },
+        clearExportedTopics: () => {
+          Storage2._exportedTopicsCache = {};
+          DedupStore.clearSeen("linuxdo");
         }
       };
       var SyncState2 = {
@@ -1214,6 +1383,38 @@
           if (!text) return "";
           return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         },
+        // R9 共识(URL 规范化去重键): 同一页面以不同 URL 形态收藏(http/https、尾斜杠、
+        // fragment、tracking 参数)此前各算一条 → 重复导入。规范化后读写对称,
+        // 存量旧键在 BookmarkExporter.getExported 内一次性迁移。
+        normalizeDedupUrl: (url) => {
+          const raw = String(url || "").trim();
+          if (!raw || !/^https?:\/\//i.test(raw)) return raw;
+          try {
+            const parsed = new URL(raw);
+            parsed.hash = "";
+            const trackingParams = [
+              "utm_source",
+              "utm_medium",
+              "utm_campaign",
+              "utm_term",
+              "utm_content",
+              "ref",
+              "fbclid",
+              "gclid",
+              "mc_cid",
+              "mc_eid",
+              "spm",
+              "from",
+              "share_source"
+            ];
+            for (const p of trackingParams) parsed.searchParams.delete(p);
+            let normalized = parsed.toString();
+            normalized = normalized.replace(/\/+$/, "");
+            return normalized;
+          } catch {
+            return raw;
+          }
+        },
         // 从 Notion 页面对象提取标题
         getPageTitle: (page, fallback = "\u65E0\u6807\u9898") => {
           var _a, _b, _c, _d;
@@ -1247,8 +1448,9 @@
           if (!autoDedupEnabled) return categories;
           const seen = /* @__PURE__ */ new Set();
           return categories.filter((item) => {
-            if (seen.has(item)) return false;
-            seen.add(item);
+            const norm = item.toLowerCase();
+            if (seen.has(norm)) return false;
+            seen.add(norm);
             return true;
           });
         }
@@ -1384,6 +1586,8 @@
         describeExchangeError,
         describeRedirectUriMismatch
       } = require_target_discovery();
+      var INVISIBLE_CHARS_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u00AD]/g;
+      var CLIENT_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       var CredentialVault2 = {
         VERSION: 1,
         // OAuth 三键(NOTION_API_KEY/CLIENT_SECRET/REFRESH_TOKEN)已移出敏感键集:
@@ -1924,7 +2128,8 @@
           Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_AUTH_MODE, mode === "oauth" ? "oauth" : "manual");
         },
         getConfig: () => ({
-          clientId: String(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "") || "").trim(),
+          // 纵深防御(三模型共识验证轮):存量脏值(隐形字符)在读取层剥离,续签/授权不再携带
+          clientId: String(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "") || "").trim().replace(INVISIBLE_CHARS_RE, ""),
           clientSecret: String(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "") || "").trim(),
           redirectUri: String(
             Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, CONFIG2.DEFAULTS.notionOauthRedirectUri) || CONFIG2.DEFAULTS.notionOauthRedirectUri
@@ -1932,7 +2137,10 @@
         }),
         saveConfig: async ({ clientId, clientSecret, redirectUri } = {}) => {
           if (typeof clientId !== "undefined") {
-            Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, String(clientId || "").trim());
+            const normalizedClientId = String(clientId || "").trim();
+            if (normalizedClientId) {
+              Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, normalizedClientId);
+            }
           }
           if (typeof clientSecret !== "undefined") {
             const normalizedClientSecret = String(clientSecret || "").trim();
@@ -1941,10 +2149,13 @@
             }
           }
           if (typeof redirectUri !== "undefined") {
-            Storage2.set(
-              CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI,
-              String(redirectUri || "").trim() || CONFIG2.DEFAULTS.notionOauthRedirectUri
-            );
+            const normalizedRedirectUri = String(redirectUri || "").trim();
+            if (normalizedRedirectUri) {
+              Storage2.set(
+                CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI,
+                normalizedRedirectUri
+              );
+            }
           }
         },
         getMeta: () => Utils2.safeJsonParse(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_META, ""), {}),
@@ -2031,6 +2242,32 @@
             apiKeyPlaceholder: "\u624B\u52A8 Token\uFF08\u53EF\u9009\uFF09"
           };
         },
+        // —— client_id/redirect_uri 本地校验(三模型共识:根因 = 非空但非法值直接进 URL) ——
+        validateOAuthClientId: (clientId) => {
+          const raw = String(clientId ?? "").trim();
+          if (!raw) return { valid: false, code: "EMPTY", value: "", message: "\u8BF7\u5148\u586B\u5199 Notion OAuth Client ID" };
+          const stripped = raw.replace(INVISIBLE_CHARS_RE, "");
+          if (!stripped) return { valid: false, code: "INVISIBLE_ONLY", value: "", message: "Notion OAuth Client ID \u4EC5\u5305\u542B\u4E0D\u53EF\u89C1\u5B57\u7B26\uFF0C\u8BF7\u91CD\u65B0\u4ECE\u96C6\u6210\u9875\u9762\u590D\u5236 OAuth client ID" };
+          if (/^secret_/i.test(stripped)) return { valid: false, code: "LOOKS_LIKE_SECRET", value: stripped, message: "\u8FD9\u4E0D\u662F Client ID\uFF1Asecret_ \u5F00\u5934\u7684\u662F Client Secret\uFF0C\u8BF7\u7C98\u8D34\u5230\u4E0B\u65B9 Client Secret \u8F93\u5165\u6846\uFF1BClient ID \u5E94\u4E3A UUID \u683C\u5F0F" };
+          if (/^ntn_/i.test(stripped)) return { valid: false, code: "LOOKS_LIKE_TOKEN", value: stripped, message: "\u8FD9\u4E0D\u662F Client ID\uFF1Antn_ \u5F00\u5934\u7684\u662F Notion API Token\uFF1BClient ID \u5E94\u4E3A UUID \u683C\u5F0F\uFF08\u5F62\u5982 12345678-1234-4234-8234-123456789012\uFF09" };
+          if (!CLIENT_ID_UUID_RE.test(stripped)) return { valid: false, code: "FORMAT", value: stripped, message: "Notion OAuth Client ID \u683C\u5F0F\u4E0D\u5408\u6CD5\uFF1A\u5E94\u4E3A 36 \u4F4D UUID\uFF08\u5F62\u5982 12345678-1234-4234-8234-123456789012\uFF09\uFF0C\u8BF7\u5230 Notion \u96C6\u6210\u9875\u9762\u590D\u5236\u5B8C\u6574\u7684 OAuth client ID\uFF08\u4E0D\u662F\u96C6\u6210\u540D\u79F0\uFF0C\u4E5F\u4E0D\u662F Internal Integration Token\uFF09" };
+          return { valid: true, code: "OK", value: stripped, message: "" };
+        },
+        validateOAuthRedirectUri: (redirectUri) => {
+          const raw = String(redirectUri ?? "").trim();
+          if (!raw) return { valid: false, code: "EMPTY", value: "", message: "\u8BF7\u5148\u586B\u5199 Redirect URI" };
+          let url;
+          try {
+            url = new URL(raw);
+          } catch {
+            return { valid: false, code: "PARSE", value: "", message: "Redirect URI \u683C\u5F0F\u4E0D\u5408\u6CD5\uFF1A\u5FC5\u987B\u662F\u5B8C\u6574 URL\uFF08\u4F8B\u5982 https://www.notion.so/\uFF09" };
+          }
+          const isLocalhost = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+          if (url.protocol === "http:" && !isLocalhost) return { valid: false, code: "HTTP_NOT_LOCALHOST", value: raw, message: "Redirect URI \u4EC5\u5141\u8BB8 https\uFF1Bhttp \u4EC5\u9650 http://localhost \u672C\u5730\u8C03\u8BD5\uFF0C\u8BF7\u52FF\u4F7F\u7528\u516C\u7F51 http \u5730\u5740" };
+          if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalhost)) return { valid: false, code: "PROTOCOL", value: raw, message: "Redirect URI \u534F\u8BAE\u4E0D\u5408\u6CD5\uFF1A\u4EC5\u652F\u6301 https \u6216 http://localhost" };
+          if (isLocalhost) return { valid: true, code: "LOCALHOST", value: url.toString(), message: "\u672C\u5730\u56DE\u8C03\u4EC5 Chrome \u6269\u5C55\u5F62\u6001\u53EF\u7528\uFF1Auserscript \u4E0D\u8FD0\u884C\u4E8E localhost \u9875\u9762\uFF0C\u56DE\u8C03\u65E0\u6CD5\u81EA\u52A8\u5B8C\u6210" };
+          return { valid: true, code: "OK", value: url.toString(), message: "" };
+        },
         buildAuthorizeUrl: (config, state) => {
           const normalized = {
             clientId: String((config == null ? void 0 : config.clientId) || "").trim(),
@@ -2038,9 +2275,13 @@
           };
           if (!normalized.clientId) throw new Error("\u8BF7\u5148\u586B\u5199 Notion OAuth Client ID");
           if (!normalized.redirectUri) throw new Error("\u8BF7\u5148\u586B\u5199 Redirect URI");
+          const clientIdCheck = NotionOAuth2.validateOAuthClientId(normalized.clientId);
+          if (!clientIdCheck.valid) throw new Error(clientIdCheck.message);
+          const redirectCheck = NotionOAuth2.validateOAuthRedirectUri(normalized.redirectUri);
+          if (!redirectCheck.valid) throw new Error(redirectCheck.message);
           const url = new URL("https://api.notion.com/v1/oauth/authorize");
-          url.searchParams.set("client_id", normalized.clientId);
-          url.searchParams.set("redirect_uri", normalized.redirectUri);
+          url.searchParams.set("client_id", clientIdCheck.value);
+          url.searchParams.set("redirect_uri", redirectCheck.value);
           url.searchParams.set("response_type", "code");
           url.searchParams.set("owner", "user");
           if (state) url.searchParams.set("state", state);
@@ -2119,6 +2360,32 @@
             }
           });
         },
+        // 跨页/跨 tab 刷新(三模型共识辅因修复):OAuth 三键注册 GM_addValueChangeListener,
+        // 其他页面修改配置后本页面板立即回填,避免陈旧面板把旧值写回 Storage。
+        _crossPageWatchersInstalled: false,
+        installCrossPageWatchers: () => {
+          if (NotionOAuth2._crossPageWatchersInstalled) return;
+          NotionOAuth2._crossPageWatchersInstalled = true;
+          if (typeof GM_addValueChangeListener !== "function") return;
+          const keys = [
+            CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID,
+            CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET,
+            CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI
+          ];
+          try {
+            for (const key of keys) {
+              GM_addValueChangeListener(key, () => {
+                try {
+                  NotionOAuth2.syncRegisteredControls();
+                } catch (error) {
+                  console.warn("[LD-Notion] OAuth \u8DE8\u9875\u540C\u6B65\u5931\u8D25", (error == null ? void 0 : error.message) || error);
+                }
+              });
+            }
+          } catch (error) {
+            console.warn("[LD-Notion] OAuth \u8DE8\u9875\u76D1\u542C\u6CE8\u518C\u5931\u8D25", (error == null ? void 0 : error.message) || error);
+          }
+        },
         attachControls: ({ root, selectors, notify } = {}) => {
           if (!root || !selectors) return;
           const get = (name) => root.querySelector(selectors[name]);
@@ -2164,18 +2431,34 @@
             fields.clearBtn.disabled = !status.connected && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
           };
           const saveFormConfig = async () => {
+            const clientIdRaw = fields.clientIdInput.value.trim();
+            const redirectUriRaw = fields.redirectUriInput.value.trim() || CONFIG2.DEFAULTS.notionOauthRedirectUri;
+            const clientIdCheck = NotionOAuth2.validateOAuthClientId(clientIdRaw);
+            if (!clientIdCheck.valid) {
+              const err = new Error(clientIdCheck.message);
+              err.code = clientIdCheck.code;
+              throw err;
+            }
+            const redirectCheck = NotionOAuth2.validateOAuthRedirectUri(redirectUriRaw);
+            if (!redirectCheck.valid) {
+              const err = new Error(redirectCheck.message);
+              err.code = redirectCheck.code;
+              throw err;
+            }
             await NotionOAuth2.saveConfig({
-              clientId: fields.clientIdInput.value.trim(),
+              clientId: clientIdCheck.value,
               clientSecret: fields.clientSecretInput.value.trim(),
-              redirectUri: fields.redirectUriInput.value.trim() || CONFIG2.DEFAULTS.notionOauthRedirectUri
+              redirectUri: redirectCheck.value
             });
           };
+          let warnedDefaultRedirectUri = false;
           [fields.clientIdInput, fields.clientSecretInput, fields.redirectUriInput].forEach((input) => {
             input.addEventListener("change", async () => {
               try {
                 await saveFormConfig();
                 sync();
               } catch (error) {
+                if (error && error.code === "EMPTY") return;
                 if (typeof notify === "function") {
                   notify(error.message || String(error), "error");
                 }
@@ -2185,6 +2468,16 @@
           fields.authorizeBtn.addEventListener("click", async () => {
             try {
               await saveFormConfig();
+              if (!warnedDefaultRedirectUri && NotionOAuth2.getConfig().redirectUri === CONFIG2.DEFAULTS.notionOauthRedirectUri) {
+                warnedDefaultRedirectUri = true;
+                if (typeof notify === "function") {
+                  notify("\u5F53\u524D Redirect URI \u4E3A\u9ED8\u8BA4\u503C https://www.notion.so/\u3002\u8BF7\u786E\u8BA4\u5DF2\u5728 Notion \u96C6\u6210\u540E\u53F0\uFF08OAuth \u57DF\u548C URI\uFF09\u9010\u5B57\u7B26\u6CE8\u518C\u8BE5\u5730\u5740\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF1B\u672A\u6CE8\u518C\u65F6 Notion \u6388\u6743\u540E\u4F1A\u62A5\u9519\u4E14\u65E0\u6CD5\u56DE\u8C03\u3002", "info");
+                }
+              }
+              const redirectCheck = NotionOAuth2.validateOAuthRedirectUri(NotionOAuth2.getConfig().redirectUri);
+              if (redirectCheck.valid && redirectCheck.code === "LOCALHOST" && typeof notify === "function") {
+                notify(redirectCheck.message, "info");
+              }
               NotionOAuth2.startAuthorization();
               if (typeof notify === "function") {
                 notify("\u5DF2\u6253\u5F00 Notion OAuth \u6388\u6743\u9875", "info");
@@ -2237,12 +2530,21 @@
           }
           if (!config.redirectUri) throw new Error("\u8BF7\u5148\u586B\u5199 Redirect URI");
           const state = Utils2.randomToken("notion_oauth");
+          const authUrl = NotionOAuth2.buildAuthorizeUrl(config, state);
           NotionOAuth2.setPendingState({
             state,
             redirectUri: config.redirectUri,
             createdAt: Date.now()
           });
-          const authUrl = NotionOAuth2.buildAuthorizeUrl(config, state);
+          try {
+            const parsed = new URL(authUrl);
+            console.info("[LD-Notion] Notion OAuth \u6388\u6743\u8BF7\u6C42\u53C2\u6570", {
+              client_id: parsed.searchParams.get("client_id"),
+              redirect_uri: parsed.searchParams.get("redirect_uri"),
+              state: parsed.searchParams.get("state")
+            });
+          } catch (_) {
+          }
           let opened = null;
           try {
             opened = window.open(authUrl, "_blank", "noopener,noreferrer");
@@ -3941,6 +4243,10 @@ Content-Type: ${contentType}\r
       var NotionAPI2 = {
         Transport: NotionTransport2,
         _transportAdapter: null,
+        // F-SYNC-04: 共享请求预算 gate(默认 null = 行为与旧版一致)。
+        // 由 SyncEngine 注入 SyncRateLimiter.gateAcquire;多端同步开启时所有
+        // Notion 请求(含导出)共享 3 req/s 令牌桶。
+        _requestGate: null,
         configureTransport: (transport) => {
           if (!transport || typeof transport.request !== "function") {
             throw new Error("Notion transport \u9002\u914D\u5668\u5FC5\u987B\u63D0\u4F9B request \u65B9\u6CD5");
@@ -3953,8 +4259,21 @@ Content-Type: ${contentType}\r
           return NotionAPI2.Transport;
         },
         getTransport: () => NotionAPI2._transportAdapter || NotionAPI2.Transport,
+        /**
+         * 注入/移除请求 gate(校验必须是函数)
+         * @param {Function|null} gate - async () => void,进入 request 前 await
+         */
+        setRequestGate: (gate) => {
+          if (gate !== null && typeof gate !== "function") {
+            throw new Error("request gate \u5FC5\u987B\u662F\u51FD\u6570\u6216 null");
+          }
+          NotionAPI2._requestGate = gate;
+        },
         request: async (method, endpoint, data, apiKey, retries = 3, options = {}) => {
           const notionVersion = options.notionVersion || CONFIG2.API.NOTION_VERSION;
+          if (NotionAPI2._requestGate) {
+            await NotionAPI2._requestGate();
+          }
           const doRequest = async (attempt, token = NotionOAuth2.getAccessToken(apiKey), allowRefresh = true) => {
             var _a, _b;
             const response = await NotionAPI2.getTransport().request({
@@ -4464,57 +4783,6 @@ Content-Type: ${contentType}\r
     }
   });
 
-  // src/coordination/event-bus.js
-  var require_event_bus = __commonJS({
-    "src/coordination/event-bus.js"(exports, module) {
-      "use strict";
-      var subscribers = /* @__PURE__ */ Object.create(null);
-      var on = (event, handler) => {
-        if (!subscribers[event]) {
-          subscribers[event] = [];
-        }
-        if (!subscribers[event].includes(handler)) {
-          subscribers[event].push(handler);
-        }
-      };
-      var off = (event, handler) => {
-        if (!event) {
-          Object.keys(subscribers).forEach((key) => {
-            delete subscribers[key];
-          });
-          return;
-        }
-        const handlers = subscribers[event];
-        if (!handlers) return;
-        if (!handler) {
-          delete subscribers[event];
-        } else {
-          const idx = handlers.indexOf(handler);
-          if (idx > -1) {
-            handlers.splice(idx, 1);
-            if (handlers.length === 0) {
-              delete subscribers[event];
-            }
-          }
-        }
-      };
-      var emit = (event, ...args) => {
-        const handlers = subscribers[event];
-        if (!handlers || handlers.length === 0) {
-          return;
-        }
-        handlers.slice().forEach((handler) => {
-          try {
-            handler(...args);
-          } catch (error) {
-            console.error(`[EventBus] Handler error for "${event}":`, error);
-          }
-        });
-      };
-      module.exports = { on, off, emit };
-    }
-  });
-
   // src/security/index.js
   var require_security = __commonJS({
     "src/security/index.js"(exports, module) {
@@ -4592,12 +4860,21 @@ Content-Type: ${contentType}\r
           deletePage: 2,
           restorePage: 2,
           createComment: 1,
-          agentTask: 2
+          agentTask: 2,
+          // 多端同步(F-SYNC-05, HIGH-1 共识: 必须 P0 静态注册,接线在后)
+          "sync.state.pull": 0,
+          // 只读拉取 payload
+          "sync.state.push": 1,
+          // 推送本地状态(写介质)
+          "sync.medium.provision": 2,
+          // 创建同步库(复用 createDatabase 语义)
+          "sync.medium.reset": 3
+          // 重置远程同步库(跨设备不可逆)
         },
         // 危险操作列表（需要额外确认）
         // 注:deleteBlock 已从登记移除(F-UI-20)——NotionAPI.deleteBlock 无任何调用方
         // (AI 工具表无 delete_block,UI 无按钮),保留登记会误导「块级删除可经本工具触发」。
-        DANGEROUS_OPERATIONS: ["deletePage"],
+        DANGEROUS_OPERATIONS: ["deletePage", "sync.medium.reset"],
         // 检查是否有权限执行操作
         canExecute: (operation) => {
           const currentLevel = OperationGuard2.getLevel();
@@ -4791,7 +5068,12 @@ Content-Type: ${contentType}\r
           replacePageMarkdown: "write.block.inserted",
           deletePage: "page.archived",
           restorePage: "page.restored",
-          undo: "write.property.updated"
+          undo: "write.property.updated",
+          // 多端同步(HIGH-2/M-3 共识): 无映射则 inferAuditEvent 回退 import.*,语义错位
+          "sync.state.pull": "sync.state.pulled",
+          "sync.state.push": "sync.state.pushed",
+          "sync.medium.provision": "sync.medium.provisioned",
+          "sync.medium.reset": "sync.medium.reset"
         }),
         SENSITIVE_KEY_HINTS: Object.freeze([
           { pattern: /token/i, label: "token" },
@@ -9948,7 +10230,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 enriched.generatedSummary = aiResult.summary;
               }
               const aiCategory = await BookmarkExporter2.generateAICategory(bookmark, insight, settings);
-              if (aiCategory && ((settings == null ? void 0 : settings.categories) || []).some((c) => String(c) === String(aiCategory))) {
+              if (aiCategory && ((settings == null ? void 0 : settings.categories) || []).some((c) => String(c).trim().toLowerCase() === String(aiCategory).trim().toLowerCase())) {
                 inferredCategory = aiCategory;
               }
               context.aiUsedCount = (context.aiUsedCount || 0) + 1;
@@ -10065,21 +10347,60 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
         },
         // 获取已导出的书签集合
+        // F3 共识(缓存失效): 跨 tab GM storage 变更(清除/迁移/其他 tab 导出)
+        // 必须置空内存缓存,否则双 tab 并发误判 → 重复导入。
+        _registerExportedWatcher: () => {
+          if (BookmarkExporter2._exportedWatcherBound) return;
+          BookmarkExporter2._exportedWatcherBound = true;
+          if (typeof GM_addValueChangeListener !== "function") return;
+          try {
+            GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, () => {
+              BookmarkExporter2._exportedCache = null;
+            });
+          } catch (e) {
+          }
+        },
+        // R9 共识(存量键迁移): 旧键为未规范化 URL,新键规约归一后旧键成孤儿 →
+        // 已导出书签被重新导入。首次加载时重写旧键(同规范键取 max ts),写回并清理。
+        _migrateExportedKeys: () => {
+          if (BookmarkExporter2._exportedKeysMigrated) return;
+          BookmarkExporter2._exportedKeysMigrated = true;
+          const exported = BookmarkExporter2._exportedCache;
+          if (!exported) return;
+          let changed = false;
+          const merged = {};
+          for (const key of Object.keys(exported)) {
+            const norm = Utils2.normalizeDedupUrl(key);
+            const ts = Number(exported[key]) || Date.now();
+            if (norm !== key) {
+              changed = true;
+              if (!merged[norm] || (merged[norm] || 0) < ts) merged[norm] = ts;
+            } else {
+              merged[key] = ts;
+            }
+          }
+          if (changed) {
+            BookmarkExporter2._exportedCache = merged;
+            BookmarkExporter2.flushExported();
+          }
+        },
         getExported: () => {
           if (BookmarkExporter2._exportedCache) return BookmarkExporter2._exportedCache;
+          BookmarkExporter2._registerExportedWatcher();
           try {
             BookmarkExporter2._exportedCache = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}"));
           } catch (error) {
             console.warn("[LD-Notion] \u5DF2\u5BFC\u51FA\u4E66\u7B7E\u96C6\u5408\u89E3\u6790\u5931\u8D25:", error);
             BookmarkExporter2._exportedCache = {};
           }
+          BookmarkExporter2._migrateExportedKeys();
           return BookmarkExporter2._exportedCache;
         },
         // 仅 mutate 内存缓存，不写存储（DISCOVER P3 同类修复）：循环内逐条调用避免写侧 O(N²)。
         // 单次调用场景须紧跟 flushExported() 持久化，或用 markExportedAndFlush。与 GitHubAPI.markExported 同构。
         markExported: (bookmarkUrl) => {
           const exported = BookmarkExporter2.getExported();
-          exported[bookmarkUrl] = Date.now();
+          exported[Utils2.normalizeDedupUrl(bookmarkUrl)] = Date.now();
         },
         markExportedAndFlush: (bookmarkUrl) => {
           BookmarkExporter2.markExported(bookmarkUrl);
@@ -10108,7 +10429,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
         },
         isExported: (bookmarkUrl) => {
-          return !!BookmarkExporter2.getExported()[bookmarkUrl];
+          return !!BookmarkExporter2.getExported()[Utils2.normalizeDedupUrl(bookmarkUrl)];
         },
         // 导出书签到 Notion
         exportBookmarks: async (settings, onProgress) => {
@@ -10151,7 +10472,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 properties
               }, apiKey);
               BookmarkExporter2._exportedCache = BookmarkExporter2._exportedCache || {};
-              BookmarkExporter2._exportedCache[bm.url] = Date.now();
+              BookmarkExporter2._exportedCache[Utils2.normalizeDedupUrl(bm.url)] = Date.now();
               BookmarkExporter2._auditExport(
                 "createDatabasePage",
                 "success",
@@ -10449,12 +10770,15 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             url: raw.url || "",
             author: "",
             tags: [],
-            createdAt: raw.dateAdded ? new Date(raw.dateAdded / 1e3).toISOString() : "",
+            // F5 共识(R11 实证): Chrome bookmarks API dateAdded 为毫秒,
+            // 旧代码 /1000 把 2025 毫秒压成 1970 年 → 增量过滤恒 false →
+            // SyncCoordinator 首轮后冻结、去重层失效。毫秒直传即可。
+            createdAt: raw.dateAdded ? new Date(raw.dateAdded).toISOString() : "",
             raw
           };
         },
         getDedupKey(item) {
-          return `bookmark:${item.id}`;
+          return `bookmark:${item.id || item.url || ""}`;
         },
         async _fetchAndFilter(watermark) {
           const { BookmarkBridge: BookmarkBridge2, BookmarkExporter: BookmarkExporter2 } = this._getBridge();
@@ -10696,13 +11020,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
          * @param {string} sourceType - 适配器注册类型
          * @param {Object} [options]
          * @param {boolean} [options.fullSync=false] - 强制全量拉取
-         * @returns {Promise<{newItems: NormalizedItem[], skippedCount: number, watermark: Object|null, error?: string}>}
+         * @returns {Promise<{newItems: NormalizedItem[], skippedCount: number, watermark: Object|null, pendingKeys: string[], error?: string}>}
+         *
+         * F6 共识(标记后置): 本方法只过滤不标记。返回的 pendingKeys 由消费方在
+         * Notion 写入成功后调用 markItemSeen 落账,失败项天然不落账、下轮重试。
          */
         async sync(sourceType, options = {}) {
           ensureAdaptersRegistered();
           const adapter = this._getRegistry().getAdapter(sourceType);
           if (!adapter) {
-            return { newItems: [], skippedCount: 0, watermark: null, error: `\u672A\u6CE8\u518C\u9002\u914D\u5668: ${sourceType}` };
+            return { newItems: [], skippedCount: 0, watermark: null, pendingKeys: [], error: `\u672A\u6CE8\u518C\u9002\u914D\u5668: ${sourceType}` };
           }
           SyncStateV2.updateSourceState(sourceType, {
             lastAttemptAt: Date.now(),
@@ -10714,6 +11041,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             const rawItems = options.fullSync ? await adapter.fetchAll() : await adapter.fetchIncremental(currentState.watermark);
             DedupStore.beginBatch(sourceType);
             const newItems = [];
+            const pendingKeys = [];
             let skippedCount = 0;
             try {
               for (const item of rawItems) {
@@ -10723,7 +11051,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   continue;
                 }
                 newItems.push(item);
-                DedupStore.markSeen(sourceType, dedupKey);
+                pendingKeys.push(dedupKey);
               }
             } finally {
               DedupStore.endBatch();
@@ -10739,15 +11067,25 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               lastStats: { newCount: newItems.length, skippedCount },
               watermark: newWatermark || currentState.watermark
             });
-            return { newItems, skippedCount, watermark: newWatermark };
+            return { newItems, skippedCount, watermark: newWatermark, pendingKeys };
           } catch (error) {
             SyncStateV2.updateSourceState(sourceType, {
               lastOutcome: "error",
               lastError: error.message || String(error)
             });
             SyncStateV2.forceFlush();
-            return { newItems: [], skippedCount: 0, watermark: null, error: error.message || String(error) };
+            return { newItems: [], skippedCount: 0, watermark: null, pendingKeys: [], error: error.message || String(error) };
           }
+        },
+        /**
+         * F6 共识(标记后置): 消费方在 Notion 写入成功后调用,条目才进入去重账本。
+         * 失败项不落账 → 下轮 sync 仍返回 → 重试机会保留。
+         * @param {string} sourceType
+         * @param {string} dedupKey
+         */
+        markItemSeen(sourceType, dedupKey) {
+          if (!dedupKey) return;
+          DedupStore.markSeen(sourceType, dedupKey);
         }
       };
       module.exports = { SyncCoordinator };
@@ -11095,7 +11433,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             pages.push(...(response == null ? void 0 : response.results) || []);
             cursor = (response == null ? void 0 : response.has_more) ? response.next_cursor : null;
           } while (cursor);
-          return pages.map((page) => BookmarkAutoImporter2.extractPageMeta(page)).filter((page) => page.pageId && !page.archived);
+          return pages.map((page) => BookmarkAutoImporter2.extractPageMeta(page)).filter((page) => page.pageId);
         },
         buildPageIndex: (pages = []) => {
           const byBookmarkId = /* @__PURE__ */ new Map();
@@ -11239,6 +11577,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           let unchanged = 0;
           let failed = 0;
           const CONCURRENCY = 3;
+          const successfulIds = /* @__PURE__ */ new Set();
           const processInBatches = async (items, processor) => {
             for (let i = 0; i < items.length; i += CONCURRENCY) {
               const batch = items.slice(i, i + CONCURRENCY);
@@ -11255,7 +11594,20 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             const snapshotEntry = previousSnapshot[bookmarkId] || null;
             let pageMeta = pageIndex.byBookmarkId.get(bookmarkId) || pageIndex.byUrl.get(bookmark.url) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? pageIndex.byPageId.get(snapshotEntry.pageId) : null);
             try {
+              if (pageMeta == null ? void 0 : pageMeta.archived) {
+                unchanged++;
+                successfulIds.add(bookmarkId);
+                nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageMeta.pageId);
+                return;
+              }
               if (!pageMeta) {
+                const rivalByUrl = bookmark.url ? pageIndex.byUrl.get(bookmark.url) : null;
+                if (rivalByUrl && rivalByUrl.bookmarkId !== bookmarkId && rivalByUrl.pageId) {
+                  unchanged++;
+                  successfulIds.add(bookmarkId);
+                  nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, rivalByUrl.pageId);
+                  return;
+                }
                 BookmarkAutoImporter2.updateStatus(`\u{1F4C4} \u6B63\u5728\u65B0\u589E\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
                 const { OperationGuard: OperationGuard2 } = require_security();
                 if (!OperationGuard2.canExecute("createDatabasePage")) {
@@ -11286,7 +11638,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   "success",
                   { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, databaseId: settings.databaseId }
                 );
+                BookmarkExporter2.markExported(bookmark.url);
                 created++;
+                successfulIds.add(bookmarkId);
               } else if (BookmarkAutoImporter2.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
                 BookmarkAutoImporter2.updateStatus(`\u{1F4E7} \u6B63\u5728\u66F4\u65B0\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
                 const { OperationGuard: OperationGuard2 } = require_security();
@@ -11308,8 +11662,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title }
                 );
                 updated++;
+                successfulIds.add(bookmarkId);
               } else {
                 unchanged++;
+                successfulIds.add(bookmarkId);
               }
               const pageId = (pageMeta == null ? void 0 : pageMeta.pageId) || (snapshotEntry == null ? void 0 : snapshotEntry.pageId) || "";
               const syncedMeta = {
@@ -11323,7 +11679,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               if (pageId) pageIndex.byPageId.set(pageId, syncedMeta);
               pageIndex.byBookmarkId.set(bookmarkId, syncedMeta);
               if (syncedMeta.url) pageIndex.byUrl.set(syncedMeta.url, syncedMeta);
-              BookmarkExporter2.markExported(bookmark.url);
               nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageId);
             } catch (error) {
               console.error(`[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5931\u8D25: ${bookmark.title || bookmark.url}`, error);
@@ -11393,7 +11748,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           await processInBatches(deletedIds, (id, idx) => processDeleted(id, idx));
           SyncState2.updateBookmarkState({
             snapshot: nextSnapshot,
-            watermark: SyncState2.buildWatermark(currentBookmarks, (bookmark) => bookmark.dateAdded, (bookmark) => bookmark.id),
+            // F7 共识: watermark 仅由成功项推进(created/updated/unchanged),
+            // 失败项保留在增量窗口内下轮重试。
+            watermark: SyncState2.buildWatermark(
+              currentBookmarks.filter((b) => successfulIds.has(String(b.id))),
+              (bookmark) => bookmark.dateAdded,
+              (bookmark) => bookmark.id
+            ),
             lastAttemptAt: attemptAt,
             lastSuccessAt: created + updated + archived > 0 ? Date.now() : failed === 0 ? Date.now() : previousState.lastSuccessAt || 0,
             lastOutcome: failed > 0 ? "partial" : "success",
@@ -11810,7 +12171,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 settings
               );
               if (aiCategory) {
-                enriched.inferredCategory = aiCategory;
+                const whitelisted = ((settings == null ? void 0 : settings.categories) || []).some(
+                  (c) => String(c).trim().toLowerCase() === String(aiCategory).trim().toLowerCase()
+                );
+                if (whitelisted) {
+                  enriched.inferredCategory = aiCategory;
+                } else {
+                  console.warn(`[LD-Notion] RSS AI \u5206\u7C7B\u4E0D\u5728\u767D\u540D\u5355\uFF0C\u4F7F\u7528\u542F\u53D1\u5F0F fallback: ${aiCategory}`);
+                }
               }
               context.aiUsedCount = (context.aiUsedCount || 0) + 1;
             } catch (e) {
@@ -11894,6 +12262,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const previousState = SyncState2.getRssState();
           const previousSnapshot = (previousState == null ? void 0 : previousState.snapshot) && typeof previousState.snapshot === "object" ? previousState.snapshot : {};
           let currentItems = syncResult.newItems || [];
+          if (currentItems.length > 0) {
+            const dedupMode = RSSAutoImporter2.getDedupMode();
+            currentItems = currentItems.map((item) => ({
+              ...item,
+              itemKey: item.itemKey || RSSAutoImporter2.buildItemKey(item, dedupMode)
+            }));
+          }
           let feedCount = RSSAutoImporter2.getFeedUrls().length;
           if (currentItems.length === 0) {
             const fallback = await RSSAutoImporter2.loadCurrentItems();
@@ -11988,6 +12363,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             if (pageId) index.byPageId.set(pageId, syncedMeta);
             if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
             if (syncedMeta.title) index.byTitle.set(syncedMeta.title, syncedMeta);
+            if (result.created || result.updated) {
+              SyncCoordinator.markItemSeen("rss", item.itemKey);
+            }
             nextSnapshot[item.itemKey] = RSSAutoImporter2.buildSnapshotEntry(item, pageId);
             result.success = true;
             return result;
@@ -13231,9 +13609,25 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const url = token ? `https://api.github.com/gists` : `https://api.github.com/users/${encodeURIComponent(username)}/gists`;
           return GitHubAPI2._fetchPaginated(url, token, "GitHub Gists");
         },
+        // F3 共识(缓存失效): 跨 tab 清除/其他 tab 标记必须置空内存缓存
+        _registerExportedWatcher: () => {
+          if (GitHubAPI2._exportedWatcherBound) return;
+          GitHubAPI2._exportedWatcherBound = true;
+          if (typeof GM_addValueChangeListener !== "function") return;
+          try {
+            GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, () => {
+              GitHubAPI2._exportedCache = null;
+            });
+            GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, () => {
+              GitHubAPI2._exportedGistsCache = null;
+            });
+          } catch (e) {
+          }
+        },
         // 获取已导出的 repo 集合
         getExported: () => {
           if (GitHubAPI2._exportedCache) return GitHubAPI2._exportedCache;
+          GitHubAPI2._registerExportedWatcher();
           try {
             GitHubAPI2._exportedCache = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}"));
           } catch {
@@ -13244,6 +13638,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 获取已导出的 gist 集合
         getExportedGists: () => {
           if (GitHubAPI2._exportedGistsCache) return GitHubAPI2._exportedGistsCache;
+          GitHubAPI2._registerExportedWatcher();
           try {
             GitHubAPI2._exportedGistsCache = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}"));
           } catch {
@@ -14482,10 +14877,11 @@ ${insight.summary || ""}`,
           AutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u68C0\u67E5\u65B0\u6536\u85CF...");
           const syncState = SyncState2.getLinuxDoState();
           const bookmarks = await LinuxDoAPI2.fetchBookmarksSince(username, syncState.watermark);
-          const newBookmarks = bookmarks.filter((bookmark) => {
+          const dedupStrict = Utils2.isLinuxDoDedupStrict();
+          const newBookmarks = dedupStrict ? bookmarks.filter((bookmark) => {
             const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
             return !Storage2.isTopicExported(topicId);
-          });
+          }) : bookmarks.slice();
           if (newBookmarks.length === 0) {
             const statePatch2 = {
               lastAttemptAt: attemptAt,
@@ -17983,7 +18379,7 @@ ${report}
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-lock" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">\u9501\u5B9A</button>
                         </div>
                         <div class="ldb-tip" id="ldb-notion-vault-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                        <div class="ldb-tip">\u9002\u7528\u4E8E Notion \u516C\u5F00\u96C6\u6210\u3002\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u4EC5\u5728\u89E3\u9501\u540E\u7684\u5F53\u524D\u4F1A\u8BDD\u5185\u53EF\u7528\u3002</div>
+                        <div class="ldb-tip">\u9002\u7528\u4E8E Notion \u516C\u5F00\u96C6\u6210\u3002\u8BF7\u786E\u8BA4\u5DF2\u5728\u96C6\u6210\u540E\u53F0\u9010\u5B57\u7B26\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF0C\u4E14\u96C6\u6210\u5DF2\u63D0\u4EA4 Notion \u5BA1\u6838\uFF08Authorization URL \u5728\u5BA1\u6838\u901A\u8FC7\u540E\u624D\u751F\u6548\uFF09\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\u3002\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u4EC5\u5728\u89E3\u9501\u540E\u7684\u5F53\u524D\u4F1A\u8BDD\u5185\u53EF\u7528\u3002</div>
                     </div>
                     <div class="ldb-input-group">
                         <label class="ldb-label" for="ldb-notion-ai-target-db">\u6570\u636E\u5E93 / \u9875\u9762</label>
@@ -21280,7 +21676,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-vault-lock">\u9501\u5B9A</button>
                             </div>
                             <div class="ldb-tip" id="ldb-vault-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                            <div class="ldb-tip">\u5982\u679C\u4F60\u4F7F\u7528 Notion \u516C\u5F00\u96C6\u6210\uFF0C\u8BF7\u5148\u628A Redirect URI \u52A0\u5230\u96C6\u6210\u914D\u7F6E\u91CC\uFF0C\u518D\u70B9\u51FB\u4E00\u952E\u6388\u6743\u3002\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\u3002</div>
+                            <div class="ldb-tip">\u5982\u679C\u4F60\u4F7F\u7528 Notion \u516C\u5F00\u96C6\u6210\uFF1A\u2460 \u5728\u96C6\u6210\u540E\u53F0\u9010\u5B57\u7B26\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF1B\u2461 Notion \u8981\u6C42\u516C\u5F00\u96C6\u6210<strong>\u63D0\u4EA4\u5BA1\u6838\u5E76\u901A\u8FC7\u540E</strong> Authorization URL \u624D\u4F1A\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\uFF08\u4E0D\u662F Client Secret\uFF09\u3001URI \u5DF2\u6CE8\u518C\u3001\u96C6\u6210\u5DF2\u901A\u8FC7\u5BA1\u6838\u3002\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\u3002</div>
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label" for="ldb-workspace-select">\u6570\u636E\u5E93 / \u9875\u9762</label>
@@ -25214,7 +25610,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                             <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-lock" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">\u9501\u5B9A</button>
                         </div>
                         <div id="gclip-vault-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);"></div>
-                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">\u516C\u5F00 OAuth \u9002\u5408\u4E2A\u4EBA\u81EA\u5EFA\u96C6\u6210\uFF1B\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\u3002</div>
+                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">\u516C\u5F00 OAuth \u9002\u5408\u4E2A\u4EBA\u81EA\u5EFA\u96C6\u6210\uFF1B\u9700\u5728\u96C6\u6210\u540E\u53F0\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF0C\u4E14\u96C6\u6210\u901A\u8FC7 Notion \u5BA1\u6838\u540E\u6388\u6743\u94FE\u63A5\u624D\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\u3002\u654F\u611F\u51ED\u8BC1\u4F1A\u4FDD\u5B58\u5728\u672C\u5730\u52A0\u5BC6\u4FDD\u9669\u7BB1\u4E2D\u3002</div>
                     </div>
                     <div class="gclip-field">
                         <label for="gclip-export-type">\u5BFC\u51FA\u76EE\u6807\u7C7B\u578B</label>
@@ -28415,6 +28811,1505 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
     }
   });
 
+  // src/sync/constants.js
+  var require_constants2 = __commonJS({
+    "src/sync/constants.js"(exports, module) {
+      "use strict";
+      var SyncConstants = Object.freeze({
+        // payload 结构版本: 跨版本混并必须拒绝
+        SCHEMA_VERSION: 1,
+        // 行 kind 枚举(同步库行模型 { kind, source, key, version, updatedAt, deviceId, payload, checksum })
+        ROW_KINDS: Object.freeze(["dedup", "watermark", "settings"]),
+        // Notion 同步库行数上限(防恶意介质塞爆, H-3)
+        MAX_ROWS: 2e3,
+        // 分片参数: Notion rich_text 单块 2000 字符、页面 100 块上限(设计假设,保守取值)
+        FRAGMENT_CHUNK_CHARS: 2e3,
+        FRAGMENT_MAX_BLOCKS: 100,
+        // 单行保守上限(分片前)
+        FRAGMENT_MAX_ROW_CHARS: 4e4,
+        // payload 大小上限(防恶意介质, sec 共识 H-2)
+        MAX_PAYLOAD_BYTES: 200 * 1024,
+        // 单键长度上限 / 单源去重键数上限(H-3)
+        MAX_DEDUP_KEY_LENGTH: 512,
+        MAX_DEDUP_ENTRIES_PER_SOURCE: 1e5,
+        // ts 偏斜容忍: 远端键时间戳必须在 [now-90d, now+5min](H-2/H-4)
+        TS_FUTURE_SKEW_MS: 5 * 60 * 1e3,
+        TS_PAST_TTL_MS: 90 * 24 * 60 * 60 * 1e3,
+        // epoch 通胀上限: 远端 epoch ≤ 本地+1(H-5)
+        MAX_EPOCH_LEAD: 1,
+        // 危险键: 原型链污染(H-3)
+        FORBIDDEN_KEYS: Object.freeze(["__proto__", "constructor", "prototype"]),
+        // 同步自限速率: 共享 3 req/s 桶,同步路径自限 ≤2/s(F-SYNC-04)
+        RATE_CAPACITY: 3,
+        RATE_REFILL_PER_SEC: 1,
+        SYNC_SELF_LIMIT_PER_SEC: 2,
+        // 防抖窗口 / 退避(5xx 指数退避 1000*2^n, cap 30s)
+        DEBOUNCE_MS: 5e3,
+        BACKOFF_BASE_MS: 1e3,
+        BACKOFF_CAP_MS: 3e4
+      });
+      module.exports = { SyncConstants };
+    }
+  });
+
+  // src/sync/SyncPayload.js
+  var require_SyncPayload = __commonJS({
+    "src/sync/SyncPayload.js"(exports, module) {
+      "use strict";
+      var { SyncConstants } = require_constants2();
+      var isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+      var clone = (v) => {
+        if (typeof structuredClone === "function") return structuredClone(v);
+        return JSON.parse(JSON.stringify(v));
+      };
+      var watermarkCompare = (a, b) => {
+        const ea = Number(a == null ? void 0 : a.epoch) || 0;
+        const eb = Number(b == null ? void 0 : b.epoch) || 0;
+        if (ea !== eb) return ea > eb ? 1 : -1;
+        const ta = String((a == null ? void 0 : a.time) || "");
+        const tb = String((b == null ? void 0 : b.time) || "");
+        if (ta !== tb) return ta > tb ? 1 : -1;
+        return 0;
+      };
+      var SyncPayload = {
+        isEmpty(payload) {
+          if (!isPlainObject(payload)) return true;
+          const { dedup, watermarks, settings } = payload;
+          const isEmptyMap = (m) => !isPlainObject(m) || Object.keys(m).length === 0;
+          return isEmptyMap(dedup) && isEmptyMap(watermarks) && isEmptyMap(settings);
+        },
+        /**
+         * merge(a, b) — join-semilattice:
+         * ① dedup: per-source {key: max(tsA, tsB)} (union + max)
+         * ② watermarks: 单边缺失取存在侧; epoch 大者整段胜出; 相等比 time; 同刻 ids 并集
+         * ③ settings: 字段级 LWW — updatedAt 决胜, deviceId 字典序平局
+         * 交换/结合/幂等: 全序 max + 平局确定性 → 任意乱序收敛同一固定点
+         * @throws {Error} schema 不匹配
+         */
+        merge(a, b) {
+          if (!isPlainObject(a)) return clone(b || {});
+          if (!isPlainObject(b)) return clone(a);
+          if (a.schemaVersion !== b.schemaVersion) {
+            throw new Error(`SyncPayload schema \u4E0D\u5339\u914D: ${a.schemaVersion} vs ${b.schemaVersion}`);
+          }
+          const out = {
+            schemaVersion: a.schemaVersion,
+            deviceId: (a.updatedAt || "") >= (b.updatedAt || "") ? a.deviceId : b.deviceId,
+            version: Math.max(Number(a.version) || 0, Number(b.version) || 0),
+            updatedAt: (a.updatedAt || "") >= (b.updatedAt || "") ? a.updatedAt : b.updatedAt,
+            dedup: {},
+            watermarks: {},
+            settings: {}
+          };
+          const dedupSources = /* @__PURE__ */ new Set([...Object.keys(a.dedup || {}), ...Object.keys(b.dedup || {})]);
+          for (const src of dedupSources) {
+            const A = a.dedup[src] || {};
+            const B = b.dedup[src] || {};
+            const merged = {};
+            const keys = /* @__PURE__ */ new Set([...Object.keys(A), ...Object.keys(B)]);
+            for (const k of keys) {
+              merged[k] = Math.max(Number(A[k]) || 0, Number(B[k]) || 0);
+            }
+            out.dedup[src] = merged;
+          }
+          const wmSources = /* @__PURE__ */ new Set([...Object.keys(a.watermarks || {}), ...Object.keys(b.watermarks || {})]);
+          for (const src of wmSources) {
+            const A = a.watermarks[src];
+            const B = b.watermarks[src];
+            if (!isPlainObject(A)) {
+              out.watermarks[src] = clone(B);
+              continue;
+            }
+            if (!isPlainObject(B)) {
+              out.watermarks[src] = clone(A);
+              continue;
+            }
+            const cmp = watermarkCompare(A, B);
+            if (cmp !== 0) {
+              out.watermarks[src] = clone(cmp > 0 ? A : B);
+            } else {
+              out.watermarks[src] = {
+                epoch: Math.max(Number(A.epoch) || 0, Number(B.epoch) || 0),
+                time: (A.time || "") >= (B.time || "") ? A.time : B.time,
+                ids: Array.from(/* @__PURE__ */ new Set([...A.ids || [], ...B.ids || []]))
+              };
+            }
+          }
+          const settingKeys = /* @__PURE__ */ new Set([...Object.keys(a.settings || {}), ...Object.keys(b.settings || {})]);
+          for (const k of settingKeys) {
+            const A = a.settings[k];
+            const B = b.settings[k];
+            if (!isPlainObject(A)) {
+              out.settings[k] = clone(B);
+              continue;
+            }
+            if (!isPlainObject(B)) {
+              out.settings[k] = clone(A);
+              continue;
+            }
+            const cmp = (A.updatedAt || "") === (B.updatedAt || "") ? String(A.deviceId || "").localeCompare(String(B.deviceId || "")) : (A.updatedAt || "") > (B.updatedAt || "") ? 1 : -1;
+            out.settings[k] = clone(cmp >= 0 ? A : B);
+          }
+          return out;
+        },
+        /**
+         * buildFromLocal — 从本地去重账本 + watermark + 设置构建 payload
+         * @param {Object} deps { deviceId, now, dedupSets: {src: {key:ts}}, watermarks: {src: {epoch,time,ids}}, settings: {key: {value,updatedAt}} }
+         */
+        buildFromLocal({ deviceId = "local", now = Date.now(), dedupSets = {}, watermarks = {}, settings = {} }) {
+          const payload = {
+            schemaVersion: SyncConstants.SCHEMA_VERSION,
+            deviceId,
+            version: 0,
+            updatedAt: new Date(now).toISOString(),
+            dedup: {},
+            watermarks: {},
+            settings: {}
+          };
+          for (const [src, set] of Object.entries(dedupSets)) {
+            if (!isPlainObject(set)) continue;
+            const clean = {};
+            for (const [k, ts] of Object.entries(set)) {
+              const num = Number(ts);
+              if (Number.isFinite(num) && num > 0) clean[k] = num;
+            }
+            if (Object.keys(clean).length > 0) payload.dedup[src] = clean;
+          }
+          for (const [src, wm] of Object.entries(watermarks)) {
+            if (isPlainObject(wm) && (wm.time || wm.epoch)) {
+              payload.watermarks[src] = {
+                epoch: Math.max(0, Math.floor(Number(wm.epoch) || 0)),
+                time: wm.time || "",
+                ids: Array.isArray(wm.ids) ? wm.ids.map(String) : []
+              };
+            }
+          }
+          for (const [k, entry] of Object.entries(settings)) {
+            if (isPlainObject(entry)) {
+              payload.settings[k] = {
+                value: entry.value,
+                updatedAt: entry.updatedAt || new Date(now).toISOString(),
+                deviceId
+              };
+            }
+          }
+          return payload;
+        },
+        /**
+         * diffWinners — 计算本地需应用的胜出项(纯函数,不触碰存储)
+         * @returns {{ dedupEntries: [{source,key,ts}], watermarkWinners: [{source, watermark}], settingsWinners: [{key, entry}] }}
+         */
+        diffWinners(local, remote) {
+          var _a, _b, _c;
+          const localSafe = isPlainObject(local) ? local : {};
+          const remoteSafe = isPlainObject(remote) ? remote : {};
+          const dedupEntries = [];
+          const watermarkWinners = [];
+          const settingsWinners = [];
+          for (const [src, remoteSet] of Object.entries(remoteSafe.dedup || {})) {
+            if (!isPlainObject(remoteSet)) continue;
+            const localSet = ((_a = localSafe.dedup) == null ? void 0 : _a[src]) || {};
+            for (const [k, ts] of Object.entries(remoteSet)) {
+              const num = Number(ts);
+              if (!Number.isFinite(num) || num <= 0) continue;
+              if ((Number(localSet[k]) || 0) < num) {
+                dedupEntries.push({ source: src, key: k, ts: num });
+              }
+            }
+          }
+          for (const [src, remoteWm] of Object.entries(remoteSafe.watermarks || {})) {
+            if (!isPlainObject(remoteWm)) continue;
+            const localWm = (_b = localSafe.watermarks) == null ? void 0 : _b[src];
+            if (!isPlainObject(localWm) || watermarkCompare(remoteWm, localWm) > 0) {
+              watermarkWinners.push({ source: src, watermark: clone(remoteWm) });
+            }
+          }
+          for (const [k, remoteEntry] of Object.entries(remoteSafe.settings || {})) {
+            if (!isPlainObject(remoteEntry)) continue;
+            const localEntry = (_c = localSafe.settings) == null ? void 0 : _c[k];
+            if (!isPlainObject(localEntry)) {
+              settingsWinners.push({ key: k, entry: clone(remoteEntry) });
+              continue;
+            }
+            const cmp = (remoteEntry.updatedAt || "") === (localEntry.updatedAt || "") ? String(remoteEntry.deviceId || "").localeCompare(String(localEntry.deviceId || "")) : (remoteEntry.updatedAt || "") > (localEntry.updatedAt || "") ? 1 : -1;
+            if (cmp > 0) settingsWinners.push({ key: k, entry: clone(remoteEntry) });
+          }
+          return { dedupEntries, watermarkWinners, settingsWinners };
+        }
+      };
+      module.exports = { SyncPayload };
+    }
+  });
+
+  // src/sync/SyncCrypto.js
+  var require_SyncCrypto = __commonJS({
+    "src/sync/SyncCrypto.js"(exports, module) {
+      "use strict";
+      var { SyncConstants } = require_constants2();
+      var subtle = () => {
+        var _a, _b;
+        if (typeof ((_b = (_a = globalThis.crypto) == null ? void 0 : _a.subtle) == null ? void 0 : _b.digest) === "function") return globalThis.crypto.subtle;
+        return null;
+      };
+      var bytesToHex = (bytes) => {
+        const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+        let hex = "";
+        for (let i = 0; i < arr.length; i++) {
+          hex += arr[i].toString(16).padStart(2, "0");
+        }
+        return hex;
+      };
+      var base64ToBytes = (b64) => {
+        if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(b64, "base64"));
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return bytes;
+      };
+      var bytesToBase64 = (bytes) => {
+        if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        return btoa(binary);
+      };
+      var SyncCrypto = {
+        /**
+         * SHA-256 hex(URL 哈希化唯一 canonical 函数)
+         * @returns {Promise<string>}
+         */
+        async sha256Hex(str) {
+          const text = String(str ?? "");
+          const encoder = new TextEncoder();
+          const subtleApi = subtle();
+          if (subtleApi) {
+            const digest = await subtleApi.digest("SHA-256", encoder.encode(text));
+            return bytesToHex(digest);
+          }
+          const { createHash } = __require("crypto");
+          return createHash("sha256").update(text).digest("hex");
+        },
+        // --- encryptBlob / decryptBlob (PBKDF2-200000 + AES-256-GCM, 16B salt / 12B IV) ---
+        async _deriveKey(passphrase, saltBytes, iterations = 2e5) {
+          const encoder = new TextEncoder();
+          const subtleApi = subtle();
+          if (subtleApi) {
+            const baseKey = await subtleApi.importKey(
+              "raw",
+              encoder.encode(passphrase),
+              "PBKDF2",
+              false,
+              ["deriveKey"]
+            );
+            return subtleApi.deriveKey(
+              { name: "PBKDF2", salt: saltBytes, iterations, hash: "SHA-256" },
+              baseKey,
+              { name: "AES-GCM", length: 256 },
+              false,
+              ["encrypt", "decrypt"]
+            );
+          }
+          const { scryptSync, createCipheriv } = __require("crypto");
+          return { mode: "node", key: __require("crypto").pbkdf2Sync(passphrase, saltBytes, iterations, 32, "sha256"), createCipheriv };
+        },
+        _randomBytes(n) {
+          var _a;
+          if (typeof ((_a = globalThis.crypto) == null ? void 0 : _a.getRandomValues) === "function") {
+            const arr = new Uint8Array(n);
+            globalThis.crypto.getRandomValues(arr);
+            return arr;
+          }
+          const { randomBytes } = __require("crypto");
+          return randomBytes(n);
+        },
+        /**
+         * 加密 payload(异步)
+         * @param {string} passphrase
+         * @param {string} plaintext
+         * @returns {Promise<{v:number, salt:string, iv:string, ct:string}>}
+         */
+        async encryptBlob(passphrase, plaintext) {
+          if (!passphrase) throw new Error("\u52A0\u5BC6\u9700\u8981 passphrase");
+          const salt = this._randomBytes(16);
+          const iv = this._randomBytes(12);
+          const encoder = new TextEncoder();
+          const subtleApi = subtle();
+          let ciphertext;
+          if (subtleApi) {
+            const key = await this._deriveKey(passphrase, salt);
+            ciphertext = await subtleApi.encrypt({ name: "AES-GCM", iv }, key, encoder.encode(plaintext));
+          } else {
+            const { createCipheriv } = __require("crypto");
+            const key = __require("crypto").pbkdf2Sync(passphrase, salt, 2e5, 32, "sha256");
+            const cipher = createCipheriv("aes-256-gcm", key, iv);
+            ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+          }
+          return {
+            v: 1,
+            salt: bytesToBase64(salt),
+            iv: bytesToBase64(iv),
+            ct: bytesToBase64(ciphertext)
+          };
+        },
+        /**
+         * 解密 payload; 错口令/损坏 throw
+         * @param {string} passphrase
+         * @param {Object} blob - {v, salt, iv, ct}
+         * @returns {Promise<string>}
+         */
+        async decryptBlob(passphrase, blob) {
+          if (!passphrase || !blob || blob.v !== 1) throw new Error("\u65E0\u6548\u7684\u52A0\u5BC6 payload");
+          const salt = base64ToBytes(blob.salt);
+          const iv = base64ToBytes(blob.iv);
+          const ct = base64ToBytes(blob.ct);
+          const subtleApi = subtle();
+          if (subtleApi) {
+            const key2 = await this._deriveKey(passphrase, salt);
+            try {
+              const plain = await subtleApi.decrypt({ name: "AES-GCM", iv }, key2, ct);
+              return new TextDecoder().decode(plain);
+            } catch (e) {
+              throw new Error("\u53E3\u4EE4\u9519\u8BEF\u6216\u6570\u636E\u635F\u574F");
+            }
+          }
+          const { createDecipheriv } = __require("crypto");
+          const key = __require("crypto").pbkdf2Sync(passphrase, salt, 2e5, 32, "sha256");
+          try {
+            const decipher = createDecipheriv("aes-256-gcm", key, iv);
+            return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
+          } catch (e) {
+            throw new Error("\u53E3\u4EE4\u9519\u8BEF\u6216\u6570\u636E\u635F\u574F");
+          }
+        }
+      };
+      module.exports = { SyncCrypto };
+    }
+  });
+
+  // src/sync/SyncSerializer.js
+  var require_SyncSerializer = __commonJS({
+    "src/sync/SyncSerializer.js"(exports, module) {
+      "use strict";
+      var { SyncConstants } = require_constants2();
+      var { SyncCrypto } = require_SyncCrypto();
+      var { SyncStateV2 } = require_SyncState();
+      var WHITELIST = Object.freeze({
+        // 设置类(LWW)
+        settings: {
+          // W: 无敏感信息
+          ldb_sync_interval_linuxdo: { scope: "shared", kind: "number" },
+          ldb_sync_interval_github: { scope: "shared", kind: "number" },
+          ldb_sync_interval_bookmarks: { scope: "shared", kind: "number" },
+          ldb_sync_interval_rss: { scope: "shared", kind: "number" },
+          ldb_cross_source_mode: { scope: "shared", kind: "string" },
+          ldb_auto_import_enabled: { scope: "shared", kind: "boolean" },
+          ldb_auto_import_interval: { scope: "shared", kind: "number" },
+          ldb_github_auto_import_enabled: { scope: "shared", kind: "boolean" },
+          ldb_github_auto_import_interval: { scope: "shared", kind: "number" },
+          ldb_bookmark_auto_import_enabled: { scope: "shared", kind: "boolean" },
+          ldb_bookmark_auto_import_interval: { scope: "shared", kind: "number" },
+          ldb_rss_auto_import_enabled: { scope: "shared", kind: "boolean" },
+          ldb_rss_auto_import_interval: { scope: "shared", kind: "number" },
+          ldb_rss_import_dedup_mode: { scope: "shared", kind: "string" },
+          ldb_linuxdo_import_dedup_mode: { scope: "shared", kind: "string" },
+          ldb_bookmark_import_dedup_mode: { scope: "shared", kind: "string" },
+          ldb_ai_category_auto_dedup: { scope: "shared", kind: "boolean" },
+          ldb_bookmark_source: { scope: "shared", kind: "string" },
+          ldb_github_import_types: { scope: "shared", kind: "string" },
+          ldb_export_target_type: { scope: "shared", kind: "string" },
+          ldb_workspace_max_pages: { scope: "shared", kind: "number" },
+          ldb_agent_max_iterations: { scope: "shared", kind: "number" },
+          ldb_ai_service: { scope: "shared", kind: "string" },
+          ldb_ai_model: { scope: "shared", kind: "string" },
+          ldb_ai_categories: { scope: "shared", kind: "string" },
+          ldb_export_concurrency: { scope: "shared", kind: "number" },
+          ldb_theme_preference: { scope: "shared", kind: "string" },
+          // W(p): 个性化, shared 剔除
+          ldb_agent_persona_name: { scope: "personal", kind: "string" },
+          ldb_agent_persona_tone: { scope: "personal", kind: "string" },
+          ldb_agent_persona_expertise: { scope: "personal", kind: "string" },
+          ldb_agent_persona_instructions: { scope: "personal", kind: "string" },
+          ldb_ai_templates: { scope: "personal", kind: "string" },
+          // W*(高价值, 首次应用需 L2 确认): Notion 目标库
+          ldb_notion_database_id: { scope: "shared", kind: "string", confirmLevel: 2 },
+          ldb_ai_target_db: { scope: "shared", kind: "string", confirmLevel: 2 }
+        },
+        // 去重集合(sourceType → 是否 URL 类键需哈希化)。RSS_FEED_URLS 等入硬黑名单(M-2)。
+        dedupSources: Object.freeze({
+          linuxdo: { urlKeyed: false },
+          // linuxdo:{id}
+          "github-stars": { urlKeyed: false },
+          "github-repos": { urlKeyed: false },
+          "github-forks": { urlKeyed: false },
+          "github-gists": { urlKeyed: false },
+          bookmark: { urlKeyed: true },
+          // bookmark:{url} → 哈希
+          rss: { urlKeyed: true },
+          // rss:{guid||link} → 哈希
+          zhihu: { urlKeyed: true },
+          generic: { urlKeyed: true }
+          // generic:{url} → 哈希
+        }),
+        // watermark 源白名单(与 SyncStateV2._defaults 对齐)
+        watermarkSources: Object.freeze([
+          "linuxdo",
+          "github-stars",
+          "github-repos",
+          "github-forks",
+          "github-gists",
+          "bookmark",
+          "rss",
+          "zhihu",
+          "generic"
+        ])
+      });
+      var BLACKLIST = Object.freeze([
+        // Notion 凭证(OAuth 三键不在 SENSITIVE_KEYS, 必须显式)
+        "ldb_notion_api_key",
+        "ldb_notion_oauth_client_secret",
+        "ldb_notion_oauth_refresh_token",
+        // OAuth 瞬态/设备态
+        "ldb_notion_oauth_client_id",
+        "ldb_notion_oauth_redirect_uri",
+        "ldb_notion_oauth_state",
+        "ldb_notion_oauth_meta",
+        "ldb_notion_oauth_notice",
+        "ldb_notion_oauth_post_auth_target",
+        "ldb_notion_auth_mode",
+        // 保险箱
+        "ldb_credential_vault",
+        // 其他凭证
+        "ldb_ai_api_key",
+        "ldb_ai_base_url",
+        "ldb_github_token",
+        "ldb_obs_api_key",
+        "ldb_obs_api_url",
+        // 安全姿态(远程可改 = 提权/去审计)
+        "ldb_permission_level",
+        "ldb_require_confirm",
+        "ldb_enable_audit_log",
+        // 审计/隐私
+        "ldb_operation_log",
+        "ldb_chat_history",
+        "ldb_ai_trace_log",
+        // UI 瞬态/设备态
+        "ldb_panel_minimized",
+        "ldb_collapse_state",
+        "ldb_active_tab",
+        "ldb_panel_size_notion",
+        "ldb_panel_size_main",
+        "ldb_panel_size_generic",
+        "ldb_notion_panel_position",
+        "ldb_notion_panel_minimized",
+        "ldb_float_btn_position",
+        "ldb_ext_install_prompt_shown",
+        "ldb_mode_conflict_tip_shown",
+        // 过滤词/隐私边缘
+        "ldb_filter_only_first",
+        "ldb_filter_only_op",
+        "ldb_filter_range_start",
+        "ldb_filter_range_end",
+        "ldb_filter_img",
+        "ldb_filter_users",
+        "ldb_filter_include",
+        "ldb_filter_exclude",
+        "ldb_filter_minlen",
+        "ldb_img_mode",
+        // 设备/缓存
+        "ldb_request_delay",
+        "ldb_fetched_models",
+        "ldb_workspace_pages",
+        "ldb_update_auto_check_enabled",
+        "ldb_update_check_interval_hours",
+        "ldb_update_last_check_at",
+        "ldb_update_last_seen_version",
+        "ldb_update_last_result",
+        // 同步库本体/设备本地
+        "ldb_parent_page_id",
+        // 承载同步库, 循环语义
+        "ldb_exported_topics",
+        // legacy 键(已迁移到派生键)
+        "ldb_auto_sync_state",
+        // 本地真源, 仅投影 watermark+epoch
+        "ldb_sync_device_id",
+        "ldb_sync_enabled",
+        "ldb_sync_mode",
+        "ldb_sync_database_id",
+        "ldb_sync_parent_page_id",
+        "ldb_sync_last_push_at",
+        "ldb_sync_last_pull_at",
+        "ldb_sync_last_outcome",
+        "ldb_sync_passphrase_set",
+        // RSS feed URL(可能携带私有凭证, M-2 硬黑)
+        "ldb_rss_feed_urls",
+        // GitHub 身份/路径语义
+        "ldb_github_username",
+        "ldb_obs_dir",
+        "ldb_obs_img_mode",
+        "ldb_obs_img_dir"
+      ]);
+      var BLACKLIST_SET = new Set(BLACKLIST);
+      var FORBIDDEN_KEYS = new Set(SyncConstants.FORBIDDEN_KEYS);
+      var SyncSerializer = {
+        WHITELIST,
+        BLACKLIST,
+        /**
+         * 断言 payload 不含黑名单键/危险键(契约: 黑名单键经序列化器永不出现)
+         * @throws {Error}
+         */
+        assertNoBlacklisted(payload) {
+          const bad = [];
+          if ((payload == null ? void 0 : payload.settings) && typeof payload.settings === "object") {
+            for (const key of Object.keys(payload.settings)) {
+              if (BLACKLIST_SET.has(key)) bad.push(`settings:${key}`);
+              if (FORBIDDEN_KEYS.has(key)) bad.push(`settings:${key}(\u5371\u9669\u952E)`);
+            }
+          }
+          if ((payload == null ? void 0 : payload.dedup) && typeof payload.dedup === "object") {
+            for (const [src, set] of Object.entries(payload.dedup)) {
+              if (!WHITELIST.dedupSources[src]) bad.push(`dedup.${src}(\u6E90\u672A\u767D\u540D\u5355)`);
+              if (set && typeof set === "object") {
+                for (const k of Object.keys(set)) {
+                  if (FORBIDDEN_KEYS.has(k)) bad.push(`dedup.${src}:${k}(\u5371\u9669\u952E)`);
+                  if (k.length > SyncConstants.MAX_DEDUP_KEY_LENGTH) bad.push(`dedup.${src}:\u952E\u8D85\u957F`);
+                }
+              }
+            }
+          }
+          if (bad.length > 0) {
+            throw new Error(`SyncSerializer \u9ED1\u540D\u5355\u62E6\u622A: ${bad.join(", ")}`);
+          }
+        },
+        /**
+         * 从原始集合构建 payload(白名单过滤 + URL 哈希化 + 边界校验)
+         * @param {Object} raw { dedupSets, watermarks, settings }
+         * @param {Object} opts { deviceId, now, mode: "personal"|"shared", hashUrls: boolean }
+         * @returns {Promise<Object>} payload
+         */
+        async buildPayload(raw, { deviceId = "local", now = Date.now(), mode = "personal", hashUrls = true } = {}) {
+          var _a, _b;
+          const payload = {
+            schemaVersion: SyncConstants.SCHEMA_VERSION,
+            deviceId,
+            version: 0,
+            updatedAt: new Date(now).toISOString(),
+            dedup: {},
+            watermarks: {},
+            settings: {}
+          };
+          for (const [src, set] of Object.entries((raw == null ? void 0 : raw.dedupSets) || {})) {
+            const meta = WHITELIST.dedupSources[src];
+            if (!meta || !set || typeof set !== "object") continue;
+            const clean = {};
+            let count = 0;
+            for (const [k, ts] of Object.entries(set)) {
+              if (FORBIDDEN_KEYS.has(k)) continue;
+              if (k.length > SyncConstants.MAX_DEDUP_KEY_LENGTH) continue;
+              const num = Number(ts);
+              if (!Number.isFinite(num) || num <= 0) continue;
+              if (++count > SyncConstants.MAX_DEDUP_ENTRIES_PER_SOURCE) break;
+              const key = meta.urlKeyed && hashUrls ? `h:${await SyncCrypto.sha256Hex(k)}` : k;
+              clean[key] = num;
+            }
+            if (Object.keys(clean).length > 0) payload.dedup[src] = clean;
+          }
+          for (const src of WHITELIST.watermarkSources) {
+            const wm = (_a = raw == null ? void 0 : raw.watermarks) == null ? void 0 : _a[src];
+            if (!wm || typeof wm !== "object") continue;
+            const epoch = Number(wm.epoch);
+            if (!Number.isFinite(epoch) || epoch < 0) continue;
+            payload.watermarks[src] = {
+              epoch: Math.floor(epoch),
+              time: String(wm.time || ""),
+              ids: Array.isArray(wm.ids) ? wm.ids.map(String).slice(0, 500) : []
+            };
+          }
+          for (const [key, def] of Object.entries(WHITELIST.settings)) {
+            if (mode === "shared" && def.scope === "personal") continue;
+            const value = (_b = raw == null ? void 0 : raw.settings) == null ? void 0 : _b[key];
+            if (value === void 0 || value === null) continue;
+            const clean = SyncSerializer._coerceSetting(value, def.kind);
+            if (clean === void 0) continue;
+            payload.settings[key] = {
+              value: clean,
+              updatedAt: new Date(now).toISOString(),
+              deviceId
+            };
+          }
+          return payload;
+        },
+        _coerceSetting(value, kind) {
+          switch (kind) {
+            case "number": {
+              const n = Number(value);
+              return Number.isFinite(n) ? n : void 0;
+            }
+            case "boolean":
+              return value === true || value === false ? value : void 0;
+            case "string": {
+              const s = String(value ?? "");
+              return s.length <= 1e3 ? s : void 0;
+            }
+            default:
+              return void 0;
+          }
+        },
+        /**
+         * 校验远端 payload(拉取侧强校验, H-2):
+         * 结构/schemaVersion/键长/计数/ts 偏斜/epoch 增量上限/危险键
+         * @param {Object} payload
+         * @param {Object} opts { now, localEpochs: {src: number} }
+         * @returns {Object} { ok: boolean, error?: string }
+         */
+        validateRemote(payload, { now = Date.now(), localEpochs = {} } = {}) {
+          if (!payload || typeof payload !== "object") {
+            return { ok: false, error: "payload \u975E\u5BF9\u8C61" };
+          }
+          if (payload.schemaVersion !== SyncConstants.SCHEMA_VERSION) {
+            return { ok: false, error: `schema \u7248\u672C\u4E0D\u517C\u5BB9: ${payload.schemaVersion}` };
+          }
+          try {
+            SyncSerializer.assertNoBlacklisted(payload);
+          } catch (e) {
+            return { ok: false, error: e.message };
+          }
+          try {
+            if (JSON.stringify(payload).length > SyncConstants.MAX_PAYLOAD_BYTES) {
+              return { ok: false, error: "payload \u8D85\u9650" };
+            }
+          } catch {
+          }
+          const tsMin = now - SyncConstants.TS_PAST_TTL_MS;
+          const tsMax = now + SyncConstants.TS_FUTURE_SKEW_MS;
+          for (const [src, set] of Object.entries(payload.dedup || {})) {
+            for (const [k, ts] of Object.entries(set || {})) {
+              const num = Number(ts);
+              if (!Number.isFinite(num) || num < tsMin || num > tsMax) {
+                return { ok: false, error: `dedup.${src} ts \u8D8A\u754C: ${k}` };
+              }
+            }
+          }
+          for (const [src, wm] of Object.entries(payload.watermarks || {})) {
+            const localEpoch = Number(localEpochs[src]) || 0;
+            const remoteEpoch = Number(wm == null ? void 0 : wm.epoch) || 0;
+            if (remoteEpoch > localEpoch + SyncConstants.MAX_EPOCH_LEAD) {
+              return { ok: false, error: `watermark ${src} epoch \u901A\u80C0: ${remoteEpoch} > ${localEpoch}+1` };
+            }
+          }
+          return { ok: true };
+        },
+        // 契约辅助: 96 键穷举分区断言(W/B 恰好落一侧, 未知键默认拒绝)
+        assertKeyPartition(keys) {
+          const violations = [];
+          for (const key of keys) {
+            const inW = WHITELIST.settings[key] !== void 0;
+            const inB = BLACKLIST_SET.has(key);
+            if (inW && inB) violations.push(`${key}(W+B \u51B2\u7A81)`);
+          }
+          if (violations.length > 0) {
+            throw new Error(`\u9ED1\u767D\u540D\u5355\u51B2\u7A81: ${violations.join(", ")}`);
+          }
+          return true;
+        }
+      };
+      module.exports = { SyncSerializer };
+    }
+  });
+
+  // src/sync/SyncFragmenter.js
+  var require_SyncFragmenter = __commonJS({
+    "src/sync/SyncFragmenter.js"(exports, module) {
+      "use strict";
+      var { SyncConstants } = require_constants2();
+      var fnv1a = (text) => {
+        let hash = 2166136261;
+        for (let i = 0; i < text.length; i++) {
+          hash ^= text.charCodeAt(i);
+          hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(36);
+      };
+      var SyncFragmenter = {
+        /**
+         * 分片(单行方案: 若超限转多行分片)
+         * @param {string} text
+         * @returns {{rows: string[]}}
+         */
+        fragment(text, { chunkChars = SyncConstants.FRAGMENT_CHUNK_CHARS } = {}) {
+          const str = String(text ?? "");
+          if (str.length <= SyncConstants.FRAGMENT_MAX_ROW_CHARS) {
+            return { rows: [str] };
+          }
+          const rows = [];
+          const prefix = `LD-SYNC:${fnv1a(str)}:`;
+          const headerLen = prefix.length + 2;
+          const usable = Math.max(100, chunkChars - headerLen);
+          for (let i = 0; i < str.length; i += usable) {
+            rows.push(str.slice(i, i + usable));
+          }
+          if (rows.length > SyncConstants.FRAGMENT_MAX_BLOCKS) {
+            throw new Error(`payload \u8FC7\u5927: ${rows.length} \u5757\u8D85\u8FC7 ${SyncConstants.FRAGMENT_MAX_BLOCKS} \u4E0A\u9650`);
+          }
+          const checksum = fnv1a(str);
+          const total = rows.length;
+          return {
+            rows: rows.map((data, index) => `${prefix}${index + 1}/${total};${checksum};${data}`)
+          };
+        },
+        /**
+         * 重组(自动识别分片; 普通单行原样返回)
+         * @param {string[]} rowTexts
+         * @returns {{ok: boolean, text?: string, error?: string}}
+         */
+        defragment(rowTexts) {
+          const rows = Array.isArray(rowTexts) ? rowTexts : [];
+          if (rows.length === 0) return { ok: false, error: "\u65E0\u884C\u6570\u636E" };
+          const fragments = [];
+          const pattern = /^LD-SYNC:([0-9a-z]+):(\d+)\/(\d+);([0-9a-z]+);/;
+          for (const row of rows) {
+            const m = String(row || "").match(pattern);
+            if (!m) return { ok: true, text: rows.join("") };
+            fragments.push({ checksum: m[1], index: Number(m[2]), total: Number(m[3]), innerChecksum: m[4], data: row.slice(m[0].length) });
+          }
+          const first = fragments[0];
+          if (fragments.some((f) => f.total !== first.total || f.checksum !== first.checksum)) {
+            return { ok: false, error: "\u5206\u7247\u5143\u6570\u636E\u4E0D\u4E00\u81F4" };
+          }
+          const ordered = fragments.sort((a, b) => a.index - b.index);
+          if (ordered.length !== first.total) {
+            return { ok: false, error: `\u5206\u7247\u7F3A\u5931: ${ordered.length}/${first.total}` };
+          }
+          for (let i = 0; i < ordered.length; i++) {
+            if (ordered[i].index !== i + 1) return { ok: false, error: "\u5206\u7247\u5E8F\u53F7\u4E0D\u8FDE\u7EED" };
+          }
+          const text = ordered.map((f) => f.data).join("");
+          if (fnv1a(text) !== first.innerChecksum) {
+            return { ok: false, error: "checksum \u4E0D\u5339\u914D, payload \u635F\u574F" };
+          }
+          return { ok: true, text };
+        }
+      };
+      module.exports = { SyncFragmenter };
+    }
+  });
+
+  // src/sync/SyncRateLimiter.js
+  var require_SyncRateLimiter = __commonJS({
+    "src/sync/SyncRateLimiter.js"(exports, module) {
+      "use strict";
+      var { SyncConstants } = require_constants2();
+      var SyncRateLimiter = {
+        _tokens: SyncConstants.RATE_CAPACITY,
+        _lastRefill: Date.now(),
+        _waiters: [],
+        _inflight: 0,
+        _selfLimitTokens: SyncConstants.SYNC_SELF_LIMIT_PER_SEC,
+        _selfLastRefill: Date.now(),
+        /** 令牌桶 refresh */
+        _refill() {
+          const now = Date.now();
+          const elapsed = (now - this._lastRefill) / 1e3;
+          if (elapsed > 0) {
+            this._tokens = Math.min(SyncConstants.RATE_CAPACITY, this._tokens + elapsed * SyncConstants.RATE_REFILL_PER_SEC);
+            this._lastRefill = now;
+          }
+        },
+        /**
+         * 令牌桶 acquire(全局共享预算, gateAcquire 同实现)
+         * @returns {Promise<void>}
+         */
+        acquire() {
+          this._refill();
+          if (this._tokens >= 1) {
+            this._tokens -= 1;
+            return Promise.resolve();
+          }
+          return new Promise((resolve) => {
+            this._waiters.push(resolve);
+            this._drain();
+          });
+        },
+        _drain() {
+          if (this._waiters.length === 0) return;
+          const delay = Math.max(0, Math.ceil((1 - this._tokens) * 1e3));
+          setTimeout(() => {
+            this._refill();
+            while (this._waiters.length > 0 && this._tokens >= 1) {
+              this._tokens -= 1;
+              const resolve = this._waiters.shift();
+              resolve();
+            }
+          }, delay);
+        },
+        /**
+         * 同步路径自限(≤2/s, 独立小桶)
+         */
+        selfAcquire() {
+          const now = Date.now();
+          const elapsed = (now - this._selfLastRefill) / 1e3;
+          if (elapsed >= 1) {
+            this._selfLimitTokens = SyncConstants.SYNC_SELF_LIMIT_PER_SEC;
+            this._selfLastRefill = now;
+          }
+          if (this._selfLimitTokens >= 1) {
+            this._selfLimitTokens -= 1;
+            return Promise.resolve();
+          }
+          return new Promise((resolve) => {
+            setTimeout(() => this.selfAcquire().then(resolve), Math.max(100, 1e3 - elapsed * 1e3));
+          });
+        },
+        /**
+         * NotionAPI.setRequestGate 注入形态
+         */
+        async gateAcquire() {
+          await this.acquire();
+        },
+        /**
+         * 同 key 防抖合并: 窗口内对同一 key 的多次调用合并为 1 次(最后一次胜出)
+         * @param {string} key
+         * @param {Function} fn - 执行体
+         * @param {Object} opts { windowMs=5000, maxWaitMs=30000 }
+         * @returns {Promise<*>}
+         */
+        schedule(key, fn, { windowMs = SyncConstants.DEBOUNCE_MS, maxWaitMs = 3e4 } = {}) {
+          const now = Date.now();
+          if (this._pending && this._pending.key === key && now - this._pending.startedAt < windowMs) {
+            this._pending.fn = fn;
+            return this._pending.promise;
+          }
+          if (this._pending && this._pending.key === key) {
+            this._pending = null;
+            return fn();
+          }
+          const p = new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+              if (this._pending === entry) {
+                this._pending = null;
+                Promise.resolve(entry.fn()).then(resolve, reject);
+              }
+            }, windowMs);
+            const entry = { key, fn, startedAt: now, promise: p, timer };
+            this._pending = entry;
+          });
+          return p;
+        },
+        /**
+         * 错误分类: 401/403/400 → fatal(不重试); 其他 → retry
+         */
+        classifyError(err) {
+          const status = Number((err == null ? void 0 : err.status) || (err == null ? void 0 : err.statusCode) || (err == null ? void 0 : err.code));
+          if (status === 401 || status === 403 || status === 400) {
+            return { action: "fatal", status };
+          }
+          if (status >= 500 || status === 429) {
+            return { action: "retry", status };
+          }
+          return { action: "retry", status };
+        },
+        /** 退避: min(30s, 1000*2^attempt) */
+        backoffMs(attempt) {
+          return Math.min(SyncConstants.BACKOFF_CAP_MS, SyncConstants.BACKOFF_BASE_MS * Math.pow(2, attempt));
+        },
+        /** 测试辅助 */
+        _reset() {
+          this._tokens = SyncConstants.RATE_CAPACITY;
+          this._lastRefill = Date.now();
+          this._waiters = [];
+          this._selfLimitTokens = SyncConstants.SYNC_SELF_LIMIT_PER_SEC;
+          this._selfLastRefill = Date.now();
+        }
+      };
+      module.exports = { SyncRateLimiter };
+    }
+  });
+
+  // src/sync/SyncLedger.js
+  var require_SyncLedger = __commonJS({
+    "src/sync/SyncLedger.js"(exports, module) {
+      "use strict";
+      var { SyncFragmenter } = require_SyncFragmenter();
+      var { SyncRateLimiter } = require_SyncRateLimiter();
+      var ROW_TITLE_PROP = "\u952E";
+      var ROW_KIND_PROP = "\u7C7B\u578B";
+      var ROW_VERSION_PROP = "\u7248\u672C";
+      var ROW_UPDATED_AT_PROP = "\u66F4\u65B0\u65F6\u95F4";
+      var ROW_DEVICE_PROP = "\u8BBE\u5907";
+      var ROW_PAYLOAD_PROP = "\u6570\u636E";
+      var SyncLedger = {
+        /**
+         * 幂等 provision: 搜索已有同步库 → fetchDatabase → createDatabase
+         * @param {Object} deps { NotionAPI, OperationGuard, apiKey, parentPageId, context }
+         * @returns {Promise<{databaseId: string, created: boolean}>}
+         */
+        async provision({ NotionAPI: NotionAPI2, OperationGuard: OperationGuard2, apiKey, parentPageId, context = {} }) {
+          var _a, _b;
+          const searchFilter = { property: "\u6765\u6E90", rich_text: { equals: "LD-Sync" } };
+          const existing = await NotionAPI2.queryDatabase(
+            parentPageId,
+            searchFilter,
+            null,
+            null,
+            apiKey
+          ).catch(() => ({ results: [] }));
+          if ((_b = (_a = existing == null ? void 0 : existing.results) == null ? void 0 : _a[0]) == null ? void 0 : _b.id) {
+            return { databaseId: existing.results[0].id, created: false };
+          }
+          return OperationGuard2.execute("sync.medium.provision", async () => {
+            const db = await NotionAPI2.createDatabase(parentPageId, {
+              title: [{ type: "text", text: { content: "LD-Notion \u591A\u7AEF\u540C\u6B65" } }],
+              properties: SyncLedger._buildSchema()
+            }, apiKey);
+            return { databaseId: String((db == null ? void 0 : db.id) || ""), created: true };
+          }, { ...context, actor: "system", source: "sync-ledger" });
+        },
+        _buildSchema() {
+          const rich = () => ({ rich_text: {} });
+          const num = () => ({ number: {} });
+          return {
+            [ROW_TITLE_PROP]: { title: {} },
+            [ROW_KIND_PROP]: rich(),
+            [ROW_VERSION_PROP]: num(),
+            [ROW_UPDATED_AT_PROP]: rich(),
+            [ROW_DEVICE_PROP]: rich(),
+            [ROW_PAYLOAD_PROP]: rich(),
+            \u6765\u6E90: rich()
+          };
+        },
+        /**
+         * 拉取全部行(分页)
+         * @returns {Promise<Array>} rows
+         */
+        async pullRows({ NotionAPI: NotionAPI2, apiKey, databaseId, context = {} }) {
+          await SyncRateLimiter.selfAcquire();
+          const rows = [];
+          let cursor = null;
+          do {
+            await SyncRateLimiter.acquire();
+            const response = await NotionAPI2.queryDatabase(databaseId, void 0, null, cursor, apiKey);
+            rows.push(...(response == null ? void 0 : response.results) || []);
+            cursor = (response == null ? void 0 : response.has_more) ? response.next_cursor : null;
+          } while (cursor);
+          return rows;
+        },
+        /**
+         * 推送单行(updatePage PATCH; 行不存在时由引擎先 create)
+         * @returns {Promise<{updatedAt: string}>}
+         */
+        async pushRow({ NotionAPI: NotionAPI2, apiKey, databaseId, pageId, row, context = {} }) {
+          await SyncRateLimiter.acquire();
+          const props = SyncLedger._rowToProperties(row);
+          await NotionAPI2.updatePage(pageId, props, apiKey);
+          return { updatedAt: row.updatedAt };
+        },
+        /**
+         * 创建新行(provision 后首次 push 或行缺失时)
+         */
+        async createRow({ NotionAPI: NotionAPI2, apiKey, databaseId, row, context = {} }) {
+          await SyncRateLimiter.acquire();
+          const props = SyncLedger._rowToProperties(row);
+          const page = await NotionAPI2.request("POST", "/pages", {
+            parent: { database_id: databaseId },
+            properties: props
+          }, apiKey);
+          return { pageId: String((page == null ? void 0 : page.id) || ""), updatedAt: row.updatedAt };
+        },
+        /**
+         * 行 → Notion properties(payload 分片存第一片, 其余片存附件块——v1 简化: 单行 payload 分片存储于数据属性, 超限拒绝)
+         */
+        _rowToProperties(row) {
+          const payloadText = JSON.stringify(row.payload || {});
+          const { rows } = SyncFragmenter.fragment(payloadText);
+          if (rows.length > 1) {
+            throw new Error(`\u884C payload \u8FC7\u5927(${payloadText.length} \u5B57\u7B26), \u9700\u5206\u7247\u4E3A\u591A\u884C`);
+          }
+          return {
+            [ROW_TITLE_PROP]: { title: [{ type: "text", text: { content: String(row.key || "").slice(0, 1900) } }] },
+            [ROW_KIND_PROP]: { rich_text: [{ type: "text", text: { content: String(row.kind || "dedup").slice(0, 100) } }] },
+            [ROW_VERSION_PROP]: { number: Number(row.version) || 0 },
+            [ROW_UPDATED_AT_PROP]: { rich_text: [{ type: "text", text: { content: String(row.updatedAt || "").slice(0, 100) } }] },
+            [ROW_DEVICE_PROP]: { rich_text: [{ type: "text", text: { content: String(row.deviceId || "").slice(0, 100) } }] },
+            [ROW_PAYLOAD_PROP]: { rich_text: [{ type: "text", text: { content: rows[0].slice(0, 2e3) } }] },
+            \u6765\u6E90: { rich_text: [{ type: "text", text: { content: "LD-Sync" } }] }
+          };
+        },
+        /**
+         * Notion page → 行(读取 + 损坏检测)
+         */
+        pageToRow(page) {
+          if (!(page == null ? void 0 : page.properties)) return null;
+          const get = (name) => {
+            var _a, _b, _c, _d;
+            const prop = page.properties[name];
+            if ((_b = (_a = prop == null ? void 0 : prop.title) == null ? void 0 : _a[0]) == null ? void 0 : _b.plain_text) return prop.title[0].plain_text;
+            if ((_d = (_c = prop == null ? void 0 : prop.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.plain_text) return prop.rich_text[0].plain_text;
+            if ((prop == null ? void 0 : prop.number) !== void 0 && (prop == null ? void 0 : prop.number) !== null) return String(prop.number);
+            return "";
+          };
+          const payloadText = get(ROW_PAYLOAD_PROP);
+          if (!payloadText) return null;
+          try {
+            return {
+              pageId: String(page.id || ""),
+              kind: get(ROW_KIND_PROP),
+              key: get(ROW_TITLE_PROP),
+              version: Number(get(ROW_VERSION_PROP)) || 0,
+              updatedAt: get(ROW_UPDATED_AT_PROP),
+              deviceId: get(ROW_DEVICE_PROP),
+              payload: JSON.parse(payloadText)
+            };
+          } catch {
+            return null;
+          }
+        }
+      };
+      module.exports = { SyncLedger };
+    }
+  });
+
+  // src/sync/SyncConfig.js
+  var require_SyncConfig = __commonJS({
+    "src/sync/SyncConfig.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var SyncConfig = {
+        _deviceId: null,
+        /**
+         * 获取/生成设备 ID(内存缓存 + 持久化)
+         */
+        getDeviceId() {
+          var _a;
+          if (SyncConfig._deviceId) return SyncConfig._deviceId;
+          let id = GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_DEVICE_ID, "");
+          if (!id || !/^[0-9a-f]{32}$/.test(id)) {
+            const bytes = new Uint8Array(16);
+            if (typeof ((_a = globalThis.crypto) == null ? void 0 : _a.getRandomValues) === "function") {
+              globalThis.crypto.getRandomValues(bytes);
+            } else {
+              const { randomBytes } = __require("crypto");
+              const buf = randomBytes(16);
+              bytes.set(buf);
+            }
+            id = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+            GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_DEVICE_ID, id);
+          }
+          SyncConfig._deviceId = id;
+          return id;
+        },
+        isEnabled() {
+          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_ENABLED, CONFIG2.DEFAULTS.syncEnabled) === true;
+        },
+        setEnabled(v) {
+          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_ENABLED, !!v);
+        },
+        getMode() {
+          const m = GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_MODE, CONFIG2.DEFAULTS.syncMode);
+          return m === "shared" ? "shared" : "personal";
+        },
+        setMode(m) {
+          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_MODE, m === "shared" ? "shared" : "personal");
+        },
+        getDatabaseId() {
+          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_DATABASE_ID, "") || "";
+        },
+        setDatabaseId(id) {
+          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_DATABASE_ID, String(id || ""));
+        },
+        getParentPageId() {
+          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_PARENT_PAGE_ID, "") || "";
+        },
+        setParentPageId(id) {
+          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_PARENT_PAGE_ID, String(id || ""));
+        },
+        getLastPushAt() {
+          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_PUSH_AT, 0) || 0;
+        },
+        setLastPushAt(ts) {
+          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_PUSH_AT, Number(ts) || Date.now());
+        },
+        getLastPullAt() {
+          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_PULL_AT, 0) || 0;
+        },
+        setLastPullAt(ts) {
+          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_PULL_AT, Number(ts) || Date.now());
+        },
+        getLastOutcome() {
+          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_OUTCOME, "") || "";
+        },
+        setLastOutcome(s) {
+          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_OUTCOME, String(s || ""));
+        },
+        isPassphraseSet() {
+          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_PASSPHRASE_SET, false) === true;
+        },
+        setPassphraseSet(v) {
+          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_PASSPHRASE_SET, !!v);
+        }
+      };
+      module.exports = { SyncConfig };
+    }
+  });
+
+  // src/sync/SyncEngine.js
+  var require_SyncEngine = __commonJS({
+    "src/sync/SyncEngine.js"(exports, module) {
+      "use strict";
+      var { SyncConstants } = require_constants2();
+      var { SyncPayload } = require_SyncPayload();
+      var { SyncSerializer } = require_SyncSerializer();
+      var { SyncLedger } = require_SyncLedger();
+      var { SyncConfig } = require_SyncConfig();
+      var { SyncRateLimiter } = require_SyncRateLimiter();
+      var { SyncCrypto } = require_SyncCrypto();
+      var SyncEngine = {
+        _deps: null,
+        _timer: null,
+        _pushTimer: null,
+        _running: false,
+        /**
+         * 初始化(仅 flag on 且 SyncConfig.isEnabled() 时由 main.js 调用)
+         * @param {Object} deps { Storage, SyncStateV2, DedupStore, NotionAPI, OperationGuard, OperationLog, apiKeyProvider }
+         */
+        init(deps) {
+          SyncEngine._deps = deps;
+          const { on } = require_event_bus();
+          on("storage:state-committed", (e) => {
+            if (SyncEngine._pushTimer) clearTimeout(SyncEngine._pushTimer);
+            SyncEngine._pushTimer = setTimeout(() => {
+              SyncEngine.push({ reason: "state-committed" });
+            }, SyncConstants.DEBOUNCE_MS);
+          });
+        },
+        _getDeps() {
+          if (!SyncEngine._deps) throw new Error("SyncEngine \u672A\u521D\u59CB\u5316");
+          return SyncEngine._deps;
+        },
+        /**
+         * 收集本地状态 → payload(Serializer 过滤+哈希化)
+         */
+        async _buildLocalPayload() {
+          var _a;
+          const { Storage: Storage2, SyncStateV2, DedupStore, OperationGuard: OperationGuard2 } = SyncEngine._getDeps();
+          const deviceId = SyncConfig.getDeviceId();
+          const mode = SyncConfig.getMode();
+          const dedupSets = {};
+          for (const src of Object.keys(SyncSerializer.WHITELIST.dedupSources)) {
+            dedupSets[src] = DedupStore.getSeen(src) || {};
+          }
+          const watermarks = {};
+          for (const src of SyncSerializer.WHITELIST.watermarkSources) {
+            const st = SyncStateV2.getSourceState(src);
+            if ((_a = st.watermark) == null ? void 0 : _a.time) {
+              watermarks[src] = { epoch: st.epoch || 0, time: st.watermark.time, ids: st.watermark.ids || [] };
+            }
+          }
+          const settings = {};
+          for (const key of Object.keys(SyncSerializer.WHITELIST.settings)) {
+            const value = Storage2.get(key, void 0);
+            if (value !== void 0 && value !== null) settings[key] = value;
+          }
+          const payload = await SyncSerializer.buildPayload(
+            { dedupSets, watermarks, settings },
+            { deviceId, now: Date.now(), mode, hashUrls: true }
+          );
+          SyncSerializer.assertNoBlacklisted(payload);
+          return payload;
+        },
+        /**
+         * push: 本地 payload 全量投影到介质(每源一行; 幂等 upsert)
+         * @returns {Promise<{ok: boolean, outcome: string, error?: string}>}
+         */
+        async push({ reason = "manual" } = {}) {
+          if (SyncEngine._running) return { ok: false, outcome: "busy" };
+          const { OperationGuard: OperationGuard2, OperationLog: OperationLog2, NotionAPI: NotionAPI2 } = SyncEngine._getDeps();
+          if (!OperationGuard2.canExecute("sync.state.push")) {
+            OperationLog2.add({
+              audit_event: "guard.denied",
+              actor: "system",
+              source: "sync-engine",
+              guard: { operation: "sync.state.push", decision: "deny", reason: "\u6743\u9650\u4E0D\u8DB3: \u591A\u7AEF\u540C\u6B65\u63A8\u9001\u9700 level\u22651" },
+              operationName: "sync.state.push",
+              status: "denied",
+              context: { reason }
+            }, { force: true });
+            SyncConfig.setLastOutcome("denied");
+            return { ok: false, outcome: "denied" };
+          }
+          SyncEngine._running = true;
+          try {
+            const payload = await SyncEngine._buildLocalPayload();
+            const apiKey = SyncEngine._getApiKey();
+            const databaseId = SyncConfig.getDatabaseId();
+            if (!databaseId || !apiKey) {
+              SyncConfig.setLastOutcome("not-configured");
+              return { ok: false, outcome: "not-configured" };
+            }
+            const { OperationGuard: Guard } = SyncEngine._getDeps();
+            await Guard.execute("sync.state.push", async () => {
+              const rows = [];
+              for (const [src, set] of Object.entries(payload.dedup)) {
+                rows.push({
+                  kind: "dedup",
+                  key: src,
+                  version: payload.version || 0,
+                  updatedAt: payload.updatedAt,
+                  deviceId: payload.deviceId,
+                  payload: {
+                    dedup: { [src]: set },
+                    watermarks: payload.watermarks[src] ? { [src]: payload.watermarks[src] } : void 0
+                  }
+                });
+              }
+              for (const [src] of Object.entries(payload.watermarks)) {
+                if (!payload.dedup[src]) {
+                  rows.push({
+                    kind: "watermark",
+                    key: src,
+                    version: payload.version || 0,
+                    updatedAt: payload.updatedAt,
+                    deviceId: payload.deviceId,
+                    payload: { watermarks: { [src]: payload.watermarks[src] } }
+                  });
+                }
+              }
+              rows.push({
+                kind: "settings",
+                key: "settings",
+                version: payload.version || 0,
+                updatedAt: payload.updatedAt,
+                deviceId: payload.deviceId,
+                payload: { settings: payload.settings }
+              });
+              const existing = await SyncLedger.pullRows({ NotionAPI: NotionAPI2, apiKey, databaseId, context: { reason } });
+              const index = /* @__PURE__ */ new Map();
+              for (const row of existing) {
+                const parsed = SyncLedger.pageToRow(row);
+                if (parsed) index.set(`${parsed.kind}:${parsed.key}`, parsed);
+              }
+              for (const row of rows) {
+                const id = `${row.kind}:${row.key}`;
+                const prior = index.get(id);
+                if (prior && prior.pageId) {
+                  await SyncLedger.pushRow({ NotionAPI: NotionAPI2, apiKey, databaseId, pageId: prior.pageId, row, context: { reason } });
+                } else {
+                  await SyncLedger.createRow({ NotionAPI: NotionAPI2, apiKey, databaseId, row, context: { reason } });
+                }
+              }
+            }, { trigger: "multi_device_sync", reason });
+            SyncConfig.setLastPushAt(Date.now());
+            SyncConfig.setLastOutcome("success");
+            return { ok: true, outcome: "success" };
+          } catch (error) {
+            SyncConfig.setLastOutcome(`error:${String((error == null ? void 0 : error.message) || error).slice(0, 200)}`);
+            return { ok: false, outcome: "error", error: String((error == null ? void 0 : error.message) || error) };
+          } finally {
+            SyncEngine._running = false;
+          }
+        },
+        _getApiKey() {
+          var _a;
+          const deps = SyncEngine._getDeps();
+          if (typeof deps.apiKeyProvider === "function") {
+            const v = deps.apiKeyProvider();
+            if (v) return v;
+          }
+          try {
+            const { NotionOAuth: NotionOAuth2 } = require_auth();
+            return ((_a = NotionOAuth2 == null ? void 0 : NotionOAuth2.getAccessToken) == null ? void 0 : _a.call(NotionOAuth2)) || "";
+          } catch {
+            return "";
+          }
+        },
+        /**
+         * pull: 拉远端行 → 校验 → merge → applyRemote(仅胜出项)
+         * @returns {Promise<{ok: boolean, outcome: string, applied: Object, error?: string}>}
+         */
+        async pull({ reason = "manual" } = {}) {
+          if (SyncEngine._running) return { ok: false, outcome: "busy" };
+          const { OperationGuard: OperationGuard2, OperationLog: OperationLog2, NotionAPI: NotionAPI2, SyncStateV2, DedupStore } = SyncEngine._getDeps();
+          if (!OperationGuard2.canExecute("sync.state.pull")) {
+            OperationLog2.add({
+              audit_event: "guard.denied",
+              actor: "system",
+              source: "sync-engine",
+              guard: { operation: "sync.state.pull", decision: "deny", reason: "\u6743\u9650\u4E0D\u8DB3: \u62C9\u53D6\u9700 level\u22650" },
+              operationName: "sync.state.pull",
+              status: "denied",
+              context: { reason }
+            }, { force: true });
+            SyncConfig.setLastOutcome("denied");
+            return { ok: false, outcome: "denied" };
+          }
+          SyncEngine._running = true;
+          try {
+            const apiKey = SyncEngine._getApiKey();
+            const databaseId = SyncConfig.getDatabaseId();
+            if (!databaseId || !apiKey) {
+              SyncConfig.setLastOutcome("not-configured");
+              return { ok: false, outcome: "not-configured" };
+            }
+            const rows = await SyncLedger.pullRows({ NotionAPI: NotionAPI2, apiKey, databaseId, context: { reason } });
+            let mergedRemote = { schemaVersion: SyncConstants.SCHEMA_VERSION, deviceId: "", updatedAt: "", version: 0, dedup: {}, watermarks: {}, settings: {} };
+            let validRows = 0;
+            for (const page of rows) {
+              const row = SyncLedger.pageToRow(page);
+              if (!row || !row.payload || typeof row.payload !== "object") continue;
+              validRows++;
+              const rowPayload = { schemaVersion: 1, deviceId: row.deviceId || "", updatedAt: row.updatedAt || "", version: row.version || 0, ...row.payload };
+              try {
+                mergedRemote = SyncPayload.merge(mergedRemote, rowPayload);
+              } catch {
+              }
+            }
+            if (validRows === 0) {
+              SyncConfig.setLastPullAt(Date.now());
+              SyncConfig.setLastOutcome("empty");
+              return { ok: true, outcome: "empty", applied: { dedupEntries: [], watermarkWinners: [], settingsWinners: [] } };
+            }
+            const localEpochs = {};
+            for (const src of SyncSerializer.WHITELIST.watermarkSources) {
+              localEpochs[src] = SyncStateV2.getSourceState(src).epoch || 0;
+            }
+            const validation = SyncSerializer.validateRemote(mergedRemote, { now: Date.now(), localEpochs });
+            if (!validation.ok) {
+              OperationLog2.add({
+                audit_event: "sync.state.pulled",
+                actor: "system",
+                source: "sync-engine",
+                operationName: "sync.state.pull",
+                status: "failed",
+                context: { reason, error: validation.error }
+              }, { force: true });
+              SyncConfig.setLastOutcome(`rejected:${validation.error}`);
+              return { ok: false, outcome: "rejected", error: validation.error };
+            }
+            const localPayload = await SyncEngine._buildLocalPayload();
+            const merged = SyncPayload.merge(localPayload, mergedRemote);
+            const winners = SyncPayload.diffWinners(localPayload, mergedRemote);
+            const applied = SyncEngine.applyRemote(winners, { SyncStateV2, DedupStore });
+            SyncConfig.setLastPullAt(Date.now());
+            SyncConfig.setLastOutcome(`success(applied:${applied.dedupEntries.length}/${applied.watermarkWinners.length}/${applied.settingsWinners.length})`);
+            return { ok: true, outcome: "success", applied };
+          } catch (error) {
+            SyncConfig.setLastOutcome(`error:${String((error == null ? void 0 : error.message) || error).slice(0, 200)}`);
+            return { ok: false, outcome: "error", error: String((error == null ? void 0 : error.message) || error) };
+          } finally {
+            SyncEngine._running = false;
+          }
+        },
+        /**
+         * applyRemote — 仅写 diffWinners 胜出项(去重 union 写回 + watermark 应用 + settings 应用)
+         */
+        applyRemote(winners, { SyncStateV2, DedupStore } = {}) {
+          var _a;
+          const deps = SyncEngine._getDeps();
+          const State = SyncStateV2 || deps.SyncStateV2;
+          const Dedup = DedupStore || deps.DedupStore;
+          const changedSources = /* @__PURE__ */ new Set();
+          for (const entry of winners.dedupEntries || []) {
+            Dedup.markSeen(entry.source, entry.key);
+            changedSources.add(entry.source);
+          }
+          for (const { source, watermark } of winners.watermarkWinners || []) {
+            const local = State.getSourceState(source);
+            const localEpoch = Number(local.epoch) || 0;
+            const remoteEpoch = Number(watermark.epoch) || 0;
+            if (remoteEpoch > localEpoch + SyncConstants.MAX_EPOCH_LEAD) continue;
+            State.updateSourceState(source, {
+              watermark: { time: watermark.time, ids: watermark.ids || [] },
+              epoch: Math.max(localEpoch, remoteEpoch),
+              lastOutcome: "success"
+            });
+          }
+          const { Storage: Storage2, OperationGuard: OperationGuard2 } = deps;
+          for (const { key, entry } of winners.settingsWinners || []) {
+            const def = SyncSerializer.WHITELIST.settings[key];
+            if (!def) continue;
+            if (def.confirmLevel && !OperationGuard2.canExecute("updatePage")) {
+              continue;
+            }
+            const coerce = SyncSerializer._coerceSetting(entry.value, def.kind);
+            if (coerce === void 0) continue;
+            Storage2.set(key, coerce);
+          }
+          for (const src of changedSources) {
+            const set = Dedup.getSeen(src);
+            (_a = Dedup._evictExpired) == null ? void 0 : _a.call(Dedup, set);
+          }
+          return {
+            dedupEntries: (winners.dedupEntries || []).length,
+            watermarkWinners: (winners.watermarkWinners || []).length,
+            settingsWinners: (winners.settingsWinners || []).length
+          };
+        },
+        /**
+         * syncOnce: push + pull(顺序, 避免自触发)
+         */
+        async syncOnce({ reason = "manual" } = {}) {
+          const pushResult = await SyncEngine.push({ reason });
+          const pullResult = await SyncEngine.pull({ reason });
+          return { push: pushResult, pull: pullResult };
+        },
+        /**
+         * resetRemote: 清空介质(危险操作 L3 + 确认)
+         */
+        async resetRemote({ confirm: confirm2 = false } = {}) {
+          if (!confirm2) return { ok: false, outcome: "need-confirm" };
+          const { OperationGuard: OperationGuard2, OperationLog: OperationLog2, NotionAPI: NotionAPI2 } = SyncEngine._getDeps();
+          return OperationGuard2.execute("sync.medium.reset", async () => {
+            const apiKey = SyncEngine._getApiKey();
+            const databaseId = SyncConfig.getDatabaseId();
+            if (databaseId) {
+              await NotionAPI2.deletePage(databaseId, apiKey).catch(() => {
+              });
+            }
+            SyncConfig.setDatabaseId("");
+            SyncConfig.setLastOutcome("reset");
+            return { ok: true, outcome: "reset" };
+          }, { trigger: "multi_device_sync", actor: "user" });
+        },
+        getStatus() {
+          return {
+            enabled: SyncConfig.isEnabled(),
+            mode: SyncConfig.getMode(),
+            deviceId: SyncConfig.getDeviceId(),
+            databaseId: SyncConfig.getDatabaseId(),
+            lastPushAt: SyncConfig.getLastPushAt(),
+            lastPullAt: SyncConfig.getLastPullAt(),
+            lastOutcome: SyncConfig.getLastOutcome()
+          };
+        }
+      };
+      module.exports = { SyncEngine };
+    }
+  });
+
+  // src/sync/index.js
+  var require_sync = __commonJS({
+    "src/sync/index.js"(exports, module) {
+      "use strict";
+      var { SyncConstants } = require_constants2();
+      var { SyncPayload } = require_SyncPayload();
+      var { SyncSerializer } = require_SyncSerializer();
+      var { SyncCrypto } = require_SyncCrypto();
+      var { SyncFragmenter } = require_SyncFragmenter();
+      var { SyncRateLimiter } = require_SyncRateLimiter();
+      var { SyncLedger } = require_SyncLedger();
+      var { SyncEngine } = require_SyncEngine();
+      var { SyncConfig } = require_SyncConfig();
+      module.exports = {
+        SyncConstants,
+        SyncPayload,
+        SyncSerializer,
+        SyncCrypto,
+        SyncFragmenter,
+        SyncRateLimiter,
+        SyncLedger,
+        SyncEngine,
+        SyncConfig
+      };
+    }
+  });
+
   // src/main.js
   var { CONFIG, SUPPORTED_FILE_TYPES, EXT_TO_MIME, FILE_TYPE_CATEGORY, SUPPORTED_IMAGE_TYPES, MULTI_PART_THRESHOLD, isSupportedFileType, getMimeType: getMimeType2, getFileCategory, MSG } = require_config();
   var { Utils } = require_utils();
@@ -28429,6 +30324,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter } = require_bridge();
   var { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI, GenericUI } = require_ui();
   var { UICommandService } = require_coordination();
+  var syncModule = CONFIG.MULTI_DEVICE_SYNC_ENABLED ? require_sync() : null;
   Storage.CredentialVault = CredentialVault;
   BookmarkBridge.init();
   window.addEventListener("ld-notion-popup-action", (event) => {
@@ -28472,6 +30368,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       if (!accessToken) return;
       await UICommandService.execute("discover_export_target_after_auth", { accessToken, source });
     });
+    NotionOAuth.installCrossPageWatchers();
     const initUI = async () => {
       try {
         DesignSystem.initTheme();
@@ -28501,6 +30398,28 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           GenericUI.init();
         } else if (currentSite === SiteDetector.SITES.GENERIC) {
           GenericUI.init();
+        }
+        if (syncModule && syncModule.SyncConfig && syncModule.SyncConfig.isEnabled()) {
+          const { SyncEngine, SyncConfig: SC, SyncRateLimiter, SyncSerializer, SyncLedger, SyncPayload, SyncCrypto } = syncModule;
+          SyncEngine.init({
+            Storage,
+            SyncStateV2: SyncState,
+            DedupStore: require_DedupStore().DedupStore,
+            NotionAPI,
+            OperationGuard,
+            OperationLog
+          });
+          NotionAPI.setRequestGate(() => SyncRateLimiter.gateAcquire());
+          Utils.runWhenBrowserIdle(() => SyncEngine.pull({ reason: "idle" }));
+          const hash = SC.getDeviceId().split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+          const phase = hash % 15;
+          setTimeout(() => {
+            const loop = () => {
+              SyncEngine.pull({ reason: "periodic" });
+              setTimeout(loop, 30 * 60 * 1e3 + phase * 6e4);
+            };
+            loop();
+          }, phase * 6e4);
         }
         const notice = NotionOAuth.consumeNotice();
         if (notice == null ? void 0 : notice.message) {

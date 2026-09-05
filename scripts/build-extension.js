@@ -786,6 +786,30 @@ function GM_deleteValue(key) {
     chrome.storage.local.remove(key);
 }
 
+// 跨页配置变更监听垫片(三模型共识):chrome.storage.onChanged 映射为 GM_addValueChangeListener
+var _gmValueChangeListeners = Object.create(null);
+function GM_addValueChangeListener(key, callback) {
+    if (typeof callback !== "function") return 0;
+    if (!_gmValueChangeListeners[key]) _gmValueChangeListeners[key] = [];
+    _gmValueChangeListeners[key].push(callback);
+    return _gmValueChangeListeners[key].length;
+}
+if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName !== "local") return;
+        for (const key of Object.keys(changes)) {
+            const cbs = _gmValueChangeListeners[key];
+            if (!cbs || !cbs.length) continue;
+            const change = changes[key];
+            for (const cb of cbs) {
+                try {
+                    cb(change && typeof change.newValue !== "undefined" ? change.newValue : undefined, change && change.oldValue);
+                } catch (_) { /* 回调失败不影响存储 */ }
+            }
+        }
+    });
+}
+
 // HTTP 请求垫片 — 通过 background service worker 代理
 function GM_xmlhttpRequest(details) {
     const { method, url, headers, data, onload, onerror, timeout, ontimeout } = details;

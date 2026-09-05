@@ -86,6 +86,9 @@ function main() {
         await UICommandService.execute("discover_export_target_after_auth", { accessToken, source });
     });
 
+    // 跨页配置刷新(三模型共识):OAuth 三键 GM_addValueChangeListener,其他页面改动本页即时回填
+    NotionOAuth.installCrossPageWatchers();
+
     const initUI = async () => {
       try {
         // 初始化主题系统

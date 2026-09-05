@@ -283,7 +283,7 @@ const NotionSiteUI = {
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-vault-lock" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">锁定</button>
                         </div>
                         <div class="ldb-tip" id="ldb-notion-vault-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                        <div class="ldb-tip">适用于 Notion 公开集成。敏感凭证会保存在本地加密保险箱中，仅在解锁后的当前会话内可用。</div>
+                        <div class="ldb-tip">适用于 Notion 公开集成。请确认已在集成后台逐字符注册 Redirect URI（含末尾斜杠），且集成已提交 Notion 审核（Authorization URL 在审核通过后才生效）。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID。敏感凭证会保存在本地加密保险箱中，仅在解锁后的当前会话内可用。</div>
                     </div>
                     <div class="ldb-input-group">
                         <label class="ldb-label" for="ldb-notion-ai-target-db">数据库 / 页面</label>

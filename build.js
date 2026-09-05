@@ -43,6 +43,7 @@ const USERSCRIPT_HEADER = `// ==UserScript==
 // @grant        GM_deleteValue
 // @grant        GM_xmlhttpRequest
 // @grant        GM_notification
+// @grant        GM_addValueChangeListener
 // @connect      api.notion.com
 // @connect      linux.do
 // @connect      *.amazonaws.com

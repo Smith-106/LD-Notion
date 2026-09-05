@@ -56,6 +56,7 @@ const REQUIRED_GM_APIS = [
     "GM_deleteValue",
     "GM_xmlhttpRequest",
     "GM_notification",
+    "GM_addValueChangeListener",
 ];
 
 // ===========================================

@@ -31,6 +31,8 @@ const {
     validatePatchedBuildAssumptions
 } = require(buildScriptPath);
 const userScriptContent = fs.readFileSync(userScriptPath, 'utf8');
+// 三模型共识: Notion OAuth 合法 Client ID fixture(UUID 格式)
+const VALID_CLIENT_ID = '8f14e45f-ceea-4b4a-8a3e-3b6c2a1d9e7f';
 const wrappedCoreCode = extractUserscriptIifeBody(userScriptContent);
 const coreCode = wrappedCoreCode.replace(/\n\s*main\(\);\s*$/, '\n');
 const { loadBundle } = require('./legacy-harness.js');
@@ -598,7 +600,7 @@ function createWorkspaceVisualizationFixture(harness) {
         const harness = createHarness();
         await unlockCredentialVault(harness);
         await harness.NotionOAuth.saveConfig({
-            clientId: 'client_123',
+            clientId: VALID_CLIENT_ID,
             clientSecret: 'secret_456',
             redirectUri: 'https://www.notion.so/'
         });
@@ -606,7 +608,7 @@ function createWorkspaceVisualizationFixture(harness) {
         const url = new URL(harness.NotionOAuth.buildAuthorizeUrl(harness.NotionOAuth.getConfig(), 'state_abc'));
 
         assert.strictEqual(url.origin + url.pathname, 'https://api.notion.com/v1/oauth/authorize');
-        assert.strictEqual(url.searchParams.get('client_id'), 'client_123');
+        assert.strictEqual(url.searchParams.get('client_id'), VALID_CLIENT_ID);
         assert.strictEqual(url.searchParams.get('redirect_uri'), 'https://www.notion.so/');
         assert.strictEqual(url.searchParams.get('response_type'), 'code');
         assert.strictEqual(url.searchParams.get('owner'), 'user');
@@ -3668,15 +3670,19 @@ function createWorkspaceVisualizationFixture(harness) {
             202: 1710000001000
         });
 
+        // F1 单一账本语义: legacy 键在首次访问时一次性迁移到 DedupStore 账本并删除
         assert.strictEqual(harness.Storage.isTopicExported('101'), true);
         assert.strictEqual(harness.Storage.isTopicExported('202'), true);
         assert.strictEqual(harness.Storage.unmarkTopicExported('101'), true);
         assert.strictEqual(harness.Storage.isTopicExported('101'), false);
         assert.strictEqual(harness.Storage.isTopicExported('202'), true);
+        // 迁移后 legacy 键已删除, 账本在 DedupStore 键(单一事实源)
+        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS], undefined);
         assert.deepStrictEqual(
-            JSON.parse(harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS]),
+            JSON.parse(harness.store['ldb_exported_topics:linuxdo']),
             { 202: 1710000001000 }
         );
+        assert.deepStrictEqual(harness.Storage.getExportedTopics(), { 202: 1710000001000 });
         assert.strictEqual(harness.Storage.unmarkTopicExported('404'), false);
     });
 
@@ -5852,9 +5858,9 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.deepStrictEqual(deletedPageIds, [['page-3', 'manual_api_key']]);
         // processInBatches 并发处理（CONCURRENCY=3），markExported 调用顺序非确定；
         // 用集合比较而非有序数组断言，避免对并发完成顺序的脆弱依赖。
+        // F10 共识(自动不污染手动): 仅 created 分支写入手动导入去重集合, updated 分支不标记。
         assert.deepStrictEqual([...exportedUrls].sort(), [
-            'https://example.com/new',
-            'https://example.com/updated'
+            'https://example.com/new'
         ]);
 
         const bookmarkState = harness.SyncState.getBookmarkState();
@@ -6538,5 +6544,217 @@ function createWorkspaceVisualizationFixture(harness) {
         ]);
     });
 
-    console.log('\nAll NotionOAuth tests passed successfully!');
+        // ===== 三模型共识: 客户端 ID 缺失或不完整 修复测试 (T1-T22) =====
+    await runTest('T1 validateOAuthClientId: accepts valid lowercase UUID', async () => {
+        const harness = createHarness();
+        const r = harness.NotionOAuth.validateOAuthClientId(VALID_CLIENT_ID);
+        assert.strictEqual(r.valid, true);
+        assert.strictEqual(r.code, 'OK');
+        assert.strictEqual(r.value, VALID_CLIENT_ID);
+    });
+
+    await runTest('T2 validateOAuthClientId: accepts uppercase UUID (case preserved)', async () => {
+        const harness = createHarness();
+        const upper = VALID_CLIENT_ID.toUpperCase();
+        const r = harness.NotionOAuth.validateOAuthClientId(upper);
+        assert.strictEqual(r.valid, true);
+        assert.strictEqual(r.value, upper);
+    });
+
+    await runTest('T3 validateOAuthClientId: strips invisible chars around UUID', async () => {
+        const harness = createHarness();
+        const wrapped = '\u200B\u200C' + VALID_CLIENT_ID + '\uFEFF\u2060';
+        const r = harness.NotionOAuth.validateOAuthClientId(wrapped);
+        assert.strictEqual(r.valid, true);
+        assert.strictEqual(r.value, VALID_CLIENT_ID);
+        assert.ok(!/[\u200B\u200C\u200D\uFEFF\u2060]/.test(r.value));
+    });
+
+    await runTest('T4 validateOAuthClientId: rejects empty / whitespace', async () => {
+        const harness = createHarness();
+        assert.strictEqual(harness.NotionOAuth.validateOAuthClientId('').code, 'EMPTY');
+        assert.strictEqual(harness.NotionOAuth.validateOAuthClientId('   \t\n ').code, 'EMPTY');
+        assert.strictEqual(harness.NotionOAuth.validateOAuthClientId(undefined).code, 'EMPTY');
+        assert.strictEqual(harness.NotionOAuth.validateOAuthClientId(null).code, 'EMPTY');
+    });
+
+    await runTest('T5 validateOAuthClientId: rejects invisible-only input', async () => {
+        const harness = createHarness();
+        const r = harness.NotionOAuth.validateOAuthClientId('\u200B\u200C\uFEFF');
+        assert.strictEqual(r.valid, false);
+        assert.strictEqual(r.code, 'INVISIBLE_ONLY');
+    });
+
+    await runTest('T6 validateOAuthClientId: secret_ prefix -> targeted hint', async () => {
+        const harness = createHarness();
+        const r = harness.NotionOAuth.validateOAuthClientId('secret_' + VALID_CLIENT_ID);
+        assert.strictEqual(r.valid, false);
+        assert.strictEqual(r.code, 'LOOKS_LIKE_SECRET');
+        assert.ok(r.message.includes('Client Secret'));
+    });
+
+    await runTest('T7 validateOAuthClientId: ntn_ prefix -> targeted hint', async () => {
+        const harness = createHarness();
+        const r = harness.NotionOAuth.validateOAuthClientId('ntn_1234567890abcdef');
+        assert.strictEqual(r.valid, false);
+        assert.strictEqual(r.code, 'LOOKS_LIKE_TOKEN');
+        assert.ok(r.message.includes('API Token'));
+    });
+
+    await runTest('T8 validateOAuthClientId: rejects non-UUID formats', async () => {
+        const harness = createHarness();
+        for (const bad of ['client_123', '12345678123442348234123456789012', '8f14e45f-ceea-4b4a', 'zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz', '12345']) {
+            const r = harness.NotionOAuth.validateOAuthClientId(bad);
+            assert.strictEqual(r.valid, false, 'should reject: ' + bad);
+            assert.strictEqual(r.code, 'FORMAT');
+            assert.ok(r.message.includes('UUID'), 'message should mention UUID for: ' + bad);
+        }
+    });
+
+    await runTest('T9 validateOAuthClientId: String() coercion no prototype pollution', async () => {
+        const harness = createHarness();
+        const evil = JSON.parse('{"__proto__":"8f14e45f-ceea-4b4a-8a3e-3b6c2a1d9e7f"}');
+        const r = harness.NotionOAuth.validateOAuthClientId(evil.__proto__);
+        assert.strictEqual(r.valid, true);
+        assert.strictEqual(({}).polluted, undefined);
+    });
+
+    await runTest('T10 validateOAuthRedirectUri: accepts https', async () => {
+        const harness = createHarness();
+        const r = harness.NotionOAuth.validateOAuthRedirectUri('https://www.notion.so/');
+        assert.strictEqual(r.valid, true);
+        assert.strictEqual(r.code, 'OK');
+    });
+
+    await runTest('T11 validateOAuthRedirectUri: accepts http://localhost', async () => {
+        const harness = createHarness();
+        assert.strictEqual(harness.NotionOAuth.validateOAuthRedirectUri('http://localhost:3000/callback').valid, true);
+        assert.strictEqual(harness.NotionOAuth.validateOAuthRedirectUri('http://127.0.0.1:8080/cb').valid, true);
+    });
+
+    await runTest('T12 validateOAuthRedirectUri: rejects empty', async () => {
+        const harness = createHarness();
+        const r = harness.NotionOAuth.validateOAuthRedirectUri('');
+        assert.strictEqual(r.valid, false);
+        assert.strictEqual(r.code, 'EMPTY');
+        assert.ok(r.message.includes('Redirect URI'));
+    });
+
+    await runTest('T13 validateOAuthRedirectUri: rejects http non-localhost', async () => {
+        const harness = createHarness();
+        const r = harness.NotionOAuth.validateOAuthRedirectUri('http://example.com/cb');
+        assert.strictEqual(r.valid, false);
+        assert.strictEqual(r.code, 'HTTP_NOT_LOCALHOST');
+        assert.ok(r.message.includes('localhost'));
+    });
+
+    await runTest('T14 validateOAuthRedirectUri: rejects dangerous schemes', async () => {
+        const harness = createHarness();
+        for (const bad of ['javascript:alert(1)', 'data:text/html,hi', 'file:///etc/passwd', '/callback', 'not a url']) {
+            const r = harness.NotionOAuth.validateOAuthRedirectUri(bad);
+            assert.strictEqual(r.valid, false, 'should reject: ' + bad);
+        }
+    });
+
+    await runTest('T15 saveConfig: empty clientId does not overwrite stored value', async () => {
+        const harness = createHarness();
+        await harness.NotionOAuth.saveConfig({ clientId: VALID_CLIENT_ID, clientSecret: 'secret_456' });
+        await harness.NotionOAuth.saveConfig({ clientId: '' });
+        await harness.NotionOAuth.saveConfig({ clientId: '   ' });
+        assert.strictEqual(harness.NotionOAuth.getConfig().clientId, VALID_CLIENT_ID);
+    });
+
+    await runTest('T16 saveConfig: empty clientId with no prior value leaves storage unwritten', async () => {
+        const harness = createHarness();
+        await harness.NotionOAuth.saveConfig({ clientId: '' });
+        assert.strictEqual(harness.store['ldb_notion_oauth_client_id'], undefined);
+        assert.strictEqual(harness.NotionOAuth.getConfig().clientId, '');
+    });
+
+    await runTest('T17 buildAuthorizeUrl: throws on secret_ prefixed clientId', async () => {
+        const harness = createHarness();
+        assert.throws(() => harness.NotionOAuth.buildAuthorizeUrl({ clientId: 'secret_abc', redirectUri: 'https://www.notion.so/' }), (e) => e.message.includes('Client Secret'));
+    });
+
+    await runTest('T18 buildAuthorizeUrl: throws on non-UUID clientId', async () => {
+        const harness = createHarness();
+        assert.throws(() => harness.NotionOAuth.buildAuthorizeUrl({ clientId: 'client_123', redirectUri: 'https://www.notion.so/' }), (e) => e.message.includes('UUID'));
+    });
+
+    await runTest('T19 buildAuthorizeUrl: throws on invalid redirectUri', async () => {
+        const harness = createHarness();
+        assert.throws(() => harness.NotionOAuth.buildAuthorizeUrl({ clientId: VALID_CLIENT_ID, redirectUri: 'http://evil.example/cb' }), (e) => e.message.includes('localhost'));
+    });
+
+    await runTest('T20 buildAuthorizeUrl: strips invisible chars in URL params', async () => {
+        const harness = createHarness();
+        const url = harness.NotionOAuth.buildAuthorizeUrl({ clientId: '\u200B' + VALID_CLIENT_ID + '\uFEFF', redirectUri: 'https://www.notion.so/' }, 's1');
+        const parsed = new URL(url);
+        assert.strictEqual(parsed.searchParams.get('client_id'), VALID_CLIENT_ID);
+    });
+
+    await runTest('T21 installCrossPageWatchers: idempotent and guarded', async () => {
+        const harness = createHarness();
+        // sandbox 无 GM_addValueChangeListener -> typeof 守卫, 不抛错
+        harness.NotionOAuth.installCrossPageWatchers();
+        harness.NotionOAuth.installCrossPageWatchers();
+        assert.ok(true);
+    });
+
+    await runTest('T22 startAuthorization: invalid config does not persist pending state', async () => {
+        const harness = createHarness();
+        await unlockCredentialVault(harness);
+        await harness.NotionOAuth.saveConfig({ clientId: 'client_123', clientSecret: 'secret_456' });
+        assert.throws(() => harness.NotionOAuth.startAuthorization(), /UUID|格式不合法|Client ID/);
+        const pending = harness.NotionOAuth.getPendingState();
+        assert.strictEqual(pending, null);
+    });
+
+    // ===== 三模型共识验证轮: HIGH/中危修复回归 (T23-T28) =====
+    await runTest('T23 saveConfig: empty redirectUri does not overwrite stored value', async () => {
+        const harness = createHarness();
+        await harness.NotionOAuth.saveConfig({ clientId: VALID_CLIENT_ID, redirectUri: 'https://custom.example/cb' });
+        await harness.NotionOAuth.saveConfig({ redirectUri: '' });
+        await harness.NotionOAuth.saveConfig({ redirectUri: '   ' });
+        assert.strictEqual(harness.NotionOAuth.getConfig().redirectUri, 'https://custom.example/cb');
+    });
+
+    await runTest('T24 userscript header declares @grant GM_addValueChangeListener', async () => {
+        // 验证轮 HIGH 修复: 无 grant 时沙箱内 typeof undefined -> 跨页监听为死代码
+        assert.ok(userScriptContent.includes('@grant        GM_addValueChangeListener'), 'header must grant GM_addValueChangeListener');
+    });
+
+    await runTest('T25 validateOAuthRedirectUri: localhost returns LOCALHOST code with hint', async () => {
+        const harness = createHarness();
+        const r = harness.NotionOAuth.validateOAuthRedirectUri('http://localhost:3000/cb');
+        assert.strictEqual(r.valid, true);
+        assert.strictEqual(r.code, 'LOCALHOST');
+        assert.ok(r.message.includes('扩展'));
+    });
+
+    await runTest('T26 getConfig: strips invisible chars from stored clientId (defense in depth)', async () => {
+        const harness = createHarness();
+        harness.store['ldb_notion_oauth_client_id'] = '\u200B' + VALID_CLIENT_ID + '\uFEFF';
+        assert.strictEqual(harness.NotionOAuth.getConfig().clientId, VALID_CLIENT_ID);
+    });
+
+    await runTest('T27 validateOAuthClientId: strips bidi marks and soft hyphen', async () => {
+        const harness = createHarness();
+        const wrapped = '\u200E' + VALID_CLIENT_ID + '\u00AD';
+        const r = harness.NotionOAuth.validateOAuthClientId(wrapped);
+        assert.strictEqual(r.valid, true);
+        assert.strictEqual(r.value, VALID_CLIENT_ID);
+    });
+
+    await runTest('T28 handleRedirectCallback: state mismatch rejects and clears pending', async () => {
+        const harness = createHarness();
+        await unlockCredentialVault(harness);
+        harness.NotionOAuth.setPendingState({ state: 'right_state', redirectUri: 'https://www.notion.so/', createdAt: Date.now() });
+        harness.setLocation('https://www.notion.so/?code=abc123&state=wrong_state');
+        await harness.NotionOAuth.handleRedirectCallback();
+        // state 校验失败 -> catch -> finally 清 pending(CSRF 防线)
+        assert.strictEqual(harness.NotionOAuth.getPendingState(), null);
+    });
+
+console.log('\nAll NotionOAuth tests passed successfully!');
 })();

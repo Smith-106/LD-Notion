@@ -257,7 +257,7 @@ const GenericUI = {
                             <button class="gclip-btn gclip-btn-secondary" id="gclip-vault-lock" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">锁定</button>
                         </div>
                         <div id="gclip-vault-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);"></div>
-                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">公开 OAuth 适合个人自建集成；敏感凭证会保存在本地加密保险箱中。</div>
+                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">公开 OAuth 适合个人自建集成；需在集成后台注册 Redirect URI（含末尾斜杠），且集成通过 Notion 审核后授权链接才生效。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID。敏感凭证会保存在本地加密保险箱中。</div>
                     </div>
                     <div class="gclip-field">
                         <label for="gclip-export-type">导出目标类型</label>
