@@ -99,7 +99,9 @@ flowchart TB
 | API 域模块 | `src/api/`（核心 696 LOC + constants/DOMToNotion/obsidian/notion-upload） |
 | URL 安全原语 | `src/security/UrlValidator.js`（`validateAiBaseUrl`/`validateObsidianUrl`/`validatePageExternalUrl`） |
 | 多源适配器注册表 | `src/adapter/`（`AdapterRegistry` + 各 `*Adapter`，bridge 经 lazy accessor 注入） |
-| 自动化测试 | `tests/`（29 文件 556 用例） |
+| 多端同步（feature flag 控制,默认 off） | `src/sync/`（`SyncConfig`/`SyncEngine`/`SyncLedger`/`SyncPayload`/`SyncCrypto`/`SyncSerializer`/`SyncFragmenter`/`SyncRateLimiter`/`constants`，经 `CONFIG.MULTI_DEVICE_SYNC_ENABLED` 条件 require） |
+| 同步锁 | `src/sync-lock.js` |
+| 自动化测试 | `tests/`（33 文件 673 用例） |
 | UI 手工回归 | `docs/ui-regression-checklist.md` |
 
 ## 设计取舍

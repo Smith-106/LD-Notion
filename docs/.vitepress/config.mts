@@ -71,6 +71,7 @@ export default defineConfig({
           { text: 'Audit Events', link: '/reference/audit-events' },
           { text: 'Deployment', link: '/reference/deployment' },
           { text: '安全与权限', link: '/architecture/security' },
+          { text: '关键流程图', link: '/architecture/flows' },
           { text: '常见问题', link: '/faq' }
         ]
       },
