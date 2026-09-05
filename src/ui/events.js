@@ -781,11 +781,15 @@ const UIEvents = {
                     const item = reexportBtn.closest(".ldb-bookmark-item");
                     const bookmarkKey = String(item?.dataset.topicId || "");
                     if (bookmarkKey) {
+                        const isGitHubKey = bookmarkKey.startsWith("gh:");
                         // Odyssey Review F2(flash+hy3): 恢复破坏性覆盖前的确认弹窗
                         // (随坏内联 onclick 移除而丢失;旧内联因 ConfirmationDialog 非全局本就失效)
+                        // v3.14.4: GitHub 项同供重新导出(对账误标恢复入口)
                         ConfirmationDialog.show({
                             title: "确认重新导出",
-                            message: "重新导出将移除该帖子的导出记录并重新加入待导出列表，可能覆盖现有 Notion 页面，是否继续？",
+                            message: isGitHubKey
+                                ? "重新导出将移除该项（仓库/Gist）的导出记录并重新加入待导出列表，可能覆盖现有 Notion 页面或 Obsidian 笔记，是否继续？"
+                                : "重新导出将移除该帖子的导出记录并重新加入待导出列表，可能覆盖现有 Notion 页面，是否继续？",
                             confirmText: "重新导出",
                             onConfirm: () => {
                                 UI.requeueLinuxDoBookmark(bookmarkKey);

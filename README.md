@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.3`
+- 当前仓库源码版本：`v3.14.4`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -373,7 +373,7 @@ A: 请检查：
   5. 如涉及扩展交付：`node scripts/build-extension.js`
   6. 最后按 `docs/ui-regression-checklist.md` 做 Linux.do / Notion / 通用网页 / `chrome-extension-full` 手工 smoke
 - 一键交付验证：`npm run verify:delivery`（包含 baseline、`bounded_hosts` smoke、bridge runtime smoke 与默认扩展构建）
-- `npm test`：33 个测试文件、679 个用例，覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、AI Schema/Trace/Handlers、API 模块、RSS/Atom 解析、GitHub/书签/通用导出、UI 基线等模块
+- `npm test`：34 个测试文件、690 个用例，覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、AI Schema/Trace/Handlers、API 模块、RSS/Atom 解析、GitHub/书签/通用导出、UI 基线等模块
 - Node 测试会直接读取并执行当前 `LinuxDo-Bookmarks-to-Notion.user.js` 的核心代码，并复用 `scripts/build-extension.js` 的提取/构建 seam，而不是维护一份单独的测试副本
 - 当前自动化验证重点覆盖：Utils 辅助函数、OAuth 回调与 refresh fallback、`TargetState`、`quickParseIntent` 正/反例、`assistant_result v1` 输出契约，以及 `scripts/build-extension.js` 的锚点、builder seam、manifest profile、bridge runtime 边界与构建冒烟
 - 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）
@@ -385,6 +385,15 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.4
+
+修复 v3.14.3 三模型共识审查发现的对账/同步缺陷：
+- **对账 LinuxDo 死代码** LinuxDo 原始收藏对象无 `url` 字段（仅含带 slug 的 `bookmarkable_url`），旧实现读 `bookmark.url` 恒空 → 对账永不命中；改按 `topic_id` 构造规范 URL（与导出写入"链接"属性同法）匹配，数据源改双源合并快照（LinuxDo+GitHub 一次覆盖）
+- **多端同步 90 天后必然失败** 本地导出账本永久保留后，同步层 90 天 ts 校验对任一过期条目整包拒绝；同步投影改为只投递新鲜条目（本地不受影响），单源行 payload 超 2000 字符按时间降序截断并记审计
+- **写回 O(N²) 消除** 对账回填与 GitHub→Obsidian 导出循环改为"循环内仅改内存缓存 + 循环末单次落盘"
+- **GitHub「重新导出」入口** 已导出的仓库/Gist 可一键移除记录重新入列（对账误标恢复路径）
+- **升级** 点「刷新工作区」即可对账（需先在对应页签加载过收藏列表）
 
 ### v3.14.3
 

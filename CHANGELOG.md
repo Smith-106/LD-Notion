@@ -1,5 +1,20 @@
 # 更新日志
 
+## [3.14.4] - 2026-09-05
+
+### 修复（v3.14.3 三模型共识审查发现：对账 LinuxDo 死代码 + 同步投影过期拒绝 + 写回 O(N²)）
+
+**根因**：v3.14.3 的对账回填对 LinuxDo 项实际无效——Discourse 原始 bookmark 对象无 `url` 字段（仅含带 slug 的 `bookmarkable_url`），旧实现读 `bookmark.url` 恒为空 → LinuxDo 对账永不命中，主报修场景（471 项待导出）未真正修复；另有两项审查发现：多端同步采用约 90 天后必然整包拒绝（本地账本永久保留后，validateRemote 的 90 天 ts 校验对任一过期条目即拒整包）；对账/导出循环内逐条写账本违反写侧 O(N²) 禁令。
+
+**修复**：
+- **对账 LinuxDo 死代码**：LinuxDo 项改按 `topic_id` 构造规范 URL（`https://linux.do/t/{topicId}`，与导出写入“链接”属性同法）参与匹配；数据源改 `getCombinedVisualBookmarks()` 覆盖 LinuxDo+GitHub 两源（旧版只查当前激活源）；回填后刷新列表徽标
+- **同步投影过期裁剪**（多端同步）：本地导出账本永久保留不变，同步投影只投递新鲜条目（ts ≥ now-90d），消除 validateRemote 整包拒绝回归；单源行 payload 超 2000 字符（Notion rich_text 上限）时按时间降序保留最新条目并记审计事件
+- **写回 O(N²) 消除**：对账回填与 GitHub→Obsidian 导出循环内仅 mutate 内存缓存，循环末单次 flush（LinuxDo 经 DedupStore beginBatch/endBatch，GitHub 经 flushExported/flushGistsExported）
+- **GitHub「重新导出」入口**：已导出的 GitHub 仓库/Gist 项现可一键移除导出记录重新入列（修复对账误标后无恢复路径，此前只能清空全部账本）
+- **治理文本同步**：AGENTS.md 与 coding-conventions 规范条目更新为「导出账本容量上限 / 去重账本时间 TTL」分类正模式（原 90 天 TTL 正模式正是本次根因的规范源头）
+
+**升级说明**：安装后重新点击「刷新工作区」即可对账（需先在对应页签加载过收藏列表；LinuxDo 项需 Notion 页面存在“链接”属性且在扫描页数范围内）。
+
 ## [3.14.3] - 2026-09-05
 
 ### 修复（导出账本 90 天 TTL 误删 · “已导出内容反复显示待导出”根因）
@@ -11,7 +26,12 @@
 - Obsidian 导出成功即写入已导出账本（LinuxDo 帖文 `markTopicExported`；GitHub 仓库/Gist `markExportedAndFlush`/`markGistExportedAndFlush`），与 Notion 导出路径对称
 - 工作区扫描后自动对账回填：Notion 页面“链接”属性与本地已加载项 URL 归一化精确匹配，命中即回写已导出账本（仅 strict 去重模式回填 LinuxDo，allow_duplicates 语义不被对账破坏）；扫描完成状态栏提示识别数量
 
-**升级说明**：安装后重新点击「刷新工作区」即可把 Notion 中已存在的内容与本地账本对齐，此前被 90 天窗口遗忘的导出记录恢复正常识别。
+**升级说明**：安装后重新点击「刷新工作区」即可把 Notion 中已存在的内容与本地账本对齐（需本地收藏列表已加载；LinuxDo 链接属性匹配依赖 v3.14.4 对账修复）。此前被 90 天窗口遗忘的导出记录，符合条件者（Notion 页面带“链接”属性且在扫描范围内）经对账恢复识别。
+
+[3.14.4]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.4
+[3.14.3]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.3
+[3.14.2]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.2
+[3.14.1]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.1
 
 ## [3.14.2] - 2026-09-05
 

@@ -2,7 +2,7 @@
 
 const { CONFIG, MSG } = require("../config");
 const { Utils } = require("../utils");
-const { Storage, SyncState } = require("../storage");
+const { Storage, SyncState, DedupStore } = require("../storage");
 const { NotionOAuth } = require("../auth");
 const { NotionAPI } = require("../api");
 const { ConfirmationDialog } = require("../security");
@@ -840,15 +840,28 @@ const WorkspaceInsight = {
     // 解决存量误判: 导出账本曾被 90 天 TTL 时间淘汰静默遗忘, Notion 已存在页面被 UI 判为“待导出”。
     // 护栏: 仅 strict 模式回填 LinuxDo 账本(allow_duplicates 语义是允许重复导出, 不得被对账破坏);
     // URL 非空且归一化精确相等才回写, 避免误标用户手工页面。
+    // v3.14.4 修复: ① LinuxDo 项 Discourse 原始 bookmark 对象无 url 字段(仅 bookmarkable_url 含 slug),
+    // 旧实现 bookmark?.url 恒 undefined → LinuxDo 对账永不命中(死代码); 改按 topic_id 构造规范 URL
+    // https://linux.do/t/{topicId}(与 LinuxDoAdapter.normalize 及导出写入“链接”属性同法, 无 slug)。
+    // ② 数据源改 getCombinedVisualBookmarks() 覆盖 LinuxDo+GitHub 两源(旧实现只查当前激活源)。
+    // ③ 回填后调 renderBookmarkList() 刷新行内徽标, 与状态提示一致。
+    // ④ 循环内仅 mutate 账本缓存, 循环末单次 flush(消除写侧 O(N²), 见 AGENTS.md 禁令)。
     reconcileExportedFromWorkspace: (records = []) => {
-        const bookmarks = UI().bookmarks || [];
+        const bookmarks = UI().getCombinedVisualBookmarks();
         if (!Array.isArray(bookmarks) || bookmarks.length === 0 || !Array.isArray(records) || records.length === 0) {
             return 0;
         }
-        // 本地已加载项 → 归一化 URL 索引
+        // 本地已加载项 → 归一化 URL 索引。
+        // GitHub 项用 raw.html_url(与导出写入同串); LinuxDo 项按 topic_id 构造无 slug 规范 URL。
         const urlToBookmark = new Map();
         bookmarks.forEach((bookmark) => {
-            const rawUrl = bookmark?.source === "github" ? bookmark?.raw?.html_url : bookmark?.url;
+            let rawUrl = "";
+            if (bookmark?.source === "github") {
+                rawUrl = bookmark?.raw?.html_url;
+            } else {
+                const topicId = String(bookmark?.topic_id || bookmark?.bookmarkable_id || "");
+                if (topicId) rawUrl = `https://linux.do/t/${topicId}`;
+            }
             const url = UI().normalizeWorkspaceInsightUrl(rawUrl || "");
             if (url && !urlToBookmark.has(url)) urlToBookmark.set(url, bookmark);
         });
@@ -856,6 +869,13 @@ const WorkspaceInsight = {
 
         const strictMode = Utils.isLinuxDoDedupStrict();
         let matched = 0;
+        let githubDirty = false;
+        let linuxdoDirty = false;
+        // LinuxDo 账本用 DedupStore batch 模式: 循环内 markSeen 仅 mutate 内存缓存,
+        // 循环末 endBatch 单次写回(消除逐条全账本序列化的写侧 O(N²), 与 SyncCoordinator 同模式)
+        if (strictMode) {
+            try { DedupStore.beginBatch("linuxdo"); } catch { /* batch 不可用时降级直写 */ }
+        }
         records.forEach((record) => {
             const recordUrl = UI().normalizeWorkspaceInsightUrl(record?.sourceUrl || "");
             if (!recordUrl) return;
@@ -867,23 +887,34 @@ const WorkspaceInsight = {
                 if (!itemKey) return;
                 if (bookmark.sourceType === "gists") {
                     if (GitHubAPI.isGistExported(itemKey)) return;
-                    GitHubAPI.markGistExportedAndFlush(itemKey);
+                    GitHubAPI.markGistExported(itemKey);
                 } else {
                     if (GitHubAPI.isExported(itemKey)) return;
-                    GitHubAPI.markExportedAndFlush(itemKey);
+                    GitHubAPI.markExported(itemKey);
                 }
+                githubDirty = true;
                 matched++;
             } else if (strictMode) {
                 const topicId = String(bookmark?.topic_id || bookmark?.bookmarkable_id || "");
                 if (!topicId) return;
                 if (Storage.isTopicExported(topicId)) return;
                 Storage.markTopicExported(topicId);
+                linuxdoDirty = true;
                 matched++;
             }
         });
+        // 循环末单次持久化(与 GitHubExporter/批量导出同模式): 避免逐条 flush 的写侧 O(N²)
+        if (githubDirty) {
+            GitHubAPI.flushExported();
+            GitHubAPI.flushGistsExported();
+        }
+        if (linuxdoDirty) {
+            try { DedupStore.endBatch("linuxdo"); } catch { /* batch 未开启时 markSeen 已直写, 无需 flush */ }
+        }
         if (matched > 0) {
             UI().recomputeExportStats();
             UI().updateSelectCount();
+            UI().renderBookmarkList();
         }
         return matched;
     },

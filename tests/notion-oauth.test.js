@@ -3705,11 +3705,11 @@ function createWorkspaceVisualizationFixture(harness) {
             { message: '已移除该帖子的导出记录，请重新点击导出。', type: 'success' }
         );
 
-        assert.strictEqual(harness.UI.requeueLinuxDoBookmark('gh:repos:smith/repo-a'), false);
+        assert.strictEqual(harness.UI.requeueLinuxDoBookmark('gh:nonexistent/repo'), false);
         assert.strictEqual(renderCalls, 1);
     });
 
-    await runTest('UI.buildBookmarkItemHtml: shows re-export action only for exported Linux.do bookmarks', async () => {
+    await runTest('UI.buildBookmarkItemHtml: shows re-export action for exported Linux.do and GitHub bookmarks', async () => {
         const harness = createHarness();
 
         harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS] = JSON.stringify({
@@ -3719,6 +3719,7 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.GitHubAPI.isExported = () => true;
 
         const linuxdoHtml = harness.UI.buildBookmarkItemHtml({ topic_id: 101, title: 'Post A' }, false);
+        // v3.14.4: GitHub 项已导出同样提供重新导出入口(对账误标恢复路径, F-5)
         const githubHtml = harness.UI.buildBookmarkItemHtml({
             source: 'github',
             sourceType: 'repos',
@@ -3729,7 +3730,11 @@ function createWorkspaceVisualizationFixture(harness) {
 
         assert.ok(linuxdoHtml.includes('data-bookmark-action="reexport"'));
         assert.ok(linuxdoHtml.includes('重新导出'));
-        assert.ok(!githubHtml.includes('data-bookmark-action="reexport"'));
+        assert.ok(githubHtml.includes('data-bookmark-action="reexport"'));
+        assert.ok(githubHtml.includes('重新导出'));
+        // 未导出项不显示重新导出按钮
+        const unexportedHtml = harness.UI.buildBookmarkItemHtml({ topic_id: 202, title: 'Post B' }, false);
+        assert.ok(!unexportedHtml.includes('data-bookmark-action="reexport"'));
     });
 
     await runTest('UI.getSelectedBookmarks: returns only selected items from current loaded bookmarks', async () => {

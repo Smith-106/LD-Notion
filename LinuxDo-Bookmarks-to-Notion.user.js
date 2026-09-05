@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.3
+// @version      3.14.4
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -14004,6 +14004,23 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         isGistExported: (gistId) => {
           return !!GitHubAPI2.getExportedGists()[gistId];
         },
+        // v3.14.4: 键级撤销已导出记录(与 Storage.unmarkTopicExported 对称), 供“重新导出”入口
+        // 修复对账误标后 GitHub 项无恢复路径的问题(此前只能清空全部账本)。
+        // 返回是否真正移除; 单次调用内 flush(与 markExportedAndFlush 对称)。
+        unmarkExported: (repoFullName) => {
+          const exported = GitHubAPI2.getExported();
+          if (!Object.prototype.hasOwnProperty.call(exported, repoFullName)) return false;
+          delete exported[repoFullName];
+          GitHubAPI2.flushExported();
+          return true;
+        },
+        unmarkGistExported: (gistId) => {
+          const exported = GitHubAPI2.getExportedGists();
+          if (!Object.prototype.hasOwnProperty.call(exported, gistId)) return false;
+          delete exported[gistId];
+          GitHubAPI2.flushGistsExported();
+          return true;
+        },
         // 获取启用的导入类型
         getImportTypes: () => {
           try {
@@ -19575,37 +19592,46 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         const success = [];
         const failed = [];
         const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-        for (let i = 0; i < selectedItems.length; i++) {
-          if (control.isCancelled) break;
-          while (control.isPaused) {
-            await Utils2.sleep(200);
+        let githubDirty = false;
+        try {
+          for (let i = 0; i < selectedItems.length; i++) {
             if (control.isCancelled) break;
-          }
-          if (control.isCancelled) break;
-          const item = selectedItems[i];
-          onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
-          try {
-            const note = await buildGitHubObsidianMarkdown(item, settings);
-            const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
-            if (!noteResult.ok) throw new Error(noteResult.error);
-            if (item.sourceType === "gists") {
-              GitHubAPI2.markGistExportedAndFlush(item.itemKey);
-            } else {
-              GitHubAPI2.markExportedAndFlush(item.itemKey);
+            while (control.isPaused) {
+              await Utils2.sleep(200);
+              if (control.isCancelled) break;
             }
-            success.push({
-              title: note.title,
-              url: note.url
-            });
-          } catch (error) {
-            console.warn(`[GitHubObsidianService] Export failed: ${item.itemKey}`, error);
-            failed.push({
-              title: item.title || item.itemKey || "GitHub",
-              error: error.message
-            });
+            if (control.isCancelled) break;
+            const item = selectedItems[i];
+            onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
+            try {
+              const note = await buildGitHubObsidianMarkdown(item, settings);
+              const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
+              if (!noteResult.ok) throw new Error(noteResult.error);
+              if (item.sourceType === "gists") {
+                GitHubAPI2.markGistExported(item.itemKey);
+              } else {
+                GitHubAPI2.markExported(item.itemKey);
+              }
+              githubDirty = true;
+              success.push({
+                title: note.title,
+                url: note.url
+              });
+            } catch (error) {
+              console.warn(`[GitHubObsidianService] Export failed: ${item.itemKey}`, error);
+              failed.push({
+                title: item.title || item.itemKey || "GitHub",
+                error: error.message
+              });
+            }
+            if (i < selectedItems.length - 1 && delay > 0) {
+              await Utils2.sleep(delay);
+            }
           }
-          if (i < selectedItems.length - 1 && delay > 0) {
-            await Utils2.sleep(delay);
+        } finally {
+          if (githubDirty) {
+            GitHubAPI2.flushExported();
+            GitHubAPI2.flushGistsExported();
           }
         }
         return {
@@ -20365,7 +20391,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const isExported = UI2().isBookmarkKeyExported(bookmarkKey);
           const isSelected = (_a = UI2().selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
           const sourceTag = githubMode ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${Utils2.escapeHtml((bookmark.sourceType || "stars").toUpperCase())}</span>` : "";
-          const reexportAction = !githubMode && isExported ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868">\u91CD\u65B0\u5BFC\u51FA</button>` : ``;
+          const reexportAction = isExported ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="\u79FB\u9664\u8BE5\u9879\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868">\u91CD\u65B0\u5BFC\u51FA</button>` : ``;
           const escapedBookmarkKey = Utils2.escapeHtml(bookmarkKey);
           return `
             <div class="ldb-bookmark-item" data-topic-id="${escapedBookmarkKey}">
@@ -20440,7 +20466,28 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           UI2().updateSelectCount();
         },
         requeueLinuxDoBookmark: (bookmarkKey) => {
-          if (!bookmarkKey || bookmarkKey.startsWith("gh:")) return false;
+          if (!bookmarkKey) return false;
+          if (bookmarkKey.startsWith("gh:")) {
+            const parts = bookmarkKey.split(":");
+            const sourceType = parts[1] || "";
+            const itemKey = parts.slice(2).join(":");
+            if (!itemKey) return false;
+            let removed2 = false;
+            if (sourceType === "gists") {
+              removed2 = GitHubAPI2.unmarkGistExported(itemKey);
+            } else {
+              removed2 = GitHubAPI2.unmarkExported(itemKey);
+            }
+            if (!removed2) {
+              UI2().showStatus("\u8BE5\u9879\u5F53\u524D\u4E0D\u5728\u5DF2\u5BFC\u51FA\u8BB0\u5F55\u4E2D\u3002", "info");
+              return false;
+            }
+            UI2().selectedBookmarks.add(bookmarkKey);
+            UI2().recomputeExportStats();
+            UI2().renderBookmarkList();
+            UI2().showStatus("\u5DF2\u79FB\u9664\u8BE5\u9879\u7684\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u8BF7\u91CD\u65B0\u52FE\u9009\u5E76\u5BFC\u51FA\u3002", "success");
+            return true;
+          }
           if (!Utils2.isLinuxDoDedupStrict()) {
             UI2().showStatus("\u5F53\u524D\u4E3A\u5141\u8BB8\u91CD\u590D\u6A21\u5F0F\uFF0C\u65E0\u9700\u91CD\u65B0\u5BFC\u51FA\uFF1B\u76F4\u63A5\u52FE\u9009\u5E76\u5BFC\u51FA\u5373\u53EF\u3002", "info");
             return false;
@@ -20480,7 +20527,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       "use strict";
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
+      var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
       var { NotionOAuth: NotionOAuth2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { ConfirmationDialog: ConfirmationDialog3 } = require_security();
@@ -21224,21 +21271,41 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         // 解决存量误判: 导出账本曾被 90 天 TTL 时间淘汰静默遗忘, Notion 已存在页面被 UI 判为“待导出”。
         // 护栏: 仅 strict 模式回填 LinuxDo 账本(allow_duplicates 语义是允许重复导出, 不得被对账破坏);
         // URL 非空且归一化精确相等才回写, 避免误标用户手工页面。
+        // v3.14.4 修复: ① LinuxDo 项 Discourse 原始 bookmark 对象无 url 字段(仅 bookmarkable_url 含 slug),
+        // 旧实现 bookmark?.url 恒 undefined → LinuxDo 对账永不命中(死代码); 改按 topic_id 构造规范 URL
+        // https://linux.do/t/{topicId}(与 LinuxDoAdapter.normalize 及导出写入“链接”属性同法, 无 slug)。
+        // ② 数据源改 getCombinedVisualBookmarks() 覆盖 LinuxDo+GitHub 两源(旧实现只查当前激活源)。
+        // ③ 回填后调 renderBookmarkList() 刷新行内徽标, 与状态提示一致。
+        // ④ 循环内仅 mutate 账本缓存, 循环末单次 flush(消除写侧 O(N²), 见 AGENTS.md 禁令)。
         reconcileExportedFromWorkspace: (records = []) => {
-          const bookmarks = UI2().bookmarks || [];
+          const bookmarks = UI2().getCombinedVisualBookmarks();
           if (!Array.isArray(bookmarks) || bookmarks.length === 0 || !Array.isArray(records) || records.length === 0) {
             return 0;
           }
           const urlToBookmark = /* @__PURE__ */ new Map();
           bookmarks.forEach((bookmark) => {
             var _a;
-            const rawUrl = (bookmark == null ? void 0 : bookmark.source) === "github" ? (_a = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _a.html_url : bookmark == null ? void 0 : bookmark.url;
+            let rawUrl = "";
+            if ((bookmark == null ? void 0 : bookmark.source) === "github") {
+              rawUrl = (_a = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _a.html_url;
+            } else {
+              const topicId = String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
+              if (topicId) rawUrl = `https://linux.do/t/${topicId}`;
+            }
             const url = UI2().normalizeWorkspaceInsightUrl(rawUrl || "");
             if (url && !urlToBookmark.has(url)) urlToBookmark.set(url, bookmark);
           });
           if (urlToBookmark.size === 0) return 0;
           const strictMode = Utils2.isLinuxDoDedupStrict();
           let matched = 0;
+          let githubDirty = false;
+          let linuxdoDirty = false;
+          if (strictMode) {
+            try {
+              DedupStore.beginBatch("linuxdo");
+            } catch {
+            }
+          }
           records.forEach((record) => {
             const recordUrl = UI2().normalizeWorkspaceInsightUrl((record == null ? void 0 : record.sourceUrl) || "");
             if (!recordUrl) return;
@@ -21249,23 +21316,36 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               if (!itemKey) return;
               if (bookmark.sourceType === "gists") {
                 if (GitHubAPI2.isGistExported(itemKey)) return;
-                GitHubAPI2.markGistExportedAndFlush(itemKey);
+                GitHubAPI2.markGistExported(itemKey);
               } else {
                 if (GitHubAPI2.isExported(itemKey)) return;
-                GitHubAPI2.markExportedAndFlush(itemKey);
+                GitHubAPI2.markExported(itemKey);
               }
+              githubDirty = true;
               matched++;
             } else if (strictMode) {
               const topicId = String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
               if (!topicId) return;
               if (Storage2.isTopicExported(topicId)) return;
               Storage2.markTopicExported(topicId);
+              linuxdoDirty = true;
               matched++;
             }
           });
+          if (githubDirty) {
+            GitHubAPI2.flushExported();
+            GitHubAPI2.flushGistsExported();
+          }
+          if (linuxdoDirty) {
+            try {
+              DedupStore.endBatch("linuxdo");
+            } catch {
+            }
+          }
           if (matched > 0) {
             UI2().recomputeExportStats();
             UI2().updateSelectCount();
+            UI2().renderBookmarkList();
           }
           return matched;
         },
@@ -24582,9 +24662,10 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 const item2 = reexportBtn.closest(".ldb-bookmark-item");
                 const bookmarkKey = String((item2 == null ? void 0 : item2.dataset.topicId) || "");
                 if (bookmarkKey) {
+                  const isGitHubKey = bookmarkKey.startsWith("gh:");
                   ConfirmationDialog3.show({
                     title: "\u786E\u8BA4\u91CD\u65B0\u5BFC\u51FA",
-                    message: "\u91CD\u65B0\u5BFC\u51FA\u5C06\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868\uFF0C\u53EF\u80FD\u8986\u76D6\u73B0\u6709 Notion \u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
+                    message: isGitHubKey ? "\u91CD\u65B0\u5BFC\u51FA\u5C06\u79FB\u9664\u8BE5\u9879\uFF08\u4ED3\u5E93/Gist\uFF09\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868\uFF0C\u53EF\u80FD\u8986\u76D6\u73B0\u6709 Notion \u9875\u9762\u6216 Obsidian \u7B14\u8BB0\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F" : "\u91CD\u65B0\u5BFC\u51FA\u5C06\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868\uFF0C\u53EF\u80FD\u8986\u76D6\u73B0\u6709 Notion \u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
                     confirmText: "\u91CD\u65B0\u5BFC\u51FA",
                     onConfirm: () => {
                       UI2.requeueLinuxDoBookmark(bookmarkKey);
@@ -29700,6 +29781,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
             watermarks: {},
             settings: {}
           };
+          const tsFloor = now - SyncConstants.TS_PAST_TTL_MS;
           for (const [src, set] of Object.entries((raw == null ? void 0 : raw.dedupSets) || {})) {
             const meta = WHITELIST.dedupSources[src];
             if (!meta || !set || typeof set !== "object") continue;
@@ -29710,6 +29792,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
               if (k.length > SyncConstants.MAX_DEDUP_KEY_LENGTH) continue;
               const num = Number(ts);
               if (!Number.isFinite(num) || num <= 0) continue;
+              if (!meta.urlKeyed && num < tsFloor) continue;
               if (++count > SyncConstants.MAX_DEDUP_ENTRIES_PER_SOURCE) break;
               const key = meta.urlKeyed && hashUrls && !k.startsWith("h:") ? `h:${await SyncCrypto.sha256Hex(k)}` : k;
               clean[key] = num;
@@ -30359,7 +30442,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
                   updatedAt: payload.updatedAt,
                   deviceId: payload.deviceId,
                   payload: {
-                    dedup: { [src]: set },
+                    dedup: { [src]: SyncEngine._truncateSetForRow(src, set) },
                     watermarks: payload.watermarks[src] ? { [src]: payload.watermarks[src] } : void 0
                   }
                 });
@@ -30423,6 +30506,39 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           } catch {
             return "";
           }
+        },
+        /**
+         * v3.14.4: 单源 dedup set 截断以适配 SyncLedger 单行 2000 字符硬限。
+         * 按 ts 降序保留最新条目; 触发截断时记审计事件。返回新对象(不 mutate 输入)。
+         */
+        _truncateSetForRow(src, set, budgetChars = 1900) {
+          const probe = JSON.stringify(set || {});
+          if (probe === void 0 || probe.length <= budgetChars) return set;
+          const entries = Object.entries(set || {});
+          entries.sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0));
+          const picked = {};
+          let size = 2;
+          let kept = 0;
+          for (const [k, ts] of entries) {
+            const inc = (kept > 0 ? 1 : 0) + JSON.stringify(k).length + 1 + String(Number(ts)).length;
+            if (size + inc > budgetChars) break;
+            picked[k] = Number(ts);
+            size += inc;
+            kept++;
+          }
+          try {
+            const { OperationLog: OperationLog2 } = SyncEngine._getDeps();
+            OperationLog2.add({
+              audit_event: "sync.row.truncated",
+              actor: "system",
+              source: "sync-engine",
+              operationName: "sync.state.push",
+              status: "success",
+              context: { source: src, total: entries.length, kept, reason: "row payload 2000 char hard limit" }
+            }, { force: true });
+          } catch {
+          }
+          return picked;
         },
         /**
          * pull: 拉远端行 → 校验 → merge → applyRemote(仅胜出项)

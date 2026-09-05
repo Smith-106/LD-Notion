@@ -211,6 +211,10 @@ const SyncSerializer = {
         };
 
         // ① dedup: 白名单源过滤 + URL 键哈希化(共享键空间收敛, MED-3)
+        // v3.14.4 修复: id 键源导出账本本地永久保留(容量上限淘汰), 但同步投影只发新鲜条目
+        // (ts ≥ now - TS_PAST_TTL_MS) —— validateRemote 对过期 ts 是整包拒绝语义(H-2),
+        // 不过滤会让采用约 90 天后同步全量失败。本地账本不受影响(仅投影裁剪)。
+        const tsFloor = now - SyncConstants.TS_PAST_TTL_MS;
         for (const [src, set] of Object.entries(raw?.dedupSets || {})) {
             const meta = WHITELIST.dedupSources[src];
             if (!meta || !set || typeof set !== "object") continue;
@@ -221,6 +225,8 @@ const SyncSerializer = {
                 if (k.length > SyncConstants.MAX_DEDUP_KEY_LENGTH) continue;
                 const num = Number(ts);
                 if (!Number.isFinite(num) || num <= 0) continue;
+                // id 键源(导出账本)同步投影过期裁剪: 本地永久保留 ≠ 远端永久投递
+                if (!meta.urlKeyed && num < tsFloor) continue;
                 if (++count > SyncConstants.MAX_DEDUP_ENTRIES_PER_SOURCE) break;
                 // 本地账本含原文键与 h: 哈希键双条目(DedupStore 双写); 已哈希键跳过再哈希
                 const key = meta.urlKeyed && hashUrls && !k.startsWith("h:") ? `h:${await SyncCrypto.sha256Hex(k)}` : k;

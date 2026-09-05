@@ -233,6 +233,25 @@ const GitHubAPI = {
         return !!GitHubAPI.getExportedGists()[gistId];
     },
 
+    // v3.14.4: 键级撤销已导出记录(与 Storage.unmarkTopicExported 对称), 供“重新导出”入口
+    // 修复对账误标后 GitHub 项无恢复路径的问题(此前只能清空全部账本)。
+    // 返回是否真正移除; 单次调用内 flush(与 markExportedAndFlush 对称)。
+    unmarkExported: (repoFullName) => {
+        const exported = GitHubAPI.getExported();
+        if (!Object.prototype.hasOwnProperty.call(exported, repoFullName)) return false;
+        delete exported[repoFullName];
+        GitHubAPI.flushExported();
+        return true;
+    },
+
+    unmarkGistExported: (gistId) => {
+        const exported = GitHubAPI.getExportedGists();
+        if (!Object.prototype.hasOwnProperty.call(exported, gistId)) return false;
+        delete exported[gistId];
+        GitHubAPI.flushGistsExported();
+        return true;
+    },
+
     // 获取启用的导入类型
     getImportTypes: () => {
         try {

@@ -19,7 +19,7 @@ npm run verify:baseline   # 测试 + 语法检查 + UI 校验(改动前的基线
 
 ## 项目速览
 
-LD-Notion Hub v3.7.8 是 **Tampermonkey 用户脚本 + Chrome 扩展**,统一连接 Linux.do、GitHub、浏览器书签、RSS、知乎 → Notion。**纯前端,无后端/服务端,无外部数据库。**
+LD-Notion Hub v3.14.4 是 **Tampermonkey 用户脚本 + Chrome 扩展**,统一连接 Linux.do、GitHub、浏览器书签、RSS、知乎 → Notion。**纯前端,无后端/服务端,无外部数据库。**
 
 | 维度 | 约定 |
 | --- | --- |
@@ -90,7 +90,7 @@ LD-Notion Hub v3.7.8 是 **Tampermonkey 用户脚本 + Chrome 扩展**,统一连
 - **fetch 超时+退避重试**:`AbortController` + `setTimeout(15000)` + 退避 `1000*2^attempt`;401/403/400 短路不重试;定时器前置 `clearTimeout`/`clearInterval` 防泄漏。
 - **JSON 映射缓存消除 O(N²)**:禁止循环内逐条 `Storage.set + JSON.stringify`;用顶层缓存引用 + 单次序列化(读写对称,写侧 `mark*` 仅 mutate + 末次 flush)。
 - **AI JSON 消费统一入口** `AISchema.parseAIJson`,禁止再内联三段式 `jsonMatch+JSON.parse+try-catch`。
-- **持久化存储键必须有 TTL 或容量上限**,禁止无界增长(GM 存储 FIFO rotate);导出/去重集合(`DedupStore`、`GITHUB_EXPORTED_REPOS`、`BOOKMARK_EXPORTED` 等)90 天 TTL 自动淘汰;日志/历史类数组用 `MAX_ENTRIES` 截断。
+- **持久化存储键必须有 TTL 或容量上限**,禁止无界增长(GM 存储 FIFO rotate)。淘汰策略按账本性质分类(v3.14.4):**导出事实账本**(不可再生,误删致 UI 误判"待导出"→重复导出)用**容量上限淘汰**——`DedupStore` id 键源(linuxdo/github-*)、`GITHUB_EXPORTED_REPOS`、`GITHUB_EXPORTED_GISTS`、`BOOKMARK_EXPORTED` 超 10000 条才淘汰最旧,**禁止对导出账本用时间 TTL**(v3.14.3 根因:90 天窗口静默遗忘导出事实);**去重事实账本**(可再生)用 90 天时间 TTL——`DedupStore` URL 键源(bookmark/rss/zhihu/generic);日志/历史类数组用 `MAX_ENTRIES` 截断。同步投影层另有独立约束:单源行 payload ≤2000 字符(SyncLedger 硬限,超限按 ts 降序截断),id 键源同步只投递新鲜条目(ts ≥ now-90d,本地永久保留不影响)。
 - **缓存指纹字段须单向哈希**(如 `apiKeyHash`),禁止明文 key 子串(`slice(-8)`)。
 - **变量命名禁与遍历索引冲突**(返回对象的变量禁命名 `index`/`idx`,应命名 `pageIndex`)。
 

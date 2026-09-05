@@ -112,6 +112,9 @@ const SyncEngine = {
                 // 行模型: 每源一行(dedup+watermark 合并), settings 一行
                 // payload 保持完整嵌套结构 { dedup: {src: {key:ts}}, watermarks: {src: …}, settings: {…} },
                 // 保证 pull 侧 merge 到同一键空间(diffWinners 按 sourceType 查本地账本)。
+                // v3.14.4 修复: SyncLedger 单行 payload 硬限 2000 字符(Notion rich_text 上限, v1 不做多行分片),
+                // 单源条目过多时按 ts 降序保留最新条目截断, 防止 push 抛错“行 payload 过大”;
+                // 截断仅影响同步介质投影, 本地账本完整保留(容量上限 10000 兜底)。
                 const rows = [];
                 for (const [src, set] of Object.entries(payload.dedup)) {
                     rows.push({
@@ -121,7 +124,7 @@ const SyncEngine = {
                         updatedAt: payload.updatedAt,
                         deviceId: payload.deviceId,
                         payload: {
-                            dedup: { [src]: set },
+                            dedup: { [src]: SyncEngine._truncateSetForRow(src, set) },
                             watermarks: payload.watermarks[src] ? { [src]: payload.watermarks[src] } : undefined,
                         },
                     });
@@ -189,6 +192,36 @@ const SyncEngine = {
         } catch {
             return "";
         }
+    },
+
+    /**
+     * v3.14.4: 单源 dedup set 截断以适配 SyncLedger 单行 2000 字符硬限。
+     * 按 ts 降序保留最新条目; 触发截断时记审计事件。返回新对象(不 mutate 输入)。
+     */
+    _truncateSetForRow(src, set, budgetChars = 1900) {
+        const probe = JSON.stringify(set || {});
+        if (probe === undefined || probe.length <= budgetChars) return set;
+        const entries = Object.entries(set || {});
+        entries.sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0));
+        const picked = {};
+        let size = 2; // "{}"
+        let kept = 0;
+        for (const [k, ts] of entries) {
+            const inc = (kept > 0 ? 1 : 0) + JSON.stringify(k).length + 1 + String(Number(ts)).length;
+            if (size + inc > budgetChars) break;
+            picked[k] = Number(ts);
+            size += inc;
+            kept++;
+        }
+        try {
+            const { OperationLog } = SyncEngine._getDeps();
+            OperationLog.add({
+                audit_event: "sync.row.truncated", actor: "system", source: "sync-engine",
+                operationName: "sync.state.push", status: "success",
+                context: { source: src, total: entries.length, kept, reason: "row payload 2000 char hard limit" },
+            }, { force: true });
+        } catch { /* 审计不可用不阻断 push */ }
+        return picked;
     },
 
     /**

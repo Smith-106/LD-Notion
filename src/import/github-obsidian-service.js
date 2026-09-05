@@ -186,7 +186,11 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
     const success = [];
     const failed = [];
     const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
+    // v3.14.4: 循环内仅 mutate 内存缓存, 循环末单次 flush —— 消除逐条全账本序列化的
+    // 写侧 O(N²)(AGENTS.md 禁令; 与 GitHubExporter._exportItems PERF-003 模式同构)
+    let githubDirty = false;
 
+    try {
     for (let i = 0; i < selectedItems.length; i++) {
         if (control.isCancelled) break;
         while (control.isPaused) {
@@ -205,10 +209,11 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
             // v3.14.3 修复: Obsidian 导出成功同样写入已导出账本(与 Notion 分支同构),
             // 否则 UI 恒显示“待导出”致重复导出。
             if (item.sourceType === "gists") {
-                GitHubAPI.markGistExportedAndFlush(item.itemKey);
+                GitHubAPI.markGistExported(item.itemKey);
             } else {
-                GitHubAPI.markExportedAndFlush(item.itemKey);
+                GitHubAPI.markExported(item.itemKey);
             }
+            githubDirty = true;
             success.push({
                 title: note.title,
                 url: note.url,
@@ -223,6 +228,13 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
 
         if (i < selectedItems.length - 1 && delay > 0) {
             await Utils.sleep(delay);
+        }
+    }
+    } finally {
+        // 循环末单次持久化(成功/失败/取消均 flush, 避免中断丢账本)
+        if (githubDirty) {
+            GitHubAPI.flushExported();
+            GitHubAPI.flushGistsExported();
         }
     }
 

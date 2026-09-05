@@ -166,8 +166,8 @@ const BookmarkList = {
         const sourceTag = githubMode
             ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${Utils.escapeHtml((bookmark.sourceType || "stars").toUpperCase())}</span>`
             : "";
-        const reexportAction = !githubMode && isExported
-            ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="移除该帖子的导出记录并重新加入待导出列表">重新导出</button>`
+        const reexportAction = isExported
+            ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="移除该项的导出记录并重新加入待导出列表">重新导出</button>`
             : ``;
                 
         // Render re-export action with confirmation dialog
@@ -256,7 +256,30 @@ const BookmarkList = {
     },
 
     requeueLinuxDoBookmark: (bookmarkKey) => {
-        if (!bookmarkKey || bookmarkKey.startsWith("gh:")) return false;
+        if (!bookmarkKey) return false;
+        // v3.14.4: GitHub 项(gh: 前缀 key)同样支持重新导出 —— 修复对账误标后无恢复入口的问题
+        // (共享账本下"已导出"= Notion 或 Obsidian 任一目标, 误标可通过此入口撤销)。
+        if (bookmarkKey.startsWith("gh:")) {
+            const parts = bookmarkKey.split(":");
+            const sourceType = parts[1] || "";
+            const itemKey = parts.slice(2).join(":");
+            if (!itemKey) return false;
+            let removed = false;
+            if (sourceType === "gists") {
+                removed = GitHubAPI.unmarkGistExported(itemKey);
+            } else {
+                removed = GitHubAPI.unmarkExported(itemKey);
+            }
+            if (!removed) {
+                UI().showStatus("该项当前不在已导出记录中。", "info");
+                return false;
+            }
+            UI().selectedBookmarks.add(bookmarkKey);
+            UI().recomputeExportStats();
+            UI().renderBookmarkList();
+            UI().showStatus("已移除该项的导出记录，请重新勾选并导出。", "success");
+            return true;
+        }
         if (!Utils.isLinuxDoDedupStrict()) {
             UI().showStatus("当前为允许重复模式，无需重新导出；直接勾选并导出即可。", "info");
             return false;
