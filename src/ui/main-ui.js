@@ -1651,7 +1651,7 @@ const UI = {
             databases.forEach(db => {
                 const value = `database:${db.id}`;
                 knownValues.add(value);
-                options += `<option value="${value}">📁 ${Utils.escapeHtml(db.title)}</option>`;
+                options += `<option value="${Utils.escapeHtml(value)}">📁 ${Utils.escapeHtml(db.title)}</option>`;
             });
             options += '</optgroup>';
         }
@@ -1663,7 +1663,7 @@ const UI = {
             workspacePages.forEach(page => {
                 const value = `page:${page.id}`;
                 knownValues.add(value);
-                options += `<option value="${value}">📄 ${Utils.escapeHtml(page.title)}</option>`;
+                options += `<option value="${Utils.escapeHtml(value)}">📄 ${Utils.escapeHtml(page.title)}</option>`;
             });
             options += '</optgroup>';
         }
@@ -1750,14 +1750,15 @@ const UI = {
             options += '<optgroup label="📁 指定数据库">';
             databases.forEach(db => {
                 knownIds.add(db.id);
-                options += `<option value="${db.id}">📁 ${Utils.escapeHtml(db.title)}</option>`;
+                options += `<option value="${Utils.escapeHtml(db.id)}">📁 ${Utils.escapeHtml(db.title)}</option>`;
             });
             options += '</optgroup>';
         }
 
         if (savedValue && savedValue !== "__all__" && !knownIds.has(savedValue)) {
             const displayId = savedValue.replace(/^page:/, "");
-            options += `<option value="${savedValue}">已配置 (ID: ${displayId.slice(0, 8)}...)</option>`;
+            // v3.14.7 audit: savedValue 为手输 ID 可含引号——value 属性须 escapeHtml 防属性逃逸
+            options += `<option value="${Utils.escapeHtml(savedValue)}">已配置 (ID: ${Utils.escapeHtml(displayId.slice(0, 8))}...)</option>`;
         }
 
         select.innerHTML = options;
@@ -2439,7 +2440,10 @@ const UI = {
     },
 
     exportGitHubSelected: async (selectedItems, settings, onProgress) => {
-        return require("../import/github-obsidian-service").exportGitHubSelectedToNotion(selectedItems, settings, onProgress);
+        return require("../import/github-obsidian-service").exportGitHubSelectedToNotion(selectedItems, settings, onProgress, {
+            get isCancelled() { return Exporter.isCancelled; },
+            get isPaused() { return Exporter.isPaused; },
+        });
     },
 
     // 重算导出统计（在列表变更后调用）

@@ -1,5 +1,14 @@
 # 更新日志
 
+## [3.14.8] - 2026-09-07
+
+### fix delivery leftover
+
+- verify STRICT + win32 + negative restore
+- ConfirmationDialog queue/close; generic save warning; GitHub Notion pause/cancel
+- docs: userscript no longer matches arbitrary pages; list @match; extension still generic
+
+
 ## [3.14.7] - 2026-09-06
 
 ### 修复（31 条 UI 审计发现全量修复 + 导出几分钟后 token invalid 全部失败根因修复）
@@ -67,6 +76,11 @@
 
 ## [3.14.3] - 2026-09-05
 
+### Fix (API Key invalid after update / vault retired / commit 049bf46)
+
+No v3.14.2 GitHub tag existed; this is the first tagged release containing the vault retirement (SENSITIVE_KEYS cleared, GM plaintext). See historical 3.14.2 excerpt below.
+
+
 ### 修复（导出账本 90 天 TTL 误删 · “已导出内容反复显示待导出”根因）
 
 **根因**：导出账本（LinuxDo 帖文 / GitHub 仓库与 Gist / 浏览器书签）在每次写回时按 90 天时间 TTL 全局淘汰，超过 90 天的已导出记录被静默遗忘；判定“是否已导出”只查本地账本、从不与 Notion 工作区页面核对 → 已导出的内容被 UI 重新判为“待导出”，列表反复显示（用户报告：Notion 已存在 837 页，本地仍显示 471 项待导出）。此外 Obsidian 导出路径（LinuxDo 帖文 / GitHub 仓库）成功写入后从不记录账本，导出的内容下次仍显示“待导出”。
@@ -80,10 +94,9 @@
 
 [3.14.4]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.4
 [3.14.3]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.3
-[3.14.2]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.2
 [3.14.1]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.1
 
-## [3.14.2] - 2026-09-05
+## [3.14.2] - 2026-09-05 (untagged orphan; see 3.14.3 for vault fix 049bf46)
 
 ### 修复（每次更新后 API Key 失效 · 保险箱会话锁定根因）
 

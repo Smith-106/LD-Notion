@@ -19,7 +19,7 @@ npm run verify:baseline   # 测试 + 语法检查 + UI 校验(改动前的基线
 
 ## 项目速览
 
-LD-Notion Hub v3.14.6 是 **Tampermonkey 用户脚本 + Chrome 扩展**,统一连接 Linux.do、GitHub、浏览器书签、RSS、知乎 → Notion。**纯前端,无后端/服务端,无外部数据库。**
+LD-Notion Hub v3.14.8 是 **Tampermonkey 用户脚本 + Chrome 扩展**,统一连接 Linux.do、GitHub、浏览器书签、RSS、知乎 → Notion。**纯前端,无后端/服务端,无外部数据库。**
 
 | 维度 | 约定 |
 | --- | --- |
@@ -51,12 +51,12 @@ LD-Notion Hub v3.14.6 是 **Tampermonkey 用户脚本 + Chrome 扩展**,统一�
 | `verify:baseline` | 测试 + 语法检查(`node --check`)+ UI 校验 |
 | `build` | `node build.js` 生成单文件 userscript |
 | `build:extension` | 构建 Chrome 扩展 |
-| `verify:build` | 构建 + 产物语法检查 + 构建标记校验 |
+| `verify:build` | scripts/verify-build.js: build + node --check + BUILD markers + sync prune (can FAIL) + root==dist |
 | `verify:extension:bounded` | bounded_hosts manifest 临时构建验证 |
 | `verify:bridge-extension` | 桥接扩展验证 |
 | `verify:extension:surfaces` | 扩展表面验证 |
 | `verify:equivalence` | 打包等价性校验(存储键字面量等) |
-| `verify:delivery` | **交付前 13 维度全链检查**(基线+构建+扩展+桥接+表面+等价) |
+| `verify:delivery` | scripts/verify-delivery.js: baseline, build, build:extension, then bounded/bridge/surfaces/equivalence |
 | `docs:dev` / `docs:build` / `docs:preview` | VitePress 文档开发/构建/预览 |
 
 ## src/ 模块结构
@@ -66,7 +66,7 @@ LD-Notion Hub v3.14.6 是 **Tampermonkey 用户脚本 + Chrome 扩展**,统一�
 | `adapter/` | 多源适配器抽象层:`SourceAdapter` 基类 + `AdapterRegistry` + LinuxDo/GitHub/Bookmark/RSS/Zhihu/Generic 各适配器,新知识源接入标准接口 |
 | `ai/` | AI 助手与 Agent:ReAct Agent Loop、`AgentTools`、`Handlers`、`BlockConverter`、`NameResolver`、`AISchema` 输出校验、`AgentTrace` 调用链追踪 |
 | `api/` | Notion/Obsidian API 传输层:`NotionTransport`、`NotionAPI`、`DOMToNotion`、`ObsidianAPI`、`SiteDetector`、`HTMLToMarkdown` |
-| `auth/` | 鉴权:`NotionOAuth` + manual token + `CredentialVault`(敏感键 GM 明文存储 + 审计脱敏,v3.14.2 起保险箱机制退役) + `TargetState` |
+| `auth/` | 鉴权:`NotionOAuth` + manual token + `CredentialVault`(敏感键 GM 明文存储 + 审计脱敏,v3.14.3 起保险箱机制退役(commit 049bf46; no v3.14.2 GitHub tag)) + `TargetState` |
 | `bridge/` | 浏览器书签/RSS 桥接:`BookmarkBridge`、`BookmarkExporter`、`BookmarkAutoImporter`、`RSSAutoImporter` |
 | `config/` | 全局配置常量:`CONFIG`、`MSG` 消息、文件类型映射、MIME |
 | `coordination/` | UI 命令分发协调器 `UICommandService`(从 extract 层迁出,解耦多向耦合) |
@@ -118,7 +118,7 @@ v3.7.8 schema 校验拦截:icon/cover URL 指向 `169.254.169.254`(SSRF)、`rela
 ### Auth
 
 - OAuth 推荐路径,manual token 高级兜底。
-- 敏感凭证(token/Client Secret/AI Key/GitHub/Obsidian token)存 GM 明文存储,审计日志由 `REDACT_IN_LOGS` 超集脱敏(v3.14.2 起保险箱退役:解锁态为页面内存态,每次加载即锁定,锁定态读空致"更新后失效")。
+- 敏感凭证(token/Client Secret/AI Key/GitHub/Obsidian token)存 GM 明文存储,审计日志由 `REDACT_IN_LOGS` 超集脱敏(v3.14.3 起保险箱退役:解锁态为页面内存态,每次加载即锁定,锁定态读空致"更新后失效")。
 - 鉴权失败须在 Guard 前阻止写入;审计日志不得含真实 token。
 
 ### Routing 优先级
@@ -133,7 +133,7 @@ v3.7.8 schema 校验拦截:icon/cover URL 指向 `169.254.169.254`(SSRF)、`rela
 
 - `UrlValidator` 白名单:AI base 限 `api.openai/anthropic/google` 或 HTTPS 非内网;Obsidian 仅 `127.0.0.1/localhost/::1`;页面外链 http(s) + 拒内网/169.254。
 - Extension background worker 强制 https + 默认端口 + hostname 精确匹配。
-- 权限域收窄(v3.7.0):`@match` 6 个显式站点;`@connect` 9 个域名白名单;`@include` 正则白名单 + `@exclude` 搜索引擎/邮箱/localhost。
+- 权限域收窄(v3.7.0):`@match` 显式站点(linux.do/Notion/GitHub/Zhihu);`@connect` 域名白名单;`@exclude` 搜索引擎/邮箱/localhost（broad include catch-all 已移除）。
 
 ## 禁止操作(明确清单)
 

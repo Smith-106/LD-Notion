@@ -283,6 +283,9 @@ const RSSAutoImporter = {
                 return await RSSAutoImporter.fetchFeed(feedUrl);
             } catch (error) {
                 lastError = error;
+                // 400/401/403 为客户端错误，退避重试无意义，立即短路
+                const msg = String(error && error.message || error || "");
+                if (/\bHTTP\s+40[013]\b/.test(msg)) throw error;
                 if (attempt < retries) {
                     await Utils.sleep(1000 * Math.pow(2, attempt));
                 }

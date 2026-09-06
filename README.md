@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.7`
+- 当前仓库源码版本：`v3.14.8`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -120,7 +120,7 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 - **撤销支持**：危险操作提供 5 秒撤销窗口；常规写入默认记录审计，不承诺统一可撤销
 - **权限域收窄**（v3.7.0）：`@match` 从 `*://*/*` 收窄为 6 个显式站点，`@connect` 从 `*` 收窄为 9 个显式域名白名单，阻止向任意域名发起请求
 - **Prompt Injection 防御**（v3.7.0）：AI 输入用 XML 标签隔离用户内容与系统指令，输出经 `escapeHtml` + `safeMarkdown` 净化，UI 全局 50+ 处拼接点统一转义
-- **凭证保险箱**：AI API Key、Base URL、GitHub Token、Obsidian API Key/URL 等敏感凭证使用 AES-256-GCM 加密存储，PBKDF2 200K 迭代派生密钥，会话内解锁后可用；Notion OAuth 三键（Client Secret / Refresh Token / Access Token）自 v3.12.0 起改走浏览器本地明文存储（GM 存储）以保证跨页回调可读，审计日志仍由 `REDACT_IN_LOGS` 超集统一脱敏
+- **凭证存储**（v3.14.3 / commit 049bf46）：AI API Key、Base URL、GitHub Token、Obsidian API Key/URL 与 Notion OAuth 三键均走浏览器本地明文存储（GM 存储）；保险箱机制已退役。审计日志仍由 `REDACT_IN_LOGS` 超集统一脱敏
 - **setLevel 验证**（v3.7.0）：权限等级设置强制校验 0-3 整数，拒绝 NaN/Infinity/超范围值
 
 ## 安装
@@ -130,6 +130,9 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 > 当前优先支持：Chrome / Edge（脚本版与独立扩展版均按这两种浏览器验证）
 
 ### 方式 A：油猴脚本（推荐）
+
+> **v3.14.8 提示**：油猴脚本仅匹配 Linux.do / Notion / GitHub / 知乎（含 `*.linux.do` / `*.notion.so` 子域）；**不再**在任意网页自动出现面板。通用剪藏请用 Chrome 扩展，或自行添加 Tampermonkey `@match`。
+
 
 #### 1. 安装 Tampermonkey
 
@@ -223,7 +226,7 @@ node scripts/build-extension.js
 
 注意：
 - 当前项目是纯前端运行，没有单独后端；Notion OAuth 三键（Client Secret、access/refresh token）保存在你的浏览器本地 GM 存储中，以保证授权回调跨页面可读（v3.12.0 起的存储模型）
-- AI API Key、GitHub Token、Obsidian 等其它敏感凭证仍走本地加密保险箱，需设置口令并会话内解锁后才可使用
+- AI API Key、GitHub Token、Obsidian 等敏感凭证自 v3.14.3 起亦走 GM 明文存储（保险箱退役），更新脚本后无需重新解锁
 - 这更适合个人自建公开集成，不建议把共享的生产级公开集成 secret 直接放进前端
 - 面板里的“断开授权”只会清除本地保存的 OAuth 凭据，不会撤销 Notion 后台已经批准的授权
 
@@ -386,6 +389,12 @@ A: 请检查：
 
 ## 更新日志
 
+### v3.14.8
+
+- userscript match docs + subdomain @match
+- LD_VERIFY_STRICT + verify-build negative restore
+- ConfirmationDialog queue/close; generic save warning; GitHub Notion pause/cancel
+
 ### v3.14.7
 
 31 条 UI 审计发现全量修复 + 导出几分钟后 token invalid 全部失败根因修复（四因素叠加：`isAuthTerminalError` 消息子串误判致 fail-fast、导出循环固定 `settings.apiKey` 快照遮蔽 OAuth 续签、终态降级残留过期 access token、站设置空输入误清 token 翻 manual）：
@@ -430,7 +439,7 @@ A: 请检查：
 - **修复** 导出账本改容量上限淘汰（>10000 条才淘汰最旧，URL 键源去重保留时间 TTL）；Obsidian 导出成功即记账；工作区扫描后按“链接”属性与本地项 URL 精确匹配自动对账回填（仅 strict 模式回填 LinuxDo）
 - **升级** 安装后点「刷新工作区」即可把 Notion 已存在内容与本地账本对齐，恢复正确识别
 
-### v3.14.2
+### v3.14.2 (untagged orphan; see v3.14.3)
 
 修复「每次更新后 API Key 失效」（保险箱会话锁定根因，同 v3.12.0 OAuth 先例）：
 - **根因** 凭证保险箱解锁态为页面内存态，每次页面加载（含脚本更新重载）即锁定，锁定态下 AI/GitHub/Obsidian 敏感键读空

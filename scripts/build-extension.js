@@ -38,8 +38,10 @@ const MANIFEST_SHARED_DEFAULTS = Object.freeze({
     ]),
     contentScriptMatches: Object.freeze([
         "https://linux.do/*",
+        "https://*.linux.do/*",
         "https://www.notion.so/*",
         "https://notion.so/*",
+        "https://*.notion.so/*",
         "https://github.com/*",
         "https://www.github.com/*",
         "https://www.zhihu.com/*",

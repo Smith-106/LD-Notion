@@ -576,18 +576,32 @@ const OperationLog = {
 
 const ConfirmationDialog = {
     dialogElement: null,
+    _queue: [],
+    _activeResolve: null,
 
     // 显示确认对话框
     // 支持 onConfirm/confirmText(三模型共识 F-UI-01):确认时调用 onConfirm 回调,
     // 按钮文案用 confirmText(默认「确认」),修复「重新导出/删除模板确认后零执行」瘫痪。
+    // v3.14.8: 重入改为队列(不再 resolve(false) 伪取消); close() 会 resolve(false);
+    // 名称确认提示用 textContent 展示原文, 比较也用 raw itemName。
     show: (options) => {
         return new Promise((resolve) => {
-            // v3.14.7 (REV-02 UI-06): 重入闸门——已有对话框时忽略新请求,
-            // 防并发叠层(14 调用点中任一重入都复用当前对话框)。
             if (ConfirmationDialog.dialogElement) {
-                resolve(false);
+                ConfirmationDialog._queue.push({ options, resolve });
                 return;
             }
+            ConfirmationDialog._present(options, resolve);
+        });
+    },
+
+    _drainQueue: () => {
+        if (ConfirmationDialog.dialogElement) return;
+        const next = ConfirmationDialog._queue.shift();
+        if (!next) return;
+        ConfirmationDialog._present(next.options, next.resolve);
+    },
+
+    _present: (options, resolve) => {
             const {
                 title = "确认操作",
                 message = "确定要执行此操作吗？",
@@ -596,9 +610,10 @@ const ConfirmationDialog = {
                 requireNameInput = false,
                 confirmText = "确认",
                 onConfirm = null,
-            } = options;
+            } = options || {};
 
             const escapeHtml = Utils.escapeHtml;
+            const rawItemName = String(itemName || "");
 
             // 创建对话框
             const dialog = document.createElement("div");
@@ -615,12 +630,12 @@ const ConfirmationDialog = {
                     </div>
                     <div class="ldb-confirm-body">
                         <p class="ldb-confirm-message">${escapeHtml(message)}</p>
-                        ${itemName ? `<p class="ldb-confirm-item">目标: <strong>${escapeHtml(itemName)}</strong></p>` : ""}
+                        ${rawItemName ? `<p class="ldb-confirm-item">目标: <strong class="ldb-confirm-item-name"></strong></p>` : ""}
                         ${requireNameInput ? `
                             <div class="ldb-confirm-input-group">
                                 <label>请输入名称确认:</label>
-                                <input type="text" class="ldb-confirm-input" placeholder="${escapeHtml(itemName)}" id="ldb-confirm-name-input">
-                                <div class="ldb-confirm-hint">请输入 "${escapeHtml(itemName)}" 以确认操作</div>
+                                <input type="text" class="ldb-confirm-input" id="ldb-confirm-name-input">
+                                <div class="ldb-confirm-hint">请输入「<span class="ldb-confirm-hint-name"></span>」以确认操作</div>
                             </div>
                         ` : ""}
                     </div>
@@ -636,8 +651,17 @@ const ConfirmationDialog = {
                 </div>
             `;
 
+            // 名称展示走 textContent(保留原文), 避免 escapeHtml 后与 raw 比较产生认知偏差
+            const itemNameEl = dialog.querySelector(".ldb-confirm-item-name");
+            if (itemNameEl) itemNameEl.textContent = rawItemName;
+            const hintNameEl = dialog.querySelector(".ldb-confirm-hint-name");
+            if (hintNameEl) hintNameEl.textContent = rawItemName;
+            const nameInputEl = dialog.querySelector("#ldb-confirm-name-input");
+            if (nameInputEl) nameInputEl.placeholder = rawItemName;
+
             document.body.appendChild(dialog);
             ConfirmationDialog.dialogElement = dialog;
+            ConfirmationDialog._activeResolve = resolve;
 
             const okBtn = dialog.querySelector("#ldb-confirm-ok");
             const cancelBtn = dialog.querySelector("#ldb-confirm-cancel");
@@ -648,10 +672,8 @@ const ConfirmationDialog = {
             let canConfirm = !requireNameInput;
             let settled = false;
 
-            // v3.14.7 (REV-02 UI-06): 统一关闭路径——cancel/ok/esc 三路共用一个
-            // cleanup, 防 keydown 监听器与整棵 dialog 闭包泄漏(此前 cancel/ok 只
-            // remove() 不卸载 escHandler, 每次按钮关闭泄漏一份)。
-            const cleanup = () => {
+            // v3.14.7 (REV-02 UI-06): 统一关闭路径——cancel/ok/esc/close 共用 cleanup
+            const cleanup = (result) => {
                 if (settled) return;
                 settled = true;
                 clearInterval(timer);
@@ -660,7 +682,13 @@ const ConfirmationDialog = {
                 if (ConfirmationDialog.dialogElement === dialog) {
                     ConfirmationDialog.dialogElement = null;
                 }
+                if (ConfirmationDialog._activeResolve === resolve) {
+                    ConfirmationDialog._activeResolve = null;
+                }
+                resolve(result);
+                ConfirmationDialog._drainQueue();
             };
+            dialog._ldConfirmCleanup = cleanup;
 
             // 倒计时进度条
             const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
@@ -687,10 +715,10 @@ const ConfirmationDialog = {
             }, 1000);
             dialog._countdownTimer = timer;
 
-            // 名称输入验证
+            // 名称输入验证——比较 raw itemName(非 HTML 转义串)
             if (nameInput) {
                 nameInput.oninput = () => {
-                    canConfirm = nameInput.value.trim() === itemName;
+                    canConfirm = nameInput.value.trim() === rawItemName;
                     if (remaining <= 0 && canConfirm) {
                         okBtn.disabled = false;
                     } else {
@@ -702,15 +730,13 @@ const ConfirmationDialog = {
 
             // 取消按钮
             cancelBtn.onclick = () => {
-                cleanup();
-                resolve(false);
+                cleanup(false);
             };
 
             // 确认按钮
             okBtn.onclick = () => {
                 if (okBtn.disabled) return;
-                cleanup();
-                resolve(true);
+                cleanup(true);
                 // F-UI-01:确认后执行调用方回调(重新导出/删除模板等),失败不吞错
                 if (typeof onConfirm === "function") {
                     try {
@@ -724,26 +750,32 @@ const ConfirmationDialog = {
             // ESC 关闭
             const escHandler = (e) => {
                 if (e.key === "Escape") {
-                    cleanup();
-                    resolve(false);
+                    cleanup(false);
                 }
             };
             document.addEventListener("keydown", escHandler);
             // v3.14.7 (REV-16 UI-18): 焦点移入对话框(此前焦点留在背景按钮)
-            cancelBtn.focus();
-        });
+            if (!nameInput) cancelBtn.focus();
     },
 
-    // 关闭对话框
+    // 关闭对话框(外部关闭视为取消, resolve false)
     close: () => {
-        if (ConfirmationDialog.dialogElement) {
-            // 清倒计时 interval，防 dialog 被外部移除后 interval 泄漏（L2 reliability）
-            if (ConfirmationDialog.dialogElement._countdownTimer) {
-                clearInterval(ConfirmationDialog.dialogElement._countdownTimer);
-            }
-            ConfirmationDialog.dialogElement.remove();
-            ConfirmationDialog.dialogElement = null;
+        const dialog = ConfirmationDialog.dialogElement;
+        if (!dialog) return;
+        if (typeof dialog._ldConfirmCleanup === "function") {
+            dialog._ldConfirmCleanup(false);
+            return;
         }
+        // 兜底:无 cleanup 句柄时仍清 DOM / timer
+        if (dialog._countdownTimer) {
+            clearInterval(dialog._countdownTimer);
+        }
+        dialog.remove();
+        ConfirmationDialog.dialogElement = null;
+        const resolve = ConfirmationDialog._activeResolve;
+        ConfirmationDialog._activeResolve = null;
+        if (typeof resolve === "function") resolve(false);
+        ConfirmationDialog._drainQueue();
     },
 };
 

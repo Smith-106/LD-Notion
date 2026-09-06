@@ -13,20 +13,25 @@ const path = require("path");
 const USERSCRIPT_HEADER = `// ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.7
+// @version      3.14.8
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
 // @downloadURL  https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
 // @match        https://linux.do/*
+// @match        https://*.linux.do/*
 // @match        https://www.notion.so/*
 // @match        https://notion.so/*
+// @match        https://*.notion.so/*
 // @match        https://github.com/*
 // @match        https://www.github.com/*
 // @match        https://www.zhihu.com/*
 // @match        https://zhuanlan.zhihu.com/*
-// @include      /^https?://(?!(www\.google\.com|www\.google\.com\.hk|www\.baidu\.com|www\.bing\.com|duckduckgo\.com|mail\.google\.com|outlook\.live\.com|localhost|127\.0\.0\.1))/
+// (audit) broad include catch-all removed; supported sites use explicit @match above.
+// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so).
+// Gap: SiteDetector does not treat gist.github.com as GitHub; userscript likewise omits it.
+// Generic sites: add Tampermonkey user @match as needed; extension still has http(s)://*/* ; @exclude retained as defense-in-depth.
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
 // @exclude      https://www.baidu.com/*
@@ -150,14 +155,17 @@ async function build() {
     // 第三步：拼接 userscript 头 + IIFE 主体
     const finalContent = USERSCRIPT_HEADER + "\n" + bundleContent;
 
-    // 第四步：写入最终输出
+    // 第四步：写入最终输出（dist + 根目录同步，避免根产物与 dist 漂移）
     const outfile = path.join(outDir, "LinuxDo-Bookmarks-to-Notion.user.js");
+    const rootOutfile = path.join(__dirname, "LinuxDo-Bookmarks-to-Notion.user.js");
     fs.writeFileSync(outfile, finalContent, "utf8");
+    fs.writeFileSync(rootOutfile, finalContent, "utf8");
 
     // 清理临时文件
     fs.unlinkSync(tempFile);
 
     console.log(`Build complete: ${outfile}`);
+    console.log(`Also wrote root: ${rootOutfile}`);
     console.log(`Output size: ${(fs.statSync(outfile).size / 1024).toFixed(1)} KB`);
 }
 

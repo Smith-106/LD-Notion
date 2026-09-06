@@ -5622,8 +5622,10 @@ function createWorkspaceVisualizationFixture(harness) {
             assert.ok(popupScript.includes('LD_NOTION_SET_BOOKMARK_SOURCE'));
             assert.deepStrictEqual(manifest.content_scripts[0].matches, [
                 'https://linux.do/*',
+                'https://*.linux.do/*',
                 'https://www.notion.so/*',
                 'https://notion.so/*',
+                'https://*.notion.so/*',
                 'https://github.com/*',
                 'https://www.github.com/*',
                 'https://www.zhihu.com/*',

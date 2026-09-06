@@ -886,7 +886,7 @@ const NotionSiteUI = {
             options += '<optgroup label="📁 数据库">';
             databases.forEach(db => {
                 knownIds.add(db.id);
-                options += `<option value="${db.id}">📁 ${Utils.escapeHtml(db.title)}</option>`;
+                options += `<option value="${Utils.escapeHtml(db.id)}">📁 ${Utils.escapeHtml(db.title)}</option>`;
             });
             options += '</optgroup>';
         }
@@ -898,7 +898,7 @@ const NotionSiteUI = {
             workspacePages.forEach(page => {
                 const val = `page:${page.id}`;
                 knownIds.add(val);
-                options += `<option value="${val}">${Utils.escapeHtml(
+                options += `<option value="${Utils.escapeHtml(val)}">${Utils.escapeHtml(
                     NotionSiteUI.getAITargetPageOptionLabel(page)
                 )}</option>`;
             });
@@ -911,7 +911,7 @@ const NotionSiteUI = {
             nestedPages.forEach(page => {
                 const val = `page:${page.id}`;
                 knownIds.add(val);
-                options += `<option value="${val}">${Utils.escapeHtml(
+                options += `<option value="${Utils.escapeHtml(val)}">${Utils.escapeHtml(
                     NotionSiteUI.getAITargetPageOptionLabel(page, { includeParentLabel: true, databases, pages })
                 )}</option>`;
             });

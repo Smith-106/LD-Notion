@@ -1,20 +1,25 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.7
+// @version      3.14.8
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
 // @downloadURL  https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
 // @match        https://linux.do/*
+// @match        https://*.linux.do/*
 // @match        https://www.notion.so/*
 // @match        https://notion.so/*
+// @match        https://*.notion.so/*
 // @match        https://github.com/*
 // @match        https://www.github.com/*
 // @match        https://www.zhihu.com/*
 // @match        https://zhuanlan.zhihu.com/*
-// @include      /^https?://(?!(www.google.com|www.google.com.hk|www.baidu.com|www.bing.com|duckduckgo.com|mail.google.com|outlook.live.com|localhost|127.0.0.1))/
+// (audit) broad include catch-all removed; supported sites use explicit @match above.
+// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so).
+// Gap: SiteDetector does not treat gist.github.com as GitHub; userscript likewise omits it.
+// Generic sites: add Tampermonkey user @match as needed; extension still has http(s)://*/* ; @exclude retained as defense-in-depth.
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
 // @exclude      https://www.baidu.com/*
@@ -5757,31 +5762,46 @@ Content-Type: ${contentType}\r
       };
       var ConfirmationDialog3 = {
         dialogElement: null,
+        _queue: [],
+        _activeResolve: null,
         // 显示确认对话框
         // 支持 onConfirm/confirmText(三模型共识 F-UI-01):确认时调用 onConfirm 回调,
         // 按钮文案用 confirmText(默认「确认」),修复「重新导出/删除模板确认后零执行」瘫痪。
+        // v3.14.8: 重入改为队列(不再 resolve(false) 伪取消); close() 会 resolve(false);
+        // 名称确认提示用 textContent 展示原文, 比较也用 raw itemName。
         show: (options) => {
           return new Promise((resolve) => {
             if (ConfirmationDialog3.dialogElement) {
-              resolve(false);
+              ConfirmationDialog3._queue.push({ options, resolve });
               return;
             }
-            const {
-              title = "\u786E\u8BA4\u64CD\u4F5C",
-              message = "\u786E\u5B9A\u8981\u6267\u884C\u6B64\u64CD\u4F5C\u5417\uFF1F",
-              itemName = "",
-              countdown = 5,
-              requireNameInput = false,
-              confirmText = "\u786E\u8BA4",
-              onConfirm = null
-            } = options;
-            const escapeHtml = Utils2.escapeHtml;
-            const dialog = document.createElement("div");
-            dialog.className = "ldb-confirm-overlay";
-            dialog.setAttribute("role", "dialog");
-            dialog.setAttribute("aria-modal", "true");
-            dialog.setAttribute("aria-labelledby", "ldb-confirm-title");
-            dialog.innerHTML = `
+            ConfirmationDialog3._present(options, resolve);
+          });
+        },
+        _drainQueue: () => {
+          if (ConfirmationDialog3.dialogElement) return;
+          const next = ConfirmationDialog3._queue.shift();
+          if (!next) return;
+          ConfirmationDialog3._present(next.options, next.resolve);
+        },
+        _present: (options, resolve) => {
+          const {
+            title = "\u786E\u8BA4\u64CD\u4F5C",
+            message = "\u786E\u5B9A\u8981\u6267\u884C\u6B64\u64CD\u4F5C\u5417\uFF1F",
+            itemName = "",
+            countdown = 5,
+            requireNameInput = false,
+            confirmText = "\u786E\u8BA4",
+            onConfirm = null
+          } = options || {};
+          const escapeHtml = Utils2.escapeHtml;
+          const rawItemName = String(itemName || "");
+          const dialog = document.createElement("div");
+          dialog.className = "ldb-confirm-overlay";
+          dialog.setAttribute("role", "dialog");
+          dialog.setAttribute("aria-modal", "true");
+          dialog.setAttribute("aria-labelledby", "ldb-confirm-title");
+          dialog.innerHTML = `
                 <div class="ldb-confirm-dialog">
                     <div class="ldb-confirm-header">
                         <span class="ldb-confirm-icon">\u26A0\uFE0F</span>
@@ -5789,12 +5809,12 @@ Content-Type: ${contentType}\r
                     </div>
                     <div class="ldb-confirm-body">
                         <p class="ldb-confirm-message">${escapeHtml(message)}</p>
-                        ${itemName ? `<p class="ldb-confirm-item">\u76EE\u6807: <strong>${escapeHtml(itemName)}</strong></p>` : ""}
+                        ${rawItemName ? `<p class="ldb-confirm-item">\u76EE\u6807: <strong class="ldb-confirm-item-name"></strong></p>` : ""}
                         ${requireNameInput ? `
                             <div class="ldb-confirm-input-group">
                                 <label>\u8BF7\u8F93\u5165\u540D\u79F0\u786E\u8BA4:</label>
-                                <input type="text" class="ldb-confirm-input" placeholder="${escapeHtml(itemName)}" id="ldb-confirm-name-input">
-                                <div class="ldb-confirm-hint">\u8BF7\u8F93\u5165 "${escapeHtml(itemName)}" \u4EE5\u786E\u8BA4\u64CD\u4F5C</div>
+                                <input type="text" class="ldb-confirm-input" id="ldb-confirm-name-input">
+                                <div class="ldb-confirm-hint">\u8BF7\u8F93\u5165\u300C<span class="ldb-confirm-hint-name"></span>\u300D\u4EE5\u786E\u8BA4\u64CD\u4F5C</div>
                             </div>
                         ` : ""}
                     </div>
@@ -5809,90 +5829,107 @@ Content-Type: ${contentType}\r
                     </div>
                 </div>
             `;
-            document.body.appendChild(dialog);
-            ConfirmationDialog3.dialogElement = dialog;
-            const okBtn = dialog.querySelector("#ldb-confirm-ok");
-            const cancelBtn = dialog.querySelector("#ldb-confirm-cancel");
-            const countdownEl = dialog.querySelector("#ldb-confirm-countdown");
-            const nameInput = dialog.querySelector("#ldb-confirm-name-input");
-            let remaining = countdown;
-            let canConfirm = !requireNameInput;
-            let settled = false;
-            const cleanup = () => {
-              if (settled) return;
-              settled = true;
-              clearInterval(timer);
-              document.removeEventListener("keydown", escHandler);
-              dialog.remove();
-              if (ConfirmationDialog3.dialogElement === dialog) {
-                ConfirmationDialog3.dialogElement = null;
-              }
-            };
-            const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
-            if (countdownFill) {
-              requestAnimationFrame(() => {
-                countdownFill.style.width = "0%";
-                countdownFill.style.transition = `width ${countdown}s linear`;
-              });
+          const itemNameEl = dialog.querySelector(".ldb-confirm-item-name");
+          if (itemNameEl) itemNameEl.textContent = rawItemName;
+          const hintNameEl = dialog.querySelector(".ldb-confirm-hint-name");
+          if (hintNameEl) hintNameEl.textContent = rawItemName;
+          const nameInputEl = dialog.querySelector("#ldb-confirm-name-input");
+          if (nameInputEl) nameInputEl.placeholder = rawItemName;
+          document.body.appendChild(dialog);
+          ConfirmationDialog3.dialogElement = dialog;
+          ConfirmationDialog3._activeResolve = resolve;
+          const okBtn = dialog.querySelector("#ldb-confirm-ok");
+          const cancelBtn = dialog.querySelector("#ldb-confirm-cancel");
+          const countdownEl = dialog.querySelector("#ldb-confirm-countdown");
+          const nameInput = dialog.querySelector("#ldb-confirm-name-input");
+          let remaining = countdown;
+          let canConfirm = !requireNameInput;
+          let settled = false;
+          const cleanup = (result) => {
+            if (settled) return;
+            settled = true;
+            clearInterval(timer);
+            document.removeEventListener("keydown", escHandler);
+            dialog.remove();
+            if (ConfirmationDialog3.dialogElement === dialog) {
+              ConfirmationDialog3.dialogElement = null;
             }
-            const timer = setInterval(() => {
-              remaining--;
-              countdownEl.textContent = remaining;
-              if (remaining <= 0) {
-                clearInterval(timer);
-                countdownEl.parentElement.textContent = confirmText;
-                if (canConfirm) {
-                  okBtn.disabled = false;
-                }
-              }
-            }, 1e3);
-            dialog._countdownTimer = timer;
-            if (nameInput) {
-              nameInput.oninput = () => {
-                canConfirm = nameInput.value.trim() === itemName;
-                if (remaining <= 0 && canConfirm) {
-                  okBtn.disabled = false;
-                } else {
-                  okBtn.disabled = true;
-                }
-              };
-              nameInput.focus();
+            if (ConfirmationDialog3._activeResolve === resolve) {
+              ConfirmationDialog3._activeResolve = null;
             }
-            cancelBtn.onclick = () => {
-              cleanup();
-              resolve(false);
-            };
-            okBtn.onclick = () => {
-              if (okBtn.disabled) return;
-              cleanup();
-              resolve(true);
-              if (typeof onConfirm === "function") {
-                try {
-                  onConfirm();
-                } catch (error) {
-                  console.error("[LD-Notion] ConfirmationDialog onConfirm \u6267\u884C\u5931\u8D25:", error);
-                }
-              }
-            };
-            const escHandler = (e) => {
-              if (e.key === "Escape") {
-                cleanup();
-                resolve(false);
-              }
-            };
-            document.addEventListener("keydown", escHandler);
-            cancelBtn.focus();
-          });
-        },
-        // 关闭对话框
-        close: () => {
-          if (ConfirmationDialog3.dialogElement) {
-            if (ConfirmationDialog3.dialogElement._countdownTimer) {
-              clearInterval(ConfirmationDialog3.dialogElement._countdownTimer);
-            }
-            ConfirmationDialog3.dialogElement.remove();
-            ConfirmationDialog3.dialogElement = null;
+            resolve(result);
+            ConfirmationDialog3._drainQueue();
+          };
+          dialog._ldConfirmCleanup = cleanup;
+          const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
+          if (countdownFill) {
+            requestAnimationFrame(() => {
+              countdownFill.style.width = "0%";
+              countdownFill.style.transition = `width ${countdown}s linear`;
+            });
           }
+          const timer = setInterval(() => {
+            remaining--;
+            countdownEl.textContent = remaining;
+            if (remaining <= 0) {
+              clearInterval(timer);
+              countdownEl.parentElement.textContent = confirmText;
+              if (canConfirm) {
+                okBtn.disabled = false;
+              }
+            }
+          }, 1e3);
+          dialog._countdownTimer = timer;
+          if (nameInput) {
+            nameInput.oninput = () => {
+              canConfirm = nameInput.value.trim() === rawItemName;
+              if (remaining <= 0 && canConfirm) {
+                okBtn.disabled = false;
+              } else {
+                okBtn.disabled = true;
+              }
+            };
+            nameInput.focus();
+          }
+          cancelBtn.onclick = () => {
+            cleanup(false);
+          };
+          okBtn.onclick = () => {
+            if (okBtn.disabled) return;
+            cleanup(true);
+            if (typeof onConfirm === "function") {
+              try {
+                onConfirm();
+              } catch (error) {
+                console.error("[LD-Notion] ConfirmationDialog onConfirm \u6267\u884C\u5931\u8D25:", error);
+              }
+            }
+          };
+          const escHandler = (e) => {
+            if (e.key === "Escape") {
+              cleanup(false);
+            }
+          };
+          document.addEventListener("keydown", escHandler);
+          if (!nameInput) cancelBtn.focus();
+        },
+        // 关闭对话框(外部关闭视为取消, resolve false)
+        close: () => {
+          const dialog = ConfirmationDialog3.dialogElement;
+          if (!dialog) return;
+          if (typeof dialog._ldConfirmCleanup === "function") {
+            dialog._ldConfirmCleanup(false);
+            return;
+          }
+          if (dialog._countdownTimer) {
+            clearInterval(dialog._countdownTimer);
+          }
+          dialog.remove();
+          ConfirmationDialog3.dialogElement = null;
+          const resolve = ConfirmationDialog3._activeResolve;
+          ConfirmationDialog3._activeResolve = null;
+          if (typeof resolve === "function") resolve(false);
+          ConfirmationDialog3._drainQueue();
         }
       };
       var UndoManager2 = {
@@ -6083,6 +6120,8 @@ Content-Type: ${contentType}\r
               return await res.json();
             } catch (e) {
               lastErr = e;
+              const msg = String(e && e.message || e || "");
+              if (/\bHTTP\s+40[013]\b/.test(msg)) throw e;
               if (i < retries) await Utils2.sleep(1e3 * Math.pow(2, i));
             } finally {
               clearTimeout(timer);
@@ -6773,8 +6812,47 @@ Content-Type: ${contentType}\r
           if (data.explanation !== void 0 && typeof data.explanation !== "string") return { ok: false, reason: "AI \u8FD4\u56DE\u7684 explanation \u4E0D\u662F\u5B57\u7B26\u4E32" };
           return { ok: true };
         },
+        // 校验 workspaceConnection 结构（跨源关联候选 AI 草稿）。
+        // recommendedAction 白名单；其余字段类型/长度由消费点再截断。
+        ALLOWED_WORKSPACE_ACTIONS: /* @__PURE__ */ new Set(["merge", "review", "enrich", "archive"]),
+        validateWorkspaceConnectionSchema: (data) => {
+          if (!data || typeof data !== "object" || Array.isArray(data)) {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u8DE8\u6E90\u5173\u8054\u5EFA\u8BAE\u4E0D\u662F\u5BF9\u8C61" };
+          }
+          if (data.canonicalTitle !== void 0 && typeof data.canonicalTitle !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 canonicalTitle \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          if (data.title !== void 0 && typeof data.title !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 title \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          if (data.summary !== void 0 && typeof data.summary !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 summary \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          if (data.recommendedAction !== void 0) {
+            if (typeof data.recommendedAction !== "string") {
+              return { ok: false, reason: "AI \u8FD4\u56DE\u7684 recommendedAction \u4E0D\u662F\u5B57\u7B26\u4E32" };
+            }
+            const action = data.recommendedAction.trim().toLowerCase();
+            if (action && !AISchema.ALLOWED_WORKSPACE_ACTIONS.has(action)) {
+              return { ok: false, reason: "AI \u8FD4\u56DE\u7684 recommendedAction \u4E0D\u5728\u767D\u540D\u5355" };
+            }
+          }
+          if (data.nextStep !== void 0 && typeof data.nextStep !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 nextStep \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          if (data.mergeReason !== void 0 && typeof data.mergeReason !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 mergeReason \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          if (data.tags !== void 0) {
+            if (!Array.isArray(data.tags)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684 tags \u4E0D\u662F\u6570\u7EC4" };
+            for (const tag of data.tags) {
+              if (typeof tag !== "string") return { ok: false, reason: "AI \u8FD4\u56DE\u7684 tags \u9879\u4E0D\u662F\u5B57\u7B26\u4E32" };
+            }
+          }
+          return { ok: true };
+        },
         // 统一 AI JSON 解析入口：正则提取 + JSON.parse + 按 name 路由校验。
-        // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"|"bookmarkSummary"}。
+        // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"|"bookmarkSummary"|"workspaceConnection"}。
         // 返回 { ok: true, value } 或 { ok: false, reason }。
         parseAIJson: (name, rawText) => {
           if (!rawText) return { ok: false, reason: "AI \u54CD\u5E94\u4E3A\u7A7A" };
@@ -6792,7 +6870,8 @@ Content-Type: ${contentType}\r
             editPlan: AISchema.validateEditPlanSchema,
             generatePages: AISchema.validateGeneratePagesSchema,
             agentPlan: AISchema.validateAgentPlanSchema,
-            intent: AISchema.validateIntentSchema
+            intent: AISchema.validateIntentSchema,
+            workspaceConnection: AISchema.validateWorkspaceConnectionSchema
           };
           const validator = validators[name];
           if (validator) {
@@ -12649,6 +12728,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               return await RSSAutoImporter2.fetchFeed(feedUrl);
             } catch (error) {
               lastError = error;
+              const msg = String(error && error.message || error || "");
+              if (/\bHTTP\s+40[013]\b/.test(msg)) throw error;
               if (attempt < retries) {
                 await Utils2.sleep(1e3 * Math.pow(2, attempt));
               }
@@ -19660,7 +19741,7 @@ ${report}
             options += '<optgroup label="\u{1F4C1} \u6570\u636E\u5E93">';
             databases.forEach((db) => {
               knownIds.add(db.id);
-              options += `<option value="${db.id}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
+              options += `<option value="${Utils2.escapeHtml(db.id)}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
             });
             options += "</optgroup>";
           }
@@ -19670,7 +19751,7 @@ ${report}
             workspacePages.forEach((page) => {
               const val = `page:${page.id}`;
               knownIds.add(val);
-              options += `<option value="${val}">${Utils2.escapeHtml(
+              options += `<option value="${Utils2.escapeHtml(val)}">${Utils2.escapeHtml(
                 NotionSiteUI2.getAITargetPageOptionLabel(page)
               )}</option>`;
             });
@@ -19682,7 +19763,7 @@ ${report}
             nestedPages.forEach((page) => {
               const val = `page:${page.id}`;
               knownIds.add(val);
-              options += `<option value="${val}">${Utils2.escapeHtml(
+              options += `<option value="${Utils2.escapeHtml(val)}">${Utils2.escapeHtml(
                 NotionSiteUI2.getAITargetPageOptionLabel(page, { includeParentLabel: true, databases, pages })
               )}</option>`;
             });
@@ -20112,7 +20193,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           ...authAbortInfo ? { authAborted: authAbortInfo } : {}
         };
       };
-      var exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress) => {
+      var exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress, control = {}) => {
         if (SyncLock.isExporting) {
           return {
             success: [],
@@ -20139,6 +20220,12 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         SyncLock.isExporting = true;
         try {
           for (let i = 0; i < selectedItems.length; i++) {
+            if (control.isCancelled) break;
+            while (control.isPaused) {
+              await Utils2.sleep(200);
+              if (control.isCancelled) break;
+            }
+            if (control.isCancelled) break;
             const item = selectedItems[i];
             const bookmark = item.raw;
             const sourceType = item.sourceType;
@@ -20225,7 +20312,13 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }
           SyncLock.isExporting = false;
         }
-        return { success, failed, skipped: [] };
+        return {
+          success,
+          failed,
+          skipped: control.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
+            title: item.title || item.itemKey || "GitHub"
+          })) : []
+        };
       };
       module.exports = {
         sanitizeObsidianFileName,
@@ -21164,7 +21257,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             "JSON Schema:",
             '{"canonicalTitle":"","summary":"","recommendedAction":"merge|review|enrich|archive","nextStep":"","mergeReason":"","tags":[""]}',
             "",
-            JSON.stringify({
+            // 候选标题/URL/来源来自 Notion 页面元数据，不可信——与 main-ui 同构，走 isolateContent 防 prompt injection
+            `<user_content>
+${AIService2.isolateContent(JSON.stringify({
               label: (candidate == null ? void 0 : candidate.label) || "",
               reason: (candidate == null ? void 0 : candidate.reason) || "",
               count: Number((candidate == null ? void 0 : candidate.count) || items.length || 0),
@@ -21176,7 +21271,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 parentLabel: (item == null ? void 0 : item.parentLabel) || "",
                 url: (item == null ? void 0 : item.url) || ""
               }))
-            }, null, 2)
+            }, null, 2))}
+</user_content>`
           ].join("\n");
         },
         buildWorkspaceConnectionCandidateAIDraft: async (candidate, settings) => {
@@ -23580,7 +23676,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             databases.forEach((db) => {
               const value = `database:${db.id}`;
               knownValues.add(value);
-              options += `<option value="${value}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
+              options += `<option value="${Utils2.escapeHtml(value)}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
             });
             options += "</optgroup>";
           }
@@ -23590,7 +23686,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             workspacePages.forEach((page) => {
               const value = `page:${page.id}`;
               knownValues.add(value);
-              options += `<option value="${value}">\u{1F4C4} ${Utils2.escapeHtml(page.title)}</option>`;
+              options += `<option value="${Utils2.escapeHtml(value)}">\u{1F4C4} ${Utils2.escapeHtml(page.title)}</option>`;
             });
             options += "</optgroup>";
           }
@@ -23663,13 +23759,13 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             options += '<optgroup label="\u{1F4C1} \u6307\u5B9A\u6570\u636E\u5E93">';
             databases.forEach((db) => {
               knownIds.add(db.id);
-              options += `<option value="${db.id}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
+              options += `<option value="${Utils2.escapeHtml(db.id)}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
             });
             options += "</optgroup>";
           }
           if (savedValue && savedValue !== "__all__" && !knownIds.has(savedValue)) {
             const displayId = savedValue.replace(/^page:/, "");
-            options += `<option value="${savedValue}">\u5DF2\u914D\u7F6E (ID: ${displayId.slice(0, 8)}...)</option>`;
+            options += `<option value="${Utils2.escapeHtml(savedValue)}">\u5DF2\u914D\u7F6E (ID: ${Utils2.escapeHtml(displayId.slice(0, 8))}...)</option>`;
           }
           select.innerHTML = options;
           if (savedValue) {
@@ -24282,7 +24378,14 @@ ${AIService2.isolateContent(JSON.stringify({
           return require_github_obsidian_service().mapGitHubItemsToBookmarks(items, sourceType);
         },
         exportGitHubSelected: async (selectedItems, settings, onProgress) => {
-          return require_github_obsidian_service().exportGitHubSelectedToNotion(selectedItems, settings, onProgress);
+          return require_github_obsidian_service().exportGitHubSelectedToNotion(selectedItems, settings, onProgress, {
+            get isCancelled() {
+              return Exporter2.isCancelled;
+            },
+            get isPaused() {
+              return Exporter2.isPaused;
+            }
+          });
         },
         // 重算导出统计（在列表变更后调用）
         recomputeExportStats: () => {
@@ -26712,12 +26815,12 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             workspacePages.forEach((page) => {
               const value = `page:${page.id}`;
               known.add(value);
-              options += `<option value="${value}">\u{1F4C4} ${Utils2.escapeHtml(page.title || "\u672A\u547D\u540D\u9875\u9762")}</option>`;
+              options += `<option value="${Utils2.escapeHtml(value)}">\u{1F4C4} ${Utils2.escapeHtml(page.title || "\u672A\u547D\u540D\u9875\u9762")}</option>`;
             });
           } else {
             databases.forEach((db) => {
               known.add(db.id);
-              options += `<option value="${db.id}">\u{1F4C1} ${Utils2.escapeHtml(db.title || "\u672A\u547D\u540D\u6570\u636E\u5E93")}</option>`;
+              options += `<option value="${Utils2.escapeHtml(db.id)}">\u{1F4C1} ${Utils2.escapeHtml(db.title || "\u672A\u547D\u540D\u6570\u636E\u5E93")}</option>`;
             });
           }
           if (restoreValue && !known.has(restoreValue)) {
@@ -26911,14 +27014,16 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               imgMode,
               autoSetupDatabaseProperties: exportType === "database"
             });
-            if (setupResult && !setupResult.success) {
-              return GenericUI2.showStatus(`\u914D\u7F6E\u5931\u8D25: ${setupResult.message || setupResult.error}`, "error");
-            }
             GenericUI2.loadTargetOptionsFromCache(apiKey);
-            GenericUI2.showStatus("\u914D\u7F6E\u5DF2\u4FDD\u5B58", "success");
             panel.querySelector("#gclip-settings").style.display = "none";
             panel.querySelector("#gclip-export").style.display = "block";
             panel.querySelector("#gclip-show-settings").style.display = "block";
+            if (setupResult && !setupResult.success) {
+              const detail = setupResult.message || setupResult.error || "\u672A\u77E5\u9519\u8BEF";
+              GenericUI2.showStatus(`\u76EE\u6807\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u6570\u636E\u5E93\u5C5E\u6027\u914D\u7F6E\u5931\u8D25: ${detail}\uFF08\u4ECD\u53EF\u5C1D\u8BD5\u5BFC\u51FA\uFF09`, "warning");
+              return;
+            }
+            GenericUI2.showStatus("\u914D\u7F6E\u5DF2\u4FDD\u5B58", "success");
           });
           NotionOAuth2.attachControls({
             root: panel,

@@ -362,12 +362,12 @@ const GenericUI = {
             workspacePages.forEach(page => {
                 const value = `page:${page.id}`;
                 known.add(value);
-                options += `<option value="${value}">📄 ${Utils.escapeHtml(page.title || "未命名页面")}</option>`;
+                options += `<option value="${Utils.escapeHtml(value)}">📄 ${Utils.escapeHtml(page.title || "未命名页面")}</option>`;
             });
         } else {
             databases.forEach(db => {
                 known.add(db.id);
-                options += `<option value="${db.id}">📁 ${Utils.escapeHtml(db.title || "未命名数据库")}</option>`;
+                options += `<option value="${Utils.escapeHtml(db.id)}">📁 ${Utils.escapeHtml(db.title || "未命名数据库")}</option>`;
             });
         }
 
@@ -594,16 +594,17 @@ const GenericUI = {
                 imgMode,
                 autoSetupDatabaseProperties: exportType === "database",
             });
-            if (setupResult && !setupResult.success) {
-                return GenericUI.showStatus(`配置失败: ${setupResult.message || setupResult.error}`, "error");
-            }
-
+            // v3.14.8: 目标已写入 TargetState；即便 setupDatabaseProperties 失败也进入导出区并警告
             GenericUI.loadTargetOptionsFromCache(apiKey);
-
-            GenericUI.showStatus("配置已保存", "success");
             panel.querySelector("#gclip-settings").style.display = "none";
             panel.querySelector("#gclip-export").style.display = "block";
             panel.querySelector("#gclip-show-settings").style.display = "block";
+            if (setupResult && !setupResult.success) {
+                const detail = setupResult.message || setupResult.error || "未知错误";
+                GenericUI.showStatus(`目标已保存，但数据库属性配置失败: ${detail}（仍可尝试导出）`, "warning");
+                return;
+            }
+            GenericUI.showStatus("配置已保存", "success");
         });
 
         NotionOAuth.attachControls({

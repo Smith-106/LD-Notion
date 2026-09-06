@@ -10,7 +10,12 @@ const contentScriptPath = path.resolve(__dirname, "..", "chrome-extension-full",
 // CI 中 verify:delivery 先执行 build:extension 生成该目录，此处始终可验证；
 // 若目录缺失（如未构建直接跑本脚本），优雅跳过并提示先构建。
 if (!fs.existsSync(contentScriptPath)) {
-    console.warn(`⚠️  跳过桥接扩展验证：${contentScriptPath} 不存在（请先运行 npm run build:extension）`);
+    const __ldStrictMsg = `⚠️  跳过桥接扩展验证：${contentScriptPath} 不存在（请先运行 npm run build:extension）`;
+    if (process.env.LD_VERIFY_STRICT === "1") {
+        console.error(__ldStrictMsg + " [LD_VERIFY_STRICT]");
+        process.exit(1);
+    }
+    console.warn(__ldStrictMsg);
     process.exit(0);
 }
 const contentScriptSource = fs.readFileSync(contentScriptPath, "utf8");
@@ -20,7 +25,12 @@ const bridgeEndMarker = "[LD-NOTION-BUILD:BOOKMARK_EVENT_BRIDGE_END]";
 const bridgeStart = contentScriptSource.indexOf(bridgeStartMarker);
 const bridgeEnd = contentScriptSource.indexOf(bridgeEndMarker);
 if (bridgeStart === -1 || bridgeEnd === -1 || bridgeEnd <= bridgeStart) {
-    console.warn(`⚠️  跳过桥接扩展验证：content.js 中未找到桥接协议标记段（${bridgeStartMarker}）`);
+    const __ldStrictMsg = `⚠️  跳过桥接扩展验证：content.js 中未找到桥接协议标记段（${bridgeStartMarker}）`;
+    if (process.env.LD_VERIFY_STRICT === "1") {
+        console.error(__ldStrictMsg + " [LD_VERIFY_STRICT]");
+        process.exit(1);
+    }
+    console.warn(__ldStrictMsg);
     process.exit(0);
 }
 const bridgeSource = contentScriptSource.slice(bridgeStart, bridgeEnd);
