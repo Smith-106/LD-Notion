@@ -20,7 +20,9 @@ const ROOT_USER = path.join(ROOT, "LinuxDo-Bookmarks-to-Notion.user.js");
 
 function fail(msg) {
     console.error(`[FAIL] ${msg}`);
-    process.exit(1);
+    const err = new Error(msg);
+    err.code = "VERIFY_BUILD_FAIL";
+    throw err;
 }
 
 function pass(msg) {
@@ -63,12 +65,15 @@ function main() {
     const rootBuf = fs.readFileSync(ROOT_USER);
     const distBuf = fs.readFileSync(DIST);
 
+    let originalDistForNeg = null;
     if (negative) {
-        // 注入应导致剪枝断言失败的假声明
+        // 注入应导致剪枝断言失败的假声明；finally 还原 dist
+        originalDistForNeg = fs.readFileSync(DIST);
         distContent += "\nvar SyncSerializer = {};\n";
         fs.writeFileSync(DIST, distContent, "utf8");
         console.log("[NEG] injected SyncSerializer into dist for negative check");
     }
+    try {
 
     checkSyntax(DIST);
     if (!negative) checkSyntax(ROOT_USER);
@@ -101,6 +106,17 @@ function main() {
     }
 
     console.log("\n✅ verify:build 全部通过");
+    } finally {
+        if (originalDistForNeg) {
+            fs.writeFileSync(DIST, originalDistForNeg);
+            console.log("[NEG] restored dist after negative check");
+        }
+    }
 }
 
-main();
+try {
+    main();
+} catch (e) {
+    if (e && e.code === "VERIFY_BUILD_FAIL") process.exit(1);
+    throw e;
+}

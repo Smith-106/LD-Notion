@@ -1,21 +1,25 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.7
+// @version      3.14.8
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
 // @downloadURL  https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
 // @match        https://linux.do/*
+// @match        https://*.linux.do/*
 // @match        https://www.notion.so/*
 // @match        https://notion.so/*
+// @match        https://*.notion.so/*
 // @match        https://github.com/*
 // @match        https://www.github.com/*
 // @match        https://www.zhihu.com/*
 // @match        https://zhuanlan.zhihu.com/*
 // (audit) broad include catch-all removed; supported sites use explicit @match above.
-// Generic sites: add Tampermonkey user @match as needed; @exclude retained as defense-in-depth.
+// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so).
+// Gap: SiteDetector does not treat gist.github.com as GitHub; userscript likewise omits it.
+// Generic sites: add Tampermonkey user @match as needed; extension still has http(s)://*/* ; @exclude retained as defense-in-depth.
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
 // @exclude      https://www.baidu.com/*
@@ -5758,31 +5762,46 @@ Content-Type: ${contentType}\r
       };
       var ConfirmationDialog3 = {
         dialogElement: null,
+        _queue: [],
+        _activeResolve: null,
         // 显示确认对话框
         // 支持 onConfirm/confirmText(三模型共识 F-UI-01):确认时调用 onConfirm 回调,
         // 按钮文案用 confirmText(默认「确认」),修复「重新导出/删除模板确认后零执行」瘫痪。
+        // v3.14.8: 重入改为队列(不再 resolve(false) 伪取消); close() 会 resolve(false);
+        // 名称确认提示用 textContent 展示原文, 比较也用 raw itemName。
         show: (options) => {
           return new Promise((resolve) => {
             if (ConfirmationDialog3.dialogElement) {
-              resolve(false);
+              ConfirmationDialog3._queue.push({ options, resolve });
               return;
             }
-            const {
-              title = "\u786E\u8BA4\u64CD\u4F5C",
-              message = "\u786E\u5B9A\u8981\u6267\u884C\u6B64\u64CD\u4F5C\u5417\uFF1F",
-              itemName = "",
-              countdown = 5,
-              requireNameInput = false,
-              confirmText = "\u786E\u8BA4",
-              onConfirm = null
-            } = options;
-            const escapeHtml = Utils2.escapeHtml;
-            const dialog = document.createElement("div");
-            dialog.className = "ldb-confirm-overlay";
-            dialog.setAttribute("role", "dialog");
-            dialog.setAttribute("aria-modal", "true");
-            dialog.setAttribute("aria-labelledby", "ldb-confirm-title");
-            dialog.innerHTML = `
+            ConfirmationDialog3._present(options, resolve);
+          });
+        },
+        _drainQueue: () => {
+          if (ConfirmationDialog3.dialogElement) return;
+          const next = ConfirmationDialog3._queue.shift();
+          if (!next) return;
+          ConfirmationDialog3._present(next.options, next.resolve);
+        },
+        _present: (options, resolve) => {
+          const {
+            title = "\u786E\u8BA4\u64CD\u4F5C",
+            message = "\u786E\u5B9A\u8981\u6267\u884C\u6B64\u64CD\u4F5C\u5417\uFF1F",
+            itemName = "",
+            countdown = 5,
+            requireNameInput = false,
+            confirmText = "\u786E\u8BA4",
+            onConfirm = null
+          } = options || {};
+          const escapeHtml = Utils2.escapeHtml;
+          const rawItemName = String(itemName || "");
+          const dialog = document.createElement("div");
+          dialog.className = "ldb-confirm-overlay";
+          dialog.setAttribute("role", "dialog");
+          dialog.setAttribute("aria-modal", "true");
+          dialog.setAttribute("aria-labelledby", "ldb-confirm-title");
+          dialog.innerHTML = `
                 <div class="ldb-confirm-dialog">
                     <div class="ldb-confirm-header">
                         <span class="ldb-confirm-icon">\u26A0\uFE0F</span>
@@ -5790,12 +5809,12 @@ Content-Type: ${contentType}\r
                     </div>
                     <div class="ldb-confirm-body">
                         <p class="ldb-confirm-message">${escapeHtml(message)}</p>
-                        ${itemName ? `<p class="ldb-confirm-item">\u76EE\u6807: <strong>${escapeHtml(itemName)}</strong></p>` : ""}
+                        ${rawItemName ? `<p class="ldb-confirm-item">\u76EE\u6807: <strong class="ldb-confirm-item-name"></strong></p>` : ""}
                         ${requireNameInput ? `
                             <div class="ldb-confirm-input-group">
                                 <label>\u8BF7\u8F93\u5165\u540D\u79F0\u786E\u8BA4:</label>
-                                <input type="text" class="ldb-confirm-input" placeholder="${escapeHtml(itemName)}" id="ldb-confirm-name-input">
-                                <div class="ldb-confirm-hint">\u8BF7\u8F93\u5165 "${escapeHtml(itemName)}" \u4EE5\u786E\u8BA4\u64CD\u4F5C</div>
+                                <input type="text" class="ldb-confirm-input" id="ldb-confirm-name-input">
+                                <div class="ldb-confirm-hint">\u8BF7\u8F93\u5165\u300C<span class="ldb-confirm-hint-name"></span>\u300D\u4EE5\u786E\u8BA4\u64CD\u4F5C</div>
                             </div>
                         ` : ""}
                     </div>
@@ -5810,90 +5829,107 @@ Content-Type: ${contentType}\r
                     </div>
                 </div>
             `;
-            document.body.appendChild(dialog);
-            ConfirmationDialog3.dialogElement = dialog;
-            const okBtn = dialog.querySelector("#ldb-confirm-ok");
-            const cancelBtn = dialog.querySelector("#ldb-confirm-cancel");
-            const countdownEl = dialog.querySelector("#ldb-confirm-countdown");
-            const nameInput = dialog.querySelector("#ldb-confirm-name-input");
-            let remaining = countdown;
-            let canConfirm = !requireNameInput;
-            let settled = false;
-            const cleanup = () => {
-              if (settled) return;
-              settled = true;
-              clearInterval(timer);
-              document.removeEventListener("keydown", escHandler);
-              dialog.remove();
-              if (ConfirmationDialog3.dialogElement === dialog) {
-                ConfirmationDialog3.dialogElement = null;
-              }
-            };
-            const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
-            if (countdownFill) {
-              requestAnimationFrame(() => {
-                countdownFill.style.width = "0%";
-                countdownFill.style.transition = `width ${countdown}s linear`;
-              });
+          const itemNameEl = dialog.querySelector(".ldb-confirm-item-name");
+          if (itemNameEl) itemNameEl.textContent = rawItemName;
+          const hintNameEl = dialog.querySelector(".ldb-confirm-hint-name");
+          if (hintNameEl) hintNameEl.textContent = rawItemName;
+          const nameInputEl = dialog.querySelector("#ldb-confirm-name-input");
+          if (nameInputEl) nameInputEl.placeholder = rawItemName;
+          document.body.appendChild(dialog);
+          ConfirmationDialog3.dialogElement = dialog;
+          ConfirmationDialog3._activeResolve = resolve;
+          const okBtn = dialog.querySelector("#ldb-confirm-ok");
+          const cancelBtn = dialog.querySelector("#ldb-confirm-cancel");
+          const countdownEl = dialog.querySelector("#ldb-confirm-countdown");
+          const nameInput = dialog.querySelector("#ldb-confirm-name-input");
+          let remaining = countdown;
+          let canConfirm = !requireNameInput;
+          let settled = false;
+          const cleanup = (result) => {
+            if (settled) return;
+            settled = true;
+            clearInterval(timer);
+            document.removeEventListener("keydown", escHandler);
+            dialog.remove();
+            if (ConfirmationDialog3.dialogElement === dialog) {
+              ConfirmationDialog3.dialogElement = null;
             }
-            const timer = setInterval(() => {
-              remaining--;
-              countdownEl.textContent = remaining;
-              if (remaining <= 0) {
-                clearInterval(timer);
-                countdownEl.parentElement.textContent = confirmText;
-                if (canConfirm) {
-                  okBtn.disabled = false;
-                }
-              }
-            }, 1e3);
-            dialog._countdownTimer = timer;
-            if (nameInput) {
-              nameInput.oninput = () => {
-                canConfirm = nameInput.value.trim() === itemName;
-                if (remaining <= 0 && canConfirm) {
-                  okBtn.disabled = false;
-                } else {
-                  okBtn.disabled = true;
-                }
-              };
-              nameInput.focus();
+            if (ConfirmationDialog3._activeResolve === resolve) {
+              ConfirmationDialog3._activeResolve = null;
             }
-            cancelBtn.onclick = () => {
-              cleanup();
-              resolve(false);
-            };
-            okBtn.onclick = () => {
-              if (okBtn.disabled) return;
-              cleanup();
-              resolve(true);
-              if (typeof onConfirm === "function") {
-                try {
-                  onConfirm();
-                } catch (error) {
-                  console.error("[LD-Notion] ConfirmationDialog onConfirm \u6267\u884C\u5931\u8D25:", error);
-                }
-              }
-            };
-            const escHandler = (e) => {
-              if (e.key === "Escape") {
-                cleanup();
-                resolve(false);
-              }
-            };
-            document.addEventListener("keydown", escHandler);
-            cancelBtn.focus();
-          });
-        },
-        // 关闭对话框
-        close: () => {
-          if (ConfirmationDialog3.dialogElement) {
-            if (ConfirmationDialog3.dialogElement._countdownTimer) {
-              clearInterval(ConfirmationDialog3.dialogElement._countdownTimer);
-            }
-            ConfirmationDialog3.dialogElement.remove();
-            ConfirmationDialog3.dialogElement = null;
+            resolve(result);
+            ConfirmationDialog3._drainQueue();
+          };
+          dialog._ldConfirmCleanup = cleanup;
+          const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
+          if (countdownFill) {
+            requestAnimationFrame(() => {
+              countdownFill.style.width = "0%";
+              countdownFill.style.transition = `width ${countdown}s linear`;
+            });
           }
+          const timer = setInterval(() => {
+            remaining--;
+            countdownEl.textContent = remaining;
+            if (remaining <= 0) {
+              clearInterval(timer);
+              countdownEl.parentElement.textContent = confirmText;
+              if (canConfirm) {
+                okBtn.disabled = false;
+              }
+            }
+          }, 1e3);
+          dialog._countdownTimer = timer;
+          if (nameInput) {
+            nameInput.oninput = () => {
+              canConfirm = nameInput.value.trim() === rawItemName;
+              if (remaining <= 0 && canConfirm) {
+                okBtn.disabled = false;
+              } else {
+                okBtn.disabled = true;
+              }
+            };
+            nameInput.focus();
+          }
+          cancelBtn.onclick = () => {
+            cleanup(false);
+          };
+          okBtn.onclick = () => {
+            if (okBtn.disabled) return;
+            cleanup(true);
+            if (typeof onConfirm === "function") {
+              try {
+                onConfirm();
+              } catch (error) {
+                console.error("[LD-Notion] ConfirmationDialog onConfirm \u6267\u884C\u5931\u8D25:", error);
+              }
+            }
+          };
+          const escHandler = (e) => {
+            if (e.key === "Escape") {
+              cleanup(false);
+            }
+          };
+          document.addEventListener("keydown", escHandler);
+          if (!nameInput) cancelBtn.focus();
+        },
+        // 关闭对话框(外部关闭视为取消, resolve false)
+        close: () => {
+          const dialog = ConfirmationDialog3.dialogElement;
+          if (!dialog) return;
+          if (typeof dialog._ldConfirmCleanup === "function") {
+            dialog._ldConfirmCleanup(false);
+            return;
+          }
+          if (dialog._countdownTimer) {
+            clearInterval(dialog._countdownTimer);
+          }
+          dialog.remove();
+          ConfirmationDialog3.dialogElement = null;
+          const resolve = ConfirmationDialog3._activeResolve;
+          ConfirmationDialog3._activeResolve = null;
+          if (typeof resolve === "function") resolve(false);
+          ConfirmationDialog3._drainQueue();
         }
       };
       var UndoManager2 = {
@@ -20157,7 +20193,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           ...authAbortInfo ? { authAborted: authAbortInfo } : {}
         };
       };
-      var exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress) => {
+      var exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress, control = {}) => {
         if (SyncLock.isExporting) {
           return {
             success: [],
@@ -20184,6 +20220,12 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         SyncLock.isExporting = true;
         try {
           for (let i = 0; i < selectedItems.length; i++) {
+            if (control.isCancelled) break;
+            while (control.isPaused) {
+              await Utils2.sleep(200);
+              if (control.isCancelled) break;
+            }
+            if (control.isCancelled) break;
             const item = selectedItems[i];
             const bookmark = item.raw;
             const sourceType = item.sourceType;
@@ -20270,7 +20312,13 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }
           SyncLock.isExporting = false;
         }
-        return { success, failed, skipped: [] };
+        return {
+          success,
+          failed,
+          skipped: control.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
+            title: item.title || item.itemKey || "GitHub"
+          })) : []
+        };
       };
       module.exports = {
         sanitizeObsidianFileName,
@@ -24330,7 +24378,14 @@ ${AIService2.isolateContent(JSON.stringify({
           return require_github_obsidian_service().mapGitHubItemsToBookmarks(items, sourceType);
         },
         exportGitHubSelected: async (selectedItems, settings, onProgress) => {
-          return require_github_obsidian_service().exportGitHubSelectedToNotion(selectedItems, settings, onProgress);
+          return require_github_obsidian_service().exportGitHubSelectedToNotion(selectedItems, settings, onProgress, {
+            get isCancelled() {
+              return Exporter2.isCancelled;
+            },
+            get isPaused() {
+              return Exporter2.isPaused;
+            }
+          });
         },
         // 重算导出统计（在列表变更后调用）
         recomputeExportStats: () => {
@@ -26959,14 +27014,16 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               imgMode,
               autoSetupDatabaseProperties: exportType === "database"
             });
-            if (setupResult && !setupResult.success) {
-              return GenericUI2.showStatus(`\u914D\u7F6E\u5931\u8D25: ${setupResult.message || setupResult.error}`, "error");
-            }
             GenericUI2.loadTargetOptionsFromCache(apiKey);
-            GenericUI2.showStatus("\u914D\u7F6E\u5DF2\u4FDD\u5B58", "success");
             panel.querySelector("#gclip-settings").style.display = "none";
             panel.querySelector("#gclip-export").style.display = "block";
             panel.querySelector("#gclip-show-settings").style.display = "block";
+            if (setupResult && !setupResult.success) {
+              const detail = setupResult.message || setupResult.error || "\u672A\u77E5\u9519\u8BEF";
+              GenericUI2.showStatus(`\u76EE\u6807\u5DF2\u4FDD\u5B58\uFF0C\u4F46\u6570\u636E\u5E93\u5C5E\u6027\u914D\u7F6E\u5931\u8D25: ${detail}\uFF08\u4ECD\u53EF\u5C1D\u8BD5\u5BFC\u51FA\uFF09`, "warning");
+              return;
+            }
+            GenericUI2.showStatus("\u914D\u7F6E\u5DF2\u4FDD\u5B58", "success");
           });
           NotionOAuth2.attachControls({
             root: panel,

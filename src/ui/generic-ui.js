@@ -594,16 +594,17 @@ const GenericUI = {
                 imgMode,
                 autoSetupDatabaseProperties: exportType === "database",
             });
-            if (setupResult && !setupResult.success) {
-                return GenericUI.showStatus(`配置失败: ${setupResult.message || setupResult.error}`, "error");
-            }
-
+            // v3.14.8: 目标已写入 TargetState；即便 setupDatabaseProperties 失败也进入导出区并警告
             GenericUI.loadTargetOptionsFromCache(apiKey);
-
-            GenericUI.showStatus("配置已保存", "success");
             panel.querySelector("#gclip-settings").style.display = "none";
             panel.querySelector("#gclip-export").style.display = "block";
             panel.querySelector("#gclip-show-settings").style.display = "block";
+            if (setupResult && !setupResult.success) {
+                const detail = setupResult.message || setupResult.error || "未知错误";
+                GenericUI.showStatus(`目标已保存，但数据库属性配置失败: ${detail}（仍可尝试导出）`, "warning");
+                return;
+            }
+            GenericUI.showStatus("配置已保存", "success");
         });
 
         NotionOAuth.attachControls({

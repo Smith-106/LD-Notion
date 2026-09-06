@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.7`
+- 当前仓库源码版本：`v3.14.8`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -130,6 +130,9 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 > 当前优先支持：Chrome / Edge（脚本版与独立扩展版均按这两种浏览器验证）
 
 ### 方式 A：油猴脚本（推荐）
+
+> **v3.14.8 提示**：油猴脚本仅匹配 Linux.do / Notion / GitHub / 知乎（含 `*.linux.do` / `*.notion.so` 子域）；**不再**在任意网页自动出现面板。通用剪藏请用 Chrome 扩展，或自行添加 Tampermonkey `@match`。
+
 
 #### 1. 安装 Tampermonkey
 
@@ -385,6 +388,12 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.8
+
+- userscript match docs + subdomain @match
+- LD_VERIFY_STRICT + verify-build negative restore
+- ConfirmationDialog queue/close; generic save warning; GitHub Notion pause/cancel
 
 ### v3.14.7
 

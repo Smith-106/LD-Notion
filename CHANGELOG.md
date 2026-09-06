@@ -1,5 +1,14 @@
 # 更新日志
 
+## [3.14.8] - 2026-09-07
+
+### fix delivery leftover
+
+- verify STRICT + win32 + negative restore
+- ConfirmationDialog queue/close; generic save warning; GitHub Notion pause/cancel
+- docs: userscript no longer matches arbitrary pages; list @match; extension still generic
+
+
 ## [3.14.7] - 2026-09-06
 
 ### 修复（31 条 UI 审计发现全量修复 + 导出几分钟后 token invalid 全部失败根因修复）

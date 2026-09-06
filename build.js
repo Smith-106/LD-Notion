@@ -13,21 +13,25 @@ const path = require("path");
 const USERSCRIPT_HEADER = `// ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.7
+// @version      3.14.8
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
 // @downloadURL  https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
 // @match        https://linux.do/*
+// @match        https://*.linux.do/*
 // @match        https://www.notion.so/*
 // @match        https://notion.so/*
+// @match        https://*.notion.so/*
 // @match        https://github.com/*
 // @match        https://www.github.com/*
 // @match        https://www.zhihu.com/*
 // @match        https://zhuanlan.zhihu.com/*
 // (audit) broad include catch-all removed; supported sites use explicit @match above.
-// Generic sites: add Tampermonkey user @match as needed; @exclude retained as defense-in-depth.
+// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so).
+// Gap: SiteDetector does not treat gist.github.com as GitHub; userscript likewise omits it.
+// Generic sites: add Tampermonkey user @match as needed; extension still has http(s)://*/* ; @exclude retained as defense-in-depth.
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
 // @exclude      https://www.baidu.com/*

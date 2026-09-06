@@ -280,8 +280,9 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
  * @param {Array} selectedItems
  * @param {Object} settings - { apiKey, databaseId, token }
  * @param {Function} onProgress
+ * @param {Object} control - { isCancelled, isPaused } 取消/暂停控制（与 Obsidian 路径同构）
  */
-const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress) => {
+const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress, control = {}) => {
     // v3.14.7 (REV-01 UI-05): GitHub 路径补 SyncLock 重入守卫——与 LinuxDo 路径
     // (export/index.js exportBookmarks)同构: AI 写/自动同步/手动导出并发时仅一方执行,
     // 避免双建页与互斥纪律缺口。
@@ -317,6 +318,13 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress)
 
     try {
     for (let i = 0; i < selectedItems.length; i++) {
+        if (control.isCancelled) break;
+        while (control.isPaused) {
+            await Utils.sleep(200);
+            if (control.isCancelled) break;
+        }
+        if (control.isCancelled) break;
+
         const item = selectedItems[i];
         const bookmark = item.raw;
         const sourceType = item.sourceType;
@@ -403,7 +411,15 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress)
         SyncLock.isExporting = false;
     }
 
-    return { success, failed, skipped: [] };
+    return {
+        success,
+        failed,
+        skipped: control.isCancelled
+            ? selectedItems.slice(success.length + failed.length).map((item) => ({
+                title: item.title || item.itemKey || "GitHub",
+            }))
+            : [],
+    };
 };
 
 module.exports = {

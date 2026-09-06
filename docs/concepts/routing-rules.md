@@ -50,7 +50,7 @@ flowchart TD
 | 2 | GitHub URL 或仓库元信息 | 匹配 repository、issue、discussion 或 README | 使用 GitHubAPI / GitHubExporter | 检查 GitHub 请求限制与目标写入权限 | 保存 URL、标题和基础元数据，跳过深度内容。 |
 | 3 | chrome.bookmarks 可用性 | 浏览器书签桥接扩展或独立扩展可用 | 使用 BookmarkBridge / BookmarkExporter | 检查扩展权限与用户选择范围 | 提示安装桥接扩展或改用手动网页剪藏。 |
 | 4 | Zhihu URL 或页面结构 | 匹配知乎内容页 | 使用 ZhihuAPI 或页面解析 | 检查内容可访问性 | 使用 Generic Web 摘要路径。 |
-| 5 | 任意网页 URL | 未匹配专用来源 | 使用 Generic Web 剪藏 | 检查页面可读内容 | 保存标题、URL 和用户选中文本。 |
+| 5 | 通用网页 URL | 扩展已注入，或油猴已添加用户 `@match`，且未匹配专用来源 | 使用 Generic Web 剪藏 | 检查页面可读内容；油猴默认不注入任意网页 | 保存标题、URL 和用户选中文本；无注入时提示改用扩展或添加 `@match`。 |
 
 ### Destination routing
 

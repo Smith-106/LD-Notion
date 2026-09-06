@@ -213,7 +213,12 @@ function verifyChromeManifest() {
     // CI 链路中 verify:equivalence 先于 build:extension 执行,此时 chrome-extension-full/ 尚未生成;
     // 该目录的 manifest 已由 verify:extension:surfaces(bounded/完整构建)覆盖验证,此处存在时复核。
     if (!fs.existsSync(CHROME_MANIFEST)) {
-        console.log(`  [SKIP] chrome-extension-full/manifest.json 不存在(构建产物,由 verify:extension:surfaces 覆盖),跳过`);
+        const __ldStrictMsg = `  [SKIP] chrome-extension-full/manifest.json 不存在(构建产物,由 verify:extension:surfaces 覆盖),跳过`;
+        if (process.env.LD_VERIFY_STRICT === "1") {
+            console.error("  [FAIL] chrome-extension-full/manifest.json missing under LD_VERIFY_STRICT");
+            throw new Error("missing chrome-extension-full/manifest.json under LD_VERIFY_STRICT");
+        }
+        console.log(__ldStrictMsg);
         return;
     }
     const bridgeManifestSource = readIfExists(CHROME_MANIFEST);

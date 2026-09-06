@@ -19,7 +19,7 @@ npm run verify:baseline   # 测试 + 语法检查 + UI 校验(改动前的基线
 
 ## 项目速览
 
-LD-Notion Hub v3.14.7 是 **Tampermonkey 用户脚本 + Chrome 扩展**,统一连接 Linux.do、GitHub、浏览器书签、RSS、知乎 → Notion。**纯前端,无后端/服务端,无外部数据库。**
+LD-Notion Hub v3.14.8 是 **Tampermonkey 用户脚本 + Chrome 扩展**,统一连接 Linux.do、GitHub、浏览器书签、RSS、知乎 → Notion。**纯前端,无后端/服务端,无外部数据库。**
 
 | 维度 | 约定 |
 | --- | --- |

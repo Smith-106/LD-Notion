@@ -86,7 +86,7 @@ npm run verify:extension:bounded
 2. 如涉及扩展形态，再跑 `npm run verify:extension:bounded`
 3. 需要生成默认安装目录时执行 `npm run build:extension`
 4. 想一次跑完自动化交付门槛，就执行 `npm run verify:delivery`
-5. 最后按 `docs/ui-regression-checklist.md` 检查 Linux.do / Notion / 通用网页 / `chrome-extension-full`
+5. 最后按 `docs/ui-regression-checklist.md` 检查 Linux.do / Notion / 知乎 / GitHub；通用网页剪藏以 `chrome-extension-full` 为准（油猴不再默认匹配任意网页）
 
 <!-- 📸 独立扩展安装完成 -->
 

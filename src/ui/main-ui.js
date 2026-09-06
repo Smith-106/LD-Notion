@@ -2440,7 +2440,10 @@ const UI = {
     },
 
     exportGitHubSelected: async (selectedItems, settings, onProgress) => {
-        return require("../import/github-obsidian-service").exportGitHubSelectedToNotion(selectedItems, settings, onProgress);
+        return require("../import/github-obsidian-service").exportGitHubSelectedToNotion(selectedItems, settings, onProgress, {
+            get isCancelled() { return Exporter.isCancelled; },
+            get isPaused() { return Exporter.isPaused; },
+        });
     },
 
     // 重算导出统计（在列表变更后调用）
