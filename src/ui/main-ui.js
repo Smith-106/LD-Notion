@@ -510,6 +510,7 @@ const UI = {
                 <div class="ldb-tab-content" data-tab-content="ai" role="tabpanel" id="ldb-tab-ai">
                     <div class="ldb-section">
                         <!-- 对话区域 -->
+                        <!-- v3.14.7 (REV-27 UI-13): 聊天容器 aria-live=polite —— AI 流式回复对辅助技术可感知 -->
                         <div class="ldb-chat-container" id="ldb-chat-messages" aria-live="polite" aria-relevant="additions">
                             ${AIWelcomeUI.render(personaName)}
                         </div>

@@ -1,0 +1,45 @@
+✅ CONFIG.STORAGE_KEYS has all required keys
+✅ CONFIG.DEFAULTS has sensible values
+✅ CONFIG.EXPORT_TARGET_TYPES has database and page
+✅ CONFIG.PERMISSION_LEVELS are ordered
+✅ MSG constants are non-empty strings
+✅ TargetState.normalizeNotionId: extracts 32-char id
+✅ TargetState.normalizeNotionId: removes dashes
+✅ TargetState.normalizeNotionId: returns empty for empty input
+✅ TargetState.normalizeAITarget: handles __all__
+✅ TargetState.normalizeAITarget: handles page: prefix
+✅ TargetState.normalizeAITarget: returns empty for empty
+✅ TargetState.normalizeAITarget: normalizes database id
+✅ TargetState.parseAITarget: database mode
+✅ TargetState.parseAITarget: page mode
+✅ TargetState.parseAITarget: all mode
+✅ TargetState.parseAITarget: default mode for empty
+✅ TargetState.getStoredAITarget: returns exists=false when not set
+✅ TargetState.getStoredAITarget: returns exists=true when set
+✅ TargetState.setAITarget + getStoredAITarget round-trip
+✅ TargetState.setExportTargetType defaults to database
+✅ TargetState.setExportTargetType accepts page
+✅ TargetState.getExportState returns database target by default
+✅ TargetState.getExportState returns page target when configured
+✅ TargetState.saveExportState saves all fields
+✅ OperationGuard.OPERATION_LEVELS: read ops are level 0
+✅ OperationGuard.OPERATION_LEVELS: write ops are level 1
+✅ OperationGuard.OPERATION_LEVELS: advanced ops are level 2
+✅ OperationGuard.canExecute: allows level 0 at permission 0
+✅ OperationGuard.canExecute: denies level 1 at permission 0
+✅ OperationGuard.canExecute: allows level 1 at permission 1
+✅ OperationGuard.canExecute: allows level 2 at permission 2
+OperationGuard: 操作 "nonexistentOp" 未定义权限级别，默认拒绝
+✅ OperationGuard.canExecute: denies undefined operations
+✅ OperationGuard.isDangerous: deletePage and deleteBlock
+✅ OperationLog.collectRedactionHints: detects secret-like fields and target ids
+✅ OperationLog.normalizeAuditEntry: produces structured audit event fields
+✅ Utils.extractNotionId: extracts from Notion URL
+✅ Utils.extractNotionId: normalizes dashed id
+✅ Utils.extractNotionId: returns empty for no match
+✅ Utils.extractNotionId: returns raw 32-char string unchanged
+✅ Utils.extractQuotedText: extracts Chinese quoted content
+
+========================================
+Logic module tests: 40 passed, 0 failed
+All logic module tests passed successfully!

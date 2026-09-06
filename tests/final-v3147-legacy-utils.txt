@@ -1,0 +1,22 @@
+Running tests for Utils.getPageTitle...
+
+✅ getPageTitle: returns fallback when page is null
+✅ getPageTitle: returns default fallback when page is undefined
+✅ getPageTitle: returns fallback when properties are missing
+✅ getPageTitle: returns title from "title" property
+✅ getPageTitle: returns title from "标题" property
+✅ getPageTitle: returns title from "Name" property
+✅ getPageTitle: returns title from "名称" property
+✅ getPageTitle: returns title from any property of type "title"
+✅ getPageTitle: respects priority of common names
+✅ getPageTitle: returns fallback when no title property found
+✅ getPageTitle: returns fallback when title array is empty
+✅ extractNotionId: returns raw 32-char notion id
+✅ extractNotionId: normalizes dashed notion id
+✅ extractNotionId: extracts notion id from notion page url
+✅ extractNotionId: returns empty string when notion id is absent
+✅ extractQuotedText: extracts chinese quoted content
+✅ extractQuotedTexts: extracts multiple quoted fragments in order
+✅ extractQuotedTexts: returns empty array when no quoted fragments exist
+
+All tests passed successfully!
