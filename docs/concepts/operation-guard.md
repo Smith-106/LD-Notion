@@ -16,11 +16,13 @@ OperationGuard 不替代 Notion 权限，也不绕过 Integration 的连接范�
 | Level | Name | Capability boundary | Typical operations |
 | --- | --- | --- | --- |
 | 0 | 只读 | 搜索、读取、查看详情，不写入远端目标。 | `search`、`fetchPage`、`fetchBlocks`、`queryDatabase` |
-| 1 | 标准 | 创建页面、追加块、更新属性和普通导入。 | `createDatabasePage`、`updatePage`、`appendBlocks`、`createComment` |
+| 1 | 标准 | 创建页面、追加块、更新属性和普通导入。 | `createDatabasePage`、`updatePage`、`appendBlocks`、`createComment`、`obsidian.writeNote`、`obsidian.writeImage` |
 | 2 | 高级 | 移动、复制、归档、恢复、替换正文和 Agent 批量任务。 | `movePage`、`duplicatePage`、`deletePage`、`restorePage`、`agentTask` |
 | 3 | 管理员 | 管理类或结构类高风险操作。 | 数据库结构调整、维护类操作 |
 
 默认使用标准权限。只读权限适合初次体验；高级和管理员权限应短期开启，用完后降回标准或只读。
+
+> v3.14.7：Obsidian 写笔记/写图片（`obsidian.writeNote`、`obsidian.writeImage`）已登记 `OPERATION_LEVELS` level=1；所有写入统一经 OperationGuard 闸门（`canExecute` + `auditDenied`），禁止裸调绕过（含 UI、GitHub 自动导入与站点面板）。
 
 ## Guard lifecycle
 

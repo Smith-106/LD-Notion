@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.6`
+- 当前仓库源码版本：`v3.14.7`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -385,6 +385,16 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.7
+
+31 条 UI 审计发现全量修复 + 导出几分钟后 token invalid 全部失败根因修复（四因素叠加：`isAuthTerminalError` 消息子串误判致 fail-fast、导出循环固定 `settings.apiKey` 快照遮蔽 OAuth 续签、终态降级残留过期 access token、站设置空输入误清 token 翻 manual）：
+- **认证（P0）**：`isAuthTerminalError` 只信 `error.isAuthTerminal === true` 显式标记（三处）；导出循环每项开工前重解析最新 token；终态降级清残留 `NOTION_API_KEY`；站设置仅显式编辑时清 token；`setManualApiKey` 空值不翻 manual；凭证落盘改 `REDACT_IN_LOGS` 明文脱敏集
+- **安全（P1）**：导出按钮 disabled 提前 + GitHub 导出 SyncLock 重入守卫；Obsidian `writeNote`/`writeImage` 登记 `OPERATION_LEVELS` level=1，4 处裸调点统一经 OperationGuard；工作区洞察 prompt 改 `isolateContent` 隔离
+- **UI（P2/P3）**：ConfirmationDialog 重入闸门 + ARIA 焦点管理；三面板主题重应用；oplog 防抖；option 转义 ×3；原生 confirm 替换 ×2；硬编码 rgba 换设计令牌；savedTab 白名单防选择器注入；时间线 label 转义；聊天容器 aria-live；mini 按钮 aria-label；`AI_TEMPLATES` 容量上限 50 等 31 条全量修复
+- **验证**：vitest 38 文件 755 用例 + legacy 三件套全绿；verify:baseline/build/delivery EXIT=0（295 PASS）
+
+**升级说明**：涉及认证续签与凭证落盘语义变化，安装后请重新授权 Notion（OAuth 一键授权或填入 API Key）。
 
 ### v3.14.6
 

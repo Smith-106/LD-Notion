@@ -77,6 +77,13 @@ Notion 授权只说明 token 有机会访问 workspace，不保证目标已经�
 | `403` | Integration 没有目标权限。 | 检查 Capabilities 与目标 Connections。 |
 | Disconnect 后 Notion 后台仍显示授权 | 本地清除不等于后台撤销。 | 到 Notion Integration 后台撤销授权。 |
 
+## v3.14.7 认证语义变更
+
+- **终态判定只信显式标记**：`isAuthTerminalError` 不再做消息子串匹配（子串会把瞬态续签失败误判为终态 fail-fast），只信任 `error.isAuthTerminal === true` 标记。
+- **导出循环逐项重解析 token**：每次导出项开工前调用 `getAccessToken("")` 重解析最新 token，避免固定 `settings.apiKey` 快照遮蔽 OAuth 续签后的新 token。
+- **空输入不再清 token**：站设置保存时仅显式编辑才清 token，`setManualApiKey` 空值不翻 manual 模式（保护 OAuth 续签状态）。
+- **终态降级清残留**：降级时同步清除残留的 `NOTION_API_KEY`，防止下次导出首项即报 token invalid。
+
 ## Contract
 
 - OAuth 是推荐路径。
