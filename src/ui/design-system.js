@@ -33,6 +33,12 @@ const DesignSystem = {
         DesignSystem._applyTheme();
     },
 
+    // v3.14.7 (REV-05 UI-09): 公开重应用入口——面板/浮动按钮在 initTheme 之后动态创建时
+    // 只带 data-ldb-root 不带 data-ldb-theme, 主题偏好被忽略; 创建方在 append 后调用一次。
+    applyTheme: () => {
+        DesignSystem._applyTheme();
+    },
+
     getEffectiveTheme: () => {
         if (DesignSystem._theme === "auto") {
             return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -115,6 +121,16 @@ const DesignSystem = {
             --ldb-ui-success: #16a34a;
             --ldb-ui-warning: #d97706;
             --ldb-ui-danger: #dc2626;
+
+            /* v3.14.7 (REV-21 UI-12): danger/success/warning alpha 变体——消除硬编码 rgba 绕过令牌 */
+            --ldb-ui-danger-alpha-06: rgba(220, 38, 38, 0.06);
+            --ldb-ui-danger-alpha-12: rgba(239, 68, 68, 0.12);
+            --ldb-ui-danger-alpha-12b: rgba(220, 38, 38, 0.12);
+            --ldb-ui-danger-alpha-35: rgba(220, 38, 38, 0.35);
+            --ldb-ui-success-alpha-06: rgba(22, 163, 74, 0.06);
+            --ldb-ui-success-alpha-12: rgba(22, 163, 74, 0.12);
+            --ldb-ui-success-alpha-35: rgba(22, 163, 74, 0.35);
+            --ldb-ui-warning-alpha-35: rgba(217, 119, 6, 0.35);
 
             --ldb-ui-badge-teal: #0f766e;
             --ldb-ui-badge-blue: #1d4ed8;

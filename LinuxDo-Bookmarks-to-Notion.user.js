@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.6
+// @version      3.14.7
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -329,8 +329,12 @@
           // 每次加载的收藏数量
           UNDO_TIMEOUT: 5e3,
           // 撤销窗口时间 (ms)
-          MAX_LOG_ENTRIES: 100
+          MAX_LOG_ENTRIES: 100,
           // 最大日志条目数
+          // v3.14.7 (REV-09 UI-13): AI 模板容量上限——模板由用户手工添加且无删除上限时
+          // 数组无界增长; 超限保留最旧模板(用户可见列表截断, 不影响既有模板引用)
+          AI_TEMPLATES_MAX: 50
+          // 最大 AI 模板数
         }
       };
       var SUPPORTED_FILE_TYPES2 = Object.freeze(/* @__PURE__ */ new Set([
@@ -2533,7 +2537,7 @@
         setManualApiKey: async (apiKey = "") => {
           const normalized = String(apiKey || "").trim();
           Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, normalized);
-          NotionOAuth2.setAuthMode("manual");
+          if (normalized) NotionOAuth2.setAuthMode("manual");
           NotionOAuth2.syncApiKeyInputs(normalized);
           NotionOAuth2.syncRegisteredControls();
         },
@@ -3024,6 +3028,7 @@
                     return retryResult.access_token;
                   }
                   await NotionOAuth2.setRefreshToken("");
+                  Storage2.remove(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
                   NotionOAuth2.setAuthMode("manual");
                   const message = String((error == null ? void 0 : error.message) || "");
                   const errorCode = String((error == null ? void 0 : error.code) || "").toLowerCase();
@@ -3269,7 +3274,8 @@
         getBookmarkExtensionUrl: () => InstallHelper2.BOOKMARK_EXTENSION_URL,
         renderInstallLink: (label = "\u4E00\u952E\u5B89\u88C5\u6D4F\u89C8\u5668\u6269\u5C55") => {
           const url = InstallHelper2.getBookmarkExtensionUrl();
-          return `<a href="${url}" target="_blank" class="ldb-link">${label}</a>`;
+          const safeLabel = String(label || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+          return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="ldb-link">${safeLabel}</a>`;
         },
         openBookmarkExtensionInstall: () => {
           window.open(InstallHelper2.getBookmarkExtensionUrl(), "_blank", "noopener,noreferrer");
@@ -5356,6 +5362,11 @@ Content-Type: ${contentType}\r
           restorePage: 2,
           createComment: 1,
           agentTask: 2,
+          // v3.14.7 (REV-03 UI-07): Obsidian 写入登记——此前 4 个裸调点(events.js:1335/1380,
+          // github-obsidian-service.js:210, generic-ui.js:704)绕过 OperationGuard, 权限 0 只读
+          // 级仍可写零审计。登记后 writeNote/writeImage 统一经 canExecute 闸门 + auditDenied。
+          "obsidian.writeNote": 1,
+          "obsidian.writeImage": 1,
           // 多端同步(F-SYNC-05, HIGH-1 共识: 必须 P0 静态注册,接线在后)
           "sync.state.pull": 0,
           // 只读拉取 payload
@@ -5751,6 +5762,10 @@ Content-Type: ${contentType}\r
         // 按钮文案用 confirmText(默认「确认」),修复「重新导出/删除模板确认后零执行」瘫痪。
         show: (options) => {
           return new Promise((resolve) => {
+            if (ConfirmationDialog3.dialogElement) {
+              resolve(false);
+              return;
+            }
             const {
               title = "\u786E\u8BA4\u64CD\u4F5C",
               message = "\u786E\u5B9A\u8981\u6267\u884C\u6B64\u64CD\u4F5C\u5417\uFF1F",
@@ -5763,11 +5778,14 @@ Content-Type: ${contentType}\r
             const escapeHtml = Utils2.escapeHtml;
             const dialog = document.createElement("div");
             dialog.className = "ldb-confirm-overlay";
+            dialog.setAttribute("role", "dialog");
+            dialog.setAttribute("aria-modal", "true");
+            dialog.setAttribute("aria-labelledby", "ldb-confirm-title");
             dialog.innerHTML = `
                 <div class="ldb-confirm-dialog">
                     <div class="ldb-confirm-header">
                         <span class="ldb-confirm-icon">\u26A0\uFE0F</span>
-                        <span class="ldb-confirm-title">${escapeHtml(title)}</span>
+                        <span class="ldb-confirm-title" id="ldb-confirm-title">${escapeHtml(title)}</span>
                     </div>
                     <div class="ldb-confirm-body">
                         <p class="ldb-confirm-message">${escapeHtml(message)}</p>
@@ -5799,6 +5817,17 @@ Content-Type: ${contentType}\r
             const nameInput = dialog.querySelector("#ldb-confirm-name-input");
             let remaining = countdown;
             let canConfirm = !requireNameInput;
+            let settled = false;
+            const cleanup = () => {
+              if (settled) return;
+              settled = true;
+              clearInterval(timer);
+              document.removeEventListener("keydown", escHandler);
+              dialog.remove();
+              if (ConfirmationDialog3.dialogElement === dialog) {
+                ConfirmationDialog3.dialogElement = null;
+              }
+            };
             const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
             if (countdownFill) {
               requestAnimationFrame(() => {
@@ -5830,16 +5859,12 @@ Content-Type: ${contentType}\r
               nameInput.focus();
             }
             cancelBtn.onclick = () => {
-              clearInterval(timer);
-              dialog.remove();
-              ConfirmationDialog3.dialogElement = null;
+              cleanup();
               resolve(false);
             };
             okBtn.onclick = () => {
               if (okBtn.disabled) return;
-              clearInterval(timer);
-              dialog.remove();
-              ConfirmationDialog3.dialogElement = null;
+              cleanup();
               resolve(true);
               if (typeof onConfirm === "function") {
                 try {
@@ -5851,14 +5876,12 @@ Content-Type: ${contentType}\r
             };
             const escHandler = (e) => {
               if (e.key === "Escape") {
-                clearInterval(timer);
-                dialog.remove();
-                ConfirmationDialog3.dialogElement = null;
-                document.removeEventListener("keydown", escHandler);
+                cleanup();
                 resolve(false);
               }
             };
             document.addEventListener("keydown", escHandler);
+            cancelBtn.focus();
           });
         },
         // 关闭对话框
@@ -11015,7 +11038,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   { bookmarkUrl: bm.url, itemName: bm.title, reason: String((e == null ? void 0 : e.message) || e) }
                 );
                 failed++;
-                if (e && (e.isAuthTerminal || String((e == null ? void 0 : e.message) || "").includes("Notion OAuth \u7EED\u7B7E\u5931\u8D25"))) {
+                if (e && e.isAuthTerminal === true) {
                   BookmarkExporter2.flushExported();
                   const remainingCount = newBookmarks.length - i - 1;
                   return {
@@ -13851,7 +13874,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           Exporter2.currentIndex = 0;
         },
         // 批量导出:认证终态错误(不可续签的 401)标记检测——系统性失败应中止批次而非逐项重试
-        isAuthTerminalError: (error) => !!(error && (error.isAuthTerminal || String((error == null ? void 0 : error.message) || "").includes("Notion OAuth \u7EED\u7B7E\u5931\u8D25"))),
+        // v3.14.7 (AUD-ARCH-11 回归修复): 仅信 error.isAuthTerminal 标记, 不再用消息子串匹配——
+        // api 层对瞬态续签失败(网络/超时/429/5xx)不带标记只设 60s 冷却, 消息前缀与终态相同,
+        // 子串匹配会把一次网络抖动误判为认证终态而中止整批(用户报「几分钟后全部失败」主因)。
+        isAuthTerminalError: (error) => !!(error && error.isAuthTerminal === true),
         // 认证中止时的剩余项收集:与取消路径同构,但保留原因说明供 UI 报告展示
         _collectSkippedFrom: (bookmarks, remaining) => remaining.map((i) => {
           const b = bookmarks[i];
@@ -13906,6 +13932,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 console.warn("[LD-Notion] onProgress \u56DE\u8C03\u5F02\u5E38:", progressError);
               }
               try {
+                if (!settings.liveApiKey) {
+                  settings.apiKey = NotionOAuth2.getAccessToken("");
+                }
                 await Exporter2.exportTopic(bookmark, settings, (detail) => {
                   try {
                     onProgress == null ? void 0 : onProgress({
@@ -15431,6 +15460,7 @@ ${insight.summary || ""}`,
           GitHubAutoImporter2.updateStatus(`\u274C GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
         } finally {
           GitHubAutoImporter2.isRunning = false;
+          emit("bookmarks:updated");
           emit("sync:center-summary-updated");
         }
       };
@@ -16501,6 +16531,11 @@ ${report}
           Storage2.set(CONFIG2.STORAGE_KEYS.THEME_PREFERENCE, theme);
           DesignSystem2._applyTheme();
         },
+        // v3.14.7 (REV-05 UI-09): 公开重应用入口——面板/浮动按钮在 initTheme 之后动态创建时
+        // 只带 data-ldb-root 不带 data-ldb-theme, 主题偏好被忽略; 创建方在 append 后调用一次。
+        applyTheme: () => {
+          DesignSystem2._applyTheme();
+        },
         getEffectiveTheme: () => {
           if (DesignSystem2._theme === "auto") {
             return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -16575,6 +16610,16 @@ ${report}
             --ldb-ui-success: #16a34a;
             --ldb-ui-warning: #d97706;
             --ldb-ui-danger: #dc2626;
+
+            /* v3.14.7 (REV-21 UI-12): danger/success/warning alpha \u53D8\u4F53\u2014\u2014\u6D88\u9664\u786C\u7F16\u7801 rgba \u7ED5\u8FC7\u4EE4\u724C */
+            --ldb-ui-danger-alpha-06: rgba(220, 38, 38, 0.06);
+            --ldb-ui-danger-alpha-12: rgba(239, 68, 68, 0.12);
+            --ldb-ui-danger-alpha-12b: rgba(220, 38, 38, 0.12);
+            --ldb-ui-danger-alpha-35: rgba(220, 38, 38, 0.35);
+            --ldb-ui-success-alpha-06: rgba(22, 163, 74, 0.06);
+            --ldb-ui-success-alpha-12: rgba(22, 163, 74, 0.12);
+            --ldb-ui-success-alpha-35: rgba(22, 163, 74, 0.35);
+            --ldb-ui-warning-alpha-35: rgba(217, 119, 6, 0.35);
 
             --ldb-ui-badge-teal: #0f766e;
             --ldb-ui-badge-blue: #1d4ed8;
@@ -17411,11 +17456,17 @@ ${report}
             minHeight = 200,
             maxWidth = 800
           } = options;
+          PanelResize2._resizeTargets = PanelResize2._resizeTargets || /* @__PURE__ */ new Map();
+          if (storageKey) {
+            PanelResize2._resizeTargets.set(storageKey, element);
+          }
           PanelResize2.resetSize = (key) => {
+            const targets = PanelResize2._resizeTargets || /* @__PURE__ */ new Map();
+            const target = key && targets.get(key) || (targets.size > 0 ? targets.values().next().value : null);
             if (key) Storage2.remove(key);
-            if (element) {
-              element.style.width = "";
-              element.style.maxHeight = "";
+            if (target) {
+              target.style.width = "";
+              target.style.maxHeight = "";
             }
           };
           PanelResize2.injectStyles();
@@ -17608,10 +17659,13 @@ ${report}
         },
         _persistProvidedSensitiveEntries: async (entries = {}) => {
           for (const [key, value] of Object.entries(entries)) {
-            if (!CredentialVault2.isSensitiveKey(key)) continue;
+            if (!CredentialVault2.REDACT_IN_LOGS.has(key)) continue;
             const normalized = String(value || "").trim();
-            if (!normalized) continue;
-            await CredentialVault2.set(key, normalized);
+            if (!normalized) {
+              Storage2.remove(key);
+              continue;
+            }
+            Storage2.set(key, normalized);
           }
         },
         _saveNotionSiteSettings: async (payload = {}) => {
@@ -17950,6 +18004,14 @@ ${report}
                 color: var(--ldb-ui-badge-blue);
                 border-color: var(--ldb-ui-focus-ring);
                 background: rgba(59, 130, 246, 0.14);
+            }
+
+            /* v3.14.7 (REV-29 UI-25): .ldb-highlight \u7C7B\u6B64\u524D\u4E0D\u5B58\u5728, OAuth \u540E\u300C\u8BF7\u9009\u62E9\u5BFC\u51FA\u76EE\u6807\u300D
+               \u9AD8\u4EAE\u53CD\u9988\u4E3A\u89C6\u89C9\u7A7A\u64CD\u4F5C\u2014\u2014\u8865\u5B9A\u4E49(\u590D\u7528 focus-ring \u4EE4\u724C) */
+            .ldb-highlight {
+                border-color: var(--ldb-ui-focus-ring) !important;
+                box-shadow: 0 0 0 3px var(--ldb-ui-focus-ring);
+                transition: box-shadow 0.3s ease, border-color 0.3s ease;
             }
 
             .ldb-body {
@@ -18471,7 +18533,7 @@ ${report}
                 color: var(--ldb-ui-text);
                 border-radius: var(--ldb-ui-radius-sm);
                 border: 1px dashed color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 75%);
-                background: rgba(15, 23, 42, 0.04);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 96%);
                 padding: var(--ldb-ui-spacing-xl);
                 max-height: 280px;
                 overflow: auto;
@@ -19008,6 +19070,7 @@ ${report}
           }
           document.body.appendChild(btn);
           NotionSiteUI2.floatBtn = btn;
+          DesignSystem2.applyTheme();
           return btn;
         },
         // 创建面板
@@ -19067,7 +19130,7 @@ ${report}
                 <div class="ldb-notion-toggle-content collapsed" id="ldb-notion-settings-content">
                     <div class="ldb-input-group ldb-mt-12">
                         <label class="ldb-label" for="ldb-notion-api-key">Notion API Key</label>
-                        <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx...">
+                        <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx..." data-touched="false">
                     </div>
                     <div class="ldb-input-group">
                         <label class="ldb-label">Notion OAuth\uFF08\u516C\u5F00\u96C6\u6210\uFF09</label>
@@ -19213,6 +19276,7 @@ ${report}
           document.body.appendChild(panel);
           NotionSiteUI2.panel = panel;
           NotionSiteUI2._abortController = new AbortController();
+          DesignSystem2.applyTheme();
           const stopPropagation = (e) => {
             if (e.key === "Escape") return;
             e.stopPropagation();
@@ -19296,7 +19360,9 @@ ${report}
               await UICommandService2.execute("save_command_boundary_settings", {
                 scope: "notion-site",
                 liveApiKey: panel.querySelector("#ldb-notion-api-key").value.trim(),
-                clearManualApiKey: true,
+                // v3.14.7: 仅用户显式编辑过输入框时才清空已存 token——
+                // 此前恒传 true 导致 manual 模式改任意设置(输入框 placeholder 态)即抹掉 token
+                clearManualApiKey: panel.querySelector("#ldb-notion-api-key").dataset.touched === "true",
                 aiTargetValue: panel.querySelector("#ldb-notion-ai-target-db").value,
                 aiService: panel.querySelector("#ldb-notion-ai-service").value,
                 aiModel: panel.querySelector("#ldb-notion-ai-model").value,
@@ -19320,6 +19386,7 @@ ${report}
             } catch (error) {
               NotionSiteUI2.showStatus(`\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25\uFF1A${error.message}`, "error");
             } finally {
+              panel.querySelector("#ldb-notion-api-key").dataset.touched = "false";
               saveBtn.textContent = originalText;
               saveBtn.disabled = false;
             }
@@ -19431,6 +19498,10 @@ ${report}
         loadConfig: () => {
           const panel = NotionSiteUI2.panel;
           panel.querySelector("#ldb-notion-api-key").value = "";
+          panel.querySelector("#ldb-notion-api-key").dataset.touched = "false";
+          panel.querySelector("#ldb-notion-api-key").oninput = () => {
+            panel.querySelector("#ldb-notion-api-key").dataset.touched = "true";
+          };
           panel.querySelector("#ldb-notion-ai-service").value = Storage2.get(CONFIG2.STORAGE_KEYS.AI_SERVICE, CONFIG2.DEFAULTS.aiService);
           panel.querySelector("#ldb-notion-ai-api-key").value = "";
           panel.querySelector("#ldb-notion-ai-base-url").value = Storage2.get(CONFIG2.STORAGE_KEYS.AI_BASE_URL, "");
@@ -19618,7 +19689,7 @@ ${report}
             options += "</optgroup>";
           }
           if (savedValue && savedValue !== "__all__" && !knownIds.has(savedValue)) {
-            options += `<option value="${savedValue}">${Utils2.escapeHtml(
+            options += `<option value="${Utils2.escapeHtml(savedValue)}">${Utils2.escapeHtml(
               NotionSiteUI2.getAITargetCompatibilityOptionLabel(savedValue, {
                 storedTarget,
                 databases,
@@ -19796,9 +19867,18 @@ ${report}
       var { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
       var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
       var { OperationGuard: OperationGuard2 } = require_security();
+      var { SyncLock } = require_sync_lock();
       var sanitizeObsidianFileName = (name, fallback = "untitled") => {
         const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
         return base || fallback;
+      };
+      var assertObsidianWriteAllowed = (operation, context = {}) => {
+        if (OperationGuard2.canExecute(operation)) return;
+        OperationGuard2.auditDenied(operation, { ...context, trigger: context.trigger || "user_requested_write" }, {
+          phase: "execute",
+          reason: `\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u5199\u5165(${operation})\u9700\u8981 level\u22651\uFF0C\u53EF\u5728\u4E3B\u9762\u677F\u300C\u6743\u9650\u63A7\u5236\u300D\u4E2D\u8C03\u6574\u3002`
+        });
+        throw new Error(`\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u5199\u5165\u9700\u8981 level\u22651\uFF08\u53EF\u5728\u4E3B\u9762\u677F\u300C\u6743\u9650\u63A7\u5236\u300D\u4E2D\u8C03\u6574\uFF09\u3002`);
       };
       var mapGitHubItemsToBookmarks = (items, sourceType) => {
         return (items || []).map((item) => {
@@ -19988,6 +20068,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
             try {
               const note = await buildGitHubObsidianMarkdown(item, settings);
+              assertObsidianWriteAllowed("obsidian.writeNote", { itemKey: item.itemKey, sourceType: item.sourceType, itemName: item.title || item.itemKey });
               const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
               if (!noteResult.ok) throw new Error(noteResult.error);
               if (item.sourceType === "gists") {
@@ -20032,6 +20113,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         };
       };
       var exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress) => {
+        if (SyncLock.isExporting) {
+          return {
+            success: [],
+            failed: [],
+            skipped: (selectedItems || []).map((item) => ({ title: (item == null ? void 0 : item.title) || (item == null ? void 0 : item.itemKey) || "GitHub" })),
+            message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
+          };
+        }
         const { apiKey, databaseId } = settings;
         if (!apiKey || !databaseId) {
           throw new Error("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
@@ -20047,6 +20136,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         const success = [];
         const failed = [];
         let githubDirty = false;
+        SyncLock.isExporting = true;
         try {
           for (let i = 0; i < selectedItems.length; i++) {
             const item = selectedItems[i];
@@ -20113,7 +20203,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 itemKey: item.itemKey,
                 sourceType
               });
-              if (error && (error.isAuthTerminal || String((error == null ? void 0 : error.message) || "").includes("Notion OAuth \u7EED\u7B7E\u5931\u8D25"))) {
+              if (error && error.isAuthTerminal === true) {
                 const skipped = selectedItems.slice(i + 1).map((skippedItem) => ({
                   title: skippedItem.title || skippedItem.itemKey || "GitHub"
                 }));
@@ -20133,6 +20223,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             GitHubAPI2.flushExported();
             GitHubAPI2.flushGistsExported();
           }
+          SyncLock.isExporting = false;
         }
         return { success, failed, skipped: [] };
       };
@@ -22463,7 +22554,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 <div class="ldb-tab-content" data-tab-content="ai" role="tabpanel" id="ldb-tab-ai">
                     <div class="ldb-section">
                         <!-- \u5BF9\u8BDD\u533A\u57DF -->
-                        <div class="ldb-chat-container" id="ldb-chat-messages">
+                        <div class="ldb-chat-container" id="ldb-chat-messages" aria-live="polite" aria-relevant="additions">
                             ${AIWelcomeUI2.render(personaName)}
                         </div>
 
@@ -22955,6 +23046,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           document.body.appendChild(panel);
           UI2.panel = panel;
           UI2.cacheRefs();
+          DesignSystem2.applyTheme();
           UI2.bindEvents();
           UI2.loadConfig();
         },
@@ -22965,6 +23057,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           btn.setAttribute("data-ldb-root", "");
           btn.innerHTML = "\u{1F4DA}";
           btn.title = "\u6253\u5F00\u6536\u85CF\u5BFC\u51FA\u5DE5\u5177";
+          btn.setAttribute("aria-label", "\u6253\u5F00\u6536\u85CF\u5BFC\u51FA\u5DE5\u5177");
           btn.style.display = "none";
           btn.onclick = () => {
             UI2.panel.style.display = "flex";
@@ -23007,6 +23100,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             refs.exportTargetDatabaseRadio.checked = true;
             refs.parentPageGroup.style.display = "none";
             refs.exportTargetTip.textContent = "\u5BFC\u51FA\u4E3A\u6570\u636E\u5E93\u6761\u76EE\uFF0C\u652F\u6301\u7B5B\u9009\u548C\u6392\u5E8F";
+            const hasManualDb = !!String(refs.databaseIdInput.value || "").trim();
+            refs.manualDbWrap.style.display = hasManualDb ? "block" : "none";
           }
           refs.permissionLevelSelect.value = Storage2.get(CONFIG2.STORAGE_KEYS.PERMISSION_LEVEL, CONFIG2.DEFAULTS.permissionLevel);
           refs.requireConfirmCheckbox.checked = Storage2.get(CONFIG2.STORAGE_KEYS.REQUIRE_CONFIRM, CONFIG2.DEFAULTS.requireConfirm);
@@ -23398,7 +23493,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         },
         // 显示状态
         showStatus: (message, type = "info") => {
-          const container = UI2.refs.statusContainer;
+          var _a;
+          const container = (_a = UI2.refs) == null ? void 0 : _a.statusContainer;
+          if (!container) return;
           if (container._statusTimer) clearTimeout(container._statusTimer);
           container.innerHTML = `
             <div class="ldb-status ${Utils2.escapeHtml(type)}">
@@ -23420,8 +23517,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         },
         // 显示进度
         showProgress: (current, total, message) => {
-          const container = UI2.refs.statusContainer;
+          var _a;
+          const container = (_a = UI2.refs) == null ? void 0 : _a.statusContainer;
+          if (!container) return;
           const percent = total > 0 ? Math.round(current / total * 100) : 0;
+          if (container._statusTimer) {
+            clearTimeout(container._statusTimer);
+            container._statusTimer = null;
+          }
           container.innerHTML = `
             <div class="ldb-progress">
                 <div class="ldb-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
@@ -23436,7 +23539,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         },
         // 隐藏进度
         hideProgress: () => {
-          UI2.refs.statusContainer.innerHTML = "";
+          var _a;
+          const container = (_a = UI2.refs) == null ? void 0 : _a.statusContainer;
+          if (!container) return;
+          if (container._statusTimer) {
+            clearTimeout(container._statusTimer);
+            container._statusTimer = null;
+          }
+          container.innerHTML = "";
         },
         // 更新 AI 模型选项
         updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
@@ -23485,7 +23595,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }
           if (restoreValue && !knownValues.has(restoreValue)) {
             const shortId = restoreValue.split(":")[1] || "";
-            options += `<option value="${restoreValue}">\u5DF2\u914D\u7F6E (ID: ${shortId.slice(0, 8)}...)</option>`;
+            const safeRestoreValue = Utils2.escapeHtml(restoreValue);
+            options += `<option value="${safeRestoreValue}">\u5DF2\u914D\u7F6E (ID: ${Utils2.escapeHtml(shortId.slice(0, 8))}...)</option>`;
           }
           select.innerHTML = options;
           if (restoreValue) {
@@ -24031,7 +24142,11 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 "2. \u4F9D\u6B21\u8986\u76D6\u6574\u4F53\u5224\u65AD\u3001\u7ED3\u6784\u7F3A\u53E3\u3001\u8DE8\u6E90\u5173\u8054\u673A\u4F1A\u3001\u4E0B\u4E00\u6B65\u52A8\u4F5C\u3002",
                 "3. \u4E0D\u8981\u91CD\u590D\u539F\u59CB\u6570\u5B57\u8868\u683C\uFF0C\u91CD\u70B9\u505A\u7ED3\u8BBA\u4E0E\u5EFA\u8BAE\u3002",
                 "",
-                JSON.stringify({
+                // v3.14.7 (REV-04 UI-08): label 溯源 Notion 页面标题(常来自不可信导入内容),
+                // 裸 JSON.stringify 注入可让页面内容劫持 AI 意图——统一走 isolateContent
+                // 隔离标签(与全仓其余 12+ AI 请求构造点对齐, 五层防御第①层)。
+                `<user_input>
+${AIService2.isolateContent(JSON.stringify({
                   totalPages: model.totalPages,
                   totalDatabases: model.totalDatabases,
                   sourceBreakdown: model.sourceBreakdown,
@@ -24050,7 +24165,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                   missingSourcePages: model.missingSourcePages,
                   missingDatePages: model.missingDatePages,
                   missingCategoryPages: model.missingCategoryPages
-                }, null, 2)
+                }, null, 2))}
+</user_input>`
               ].join("\n");
               aiSummary = String(await AIService2.requestChat(prompt2, settings, 900) || "").trim();
             }
@@ -24106,9 +24222,11 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           ];
           const timelineMarkup = model.timeline.length > 0 ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
                 <div class="ldb-view-timeline-item">
-                    <div class="ldb-view-timeline-label">${item.label}</div>
+                    <!-- v3.14.7 (REV-25 UI-24): label \u88F8\u63D2\u503C\u8F6C\u4E49\u2014\u2014\u5F53\u524D\u6570\u503C\u6765\u6E90\u4E0D\u53EF\u6CE8\u5165,
+                         \u4E00\u65E6\u751F\u6210\u903B\u8F91\u643A\u5E26\u6765\u6E90\u6587\u672C\u5373\u6210 XSS \u70B9, \u7EDF\u4E00 escapeHtml -->
+                    <div class="ldb-view-timeline-label">${Utils2.escapeHtml(String(item.label || ""))}</div>
                     <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${item.count > 0 ? Math.max(8, UI2.getViewPct(item.count, model.total)) : 0}%;"></div></div>
-                    <div class="ldb-view-timeline-value">${item.count} \u9879 / \u5DF2\u5BFC\u51FA ${item.exported}</div>
+                    <div class="ldb-view-timeline-value">${Utils2.escapeHtml(String(item.count))} \u9879 / \u5DF2\u5BFC\u51FA ${Utils2.escapeHtml(String(item.exported))}</div>
                 </div>
             `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u6570\u636E\u91CC\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u65F6\u95F4\u5B57\u6BB5\u3002</div>`;
           const typeHighlights = model.typeBreakdown.slice(0, 4).map((item) => {
@@ -24205,7 +24323,13 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             selectAll.checked = false;
             selectAll.indeterminate = true;
           }
-          UI2.renderVisualSummary();
+          if (!UI2._selectCountRenderScheduled) {
+            UI2._selectCountRenderScheduled = true;
+            Promise.resolve().then(() => {
+              UI2._selectCountRenderScheduled = false;
+              UI2.renderVisualSummary();
+            });
+          }
         },
         // 显示导出报告
         showReport: (results) => {
@@ -24215,7 +24339,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           html += '<div class="ldb-report-title">\u{1F4CA} \u5BFC\u51FA\u62A5\u544A</div>';
           const authAborted = results.authAborted || (results.aborted === true ? { reason: "\u8BA4\u8BC1\u5931\u8D25" } : null);
           if (authAborted) {
-            html += `<div class="ldb-report-item failed" style="padding:8px 12px;margin-bottom:6px;border-radius:6px;background:rgba(239,68,68,0.12);">
+            html += `<div class="ldb-report-item failed" style="padding:8px 12px;margin-bottom:6px;border-radius:6px;background:var(--ldb-ui-danger-alpha-12);">
                 <div>\u26D4 \u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF1ANotion \u8BA4\u8BC1\u5931\u8D25\uFF08API token \u65E0\u6548\u4E14\u65E0\u6CD5\u81EA\u52A8\u7EED\u7B7E\uFF09</div>
                 <div style="margin-top:4px;font-size:12px;opacity:.85;">${Utils2.escapeHtml(Utils2.truncateText(String(authAborted.reason || ""), 160))}</div>
                 <div style="margin-top:4px;font-size:12px;opacity:.85;">\u8BF7\u68C0\u67E5 Notion API Key \u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743\u540E\uFF0C\u518D\u6B21\u70B9\u51FB\u5BFC\u51FA\u5373\u53EF\u7EED\u4F20\u5269\u4F59\u9879\u3002</div>
@@ -24351,10 +24475,18 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           UI2.miniBtn = UI2.createMiniButton();
           const { on } = require_event_bus();
           on("oplog:changed", () => {
-            var _a;
-            if (((_a = UI2.refs) == null ? void 0 : _a.logPanel) && !UI2.refs.logPanel.classList.contains("collapsed")) {
-              UI2.updateLogPanel();
-            }
+            clearTimeout(UI2._oplogDebounceTimer);
+            UI2._oplogDebounceTimer = setTimeout(() => {
+              var _a;
+              const content = (_a = UI2.refs) == null ? void 0 : _a.logContent;
+              if (content && !content.classList.contains("collapsed")) {
+                try {
+                  UI2.updateLogPanel();
+                } catch (e) {
+                  console.warn("[LD-Notion] \u65E5\u5FD7\u9762\u677F\u6E32\u67D3\u5931\u8D25:", e);
+                }
+              }
+            }, 120);
           });
           on("notify", ({ message, type }) => {
             UI2.showStatus(message, type);
@@ -24366,6 +24498,16 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               } catch (e) {
                 console.warn("[LD-Notion] \u540C\u6B65\u4E2D\u5FC3\u9762\u677F\u6E32\u67D3\u5931\u8D25:", e);
               }
+            }
+            try {
+              UI2.renderSyncChainStatus();
+            } catch (e) {
+              console.warn("[LD-Notion] \u540C\u6B65\u94FE\u72B6\u6001\u6E32\u67D3\u5931\u8D25:", e);
+            }
+            try {
+              UI2.updateExportTargetSummary();
+            } catch (e) {
+              console.warn("[LD-Notion] \u5BFC\u51FA\u76EE\u6807\u6458\u8981\u6E32\u67D3\u5931\u8D25:", e);
             }
           });
           on("bookmarks:updated", () => {
@@ -24553,7 +24695,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             });
           }
           const savedTab = Storage2.get(CONFIG2.STORAGE_KEYS.ACTIVE_TAB, CONFIG2.DEFAULTS.activeTab);
-          const tabBtn = panel.querySelector(`.ldb-tab[data-tab="${savedTab}"]`);
+          const SAFE_TABS = ["bookmarks", "visuals", "ai", "settings"];
+          const safeTab = SAFE_TABS.includes(savedTab) ? savedTab : CONFIG2.DEFAULTS.activeTab;
+          const tabBtn = panel.querySelector(`.ldb-tab[data-tab="${safeTab}"]`);
           if (tabBtn) tabBtn.click();
           const collapseState = Storage2.get(CONFIG2.STORAGE_KEYS.COLLAPSE_STATE, {});
           const collapseSections = [
@@ -24603,20 +24747,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               refs.obsTestStatus.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">\u274C ${Utils2.escapeHtml(e.message)}</span>`;
             }
           };
-          refs.sourceSettingsToggle.onclick = () => {
-            const content = refs.sourceSettingsContent;
-            const arrow = refs.sourceSettingsArrow;
-            content.classList.toggle("collapsed");
-            arrow.textContent = content.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
-            refs.sourceSettingsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
-          };
-          refs.sourcePartitionsToggle.onclick = () => {
-            const content = refs.sourcePartitionsContent;
-            const arrow = refs.sourcePartitionsArrow;
-            content.classList.toggle("collapsed");
-            arrow.textContent = content.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
-            refs.sourcePartitionsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
-          };
           [
             refs.filterToggle,
             refs.aiSettingsToggle,
@@ -24633,27 +24763,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               }
             });
           });
-          collapseSections.forEach(applyCollapse);
-          collapseSections.forEach(bindCollapse);
-          refs.obsTestBtn.onclick = async () => {
-            const url = refs.obsApiUrlInput.value.trim();
-            const key = getSensitiveValue(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, CONFIG2.DEFAULTS.obsApiKey);
-            if (!url || !key) {
-              refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--danger">\u8BF7\u586B\u5199 API \u5730\u5740\u548C Key</span>';
-              return;
-            }
-            refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--accent">\u8FDE\u63A5\u4E2D...</span>';
-            try {
-              const result = await ObsidianAPI2.testConnection(url, key);
-              if (result.ok) {
-                refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--success">\u2705 \u8FDE\u63A5\u6210\u529F</span>';
-              } else {
-                refs.obsTestStatus.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">\u274C ${Utils2.escapeHtml(result.error)}</span>`;
-              }
-            } catch (e) {
-              refs.obsTestStatus.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">\u274C ${Utils2.escapeHtml(e.message)}</span>`;
-            }
-          };
           refs.sourceSelectLinuxdo.onclick = () => {
             UI2.switchBookmarkSource("linuxdo");
           };
@@ -24813,6 +24922,15 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             refs.autoImportOptions.style.display = enabled ? "block" : "none";
             if (enabled) {
               if (cfg.isGitHub) {
+                const githubReady = !!(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "").trim() || Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "").trim());
+                const notionReady = !!(NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim()) && (refs.databaseIdInput.value.trim() || refs.parentPageIdInput.value.trim()));
+                if (!githubReady || !notionReady) {
+                  AutoImporter2.updateStatus("\u26A0\uFE0F \u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D/Token \u4E0E Notion \u76EE\u6807");
+                  e.target.checked = false;
+                  Storage2.set(cfg.enabledKey, false);
+                  refs.autoImportOptions.style.display = "none";
+                  return;
+                }
                 GitHubAutoImporter2.run();
                 const interval2 = parseInt(refs.autoImportInterval.value) || 0;
                 Storage2.set(cfg.intervalKey, interval2);
@@ -25182,7 +25300,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               UI2.selectedBookmarks = new Set(bookmarks.map((b) => UI2.getBookmarkKey(b)));
               UI2.recomputeExportStats();
               UI2.refs.bookmarkCount.textContent = bookmarks.length;
-              UI2.refs.exportBtn.disabled = false;
+              updateExportButtonState();
               UI2.refs.obsExportBtn.disabled = false;
               UI2.renderBookmarkList();
               UI2.refs.bookmarkListContainer.style.display = "block";
@@ -25288,6 +25406,10 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           refs.exportBtn.onclick = async () => {
             var _a;
             if (refs.exportBtn.disabled) return;
+            refs.exportBtn.disabled = true;
+            const restoreExportBtn = () => {
+              refs.exportBtn.disabled = false;
+            };
             const liveApiKey = refs.apiKeyInput.value.trim();
             const apiKey = NotionOAuth2.getAccessToken(liveApiKey);
             const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
@@ -25295,18 +25417,22 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             const parentPageId = refs.parentPageIdInput.value.trim();
             if (!apiKey) {
               UI2.showStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key", "error");
+              restoreExportBtn();
               return;
             }
             if (exportTargetType === "database" && !databaseId) {
               UI2.showStatus("\u8BF7\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID", "error");
+              restoreExportBtn();
               return;
             }
             if (exportTargetType === "page" && !parentPageId) {
               UI2.showStatus("\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID", "error");
+              restoreExportBtn();
               return;
             }
             if (!UI2.bookmarks || UI2.bookmarks.length === 0) {
               UI2.showStatus("\u8BF7\u5148\u52A0\u8F7D\u6536\u85CF\u5217\u8868", "error");
+              restoreExportBtn();
               return;
             }
             const toExport = UI2.bookmarks.filter((b) => {
@@ -25315,10 +25441,13 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             });
             if (toExport.length === 0) {
               UI2.showStatus("\u6CA1\u6709\u53EF\u5BFC\u51FA\u7684\u6536\u85CF\uFF08\u53EF\u80FD\u90FD\u5DF2\u5BFC\u51FA\u8FC7\u6216\u672A\u9009\u4E2D\uFF09", "info");
+              restoreExportBtn();
               return;
             }
             const settings = {
               apiKey,
+              // v3.14.7: 透传输入框原文(liveApiKey 为空=OAuth 模式)→ 导出循环每项重解析最新 token
+              liveApiKey,
               databaseId,
               parentPageId,
               exportTargetType,
@@ -25550,6 +25679,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                               ontimeout: () => reject(new Error("\u56FE\u7247\u4E0B\u8F7D\u8D85\u65F6"))
                             });
                           });
+                          if (!OperationGuard2.canExecute("obsidian.writeImage")) {
+                            OperationGuard2.auditDenied("obsidian.writeImage", { itemName: topic.title, trigger: "user_requested_write" }, {
+                              phase: "execute",
+                              reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u56FE\u7247\u5199\u5165\u9700\u8981 level\u22651"
+                            });
+                            throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u56FE\u7247\u5199\u5165\u9700\u8981 level\u22651");
+                          }
                           const imgResult = await ObsidianAPI2.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType(ext));
                           if (!imgResult.ok) throw new Error(imgResult.error);
                           md = md.replace(img.full, `![${img.alt}](${encodeURI(imgPath)})`);
@@ -25591,6 +25727,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                       }
                     }
                     const fileName = UI2.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
+                    if (!OperationGuard2.canExecute("obsidian.writeNote")) {
+                      OperationGuard2.auditDenied("obsidian.writeNote", { itemName: topic.title, trigger: "user_requested_write" }, {
+                        phase: "execute",
+                        reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651"
+                      });
+                      throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651");
+                    }
                     const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
                     if (!noteResult.ok) throw new Error(noteResult.error);
                     Storage2.markTopicExported(topicId);
@@ -25638,6 +25781,11 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const level = parseInt(e.target.value);
             OperationGuard2.setLevel(level);
             UI2.showStatus(`\u6743\u9650\u7EA7\u522B\u5DF2\u8BBE\u7F6E\u4E3A: ${CONFIG2.PERMISSION_NAMES[level]}`, "success");
+            try {
+              UI2.updateExportTargetSummary();
+            } catch (err) {
+              console.warn("[LD-Notion] \u6743\u9650\u6458\u8981\u5237\u65B0\u5931\u8D25:", err);
+            }
           };
           refs.requireConfirmCheckbox.onchange = (e) => {
             Storage2.set(CONFIG2.STORAGE_KEYS.REQUIRE_CONFIRM, e.target.checked);
@@ -26141,6 +26289,10 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             }
           };
           UI2._saveTemplates = (templates) => {
+            const cap = CONFIG2.LIMITS.AI_TEMPLATES_MAX;
+            if (Array.isArray(templates) && templates.length > cap) {
+              templates = templates.slice(templates.length - cap);
+            }
             Storage2.set(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, JSON.stringify(templates));
           };
           UI2.renderTemplateList = () => {
@@ -26274,18 +26426,18 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
 
             .gclip-float-btn.exporting {
                 background: linear-gradient(135deg, var(--ldb-ui-warning-bright), var(--ldb-ui-warning));
-                border-color: rgba(217, 119, 6, 0.35);
+                border-color: var(--ldb-ui-warning-alpha-35);
                 animation: gclip-pulse 1.2s infinite;
             }
 
             .gclip-float-btn.success {
                 background: linear-gradient(135deg, var(--ldb-ui-success-bright), var(--ldb-ui-success));
-                border-color: rgba(22, 163, 74, 0.35);
+                border-color: var(--ldb-ui-success-alpha-35);
             }
 
             .gclip-float-btn.error {
                 background: linear-gradient(135deg, var(--ldb-ui-danger-bright), var(--ldb-ui-danger));
-                border-color: rgba(220, 38, 38, 0.35);
+                border-color: var(--ldb-ui-danger-alpha-35);
             }
 
             @keyframes gclip-pulse {
@@ -26367,22 +26519,22 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
 
             .gclip-status.info {
                 display: block;
-                border-color: rgba(37, 99, 235, 0.30);
-                background: rgba(37, 99, 235, 0.10);
+                border-color: var(--ldb-ui-accent-alpha-30);
+                background: var(--ldb-ui-accent-alpha-10);
                 color: var(--ldb-ui-text);
             }
 
             .gclip-status.success {
                 display: block;
-                border-color: rgba(22, 163, 74, 0.35);
-                background: rgba(22, 163, 74, 0.12);
+                border-color: var(--ldb-ui-success-alpha-35);
+                background: var(--ldb-ui-success-alpha-12);
                 color: var(--ldb-ui-text);
             }
 
             .gclip-status.error {
                 display: block;
-                border-color: rgba(220, 38, 38, 0.35);
-                background: rgba(220, 38, 38, 0.12);
+                border-color: var(--ldb-ui-danger-alpha-35);
+                background: var(--ldb-ui-danger-alpha-12b);
                 color: var(--ldb-ui-text);
             }
 
@@ -26412,6 +26564,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           });
           document.body.appendChild(btn);
           GenericUI2.floatBtn = btn;
+          DesignSystem2.applyTheme();
           return btn;
         },
         // 创建设置面板
@@ -26529,6 +26682,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         `;
           document.body.appendChild(panel);
           GenericUI2.panel = panel;
+          DesignSystem2.applyTheme();
           GenericUI2.bindEvents();
           panel.querySelector("#gclip-export-type").value = exportType;
           panel.querySelector("#gclip-target-label").textContent = exportType === "page" ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93";
@@ -26567,7 +26721,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           }
           if (restoreValue && !known.has(restoreValue)) {
             const shortId = restoreValue.replace(/^page:/, "");
-            options += `<option value="${restoreValue}">\u5DF2\u914D\u7F6E (ID: ${shortId.slice(0, 8)}...)</option>`;
+            options += `<option value="${Utils2.escapeHtml(restoreValue)}">\u5DF2\u914D\u7F6E (ID: ${Utils2.escapeHtml(shortId.slice(0, 8))}...)</option>`;
           }
           select.innerHTML = options;
           if (restoreValue) {
@@ -26692,7 +26846,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             }
           });
           const obsStatusEl = panel.querySelector("#gclip-obs-status");
-          panel.querySelector("#gclip-save-obs").addEventListener("click", () => {
+          panel.querySelector("#gclip-save-obs").addEventListener("click", async () => {
             const url = panel.querySelector("#gclip-obs-url").value.trim();
             const key = panel.querySelector("#gclip-obs-key").value.trim();
             const dir = panel.querySelector("#gclip-obs-dir").value.trim();
@@ -26702,7 +26856,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               return;
             }
             Storage2.set(CONFIG2.STORAGE_KEYS.OBS_API_URL, url);
-            CredentialVault2.setSecret(CONFIG2.STORAGE_KEYS.OBS_API_KEY, key);
+            await CredentialVault2.set(CONFIG2.STORAGE_KEYS.OBS_API_KEY, key);
             Storage2.set(CONFIG2.STORAGE_KEYS.OBS_DIR, dir || CONFIG2.DEFAULTS.obsDir);
             panel.querySelector("#gclip-obs-key").value = "";
             obsStatusEl.textContent = "\u2705 Obsidian \u914D\u7F6E\u5DF2\u4FDD\u5B58";
@@ -26812,7 +26966,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const obsKey = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_API_KEY, CONFIG2.DEFAULTS.obsApiKey);
             const obsDir = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_DIR, CONFIG2.DEFAULTS.obsDir);
             if (!obsUrl || !obsKey) {
-              GenericUI2.showStatus("\u8BF7\u5148\u914D\u7F6E Obsidian API\uFF08\u8BF7\u524D\u5F80 Linux.do \u8BBA\u575B\u9875\u9762\uFF0C\u901A\u8FC7\u6D6E\u52A8\u6309\u94AE\u6253\u5F00\u8BBE\u7F6E\u9762\u677F\u8FDB\u884C\u914D\u7F6E\uFF09", "error");
+              GenericUI2.showStatus("\u8BF7\u5148\u914D\u7F6E Obsidian\uFF1A\u5728\u4E0A\u65B9\u300CObsidian\uFF08Local REST API\uFF09\u300D\u533A\u5757\u586B\u5199 API \u5730\u5740\u4E0E Key \u5E76\u4FDD\u5B58", "error");
               GenericUI2.isExporting = false;
               return;
             }
@@ -26857,6 +27011,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 md += HTMLToMarkdown2.convert(body.innerHTML) + "\n";
               }
               const fileName = title.replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
+              if (!OperationGuard2.canExecute("obsidian.writeNote")) {
+                OperationGuard2.auditDenied("obsidian.writeNote", { itemName: title, trigger: "user_requested_write" }, {
+                  phase: "execute",
+                  reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651"
+                });
+                throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651");
+              }
               const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
               if (!noteResult.ok) throw new Error(noteResult.error);
               GenericUI2.showStatus(`Obsidian \u5BFC\u51FA\u6210\u529F\uFF1A${title}`, "success");
@@ -29461,8 +29622,13 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           }
           const clearBtn = document.querySelector("#ldb-chat-clear");
           if (clearBtn) {
-            clearBtn.onclick = () => {
-              if (confirm("\u786E\u5B9A\u8981\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2\u5417\uFF1F")) {
+            clearBtn.onclick = async () => {
+              const confirmed = await ConfirmationDialog3.show({
+                title: "\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2",
+                message: "\u786E\u5B9A\u8981\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2\u5417\uFF1F",
+                countdown: 3
+              });
+              if (confirmed) {
                 ChatState2.clear();
               }
             };
@@ -29481,8 +29647,13 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           }
           const classifyCancelBtn = document.querySelector("#ldb-classify-cancel");
           if (classifyCancelBtn) {
-            classifyCancelBtn.onclick = () => {
-              if (confirm("\u786E\u5B9A\u8981\u53D6\u6D88\u6279\u91CF\u5206\u7C7B\u5417\uFF1F\u5DF2\u5B8C\u6210\u7684\u90E8\u5206\u4E0D\u4F1A\u4E22\u5931\u3002")) {
+            classifyCancelBtn.onclick = async () => {
+              const confirmed = await ConfirmationDialog3.show({
+                title: "\u53D6\u6D88\u6279\u91CF\u5206\u7C7B",
+                message: "\u786E\u5B9A\u8981\u53D6\u6D88\u6279\u91CF\u5206\u7C7B\u5417\uFF1F\u5DF2\u5B8C\u6210\u7684\u90E8\u5206\u4E0D\u4F1A\u4E22\u5931\u3002",
+                countdown: 3
+              });
+              if (confirmed) {
                 AIClassifier2.cancel();
               }
             };

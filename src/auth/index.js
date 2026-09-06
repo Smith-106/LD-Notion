@@ -724,7 +724,10 @@ const NotionOAuth = {
     setManualApiKey: async (apiKey = "") => {
         const normalized = String(apiKey || "").trim();
         Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, normalized);
-        NotionOAuth.setAuthMode("manual");
+        // v3.14.7 (AUD-ARCH-11 残余修复): 仅非空值才翻 manual——空值(清空覆盖)不应
+        // 静默关闭 OAuth 自动续签。此前任何输入框清空/占位保存都会 setAuthMode("manual"),
+        // 用户在下一次 access token 过期后即遇「API token is invalid」全批失败。
+        if (normalized) NotionOAuth.setAuthMode("manual");
         NotionOAuth.syncApiKeyInputs(normalized);
         NotionOAuth.syncRegisteredControls();
     },
@@ -1299,7 +1302,11 @@ const NotionOAuth = {
                         // invalid_grant=已使用/已过期; invalid_client=clientId 被污染/非法——
                         // 两者都清 token 降级 manual, 禁止无限重试(此前 invalid_client 永不降级,
                         // 与 clientId 无法清除叠加成死锁)。
+                        // v3.14.7 (AUD-ARCH-11 残余修复): 同时清除残留的过期 access token——
+                        // 否则降级后每次导出首项即报「API token is invalid」, 且用户无法从
+                        // 输入框占位符看出需要重新授权。
                         await NotionOAuth.setRefreshToken("");
+                        Storage.remove(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
                         NotionOAuth.setAuthMode("manual");
                         const message = String(error?.message || "");
                         const errorCode = String(error?.code || "").toLowerCase();

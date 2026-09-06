@@ -144,12 +144,62 @@ describe("R-AUTH-02: Exporter.exportBookmarks 认证中止", () => {
         }
     });
 
-    it("isAuthTerminalError: OAuth 续签失败消息也被识别", () => {
-        expect(Exporter.isAuthTerminalError(new Error("Notion OAuth 续签失败: invalid_grant"))).toBe(true);
+    it("isAuthTerminalError: 仅识别带 isAuthTerminal 标记的错误(v3.14.7 回归修复)", () => {
+        // 瞬态续签失败(网络/超时/429)不带标记, 消息前缀与终态相同——不得误判中止整批
+        expect(Exporter.isAuthTerminalError(new Error("Notion OAuth 续签失败: OAuth 网络请求失败"))).toBe(false);
+        expect(Exporter.isAuthTerminalError(new Error("Notion OAuth 续签失败: invalid_grant"))).toBe(false);
+        // 终态错误必带标记(api 层 isTerminalRefreshError 判定后设置)
         const marked = new Error("Notion API 错误: API token is invalid.");
         marked.isAuthTerminal = true;
         expect(Exporter.isAuthTerminalError(marked)).toBe(true);
         expect(Exporter.isAuthTerminalError(new Error("body failed validation"))).toBe(false);
         expect(Exporter.isAuthTerminalError(null)).toBe(false);
+    });
+
+    it("瞬态续签失败(无 isAuthTerminal 标记) → 批次不中止, 仅该项失败(v3.14.7 回归修复)", async () => {
+        const bookmarks = Array.from({ length: 3 }, (_, idx) => ({ topic_id: 200 + idx, title: `Post ${idx}` }));
+        const { LinuxDoAPI } = require("../src/export");
+        const origFetch = LinuxDoAPI.fetchAllPosts;
+        LinuxDoAPI.fetchAllPosts = async (topicId) => ({ topic: { topic_id: topicId, title: `T${topicId}`, url: `https://linux.do/t/${topicId}` }, posts: [] });
+        const origBuild = Exporter.buildContentBlocks;
+        Exporter.buildContentBlocks = () => [];
+        const origProps = Exporter.buildProperties;
+        Exporter.buildProperties = () => ({});
+
+        let notionCalls = 0;
+        global.__ldNotionResponder = (opts) => {
+            if (String(opts.url || "").includes("api.notion.com")) {
+                notionCalls++;
+                // 全部请求 401: 第 1 项触发续签(瞬态失败→冷却), 后续项仍逐项尝试, 批次不得中止
+                opts.onload({ status: 401, responseText: JSON.stringify({ message: "API token is invalid." }), responseHeaders: "" });
+            } else {
+                opts.onload({ status: 200, responseText: "{}", responseHeaders: "" });
+            }
+        };
+        const { NotionOAuth } = require("../src/auth");
+        const origCanRefresh = NotionOAuth.canAutoRefresh;
+        NotionOAuth.canAutoRefresh = () => false; // 非 OAuth 场景: 401 直达终态标记?
+        // 修正: 模拟 OAuth 已连接但续签端点瞬态失败(网络错误)→ 401 触发续签 → 续签抛瞬态错误
+        NotionOAuth.canAutoRefresh = () => true;
+        const origIsOAuthConnected = NotionOAuth.isOAuthConnected;
+        NotionOAuth.isOAuthConnected = () => true;
+        const origGetAuthMode = NotionOAuth.getAuthMode;
+        NotionOAuth.getAuthMode = () => "oauth";
+
+        try {
+            const results = await Exporter.exportBookmarks(bookmarks, { concurrency: 1, apiKey: "", databaseId: "db1", exportTargetType: "database" });
+            // 3 项全部失败(401+续签失败), 但批次不中止: 无 authAborted, skipped=0
+            expect(results.authAborted).toBeUndefined();
+            expect(results.failed.length).toBe(3);
+            expect(results.skipped.length).toBe(0);
+            expect(notionCalls).toBeGreaterThanOrEqual(3); // 3 项均发出了请求(未在首项中止)
+        } finally {
+            LinuxDoAPI.fetchAllPosts = origFetch;
+            Exporter.buildContentBlocks = origBuild;
+            Exporter.buildProperties = origProps;
+            NotionOAuth.canAutoRefresh = origCanRefresh;
+            NotionOAuth.isOAuthConnected = origIsOAuthConnected;
+            NotionOAuth.getAuthMode = origGetAuthMode;
+        }
     });
 });

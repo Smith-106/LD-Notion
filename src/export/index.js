@@ -781,7 +781,10 @@ const Exporter = {
     reset: () => { Exporter.isPaused = false; Exporter.isCancelled = false; Exporter.currentIndex = 0; },
 
     // 批量导出:认证终态错误(不可续签的 401)标记检测——系统性失败应中止批次而非逐项重试
-    isAuthTerminalError: (error) => !!(error && (error.isAuthTerminal || String(error?.message || "").includes("Notion OAuth 续签失败"))),
+    // v3.14.7 (AUD-ARCH-11 回归修复): 仅信 error.isAuthTerminal 标记, 不再用消息子串匹配——
+    // api 层对瞬态续签失败(网络/超时/429/5xx)不带标记只设 60s 冷却, 消息前缀与终态相同,
+    // 子串匹配会把一次网络抖动误判为认证终态而中止整批(用户报「几分钟后全部失败」主因)。
+    isAuthTerminalError: (error) => !!(error && error.isAuthTerminal === true),
 
     // 认证中止时的剩余项收集:与取消路径同构,但保留原因说明供 UI 报告展示
     _collectSkippedFrom: (bookmarks, remaining) => remaining.map((i) => {
@@ -848,6 +851,14 @@ const Exporter = {
                 }
 
                 try {
+                    // v3.14.7 (AUD-ARCH-11 残余修复): 每项开工前重解析 apiKey——
+                    // 导出开始时捕获的 settings.apiKey 快照在 OAuth 续签后失效(getAccessToken
+                    // liveValue 优先遮蔽 Storage 新 token), 导致每项 401+续签风暴。
+                    // OAuth 用户 liveApiKey 为空 → 每项读 Storage 最新 token; 手动覆盖用户
+                    // liveApiKey 非空 → 保持其覆盖语义不变。
+                    if (!settings.liveApiKey) {
+                        settings.apiKey = NotionOAuth.getAccessToken("");
+                    }
                     await Exporter.exportTopic(bookmark, settings, (detail) => {
                         try {
                             onProgress?.({

@@ -1,5 +1,22 @@
 # 更新日志
 
+## [3.14.7] - 2026-09-06
+
+### 修复（31 条 UI 审计发现全量修复 + 导出几分钟后 token invalid 全部失败根因修复）
+
+**根因（三模型共识确认）**：导出进行几分钟后全部报「Notion API 错误: API token is invalid.」由四因素叠加——`isAuthTerminalError` 消息子串匹配把瞬态续签失败误判为终态致 fail-fast 中止整批；导出循环固定 `settings.apiKey` 快照遮蔽 OAuth 续签后的新 token（每项 401 + 续签风暴）；终态降级只清 refresh_token 残留过期 access token（下次导出首项即报错）；站设置空输入保存误清 token 并翻 manual 模式。
+
+**修复**：
+- **token invalid 根因（P0）**：`isAuthTerminalError` 只信 `error.isAuthTerminal === true` 标记（export/index.js + BookmarkExporter + github-obsidian-service 三处）；导出循环每项开工前 `getAccessToken("")` 重解析最新 token（settings.liveApiKey 透传）；终态降级清残留 NOTION_API_KEY；站设置仅显式编辑时清 token；`setManualApiKey` 空值不翻 manual（保 OAuth 续签）；`_persistProvidedSensitiveEntries` 改 REDACT_IN_LOGS 明文落盘；新增 2 回归测试（突变验证旧实现 2 failed→修复全绿）
+- **High（P1）**：导出按钮 disabled 提前到首个 await 前 + 校验失败恢复 + GitHub 导出 SyncLock 重入守卫；Obsidian writeNote/writeImage 登记 OPERATION_LEVELS level=1，4 裸调点统一经 OperationGuard；工作区洞察 prompt JSON 序列化改 `isolateContent` 隔离
+- **Medium（P2）**：ConfirmationDialog 重入闸门 + 统一 cleanup + ARIA（role/aria-modal/焦点）；DesignSystem.applyTheme 公开 + 三面板创建后重应用；GitHubAutoImporter finally 补 emit；showStatus/showProgress 判空 + 清残留定时器；中心摘要刷新链状态；权限变更后刷新导出目标摘要；GitHub 自动导入未配置回滚；oplog 防抖；loadConfig 恢复手动 DB 输入框可见性
+- **Low（P3）**：option 值转义×3；原生 confirm 改 ConfirmationDialog×2；删除 events.js 重复折叠绑定死代码（恢复 source 两区折叠持久化）；硬编码 rgba 换令牌（design-system 新增 danger/success/warning alpha 变体×8）；PanelResize.resetSize 注册表分发；savedTab 白名单防选择器注入；renderInstallLink 转义 + rel=noopener；时间线 label 转义；加载后经 readiness 判定导出按钮；聊天容器 aria-live；mini 按钮 aria-label；.ldb-highlight 样式补定义；Obsidian 指引文案与实机 UI 对齐；renderVisualSummary 微任务合并防抖动；AI_TEMPLATES 容量上限 50
+- **验证**：vitest 38 文件 755 用例 + legacy 三件套全绿；verify:baseline/build/delivery EXIT=0（295 PASS）
+
+**升级说明**：涉及认证续签与凭证落盘语义变化，安装后请重新授权 Notion（OAuth 一键授权或填入 API Key）。
+
+[3.14.7]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.7
+
 ## [3.14.6] - 2026-09-06
 
 ### 修复（三模型共识审计 51 条发现全量修复 · 安全/并发/存储/同步）

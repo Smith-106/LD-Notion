@@ -56,18 +56,18 @@ const GenericUI = {
 
             .gclip-float-btn.exporting {
                 background: linear-gradient(135deg, var(--ldb-ui-warning-bright), var(--ldb-ui-warning));
-                border-color: rgba(217, 119, 6, 0.35);
+                border-color: var(--ldb-ui-warning-alpha-35);
                 animation: gclip-pulse 1.2s infinite;
             }
 
             .gclip-float-btn.success {
                 background: linear-gradient(135deg, var(--ldb-ui-success-bright), var(--ldb-ui-success));
-                border-color: rgba(22, 163, 74, 0.35);
+                border-color: var(--ldb-ui-success-alpha-35);
             }
 
             .gclip-float-btn.error {
                 background: linear-gradient(135deg, var(--ldb-ui-danger-bright), var(--ldb-ui-danger));
-                border-color: rgba(220, 38, 38, 0.35);
+                border-color: var(--ldb-ui-danger-alpha-35);
             }
 
             @keyframes gclip-pulse {
@@ -149,22 +149,22 @@ const GenericUI = {
 
             .gclip-status.info {
                 display: block;
-                border-color: rgba(37, 99, 235, 0.30);
-                background: rgba(37, 99, 235, 0.10);
+                border-color: var(--ldb-ui-accent-alpha-30);
+                background: var(--ldb-ui-accent-alpha-10);
                 color: var(--ldb-ui-text);
             }
 
             .gclip-status.success {
                 display: block;
-                border-color: rgba(22, 163, 74, 0.35);
-                background: rgba(22, 163, 74, 0.12);
+                border-color: var(--ldb-ui-success-alpha-35);
+                background: var(--ldb-ui-success-alpha-12);
                 color: var(--ldb-ui-text);
             }
 
             .gclip-status.error {
                 display: block;
-                border-color: rgba(220, 38, 38, 0.35);
-                background: rgba(220, 38, 38, 0.12);
+                border-color: var(--ldb-ui-danger-alpha-35);
+                background: var(--ldb-ui-danger-alpha-12b);
                 color: var(--ldb-ui-text);
             }
 
@@ -195,6 +195,8 @@ const GenericUI = {
         });
         document.body.appendChild(btn);
         GenericUI.floatBtn = btn;
+        // v3.14.7 (REV-05 UI-09): 动态创建后重应用主题偏好
+        DesignSystem.applyTheme();
         return btn;
     },
 
@@ -319,6 +321,8 @@ const GenericUI = {
 
         document.body.appendChild(panel);
         GenericUI.panel = panel;
+        // v3.14.7 (REV-05 UI-09): 动态创建后重应用主题偏好
+        DesignSystem.applyTheme();
 
         // 绑定事件
         GenericUI.bindEvents();
@@ -369,7 +373,8 @@ const GenericUI = {
 
         if (restoreValue && !known.has(restoreValue)) {
             const shortId = restoreValue.replace(/^page:/, "");
-            options += `<option value="${restoreValue}">已配置 (ID: ${shortId.slice(0, 8)}...)</option>`;
+            // v3.14.7 (REV-18 UI-01): restoreValue 为手输 ID 可含引号——value 属性转义防属性逃逸
+            options += `<option value="${Utils.escapeHtml(restoreValue)}">已配置 (ID: ${Utils.escapeHtml(shortId.slice(0, 8))}...)</option>`;
         }
 
         select.innerHTML = options;
@@ -518,7 +523,7 @@ const GenericUI = {
 
         // F-UI-08:Obsidian 配置保存/测试(本站直接配置,不再要求跳转 Linux.do 页面)
         const obsStatusEl = panel.querySelector("#gclip-obs-status");
-        panel.querySelector("#gclip-save-obs").addEventListener("click", () => {
+        panel.querySelector("#gclip-save-obs").addEventListener("click", async () => {
             const url = panel.querySelector("#gclip-obs-url").value.trim();
             const key = panel.querySelector("#gclip-obs-key").value.trim();
             const dir = panel.querySelector("#gclip-obs-dir").value.trim();
@@ -528,7 +533,9 @@ const GenericUI = {
                 return;
             }
             Storage.set(CONFIG.STORAGE_KEYS.OBS_API_URL, url);
-            CredentialVault.setSecret(CONFIG.STORAGE_KEYS.OBS_API_KEY, key);
+            // v3.14.7 (REV-08): setSecret 已随 v3.14.2 保险箱退役删除, 恒抛 TypeError——
+            // 改走统一明文存储入口 CredentialVault.set(非敏感键直落 GM 明文, 审计由 REDACT_IN_LOGS 脱敏)
+            await CredentialVault.set(CONFIG.STORAGE_KEYS.OBS_API_KEY, key);
             Storage.set(CONFIG.STORAGE_KEYS.OBS_DIR, dir || CONFIG.DEFAULTS.obsDir);
             panel.querySelector("#gclip-obs-key").value = "";
             obsStatusEl.textContent = "✅ Obsidian 配置已保存";
@@ -659,7 +666,9 @@ const GenericUI = {
             const obsDir = Storage.get(CONFIG.STORAGE_KEYS.OBS_DIR, CONFIG.DEFAULTS.obsDir);
 
             if (!obsUrl || !obsKey) {
-                GenericUI.showStatus("请先配置 Obsidian API（请前往 Linux.do 论坛页面，通过浮动按钮打开设置面板进行配置）", "error");
+                // v3.14.7 (REV-30 UI-26): 文案与实机 UI 对齐——gclip 面板现已直接配置
+                // Obsidian API(上方「保存 Obsidian 配置」区块), 不再跳转 Linux.do 论坛。
+                GenericUI.showStatus("请先配置 Obsidian：在上方「Obsidian（Local REST API）」区块填写 API 地址与 Key 并保存", "error");
                 GenericUI.isExporting = false;
                 return;
             }
@@ -701,6 +710,14 @@ const GenericUI = {
                 }
 
                 const fileName = title.replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
+                // v3.14.7 (REV-03 UI-07): Obsidian 写入经 OperationGuard 闸门(此前裸调零审计)
+                if (!OperationGuard.canExecute("obsidian.writeNote")) {
+                    OperationGuard.auditDenied("obsidian.writeNote", { itemName: title, trigger: "user_requested_write" }, {
+                        phase: "execute",
+                        reason: "权限不足：Obsidian 笔记写入需要 level≥1",
+                    });
+                    throw new Error("权限不足：Obsidian 笔记写入需要 level≥1");
+                }
                 const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
                 if (!noteResult.ok) throw new Error(noteResult.error);
 

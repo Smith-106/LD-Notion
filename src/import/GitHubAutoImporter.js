@@ -460,6 +460,10 @@ GitHubAutoImporter.run = async () => {
         GitHubAutoImporter.updateStatus(`❌ GitHub 自动导入出错: ${error.message}`);
     } finally {
         GitHubAutoImporter.isRunning = false;
+        // v3.14.7 (REV-06): 补 emit bookmarks:updated——收藏列表唯一自动重渲染触发是
+        // bookmarks:updated(main-ui.js:2638-2642), 此前只 emit sync:center-summary-updated
+        // 导致 GitHub 新建页面后 UI 仍显示「待导出」, 严格模式手动导出被静默过滤。
+        emit("bookmarks:updated");
         emit("sync:center-summary-updated");
     }
 };

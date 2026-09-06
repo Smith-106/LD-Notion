@@ -53,11 +53,20 @@ const PanelResize = {
         } = options;
 
         // F-UI-18:重置面板尺寸(清除持久化尺寸并恢复默认)
+        // v3.14.7 (REV-22 UI-21): resetSize 改按 storageKey 注册——此前每次 makeResizable
+        // 都覆盖全局 resetSize 闭包, 多面板时后初始化者覆盖前者(每页单面板场景无实发,
+        // 属潜在缺陷)。注册表内找到该面板即重置, 找不到(无 storageKey)时回退首个面板。
+        PanelResize._resizeTargets = PanelResize._resizeTargets || new Map();
+        if (storageKey) {
+            PanelResize._resizeTargets.set(storageKey, element);
+        }
         PanelResize.resetSize = (key) => {
+            const targets = PanelResize._resizeTargets || new Map();
+            const target = (key && targets.get(key)) || (targets.size > 0 ? targets.values().next().value : null);
             if (key) Storage.remove(key);
-            if (element) {
-                element.style.width = "";
-                element.style.maxHeight = "";
+            if (target) {
+                target.style.width = "";
+                target.style.maxHeight = "";
             }
         };
 

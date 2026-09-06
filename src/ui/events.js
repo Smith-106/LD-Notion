@@ -173,8 +173,12 @@ const UIEvents = {
         }
 
         // 恢复上次选择的 tab
+        // v3.14.7 (REV-23 UI-22): savedTab 注入防御——存储损坏/手改(如含引号/方括号)
+        // 会令 querySelector 抛 SyntaxError 中断 bindEvents 整链; 先校验仅允许白名单值。
         const savedTab = Storage.get(CONFIG.STORAGE_KEYS.ACTIVE_TAB, CONFIG.DEFAULTS.activeTab);
-        const tabBtn = panel.querySelector(`.ldb-tab[data-tab="${savedTab}"]`);
+        const SAFE_TABS = ["bookmarks", "visuals", "ai", "settings"];
+        const safeTab = SAFE_TABS.includes(savedTab) ? savedTab : CONFIG.DEFAULTS.activeTab;
+        const tabBtn = panel.querySelector(`.ldb-tab[data-tab="${safeTab}"]`);
         if (tabBtn) tabBtn.click();
 
         // 折叠筛选设置
@@ -230,23 +234,9 @@ const UIEvents = {
             }
         };
 
-        refs.sourceSettingsToggle.onclick = () => {
-            const content = refs.sourceSettingsContent
-            const arrow = refs.sourceSettingsArrow
-            content.classList.toggle("collapsed");
-            arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
-            refs.sourceSettingsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
-        };
-
-        refs.sourcePartitionsToggle.onclick = () => {
-            const content = refs.sourcePartitionsContent
-            const arrow = refs.sourcePartitionsArrow
-            content.classList.toggle("collapsed");
-            arrow.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
-            refs.sourcePartitionsToggle.setAttribute("aria-expanded", !content.classList.contains("collapsed"));
-        };
-
         // 折叠区域键盘支持（Enter/Space 触发 click）
+        // v3.14.7 (REV-20 UI-03): 已删除非持久化 sourceSettings/Partitions toggle handler——
+        // 它们覆盖上方 bindCollapse 的持久化版本(丢失 source 两区折叠持久化)。
         [refs.filterToggle, refs.aiSettingsToggle, refs.githubSettingsToggle,
          refs.obsSettingsToggle, refs.sourceSettingsToggle, refs.sourcePartitionsToggle
         ].forEach(el => {
@@ -259,29 +249,10 @@ const UIEvents = {
             });
         });
 
-        collapseSections.forEach(applyCollapse);
-        collapseSections.forEach(bindCollapse);
-
-        // Obsidian 测试连接
-        refs.obsTestBtn.onclick = async () => {
-            const url = refs.obsApiUrlInput.value.trim();
-            const key = getSensitiveValue(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
-            if (!url || !key) {
-                refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--danger">请填写 API 地址和 Key</span>';
-                return;
-            }
-            refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--accent">连接中...</span>';
-            try {
-                const result = await ObsidianAPI.testConnection(url, key);
-                if (result.ok) {
-                    refs.obsTestStatus.innerHTML = '<span class="ldb-status-text ldb-status-text--success">✅ 连接成功</span>';
-                } else {
-                    refs.obsTestStatus.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">❌ ${Utils.escapeHtml(result.error)}</span>`;
-                }
-            } catch (e) {
-                refs.obsTestStatus.innerHTML = `<span class="ldb-status-text ldb-status-text--danger">❌ ${Utils.escapeHtml(e.message)}</span>`;
-            }
-        };
+        // v3.14.7 (REV-20 UI-03): 删除重复死代码——此前的非持久化 sourceSettings/Partitions
+        // toggle handler 会覆盖上方 bindCollapse 的持久化版本(丢失折叠持久化),
+        // 且 collapseSections.forEach×2 + obsTestBtn.onclick 在此后重复出现。
+        // 统一保留: bindCollapse(持久化) + 上方唯一 obsTestBtn.onclick。
 
         refs.sourceSelectLinuxdo.onclick = () => {
             UI.switchBookmarkSource("linuxdo");
@@ -476,6 +447,23 @@ const UIEvents = {
             refs.autoImportOptions.style.display = enabled ? "block" : "none";
             if (enabled) {
                 if (cfg.isGitHub) {
+                    // v3.14.7 (REV-14 UI-16): 未配置时勾选不再假启用——此前 enabledKey 直接落盘,
+                    // 即使无 GitHub 用户名/token + Notion 目标也显示开启且开始注定失败的轮询。
+                    const githubReady = !!(
+                        Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "").trim()
+                        || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "").trim()
+                    );
+                    const notionReady = !!(
+                        NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim())
+                        && (refs.databaseIdInput.value.trim() || refs.parentPageIdInput.value.trim())
+                    );
+                    if (!githubReady || !notionReady) {
+                        AutoImporter.updateStatus("⚠️ 请先配置 GitHub 用户名/Token 与 Notion 目标");
+                        e.target.checked = false;
+                        Storage.set(cfg.enabledKey, false);
+                        refs.autoImportOptions.style.display = "none";
+                        return;
+                    }
                     GitHubAutoImporter.run();
                     const interval = parseInt(refs.autoImportInterval.value) || 0;
                     Storage.set(cfg.intervalKey, interval);
@@ -904,7 +892,9 @@ const UIEvents = {
                 UI.selectedBookmarks = new Set(bookmarks.map(b => UI.getBookmarkKey(b)));
                 UI.recomputeExportStats();
                 UI.refs.bookmarkCount.textContent = bookmarks.length;
-                UI.refs.exportBtn.disabled = false;
+                // v3.14.7 (REV-26 UI-19): 加载后不再无条件启用导出按钮——
+                // 配置不完整时按钮可点且 title 提示矛盾; 经 readiness 统一判定。
+                updateExportButtonState();
                 UI.refs.obsExportBtn.disabled = false;
 
                 // 渲染收藏列表
@@ -1025,6 +1015,12 @@ const UIEvents = {
         refs.exportBtn.onclick = async () => {
             // 防重入：导出进行中时忽略重复点击
             if (refs.exportBtn.disabled) return;
+            // v3.14.7 (REV-01 UI-05): 立即禁用按钮——此前在首个 await
+            // (save_command_boundary_settings) 之后才置 disabled, 双击窗口内
+            // 两次 onClick 都会通过守卫(重入面收窄到 SyncLock 兜底)。
+            refs.exportBtn.disabled = true;
+            // 校验失败时恢复按钮(供下方 return 分支使用)
+            const restoreExportBtn = () => { refs.exportBtn.disabled = false; };
             const liveApiKey = refs.apiKeyInput.value.trim();
             const apiKey = NotionOAuth.getAccessToken(liveApiKey);
             const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
@@ -1033,21 +1029,25 @@ const UIEvents = {
 
             if (!apiKey) {
                 UI.showStatus("请先配置 Notion API Key", "error");
+                restoreExportBtn();
                 return;
             }
 
             if (exportTargetType === "database" && !databaseId) {
                 UI.showStatus("请先配置数据库 ID", "error");
+                restoreExportBtn();
                 return;
             }
 
             if (exportTargetType === "page" && !parentPageId) {
                 UI.showStatus("请先配置父页面 ID", "error");
+                restoreExportBtn();
                 return;
             }
 
             if (!UI.bookmarks || UI.bookmarks.length === 0) {
                 UI.showStatus("请先加载收藏列表", "error");
+                restoreExportBtn();
                 return;
             }
 
@@ -1059,11 +1059,14 @@ const UIEvents = {
 
             if (toExport.length === 0) {
                 UI.showStatus("没有可导出的收藏（可能都已导出过或未选中）", "info");
+                restoreExportBtn();
                 return;
             }
 
             const settings = {
                 apiKey,
+                // v3.14.7: 透传输入框原文(liveApiKey 为空=OAuth 模式)→ 导出循环每项重解析最新 token
+                liveApiKey,
                 databaseId,
                 parentPageId,
                 exportTargetType,
@@ -1319,6 +1322,14 @@ const UIEvents = {
                                                 ontimeout: () => reject(new Error("图片下载超时")),
                                             });
                                         });
+                                        // v3.14.7 (REV-03 UI-07): Obsidian 写入经 OperationGuard 闸门
+                                        if (!OperationGuard.canExecute("obsidian.writeImage")) {
+                                            OperationGuard.auditDenied("obsidian.writeImage", { itemName: topic.title, trigger: "user_requested_write" }, {
+                                                phase: "execute",
+                                                reason: "权限不足：Obsidian 图片写入需要 level≥1",
+                                            });
+                                            throw new Error("权限不足：Obsidian 图片写入需要 level≥1");
+                                        }
                                         const imgResult = await ObsidianAPI.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType(ext));
                                         if (!imgResult.ok) throw new Error(imgResult.error);
                                         md = md.replace(img.full, `![${img.alt}](${encodeURI(imgPath)})`);
@@ -1364,6 +1375,14 @@ const UIEvents = {
                             }
 
                             const fileName = UI.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
+                            // v3.14.7 (REV-03 UI-07): Obsidian 写入经 OperationGuard 闸门
+                            if (!OperationGuard.canExecute("obsidian.writeNote")) {
+                                OperationGuard.auditDenied("obsidian.writeNote", { itemName: topic.title, trigger: "user_requested_write" }, {
+                                    phase: "execute",
+                                    reason: "权限不足：Obsidian 笔记写入需要 level≥1",
+                                });
+                                throw new Error("权限不足：Obsidian 笔记写入需要 level≥1");
+                            }
                             const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
                             if (!noteResult.ok) throw new Error(noteResult.error);
                             // v3.14.3 修复: Obsidian 导出成功同样写入已导出账本(与 Notion 导出同构),
@@ -1423,6 +1442,8 @@ const UIEvents = {
             const level = parseInt(e.target.value);
             OperationGuard.setLevel(level);
             UI.showStatus(`权限级别已设置为: ${CONFIG.PERMISSION_NAMES[level]}`, "success");
+            // v3.14.7 (REV-13 UI-14): 权限变更后刷新收藏 Tab 摘要(此前仍显示旧级别)
+            try { UI.updateExportTargetSummary(); } catch (err) { console.warn("[LD-Notion] 权限摘要刷新失败:", err); }
         };
 
         refs.requireConfirmCheckbox.onchange = (e) => {
@@ -2016,6 +2037,11 @@ const UIEvents = {
         };
 
         UI._saveTemplates = (templates) => {
+            // v3.14.7 (REV-09 UI-13): 容量上限——防 GM 存储无界增长(超限保留最旧)
+            const cap = CONFIG.LIMITS.AI_TEMPLATES_MAX;
+            if (Array.isArray(templates) && templates.length > cap) {
+                templates = templates.slice(templates.length - cap);
+            }
             Storage.set(CONFIG.STORAGE_KEYS.AI_TEMPLATES, JSON.stringify(templates));
         };
 

@@ -206,6 +206,8 @@ const NotionSiteUI = {
 
         document.body.appendChild(btn);
         NotionSiteUI.floatBtn = btn;
+        // v3.14.7 (REV-05 UI-09): 动态创建后重应用主题偏好
+        DesignSystem.applyTheme();
         return btn;
     },
 
@@ -266,7 +268,7 @@ const NotionSiteUI = {
                 <div class="ldb-notion-toggle-content collapsed" id="ldb-notion-settings-content">
                     <div class="ldb-input-group ldb-mt-12">
                         <label class="ldb-label" for="ldb-notion-api-key">Notion API Key</label>
-                        <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx...">
+                        <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx..." data-touched="false">
                     </div>
                     <div class="ldb-input-group">
                         <label class="ldb-label">Notion OAuth（公开集成）</label>
@@ -413,6 +415,8 @@ const NotionSiteUI = {
         document.body.appendChild(panel);
         NotionSiteUI.panel = panel;
         NotionSiteUI._abortController = new AbortController();
+        // v3.14.7 (REV-05 UI-09): 动态创建后重应用主题偏好
+        DesignSystem.applyTheme();
 
         // 阻止面板内的键盘和剪贴板事件冒泡到 Notion
         const stopPropagation = (e) => {
@@ -522,7 +526,9 @@ const NotionSiteUI = {
                 await UICommandService.execute("save_command_boundary_settings", {
                     scope: "notion-site",
                     liveApiKey: panel.querySelector("#ldb-notion-api-key").value.trim(),
-                    clearManualApiKey: true,
+                    // v3.14.7: 仅用户显式编辑过输入框时才清空已存 token——
+                    // 此前恒传 true 导致 manual 模式改任意设置(输入框 placeholder 态)即抹掉 token
+                    clearManualApiKey: panel.querySelector("#ldb-notion-api-key").dataset.touched === "true",
                     aiTargetValue: panel.querySelector("#ldb-notion-ai-target-db").value,
                     aiService: panel.querySelector("#ldb-notion-ai-service").value,
                     aiModel: panel.querySelector("#ldb-notion-ai-model").value,
@@ -546,6 +552,8 @@ const NotionSiteUI = {
             } catch (error) {
                 NotionSiteUI.showStatus(`设置保存失败：${error.message}`, "error");
             } finally {
+                // v3.14.7: 保存后重置显式编辑标记(syncApiKeyInputs 的程序性清空不算用户编辑)
+                panel.querySelector("#ldb-notion-api-key").dataset.touched = "false";
                 saveBtn.textContent = originalText;
                 saveBtn.disabled = false;
             }
@@ -682,6 +690,11 @@ const NotionSiteUI = {
         const panel = NotionSiteUI.panel;
 
         panel.querySelector("#ldb-notion-api-key").value = "";
+        // v3.14.7: 输入框显式编辑标记——保存时仅 touched 才允许清空已存 token(防误抹)
+        panel.querySelector("#ldb-notion-api-key").dataset.touched = "false";
+        panel.querySelector("#ldb-notion-api-key").oninput = () => {
+            panel.querySelector("#ldb-notion-api-key").dataset.touched = "true";
+        };
         panel.querySelector("#ldb-notion-ai-service").value = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
         panel.querySelector("#ldb-notion-ai-api-key").value = "";
         panel.querySelector("#ldb-notion-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, "");
@@ -907,7 +920,8 @@ const NotionSiteUI = {
 
         // 如果已保存的值不在列表中，添加一个兼容选项
         if (savedValue && savedValue !== "__all__" && !knownIds.has(savedValue)) {
-            options += `<option value="${savedValue}">${Utils.escapeHtml(
+            // v3.14.7 (REV-18 UI-01): savedValue 为手输 ID 可含引号——value 属性转义防属性逃逸
+            options += `<option value="${Utils.escapeHtml(savedValue)}">${Utils.escapeHtml(
                 NotionSiteUI.getAITargetCompatibilityOptionLabel(savedValue, {
                     storedTarget,
                     databases,

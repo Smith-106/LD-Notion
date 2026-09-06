@@ -50,6 +50,14 @@ const UI_CSS = `
                 background: rgba(59, 130, 246, 0.14);
             }
 
+            /* v3.14.7 (REV-29 UI-25): .ldb-highlight 类此前不存在, OAuth 后「请选择导出目标」
+               高亮反馈为视觉空操作——补定义(复用 focus-ring 令牌) */
+            .ldb-highlight {
+                border-color: var(--ldb-ui-focus-ring) !important;
+                box-shadow: 0 0 0 3px var(--ldb-ui-focus-ring);
+                transition: box-shadow 0.3s ease, border-color 0.3s ease;
+            }
+
             .ldb-body {
                 overflow-y: auto;
                 padding: var(--ldb-ui-spacing-2xl);
@@ -569,7 +577,7 @@ const UI_CSS = `
                 color: var(--ldb-ui-text);
                 border-radius: var(--ldb-ui-radius-sm);
                 border: 1px dashed color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 75%);
-                background: rgba(15, 23, 42, 0.04);
+                background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 96%);
                 padding: var(--ldb-ui-spacing-xl);
                 max-height: 280px;
                 overflow: auto;

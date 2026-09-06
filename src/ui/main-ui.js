@@ -510,7 +510,7 @@ const UI = {
                 <div class="ldb-tab-content" data-tab-content="ai" role="tabpanel" id="ldb-tab-ai">
                     <div class="ldb-section">
                         <!-- 对话区域 -->
-                        <div class="ldb-chat-container" id="ldb-chat-messages">
+                        <div class="ldb-chat-container" id="ldb-chat-messages" aria-live="polite" aria-relevant="additions">
                             ${AIWelcomeUI.render(personaName)}
                         </div>
 
@@ -1003,6 +1003,9 @@ const UI = {
         document.body.appendChild(panel);
         UI.panel = panel;
         UI.cacheRefs();
+        // v3.14.7 (REV-05 UI-09): 动态创建后重应用主题偏好(仅 data-ldb-root 不带 data-ldb-theme 时
+        // 主题被忽略; 与 notion-site/generic 面板同根因同修复)
+        DesignSystem.applyTheme();
 
         // 绑定事件
         UI.bindEvents();
@@ -1018,6 +1021,8 @@ const UI = {
         btn.setAttribute("data-ldb-root", "");
         btn.innerHTML = "📚";
         btn.title = "打开收藏导出工具";
+        // v3.14.7 (REV-28 UI-20): mini 按钮补 aria-label(对照 notion-site/generic 同族浮钮均有)
+        btn.setAttribute("aria-label", "打开收藏导出工具");
         btn.style.display = "none";
 
         btn.onclick = () => {
@@ -1069,6 +1074,11 @@ const UI = {
             refs.exportTargetDatabaseRadio.checked = true;
             refs.parentPageGroup.style.display = "none";
             refs.exportTargetTip.textContent = "导出为数据库条目，支持筛选和排序";
+            // v3.14.7 (REV-17 UI-15): 恢复手动 DB 输入框可见性——此前 database 分支恒隐藏
+            // manualDbWrap, 与保存时的显示态脱节(用户手动输入的 databaseId 恢复后输入框
+            // 却不可见, 需再点「高级」按钮才看到值)。
+            const hasManualDb = !!String(refs.databaseIdInput.value || "").trim();
+            refs.manualDbWrap.style.display = hasManualDb ? "block" : "none";
         }
 
         // 加载权限设置
@@ -1523,7 +1533,11 @@ const UI = {
 
     // 显示状态
     showStatus: (message, type = "info") => {
-        const container = UI.refs.statusContainer
+        // v3.14.7 (REV-10 UI-04): 面板销毁(destroy 置 UI.refs=null)后 emit("notify")
+        // 对 null 解引用抛 TypeError(被 event-bus 吞成 console.error, 通知静默丢失)——
+        // 判空后直接忽略, 配合 bus 不抛错语义。
+        const container = UI.refs?.statusContainer;
+        if (!container) return;
 
         // 清除上一个定时器，避免新消息被旧定时器提前清除
         if (container._statusTimer) clearTimeout(container._statusTimer);
@@ -1552,8 +1566,17 @@ const UI = {
 
     // 显示进度
     showProgress: (current, total, message) => {
-        const container = UI.refs.statusContainer
+        // v3.14.7 (REV-10): 与 showStatus 同款判空(destroy 后总线悬挂 TypeError 同类)
+        const container = UI.refs?.statusContainer;
+        if (!container) return;
         const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+
+        // v3.14.7 (REV-12 UI-11): 清除 showStatus 残留的自动清除定时器——
+        // 否则导出前的 3s/10s 状态提示定时器在进度条展示中途到期, 把进度条容器清空(随机闪断)。
+        if (container._statusTimer) {
+            clearTimeout(container._statusTimer);
+            container._statusTimer = null;
+        }
 
         container.innerHTML = `
             <div class="ldb-progress">
@@ -1570,7 +1593,14 @@ const UI = {
 
     // 隐藏进度
     hideProgress: () => {
-        UI.refs.statusContainer.innerHTML = "";
+        // v3.14.7 (REV-12): 同步清除残留定时器, 防隐藏后旧定时器清空新内容
+        const container = UI.refs?.statusContainer;
+        if (!container) return;
+        if (container._statusTimer) {
+            clearTimeout(container._statusTimer);
+            container._statusTimer = null;
+        }
+        container.innerHTML = "";
     },
 
     // 更新 AI 模型选项
@@ -1639,7 +1669,10 @@ const UI = {
 
         if (restoreValue && !knownValues.has(restoreValue)) {
             const shortId = restoreValue.split(":")[1] || "";
-            options += `<option value="${restoreValue}">已配置 (ID: ${shortId.slice(0, 8)}...)</option>`;
+            // v3.14.7 (REV-18 UI-01): restoreValue 为用户手输 ID(可含引号)——
+            // value 属性须转义防属性逃逸(self-XSS 面; db.id/page.id 为 Notion UUID 实际安全)
+            const safeRestoreValue = Utils.escapeHtml(restoreValue);
+            options += `<option value="${safeRestoreValue}">已配置 (ID: ${Utils.escapeHtml(shortId.slice(0, 8))}...)</option>`;
         }
 
         select.innerHTML = options;
@@ -2252,7 +2285,10 @@ const UI = {
                     "2. 依次覆盖整体判断、结构缺口、跨源关联机会、下一步动作。",
                     "3. 不要重复原始数字表格，重点做结论与建议。",
                     "",
-                    JSON.stringify({
+                    // v3.14.7 (REV-04 UI-08): label 溯源 Notion 页面标题(常来自不可信导入内容),
+                    // 裸 JSON.stringify 注入可让页面内容劫持 AI 意图——统一走 isolateContent
+                    // 隔离标签(与全仓其余 12+ AI 请求构造点对齐, 五层防御第①层)。
+                    `<user_input>\n${AIService.isolateContent(JSON.stringify({
                         totalPages: model.totalPages,
                         totalDatabases: model.totalDatabases,
                         sourceBreakdown: model.sourceBreakdown,
@@ -2271,7 +2307,7 @@ const UI = {
                         missingSourcePages: model.missingSourcePages,
                         missingDatePages: model.missingDatePages,
                         missingCategoryPages: model.missingCategoryPages,
-                    }, null, 2),
+                    }, null, 2))}\n</user_input>`,
                 ].join("\n");
                 aiSummary = String(await AIService.requestChat(prompt, settings, 900) || "").trim();
             }
@@ -2339,9 +2375,11 @@ const UI = {
         const timelineMarkup = model.timeline.length > 0
             ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
                 <div class="ldb-view-timeline-item">
-                    <div class="ldb-view-timeline-label">${item.label}</div>
+                    <!-- v3.14.7 (REV-25 UI-24): label 裸插值转义——当前数值来源不可注入,
+                         一旦生成逻辑携带来源文本即成 XSS 点, 统一 escapeHtml -->
+                    <div class="ldb-view-timeline-label">${Utils.escapeHtml(String(item.label || ""))}</div>
                     <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${item.count > 0 ? Math.max(8, UI.getViewPct(item.count, model.total)) : 0}%;"></div></div>
-                    <div class="ldb-view-timeline-value">${item.count} 项 / 已导出 ${item.exported}</div>
+                    <div class="ldb-view-timeline-value">${Utils.escapeHtml(String(item.count))} 项 / 已导出 ${Utils.escapeHtml(String(item.exported))}</div>
                 </div>
             `).join("")}</div>`
             : `<div class="ldb-view-empty-text">当前数据里没有可解析的时间字段。</div>`;
@@ -2449,7 +2487,15 @@ const UI = {
             selectAll.checked = false;
             selectAll.indeterminate = true;
         }
-        UI.renderVisualSummary();
+        // v3.14.7 (REV-31 UI-27): renderVisualSummary 微任务合并——逐项选择几十项时
+        // 每次 updateSelectCount 都全量重渲染概览致抖动; 合并到同轮宏任务末只渲染一次。
+        if (!UI._selectCountRenderScheduled) {
+            UI._selectCountRenderScheduled = true;
+            Promise.resolve().then(() => {
+                UI._selectCountRenderScheduled = false;
+                UI.renderVisualSummary();
+            });
+        }
     },
 
     // 显示导出报告
@@ -2464,7 +2510,7 @@ const UI = {
         const authAborted = results.authAborted
             || (results.aborted === true ? { reason: "认证失败" } : null);
         if (authAborted) {
-            html += `<div class="ldb-report-item failed" style="padding:8px 12px;margin-bottom:6px;border-radius:6px;background:rgba(239,68,68,0.12);">
+            html += `<div class="ldb-report-item failed" style="padding:8px 12px;margin-bottom:6px;border-radius:6px;background:var(--ldb-ui-danger-alpha-12);">
                 <div>⛔ 已中止导出：Notion 认证失败（API token 无效且无法自动续签）</div>
                 <div style="margin-top:4px;font-size:12px;opacity:.85;">${Utils.escapeHtml(Utils.truncateText(String(authAborted.reason || ""), 160))}</div>
                 <div style="margin-top:4px;font-size:12px;opacity:.85;">请检查 Notion API Key 或重新 OAuth 一键授权后，再次点击导出即可续传剩余项。</div>
@@ -2623,9 +2669,17 @@ const UI = {
         // 事件总线订阅（security 解耦后，oplog/notify 通过总线触达 UI）
         const { on } = require("../coordination/event-bus");
         on("oplog:changed", () => {
-            if (UI.refs?.logPanel && !UI.refs.logPanel.classList.contains("collapsed")) {
-                UI.updateLogPanel();
-            }
+            // v3.14.7 (REV-15 UI-17): 修正折叠守卫——此前检查 #ldb-log-panel(存在性容器
+            // 恒不 collapsed)恒真, 审计关闭/折叠时仍全量重渲染; 改查真实折叠元素
+            // #ldb-log-content。另加防抖: 批量导出 O(N) 次 OperationLog.add 每项都
+            // emit+parse+重渲染, 合并到宏任务末一次性刷新。
+            clearTimeout(UI._oplogDebounceTimer);
+            UI._oplogDebounceTimer = setTimeout(() => {
+                const content = UI.refs?.logContent;
+                if (content && !content.classList.contains("collapsed")) {
+                    try { UI.updateLogPanel(); } catch (e) { console.warn("[LD-Notion] 日志面板渲染失败:", e); }
+                }
+            }, 120);
         });
         on("notify", ({ message, type }) => {
             UI.showStatus(message, type);
@@ -2634,6 +2688,11 @@ const UI = {
             if (typeof UI.renderSyncCenterSummary === "function") {
                 try { UI.renderSyncCenterSummary(); } catch (e) { console.warn("[LD-Notion] 同步中心面板渲染失败:", e); }
             }
+            // v3.14.7 (REV-11 UI-10): 自动同步完成只 emit sync:center-summary-updated,
+            // 而收藏 Tab 三条链状态(#ldb-*-auto-import-status)的渲染不在此事件链上,
+            // 冻结在加载时刻——同步事件同时刷新收藏 Tab 链状态与导出目标摘要。
+            try { UI.renderSyncChainStatus(); } catch (e) { console.warn("[LD-Notion] 同步链状态渲染失败:", e); }
+            try { UI.updateExportTargetSummary(); } catch (e) { console.warn("[LD-Notion] 导出目标摘要渲染失败:", e); }
         });
         on("bookmarks:updated", () => {
             if (typeof UI.renderBookmarkList === "function") {

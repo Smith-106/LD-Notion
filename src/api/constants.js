@@ -55,7 +55,10 @@ const InstallHelper = {
 
     renderInstallLink: (label = "一键安装浏览器扩展") => {
         const url = InstallHelper.getBookmarkExtensionUrl();
-        return `<a href="${url}" target="_blank" class="ldb-link">${label}</a>`;
+        // v3.14.7 (REV-24 UI-23): label 经 escapeHtml + rel=noopener——当前调用点虽为静态
+        // 字面量不可利用, 属纵深防御(与全仓 innerHTML 插值统一转义规范对齐)
+        const safeLabel = String(label || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="ldb-link">${safeLabel}</a>`;
     },
 
     openBookmarkExtensionInstall: () => {

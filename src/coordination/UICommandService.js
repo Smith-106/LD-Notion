@@ -48,11 +48,18 @@ const UICommandService = Object.freeze({
     },
 
     _persistProvidedSensitiveEntries: async (entries = {}) => {
+        // v3.14.7 (REV-07): SENSITIVE_KEYS 已清空(v3.14.2 保险箱退役, isSensitiveKey 恒 false)
+        // 导致此函数退化为 no-op, AI/GitHub 密钥在站设置/导出会话保存时被静默丢弃。
+        // 改判 REDACT_IN_LOGS(明文存储方针的脱敏超集): 匹配键直接 GM 明文落盘,
+        // 审计日志仍由 REDACT_IN_LOGS 统一脱敏。
         for (const [key, value] of Object.entries(entries)) {
-            if (!CredentialVault.isSensitiveKey(key)) continue;
+            if (!CredentialVault.REDACT_IN_LOGS.has(key)) continue;
             const normalized = String(value || "").trim();
-            if (!normalized) continue;
-            await CredentialVault.set(key, normalized);
+            if (!normalized) {
+                Storage.remove(key);
+                continue;
+            }
+            Storage.set(key, normalized);
         }
     },
 

@@ -11,6 +11,7 @@ const { NotionAPI, HTMLToMarkdown, ObsidianAPI } = require("../api");
 const { GitHubExporter } = require("./GitHubExporter");
 const { GitHubAPI } = require("./GitHubAPI");
 const { OperationGuard } = require("../security");
+const { SyncLock } = require("../sync-lock");
 
 /**
  * 文件名清理（Obsidian 兼容）
@@ -20,6 +21,22 @@ const { OperationGuard } = require("../security");
 const sanitizeObsidianFileName = (name, fallback = "untitled") => {
     const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
     return base || fallback;
+};
+
+/**
+ * v3.14.7 (REV-03 UI-07): Obsidian 写入统一经 OperationGuard 闸门。
+ * 此前 4 个裸调点绕过 Guard(权限 0 只读级仍可写零审计), 登记 obsidian.writeNote/writeImage
+ * 后, 写入前 must canExecute, 拒绝时记 guard.denied 并抛错(由调用方按普通失败处理)。
+ * @param {string} operation - obsidian.writeNote | obsidian.writeImage
+ * @param {Object} context - 审计上下文(trigger/target 等)
+ */
+const assertObsidianWriteAllowed = (operation, context = {}) => {
+    if (OperationGuard.canExecute(operation)) return;
+    OperationGuard.auditDenied(operation, { ...context, trigger: context.trigger || "user_requested_write" }, {
+        phase: "execute",
+        reason: `权限不足：Obsidian 写入(${operation})需要 level≥1，可在主面板「权限控制」中调整。`,
+    });
+    throw new Error(`权限不足：Obsidian 写入需要 level≥1（可在主面板「权限控制」中调整）。`);
 };
 
 /**
@@ -206,6 +223,8 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
 
         try {
             const note = await buildGitHubObsidianMarkdown(item, settings);
+            // v3.14.7 (REV-03 UI-07): Obsidian 写入经 OperationGuard 闸门(此前裸调零审计)
+            assertObsidianWriteAllowed("obsidian.writeNote", { itemKey: item.itemKey, sourceType: item.sourceType, itemName: item.title || item.itemKey });
             const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
             if (!noteResult.ok) throw new Error(noteResult.error);
             // v3.14.3 修复: Obsidian 导出成功同样写入已导出账本(与 Notion 分支同构),
@@ -263,6 +282,17 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
  * @param {Function} onProgress
  */
 const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress) => {
+    // v3.14.7 (REV-01 UI-05): GitHub 路径补 SyncLock 重入守卫——与 LinuxDo 路径
+    // (export/index.js exportBookmarks)同构: AI 写/自动同步/手动导出并发时仅一方执行,
+    // 避免双建页与互斥纪律缺口。
+    if (SyncLock.isExporting) {
+        return {
+            success: [],
+            failed: [],
+            skipped: (selectedItems || []).map((item) => ({ title: item?.title || item?.itemKey || "GitHub" })),
+            message: "已有导出进行中，已跳过本次请求",
+        };
+    }
     const { apiKey, databaseId } = settings;
     if (!apiKey || !databaseId) {
         throw new Error("请先配置 Notion API Key 和数据库 ID");
@@ -283,6 +313,7 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress)
     // ReferenceError(v3.14.5 缺陷); 循环内仅 mutate 内存缓存 + 末次 flush, 消除逐条全账本
     // 序列化的写侧 O(N²)(与 Obsidian 分支同构)
     let githubDirty = false;
+    SyncLock.isExporting = true;
 
     try {
     for (let i = 0; i < selectedItems.length; i++) {
@@ -344,7 +375,8 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress)
                 sourceType,
             });
             // 认证终态 fail-fast(v3.14.5):中止剩余 GitHub 项导出,避免逐项重复注定失败的 401
-            if (error && (error.isAuthTerminal || String(error?.message || "").includes("Notion OAuth 续签失败"))) {
+            // v3.14.7: 仅信 isAuthTerminal 标记(与 api 层终态/瞬态区分对齐), 消息子串会误杀瞬态续签失败
+            if (error && error.isAuthTerminal === true) {
                 const skipped = selectedItems.slice(i + 1).map((skippedItem) => ({
                     title: skippedItem.title || skippedItem.itemKey || "GitHub",
                 }));
@@ -367,6 +399,8 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress)
             GitHubAPI.flushExported();
             GitHubAPI.flushGistsExported();
         }
+        // v3.14.7 (REV-01): 无论成败释放互斥锁(与 export/index.js finally 同构)
+        SyncLock.isExporting = false;
     }
 
     return { success, failed, skipped: [] };

@@ -2294,8 +2294,14 @@ const ChatUI = {
         // 清空对话
         const clearBtn = document.querySelector("#ldb-chat-clear");
         if (clearBtn) {
-            clearBtn.onclick = () => {
-                if (confirm("确定要清空对话历史吗？")) {
+            clearBtn.onclick = async () => {
+                // v3.14.7 (REV-19 UI-02): 原生 confirm 遗留 → ConfirmationDialog 统一(其余危险操作已全迁移)
+                const confirmed = await ConfirmationDialog.show({
+                    title: "清空对话历史",
+                    message: "确定要清空对话历史吗？",
+                    countdown: 3,
+                });
+                if (confirmed) {
                     ChatState.clear();
                 }
             };
@@ -2316,8 +2322,14 @@ const ChatUI = {
         }
         const classifyCancelBtn = document.querySelector("#ldb-classify-cancel");
         if (classifyCancelBtn) {
-            classifyCancelBtn.onclick = () => {
-                if (confirm("确定要取消批量分类吗？已完成的部分不会丢失。")) {
+            classifyCancelBtn.onclick = async () => {
+                // v3.14.7 (REV-19 UI-02): 原生 confirm 遗留 → ConfirmationDialog 统一
+                const confirmed = await ConfirmationDialog.show({
+                    title: "取消批量分类",
+                    message: "确定要取消批量分类吗？已完成的部分不会丢失。",
+                    countdown: 3,
+                });
+                if (confirmed) {
                     AIClassifier.cancel();
                 }
             };

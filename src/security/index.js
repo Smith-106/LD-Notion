@@ -122,6 +122,11 @@ const OperationGuard = {
         restorePage: 2,
         createComment: 1,
         agentTask: 2,
+        // v3.14.7 (REV-03 UI-07): Obsidian 写入登记——此前 4 个裸调点(events.js:1335/1380,
+        // github-obsidian-service.js:210, generic-ui.js:704)绕过 OperationGuard, 权限 0 只读
+        // 级仍可写零审计。登记后 writeNote/writeImage 统一经 canExecute 闸门 + auditDenied。
+        "obsidian.writeNote": 1,
+        "obsidian.writeImage": 1,
         // 多端同步(F-SYNC-05, HIGH-1 共识: 必须 P0 静态注册,接线在后)
         "sync.state.pull": 0,      // 只读拉取 payload
         "sync.state.push": 1,      // 推送本地状态(写介质)
@@ -577,6 +582,12 @@ const ConfirmationDialog = {
     // 按钮文案用 confirmText(默认「确认」),修复「重新导出/删除模板确认后零执行」瘫痪。
     show: (options) => {
         return new Promise((resolve) => {
+            // v3.14.7 (REV-02 UI-06): 重入闸门——已有对话框时忽略新请求,
+            // 防并发叠层(14 调用点中任一重入都复用当前对话框)。
+            if (ConfirmationDialog.dialogElement) {
+                resolve(false);
+                return;
+            }
             const {
                 title = "确认操作",
                 message = "确定要执行此操作吗？",
@@ -591,12 +602,16 @@ const ConfirmationDialog = {
 
             // 创建对话框
             const dialog = document.createElement("div");
+            // v3.14.7 (REV-16 UI-18): ARIA——role=dialog + aria-modal, 屏幕阅读器可播报
             dialog.className = "ldb-confirm-overlay";
+            dialog.setAttribute("role", "dialog");
+            dialog.setAttribute("aria-modal", "true");
+            dialog.setAttribute("aria-labelledby", "ldb-confirm-title");
             dialog.innerHTML = `
                 <div class="ldb-confirm-dialog">
                     <div class="ldb-confirm-header">
                         <span class="ldb-confirm-icon">⚠️</span>
-                        <span class="ldb-confirm-title">${escapeHtml(title)}</span>
+                        <span class="ldb-confirm-title" id="ldb-confirm-title">${escapeHtml(title)}</span>
                     </div>
                     <div class="ldb-confirm-body">
                         <p class="ldb-confirm-message">${escapeHtml(message)}</p>
@@ -631,6 +646,21 @@ const ConfirmationDialog = {
 
             let remaining = countdown;
             let canConfirm = !requireNameInput;
+            let settled = false;
+
+            // v3.14.7 (REV-02 UI-06): 统一关闭路径——cancel/ok/esc 三路共用一个
+            // cleanup, 防 keydown 监听器与整棵 dialog 闭包泄漏(此前 cancel/ok 只
+            // remove() 不卸载 escHandler, 每次按钮关闭泄漏一份)。
+            const cleanup = () => {
+                if (settled) return;
+                settled = true;
+                clearInterval(timer);
+                document.removeEventListener("keydown", escHandler);
+                dialog.remove();
+                if (ConfirmationDialog.dialogElement === dialog) {
+                    ConfirmationDialog.dialogElement = null;
+                }
+            };
 
             // 倒计时进度条
             const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
@@ -672,18 +702,14 @@ const ConfirmationDialog = {
 
             // 取消按钮
             cancelBtn.onclick = () => {
-                clearInterval(timer);
-                dialog.remove();
-                ConfirmationDialog.dialogElement = null;
+                cleanup();
                 resolve(false);
             };
 
             // 确认按钮
             okBtn.onclick = () => {
                 if (okBtn.disabled) return;
-                clearInterval(timer);
-                dialog.remove();
-                ConfirmationDialog.dialogElement = null;
+                cleanup();
                 resolve(true);
                 // F-UI-01:确认后执行调用方回调(重新导出/删除模板等),失败不吞错
                 if (typeof onConfirm === "function") {
@@ -698,14 +724,13 @@ const ConfirmationDialog = {
             // ESC 关闭
             const escHandler = (e) => {
                 if (e.key === "Escape") {
-                    clearInterval(timer);
-                    dialog.remove();
-                    ConfirmationDialog.dialogElement = null;
-                    document.removeEventListener("keydown", escHandler);
+                    cleanup();
                     resolve(false);
                 }
             };
             document.addEventListener("keydown", escHandler);
+            // v3.14.7 (REV-16 UI-18): 焦点移入对话框(此前焦点留在背景按钮)
+            cancelBtn.focus();
         });
     },
 

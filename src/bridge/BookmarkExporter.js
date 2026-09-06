@@ -682,7 +682,8 @@ const BookmarkExporter = {
                     { bookmarkUrl: bm.url, itemName: bm.title, reason: String(e?.message || e) });
                 failed++;
                 // 认证终态 fail-fast(v3.14.5):中止剩余书签导出,返回部分结果供重试
-                if (e && (e.isAuthTerminal || String(e?.message || "").includes("Notion OAuth 续签失败"))) {
+                // v3.14.7: 仅信 isAuthTerminal 标记(与 api 层终态/瞬态区分对齐), 消息子串会误杀瞬态续签失败
+                if (e && e.isAuthTerminal === true) {
                     // 已成功项的导出事实必须先落盘(flushExported 幂等,与正常路径末次 flush 对称)
                     BookmarkExporter.flushExported();
                     const remainingCount = newBookmarks.length - i - 1;
