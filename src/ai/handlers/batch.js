@@ -165,7 +165,7 @@ handleBatchTranslate: async (params, settings, explanation) => {
                 const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 4000);
                 if (!content.trim()) { failCount++; continue; }
 
-                const prompt = `你是一个专业翻译。将以下内容翻译为${lang}，使用 Markdown 格式，保持原文结构。\n\n原文：\n${content}`;
+                const prompt = `你是一个专业翻译。将以下内容翻译为${lang}，使用 Markdown 格式，保持原文结构。\n\n原文：\n${AI().isolateContent(content)}`;
                 const translated = await svc().requestChat(prompt, settings, 2000);
 
                 const blocks = [
@@ -242,7 +242,7 @@ handleExtractToDatabase: async (params, settings, explanation) => {
 - 分类/状态 → select，数量/金额 → number，是否 → checkbox，其他 → rich_text
 
 页面内容：
-${content}`;
+${AI().isolateContent(content)}`;
 
         const aiResponse = await svc().requestChat(analyzePrompt, settings, 3000);
 
@@ -364,8 +364,8 @@ handleGeneratePages: async (params, settings, explanation) => {
         // AI 规划页面结构
         const planPrompt = `你是一个 Notion 内容架构师。根据用户需求规划多页面内容结构。
 
-用户需求：${topic}
-${structure_prompt ? `补充要求：${structure_prompt}` : ""}
+用户需求：${AI().isolateContent(topic)}
+${structure_prompt ? `补充要求：${AI().isolateContent(structure_prompt)}` : ""}
 
 返回 JSON 格式（只返回 JSON）：
 {
@@ -479,9 +479,9 @@ ${structure_prompt ? `补充要求：${structure_prompt}` : ""}
                 // 生成子页面内容
                 const contentPrompt = `为以下主题生成详细内容，使用 Markdown 格式。
 
-主题：${child.title}
-描述：${child.description}
-上下文：这是「${plan.parent_title}」的子页面
+主题：${AI().isolateContent(child.title)}
+描述：${AI().isolateContent(child.description)}
+上下文：这是「${AI().isolateContent(plan.parent_title)}」的子页面
 
 请生成实用、具体的内容，包含合适的标题层级和结构化信息。`;
 
@@ -570,7 +570,7 @@ handleBatchAnalyze: async (params, settings, explanation) => {
 
 --- 以下是 ${pages.length} 个页面的内容 ---
 
-${contentParts.join("\n\n---\n\n")}`;
+${contentParts.map((part) => AI().isolateContent(part)).join("\n\n---\n\n")}`;
 
         const report = await svc().requestChat(prompt, settings, 4000);
 
@@ -707,8 +707,18 @@ handleBookmarkImport: async (params, settings, explanation) => {
         if (result.failed > 0) response += `❌ 失败 ${result.failed} 个\n`;
         if (result.exported === 0 && result.failed === 0) response += `\n所有书签已是最新状态。`;
 
+        // v3.14.6 (AUD-ARCH-17): 认证中止(aborted/skipped)不得渲染为 ✅ 完成
+        if (result.aborted) {
+            response = `⛔ **浏览器书签导入已中止**\n\n`;
+            response += `📊 共 ${result.total} 个书签\n`;
+            response += `📥 成功 ${result.exported} 个\n`;
+            response += `❌ 失败 ${result.failed} 个\n`;
+            if (result.skipped > 0) response += `⏭ 剩余 ${result.skipped} 个未尝试\n`;
+            response += `\n🔑 请检查 Notion API Key / OAuth 授权后重新导入。`;
+        }
+
         // 如果有 AI 配置，询问是否分类
-        if (result.exported > 0 && settings.aiApiKey) {
+        if (result.exported > 0 && settings.aiApiKey && !result.aborted) {
             response += `\n\n💡 可以输入「分类书签」让 AI 自动为导入的书签分类。`;
         }
 

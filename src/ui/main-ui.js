@@ -1145,7 +1145,7 @@ const UI = {
         const bmStatusMain = refs.bookmarkExtStatus
         if (bmStatusMain) {
             if (BookmarkBridge.isExtensionAvailable()) {
-                const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
+                const isUserscriptMode = Utils.isUserscriptMode();
                 if (isUserscriptMode) {
                     bmStatusMain.innerHTML = '<span class="ldb-status-text ldb-status-text--success">✅ 桥接已就绪（Userscript 模式）</span> — 可用「📖 导入浏览器书签」按钮';
                 } else {
@@ -1348,7 +1348,7 @@ const UI = {
         const resultEl = refs.selfCheckResult
         if (!resultEl) return;
 
-        const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
+        const isUserscriptMode = Utils.isUserscriptMode();
         const hasBridgeMarker = BookmarkBridge.isExtensionAvailable();
         const bookmarkSource = UI.getActiveBookmarkSource();
         const hasGitHubUsername = !!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
@@ -1418,7 +1418,7 @@ const UI = {
     },
 
     copyDiagnostics: async () => {
-        const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
+        const isUserscriptMode = Utils.isUserscriptMode();
         const hasBridgeMarker = BookmarkBridge.isExtensionAvailable();
         const bookmarkSource = UI.getActiveBookmarkSource();
         const hasGitHubUsername = !!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "").trim();

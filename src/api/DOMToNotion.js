@@ -109,7 +109,9 @@ const DOMToNotion = {
             host === "youtu.be" || host.endsWith(".youtu.be") ||
             host === "vimeo.com" || host.endsWith(".vimeo.com") ||
             host === "bilibili.com" || host.endsWith(".bilibili.com");
-        if (isAllowedEmbedHost || host.includes("player.")) {
+        // v3.14.6 (XN-04): player. 子串兜底移除 —— 任意公网域 player.evil.com 可被放行写入
+        // embed.url(服务端抓取 SSRF); 仅显式视频宿主白名单 + _safeExternalUrl 双保险
+        if (isAllowedEmbedHost) {
             const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
             if (full) {
                 blocks.push({ type: "embed", embed: { url: full } });
@@ -342,9 +344,13 @@ const DOMToNotion = {
                 }
                 const link = Utils.absoluteUrl(href);
                 const linkText = el.textContent || link;
+                // v3.14.6 (XN-04): 文本链接过 _safeExternalUrl —— 非法(内网/169.254/非 http(s))降级纯文本
+                const safeLink = DOMToNotion._safeExternalUrl(link);
                 if (link && linkText) {
                     const chunks = DOMToNotion.splitLongText(linkText, annotations);
-                    chunks.forEach(chunk => { chunk.text.link = { url: link }; });
+                    if (safeLink) {
+                        chunks.forEach(chunk => { chunk.text.link = { url: safeLink }; });
+                    }
                     result.push(...chunks);
                 }
                 return;

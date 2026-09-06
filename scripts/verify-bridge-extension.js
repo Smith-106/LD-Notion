@@ -3,7 +3,6 @@ const path = require("path");
 const assert = require("assert");
 
 const ACTIVE_ROOT_SELECTOR = "[data-ldb-root], .ldb-panel, .ldb-notion-panel, .gclip-panel";
-const BRIDGE_DENIAL_MESSAGE = "未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。";
 const contentScriptPath = path.resolve(__dirname, "..", "chrome-extension-full", "content.js");
 // chrome-extension-full/ 是当前桥接扩展形态（legacy chrome-extension/ 已废弃，见 39beda4 清理提交）。
 // content.js 是完整 userscript 的 esbuild 产物（含 UI 初始化，需完整 DOM 环境），
@@ -170,36 +169,28 @@ async function dispatchBridgeRequest(harness, type, detail) {
     return responsePromise;
 }
 
-async function verifyInactiveRootBoundary() {
+async function verifyNoRootStillServes() {
+    // v3.14.6 (AUD-ARCH-03): DOM 活动根门已移除 —— 面板未渲染/已关闭时桥接请求仍须成功
     const harness = createHarness({ hasActiveRoot: false });
     const marker = harness.document.querySelector('meta[name="ld-notion-ext"]');
 
     assert.ok(marker, "content script 应注入 ld-notion-ext ready 标记");
     assert.strictEqual(marker.content, "ready");
 
-    const denied = await dispatchBridgeRequest(harness, "ld-notion-request-bookmarks", {
-        requestId: "deny-bookmarks",
+    const treeResponse = await dispatchBridgeRequest(harness, "ld-notion-request-bookmarks", {
+        requestId: "no-root-tree",
     });
+    assert.strictEqual(treeResponse.requestId, "no-root-tree");
+    assert.strictEqual(treeResponse.success, true);
+    assert.deepStrictEqual(treeResponse.data, harness.chrome.fixture.tree);
+    assert.strictEqual(harness.chrome.callCounts.getTree, 1);
 
-    assert.deepStrictEqual(denied, {
-        requestId: "deny-bookmarks",
-        success: false,
-        error: BRIDGE_DENIAL_MESSAGE,
-    });
-    assert.strictEqual(harness.chrome.callCounts.getTree, 0);
-    assert.strictEqual(harness.chrome.callCounts.getChildren, 0);
-
-    const deniedSearch = await dispatchBridgeRequest(harness, "ld-notion-search-bookmarks", {
-        requestId: "deny-search",
+    const searchResponse = await dispatchBridgeRequest(harness, "ld-notion-search-bookmarks", {
+        requestId: "no-root-search",
         query: "ld-notion",
     });
-
-    assert.deepStrictEqual(deniedSearch, {
-        requestId: "deny-search",
-        success: false,
-        error: BRIDGE_DENIAL_MESSAGE,
-    });
-    assert.strictEqual(harness.chrome.callCounts.search, 0);
+    assert.strictEqual(searchResponse.success, true);
+    assert.strictEqual(harness.chrome.callCounts.search, 1);
 }
 
 async function verifyActiveRootBookmarkFlow() {
@@ -260,7 +251,7 @@ async function verifyMissingRequestIdIsIgnored() {
 }
 
 async function main() {
-    await verifyInactiveRootBoundary();
+    await verifyNoRootStillServes();
     await verifyActiveRootBookmarkFlow();
     await verifyMissingRequestIdIsIgnored();
     console.log("✅ Bridge extension runtime smoke passed");

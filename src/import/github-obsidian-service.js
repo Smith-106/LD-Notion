@@ -279,13 +279,22 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress)
     const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
     const success = [];
     const failed = [];
+    // v3.14.6 (AUD-ARCH-02/08): Notion 分支补声明 githubDirty —— 认证终态分支引用它时不再
+    // ReferenceError(v3.14.5 缺陷); 循环内仅 mutate 内存缓存 + 末次 flush, 消除逐条全账本
+    // 序列化的写侧 O(N²)(与 Obsidian 分支同构)
+    let githubDirty = false;
 
+    try {
     for (let i = 0; i < selectedItems.length; i++) {
         const item = selectedItems[i];
         const bookmark = item.raw;
         const sourceType = item.sourceType;
         const label = item.title || item.itemKey;
-        onProgress?.(i + 1, selectedItems.length, label);
+        try {
+            onProgress?.(i + 1, selectedItems.length, label);
+        } catch (progressError) {
+            console.warn(`[GitHubObsidianService] onProgress 回调异常 (${label}):`, progressError);
+        }
 
         try {
             let properties;
@@ -311,10 +320,11 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress)
             }, apiKey);
 
             if (sourceType === "gists") {
-                GitHubAPI.markGistExportedAndFlush(item.itemKey);
+                GitHubAPI.markGistExported(item.itemKey);
             } else {
-                GitHubAPI.markExportedAndFlush(item.itemKey);
+                GitHubAPI.markExported(item.itemKey);
             }
+            githubDirty = true;
             GitHubExporter._auditExport("createDatabasePage", "success",
                 { pageId: String(page?.id || ""), itemKey: item.itemKey, sourceType, databaseId });
             success.push({
@@ -349,6 +359,13 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress)
 
         if (i < selectedItems.length - 1 && delay > 0) {
             await Utils.sleep(delay);
+        }
+    }
+    } finally {
+        // 循环末单次持久化(成功/失败/取消/中止均 flush, 不丢已导出事实; flush 幂等)
+        if (githubDirty) {
+            GitHubAPI.flushExported();
+            GitHubAPI.flushGistsExported();
         }
     }
 

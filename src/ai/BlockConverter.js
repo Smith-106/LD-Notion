@@ -7,6 +7,7 @@
 // AIAssistant 上保留转发壳 (_textToBlocks/_buildBlockUpdatePayload) 保持 38 处调用点零改动。
 
 const { Utils } = require("../utils");
+const { UrlValidator } = require("../security/UrlValidator");
 
 const BlockConverter = {
     // markdown 文本 → Notion blocks 数组
@@ -203,8 +204,9 @@ const BlockConverter = {
                     }
                 };
             case "bookmark":
-                if (!Utils.isHttpUrl(rawContent)) {
-                    throw new Error("bookmark 块仅支持更新为 http/https URL。");
+                // v3.14.6 (S-03): bookmark 块是 Notion 服务端抓取面 —— 协议白名单 + 私网/169.254 拒绝
+                if (!UrlValidator.validatePageExternalUrl(rawContent)) {
+                    throw new Error("bookmark 块仅支持 http/https 公网 URL。");
                 }
                 return {
                     bookmark: {
@@ -214,8 +216,9 @@ const BlockConverter = {
                     }
                 };
             case "embed":
-                if (!Utils.isHttpUrl(rawContent)) {
-                    throw new Error("embed 块仅支持更新为 http/https URL。");
+                // v3.14.6 (S-03): embed 同属服务端抓取面, 与 bookmark 同一原语
+                if (!UrlValidator.validatePageExternalUrl(rawContent)) {
+                    throw new Error("embed 块仅支持 http/https 公网 URL。");
                 }
                 return {
                     embed: {

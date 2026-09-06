@@ -32,7 +32,9 @@ const RSSAdapter = Object.assign(Object.create(SourceAdapter), {
     normalize(raw) {
         return {
             source: "rss",
-            id: raw.guid || raw.link || "",
+            // v3.14.6 (DC-007): 实际拉取路径产物带 id/url → 键派生单源化,
+            // 与落账键 `rss:${item.id}` 对齐(此前恒 'rss:' 致适配器级去重失效)
+            id: raw.id || raw.guid || raw.link || "",
             title: raw.title || "",
             content: raw.content || raw.summary || "",
             url: raw.link || "",

@@ -39,6 +39,22 @@ const CredentialVault = {
 
     isSensitiveKey: (key) => CredentialVault.SENSITIVE_KEYS.has(key),
 
+    // v3.14.6 (S-08): 自由文本/JSON 序列化脱敏 —— REDACT_IN_LOGS 键名 + token 形态正则,
+    // AI trace/回喂 payload 落盘前统一过此函数(凭证片段不回显)
+    redactText: (text) => {
+        let out = String(text ?? "");
+        for (const key of CredentialVault.REDACT_IN_LOGS) {
+            out = out.split(key).join("***REDACTED***");
+        }
+        return out
+            .replace(/ntn_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***")
+            .replace(/sk-[A-Za-z0-9_\-]{20,}/g, "***REDACTED***")
+            .replace(/Bearer\s+[A-Za-z0-9._\-]{10,}/gi, "Bearer ***REDACTED***")
+            .replace(/github_pat_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***")
+            .replace(/ghp_[A-Za-z0-9]{20,}/g, "***REDACTED***")
+            .replace(/gho_[A-Za-z0-9]{20,}/g, "***REDACTED***");
+    },
+
     hasVault: () => !!CredentialVault._getVaultPayloadRaw(),
 
     isUnlocked: () => CredentialVault._unlocked,
@@ -1210,6 +1226,18 @@ const NotionOAuth = {
         });
     },
 
+    // v3.14.6 (AUD-ARCH-11): 续签失败终态判定单源 —— invalid_grant/invalid_client 或凭证类关键词
+    // 为终态(已使用/已过期/Client 配置无效), 其余(网络/超时/5xx)为可恢复瞬态;
+    // api 层据此决定是否标记 isAuthTerminal 中止整批(可恢复批次不得误杀)
+    isTerminalRefreshError: (error) => {
+        const message = String(error?.message || "");
+        const errorCode = String(error?.code || "").toLowerCase();
+        return errorCode === "invalid_grant" || errorCode === "invalid_client"
+            || message.includes("已使用或已过期") || message.includes("invalid_grant")
+            || message.includes("invalid_client") || message.includes("Client 配置无效")
+            || message.includes("Client ID 与 Client Secret 不匹配");
+    },
+
     refreshAccessToken: async () => {
         // 并发串行化(三模型共识,借鉴 MCP 令牌工程):多标签 401 同时续签时单飞,
         // 避免 refresh_token 轮换竞争与重复交换
@@ -1217,53 +1245,98 @@ const NotionOAuth = {
             return NotionOAuth._refreshInFlight;
         }
         NotionOAuth._refreshInFlight = (async () => {
-            const refreshToken = NotionOAuth.getRefreshToken();
-            const config = NotionOAuth.getConfig();
-            if (!refreshToken) {
-                if (CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
-                    throw new Error("Notion OAuth refresh token 已保存在保险箱中，请先解锁凭证保险箱后再刷新令牌。");
-                }
-                throw new Error("当前没有可刷新的 Notion OAuth refresh_token");
-            }
-            if (!config.clientId || !config.clientSecret) {
-                if (CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
-                    throw new Error("Notion OAuth Client Secret 已保存在保险箱中，请先解锁凭证保险箱后再刷新令牌。");
-                }
-                throw new Error("缺少 Notion OAuth Client 配置，无法刷新令牌");
-            }
-
+            // v3.14.6 (CC-09): 跨 tab 续签租约 —— refresh_token 轮换 + 双 tab 并发时
+            // 后到者 invalid_grant 被判终态清凭据降级(先到者已成功); 持锁者交换,
+            // 其余等待 GM 值变化拿到新 token
+            const { SyncLock } = require("../sync-lock");
+            const leaseKey = CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_LEASE;
+            let lease = await SyncLock.acquireLease(leaseKey, 30000);
             try {
-                const result = await NotionOAuth.exchangeToken({
-                    grant_type: "refresh_token",
-                    refresh_token: refreshToken,
-                });
-                await NotionOAuth.applyTokenResponse(result, { source: "refresh" });
-                return result.access_token;
-            } catch (error) {
-                // invalid_grant/invalid_client 均视为终态(三模型共识 + 全盘审计交叉回归):
-                // invalid_grant=已使用/已过期; invalid_client=clientId 被污染/非法——
-                // 两者都清 token 降级 manual, 禁止无限重试(此前 invalid_client 永不降级,
-                // 与 clientId 无法清除叠加成死锁)。
-                const message = String(error?.message || "");
-                const errorCode = String(error?.code || "").toLowerCase();
-                const isTerminal = errorCode === "invalid_grant" || errorCode === "invalid_client"
-                    || message.includes("已使用或已过期") || message.includes("invalid_grant")
-                    || message.includes("invalid_client") || message.includes("Client 配置无效")
-                    || message.includes("Client ID 与 Client Secret 不匹配");
-                if (isTerminal) {
-                    await NotionOAuth.setRefreshToken("");
-                    NotionOAuth.setAuthMode("manual");
-                    const hint = errorCode === "invalid_client" || message.includes("invalid_client") || message.includes("Client ID 与 Client Secret 不匹配")
-                        ? "Notion OAuth Client 配置无效，已切换手动模式。请重新一键授权或填写有效 Client ID。"
-                        : "Notion OAuth 登录已过期，请重新点击一键授权。";
-                    NotionOAuth.pushNotice(hint, "error");
+                if (!lease) {
+                    const rotated = await NotionOAuth._waitForTokenRotation(30000);
+                    if (rotated) return rotated;
+                    // 30s 未等到(他 tab 崩溃/超时) → 租约 TTL 已过期, 重试获取
+                    lease = await SyncLock.acquireLease(leaseKey, 30000);
+                    if (!lease) throw new Error("Notion OAuth 续签被其他标签页占用，请稍后重试");
                 }
-                throw error;
+                const refreshToken = NotionOAuth.getRefreshToken();
+                const config = NotionOAuth.getConfig();
+                if (!refreshToken) {
+                    if (CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
+                        throw new Error("Notion OAuth refresh token 已保存在保险箱中，请先解锁凭证保险箱后再刷新令牌。");
+                    }
+                    throw new Error("当前没有可刷新的 Notion OAuth refresh_token");
+                }
+                if (!config.clientId || !config.clientSecret) {
+                    if (CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault.hasVault() && !CredentialVault.isUnlocked()) {
+                        throw new Error("Notion OAuth Client Secret 已保存在保险箱中，请先解锁凭证保险箱后再刷新令牌。");
+                    }
+                    throw new Error("缺少 Notion OAuth Client 配置，无法刷新令牌");
+                }
+
+                try {
+                    const result = await NotionOAuth.exchangeToken({
+                        grant_type: "refresh_token",
+                        refresh_token: refreshToken,
+                    });
+                    await NotionOAuth.applyTokenResponse(result, { source: "refresh" });
+                    return result.access_token;
+                } catch (error) {
+                    const isTerminal = NotionOAuth.isTerminalRefreshError(error);
+                    if (isTerminal) {
+                        // v3.14.6 (CC-09): 降级前重读存储 token —— 他 tab 可能已轮换成功,
+                        // 用新值重试一次再判终态(防后到者误清凭据)
+                        const stored = Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "");
+                        if (stored && stored !== refreshToken) {
+                            const retryResult = await NotionOAuth.exchangeToken({
+                                grant_type: "refresh_token",
+                                refresh_token: stored,
+                            });
+                            await NotionOAuth.applyTokenResponse(retryResult, { source: "refresh" });
+                            return retryResult.access_token;
+                        }
+                        // invalid_grant/invalid_client 均视为终态(三模型共识 + 全盘审计交叉回归):
+                        // invalid_grant=已使用/已过期; invalid_client=clientId 被污染/非法——
+                        // 两者都清 token 降级 manual, 禁止无限重试(此前 invalid_client 永不降级,
+                        // 与 clientId 无法清除叠加成死锁)。
+                        await NotionOAuth.setRefreshToken("");
+                        NotionOAuth.setAuthMode("manual");
+                        const message = String(error?.message || "");
+                        const errorCode = String(error?.code || "").toLowerCase();
+                        const hint = errorCode === "invalid_client" || message.includes("invalid_client") || message.includes("Client ID 与 Client Secret 不匹配")
+                            ? "Notion OAuth Client 配置无效，已切换手动模式。请重新一键授权或填写有效 Client ID。"
+                            : "Notion OAuth 登录已过期，请重新点击一键授权。";
+                        NotionOAuth.pushNotice(hint, "error");
+                    }
+                    throw error;
+                }
             } finally {
+                if (lease) SyncLock.releaseLease(leaseKey, lease);
                 NotionOAuth._refreshInFlight = null;
             }
         })();
         return NotionOAuth._refreshInFlight;
+    },
+
+    // v3.14.6 (CC-09): 等待他 tab 轮换后的新 token(GM 存储值变化轮询)
+    _waitForTokenRotation: (timeoutMs = 30000) => {
+        return new Promise((resolve) => {
+            const before = Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "");
+            const start = Date.now();
+            const poll = () => {
+                const current = Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "");
+                if (current && current !== before) {
+                    resolve(Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""));
+                    return;
+                }
+                if (Date.now() - start >= timeoutMs) {
+                    resolve(null);
+                    return;
+                }
+                setTimeout(poll, 500);
+            };
+            poll();
+        });
     },
 
     handleRedirectCallback: async () => {

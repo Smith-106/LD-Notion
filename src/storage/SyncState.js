@@ -14,7 +14,8 @@ const _setRaw = (key, val) => GM_setValue(key, val);
 const SyncStateV2 = {
     VERSION: 2,
     _cache: null,
-    _saveTimer: null,
+    _saveTimerId: null,
+    _savePending: false,
     _dirty: false,
     OUTCOMES: Object.freeze(["idle", "running", "success", "partial", "error"]),
 
@@ -186,13 +187,14 @@ const SyncStateV2 = {
         this._dirty = true;
         // 使用 queueMicrotask 合并同一事件循环中的多次写入
         // 在测试环境 (无 setTimeout) 中也能正常工作
-        if (this._saveTimer) return;
-        const flush = () => { this._saveTimer = null; this._flushSave(); };
+        if (this._saveTimerId || this._savePending) return;
+        const flush = () => { this._saveTimerId = null; this._savePending = false; this._flushSave(); };
         if (typeof globalThis.queueMicrotask === "function") {
-            this._saveTimer = 1; // sentinel, non-null
+            // v3.14.6 (CC-15): 微任务无真实句柄, 用 _savePending 布尔标记而非数字哨兵
+            this._savePending = true;
             globalThis.queueMicrotask(flush);
         } else if (typeof globalThis.setTimeout === "function") {
-            this._saveTimer = globalThis.setTimeout(flush, 0);
+            this._saveTimerId = globalThis.setTimeout(flush, 0);
         } else {
             // 同步环境直接写入
             this._flushSave();
@@ -200,7 +202,8 @@ const SyncStateV2 = {
     },
 
     _flushSave() {
-        this._saveTimer = null;
+        this._saveTimerId = null;
+        this._savePending = false;
         if (!this._dirty) return;
         this._dirty = false;
         _setRaw(CONFIG.STORAGE_KEYS.AUTO_SYNC_STATE, JSON.stringify(this._cache));
@@ -213,10 +216,12 @@ const SyncStateV2 = {
      * 强制立即写入 (用于 sync 结束后等关键节点)
      */
     forceFlush() {
-        if (this._saveTimer) {
-            globalThis.clearTimeout?.(this._saveTimer);
-            this._saveTimer = null;
+        // v3.14.6 (CC-15): 仅对真实定时器句柄 clearTimeout, 数字哨兵不再伪装句柄
+        if (this._saveTimerId !== null) {
+            globalThis.clearTimeout?.(this._saveTimerId);
+            this._saveTimerId = null;
         }
+        this._savePending = false;
         this._flushSave();
     },
 
@@ -350,3 +355,16 @@ const SyncStateV2 = {
 };
 
 module.exports = { SyncStateV2 };
+
+// v3.14.6 (CC-13): AUTO_SYNC_STATE 跨上下文监听 —— 远端(tab/扩展/他机)变更时失效内存缓存,
+// 防陈旧 _cache 经 _save 整键覆写新 watermark/epoch; 本 tab 自写 remote=false 不触发,
+// 残余读写间隙 LWW 窗口由跨 tab 租约(CC-04)进一步压缩
+if (typeof GM_addValueChangeListener === "function") {
+    try {
+        GM_addValueChangeListener(CONFIG.STORAGE_KEYS.AUTO_SYNC_STATE, (key, oldValue, newValue, remote) => {
+            if (remote) SyncStateV2._cache = null;
+        });
+    } catch {
+        // 无 GM 环境(测试)下静默
+    }
+}

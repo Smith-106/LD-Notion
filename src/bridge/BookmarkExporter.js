@@ -231,7 +231,7 @@ const BookmarkExporter = {
     generateAISummary: async (bookmark, insight, settings) => {
         if (!settings?.aiApiKey || !settings?.aiService) return null;
 
-        const prompt = `请根据以下网页信息生成书签标题和摘要，要求：\n1) 标题 30 字以内\n2) 摘要 90 字以内\n3) 使用中文\n4) 仅返回 JSON，不要其他内容\n\nJSON 格式：{"title":"...","summary":"..."}\n\n网页 URL：${bookmark.url}\n原始标题：${bookmark.title || ""}\n页面标题：${insight.title || ""}\n页面摘要：${insight.summary || ""}`;
+        const prompt = `请根据以下网页信息生成书签标题和摘要，要求：\n1) 标题 30 字以内\n2) 摘要 90 字以内\n3) 使用中文\n4) 仅返回 JSON，不要其他内容\n\nJSON 格式：{"title":"...","summary":"..."}\n\n网页 URL：${AIService.isolateContent(bookmark.url)}\n原始标题：${AIService.isolateContent(bookmark.title || "")}\n页面标题：${AIService.isolateContent(insight.title || "")}\n页面摘要：${AIService.isolateContent(insight.summary || "")}`;
 
         try {
             const response = await AIService.requestChat(prompt, settings, 220);
@@ -562,10 +562,27 @@ const BookmarkExporter = {
     // 批量导出循环末尾单次回写已导出映射（PERF-003）：循环内仅 mutate 内存缓存，
     // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。语义与逐条 markExported 等价。
     // v3.14.3: 改容量上限淘汰（用户书签数天然有界），不再按 90 天时间 TTL 误删导出事实。
+    // v3.14.6 (CC-05): 写前 rebase(重读-并集-max ts) —— 跨 tab 他端新增键不可丢(导出账本不可再生)
     flushExported: () => {
         if (BookmarkExporter._exportedCache) {
             BookmarkExporter._evictByCapacity(BookmarkExporter._exportedCache);
-            Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(BookmarkExporter._exportedCache));
+            let remote = {};
+            try {
+                remote = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}")) || {};
+            } catch { remote = {}; }
+            // v3.14.6 (CC-05): rebase —— 远端键并入(同键 max ts)防他 tab 新增键丢失;
+            // 并入前做 URL 规范化(与 _migrateExportedKeys 不变量一致, 防 raw 键复活)
+            const merged = {};
+            for (const [key, ts] of Object.entries(remote)) {
+                const norm = Utils.normalizeDedupUrl(key);
+                if (merged[norm] === undefined || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
+            }
+            for (const [key, ts] of Object.entries(BookmarkExporter._exportedCache)) {
+                const norm = Utils.normalizeDedupUrl(key);
+                if (merged[norm] === undefined || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
+            }
+            BookmarkExporter._exportedCache = merged;
+            Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(merged));
         }
     },
 
@@ -600,7 +617,13 @@ const BookmarkExporter = {
             throw new Error("请先配置 Notion API Key 和数据库");
         }
 
-        if (onProgress) onProgress("正在配置数据库结构...", 0);
+        if (onProgress) {
+            try {
+                onProgress("正在配置数据库结构...", 0);
+            } catch (progressError) {
+                console.warn("[BookmarkExporter] onProgress 回调异常:", progressError);
+            }
+        }
         const setupResult = await BookmarkExporter.setupDatabaseProperties(databaseId, apiKey);
         if (!setupResult.success) {
             throw new Error(`数据库配置失败: ${setupResult.error}`);
@@ -619,10 +642,16 @@ const BookmarkExporter = {
         let success = 0, failed = 0;
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
 
+        // v3.14.6 (CC-10): 循环包 try/finally flush —— onProgress 抛错/异常路径也不丢导出账本
+        try {
         for (let i = 0; i < newBookmarks.length; i++) {
             const bm = newBookmarks[i];
             const pct = Math.round(5 + (i / newBookmarks.length) * 90);
-            if (onProgress) onProgress(`正在导出 (${i + 1}/${newBookmarks.length}): ${bm.title}`, pct);
+            try {
+                if (onProgress) onProgress(`正在导出 (${i + 1}/${newBookmarks.length}): ${bm.title}`, pct);
+            } catch (progressError) {
+                console.warn("[BookmarkExporter] onProgress 回调异常:", progressError);
+            }
 
             try {
                 const enriched = await BookmarkExporter.enrichBookmark(bm, settings, enrichContext);
@@ -672,9 +701,11 @@ const BookmarkExporter = {
                 await Utils.sleep(delay);
             }
         }
-
-        // 批量回写已导出映射（PERF-003）：无论 success/failed，循环结束单次 flush，写侧从 O(N²)→O(N)。
-        BookmarkExporter.flushExported();
+        } finally {
+            // 批量回写已导出映射（PERF-003）：无论 success/failed/异常，循环结束单次 flush，
+            // 写侧从 O(N²)→O(N)。v3.14.6 (CC-10): finally 保证 onProgress 抛错也不丢账本
+            BookmarkExporter.flushExported();
+        }
 
         return { total: bookmarks.length, exported: success, failed, newCount: newBookmarks.length };
     },

@@ -12,6 +12,12 @@ const UrlValidator = {
     // 本地/私有地址（Obsidian Local REST API 仅运行在本地）
     LOCAL_HOSTS: new Set(["127.0.0.1", "localhost", "::1"]),
 
+    // v3.14.6 (XN-02): 通配 DNS 后缀黑名单 —— nip.io 等将任意子域解析到内网/127.0.0.1,
+    // WHATWG URL 不归一化域名形态, 字面匹配无法拦截(SSRF 已知限制的静态收窄层)。
+    // 注: 非规范 IP 字面量(2130706433/0x7f000001/0177.0.0.1/127.1/前导零)已被 WHATWG
+    // URL 解析器归一化为点分十进制(实测), 落入 _isPrivateHost 网段校验, 此处为纵深防御。
+    WILDCARD_DNS_PATTERN: /\.(nip\.io|sslip\.io|xip\.io|loca\.lt|ssrf\.sh)$/i,
+
     // 校验 AI 请求 baseUrl：白名单或 HTTPS（非空时）
     validateAiBaseUrl: (baseUrl) => {
         if (!baseUrl) return true;
@@ -24,7 +30,7 @@ const UrlValidator = {
         if (parsed.protocol !== "https:") return false;
         if (UrlValidator.AI_ALLOWED_HOSTS.has(parsed.hostname)) return true;
         // 允许自定义 HTTPS 域名（用户自建反代），但拒绝 localhost/内网
-        return !UrlValidator._isPrivateHost(parsed.hostname);
+        return !UrlValidator._isPrivateHost(parsed.hostname) && !UrlValidator._isSuspiciousHostname(parsed.hostname);
     },
 
     // 校验 Obsidian API URL：仅允许本地地址
@@ -53,7 +59,22 @@ const UrlValidator = {
             return false;
         }
         if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-        return !UrlValidator._isPrivateHost(parsed.hostname);
+        return !UrlValidator._isPrivateHost(parsed.hostname) && !UrlValidator._isSuspiciousHostname(parsed.hostname);
+    },
+
+    // v3.14.6 (XN-02): 可疑 hostname 静态判定 —— 通配 DNS 后缀 + 纵深防御非规范 IP 字面量
+    _isSuspiciousHostname: (hostname) => {
+        const h = String(hostname).replace(/\.$/, "").toLowerCase();
+        if (UrlValidator.WILDCARD_DNS_PATTERN.test(h)) return true;
+        // 纵深防御: 纯数字整数 / 0x 十六进制整体 / 混合段 0x|0b 前缀(WHATWG 已归一化, 兜底) 
+        if (/^\d+$/.test(h)) return true;
+        if (/^0x[0-9a-f]+$/i.test(h)) return true;
+        const segs = h.split(".");
+        if (segs.length === 4 && segs.some((s) => /^0x/i.test(s) || /^0b/i.test(s))) return true;
+        // 前导零段(0177 等八进制形态, 段长可超 3 位)——仅当末段为纯数字 IP 字面量形态时判定,
+        // 避免误拒 a.b.01.com 类合法域名(WHATWG 仅末段全数字按 IPv4 解析, rev NEW-03)
+        if (segs.length === 4 && /^\d+$/.test(segs[3]) && segs.some((s) => /^0\d+$/.test(s))) return true;
+        return false;
     },
 
     // 判断是否为私有/内网主机

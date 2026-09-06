@@ -358,6 +358,15 @@ const RSSAutoImporter = {
         }
     },
 
+    // v3.14.6 (XN-03): 链接属性安全校验 —— 仅 http(s) 公网(拒内网/169.254/非 http 协议)
+    _safeUrl: (url) => {
+        if (!url) return "";
+        const { UrlValidator } = require("../security/UrlValidator");
+        return UrlValidator.validatePageExternalUrl(String(url).trim())
+            ? String(url).trim().slice(0, 2000)
+            : "";
+    },
+
     buildProperties: (item) => {
         const normalized = RSSAutoImporter.normalizeItem(item);
         const inferredCategory = BookmarkExporter.normalizeText(item?.inferredCategory || "", 300);
@@ -365,12 +374,12 @@ const RSSAutoImporter = {
             ...(normalized.feedTitle ? [normalized.feedTitle] : []),
             ...(Array.isArray(normalized.tags) ? normalized.tags : []),
         ]));
+        // v3.14.6 (XN-03): feed 链接零校验直写(RSS 源不可信) —— 仅 http(s) 公网才写,
+        // 否则跳过该属性(对称 BookmarkExporter 模式)
+        const safeUrl = RSSAutoImporter._safeUrl(normalized.url);
         const properties = {
             "标题": {
                 title: [{ text: { content: normalized.title } }]
-            },
-            "链接": {
-                url: normalized.url
             },
             "来源": {
                 rich_text: [{ text: { content: "RSS" } }]
@@ -379,6 +388,9 @@ const RSSAutoImporter = {
                 rich_text: [{ text: { content: "Feed" } }]
             },
         };
+        if (safeUrl) {
+            properties["链接"] = { url: safeUrl };
+        }
         if (normalized.summary) {
             properties["描述"] = {
                 rich_text: [{ text: { content: normalized.summary } }]
@@ -659,6 +671,14 @@ const RSSAutoImporter = {
         const { currentItems, feedCount, nextSnapshot } = ctx;
         const { created, updated, unchanged, failed } = stats;
 
+        // v3.14.6 (DC-006): nextSnapshot 从 {...previousSnapshot} 起步只增不删 →
+        // feed 移除条目永驻, 无界增长违容量约束; 收尾按当前项键集剪枝
+        // (失败项也在 currentItems 中, snapshot 保留语义不变)
+        const keptKeys = new Set(currentItems.map((item) => item.itemKey));
+        for (const key of Object.keys(nextSnapshot)) {
+            if (!keptKeys.has(key)) delete nextSnapshot[key];
+        }
+
         const statePatch = {
             snapshot: nextSnapshot,
             lastAttemptAt: attemptAt,
@@ -732,6 +752,8 @@ const RSSAutoImporter = {
         if (now - RSSAutoImporter.lastRunAt < RSSAutoImporter.minimumRunGapMs) return;
         RSSAutoImporter.lastRunAt = now;
         RSSAutoImporter.isRunning = true;
+        // v3.14.6 (CC-03): 占用导出互斥, 防并发交错; finally 复位
+        SyncLock.isExporting = true;
         const attemptAt = Date.now();
 
         try {
@@ -739,6 +761,10 @@ const RSSAutoImporter = {
 
             const stats = { created: 0, updated: 0, unchanged: 0, failed: 0 };
             const successfulKeys = new Set();
+            // v3.14.6 (DC-004): run 级 batch —— markItemSeen 落账缓存化, 单次 flush; finally 兜底
+            const { DedupStore } = require("../storage");
+            DedupStore.beginBatch("rss");
+            try {
 
             for (let i = 0; i < ctx.currentItems.length; i++) {
                 const r = await RSSAutoImporter._syncSingleRssItem(ctx.currentItems[i], {
@@ -762,6 +788,10 @@ const RSSAutoImporter = {
             }
 
             RSSAutoImporter._aggregateRssState(ctx, stats, successfulKeys, attemptAt);
+            } finally {
+                // v3.14.6 (DC-004): 结束 batch —— 异常路径也单次 flush
+                DedupStore.endBatch("rss");
+            }
         } catch (error) {
             console.error("[LD-Notion] RSS 自动同步出错:", error);
             SyncState.updateRssState({
@@ -773,6 +803,8 @@ const RSSAutoImporter = {
             RSSAutoImporter.updateStatus(`RSS 自动同步出错: ${error.message}`);
         } finally {
             RSSAutoImporter.isRunning = false;
+            // v3.14.6 (CC-03): 复位互斥
+            SyncLock.isExporting = false;
             emit("sync:center-summary-updated");
         }
     },

@@ -1,6 +1,7 @@
 "use strict";
 
 const { CONFIG } = require("../config");
+const { CredentialVault } = require("../auth");
 
 /**
  * AgentTrace — AI Agent 调用链路追踪持久化（ISS-012, MAINT-002）。
@@ -117,8 +118,18 @@ const AgentTrace = {
      */
     persist(trace, status, finalResponse) {
         if (!trace) return null;
+        // v3.14.6 (S-08): 落盘前脱敏 —— trace 内容可携带凭证片段(错误信息/回复/预览)
+        trace.userInput = CredentialVault.redactText(trace.userInput || "");
+        trace.finalResponse = CredentialVault.redactText(String(finalResponse || "").slice(0, this.MAX_FINAL_RESPONSE));
+        if (Array.isArray(trace.results)) {
+            for (const r of trace.results) {
+                if (r && typeof r.preview === "string") r.preview = CredentialVault.redactText(r.preview);
+            }
+        }
+        if (Array.isArray(trace.errors)) {
+            trace.errors = trace.errors.map((e) => CredentialVault.redactText(e));
+        }
         trace.status = status || "completed";
-        trace.finalResponse = String(finalResponse || "").slice(0, this.MAX_FINAL_RESPONSE);
         trace.latencyMs = trace._startedAt ? Date.now() - trace._startedAt : 0;
         delete trace._startedAt;
 

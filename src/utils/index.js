@@ -48,6 +48,13 @@ const Utils = {
 
     isHttpUrl: (value) => /^https?:\/\//i.test(String(value || "").trim()),
 
+    // v3.14.6 (AUD-ARCH-05): userscript 模式判定 —— 扩展垫片 scriptHandler='chrome-extension'
+    // 会令旧判定恒真(徽章误标/扩展专属功能跳过), 显式排除
+    isUserscriptMode: () =>
+        typeof GM_info !== "undefined"
+        && !!GM_info.scriptHandler
+        && GM_info.scriptHandler !== "chrome-extension",
+
     extractNotionId: (value) => {
         const raw = String(value || "").trim();
         if (!raw) return "";

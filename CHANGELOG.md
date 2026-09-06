@@ -1,5 +1,22 @@
 # 更新日志
 
+## [3.14.6] - 2026-09-06
+
+### 修复（三模型共识审计 51 条发现全量修复 · 安全/并发/存储/同步）
+
+**根因**：上一审计 Session（maestro-20260906-trimodel-consensus-audit-20260905-201412）发现 51 条问题（2C/8H/17M/24L），涵盖 OAuth 跨页状态失效、批量导出认证失败不中止、凭证落盘未脱敏、AI 输入隔离不完整、Gemini 多轮 role 契约违例、通配 DNS SSRF、存储回写竞态、导出账本 TTL 静默遗忘、同步 payload 超限整包拒绝等。
+
+**修复**：
+- **安全（S/XN 类 16 条）**：OAuth 跨 tab 续签租约（修「更新后 Key 失效」根因）；CredentialVault 保险箱退役后凭证 GM 明文 + 审计全链路脱敏，AgentTrace 落盘前 finalResponse/userInput/preview/errors 脱敏（接线测试补防回归）；AI 输入隔离逐字符 `<`/`>` 转义防 `</user_input>` 标签逃逸；Gemini contents[].role 仅 user/model（assistant→model 映射防 400）；通配 DNS 后缀 5 类静态拒绝 + 非规范 IP 字面量（整数/0x/0b/八进制/前导零）纵深防御，前导零判定收窄至末段纯数字形态防合法域名误拒
+- **并发（CC 类 7 条）**：批量导出/自动导入遇认证终态 fail-fast（6 处循环，剩余项 skipped 可续传，账本先落盘）；DedupStore beginBatch 幂等 + endBatch 单次 flush rebase（消除 O(N²) 与双 tab 竞争）；SyncState 定时器句柄/挂起布尔拆分
+- **存储（DC 类 8 条）**：导出事实账本容量上限淘汰（10000 条最旧淘汰，禁时间 TTL——v3.14.3 根因修正）；去重 URL 键源 90 天 TTL；markSeen 时间合并；sha256 代理项 UTF-8 编码对齐 TextEncoder（高位孤立项 U+FFFD）；sync 模块编译期剪枝（`false ? require("./sync") : null` 源字面量路线）
+- **同步（DC 类 6 条）**：单源行 payload ≤2000 字符硬限（超限按 ts 降序截断）；id 键源只投递 ts ≥ now-90d 新鲜条目；RSS 聚合状态按当前键集剪枝；SyncEngine 权限不足审计语义统一（denied/cancelled 区分）
+- **修复验证**：fix-p0/p1/p2 契约测试 55 用例（含 Run#7 review 闭环新增 4 条：persist 脱敏接线、Gemini role 映射、XN-02 前导零回归）；全量 vitest 38 文件 754 用例 + legacy 三件套全绿；verify:delivery 13 维度全链 EXIT=0
+
+**升级说明**：涉及持久化存储键与 OAuth 状态语义变化，安装后请重新授权 Notion（OAuth 一键授权或填入 API Key），并点击「刷新工作区」对齐本地账本；此前被 90 天窗口遗忘的导出记录不再发生（容量上限淘汰）。
+
+[3.14.6]: https://github.com/Smith-106/LD-Notion/releases/tag/v3.14.6
+
 ## [3.14.5] - 2026-09-06
 
 ### 修复（批量导出遇失效 Token 逐项全量失败 · 认证终态 fail-fast）

@@ -73,8 +73,8 @@ const AIService = {
 可选分类：${categories.join(", ")}
 
 <user_content>
-<title>${String(title).replace(/<\/user_content>/gi, "&lt;$&gt;")}</title>
-<body>${String(content).slice(0, 2000).replace(/<\/user_content>/gi, "&lt;$&gt;")}</body>
+<title>${isolateContent(title)}</title>
+<body>${isolateContent(content).slice(0, 2000)}</body>
 </user_content>
 
 分类：`;
@@ -303,13 +303,66 @@ const AIService = {
         );
     },
 
-    // Agent 多轮对话请求（将 system + messages 拼接为单个 prompt）
+    // Agent 多轮对话请求 —— v3.14.6 (S-02): 系统指令与不可信用户内容角色分离,
+    // OpenAI messages[role=system] / Anthropic 顶层 system / Gemini systemInstruction;
+    // 不支持通道保留原压平 + 防伪前缀
     requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500) => {
-        let prompt = `[系统指令]\n${systemPrompt}\n\n`;
-        for (const msg of messages) {
+        const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
+        const provider = AIService.PROVIDERS[aiService];
+        if (!provider) throw new Error(`未知的 AI 服务: ${aiService}`);
+        const model = aiModel || provider.defaultModel;
+        const normalizedMessages = (messages || []).map((msg) => ({
+            role: msg.role === "assistant" ? "assistant" : "user",
+            content: String(msg.content ?? ""),
+        }));
+        const systemText = String(systemPrompt ?? "");
+
+        if (aiService === "openai") {
+            const normalizedBase = AIService._normalizeBaseUrl(aiBaseUrl, "v1");
+            const url = normalizedBase
+                ? `${normalizedBase}/v1/chat/completions`
+                : "https://api.openai.com/v1/chat/completions";
+            return await AIService._chatRequest(
+                url,
+                { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
+                { model, messages: [{ role: "system", content: systemText }, ...normalizedMessages], max_completion_tokens: maxTokens, temperature: 0.7 },
+                (result) => result.choices?.[0]?.message?.content?.trim() || "",
+                "OpenAI"
+            );
+        }
+        if (aiService === "claude") {
+            const normalizedBase = AIService._normalizeBaseUrl(aiBaseUrl, "v1");
+            const url = normalizedBase
+                ? `${normalizedBase}/v1/messages`
+                : "https://api.anthropic.com/v1/messages";
+            return await AIService._chatRequest(
+                url,
+                { "x-api-key": aiApiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+                { model, system: systemText, messages: normalizedMessages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: maxTokens },
+                (result) => result.content?.[0]?.text?.trim() || "",
+                "Claude"
+            );
+        }
+        if (aiService === "gemini") {
+            const normalizedBase = AIService._normalizeBaseUrl(aiBaseUrl, "v1beta");
+            const url = normalizedBase
+                ? `${normalizedBase}/v1beta/models/${model}:generateContent`
+                : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+            return await AIService._chatRequest(
+                url,
+                { "Content-Type": "application/json", "x-goog-api-key": aiApiKey },
+                { systemInstruction: { parts: [{ text: systemText }] }, contents: normalizedMessages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })), generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
+                (result) => result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "",
+                "Gemini"
+            );
+        }
+
+        // 不支持通道: 保留压平 + 防伪前缀(用户内容仍经调用方 isolateContent 隔离, 纵深防御)
+        let prompt = `[系统指令]\n${systemText}\n\n`;
+        for (const msg of normalizedMessages) {
             if (msg.role === "user") {
                 prompt += `[用户]: ${msg.content}\n\n`;
-            } else if (msg.role === "assistant") {
+            } else {
                 prompt += `[助手]: ${msg.content}\n\n`;
             }
         }
@@ -1016,7 +1069,8 @@ const AIAssistant = {
     _resultToText: (result) => AIAssistant._normalizeExecutionResult(result).text,
 
     _resultToAgentPayload: (result) => {
-        return JSON.stringify(AIAssistant._normalizeExecutionResult(result), null, 2);
+        // v3.14.6 (S-08): 回喂模型前脱敏 —— 错误信息/reason 可携带凭证片段, 不回显
+        return CredentialVault.redactText(JSON.stringify(AIAssistant._normalizeExecutionResult(result), null, 2));
     },
 
     _isErrorResult: (result) => AIAssistant._normalizeExecutionResult(result).status === "error",
@@ -1725,7 +1779,7 @@ compound 格式（仅当 intent 为 compound 时使用）：
 
         try {
             const response = await AIService.requestChat(
-                `${systemPrompt}\n\n<user_input>\n${String(userMessage).replace(/<\/user_input>/gi, "&lt;$&gt;")}\n</user_input>`,
+                `${systemPrompt}\n\n<user_input>\n${isolateContent(userMessage)}\n</user_input>`,
                 settings,
                 800
             );
@@ -2512,6 +2566,12 @@ Object.assign(AIAssistant, require("./guarded-write").GuardedWrite);
 // TASK-003: 独立导出 getAISettings，UI 模块直接解构导入，
 // 不再经 AIAssistant.getSettings() 字面调用（为 TASK-007 拆分 settings 簇做准备）。
 const getAISettings = () => AIAssistant.getSettings();
+
+// v3.14.6 (S-01/S-06/XN-05): 共享输入隔离 —— 逐字符转义 < >, 输出零字面尖括号,
+// 杜绝 </user_input>/<user_content> 标签逃逸(S-06 原 $& 回插破损修复: 替换结果仍含字面闭合标签)
+const isolateContent = (content) => String(content ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+AIService.isolateContent = isolateContent;
+Object.assign(AIAssistant, { isolateContent });
 
 module.exports = { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier, AgentTrace, getAISettings };
 Object.assign(AIAssistant, require("./agent-executor").AgentExecutor);

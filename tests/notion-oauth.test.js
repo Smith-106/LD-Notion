@@ -1282,7 +1282,7 @@ function createWorkspaceVisualizationFixture(harness) {
             bookmark: {
                 url: 'https://old.example.com'
             }
-        }, 'mailto:test@example.com'), /bookmark 块仅支持更新为 http\/https URL/);
+        }, 'mailto:test@example.com'), /bookmark 块仅支持 http\/https 公网 URL/);
     });
 
     await runTest('AIAssistant._buildBlockUpdatePayload: updates embed url while preserving caption', async () => {
@@ -1312,7 +1312,7 @@ function createWorkspaceVisualizationFixture(harness) {
             embed: {
                 url: 'https://old.example.com/embed'
             }
-        }, 'not-a-url'), /embed 块仅支持更新为 http\/https URL/);
+        }, 'not-a-url'), /embed 块仅支持 http\/https 公网 URL/);
     });
 
     await runTest('AIAssistant._buildBlockUpdatePayload: updates template rich text', async () => {
@@ -5448,7 +5448,9 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(gmShim.includes(GENERATED_SECTION_MARKERS.gmShimEnd));
         assert.ok(contentScript.includes('await _gmInitStorage();'));
         assert.ok(contentScript.includes('console.log("patched");'));
-        assert.ok(contentScript.includes('const LD_NOTION_ACTIVE_ROOT_SELECTOR = "[data-ldb-root], .ldb-panel, .ldb-notion-panel, .gclip-panel";'));
+        // v3.14.6 (AUD-ARCH-03): DOM 活动根门已移除 —— 产物不再含活动根选择器/拒绝文案
+        assert.ok(!contentScript.includes('LD_NOTION_ACTIVE_ROOT_SELECTOR'));
+        assert.ok(!contentScript.includes('hasActiveLdNotionRoot'));
         assert.ok(popupHtml.includes('id="import-bookmarks"'));
         assert.ok(popupHtml.includes('<script src="popup.js"></script>'));
         assert.ok(popupScript.includes('LD_NOTION_IMPORT_BOOKMARKS'));
@@ -5490,9 +5492,6 @@ function createWorkspaceVisualizationFixture(harness) {
         const contentScript = `
             ${GENERATED_SECTION_MARKERS.gmShimStart}
             ${GENERATED_SECTION_MARKERS.bookmarkEventBridgeStart}
-            const LD_NOTION_ACTIVE_ROOT_SELECTOR = "[data-ldb-root], .ldb-panel, .ldb-notion-panel, .gclip-panel";
-            function hasActiveLdNotionRoot() { return true; }
-            if (!hasActiveLdNotionRoot()) { throw new Error("未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。"); }
             window.addEventListener("ld-notion-request-bookmarks", () => {});
             window.addEventListener("ld-notion-search-bookmarks", () => {});
             ${GENERATED_SECTION_MARKERS.bookmarkEventBridgeEnd}
@@ -5607,9 +5606,11 @@ function createWorkspaceVisualizationFixture(harness) {
             assert.ok(contentScript.includes(GENERATED_SECTION_MARKERS.popupMessageBridgeEnd));
             assert.ok(contentScript.includes('LD-Notion Chrome Extension — Content Script'));
             assert.ok(contentScript.includes('await _gmInitStorage();'));
-            assert.ok(contentScript.includes('const LD_NOTION_ACTIVE_ROOT_SELECTOR = "[data-ldb-root], .ldb-panel, .ldb-notion-panel, .gclip-panel";'));
+            assert.ok(contentScript.includes('window.addEventListener("ld-notion-request-bookmarks"'));
             assert.ok(contentScript.includes('chrome.bookmarks.getTree()'));
-            assert.ok(contentScript.includes('未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。'));
+            // v3.14.6 (AUD-ARCH-03): DOM 活动根门已移除
+            assert.ok(!contentScript.includes('LD_NOTION_ACTIVE_ROOT_SELECTOR'));
+            assert.ok(!contentScript.includes('未检测到活动中的 LD-Notion 面板'));
             assert.ok(contentScript.includes('return !!(typeof chrome !== "undefined" && chrome.bookmarks);'));
             assert.ok(!contentScript.includes('// ==UserScript=='));
             assert.ok(backgroundScript.includes('message.type !== "GM_xmlhttpRequest"'));

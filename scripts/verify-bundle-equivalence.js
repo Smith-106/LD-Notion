@@ -45,15 +45,7 @@ const REQUIRED_CONSTS = [
     "ZhihuAPI",
     "GenericExtractor",
     "UI",
-    // 全盘审计: 补登多端同步与后续拆分模块(此前 19 项名单对新模块失效, 等价性校验盲区)
-    "SyncEngine",
-    "SyncConfig",
-    "SyncCrypto",
-    "SyncSerializer",
-    "SyncPayload",
-    "SyncLedger",
-    "SyncRateLimiter",
-    "SyncFragmenter",
+    // 全盘审计: 补登后续拆分模块(此前 19 项名单对新模块失效, 等价性校验盲区)
     "DedupStore",
     "UICommandService",
     "NotionSiteUI",
@@ -65,6 +57,21 @@ const REQUIRED_CONSTS = [
     "OperationLog",
     "UndoManager",
     "UrlValidator",
+    // v3.14.6 (AUD-ARCH-07): 多端同步模块由 main.js 编译期字面量开关剪枝(默认 false 不入包),
+    // 移出 REQUIRED_CONSTS → SYNC_PRUNED_CONSTS(见 verifySyncPrunedConsts)
+];
+
+// v3.14.6 (AUD-ARCH-07): sync/ 全模块随编译期开关剪枝 —— 产物中应整体缺席;
+// 全员缺席视为符合预期(半剪枝/未剪枝都会在此失败, 保持等价性校验盲区闭合)
+const SYNC_PRUNED_CONSTS = [
+    "SyncEngine",
+    "SyncConfig",
+    "SyncCrypto",
+    "SyncSerializer",
+    "SyncPayload",
+    "SyncLedger",
+    "SyncRateLimiter",
+    "SyncFragmenter",
 ];
 
 // ===========================================
@@ -137,6 +144,18 @@ function verifyRequiredConsts(bundleSource, originalSource) {
         throw new Error(`Bundle 缺少必需常量: ${missing.join(", ")}`);
     }
     console.log(`  [PASS] 全部 ${REQUIRED_CONSTS.length} 个必需常量存在于 bundle 中`);
+}
+
+// v3.14.6 (AUD-ARCH-07): 剪枝断言 —— sync/ 模块整体缺席(任一带回即失败)
+function verifySyncPrunedConsts(bundleSource) {
+    const present = [];
+    for (const name of SYNC_PRUNED_CONSTS) {
+        if (makeConstPattern(name).test(bundleSource)) present.push(name);
+    }
+    if (present.length > 0) {
+        throw new Error(`sync/ 未按编译期开关剪枝(应缺席): ${present.join(", ")}`);
+    }
+    console.log(`  [PASS] 全部 ${SYNC_PRUNED_CONSTS.length} 个 sync/ 模块常量按剪枝预期缺席 bundle`);
 }
 
 function verifyGmApis(bundleSource) {
@@ -243,6 +262,9 @@ function main() {
 
     console.log("1. 验证必需常量...");
     verifyRequiredConsts(bundleSource, originalSource);
+
+    console.log("1b. 验证 sync/ 剪枝常量(应缺席)...");
+    verifySyncPrunedConsts(bundleSource);
 
     console.log("\n2. 验证 GM_api 函数...");
     verifyGmApis(bundleSource);

@@ -13,7 +13,7 @@ const path = require("path");
 const USERSCRIPT_HEADER = `// ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.5
+// @version      3.14.6
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -54,6 +54,10 @@ const USERSCRIPT_HEADER = `// ==UserScript==
 // @connect      api.github.com
 // @connect      zhihu.com
 // @connect      zhuanlan.zhihu.com
+// v3.14.6 (AUD-ARCH-13): Obsidian 本地导出需 127.0.0.1/localhost —— 缺白名单时
+// userscript 形态 Obsidian 请求被 TM 拒绝(扩展 manifest 已含, 不动)
+// @connect      127.0.0.1
+// @connect      localhost
 // @run-at       document-idle
 // ==/UserScript==
 `;

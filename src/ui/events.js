@@ -52,7 +52,7 @@ const UIEvents = {
             CredentialVault.syncSensitiveInput(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
         };
 
-        const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
+        const isUserscriptMode = Utils.isUserscriptMode();
         const hasBridgeMarker = BookmarkBridge.isExtensionAvailable();
         if (refs.runtimeBadge) {
             refs.runtimeBadge.textContent = isUserscriptMode ? "Userscript" : "Extension";

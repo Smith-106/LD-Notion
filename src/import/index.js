@@ -130,6 +130,8 @@ AutoImporter.run = async () => {
     if (now - AutoImporter.lastRunAt < AutoImporter.minimumRunGapMs) return;
     AutoImporter.lastRunAt = now;
     AutoImporter.isRunning = true;
+    // v3.14.6 (CC-03): 自动导入占用导出互斥, 防手动/AI/自动并发交错; finally 复位
+    SyncLock.isExporting = true;
     const attemptAt = Date.now();
     const exportBtn = document.querySelector("#ldb-export");
 
@@ -224,8 +226,9 @@ AutoImporter.run = async () => {
                     failed++;
                     // 认证终态 fail-fast(v3.14.5):token 无效时中止批次,
                     // 剩余项留待下次自动同步重试(不逐项重复注定失败的 401)
+                    // v3.14.6 (AUD-ARCH-09/CC-02/X-03): 不再 unshift 毒项回插队列 ——
+                    // 并发 worker 会立即重新消费同一毒项反复 401; 该项因未落账自然留待下轮
                     if (Exporter.isAuthTerminalError && Exporter.isAuthTerminalError(error)) {
-                        remaining.unshift(i);
                         autoImportAborted = true;
                         break;
                     }
@@ -296,6 +299,8 @@ AutoImporter.run = async () => {
         AutoImporter.updateStatus(`❌ 自动导入出错: ${error.message}`);
     } finally {
         AutoImporter.isRunning = false;
+        // v3.14.6 (CC-03): 复位互斥
+        SyncLock.isExporting = false;
         if (exportBtn) exportBtn.disabled = false;
         const obsExportBtn2 = document.querySelector("#ldb-obs-export");
         if (obsExportBtn2) obsExportBtn2.disabled = false;

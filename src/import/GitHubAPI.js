@@ -180,10 +180,20 @@ const GitHubAPI = {
     // 批量导出循环末尾单次回写已导出映射（DISCOVER P3 同类修复）：循环内仅 mutate 内存缓存，
     // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。与 BookmarkExporter.flushExported 同构。
     // v3.14.3: 导出账本改容量上限淘汰（repo full_name 天然有界），不再按 90 天时间 TTL 误删导出事实。
+    // v3.14.6 (CC-05): 写前 rebase(重读-并集-max ts) —— 跨 tab 他端新增键不可丢
     flushExported: () => {
         if (GitHubAPI._exportedCache) {
             GitHubAPI._evictByCapacity(GitHubAPI._exportedCache);
-            Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(GitHubAPI._exportedCache));
+            let remote = {};
+            try {
+                remote = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}")) || {};
+            } catch { remote = {}; }
+            const merged = { ...remote };
+            for (const [key, ts] of Object.entries(GitHubAPI._exportedCache)) {
+                if (merged[key] === undefined || Number(merged[key]) < Number(ts)) merged[key] = ts;
+            }
+            GitHubAPI._exportedCache = merged;
+            Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(merged));
         }
     },
 
@@ -208,7 +218,17 @@ const GitHubAPI = {
     flushGistsExported: () => {
         if (GitHubAPI._exportedGistsCache) {
             GitHubAPI._evictByCapacity(GitHubAPI._exportedGistsCache);
-            Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(GitHubAPI._exportedGistsCache));
+            // v3.14.6 (CC-05): 写前 rebase(重读-并集-max ts)
+            let remote = {};
+            try {
+                remote = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}")) || {};
+            } catch { remote = {}; }
+            const merged = { ...remote };
+            for (const [key, ts] of Object.entries(GitHubAPI._exportedGistsCache)) {
+                if (merged[key] === undefined || Number(merged[key]) < Number(ts)) merged[key] = ts;
+            }
+            GitHubAPI._exportedGistsCache = merged;
+            Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(merged));
         }
     },
 

@@ -88,6 +88,10 @@ const AISchema = {
             case "date":
                 return AISchema.ISO_DATE_RE.test(String(val).trim()) ? String(val).trim() : null;
             case "url":
+                // v3.14.6 (S-07): url 属性必须 http(s) 公网 —— 拒 javascript:/data:/ftp: 写入
+                return UrlValidator.validatePageExternalUrl(String(val).trim())
+                    ? String(val).trim().slice(0, AISchema.MAX_RICH_TEXT)
+                    : null;
             case "email":
             case "phone_number":
                 return String(val).trim().slice(0, AISchema.MAX_RICH_TEXT);

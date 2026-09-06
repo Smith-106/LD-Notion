@@ -225,8 +225,9 @@ const SyncSerializer = {
                 if (k.length > SyncConstants.MAX_DEDUP_KEY_LENGTH) continue;
                 const num = Number(ts);
                 if (!Number.isFinite(num) || num <= 0) continue;
-                // id 键源(导出账本)同步投影过期裁剪: 本地永久保留 ≠ 远端永久投递
-                if (!meta.urlKeyed && num < tsFloor) continue;
+                // v3.14.6 (DC-002): 全源新鲜度裁剪 —— urlKeyed 去重账本同样只投递 90 天内条目
+                // (可再生账本, 本地 TTL 同语义; 仅投影裁, 本地账本不受影响), 防同步介质无限膨胀
+                if (num < tsFloor) continue;
                 if (++count > SyncConstants.MAX_DEDUP_ENTRIES_PER_SOURCE) break;
                 // 本地账本含原文键与 h: 哈希键双条目(DedupStore 双写); 已哈希键跳过再哈希
                 const key = meta.urlKeyed && hashUrls && !k.startsWith("h:") ? `h:${await SyncCrypto.sha256Hex(k)}` : k;

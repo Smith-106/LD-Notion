@@ -59,6 +59,42 @@ const OperationGuard = {
         return Storage.get(CONFIG.STORAGE_KEYS.REQUIRE_CONFIRM, CONFIG.DEFAULTS.requireConfirm);
     },
 
+    // v3.14.6 (XN-06/S-05): guard.denied 统一构造器 —— 6 处手写形态归一(actor/source/status 不再漂移);
+    // phase: precheck(canExecute 非阻塞闸门) | execute(execute 内权限拒绝) | cancelled(确认取消);
+    // 语义: denied 顶 status="denied"(非 failed); 确认取消独立事件 guard.cancelled
+    auditDenied: (operation, context = {}, options = {}) => {
+        const { phase = "precheck", reason = "", force = false } = options;
+        const startedAt = Date.now();
+        const isCancelled = phase === "cancelled";
+        const actor = OperationGuard._inferActor(context);
+        const source = OperationGuard._inferSource(context);
+        const risk = OperationGuard._getPermissionName(OperationGuard.OPERATION_LEVELS[operation]) || "unknown";
+        return OperationLog.add({
+            audit_event: isCancelled ? "guard.cancelled" : "guard.denied",
+            actor,
+            source,
+            guard: OperationGuard._buildGuardSnapshot(operation, "deny", context),
+            operation: {
+                name: operation,
+                risk,
+                trigger: context.trigger || "user_requested_write",
+            },
+            target: OperationLog.buildTarget(context),
+            payload: OperationLog.buildPayload(context),
+            result: {
+                status: isCancelled ? "cancelled" : "denied",
+                reason: reason || (isCancelled ? "user_cancelled_confirmation" : "权限不足"),
+            },
+            redaction: OperationLog.collectRedactionHints(context),
+            operationName: operation,
+            context: { ...context, phase },
+            status: isCancelled ? "cancelled" : "denied",
+            error: reason || (isCancelled ? "操作已取消" : "权限不足"),
+            startTime: startedAt,
+            endTime: Date.now(),
+        }, { force });
+    },
+
     // 操作所需的最低权限级别
     OPERATION_LEVELS: {
         // 只读操作
@@ -128,75 +164,28 @@ const OperationGuard = {
             const denialReason = requiredLevelForOp === undefined
                 ? `未定义权限级别: ${operation}`
                 : `权限不足：需要"${requiredName}"及以上权限才能执行此操作。可在主面板「权限控制」中调整权限级别。`;
-            OperationLog.add({
-                audit_event: "guard.denied",
-                actor,
-                source,
-                guard: OperationGuard._buildGuardSnapshot(operation, "deny", context, {
-                    confirmation: "not_allowed",
-                }),
-                operation: {
-                    name: operation,
-                    risk: requiredLevelForOp === undefined ? "unknown" : OperationGuard._getPermissionName(requiredLevelForOp),
-                    trigger: context.trigger || "user_requested_write",
-                },
-                target: OperationLog.buildTarget(context),
-                payload: OperationLog.buildPayload(context),
-                result: {
-                    status: "denied",
-                    reason: denialReason,
-                },
-                redaction: OperationLog.collectRedactionHints(context),
-                operationName: operation,
-                context,
-                status: "failed",
-                error: denialReason,
-                startTime: startedAt,
-                endTime: Date.now(),
-            });
+            // v3.14.6 (XN-06): 统一构造器(phase=execute, status=denied)
+            OperationGuard.auditDenied(operation, context, { phase: "execute", reason: denialReason });
             throw new Error(denialReason);
         }
 
-        // 危险操作需要确认
-        if (OperationGuard.isDangerous(operation) && OperationGuard.requiresConfirm()) {
+        // 危险操作需要确认; v3.14.6 (S-04): context.requireConfirm 使 AI 常规写也走确认(AI 写零确认缺口)
+        if ((OperationGuard.isDangerous(operation) && OperationGuard.requiresConfirm()) || context.requireConfirm === true) {
             const isPermanent = false; // deleteBlock 已从危险操作登记移除(F-UI-20)
+            const dangerous = OperationGuard.isDangerous(operation);
             const confirmed = await ConfirmationDialog.show({
-                title: isPermanent ? "⚠️ 永久删除确认" : "危险操作确认",
+                title: isPermanent ? "⚠️ 永久删除确认" : (dangerous ? "危险操作确认" : "操作确认"),
                 message: isPermanent
                     ? `您即将永久删除块，此操作无法撤销！`
-                    : `您即将执行危险操作: ${operation}`,
+                    : (dangerous ? `您即将执行危险操作: ${operation}` : `您即将执行操作: ${operation}`),
                 itemName: context.itemName || "未知项目",
                 countdown: isPermanent ? 8 : 5, // 永久删除需要更长倒计时
                 requireNameInput: true,
             });
 
             if (!confirmed) {
-                OperationLog.add({
-                    audit_event: "guard.denied",
-                    actor,
-                    source,
-                    guard: OperationGuard._buildGuardSnapshot(operation, "deny", context, {
-                        confirmation: "cancelled",
-                    }),
-                    operation: {
-                        name: operation,
-                        risk: OperationGuard._getPermissionName(requiredLevelForOp),
-                        trigger: context.trigger || "user_requested_write",
-                    },
-                    target: OperationLog.buildTarget(context),
-                    payload: OperationLog.buildPayload(context),
-                    result: {
-                        status: "cancelled",
-                        reason: "user_cancelled_confirmation",
-                    },
-                    redaction: OperationLog.collectRedactionHints(context),
-                    operationName: operation,
-                    context,
-                    status: "failed",
-                    error: "操作已取消",
-                    startTime: startedAt,
-                    endTime: Date.now(),
-                });
+                // v3.14.6 (S-05/XN-06): 确认取消独立事件 guard.cancelled + status=cancelled
+                OperationGuard.auditDenied(operation, context, { phase: "cancelled", reason: "user_cancelled_confirmation" });
                 throw new Error("操作已取消");
             }
         }
@@ -523,9 +512,28 @@ const OperationLog = {
         Storage.set(CONFIG.STORAGE_KEYS.OPERATION_LOG, JSON.stringify(logs));
 
         // 触发UI更新（通过事件总线，消除 security→ui 循环依赖）
-        emit("oplog:changed", JSON.parse(JSON.stringify(logs)));
+        // v3.14.6 (XN-07): 广播投影而非全量深拷贝 —— context/payload/error 原文不回传事件总线
+        emit("oplog:changed", OperationLog.projectForBroadcast(logs));
 
         return logEntry;
+    },
+
+    // v3.14.6 (XN-07): 广播投影 —— 仅安全字段子集(id/timestamp/operationName/actor/source/status/
+    // audit_event/result:{status,reason 截断}); UI 渲染走 getAll 全量(已脱敏), 事件总线零敏感载荷
+    projectForBroadcast: (logs = []) => {
+        return logs.map((entry) => ({
+            id: entry.id,
+            timestamp: entry.timestamp || entry.at || entry.startTime,
+            operationName: entry.operationName || entry.operation?.name || entry.audit_event,
+            actor: entry.actor,
+            source: entry.source,
+            status: entry.result?.status || entry.status,
+            audit_event: entry.audit_event,
+            result: {
+                status: entry.result?.status || entry.status,
+                reason: String(entry.result?.reason || "").slice(0, 120),
+            },
+        }));
     },
 
     // 清空日志

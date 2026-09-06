@@ -68,6 +68,7 @@ const SyncScheduler = {
     _timers: new Map(),    // sourceType → intervalId
     _retries: new Map(),   // sourceType → retryTimeoutId
     _retryCounts: new Map(), // sourceType → retry count
+    _epochs: new Map(),    // sourceType → epoch (v3.14.6 CC-07: 取消在途)
 
     /**
      * 获取源的同步间隔 (分钟)
@@ -99,6 +100,8 @@ const SyncScheduler = {
      */
     start(sourceType, intervalMinutes) {
         this.stop(sourceType);
+        // v3.14.6 (CC-07): 递增 epoch, 使此前在途 _doSync 完成时判旧丢弃
+        this._epochs.set(sourceType, (this._epochs.get(sourceType) || 0) + 1);
         const intervalMin = Number.isFinite(intervalMinutes) && intervalMinutes > 0
             ? intervalMinutes
             : this.getIntervalMinutes(sourceType);
@@ -122,6 +125,8 @@ const SyncScheduler = {
      * @param {string} sourceType
      */
     stop(sourceType) {
+        // v3.14.6 (CC-07): 递增 epoch 使在途 _doSync 完成时判旧丢弃结果/不调度重试
+        this._epochs.set(sourceType, (this._epochs.get(sourceType) || 0) + 1);
         const timerId = this._timers.get(sourceType);
         if (timerId != null) {
             globalThis.clearInterval(timerId);
@@ -174,16 +179,20 @@ const SyncScheduler = {
      * @param {string} sourceType
      */
     async _doSync(sourceType) {
+        // v3.14.6 (CC-07): 捕获启动 epoch, 完成时与当前不符则丢弃(停止后不再调度重试/复位计数)
+        const epoch = this._epochs.get(sourceType) || 0;
         try {
             // F-UI-02 修复:定时路径走完整同步 runner(写 Notion + 推进水位),
             // 与手动路径一致;SyncCoordinator 保留给手动全量同步。
             const runner = SOURCE_RUNNERS[sourceType];
             if (typeof runner === "function") {
                 await runner();
+                if (epoch !== (this._epochs.get(sourceType) || 0)) return; // 已停止: 丢弃
                 this._retryCounts.set(sourceType, 0);
                 return;
             }
             const result = await SyncCoordinator.sync(sourceType);
+            if (epoch !== (this._epochs.get(sourceType) || 0)) return; // 已停止: 丢弃
             if (result.error) {
                 this._scheduleRetry(sourceType);
             } else {
@@ -191,6 +200,7 @@ const SyncScheduler = {
             }
         } catch (error) {
             console.warn("[LD-Notion] sync unexpected error:", sourceType, error);
+            if (epoch !== (this._epochs.get(sourceType) || 0)) return; // 已停止: 丢弃
             this._scheduleRetry(sourceType);
         }
     },

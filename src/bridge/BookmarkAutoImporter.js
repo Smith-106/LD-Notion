@@ -273,6 +273,19 @@ BookmarkAutoImporter.run = async () => {
     if (now - BookmarkAutoImporter.lastRunAt < BookmarkAutoImporter.minimumRunGapMs) return;
     BookmarkAutoImporter.lastRunAt = now;
     BookmarkAutoImporter.isRunning = true;
+    // v3.14.6 (CC-04): 跨 tab 租约 —— 双 tab 同刻 run 仅一方建页; TTL 兜底防崩溃锁泄漏
+    const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+    if (!lease) {
+        BookmarkAutoImporter.isRunning = false;
+        BookmarkAutoImporter.updateStatus("⏸ 其他标签页正在同步浏览器书签，本轮跳过");
+        return;
+    }
+    // v3.14.6 (CC-03): 占用导出互斥(租约获证后), 防手动/AI/自动并发交错; finally 复位
+    SyncLock.isExporting = true;
+    // 持有期间每 30s 续约(少于 60s TTL, 防中途过期被抢占)
+    const renewTimer = setInterval(() => {
+        SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+    }, 30000);
     const attemptAt = Date.now();
 
     try {
@@ -284,12 +297,8 @@ BookmarkAutoImporter.run = async () => {
         });
         BookmarkAutoImporter.updateStatus("📧 正在同步浏览器书签...");
 
-        // 使用 SyncCoordinator 获取增量同步概要 (统一状态管理; F7: watermark 由本函数按成功项提交)
-        const syncResult = await SyncCoordinator.sync("bookmark", { commitWatermark: false });
-        if (syncResult.error) {
-            throw new Error(syncResult.error);
-        }
-
+        // v3.14.6 (AUD-ARCH-10): 移除冗余 SyncCoordinator.sync 预拉取 —— 结果仅查 error、
+        // newItems 弃用, 随后自行全量对账(冗余拉取+过滤语义旁路); 过滤由 DedupStore 落账承担
         const setupResult = await BookmarkExporter.setupDatabaseProperties(settings.databaseId, settings.apiKey);
         if (!setupResult.success) {
             throw new Error(`数据库配置失败: ${setupResult.error}`);
@@ -306,6 +315,10 @@ BookmarkAutoImporter.run = async () => {
         // 此前命名 index 与 processBookmark/processDeleted 的 itemIndex 参数混淆，
         // 导致 delay 条件 `index < length-1` 引用对象（NaN）恒 false、REQUEST_DELAY 失效（ISS 修正）。
         const pageIndex = BookmarkAutoImporter.buildPageIndex(trackedPages);
+        // v3.14.6 (CC-08): 批次内同 URL 先行声明 —— F9 的 byUrl 检查在并发批次内双方均查空,
+        // 同批两个同 URL 书签可双建页; 声明(url → {bookmarkId, promise})同步登记,
+        // 后续项 await 先建者的 pageId 共用页面(处理完批次清空)
+        const pendingUrlClaim = new Map();
         const nextSnapshot = {};
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
@@ -318,6 +331,11 @@ BookmarkAutoImporter.run = async () => {
 
         // 分批并发处理（每批 3 个，避免 Notion API 速率限制）
         const CONCURRENCY = 3;
+        // v3.14.6 (DC-004): run 级 batch —— markItemSeen 落账缓存化, 结束单次 flush(写侧 O(N²)→O(N));
+        // try/finally 保证异常路径也 flush
+        const { DedupStore } = require("../storage");
+        DedupStore.beginBatch("bookmark");
+        try {
         // F7 共识(watermark 只按成功项推进): 失败项不推进 → 下轮保留重试机会。
         const successfulIds = new Set();
         const processInBatches = async (items, processor) => {
@@ -338,6 +356,8 @@ BookmarkAutoImporter.run = async () => {
             let pageMeta = pageIndex.byBookmarkId.get(bookmarkId)
                 || pageIndex.byUrl.get(bookmark.url)
                 || (snapshotEntry?.pageId ? pageIndex.byPageId.get(snapshotEntry.pageId) : null);
+            // v3.14.6 (CC-08): 本项声明回调(创建失败/完成时决议, 防 await 方悬挂)
+            let claimResolve = null;
 
             try {
                 // F8 共识(归档复活): 命中已归档页时跳过重建(用户主动归档 = 删除意图),
@@ -349,6 +369,17 @@ BookmarkAutoImporter.run = async () => {
                     return;
                 }
                 if (!pageMeta) {
+                    // v3.14.6 (CC-08): 批次内声明命中检查(先于 F9, 并发双方均建页前)
+                    const claim = bookmark.url ? pendingUrlClaim.get(bookmark.url) : null;
+                    if (claim && claim.bookmarkId !== bookmarkId) {
+                        const claimedPageId = await claim.promise;
+                        if (claimedPageId) {
+                            unchanged++;
+                            successfulIds.add(bookmarkId);
+                            nextSnapshot[bookmarkId] = BookmarkAutoImporter.buildSnapshotEntry(bookmark, claimedPageId);
+                            return;
+                        }
+                    }
                     // F9 共识(同 URL 并发竞态): 批次内先完成者已回填 byUrl 索引,
                     // 同 URL 不同 id 的第二书签不再建页(避免 id 乒乓双页),记 unchanged 并共用页面。
                     const rivalByUrl = bookmark.url ? pageIndex.byUrl.get(bookmark.url) : null;
@@ -357,6 +388,11 @@ BookmarkAutoImporter.run = async () => {
                         successfulIds.add(bookmarkId);
                         nextSnapshot[bookmarkId] = BookmarkAutoImporter.buildSnapshotEntry(bookmark, rivalByUrl.pageId);
                         return;
+                    }
+                    // v3.14.6 (CC-08): 同步登记声明(首个 await 之前), 同批后续项命中即共享
+                    if (bookmark.url) {
+                        const claimPromise = new Promise((resolve) => { claimResolve = resolve; });
+                        pendingUrlClaim.set(bookmark.url, { bookmarkId, promise: claimPromise });
                     }
                     BookmarkAutoImporter.updateStatus(`📄 正在新增书签 (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
                     // createDatabasePage 是 level 1 写操作，自动同步不可裸调 NotionAPI（C1 审计完整性）。
@@ -382,6 +418,8 @@ BookmarkAutoImporter.run = async () => {
                         folderPath: bookmark.folderPath,
                         dateAdded: SyncState.normalizeTime(bookmark.dateAdded),
                     };
+                    // v3.14.6 (CC-08): 建页成功后决议声明, 批次内同 URL 后续项共享此页
+                    if (claimResolve) claimResolve(pageMeta.pageId);
                     BookmarkAutoImporter._auditAutoSync("createDatabasePage", "success",
                         { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, databaseId: settings.databaseId });
                     // F10 共识(自动不污染手动): 仅新创建页才写入手动导入去重集合;
@@ -430,6 +468,8 @@ BookmarkAutoImporter.run = async () => {
                 if (syncedMeta.url) pageIndex.byUrl.set(syncedMeta.url, syncedMeta);
                 nextSnapshot[bookmarkId] = BookmarkAutoImporter.buildSnapshotEntry(bookmark, pageId);
             } catch (error) {
+                // v3.14.6 (CC-08): 失败决议 null, 防同批 await 方悬挂
+                if (claimResolve) claimResolve(null);
                 console.error(`[LD-Notion] 浏览器书签自动同步失败: ${bookmark.title || bookmark.url}`, error);
                 BookmarkAutoImporter._auditAutoSync("createDatabasePage", "failed",
                     { bookmarkId, itemName: bookmark.title || bookmark.url, reason: String(error?.message || error) });
@@ -445,6 +485,8 @@ BookmarkAutoImporter.run = async () => {
         };
 
         await processInBatches(currentBookmarks, processBookmark);
+        // v3.14.6 (CC-08): 批次完成清空声明(索引已回填, 声明使命结束)
+        pendingUrlClaim.clear();
         // 批量回写已导出映射（DISCOVER P3 同类修复）：processBookmark 内 markExported 仅 mutate 内存缓存，
         // 批次全部完成后单次 flush，写侧从 O(N²)→O(N)。flush 内有 if(cache) 守卫，未 mutate 的缓存为 null 不写。
         BookmarkExporter.flushExported();
@@ -472,15 +514,15 @@ BookmarkAutoImporter.run = async () => {
                 // lazy require 避免加载期环（security→api，运行时整张图已加载）。
                 const { OperationGuard, OperationLog } = require("../security");
                 if (!OperationGuard.canExecute("deletePage")) {
-                    OperationLog.add({
-                        audit_event: "guard.denied",
+                    // v3.14.6 (XN-06): 统一构造器(phase=precheck)
+                    OperationGuard.auditDenied("deletePage", {
+                        pageId: pageMeta.pageId,
+                        bookmarkId,
+                        itemName: itemLabel,
                         actor: "system",
                         source: "bookmark-auto-sync",
-                        guard: { operation: "deletePage", decision: "deny", reason: "权限不足：自动归档需 level≥2" },
-                        operationName: "deletePage",
-                        status: "denied",
-                        context: { pageId: pageMeta.pageId, bookmarkId, itemName: itemLabel },
-                    });
+                        trigger: "auto_sync_archive",
+                    }, { phase: "precheck", reason: "权限不足：自动归档需 level≥2" });
                     failed++;
                     nextSnapshot[bookmarkId] = snapshotEntry;
                     return;
@@ -546,6 +588,10 @@ BookmarkAutoImporter.run = async () => {
                 timeout: 5000,
             });
         }
+        } finally {
+            // v3.14.6 (DC-004): 结束 batch —— 异常路径也单次 flush
+            DedupStore.endBatch("bookmark");
+        }
     } catch (error) {
         console.error("[LD-Notion] 浏览器书签自动同步出错:", error);
         SyncState.updateBookmarkState({
@@ -556,6 +602,10 @@ BookmarkAutoImporter.run = async () => {
         });
         BookmarkAutoImporter.updateStatus(`❌ 浏览器书签自动同步出错: ${error.message}`);
     } finally {
+        clearInterval(renewTimer);
+        SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+        // v3.14.6 (CC-03): 复位互斥
+        SyncLock.isExporting = false;
         BookmarkAutoImporter.isRunning = false;
         emit("sync:center-summary-updated");
     }

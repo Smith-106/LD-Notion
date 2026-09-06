@@ -48,3 +48,34 @@ describe("AT-006: AIService.matchCategory + PROVIDERS", () => {
         });
     });
 });
+
+// Run#8 review 闭环 (NEW-02): Gemini contents[].role 契约(user/model) ——
+// 多轮 agent 往返中 assistant 消息必须映射为 model, 否则 generateContent 400
+describe("review NEW-02: requestAgentChat Gemini role 映射", () => {
+    it("gemini 分支 contents[].role 仅 user/model, assistant 映射为 model", async () => {
+        const captured = [];
+        const original = AIService._chatRequest;
+        AIService._chatRequest = (url, headers, body, extractResponse, errorPrefix) => {
+            captured.push(body);
+            return Promise.resolve({ ok: true });
+        };
+        try {
+            await AIService.requestAgentChat(
+                "system",
+                [
+                    { role: "user", content: "第一条用户消息" },
+                    { role: "assistant", content: "助手回复" },
+                    { role: "user", content: "第二条用户消息" },
+                ],
+                { aiService: "gemini", aiApiKey: "test-key", aiModel: "gemini-2.0-flash", aiBaseUrl: "" }
+            );
+        } finally {
+            AIService._chatRequest = original;
+        }
+        expect(captured.length).toBe(1);
+        const roles = captured[0].contents.map((c) => c.role);
+        expect(roles).toEqual(["user", "model", "user"]);
+        expect(roles).not.toContain("assistant");
+        expect(captured[0].systemInstruction.parts[0].text).toBe("system");
+    });
+});

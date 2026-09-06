@@ -20,7 +20,11 @@ const { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents,
 const { UICommandService } = require("./coordination");
 // 多端同步(F-SYNC-11): 编译期 flag 默认 off → require 惰性(打包体积零新增? 否,
 // esbuild 仍会打进去; 但 flag off 时 init 不执行 = 零网络/零定时器/零 DOM)。
-const syncModule = CONFIG.MULTI_DEVICE_SYNC_ENABLED ? require("./sync") : null;
+// v3.14.6 (AUD-ARCH-07): 编译期字面量开关剪枝 sync/ 全模块 —— 实测 esbuild(treeShaking:false)
+// 对 define 替换后的条件不触发外层 DCE, 仅源字面量 `false ? require(...)` 在解析期折叠移除
+// (1.59MB 包体中 sync/ 全量入包; 启用多端同步时改 true 并重建双形态)。
+// 与 CONFIG.MULTI_DEVICE_SYNC_ENABLED 运行期双闸保持一致: 运行时 SyncConfig.isEnabled() 仍为第二道闸。
+const syncModule = false ? require("./sync") : null;
 
 // ===========================================
 // 模块连接 — 注入跨模块依赖
@@ -127,31 +131,18 @@ function main() {
         }
 
         // 多端同步引擎初始化(F-SYNC-11 双重闸: 编译期 flag + 运行期 SyncConfig)
-        if (syncModule && syncModule.SyncConfig && syncModule.SyncConfig.isEnabled()) {
-            const { SyncEngine, SyncConfig: SC, SyncRateLimiter, SyncSerializer, SyncLedger, SyncPayload, SyncCrypto } = syncModule;
-            SyncEngine.init({
+        // v3.14.6 (AUD-ARCH-07): 接线整体移入 sync/index.js boot —— 字面量开关剪枝时
+        // require 整体缺席, 接线文本与 sync 模块名不残留于产物
+        if (syncModule && syncModule.boot) {
+            syncModule.boot({
                 Storage,
-                SyncStateV2: SyncState,
+                SyncState,
                 DedupStore: require("./storage/DedupStore").DedupStore,
                 NotionAPI,
                 OperationGuard,
                 OperationLog,
+                Utils,
             });
-            // 共享请求预算(F-SYNC-04): gate 默认 null; 仅同步启用时注入, 导出路径共享 3 req/s 桶
-            NotionAPI.setRequestGate(() => SyncRateLimiter.gateAcquire());
-            Utils.runWhenBrowserIdle(() => SyncEngine.pull({ reason: "idle" }));
-            // 周期 pull(与自动导入节奏错峰, LOW-3: deviceId 哈希取模)
-            const hash = SC.getDeviceId().split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-            const phase = hash % 15; // 0-14 分钟偏移
-            setTimeout(() => {
-                const loop = () => {
-                    // 全盘审计修复(find 6): 禁用后停止周期 pull(不再拉取/应用远端状态)
-                    if (!SC.isEnabled()) return;
-                    SyncEngine.pull({ reason: "periodic" });
-                    setTimeout(loop, 30 * 60 * 1000 + phase * 60000);
-                };
-                loop();
-            }, phase * 60000);
         }
 
         const notice = NotionOAuth.consumeNotice();
@@ -180,9 +171,10 @@ function main() {
         // 此处 console.error 落诊断 + 尽力向用户展示失败提示（showStatus 自身失败不影响）。
         console.error("[LD-Notion] 初始化失败:", e);
         try {
-            if (typeof UI !== "undefined" && typeof UI.showStatus === "function") {
+            // v3.14.6 (AUD-ARCH-16): UI/GenericUI 为顶部 import, typeof 守卫恒真, 删前缀仅留方法存在性检查
+            if (typeof UI.showStatus === "function") {
                 UI.showStatus(`LD-Notion 初始化失败: ${e?.message || e}`, "error");
-            } else if (typeof GenericUI !== "undefined" && typeof GenericUI.showStatus === "function") {
+            } else if (typeof GenericUI.showStatus === "function") {
                 GenericUI.showStatus(`LD-Notion 初始化失败: ${e?.message || e}`, "error");
             }
         } catch (_) { /* 错误展示自身失败不二次抛出，外层 console.error 已落诊断 */ }

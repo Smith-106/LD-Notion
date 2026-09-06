@@ -1,6 +1,6 @@
 {
   "name": "ld-notion-hub",
-  "version": "3.14.5",
+  "version": "3.14.6",
   "private": true,
   "description": "LD-Notion Hub — AI 多源知识中枢",
   "main": "LinuxDo-Bookmarks-to-Notion.user.js",
@@ -15,7 +15,7 @@
     "verify:equivalence": "node scripts/verify-bundle-equivalence.js",
     "verify:delivery": "npm run verify:baseline && npm run build && npm run verify:extension:bounded && npm run verify:bridge-extension && npm run verify:extension:surfaces && npm run verify:equivalence && npm run build:extension",
     "build": "node build.js",
-    "verify:build": "node build.js && node --check dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q 'LD-NOTION-BUILD:USER_SCRIPT_BODY_START' dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q 'LD-NOTION-BUILD:BOOKMARK_BRIDGE_START' dist/LinuxDo-Bookmarks-to-Notion.user.js",
+    "verify:build": "node build.js && node --check dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q \"LD-NOTION-BUILD:USER_SCRIPT_BODY_START\" dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q \"LD-NOTION-BUILD:BOOKMARK_BRIDGE_START\" dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q \"SyncSerializer\" dist/LinuxDo-Bookmarks-to-Notion.user.js && (echo \"FAIL: sync/ 未剪枝(SyncSerializer 应缺席)\" && exit 1) || (echo \"[PASS] sync/ 已按编译期开关剪枝\")",
     "docs:dev": "vitepress docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs"

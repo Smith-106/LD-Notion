@@ -107,6 +107,9 @@ const MANIFEST_PROFILE_PRESETS = Object.freeze({
 });
 
 function resolveBuildPaths({ src, outDir } = {}) {
+    // v3.14.6 (AUD-ARCH-07): 双形态同源 —— 扩展消费根 userscript 主体, sync/ 剪枝状态
+    // 随 main.js 编译期字面量开关(默认 false)整体带入扩展, 无需二次取值; 显式取值点:
+    // 启用多端同步时改 src/main.js 开关 → 重建 userscript → 本脚本自动继承。
     const resolvedSrc = src || process.env.LD_NOTION_BUILD_SRC || path.resolve(__dirname, "..", "LinuxDo-Bookmarks-to-Notion.user.js");
     const resolvedOutDir = outDir || process.env.LD_NOTION_BUILD_OUT_DIR || path.resolve(__dirname, "..", "chrome-extension-full");
     return {
@@ -364,6 +367,12 @@ function assertContains(source, snippet, label) {
     }
 }
 
+function assertDoesNotContain(source, snippet, label) {
+    if (source.includes(snippet)) {
+        throw new Error(`扩展构建前置检查失败：不应包含 ${label}`);
+    }
+}
+
 function resolveManifestProfile(profileName) {
     const resolvedName = profileName || process.env.LD_NOTION_MANIFEST_PROFILE || DEFAULT_MANIFEST_PROFILE;
     const profile = MANIFEST_PROFILE_PRESETS[resolvedName];
@@ -408,9 +417,9 @@ function validatePatchedBuildAssumptions({ source, patchedBody, contentScript, b
         assertContains(contentScript, "chrome.runtime.onMessage.addListener", "content script popup 桥接监听");
         assertContains(contentScript, "window.addEventListener(\"ld-notion-request-bookmarks\"", "content script 书签请求桥接");
         assertContains(contentScript, "window.addEventListener(\"ld-notion-search-bookmarks\"", "content script 书签搜索桥接");
-        assertContains(contentScript, "const LD_NOTION_ACTIVE_ROOT_SELECTOR =", "content script LD-Notion 活动根选择器");
-        assertContains(contentScript, "if (!hasActiveLdNotionRoot())", "content script 活动根校验");
-        assertContains(contentScript, "未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。", "content script 非活动上下文拒绝文案");
+        // v3.14.6 (AUD-ARCH-03): DOM 门已移除 —— 桥接不再依赖面板存在(自动同步在面板未渲染/已关闭时也工作)
+        assertDoesNotContain(contentScript, "hasActiveLdNotionRoot", "content script 不再有 DOM 活动根门");
+        assertDoesNotContain(contentScript, "未检测到活动中的 LD-Notion 面板", "content script 不再有面板拒绝文案");
     }
 
     if (typeof backgroundScript === "string") {
@@ -481,6 +490,21 @@ function isUrlAllowed(url) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // v3.14.6 (AUD-ARCH-12): content script 通知转发 —— background 持有 notifications 权限
+    if (message && message.type === "LD_NOTION_NOTIFY") {
+        const { title, text } = (message.payload || {});
+        if (chrome.notifications && chrome.notifications.create) {
+            try {
+                chrome.notifications.create({
+                    type: "basic",
+                    iconUrl: "icon128.png",
+                    title: title || "LD-Notion",
+                    message: text || ""
+                });
+            } catch (_) { /* 通知失败不影响主流程 */ }
+        }
+        return false; // 无需 sendResponse
+    }
     if (message.type !== "GM_xmlhttpRequest") return false;
 
     const { method, url, headers, data, timeout } = message.payload;
@@ -818,12 +842,19 @@ if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.onChanged)
     chrome.storage.onChanged.addListener((changes, areaName) => {
         if (areaName !== "local") return;
         for (const key of Object.keys(changes)) {
+            const change = changes[key];
+            // v3.14.6 (AUD-ARCH-04): 内存快照随 onChanged 回写 —— 跨 tab 修改本页可见
+            if (change && typeof change.newValue !== "undefined") {
+                _gmStorage[key] = change.newValue;
+            } else {
+                delete _gmStorage[key];
+            }
             const cbs = _gmValueChangeListeners[key];
             if (!cbs || !cbs.length) continue;
-            const change = changes[key];
             for (const cb of cbs) {
                 try {
-                    cb(change && typeof change.newValue !== "undefined" ? change.newValue : undefined, change && change.oldValue);
+                    // v3.14.6 (AUD-ARCH-04): 参数序对齐 TM —— (key, oldValue, newValue, remote)
+                    cb(key, change && change.oldValue, change && typeof change.newValue !== "undefined" ? change.newValue : undefined, false);
                 } catch (_) { /* 回调失败不影响存储 */ }
             }
         }
@@ -866,6 +897,8 @@ function GM_xmlhttpRequest(details) {
 }
 
 // 通知垫片
+// v3.14.6 (AUD-ARCH-12): MV3 content script 无 chrome.notifications 权限 → 原守卫静默 no-op;
+// 改经 background onMessage 分支转发(chrome.notifications.create 在 background 执行)
 function GM_notification(detailsOrTitle, textOrUndefined) {
     let title, text;
     if (typeof detailsOrTitle === "object") {
@@ -876,13 +909,10 @@ function GM_notification(detailsOrTitle, textOrUndefined) {
         text = textOrUndefined || "";
     }
 
-    if (chrome.notifications && chrome.notifications.create) {
-        chrome.notifications.create({
-            type: "basic",
-            iconUrl: "icon128.png",
-            title: title,
-            message: text
-        });
+    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+        try {
+            chrome.runtime.sendMessage({ type: "LD_NOTION_NOTIFY", payload: { title, text } });
+        } catch (_) { /* 扩展上下文不可用时静默 */ }
     }
 }
 
@@ -892,12 +922,6 @@ if (typeof document !== "undefined" && document.head && !document.querySelector(
     marker.name = "ld-notion-ext";
     marker.content = "ready";
     document.head.appendChild(marker);
-}
-
-const LD_NOTION_ACTIVE_ROOT_SELECTOR = "[data-ldb-root], .ldb-panel, .ldb-notion-panel, .gclip-panel";
-
-function hasActiveLdNotionRoot() {
-    return typeof document !== "undefined" && !!document.querySelector(LD_NOTION_ACTIVE_ROOT_SELECTOR);
 }
 
 function dispatchBookmarkBridgeResponse(detail) {
@@ -914,14 +938,13 @@ function rejectBookmarkBridgeRequest(requestId, error) {
 }
 
 // 兼容 userscript 的 CustomEvent 书签桥接协议
+// v3.14.6 (AUD-ARCH-03): 移除 DOM 活动根门 —— 页面未渲染/已关闭面板时
+// 桥接请求被拒致自动同步失效; 且该门可被页面 JS 注入伪造 div 绕过,
+// 无真实防护。信任边界为 manifest content_scripts @match 白名单。
 ${GENERATED_SECTION_MARKERS.bookmarkEventBridgeStart}
 window.addEventListener("ld-notion-request-bookmarks", async (event) => {
     const { requestId, folderId } = event.detail || {};
     if (!requestId) return;
-    if (!hasActiveLdNotionRoot()) {
-        rejectBookmarkBridgeRequest(requestId, "未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。");
-        return;
-    }
     try {
         const data = folderId
             ? await chrome.bookmarks.getChildren(folderId)
@@ -935,10 +958,6 @@ window.addEventListener("ld-notion-request-bookmarks", async (event) => {
 window.addEventListener("ld-notion-search-bookmarks", async (event) => {
     const { requestId, query } = event.detail || {};
     if (!requestId) return;
-    if (!hasActiveLdNotionRoot()) {
-        rejectBookmarkBridgeRequest(requestId, "未检测到活动中的 LD-Notion 面板，已拒绝书签桥接请求。");
-        return;
-    }
     try {
         const data = await chrome.bookmarks.search(query || "");
         dispatchBookmarkBridgeResponse({ requestId, success: true, data });

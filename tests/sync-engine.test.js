@@ -18,9 +18,18 @@ const { SyncEngine } = require("../src/sync/SyncEngine");
 const { SyncConfig } = require("../src/sync/SyncConfig");
 
 // 简化 Guard(测试隔离)
-const makeGuard = () => ({
-    canExecute: () => true,
+// v3.14.6 (XN-06): 补 auditDenied 统一构造器签名(denied 语义统一收束后由 guard 委托审计)
+const makeGuard = (canExecute = true) => ({
+    canExecute: () => canExecute,
     execute: async (op, fn) => fn(),
+    auditDenied: (op, ctx, opts = {}) => {
+        (globalThis.__auditLog = globalThis.__auditLog || []).push({
+            audit_event: opts.phase === "cancelled" ? "guard.cancelled" : "guard.denied",
+            operationName: op,
+            status: opts.phase === "cancelled" ? "cancelled" : "denied",
+            context: { ...ctx, phase: opts.phase || "precheck" },
+        });
+    },
 });
 const makeLog = () => ({
     add: (entry, opts) => { (globalThis.__auditLog = globalThis.__auditLog || []).push(entry); },
@@ -193,8 +202,8 @@ describe("SyncEngine 双设备收敛", () => {
             SyncStateV2,
             DedupStore,
             NotionAPI: fakeNotion("X"),
-            OperationGuard: { canExecute: () => false, execute: async () => { throw new Error("not reached"); } },
-            OperationLog: { add: (e) => (globalThis.__auditLog = globalThis.__auditLog || []).push(e) },
+            OperationGuard: makeGuard(false),
+            OperationLog: makeLog(),
             apiKeyProvider: () => "test-key",
         });
         const r = await SyncEngine.push({ reason: "test" });

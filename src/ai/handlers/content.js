@@ -76,7 +76,7 @@ handleWriteContent: async (params, settings, explanation) => {
 
         state().updateLastMessage("正在生成内容...", "processing");
 
-        const prompt = `你是一个内容生成助手。根据用户要求生成内容，使用 Markdown 格式。\n\n用户要求：${content_prompt}`;
+        const prompt = `你是一个内容生成助手。根据用户要求生成内容，使用 Markdown 格式。\n\n用户要求：${AI().isolateContent(content_prompt)}`;
         const aiResponse = await svc().requestChat(prompt, settings, 2000);
 
         state().updateLastMessage("正在写入页面...", "processing");

@@ -272,27 +272,38 @@ ${availableTools}
         } else {
             // Level >= 1 的写入操作需要用户确认
             if (tool.level >= 1) {
-                try {
-                    result = await OperationGuard.execute(toolCall.tool, async () => {
-                        return await tool.execute(toolCall.args || {}, settings);
-                    }, {
-                        source: "ai-agent-loop",
-                        actor: "ai",
-                        itemName: toolCall.tool,
-                        trigger: "ai_tool_execution",
-                    });
-                } catch (guardError) {
-                    if (guardError.message === "操作已取消") {
-                        result = AI()._normalizeExecutionResult(
-                            `错误: 用户取消了 "${toolCall.tool}" 操作的执行`,
-                            { source: "tool", name: toolCall.tool, status: "cancelled" }
-                        );
-                    } else {
-                        result = AI()._normalizeExecutionResult(`错误: ${guardError.message}`, {
-                            source: "tool",
-                            name: toolCall.tool,
-                            status: "error",
+                // v3.14.6 (CC-03): 手动/自动导出进行中时拒绝 AI 写, 防并发交错双建页
+                const { SyncLock } = require("../sync-lock");
+                if (SyncLock.isExporting) {
+                    result = AI()._normalizeExecutionResult(
+                        `错误: 当前有导出/自动同步正在进行，已拒绝 "${toolCall.tool}" 操作以避免并发写入冲突，请稍后重试`,
+                        { source: "tool", name: toolCall.tool, status: "error" }
+                    );
+                } else {
+                    try {
+                        result = await OperationGuard.execute(toolCall.tool, async () => {
+                            return await tool.execute(toolCall.args || {}, settings);
+                        }, {
+                            source: "ai-agent-loop",
+                            actor: "ai",
+                            itemName: toolCall.tool,
+                            trigger: "ai_tool_execution",
+                            // v3.14.6 (S-04): AI 常规写也弹确认, 取消记 guard.cancelled
+                            requireConfirm: true,
                         });
+                    } catch (guardError) {
+                        if (guardError.message === "操作已取消") {
+                            result = AI()._normalizeExecutionResult(
+                                `错误: 用户取消了 "${toolCall.tool}" 操作的执行`,
+                                { source: "tool", name: toolCall.tool, status: "cancelled" }
+                            );
+                        } else {
+                            result = AI()._normalizeExecutionResult(`错误: ${guardError.message}`, {
+                                source: "tool",
+                                name: toolCall.tool,
+                                status: "error",
+                            });
+                        }
                     }
                 }
             } else {
@@ -328,7 +339,7 @@ ${availableTools}
         // 2. Agent 循环（<user_input> 包裹防 prompt injection，learnings-003）
         // 工具结果同属不可信输入(抓取的网页内容可携带指令), 同样包裹隔离标签;
         // 内容做 XML 转义防 </user_input> 标签逃逸(安全审计 hy3 MEDIUM)。
-        const isolate = (content) => `<user_input>\n${String(content).replace(/<\/?user_input>/gi, "&lt;$&gt;")}\n</user_input>`;
+        const isolate = (content) => `<user_input>\n${AI().isolateContent(content)}\n</user_input>`;
         const messages = [{ role: "user", content: isolate(userMessage) }];
         let iteration = 0;
 

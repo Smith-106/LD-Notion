@@ -88,7 +88,7 @@ describe("SyncSerializer 白名单默认拒绝", () => {
         // 过期条目(1970 epoch)不出现在同步投影中
         expect(p.dedup.linuxdo["456"]).toBeUndefined();
         expect(p.dedup.evil).toBeUndefined();
-        // bookmark url 键哈希化(URL 键源不做过期裁剪, 维持原语义)
+        // bookmark url 键哈希化(v3.14.6 DC-002: 全源投影裁剪, 新鲜条目才投递)
         const keys = Object.keys(p.dedup.bookmark);
         expect(keys[0]).toMatch(/^h:[0-9a-f]{64}$/);
         expect(keys[0]).not.toContain("a.com");
@@ -97,7 +97,7 @@ describe("SyncSerializer 白名单默认拒绝", () => {
     it("URL 哈希确定性(同 URL 同哈希, M-1)", async () => {
         const mk = async () => {
             const p = await SyncSerializer.buildPayload(
-                { dedupSets: { bookmark: { "https://a.com/x": 100 } } },
+                { dedupSets: { bookmark: { "https://a.com/x": now - 1000 } } },
                 { deviceId: "d", now }
             );
             return Object.keys(p.dedup.bookmark)[0];

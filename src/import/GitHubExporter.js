@@ -5,6 +5,7 @@ const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { NotionAPI } = require("../api");
 const { GitHubAPI } = require("./GitHubAPI");
+const { Exporter } = require("../export");
 const { AIService } = require("../ai");
 
 const GitHubExporter = {
@@ -122,7 +123,9 @@ const GitHubExporter = {
                 categories,
                 settings
             );
-        } catch {
+        } catch (error) {
+            // v3.14.6 (AUD-ARCH-15): AI 分类为可选增强, 失败降级空串不阻断导入; 补可观测性日志
+            console.warn("[LD-Notion] AI 仓库分类失败, 降级跳过分类:", repo.full_name || repo.name || "?", String(error?.message || error).slice(0, 120));
             return "";
         }
     },
@@ -135,7 +138,9 @@ const GitHubExporter = {
         try {
             const readme = await GitHubAPI.fetchRepoReadme(repo.full_name, settings?.token || "");
             insight = GitHubExporter.extractReadmeInsight(readme);
-        } catch {
+        } catch (error) {
+            // v3.14.6 (AUD-ARCH-15): README 摘要为可选增强, 失败降级空摘要; 补可观测性日志
+            console.warn("[LD-Notion] 仓库 README 摘要失败, 降级空摘要:", repo.full_name || repo.name || "?", String(error?.message || error).slice(0, 120));
             insight = { title: "", summary: "" };
         }
 
@@ -323,12 +328,18 @@ const GitHubExporter = {
         }
 
         let success = 0, failed = 0;
+        let authAbortInfo = null;
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+        try {
         for (let i = 0; i < newItems.length; i++) {
             const item = newItems[i];
             const key = getKeyFn(item);
             const pct = Math.round(10 + (i / newItems.length) * 85);
-            if (onProgress) onProgress(`正在导出 ${sourceType} (${i + 1}/${newItems.length}): ${key}`, pct);
+            try {
+                if (onProgress) onProgress(`正在导出 ${sourceType} (${i + 1}/${newItems.length}): ${key}`, pct);
+            } catch (progressError) {
+                console.warn(`[GitHubExporter] onProgress 回调异常 (${key}):`, progressError);
+            }
 
             try {
                 const enriched = sourceType === "Gist" ? item : await GitHubExporter.enrichRepo(item, settings, enrichContext);
@@ -358,6 +369,12 @@ const GitHubExporter = {
                 console.warn(`[GitHubExporter] 导出失败: ${key}`, e);
                 GitHubExporter._auditExport("createDatabasePage", "failed",
                     { itemKey: key, sourceType, reason: String(e?.message || e) });
+                // v3.14.6 (AUD-ARCH-01/DC-005/X-02): 认证终态 fail-fast —— 与 github-obsidian-service
+                // 同构, 避免 464 项全量 401 风暴; 剩余项计入 skipped 留待下轮(watermark 不推进)
+                if (Exporter.isAuthTerminalError(e)) {
+                    authAbortInfo = { reason: e.message, at: i + 1 };
+                    break;
+                }
                 failed++;
             }
 
@@ -365,12 +382,16 @@ const GitHubExporter = {
                 await Utils.sleep(delay);
             }
         }
+        } finally {
+            // 批量回写已导出映射（DISCOVER P3）：循环内 markExportedFn 仅 mutate 内存缓存，
+            // 循环末单次 flush，写侧从 O(N²)→O(N)。与 BookmarkExporter.flushExported 同构。
+            // v3.14.6 (DC-009/CC-10): finally 保证异常/中止路径也落盘, flush 幂等
+            if (flushFn) flushFn();
+        }
 
-        // 批量回写已导出映射（DISCOVER P3）：循环内 markExportedFn 仅 mutate 内存缓存，
-        // 循环末单次 flush，写侧从 O(N²)→O(N)。与 BookmarkExporter.flushExported 同构。
-        if (flushFn) flushFn();
-
-        return { total: items.length, exported: success, failed, newCount: newItems.length };
+        return authAbortInfo
+            ? { total: items.length, exported: success, failed, skipped: newItems.length - success - failed, authAborted: authAbortInfo, newCount: newItems.length }
+            : { total: items.length, exported: success, failed, newCount: newItems.length };
     },
 
     // 导出 stars 到 Notion
@@ -541,10 +562,10 @@ const GitHubExporter = {
             try {
                 const prompt = `请根据以下 GitHub 仓库信息，从这些分类中选择最合适的一个: [${categories.join(", ")}]
 
-仓库名: ${title}
-描述: ${desc}
-语言: ${lang}
-标签: ${tags}
+仓库名: ${AIService.isolateContent(title)}
+描述: ${AIService.isolateContent(desc)}
+语言: ${AIService.isolateContent(lang)}
+标签: ${AIService.isolateContent(tags)}
 
 只回复分类名，不要其他内容。`;
 
@@ -580,6 +601,10 @@ const GitHubExporter = {
                 console.warn(`[GitHubExporter] 分类失败: ${title}`, e);
                 GitHubExporter._auditExport("updatePage", "failed",
                     { pageId: page?.id, itemName: title, reason: String(e?.message || e) });
+                // v3.14.6 (AUD-ARCH-01): 认证终态 fail-fast, 与 _exportItems 同构
+                if (Exporter.isAuthTerminalError(e)) {
+                    return { classified, total: pages.length, authAborted: { reason: e.message, at: i + 1 } };
+                }
             }
 
             await Utils.sleep(500);

@@ -164,34 +164,13 @@ const UICommandService = Object.freeze({
             // 采用 canExecute 非阻塞闸门 + guard.denied 审计(与自动同步归档模式对称)。
             const { OperationGuard, OperationLog } = require("../security");
             if (!OperationGuard.canExecute("updateDatabase")) {
-                const startedAt = Date.now();
-                OperationLog.add({
-                    audit_event: "guard.denied",
+                // v3.14.6 (XN-06): 统一构造器(phase=precheck, status=denied)
+                OperationGuard.auditDenied("updateDatabase", {
+                    trigger: "user_requested_setup_database",
+                    databaseId: targetId,
                     actor: "user",
                     source: "ui",
-                    guard: OperationGuard._buildGuardSnapshot("updateDatabase", "deny", {
-                        trigger: "user_requested_setup_database",
-                        databaseId: targetId,
-                    }),
-                    operation: {
-                        name: "updateDatabase",
-                        risk: "standard",
-                        trigger: "user_requested_setup_database",
-                    },
-                    target: OperationLog.buildTarget({ databaseId: targetId }),
-                    payload: null,
-                    result: {
-                        status: "denied",
-                        reason: "权限不足:当前权限级别无法修改 Notion 数据库结构",
-                    },
-                    redaction: OperationLog.collectRedactionHints({ databaseId: targetId }),
-                    operationName: "updateDatabase",
-                    context: { databaseId: targetId, trigger: "user_requested_setup_database" },
-                    status: "failed",
-                    error: "权限不足:需要\"标准\"及以上权限才能自动设置数据库属性",
-                    startTime: startedAt,
-                    endTime: Date.now(),
-                });
+                }, { phase: "precheck", reason: "权限不足:当前权限级别无法修改 Notion 数据库结构" });
                 setupResult = {
                     success: false,
                     error: "权限不足:需要\"标准\"及以上权限才能自动设置数据库属性(已跳过自动建属性,目标已保存)",

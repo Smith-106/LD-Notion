@@ -33,12 +33,13 @@ describe("R-SYNC-01: 同步投影过期裁剪(F-2/F-3)", () => {
         expect(p.dedup.linuxdo["new"]).toBe(NOW - 10 * 86400000);
     });
 
-    it("URL 键源(bookmark): 过期条目保留(维持时间 TTL 语义, 由本地淘汰负责)", async () => {
+    it("URL 键源(bookmark): 过期条目也不投递(v3.14.6 DC-002 全源裁剪), 新鲜条目保留", async () => {
         const p = await SyncSerializer.buildPayload(
-            { dedupSets: { bookmark: { "https://a.com/x": NOW - D90 - 86400000 } } },
+            { dedupSets: { bookmark: { "https://a.com/old": NOW - D90 - 86400000, "https://a.com/new": NOW - 10 * 86400000 } } },
             { deviceId: "t", now: NOW, hashUrls: false }
         );
-        expect(p.dedup.bookmark["https://a.com/x"]).toBe(NOW - D90 - 86400000);
+        expect(p.dedup.bookmark["https://a.com/old"]).toBeUndefined();
+        expect(p.dedup.bookmark["https://a.com/new"]).toBe(NOW - 10 * 86400000);
     });
 
     it("过期裁剪后 payload 通过 validateRemote 整包 ts 校验(修复 F-2 整包拒绝回归)", async () => {
@@ -145,9 +146,9 @@ describe("R-REC-02: DedupStore batch 模式对账批量写回(F-4 回归护栏)"
         DedupStore.markSeen("linuxdo", "111");
         DedupStore.markSeen("linuxdo", "222");
         // 未 endBatch 前不落盘
-        expect(store.get(DedupStore._keyFor("linuxdo"))).toBeUndefined();
+        expect(store.get(DedupStore.keyFor("linuxdo"))).toBeUndefined();
         DedupStore.endBatch("linuxdo");
-        const saved = JSON.parse(store.get(DedupStore._keyFor("linuxdo")));
+        const saved = JSON.parse(store.get(DedupStore.keyFor("linuxdo")));
         expect(saved["111"]).toBeTruthy();
         expect(saved["222"]).toBeTruthy();
     });
@@ -157,7 +158,7 @@ describe("R-REC-02: DedupStore batch 模式对账批量写回(F-4 回归护栏)"
         const oldTs = NOW - D90 - 86400000; // 91 天前
         for (let i = 0; i < 50; i++) DedupStore.markSeen("linuxdo", `t${i}`);
         DedupStore.endBatch("linuxdo");
-        const saved = JSON.parse(store.get(DedupStore._keyFor("linuxdo")));
+        const saved = JSON.parse(store.get(DedupStore.keyFor("linuxdo")));
         expect(Object.keys(saved).length).toBe(50); // 容量上限不删
         expect(oldTs).toBeLessThan(Date.now() - D90); // 时间断言背景: 91 天条目若在集合中也不会被 endBatch 淘汰
     });

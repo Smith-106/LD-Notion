@@ -25,4 +25,32 @@ module.exports = {
     SyncLedger,
     SyncEngine,
     SyncConfig,
+    // v3.14.6 (AUD-ARCH-07): 启动接线迁入本模块 —— main.js 编译期字面量开关剪枝时
+    // require 整体缺席, 接线文本与 sync 模块名不再残留于产物; 启用时运行期 SyncConfig 双闸不变
+    boot: ({ Storage, SyncState, DedupStore, NotionAPI, OperationGuard, OperationLog, Utils }) => {
+        if (!SyncConfig.isEnabled()) return;
+        SyncEngine.init({
+            Storage,
+            SyncStateV2: SyncState,
+            DedupStore,
+            NotionAPI,
+            OperationGuard,
+            OperationLog,
+        });
+        // 共享请求预算(F-SYNC-04): gate 默认 null; 仅同步启用时注入, 导出路径共享 3 req/s 桶
+        NotionAPI.setRequestGate(() => SyncRateLimiter.gateAcquire());
+        Utils.runWhenBrowserIdle(() => SyncEngine.pull({ reason: "idle" }));
+        // 周期 pull(与自动导入节奏错峰, LOW-3: deviceId 哈希取模)
+        const hash = SyncConfig.getDeviceId().split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+        const phase = hash % 15; // 0-14 分钟偏移
+        setTimeout(() => {
+            const loop = () => {
+                // 全盘审计修复(find 6): 禁用后停止周期 pull(不再拉取/应用远端状态)
+                if (!SyncConfig.isEnabled()) return;
+                SyncEngine.pull({ reason: "periodic" });
+                setTimeout(loop, 30 * 60 * 1000 + phase * 60000);
+            };
+            loop();
+        }, phase * 60000);
+    },
 };

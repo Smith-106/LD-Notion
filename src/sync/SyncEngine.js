@@ -88,12 +88,10 @@ const SyncEngine = {
         if (SyncEngine._running) return { ok: false, outcome: "busy" };
         const { OperationGuard, OperationLog, NotionAPI } = SyncEngine._getDeps();
         if (!OperationGuard.canExecute("sync.state.push")) {
-            OperationLog.add({
-                audit_event: "guard.denied", actor: "system", source: "sync-engine",
-                guard: { operation: "sync.state.push", decision: "deny", reason: "权限不足: 多端同步推送需 level≥1" },
-                operationName: "sync.state.push", status: "denied",
-                context: { reason },
-            }, { force: true }); // M-4: 审计关闭时 guard.denied 仍可见
+            // v3.14.6 (XN-06): 统一构造器(phase=precheck, force 保审计可见)
+            OperationGuard.auditDenied("sync.state.push", {
+                reason, actor: "system", source: "sync-engine", trigger: "multi_device_sync",
+            }, { phase: "precheck", reason: "权限不足: 多端同步推送需 level≥1", force: true });
             SyncConfig.setLastOutcome("denied");
             return { ok: false, outcome: "denied" };
         }
@@ -158,7 +156,10 @@ const SyncEngine = {
                     if (parsed) index.set(`${parsed.kind}:${parsed.key}`, parsed);
                 }
 
-                for (const row of rows) {
+                // v3.14.6 (DC-003): 行预算逐级截断 —— watermark ids/settings 行此前无预算,
+                // 超 SyncLedger 2000 硬限整行失败; 现在构造后量长, 超限逐级裁剪
+                const budgetedRows = SyncEngine._enforceRowBudget(rows);
+                for (const row of budgetedRows) {
                     const id = `${row.kind}:${row.key}`;
                     const prior = index.get(id);
                     if (prior && prior.pageId) {
@@ -225,6 +226,108 @@ const SyncEngine = {
     },
 
     /**
+     * v3.14.6 (DC-003): 行预算逐级截断 —— 构造后量长, 超限逐级:
+     * ① dedup 集按剩余预算(剔除 watermark 开销)进一步 ts 降序截断;
+     * ② watermark ids 稳定序截断 + 审计;
+     * ③ settings 按字段分片行(≤8 片, 每片 ≤1900)。
+     * 返回新行数组(可能含拆分出的 settings 分片行)。
+     */
+    _enforceRowBudget(rows, budgetChars = 1900) {
+        const out = [];
+        for (const row of rows) {
+            const raw = JSON.stringify(row.payload || {});
+            if (raw.length <= budgetChars) {
+                out.push(row);
+                continue;
+            }
+            // ① dedup 集进一步按剩余预算截断(watermark 开销已占用预算)
+            if (row.payload && row.payload.dedup) {
+                const src = Object.keys(row.payload.dedup)[0];
+                const wmText = JSON.stringify(row.payload.watermarks || {});
+                const remain = budgetChars - 11 - wmText.length; // 含 {"dedup":…} 包装开销
+                if (remain > 50) {
+                    row.payload.dedup = { [src]: SyncEngine._truncateSetForRow(src, row.payload.dedup[src], remain) };
+                }
+            }
+            // ② watermark ids 稳定序截断 + 审计(保留前缀, 确定性)
+            if (JSON.stringify(row.payload || {}).length > budgetChars && row.payload && row.payload.watermarks) {
+                for (const [src, wm] of Object.entries(row.payload.watermarks)) {
+                    if (!Array.isArray(wm.ids) || wm.ids.length === 0) continue;
+                    const before = wm.ids.length;
+                    const base = JSON.stringify({ ...row.payload, watermarks: { [src]: { ...wm, ids: [] } } }).length;
+                    let kept = 0;
+                    const picked = [];
+                    let size = base;
+                    for (const id of wm.ids) {
+                        const inc = (kept > 0 ? 1 : 0) + JSON.stringify(id).length;
+                        if (size + inc > budgetChars) break;
+                        picked.push(id);
+                        size += inc;
+                        kept++;
+                    }
+                    wm.ids = picked;
+                    if (kept < before) {
+                        try {
+                            const { OperationLog } = SyncEngine._getDeps();
+                            OperationLog.add({
+                                audit_event: "sync.row.ids.truncated", actor: "system", source: "sync-engine",
+                                operationName: "sync.state.push", status: "success",
+                                context: { source: src, total: before, kept, reason: "watermark ids row budget" },
+                            }, { force: true });
+                        } catch { /* 审计不可用不阻断 push */ }
+                    }
+                }
+            }
+            // ③ settings 按字段分片(≤8 片, 每片 ≤1900; 单字段超限交由 SyncLedger 显式拒绝)
+            if (JSON.stringify(row.payload || {}).length > budgetChars && row.payload && row.payload.settings) {
+                const shards = SyncEngine._splitSettingsRow(row, budgetChars);
+                if (shards.length > 0) {
+                    out.push(...shards);
+                    continue;
+                }
+            }
+            out.push(row);
+        }
+        return out;
+    },
+
+    /**
+     * v3.14.6 (DC-003): settings 行按字段拆分 —— 字段级 LWW 语义下拆行不影响
+     * pull 侧 merge(SyncPayload.merge 按 key 并集), 每片 ≤ budgetChars, ≤8 片封顶。
+     */
+    _splitSettingsRow(row, budgetChars = 1900) {
+        const entries = Object.entries(row.payload.settings || {});
+        if (entries.length <= 1) return []; // 单字段无法拆(超限交 SyncLedger 显式拒绝)
+        const shards = [];
+        let cur = {};
+        const flush = () => {
+            if (Object.keys(cur).length === 0) return;
+            shards.push({
+                kind: "settings",
+                key: `settings#${shards.length}`,
+                version: row.version || 0,
+                updatedAt: row.updatedAt || "",
+                deviceId: row.deviceId || "",
+                payload: { settings: cur },
+            });
+            cur = {};
+        };
+        for (const [k, v] of entries) {
+            // 预算按含包装的整行 payload 测量(与 SyncLedger 硬限同基准)
+            const inc = JSON.stringify({ settings: { ...cur, [k]: v } }).length;
+            if (inc > budgetChars && Object.keys(cur).length > 0) flush();
+            if (shards.length >= 8) {
+                // 8 片封顶: 余下字段并入当前片(超限仍由 SyncLedger 显式拒绝, 不静默截断)
+                cur[k] = v;
+                continue;
+            }
+            cur[k] = v;
+        }
+        flush();
+        return shards;
+    },
+
+    /**
      * pull: 拉远端行 → 校验 → merge → applyRemote(仅胜出项)
      * @returns {Promise<{ok: boolean, outcome: string, applied: Object, error?: string}>}
      */
@@ -236,11 +339,10 @@ const SyncEngine = {
         const { OperationGuard, OperationLog, NotionAPI, SyncStateV2, DedupStore } = SyncEngine._getDeps();
         // pull 是只读(L0), canExecute 非阻塞; denied 仍审计(M-4 force)
         if (!OperationGuard.canExecute("sync.state.pull")) {
-            OperationLog.add({
-                audit_event: "guard.denied", actor: "system", source: "sync-engine",
-                guard: { operation: "sync.state.pull", decision: "deny", reason: "权限不足: 拉取需 level≥0" },
-                operationName: "sync.state.pull", status: "denied", context: { reason },
-            }, { force: true });
+            // v3.14.6 (XN-06): 统一构造器(phase=precheck)
+            OperationGuard.auditDenied("sync.state.pull", {
+                reason, actor: "system", source: "sync-engine",
+            }, { phase: "precheck", reason: "权限不足: 拉取需 level≥0", force: true });
             SyncConfig.setLastOutcome("denied");
             return { ok: false, outcome: "denied" };
         }
@@ -317,7 +419,8 @@ const SyncEngine = {
 
         // ① dedup 胜出项 → 写回对应源集合(取 max, 保留本地已有)
         for (const entry of winners.dedupEntries || []) {
-            Dedup.markSeen(entry.source, entry.key);
+            // v3.14.6 (DC-008): 传远端 ts 保留 TTL 起点(此前默认 now 使远端条目标记"新鲜")
+            Dedup.markSeen(entry.source, entry.key, entry.ts);
         }
 
         // ② watermark 胜出项(epoch 校验在 validateRemote 已做; 应用时再防一次)

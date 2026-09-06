@@ -63,6 +63,8 @@ const NotionAPI = {
     // 由 SyncEngine 注入 SyncRateLimiter.gateAcquire;多端同步开启时所有
     // Notion 请求(含导出)共享 3 req/s 令牌桶。
     _requestGate: null,
+    // v3.14.6 (AUD-ARCH-11): 续签冷却截止时间戳, 非终态续签失败后 60s 内不再重放续签
+    _refreshCooldownUntil: null,
 
     configureTransport: (transport) => {
         if (!transport || typeof transport.request !== "function") {
@@ -120,12 +122,26 @@ const NotionAPI = {
                 return result;
             }
             if (response.status === 401 && allowRefresh && NotionOAuth.canAutoRefresh()) {
+                // v3.14.6 (AUD-ARCH-11): 续签冷却 60s —— 批量循环 464 项逐个 401 时,
+                // 冷却期内跳过续签重放直接按非终态 401 抛(逐项失败留待下轮)
+                if (NotionAPI._refreshCooldownUntil && Date.now() < NotionAPI._refreshCooldownUntil) {
+                    const cooldownError = new Error(`Notion API 错误: ${result.message || response.status}(续签冷却中)`);
+                    cooldownError.statusCode = response.status;
+                    throw cooldownError;
+                }
                 try {
                     const refreshedToken = await NotionOAuth.refreshAccessToken();
                     return doRequest(attempt, refreshedToken, false);
                 } catch (refreshError) {
                     const error = new Error(`Notion OAuth 续签失败: ${refreshError.message}`);
-                    error.isAuthTerminal = true;
+                    // v3.14.6 (AUD-ARCH-11): 仅认证终态(invalid_grant/invalid_client/凭证类关键词)
+                    // 才标记 isAuthTerminal 中止整批; 网络抖动/超时/5xx 为可恢复瞬态, 抛非终态
+                    // 让批量循环逐项失败重试(60s 冷却压顶, 不重放续签)
+                    if (NotionOAuth.isTerminalRefreshError(refreshError)) {
+                        error.isAuthTerminal = true;
+                    } else {
+                        NotionAPI._refreshCooldownUntil = Date.now() + 60 * 1000;
+                    }
                     throw error;
                 }
             }

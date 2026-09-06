@@ -876,6 +876,7 @@ const WorkspaceInsight = {
         if (strictMode) {
             try { DedupStore.beginBatch("linuxdo"); } catch { /* batch 不可用时降级直写 */ }
         }
+        try {
         records.forEach((record) => {
             const recordUrl = UI().normalizeWorkspaceInsightUrl(record?.sourceUrl || "");
             if (!recordUrl) return;
@@ -903,13 +904,16 @@ const WorkspaceInsight = {
                 matched++;
             }
         });
+        } finally {
+            // v3.14.6 (CC-14): forEach 抛错也会 flush —— 槽残留致账本静默丢失
+            if (linuxdoDirty) {
+                try { DedupStore.endBatch("linuxdo"); } catch { /* batch 未开启时 markSeen 已直写, 无需 flush */ }
+            }
+        }
         // 循环末单次持久化(与 GitHubExporter/批量导出同模式): 避免逐条 flush 的写侧 O(N²)
         if (githubDirty) {
             GitHubAPI.flushExported();
             GitHubAPI.flushGistsExported();
-        }
-        if (linuxdoDirty) {
-            try { DedupStore.endBatch("linuxdo"); } catch { /* batch 未开启时 markSeen 已直写, 无需 flush */ }
         }
         if (matched > 0) {
             UI().recomputeExportStats();

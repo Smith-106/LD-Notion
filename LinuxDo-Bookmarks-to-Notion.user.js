@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.5
+// @version      3.14.6
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -42,6 +42,10 @@
 // @connect      api.github.com
 // @connect      zhihu.com
 // @connect      zhuanlan.zhihu.com
+// v3.14.6 (AUD-ARCH-13): Obsidian 本地导出需 127.0.0.1/localhost —— 缺白名单时
+// userscript 形态 Obsidian 请求被 TM 拒绝(扩展 manifest 已含, 不动)
+// @connect      127.0.0.1
+// @connect      localhost
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -49,13 +53,7 @@
     // [LD-NOTION-BUILD:USER_SCRIPT_BODY_START]
     "use strict";
   var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-    get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-  }) : x)(function(x) {
-    if (typeof require !== "undefined") return require.apply(this, arguments);
-    throw Error('Dynamic require of "' + x + '" is not supported');
-  });
-  var __commonJS = (cb, mod) => function __require2() {
+  var __commonJS = (cb, mod) => function __require() {
     try {
       return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
     } catch (e) {
@@ -80,6 +78,7 @@
           NOTION_OAUTH_CLIENT_SECRET: "ldb_notion_oauth_client_secret",
           NOTION_OAUTH_REDIRECT_URI: "ldb_notion_oauth_redirect_uri",
           NOTION_OAUTH_REFRESH_TOKEN: "ldb_notion_oauth_refresh_token",
+          NOTION_OAUTH_REFRESH_LEASE: "ldb_notion_oauth_refresh_lease",
           NOTION_OAUTH_STATE: "ldb_notion_oauth_state",
           NOTION_OAUTH_META: "ldb_notion_oauth_meta",
           NOTION_OAUTH_NOTICE: "ldb_notion_oauth_notice",
@@ -174,6 +173,8 @@
           // 跨源设置
           CROSS_SOURCE_MODE: "ldb_cross_source_mode",
           AUTO_SYNC_STATE: "ldb_auto_sync_state",
+          // v3.14.6 (CC-04): 跨 tab 自动同步租约锁键(owner+expiresAt JSON, TTL 兜底)
+          AUTO_SYNC_LEASE: "ldb_auto_sync_lease",
           // 同步间隔 (每源独立可配)
           SYNC_INTERVAL_LINUXDO: "ldb_sync_interval_linuxdo",
           SYNC_INTERVAL_GITHUB: "ldb_sync_interval_github",
@@ -601,7 +602,8 @@
       var SyncStateV2 = {
         VERSION: 2,
         _cache: null,
-        _saveTimer: null,
+        _saveTimerId: null,
+        _savePending: false,
         _dirty: false,
         OUTCOMES: Object.freeze(["idle", "running", "success", "partial", "error"]),
         /**
@@ -737,22 +739,24 @@
         _save(state) {
           this._cache = state;
           this._dirty = true;
-          if (this._saveTimer) return;
+          if (this._saveTimerId || this._savePending) return;
           const flush = () => {
-            this._saveTimer = null;
+            this._saveTimerId = null;
+            this._savePending = false;
             this._flushSave();
           };
           if (typeof globalThis.queueMicrotask === "function") {
-            this._saveTimer = 1;
+            this._savePending = true;
             globalThis.queueMicrotask(flush);
           } else if (typeof globalThis.setTimeout === "function") {
-            this._saveTimer = globalThis.setTimeout(flush, 0);
+            this._saveTimerId = globalThis.setTimeout(flush, 0);
           } else {
             this._flushSave();
           }
         },
         _flushSave() {
-          this._saveTimer = null;
+          this._saveTimerId = null;
+          this._savePending = false;
           if (!this._dirty) return;
           this._dirty = false;
           _setRaw(CONFIG2.STORAGE_KEYS.AUTO_SYNC_STATE, JSON.stringify(this._cache));
@@ -763,10 +767,11 @@
          */
         forceFlush() {
           var _a;
-          if (this._saveTimer) {
-            (_a = globalThis.clearTimeout) == null ? void 0 : _a.call(globalThis, this._saveTimer);
-            this._saveTimer = null;
+          if (this._saveTimerId !== null) {
+            (_a = globalThis.clearTimeout) == null ? void 0 : _a.call(globalThis, this._saveTimerId);
+            this._saveTimerId = null;
           }
+          this._savePending = false;
           this._flushSave();
         },
         /**
@@ -898,6 +903,14 @@
         }
       };
       module.exports = { SyncStateV2 };
+      if (typeof GM_addValueChangeListener === "function") {
+        try {
+          GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.AUTO_SYNC_STATE, (key, oldValue, newValue, remote) => {
+            if (remote) SyncStateV2._cache = null;
+          });
+        } catch {
+        }
+      }
     }
   });
 
@@ -979,15 +992,17 @@
             out.push(code);
           } else if (code < 2048) {
             out.push(192 | code >> 6, 128 | code & 63);
-          } else if (code >= 55296 && code <= 56319 && i + 1 < str.length) {
-            const low = str.charCodeAt(i + 1);
+          } else if (code >= 55296 && code <= 56319) {
+            const low = i + 1 < str.length ? str.charCodeAt(i + 1) : -1;
             if (low >= 56320 && low <= 57343) {
               code = 65536 + (code - 55296 << 10) + (low - 56320);
               out.push(240 | code >> 18, 128 | code >> 12 & 63, 128 | code >> 6 & 63, 128 | code & 63);
               i++;
             } else {
-              out.push(224 | code >> 12, 128 | code >> 6 & 63, 128 | code & 63);
+              out.push(239, 191, 189);
             }
+          } else if (code >= 56320 && code <= 57343) {
+            out.push(239, 191, 189);
           } else if (code >= 65536) {
             out.push(240 | code >> 18, 128 | code >> 12 & 63, 128 | code >> 6 & 63, 128 | code & 63);
           } else {
@@ -1078,7 +1093,7 @@
         DEDUP_TTL_MS,
         DEDUP_CAPACITY_LIMIT,
         URL_KEYED_SOURCES,
-        _keyFor(sourceType) {
+        keyFor(sourceType) {
           return `${CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`;
         },
         /**
@@ -1091,7 +1106,7 @@
           return HASH_PREFIX + sha256HexSync(dedupKey);
         },
         _loadSet(sourceType) {
-          const raw = GM_getValue(this._keyFor(sourceType), "{}");
+          const raw = GM_getValue(this.keyFor(sourceType), "{}");
           try {
             const parsed = JSON.parse(raw);
             return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
@@ -1105,7 +1120,7 @@
           } else {
             this._evictByCapacity(set);
           }
-          GM_setValue(this._keyFor(sourceType), JSON.stringify(set));
+          GM_setValue(this.keyFor(sourceType), JSON.stringify(set));
         },
         // --- batch 模式: 减少 IPC 调用(全盘审计 find 7: 单槽 → 按 sourceType 分槽,
         // 多导入器并发时 A 的缓存被 B 覆盖丢失, 现每源独立缓存) ---
@@ -1116,11 +1131,14 @@
          * @param {string} sourceType
          */
         beginBatch(sourceType) {
+          if (this._batchCaches[sourceType]) return;
           this._batchCaches[sourceType] = { set: this._loadSet(sourceType), dirty: false };
         },
         /**
          * 结束批量模式，如有变更则一次写回。
          * 写回前自动淘汰超过 TTL 的过期条目（PERF-001）。
+         * v3.14.6 (CC-06): 写回前 rebase —— 重读 fresh set 并集, 同键 max ts,
+         * 防跨 batch 并发时后写者以陈旧内存快照覆盖先写者已落盘条目。
          * @param {string} [sourceType] 指定源; 省略时 flush 全部缓存
          */
         endBatch(sourceType) {
@@ -1128,12 +1146,18 @@
           for (const src of targets) {
             const cache = this._batchCaches[src];
             if (cache && cache.dirty) {
-              if (URL_KEYED_SOURCES.includes(src)) {
-                this._evictExpired(cache.set);
-              } else {
-                this._evictByCapacity(cache.set);
+              const fresh = this._loadSet(src);
+              for (const [k, ts] of Object.entries(cache.set)) {
+                const prev = fresh[k];
+                if (prev === void 0 || Number(ts) > Number(prev)) fresh[k] = ts;
               }
-              this._saveSet(src, cache.set);
+              if (URL_KEYED_SOURCES.includes(src)) {
+                this._evictExpired(fresh);
+              } else {
+                this._evictByCapacity(fresh);
+              }
+              this._saveSet(src, fresh);
+              cache.set = fresh;
               emit("storage:state-committed", { sourceType: src, kind: "dedup" });
             }
           }
@@ -1202,21 +1226,25 @@
         },
         /**
          * 标记条目为已见(urlKeyed 源双写哈希键, 与同步 payload 键空间一致)
+         * v3.14.6 (DC-008): 可选 ts 参数(远端 TTL 起点失真修复), 显式取 max
          * @param {string} sourceType
          * @param {string} dedupKey
+         * @param {number} [ts] - 条目时间戳, 默认 Date.now()
          */
-        markSeen(sourceType, dedupKey) {
+        markSeen(sourceType, dedupKey, ts) {
+          const now = ts === void 0 ? Date.now() : Number(ts);
+          const stamp = Number.isFinite(now) && now > 0 ? now : Date.now();
           const hashed = this._hashKeyFor(sourceType, dedupKey);
           const batch = this._batchGet(sourceType);
           if (batch) {
-            batch.set[dedupKey] = Date.now();
-            if (hashed !== dedupKey) batch.set[hashed] = Date.now();
+            if (!batch.set[dedupKey] || batch.set[dedupKey] < stamp) batch.set[dedupKey] = stamp;
+            if (hashed !== dedupKey && (!batch.set[hashed] || batch.set[hashed] < stamp)) batch.set[hashed] = stamp;
             batch.dirty = true;
             return;
           }
           const set = this._loadSet(sourceType);
-          set[dedupKey] = Date.now();
-          if (hashed !== dedupKey) set[hashed] = Date.now();
+          if (!set[dedupKey] || set[dedupKey] < stamp) set[dedupKey] = stamp;
+          if (hashed !== dedupKey && (!set[hashed] || set[hashed] < stamp)) set[hashed] = stamp;
           this._saveSet(sourceType, set);
         },
         /**
@@ -1273,7 +1301,7 @@
             batch.dirty = true;
             return;
           }
-          GM_deleteValue(this._keyFor(sourceType));
+          GM_deleteValue(this.keyFor(sourceType));
         }
       };
       module.exports = { DedupStore };
@@ -1364,7 +1392,7 @@
               }
             }
             if (changed) {
-              GM_setValue(DedupStore._keyFor("linuxdo"), JSON.stringify(set));
+              GM_setValue(DedupStore.keyFor("linuxdo"), JSON.stringify(set));
             }
             Storage2.remove(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS);
           } catch (e) {
@@ -1492,6 +1520,9 @@
           return window.location.origin + "/" + src.replace(/^\.?\//, "");
         },
         isHttpUrl: (value) => /^https?:\/\//i.test(String(value || "").trim()),
+        // v3.14.6 (AUD-ARCH-05): userscript 模式判定 —— 扩展垫片 scriptHandler='chrome-extension'
+        // 会令旧判定恒真(徽章误标/扩展专属功能跳过), 显式排除
+        isUserscriptMode: () => typeof GM_info !== "undefined" && !!GM_info.scriptHandler && GM_info.scriptHandler !== "chrome-extension",
         extractNotionId: (value) => {
           const raw = String(value || "").trim();
           if (!raw) return "";
@@ -1817,6 +1848,73 @@
     }
   });
 
+  // src/sync-lock.js
+  var require_sync_lock = __commonJS({
+    "src/sync-lock.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var SyncLock = {
+        _exporting: false,
+        get isExporting() {
+          return this._exporting;
+        },
+        set isExporting(val) {
+          this._exporting = Boolean(val);
+        },
+        /**
+         * 尝试获取跨 tab 租约(owner + expiresAt, TTL 兜底)
+         * @param {string} key - 租约存储键(建议 per-source, 如 CONFIG.STORAGE_KEYS.XXX + ":lease")
+         * @param {number} ttlMs - 租约有效期(默认 60s)
+         * @returns {Promise<{owner: string, expiresAt: number}|null>} 成功返回租约, 失败/被占返回 null
+         */
+        acquireLease: async (key, ttlMs = 6e4) => {
+          if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
+            if (SyncLock.isExporting) return null;
+            SyncLock.isExporting = true;
+            return { owner: "local", expiresAt: Date.now() + ttlMs };
+          }
+          const now = Date.now();
+          const existing = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+          if (existing.owner && Number(existing.expiresAt) > now) {
+            return null;
+          }
+          const lease = { owner: Utils2.randomToken(), expiresAt: now + ttlMs };
+          GM_setValue(key, JSON.stringify(lease));
+          await Utils2.sleep(150);
+          const reread = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+          if (!reread.owner || reread.owner !== lease.owner) {
+            return null;
+          }
+          return lease;
+        },
+        /**
+         * 续约(持有期间定期调用, 防 TTL 中途过期)
+         */
+        renewLease: (key, lease, ttlMs = 6e4) => {
+          if (!lease || typeof GM_setValue !== "function") return lease;
+          lease.expiresAt = Date.now() + ttlMs;
+          GM_setValue(key, JSON.stringify(lease));
+          return lease;
+        },
+        /**
+         * 释放租约(仅 owner 本人删除; finally 中调用)
+         */
+        releaseLease: (key, lease) => {
+          if (!lease || typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
+            SyncLock.isExporting = false;
+            return;
+          }
+          const current = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+          if (current.owner && current.owner === lease.owner) {
+            GM_setValue(key, "{}");
+          }
+        }
+      };
+      module.exports = { SyncLock };
+    }
+  });
+
   // src/auth/index.js
   var require_auth = __commonJS({
     "src/auth/index.js"(exports, module) {
@@ -1854,6 +1952,15 @@
         _unlocked: false,
         _syncHandlers: [],
         isSensitiveKey: (key) => CredentialVault2.SENSITIVE_KEYS.has(key),
+        // v3.14.6 (S-08): 自由文本/JSON 序列化脱敏 —— REDACT_IN_LOGS 键名 + token 形态正则,
+        // AI trace/回喂 payload 落盘前统一过此函数(凭证片段不回显)
+        redactText: (text) => {
+          let out = String(text ?? "");
+          for (const key of CredentialVault2.REDACT_IN_LOGS) {
+            out = out.split(key).join("***REDACTED***");
+          }
+          return out.replace(/ntn_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/sk-[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/Bearer\s+[A-Za-z0-9._\-]{10,}/gi, "Bearer ***REDACTED***").replace(/github_pat_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/ghp_[A-Za-z0-9]{20,}/g, "***REDACTED***").replace(/gho_[A-Za-z0-9]{20,}/g, "***REDACTED***");
+        },
         hasVault: () => !!CredentialVault2._getVaultPayloadRaw(),
         isUnlocked: () => CredentialVault2._unlocked,
         get: (key, defaultValue = "") => {
@@ -2860,48 +2967,97 @@
             source
           });
         },
+        // v3.14.6 (AUD-ARCH-11): 续签失败终态判定单源 —— invalid_grant/invalid_client 或凭证类关键词
+        // 为终态(已使用/已过期/Client 配置无效), 其余(网络/超时/5xx)为可恢复瞬态;
+        // api 层据此决定是否标记 isAuthTerminal 中止整批(可恢复批次不得误杀)
+        isTerminalRefreshError: (error) => {
+          const message = String((error == null ? void 0 : error.message) || "");
+          const errorCode = String((error == null ? void 0 : error.code) || "").toLowerCase();
+          return errorCode === "invalid_grant" || errorCode === "invalid_client" || message.includes("\u5DF2\u4F7F\u7528\u6216\u5DF2\u8FC7\u671F") || message.includes("invalid_grant") || message.includes("invalid_client") || message.includes("Client \u914D\u7F6E\u65E0\u6548") || message.includes("Client ID \u4E0E Client Secret \u4E0D\u5339\u914D");
+        },
         refreshAccessToken: async () => {
           if (NotionOAuth2._refreshInFlight) {
             return NotionOAuth2._refreshInFlight;
           }
           NotionOAuth2._refreshInFlight = (async () => {
-            const refreshToken = NotionOAuth2.getRefreshToken();
-            const config = NotionOAuth2.getConfig();
-            if (!refreshToken) {
-              if (CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && CredentialVault2.hasVault() && !CredentialVault2.isUnlocked()) {
-                throw new Error("Notion OAuth refresh token \u5DF2\u4FDD\u5B58\u5728\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u8BF7\u5148\u89E3\u9501\u51ED\u8BC1\u4FDD\u9669\u7BB1\u540E\u518D\u5237\u65B0\u4EE4\u724C\u3002");
-              }
-              throw new Error("\u5F53\u524D\u6CA1\u6709\u53EF\u5237\u65B0\u7684 Notion OAuth refresh_token");
-            }
-            if (!config.clientId || !config.clientSecret) {
-              if (CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault2.hasVault() && !CredentialVault2.isUnlocked()) {
-                throw new Error("Notion OAuth Client Secret \u5DF2\u4FDD\u5B58\u5728\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u8BF7\u5148\u89E3\u9501\u51ED\u8BC1\u4FDD\u9669\u7BB1\u540E\u518D\u5237\u65B0\u4EE4\u724C\u3002");
-              }
-              throw new Error("\u7F3A\u5C11 Notion OAuth Client \u914D\u7F6E\uFF0C\u65E0\u6CD5\u5237\u65B0\u4EE4\u724C");
-            }
+            const { SyncLock } = require_sync_lock();
+            const leaseKey = CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_LEASE;
+            let lease = await SyncLock.acquireLease(leaseKey, 3e4);
             try {
-              const result = await NotionOAuth2.exchangeToken({
-                grant_type: "refresh_token",
-                refresh_token: refreshToken
-              });
-              await NotionOAuth2.applyTokenResponse(result, { source: "refresh" });
-              return result.access_token;
-            } catch (error) {
-              const message = String((error == null ? void 0 : error.message) || "");
-              const errorCode = String((error == null ? void 0 : error.code) || "").toLowerCase();
-              const isTerminal = errorCode === "invalid_grant" || errorCode === "invalid_client" || message.includes("\u5DF2\u4F7F\u7528\u6216\u5DF2\u8FC7\u671F") || message.includes("invalid_grant") || message.includes("invalid_client") || message.includes("Client \u914D\u7F6E\u65E0\u6548") || message.includes("Client ID \u4E0E Client Secret \u4E0D\u5339\u914D");
-              if (isTerminal) {
-                await NotionOAuth2.setRefreshToken("");
-                NotionOAuth2.setAuthMode("manual");
-                const hint = errorCode === "invalid_client" || message.includes("invalid_client") || message.includes("Client ID \u4E0E Client Secret \u4E0D\u5339\u914D") ? "Notion OAuth Client \u914D\u7F6E\u65E0\u6548\uFF0C\u5DF2\u5207\u6362\u624B\u52A8\u6A21\u5F0F\u3002\u8BF7\u91CD\u65B0\u4E00\u952E\u6388\u6743\u6216\u586B\u5199\u6709\u6548 Client ID\u3002" : "Notion OAuth \u767B\u5F55\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u70B9\u51FB\u4E00\u952E\u6388\u6743\u3002";
-                NotionOAuth2.pushNotice(hint, "error");
+              if (!lease) {
+                const rotated = await NotionOAuth2._waitForTokenRotation(3e4);
+                if (rotated) return rotated;
+                lease = await SyncLock.acquireLease(leaseKey, 3e4);
+                if (!lease) throw new Error("Notion OAuth \u7EED\u7B7E\u88AB\u5176\u4ED6\u6807\u7B7E\u9875\u5360\u7528\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5");
               }
-              throw error;
+              const refreshToken = NotionOAuth2.getRefreshToken();
+              const config = NotionOAuth2.getConfig();
+              if (!refreshToken) {
+                if (CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && CredentialVault2.hasVault() && !CredentialVault2.isUnlocked()) {
+                  throw new Error("Notion OAuth refresh token \u5DF2\u4FDD\u5B58\u5728\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u8BF7\u5148\u89E3\u9501\u51ED\u8BC1\u4FDD\u9669\u7BB1\u540E\u518D\u5237\u65B0\u4EE4\u724C\u3002");
+                }
+                throw new Error("\u5F53\u524D\u6CA1\u6709\u53EF\u5237\u65B0\u7684 Notion OAuth refresh_token");
+              }
+              if (!config.clientId || !config.clientSecret) {
+                if (CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && CredentialVault2.hasVault() && !CredentialVault2.isUnlocked()) {
+                  throw new Error("Notion OAuth Client Secret \u5DF2\u4FDD\u5B58\u5728\u4FDD\u9669\u7BB1\u4E2D\uFF0C\u8BF7\u5148\u89E3\u9501\u51ED\u8BC1\u4FDD\u9669\u7BB1\u540E\u518D\u5237\u65B0\u4EE4\u724C\u3002");
+                }
+                throw new Error("\u7F3A\u5C11 Notion OAuth Client \u914D\u7F6E\uFF0C\u65E0\u6CD5\u5237\u65B0\u4EE4\u724C");
+              }
+              try {
+                const result = await NotionOAuth2.exchangeToken({
+                  grant_type: "refresh_token",
+                  refresh_token: refreshToken
+                });
+                await NotionOAuth2.applyTokenResponse(result, { source: "refresh" });
+                return result.access_token;
+              } catch (error) {
+                const isTerminal = NotionOAuth2.isTerminalRefreshError(error);
+                if (isTerminal) {
+                  const stored = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "");
+                  if (stored && stored !== refreshToken) {
+                    const retryResult = await NotionOAuth2.exchangeToken({
+                      grant_type: "refresh_token",
+                      refresh_token: stored
+                    });
+                    await NotionOAuth2.applyTokenResponse(retryResult, { source: "refresh" });
+                    return retryResult.access_token;
+                  }
+                  await NotionOAuth2.setRefreshToken("");
+                  NotionOAuth2.setAuthMode("manual");
+                  const message = String((error == null ? void 0 : error.message) || "");
+                  const errorCode = String((error == null ? void 0 : error.code) || "").toLowerCase();
+                  const hint = errorCode === "invalid_client" || message.includes("invalid_client") || message.includes("Client ID \u4E0E Client Secret \u4E0D\u5339\u914D") ? "Notion OAuth Client \u914D\u7F6E\u65E0\u6548\uFF0C\u5DF2\u5207\u6362\u624B\u52A8\u6A21\u5F0F\u3002\u8BF7\u91CD\u65B0\u4E00\u952E\u6388\u6743\u6216\u586B\u5199\u6709\u6548 Client ID\u3002" : "Notion OAuth \u767B\u5F55\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u70B9\u51FB\u4E00\u952E\u6388\u6743\u3002";
+                  NotionOAuth2.pushNotice(hint, "error");
+                }
+                throw error;
+              }
             } finally {
+              if (lease) SyncLock.releaseLease(leaseKey, lease);
               NotionOAuth2._refreshInFlight = null;
             }
           })();
           return NotionOAuth2._refreshInFlight;
+        },
+        // v3.14.6 (CC-09): 等待他 tab 轮换后的新 token(GM 存储值变化轮询)
+        _waitForTokenRotation: (timeoutMs = 3e4) => {
+          return new Promise((resolve) => {
+            const before = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "");
+            const start = Date.now();
+            const poll = () => {
+              const current = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "");
+              if (current && current !== before) {
+                resolve(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, ""));
+                return;
+              }
+              if (Date.now() - start >= timeoutMs) {
+                resolve(null);
+                return;
+              }
+              setTimeout(poll, 500);
+            };
+            poll();
+          });
         },
         handleRedirectCallback: async () => {
           var _a, _b, _c, _d;
@@ -2974,6 +3130,11 @@
         ]),
         // 本地/私有地址（Obsidian Local REST API 仅运行在本地）
         LOCAL_HOSTS: /* @__PURE__ */ new Set(["127.0.0.1", "localhost", "::1"]),
+        // v3.14.6 (XN-02): 通配 DNS 后缀黑名单 —— nip.io 等将任意子域解析到内网/127.0.0.1,
+        // WHATWG URL 不归一化域名形态, 字面匹配无法拦截(SSRF 已知限制的静态收窄层)。
+        // 注: 非规范 IP 字面量(2130706433/0x7f000001/0177.0.0.1/127.1/前导零)已被 WHATWG
+        // URL 解析器归一化为点分十进制(实测), 落入 _isPrivateHost 网段校验, 此处为纵深防御。
+        WILDCARD_DNS_PATTERN: /\.(nip\.io|sslip\.io|xip\.io|loca\.lt|ssrf\.sh)$/i,
         // 校验 AI 请求 baseUrl：白名单或 HTTPS（非空时）
         validateAiBaseUrl: (baseUrl) => {
           if (!baseUrl) return true;
@@ -2985,7 +3146,7 @@
           }
           if (parsed.protocol !== "https:") return false;
           if (UrlValidator.AI_ALLOWED_HOSTS.has(parsed.hostname)) return true;
-          return !UrlValidator._isPrivateHost(parsed.hostname);
+          return !UrlValidator._isPrivateHost(parsed.hostname) && !UrlValidator._isSuspiciousHostname(parsed.hostname);
         },
         // 校验 Obsidian API URL：仅允许本地地址
         validateObsidianUrl: (apiUrl) => {
@@ -3012,7 +3173,18 @@
             return false;
           }
           if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-          return !UrlValidator._isPrivateHost(parsed.hostname);
+          return !UrlValidator._isPrivateHost(parsed.hostname) && !UrlValidator._isSuspiciousHostname(parsed.hostname);
+        },
+        // v3.14.6 (XN-02): 可疑 hostname 静态判定 —— 通配 DNS 后缀 + 纵深防御非规范 IP 字面量
+        _isSuspiciousHostname: (hostname) => {
+          const h = String(hostname).replace(/\.$/, "").toLowerCase();
+          if (UrlValidator.WILDCARD_DNS_PATTERN.test(h)) return true;
+          if (/^\d+$/.test(h)) return true;
+          if (/^0x[0-9a-f]+$/i.test(h)) return true;
+          const segs = h.split(".");
+          if (segs.length === 4 && segs.some((s) => /^0x/i.test(s) || /^0b/i.test(s))) return true;
+          if (segs.length === 4 && /^\d+$/.test(segs[3]) && segs.some((s) => /^0\d+$/.test(s))) return true;
+          return false;
         },
         // 判断是否为私有/内网主机
         _isPrivateHost: (hostname) => {
@@ -3463,7 +3635,7 @@
             return false;
           }
           const isAllowedEmbedHost = host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtu.be" || host.endsWith(".youtu.be") || host === "vimeo.com" || host.endsWith(".vimeo.com") || host === "bilibili.com" || host.endsWith(".bilibili.com");
-          if (isAllowedEmbedHost || host.includes("player.")) {
+          if (isAllowedEmbedHost) {
             const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
             if (full) {
               blocks.push({ type: "embed", embed: { url: full } });
@@ -3674,11 +3846,14 @@
               }
               const link = Utils2.absoluteUrl(href);
               const linkText = el.textContent || link;
+              const safeLink = DOMToNotion2._safeExternalUrl(link);
               if (link && linkText) {
                 const chunks = DOMToNotion2.splitLongText(linkText, annotations);
-                chunks.forEach((chunk) => {
-                  chunk.text.link = { url: link };
-                });
+                if (safeLink) {
+                  chunks.forEach((chunk) => {
+                    chunk.text.link = { url: safeLink };
+                  });
+                }
                 result.push(...chunks);
               }
               return;
@@ -4513,6 +4688,8 @@ Content-Type: ${contentType}\r
         // 由 SyncEngine 注入 SyncRateLimiter.gateAcquire;多端同步开启时所有
         // Notion 请求(含导出)共享 3 req/s 令牌桶。
         _requestGate: null,
+        // v3.14.6 (AUD-ARCH-11): 续签冷却截止时间戳, 非终态续签失败后 60s 内不再重放续签
+        _refreshCooldownUntil: null,
         configureTransport: (transport) => {
           if (!transport || typeof transport.request !== "function") {
             throw new Error("Notion transport \u9002\u914D\u5668\u5FC5\u987B\u63D0\u4F9B request \u65B9\u6CD5");
@@ -4560,12 +4737,21 @@ Content-Type: ${contentType}\r
               return result;
             }
             if (response.status === 401 && allowRefresh && NotionOAuth2.canAutoRefresh()) {
+              if (NotionAPI2._refreshCooldownUntil && Date.now() < NotionAPI2._refreshCooldownUntil) {
+                const cooldownError = new Error(`Notion API \u9519\u8BEF: ${result.message || response.status}(\u7EED\u7B7E\u51B7\u5374\u4E2D)`);
+                cooldownError.statusCode = response.status;
+                throw cooldownError;
+              }
               try {
                 const refreshedToken = await NotionOAuth2.refreshAccessToken();
                 return doRequest(attempt, refreshedToken, false);
               } catch (refreshError) {
                 const error = new Error(`Notion OAuth \u7EED\u7B7E\u5931\u8D25: ${refreshError.message}`);
-                error.isAuthTerminal = true;
+                if (NotionOAuth2.isTerminalRefreshError(refreshError)) {
+                  error.isAuthTerminal = true;
+                } else {
+                  NotionAPI2._refreshCooldownUntil = Date.now() + 60 * 1e3;
+                }
                 throw error;
               }
             }
@@ -5108,6 +5294,41 @@ Content-Type: ${contentType}\r
         requiresConfirm: () => {
           return Storage2.get(CONFIG2.STORAGE_KEYS.REQUIRE_CONFIRM, CONFIG2.DEFAULTS.requireConfirm);
         },
+        // v3.14.6 (XN-06/S-05): guard.denied 统一构造器 —— 6 处手写形态归一(actor/source/status 不再漂移);
+        // phase: precheck(canExecute 非阻塞闸门) | execute(execute 内权限拒绝) | cancelled(确认取消);
+        // 语义: denied 顶 status="denied"(非 failed); 确认取消独立事件 guard.cancelled
+        auditDenied: (operation, context = {}, options = {}) => {
+          const { phase = "precheck", reason = "", force = false } = options;
+          const startedAt = Date.now();
+          const isCancelled = phase === "cancelled";
+          const actor = OperationGuard2._inferActor(context);
+          const source = OperationGuard2._inferSource(context);
+          const risk = OperationGuard2._getPermissionName(OperationGuard2.OPERATION_LEVELS[operation]) || "unknown";
+          return OperationLog2.add({
+            audit_event: isCancelled ? "guard.cancelled" : "guard.denied",
+            actor,
+            source,
+            guard: OperationGuard2._buildGuardSnapshot(operation, "deny", context),
+            operation: {
+              name: operation,
+              risk,
+              trigger: context.trigger || "user_requested_write"
+            },
+            target: OperationLog2.buildTarget(context),
+            payload: OperationLog2.buildPayload(context),
+            result: {
+              status: isCancelled ? "cancelled" : "denied",
+              reason: reason || (isCancelled ? "user_cancelled_confirmation" : "\u6743\u9650\u4E0D\u8DB3")
+            },
+            redaction: OperationLog2.collectRedactionHints(context),
+            operationName: operation,
+            context: { ...context, phase },
+            status: isCancelled ? "cancelled" : "denied",
+            error: reason || (isCancelled ? "\u64CD\u4F5C\u5DF2\u53D6\u6D88" : "\u6743\u9650\u4E0D\u8DB3"),
+            startTime: startedAt,
+            endTime: Date.now()
+          }, { force });
+        },
         // 操作所需的最低权限级别
         OPERATION_LEVELS: {
           // 只读操作
@@ -5172,71 +5393,22 @@ Content-Type: ${contentType}\r
           if (!OperationGuard2.canExecute(operation)) {
             const requiredName = CONFIG2.PERMISSION_NAMES[requiredLevelForOp];
             const denialReason = requiredLevelForOp === void 0 ? `\u672A\u5B9A\u4E49\u6743\u9650\u7EA7\u522B: ${operation}` : `\u6743\u9650\u4E0D\u8DB3\uFF1A\u9700\u8981"${requiredName}"\u53CA\u4EE5\u4E0A\u6743\u9650\u624D\u80FD\u6267\u884C\u6B64\u64CD\u4F5C\u3002\u53EF\u5728\u4E3B\u9762\u677F\u300C\u6743\u9650\u63A7\u5236\u300D\u4E2D\u8C03\u6574\u6743\u9650\u7EA7\u522B\u3002`;
-            OperationLog2.add({
-              audit_event: "guard.denied",
-              actor,
-              source,
-              guard: OperationGuard2._buildGuardSnapshot(operation, "deny", context, {
-                confirmation: "not_allowed"
-              }),
-              operation: {
-                name: operation,
-                risk: requiredLevelForOp === void 0 ? "unknown" : OperationGuard2._getPermissionName(requiredLevelForOp),
-                trigger: context.trigger || "user_requested_write"
-              },
-              target: OperationLog2.buildTarget(context),
-              payload: OperationLog2.buildPayload(context),
-              result: {
-                status: "denied",
-                reason: denialReason
-              },
-              redaction: OperationLog2.collectRedactionHints(context),
-              operationName: operation,
-              context,
-              status: "failed",
-              error: denialReason,
-              startTime: startedAt,
-              endTime: Date.now()
-            });
+            OperationGuard2.auditDenied(operation, context, { phase: "execute", reason: denialReason });
             throw new Error(denialReason);
           }
-          if (OperationGuard2.isDangerous(operation) && OperationGuard2.requiresConfirm()) {
+          if (OperationGuard2.isDangerous(operation) && OperationGuard2.requiresConfirm() || context.requireConfirm === true) {
             const isPermanent = false;
+            const dangerous = OperationGuard2.isDangerous(operation);
             const confirmed = await ConfirmationDialog3.show({
-              title: isPermanent ? "\u26A0\uFE0F \u6C38\u4E45\u5220\u9664\u786E\u8BA4" : "\u5371\u9669\u64CD\u4F5C\u786E\u8BA4",
-              message: isPermanent ? `\u60A8\u5373\u5C06\u6C38\u4E45\u5220\u9664\u5757\uFF0C\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\uFF01` : `\u60A8\u5373\u5C06\u6267\u884C\u5371\u9669\u64CD\u4F5C: ${operation}`,
+              title: isPermanent ? "\u26A0\uFE0F \u6C38\u4E45\u5220\u9664\u786E\u8BA4" : dangerous ? "\u5371\u9669\u64CD\u4F5C\u786E\u8BA4" : "\u64CD\u4F5C\u786E\u8BA4",
+              message: isPermanent ? `\u60A8\u5373\u5C06\u6C38\u4E45\u5220\u9664\u5757\uFF0C\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\uFF01` : dangerous ? `\u60A8\u5373\u5C06\u6267\u884C\u5371\u9669\u64CD\u4F5C: ${operation}` : `\u60A8\u5373\u5C06\u6267\u884C\u64CD\u4F5C: ${operation}`,
               itemName: context.itemName || "\u672A\u77E5\u9879\u76EE",
               countdown: isPermanent ? 8 : 5,
               // 永久删除需要更长倒计时
               requireNameInput: true
             });
             if (!confirmed) {
-              OperationLog2.add({
-                audit_event: "guard.denied",
-                actor,
-                source,
-                guard: OperationGuard2._buildGuardSnapshot(operation, "deny", context, {
-                  confirmation: "cancelled"
-                }),
-                operation: {
-                  name: operation,
-                  risk: OperationGuard2._getPermissionName(requiredLevelForOp),
-                  trigger: context.trigger || "user_requested_write"
-                },
-                target: OperationLog2.buildTarget(context),
-                payload: OperationLog2.buildPayload(context),
-                result: {
-                  status: "cancelled",
-                  reason: "user_cancelled_confirmation"
-                },
-                redaction: OperationLog2.collectRedactionHints(context),
-                operationName: operation,
-                context,
-                status: "failed",
-                error: "\u64CD\u4F5C\u5DF2\u53D6\u6D88",
-                startTime: startedAt,
-                endTime: Date.now()
-              });
+              OperationGuard2.auditDenied(operation, context, { phase: "cancelled", reason: "user_cancelled_confirmation" });
               throw new Error("\u64CD\u4F5C\u5DF2\u53D6\u6D88");
             }
           }
@@ -5522,8 +5694,28 @@ Content-Type: ${contentType}\r
             logs.length = CONFIG2.API.MAX_LOG_ENTRIES;
           }
           Storage2.set(CONFIG2.STORAGE_KEYS.OPERATION_LOG, JSON.stringify(logs));
-          emit("oplog:changed", JSON.parse(JSON.stringify(logs)));
+          emit("oplog:changed", OperationLog2.projectForBroadcast(logs));
           return logEntry;
+        },
+        // v3.14.6 (XN-07): 广播投影 —— 仅安全字段子集(id/timestamp/operationName/actor/source/status/
+        // audit_event/result:{status,reason 截断}); UI 渲染走 getAll 全量(已脱敏), 事件总线零敏感载荷
+        projectForBroadcast: (logs = []) => {
+          return logs.map((entry) => {
+            var _a, _b, _c, _d;
+            return {
+              id: entry.id,
+              timestamp: entry.timestamp || entry.at || entry.startTime,
+              operationName: entry.operationName || ((_a = entry.operation) == null ? void 0 : _a.name) || entry.audit_event,
+              actor: entry.actor,
+              source: entry.source,
+              status: ((_b = entry.result) == null ? void 0 : _b.status) || entry.status,
+              audit_event: entry.audit_event,
+              result: {
+                status: ((_c = entry.result) == null ? void 0 : _c.status) || entry.status,
+                reason: String(((_d = entry.result) == null ? void 0 : _d.reason) || "").slice(0, 120)
+              }
+            };
+          });
         },
         // 清空日志
         clear: () => {
@@ -6451,6 +6643,7 @@ Content-Type: ${contentType}\r
             case "date":
               return AISchema.ISO_DATE_RE.test(String(val).trim()) ? String(val).trim() : null;
             case "url":
+              return UrlValidator.validatePageExternalUrl(String(val).trim()) ? String(val).trim().slice(0, AISchema.MAX_RICH_TEXT) : null;
             case "email":
             case "phone_number":
               return String(val).trim().slice(0, AISchema.MAX_RICH_TEXT);
@@ -6595,6 +6788,7 @@ Content-Type: ${contentType}\r
     "src/ai/AgentTrace.js"(exports, module) {
       "use strict";
       var { CONFIG: CONFIG2 } = require_config();
+      var { CredentialVault: CredentialVault2 } = require_auth();
       var AgentTrace = {
         MAX_TRACES: 50,
         MAX_USER_INPUT: 500,
@@ -6679,8 +6873,17 @@ Content-Type: ${contentType}\r
          */
         persist(trace, status, finalResponse) {
           if (!trace) return null;
+          trace.userInput = CredentialVault2.redactText(trace.userInput || "");
+          trace.finalResponse = CredentialVault2.redactText(String(finalResponse || "").slice(0, this.MAX_FINAL_RESPONSE));
+          if (Array.isArray(trace.results)) {
+            for (const r of trace.results) {
+              if (r && typeof r.preview === "string") r.preview = CredentialVault2.redactText(r.preview);
+            }
+          }
+          if (Array.isArray(trace.errors)) {
+            trace.errors = trace.errors.map((e) => CredentialVault2.redactText(e));
+          }
           trace.status = status || "completed";
-          trace.finalResponse = String(finalResponse || "").slice(0, this.MAX_FINAL_RESPONSE);
           trace.latencyMs = trace._startedAt ? Date.now() - trace._startedAt : 0;
           delete trace._startedAt;
           const traces = this._load();
@@ -6713,6 +6916,7 @@ Content-Type: ${contentType}\r
     "src/ai/BlockConverter.js"(exports, module) {
       "use strict";
       var { Utils: Utils2 } = require_utils();
+      var { UrlValidator } = require_UrlValidator();
       var BlockConverter = {
         // markdown 文本 → Notion blocks 数组
         textToBlocks: (text) => {
@@ -6971,8 +7175,8 @@ Content-Type: ${contentType}\r
                 }
               };
             case "bookmark":
-              if (!Utils2.isHttpUrl(rawContent)) {
-                throw new Error("bookmark \u5757\u4EC5\u652F\u6301\u66F4\u65B0\u4E3A http/https URL\u3002");
+              if (!UrlValidator.validatePageExternalUrl(rawContent)) {
+                throw new Error("bookmark \u5757\u4EC5\u652F\u6301 http/https \u516C\u7F51 URL\u3002");
               }
               return {
                 bookmark: {
@@ -6982,8 +7186,8 @@ Content-Type: ${contentType}\r
                 }
               };
             case "embed":
-              if (!Utils2.isHttpUrl(rawContent)) {
-                throw new Error("embed \u5757\u4EC5\u652F\u6301\u66F4\u65B0\u4E3A http/https URL\u3002");
+              if (!UrlValidator.validatePageExternalUrl(rawContent)) {
+                throw new Error("embed \u5757\u4EC5\u652F\u6301 http/https \u516C\u7F51 URL\u3002");
               }
               return {
                 embed: {
@@ -9429,7 +9633,7 @@ ${AI()._resultToText(r.result)}
             state().updateLastMessage("\u6B63\u5728\u751F\u6210\u5185\u5BB9...", "processing");
             const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u751F\u6210\u52A9\u624B\u3002\u6839\u636E\u7528\u6237\u8981\u6C42\u751F\u6210\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u3002
 
-\u7528\u6237\u8981\u6C42\uFF1A${content_prompt}`;
+\u7528\u6237\u8981\u6C42\uFF1A${AI().isolateContent(content_prompt)}`;
             const aiResponse = await svc().requestChat(prompt2, settings, 2e3);
             state().updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
             try {
@@ -10406,10 +10610,10 @@ ${aiResponse}
 
 JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
 
-\u7F51\u9875 URL\uFF1A${bookmark.url}
-\u539F\u59CB\u6807\u9898\uFF1A${bookmark.title || ""}
-\u9875\u9762\u6807\u9898\uFF1A${insight.title || ""}
-\u9875\u9762\u6458\u8981\uFF1A${insight.summary || ""}`;
+\u7F51\u9875 URL\uFF1A${AIService2.isolateContent(bookmark.url)}
+\u539F\u59CB\u6807\u9898\uFF1A${AIService2.isolateContent(bookmark.title || "")}
+\u9875\u9762\u6807\u9898\uFF1A${AIService2.isolateContent(insight.title || "")}
+\u9875\u9762\u6458\u8981\uFF1A${AIService2.isolateContent(insight.summary || "")}`;
           try {
             const response = await AIService2.requestChat(prompt2, settings, 220);
             const parsed = AISchema.parseAIJson("bookmarkSummary", response);
@@ -10701,10 +10905,27 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 批量导出循环末尾单次回写已导出映射（PERF-003）：循环内仅 mutate 内存缓存，
         // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。语义与逐条 markExported 等价。
         // v3.14.3: 改容量上限淘汰（用户书签数天然有界），不再按 90 天时间 TTL 误删导出事实。
+        // v3.14.6 (CC-05): 写前 rebase(重读-并集-max ts) —— 跨 tab 他端新增键不可丢(导出账本不可再生)
         flushExported: () => {
           if (BookmarkExporter2._exportedCache) {
             BookmarkExporter2._evictByCapacity(BookmarkExporter2._exportedCache);
-            Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(BookmarkExporter2._exportedCache));
+            let remote = {};
+            try {
+              remote = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}")) || {};
+            } catch {
+              remote = {};
+            }
+            const merged = {};
+            for (const [key, ts] of Object.entries(remote)) {
+              const norm = Utils2.normalizeDedupUrl(key);
+              if (merged[norm] === void 0 || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
+            }
+            for (const [key, ts] of Object.entries(BookmarkExporter2._exportedCache)) {
+              const norm = Utils2.normalizeDedupUrl(key);
+              if (merged[norm] === void 0 || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
+            }
+            BookmarkExporter2._exportedCache = merged;
+            Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(merged));
           }
         },
         // F-05 修复：清除书签已导出记录（清键 + 失效内存缓存，供数据管理 UI 调用）
@@ -10733,7 +10954,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (!apiKey || !databaseId) {
             throw new Error("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93");
           }
-          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
+          if (onProgress) {
+            try {
+              onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
+            } catch (progressError) {
+              console.warn("[BookmarkExporter] onProgress \u56DE\u8C03\u5F02\u5E38:", progressError);
+            }
+          }
           const setupResult = await BookmarkExporter2.setupDatabaseProperties(databaseId, apiKey);
           if (!setupResult.success) {
             throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
@@ -10746,82 +10973,72 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
           let success = 0, failed = 0;
           const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-          for (let i = 0; i < newBookmarks.length; i++) {
-            const bm = newBookmarks[i];
-            const pct = Math.round(5 + i / newBookmarks.length * 90);
-            if (onProgress) onProgress(`\u6B63\u5728\u5BFC\u51FA (${i + 1}/${newBookmarks.length}): ${bm.title}`, pct);
-            try {
-              const enriched = await BookmarkExporter2.enrichBookmark(bm, settings, enrichContext);
-              const properties = BookmarkExporter2.buildProperties(enriched);
-              const { OperationGuard: OperationGuard2 } = require_security();
-              if (!OperationGuard2.canExecute("createDatabasePage")) {
+          try {
+            for (let i = 0; i < newBookmarks.length; i++) {
+              const bm = newBookmarks[i];
+              const pct = Math.round(5 + i / newBookmarks.length * 90);
+              try {
+                if (onProgress) onProgress(`\u6B63\u5728\u5BFC\u51FA (${i + 1}/${newBookmarks.length}): ${bm.title}`, pct);
+              } catch (progressError) {
+                console.warn("[BookmarkExporter] onProgress \u56DE\u8C03\u5F02\u5E38:", progressError);
+              }
+              try {
+                const enriched = await BookmarkExporter2.enrichBookmark(bm, settings, enrichContext);
+                const properties = BookmarkExporter2.buildProperties(enriched);
+                const { OperationGuard: OperationGuard2 } = require_security();
+                if (!OperationGuard2.canExecute("createDatabasePage")) {
+                  BookmarkExporter2._auditExport(
+                    "createDatabasePage",
+                    "denied",
+                    { bookmarkUrl: bm.url, itemName: bm.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
+                  );
+                  failed++;
+                  continue;
+                }
+                const page = await NotionAPI2.request("POST", "/pages", {
+                  parent: { database_id: databaseId },
+                  properties
+                }, apiKey);
+                BookmarkExporter2._exportedCache = BookmarkExporter2._exportedCache || {};
+                BookmarkExporter2._exportedCache[Utils2.normalizeDedupUrl(bm.url)] = Date.now();
                 BookmarkExporter2._auditExport(
                   "createDatabasePage",
-                  "denied",
-                  { bookmarkUrl: bm.url, itemName: bm.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
+                  "success",
+                  { pageId: String((page == null ? void 0 : page.id) || ""), bookmarkUrl: bm.url, itemName: bm.title, databaseId }
+                );
+                success++;
+              } catch (e) {
+                console.warn(`[BookmarkExporter] \u5BFC\u51FA\u5931\u8D25: ${bm.url}`, e);
+                BookmarkExporter2._auditExport(
+                  "createDatabasePage",
+                  "failed",
+                  { bookmarkUrl: bm.url, itemName: bm.title, reason: String((e == null ? void 0 : e.message) || e) }
                 );
                 failed++;
-                continue;
+                if (e && (e.isAuthTerminal || String((e == null ? void 0 : e.message) || "").includes("Notion OAuth \u7EED\u7B7E\u5931\u8D25"))) {
+                  BookmarkExporter2.flushExported();
+                  const remainingCount = newBookmarks.length - i - 1;
+                  return {
+                    total: bookmarks.length,
+                    exported: success,
+                    failed,
+                    skipped: remainingCount,
+                    aborted: true,
+                    message: `\u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF08\u6210\u529F ${success} \u4E2A\uFF0C\u5269\u4F59 ${remainingCount} \u4E2A\u672A\u5C1D\u8BD5\uFF09\u3002\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\u540E\u91CD\u8BD5\u3002`
+                  };
+                }
               }
-              const page = await NotionAPI2.request("POST", "/pages", {
-                parent: { database_id: databaseId },
-                properties
-              }, apiKey);
-              BookmarkExporter2._exportedCache = BookmarkExporter2._exportedCache || {};
-              BookmarkExporter2._exportedCache[Utils2.normalizeDedupUrl(bm.url)] = Date.now();
-              BookmarkExporter2._auditExport(
-                "createDatabasePage",
-                "success",
-                { pageId: String((page == null ? void 0 : page.id) || ""), bookmarkUrl: bm.url, itemName: bm.title, databaseId }
-              );
-              success++;
-            } catch (e) {
-              console.warn(`[BookmarkExporter] \u5BFC\u51FA\u5931\u8D25: ${bm.url}`, e);
-              BookmarkExporter2._auditExport(
-                "createDatabasePage",
-                "failed",
-                { bookmarkUrl: bm.url, itemName: bm.title, reason: String((e == null ? void 0 : e.message) || e) }
-              );
-              failed++;
-              if (e && (e.isAuthTerminal || String((e == null ? void 0 : e.message) || "").includes("Notion OAuth \u7EED\u7B7E\u5931\u8D25"))) {
-                BookmarkExporter2.flushExported();
-                const remainingCount = newBookmarks.length - i - 1;
-                return {
-                  total: bookmarks.length,
-                  exported: success,
-                  failed,
-                  skipped: remainingCount,
-                  aborted: true,
-                  message: `\u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF08\u6210\u529F ${success} \u4E2A\uFF0C\u5269\u4F59 ${remainingCount} \u4E2A\u672A\u5C1D\u8BD5\uFF09\u3002\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\u540E\u91CD\u8BD5\u3002`
-                };
+              if (i < newBookmarks.length - 1) {
+                await Utils2.sleep(delay);
               }
             }
-            if (i < newBookmarks.length - 1) {
-              await Utils2.sleep(delay);
-            }
+          } finally {
+            BookmarkExporter2.flushExported();
           }
-          BookmarkExporter2.flushExported();
           return { total: bookmarks.length, exported: success, failed, newCount: newBookmarks.length };
         }
       };
       module.exports = { BookmarkExporter: BookmarkExporter2 };
-    }
-  });
-
-  // src/sync-lock.js
-  var require_sync_lock = __commonJS({
-    "src/sync-lock.js"(exports, module) {
-      "use strict";
-      var SyncLock = {
-        _exporting: false,
-        get isExporting() {
-          return this._exporting;
-        },
-        set isExporting(val) {
-          this._exporting = Boolean(val);
-        }
-      };
-      module.exports = { SyncLock };
     }
   });
 
@@ -11149,7 +11366,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         normalize(raw) {
           return {
             source: "rss",
-            id: raw.guid || raw.link || "",
+            // v3.14.6 (DC-007): 实际拉取路径产物带 id/url → 键派生单源化,
+            // 与落账键 `rss:${item.id}` 对齐(此前恒 'rss:' 致适配器级去重失效)
+            id: raw.id || raw.guid || raw.link || "",
             title: raw.title || "",
             content: raw.content || raw.summary || "",
             url: raw.link || "",
@@ -11467,6 +11686,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // sourceType → retryTimeoutId
         _retryCounts: /* @__PURE__ */ new Map(),
         // sourceType → retry count
+        _epochs: /* @__PURE__ */ new Map(),
+        // sourceType → epoch (v3.14.6 CC-07: 取消在途)
         /**
          * 获取源的同步间隔 (分钟)
          * @param {string} sourceType
@@ -11495,6 +11716,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
          */
         start(sourceType, intervalMinutes) {
           this.stop(sourceType);
+          this._epochs.set(sourceType, (this._epochs.get(sourceType) || 0) + 1);
           const intervalMin = Number.isFinite(intervalMinutes) && intervalMinutes > 0 ? intervalMinutes : this.getIntervalMinutes(sourceType);
           if (intervalMin <= 0) return;
           const intervalMs = intervalMin * 60 * 1e3;
@@ -11513,6 +11735,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
          * @param {string} sourceType
          */
         stop(sourceType) {
+          this._epochs.set(sourceType, (this._epochs.get(sourceType) || 0) + 1);
           const timerId = this._timers.get(sourceType);
           if (timerId != null) {
             globalThis.clearInterval(timerId);
@@ -11559,14 +11782,17 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
          * @param {string} sourceType
          */
         async _doSync(sourceType) {
+          const epoch = this._epochs.get(sourceType) || 0;
           try {
             const runner = SOURCE_RUNNERS[sourceType];
             if (typeof runner === "function") {
               await runner();
+              if (epoch !== (this._epochs.get(sourceType) || 0)) return;
               this._retryCounts.set(sourceType, 0);
               return;
             }
             const result = await SyncCoordinator.sync(sourceType);
+            if (epoch !== (this._epochs.get(sourceType) || 0)) return;
             if (result.error) {
               this._scheduleRetry(sourceType);
             } else {
@@ -11574,6 +11800,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
           } catch (error) {
             console.warn("[LD-Notion] sync unexpected error:", sourceType, error);
+            if (epoch !== (this._epochs.get(sourceType) || 0)) return;
             this._scheduleRetry(sourceType);
           }
         },
@@ -11866,6 +12093,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         if (now - BookmarkAutoImporter2.lastRunAt < BookmarkAutoImporter2.minimumRunGapMs) return;
         BookmarkAutoImporter2.lastRunAt = now;
         BookmarkAutoImporter2.isRunning = true;
+        const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        if (!lease) {
+          BookmarkAutoImporter2.isRunning = false;
+          BookmarkAutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\u6D4F\u89C8\u5668\u4E66\u7B7E\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
+          return;
+        }
+        SyncLock.isExporting = true;
+        const renewTimer = setInterval(() => {
+          SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+        }, 3e4);
         const attemptAt = Date.now();
         try {
           SyncState2.updateBookmarkState({
@@ -11875,10 +12112,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             lastStats: {}
           });
           BookmarkAutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u540C\u6B65\u6D4F\u89C8\u5668\u4E66\u7B7E...");
-          const syncResult = await SyncCoordinator.sync("bookmark", { commitWatermark: false });
-          if (syncResult.error) {
-            throw new Error(syncResult.error);
-          }
           const setupResult = await BookmarkExporter2.setupDatabaseProperties(settings.databaseId, settings.apiKey);
           if (!setupResult.success) {
             throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
@@ -11889,6 +12122,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const currentMap = new Map(currentBookmarks.map((bookmark) => [String(bookmark.id), bookmark]));
           const trackedPages = await BookmarkAutoImporter2.fetchTrackedPages(settings.databaseId, settings.apiKey);
           const pageIndex = BookmarkAutoImporter2.buildPageIndex(trackedPages);
+          const pendingUrlClaim = /* @__PURE__ */ new Map();
           const nextSnapshot = {};
           const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
           const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
@@ -11898,210 +12132,235 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           let unchanged = 0;
           let failed = 0;
           const CONCURRENCY = 3;
-          const successfulIds = /* @__PURE__ */ new Set();
-          const processInBatches = async (items, processor) => {
-            for (let i = 0; i < items.length; i += CONCURRENCY) {
-              const batch = items.slice(i, i + CONCURRENCY);
-              const results = await Promise.allSettled(batch.map((item) => processor(item, i + batch.indexOf(item))));
-              for (const result of results) {
-                if (result.status === "rejected") {
-                  console.error("[LD-Notion] \u6279\u91CF\u5904\u7406\u5931\u8D25:", result.reason);
+          const { DedupStore } = require_storage();
+          DedupStore.beginBatch("bookmark");
+          try {
+            const successfulIds = /* @__PURE__ */ new Set();
+            const processInBatches = async (items, processor) => {
+              for (let i = 0; i < items.length; i += CONCURRENCY) {
+                const batch = items.slice(i, i + CONCURRENCY);
+                const results = await Promise.allSettled(batch.map((item) => processor(item, i + batch.indexOf(item))));
+                for (const result of results) {
+                  if (result.status === "rejected") {
+                    console.error("[LD-Notion] \u6279\u91CF\u5904\u7406\u5931\u8D25:", result.reason);
+                  }
                 }
               }
-            }
-          };
-          const processBookmark = async (bookmark, itemIndex) => {
-            const bookmarkId = String(bookmark.id);
-            const snapshotEntry = previousSnapshot[bookmarkId] || null;
-            let pageMeta = pageIndex.byBookmarkId.get(bookmarkId) || pageIndex.byUrl.get(bookmark.url) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? pageIndex.byPageId.get(snapshotEntry.pageId) : null);
-            try {
-              if (pageMeta == null ? void 0 : pageMeta.archived) {
-                unchanged++;
-                successfulIds.add(bookmarkId);
-                nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageMeta.pageId);
-                return;
-              }
-              if (!pageMeta) {
-                const rivalByUrl = bookmark.url ? pageIndex.byUrl.get(bookmark.url) : null;
-                if (rivalByUrl && rivalByUrl.bookmarkId !== bookmarkId && rivalByUrl.pageId) {
+            };
+            const processBookmark = async (bookmark, itemIndex) => {
+              const bookmarkId = String(bookmark.id);
+              const snapshotEntry = previousSnapshot[bookmarkId] || null;
+              let pageMeta = pageIndex.byBookmarkId.get(bookmarkId) || pageIndex.byUrl.get(bookmark.url) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? pageIndex.byPageId.get(snapshotEntry.pageId) : null);
+              let claimResolve = null;
+              try {
+                if (pageMeta == null ? void 0 : pageMeta.archived) {
                   unchanged++;
                   successfulIds.add(bookmarkId);
-                  nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, rivalByUrl.pageId);
+                  nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageMeta.pageId);
                   return;
                 }
-                BookmarkAutoImporter2.updateStatus(`\u{1F4C4} \u6B63\u5728\u65B0\u589E\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
-                const { OperationGuard: OperationGuard2 } = require_security();
-                if (!OperationGuard2.canExecute("createDatabasePage")) {
+                if (!pageMeta) {
+                  const claim = bookmark.url ? pendingUrlClaim.get(bookmark.url) : null;
+                  if (claim && claim.bookmarkId !== bookmarkId) {
+                    const claimedPageId = await claim.promise;
+                    if (claimedPageId) {
+                      unchanged++;
+                      successfulIds.add(bookmarkId);
+                      nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, claimedPageId);
+                      return;
+                    }
+                  }
+                  const rivalByUrl = bookmark.url ? pageIndex.byUrl.get(bookmark.url) : null;
+                  if (rivalByUrl && rivalByUrl.bookmarkId !== bookmarkId && rivalByUrl.pageId) {
+                    unchanged++;
+                    successfulIds.add(bookmarkId);
+                    nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, rivalByUrl.pageId);
+                    return;
+                  }
+                  if (bookmark.url) {
+                    const claimPromise = new Promise((resolve) => {
+                      claimResolve = resolve;
+                    });
+                    pendingUrlClaim.set(bookmark.url, { bookmarkId, promise: claimPromise });
+                  }
+                  BookmarkAutoImporter2.updateStatus(`\u{1F4C4} \u6B63\u5728\u65B0\u589E\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                  const { OperationGuard: OperationGuard2 } = require_security();
+                  if (!OperationGuard2.canExecute("createDatabasePage")) {
+                    BookmarkAutoImporter2._auditAutoSync(
+                      "createDatabasePage",
+                      "denied",
+                      { bookmarkId, itemName: bookmark.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
+                    );
+                    failed++;
+                    if (snapshotEntry) nextSnapshot[bookmarkId] = snapshotEntry;
+                    return;
+                  }
+                  const enriched = await BookmarkExporter2.enrichBookmark(bookmark, settings, enrichContext);
+                  const page = await NotionAPI2.request("POST", "/pages", {
+                    parent: { database_id: settings.databaseId },
+                    properties: BookmarkExporter2.buildProperties(enriched)
+                  }, settings.apiKey);
+                  pageMeta = {
+                    pageId: String((page == null ? void 0 : page.id) || "").trim(),
+                    bookmarkId,
+                    url: bookmark.url,
+                    title: bookmark.title,
+                    folderPath: bookmark.folderPath,
+                    dateAdded: SyncState2.normalizeTime(bookmark.dateAdded)
+                  };
+                  if (claimResolve) claimResolve(pageMeta.pageId);
                   BookmarkAutoImporter2._auditAutoSync(
                     "createDatabasePage",
-                    "denied",
-                    { bookmarkId, itemName: bookmark.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
+                    "success",
+                    { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, databaseId: settings.databaseId }
                   );
-                  failed++;
-                  if (snapshotEntry) nextSnapshot[bookmarkId] = snapshotEntry;
-                  return;
+                  BookmarkExporter2.markExported(bookmark.url);
+                  SyncCoordinator.markItemSeen("bookmark", `bookmark:${bookmarkId}`);
+                  created++;
+                  successfulIds.add(bookmarkId);
+                } else if (BookmarkAutoImporter2.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
+                  BookmarkAutoImporter2.updateStatus(`\u{1F4E7} \u6B63\u5728\u66F4\u65B0\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                  const { OperationGuard: OperationGuard2 } = require_security();
+                  if (!OperationGuard2.canExecute("updatePage")) {
+                    BookmarkAutoImporter2._auditAutoSync(
+                      "updatePage",
+                      "denied",
+                      { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u540C\u6B65\u66F4\u65B0\u9700 level\u22651" }
+                    );
+                    failed++;
+                    nextSnapshot[bookmarkId] = snapshotEntry || BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageMeta.pageId);
+                    return;
+                  }
+                  const properties = BookmarkAutoImporter2.needsFullRefresh(bookmark, snapshotEntry, pageMeta) ? BookmarkExporter2.buildProperties(await BookmarkExporter2.enrichBookmark(bookmark, settings, enrichContext)) : BookmarkAutoImporter2.buildMinimalProperties(bookmark);
+                  await NotionAPI2.updatePage(pageMeta.pageId, properties, settings.apiKey);
+                  BookmarkAutoImporter2._auditAutoSync(
+                    "updatePage",
+                    "success",
+                    { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title }
+                  );
+                  updated++;
+                  successfulIds.add(bookmarkId);
+                } else {
+                  unchanged++;
+                  successfulIds.add(bookmarkId);
                 }
-                const enriched = await BookmarkExporter2.enrichBookmark(bookmark, settings, enrichContext);
-                const page = await NotionAPI2.request("POST", "/pages", {
-                  parent: { database_id: settings.databaseId },
-                  properties: BookmarkExporter2.buildProperties(enriched)
-                }, settings.apiKey);
-                pageMeta = {
-                  pageId: String((page == null ? void 0 : page.id) || "").trim(),
+                const pageId = (pageMeta == null ? void 0 : pageMeta.pageId) || (snapshotEntry == null ? void 0 : snapshotEntry.pageId) || "";
+                const syncedMeta = {
+                  pageId,
                   bookmarkId,
                   url: bookmark.url,
                   title: bookmark.title,
                   folderPath: bookmark.folderPath,
                   dateAdded: SyncState2.normalizeTime(bookmark.dateAdded)
                 };
+                if (pageId) pageIndex.byPageId.set(pageId, syncedMeta);
+                pageIndex.byBookmarkId.set(bookmarkId, syncedMeta);
+                if (syncedMeta.url) pageIndex.byUrl.set(syncedMeta.url, syncedMeta);
+                nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageId);
+              } catch (error) {
+                if (claimResolve) claimResolve(null);
+                console.error(`[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5931\u8D25: ${bookmark.title || bookmark.url}`, error);
                 BookmarkAutoImporter2._auditAutoSync(
                   "createDatabasePage",
-                  "success",
-                  { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, databaseId: settings.databaseId }
+                  "failed",
+                  { bookmarkId, itemName: bookmark.title || bookmark.url, reason: String((error == null ? void 0 : error.message) || error) }
                 );
-                BookmarkExporter2.markExported(bookmark.url);
-                SyncCoordinator.markItemSeen("bookmark", `bookmark:${bookmarkId}`);
-                created++;
-                successfulIds.add(bookmarkId);
-              } else if (BookmarkAutoImporter2.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
-                BookmarkAutoImporter2.updateStatus(`\u{1F4E7} \u6B63\u5728\u66F4\u65B0\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
-                const { OperationGuard: OperationGuard2 } = require_security();
-                if (!OperationGuard2.canExecute("updatePage")) {
-                  BookmarkAutoImporter2._auditAutoSync(
-                    "updatePage",
-                    "denied",
-                    { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u540C\u6B65\u66F4\u65B0\u9700 level\u22651" }
-                  );
-                  failed++;
-                  nextSnapshot[bookmarkId] = snapshotEntry || BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageMeta.pageId);
-                  return;
-                }
-                const properties = BookmarkAutoImporter2.needsFullRefresh(bookmark, snapshotEntry, pageMeta) ? BookmarkExporter2.buildProperties(await BookmarkExporter2.enrichBookmark(bookmark, settings, enrichContext)) : BookmarkAutoImporter2.buildMinimalProperties(bookmark);
-                await NotionAPI2.updatePage(pageMeta.pageId, properties, settings.apiKey);
-                BookmarkAutoImporter2._auditAutoSync(
-                  "updatePage",
-                  "success",
-                  { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title }
-                );
-                updated++;
-                successfulIds.add(bookmarkId);
-              } else {
-                unchanged++;
-                successfulIds.add(bookmarkId);
-              }
-              const pageId = (pageMeta == null ? void 0 : pageMeta.pageId) || (snapshotEntry == null ? void 0 : snapshotEntry.pageId) || "";
-              const syncedMeta = {
-                pageId,
-                bookmarkId,
-                url: bookmark.url,
-                title: bookmark.title,
-                folderPath: bookmark.folderPath,
-                dateAdded: SyncState2.normalizeTime(bookmark.dateAdded)
-              };
-              if (pageId) pageIndex.byPageId.set(pageId, syncedMeta);
-              pageIndex.byBookmarkId.set(bookmarkId, syncedMeta);
-              if (syncedMeta.url) pageIndex.byUrl.set(syncedMeta.url, syncedMeta);
-              nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageId);
-            } catch (error) {
-              console.error(`[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5931\u8D25: ${bookmark.title || bookmark.url}`, error);
-              BookmarkAutoImporter2._auditAutoSync(
-                "createDatabasePage",
-                "failed",
-                { bookmarkId, itemName: bookmark.title || bookmark.url, reason: String((error == null ? void 0 : error.message) || error) }
-              );
-              failed++;
-              if (snapshotEntry) {
-                nextSnapshot[bookmarkId] = snapshotEntry;
-              }
-            }
-            if (delay > 0 && itemIndex < currentBookmarks.length - 1) {
-              await Utils2.sleep(delay);
-            }
-          };
-          await processInBatches(currentBookmarks, processBookmark);
-          BookmarkExporter2.flushExported();
-          const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
-          const processDeleted = async (bookmarkId, itemIndex) => {
-            const snapshotEntry = previousSnapshot[bookmarkId];
-            const pageMeta = ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? pageIndex.byPageId.get(snapshotEntry.pageId) : null) || pageIndex.byBookmarkId.get(bookmarkId) || ((snapshotEntry == null ? void 0 : snapshotEntry.url) ? pageIndex.byUrl.get(snapshotEntry.url) : null);
-            if (!(pageMeta == null ? void 0 : pageMeta.pageId)) {
-              archived++;
-              return;
-            }
-            try {
-              const itemLabel = (snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId;
-              BookmarkAutoImporter2.updateStatus(`\u{1F5C3}\uFE0F \u6B63\u5728\u5F52\u6863\u5DF2\u5220\u9664\u4E66\u7B7E (${itemIndex + 1}/${deletedIds.length}): ${itemLabel}`);
-              const { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
-              if (!OperationGuard2.canExecute("deletePage")) {
-                OperationLog2.add({
-                  audit_event: "guard.denied",
-                  actor: "system",
-                  source: "bookmark-auto-sync",
-                  guard: { operation: "deletePage", decision: "deny", reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u5F52\u6863\u9700 level\u22652" },
-                  operationName: "deletePage",
-                  status: "denied",
-                  context: { pageId: pageMeta.pageId, bookmarkId, itemName: itemLabel }
-                });
                 failed++;
-                nextSnapshot[bookmarkId] = snapshotEntry;
+                if (snapshotEntry) {
+                  nextSnapshot[bookmarkId] = snapshotEntry;
+                }
+              }
+              if (delay > 0 && itemIndex < currentBookmarks.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            };
+            await processInBatches(currentBookmarks, processBookmark);
+            pendingUrlClaim.clear();
+            BookmarkExporter2.flushExported();
+            const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
+            const processDeleted = async (bookmarkId, itemIndex) => {
+              const snapshotEntry = previousSnapshot[bookmarkId];
+              const pageMeta = ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? pageIndex.byPageId.get(snapshotEntry.pageId) : null) || pageIndex.byBookmarkId.get(bookmarkId) || ((snapshotEntry == null ? void 0 : snapshotEntry.url) ? pageIndex.byUrl.get(snapshotEntry.url) : null);
+              if (!(pageMeta == null ? void 0 : pageMeta.pageId)) {
+                archived++;
                 return;
               }
-              await NotionAPI2.deletePage(pageMeta.pageId, settings.apiKey);
-              BookmarkAutoImporter2._auditAutoSync(
-                "deletePage",
-                "success",
-                { pageId: pageMeta.pageId, bookmarkId, itemName: (snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId }
-              );
-              archived++;
-            } catch (error) {
-              console.error(`[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u5F52\u6863\u5931\u8D25: ${(snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId}`, error);
-              BookmarkAutoImporter2._auditAutoSync(
-                "deletePage",
-                "failed",
-                { pageId: pageMeta == null ? void 0 : pageMeta.pageId, bookmarkId, itemName: (snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId, reason: String((error == null ? void 0 : error.message) || error) }
-              );
-              failed++;
-              nextSnapshot[bookmarkId] = snapshotEntry;
-            }
-            if (delay > 0 && itemIndex < deletedIds.length - 1) {
-              await Utils2.sleep(delay);
-            }
-          };
-          await processInBatches(deletedIds, (id, idx) => processDeleted(id, idx));
-          SyncState2.updateBookmarkState({
-            snapshot: nextSnapshot,
-            // F7 共识: watermark 仅由成功项推进(created/updated/unchanged),
-            // 失败项保留在增量窗口内下轮重试。
-            watermark: SyncState2.buildWatermark(
-              currentBookmarks.filter((b) => successfulIds.has(String(b.id))),
-              (bookmark) => bookmark.dateAdded,
-              (bookmark) => bookmark.id
-            ),
-            lastAttemptAt: attemptAt,
-            lastSuccessAt: created + updated + archived > 0 ? Date.now() : failed === 0 ? Date.now() : previousState.lastSuccessAt || 0,
-            lastOutcome: failed > 0 ? "partial" : "success",
-            lastError: "",
-            lastStats: {
-              created,
-              updated,
-              archived,
-              unchanged,
-              failed
-            }
-          });
-          if (created === 0 && updated === 0 && archived === 0 && failed === 0) {
-            BookmarkAutoImporter2.updateStatus(`\u2705 \u6D4F\u89C8\u5668\u4E66\u7B7E\u5DF2\u540C\u6B65\uFF0C\u65E0\u65B0\u589E\u53D8\u66F4 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
-            return;
-          }
-          BookmarkAutoImporter2.updateStatus(
-            `\u2705 \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5B8C\u6210: \u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u5F52\u6863 ${archived}\uFF0C\u65E0\u53D8\u66F4 ${unchanged}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
-          );
-          if (created + updated + archived > 0 && typeof GM_notification === "function") {
-            GM_notification({
-              title: "\u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5B8C\u6210",
-              text: `\u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u5F52\u6863 ${archived}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""}`,
-              timeout: 5e3
+              try {
+                const itemLabel = (snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId;
+                BookmarkAutoImporter2.updateStatus(`\u{1F5C3}\uFE0F \u6B63\u5728\u5F52\u6863\u5DF2\u5220\u9664\u4E66\u7B7E (${itemIndex + 1}/${deletedIds.length}): ${itemLabel}`);
+                const { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
+                if (!OperationGuard2.canExecute("deletePage")) {
+                  OperationGuard2.auditDenied("deletePage", {
+                    pageId: pageMeta.pageId,
+                    bookmarkId,
+                    itemName: itemLabel,
+                    actor: "system",
+                    source: "bookmark-auto-sync",
+                    trigger: "auto_sync_archive"
+                  }, { phase: "precheck", reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u5F52\u6863\u9700 level\u22652" });
+                  failed++;
+                  nextSnapshot[bookmarkId] = snapshotEntry;
+                  return;
+                }
+                await NotionAPI2.deletePage(pageMeta.pageId, settings.apiKey);
+                BookmarkAutoImporter2._auditAutoSync(
+                  "deletePage",
+                  "success",
+                  { pageId: pageMeta.pageId, bookmarkId, itemName: (snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId }
+                );
+                archived++;
+              } catch (error) {
+                console.error(`[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u5F52\u6863\u5931\u8D25: ${(snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId}`, error);
+                BookmarkAutoImporter2._auditAutoSync(
+                  "deletePage",
+                  "failed",
+                  { pageId: pageMeta == null ? void 0 : pageMeta.pageId, bookmarkId, itemName: (snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId, reason: String((error == null ? void 0 : error.message) || error) }
+                );
+                failed++;
+                nextSnapshot[bookmarkId] = snapshotEntry;
+              }
+              if (delay > 0 && itemIndex < deletedIds.length - 1) {
+                await Utils2.sleep(delay);
+              }
+            };
+            await processInBatches(deletedIds, (id, idx) => processDeleted(id, idx));
+            SyncState2.updateBookmarkState({
+              snapshot: nextSnapshot,
+              // F7 共识: watermark 仅由成功项推进(created/updated/unchanged),
+              // 失败项保留在增量窗口内下轮重试。
+              watermark: SyncState2.buildWatermark(
+                currentBookmarks.filter((b) => successfulIds.has(String(b.id))),
+                (bookmark) => bookmark.dateAdded,
+                (bookmark) => bookmark.id
+              ),
+              lastAttemptAt: attemptAt,
+              lastSuccessAt: created + updated + archived > 0 ? Date.now() : failed === 0 ? Date.now() : previousState.lastSuccessAt || 0,
+              lastOutcome: failed > 0 ? "partial" : "success",
+              lastError: "",
+              lastStats: {
+                created,
+                updated,
+                archived,
+                unchanged,
+                failed
+              }
             });
+            if (created === 0 && updated === 0 && archived === 0 && failed === 0) {
+              BookmarkAutoImporter2.updateStatus(`\u2705 \u6D4F\u89C8\u5668\u4E66\u7B7E\u5DF2\u540C\u6B65\uFF0C\u65E0\u65B0\u589E\u53D8\u66F4 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
+              return;
+            }
+            BookmarkAutoImporter2.updateStatus(
+              `\u2705 \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5B8C\u6210: \u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u5F52\u6863 ${archived}\uFF0C\u65E0\u53D8\u66F4 ${unchanged}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
+            );
+            if (created + updated + archived > 0 && typeof GM_notification === "function") {
+              GM_notification({
+                title: "\u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5B8C\u6210",
+                text: `\u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u5F52\u6863 ${archived}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""}`,
+                timeout: 5e3
+              });
+            }
+          } finally {
+            DedupStore.endBatch("bookmark");
           }
         } catch (error) {
           console.error("[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u51FA\u9519:", error);
@@ -12113,6 +12372,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           });
           BookmarkAutoImporter2.updateStatus(`\u274C \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u51FA\u9519: ${error.message}`);
         } finally {
+          clearInterval(renewTimer);
+          SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          SyncLock.isExporting = false;
           BookmarkAutoImporter2.isRunning = false;
           emit("sync:center-summary-updated");
         }
@@ -12432,6 +12694,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             console.warn("[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u5BA1\u8BA1\u5199\u5165\u5931\u8D25:", e);
           }
         },
+        // v3.14.6 (XN-03): 链接属性安全校验 —— 仅 http(s) 公网(拒内网/169.254/非 http 协议)
+        _safeUrl: (url) => {
+          if (!url) return "";
+          const { UrlValidator } = require_UrlValidator();
+          return UrlValidator.validatePageExternalUrl(String(url).trim()) ? String(url).trim().slice(0, 2e3) : "";
+        },
         buildProperties: (item) => {
           const normalized = RSSAutoImporter2.normalizeItem(item);
           const inferredCategory = BookmarkExporter2.normalizeText((item == null ? void 0 : item.inferredCategory) || "", 300);
@@ -12439,12 +12707,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             ...normalized.feedTitle ? [normalized.feedTitle] : [],
             ...Array.isArray(normalized.tags) ? normalized.tags : []
           ]));
+          const safeUrl = RSSAutoImporter2._safeUrl(normalized.url);
           const properties = {
             "\u6807\u9898": {
               title: [{ text: { content: normalized.title } }]
-            },
-            "\u94FE\u63A5": {
-              url: normalized.url
             },
             "\u6765\u6E90": {
               rich_text: [{ text: { content: "RSS" } }]
@@ -12453,6 +12719,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               rich_text: [{ text: { content: "Feed" } }]
             }
           };
+          if (safeUrl) {
+            properties["\u94FE\u63A5"] = { url: safeUrl };
+          }
           if (normalized.summary) {
             properties["\u63CF\u8FF0"] = {
               rich_text: [{ text: { content: normalized.summary } }]
@@ -12710,6 +12979,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         _aggregateRssState: (ctx, stats, successfulKeys, attemptAt) => {
           const { currentItems, feedCount, nextSnapshot } = ctx;
           const { created, updated, unchanged, failed } = stats;
+          const keptKeys = new Set(currentItems.map((item) => item.itemKey));
+          for (const key of Object.keys(nextSnapshot)) {
+            if (!keptKeys.has(key)) delete nextSnapshot[key];
+          }
           const statePatch = {
             snapshot: nextSnapshot,
             lastAttemptAt: attemptAt,
@@ -12776,31 +13049,38 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (now - RSSAutoImporter2.lastRunAt < RSSAutoImporter2.minimumRunGapMs) return;
           RSSAutoImporter2.lastRunAt = now;
           RSSAutoImporter2.isRunning = true;
+          SyncLock.isExporting = true;
           const attemptAt = Date.now();
           try {
             const ctx = await RSSAutoImporter2._initSyncContext(settings, attemptAt);
             const stats = { created: 0, updated: 0, unchanged: 0, failed: 0 };
             const successfulKeys = /* @__PURE__ */ new Set();
-            for (let i = 0; i < ctx.currentItems.length; i++) {
-              const r = await RSSAutoImporter2._syncSingleRssItem(ctx.currentItems[i], {
-                settings,
-                index: ctx.index,
-                previousSnapshot: ctx.previousSnapshot,
-                nextSnapshot: ctx.nextSnapshot,
-                enrichContext: ctx.enrichContext,
-                position: i + 1,
-                total: ctx.currentItems.length
-              });
-              stats.created += r.created;
-              stats.updated += r.updated;
-              stats.unchanged += r.unchanged;
-              stats.failed += r.failed;
-              if (r.success) successfulKeys.add(r.itemKey);
-              if (ctx.delay > 0 && i < ctx.currentItems.length - 1) {
-                await Utils2.sleep(ctx.delay);
+            const { DedupStore } = require_storage();
+            DedupStore.beginBatch("rss");
+            try {
+              for (let i = 0; i < ctx.currentItems.length; i++) {
+                const r = await RSSAutoImporter2._syncSingleRssItem(ctx.currentItems[i], {
+                  settings,
+                  index: ctx.index,
+                  previousSnapshot: ctx.previousSnapshot,
+                  nextSnapshot: ctx.nextSnapshot,
+                  enrichContext: ctx.enrichContext,
+                  position: i + 1,
+                  total: ctx.currentItems.length
+                });
+                stats.created += r.created;
+                stats.updated += r.updated;
+                stats.unchanged += r.unchanged;
+                stats.failed += r.failed;
+                if (r.success) successfulKeys.add(r.itemKey);
+                if (ctx.delay > 0 && i < ctx.currentItems.length - 1) {
+                  await Utils2.sleep(ctx.delay);
+                }
               }
+              RSSAutoImporter2._aggregateRssState(ctx, stats, successfulKeys, attemptAt);
+            } finally {
+              DedupStore.endBatch("rss");
             }
-            RSSAutoImporter2._aggregateRssState(ctx, stats, successfulKeys, attemptAt);
           } catch (error) {
             console.error("[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519:", error);
             SyncState2.updateRssState({
@@ -12812,6 +13092,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             RSSAutoImporter2.updateStatus(`RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519: ${error.message}`);
           } finally {
             RSSAutoImporter2.isRunning = false;
+            SyncLock.isExporting = false;
             emit("sync:center-summary-updated");
           }
         },
@@ -13580,6 +13861,17 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           };
         }),
         exportBookmarks: async (bookmarks, settings, onProgress, startIndex = 0) => {
+          if (SyncLock.isExporting) {
+            return {
+              success: [],
+              failed: [],
+              skipped: bookmarks.slice(startIndex).map((b) => ({
+                topicId: b.topic_id || b.bookmarkable_id,
+                title: b.title || b.name || `\u5E16\u5B50 ${b.topic_id || b.bookmarkable_id}`
+              })),
+              message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
+            };
+          }
           const results = { success: [], failed: [], skipped: [] };
           Exporter2.reset();
           SyncLock.isExporting = true;
@@ -13602,22 +13894,30 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
               const title = bookmark.title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
               const taskNum = i - startIndex + 1;
-              onProgress == null ? void 0 : onProgress({
-                current: taskNum,
-                total: bookmarks.length,
-                title,
-                stage: "start",
-                isPaused: Exporter2.isPaused
-              });
+              try {
+                onProgress == null ? void 0 : onProgress({
+                  current: taskNum,
+                  total: bookmarks.length,
+                  title,
+                  stage: "start",
+                  isPaused: Exporter2.isPaused
+                });
+              } catch (progressError) {
+                console.warn("[LD-Notion] onProgress \u56DE\u8C03\u5F02\u5E38:", progressError);
+              }
               try {
                 await Exporter2.exportTopic(bookmark, settings, (detail) => {
-                  onProgress == null ? void 0 : onProgress({
-                    current: taskNum,
-                    total: bookmarks.length,
-                    title,
-                    isPaused: Exporter2.isPaused,
-                    ...detail
-                  });
+                  try {
+                    onProgress == null ? void 0 : onProgress({
+                      current: taskNum,
+                      total: bookmarks.length,
+                      title,
+                      isPaused: Exporter2.isPaused,
+                      ...detail
+                    });
+                  } catch (progressError) {
+                    console.warn("[LD-Notion] onProgress \u56DE\u8C03\u5F02\u5E38:", progressError);
+                  }
                 });
                 results.success.push({ topicId, title, url: `https://linux.do/t/${topicId}` });
               } catch (error) {
@@ -13651,13 +13951,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             SyncLock.isExporting = false;
           }
           if (Exporter2.isCancelled && remaining.length > 0) {
-            for (const i of remaining) {
-              const b = bookmarks[i];
-              results.skipped.push({
-                topicId: b.topic_id || b.bookmarkable_id,
-                title: b.title || b.name || `\u5E16\u5B50 ${b.topic_id || b.bookmarkable_id}`
-              });
-            }
+            results.skipped.push(...Exporter2._collectSkippedFrom(bookmarks, remaining));
           }
           return results;
         }
@@ -14004,10 +14298,22 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 批量导出循环末尾单次回写已导出映射（DISCOVER P3 同类修复）：循环内仅 mutate 内存缓存，
         // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。与 BookmarkExporter.flushExported 同构。
         // v3.14.3: 导出账本改容量上限淘汰（repo full_name 天然有界），不再按 90 天时间 TTL 误删导出事实。
+        // v3.14.6 (CC-05): 写前 rebase(重读-并集-max ts) —— 跨 tab 他端新增键不可丢
         flushExported: () => {
           if (GitHubAPI2._exportedCache) {
             GitHubAPI2._evictByCapacity(GitHubAPI2._exportedCache);
-            Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(GitHubAPI2._exportedCache));
+            let remote = {};
+            try {
+              remote = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}")) || {};
+            } catch {
+              remote = {};
+            }
+            const merged = { ...remote };
+            for (const [key, ts] of Object.entries(GitHubAPI2._exportedCache)) {
+              if (merged[key] === void 0 || Number(merged[key]) < Number(ts)) merged[key] = ts;
+            }
+            GitHubAPI2._exportedCache = merged;
+            Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(merged));
           }
         },
         // F-05 修复：清除已导出记录（清键 + 失效内存缓存，供数据管理 UI 调用）
@@ -14028,7 +14334,18 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         flushGistsExported: () => {
           if (GitHubAPI2._exportedGistsCache) {
             GitHubAPI2._evictByCapacity(GitHubAPI2._exportedGistsCache);
-            Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(GitHubAPI2._exportedGistsCache));
+            let remote = {};
+            try {
+              remote = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}")) || {};
+            } catch {
+              remote = {};
+            }
+            const merged = { ...remote };
+            for (const [key, ts] of Object.entries(GitHubAPI2._exportedGistsCache)) {
+              if (merged[key] === void 0 || Number(merged[key]) < Number(ts)) merged[key] = ts;
+            }
+            GitHubAPI2._exportedGistsCache = merged;
+            Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(merged));
           }
         },
         // v3.14.3: 导出账本容量上限（repo full_name / gist id 天然有界）——
@@ -14145,6 +14462,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
+      var { Exporter: Exporter2 } = require_export();
       var { AIService: AIService2 } = require_ai();
       var GitHubExporter2 = {
         // 用户触发导出的写入审计（ISS-20260724-011，CWE-862/778）。与 BookmarkAutoImporter._auditAutoSync
@@ -14241,7 +14559,8 @@ ${insight.summary || ""}`,
               categories,
               settings
             );
-          } catch {
+          } catch (error) {
+            console.warn("[LD-Notion] AI \u4ED3\u5E93\u5206\u7C7B\u5931\u8D25, \u964D\u7EA7\u8DF3\u8FC7\u5206\u7C7B:", repo.full_name || repo.name || "?", String((error == null ? void 0 : error.message) || error).slice(0, 120));
             return "";
           }
         },
@@ -14252,7 +14571,8 @@ ${insight.summary || ""}`,
           try {
             const readme = await GitHubAPI2.fetchRepoReadme(repo.full_name, (settings == null ? void 0 : settings.token) || "");
             insight = GitHubExporter2.extractReadmeInsight(readme);
-          } catch {
+          } catch (error) {
+            console.warn("[LD-Notion] \u4ED3\u5E93 README \u6458\u8981\u5931\u8D25, \u964D\u7EA7\u7A7A\u6458\u8981:", repo.full_name || repo.name || "?", String((error == null ? void 0 : error.message) || error).slice(0, 120));
             insight = { title: "", summary: "" };
           }
           const defaultSuffix = insight.title || GitHubExporter2.normalizeText(repo.description || "", 80);
@@ -14430,54 +14750,66 @@ ${insight.summary || ""}`,
             return { total: items.length, exported: 0, failed: 0, message: `\u6CA1\u6709\u65B0\u7684 ${sourceType} \u9700\u8981\u5BFC\u51FA` };
           }
           let success = 0, failed = 0;
+          let authAbortInfo = null;
           const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-          for (let i = 0; i < newItems.length; i++) {
-            const item = newItems[i];
-            const key = getKeyFn(item);
-            const pct = Math.round(10 + i / newItems.length * 85);
-            if (onProgress) onProgress(`\u6B63\u5728\u5BFC\u51FA ${sourceType} (${i + 1}/${newItems.length}): ${key}`, pct);
-            try {
-              const enriched = sourceType === "Gist" ? item : await GitHubExporter2.enrichRepo(item, settings, enrichContext);
-              const properties = buildFn(enriched);
-              for (const k of Object.keys(properties)) {
-                if (properties[k] === void 0) delete properties[k];
+          try {
+            for (let i = 0; i < newItems.length; i++) {
+              const item = newItems[i];
+              const key = getKeyFn(item);
+              const pct = Math.round(10 + i / newItems.length * 85);
+              try {
+                if (onProgress) onProgress(`\u6B63\u5728\u5BFC\u51FA ${sourceType} (${i + 1}/${newItems.length}): ${key}`, pct);
+              } catch (progressError) {
+                console.warn(`[GitHubExporter] onProgress \u56DE\u8C03\u5F02\u5E38 (${key}):`, progressError);
               }
-              const { OperationGuard: OperationGuard2 } = require_security();
-              if (!OperationGuard2.canExecute("createDatabasePage")) {
+              try {
+                const enriched = sourceType === "Gist" ? item : await GitHubExporter2.enrichRepo(item, settings, enrichContext);
+                const properties = buildFn(enriched);
+                for (const k of Object.keys(properties)) {
+                  if (properties[k] === void 0) delete properties[k];
+                }
+                const { OperationGuard: OperationGuard2 } = require_security();
+                if (!OperationGuard2.canExecute("createDatabasePage")) {
+                  GitHubExporter2._auditExport(
+                    "createDatabasePage",
+                    "denied",
+                    { itemKey: key, sourceType, itemName: item.full_name || key, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
+                  );
+                  failed++;
+                  continue;
+                }
+                const page = await NotionAPI2.request("POST", "/pages", {
+                  parent: { database_id: databaseId },
+                  properties
+                }, apiKey);
+                markExportedFn(key);
                 GitHubExporter2._auditExport(
                   "createDatabasePage",
-                  "denied",
-                  { itemKey: key, sourceType, itemName: item.full_name || key, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
+                  "success",
+                  { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: key, sourceType, databaseId }
                 );
+                success++;
+              } catch (e) {
+                console.warn(`[GitHubExporter] \u5BFC\u51FA\u5931\u8D25: ${key}`, e);
+                GitHubExporter2._auditExport(
+                  "createDatabasePage",
+                  "failed",
+                  { itemKey: key, sourceType, reason: String((e == null ? void 0 : e.message) || e) }
+                );
+                if (Exporter2.isAuthTerminalError(e)) {
+                  authAbortInfo = { reason: e.message, at: i + 1 };
+                  break;
+                }
                 failed++;
-                continue;
               }
-              const page = await NotionAPI2.request("POST", "/pages", {
-                parent: { database_id: databaseId },
-                properties
-              }, apiKey);
-              markExportedFn(key);
-              GitHubExporter2._auditExport(
-                "createDatabasePage",
-                "success",
-                { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: key, sourceType, databaseId }
-              );
-              success++;
-            } catch (e) {
-              console.warn(`[GitHubExporter] \u5BFC\u51FA\u5931\u8D25: ${key}`, e);
-              GitHubExporter2._auditExport(
-                "createDatabasePage",
-                "failed",
-                { itemKey: key, sourceType, reason: String((e == null ? void 0 : e.message) || e) }
-              );
-              failed++;
+              if (i < newItems.length - 1) {
+                await Utils2.sleep(delay);
+              }
             }
-            if (i < newItems.length - 1) {
-              await Utils2.sleep(delay);
-            }
+          } finally {
+            if (flushFn) flushFn();
           }
-          if (flushFn) flushFn();
-          return { total: items.length, exported: success, failed, newCount: newItems.length };
+          return authAbortInfo ? { total: items.length, exported: success, failed, skipped: newItems.length - success - failed, authAborted: authAbortInfo, newCount: newItems.length } : { total: items.length, exported: success, failed, newCount: newItems.length };
         },
         // 导出 stars 到 Notion
         exportStars: async (settings, onProgress) => {
@@ -14636,10 +14968,10 @@ ${insight.summary || ""}`,
             try {
               const prompt2 = `\u8BF7\u6839\u636E\u4EE5\u4E0B GitHub \u4ED3\u5E93\u4FE1\u606F\uFF0C\u4ECE\u8FD9\u4E9B\u5206\u7C7B\u4E2D\u9009\u62E9\u6700\u5408\u9002\u7684\u4E00\u4E2A: [${categories.join(", ")}]
 
-\u4ED3\u5E93\u540D: ${title}
-\u63CF\u8FF0: ${desc}
-\u8BED\u8A00: ${lang}
-\u6807\u7B7E: ${tags}
+\u4ED3\u5E93\u540D: ${AIService2.isolateContent(title)}
+\u63CF\u8FF0: ${AIService2.isolateContent(desc)}
+\u8BED\u8A00: ${AIService2.isolateContent(lang)}
+\u6807\u7B7E: ${AIService2.isolateContent(tags)}
 
 \u53EA\u56DE\u590D\u5206\u7C7B\u540D\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\u3002`;
               const category = await AIService2.request(prompt2, {
@@ -14684,6 +15016,9 @@ ${insight.summary || ""}`,
                 "failed",
                 { pageId: page == null ? void 0 : page.id, itemName: title, reason: String((e == null ? void 0 : e.message) || e) }
               );
+              if (Exporter2.isAuthTerminalError(e)) {
+                return { classified, total: pages.length, authAborted: { reason: e.message, at: i + 1 } };
+              }
             }
             await Utils2.sleep(500);
           }
@@ -15221,6 +15556,7 @@ ${insight.summary || ""}`,
         if (now - AutoImporter2.lastRunAt < AutoImporter2.minimumRunGapMs) return;
         AutoImporter2.lastRunAt = now;
         AutoImporter2.isRunning = true;
+        SyncLock.isExporting = true;
         const attemptAt = Date.now();
         const exportBtn = document.querySelector("#ldb-export");
         try {
@@ -15298,7 +15634,6 @@ ${insight.summary || ""}`,
                 console.error(`[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u5931\u8D25: ${title}`, error);
                 failed++;
                 if (Exporter2.isAuthTerminalError && Exporter2.isAuthTerminalError(error)) {
-                  remaining.unshift(i);
                   autoImportAborted = true;
                   break;
                 }
@@ -15361,6 +15696,7 @@ ${insight.summary || ""}`,
           AutoImporter2.updateStatus(`\u274C \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
         } finally {
           AutoImporter2.isRunning = false;
+          SyncLock.isExporting = false;
           if (exportBtn) exportBtn.disabled = false;
           const obsExportBtn2 = document.querySelector("#ldb-obs-export");
           if (obsExportBtn2) obsExportBtn2.disabled = false;
@@ -15517,7 +15853,7 @@ ${insight.summary || ""}`,
                 const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7FFB\u8BD1\u3002\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\u4E3A${lang}\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\uFF0C\u4FDD\u6301\u539F\u6587\u7ED3\u6784\u3002
 
 \u539F\u6587\uFF1A
-${content}`;
+${AI().isolateContent(content)}`;
                 const translated = await svc().requestChat(prompt2, settings, 2e3);
                 const blocks = [
                   { type: "divider", divider: {} },
@@ -15590,7 +15926,7 @@ ${content}`;
 - \u5206\u7C7B/\u72B6\u6001 \u2192 select\uFF0C\u6570\u91CF/\u91D1\u989D \u2192 number\uFF0C\u662F\u5426 \u2192 checkbox\uFF0C\u5176\u4ED6 \u2192 rich_text
 
 \u9875\u9762\u5185\u5BB9\uFF1A
-${content}`;
+${AI().isolateContent(content)}`;
             const aiResponse = await svc().requestChat(analyzePrompt, settings, 3e3);
             const parsedResult = AISchema.parseAIJson("extractToDatabase", aiResponse);
             if (!parsedResult.ok) {
@@ -15699,8 +16035,8 @@ ${content}`;
           try {
             const planPrompt = `\u4F60\u662F\u4E00\u4E2A Notion \u5185\u5BB9\u67B6\u6784\u5E08\u3002\u6839\u636E\u7528\u6237\u9700\u6C42\u89C4\u5212\u591A\u9875\u9762\u5185\u5BB9\u7ED3\u6784\u3002
 
-\u7528\u6237\u9700\u6C42\uFF1A${topic}
-${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${structure_prompt}` : ""}
+\u7528\u6237\u9700\u6C42\uFF1A${AI().isolateContent(topic)}
+${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${AI().isolateContent(structure_prompt)}` : ""}
 
 \u8FD4\u56DE JSON \u683C\u5F0F\uFF08\u53EA\u8FD4\u56DE JSON\uFF09\uFF1A
 {
@@ -15806,9 +16142,9 @@ ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}**
                 );
                 const contentPrompt = `\u4E3A\u4EE5\u4E0B\u4E3B\u9898\u751F\u6210\u8BE6\u7EC6\u5185\u5BB9\uFF0C\u4F7F\u7528 Markdown \u683C\u5F0F\u3002
 
-\u4E3B\u9898\uFF1A${child.title}
-\u63CF\u8FF0\uFF1A${child.description}
-\u4E0A\u4E0B\u6587\uFF1A\u8FD9\u662F\u300C${plan.parent_title}\u300D\u7684\u5B50\u9875\u9762
+\u4E3B\u9898\uFF1A${AI().isolateContent(child.title)}
+\u63CF\u8FF0\uFF1A${AI().isolateContent(child.description)}
+\u4E0A\u4E0B\u6587\uFF1A\u8FD9\u662F\u300C${AI().isolateContent(plan.parent_title)}\u300D\u7684\u5B50\u9875\u9762
 
 \u8BF7\u751F\u6210\u5B9E\u7528\u3001\u5177\u4F53\u7684\u5185\u5BB9\uFF0C\u5305\u542B\u5408\u9002\u7684\u6807\u9898\u5C42\u7EA7\u548C\u7ED3\u6784\u5316\u4FE1\u606F\u3002`;
                 const content = await svc().requestChat(contentPrompt, settings, 2e3);
@@ -15885,7 +16221,7 @@ ${content || "\uFF08\u65E0\u5185\u5BB9\uFF09"}`);
 
 --- \u4EE5\u4E0B\u662F ${pages.length} \u4E2A\u9875\u9762\u7684\u5185\u5BB9 ---
 
-${contentParts.join("\n\n---\n\n")}`;
+${contentParts.map((part) => AI().isolateContent(part)).join("\n\n---\n\n")}`;
             const report = await svc().requestChat(prompt2, settings, 4e3);
             return `\u{1F4CA} **\u6279\u91CF\u5206\u6790\u62A5\u544A**
 
@@ -16035,7 +16371,22 @@ ${report}
 `;
             if (result.exported === 0 && result.failed === 0) response += `
 \u6240\u6709\u4E66\u7B7E\u5DF2\u662F\u6700\u65B0\u72B6\u6001\u3002`;
-            if (result.exported > 0 && settings.aiApiKey) {
+            if (result.aborted) {
+              response = `\u26D4 **\u6D4F\u89C8\u5668\u4E66\u7B7E\u5BFC\u5165\u5DF2\u4E2D\u6B62**
+
+`;
+              response += `\u{1F4CA} \u5171 ${result.total} \u4E2A\u4E66\u7B7E
+`;
+              response += `\u{1F4E5} \u6210\u529F ${result.exported} \u4E2A
+`;
+              response += `\u274C \u5931\u8D25 ${result.failed} \u4E2A
+`;
+              if (result.skipped > 0) response += `\u23ED \u5269\u4F59 ${result.skipped} \u4E2A\u672A\u5C1D\u8BD5
+`;
+              response += `
+\u{1F511} \u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\u540E\u91CD\u65B0\u5BFC\u5165\u3002`;
+            }
+            if (result.exported > 0 && settings.aiApiKey && !result.aborted) {
               response += `
 
 \u{1F4A1} \u53EF\u4EE5\u8F93\u5165\u300C\u5206\u7C7B\u4E66\u7B7E\u300D\u8BA9 AI \u81EA\u52A8\u4E3A\u5BFC\u5165\u7684\u4E66\u7B7E\u5206\u7C7B\u3002`;
@@ -17357,34 +17708,12 @@ ${report}
           if (autoSetupDatabaseProperties) {
             const { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
             if (!OperationGuard2.canExecute("updateDatabase")) {
-              const startedAt = Date.now();
-              OperationLog2.add({
-                audit_event: "guard.denied",
+              OperationGuard2.auditDenied("updateDatabase", {
+                trigger: "user_requested_setup_database",
+                databaseId: targetId,
                 actor: "user",
-                source: "ui",
-                guard: OperationGuard2._buildGuardSnapshot("updateDatabase", "deny", {
-                  trigger: "user_requested_setup_database",
-                  databaseId: targetId
-                }),
-                operation: {
-                  name: "updateDatabase",
-                  risk: "standard",
-                  trigger: "user_requested_setup_database"
-                },
-                target: OperationLog2.buildTarget({ databaseId: targetId }),
-                payload: null,
-                result: {
-                  status: "denied",
-                  reason: "\u6743\u9650\u4E0D\u8DB3:\u5F53\u524D\u6743\u9650\u7EA7\u522B\u65E0\u6CD5\u4FEE\u6539 Notion \u6570\u636E\u5E93\u7ED3\u6784"
-                },
-                redaction: OperationLog2.collectRedactionHints({ databaseId: targetId }),
-                operationName: "updateDatabase",
-                context: { databaseId: targetId, trigger: "user_requested_setup_database" },
-                status: "failed",
-                error: '\u6743\u9650\u4E0D\u8DB3:\u9700\u8981"\u6807\u51C6"\u53CA\u4EE5\u4E0A\u6743\u9650\u624D\u80FD\u81EA\u52A8\u8BBE\u7F6E\u6570\u636E\u5E93\u5C5E\u6027',
-                startTime: startedAt,
-                endTime: Date.now()
-              });
+                source: "ui"
+              }, { phase: "precheck", reason: "\u6743\u9650\u4E0D\u8DB3:\u5F53\u524D\u6743\u9650\u7EA7\u522B\u65E0\u6CD5\u4FEE\u6539 Notion \u6570\u636E\u5E93\u7ED3\u6784" });
               setupResult = {
                 success: false,
                 error: '\u6743\u9650\u4E0D\u8DB3:\u9700\u8981"\u6807\u51C6"\u53CA\u4EE5\u4E0A\u6743\u9650\u624D\u80FD\u81EA\u52A8\u8BBE\u7F6E\u6570\u636E\u5E93\u5C5E\u6027(\u5DF2\u8DF3\u8FC7\u81EA\u52A8\u5EFA\u5C5E\u6027,\u76EE\u6807\u5DF2\u4FDD\u5B58)'
@@ -19645,7 +19974,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         const success = [];
         const failed = [];
         const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-        let githubDirty2 = false;
+        let githubDirty = false;
         let authAbortInfo = null;
         try {
           for (let i = 0; i < selectedItems.length; i++) {
@@ -19666,7 +19995,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               } else {
                 GitHubAPI2.markExported(item.itemKey);
               }
-              githubDirty2 = true;
+              githubDirty = true;
               success.push({
                 title: note.title,
                 url: note.url
@@ -19688,7 +20017,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             }
           }
         } finally {
-          if (githubDirty2) {
+          if (githubDirty) {
             GitHubAPI2.flushExported();
             GitHubAPI2.flushGistsExported();
           }
@@ -19717,79 +20046,92 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
         const success = [];
         const failed = [];
-        for (let i = 0; i < selectedItems.length; i++) {
-          const item = selectedItems[i];
-          const bookmark = item.raw;
-          const sourceType = item.sourceType;
-          const label = item.title || item.itemKey;
-          onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, label);
-          try {
-            let properties;
-            if (sourceType === "gists") {
-              properties = GitHubExporter2.buildGistProperties(bookmark);
-            } else {
-              const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
-              const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
-              properties = GitHubExporter2.buildRepoProperties(enriched, sourceMap[sourceType] || "Star");
+        let githubDirty = false;
+        try {
+          for (let i = 0; i < selectedItems.length; i++) {
+            const item = selectedItems[i];
+            const bookmark = item.raw;
+            const sourceType = item.sourceType;
+            const label = item.title || item.itemKey;
+            try {
+              onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, label);
+            } catch (progressError) {
+              console.warn(`[GitHubObsidianService] onProgress \u56DE\u8C03\u5F02\u5E38 (${label}):`, progressError);
             }
-            for (const key of Object.keys(properties)) {
-              if (properties[key] === void 0) delete properties[key];
-            }
-            if (!OperationGuard2.canExecute("createDatabasePage")) {
+            try {
+              let properties;
+              if (sourceType === "gists") {
+                properties = GitHubExporter2.buildGistProperties(bookmark);
+              } else {
+                const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
+                const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
+                properties = GitHubExporter2.buildRepoProperties(enriched, sourceMap[sourceType] || "Star");
+              }
+              for (const key of Object.keys(properties)) {
+                if (properties[key] === void 0) delete properties[key];
+              }
+              if (!OperationGuard2.canExecute("createDatabasePage")) {
+                GitHubExporter2._auditExport(
+                  "createDatabasePage",
+                  "denied",
+                  { itemKey: item.itemKey, sourceType, itemName: item.title || item.itemKey, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u624B\u52A8\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
+                );
+                failed.push({ title: item.title, error: "\u6743\u9650\u4E0D\u8DB3\uFF08\u9700 level\u22651\uFF09", itemKey: item.itemKey, sourceType });
+                continue;
+              }
+              const page = await NotionAPI2.request("POST", "/pages", {
+                parent: { database_id: databaseId },
+                properties
+              }, apiKey);
+              if (sourceType === "gists") {
+                GitHubAPI2.markGistExported(item.itemKey);
+              } else {
+                GitHubAPI2.markExported(item.itemKey);
+              }
+              githubDirty = true;
               GitHubExporter2._auditExport(
                 "createDatabasePage",
-                "denied",
-                { itemKey: item.itemKey, sourceType, itemName: item.title || item.itemKey, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u624B\u52A8\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
+                "success",
+                { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: item.itemKey, sourceType, databaseId }
               );
-              failed.push({ title: item.title, error: "\u6743\u9650\u4E0D\u8DB3\uFF08\u9700 level\u22651\uFF09", itemKey: item.itemKey, sourceType });
-              continue;
-            }
-            const page = await NotionAPI2.request("POST", "/pages", {
-              parent: { database_id: databaseId },
-              properties
-            }, apiKey);
-            if (sourceType === "gists") {
-              GitHubAPI2.markGistExportedAndFlush(item.itemKey);
-            } else {
-              GitHubAPI2.markExportedAndFlush(item.itemKey);
-            }
-            GitHubExporter2._auditExport(
-              "createDatabasePage",
-              "success",
-              { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: item.itemKey, sourceType, databaseId }
-            );
-            success.push({
-              title: item.title,
-              url: (bookmark == null ? void 0 : bookmark.html_url) || "https://github.com",
-              itemKey: item.itemKey,
-              sourceType
-            });
-          } catch (error) {
-            console.warn(`[GitHubObsidianService] Notion export failed: ${item.itemKey}`, error);
-            GitHubExporter2._auditExport(
-              "createDatabasePage",
-              "failed",
-              { itemKey: item.itemKey, sourceType, reason: String((error == null ? void 0 : error.message) || error) }
-            );
-            failed.push({
-              title: item.title,
-              error: error.message,
-              itemKey: item.itemKey,
-              sourceType
-            });
-            if (error && (error.isAuthTerminal || String((error == null ? void 0 : error.message) || "").includes("Notion OAuth \u7EED\u7B7E\u5931\u8D25"))) {
-              const skipped = selectedItems.slice(i + 1).map((skippedItem) => ({
-                title: skippedItem.title || skippedItem.itemKey || "GitHub"
-              }));
-              if (githubDirty) {
-                GitHubAPI2.flushExported();
-                GitHubAPI2.flushGistsExported();
+              success.push({
+                title: item.title,
+                url: (bookmark == null ? void 0 : bookmark.html_url) || "https://github.com",
+                itemKey: item.itemKey,
+                sourceType
+              });
+            } catch (error) {
+              console.warn(`[GitHubObsidianService] Notion export failed: ${item.itemKey}`, error);
+              GitHubExporter2._auditExport(
+                "createDatabasePage",
+                "failed",
+                { itemKey: item.itemKey, sourceType, reason: String((error == null ? void 0 : error.message) || error) }
+              );
+              failed.push({
+                title: item.title,
+                error: error.message,
+                itemKey: item.itemKey,
+                sourceType
+              });
+              if (error && (error.isAuthTerminal || String((error == null ? void 0 : error.message) || "").includes("Notion OAuth \u7EED\u7B7E\u5931\u8D25"))) {
+                const skipped = selectedItems.slice(i + 1).map((skippedItem) => ({
+                  title: skippedItem.title || skippedItem.itemKey || "GitHub"
+                }));
+                if (githubDirty) {
+                  GitHubAPI2.flushExported();
+                  GitHubAPI2.flushGistsExported();
+                }
+                return { success, failed, skipped, authAborted: { reason: error.message, at: i + 1 } };
               }
-              return { success, failed, skipped, authAborted: { reason: error.message, at: i + 1 } };
+            }
+            if (i < selectedItems.length - 1 && delay > 0) {
+              await Utils2.sleep(delay);
             }
           }
-          if (i < selectedItems.length - 1 && delay > 0) {
-            await Utils2.sleep(delay);
+        } finally {
+          if (githubDirty) {
+            GitHubAPI2.flushExported();
+            GitHubAPI2.flushGistsExported();
           }
         }
         return { success, failed, skipped: [] };
@@ -21368,7 +21710,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           if (urlToBookmark.size === 0) return 0;
           const strictMode = Utils2.isLinuxDoDedupStrict();
           let matched = 0;
-          let githubDirty2 = false;
+          let githubDirty = false;
           let linuxdoDirty = false;
           if (strictMode) {
             try {
@@ -21376,41 +21718,44 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             } catch {
             }
           }
-          records.forEach((record) => {
-            const recordUrl = UI2().normalizeWorkspaceInsightUrl((record == null ? void 0 : record.sourceUrl) || "");
-            if (!recordUrl) return;
-            const bookmark = urlToBookmark.get(recordUrl);
-            if (!bookmark) return;
-            if ((bookmark == null ? void 0 : bookmark.source) === "github") {
-              const itemKey = bookmark.itemKey;
-              if (!itemKey) return;
-              if (bookmark.sourceType === "gists") {
-                if (GitHubAPI2.isGistExported(itemKey)) return;
-                GitHubAPI2.markGistExported(itemKey);
-              } else {
-                if (GitHubAPI2.isExported(itemKey)) return;
-                GitHubAPI2.markExported(itemKey);
+          try {
+            records.forEach((record) => {
+              const recordUrl = UI2().normalizeWorkspaceInsightUrl((record == null ? void 0 : record.sourceUrl) || "");
+              if (!recordUrl) return;
+              const bookmark = urlToBookmark.get(recordUrl);
+              if (!bookmark) return;
+              if ((bookmark == null ? void 0 : bookmark.source) === "github") {
+                const itemKey = bookmark.itemKey;
+                if (!itemKey) return;
+                if (bookmark.sourceType === "gists") {
+                  if (GitHubAPI2.isGistExported(itemKey)) return;
+                  GitHubAPI2.markGistExported(itemKey);
+                } else {
+                  if (GitHubAPI2.isExported(itemKey)) return;
+                  GitHubAPI2.markExported(itemKey);
+                }
+                githubDirty = true;
+                matched++;
+              } else if (strictMode) {
+                const topicId = String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
+                if (!topicId) return;
+                if (Storage2.isTopicExported(topicId)) return;
+                Storage2.markTopicExported(topicId);
+                linuxdoDirty = true;
+                matched++;
               }
-              githubDirty2 = true;
-              matched++;
-            } else if (strictMode) {
-              const topicId = String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
-              if (!topicId) return;
-              if (Storage2.isTopicExported(topicId)) return;
-              Storage2.markTopicExported(topicId);
-              linuxdoDirty = true;
-              matched++;
+            });
+          } finally {
+            if (linuxdoDirty) {
+              try {
+                DedupStore.endBatch("linuxdo");
+              } catch {
+              }
             }
-          });
-          if (githubDirty2) {
+          }
+          if (githubDirty) {
             GitHubAPI2.flushExported();
             GitHubAPI2.flushGistsExported();
-          }
-          if (linuxdoDirty) {
-            try {
-              DedupStore.endBatch("linuxdo");
-            } catch {
-            }
           }
           if (matched > 0) {
             UI2().recomputeExportStats();
@@ -22714,7 +23059,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const bmStatusMain = refs.bookmarkExtStatus;
           if (bmStatusMain) {
             if (BookmarkBridge2.isExtensionAvailable()) {
-              const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
+              const isUserscriptMode = Utils2.isUserscriptMode();
               if (isUserscriptMode) {
                 bmStatusMain.innerHTML = '<span class="ldb-status-text ldb-status-text--success">\u2705 \u6865\u63A5\u5DF2\u5C31\u7EEA\uFF08Userscript \u6A21\u5F0F\uFF09</span> \u2014 \u53EF\u7528\u300C\u{1F4D6} \u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E\u300D\u6309\u94AE';
               } else {
@@ -22889,7 +23234,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const refs = UI2.refs || {};
           const resultEl = refs.selfCheckResult;
           if (!resultEl) return;
-          const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
+          const isUserscriptMode = Utils2.isUserscriptMode();
           const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           const bookmarkSource = UI2.getActiveBookmarkSource();
           const hasGitHubUsername = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
@@ -22955,7 +23300,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         },
         copyDiagnostics: async () => {
           var _a;
-          const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
+          const isUserscriptMode = Utils2.isUserscriptMode();
           const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           const bookmarkSource = UI2.getActiveBookmarkSource();
           const hasGitHubUsername = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
@@ -24114,7 +24459,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             CredentialVault2.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
             CredentialVault2.syncSensitiveInput(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
           };
-          const isUserscriptMode = typeof GM_info !== "undefined" && !!GM_info.scriptHandler;
+          const isUserscriptMode = Utils2.isUserscriptMode();
           const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           if (refs.runtimeBadge) {
             refs.runtimeBadge.textContent = isUserscriptMode ? "Userscript" : "Extension";
@@ -27001,27 +27346,37 @@ ${availableTools}
             );
           } else {
             if (tool.level >= 1) {
-              try {
-                result = await OperationGuard2.execute(toolCall.tool, async () => {
-                  return await tool.execute(toolCall.args || {}, settings);
-                }, {
-                  source: "ai-agent-loop",
-                  actor: "ai",
-                  itemName: toolCall.tool,
-                  trigger: "ai_tool_execution"
-                });
-              } catch (guardError) {
-                if (guardError.message === "\u64CD\u4F5C\u5DF2\u53D6\u6D88") {
-                  result = AI()._normalizeExecutionResult(
-                    `\u9519\u8BEF: \u7528\u6237\u53D6\u6D88\u4E86 "${toolCall.tool}" \u64CD\u4F5C\u7684\u6267\u884C`,
-                    { source: "tool", name: toolCall.tool, status: "cancelled" }
-                  );
-                } else {
-                  result = AI()._normalizeExecutionResult(`\u9519\u8BEF: ${guardError.message}`, {
-                    source: "tool",
-                    name: toolCall.tool,
-                    status: "error"
+              const { SyncLock } = require_sync_lock();
+              if (SyncLock.isExporting) {
+                result = AI()._normalizeExecutionResult(
+                  `\u9519\u8BEF: \u5F53\u524D\u6709\u5BFC\u51FA/\u81EA\u52A8\u540C\u6B65\u6B63\u5728\u8FDB\u884C\uFF0C\u5DF2\u62D2\u7EDD "${toolCall.tool}" \u64CD\u4F5C\u4EE5\u907F\u514D\u5E76\u53D1\u5199\u5165\u51B2\u7A81\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5`,
+                  { source: "tool", name: toolCall.tool, status: "error" }
+                );
+              } else {
+                try {
+                  result = await OperationGuard2.execute(toolCall.tool, async () => {
+                    return await tool.execute(toolCall.args || {}, settings);
+                  }, {
+                    source: "ai-agent-loop",
+                    actor: "ai",
+                    itemName: toolCall.tool,
+                    trigger: "ai_tool_execution",
+                    // v3.14.6 (S-04): AI 常规写也弹确认, 取消记 guard.cancelled
+                    requireConfirm: true
                   });
+                } catch (guardError) {
+                  if (guardError.message === "\u64CD\u4F5C\u5DF2\u53D6\u6D88") {
+                    result = AI()._normalizeExecutionResult(
+                      `\u9519\u8BEF: \u7528\u6237\u53D6\u6D88\u4E86 "${toolCall.tool}" \u64CD\u4F5C\u7684\u6267\u884C`,
+                      { source: "tool", name: toolCall.tool, status: "cancelled" }
+                    );
+                  } else {
+                    result = AI()._normalizeExecutionResult(`\u9519\u8BEF: ${guardError.message}`, {
+                      source: "tool",
+                      name: toolCall.tool,
+                      status: "error"
+                    });
+                  }
                 }
               }
             } else {
@@ -27045,7 +27400,7 @@ ${availableTools}
           const availableTools = Object.entries(AI().AGENT_TOOLS).filter(([_, tool]) => tool.level <= permLevel).map(([name, tool]) => `- ${name}: ${tool.description} | \u53C2\u6570: ${tool.params}`).join("\n");
           const systemPrompt = AI()._buildAgentSystemPrompt(permLevel, availableTools, settings);
           const isolate = (content) => `<user_input>
-${String(content).replace(/<\/?user_input>/gi, "&lt;$&gt;")}
+${AI().isolateContent(content)}
 </user_input>`;
           const messages = [{ role: "user", content: isolate(userMessage) }];
           let iteration = 0;
@@ -27155,8 +27510,8 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
 \u53EF\u9009\u5206\u7C7B\uFF1A${categories.join(", ")}
 
 <user_content>
-<title>${String(title).replace(/<\/user_content>/gi, "&lt;$&gt;")}</title>
-<body>${String(content).slice(0, 2e3).replace(/<\/user_content>/gi, "&lt;$&gt;")}</body>
+<title>${isolateContent(title)}</title>
+<body>${isolateContent(content).slice(0, 2e3)}</body>
 </user_content>
 
 \u5206\u7C7B\uFF1A`;
@@ -27354,18 +27709,71 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
             "Gemini"
           );
         },
-        // Agent 多轮对话请求（将 system + messages 拼接为单个 prompt）
+        // Agent 多轮对话请求 —— v3.14.6 (S-02): 系统指令与不可信用户内容角色分离,
+        // OpenAI messages[role=system] / Anthropic 顶层 system / Gemini systemInstruction;
+        // 不支持通道保留原压平 + 防伪前缀
         requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500) => {
+          const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
+          const provider = AIService2.PROVIDERS[aiService];
+          if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
+          const model = aiModel || provider.defaultModel;
+          const normalizedMessages = (messages || []).map((msg) => ({
+            role: msg.role === "assistant" ? "assistant" : "user",
+            content: String(msg.content ?? "")
+          }));
+          const systemText = String(systemPrompt ?? "");
+          if (aiService === "openai") {
+            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1");
+            const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
+            return await AIService2._chatRequest(
+              url,
+              { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
+              { model, messages: [{ role: "system", content: systemText }, ...normalizedMessages], max_completion_tokens: maxTokens, temperature: 0.7 },
+              (result) => {
+                var _a, _b, _c, _d;
+                return ((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "";
+              },
+              "OpenAI"
+            );
+          }
+          if (aiService === "claude") {
+            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1");
+            const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
+            return await AIService2._chatRequest(
+              url,
+              { "x-api-key": aiApiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+              { model, system: systemText, messages: normalizedMessages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: maxTokens },
+              (result) => {
+                var _a, _b, _c;
+                return ((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "";
+              },
+              "Claude"
+            );
+          }
+          if (aiService === "gemini") {
+            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1beta");
+            const url = normalizedBase ? `${normalizedBase}/v1beta/models/${model}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+            return await AIService2._chatRequest(
+              url,
+              { "Content-Type": "application/json", "x-goog-api-key": aiApiKey },
+              { systemInstruction: { parts: [{ text: systemText }] }, contents: normalizedMessages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })), generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
+              (result) => {
+                var _a, _b, _c, _d, _e, _f;
+                return ((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "";
+              },
+              "Gemini"
+            );
+          }
           let prompt2 = `[\u7CFB\u7EDF\u6307\u4EE4]
-${systemPrompt}
+${systemText}
 
 `;
-          for (const msg of messages) {
+          for (const msg of normalizedMessages) {
             if (msg.role === "user") {
               prompt2 += `[\u7528\u6237]: ${msg.content}
 
 `;
-            } else if (msg.role === "assistant") {
+            } else {
               prompt2 += `[\u52A9\u624B]: ${msg.content}
 
 `;
@@ -28023,7 +28431,7 @@ ${systemPrompt}
         },
         _resultToText: (result) => AIAssistant2._normalizeExecutionResult(result).text,
         _resultToAgentPayload: (result) => {
-          return JSON.stringify(AIAssistant2._normalizeExecutionResult(result), null, 2);
+          return CredentialVault2.redactText(JSON.stringify(AIAssistant2._normalizeExecutionResult(result), null, 2));
         },
         _isErrorResult: (result) => AIAssistant2._normalizeExecutionResult(result).status === "error",
         _buildPageIconPayload: (args = {}) => {
@@ -28675,7 +29083,7 @@ compound \u683C\u5F0F\uFF08\u4EC5\u5F53 intent \u4E3A compound \u65F6\u4F7F\u752
               `${systemPrompt}
 
 <user_input>
-${String(userMessage).replace(/<\/user_input>/gi, "&lt;$&gt;")}
+${isolateContent(userMessage)}
 </user_input>`,
               settings,
               800
@@ -29274,6 +29682,9 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       };
       Object.assign(AIAssistant2, require_guarded_write().GuardedWrite);
       var getAISettings = () => AIAssistant2.getSettings();
+      var isolateContent = (content) => String(content ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      AIService2.isolateContent = isolateContent;
+      Object.assign(AIAssistant2, { isolateContent });
       module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, getAISettings };
       Object.assign(AIAssistant2, require_agent_executor().AgentExecutor);
     }
@@ -29286,1536 +29697,6 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { on, off, emit } = require_event_bus();
       module.exports = { UICommandService: UICommandService2, on, off, emit };
-    }
-  });
-
-  // src/sync/constants.js
-  var require_constants2 = __commonJS({
-    "src/sync/constants.js"(exports, module) {
-      "use strict";
-      var SyncConstants = Object.freeze({
-        // payload 结构版本: 跨版本混并必须拒绝
-        SCHEMA_VERSION: 1,
-        // 行 kind 枚举(同步库行模型 { kind, source, key, version, updatedAt, deviceId, payload, checksum })
-        ROW_KINDS: Object.freeze(["dedup", "watermark", "settings"]),
-        // Notion 同步库行数上限(防恶意介质塞爆, H-3)
-        MAX_ROWS: 2e3,
-        // 分片参数: Notion rich_text 单块 2000 字符、页面 100 块上限(设计假设,保守取值)
-        FRAGMENT_CHUNK_CHARS: 2e3,
-        FRAGMENT_MAX_BLOCKS: 100,
-        // 单行保守上限(分片前)
-        FRAGMENT_MAX_ROW_CHARS: 4e4,
-        // payload 大小上限(防恶意介质, sec 共识 H-2)
-        MAX_PAYLOAD_BYTES: 200 * 1024,
-        // 单键长度上限 / 单源去重键数上限(H-3)
-        MAX_DEDUP_KEY_LENGTH: 512,
-        MAX_DEDUP_ENTRIES_PER_SOURCE: 1e5,
-        // ts 偏斜容忍: 远端键时间戳必须在 [now-90d, now+5min](H-2/H-4)
-        TS_FUTURE_SKEW_MS: 5 * 60 * 1e3,
-        TS_PAST_TTL_MS: 90 * 24 * 60 * 60 * 1e3,
-        // epoch 通胀上限: 远端 epoch ≤ 本地+1(H-5)
-        MAX_EPOCH_LEAD: 1,
-        // 危险键: 原型链污染(H-3)
-        FORBIDDEN_KEYS: Object.freeze(["__proto__", "constructor", "prototype"]),
-        // 同步自限速率: 共享 3 req/s 桶,同步路径自限 ≤2/s(F-SYNC-04)
-        RATE_CAPACITY: 3,
-        RATE_REFILL_PER_SEC: 1,
-        SYNC_SELF_LIMIT_PER_SEC: 2,
-        // 防抖窗口 / 退避(5xx 指数退避 1000*2^n, cap 30s)
-        DEBOUNCE_MS: 5e3,
-        BACKOFF_BASE_MS: 1e3,
-        BACKOFF_CAP_MS: 3e4
-      });
-      module.exports = { SyncConstants };
-    }
-  });
-
-  // src/sync/SyncPayload.js
-  var require_SyncPayload = __commonJS({
-    "src/sync/SyncPayload.js"(exports, module) {
-      "use strict";
-      var { SyncConstants } = require_constants2();
-      var isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-      var clone = (v) => {
-        if (typeof structuredClone === "function") return structuredClone(v);
-        return JSON.parse(JSON.stringify(v));
-      };
-      var watermarkCompare = (a, b) => {
-        const ea = Number(a == null ? void 0 : a.epoch) || 0;
-        const eb = Number(b == null ? void 0 : b.epoch) || 0;
-        if (ea !== eb) return ea > eb ? 1 : -1;
-        const ta = String((a == null ? void 0 : a.time) || "");
-        const tb = String((b == null ? void 0 : b.time) || "");
-        if (ta !== tb) return ta > tb ? 1 : -1;
-        return 0;
-      };
-      var SyncPayload = {
-        isEmpty(payload) {
-          if (!isPlainObject(payload)) return true;
-          const { dedup, watermarks, settings } = payload;
-          const isEmptyMap = (m) => !isPlainObject(m) || Object.keys(m).length === 0;
-          return isEmptyMap(dedup) && isEmptyMap(watermarks) && isEmptyMap(settings);
-        },
-        /**
-         * merge(a, b) — join-semilattice:
-         * ① dedup: per-source {key: max(tsA, tsB)} (union + max)
-         * ② watermarks: 单边缺失取存在侧; epoch 大者整段胜出; 相等比 time; 同刻 ids 并集
-         * ③ settings: 字段级 LWW — updatedAt 决胜, deviceId 字典序平局
-         * 交换/结合/幂等: 全序 max + 平局确定性 → 任意乱序收敛同一固定点
-         * @throws {Error} schema 不匹配
-         */
-        merge(a, b) {
-          if (!isPlainObject(a)) return clone(b || {});
-          if (!isPlainObject(b)) return clone(a);
-          if (a.schemaVersion !== b.schemaVersion) {
-            throw new Error(`SyncPayload schema \u4E0D\u5339\u914D: ${a.schemaVersion} vs ${b.schemaVersion}`);
-          }
-          const out = {
-            schemaVersion: a.schemaVersion,
-            deviceId: (a.updatedAt || "") >= (b.updatedAt || "") ? a.deviceId : b.deviceId,
-            version: Math.max(Number(a.version) || 0, Number(b.version) || 0),
-            updatedAt: (a.updatedAt || "") >= (b.updatedAt || "") ? a.updatedAt : b.updatedAt,
-            dedup: {},
-            watermarks: {},
-            settings: {}
-          };
-          const dedupSources = /* @__PURE__ */ new Set([...Object.keys(a.dedup || {}), ...Object.keys(b.dedup || {})]);
-          for (const src of dedupSources) {
-            const A = a.dedup[src] || {};
-            const B = b.dedup[src] || {};
-            const merged = {};
-            const keys = /* @__PURE__ */ new Set([...Object.keys(A), ...Object.keys(B)]);
-            for (const k of keys) {
-              merged[k] = Math.max(Number(A[k]) || 0, Number(B[k]) || 0);
-            }
-            out.dedup[src] = merged;
-          }
-          const wmSources = /* @__PURE__ */ new Set([...Object.keys(a.watermarks || {}), ...Object.keys(b.watermarks || {})]);
-          for (const src of wmSources) {
-            const A = a.watermarks[src];
-            const B = b.watermarks[src];
-            if (!isPlainObject(A)) {
-              out.watermarks[src] = clone(B);
-              continue;
-            }
-            if (!isPlainObject(B)) {
-              out.watermarks[src] = clone(A);
-              continue;
-            }
-            const cmp = watermarkCompare(A, B);
-            if (cmp !== 0) {
-              out.watermarks[src] = clone(cmp > 0 ? A : B);
-            } else {
-              out.watermarks[src] = {
-                epoch: Math.max(Number(A.epoch) || 0, Number(B.epoch) || 0),
-                time: (A.time || "") >= (B.time || "") ? A.time : B.time,
-                ids: Array.from(/* @__PURE__ */ new Set([...A.ids || [], ...B.ids || []]))
-              };
-            }
-          }
-          const settingKeys = /* @__PURE__ */ new Set([...Object.keys(a.settings || {}), ...Object.keys(b.settings || {})]);
-          for (const k of settingKeys) {
-            const A = a.settings[k];
-            const B = b.settings[k];
-            if (!isPlainObject(A)) {
-              out.settings[k] = clone(B);
-              continue;
-            }
-            if (!isPlainObject(B)) {
-              out.settings[k] = clone(A);
-              continue;
-            }
-            const cmp = (A.updatedAt || "") === (B.updatedAt || "") ? String(A.deviceId || "").localeCompare(String(B.deviceId || "")) : (A.updatedAt || "") > (B.updatedAt || "") ? 1 : -1;
-            out.settings[k] = clone(cmp >= 0 ? A : B);
-          }
-          return out;
-        },
-        /**
-         * buildFromLocal — 从本地去重账本 + watermark + 设置构建 payload
-         * @param {Object} deps { deviceId, now, dedupSets: {src: {key:ts}}, watermarks: {src: {epoch,time,ids}}, settings: {key: {value,updatedAt}} }
-         */
-        buildFromLocal({ deviceId = "local", now = Date.now(), dedupSets = {}, watermarks = {}, settings = {} }) {
-          const payload = {
-            schemaVersion: SyncConstants.SCHEMA_VERSION,
-            deviceId,
-            version: 0,
-            updatedAt: new Date(now).toISOString(),
-            dedup: {},
-            watermarks: {},
-            settings: {}
-          };
-          for (const [src, set] of Object.entries(dedupSets)) {
-            if (!isPlainObject(set)) continue;
-            const clean = {};
-            for (const [k, ts] of Object.entries(set)) {
-              const num = Number(ts);
-              if (Number.isFinite(num) && num > 0) clean[k] = num;
-            }
-            if (Object.keys(clean).length > 0) payload.dedup[src] = clean;
-          }
-          for (const [src, wm] of Object.entries(watermarks)) {
-            if (isPlainObject(wm) && (wm.time || wm.epoch)) {
-              payload.watermarks[src] = {
-                epoch: Math.max(0, Math.floor(Number(wm.epoch) || 0)),
-                time: wm.time || "",
-                ids: Array.isArray(wm.ids) ? wm.ids.map(String) : []
-              };
-            }
-          }
-          for (const [k, entry] of Object.entries(settings)) {
-            if (isPlainObject(entry)) {
-              payload.settings[k] = {
-                value: entry.value,
-                updatedAt: entry.updatedAt || new Date(now).toISOString(),
-                deviceId
-              };
-            }
-          }
-          return payload;
-        },
-        /**
-         * diffWinners — 计算本地需应用的胜出项(纯函数,不触碰存储)
-         * @returns {{ dedupEntries: [{source,key,ts}], watermarkWinners: [{source, watermark}], settingsWinners: [{key, entry}] }}
-         */
-        diffWinners(local, remote) {
-          var _a, _b, _c;
-          const localSafe = isPlainObject(local) ? local : {};
-          const remoteSafe = isPlainObject(remote) ? remote : {};
-          const dedupEntries = [];
-          const watermarkWinners = [];
-          const settingsWinners = [];
-          for (const [src, remoteSet] of Object.entries(remoteSafe.dedup || {})) {
-            if (!isPlainObject(remoteSet)) continue;
-            const localSet = ((_a = localSafe.dedup) == null ? void 0 : _a[src]) || {};
-            for (const [k, ts] of Object.entries(remoteSet)) {
-              const num = Number(ts);
-              if (!Number.isFinite(num) || num <= 0) continue;
-              if ((Number(localSet[k]) || 0) < num) {
-                dedupEntries.push({ source: src, key: k, ts: num });
-              }
-            }
-          }
-          for (const [src, remoteWm] of Object.entries(remoteSafe.watermarks || {})) {
-            if (!isPlainObject(remoteWm)) continue;
-            const localWm = (_b = localSafe.watermarks) == null ? void 0 : _b[src];
-            if (!isPlainObject(localWm) || watermarkCompare(remoteWm, localWm) > 0) {
-              watermarkWinners.push({ source: src, watermark: clone(remoteWm) });
-            }
-          }
-          for (const [k, remoteEntry] of Object.entries(remoteSafe.settings || {})) {
-            if (!isPlainObject(remoteEntry)) continue;
-            const localEntry = (_c = localSafe.settings) == null ? void 0 : _c[k];
-            if (!isPlainObject(localEntry)) {
-              settingsWinners.push({ key: k, entry: clone(remoteEntry) });
-              continue;
-            }
-            const cmp = (remoteEntry.updatedAt || "") === (localEntry.updatedAt || "") ? String(remoteEntry.deviceId || "").localeCompare(String(localEntry.deviceId || "")) : (remoteEntry.updatedAt || "") > (localEntry.updatedAt || "") ? 1 : -1;
-            if (cmp > 0) settingsWinners.push({ key: k, entry: clone(remoteEntry) });
-          }
-          return { dedupEntries, watermarkWinners, settingsWinners };
-        }
-      };
-      module.exports = { SyncPayload };
-    }
-  });
-
-  // src/sync/SyncCrypto.js
-  var require_SyncCrypto = __commonJS({
-    "src/sync/SyncCrypto.js"(exports, module) {
-      "use strict";
-      var { SyncConstants } = require_constants2();
-      var subtle = () => {
-        var _a, _b;
-        if (typeof ((_b = (_a = globalThis.crypto) == null ? void 0 : _a.subtle) == null ? void 0 : _b.digest) === "function") return globalThis.crypto.subtle;
-        return null;
-      };
-      var bytesToHex = (bytes) => {
-        const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-        let hex = "";
-        for (let i = 0; i < arr.length; i++) {
-          hex += arr[i].toString(16).padStart(2, "0");
-        }
-        return hex;
-      };
-      var base64ToBytes = (b64) => {
-        if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(b64, "base64"));
-        const binary = atob(b64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        return bytes;
-      };
-      var bytesToBase64 = (bytes) => {
-        const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-        if (typeof Buffer !== "undefined") return Buffer.from(view).toString("base64");
-        let binary = "";
-        for (let i = 0; i < view.length; i++) binary += String.fromCharCode(view[i]);
-        return btoa(binary);
-      };
-      var SyncCrypto = {
-        /**
-         * SHA-256 hex(URL 哈希化唯一 canonical 函数)
-         * @returns {Promise<string>}
-         */
-        async sha256Hex(str) {
-          const text = String(str ?? "");
-          const encoder = new TextEncoder();
-          const subtleApi = subtle();
-          if (subtleApi) {
-            const digest = await subtleApi.digest("SHA-256", encoder.encode(text));
-            return bytesToHex(digest);
-          }
-          const { createHash } = __require("crypto");
-          return createHash("sha256").update(text).digest("hex");
-        },
-        // --- encryptBlob / decryptBlob (PBKDF2-200000 + AES-256-GCM, 16B salt / 12B IV) ---
-        async _deriveKey(passphrase, saltBytes, iterations = 2e5) {
-          const encoder = new TextEncoder();
-          const subtleApi = subtle();
-          if (subtleApi) {
-            const baseKey = await subtleApi.importKey(
-              "raw",
-              encoder.encode(passphrase),
-              "PBKDF2",
-              false,
-              ["deriveKey"]
-            );
-            return subtleApi.deriveKey(
-              { name: "PBKDF2", salt: saltBytes, iterations, hash: "SHA-256" },
-              baseKey,
-              { name: "AES-GCM", length: 256 },
-              false,
-              ["encrypt", "decrypt"]
-            );
-          }
-          const { scryptSync, createCipheriv } = __require("crypto");
-          return { mode: "node", key: __require("crypto").pbkdf2Sync(passphrase, saltBytes, iterations, 32, "sha256"), createCipheriv };
-        },
-        _randomBytes(n) {
-          var _a;
-          if (typeof ((_a = globalThis.crypto) == null ? void 0 : _a.getRandomValues) === "function") {
-            const arr = new Uint8Array(n);
-            globalThis.crypto.getRandomValues(arr);
-            return arr;
-          }
-          const { randomBytes } = __require("crypto");
-          return randomBytes(n);
-        },
-        /**
-         * 加密 payload(异步)
-         * @param {string} passphrase
-         * @param {string} plaintext
-         * @returns {Promise<{v:number, salt:string, iv:string, ct:string}>}
-         */
-        async encryptBlob(passphrase, plaintext) {
-          if (!passphrase) throw new Error("\u52A0\u5BC6\u9700\u8981 passphrase");
-          const salt = this._randomBytes(16);
-          const iv = this._randomBytes(12);
-          const encoder = new TextEncoder();
-          const subtleApi = subtle();
-          let ciphertext;
-          if (subtleApi) {
-            const key = await this._deriveKey(passphrase, salt);
-            ciphertext = await subtleApi.encrypt({ name: "AES-GCM", iv }, key, encoder.encode(plaintext));
-          } else {
-            const { createCipheriv } = __require("crypto");
-            const key = __require("crypto").pbkdf2Sync(passphrase, salt, 2e5, 32, "sha256");
-            const cipher = createCipheriv("aes-256-gcm", key, iv);
-            ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-          }
-          return {
-            v: 1,
-            salt: bytesToBase64(salt),
-            iv: bytesToBase64(iv),
-            ct: bytesToBase64(ciphertext)
-          };
-        },
-        /**
-         * 解密 payload; 错口令/损坏 throw
-         * @param {string} passphrase
-         * @param {Object} blob - {v, salt, iv, ct}
-         * @returns {Promise<string>}
-         */
-        async decryptBlob(passphrase, blob) {
-          if (!passphrase || !blob || blob.v !== 1) throw new Error("\u65E0\u6548\u7684\u52A0\u5BC6 payload");
-          const salt = base64ToBytes(blob.salt);
-          const iv = base64ToBytes(blob.iv);
-          const ct = base64ToBytes(blob.ct);
-          const subtleApi = subtle();
-          if (subtleApi) {
-            const key2 = await this._deriveKey(passphrase, salt);
-            try {
-              const plain = await subtleApi.decrypt({ name: "AES-GCM", iv }, key2, ct);
-              return new TextDecoder().decode(plain);
-            } catch (e) {
-              throw new Error("\u53E3\u4EE4\u9519\u8BEF\u6216\u6570\u636E\u635F\u574F");
-            }
-          }
-          const { createDecipheriv } = __require("crypto");
-          const key = __require("crypto").pbkdf2Sync(passphrase, salt, 2e5, 32, "sha256");
-          try {
-            const decipher = createDecipheriv("aes-256-gcm", key, iv);
-            return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
-          } catch (e) {
-            throw new Error("\u53E3\u4EE4\u9519\u8BEF\u6216\u6570\u636E\u635F\u574F");
-          }
-        }
-      };
-      module.exports = { SyncCrypto };
-    }
-  });
-
-  // src/sync/SyncSerializer.js
-  var require_SyncSerializer = __commonJS({
-    "src/sync/SyncSerializer.js"(exports, module) {
-      "use strict";
-      var { SyncConstants } = require_constants2();
-      var { SyncCrypto } = require_SyncCrypto();
-      var { SyncStateV2 } = require_SyncState();
-      var WHITELIST = Object.freeze({
-        // 设置类(LWW)
-        settings: {
-          // W: 无敏感信息
-          ldb_sync_interval_linuxdo: { scope: "shared", kind: "number" },
-          ldb_sync_interval_github: { scope: "shared", kind: "number" },
-          ldb_sync_interval_bookmarks: { scope: "shared", kind: "number" },
-          ldb_sync_interval_rss: { scope: "shared", kind: "number" },
-          ldb_cross_source_mode: { scope: "shared", kind: "string" },
-          ldb_auto_import_enabled: { scope: "shared", kind: "boolean" },
-          ldb_auto_import_interval: { scope: "shared", kind: "number" },
-          ldb_github_auto_import_enabled: { scope: "shared", kind: "boolean" },
-          ldb_github_auto_import_interval: { scope: "shared", kind: "number" },
-          ldb_bookmark_auto_import_enabled: { scope: "shared", kind: "boolean" },
-          ldb_bookmark_auto_import_interval: { scope: "shared", kind: "number" },
-          ldb_rss_auto_import_enabled: { scope: "shared", kind: "boolean" },
-          ldb_rss_auto_import_interval: { scope: "shared", kind: "number" },
-          ldb_rss_import_dedup_mode: { scope: "shared", kind: "string" },
-          ldb_linuxdo_import_dedup_mode: { scope: "shared", kind: "string" },
-          ldb_bookmark_import_dedup_mode: { scope: "shared", kind: "string" },
-          ldb_ai_category_auto_dedup: { scope: "shared", kind: "boolean" },
-          ldb_bookmark_source: { scope: "shared", kind: "string" },
-          ldb_github_import_types: { scope: "shared", kind: "string" },
-          ldb_export_target_type: { scope: "shared", kind: "string" },
-          ldb_workspace_max_pages: { scope: "shared", kind: "number" },
-          ldb_agent_max_iterations: { scope: "shared", kind: "number" },
-          ldb_ai_service: { scope: "shared", kind: "string" },
-          ldb_ai_model: { scope: "shared", kind: "string" },
-          ldb_ai_categories: { scope: "shared", kind: "string" },
-          ldb_export_concurrency: { scope: "shared", kind: "number" },
-          ldb_theme_preference: { scope: "shared", kind: "string" },
-          // W(p): 个性化, shared 剔除
-          ldb_agent_persona_name: { scope: "personal", kind: "string" },
-          ldb_agent_persona_tone: { scope: "personal", kind: "string" },
-          ldb_agent_persona_expertise: { scope: "personal", kind: "string" },
-          ldb_agent_persona_instructions: { scope: "personal", kind: "string" },
-          ldb_ai_templates: { scope: "personal", kind: "string" },
-          // W*(高价值, 首次应用需 L2 确认): Notion 目标库
-          ldb_notion_database_id: { scope: "shared", kind: "string", confirmLevel: 2 },
-          ldb_ai_target_db: { scope: "shared", kind: "string", confirmLevel: 2 }
-        },
-        // 去重集合(sourceType → 是否 URL 类键需哈希化)。RSS_FEED_URLS 等入硬黑名单(M-2)。
-        dedupSources: Object.freeze({
-          linuxdo: { urlKeyed: false },
-          // linuxdo:{id}
-          "github-stars": { urlKeyed: false },
-          "github-repos": { urlKeyed: false },
-          "github-forks": { urlKeyed: false },
-          "github-gists": { urlKeyed: false },
-          bookmark: { urlKeyed: true },
-          // bookmark:{url} → 哈希
-          rss: { urlKeyed: true },
-          // rss:{guid||link} → 哈希
-          zhihu: { urlKeyed: true },
-          generic: { urlKeyed: true }
-          // generic:{url} → 哈希
-        }),
-        // watermark 源白名单(与 SyncStateV2._defaults 对齐)
-        watermarkSources: Object.freeze([
-          "linuxdo",
-          "github-stars",
-          "github-repos",
-          "github-forks",
-          "github-gists",
-          "bookmark",
-          "rss",
-          "zhihu",
-          "generic"
-        ])
-      });
-      var BLACKLIST = Object.freeze([
-        // Notion 凭证(OAuth 三键不在 SENSITIVE_KEYS, 必须显式)
-        "ldb_notion_api_key",
-        "ldb_notion_oauth_client_secret",
-        "ldb_notion_oauth_refresh_token",
-        // OAuth 瞬态/设备态
-        "ldb_notion_oauth_client_id",
-        "ldb_notion_oauth_redirect_uri",
-        "ldb_notion_oauth_state",
-        "ldb_notion_oauth_meta",
-        "ldb_notion_oauth_notice",
-        "ldb_notion_oauth_post_auth_target",
-        "ldb_notion_auth_mode",
-        // 保险箱
-        "ldb_credential_vault",
-        // 其他凭证
-        "ldb_ai_api_key",
-        "ldb_ai_base_url",
-        "ldb_github_token",
-        "ldb_obs_api_key",
-        "ldb_obs_api_url",
-        // 安全姿态(远程可改 = 提权/去审计)
-        "ldb_permission_level",
-        "ldb_require_confirm",
-        "ldb_enable_audit_log",
-        // 审计/隐私
-        "ldb_operation_log",
-        "ldb_chat_history",
-        "ldb_ai_trace_log",
-        // UI 瞬态/设备态
-        "ldb_panel_minimized",
-        "ldb_collapse_state",
-        "ldb_active_tab",
-        "ldb_panel_size_notion",
-        "ldb_panel_size_main",
-        "ldb_panel_size_generic",
-        "ldb_notion_panel_position",
-        "ldb_notion_panel_minimized",
-        "ldb_float_btn_position",
-        "ldb_ext_install_prompt_shown",
-        "ldb_mode_conflict_tip_shown",
-        // 过滤词/隐私边缘
-        "ldb_filter_only_first",
-        "ldb_filter_only_op",
-        "ldb_filter_range_start",
-        "ldb_filter_range_end",
-        "ldb_filter_img",
-        "ldb_filter_users",
-        "ldb_filter_include",
-        "ldb_filter_exclude",
-        "ldb_filter_minlen",
-        "ldb_img_mode",
-        // 设备/缓存
-        "ldb_request_delay",
-        "ldb_fetched_models",
-        "ldb_workspace_pages",
-        "ldb_update_auto_check_enabled",
-        "ldb_update_check_interval_hours",
-        "ldb_update_last_check_at",
-        "ldb_update_last_seen_version",
-        "ldb_update_last_result",
-        // 同步库本体/设备本地
-        "ldb_parent_page_id",
-        // 承载同步库, 循环语义
-        "ldb_exported_topics",
-        // legacy 键(已迁移到派生键)
-        "ldb_auto_sync_state",
-        // 本地真源, 仅投影 watermark+epoch
-        "ldb_sync_device_id",
-        "ldb_sync_enabled",
-        "ldb_sync_mode",
-        "ldb_sync_database_id",
-        "ldb_sync_parent_page_id",
-        "ldb_sync_last_push_at",
-        "ldb_sync_last_pull_at",
-        "ldb_sync_last_outcome",
-        "ldb_sync_passphrase_set",
-        // RSS feed URL(可能携带私有凭证, M-2 硬黑)
-        "ldb_rss_feed_urls",
-        // GitHub 身份/路径语义
-        "ldb_github_username",
-        "ldb_obs_dir",
-        "ldb_obs_img_mode",
-        "ldb_obs_img_dir"
-      ]);
-      var BLACKLIST_SET = new Set(BLACKLIST);
-      var FORBIDDEN_KEYS = new Set(SyncConstants.FORBIDDEN_KEYS);
-      var SyncSerializer = {
-        WHITELIST,
-        BLACKLIST,
-        /**
-         * 断言 payload 不含黑名单键/危险键(契约: 黑名单键经序列化器永不出现)
-         * @throws {Error}
-         */
-        assertNoBlacklisted(payload) {
-          const bad = [];
-          if ((payload == null ? void 0 : payload.settings) && typeof payload.settings === "object") {
-            for (const key of Object.keys(payload.settings)) {
-              if (BLACKLIST_SET.has(key)) bad.push(`settings:${key}`);
-              if (FORBIDDEN_KEYS.has(key)) bad.push(`settings:${key}(\u5371\u9669\u952E)`);
-            }
-          }
-          if ((payload == null ? void 0 : payload.dedup) && typeof payload.dedup === "object") {
-            for (const [src, set] of Object.entries(payload.dedup)) {
-              if (!WHITELIST.dedupSources[src]) bad.push(`dedup.${src}(\u6E90\u672A\u767D\u540D\u5355)`);
-              if (set && typeof set === "object") {
-                for (const k of Object.keys(set)) {
-                  if (FORBIDDEN_KEYS.has(k)) bad.push(`dedup.${src}:${k}(\u5371\u9669\u952E)`);
-                  if (k.length > SyncConstants.MAX_DEDUP_KEY_LENGTH) bad.push(`dedup.${src}:\u952E\u8D85\u957F`);
-                }
-              }
-            }
-          }
-          if (bad.length > 0) {
-            throw new Error(`SyncSerializer \u9ED1\u540D\u5355\u62E6\u622A: ${bad.join(", ")}`);
-          }
-        },
-        /**
-         * 从原始集合构建 payload(白名单过滤 + URL 哈希化 + 边界校验)
-         * @param {Object} raw { dedupSets, watermarks, settings }
-         * @param {Object} opts { deviceId, now, mode: "personal"|"shared", hashUrls: boolean }
-         * @returns {Promise<Object>} payload
-         */
-        async buildPayload(raw, { deviceId = "local", now = Date.now(), mode = "personal", hashUrls = true } = {}) {
-          var _a, _b;
-          const payload = {
-            schemaVersion: SyncConstants.SCHEMA_VERSION,
-            deviceId,
-            version: 0,
-            updatedAt: new Date(now).toISOString(),
-            dedup: {},
-            watermarks: {},
-            settings: {}
-          };
-          const tsFloor = now - SyncConstants.TS_PAST_TTL_MS;
-          for (const [src, set] of Object.entries((raw == null ? void 0 : raw.dedupSets) || {})) {
-            const meta = WHITELIST.dedupSources[src];
-            if (!meta || !set || typeof set !== "object") continue;
-            const clean = {};
-            let count = 0;
-            for (const [k, ts] of Object.entries(set)) {
-              if (FORBIDDEN_KEYS.has(k)) continue;
-              if (k.length > SyncConstants.MAX_DEDUP_KEY_LENGTH) continue;
-              const num = Number(ts);
-              if (!Number.isFinite(num) || num <= 0) continue;
-              if (!meta.urlKeyed && num < tsFloor) continue;
-              if (++count > SyncConstants.MAX_DEDUP_ENTRIES_PER_SOURCE) break;
-              const key = meta.urlKeyed && hashUrls && !k.startsWith("h:") ? `h:${await SyncCrypto.sha256Hex(k)}` : k;
-              clean[key] = num;
-            }
-            if (Object.keys(clean).length > 0) payload.dedup[src] = clean;
-          }
-          for (const src of WHITELIST.watermarkSources) {
-            const wm = (_a = raw == null ? void 0 : raw.watermarks) == null ? void 0 : _a[src];
-            if (!wm || typeof wm !== "object") continue;
-            const epoch = Number(wm.epoch);
-            if (!Number.isFinite(epoch) || epoch < 0) continue;
-            payload.watermarks[src] = {
-              epoch: Math.floor(epoch),
-              time: String(wm.time || ""),
-              ids: Array.isArray(wm.ids) ? wm.ids.map(String).slice(0, 500) : []
-            };
-          }
-          for (const [key, def] of Object.entries(WHITELIST.settings)) {
-            if (mode === "shared" && def.scope === "personal") continue;
-            const value = (_b = raw == null ? void 0 : raw.settings) == null ? void 0 : _b[key];
-            if (value === void 0 || value === null) continue;
-            const clean = SyncSerializer._coerceSetting(value, def.kind);
-            if (clean === void 0) continue;
-            payload.settings[key] = {
-              value: clean,
-              updatedAt: new Date(now).toISOString(),
-              deviceId
-            };
-          }
-          return payload;
-        },
-        _coerceSetting(value, kind) {
-          switch (kind) {
-            case "number": {
-              const n = Number(value);
-              return Number.isFinite(n) ? n : void 0;
-            }
-            case "boolean":
-              return value === true || value === false ? value : void 0;
-            case "string": {
-              const s = String(value ?? "");
-              return s.length <= 1e3 ? s : void 0;
-            }
-            default:
-              return void 0;
-          }
-        },
-        /**
-         * 校验远端 payload(拉取侧强校验, H-2):
-         * 结构/schemaVersion/键长/计数/ts 偏斜/epoch 增量上限/危险键
-         * @param {Object} payload
-         * @param {Object} opts { now, localEpochs: {src: number} }
-         * @returns {Object} { ok: boolean, error?: string }
-         */
-        validateRemote(payload, { now = Date.now(), localEpochs = {} } = {}) {
-          if (!payload || typeof payload !== "object") {
-            return { ok: false, error: "payload \u975E\u5BF9\u8C61" };
-          }
-          if (payload.schemaVersion !== SyncConstants.SCHEMA_VERSION) {
-            return { ok: false, error: `schema \u7248\u672C\u4E0D\u517C\u5BB9: ${payload.schemaVersion}` };
-          }
-          try {
-            SyncSerializer.assertNoBlacklisted(payload);
-          } catch (e) {
-            return { ok: false, error: e.message };
-          }
-          try {
-            if (JSON.stringify(payload).length > SyncConstants.MAX_PAYLOAD_BYTES) {
-              return { ok: false, error: "payload \u8D85\u9650" };
-            }
-          } catch {
-          }
-          const tsMin = now - SyncConstants.TS_PAST_TTL_MS;
-          const tsMax = now + SyncConstants.TS_FUTURE_SKEW_MS;
-          for (const [src, set] of Object.entries(payload.dedup || {})) {
-            for (const [k, ts] of Object.entries(set || {})) {
-              const num = Number(ts);
-              if (!Number.isFinite(num) || num < tsMin || num > tsMax) {
-                return { ok: false, error: `dedup.${src} ts \u8D8A\u754C: ${k}` };
-              }
-            }
-          }
-          for (const [src, wm] of Object.entries(payload.watermarks || {})) {
-            const localEpoch = Number(localEpochs[src]) || 0;
-            const remoteEpoch = Number(wm == null ? void 0 : wm.epoch) || 0;
-            if (remoteEpoch > localEpoch + SyncConstants.MAX_EPOCH_LEAD) {
-              return { ok: false, error: `watermark ${src} epoch \u901A\u80C0: ${remoteEpoch} > ${localEpoch}+1` };
-            }
-          }
-          return { ok: true };
-        },
-        // 契约辅助: 96 键穷举分区断言(W/B 恰好落一侧, 未知键默认拒绝)
-        assertKeyPartition(keys) {
-          const violations = [];
-          for (const key of keys) {
-            const inW = WHITELIST.settings[key] !== void 0;
-            const inB = BLACKLIST_SET.has(key);
-            if (inW && inB) violations.push(`${key}(W+B \u51B2\u7A81)`);
-          }
-          if (violations.length > 0) {
-            throw new Error(`\u9ED1\u767D\u540D\u5355\u51B2\u7A81: ${violations.join(", ")}`);
-          }
-          return true;
-        }
-      };
-      module.exports = { SyncSerializer };
-    }
-  });
-
-  // src/sync/SyncFragmenter.js
-  var require_SyncFragmenter = __commonJS({
-    "src/sync/SyncFragmenter.js"(exports, module) {
-      "use strict";
-      var { SyncConstants } = require_constants2();
-      var fnv1a = (text) => {
-        let hash = 2166136261;
-        for (let i = 0; i < text.length; i++) {
-          hash ^= text.charCodeAt(i);
-          hash = Math.imul(hash, 16777619);
-        }
-        return (hash >>> 0).toString(36);
-      };
-      var SyncFragmenter = {
-        /**
-         * 分片(单行方案: 若超限转多行分片)
-         * @param {string} text
-         * @returns {{rows: string[]}}
-         */
-        fragment(text, { chunkChars = SyncConstants.FRAGMENT_CHUNK_CHARS } = {}) {
-          const str = String(text ?? "");
-          if (str.length <= SyncConstants.FRAGMENT_MAX_ROW_CHARS) {
-            return { rows: [str] };
-          }
-          const rows = [];
-          const prefix = `LD-SYNC:${fnv1a(str)}:`;
-          const headerLen = prefix.length + 2;
-          const usable = Math.max(100, chunkChars - headerLen);
-          for (let i = 0; i < str.length; i += usable) {
-            rows.push(str.slice(i, i + usable));
-          }
-          if (rows.length > SyncConstants.FRAGMENT_MAX_BLOCKS) {
-            throw new Error(`payload \u8FC7\u5927: ${rows.length} \u5757\u8D85\u8FC7 ${SyncConstants.FRAGMENT_MAX_BLOCKS} \u4E0A\u9650`);
-          }
-          const checksum = fnv1a(str);
-          const total = rows.length;
-          return {
-            rows: rows.map((data, index) => `${prefix}${index + 1}/${total};${checksum};${data}`)
-          };
-        },
-        /**
-         * 重组(自动识别分片; 普通单行原样返回)
-         * @param {string[]} rowTexts
-         * @returns {{ok: boolean, text?: string, error?: string}}
-         */
-        defragment(rowTexts) {
-          const rows = Array.isArray(rowTexts) ? rowTexts : [];
-          if (rows.length === 0) return { ok: false, error: "\u65E0\u884C\u6570\u636E" };
-          const fragments = [];
-          const pattern = /^LD-SYNC:([0-9a-z]+):(\d+)\/(\d+);([0-9a-z]+);/;
-          for (const row of rows) {
-            const m = String(row || "").match(pattern);
-            if (!m) return { ok: true, text: rows.join("") };
-            fragments.push({ checksum: m[1], index: Number(m[2]), total: Number(m[3]), innerChecksum: m[4], data: row.slice(m[0].length) });
-          }
-          const first = fragments[0];
-          if (fragments.some((f) => f.total !== first.total || f.checksum !== first.checksum)) {
-            return { ok: false, error: "\u5206\u7247\u5143\u6570\u636E\u4E0D\u4E00\u81F4" };
-          }
-          const ordered = fragments.sort((a, b) => a.index - b.index);
-          if (ordered.length !== first.total) {
-            return { ok: false, error: `\u5206\u7247\u7F3A\u5931: ${ordered.length}/${first.total}` };
-          }
-          for (let i = 0; i < ordered.length; i++) {
-            if (ordered[i].index !== i + 1) return { ok: false, error: "\u5206\u7247\u5E8F\u53F7\u4E0D\u8FDE\u7EED" };
-          }
-          const text = ordered.map((f) => f.data).join("");
-          if (fnv1a(text) !== first.innerChecksum) {
-            return { ok: false, error: "checksum \u4E0D\u5339\u914D, payload \u635F\u574F" };
-          }
-          return { ok: true, text };
-        }
-      };
-      module.exports = { SyncFragmenter };
-    }
-  });
-
-  // src/sync/SyncRateLimiter.js
-  var require_SyncRateLimiter = __commonJS({
-    "src/sync/SyncRateLimiter.js"(exports, module) {
-      "use strict";
-      var { SyncConstants } = require_constants2();
-      var SyncRateLimiter = {
-        _tokens: SyncConstants.RATE_CAPACITY,
-        _lastRefill: Date.now(),
-        _waiters: [],
-        _inflight: 0,
-        _selfLimitTokens: SyncConstants.SYNC_SELF_LIMIT_PER_SEC,
-        _selfLastRefill: Date.now(),
-        /** 令牌桶 refresh */
-        _refill() {
-          const now = Date.now();
-          const elapsed = (now - this._lastRefill) / 1e3;
-          if (elapsed > 0) {
-            this._tokens = Math.min(SyncConstants.RATE_CAPACITY, this._tokens + elapsed * SyncConstants.RATE_REFILL_PER_SEC);
-            this._lastRefill = now;
-          }
-        },
-        /**
-         * 令牌桶 acquire(全局共享预算, gateAcquire 同实现)
-         * @returns {Promise<void>}
-         */
-        acquire() {
-          this._refill();
-          if (this._tokens >= 1) {
-            this._tokens -= 1;
-            return Promise.resolve();
-          }
-          return new Promise((resolve) => {
-            this._waiters.push(resolve);
-            this._drain();
-          });
-        },
-        _drain() {
-          if (this._waiters.length === 0) return;
-          this._refill();
-          while (this._waiters.length > 0 && this._tokens >= 1) {
-            this._tokens -= 1;
-            const resolve = this._waiters.shift();
-            resolve();
-          }
-          if (this._waiters.length > 0) {
-            const delay = Math.max(100, Math.ceil((1 - this._tokens) * 1e3));
-            setTimeout(() => this._drain(), delay);
-          }
-        },
-        /**
-         * 同步路径自限(≤2/s, 独立小桶)
-         */
-        selfAcquire() {
-          const now = Date.now();
-          const elapsed = (now - this._selfLastRefill) / 1e3;
-          if (elapsed >= 1) {
-            this._selfLimitTokens = SyncConstants.SYNC_SELF_LIMIT_PER_SEC;
-            this._selfLastRefill = now;
-          }
-          if (this._selfLimitTokens >= 1) {
-            this._selfLimitTokens -= 1;
-            return Promise.resolve();
-          }
-          return new Promise((resolve) => {
-            setTimeout(() => this.selfAcquire().then(resolve), Math.max(100, 1e3 - elapsed * 1e3));
-          });
-        },
-        /**
-         * NotionAPI.setRequestGate 注入形态
-         */
-        async gateAcquire() {
-          await this.acquire();
-        },
-        /**
-         * 同 key 防抖合并: 窗口内对同一 key 的多次调用合并为 1 次(最后一次胜出)
-         * @param {string} key
-         * @param {Function} fn - 执行体
-         * @param {Object} opts { windowMs=5000, maxWaitMs=30000 }
-         * @returns {Promise<*>}
-         */
-        schedule(key, fn, { windowMs = SyncConstants.DEBOUNCE_MS, maxWaitMs = 3e4 } = {}) {
-          const now = Date.now();
-          if (this._pending && this._pending.key === key && now - this._pending.startedAt < windowMs) {
-            this._pending.fn = fn;
-            return this._pending.promise;
-          }
-          if (this._pending && this._pending.key === key) {
-            this._pending = null;
-            return fn();
-          }
-          const p = new Promise((resolve, reject) => {
-            const timer = setTimeout(() => {
-              if (this._pending === entry) {
-                this._pending = null;
-                Promise.resolve(entry.fn()).then(resolve, reject);
-              }
-            }, windowMs);
-            const entry = { key, fn, startedAt: now, promise: p, timer };
-            this._pending = entry;
-          });
-          return p;
-        },
-        /**
-         * 错误分类: 401/403/400 → fatal(不重试); 其他 → retry
-         */
-        classifyError(err) {
-          const status = Number((err == null ? void 0 : err.status) || (err == null ? void 0 : err.statusCode) || (err == null ? void 0 : err.code));
-          if (status === 401 || status === 403 || status === 400) {
-            return { action: "fatal", status };
-          }
-          if (status >= 500 || status === 429) {
-            return { action: "retry", status };
-          }
-          return { action: "retry", status };
-        },
-        /** 退避: min(30s, 1000*2^attempt) */
-        backoffMs(attempt) {
-          return Math.min(SyncConstants.BACKOFF_CAP_MS, SyncConstants.BACKOFF_BASE_MS * Math.pow(2, attempt));
-        },
-        /** 测试辅助 */
-        _reset() {
-          this._tokens = SyncConstants.RATE_CAPACITY;
-          this._lastRefill = Date.now();
-          this._waiters = [];
-          this._selfLimitTokens = SyncConstants.SYNC_SELF_LIMIT_PER_SEC;
-          this._selfLastRefill = Date.now();
-        }
-      };
-      module.exports = { SyncRateLimiter };
-    }
-  });
-
-  // src/sync/SyncLedger.js
-  var require_SyncLedger = __commonJS({
-    "src/sync/SyncLedger.js"(exports, module) {
-      "use strict";
-      var { SyncFragmenter } = require_SyncFragmenter();
-      var { SyncRateLimiter } = require_SyncRateLimiter();
-      var ROW_TITLE_PROP = "\u952E";
-      var ROW_KIND_PROP = "\u7C7B\u578B";
-      var ROW_VERSION_PROP = "\u7248\u672C";
-      var ROW_UPDATED_AT_PROP = "\u66F4\u65B0\u65F6\u95F4";
-      var ROW_DEVICE_PROP = "\u8BBE\u5907";
-      var ROW_PAYLOAD_PROP = "\u6570\u636E";
-      var SyncLedger = {
-        /**
-         * 幂等 provision: 搜索已有同步库 → fetchDatabase → createDatabase
-         * @param {Object} deps { NotionAPI, OperationGuard, apiKey, parentPageId, context }
-         * @returns {Promise<{databaseId: string, created: boolean}>}
-         */
-        async provision({ NotionAPI: NotionAPI2, OperationGuard: OperationGuard2, apiKey, parentPageId, context = {} }) {
-          var _a, _b;
-          const searchFilter = { property: "\u6765\u6E90", rich_text: { equals: "LD-Sync" } };
-          const existing = await NotionAPI2.queryDatabase(
-            parentPageId,
-            searchFilter,
-            null,
-            null,
-            apiKey
-          ).catch(() => ({ results: [] }));
-          if ((_b = (_a = existing == null ? void 0 : existing.results) == null ? void 0 : _a[0]) == null ? void 0 : _b.id) {
-            return { databaseId: existing.results[0].id, created: false };
-          }
-          return OperationGuard2.execute("sync.medium.provision", async () => {
-            const db = await NotionAPI2.createDatabase(parentPageId, {
-              title: [{ type: "text", text: { content: "LD-Notion \u591A\u7AEF\u540C\u6B65" } }],
-              properties: SyncLedger._buildSchema()
-            }, apiKey);
-            return { databaseId: String((db == null ? void 0 : db.id) || ""), created: true };
-          }, { ...context, actor: "system", source: "sync-ledger" });
-        },
-        _buildSchema() {
-          const rich = () => ({ rich_text: {} });
-          const num = () => ({ number: {} });
-          return {
-            [ROW_TITLE_PROP]: { title: {} },
-            [ROW_KIND_PROP]: rich(),
-            [ROW_VERSION_PROP]: num(),
-            [ROW_UPDATED_AT_PROP]: rich(),
-            [ROW_DEVICE_PROP]: rich(),
-            [ROW_PAYLOAD_PROP]: rich(),
-            \u6765\u6E90: rich()
-          };
-        },
-        /**
-         * 拉取全部行(分页)
-         * @returns {Promise<Array>} rows
-         */
-        async pullRows({ NotionAPI: NotionAPI2, apiKey, databaseId, context = {} }) {
-          await SyncRateLimiter.selfAcquire();
-          const rows = [];
-          let cursor = null;
-          do {
-            await SyncRateLimiter.acquire();
-            const response = await NotionAPI2.queryDatabase(databaseId, void 0, null, cursor, apiKey);
-            rows.push(...(response == null ? void 0 : response.results) || []);
-            cursor = (response == null ? void 0 : response.has_more) ? response.next_cursor : null;
-          } while (cursor);
-          return rows;
-        },
-        /**
-         * 推送单行(updatePage PATCH; 行不存在时由引擎先 create)
-         * @returns {Promise<{updatedAt: string}>}
-         */
-        async pushRow({ NotionAPI: NotionAPI2, apiKey, databaseId, pageId, row, context = {} }) {
-          await SyncRateLimiter.acquire();
-          const props = SyncLedger._rowToProperties(row);
-          await NotionAPI2.updatePage(pageId, props, apiKey);
-          return { updatedAt: row.updatedAt };
-        },
-        /**
-         * 创建新行(provision 后首次 push 或行缺失时)
-         */
-        async createRow({ NotionAPI: NotionAPI2, apiKey, databaseId, row, context = {} }) {
-          await SyncRateLimiter.acquire();
-          const props = SyncLedger._rowToProperties(row);
-          const page = await NotionAPI2.request("POST", "/pages", {
-            parent: { database_id: databaseId },
-            properties: props
-          }, apiKey);
-          return { pageId: String((page == null ? void 0 : page.id) || ""), updatedAt: row.updatedAt };
-        },
-        /**
-         * 行 → Notion properties(payload 分片存第一片, 其余片存附件块——v1 简化: 单行 payload 分片存储于数据属性, 超限拒绝)
-         */
-        _rowToProperties(row) {
-          const payloadText = JSON.stringify(row.payload || {});
-          if (payloadText.length > 2e3) {
-            throw new Error(`\u884C payload \u8FC7\u5927(${payloadText.length} \u5B57\u7B26, Notion \u5355\u5C5E\u6027\u4E0A\u9650 2000), \u8BF7\u51CF\u5C11\u5355\u6E90\u53BB\u91CD\u6761\u76EE\u6216\u7B49\u5F85 TTL \u6DD8\u6C70\u540E\u91CD\u8BD5`);
-          }
-          return {
-            [ROW_TITLE_PROP]: { title: [{ type: "text", text: { content: String(row.key || "").slice(0, 1900) } }] },
-            [ROW_KIND_PROP]: { rich_text: [{ type: "text", text: { content: String(row.kind || "dedup").slice(0, 100) } }] },
-            [ROW_VERSION_PROP]: { number: Number(row.version) || 0 },
-            [ROW_UPDATED_AT_PROP]: { rich_text: [{ type: "text", text: { content: String(row.updatedAt || "").slice(0, 100) } }] },
-            [ROW_DEVICE_PROP]: { rich_text: [{ type: "text", text: { content: String(row.deviceId || "").slice(0, 100) } }] },
-            [ROW_PAYLOAD_PROP]: { rich_text: [{ type: "text", text: { content: payloadText } }] },
-            \u6765\u6E90: { rich_text: [{ type: "text", text: { content: "LD-Sync" } }] }
-          };
-        },
-        /**
-         * Notion page → 行(读取 + 损坏检测)
-         */
-        pageToRow(page) {
-          if (!(page == null ? void 0 : page.properties)) return null;
-          const get = (name) => {
-            var _a, _b, _c, _d;
-            const prop = page.properties[name];
-            if ((_b = (_a = prop == null ? void 0 : prop.title) == null ? void 0 : _a[0]) == null ? void 0 : _b.plain_text) return prop.title[0].plain_text;
-            if ((_d = (_c = prop == null ? void 0 : prop.rich_text) == null ? void 0 : _c[0]) == null ? void 0 : _d.plain_text) return prop.rich_text[0].plain_text;
-            if ((prop == null ? void 0 : prop.number) !== void 0 && (prop == null ? void 0 : prop.number) !== null) return String(prop.number);
-            return "";
-          };
-          const payloadText = get(ROW_PAYLOAD_PROP);
-          if (!payloadText) return null;
-          try {
-            return {
-              pageId: String(page.id || ""),
-              kind: get(ROW_KIND_PROP),
-              key: get(ROW_TITLE_PROP),
-              version: Number(get(ROW_VERSION_PROP)) || 0,
-              updatedAt: get(ROW_UPDATED_AT_PROP),
-              deviceId: get(ROW_DEVICE_PROP),
-              payload: JSON.parse(payloadText)
-            };
-          } catch {
-            return null;
-          }
-        }
-      };
-      module.exports = { SyncLedger };
-    }
-  });
-
-  // src/sync/SyncConfig.js
-  var require_SyncConfig = __commonJS({
-    "src/sync/SyncConfig.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var SyncConfig = {
-        _deviceId: null,
-        /**
-         * 获取/生成设备 ID(内存缓存 + 持久化)
-         */
-        getDeviceId() {
-          var _a;
-          if (SyncConfig._deviceId) return SyncConfig._deviceId;
-          let id = GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_DEVICE_ID, "");
-          if (!id || !/^[0-9a-f]{32}$/.test(id)) {
-            const bytes = new Uint8Array(16);
-            if (typeof ((_a = globalThis.crypto) == null ? void 0 : _a.getRandomValues) === "function") {
-              globalThis.crypto.getRandomValues(bytes);
-            } else {
-              const { randomBytes } = __require("crypto");
-              const buf = randomBytes(16);
-              bytes.set(buf);
-            }
-            id = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-            GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_DEVICE_ID, id);
-          }
-          SyncConfig._deviceId = id;
-          return id;
-        },
-        isEnabled() {
-          const raw = GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_ENABLED, CONFIG2.DEFAULTS.syncEnabled);
-          return raw === true || raw === "true";
-        },
-        setEnabled(v) {
-          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_ENABLED, !!v);
-        },
-        getMode() {
-          const m = GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_MODE, CONFIG2.DEFAULTS.syncMode);
-          return m === "shared" ? "shared" : "personal";
-        },
-        setMode(m) {
-          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_MODE, m === "shared" ? "shared" : "personal");
-        },
-        getDatabaseId() {
-          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_DATABASE_ID, "") || "";
-        },
-        setDatabaseId(id) {
-          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_DATABASE_ID, String(id || ""));
-        },
-        getParentPageId() {
-          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_PARENT_PAGE_ID, "") || "";
-        },
-        setParentPageId(id) {
-          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_PARENT_PAGE_ID, String(id || ""));
-        },
-        getLastPushAt() {
-          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_PUSH_AT, 0) || 0;
-        },
-        setLastPushAt(ts) {
-          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_PUSH_AT, Number(ts) || Date.now());
-        },
-        getLastPullAt() {
-          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_PULL_AT, 0) || 0;
-        },
-        setLastPullAt(ts) {
-          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_PULL_AT, Number(ts) || Date.now());
-        },
-        getLastOutcome() {
-          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_OUTCOME, "") || "";
-        },
-        setLastOutcome(s) {
-          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_LAST_OUTCOME, String(s || ""));
-        },
-        isPassphraseSet() {
-          return GM_getValue(CONFIG2.STORAGE_KEYS.SYNC_PASSPHRASE_SET, false) === true;
-        },
-        setPassphraseSet(v) {
-          GM_setValue(CONFIG2.STORAGE_KEYS.SYNC_PASSPHRASE_SET, !!v);
-        }
-      };
-      module.exports = { SyncConfig };
-    }
-  });
-
-  // src/sync/SyncEngine.js
-  var require_SyncEngine = __commonJS({
-    "src/sync/SyncEngine.js"(exports, module) {
-      "use strict";
-      var { SyncConstants } = require_constants2();
-      var { SyncPayload } = require_SyncPayload();
-      var { SyncSerializer } = require_SyncSerializer();
-      var { SyncLedger } = require_SyncLedger();
-      var { SyncConfig } = require_SyncConfig();
-      var { SyncRateLimiter } = require_SyncRateLimiter();
-      var { SyncCrypto } = require_SyncCrypto();
-      var SyncEngine = {
-        _deps: null,
-        _timer: null,
-        _pushTimer: null,
-        _running: false,
-        /**
-         * 初始化(仅 flag on 且 SyncConfig.isEnabled() 时由 main.js 调用)
-         * @param {Object} deps { Storage, SyncStateV2, DedupStore, NotionAPI, OperationGuard, OperationLog, apiKeyProvider }
-         */
-        init(deps) {
-          SyncEngine._deps = deps;
-          const { on } = require_event_bus();
-          on("storage:state-committed", (e) => {
-            if (SyncEngine._pushTimer) clearTimeout(SyncEngine._pushTimer);
-            SyncEngine._pushTimer = setTimeout(() => {
-              SyncEngine.push({ reason: "state-committed" });
-            }, SyncConstants.DEBOUNCE_MS);
-          });
-        },
-        _getDeps() {
-          if (!SyncEngine._deps) throw new Error("SyncEngine \u672A\u521D\u59CB\u5316");
-          return SyncEngine._deps;
-        },
-        /**
-         * 收集本地状态 → payload(Serializer 过滤+哈希化)
-         */
-        async _buildLocalPayload() {
-          var _a;
-          const { Storage: Storage2, SyncStateV2, DedupStore, OperationGuard: OperationGuard2 } = SyncEngine._getDeps();
-          const deviceId = SyncConfig.getDeviceId();
-          const mode = SyncConfig.getMode();
-          const dedupSets = {};
-          for (const src of Object.keys(SyncSerializer.WHITELIST.dedupSources)) {
-            dedupSets[src] = DedupStore.getSeen(src) || {};
-          }
-          const watermarks = {};
-          for (const src of SyncSerializer.WHITELIST.watermarkSources) {
-            const st = SyncStateV2.getSourceState(src);
-            if ((_a = st.watermark) == null ? void 0 : _a.time) {
-              watermarks[src] = { epoch: st.epoch || 0, time: st.watermark.time, ids: st.watermark.ids || [] };
-            }
-          }
-          const settings = {};
-          for (const key of Object.keys(SyncSerializer.WHITELIST.settings)) {
-            const value = Storage2.get(key, void 0);
-            if (value !== void 0 && value !== null) settings[key] = value;
-          }
-          const payload = await SyncSerializer.buildPayload(
-            { dedupSets, watermarks, settings },
-            { deviceId, now: Date.now(), mode, hashUrls: true }
-          );
-          SyncSerializer.assertNoBlacklisted(payload);
-          return payload;
-        },
-        /**
-         * push: 本地 payload 全量投影到介质(每源一行; 幂等 upsert)
-         * @returns {Promise<{ok: boolean, outcome: string, error?: string}>}
-         */
-        async push({ reason = "manual" } = {}) {
-          if (SyncEngine._running) return { ok: false, outcome: "busy" };
-          const { OperationGuard: OperationGuard2, OperationLog: OperationLog2, NotionAPI: NotionAPI2 } = SyncEngine._getDeps();
-          if (!OperationGuard2.canExecute("sync.state.push")) {
-            OperationLog2.add({
-              audit_event: "guard.denied",
-              actor: "system",
-              source: "sync-engine",
-              guard: { operation: "sync.state.push", decision: "deny", reason: "\u6743\u9650\u4E0D\u8DB3: \u591A\u7AEF\u540C\u6B65\u63A8\u9001\u9700 level\u22651" },
-              operationName: "sync.state.push",
-              status: "denied",
-              context: { reason }
-            }, { force: true });
-            SyncConfig.setLastOutcome("denied");
-            return { ok: false, outcome: "denied" };
-          }
-          SyncEngine._running = true;
-          try {
-            const payload = await SyncEngine._buildLocalPayload();
-            const apiKey = SyncEngine._getApiKey();
-            const databaseId = SyncConfig.getDatabaseId();
-            if (!databaseId || !apiKey) {
-              SyncConfig.setLastOutcome("not-configured");
-              return { ok: false, outcome: "not-configured" };
-            }
-            const { OperationGuard: Guard } = SyncEngine._getDeps();
-            await Guard.execute("sync.state.push", async () => {
-              const rows = [];
-              for (const [src, set] of Object.entries(payload.dedup)) {
-                rows.push({
-                  kind: "dedup",
-                  key: src,
-                  version: payload.version || 0,
-                  updatedAt: payload.updatedAt,
-                  deviceId: payload.deviceId,
-                  payload: {
-                    dedup: { [src]: SyncEngine._truncateSetForRow(src, set) },
-                    watermarks: payload.watermarks[src] ? { [src]: payload.watermarks[src] } : void 0
-                  }
-                });
-              }
-              for (const [src] of Object.entries(payload.watermarks)) {
-                if (!payload.dedup[src]) {
-                  rows.push({
-                    kind: "watermark",
-                    key: src,
-                    version: payload.version || 0,
-                    updatedAt: payload.updatedAt,
-                    deviceId: payload.deviceId,
-                    payload: { watermarks: { [src]: payload.watermarks[src] } }
-                  });
-                }
-              }
-              rows.push({
-                kind: "settings",
-                key: "settings",
-                version: payload.version || 0,
-                updatedAt: payload.updatedAt,
-                deviceId: payload.deviceId,
-                payload: { settings: payload.settings }
-              });
-              const existing = await SyncLedger.pullRows({ NotionAPI: NotionAPI2, apiKey, databaseId, context: { reason } });
-              const index = /* @__PURE__ */ new Map();
-              for (const row of existing) {
-                const parsed = SyncLedger.pageToRow(row);
-                if (parsed) index.set(`${parsed.kind}:${parsed.key}`, parsed);
-              }
-              for (const row of rows) {
-                const id = `${row.kind}:${row.key}`;
-                const prior = index.get(id);
-                if (prior && prior.pageId) {
-                  await SyncLedger.pushRow({ NotionAPI: NotionAPI2, apiKey, databaseId, pageId: prior.pageId, row, context: { reason } });
-                } else {
-                  await SyncLedger.createRow({ NotionAPI: NotionAPI2, apiKey, databaseId, row, context: { reason } });
-                }
-              }
-            }, { trigger: "multi_device_sync", reason });
-            SyncConfig.setLastPushAt(Date.now());
-            SyncConfig.setLastOutcome("success");
-            return { ok: true, outcome: "success" };
-          } catch (error) {
-            SyncConfig.setLastOutcome(`error:${String((error == null ? void 0 : error.message) || error).slice(0, 200)}`);
-            return { ok: false, outcome: "error", error: String((error == null ? void 0 : error.message) || error) };
-          } finally {
-            SyncEngine._running = false;
-          }
-        },
-        _getApiKey() {
-          var _a;
-          const deps = SyncEngine._getDeps();
-          if (typeof deps.apiKeyProvider === "function") {
-            const v = deps.apiKeyProvider();
-            if (v) return v;
-          }
-          try {
-            const { NotionOAuth: NotionOAuth2 } = require_auth();
-            return ((_a = NotionOAuth2 == null ? void 0 : NotionOAuth2.getAccessToken) == null ? void 0 : _a.call(NotionOAuth2)) || "";
-          } catch {
-            return "";
-          }
-        },
-        /**
-         * v3.14.4: 单源 dedup set 截断以适配 SyncLedger 单行 2000 字符硬限。
-         * 按 ts 降序保留最新条目; 触发截断时记审计事件。返回新对象(不 mutate 输入)。
-         */
-        _truncateSetForRow(src, set, budgetChars = 1900) {
-          const probe = JSON.stringify(set || {});
-          if (probe === void 0 || probe.length <= budgetChars) return set;
-          const entries = Object.entries(set || {});
-          entries.sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0));
-          const picked = {};
-          let size = 2;
-          let kept = 0;
-          for (const [k, ts] of entries) {
-            const inc = (kept > 0 ? 1 : 0) + JSON.stringify(k).length + 1 + String(Number(ts)).length;
-            if (size + inc > budgetChars) break;
-            picked[k] = Number(ts);
-            size += inc;
-            kept++;
-          }
-          try {
-            const { OperationLog: OperationLog2 } = SyncEngine._getDeps();
-            OperationLog2.add({
-              audit_event: "sync.row.truncated",
-              actor: "system",
-              source: "sync-engine",
-              operationName: "sync.state.push",
-              status: "success",
-              context: { source: src, total: entries.length, kept, reason: "row payload 2000 char hard limit" }
-            }, { force: true });
-          } catch {
-          }
-          return picked;
-        },
-        /**
-         * pull: 拉远端行 → 校验 → merge → applyRemote(仅胜出项)
-         * @returns {Promise<{ok: boolean, outcome: string, applied: Object, error?: string}>}
-         */
-        async pull({ reason = "manual" } = {}) {
-          if (SyncEngine._running) return { ok: false, outcome: "busy" };
-          if (!SyncConfig.isEnabled()) return { ok: false, outcome: "disabled" };
-          const { OperationGuard: OperationGuard2, OperationLog: OperationLog2, NotionAPI: NotionAPI2, SyncStateV2, DedupStore } = SyncEngine._getDeps();
-          if (!OperationGuard2.canExecute("sync.state.pull")) {
-            OperationLog2.add({
-              audit_event: "guard.denied",
-              actor: "system",
-              source: "sync-engine",
-              guard: { operation: "sync.state.pull", decision: "deny", reason: "\u6743\u9650\u4E0D\u8DB3: \u62C9\u53D6\u9700 level\u22650" },
-              operationName: "sync.state.pull",
-              status: "denied",
-              context: { reason }
-            }, { force: true });
-            SyncConfig.setLastOutcome("denied");
-            return { ok: false, outcome: "denied" };
-          }
-          SyncEngine._running = true;
-          try {
-            const apiKey = SyncEngine._getApiKey();
-            const databaseId = SyncConfig.getDatabaseId();
-            if (!databaseId || !apiKey) {
-              SyncConfig.setLastOutcome("not-configured");
-              return { ok: false, outcome: "not-configured" };
-            }
-            const rows = await SyncLedger.pullRows({ NotionAPI: NotionAPI2, apiKey, databaseId, context: { reason } });
-            let mergedRemote = { schemaVersion: SyncConstants.SCHEMA_VERSION, deviceId: "", updatedAt: "", version: 0, dedup: {}, watermarks: {}, settings: {} };
-            let validRows = 0;
-            for (const page of rows) {
-              const row = SyncLedger.pageToRow(page);
-              if (!row || !row.payload || typeof row.payload !== "object") continue;
-              validRows++;
-              const rowPayload = { schemaVersion: 1, deviceId: row.deviceId || "", updatedAt: row.updatedAt || "", version: row.version || 0, ...row.payload };
-              try {
-                mergedRemote = SyncPayload.merge(mergedRemote, rowPayload);
-              } catch {
-              }
-            }
-            if (validRows === 0) {
-              SyncConfig.setLastPullAt(Date.now());
-              SyncConfig.setLastOutcome("empty");
-              return { ok: true, outcome: "empty", applied: { dedupEntries: [], watermarkWinners: [], settingsWinners: [] } };
-            }
-            const localEpochs = {};
-            for (const src of SyncSerializer.WHITELIST.watermarkSources) {
-              localEpochs[src] = SyncStateV2.getSourceState(src).epoch || 0;
-            }
-            const validation = SyncSerializer.validateRemote(mergedRemote, { now: Date.now(), localEpochs });
-            if (!validation.ok) {
-              OperationLog2.add({
-                audit_event: "sync.state.pulled",
-                actor: "system",
-                source: "sync-engine",
-                operationName: "sync.state.pull",
-                status: "failed",
-                context: { reason, error: validation.error }
-              }, { force: true });
-              SyncConfig.setLastOutcome(`rejected:${validation.error}`);
-              return { ok: false, outcome: "rejected", error: validation.error };
-            }
-            const localPayload = await SyncEngine._buildLocalPayload();
-            const merged = SyncPayload.merge(localPayload, mergedRemote);
-            const winners = SyncPayload.diffWinners(localPayload, mergedRemote);
-            const applied = SyncEngine.applyRemote(winners, { SyncStateV2, DedupStore });
-            SyncConfig.setLastPullAt(Date.now());
-            SyncConfig.setLastOutcome(`success(applied:${applied.dedupEntries.length}/${applied.watermarkWinners.length}/${applied.settingsWinners.length})`);
-            return { ok: true, outcome: "success", applied };
-          } catch (error) {
-            SyncConfig.setLastOutcome(`error:${String((error == null ? void 0 : error.message) || error).slice(0, 200)}`);
-            return { ok: false, outcome: "error", error: String((error == null ? void 0 : error.message) || error) };
-          } finally {
-            SyncEngine._running = false;
-          }
-        },
-        /**
-         * applyRemote — 仅写 diffWinners 胜出项(去重 union 写回 + watermark 应用 + settings 应用)
-         */
-        applyRemote(winners, { SyncStateV2, DedupStore } = {}) {
-          const deps = SyncEngine._getDeps();
-          const State = SyncStateV2 || deps.SyncStateV2;
-          const Dedup = DedupStore || deps.DedupStore;
-          for (const entry of winners.dedupEntries || []) {
-            Dedup.markSeen(entry.source, entry.key);
-          }
-          for (const { source, watermark } of winners.watermarkWinners || []) {
-            const local = State.getSourceState(source);
-            const localEpoch = Number(local.epoch) || 0;
-            const remoteEpoch = Number(watermark.epoch) || 0;
-            if (remoteEpoch > localEpoch + SyncConstants.MAX_EPOCH_LEAD) continue;
-            State.updateSourceState(source, {
-              watermark: { time: watermark.time, ids: watermark.ids || [] },
-              epoch: Math.max(localEpoch, remoteEpoch),
-              lastOutcome: "success"
-            });
-          }
-          const { Storage: Storage2, OperationGuard: OperationGuard2 } = deps;
-          for (const { key, entry } of winners.settingsWinners || []) {
-            const def = SyncSerializer.WHITELIST.settings[key];
-            if (!def) continue;
-            if (def.confirmLevel && OperationGuard2.getLevel() < def.confirmLevel) {
-              continue;
-            }
-            const coerce = SyncSerializer._coerceSetting(entry.value, def.kind);
-            if (coerce === void 0) continue;
-            Storage2.set(key, coerce);
-          }
-          return {
-            dedupEntries: (winners.dedupEntries || []).length,
-            watermarkWinners: (winners.watermarkWinners || []).length,
-            settingsWinners: (winners.settingsWinners || []).length
-          };
-        },
-        /**
-         * syncOnce: push + pull(顺序, 避免自触发)
-         */
-        async syncOnce({ reason = "manual" } = {}) {
-          const pushResult = await SyncEngine.push({ reason });
-          const pullResult = await SyncEngine.pull({ reason });
-          return { push: pushResult, pull: pullResult };
-        },
-        /**
-         * resetRemote: 清空介质(危险操作 L3 + 确认)
-         */
-        async resetRemote({ confirm: confirm2 = false } = {}) {
-          if (!confirm2) return { ok: false, outcome: "need-confirm" };
-          const { OperationGuard: OperationGuard2, OperationLog: OperationLog2, NotionAPI: NotionAPI2 } = SyncEngine._getDeps();
-          return OperationGuard2.execute("sync.medium.reset", async () => {
-            const apiKey = SyncEngine._getApiKey();
-            const databaseId = SyncConfig.getDatabaseId();
-            if (databaseId) {
-              await NotionAPI2.deletePage(databaseId, apiKey).catch(() => {
-              });
-            }
-            SyncConfig.setDatabaseId("");
-            SyncConfig.setLastOutcome("reset");
-            return { ok: true, outcome: "reset" };
-          }, { trigger: "multi_device_sync", actor: "user" });
-        },
-        getStatus() {
-          return {
-            enabled: SyncConfig.isEnabled(),
-            mode: SyncConfig.getMode(),
-            deviceId: SyncConfig.getDeviceId(),
-            databaseId: SyncConfig.getDatabaseId(),
-            lastPushAt: SyncConfig.getLastPushAt(),
-            lastPullAt: SyncConfig.getLastPullAt(),
-            lastOutcome: SyncConfig.getLastOutcome()
-          };
-        }
-      };
-      module.exports = { SyncEngine };
-    }
-  });
-
-  // src/sync/index.js
-  var require_sync = __commonJS({
-    "src/sync/index.js"(exports, module) {
-      "use strict";
-      var { SyncConstants } = require_constants2();
-      var { SyncPayload } = require_SyncPayload();
-      var { SyncSerializer } = require_SyncSerializer();
-      var { SyncCrypto } = require_SyncCrypto();
-      var { SyncFragmenter } = require_SyncFragmenter();
-      var { SyncRateLimiter } = require_SyncRateLimiter();
-      var { SyncLedger } = require_SyncLedger();
-      var { SyncEngine } = require_SyncEngine();
-      var { SyncConfig } = require_SyncConfig();
-      module.exports = {
-        SyncConstants,
-        SyncPayload,
-        SyncSerializer,
-        SyncCrypto,
-        SyncFragmenter,
-        SyncRateLimiter,
-        SyncLedger,
-        SyncEngine,
-        SyncConfig
-      };
     }
   });
 
@@ -30833,7 +29714,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter } = require_bridge();
   var { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI, GenericUI } = require_ui();
   var { UICommandService } = require_coordination();
-  var syncModule = CONFIG.MULTI_DEVICE_SYNC_ENABLED ? require_sync() : null;
+  var syncModule = false ? null : null;
   Storage.CredentialVault = CredentialVault;
   BookmarkBridge.init();
   window.addEventListener("ld-notion-popup-action", (event) => {
@@ -30908,28 +29789,16 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         } else if (currentSite === SiteDetector.SITES.GENERIC) {
           GenericUI.init();
         }
-        if (syncModule && syncModule.SyncConfig && syncModule.SyncConfig.isEnabled()) {
-          const { SyncEngine, SyncConfig: SC, SyncRateLimiter, SyncSerializer, SyncLedger, SyncPayload, SyncCrypto } = syncModule;
-          SyncEngine.init({
+        if (syncModule && syncModule.boot) {
+          syncModule.boot({
             Storage,
-            SyncStateV2: SyncState,
+            SyncState,
             DedupStore: require_DedupStore().DedupStore,
             NotionAPI,
             OperationGuard,
-            OperationLog
+            OperationLog,
+            Utils
           });
-          NotionAPI.setRequestGate(() => SyncRateLimiter.gateAcquire());
-          Utils.runWhenBrowserIdle(() => SyncEngine.pull({ reason: "idle" }));
-          const hash = SC.getDeviceId().split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-          const phase = hash % 15;
-          setTimeout(() => {
-            const loop = () => {
-              if (!SC.isEnabled()) return;
-              SyncEngine.pull({ reason: "periodic" });
-              setTimeout(loop, 30 * 60 * 1e3 + phase * 6e4);
-            };
-            loop();
-          }, phase * 6e4);
         }
         const notice = NotionOAuth.consumeNotice();
         if (notice == null ? void 0 : notice.message) {
@@ -30952,9 +29821,9 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       } catch (e) {
         console.error("[LD-Notion] \u521D\u59CB\u5316\u5931\u8D25:", e);
         try {
-          if (typeof UI !== "undefined" && typeof UI.showStatus === "function") {
+          if (typeof UI.showStatus === "function") {
             UI.showStatus(`LD-Notion \u521D\u59CB\u5316\u5931\u8D25: ${(e == null ? void 0 : e.message) || e}`, "error");
-          } else if (typeof GenericUI !== "undefined" && typeof GenericUI.showStatus === "function") {
+          } else if (typeof GenericUI.showStatus === "function") {
             GenericUI.showStatus(`LD-Notion \u521D\u59CB\u5316\u5931\u8D25: ${(e == null ? void 0 : e.message) || e}`, "error");
           }
         } catch (_) {

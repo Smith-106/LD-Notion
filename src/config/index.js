@@ -17,6 +17,7 @@ const CONFIG = {
         NOTION_OAUTH_CLIENT_SECRET: "ldb_notion_oauth_client_secret",
         NOTION_OAUTH_REDIRECT_URI: "ldb_notion_oauth_redirect_uri",
         NOTION_OAUTH_REFRESH_TOKEN: "ldb_notion_oauth_refresh_token",
+        NOTION_OAUTH_REFRESH_LEASE: "ldb_notion_oauth_refresh_lease",
         NOTION_OAUTH_STATE: "ldb_notion_oauth_state",
         NOTION_OAUTH_META: "ldb_notion_oauth_meta",
         NOTION_OAUTH_NOTICE: "ldb_notion_oauth_notice",
@@ -111,6 +112,8 @@ const CONFIG = {
         // 跨源设置
         CROSS_SOURCE_MODE: "ldb_cross_source_mode",
         AUTO_SYNC_STATE: "ldb_auto_sync_state",
+        // v3.14.6 (CC-04): 跨 tab 自动同步租约锁键(owner+expiresAt JSON, TTL 兜底)
+        AUTO_SYNC_LEASE: "ldb_auto_sync_lease",
         // 同步间隔 (每源独立可配)
         SYNC_INTERVAL_LINUXDO: "ldb_sync_interval_linuxdo",
         SYNC_INTERVAL_GITHUB: "ldb_sync_interval_github",

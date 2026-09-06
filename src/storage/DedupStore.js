@@ -30,7 +30,7 @@ const DedupStore = {
     DEDUP_TTL_MS,
     DEDUP_CAPACITY_LIMIT,
     URL_KEYED_SOURCES,
-    _keyFor(sourceType) {
+    keyFor(sourceType) {
         return `${CONFIG.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`;
     },
 
@@ -45,7 +45,7 @@ const DedupStore = {
     },
 
     _loadSet(sourceType) {
-        const raw = GM_getValue(this._keyFor(sourceType), "{}");
+        const raw = GM_getValue(this.keyFor(sourceType), "{}");
         try {
             const parsed = JSON.parse(raw);
             // 损坏存储兜底: 非纯对象(数组/null/原始值)时严格模式赋值会抛 TypeError
@@ -64,7 +64,7 @@ const DedupStore = {
         } else {
             this._evictByCapacity(set);
         }
-        GM_setValue(this._keyFor(sourceType), JSON.stringify(set));
+        GM_setValue(this.keyFor(sourceType), JSON.stringify(set));
     },
 
     // --- batch 模式: 减少 IPC 调用(全盘审计 find 7: 单槽 → 按 sourceType 分槽,
@@ -76,12 +76,16 @@ const DedupStore = {
      * @param {string} sourceType
      */
     beginBatch(sourceType) {
+        // v3.14.6 (CC-06): 幂等 —— 槽已存在则复用(同源并发 batch 后开者不再覆盖先开者内存累积)
+        if (this._batchCaches[sourceType]) return;
         this._batchCaches[sourceType] = { set: this._loadSet(sourceType), dirty: false };
     },
 
     /**
      * 结束批量模式，如有变更则一次写回。
      * 写回前自动淘汰超过 TTL 的过期条目（PERF-001）。
+     * v3.14.6 (CC-06): 写回前 rebase —— 重读 fresh set 并集, 同键 max ts,
+     * 防跨 batch 并发时后写者以陈旧内存快照覆盖先写者已落盘条目。
      * @param {string} [sourceType] 指定源; 省略时 flush 全部缓存
      */
     endBatch(sourceType) {
@@ -89,13 +93,19 @@ const DedupStore = {
         for (const src of targets) {
             const cache = this._batchCaches[src];
             if (cache && cache.dirty) {
+                const fresh = this._loadSet(src);
+                for (const [k, ts] of Object.entries(cache.set)) {
+                    const prev = fresh[k];
+                    if (prev === undefined || Number(ts) > Number(prev)) fresh[k] = ts;
+                }
                 // v3.14.3: 与 _saveSet 同规则——URL 键源时间 TTL, id 键源容量上限
                 if (URL_KEYED_SOURCES.includes(src)) {
-                    this._evictExpired(cache.set);
+                    this._evictExpired(fresh);
                 } else {
-                    this._evictByCapacity(cache.set);
+                    this._evictByCapacity(fresh);
                 }
-                this._saveSet(src, cache.set);
+                this._saveSet(src, fresh);
+                cache.set = fresh;
                 // F-SYNC-11: 去重账本变更事件(零订阅者静默),多端同步引擎据此触发 push。
                 emit("storage:state-committed", { sourceType: src, kind: "dedup" });
             }
@@ -172,22 +182,26 @@ const DedupStore = {
 
     /**
      * 标记条目为已见(urlKeyed 源双写哈希键, 与同步 payload 键空间一致)
+     * v3.14.6 (DC-008): 可选 ts 参数(远端 TTL 起点失真修复), 显式取 max
      * @param {string} sourceType
      * @param {string} dedupKey
+     * @param {number} [ts] - 条目时间戳, 默认 Date.now()
      */
-    markSeen(sourceType, dedupKey) {
+    markSeen(sourceType, dedupKey, ts) {
+        const now = ts === undefined ? Date.now() : Number(ts);
+        const stamp = Number.isFinite(now) && now > 0 ? now : Date.now();
         const hashed = this._hashKeyFor(sourceType, dedupKey);
         // batch 模式下在内存缓存中标记
         const batch = this._batchGet(sourceType);
         if (batch) {
-            batch.set[dedupKey] = Date.now();
-            if (hashed !== dedupKey) batch.set[hashed] = Date.now();
+            if (!batch.set[dedupKey] || batch.set[dedupKey] < stamp) batch.set[dedupKey] = stamp;
+            if (hashed !== dedupKey && (!batch.set[hashed] || batch.set[hashed] < stamp)) batch.set[hashed] = stamp;
             batch.dirty = true;
             return;
         }
         const set = this._loadSet(sourceType);
-        set[dedupKey] = Date.now();
-        if (hashed !== dedupKey) set[hashed] = Date.now();
+        if (!set[dedupKey] || set[dedupKey] < stamp) set[dedupKey] = stamp;
+        if (hashed !== dedupKey && (!set[hashed] || set[hashed] < stamp)) set[hashed] = stamp;
         this._saveSet(sourceType, set);
     },
 
@@ -247,7 +261,7 @@ const DedupStore = {
             batch.dirty = true;
             return;
         }
-        GM_deleteValue(this._keyFor(sourceType));
+        GM_deleteValue(this.keyFor(sourceType));
     },
 };
 

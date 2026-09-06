@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.5`
+- 当前仓库源码版本：`v3.14.6`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -373,7 +373,7 @@ A: 请检查：
   5. 如涉及扩展交付：`node scripts/build-extension.js`
   6. 最后按 `docs/ui-regression-checklist.md` 做 Linux.do / Notion / 通用网页 / `chrome-extension-full` 手工 smoke
 - 一键交付验证：`npm run verify:delivery`（包含 baseline、`bounded_hosts` smoke、bridge runtime smoke 与默认扩展构建）
-- `npm test`：35 个测试文件、696 个用例，覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、AI Schema/Trace/Handlers、API 模块、RSS/Atom 解析、GitHub/书签/通用导出、UI 基线等模块
+- `npm test`：38 个测试文件、754 个用例，覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、AI Schema/Trace/Handlers、API 模块、RSS/Atom 解析、GitHub/书签/通用导出、UI 基线等模块
 - Node 测试会直接读取并执行当前 `LinuxDo-Bookmarks-to-Notion.user.js` 的核心代码，并复用 `scripts/build-extension.js` 的提取/构建 seam，而不是维护一份单独的测试副本
 - 当前自动化验证重点覆盖：Utils 辅助函数、OAuth 回调与 refresh fallback、`TargetState`、`quickParseIntent` 正/反例、`assistant_result v1` 输出契约，以及 `scripts/build-extension.js` 的锚点、builder seam、manifest profile、bridge runtime 边界与构建冒烟
 - 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）
@@ -385,6 +385,17 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.6
+
+三模型共识审计 51 条发现全量修复（安全/并发/存储/同步四大类），验证 754 用例全绿：
+- **安全**：OAuth 回调跨页状态租约续签（修复「更新后 Key 失效」）、凭证落盘前脱敏（AgentTrace 落盘接线）、AI 输入隔离统一逐字符转义、Gemini 多轮对话 role 契约映射、通配 DNS 后缀（nip.io/sslip.io/xip.io/loca.lt/ssrf.sh）静态拒绝、非规范 IP 字面量纵深防御（前导零判定收窄防合法域名误拒）
+- **并发**：批量导出遇失效 Token 认证终态 fail-fast（6 处循环）、存储回写 rebase 防双写竞争、同步锁状态拆分
+- **存储**：导出事实账本容量上限淘汰（禁时间 TTL）、去重键 markSeen 时间合并、代理项 UTF-8 编码对齐 TextEncoder（U+FFFD 高位孤立项）
+- **同步**：单源行 payload ≤2000 字符硬限 + 超限时间降序截断、id 键源 90 天新鲜度投影、RSS 状态按当前键集剪枝
+- **修复验证**：新增契约测试 fix-p0/p1/p2 共 55 用例，全量 vitest 754 用例 + legacy 三件套全绿，verify:delivery 13 维度全链通过
+
+**升级说明**：涉及持久化存储键与 OAuth 状态语义变化，安装后请重新授权 Notion（OAuth 一键授权或填入 API Key），并点击「刷新工作区」对齐本地账本。
 
 ### v3.14.5
 

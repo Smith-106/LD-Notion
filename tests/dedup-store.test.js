@@ -53,7 +53,7 @@ describe("AT-002: DedupStore 批量模式与单条模式", () => {
 
     it("Batch: beginBatch loads existing set from GM_getValue", () => {
         // 预存数据
-        const preKey = DedupStore._keyFor(SOURCE);
+        const preKey = DedupStore.keyFor(SOURCE);
         globalThis.GM_setValue(preKey, JSON.stringify({ "existing-key": 1000 }));
 
         DedupStore.beginBatch(SOURCE);

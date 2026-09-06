@@ -25,15 +25,20 @@ function _utf8Bytes(str) {
             out.push(code);
         } else if (code < 0x800) {
             out.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
-        } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < str.length) {
-            const low = str.charCodeAt(i + 1);
+        } else if (code >= 0xd800 && code <= 0xdbff) {
+            const low = i + 1 < str.length ? str.charCodeAt(i + 1) : -1;
             if (low >= 0xdc00 && low <= 0xdfff) {
                 code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00);
                 out.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 0x3f), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
                 i++;
             } else {
-                out.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+                // v3.14.6 (DC-010): 孤立高位代理项(含末尾)输出 U+FFFD(EF BF BD), 对齐 TextEncoder 标准
+                // (此前 WTF-8 3 字节原样编码 → 双实现哈希不等价)
+                out.push(0xef, 0xbf, 0xbd);
             }
+        } else if (code >= 0xdc00 && code <= 0xdfff) {
+            // v3.14.6 (DC-010): 孤立低位代理项 → U+FFFD
+            out.push(0xef, 0xbf, 0xbd);
         } else if (code >= 0x10000) {
             // BMP 外字符(emoji 等): 4 字节 UTF-8
             out.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 0x3f), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));

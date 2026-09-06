@@ -793,6 +793,18 @@ const Exporter = {
     }),
 
     exportBookmarks: async (bookmarks, settings, onProgress, startIndex = 0) => {
+        // v3.14.6 (CC-12): 重入守卫 —— 双击/UI+AI 并发时仅一方执行, 其余返回 skipped 全量映射
+        if (SyncLock.isExporting) {
+            return {
+                success: [],
+                failed: [],
+                skipped: bookmarks.slice(startIndex).map((b) => ({
+                    topicId: b.topic_id || b.bookmarkable_id,
+                    title: b.title || b.name || `帖子 ${b.topic_id || b.bookmarkable_id}`,
+                })),
+                message: "已有导出进行中，已跳过本次请求",
+            };
+        }
         const results = { success: [], failed: [], skipped: [] };
         Exporter.reset();
         SyncLock.isExporting = true;
@@ -823,23 +835,31 @@ const Exporter = {
                 const title = bookmark.title || bookmark.name || `帖子 ${topicId}`;
                 const taskNum = i - startIndex + 1;
 
-                onProgress?.({
-                    current: taskNum,
-                    total: bookmarks.length,
-                    title: title,
-                    stage: "start",
-                    isPaused: Exporter.isPaused,
-                });
+                try {
+                    onProgress?.({
+                        current: taskNum,
+                        total: bookmarks.length,
+                        title: title,
+                        stage: "start",
+                        isPaused: Exporter.isPaused,
+                    });
+                } catch (progressError) {
+                    console.warn("[LD-Notion] onProgress 回调异常:", progressError);
+                }
 
                 try {
                     await Exporter.exportTopic(bookmark, settings, (detail) => {
-                        onProgress?.({
-                            current: taskNum,
-                            total: bookmarks.length,
-                            title: title,
-                            isPaused: Exporter.isPaused,
-                            ...detail,
-                        });
+                        try {
+                            onProgress?.({
+                                current: taskNum,
+                                total: bookmarks.length,
+                                title: title,
+                                isPaused: Exporter.isPaused,
+                                ...detail,
+                            });
+                        } catch (progressError) {
+                            console.warn("[LD-Notion] onProgress 回调异常:", progressError);
+                        }
                     });
                     results.success.push({ topicId, title, url: `https://linux.do/t/${topicId}` });
                 } catch (error) {
@@ -883,15 +903,9 @@ const Exporter = {
             SyncLock.isExporting = false;
         }
 
-        // 取消时收集剩余为 skipped
+        // 取消/中止时收集剩余为 skipped(经共享收集器, 与认证中止语义同构)
         if (Exporter.isCancelled && remaining.length > 0) {
-            for (const i of remaining) {
-                const b = bookmarks[i];
-                results.skipped.push({
-                    topicId: b.topic_id || b.bookmarkable_id,
-                    title: b.title || b.name || `帖子 ${b.topic_id || b.bookmarkable_id}`,
-                });
-            }
+            results.skipped.push(...Exporter._collectSkippedFrom(bookmarks, remaining));
         }
         return results;
     },
