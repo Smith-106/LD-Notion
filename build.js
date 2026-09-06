@@ -26,7 +26,8 @@ const USERSCRIPT_HEADER = `// ==UserScript==
 // @match        https://www.github.com/*
 // @match        https://www.zhihu.com/*
 // @match        https://zhuanlan.zhihu.com/*
-// @include      /^https?://(?!(www\.google\.com|www\.google\.com\.hk|www\.baidu\.com|www\.bing\.com|duckduckgo\.com|mail\.google\.com|outlook\.live\.com|localhost|127\.0\.0\.1))/
+// (audit) broad include catch-all removed; supported sites use explicit @match above.
+// Generic sites: add Tampermonkey user @match as needed; @exclude retained as defense-in-depth.
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
 // @exclude      https://www.baidu.com/*
@@ -150,14 +151,17 @@ async function build() {
     // 第三步：拼接 userscript 头 + IIFE 主体
     const finalContent = USERSCRIPT_HEADER + "\n" + bundleContent;
 
-    // 第四步：写入最终输出
+    // 第四步：写入最终输出（dist + 根目录同步，避免根产物与 dist 漂移）
     const outfile = path.join(outDir, "LinuxDo-Bookmarks-to-Notion.user.js");
+    const rootOutfile = path.join(__dirname, "LinuxDo-Bookmarks-to-Notion.user.js");
     fs.writeFileSync(outfile, finalContent, "utf8");
+    fs.writeFileSync(rootOutfile, finalContent, "utf8");
 
     // 清理临时文件
     fs.unlinkSync(tempFile);
 
     console.log(`Build complete: ${outfile}`);
+    console.log(`Also wrote root: ${rootOutfile}`);
     console.log(`Output size: ${(fs.statSync(outfile).size / 1024).toFixed(1)} KB`);
 }
 

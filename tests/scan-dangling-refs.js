@@ -33,6 +33,14 @@ walk(SRC);
 
 // 对每个源文件:找 require("../X") 解构集 + 文件内引用的导出符号
 const issues = [];
+function localDecls(content) {
+    const s = new Set();
+    const re = /\b(?:const|let|var|function|class)\s+([A-Z][A-Za-z0-9_]*)/g;
+    let m;
+    while ((m = re.exec(content)) !== null) s.add(m[1]);
+    return s;
+}
+
 function scanFile(file) {
     const content = fs.readFileSync(file, "utf8");
     const lines = content.split("\n");
@@ -45,7 +53,9 @@ function scanFile(file) {
         const syms = rm[1].split(",").map(s => s.trim()).filter(Boolean);
         syms.forEach(s => imported.add(s));
     }
-    // 文件内引用的已知导出符号(大写开头,排除注释行)
+    // 文件内引用的已知导出符号(大写开头,排除注释行/本文件声明/同文件导出)
+    const local = localDecls(content);
+    const rel = path.relative(SRC, file).replace(/\\/g, "/");
     const referenced = new Set();
     for (const line of lines) {
         const trimmed = line.trim();
@@ -54,16 +64,14 @@ function scanFile(file) {
         let m;
         while ((m = re.exec(line)) !== null) {
             const sym = m[1];
-            if (moduleExports[sym] && !imported.has(sym)) {
-                referenced.add(sym);
-            }
+            if (!moduleExports[sym]) continue;
+            if (imported.has(sym) || local.has(sym)) continue;
+            if (moduleExports[sym] === rel) continue;
+            referenced.add(sym);
         }
     }
-    if (referenced.size > 0) {
-        const rel = path.relative(SRC, file).replace(/\\/g, "/");
-        for (const sym of referenced) {
-            issues.push({ file: rel, symbol: sym, definedIn: moduleExports[sym] });
-        }
+    for (const sym of referenced) {
+        issues.push({ file: rel, symbol: sym, definedIn: moduleExports[sym] });
     }
 }
 
@@ -84,11 +92,49 @@ const unique = issues.filter(i => {
     seen.add(k); return true;
 });
 
+// 已知惰性 require / 循环依赖注入（非顶部 import）——允许名单
+const ALLOW = new Set([
+  "adapter/BookmarkAdapter.js:BookmarkBridge",
+  "adapter/BookmarkAdapter.js:BookmarkExporter",
+  "adapter/SyncScheduler.js:SyncState",
+  "adapter/SyncScheduler.js:AutoImporter",
+  "adapter/SyncScheduler.js:GitHubAutoImporter",
+  "adapter/SyncScheduler.js:BookmarkAutoImporter",
+  "ai/agent-executor.js:ChatState",
+  "ai/agent-executor.js:AIService",
+  "ai/agent-executor.js:ConfirmationDialog",
+  "ai/handlers/batch.js:AIClassifier",
+  "ai/handlers/batch.js:GitHubAPI",
+  "ai/handlers/batch.js:BookmarkBridge",
+  "ai/handlers/batch.js:InstallHelper",
+  "ai/handlers/batch.js:BookmarkExporter",
+  "ai/handlers/content.js:AIClassifier",
+  "ai/tools/write-tools.js:AIClassifier",
+  "coordination/UICommandService.js:AIAssistant",
+  "coordination/UICommandService.js:AIClassifier",
+  "coordination/UICommandService.js:GenericExporter",
+  "coordination/UICommandService.js:BookmarkExporter",
+  "coordination/UICommandService.js:UI",
+  "coordination/UICommandService.js:GitHubAPI",
+  "coordination/UICommandService.js:AIService",
+  "import/index.js:UI",
+  "main.js:DedupStore",
+  "security/index.js:UI",
+  "storage/index.js:CredentialVault",
+]);
+const unexpected = unique.filter((i) => !ALLOW.has(i.file + ":" + i.symbol));
 if (unique.length === 0) {
     console.log("✅ 无游离引用");
-} else {
-    console.log(`发现 ${unique.length} 处游离引用:\n`);
-    for (const i of unique) {
-        console.log(`  ${i.file}: 引用 ${i.symbol} (定义于 ${i.definedIn}) 但未 import`);
-    }
+    process.exit(0);
 }
+console.log(`发现 ${unique.length} 处游离引用（其中允许名单 ${unique.length - unexpected.length}，意外 ${unexpected.length}）:\n`);
+for (const i of unique) {
+    const tag = ALLOW.has(i.file + ":" + i.symbol) ? "ALLOW" : "NEW";
+    console.log(`  [${tag}] ${i.file}: 引用 ${i.symbol} (定义于 ${i.definedIn}) 但未 import`);
+}
+if (unexpected.length > 0) {
+    console.error("\n❌ 存在未允许的游离引用");
+    process.exit(1);
+}
+console.log("\n✅ 游离引用均在允许名单内");
+process.exit(0);

@@ -7,18 +7,19 @@
   "scripts": {
     "test": "npx vitest run && npm run test:legacy",
     "test:legacy": "node tests/utils.test.js && node tests/logic-modules.test.js && node tests/notion-oauth.test.js",
-    "verify:baseline": "npm test && node --check LinuxDo-Bookmarks-to-Notion.user.js && node scripts/validate-userscript-ui.js",
+    "verify:baseline": "node scripts/verify-baseline.js",
     "build:extension": "node scripts/build-extension.js --src dist/LinuxDo-Bookmarks-to-Notion.user.js",
     "verify:extension:bounded": "node -e \"const fs=require('fs'); const os=require('os'); const path=require('path'); const { buildExtension } = require('./scripts/build-extension.js'); const outDir=fs.mkdtempSync(path.join(os.tmpdir(),'ld-notion-build-bounded-')); try { buildExtension({ manifestProfile: 'bounded_hosts', outDir }); } finally { fs.rmSync(outDir, { recursive: true, force: true }); }\"",
     "verify:bridge-extension": "node scripts/verify-bridge-extension.js",
     "verify:extension:surfaces": "node scripts/verify-extension-surfaces.js",
     "verify:equivalence": "node scripts/verify-bundle-equivalence.js",
-    "verify:delivery": "npm run verify:baseline && npm run build && npm run verify:extension:bounded && npm run verify:bridge-extension && npm run verify:extension:surfaces && npm run verify:equivalence && npm run build:extension",
+    "verify:delivery": "node scripts/verify-delivery.js",
     "build": "node build.js",
-    "verify:build": "node build.js && node --check dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q \"LD-NOTION-BUILD:USER_SCRIPT_BODY_START\" dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q \"LD-NOTION-BUILD:BOOKMARK_BRIDGE_START\" dist/LinuxDo-Bookmarks-to-Notion.user.js && grep -q \"SyncSerializer\" dist/LinuxDo-Bookmarks-to-Notion.user.js && (echo \"FAIL: sync/ 未剪枝(SyncSerializer 应缺席)\" && exit 1) || (echo \"[PASS] sync/ 已按编译期开关剪枝\")",
+    "verify:build": "node scripts/verify-build.js",
     "docs:dev": "vitepress docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "verify:build:negative": "node scripts/verify-build.js --negative-check"
   },
   "keywords": [],
   "author": "Smith-106",

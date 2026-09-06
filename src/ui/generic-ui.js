@@ -362,12 +362,12 @@ const GenericUI = {
             workspacePages.forEach(page => {
                 const value = `page:${page.id}`;
                 known.add(value);
-                options += `<option value="${value}">📄 ${Utils.escapeHtml(page.title || "未命名页面")}</option>`;
+                options += `<option value="${Utils.escapeHtml(value)}">📄 ${Utils.escapeHtml(page.title || "未命名页面")}</option>`;
             });
         } else {
             databases.forEach(db => {
                 known.add(db.id);
-                options += `<option value="${db.id}">📁 ${Utils.escapeHtml(db.title || "未命名数据库")}</option>`;
+                options += `<option value="${Utils.escapeHtml(db.id)}">📁 ${Utils.escapeHtml(db.title || "未命名数据库")}</option>`;
             });
         }
 

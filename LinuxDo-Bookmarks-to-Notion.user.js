@@ -14,7 +14,8 @@
 // @match        https://www.github.com/*
 // @match        https://www.zhihu.com/*
 // @match        https://zhuanlan.zhihu.com/*
-// @include      /^https?://(?!(www.google.com|www.google.com.hk|www.baidu.com|www.bing.com|duckduckgo.com|mail.google.com|outlook.live.com|localhost|127.0.0.1))/
+// (audit) broad include catch-all removed; supported sites use explicit @match above.
+// Generic sites: add Tampermonkey user @match as needed; @exclude retained as defense-in-depth.
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
 // @exclude      https://www.baidu.com/*
@@ -6083,6 +6084,8 @@ Content-Type: ${contentType}\r
               return await res.json();
             } catch (e) {
               lastErr = e;
+              const msg = String(e && e.message || e || "");
+              if (/\bHTTP\s+40[013]\b/.test(msg)) throw e;
               if (i < retries) await Utils2.sleep(1e3 * Math.pow(2, i));
             } finally {
               clearTimeout(timer);
@@ -6773,8 +6776,47 @@ Content-Type: ${contentType}\r
           if (data.explanation !== void 0 && typeof data.explanation !== "string") return { ok: false, reason: "AI \u8FD4\u56DE\u7684 explanation \u4E0D\u662F\u5B57\u7B26\u4E32" };
           return { ok: true };
         },
+        // 校验 workspaceConnection 结构（跨源关联候选 AI 草稿）。
+        // recommendedAction 白名单；其余字段类型/长度由消费点再截断。
+        ALLOWED_WORKSPACE_ACTIONS: /* @__PURE__ */ new Set(["merge", "review", "enrich", "archive"]),
+        validateWorkspaceConnectionSchema: (data) => {
+          if (!data || typeof data !== "object" || Array.isArray(data)) {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u8DE8\u6E90\u5173\u8054\u5EFA\u8BAE\u4E0D\u662F\u5BF9\u8C61" };
+          }
+          if (data.canonicalTitle !== void 0 && typeof data.canonicalTitle !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 canonicalTitle \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          if (data.title !== void 0 && typeof data.title !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 title \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          if (data.summary !== void 0 && typeof data.summary !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 summary \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          if (data.recommendedAction !== void 0) {
+            if (typeof data.recommendedAction !== "string") {
+              return { ok: false, reason: "AI \u8FD4\u56DE\u7684 recommendedAction \u4E0D\u662F\u5B57\u7B26\u4E32" };
+            }
+            const action = data.recommendedAction.trim().toLowerCase();
+            if (action && !AISchema.ALLOWED_WORKSPACE_ACTIONS.has(action)) {
+              return { ok: false, reason: "AI \u8FD4\u56DE\u7684 recommendedAction \u4E0D\u5728\u767D\u540D\u5355" };
+            }
+          }
+          if (data.nextStep !== void 0 && typeof data.nextStep !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 nextStep \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          if (data.mergeReason !== void 0 && typeof data.mergeReason !== "string") {
+            return { ok: false, reason: "AI \u8FD4\u56DE\u7684 mergeReason \u4E0D\u662F\u5B57\u7B26\u4E32" };
+          }
+          if (data.tags !== void 0) {
+            if (!Array.isArray(data.tags)) return { ok: false, reason: "AI \u8FD4\u56DE\u7684 tags \u4E0D\u662F\u6570\u7EC4" };
+            for (const tag of data.tags) {
+              if (typeof tag !== "string") return { ok: false, reason: "AI \u8FD4\u56DE\u7684 tags \u9879\u4E0D\u662F\u5B57\u7B26\u4E32" };
+            }
+          }
+          return { ok: true };
+        },
         // 统一 AI JSON 解析入口：正则提取 + JSON.parse + 按 name 路由校验。
-        // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"|"bookmarkSummary"}。
+        // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"|"bookmarkSummary"|"workspaceConnection"}。
         // 返回 { ok: true, value } 或 { ok: false, reason }。
         parseAIJson: (name, rawText) => {
           if (!rawText) return { ok: false, reason: "AI \u54CD\u5E94\u4E3A\u7A7A" };
@@ -6792,7 +6834,8 @@ Content-Type: ${contentType}\r
             editPlan: AISchema.validateEditPlanSchema,
             generatePages: AISchema.validateGeneratePagesSchema,
             agentPlan: AISchema.validateAgentPlanSchema,
-            intent: AISchema.validateIntentSchema
+            intent: AISchema.validateIntentSchema,
+            workspaceConnection: AISchema.validateWorkspaceConnectionSchema
           };
           const validator = validators[name];
           if (validator) {
@@ -12649,6 +12692,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               return await RSSAutoImporter2.fetchFeed(feedUrl);
             } catch (error) {
               lastError = error;
+              const msg = String(error && error.message || error || "");
+              if (/\bHTTP\s+40[013]\b/.test(msg)) throw error;
               if (attempt < retries) {
                 await Utils2.sleep(1e3 * Math.pow(2, attempt));
               }
@@ -19660,7 +19705,7 @@ ${report}
             options += '<optgroup label="\u{1F4C1} \u6570\u636E\u5E93">';
             databases.forEach((db) => {
               knownIds.add(db.id);
-              options += `<option value="${db.id}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
+              options += `<option value="${Utils2.escapeHtml(db.id)}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
             });
             options += "</optgroup>";
           }
@@ -19670,7 +19715,7 @@ ${report}
             workspacePages.forEach((page) => {
               const val = `page:${page.id}`;
               knownIds.add(val);
-              options += `<option value="${val}">${Utils2.escapeHtml(
+              options += `<option value="${Utils2.escapeHtml(val)}">${Utils2.escapeHtml(
                 NotionSiteUI2.getAITargetPageOptionLabel(page)
               )}</option>`;
             });
@@ -19682,7 +19727,7 @@ ${report}
             nestedPages.forEach((page) => {
               const val = `page:${page.id}`;
               knownIds.add(val);
-              options += `<option value="${val}">${Utils2.escapeHtml(
+              options += `<option value="${Utils2.escapeHtml(val)}">${Utils2.escapeHtml(
                 NotionSiteUI2.getAITargetPageOptionLabel(page, { includeParentLabel: true, databases, pages })
               )}</option>`;
             });
@@ -21164,7 +21209,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             "JSON Schema:",
             '{"canonicalTitle":"","summary":"","recommendedAction":"merge|review|enrich|archive","nextStep":"","mergeReason":"","tags":[""]}',
             "",
-            JSON.stringify({
+            // 候选标题/URL/来源来自 Notion 页面元数据，不可信——与 main-ui 同构，走 isolateContent 防 prompt injection
+            `<user_content>
+${AIService2.isolateContent(JSON.stringify({
               label: (candidate == null ? void 0 : candidate.label) || "",
               reason: (candidate == null ? void 0 : candidate.reason) || "",
               count: Number((candidate == null ? void 0 : candidate.count) || items.length || 0),
@@ -21176,7 +21223,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 parentLabel: (item == null ? void 0 : item.parentLabel) || "",
                 url: (item == null ? void 0 : item.url) || ""
               }))
-            }, null, 2)
+            }, null, 2))}
+</user_content>`
           ].join("\n");
         },
         buildWorkspaceConnectionCandidateAIDraft: async (candidate, settings) => {
@@ -23580,7 +23628,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             databases.forEach((db) => {
               const value = `database:${db.id}`;
               knownValues.add(value);
-              options += `<option value="${value}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
+              options += `<option value="${Utils2.escapeHtml(value)}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
             });
             options += "</optgroup>";
           }
@@ -23590,7 +23638,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             workspacePages.forEach((page) => {
               const value = `page:${page.id}`;
               knownValues.add(value);
-              options += `<option value="${value}">\u{1F4C4} ${Utils2.escapeHtml(page.title)}</option>`;
+              options += `<option value="${Utils2.escapeHtml(value)}">\u{1F4C4} ${Utils2.escapeHtml(page.title)}</option>`;
             });
             options += "</optgroup>";
           }
@@ -23663,13 +23711,13 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             options += '<optgroup label="\u{1F4C1} \u6307\u5B9A\u6570\u636E\u5E93">';
             databases.forEach((db) => {
               knownIds.add(db.id);
-              options += `<option value="${db.id}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
+              options += `<option value="${Utils2.escapeHtml(db.id)}">\u{1F4C1} ${Utils2.escapeHtml(db.title)}</option>`;
             });
             options += "</optgroup>";
           }
           if (savedValue && savedValue !== "__all__" && !knownIds.has(savedValue)) {
             const displayId = savedValue.replace(/^page:/, "");
-            options += `<option value="${savedValue}">\u5DF2\u914D\u7F6E (ID: ${displayId.slice(0, 8)}...)</option>`;
+            options += `<option value="${Utils2.escapeHtml(savedValue)}">\u5DF2\u914D\u7F6E (ID: ${Utils2.escapeHtml(displayId.slice(0, 8))}...)</option>`;
           }
           select.innerHTML = options;
           if (savedValue) {
@@ -26712,12 +26760,12 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             workspacePages.forEach((page) => {
               const value = `page:${page.id}`;
               known.add(value);
-              options += `<option value="${value}">\u{1F4C4} ${Utils2.escapeHtml(page.title || "\u672A\u547D\u540D\u9875\u9762")}</option>`;
+              options += `<option value="${Utils2.escapeHtml(value)}">\u{1F4C4} ${Utils2.escapeHtml(page.title || "\u672A\u547D\u540D\u9875\u9762")}</option>`;
             });
           } else {
             databases.forEach((db) => {
               known.add(db.id);
-              options += `<option value="${db.id}">\u{1F4C1} ${Utils2.escapeHtml(db.title || "\u672A\u547D\u540D\u6570\u636E\u5E93")}</option>`;
+              options += `<option value="${Utils2.escapeHtml(db.id)}">\u{1F4C1} ${Utils2.escapeHtml(db.title || "\u672A\u547D\u540D\u6570\u636E\u5E93")}</option>`;
             });
           }
           if (restoreValue && !known.has(restoreValue)) {

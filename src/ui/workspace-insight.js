@@ -162,7 +162,8 @@ const WorkspaceInsight = {
             "JSON Schema:",
             "{\"canonicalTitle\":\"\",\"summary\":\"\",\"recommendedAction\":\"merge|review|enrich|archive\",\"nextStep\":\"\",\"mergeReason\":\"\",\"tags\":[\"\"]}",
             "",
-            JSON.stringify({
+            // 候选标题/URL/来源来自 Notion 页面元数据，不可信——与 main-ui 同构，走 isolateContent 防 prompt injection
+            `<user_content>\n${AIService.isolateContent(JSON.stringify({
                 label: candidate?.label || "",
                 reason: candidate?.reason || "",
                 count: Number(candidate?.count || items.length || 0),
@@ -174,7 +175,7 @@ const WorkspaceInsight = {
                     parentLabel: item?.parentLabel || "",
                     url: item?.url || "",
                 })),
-            }, null, 2),
+            }, null, 2))}\n</user_content>`,
         ].join("\n");
     },
 

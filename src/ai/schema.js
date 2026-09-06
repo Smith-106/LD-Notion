@@ -209,8 +209,48 @@ const AISchema = {
         return { ok: true };
     },
 
+    // 校验 workspaceConnection 结构（跨源关联候选 AI 草稿）。
+    // recommendedAction 白名单；其余字段类型/长度由消费点再截断。
+    ALLOWED_WORKSPACE_ACTIONS: new Set(["merge", "review", "enrich", "archive"]),
+    validateWorkspaceConnectionSchema: (data) => {
+        if (!data || typeof data !== "object" || Array.isArray(data)) {
+            return { ok: false, reason: "AI 返回的跨源关联建议不是对象" };
+        }
+        if (data.canonicalTitle !== undefined && typeof data.canonicalTitle !== "string") {
+            return { ok: false, reason: "AI 返回的 canonicalTitle 不是字符串" };
+        }
+        if (data.title !== undefined && typeof data.title !== "string") {
+            return { ok: false, reason: "AI 返回的 title 不是字符串" };
+        }
+        if (data.summary !== undefined && typeof data.summary !== "string") {
+            return { ok: false, reason: "AI 返回的 summary 不是字符串" };
+        }
+        if (data.recommendedAction !== undefined) {
+            if (typeof data.recommendedAction !== "string") {
+                return { ok: false, reason: "AI 返回的 recommendedAction 不是字符串" };
+            }
+            const action = data.recommendedAction.trim().toLowerCase();
+            if (action && !AISchema.ALLOWED_WORKSPACE_ACTIONS.has(action)) {
+                return { ok: false, reason: "AI 返回的 recommendedAction 不在白名单" };
+            }
+        }
+        if (data.nextStep !== undefined && typeof data.nextStep !== "string") {
+            return { ok: false, reason: "AI 返回的 nextStep 不是字符串" };
+        }
+        if (data.mergeReason !== undefined && typeof data.mergeReason !== "string") {
+            return { ok: false, reason: "AI 返回的 mergeReason 不是字符串" };
+        }
+        if (data.tags !== undefined) {
+            if (!Array.isArray(data.tags)) return { ok: false, reason: "AI 返回的 tags 不是数组" };
+            for (const tag of data.tags) {
+                if (typeof tag !== "string") return { ok: false, reason: "AI 返回的 tags 项不是字符串" };
+            }
+        }
+        return { ok: true };
+    },
+
     // 统一 AI JSON 解析入口：正则提取 + JSON.parse + 按 name 路由校验。
-    // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"|"bookmarkSummary"}。
+    // name ∈ {"extractToDatabase"|"generatePages"|"editPlan"|"intent"|"agentPlan"|"toolCall"|"bookmarkSummary"|"workspaceConnection"}。
     // 返回 { ok: true, value } 或 { ok: false, reason }。
     parseAIJson: (name, rawText) => {
         if (!rawText) return { ok: false, reason: "AI 响应为空" };
@@ -230,6 +270,7 @@ const AISchema = {
             generatePages: AISchema.validateGeneratePagesSchema,
             agentPlan: AISchema.validateAgentPlanSchema,
             intent: AISchema.validateIntentSchema,
+            workspaceConnection: AISchema.validateWorkspaceConnectionSchema,
         };
         const validator = validators[name];
         if (validator) {
