@@ -22554,6 +22554,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 <div class="ldb-tab-content" data-tab-content="ai" role="tabpanel" id="ldb-tab-ai">
                     <div class="ldb-section">
                         <!-- \u5BF9\u8BDD\u533A\u57DF -->
+                        <!-- v3.14.7 (REV-27 UI-13): \u804A\u5929\u5BB9\u5668 aria-live=polite \u2014\u2014 AI \u6D41\u5F0F\u56DE\u590D\u5BF9\u8F85\u52A9\u6280\u672F\u53EF\u611F\u77E5 -->
                         <div class="ldb-chat-container" id="ldb-chat-messages" aria-live="polite" aria-relevant="additions">
                             ${AIWelcomeUI2.render(personaName)}
                         </div>
