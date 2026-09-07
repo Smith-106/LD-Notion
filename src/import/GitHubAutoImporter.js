@@ -3,6 +3,7 @@
 const { CONFIG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState } = require("../storage");
+const { NotionOAuth } = require("../auth");
 const { GitHubAPI } = require("./GitHubAPI");
 const { NotionAPI } = require("../api");
 const { emit } = require("../coordination/event-bus");
@@ -21,7 +22,7 @@ const GitHubAutoImporter = {
         const username = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
         const token = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
         if (!username && !token) return false;
-        const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+        const apiKey = NotionOAuth.getAccessToken("");
         const databaseId = Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "");
         return !!(apiKey && databaseId);
     },
@@ -33,7 +34,7 @@ const GitHubAutoImporter = {
 
     buildSettings: () => {
         return {
-            apiKey: Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
+            apiKey: NotionOAuth.getAccessToken(""),
             databaseId: Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
             username: Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, ""),
             token: Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, ""),
@@ -194,6 +195,8 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
             for (const k of Object.keys(properties)) {
                 if (properties[k] === undefined) delete properties[k];
             }
+            // 每项开工前重读最新 token（OAuth 续签后快照失效；与 LinuxDo AutoImporter 同构）
+            settings.apiKey = NotionOAuth.getAccessToken("");
             const page = await NotionAPI.request("POST", "/pages", {
                 parent: { database_id: settings.databaseId },
                 properties,

@@ -722,6 +722,11 @@ const GenericUI = {
                 const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
                 if (!noteResult.ok) throw new Error(noteResult.error);
 
+                // 与 Notion clipper 同账本：Obsidian 成功也 markSeen，避免 UI「待导出」/重复建页
+                GenericExporter.markClipperExported({
+                    url: location.href,
+                    source: SiteDetector.detect() === SiteDetector.SITES.ZHIHU ? "知乎" : "",
+                });
                 GenericUI.showStatus(`Obsidian 导出成功：${title}`, "success");
             } catch (error) {
                 GenericUI.showStatus(`Obsidian 导出失败: ${error.message}`, "error");
@@ -736,6 +741,25 @@ const GenericUI = {
     // 执行导出
     doExport: async () => {
         if (GenericUI.isExporting) return;
+
+        // 去重前置：已导出过则确认是否仍要再建页（clipper 此前零 markSeen → 连点必重复）
+        const previewMeta = {
+            url: typeof location !== "undefined" ? location.href : "",
+            source: SiteDetector.detect() === SiteDetector.SITES.ZHIHU ? "知乎" : "",
+        };
+        if (GenericExporter.isClipperExported(previewMeta)) {
+            const ok = await ConfirmationDialog.show({
+                title: "已导出过",
+                message: "该页面已在导出账本中。再次导出将在 Notion 新建页面，是否继续？",
+                confirmText: "仍要导出",
+                countdown: 0,
+            });
+            if (!ok) {
+                GenericUI.showStatus("已取消：页面此前已导出", "info");
+                return;
+            }
+        }
+
         GenericUI.isExporting = true;
 
         const btn = GenericUI.panel.querySelector("#gclip-export");
@@ -746,7 +770,7 @@ const GenericUI = {
         GenericUI.showStatus("正在提取页面内容...", "info");
 
         try {
-            const apiKey = NotionOAuth.getAccessToken();
+            const apiKey = NotionOAuth.getAccessToken("");
             const exportState = TargetState.getExportState();
             const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
             const aiSettings = getAISettings();
@@ -766,6 +790,7 @@ const GenericUI = {
 
             GenericUI.showStatus("正在导出到 Notion...", "info");
             const { page, meta } = await GenericExporter.exportCurrentPage(settings);
+            GenericExporter.markClipperExported(meta);
 
             floatBtn.className = "gclip-float-btn success";
             GenericUI.showStatus(`导出成功: ${meta.title}`, "success");

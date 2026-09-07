@@ -25,7 +25,8 @@ const AutoImporter = {
     buildSettings: () => {
         const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
         return {
-            apiKey: Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, ""),
+            // 与 Bookmark/RSS AutoImporter 对齐：经 getAccessToken 读取，避免绕过 OAuth 语义
+            apiKey: NotionOAuth.getAccessToken(""),
             databaseId: Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
             parentPageId: Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, ""),
             exportTargetType,
@@ -218,6 +219,9 @@ AutoImporter.run = async () => {
                 AutoImporter.updateStatus(`📬 导入中 (${i + 1}/${newBookmarks.length}): ${title}`);
 
                 try {
+                    // 与手动 exportBookmarks (v3.14.7) 同构：每项开工前重读 Storage 最新 token，
+                    // 防止 OAuth 续签后 settings.apiKey 快照遮蔽新 token（upload 分片等旁路亦受益）。
+                    settings.apiKey = NotionOAuth.getAccessToken("");
                     await Exporter.exportTopic(bookmark, settings);
                     success++;
                     successfulBookmarks.push(bookmark);

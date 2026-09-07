@@ -721,6 +721,19 @@ const NotionOAuth = {
         return String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "") || "").trim();
     },
 
+    // OAuth 可续签时：请求层禁止用调用方快照遮蔽 Storage 中刚续签的新 token。
+    // 根因：getAccessToken(liveValue) 在 liveValue 非空时优先返回快照；AutoImporter /
+    // 批量导出若把 buildSettings 时的 access token 当 apiKey 传入，首项 401 续签成功后
+    // 后续项仍带旧 token → 再次 401 → refresh_token 轮换后 invalid_grant 整批中止
+    // （v3.14.7 仅修了手动 exportBookmarks 每项重解析；自动导入/上传分片仍中招）。
+    // 手动 Token 模式：仍尊重传入的 apiKey（含 UI live 覆盖）。
+    resolveRequestToken: (apiKey = "") => {
+        if (NotionOAuth.canAutoRefresh()) {
+            return NotionOAuth.getAccessToken("");
+        }
+        return NotionOAuth.getAccessToken(apiKey);
+    },
+
     setManualApiKey: async (apiKey = "") => {
         const normalized = String(apiKey || "").trim();
         Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, normalized);

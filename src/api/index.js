@@ -100,7 +100,7 @@ const NotionAPI = {
             await NotionAPI._requestGate();
         }
 
-        const doRequest = async (attempt, token = NotionOAuth.getAccessToken(apiKey), allowRefresh = true) => {
+        const doRequest = async (attempt, token = NotionOAuth.resolveRequestToken(apiKey), allowRefresh = true) => {
             const response = await NotionAPI.getTransport().request({
                 method,
                 endpoint,

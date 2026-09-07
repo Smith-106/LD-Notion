@@ -127,7 +127,7 @@ function installUploadMethods(NotionAPI) {
                     method: 'POST',
                     url: NotionAPI.Transport.buildUrl(`/file_uploads/${uploadId}/send`),
                     headers: {
-                        'Authorization': `Bearer ${NotionOAuth.getAccessToken(apiKey)}`,
+                        'Authorization': `Bearer ${NotionOAuth.resolveRequestToken(apiKey)}`,
                         'Notion-Version': CONFIG.API.NOTION_VERSION,
                         'Content-Type': `multipart/form-data; boundary=${boundary}`,
                     },
