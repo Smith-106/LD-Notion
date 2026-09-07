@@ -2,6 +2,7 @@
 
 const { SourceAdapter } = require("./SourceAdapter");
 const { ZhihuAPI } = require("../extract");
+const { Utils } = require("../utils");
 
 const ZhihuAdapter = Object.assign(Object.create(SourceAdapter), {
     sourceType: "zhihu",
@@ -15,12 +16,14 @@ const ZhihuAdapter = Object.assign(Object.create(SourceAdapter), {
     },
 
     normalize(raw) {
+        const rawUrl = raw.url || (typeof window !== "undefined" ? window.location.href : "");
+        const url = Utils.normalizeDedupUrl(rawUrl);
         return {
             source: "zhihu",
-            id: raw.url || (typeof window !== "undefined" ? window.location.href : ""),
+            id: url,
             title: raw.title || "",
             content: raw.html || "",
-            url: raw.url || (typeof window !== "undefined" ? window.location.href : ""),
+            url,
             author: raw.author || "",
             tags: raw.tags || [],
             createdAt: raw.publishDate || "",
@@ -29,7 +32,9 @@ const ZhihuAdapter = Object.assign(Object.create(SourceAdapter), {
     },
 
     getDedupKey(item) {
-        return `zhihu:${item.id}`;
+        // Clipper URL query/hash variance → same answer must share one DedupStore key
+        const url = Utils.normalizeDedupUrl(item.id || item.url || "");
+        return `zhihu:${url}`;
     },
 
     _extractFromPage() {

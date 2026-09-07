@@ -35,6 +35,12 @@ Confirmed NEW bugs beyond PR #17 (reconcile beginBatch leak):
 - **知乎/通用 clipper mark-after-success**：`GenericExporter.markClipperExported` 与 Adapter `getDedupKey` 同构写入 DedupStore；`GenericUI.doExport` / Obsidian 导出成功后落账；已导出再次导出经 ConfirmationDialog 确认，避免连点重复建页。
 - 回归：`tests/oauth-request-token.test.js`、`tests/clipper-dedup-mark.test.js`
 
+### fix (userscript hunt round 5 — beyond #17–#20)
+
+- **ConfirmationDialog `countdown:0`**: OK stayed disabled ~1s because enable only ran inside `setInterval` (first tick after 1000ms). Zero countdown now finishes immediately.
+- **Clipper URL alternate keys**: ZhihuAdapter / GenericAdapter `getDedupKey` + `normalize`, and `GenericExporter.enrichMeta` URL, now use `Utils.normalizeDedupUrl` (strip hash + tracking query) so the same Zhihu answer / page shares one DedupStore key.
+- **UpdateChecker fallback**: replace ancient stub `3.4.5` with `CONFIG.SCRIPT_VERSION` (aligned to package / userscript @version) when `GM_info.script.version` is absent.
+
 ## [3.14.10] - 2026-09-07
 
 ### fix (userscript 一键授权 OAuth 回调竞态)

@@ -103,7 +103,8 @@ const GenericExporter = {
         const enriched = {
             ...meta,
             title: BookmarkExporter.normalizeText(meta.title || "无标题", 200) || "无标题",
-            url: String(meta.url || location.href || "").trim(),
+            // Canonicalize clipper URL (strip hash + tracking query) so DedupStore / Notion 链接 share one key
+            url: Utils.normalizeDedupUrl(String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim()),
             author: BookmarkExporter.normalizeText(meta.author || "", 100),
             publishDate: BookmarkExporter.normalizeText(meta.publishDate || "", 40),
             siteName,

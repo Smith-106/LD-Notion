@@ -668,15 +668,18 @@ const ConfirmationDialog = {
             const countdownEl = dialog.querySelector("#ldb-confirm-countdown");
             const nameInput = dialog.querySelector("#ldb-confirm-name-input");
 
-            let remaining = countdown;
+            // countdown:0 must enable immediately — setInterval only ticks after 1s,
+            // so a zero countdown previously left OK disabled for ~1s (PR #20 residual).
+            let remaining = Math.max(0, Math.floor(Number(countdown)) || 0);
             let canConfirm = !requireNameInput;
             let settled = false;
+            let timer = null;
 
             // v3.14.7 (REV-02 UI-06): 统一关闭路径——cancel/ok/esc/close 共用 cleanup
             const cleanup = (result) => {
                 if (settled) return;
                 settled = true;
-                clearInterval(timer);
+                if (timer) clearInterval(timer);
                 document.removeEventListener("keydown", escHandler);
                 dialog.remove();
                 if (ConfirmationDialog.dialogElement === dialog) {
@@ -690,30 +693,50 @@ const ConfirmationDialog = {
             };
             dialog._ldConfirmCleanup = cleanup;
 
+            const finishCountdown = () => {
+                if (timer) {
+                    clearInterval(timer);
+                    timer = null;
+                }
+                dialog._countdownTimer = null;
+                // F-UI-01:按钮文案用 confirmText(默认「确认」)
+                if (countdownEl && countdownEl.parentElement) {
+                    countdownEl.parentElement.textContent = confirmText;
+                }
+                if (canConfirm) {
+                    okBtn.disabled = false;
+                }
+            };
+
             // 倒计时进度条
             const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
             if (countdownFill) {
-                // 启动动画（下一帧开始，确保 transition 生效）
-                requestAnimationFrame(() => {
+                if (remaining <= 0) {
                     countdownFill.style.width = "0%";
-                    countdownFill.style.transition = `width ${countdown}s linear`;
-                });
+                    countdownFill.style.transition = "none";
+                } else {
+                    // 启动动画（下一帧开始，确保 transition 生效）
+                    requestAnimationFrame(() => {
+                        countdownFill.style.width = "0%";
+                        countdownFill.style.transition = `width ${remaining}s linear`;
+                    });
+                }
             }
 
-            // 倒计时
-            const timer = setInterval(() => {
-                remaining--;
-                countdownEl.textContent = remaining;
-                if (remaining <= 0) {
-                    clearInterval(timer);
-                    // F-UI-01:按钮文案用 confirmText(默认「确认」)
-                    countdownEl.parentElement.textContent = confirmText;
-                    if (canConfirm) {
-                        okBtn.disabled = false;
+            // 倒计时（0 秒立即可确认，避免空等一个 interval tick）
+            if (remaining <= 0) {
+                finishCountdown();
+            } else {
+                if (countdownEl) countdownEl.textContent = String(remaining);
+                timer = setInterval(() => {
+                    remaining--;
+                    if (countdownEl) countdownEl.textContent = String(remaining);
+                    if (remaining <= 0) {
+                        finishCountdown();
                     }
-                }
-            }, 1000);
-            dialog._countdownTimer = timer;
+                }, 1000);
+                dialog._countdownTimer = timer;
+            }
 
             // 名称输入验证——比较 raw itemName(非 HTML 转义串)
             if (nameInput) {
