@@ -3,7 +3,7 @@
 const { CONFIG } = require("../config");
 const { Storage } = require("../storage");
 const { TargetState } = require("../auth");
-const { OperationGuard } = require("../security");
+const { OperationGuard, ConfirmationDialog } = require("../security");
 const { AgentTrace } = require("./AgentTrace");
 const { AISchema } = require("./schema");
 const { AI_AGENT_TOOLS } = require("./AgentTools");

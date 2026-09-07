@@ -131,7 +131,7 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 
 ### 方式 A：油猴脚本（推荐）
 
-> **v3.14.8 提示**：油猴脚本仅匹配 Linux.do / Notion / GitHub / 知乎（含 `*.linux.do` / `*.notion.so` 子域）；**不再**在任意网页自动出现面板。通用剪藏请用 Chrome 扩展，或自行添加 Tampermonkey `@match`。
+> **v3.14.8 提示**：油猴脚本仅匹配 Linux.do / Notion / GitHub (incl. gist.github.com) / 知乎（含 `*.linux.do` / `*.notion.so` 子域）；**不再**在任意网页自动出现面板。通用剪藏请用 Chrome 扩展，或自行添加 Tampermonkey `@match`。
 
 
 #### 1. 安装 Tampermonkey

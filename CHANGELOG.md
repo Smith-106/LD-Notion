@@ -8,6 +8,11 @@
 - ConfirmationDialog queue/close; generic save warning; GitHub Notion pause/cancel
 - docs: userscript no longer matches arbitrary pages; list @match; extension still generic
 
+### fix (gist + dangling-refs CI)
+
+- treat `gist.github.com` as GitHub in SiteDetector; add userscript `@match` + extension content-script match
+- harden `tests/scan-dangling-refs.js` (export/DI/lazy `require().X`); wire into `verify:baseline` (exit 1 on new dangling refs)
+
 
 ## [3.14.7] - 2026-09-06
 

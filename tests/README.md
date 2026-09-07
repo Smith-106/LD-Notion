@@ -11,7 +11,7 @@ This directory contains the Node-based regression tests for `LinuxDo-Bookmarks-t
 ### Verification layers
 
 - Automated invariants
-  - `npm run verify:baseline`
+  - `npm run verify:baseline` [ref-scan]
   - `npm run verify:extension:bounded` for the optional bounded-host manifest smoke
   - `npm run verify:bridge-extension` for the runtime bookmark-bridge boundary smoke
   - `npm run build:extension` when the change affects the default extension delivery artifact

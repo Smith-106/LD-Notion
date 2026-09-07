@@ -133,7 +133,7 @@ v3.7.8 schema 校验拦截:icon/cover URL 指向 `169.254.169.254`(SSRF)、`rela
 
 - `UrlValidator` 白名单:AI base 限 `api.openai/anthropic/google` 或 HTTPS 非内网;Obsidian 仅 `127.0.0.1/localhost/::1`;页面外链 http(s) + 拒内网/169.254。
 - Extension background worker 强制 https + 默认端口 + hostname 精确匹配。
-- 权限域收窄(v3.7.0):`@match` 显式站点(linux.do/Notion/GitHub/Zhihu);`@connect` 域名白名单;`@exclude` 搜索引擎/邮箱/localhost（broad include catch-all 已移除）。
+- 权限域收窄(v3.7.0):`@match` 显式站点(linux.do/Notion/GitHub+gist/Zhihu);`@connect` 域名白名单;`@exclude` 搜索引擎/邮箱/localhost（broad include catch-all 已移除）。
 
 ## 禁止操作(明确清单)
 

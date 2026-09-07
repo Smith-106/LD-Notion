@@ -54,7 +54,7 @@ v3.7.0 对用户脚本权限域和 AI 输入链路做了系统性加固：
 
 ### Userscript 权限域收窄
 
-- `@match` 从 `*://*/*` 替换为显式站点模式（linux.do、notion.so、github.com、zhihu.com）。
+- `@match` 从 `*://*/*` 替换为显式站点模式（linux.do、notion.so、github.com、gist.github.com、zhihu.com）。
 - `@connect` 从 `*` 替换为 9 个显式域名白名单（api.notion.com、linux.do、s3.amazonaws.com、api.openai.com、api.anthropic.com、generativelanguage.googleapis.com、api.github.com、zhihu.com）。
 - 曾新增 `@include` 正则白名单 + `@exclude` 排除搜索引擎/邮箱/localhost；**v3.14.8 / 远程审计**：移除油猴 broad `@include` catch-all，仅保留显式 `@match` + `@exclude` 纵深防御（通用网页剪藏改由扩展承担，或用户自添 `@match`）。
 - 这阻止了用户脚本向任意域名发起网络请求（如攻击者控制的 exfil 端点）。

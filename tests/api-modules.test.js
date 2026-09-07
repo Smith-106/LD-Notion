@@ -79,6 +79,30 @@ describe("SiteDetector", () => {
         expect(SiteDetector.SITES.ZHIHU).toBe("zhihu");
         expect(SiteDetector.SITES.GENERIC).toBe("generic");
     });
+
+    it("classifies gist.github.com as github", () => {
+        const prev = window.location.hostname;
+        window.location.hostname = "gist.github.com";
+        try {
+            expect(SiteDetector.detect()).toBe(SiteDetector.SITES.GITHUB);
+            expect(SiteDetector.isGitHub()).toBe(true);
+            expect(SiteDetector.isGeneric()).toBe(false);
+        } finally {
+            window.location.hostname = prev;
+        }
+    });
+
+    it("classifies github.com and www.github.com as github", () => {
+        const prev = window.location.hostname;
+        try {
+            window.location.hostname = "github.com";
+            expect(SiteDetector.detect()).toBe(SiteDetector.SITES.GITHUB);
+            window.location.hostname = "www.github.com";
+            expect(SiteDetector.detect()).toBe(SiteDetector.SITES.GITHUB);
+        } finally {
+            window.location.hostname = prev;
+        }
+    });
 });
 
 describe("InstallHelper", () => {

@@ -51,7 +51,7 @@ sequenceDiagram
 
 - `https://linux.do/*`、`https://*.linux.do/*`
 - `https://www.notion.so/*`、`https://notion.so/*`、`https://*.notion.so/*`
-- `https://github.com/*`、`https://www.github.com/*`
+- `https://github.com/*`、`https://www.github.com/*`、`https://gist.github.com/*`
 - `https://www.zhihu.com/*`、`https://zhuanlan.zhihu.com/*`
 
 Chrome 扩展仍包含 `http://*/*` / `https://*/*` 通用匹配（另有搜索引擎等 exclude）。需要在未列出站点使用油猴剪藏时，请在 Tampermonkey 中为该站点添加用户 `@match`。

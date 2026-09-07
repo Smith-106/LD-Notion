@@ -14,11 +14,11 @@
 // @match        https://*.notion.so/*
 // @match        https://github.com/*
 // @match        https://www.github.com/*
+// @match        https://gist.github.com/*
 // @match        https://www.zhihu.com/*
 // @match        https://zhuanlan.zhihu.com/*
 // (audit) broad include catch-all removed; supported sites use explicit @match above.
-// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so).
-// Gap: SiteDetector does not treat gist.github.com as GitHub; userscript likewise omits it.
+// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so / gist.github.com).
 // Generic sites: add Tampermonkey user @match as needed; extension still has http(s)://*/* ; @exclude retained as defense-in-depth.
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
@@ -3249,7 +3249,7 @@
           if (hostname === "notion.so" || hostname === "www.notion.so" || hostname.endsWith(".notion.so")) {
             return SiteDetector2.SITES.NOTION;
           }
-          if (hostname === "github.com" || hostname === "www.github.com") {
+          if (hostname === "github.com" || hostname === "www.github.com" || hostname === "gist.github.com") {
             return SiteDetector2.SITES.GITHUB;
           }
           if (hostname === "www.zhihu.com" || hostname === "zhuanlan.zhihu.com") {
@@ -5415,7 +5415,7 @@ Content-Type: ${contentType}\r
           if (OperationGuard2.isDangerous(operation) && OperationGuard2.requiresConfirm() || context.requireConfirm === true) {
             const isPermanent = false;
             const dangerous = OperationGuard2.isDangerous(operation);
-            const confirmed = await ConfirmationDialog3.show({
+            const confirmed = await ConfirmationDialog2.show({
               title: isPermanent ? "\u26A0\uFE0F \u6C38\u4E45\u5220\u9664\u786E\u8BA4" : dangerous ? "\u5371\u9669\u64CD\u4F5C\u786E\u8BA4" : "\u64CD\u4F5C\u786E\u8BA4",
               message: isPermanent ? `\u60A8\u5373\u5C06\u6C38\u4E45\u5220\u9664\u5757\uFF0C\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\uFF01` : dangerous ? `\u60A8\u5373\u5C06\u6267\u884C\u5371\u9669\u64CD\u4F5C: ${operation}` : `\u60A8\u5373\u5C06\u6267\u884C\u64CD\u4F5C: ${operation}`,
               itemName: context.itemName || "\u672A\u77E5\u9879\u76EE",
@@ -5760,7 +5760,7 @@ Content-Type: ${contentType}\r
           };
         }
       };
-      var ConfirmationDialog3 = {
+      var ConfirmationDialog2 = {
         dialogElement: null,
         _queue: [],
         _activeResolve: null,
@@ -5771,18 +5771,18 @@ Content-Type: ${contentType}\r
         // 名称确认提示用 textContent 展示原文, 比较也用 raw itemName。
         show: (options) => {
           return new Promise((resolve) => {
-            if (ConfirmationDialog3.dialogElement) {
-              ConfirmationDialog3._queue.push({ options, resolve });
+            if (ConfirmationDialog2.dialogElement) {
+              ConfirmationDialog2._queue.push({ options, resolve });
               return;
             }
-            ConfirmationDialog3._present(options, resolve);
+            ConfirmationDialog2._present(options, resolve);
           });
         },
         _drainQueue: () => {
-          if (ConfirmationDialog3.dialogElement) return;
-          const next = ConfirmationDialog3._queue.shift();
+          if (ConfirmationDialog2.dialogElement) return;
+          const next = ConfirmationDialog2._queue.shift();
           if (!next) return;
-          ConfirmationDialog3._present(next.options, next.resolve);
+          ConfirmationDialog2._present(next.options, next.resolve);
         },
         _present: (options, resolve) => {
           const {
@@ -5836,8 +5836,8 @@ Content-Type: ${contentType}\r
           const nameInputEl = dialog.querySelector("#ldb-confirm-name-input");
           if (nameInputEl) nameInputEl.placeholder = rawItemName;
           document.body.appendChild(dialog);
-          ConfirmationDialog3.dialogElement = dialog;
-          ConfirmationDialog3._activeResolve = resolve;
+          ConfirmationDialog2.dialogElement = dialog;
+          ConfirmationDialog2._activeResolve = resolve;
           const okBtn = dialog.querySelector("#ldb-confirm-ok");
           const cancelBtn = dialog.querySelector("#ldb-confirm-cancel");
           const countdownEl = dialog.querySelector("#ldb-confirm-countdown");
@@ -5851,14 +5851,14 @@ Content-Type: ${contentType}\r
             clearInterval(timer);
             document.removeEventListener("keydown", escHandler);
             dialog.remove();
-            if (ConfirmationDialog3.dialogElement === dialog) {
-              ConfirmationDialog3.dialogElement = null;
+            if (ConfirmationDialog2.dialogElement === dialog) {
+              ConfirmationDialog2.dialogElement = null;
             }
-            if (ConfirmationDialog3._activeResolve === resolve) {
-              ConfirmationDialog3._activeResolve = null;
+            if (ConfirmationDialog2._activeResolve === resolve) {
+              ConfirmationDialog2._activeResolve = null;
             }
             resolve(result);
-            ConfirmationDialog3._drainQueue();
+            ConfirmationDialog2._drainQueue();
           };
           dialog._ldConfirmCleanup = cleanup;
           const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
@@ -5915,7 +5915,7 @@ Content-Type: ${contentType}\r
         },
         // 关闭对话框(外部关闭视为取消, resolve false)
         close: () => {
-          const dialog = ConfirmationDialog3.dialogElement;
+          const dialog = ConfirmationDialog2.dialogElement;
           if (!dialog) return;
           if (typeof dialog._ldConfirmCleanup === "function") {
             dialog._ldConfirmCleanup(false);
@@ -5925,11 +5925,11 @@ Content-Type: ${contentType}\r
             clearInterval(dialog._countdownTimer);
           }
           dialog.remove();
-          ConfirmationDialog3.dialogElement = null;
-          const resolve = ConfirmationDialog3._activeResolve;
-          ConfirmationDialog3._activeResolve = null;
+          ConfirmationDialog2.dialogElement = null;
+          const resolve = ConfirmationDialog2._activeResolve;
+          ConfirmationDialog2._activeResolve = null;
           if (typeof resolve === "function") resolve(false);
-          ConfirmationDialog3._drainQueue();
+          ConfirmationDialog2._drainQueue();
         }
       };
       var UndoManager2 = {
@@ -6070,7 +6070,7 @@ Content-Type: ${contentType}\r
           return Math.max(0, CONFIG2.API.UNDO_TIMEOUT - elapsed);
         }
       };
-      module.exports = { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 };
+      module.exports = { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2, UndoManager: UndoManager2 };
     }
   });
 
@@ -9028,7 +9028,7 @@ ${result}`;
       var { Storage: Storage2 } = require_storage();
       var { TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
-      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
+      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog2, UndoManager: UndoManager2 } = require_security();
       var { AISchema } = require_schema();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
@@ -9307,7 +9307,7 @@ ${result}`;
       var { Storage: Storage2 } = require_storage();
       var { TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
-      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
+      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog2, UndoManager: UndoManager2 } = require_security();
       var { AISchema } = require_schema();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
@@ -9679,7 +9679,7 @@ ${AI()._resultToText(r.result)}
       var { Storage: Storage2 } = require_storage();
       var { TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
-      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
+      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog2, UndoManager: UndoManager2 } = require_security();
       var { AISchema } = require_schema();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
@@ -15827,7 +15827,7 @@ ${insight.summary || ""}`,
       var { Storage: Storage2 } = require_storage();
       var { TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
-      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog3, UndoManager: UndoManager2 } = require_security();
+      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog2, UndoManager: UndoManager2 } = require_security();
       var { AISchema } = require_schema();
       var { BlockConverter } = require_BlockConverter();
       var { NameResolver } = require_NameResolver();
@@ -15941,7 +15941,7 @@ ${insight.summary || ""}`,
             if (pages.length === 0) {
               return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u9875\u9762\u3002`;
             }
-            const confirmed = await ConfirmationDialog3.show({
+            const confirmed = await ConfirmationDialog2.show({
               title: `\u{1F310} \u6279\u91CF\u7FFB\u8BD1\u786E\u8BA4`,
               message: `\u5373\u5C06\u7FFB\u8BD1 ${pages.length} \u4E2A\u9875\u9762\u4E3A${lang}\u3002
 \u7FFB\u8BD1\u540E\u7684\u5185\u5BB9\u5C06\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002`,
@@ -16059,7 +16059,7 @@ ${AI().isolateContent(content)}`;
               return `\u274C AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5747\u65E0\u6548\uFF0C\u65E0\u6CD5\u521B\u5EFA\u6570\u636E\u5E93\u3002`;
             }
             extractedData.properties = validProps;
-            const confirmed = await ConfirmationDialog3.show({
+            const confirmed = await ConfirmationDialog2.show({
               title: "\u{1F4CA} \u521B\u5EFA\u6570\u636E\u5E93\u786E\u8BA4",
               message: `\u5C06\u4ECE\u300C${sourcePage.name}\u300D\u63D0\u53D6 ${extractedData.entries.length} \u4E2A\u6761\u76EE\u3002
 \u6570\u636E\u5E93\u540D\u79F0: ${dbName}
@@ -16189,7 +16189,7 @@ ${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${AI().isolateContent(struct
             plan.parent_title = AISchema.validatePropertyValue(plan.parent_title, "title");
             plan.parent_summary = AISchema.validatePropertyValue(plan.parent_summary, "rich_text");
             const pageList = plan.children.map((c) => `${c.icon || "\u{1F4C4}"} ${c.title}`).join("\n");
-            const confirmed = await ConfirmationDialog3.show({
+            const confirmed = await ConfirmationDialog2.show({
               title: "\u{1F4D1} \u591A\u9875\u9762\u751F\u6210\u786E\u8BA4",
               message: `\u5C06\u521B\u5EFA\u4EE5\u4E0B\u9875\u9762\u7ED3\u6784\uFF1A
 
@@ -18959,7 +18959,7 @@ ${report}
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
-      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
+      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
@@ -21126,7 +21126,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
       var { NotionOAuth: NotionOAuth2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
-      var { ConfirmationDialog: ConfirmationDialog3 } = require_security();
+      var { ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { WorkspaceService: WorkspaceService2 } = require_extract();
       var { AutoImporter: AutoImporter2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2 } = require_import();
       var { BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
@@ -21781,7 +21781,7 @@ ${AIService2.isolateContent(JSON.stringify({
             btn.onclick = () => {
               const sourceKey = btn.getAttribute("data-reset-baseline");
               const sourceLabel = sourceKey === "github" ? "GitHub" : sourceKey;
-              ConfirmationDialog3.show({
+              ConfirmationDialog2.show({
                 title: `\u91CD\u7F6E\u300C${sourceLabel}\u300D\u589E\u91CF\u57FA\u7EBF`,
                 message: `\u786E\u5B9A\u91CD\u7F6E\u300C${sourceLabel}\u300D\u7684\u589E\u91CF\u540C\u6B65\u57FA\u7EBF\u5417\uFF1F
 \u91CD\u7F6E\u540E\u4E0B\u6B21\u540C\u6B65\u5C06\u91CD\u65B0\u5168\u91CF\u626B\u63CF\u3002`,
@@ -22151,7 +22151,7 @@ ${AIService2.isolateContent(JSON.stringify({
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
-      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
+      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
@@ -24565,7 +24565,7 @@ ${AIService2.isolateContent(JSON.stringify({
           if (BookmarkBridge2.isExtensionAvailable()) return;
           if (Storage2.get(CONFIG2.STORAGE_KEYS.EXT_INSTALL_PROMPT_SHOWN, false)) return;
           Storage2.set(CONFIG2.STORAGE_KEYS.EXT_INSTALL_PROMPT_SHOWN, true);
-          ConfirmationDialog3.show({
+          ConfirmationDialog2.show({
             title: "\u5B89\u88C5\u4E66\u7B7E\u6865\u63A5\u6269\u5C55",
             message: "\u68C0\u6D4B\u5230\u4F60\u5C1A\u672A\u5B89\u88C5\u4E66\u7B7E\u6865\u63A5\u6269\u5C55\u3002\n\n\u662F\u5426\u73B0\u5728\u6253\u5F00\u5B89\u88C5\u9875\u9762\uFF1F",
             confirmText: "\u6253\u5F00\u5B89\u88C5\u9875",
@@ -24668,7 +24668,7 @@ ${AIService2.isolateContent(JSON.stringify({
       var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
-      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
+      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
@@ -24747,7 +24747,7 @@ ${AIService2.isolateContent(JSON.stringify({
             document.addEventListener("keydown", UI2._escMinimizeHandler);
           }
           refs.closeBtn.onclick = () => {
-            ConfirmationDialog3.show({
+            ConfirmationDialog2.show({
               title: "\u5173\u95ED\u9762\u677F",
               message: "\u5173\u95ED\u540E\u53EF\u901A\u8FC7\u5237\u65B0\u9875\u9762\u91CD\u65B0\u6253\u5F00\u3002\u786E\u5B9A\u5173\u95ED\u5417\uFF1F",
               confirmText: "\u5173\u95ED",
@@ -25308,7 +25308,7 @@ ${AIService2.isolateContent(JSON.stringify({
                 const bookmarkKey = String((item2 == null ? void 0 : item2.dataset.topicId) || "");
                 if (bookmarkKey) {
                   const isGitHubKey = bookmarkKey.startsWith("gh:");
-                  ConfirmationDialog3.show({
+                  ConfirmationDialog2.show({
                     title: "\u786E\u8BA4\u91CD\u65B0\u5BFC\u51FA",
                     message: isGitHubKey ? "\u91CD\u65B0\u5BFC\u51FA\u5C06\u79FB\u9664\u8BE5\u9879\uFF08\u4ED3\u5E93/Gist\uFF09\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868\uFF0C\u53EF\u80FD\u8986\u76D6\u73B0\u6709 Notion \u9875\u9762\u6216 Obsidian \u7B14\u8BB0\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F" : "\u91CD\u65B0\u5BFC\u51FA\u5C06\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868\uFF0C\u53EF\u80FD\u8986\u76D6\u73B0\u6709 Notion \u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
                     confirmText: "\u91CD\u65B0\u5BFC\u51FA",
@@ -25490,7 +25490,7 @@ ${AIService2.isolateContent(JSON.stringify({
             }
           };
           refs.cancelBtn.onclick = () => {
-            ConfirmationDialog3.show({
+            ConfirmationDialog2.show({
               title: "\u53D6\u6D88\u5BFC\u51FA",
               message: "\u786E\u5B9A\u8981\u53D6\u6D88\u5BFC\u51FA\u5417\uFF1F\u5DF2\u5BFC\u51FA\u7684\u5185\u5BB9\u4E0D\u4F1A\u88AB\u5220\u9664\u3002",
               confirmText: "\u53D6\u6D88\u5BFC\u51FA",
@@ -25947,7 +25947,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             }
           };
           refs.logClearBtn.onclick = () => {
-            ConfirmationDialog3.show({
+            ConfirmationDialog2.show({
               title: "\u6E05\u9664\u64CD\u4F5C\u65E5\u5FD7",
               message: "\u786E\u5B9A\u8981\u6E05\u9664\u6240\u6709\u64CD\u4F5C\u65E5\u5FD7\u5417\uFF1F",
               confirmText: "\u6E05\u9664",
@@ -25966,7 +25966,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             el.textContent = `\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55 \u2014\u2014 Linux.do: ${linuxdoCount} \u6761\uFF1BGitHub: ${githubCount} \u6761\uFF1B\u4E66\u7B7E: ${bookmarkCount} \u6761`;
           };
           const clearWithConfirm = (label, doClear) => {
-            ConfirmationDialog3.show({
+            ConfirmationDialog2.show({
               title: `\u6E05\u9664${label}\u8BB0\u5F55`,
               message: `\u786E\u5B9A\u6E05\u9664${label}\u8BB0\u5F55\u5417\uFF1F
 \u6E05\u9664\u540E\u8BE5\u6765\u6E90\u7684\u6240\u6709\u5185\u5BB9\u5C06\u53EF\u518D\u6B21\u5BFC\u51FA/\u5BFC\u5165\u3002`,
@@ -26005,7 +26005,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           }
           if (refs.clearAiTracesBtn) {
             refs.clearAiTracesBtn.onclick = () => {
-              ConfirmationDialog3.show({
+              ConfirmationDialog2.show({
                 title: "\u6E05\u9664 AI \u8C03\u7528\u94FE",
                 message: "\u786E\u5B9A\u6E05\u9664\u6240\u6709 AI \u8C03\u7528\u94FE\u8BB0\u5F55\u5417\uFF1F",
                 confirmText: "\u6E05\u9664",
@@ -26419,7 +26419,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             list.querySelectorAll("[data-template-delete]").forEach((btn) => {
               btn.onclick = () => {
                 const idx = parseInt(btn.dataset.templateDelete);
-                ConfirmationDialog3.show({
+                ConfirmationDialog2.show({
                   title: "\u786E\u8BA4\u5220\u9664",
                   message: "\u786E\u5B9A\u8981\u5220\u9664\u6B64\u6A21\u677F\u5417\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002",
                   confirmText: "\u5220\u9664",
@@ -26482,7 +26482,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
-      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
+      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
@@ -27368,7 +27368,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { CONFIG: CONFIG2 } = require_config();
       var { Storage: Storage2 } = require_storage();
       var { TargetState: TargetState2 } = require_auth();
-      var { OperationGuard: OperationGuard2 } = require_security();
+      var { OperationGuard: OperationGuard2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { AgentTrace } = require_AgentTrace();
       var { AISchema } = require_schema();
       var { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 } = require_AgentTools();
@@ -27410,7 +27410,7 @@ ${plan.explanation || ""}
 `;
           });
           ChatState2.updateLastMessage(planMsg + "\n\u23F3 \u7B49\u5F85\u786E\u8BA4...", "processing");
-          const confirmed = await ConfirmationDialog.show({
+          const confirmed = await ConfirmationDialog2.show({
             title: "\u{1F916} Agent \u6267\u884C\u8BA1\u5212\u786E\u8BA4",
             message: plan.plan.map((s, i) => `${i + 1}. ${s.explanation}`).join("\n"),
             itemName: task_description,
@@ -27729,7 +27729,7 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
       var { NotionAPI: NotionAPI2, SiteDetector: SiteDetector2, EMOJI_MAP: EMOJI_MAP2, DOMToNotion: DOMToNotion2 } = require_api();
       var { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
       var { GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
-      var { UndoManager: UndoManager2, ConfirmationDialog: ConfirmationDialog3 } = require_security();
+      var { UndoManager: UndoManager2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { UrlValidator } = require_UrlValidator();
       var { AISchema } = require_schema();
       var { AgentTrace } = require_AgentTrace();
@@ -29729,7 +29729,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           const clearBtn = document.querySelector("#ldb-chat-clear");
           if (clearBtn) {
             clearBtn.onclick = async () => {
-              const confirmed = await ConfirmationDialog3.show({
+              const confirmed = await ConfirmationDialog2.show({
                 title: "\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2",
                 message: "\u786E\u5B9A\u8981\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2\u5417\uFF1F",
                 countdown: 3
@@ -29754,7 +29754,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           const classifyCancelBtn = document.querySelector("#ldb-classify-cancel");
           if (classifyCancelBtn) {
             classifyCancelBtn.onclick = async () => {
-              const confirmed = await ConfirmationDialog3.show({
+              const confirmed = await ConfirmationDialog2.show({
                 title: "\u53D6\u6D88\u6279\u91CF\u5206\u7C7B",
                 message: "\u786E\u5B9A\u8981\u53D6\u6D88\u6279\u91CF\u5206\u7C7B\u5417\uFF1F\u5DF2\u5B8C\u6210\u7684\u90E8\u5206\u4E0D\u4F1A\u4E22\u5931\u3002",
                 countdown: 3
@@ -29984,7 +29984,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { CredentialVault, TargetState, NotionOAuth } = require_auth();
   var { SiteDetector, InstallHelper, EMOJI_MAP, NOTION_LANGUAGES, normalizeLanguage, DOMToNotion, NotionTransport, NotionAPI, ObsidianAPI, HTMLToMarkdown } = require_api();
   var { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier } = require_ai();
-  var { OperationGuard, OperationLog, ConfirmationDialog: ConfirmationDialog2, UndoManager } = require_security();
+  var { OperationGuard, OperationLog, ConfirmationDialog, UndoManager } = require_security();
   var { ZhihuAPI, GenericExtractor, WorkspaceService } = require_extract();
   var { GenericExporter, LinuxDoAPI, Exporter } = require_export();
   var { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require_import();

@@ -1,137 +1,284 @@
-// 扫描游离引用:符号被引用但未在 require 解构中
+// 扫描游离引用: 符号被引用但未在 require 解构中导入
 // 用法: node tests/scan-dangling-refs.js
+// 退出码: 0 干净(或仅允许名单), 1 存在未允许的游离引用
+"use strict";
+
 const fs = require("fs");
 const path = require("path");
 
 const SRC = path.resolve(__dirname, "..", "src");
+const ALLOWLIST_PATH = path.resolve(__dirname, "dangling-refs-allowlist.json");
 
-// 已知的模块导出符号 → 定义文件(用于判断符号属于哪个模块)
-// 从各模块的 module.exports 收集
-const moduleExports = {}; // symbol -> modulePath (相对 src)
+/** 跳过字符串/模板/注释；返回同长度掩码文本（非代码处置空格，换行保留） */
+function maskNoise(content) {
+    const out = [];
+    let i = 0;
+    while (i < content.length) {
+        if (content[i] === "/" && content[i + 1] === "/") {
+            while (i < content.length && content[i] !== "\n") {
+                out.push(" ");
+                i++;
+            }
+            continue;
+        }
+        if (content[i] === "/" && content[i + 1] === "*") {
+            out.push(" ", " ");
+            i += 2;
+            while (i < content.length && !(content[i] === "*" && content[i + 1] === "/")) {
+                out.push(content[i] === "\n" ? "\n" : " ");
+                i++;
+            }
+            if (i < content.length) {
+                out.push(" ", " ");
+                i += 2;
+            }
+            continue;
+        }
+        if (content[i] === '"' || content[i] === "'" || content[i] === "`") {
+            const q = content[i];
+            out.push(" ");
+            i++;
+            while (i < content.length && content[i] !== q) {
+                if (content[i] === "\\") {
+                    out.push(" ", " ");
+                    i += 2;
+                    continue;
+                }
+                if (q === "`" && content[i] === "$" && content[i + 1] === "{") {
+                    out.push(" ", " ");
+                    i += 2;
+                    let depth = 1;
+                    while (i < content.length && depth > 0) {
+                        if (content[i] === "{") depth++;
+                        else if (content[i] === "}") depth--;
+                        if (depth === 0) {
+                            out.push(" ");
+                            i++;
+                            break;
+                        }
+                        out.push(content[i]);
+                        i++;
+                    }
+                    continue;
+                }
+                out.push(content[i] === "\n" ? "\n" : " ");
+                i++;
+            }
+            if (i < content.length) {
+                out.push(" ");
+                i++;
+            }
+            continue;
+        }
+        out.push(content[i]);
+        i++;
+    }
+    return out.join("");
+}
+
+function extractExportsBody(content) {
+    const masked = maskNoise(content);
+    const marker = masked.match(/module\.exports\s*=\s*\{/);
+    if (!marker) return null;
+    const start = marker.index + marker[0].length - 1;
+    let depth = 0;
+    for (let i = start; i < masked.length; i++) {
+        if (masked[i] === "{") depth++;
+        else if (masked[i] === "}") {
+            depth--;
+            if (depth === 0) return masked.slice(start + 1, i);
+        }
+    }
+    return null;
+}
+
+function topLevelExportKeys(body) {
+    const keys = new Set();
+    let depth = 0;
+    for (let i = 0; i < body.length; i++) {
+        const ch = body[i];
+        if (ch === "{") { depth++; continue; }
+        if (ch === "}") { depth--; continue; }
+        if (depth !== 0) continue;
+        if (!/[A-Z]/.test(ch)) continue;
+        if (i > 0 && /[A-Za-z0-9_]/.test(body[i - 1])) continue;
+        // 支持 shorthand `Foo,` / `Foo` 与显式 `Foo:`
+        const m = body.slice(i).match(/^([A-Z][A-Za-z0-9_]*)\s*([:,}]|$)/);
+        if (m) {
+            keys.add(m[1]);
+            i += m[1].length - 1;
+        }
+    }
+    return keys;
+}
+
+const moduleExports = {};
 function collectExports(file) {
     const content = fs.readFileSync(file, "utf8");
-    // 匹配 module.exports = { A, B, C } 或 { A: ..., B, ... }
-    const exportMatches = content.match(/module\.exports\s*=\s*\{([^}]*)\}/);
-    if (!exportMatches) return;
-    const symbols = new Set();
-    // 提取标识符: "Name:" 或 "Name," 或 "Name}"
-    const re = /\b([A-Z][A-Za-z0-9_]*)\s*[:,}]/g;
-    let m;
-    while ((m = re.exec(exportMatches[1])) !== null) symbols.add(m[1]);
+    const body = extractExportsBody(content);
+    if (!body) return;
     const rel = path.relative(SRC, file).replace(/\\/g, "/");
-    for (const s of symbols) moduleExports[s] = rel;
-}
-
-function walk(dir) {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        const p = path.join(dir, e.name);
-        if (e.isDirectory()) walk(p);
-        else if (e.name.endsWith(".js")) collectExports(p);
+    for (const s of topLevelExportKeys(body)) {
+        if (!moduleExports[s]) moduleExports[s] = rel;
     }
 }
-walk(SRC);
 
-// 对每个源文件:找 require("../X") 解构集 + 文件内引用的导出符号
-const issues = [];
-function localDecls(content) {
+function walk(dir, fn) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p, fn);
+        else if (e.name.endsWith(".js")) fn(p);
+    }
+}
+walk(SRC, collectExports);
+
+function collectParamsFromList(paramSrc, into) {
+    const flat = paramSrc.replace(/\{|\}/g, " ");
+    for (const part of flat.split(",")) {
+        const id = part.trim().match(/^([A-Z][A-Za-z0-9_]*)/);
+        if (id) into.add(id[1]);
+    }
+}
+
+function extractBalanced(src, openIdx, openCh, closeCh) {
+    let depth = 0;
+    for (let i = openIdx; i < src.length; i++) {
+        if (src[i] === openCh) depth++;
+        else if (src[i] === closeCh) {
+            depth--;
+            if (depth === 0) return src.slice(openIdx + 1, i);
+        }
+    }
+    return null;
+}
+
+function localDecls(masked) {
     const s = new Set();
-    const re = /\b(?:const|let|var|function|class)\s+([A-Z][A-Za-z0-9_]*)/g;
     let m;
-    while ((m = re.exec(content)) !== null) s.add(m[1]);
+    const declRe = /\b(?:const|let|var|function|class)\s+([A-Z][A-Za-z0-9_]*)/g;
+    while ((m = declRe.exec(masked)) !== null) s.add(m[1]);
+
+    const destr = /\b(?:const|let|var)\s*\{/g;
+    while ((m = destr.exec(masked)) !== null) {
+        const open = m.index + m[0].length - 1;
+        const body = extractBalanced(masked, open, "{", "}");
+        if (!body) continue;
+        for (const part of body.split(",")) {
+            const t = part.trim();
+            if (!t) continue;
+            const renamed = t.match(/^([A-Za-z_][\w]*)\s*:\s*([A-Za-z_][\w]*)$/);
+            if (renamed) {
+                if (/^[A-Z]/.test(renamed[2])) s.add(renamed[2]);
+            } else {
+                const id = t.match(/^([A-Z][A-Za-z0-9_]*)/);
+                if (id) s.add(id[1]);
+            }
+        }
+    }
+
+    for (let i = 0; i < masked.length; i++) {
+        if (masked[i] !== "(") continue;
+        const before = masked.slice(Math.max(0, i - 32), i);
+        const isFn =
+            /(?:async\s+)?[A-Za-z_][\w]*\s*$/.test(before) ||
+            /function\s*[A-Za-z0-9_]*\s*$/.test(before) ||
+            /(?::|=)\s*(?:async\s*)?$/.test(before);
+        if (!isFn) continue;
+        const body = extractBalanced(masked, i, "(", ")");
+        if (body == null) continue;
+        const after = masked.slice(i + body.length + 2).match(/^\s*(=>|\{)/);
+        if (!after) continue;
+        collectParamsFromList(body, s);
+    }
     return s;
 }
 
-function scanFile(file) {
-    const content = fs.readFileSync(file, "utf8");
-    const lines = content.split("\n");
-    // 收集所有 require 解构的符号
+function collectImported(raw) {
     const imported = new Set();
-    // require("../X") 解构: const { A, B } = require("../X");
-    const requireRe = /const\s*\{([^}]*)\}\s*=\s*require\(\s*["'](\.\.?\/[^"']+)["']\s*\)/g;
+    const requireRe = /(?:const|let|var)\s*\{([^}]*)\}\s*=\s*require\(\s*["'][^"']+["']\s*\)/g;
     let rm;
-    while ((rm = requireRe.exec(content)) !== null) {
-        const syms = rm[1].split(",").map(s => s.trim()).filter(Boolean);
-        syms.forEach(s => imported.add(s));
+    while ((rm = requireRe.exec(raw)) !== null) {
+        for (const part of rm[1].split(",")) {
+            const t = part.trim();
+            if (!t) continue;
+            const renamed = t.match(/^([A-Za-z_][\w]*)\s*:\s*([A-Za-z_][\w]*)$/);
+            if (renamed) imported.add(renamed[2]);
+            else {
+                const id = t.match(/^([A-Za-z_][\w]*)/);
+                if (id) imported.add(id[1]);
+            }
+        }
     }
-    // 文件内引用的已知导出符号(大写开头,排除注释行/本文件声明/同文件导出)
-    const local = localDecls(content);
+    const propRe = /require\(\s*["'][^"']+["']\s*\)\s*\.\s*([A-Z][A-Za-z0-9_]*)/g;
+    while ((rm = propRe.exec(raw)) !== null) imported.add(rm[1]);
+    return imported;
+}
+
+const issues = [];
+function scanFile(file) {
+    const raw = fs.readFileSync(file, "utf8");
+    const masked = maskNoise(raw);
+    const imported = collectImported(raw);
+    const local = localDecls(masked);
     const rel = path.relative(SRC, file).replace(/\\/g, "/");
     const referenced = new Set();
-    for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
-        const re = /\b([A-Z][A-Za-z0-9_]*)\b/g;
-        let m;
-        while ((m = re.exec(line)) !== null) {
-            const sym = m[1];
-            if (!moduleExports[sym]) continue;
-            if (imported.has(sym) || local.has(sym)) continue;
-            if (moduleExports[sym] === rel) continue;
-            referenced.add(sym);
-        }
+    const re = /\b([A-Z][A-Za-z0-9_]*)\b/g;
+    let m;
+    while ((m = re.exec(masked)) !== null) {
+        const sym = m[1];
+        if (!moduleExports[sym]) continue;
+        if (imported.has(sym) || local.has(sym)) continue;
+        if (moduleExports[sym] === rel) continue;
+        const after = masked.slice(m.index + sym.length).match(/^\s*:/);
+        if (after) continue; // object key, not free var
+        referenced.add(sym);
     }
     for (const sym of referenced) {
         issues.push({ file: rel, symbol: sym, definedIn: moduleExports[sym] });
     }
 }
 
-function walkScan(dir) {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        const p = path.join(dir, e.name);
-        if (e.isDirectory()) walkScan(p);
-        else if (e.name.endsWith(".js")) scanFile(p);
-    }
-}
-walkScan(SRC);
+walk(SRC, scanFile);
 
-// 去重
 const seen = new Set();
-const unique = issues.filter(i => {
+const unique = issues.filter((i) => {
     const k = i.file + ":" + i.symbol;
     if (seen.has(k)) return false;
-    seen.add(k); return true;
+    seen.add(k);
+    return true;
 });
 
-// 已知惰性 require / 循环依赖注入（非顶部 import）——允许名单
-const ALLOW = new Set([
-  "adapter/BookmarkAdapter.js:BookmarkBridge",
-  "adapter/BookmarkAdapter.js:BookmarkExporter",
-  "adapter/SyncScheduler.js:SyncState",
-  "adapter/SyncScheduler.js:AutoImporter",
-  "adapter/SyncScheduler.js:GitHubAutoImporter",
-  "adapter/SyncScheduler.js:BookmarkAutoImporter",
-  "ai/agent-executor.js:ChatState",
-  "ai/agent-executor.js:AIService",
-  "ai/agent-executor.js:ConfirmationDialog",
-  "ai/handlers/batch.js:AIClassifier",
-  "ai/handlers/batch.js:GitHubAPI",
-  "ai/handlers/batch.js:BookmarkBridge",
-  "ai/handlers/batch.js:InstallHelper",
-  "ai/handlers/batch.js:BookmarkExporter",
-  "ai/handlers/content.js:AIClassifier",
-  "ai/tools/write-tools.js:AIClassifier",
-  "coordination/UICommandService.js:AIAssistant",
-  "coordination/UICommandService.js:AIClassifier",
-  "coordination/UICommandService.js:GenericExporter",
-  "coordination/UICommandService.js:BookmarkExporter",
-  "coordination/UICommandService.js:UI",
-  "coordination/UICommandService.js:GitHubAPI",
-  "coordination/UICommandService.js:AIService",
-  "import/index.js:UI",
-  "main.js:DedupStore",
-  "security/index.js:UI",
-  "storage/index.js:CredentialVault",
-]);
+function loadAllowlist() {
+    if (!fs.existsSync(ALLOWLIST_PATH)) return { entries: new Set(), reasons: {} };
+    const data = JSON.parse(fs.readFileSync(ALLOWLIST_PATH, "utf8"));
+    const entries = new Set();
+    const reasons = {};
+    for (const [key, reason] of Object.entries(data.allow || {})) {
+        entries.add(key);
+        reasons[key] = reason;
+    }
+    return { entries, reasons };
+}
+
+const { entries: ALLOW, reasons } = loadAllowlist();
 const unexpected = unique.filter((i) => !ALLOW.has(i.file + ":" + i.symbol));
+const allowedHits = unique.filter((i) => ALLOW.has(i.file + ":" + i.symbol));
+const unusedAllow = [...ALLOW].filter((k) => !unique.some((i) => i.file + ":" + i.symbol === k));
+
 if (unique.length === 0) {
     console.log("✅ 无游离引用");
+    if (unusedAllow.length) console.log(`(提示: 允许名单有 ${unusedAllow.length} 条未命中，可考虑清理)`);
     process.exit(0);
 }
-console.log(`发现 ${unique.length} 处游离引用（其中允许名单 ${unique.length - unexpected.length}，意外 ${unexpected.length}）:\n`);
+
+console.log(`发现 ${unique.length} 处游离引用（允许名单命中 ${allowedHits.length}，意外 ${unexpected.length}）:\n`);
 for (const i of unique) {
-    const tag = ALLOW.has(i.file + ":" + i.symbol) ? "ALLOW" : "NEW";
-    console.log(`  [${tag}] ${i.file}: 引用 ${i.symbol} (定义于 ${i.definedIn}) 但未 import`);
+    const key = i.file + ":" + i.symbol;
+    const tag = ALLOW.has(key) ? "ALLOW" : "NEW";
+    const why = reasons[key] ? ` — ${reasons[key]}` : "";
+    console.log(`  [${tag}] ${i.file}: 引用 ${i.symbol} (定义于 ${i.definedIn}) 但未 import${why}`);
 }
+if (unusedAllow.length) console.log(`\n(提示: 允许名单有 ${unusedAllow.length} 条未命中)`);
 if (unexpected.length > 0) {
     console.error("\n❌ 存在未允许的游离引用");
     process.exit(1);
