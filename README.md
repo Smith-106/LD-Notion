@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.10`
+- 当前仓库源码版本：`v3.14.11`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -388,6 +388,16 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.11
+
+### fix (#17–#21 · DedupStore / OAuth 续签 / clipper / UI)
+
+- **#17** 对账 DedupStore batch 槽残留：strict 对账零命中也 `endBatch`；LinuxDo `getDedupKey` 对齐裸 topicId
+- **#18** skip keys / dual-ledger clear / batch wipe：GitHubAutoImporter `isExported` 过滤；RSS `allow_duplicates` 键；Bookmark 清账兼清 DedupStore；`clearSeen` `wiped` 防复活
+- **#19** batch `unmarkSeen` 墓碑 (`dirtyKeys`+`deleted`) + Discourse slug 对账 URL 归一
+- **#20** OAuth `resolveRequestToken` 禁快照遮蔽续签；知乎/通用 clipper 成功后 mark DedupStore
+- **#21** ConfirmationDialog `countdown:0` 立即启用；clipper URL `normalizeDedupUrl`；UpdateChecker fallback 用 `CONFIG.SCRIPT_VERSION`
 
 ### v3.14.10
 
