@@ -163,3 +163,36 @@ describe("R-REC-02: DedupStore batch 模式对账批量写回(F-4 回归护栏)"
         expect(oldTs).toBeLessThan(Date.now() - D90); // 时间断言背景: 91 天条目若在集合中也不会被 endBatch 淘汰
     });
 });
+
+
+describe("R-REC-03: 对账 beginBatch 零命中也必须 endBatch(槽残留根因)", () => {
+    it("漏 endBatch 时后续 markSeen 只驻内存、不落盘(对照: 旧对账零命中路径)", () => {
+        DedupStore.beginBatch("linuxdo");
+        DedupStore.markSeen("linuxdo", "leak-1");
+        // 模拟旧逻辑: linuxdoDirty=false → 不调 endBatch
+        expect(DedupStore._batchCaches.linuxdo).toBeTruthy();
+        expect(store.get(DedupStore.keyFor("linuxdo"))).toBeUndefined();
+        // 清槽模拟页面重载
+        DedupStore._batchCaches = {};
+        expect(DedupStore.isDuplicate("linuxdo", "leak-1")).toBe(false);
+    });
+
+    it("beginBatch 后即使零写入也 endBatch → 槽清除, 随后直写 markSeen 落盘", () => {
+        DedupStore.beginBatch("linuxdo");
+        // 零命中: dirty 仍为 false, 但必须关闭槽(修复后语义)
+        DedupStore.endBatch("linuxdo");
+        expect(DedupStore._batchCaches.linuxdo).toBeUndefined();
+        DedupStore.markSeen("linuxdo", "persist-1");
+        const saved = JSON.parse(store.get(DedupStore.keyFor("linuxdo")));
+        expect(saved["persist-1"]).toBeTruthy();
+    });
+
+    it("LinuxDoAdapter.getDedupKey 与导出账本键空间一致(裸 topicId)", () => {
+        const { LinuxDoAdapter } = require("../src/adapter/LinuxDoAdapter");
+        const item = LinuxDoAdapter.normalize({ topic_id: 4242, name: "t" });
+        expect(item.id).toBe("4242");
+        expect(LinuxDoAdapter.getDedupKey(item)).toBe("4242");
+        DedupStore.markSeen("linuxdo", "4242");
+        expect(DedupStore.isDuplicate("linuxdo", LinuxDoAdapter.getDedupKey(item))).toBe(true);
+    });
+});

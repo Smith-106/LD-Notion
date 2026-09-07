@@ -23,12 +23,13 @@ const LinuxDoAdapter = Object.assign(Object.create(SourceAdapter), {
     },
 
     normalize(raw) {
+        const topicId = raw.topic_id || raw.bookmarkable_id || raw.id || "";
         return {
             source: "linuxdo",
-            id: String(raw.topic_id || raw.bookmarkable_id || ""),
+            id: String(topicId),
             title: raw.name || raw.title || "",
             content: "",
-            url: raw.topic_id ? `https://linux.do/t/${raw.topic_id}` : "",
+            url: topicId ? `https://linux.do/t/${topicId}` : "",
             author: raw.username || "",
             tags: [],
             createdAt: raw.created_at || raw.bookmarked_at || raw.updated_at || "",
@@ -37,7 +38,9 @@ const LinuxDoAdapter = Object.assign(Object.create(SourceAdapter), {
     },
 
     getDedupKey(item) {
-        return `linuxdo:${item.id}`;
+        // 与 Storage.markTopicExported / isTopicExported 键空间一致(裸 topicId)。
+        // 旧实现 `linuxdo:${id}` 与导出账本双轨 → SyncCoordinator 过滤层永不命中已导出项。
+        return String(item?.id || "");
     },
 });
 

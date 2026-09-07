@@ -871,11 +871,18 @@ const WorkspaceInsight = {
         const strictMode = Utils.isLinuxDoDedupStrict();
         let matched = 0;
         let githubDirty = false;
-        let linuxdoDirty = false;
         // LinuxDo 账本用 DedupStore batch 模式: 循环内 markSeen 仅 mutate 内存缓存,
         // 循环末 endBatch 单次写回(消除逐条全账本序列化的写侧 O(N²), 与 SyncCoordinator 同模式)
+        // v3.14.11: 无论是否命中 LinuxDo 回填, beginBatch 后必须 endBatch。
+        // 旧逻辑仅在 linuxdoDirty 时 endBatch → 刷新工作区零命中时槽残留;
+        // 随后手动/自动导出的 markTopicExported 只写内存, 页面重载后账本丢失,
+        // UI 再次显示「待导出」、自动去重失效(用户报「自动去重也有问题」)。
+        let linuxdoBatchOpened = false;
         if (strictMode) {
-            try { DedupStore.beginBatch("linuxdo"); } catch { /* batch 不可用时降级直写 */ }
+            try {
+                DedupStore.beginBatch("linuxdo");
+                linuxdoBatchOpened = true;
+            } catch { /* batch 不可用时降级直写 */ }
         }
         try {
         records.forEach((record) => {
@@ -901,14 +908,16 @@ const WorkspaceInsight = {
                 if (!topicId) return;
                 if (Storage.isTopicExported(topicId)) return;
                 Storage.markTopicExported(topicId);
-                linuxdoDirty = true;
                 matched++;
             }
         });
         } finally {
-            // v3.14.6 (CC-14): forEach 抛错也会 flush —— 槽残留致账本静默丢失
-            if (linuxdoDirty) {
-                try { DedupStore.endBatch("linuxdo"); } catch { /* batch 未开启时 markSeen 已直写, 无需 flush */ }
+            // v3.14.6 (CC-14) + v3.14.11: 只要开过 batch 就必须关闭(含零命中/抛错),
+            // 否则槽残留使后续导出 markSeen 仅驻内存、刷新后「待导出」复发。
+            if (linuxdoBatchOpened) {
+                try { DedupStore.endBatch("linuxdo"); } catch { /* batch 异常时忽略 */ }
+                // endBatch 可能 rebase/淘汰; 失效 Storage 侧缓存, 避免同 tab 读到陈旧对象
+                Storage._exportedTopicsCache = null;
             }
         }
         // 循环末单次持久化(与 GitHubExporter/批量导出同模式): 避免逐条 flush 的写侧 O(N²)
