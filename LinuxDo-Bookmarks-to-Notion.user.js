@@ -1143,7 +1143,7 @@
          */
         beginBatch(sourceType) {
           if (this._batchCaches[sourceType]) return;
-          this._batchCaches[sourceType] = { set: this._loadSet(sourceType), dirty: false };
+          this._batchCaches[sourceType] = { set: this._loadSet(sourceType), dirty: false, wiped: false };
         },
         /**
          * 结束批量模式，如有变更则一次写回。
@@ -1157,18 +1157,23 @@
           for (const src of targets) {
             const cache = this._batchCaches[src];
             if (cache && cache.dirty) {
-              const fresh = this._loadSet(src);
-              for (const [k, ts] of Object.entries(cache.set)) {
-                const prev = fresh[k];
-                if (prev === void 0 || Number(ts) > Number(prev)) fresh[k] = ts;
+              let next;
+              if (cache.wiped) {
+                next = { ...cache.set };
+              } else {
+                next = this._loadSet(src);
+                for (const [k, ts] of Object.entries(cache.set)) {
+                  const prev = next[k];
+                  if (prev === void 0 || Number(ts) > Number(prev)) next[k] = ts;
+                }
               }
               if (URL_KEYED_SOURCES.includes(src)) {
-                this._evictExpired(fresh);
+                this._evictExpired(next);
               } else {
-                this._evictByCapacity(fresh);
+                this._evictByCapacity(next);
               }
-              this._saveSet(src, fresh);
-              cache.set = fresh;
+              this._saveSet(src, next);
+              cache.set = next;
               emit("storage:state-committed", { sourceType: src, kind: "dedup" });
             }
           }
@@ -1310,6 +1315,7 @@
           if (batch) {
             batch.set = {};
             batch.dirty = true;
+            batch.wiped = true;
             return;
           }
           GM_deleteValue(this.keyFor(sourceType));
@@ -11112,9 +11118,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
         },
         // F-05 修复：清除书签已导出记录（清键 + 失效内存缓存，供数据管理 UI 调用）
+        // 双账本: BOOKMARK_EXPORTED(URL, 手动导出) + DedupStore("bookmark")(bookmark:id, 自动同步落账)。
+        // 只清前者会导致 SyncCoordinator/自动去重仍命中旧键,「清除后可再导出」失效。
         clearExportedRecords: () => {
           BookmarkExporter2._exportedCache = null;
           Storage2.remove(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED);
+          try {
+            const { DedupStore } = require_storage();
+            DedupStore.clearSeen("bookmark");
+          } catch {
+          }
         },
         // v3.14.3: 导出账本容量上限（书签 URL 数天然有界）——
         // 仅在超过上限时淘汰最旧条目，避免 90 天时间窗误删导出事实致 UI 误判“待导出”。
@@ -11555,7 +11568,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             id: raw.id || raw.guid || raw.link || "",
             title: raw.title || "",
             content: raw.content || raw.summary || "",
-            url: raw.link || "",
+            // parseFeedXml/normalizeItem 用 url; 原始 feed 项可能仅有 link
+            url: raw.url || raw.link || "",
+            feedUrl: raw.feedUrl || "",
             author: raw.creator || raw.author || "",
             tags: raw.categories || [],
             // RSSAutoImporter.normalizeItem 输出 publishedAt(ISO), 适配器原读 pubDate/isoDate 恒空 →
@@ -11565,7 +11580,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           };
         },
         getDedupKey(item) {
-          return `rss:${item.id}`;
+          const { RSSAutoImporter: RSSAutoImporter2 } = this._getBridge();
+          if (typeof (RSSAutoImporter2 == null ? void 0 : RSSAutoImporter2.buildDedupStoreKey) === "function") {
+            return RSSAutoImporter2.buildDedupStoreKey(item);
+          }
+          return `rss:${(item == null ? void 0 : item.id) || ""}`;
         },
         async _fetchItems(watermark) {
           var _a;
@@ -12714,6 +12733,18 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           return String(normalized.url || normalized.id || "").trim();
         },
+        // DedupStore / SyncCoordinator 过滤键(与 RSSAdapter.getDedupKey 同构)。
+        // allow_duplicates: rss:{feedUrl}::{id}; strict: rss:{id}。
+        // 与 snapshot 用的 buildItemKey(URL 或 feed::id 无 rss: 前缀)刻意分轨。
+        buildDedupStoreKey: (item, dedupMode = RSSAutoImporter2.getDedupMode()) => {
+          var _a, _b;
+          const id = String((item == null ? void 0 : item.id) || ((_a = item == null ? void 0 : item.raw) == null ? void 0 : _a.id) || (item == null ? void 0 : item.guid) || (item == null ? void 0 : item.link) || "").trim();
+          if (dedupMode === "allow_duplicates") {
+            const feedUrl = String((item == null ? void 0 : item.feedUrl) || ((_b = item == null ? void 0 : item.raw) == null ? void 0 : _b.feedUrl) || "feed").trim() || "feed";
+            return `rss:${feedUrl}::${id}`;
+          }
+          return `rss:${id}`;
+        },
         parseFeedXml: (xml, feedUrl = "") => {
           const source = String(xml || "").trim();
           if (!source) return { feedTitle: "", items: [] };
@@ -13140,8 +13171,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             if (pageId) index.byPageId.set(pageId, syncedMeta);
             if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
             if (syncedMeta.title) index.byTitle.set(syncedMeta.title, syncedMeta);
-            if (result.created || result.updated) {
-              SyncCoordinator.markItemSeen("rss", `rss:${item.id || ""}`);
+            if (result.created || result.updated || result.unchanged) {
+              SyncCoordinator.markItemSeen("rss", RSSAutoImporter2.buildDedupStoreKey(item));
             }
             nextSnapshot[item.itemKey] = RSSAutoImporter2.buildSnapshotEntry(item, pageId);
             result.success = true;
@@ -15353,8 +15384,20 @@ ${insight.summary || ""}`,
         const successEntries = [];
         const failedEntries = [];
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-        for (let i = 0; i < mappedItems.length; i++) {
-          const item = mappedItems[i];
+        const toExport = [];
+        for (const item of mappedItems) {
+          const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
+          if (itemKey) {
+            const already = type === "gists" ? GitHubAPI2.isGistExported(itemKey) : GitHubAPI2.isExported(itemKey);
+            if (already) {
+              successEntries.push({ itemKey, skippedExisting: true });
+              continue;
+            }
+          }
+          toExport.push(item);
+        }
+        for (let i = 0; i < toExport.length; i++) {
+          const item = toExport[i];
           const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
           try {
             const raw = item.raw || item;
@@ -15411,13 +15454,19 @@ ${insight.summary || ""}`,
             }
             failedEntries.push({ itemKey, title: item.title || itemKey });
           }
-          if (i < mappedItems.length - 1) {
+          if (i < toExport.length - 1) {
             await Utils2.sleep(delay);
           }
         }
         GitHubAPI2.flushExported();
         GitHubAPI2.flushGistsExported();
-        return { success: successEntries, failed: failedEntries };
+        const createdEntries = successEntries.filter((e) => !e.skippedExisting);
+        return {
+          success: successEntries,
+          // 含 skippedExisting, 供 watermark 推进
+          created: createdEntries,
+          failed: failedEntries
+        };
       };
       GitHubAutoImporter2._exportMappedItems = async (mappedItems, type, meta, settings) => {
         return await GitHubAutoImporter2._exportViaGitHubExporter(mappedItems, type, meta, settings);
@@ -15485,8 +15534,9 @@ ${insight.summary || ""}`,
             lastStats: {
               scanned: items.length,
               pending: incrementalItems.length,
-              exported: result.success.length,
-              failed: result.failed.length
+              exported: (result.created || result.success.filter((e) => !e.skippedExisting)).length,
+              failed: result.failed.length,
+              skippedExisting: result.success.filter((e) => e.skippedExisting).length
             }
           };
           if (successfulItems.length > 0) {
@@ -15506,7 +15556,8 @@ ${insight.summary || ""}`,
             typeStatePatch.lastSuccessAt = Date.now();
           }
           SyncState2.updateGitHubState(type, typeStatePatch);
-          return { pending: true, success: result.success.length, failed: result.failed.length };
+          const createdCount = (result.created || result.success.filter((e) => !e.skippedExisting)).length;
+          return { pending: true, success: createdCount, failed: result.failed.length };
         } catch (error) {
           SyncState2.updateGitHubState(type, {
             lastAttemptAt: typeAttemptAt,

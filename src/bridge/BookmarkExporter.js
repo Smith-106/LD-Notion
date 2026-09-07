@@ -587,9 +587,15 @@ const BookmarkExporter = {
     },
 
     // F-05 修复：清除书签已导出记录（清键 + 失效内存缓存，供数据管理 UI 调用）
+    // 双账本: BOOKMARK_EXPORTED(URL, 手动导出) + DedupStore("bookmark")(bookmark:id, 自动同步落账)。
+    // 只清前者会导致 SyncCoordinator/自动去重仍命中旧键,「清除后可再导出」失效。
     clearExportedRecords: () => {
         BookmarkExporter._exportedCache = null;
         Storage.remove(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED);
+        try {
+            const { DedupStore } = require("../storage");
+            DedupStore.clearSeen("bookmark");
+        } catch { /* DedupStore 不可用时仅清手动账本 */ }
     },
 
     // v3.14.3: 导出账本容量上限（书签 URL 数天然有界）——

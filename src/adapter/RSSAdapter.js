@@ -37,7 +37,9 @@ const RSSAdapter = Object.assign(Object.create(SourceAdapter), {
             id: raw.id || raw.guid || raw.link || "",
             title: raw.title || "",
             content: raw.content || raw.summary || "",
-            url: raw.link || "",
+            // parseFeedXml/normalizeItem 用 url; 原始 feed 项可能仅有 link
+            url: raw.url || raw.link || "",
+            feedUrl: raw.feedUrl || "",
             author: raw.creator || raw.author || "",
             tags: raw.categories || [],
             // RSSAutoImporter.normalizeItem 输出 publishedAt(ISO), 适配器原读 pubDate/isoDate 恒空 →
@@ -48,7 +50,13 @@ const RSSAdapter = Object.assign(Object.create(SourceAdapter), {
     },
 
     getDedupKey(item) {
-        return `rss:${item.id}`;
+        // 与 RSSAutoImporter.buildDedupStoreKey 对齐: allow_duplicates 时按 feed+id,
+        // 避免「按 Feed + ID 保留重复」被 SyncCoordinator 以裸 rss:id 误杀跨 Feed 条目。
+        const { RSSAutoImporter } = this._getBridge();
+        if (typeof RSSAutoImporter?.buildDedupStoreKey === "function") {
+            return RSSAutoImporter.buildDedupStoreKey(item);
+        }
+        return `rss:${item?.id || ""}`;
     },
 
     async _fetchItems(watermark) {

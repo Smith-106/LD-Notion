@@ -252,6 +252,26 @@ describe("AT-005: RSSAutoImporter 纯函数", () => {
         });
     });
 
+    describe("buildDedupStoreKey", () => {
+        it("strict → rss:{id}", () => {
+            expect(RSSAutoImporter.buildDedupStoreKey({ id: "g1" }, "strict")).toBe("rss:g1");
+        });
+
+        it("allow_duplicates → rss:{feedUrl}::{id} (跨 Feed 同 guid 不碰撞)", () => {
+            const a = RSSAutoImporter.buildDedupStoreKey(
+                { id: "same-guid", feedUrl: "https://a.example/feed.xml" },
+                "allow_duplicates"
+            );
+            const b = RSSAutoImporter.buildDedupStoreKey(
+                { id: "same-guid", feedUrl: "https://b.example/feed.xml" },
+                "allow_duplicates"
+            );
+            expect(a).toBe("rss:https://a.example/feed.xml::same-guid");
+            expect(b).toBe("rss:https://b.example/feed.xml::same-guid");
+            expect(a).not.toBe(b);
+        });
+    });
+
     // ── parseFeedXml ────────────────────────────────────────────
     describe("parseFeedXml", () => {
         it("valid RSS 2.0 feed → array of items", () => {

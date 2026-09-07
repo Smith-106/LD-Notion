@@ -179,6 +179,18 @@ const RSSAutoImporter = {
         return String(normalized.url || normalized.id || "").trim();
     },
 
+    // DedupStore / SyncCoordinator 过滤键(与 RSSAdapter.getDedupKey 同构)。
+    // allow_duplicates: rss:{feedUrl}::{id}; strict: rss:{id}。
+    // 与 snapshot 用的 buildItemKey(URL 或 feed::id 无 rss: 前缀)刻意分轨。
+    buildDedupStoreKey: (item, dedupMode = RSSAutoImporter.getDedupMode()) => {
+        const id = String(item?.id || item?.raw?.id || item?.guid || item?.link || "").trim();
+        if (dedupMode === "allow_duplicates") {
+            const feedUrl = String(item?.feedUrl || item?.raw?.feedUrl || "feed").trim() || "feed";
+            return `rss:${feedUrl}::${id}`;
+        }
+        return `rss:${id}`;
+    },
+
     parseFeedXml: (xml, feedUrl = "") => {
         const source = String(xml || "").trim();
         if (!source) return { feedTitle: "", items: [] };
@@ -648,10 +660,11 @@ const RSSAutoImporter = {
             if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
             if (syncedMeta.title) index.byTitle.set(syncedMeta.title, syncedMeta);
             // F6 共识(标记后置): Notion 写入成功后条目才进去重账本,失败项不落账、下轮重试。
-            // 全盘审计修复(find 8 键空间统一): 落账键用 adapter 过滤键 `rss:${id}`(此前用无前缀
-            // itemKey URL → SyncCoordinator 过滤层 isDuplicate 恒 false, 每轮全量重扫)。
-            if (result.created || result.updated) {
-                SyncCoordinator.markItemSeen("rss", `rss:${item.id || ""}`);
+            // unchanged 也须落账: 工作区已有页但对账未写入 DedupStore 时, 无 publishedAt 的条目
+            // 会因 watermark 过滤 `!itemTime → 保留` 每轮进入 newItems, 反复打 Notion 查询。
+            // 键空间与 RSSAdapter.getDedupKey / buildDedupStoreKey 对齐(含 allow_duplicates)。
+            if (result.created || result.updated || result.unchanged) {
+                SyncCoordinator.markItemSeen("rss", RSSAutoImporter.buildDedupStoreKey(item));
             }
             nextSnapshot[item.itemKey] = RSSAutoImporter.buildSnapshotEntry(item, pageId);
             result.success = true;

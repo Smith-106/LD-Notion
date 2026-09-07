@@ -11,6 +11,17 @@
 - `LinuxDoAdapter.getDedupKey` 改为裸 `topicId`，与 `Storage.isTopicExported` / 导出账本键空间对齐（消除 SyncCoordinator 过滤层双轨）；`normalize` 同时接受 `raw.id`
 - 回归：`tests/reconcile-export.test.js` R-REC-03
 
+### fix (dedup skip keys / dual ledger / batch clear)
+
+Confirmed NEW bugs beyond PR #17 (reconcile beginBatch leak):
+
+1. **GitHubAutoImporter** missed `isExported` / `isGistExported` filter (manual `GitHubExporter` had it). After UI「重置增量基线」, auto-sync re-created Notion pages for already-exported repos/gists.
+2. **RSS `allow_duplicates`** (按 Feed + ID 保留重复) ignored by SyncCoordinator: `getDedupKey` was always `rss:{id}`, so same GUID across feeds was mis-deduped. Added `buildDedupStoreKey` + adapter alignment. Also mark DedupStore on **unchanged** (dateless items otherwise re-entered `newItems` every run).
+3. **BookmarkExporter.clearExportedRecords** only cleared `BOOKMARK_EXPORTED`; left `DedupStore("bookmark")` orphans → clear UI lied about「可再导出」for SyncCoordinator path.
+4. **DedupStore.clearSeen** inside an open batch was undone by `endBatch` rebase (merge with on-disk fresh revived wiped keys). `wiped` flag skips revive.
+
+Note: PR #17 (`fix/reconcile-dedup-batch-leak`) still required for reconcile zero-hit batch slot leak + LinuxDo bare topicId key alignment — this branch does not duplicate that fix.
+
 ## [3.14.10] - 2026-09-07
 
 ### fix (userscript 一键授权 OAuth 回调竞态)
