@@ -11358,12 +11358,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return rawItems.map((item) => this.normalize(item));
         },
         normalize(raw) {
+          const topicId = raw.topic_id || raw.bookmarkable_id || raw.id || "";
           return {
             source: "linuxdo",
-            id: String(raw.topic_id || raw.bookmarkable_id || ""),
+            id: String(topicId),
             title: raw.name || raw.title || "",
             content: "",
-            url: raw.topic_id ? `https://linux.do/t/${raw.topic_id}` : "",
+            url: topicId ? `https://linux.do/t/${topicId}` : "",
             author: raw.username || "",
             tags: [],
             createdAt: raw.created_at || raw.bookmarked_at || raw.updated_at || "",
@@ -11371,7 +11372,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           };
         },
         getDedupKey(item) {
-          return `linuxdo:${item.id}`;
+          return String((item == null ? void 0 : item.id) || "");
         }
       });
       module.exports = { LinuxDoAdapter };
@@ -21979,10 +21980,11 @@ ${AIService2.isolateContent(JSON.stringify({
           const strictMode = Utils2.isLinuxDoDedupStrict();
           let matched = 0;
           let githubDirty = false;
-          let linuxdoDirty = false;
+          let linuxdoBatchOpened = false;
           if (strictMode) {
             try {
               DedupStore.beginBatch("linuxdo");
+              linuxdoBatchOpened = true;
             } catch {
             }
           }
@@ -22009,16 +22011,16 @@ ${AIService2.isolateContent(JSON.stringify({
                 if (!topicId) return;
                 if (Storage2.isTopicExported(topicId)) return;
                 Storage2.markTopicExported(topicId);
-                linuxdoDirty = true;
                 matched++;
               }
             });
           } finally {
-            if (linuxdoDirty) {
+            if (linuxdoBatchOpened) {
               try {
                 DedupStore.endBatch("linuxdo");
               } catch {
               }
+              Storage2._exportedTopicsCache = null;
             }
           }
           if (githubDirty) {

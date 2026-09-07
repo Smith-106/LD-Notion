@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### fix (对账 DedupStore batch 槽残留 → 自动去重/「待导出」复发)
+
+**根因**：`reconcileExportedFromWorkspace` 在 strict 模式总会 `beginBatch("linuxdo")`，但仅在 `linuxdoDirty`（有新回填）时 `endBatch`。刷新工作区零命中（账本已对齐的常见路径）留下打开的 batch 槽；此后手动/自动导出的 `markTopicExported` → `DedupStore.markSeen` 只写内存，页面重载后导出事实丢失 → UI 再显示「待导出」、自动去重跳过失效。
+
+**修复**：
+- 只要开过 linuxdo batch，finally 无条件 `endBatch`，并清空 `Storage._exportedTopicsCache`
+- `LinuxDoAdapter.getDedupKey` 改为裸 `topicId`，与 `Storage.isTopicExported` / 导出账本键空间对齐（消除 SyncCoordinator 过滤层双轨）；`normalize` 同时接受 `raw.id`
+- 回归：`tests/reconcile-export.test.js` R-REC-03
 
 ## [3.14.10] - 2026-09-07
 

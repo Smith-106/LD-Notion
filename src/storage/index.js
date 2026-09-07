@@ -115,7 +115,8 @@ const Storage = {
         const exported = Storage.getExportedTopics();
         exported[key] = Date.now();
         Storage._exportedTopicsCache = exported;
-        // DedupStore 内部维护批量缓存:非 batch 模式直接写回,带 TTL 淘汰
+        // DedupStore 内部维护批量缓存:非 batch 模式直接写回;
+        // linuxdo 为 id 键源, 走容量上限淘汰(非 90 天 TTL)。
         DedupStore.markSeen("linuxdo", key);
     },
 
