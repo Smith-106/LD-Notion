@@ -73,6 +73,8 @@
     "src/config/index.js"(exports, module) {
       "use strict";
       var CONFIG2 = {
+        // Keep in sync with package.json + userscript @version + build.js header.
+        SCRIPT_VERSION: "3.14.10",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -5970,13 +5972,14 @@ Content-Type: ${contentType}\r
           const cancelBtn = dialog.querySelector("#ldb-confirm-cancel");
           const countdownEl = dialog.querySelector("#ldb-confirm-countdown");
           const nameInput = dialog.querySelector("#ldb-confirm-name-input");
-          let remaining = countdown;
+          let remaining = Math.max(0, Math.floor(Number(countdown)) || 0);
           let canConfirm = !requireNameInput;
           let settled = false;
+          let timer = null;
           const cleanup = (result) => {
             if (settled) return;
             settled = true;
-            clearInterval(timer);
+            if (timer) clearInterval(timer);
             document.removeEventListener("keydown", escHandler);
             dialog.remove();
             if (ConfirmationDialog2.dialogElement === dialog) {
@@ -5989,25 +5992,44 @@ Content-Type: ${contentType}\r
             ConfirmationDialog2._drainQueue();
           };
           dialog._ldConfirmCleanup = cleanup;
+          const finishCountdown = () => {
+            if (timer) {
+              clearInterval(timer);
+              timer = null;
+            }
+            dialog._countdownTimer = null;
+            if (countdownEl && countdownEl.parentElement) {
+              countdownEl.parentElement.textContent = confirmText;
+            }
+            if (canConfirm) {
+              okBtn.disabled = false;
+            }
+          };
           const countdownFill = dialog.querySelector("#ldb-confirm-countdown-fill");
           if (countdownFill) {
-            requestAnimationFrame(() => {
-              countdownFill.style.width = "0%";
-              countdownFill.style.transition = `width ${countdown}s linear`;
-            });
-          }
-          const timer = setInterval(() => {
-            remaining--;
-            countdownEl.textContent = remaining;
             if (remaining <= 0) {
-              clearInterval(timer);
-              countdownEl.parentElement.textContent = confirmText;
-              if (canConfirm) {
-                okBtn.disabled = false;
-              }
+              countdownFill.style.width = "0%";
+              countdownFill.style.transition = "none";
+            } else {
+              requestAnimationFrame(() => {
+                countdownFill.style.width = "0%";
+                countdownFill.style.transition = `width ${remaining}s linear`;
+              });
             }
-          }, 1e3);
-          dialog._countdownTimer = timer;
+          }
+          if (remaining <= 0) {
+            finishCountdown();
+          } else {
+            if (countdownEl) countdownEl.textContent = String(remaining);
+            timer = setInterval(() => {
+              remaining--;
+              if (countdownEl) countdownEl.textContent = String(remaining);
+              if (remaining <= 0) {
+                finishCountdown();
+              }
+            }, 1e3);
+            dialog._countdownTimer = timer;
+          }
           if (nameInput) {
             nameInput.oninput = () => {
               canConfirm = nameInput.value.trim() === rawItemName;
@@ -11662,6 +11684,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       "use strict";
       var { SourceAdapter } = require_SourceAdapter();
       var { ZhihuAPI: ZhihuAPI2 } = require_extract();
+      var { Utils: Utils2 } = require_utils();
       var ZhihuAdapter = Object.assign(Object.create(SourceAdapter), {
         sourceType: "zhihu",
         async fetchIncremental(watermark) {
@@ -11671,12 +11694,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return this._extractFromPage();
         },
         normalize(raw) {
+          const rawUrl = raw.url || (typeof window !== "undefined" ? window.location.href : "");
+          const url = Utils2.normalizeDedupUrl(rawUrl);
           return {
             source: "zhihu",
-            id: raw.url || (typeof window !== "undefined" ? window.location.href : ""),
+            id: url,
             title: raw.title || "",
             content: raw.html || "",
-            url: raw.url || (typeof window !== "undefined" ? window.location.href : ""),
+            url,
             author: raw.author || "",
             tags: raw.tags || [],
             createdAt: raw.publishDate || "",
@@ -11684,7 +11709,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           };
         },
         getDedupKey(item) {
-          return `zhihu:${item.id}`;
+          const url = Utils2.normalizeDedupUrl(item.id || item.url || "");
+          return `zhihu:${url}`;
         },
         _extractFromPage() {
           if (!ZhihuAPI2 || typeof ZhihuAPI2.detectPage !== "function") return [];
@@ -11705,6 +11731,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       "use strict";
       var { SourceAdapter } = require_SourceAdapter();
       var { GenericExtractor: GenericExtractor2 } = require_extract();
+      var { Utils: Utils2 } = require_utils();
       var GenericAdapter = Object.assign(Object.create(SourceAdapter), {
         sourceType: "generic",
         async fetchIncremental(watermark) {
@@ -11714,12 +11741,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return this._extractFromPage();
         },
         normalize(raw) {
+          const url = Utils2.normalizeDedupUrl(raw.url || "");
           return {
             source: "generic",
-            id: raw.url || "",
+            id: url,
             title: raw.title || "",
             content: raw.description || "",
-            url: raw.url || "",
+            url,
             author: raw.author || "",
             tags: [],
             createdAt: raw.publishDate || "",
@@ -11727,7 +11755,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           };
         },
         getDedupKey(item) {
-          return `generic:${item.url}`;
+          const url = Utils2.normalizeDedupUrl(item.url || item.id || "");
+          return `generic:${url}`;
         },
         _extractFromPage() {
           if (!GenericExtractor2 || typeof GenericExtractor2.extractMeta !== "function") return [];
@@ -13528,7 +13557,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const enriched = {
             ...meta,
             title: BookmarkExporter2.normalizeText(meta.title || "\u65E0\u6807\u9898", 200) || "\u65E0\u6807\u9898",
-            url: String(meta.url || location.href || "").trim(),
+            // Canonicalize clipper URL (strip hash + tracking query) so DedupStore / Notion 链接 share one key
+            url: Utils2.normalizeDedupUrl(String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim()),
             author: BookmarkExporter2.normalizeText(meta.author || "", 100),
             publishDate: BookmarkExporter2.normalizeText(meta.publishDate || "", 40),
             siteName,
@@ -14268,7 +14298,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (typeof GM_info !== "undefined" && ((_a = GM_info == null ? void 0 : GM_info.script) == null ? void 0 : _a.version)) {
             return GM_info.script.version;
           }
-          return "3.4.5";
+          return CONFIG2.SCRIPT_VERSION || "3.14.10";
         },
         compareVersions: (a, b) => {
           const parse = (v) => String(v || "0").replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);

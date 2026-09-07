@@ -2,6 +2,7 @@
 
 const { SourceAdapter } = require("./SourceAdapter");
 const { GenericExtractor } = require("../extract");
+const { Utils } = require("../utils");
 
 const GenericAdapter = Object.assign(Object.create(SourceAdapter), {
     sourceType: "generic",
@@ -15,12 +16,13 @@ const GenericAdapter = Object.assign(Object.create(SourceAdapter), {
     },
 
     normalize(raw) {
+        const url = Utils.normalizeDedupUrl(raw.url || "");
         return {
             source: "generic",
-            id: raw.url || "",
+            id: url,
             title: raw.title || "",
             content: raw.description || "",
-            url: raw.url || "",
+            url,
             author: raw.author || "",
             tags: [],
             createdAt: raw.publishDate || "",
@@ -29,7 +31,9 @@ const GenericAdapter = Object.assign(Object.create(SourceAdapter), {
     },
 
     getDedupKey(item) {
-        return `generic:${item.url}`;
+        // Clipper URL query/hash variance → same page must share one DedupStore key
+        const url = Utils.normalizeDedupUrl(item.url || item.id || "");
+        return `generic:${url}`;
     },
 
     _extractFromPage() {

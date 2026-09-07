@@ -20,7 +20,9 @@ const UpdateChecker = {
         if (typeof GM_info !== "undefined" && GM_info?.script?.version) {
             return GM_info.script.version;
         }
-        return "3.4.5";
+        // Fallback must track userscript @version / package.json — never an ancient stub
+        // (extension shim already injects GM_info.script.version; this is Node/test + missing-shim only).
+        return CONFIG.SCRIPT_VERSION || "3.14.10";
     },
 
     compareVersions: (a, b) => {
