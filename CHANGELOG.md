@@ -20,7 +20,14 @@ Confirmed NEW bugs beyond PR #17 (reconcile beginBatch leak):
 3. **BookmarkExporter.clearExportedRecords** only cleared `BOOKMARK_EXPORTED`; left `DedupStore("bookmark")` orphans → clear UI lied about「可再导出」for SyncCoordinator path.
 4. **DedupStore.clearSeen** inside an open batch was undone by `endBatch` rebase (merge with on-disk fresh revived wiped keys). `wiped` flag skips revive.
 
-Note: PR #17 (`fix/reconcile-dedup-batch-leak`) still required for reconcile zero-hit batch slot leak + LinuxDo bare topicId key alignment — this branch does not duplicate that fix.
+### fix (userscript dedup batch unmark 复活 + Discourse slug 对账)
+
+**Confirmed beyond #17/#18** (不重复 reconcile zero-hit endBatch / clearSeen wiped / GitHubAutoImporter isExported / RSS allow_duplicates):
+
+1. **DedupStore batch `unmarkSeen` 被 endBatch rebase 复活** —— 旧逻辑把 `cache.set` 全量并入 fresh；batch 内删除的键仍在盘上 → 「重新导出」后刷新仍显示已导出。修复：`dirtyKeys` 仅写本批 mark + `deleted` 墓碑在 flush 时从 fresh 删除（兼容 #18 `wiped`）。
+2. **工作区对账 Discourse slug 链接不命中** —— Notion「链接」常为 `/t/slug/id`，本地索引 `/t/{id}`；`normalizeWorkspaceInsightUrl` 对 `linux.do` 归一到裸 topic id。
+3. **GitHubAutoImporter 导出 flush 无 finally** —— 与 `GitHubExporter` CC-10 对齐，异常路径也落盘已导出账本。
+4. **fix-p1 rebase 用例 GM 键假绿** —— `ldb_dedup_*` 从未被生产使用；改为 `DedupStore.keyFor`。
 
 ## [3.14.10] - 2026-09-07
 

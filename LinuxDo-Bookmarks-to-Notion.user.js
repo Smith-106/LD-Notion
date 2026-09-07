@@ -1136,14 +1136,20 @@
         // --- batch 模式: 减少 IPC 调用(全盘审计 find 7: 单槽 → 按 sourceType 分槽,
         // 多导入器并发时 A 的缓存被 B 覆盖丢失, 现每源独立缓存) ---
         _batchCaches: {},
-        // sourceType → { set, dirty }
+        // sourceType → { set, dirty, dirtyKeys, deleted, wiped }
         /**
          * 开始批量模式 (SyncCoordinator 在 sync 循环前后调用)
          * @param {string} sourceType
          */
         beginBatch(sourceType) {
           if (this._batchCaches[sourceType]) return;
-          this._batchCaches[sourceType] = { set: this._loadSet(sourceType), dirty: false, wiped: false };
+          this._batchCaches[sourceType] = {
+            set: this._loadSet(sourceType),
+            dirty: false,
+            dirtyKeys: /* @__PURE__ */ new Set(),
+            deleted: /* @__PURE__ */ new Set(),
+            wiped: false
+          };
         },
         /**
          * 结束批量模式，如有变更则一次写回。
@@ -1162,9 +1168,15 @@
                 next = { ...cache.set };
               } else {
                 next = this._loadSet(src);
-                for (const [k, ts] of Object.entries(cache.set)) {
+                const dirtyKeys = cache.dirtyKeys || /* @__PURE__ */ new Set();
+                for (const k of dirtyKeys) {
+                  if (!Object.prototype.hasOwnProperty.call(cache.set, k)) continue;
+                  const ts = cache.set[k];
                   const prev = next[k];
                   if (prev === void 0 || Number(ts) > Number(prev)) next[k] = ts;
+                }
+                if (cache.deleted) {
+                  for (const k of cache.deleted) delete next[k];
                 }
               }
               if (URL_KEYED_SOURCES.includes(src)) {
@@ -1255,6 +1267,14 @@
           if (batch) {
             if (!batch.set[dedupKey] || batch.set[dedupKey] < stamp) batch.set[dedupKey] = stamp;
             if (hashed !== dedupKey && (!batch.set[hashed] || batch.set[hashed] < stamp)) batch.set[hashed] = stamp;
+            if (batch.dirtyKeys) {
+              batch.dirtyKeys.add(dedupKey);
+              if (hashed !== dedupKey) batch.dirtyKeys.add(hashed);
+            }
+            if (batch.deleted) {
+              batch.deleted.delete(dedupKey);
+              if (hashed !== dedupKey) batch.deleted.delete(hashed);
+            }
             batch.dirty = true;
             return;
           }
@@ -1274,12 +1294,19 @@
           if (batch) {
             if (Object.prototype.hasOwnProperty.call(batch.set, dedupKey)) {
               delete batch.set[dedupKey];
-              batch.dirty = true;
             }
             if (hashed !== dedupKey && Object.prototype.hasOwnProperty.call(batch.set, hashed)) {
               delete batch.set[hashed];
-              batch.dirty = true;
             }
+            if (batch.deleted) {
+              batch.deleted.add(dedupKey);
+              if (hashed !== dedupKey) batch.deleted.add(hashed);
+            }
+            if (batch.dirtyKeys) {
+              batch.dirtyKeys.delete(dedupKey);
+              if (hashed !== dedupKey) batch.dirtyKeys.delete(hashed);
+            }
+            batch.dirty = true;
             return;
           }
           const set = this._loadSet(sourceType);
@@ -1316,6 +1343,8 @@
             batch.set = {};
             batch.dirty = true;
             batch.wiped = true;
+            if (batch.dirtyKeys) batch.dirtyKeys.clear();
+            if (batch.deleted) batch.deleted.clear();
             return;
           }
           GM_deleteValue(this.keyFor(sourceType));
@@ -15396,70 +15425,73 @@ ${insight.summary || ""}`,
           }
           toExport.push(item);
         }
-        for (let i = 0; i < toExport.length; i++) {
-          const item = toExport[i];
-          const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
-          try {
-            const raw = item.raw || item;
-            const { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
-            if (!OperationGuard2.canExecute("createDatabasePage")) {
-              OperationLog2.add({
-                audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "denied"),
-                actor: "system",
-                source: "github-auto-sync",
-                operationName: "createDatabasePage",
-                status: "denied",
-                context: { itemKey, itemName: meta.getId(raw), reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AGitHub \u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
-              });
-              failedEntries.push({ itemKey, title: item.title || itemKey });
-              continue;
-            }
-            const enriched = await GitHubExporter2.enrichRepo(raw, settings, enrichContext);
-            const buildFn = type === "gists" ? GitHubExporter2.buildGistProperties : (r) => GitHubExporter2.buildRepoProperties(r, meta.label);
-            const properties = buildFn(enriched);
-            for (const k of Object.keys(properties)) {
-              if (properties[k] === void 0) delete properties[k];
-            }
-            const page = await NotionAPI2.request("POST", "/pages", {
-              parent: { database_id: settings.databaseId },
-              properties
-            }, settings.apiKey);
-            OperationLog2.add({
-              audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "success"),
-              actor: "system",
-              source: "github-auto-sync",
-              operationName: "createDatabasePage",
-              status: "success",
-              context: { pageId: String((page == null ? void 0 : page.id) || "").trim(), itemKey, itemName: meta.getId(raw), databaseId: settings.databaseId }
-            });
-            if (type === "gists") {
-              GitHubAPI2.markGistExported(meta.getId(raw));
-            } else {
-              GitHubAPI2.markExported(meta.getId(raw));
-            }
-            successEntries.push({ itemKey });
-          } catch (e) {
-            console.warn(`[GitHubAutoImporter] \u5BFC\u51FA\u5931\u8D25: ${itemKey}`, e);
+        try {
+          for (let i = 0; i < toExport.length; i++) {
+            const item = toExport[i];
+            const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
             try {
-              const { OperationLog: OperationLog2 } = require_security();
+              const raw = item.raw || item;
+              const { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
+              if (!OperationGuard2.canExecute("createDatabasePage")) {
+                OperationLog2.add({
+                  audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "denied"),
+                  actor: "system",
+                  source: "github-auto-sync",
+                  operationName: "createDatabasePage",
+                  status: "denied",
+                  context: { itemKey, itemName: meta.getId(raw), reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AGitHub \u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
+                });
+                failedEntries.push({ itemKey, title: item.title || itemKey });
+                continue;
+              }
+              const enriched = await GitHubExporter2.enrichRepo(raw, settings, enrichContext);
+              const buildFn = type === "gists" ? GitHubExporter2.buildGistProperties : (r) => GitHubExporter2.buildRepoProperties(r, meta.label);
+              const properties = buildFn(enriched);
+              for (const k of Object.keys(properties)) {
+                if (properties[k] === void 0) delete properties[k];
+              }
+              const page = await NotionAPI2.request("POST", "/pages", {
+                parent: { database_id: settings.databaseId },
+                properties
+              }, settings.apiKey);
               OperationLog2.add({
-                audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "failed"),
+                audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "success"),
                 actor: "system",
                 source: "github-auto-sync",
                 operationName: "createDatabasePage",
-                status: "failed",
-                context: { itemKey, reason: String((e == null ? void 0 : e.message) || e) }
+                status: "success",
+                context: { pageId: String((page == null ? void 0 : page.id) || "").trim(), itemKey, itemName: meta.getId(raw), databaseId: settings.databaseId }
               });
-            } catch (_) {
+              if (type === "gists") {
+                GitHubAPI2.markGistExported(meta.getId(raw));
+              } else {
+                GitHubAPI2.markExported(meta.getId(raw));
+              }
+              successEntries.push({ itemKey });
+            } catch (e) {
+              console.warn(`[GitHubAutoImporter] \u5BFC\u51FA\u5931\u8D25: ${itemKey}`, e);
+              try {
+                const { OperationLog: OperationLog2 } = require_security();
+                OperationLog2.add({
+                  audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "failed"),
+                  actor: "system",
+                  source: "github-auto-sync",
+                  operationName: "createDatabasePage",
+                  status: "failed",
+                  context: { itemKey, reason: String((e == null ? void 0 : e.message) || e) }
+                });
+              } catch (_) {
+              }
+              failedEntries.push({ itemKey, title: item.title || itemKey });
             }
-            failedEntries.push({ itemKey, title: item.title || itemKey });
+            if (i < toExport.length - 1) {
+              await Utils2.sleep(delay);
+            }
           }
-          if (i < toExport.length - 1) {
-            await Utils2.sleep(delay);
-          }
+        } finally {
+          GitHubAPI2.flushExported();
+          GitHubAPI2.flushGistsExported();
         }
-        GitHubAPI2.flushExported();
-        GitHubAPI2.flushGistsExported();
         const createdEntries = successEntries.filter((e) => !e.skippedExisting);
         return {
           success: successEntries,
@@ -20943,9 +20975,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           if (!raw) return "";
           try {
             const parsed = new URL(raw);
-            const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+            let pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+            const host = parsed.host.toLowerCase();
+            if (host === "linux.do" || host.endsWith(".linux.do")) {
+              const topicMatch = pathname.match(/^\/t\/(?:[^/]+\/)?(\d+)(?:\/\d+)?$/i);
+              if (topicMatch) pathname = `/t/${topicMatch[1]}`;
+            }
             const search = parsed.search || "";
-            return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${pathname}${search}`;
+            return `${parsed.protocol.toLowerCase()}//${host}${pathname}${search}`;
           } catch {
             return raw.toLowerCase().replace(/#.*$/, "").replace(/\/+$/, "");
           }
@@ -22006,6 +22043,7 @@ ${AIService2.isolateContent(JSON.stringify({
         // v3.14.4 修复: ① LinuxDo 项 Discourse 原始 bookmark 对象无 url 字段(仅 bookmarkable_url 含 slug),
         // 旧实现 bookmark?.url 恒 undefined → LinuxDo 对账永不命中(死代码); 改按 topic_id 构造规范 URL
         // https://linux.do/t/{topicId}(与 LinuxDoAdapter.normalize 及导出写入“链接”属性同法, 无 slug)。
+        // Notion 侧若存带 slug 的链接, normalizeWorkspaceInsightUrl 会归一到 /t/{id} 再匹配。
         // ② 数据源改 getCombinedVisualBookmarks() 覆盖 LinuxDo+GitHub 两源(旧实现只查当前激活源)。
         // ③ 回填后调 renderBookmarkList() 刷新行内徽标, 与状态提示一致。
         // ④ 循环内仅 mutate 账本缓存, 循环末单次 flush(消除写侧 O(N²), 见 AGENTS.md 禁令)。

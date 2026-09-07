@@ -557,9 +557,16 @@ const WorkspaceVisual = {
         if (!raw) return "";
         try {
             const parsed = new URL(raw);
-            const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+            let pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+            // Discourse 对账: Notion「链接」常带 slug(`/t/slug/id` 或 `/t/slug/id/post`),
+            // 本地索引与导出写入均为 `/t/{id}`。不归一则工作区对账永不命中 → 仍显示「待导出」。
+            const host = parsed.host.toLowerCase();
+            if (host === "linux.do" || host.endsWith(".linux.do")) {
+                const topicMatch = pathname.match(/^\/t\/(?:[^/]+\/)?(\d+)(?:\/\d+)?$/i);
+                if (topicMatch) pathname = `/t/${topicMatch[1]}`;
+            }
             const search = parsed.search || "";
-            return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${pathname}${search}`;
+            return `${parsed.protocol.toLowerCase()}//${host}${pathname}${search}`;
         } catch {
             return raw
                 .toLowerCase()

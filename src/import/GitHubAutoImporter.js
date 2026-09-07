@@ -168,6 +168,7 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
         }
         toExport.push(item);
     }
+    try {
     for (let i = 0; i < toExport.length; i++) {
         const item = toExport[i];
         const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
@@ -226,10 +227,12 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
             await Utils.sleep(delay);
         }
     }
-    // 批量回写已导出映射（DISCOVER P3）：循环内 markExported/markGistExported 仅 mutate 内存缓存，
-    // 循环末单次 flush，写侧从 O(N²)→O(N)。flush 内有 if(cache) 守卫，未 mutate 的缓存为 null 不写。
+    } finally {
+    // 批量回写已导出映射（DISCOVER P3 / CC-10）：循环内 markExported 仅 mutate 内存缓存，
+    // finally 单次 flush —— 异常/中止路径也不丢已导出事实(与 GitHubExporter._exportItems 同构)。
     GitHubAPI.flushExported();
     GitHubAPI.flushGistsExported();
+    }
     const createdEntries = successEntries.filter((e) => !e.skippedExisting);
     return {
         success: successEntries, // 含 skippedExisting, 供 watermark 推进
@@ -238,7 +241,6 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
     };
 };
 
-// 导出映射后的 items（统一走 GitHubExporter 降级路径，事件总线解耦）（MNT-001 提取自 run）
 GitHubAutoImporter._exportMappedItems = async (mappedItems, type, meta, settings) => {
     return await GitHubAutoImporter._exportViaGitHubExporter(mappedItems, type, meta, settings);
 };
