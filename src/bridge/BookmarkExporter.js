@@ -488,7 +488,14 @@ const BookmarkExporter = {
 
             return { success: true, added: Object.keys(propsToAdd) };
         } catch (error) {
-            return { success: false, error: error.message };
+            // v3.14.13 (M3): 透传认证终态标记 + authCode——自动导入器据此 fail-fast 与场景文案分支
+            // (token 失效最常见首触点: GET /databases 401)。
+            return {
+                success: false,
+                error: error && error.message ? error.message : String(error),
+                isAuthTerminal: !!(error && error.isAuthTerminal === true),
+                authCode: (error && error.authCode) || undefined,
+            };
         }
     },
 

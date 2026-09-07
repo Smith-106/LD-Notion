@@ -301,7 +301,14 @@ BookmarkAutoImporter.run = async () => {
         // newItems 弃用, 随后自行全量对账(冗余拉取+过滤语义旁路); 过滤由 DedupStore 落账承担
         const setupResult = await BookmarkExporter.setupDatabaseProperties(settings.databaseId, settings.apiKey);
         if (!setupResult.success) {
-            throw new Error(`数据库配置失败: ${setupResult.error}`);
+            // v3.14.13 (M3): 透传认证终态标记 + authCode——token 失效最常见的首触点
+            // (GET /databases 401)此前被包装成普通 Error, 外层 catch 的 authCode 分支恒不可达。
+            const setupError = new Error(`数据库配置失败: ${setupResult.error}`);
+            if (setupResult.isAuthTerminal === true) {
+                setupError.isAuthTerminal = true;
+                setupError.authCode = setupResult.authCode || "unauthorized";
+            }
+            throw setupError;
         }
 
         const previousState = SyncState.getBookmarkState();
@@ -338,12 +345,21 @@ BookmarkAutoImporter.run = async () => {
         try {
         // F7 共识(watermark 只按成功项推进): 失败项不推进 → 下轮保留重试机会。
         const successfulIds = new Set();
+        // v3.14.13 (P1-3): 认证终态错误 fail-fast——逐项重试只会重复注定失败的请求
+        // (401 风暴), 检测到 isAuthTerminal 标记即中止整批, 保留用户可见状态待修复 token。
+        let authAborted = false;
+        let authAbortError = null;
         const processInBatches = async (items, processor) => {
-            for (let i = 0; i < items.length; i += CONCURRENCY) {
+            for (let i = 0; i < items.length && !authAborted; i += CONCURRENCY) {
                 const batch = items.slice(i, i + CONCURRENCY);
                 const results = await Promise.allSettled(batch.map((item) => processor(item, i + batch.indexOf(item))));
                 for (const result of results) {
                     if (result.status === "rejected") {
+                        if (result.reason && result.reason.isAuthTerminal === true) {
+                            authAborted = true;
+                            authAbortError = result.reason;
+                            break;
+                        }
                         console.error("[LD-Notion] 批量处理失败:", result.reason);
                     }
                 }
@@ -360,6 +376,9 @@ BookmarkAutoImporter.run = async () => {
             let claimResolve = null;
 
             try {
+                // v3.14.13 (P1-3): 每项开工前重读 token——buildSettings 快照在 OAuth 续签后
+                // 失效, 快照整轮复用导致后续项 401+续签风暴(对齐 export/index.js:886 模式)。
+                settings.apiKey = NotionOAuth.getAccessToken("");
                 // F8 共识(归档复活): 命中已归档页时跳过重建(用户主动归档 = 删除意图),
                 // 不创建新页、不更新,保留 snapshot 避免下轮再次命中。
                 if (pageMeta?.archived) {
@@ -470,6 +489,13 @@ BookmarkAutoImporter.run = async () => {
             } catch (error) {
                 // v3.14.6 (CC-08): 失败决议 null, 防同批 await 方悬挂
                 if (claimResolve) claimResolve(null);
+                // v3.14.13 (P1-3): 认证终态错误(401/403)不吞——抛原 error 让 processInBatches
+                // fail-fast 中止整批, 避免剩余项重复注定失败的请求(仅信 isAuthTerminal 标记,
+                // 消息子串会误杀瞬态续签失败, 对齐 export/index.js:810 模式); 原 error 携带
+                // authCode 供外层 catch 按场景分支文案。
+                if (error && error.isAuthTerminal === true) {
+                    throw error;
+                }
                 console.error(`[LD-Notion] 浏览器书签自动同步失败: ${bookmark.title || bookmark.url}`, error);
                 BookmarkAutoImporter._auditAutoSync("createDatabasePage", "failed",
                     { bookmarkId, itemName: bookmark.title || bookmark.url, reason: String(error?.message || error) });
@@ -489,7 +515,14 @@ BookmarkAutoImporter.run = async () => {
         pendingUrlClaim.clear();
         // 批量回写已导出映射（DISCOVER P3 同类修复）：processBookmark 内 markExported 仅 mutate 内存缓存，
         // 批次全部完成后单次 flush，写侧从 O(N²)→O(N)。flush 内有 if(cache) 守卫，未 mutate 的缓存为 null 不写。
+        // v3.14.13 (H1): 必须在 fail-fast 抛错前落盘——已成功项的导出事实(不可再生)仅存内存,
+        // 页面重载后丢失 → 手动导出去重失效 → 重复建页(与 BookmarkExporter.js:694 中止先行 flush 约定对齐)。
         BookmarkExporter.flushExported();
+        // v3.14.13 (P1-3): fail-fast 后抛原错误(带 authCode), 外层 catch 按场景分支文案,
+        // 用户可见「token 无效」而非静默成功。
+        if (authAborted) {
+            throw authAbortError;
+        }
 
         const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
 
@@ -505,6 +538,9 @@ BookmarkAutoImporter.run = async () => {
             }
 
             try {
+                // v3.14.13 (P1-3): 归档阶段每项开工前重读 token(OAuth 续签后快照失效),
+                // 与 processBookmark 对齐——过期快照直发 401 后重读可自愈, 不再整轮复用失效值。
+                settings.apiKey = NotionOAuth.getAccessToken("");
                 const itemLabel = snapshotEntry?.title || snapshotEntry?.url || bookmarkId;
                 BookmarkAutoImporter.updateStatus(`🗃️ 正在归档已删除书签 (${itemIndex + 1}/${deletedIds.length}): ${itemLabel}`);
                 // deletePage 是 level 2 危险操作（DANGEROUS_OPERATIONS），自动同步循环不可绕过
@@ -532,6 +568,9 @@ BookmarkAutoImporter.run = async () => {
                     { pageId: pageMeta.pageId, bookmarkId, itemName: snapshotEntry?.title || snapshotEntry?.url || bookmarkId });
                 archived++;
             } catch (error) {
+                // v3.14.13 (M4): 认证终态错误向上抛——processInBatches 的 rejected 检查捕获后
+                // authAborted → 中止归档批次, 删除项不再逐项 401 风暴(与 processBookmark 对齐)。
+                if (error && error.isAuthTerminal === true) throw error;
                 console.error(`[LD-Notion] 浏览器书签归档失败: ${snapshotEntry?.title || snapshotEntry?.url || bookmarkId}`, error);
                 BookmarkAutoImporter._auditAutoSync("deletePage", "failed",
                     { pageId: pageMeta?.pageId, bookmarkId, itemName: snapshotEntry?.title || snapshotEntry?.url || bookmarkId, reason: String(error?.message || error) });
@@ -600,7 +639,15 @@ BookmarkAutoImporter.run = async () => {
             lastError: error?.message || String(error),
             lastStats: {},
         });
-        BookmarkAutoImporter.updateStatus(`❌ 浏览器书签自动同步出错: ${error.message}`);
+        // v3.14.13 (三模型共识): 按 authCode 分支——用户看到裸 401 文案无法区分场景
+        const authCode = String(error?.authCode || "").toLowerCase();
+        let statusText = `❌ 浏览器书签自动同步出错: ${error.message}`;
+        if (authCode === "empty_token") {
+            statusText = "❌ 浏览器书签自动同步出错: 未读取到已保存的 API Key，请重新保存（或重新 OAuth 一键授权）";
+        } else if (authCode === "unauthorized" || authCode === "invalid_bearer_token") {
+            statusText = "❌ 浏览器书签自动同步出错: Notion 拒绝了该 API Key（可能已失效或复制不完整），请重新复制保存或重新 OAuth 授权";
+        }
+        BookmarkAutoImporter.updateStatus(statusText);
     } finally {
         clearInterval(renewTimer);
         SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);

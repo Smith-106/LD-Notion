@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.12
+// @version      3.14.13
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -74,7 +74,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.14.12",
+        SCRIPT_VERSION: "3.14.13",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -2905,7 +2905,7 @@
               }
             }
             fields.authorizeBtn.textContent = status.connected ? "\u{1F504} \u91CD\u65B0\u6388\u6743" : "\u{1F510} \u4E00\u952E\u6388\u6743";
-            fields.clearBtn.textContent = status.connected ? "\u65AD\u5F00\u5E76\u5207\u56DE\u624B\u52A8" : "\u6E05\u9664\u672C\u5730\u6388\u6743";
+            fields.clearBtn.textContent = status.connected ? "\u65AD\u5F00 OAuth \u5E76\u6E05\u9664\u672C\u5730\u51ED\u636E" : "\u6E05\u9664\u672C\u5730\u51ED\u636E(\u542B\u624B\u52A8 API Key)";
             fields.clearBtn.disabled = !status.connected && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
           };
           const saveFormConfig = async () => {
@@ -2972,7 +2972,7 @@
             try {
               await NotionOAuth2.clearConnection();
               if (typeof notify === "function") {
-                notify("\u5DF2\u6E05\u9664\u672C\u5730 OAuth \u51ED\u636E\uFF0C\u53EF\u7EE7\u7EED\u624B\u52A8\u586B\u5199 API Key\uFF1B\u8FD9\u4E0D\u4F1A\u64A4\u9500 Notion \u540E\u53F0\u6388\u6743\u3002", "success");
+                notify("\u5DF2\u6E05\u9664\u672C\u5730\u5168\u90E8 Notion \u51ED\u636E(\u542B\u624B\u52A8 API Key \u4E0E OAuth \u6B8B\u7559)\uFF0C\u53EF\u91CD\u65B0\u586B\u5199\uFF1B\u8FD9\u4E0D\u4F1A\u64A4\u9500 Notion \u540E\u53F0\u6388\u6743\u3002", "success");
               }
             } catch (error) {
               if (typeof notify === "function") {
@@ -2986,10 +2986,7 @@
           sync();
         },
         clearConnection: async () => {
-          const shouldClearAccessToken = NotionOAuth2.getAuthMode() === "oauth";
-          if (shouldClearAccessToken) {
-            Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "");
-          }
+          Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "");
           await NotionOAuth2.setRefreshToken("");
           NotionOAuth2.setMeta({});
           NotionOAuth2.clearPendingState();
@@ -11116,7 +11113,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
             return { success: true, added: Object.keys(propsToAdd) };
           } catch (error) {
-            return { success: false, error: error.message };
+            return {
+              success: false,
+              error: error && error.message ? error.message : String(error),
+              isAuthTerminal: !!(error && error.isAuthTerminal === true),
+              authCode: error && error.authCode || void 0
+            };
           }
         },
         // 获取已导出的书签集合
@@ -12413,7 +12415,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           BookmarkAutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u540C\u6B65\u6D4F\u89C8\u5668\u4E66\u7B7E...");
           const setupResult = await BookmarkExporter2.setupDatabaseProperties(settings.databaseId, settings.apiKey);
           if (!setupResult.success) {
-            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+            const setupError = new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+            if (setupResult.isAuthTerminal === true) {
+              setupError.isAuthTerminal = true;
+              setupError.authCode = setupResult.authCode || "unauthorized";
+            }
+            throw setupError;
           }
           const previousState = SyncState2.getBookmarkState();
           const previousSnapshot = (previousState == null ? void 0 : previousState.snapshot) && typeof previousState.snapshot === "object" ? previousState.snapshot : {};
@@ -12435,12 +12442,19 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           DedupStore.beginBatch("bookmark");
           try {
             const successfulIds = /* @__PURE__ */ new Set();
+            let authAborted = false;
+            let authAbortError = null;
             const processInBatches = async (items, processor) => {
-              for (let i = 0; i < items.length; i += CONCURRENCY) {
+              for (let i = 0; i < items.length && !authAborted; i += CONCURRENCY) {
                 const batch = items.slice(i, i + CONCURRENCY);
                 const results = await Promise.allSettled(batch.map((item) => processor(item, i + batch.indexOf(item))));
                 for (const result of results) {
                   if (result.status === "rejected") {
+                    if (result.reason && result.reason.isAuthTerminal === true) {
+                      authAborted = true;
+                      authAbortError = result.reason;
+                      break;
+                    }
                     console.error("[LD-Notion] \u6279\u91CF\u5904\u7406\u5931\u8D25:", result.reason);
                   }
                 }
@@ -12452,6 +12466,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               let pageMeta = pageIndex.byBookmarkId.get(bookmarkId) || pageIndex.byUrl.get(bookmark.url) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? pageIndex.byPageId.get(snapshotEntry.pageId) : null);
               let claimResolve = null;
               try {
+                settings.apiKey = NotionOAuth2.getAccessToken("");
                 if (pageMeta == null ? void 0 : pageMeta.archived) {
                   unchanged++;
                   successfulIds.add(bookmarkId);
@@ -12558,6 +12573,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 nextSnapshot[bookmarkId] = BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageId);
               } catch (error) {
                 if (claimResolve) claimResolve(null);
+                if (error && error.isAuthTerminal === true) {
+                  throw error;
+                }
                 console.error(`[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5931\u8D25: ${bookmark.title || bookmark.url}`, error);
                 BookmarkAutoImporter2._auditAutoSync(
                   "createDatabasePage",
@@ -12576,6 +12594,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             await processInBatches(currentBookmarks, processBookmark);
             pendingUrlClaim.clear();
             BookmarkExporter2.flushExported();
+            if (authAborted) {
+              throw authAbortError;
+            }
             const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
             const processDeleted = async (bookmarkId, itemIndex) => {
               const snapshotEntry = previousSnapshot[bookmarkId];
@@ -12585,6 +12606,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 return;
               }
               try {
+                settings.apiKey = NotionOAuth2.getAccessToken("");
                 const itemLabel = (snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId;
                 BookmarkAutoImporter2.updateStatus(`\u{1F5C3}\uFE0F \u6B63\u5728\u5F52\u6863\u5DF2\u5220\u9664\u4E66\u7B7E (${itemIndex + 1}/${deletedIds.length}): ${itemLabel}`);
                 const { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
@@ -12609,6 +12631,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 );
                 archived++;
               } catch (error) {
+                if (error && error.isAuthTerminal === true) throw error;
                 console.error(`[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u5F52\u6863\u5931\u8D25: ${(snapshotEntry == null ? void 0 : snapshotEntry.title) || (snapshotEntry == null ? void 0 : snapshotEntry.url) || bookmarkId}`, error);
                 BookmarkAutoImporter2._auditAutoSync(
                   "deletePage",
@@ -12669,7 +12692,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             lastError: (error == null ? void 0 : error.message) || String(error),
             lastStats: {}
           });
-          BookmarkAutoImporter2.updateStatus(`\u274C \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u51FA\u9519: ${error.message}`);
+          const authCode = String((error == null ? void 0 : error.authCode) || "").toLowerCase();
+          let statusText = `\u274C \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u51FA\u9519: ${error.message}`;
+          if (authCode === "empty_token") {
+            statusText = "\u274C \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u51FA\u9519: \u672A\u8BFB\u53D6\u5230\u5DF2\u4FDD\u5B58\u7684 API Key\uFF0C\u8BF7\u91CD\u65B0\u4FDD\u5B58\uFF08\u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743\uFF09";
+          } else if (authCode === "unauthorized" || authCode === "invalid_bearer_token") {
+            statusText = "\u274C \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u51FA\u9519: Notion \u62D2\u7EDD\u4E86\u8BE5 API Key\uFF08\u53EF\u80FD\u5DF2\u5931\u6548\u6216\u590D\u5236\u4E0D\u5B8C\u6574\uFF09\uFF0C\u8BF7\u91CD\u65B0\u590D\u5236\u4FDD\u5B58\u6216\u91CD\u65B0 OAuth \u6388\u6743";
+          }
+          BookmarkAutoImporter2.updateStatus(statusText);
         } finally {
           clearInterval(renewTimer);
           SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
@@ -13161,7 +13191,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           const setupResult = await BookmarkExporter2.setupDatabaseProperties(settings.databaseId, settings.apiKey);
           if (!setupResult.success) {
-            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+            const setupError = new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+            if (setupResult.isAuthTerminal === true) {
+              setupError.isAuthTerminal = true;
+              setupError.authCode = setupResult.authCode || "unauthorized";
+            }
+            throw setupError;
           }
           const previousState = SyncState2.getRssState();
           const previousSnapshot = (previousState == null ? void 0 : previousState.snapshot) && typeof previousState.snapshot === "object" ? previousState.snapshot : {};
@@ -13199,6 +13234,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           let pageMeta = (item.url ? index.byUrl.get(item.url) : null) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? index.byPageId.get(snapshotEntry.pageId) : null) || (item.title ? index.byTitle.get(item.title) : null);
           let result = { created: 0, updated: 0, unchanged: 0, failed: 0, itemKey: item.itemKey };
           try {
+            settings.apiKey = NotionOAuth2.getAccessToken("");
             if (!pageMeta) {
               RSSAutoImporter2.updateStatus(`\u6B63\u5728\u65B0\u589E RSS \u6761\u76EE (${ctx.position}/${total}): ${item.title}`);
               const { OperationGuard: OperationGuard2 } = require_security();
@@ -13274,6 +13310,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             result.success = true;
             return result;
           } catch (error) {
+            if (error && error.isAuthTerminal === true) {
+              throw error;
+            }
             console.error(`[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u5931\u8D25: ${item.title || item.url}`, error);
             RSSAutoImporter2._auditAutoSync(
               "createDatabasePage",
@@ -13402,7 +13441,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               lastError: (error == null ? void 0 : error.message) || String(error),
               lastStats: {}
             });
-            RSSAutoImporter2.updateStatus(`RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519: ${error.message}`);
+            const authCode = String((error == null ? void 0 : error.authCode) || "").toLowerCase();
+            let statusText = `RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519: ${error.message}`;
+            if (authCode === "empty_token") {
+              statusText = "RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519: \u672A\u8BFB\u53D6\u5230\u5DF2\u4FDD\u5B58\u7684 API Key\uFF0C\u8BF7\u91CD\u65B0\u4FDD\u5B58\uFF08\u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743\uFF09";
+            } else if (authCode === "unauthorized" || authCode === "invalid_bearer_token") {
+              statusText = "RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519: Notion \u62D2\u7EDD\u4E86\u8BE5 API Key\uFF08\u53EF\u80FD\u5DF2\u5931\u6548\u6216\u590D\u5236\u4E0D\u5B8C\u6574\uFF09\uFF0C\u8BF7\u91CD\u65B0\u590D\u5236\u4FDD\u5B58\u6216\u91CD\u65B0 OAuth \u6388\u6743";
+            }
+            RSSAutoImporter2.updateStatus(statusText);
           } finally {
             RSSAutoImporter2.isRunning = false;
             SyncLock.isExporting = false;
@@ -15909,7 +15955,7 @@ ${insight.summary || ""}`,
         }
         if (AutoImporter2.isRunning) return;
         if (SyncLock.isExporting) return;
-        const apiKey = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "");
+        const apiKey = NotionOAuth2.getAccessToken("");
         if (!apiKey) {
           AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key");
           return;
@@ -16006,7 +16052,7 @@ ${insight.summary || ""}`,
                 console.error(`[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u5931\u8D25: ${title}`, error);
                 failed++;
                 if (Exporter2.isAuthTerminalError && Exporter2.isAuthTerminalError(error)) {
-                  autoImportAborted = true;
+                  autoImportAborted = { authCode: error.authCode || "unauthorized" };
                   break;
                 }
               }
@@ -16047,8 +16093,15 @@ ${insight.summary || ""}`,
             statePatch.lastSuccessAt = Date.now();
           }
           SyncState2.updateLinuxDoState(statePatch);
+          const authCode = String((autoImportAborted == null ? void 0 : autoImportAborted.authCode) || "").toLowerCase();
+          let abortText = `\u26D4 \u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u6210\u529F ${success} \u4E2A\uFF1B\u5269\u4F59\u9879\u5C06\u5728\u4E0B\u6B21\u540C\u6B65\u91CD\u8BD5\u3002\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`;
+          if (authCode === "empty_token") {
+            abortText = `\u26D4 \u672A\u8BFB\u53D6\u5230 API Key\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u6210\u529F ${success} \u4E2A\uFF1B\u8BF7\u91CD\u65B0\u4FDD\u5B58 API Key \u6216\u91CD\u65B0 OAuth \u6388\u6743\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`;
+          } else if (authCode === "unauthorized" || authCode === "invalid_bearer_token") {
+            abortText = `\u26D4 Notion \u62D2\u7EDD\u4E86\u8BE5 API Key\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u6210\u529F ${success} \u4E2A\uFF1B\u8BF7\u91CD\u65B0\u590D\u5236\u4FDD\u5B58\u6216\u91CD\u65B0 OAuth \u6388\u6743\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`;
+          }
           AutoImporter2.updateStatus(
-            autoImportAborted ? `\u26D4 \u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u6210\u529F ${success} \u4E2A\uFF1B\u5269\u4F59\u9879\u5C06\u5728\u4E0B\u6B21\u540C\u6B65\u91CD\u8BD5\u3002\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})` : `\u2705 \u81EA\u52A8\u5BFC\u5165\u5B8C\u6210: ${success} \u4E2A\u6210\u529F${failed > 0 ? `\uFF0C${failed} \u4E2A\u5931\u8D25` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
+            autoImportAborted ? abortText : `\u2705 \u81EA\u52A8\u5BFC\u5165\u5B8C\u6210: ${success} \u4E2A\u6210\u529F${failed > 0 ? `\uFF0C${failed} \u4E2A\u5931\u8D25` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
           );
           if (success > 0 && typeof GM_notification === "function") {
             GM_notification({
@@ -26967,7 +27020,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           panel.className = "gclip-panel";
           panel.setAttribute("data-ldb-root", "");
           const exportState = TargetState2.getExportState();
-          const apiKey = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "");
+          const apiKey = NotionOAuth2.getAccessToken();
           const dbId = exportState.databaseId;
           const parentPageId = exportState.parentPageId;
           const exportType = exportState.targetType;

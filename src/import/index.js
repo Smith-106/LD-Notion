@@ -112,7 +112,8 @@ AutoImporter.run = async () => {
     if (AutoImporter.isRunning) return;
     if (SyncLock.isExporting) return;
 
-    const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+    // v3.14.13 (三模型共识): 直读改走 getAccessToken 清洗——脏值(仅不可见字符)不再假通过闸门
+    const apiKey = NotionOAuth.getAccessToken("");
     if (!apiKey) {
         AutoImporter.updateStatus("请先配置 Notion API Key");
         return;
@@ -233,7 +234,8 @@ AutoImporter.run = async () => {
                     // v3.14.6 (AUD-ARCH-09/CC-02/X-03): 不再 unshift 毒项回插队列 ——
                     // 并发 worker 会立即重新消费同一毒项反复 401; 该项因未落账自然留待下轮
                     if (Exporter.isAuthTerminalError && Exporter.isAuthTerminalError(error)) {
-                        autoImportAborted = true;
+                        // v3.14.13 (三模型共识): 透传 authCode 供状态栏分支文案
+                        autoImportAborted = { authCode: error.authCode || "unauthorized" };
                         break;
                     }
                 }
@@ -279,9 +281,17 @@ AutoImporter.run = async () => {
         }
         SyncState.updateLinuxDoState(statePatch);
 
+        // v3.14.13 (三模型共识): 按 authCode 分支——用户看到裸 401 文案无法区分场景
+        const authCode = String(autoImportAborted?.authCode || "").toLowerCase();
+        let abortText = `⛔ 认证失败，已中止自动导入（成功 ${success} 个；剩余项将在下次同步重试。请检查 Notion API Key / OAuth 授权） (${new Date().toLocaleTimeString()})`;
+        if (authCode === "empty_token") {
+            abortText = `⛔ 未读取到 API Key，已中止自动导入（成功 ${success} 个；请重新保存 API Key 或重新 OAuth 授权） (${new Date().toLocaleTimeString()})`;
+        } else if (authCode === "unauthorized" || authCode === "invalid_bearer_token") {
+            abortText = `⛔ Notion 拒绝了该 API Key，已中止自动导入（成功 ${success} 个；请重新复制保存或重新 OAuth 授权） (${new Date().toLocaleTimeString()})`;
+        }
         AutoImporter.updateStatus(
             autoImportAborted
-                ? `⛔ 认证失败，已中止自动导入（成功 ${success} 个；剩余项将在下次同步重试。请检查 Notion API Key / OAuth 授权） (${new Date().toLocaleTimeString()})`
+                ? abortText
                 : `✅ 自动导入完成: ${success} 个成功${failed > 0 ? `，${failed} 个失败` : ""} (${new Date().toLocaleTimeString()})`
         );
 

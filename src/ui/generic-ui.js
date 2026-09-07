@@ -207,7 +207,9 @@ const GenericUI = {
         panel.setAttribute("data-ldb-root", "");
 
         const exportState = TargetState.getExportState();
-        const apiKey = Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
+        // v3.14.13 (F-06): 直读 Storage 改统一入口 getAccessToken(清洗不可见字符+换行),
+        // 避免粘贴污染值使 isConfigured 误判已配置。
+        const apiKey = NotionOAuth.getAccessToken();
         const dbId = exportState.databaseId;
         const parentPageId = exportState.parentPageId;
         const exportType = exportState.targetType;

@@ -1098,7 +1098,9 @@ const NotionOAuth = {
                 }
             }
             fields.authorizeBtn.textContent = status.connected ? "🔄 重新授权" : "🔐 一键授权";
-            fields.clearBtn.textContent = status.connected ? "断开并切回手动" : "清除本地授权";
+            // v3.14.13: 清除按钮会清除本地全部 Notion 凭据(含手动保存的 API Key)——
+            // 文案明示, 避免 manual 用户误以为仅断 OAuth。
+            fields.clearBtn.textContent = status.connected ? "断开 OAuth 并清除本地凭据" : "清除本地凭据(含手动 API Key)";
             fields.clearBtn.disabled = !status.connected
                 && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN)
                 && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
@@ -1177,7 +1179,7 @@ const NotionOAuth = {
             try {
                 await NotionOAuth.clearConnection();
                 if (typeof notify === "function") {
-                    notify("已清除本地 OAuth 凭据，可继续手动填写 API Key；这不会撤销 Notion 后台授权。", "success");
+                    notify("已清除本地全部 Notion 凭据(含手动 API Key 与 OAuth 残留)，可重新填写；这不会撤销 Notion 后台授权。", "success");
                 }
             } catch (error) {
                 if (typeof notify === "function") {
@@ -1193,10 +1195,10 @@ const NotionOAuth = {
     },
 
     clearConnection: async () => {
-        const shouldClearAccessToken = NotionOAuth.getAuthMode() === "oauth";
-        if (shouldClearAccessToken) {
-            Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
-        }
+        // v3.14.13 (P1-4): 无条件清 NOTION_API_KEY——此前仅 oauth 模式清键, manual 模式下
+        // OAuth 残留(applyTokenResponse 曾用 access_token 覆盖此键)永不清除, 用户断开授权后
+        // 定时更新仍直发残留 token 401。断开=清除本地全部凭据的用户意图, 与 authMode 无关。
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "");
         await NotionOAuth.setRefreshToken("");
         NotionOAuth.setMeta({});
         NotionOAuth.clearPendingState();

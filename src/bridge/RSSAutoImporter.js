@@ -550,7 +550,13 @@ const RSSAutoImporter = {
 
         const setupResult = await BookmarkExporter.setupDatabaseProperties(settings.databaseId, settings.apiKey);
         if (!setupResult.success) {
-            throw new Error(`数据库配置失败: ${setupResult.error}`);
+            // v3.14.13 (M3): 透传认证终态标记 + authCode(与 BookmarkAutoImporter 同款), 场景文案分支可达。
+            const setupError = new Error(`数据库配置失败: ${setupResult.error}`);
+            if (setupResult.isAuthTerminal === true) {
+                setupError.isAuthTerminal = true;
+                setupError.authCode = setupResult.authCode || "unauthorized";
+            }
+            throw setupError;
         }
 
         const previousState = SyncState.getRssState();
@@ -601,6 +607,9 @@ const RSSAutoImporter = {
         let result = { created: 0, updated: 0, unchanged: 0, failed: 0, itemKey: item.itemKey };
 
         try {
+            // v3.14.13 (P1-3): 每项开工前重读 token——buildSettings 快照在 OAuth 续签后
+            // 失效, 快照整轮复用导致后续项 401+续签风暴(对齐 export/index.js:886 模式)。
+            settings.apiKey = NotionOAuth.getAccessToken("");
             if (!pageMeta) {
                 RSSAutoImporter.updateStatus(`正在新增 RSS 条目 (${ctx.position}/${total}): ${item.title}`);
                 // createDatabasePage level 1，canExecute 非阻塞闸门 + 审计（C1）。
@@ -670,6 +679,11 @@ const RSSAutoImporter = {
             result.success = true;
             return result;
         } catch (error) {
+            // v3.14.13 (P1-3): 认证终态错误(401/403)不吞——抛原 error 中止整轮循环,
+            // 避免剩余项重复注定失败的请求; 原 error 携带 authCode 供外层 catch 分支文案。
+            if (error && error.isAuthTerminal === true) {
+                throw error;
+            }
             console.error(`[LD-Notion] RSS 自动同步失败: ${item.title || item.url}`, error);
             RSSAutoImporter._auditAutoSync("createDatabasePage", "failed",
                 { itemKey: item.itemKey, itemName: item.title || item.url, reason: String(error?.message || error) });
@@ -816,7 +830,15 @@ const RSSAutoImporter = {
                 lastError: error?.message || String(error),
                 lastStats: {},
             });
-            RSSAutoImporter.updateStatus(`RSS 自动同步出错: ${error.message}`);
+            // v3.14.13 (三模型共识): 按 authCode 分支
+            const authCode = String(error?.authCode || "").toLowerCase();
+            let statusText = `RSS 自动同步出错: ${error.message}`;
+            if (authCode === "empty_token") {
+                statusText = "RSS 自动同步出错: 未读取到已保存的 API Key，请重新保存（或重新 OAuth 一键授权）";
+            } else if (authCode === "unauthorized" || authCode === "invalid_bearer_token") {
+                statusText = "RSS 自动同步出错: Notion 拒绝了该 API Key（可能已失效或复制不完整），请重新复制保存或重新 OAuth 授权";
+            }
+            RSSAutoImporter.updateStatus(statusText);
         } finally {
             RSSAutoImporter.isRunning = false;
             // v3.14.6 (CC-03): 复位互斥
