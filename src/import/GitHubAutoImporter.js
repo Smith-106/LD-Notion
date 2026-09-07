@@ -151,8 +151,25 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
     const successEntries = [];
     const failedEntries = [];
     const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-    for (let i = 0; i < mappedItems.length; i++) {
-        const item = mappedItems[i];
+    // 重置增量基线后 watermark 回退会再次扫到已导出项; 手动路径 GitHubExporter
+    // 有 isExported 过滤, 自动路径此前缺失 → 重复建 Notion 页。已导出项计入 success
+    // 仅用于推进 watermark(不建页、不计入「新增」语义由调用方用 length 区分时可再拆)。
+    const toExport = [];
+    for (const item of mappedItems) {
+        const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
+        if (itemKey) {
+            const already = type === "gists"
+                ? GitHubAPI.isGistExported(itemKey)
+                : GitHubAPI.isExported(itemKey);
+            if (already) {
+                successEntries.push({ itemKey, skippedExisting: true });
+                continue;
+            }
+        }
+        toExport.push(item);
+    }
+    for (let i = 0; i < toExport.length; i++) {
+        const item = toExport[i];
         const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
         try {
             const raw = item.raw || item;
@@ -205,7 +222,7 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
             } catch (_) { /* 审计失败不阻断降级 */ }
             failedEntries.push({ itemKey, title: item.title || itemKey });
         }
-        if (i < mappedItems.length - 1) {
+        if (i < toExport.length - 1) {
             await Utils.sleep(delay);
         }
     }
@@ -213,7 +230,12 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
     // 循环末单次 flush，写侧从 O(N²)→O(N)。flush 内有 if(cache) 守卫，未 mutate 的缓存为 null 不写。
     GitHubAPI.flushExported();
     GitHubAPI.flushGistsExported();
-    return { success: successEntries, failed: failedEntries };
+    const createdEntries = successEntries.filter((e) => !e.skippedExisting);
+    return {
+        success: successEntries, // 含 skippedExisting, 供 watermark 推进
+        created: createdEntries,
+        failed: failedEntries,
+    };
 };
 
 // 导出映射后的 items（统一走 GitHubExporter 降级路径，事件总线解耦）（MNT-001 提取自 run）
@@ -299,8 +321,9 @@ GitHubAutoImporter._syncSingleType = async (type, settings, attemptAt) => {
             lastStats: {
                 scanned: items.length,
                 pending: incrementalItems.length,
-                exported: result.success.length,
+                exported: (result.created || result.success.filter((e) => !e.skippedExisting)).length,
                 failed: result.failed.length,
+                skippedExisting: result.success.filter((e) => e.skippedExisting).length,
             },
         };
 
@@ -322,7 +345,8 @@ GitHubAutoImporter._syncSingleType = async (type, settings, attemptAt) => {
         }
 
         SyncState.updateGitHubState(type, typeStatePatch);
-        return { pending: true, success: result.success.length, failed: result.failed.length };
+        const createdCount = (result.created || result.success.filter((e) => !e.skippedExisting)).length;
+        return { pending: true, success: createdCount, failed: result.failed.length };
     } catch (error) {
         SyncState.updateGitHubState(type, {
             lastAttemptAt: typeAttemptAt,

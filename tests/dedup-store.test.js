@@ -172,4 +172,20 @@ describe("AT-002: DedupStore 批量模式与单条模式", () => {
 
         gmSetSpy.mockRestore();
     });
+
+    it("Batch: clearSeen then endBatch must not revive wiped keys (rebase 护栏)", () => {
+        DedupStore.markSeen(SOURCE, "keep-me");
+        DedupStore.beginBatch(SOURCE);
+        DedupStore.clearSeen(SOURCE);
+        expect(DedupStore.isDuplicate(SOURCE, "keep-me")).toBe(false);
+        DedupStore.endBatch(SOURCE);
+        expect(DedupStore.isDuplicate(SOURCE, "keep-me")).toBe(false);
+        // 清后新写入应保留
+        DedupStore.beginBatch(SOURCE);
+        DedupStore.clearSeen(SOURCE);
+        DedupStore.markSeen(SOURCE, "after-clear");
+        DedupStore.endBatch(SOURCE);
+        expect(DedupStore.isDuplicate(SOURCE, "keep-me")).toBe(false);
+        expect(DedupStore.isDuplicate(SOURCE, "after-clear")).toBe(true);
+    });
 });

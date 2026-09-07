@@ -78,7 +78,7 @@ const DedupStore = {
     beginBatch(sourceType) {
         // v3.14.6 (CC-06): 幂等 —— 槽已存在则复用(同源并发 batch 后开者不再覆盖先开者内存累积)
         if (this._batchCaches[sourceType]) return;
-        this._batchCaches[sourceType] = { set: this._loadSet(sourceType), dirty: false };
+        this._batchCaches[sourceType] = { set: this._loadSet(sourceType), dirty: false, wiped: false };
     },
 
     /**
@@ -93,19 +93,26 @@ const DedupStore = {
         for (const src of targets) {
             const cache = this._batchCaches[src];
             if (cache && cache.dirty) {
-                const fresh = this._loadSet(src);
-                for (const [k, ts] of Object.entries(cache.set)) {
-                    const prev = fresh[k];
-                    if (prev === undefined || Number(ts) > Number(prev)) fresh[k] = ts;
+                // clearSeen 在 batch 内清空后必须整本落空: 不可再与盘上 fresh 并集,
+                // 否则 endBatch rebase 会把已清除键复活(用户点「清除去重」后仍显示已导出)。
+                let next;
+                if (cache.wiped) {
+                    next = { ...cache.set }; // 通常为空; 清后若又 markSeen 则仅保留清后新写入
+                } else {
+                    next = this._loadSet(src);
+                    for (const [k, ts] of Object.entries(cache.set)) {
+                        const prev = next[k];
+                        if (prev === undefined || Number(ts) > Number(prev)) next[k] = ts;
+                    }
                 }
                 // v3.14.3: 与 _saveSet 同规则——URL 键源时间 TTL, id 键源容量上限
                 if (URL_KEYED_SOURCES.includes(src)) {
-                    this._evictExpired(fresh);
+                    this._evictExpired(next);
                 } else {
-                    this._evictByCapacity(fresh);
+                    this._evictByCapacity(next);
                 }
-                this._saveSet(src, fresh);
-                cache.set = fresh;
+                this._saveSet(src, next);
+                cache.set = next;
                 // F-SYNC-11: 去重账本变更事件(零订阅者静默),多端同步引擎据此触发 push。
                 emit("storage:state-committed", { sourceType: src, kind: "dedup" });
             }
@@ -259,6 +266,7 @@ const DedupStore = {
         if (batch) {
             batch.set = {};
             batch.dirty = true;
+            batch.wiped = true; // endBatch 勿与盘上旧集并集复活
             return;
         }
         GM_deleteValue(this.keyFor(sourceType));
