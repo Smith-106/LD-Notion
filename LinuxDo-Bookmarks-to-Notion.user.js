@@ -51,7 +51,9 @@
 // userscript 形态 Obsidian 请求被 TM 拒绝(扩展 manifest 已含, 不动)
 // @connect      127.0.0.1
 // @connect      localhost
-// @run-at       document-idle
+// v3.14.10: document-start so OAuth ?code&state are snapshotted before Notion SPA
+// history.replaceState strips them (document-idle + 1.5MB parse lost the race).
+// @run-at       document-start
 // ==/UserScript==
 
 (function () {
@@ -2645,7 +2647,12 @@
           try {
             const current = new URL(currentUrl);
             const expected = new URL(redirectUri);
-            return current.origin === expected.origin && current.pathname === expected.pathname;
+            const normalizePath = (path) => {
+              let p = String(path || "/");
+              if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+              return p.toLowerCase();
+            };
+            return current.origin === expected.origin && normalizePath(current.pathname) === normalizePath(expected.pathname);
           } catch {
             return false;
           }
@@ -2713,28 +2720,79 @@
             }
           });
         },
-        // 跨页/跨 tab 刷新(三模型共识辅因修复):OAuth 三键注册 GM_addValueChangeListener,
-        // 其他页面修改配置后本页面板立即回填,避免陈旧面板把旧值写回 Storage。
+        // 跨页/跨 tab 刷新(三模型共识辅因修复):OAuth 配置三键 + 授权完成态注册 GM_addValueChangeListener,
+        // 其他页面修改配置/完成回调后本页面板立即回填,避免陈旧面板把旧值写回 Storage,
+        // 以及发起页一直停在「等待回调」而回调页其实已成功(userscript 弹窗/跳转场景)。
         _crossPageWatchersInstalled: false,
+        // document-start 快照:Notion SPA 可能在 document-idle 前清掉 ?code&state
+        _callbackSnapshot: null,
+        captureCallbackSnapshot: (href) => {
+          var _a;
+          const rawHref = typeof href === "string" && href ? href : typeof window !== "undefined" ? String(((_a = window.location) == null ? void 0 : _a.href) || "") : "";
+          if (!rawHref) return null;
+          try {
+            const url = new URL(rawHref);
+            const code = url.searchParams.get("code");
+            const error = url.searchParams.get("error");
+            const state = url.searchParams.get("state");
+            if (!code && !error) return null;
+            NotionOAuth2._callbackSnapshot = {
+              href: rawHref,
+              code,
+              error,
+              state,
+              capturedAt: Date.now()
+            };
+            return NotionOAuth2._callbackSnapshot;
+          } catch {
+            return null;
+          }
+        },
+        clearCallbackSnapshot: () => {
+          NotionOAuth2._callbackSnapshot = null;
+        },
         installCrossPageWatchers: () => {
           if (NotionOAuth2._crossPageWatchersInstalled) return;
           NotionOAuth2._crossPageWatchersInstalled = true;
           if (typeof GM_addValueChangeListener !== "function") return;
-          const keys = [
+          const configKeys = [
             CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID,
             CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET,
             CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI
           ];
+          const authResultKeys = [
+            CONFIG2.STORAGE_KEYS.NOTION_API_KEY,
+            CONFIG2.STORAGE_KEYS.NOTION_AUTH_MODE,
+            CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN,
+            CONFIG2.STORAGE_KEYS.NOTION_OAUTH_META,
+            CONFIG2.STORAGE_KEYS.NOTION_OAUTH_STATE
+          ];
           try {
-            for (const key of keys) {
-              GM_addValueChangeListener(key, () => {
-                try {
-                  NotionOAuth2.syncRegisteredControls();
-                } catch (error) {
-                  console.warn("[LD-Notion] OAuth \u8DE8\u9875\u540C\u6B65\u5931\u8D25", (error == null ? void 0 : error.message) || error);
-                }
-              });
+            const syncUi = () => {
+              try {
+                NotionOAuth2.syncApiKeyInputs();
+                NotionOAuth2.syncRegisteredControls();
+              } catch (error) {
+                console.warn("[LD-Notion] OAuth \u8DE8\u9875\u540C\u6B65\u5931\u8D25", (error == null ? void 0 : error.message) || error);
+              }
+            };
+            for (const key of configKeys) {
+              GM_addValueChangeListener(key, syncUi);
             }
+            for (const key of authResultKeys) {
+              GM_addValueChangeListener(key, syncUi);
+            }
+            GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_NOTICE, (_name, _oldValue, newValue, remote) => {
+              if (!remote || !newValue) return;
+              try {
+                const notice = Utils2.safeJsonParse(newValue, null);
+                if (!(notice == null ? void 0 : notice.message)) return;
+                NotionOAuth2.syncApiKeyInputs();
+                NotionOAuth2.syncRegisteredControls();
+              } catch (error) {
+                console.warn("[LD-Notion] OAuth \u8DE8\u9875\u901A\u77E5\u540C\u6B65\u5931\u8D25", (error == null ? void 0 : error.message) || error);
+              }
+            });
           } catch (error) {
             console.warn("[LD-Notion] OAuth \u8DE8\u9875\u76D1\u542C\u6CE8\u518C\u5931\u8D25", (error == null ? void 0 : error.message) || error);
           }
@@ -3072,28 +3130,50 @@
         handleRedirectCallback: async () => {
           var _a, _b, _c, _d;
           const pending = NotionOAuth2.getPendingState();
-          if (!(pending == null ? void 0 : pending.state) || !(pending == null ? void 0 : pending.redirectUri)) return false;
+          if (!(pending == null ? void 0 : pending.state) || !(pending == null ? void 0 : pending.redirectUri)) {
+            NotionOAuth2.clearCallbackSnapshot();
+            return false;
+          }
           if (pending.createdAt && Date.now() - pending.createdAt > 10 * 60 * 1e3) {
             NotionOAuth2.clearPendingState();
+            NotionOAuth2.clearCallbackSnapshot();
             Utils2.cleanupUrlParams(["code", "state", "error"]);
             return false;
           }
-          let currentUrl;
-          try {
-            currentUrl = new URL(window.location.href);
-          } catch {
+          const snapshot = NotionOAuth2._callbackSnapshot;
+          const snapshotFresh = !!(snapshot && (snapshot.code || snapshot.error) && snapshot.capturedAt && Date.now() - snapshot.capturedAt <= 10 * 60 * 1e3);
+          let callbackHref = "";
+          let code = null;
+          let error = null;
+          let state = null;
+          if (snapshotFresh) {
+            callbackHref = snapshot.href;
+            code = snapshot.code;
+            error = snapshot.error;
+            state = snapshot.state;
+          } else {
+            try {
+              callbackHref = window.location.href;
+              const currentUrl = new URL(callbackHref);
+              code = currentUrl.searchParams.get("code");
+              error = currentUrl.searchParams.get("error");
+              state = currentUrl.searchParams.get("state");
+            } catch {
+              NotionOAuth2.clearCallbackSnapshot();
+              return false;
+            }
+          }
+          if (!code && !error) {
+            NotionOAuth2.clearCallbackSnapshot();
             return false;
           }
-          const code = currentUrl.searchParams.get("code");
-          const error = currentUrl.searchParams.get("error");
-          const state = currentUrl.searchParams.get("state");
-          if (!code && !error) return false;
-          if (!NotionOAuth2.matchesRedirectUri(window.location.href, pending.redirectUri)) {
-            const diff = describeRedirectUriMismatch(window.location.href, pending.redirectUri);
+          if (!NotionOAuth2.matchesRedirectUri(callbackHref, pending.redirectUri)) {
+            const diff = describeRedirectUriMismatch(callbackHref, pending.redirectUri);
             NotionOAuth2.pushNotice(
               `\u56DE\u8C03\u5730\u5740\u4E0E Redirect URI \u4E0D\u4E00\u81F4: \u671F\u671B ${((_a = diff.expected) == null ? void 0 : _a.origin) || "?"}${((_b = diff.expected) == null ? void 0 : _b.pathname) || ""} / \u5B9E\u9645 ${((_c = diff.actual) == null ? void 0 : _c.origin) || "?"}${((_d = diff.actual) == null ? void 0 : _d.pathname) || ""}\u3002\u8BF7\u68C0\u67E5 Notion \u96C6\u6210\u540E\u53F0\u7684 Redirect URI \u914D\u7F6E\u3002`,
               "error"
             );
+            NotionOAuth2.clearCallbackSnapshot();
             return false;
           }
           try {
@@ -3118,6 +3198,7 @@
             NotionOAuth2.pushNotice(`Notion OAuth \u6388\u6743\u5931\u8D25: ${errorObj.message}`, "error");
           } finally {
             NotionOAuth2.clearPendingState();
+            NotionOAuth2.clearCallbackSnapshot();
             Utils2.cleanupUrlParams(["code", "state", "error"]);
           }
           return true;
@@ -29994,6 +30075,10 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var syncModule = false ? null : null;
   Storage.CredentialVault = CredentialVault;
   BookmarkBridge.init();
+  try {
+    NotionOAuth.captureCallbackSnapshot();
+  } catch (_) {
+  }
   window.addEventListener("ld-notion-popup-action", (event) => {
     var _a;
     const { action } = event.detail || {};

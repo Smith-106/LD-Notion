@@ -1,5 +1,19 @@
 # 更新日志
 
+## [Unreleased]
+
+### fix (userscript 一键授权 OAuth 回调竞态)
+
+**根因（userscript 专属）**：`@run-at document-idle` + ~1.5MB 包体解析，晚于 Notion SPA 的 `history.replaceState` 清掉 `?code&state`，`handleRedirectCallback` 读不到授权码 → 一键授权看似无法完成。发起页亦未监听授权完成态 GM 键，回调成功后仍停在「等待回调」。
+
+**修复**：
+- userscript 改 `@run-at document-start`；`main.js` 启动即 `NotionOAuth.captureCallbackSnapshot()`
+- `handleRedirectCallback` 优先消费快照（即使 live URL 已被 SPA 清参）
+- `installCrossPageWatchers` 增补 API Key / auth mode / refresh / meta / pending / notice，发起页即时刷新
+- `matchesRedirectUri` 与诊断函数对齐：非根路径尾斜杠不敏感
+- 回归：legacy T29/T30 + vitest `oauth-callback-snapshot.test.js`
+
+
 ## [3.14.9] - 2026-09-07
 
 ### fix (gist + dangling-refs CI + ConfirmationDialog)

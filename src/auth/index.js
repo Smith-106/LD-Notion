@@ -847,7 +847,15 @@ const NotionOAuth = {
         try {
             const current = new URL(currentUrl);
             const expected = new URL(redirectUri);
-            return current.origin === expected.origin && current.pathname === expected.pathname;
+            // Align with describeRedirectUriMismatch: trailing-slash insensitive
+            // (https://host/cb vs https://host/cb/ must not fail CSRF-safe path check).
+            const normalizePath = (path) => {
+                let p = String(path || "/");
+                if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+                return p.toLowerCase();
+            };
+            return current.origin === expected.origin
+                && normalizePath(current.pathname) === normalizePath(expected.pathname);
         } catch {
             return false;
         }
@@ -923,29 +931,86 @@ const NotionOAuth = {
         });
     },
 
-    // 跨页/跨 tab 刷新(三模型共识辅因修复):OAuth 三键注册 GM_addValueChangeListener,
-    // 其他页面修改配置后本页面板立即回填,避免陈旧面板把旧值写回 Storage。
+    // 跨页/跨 tab 刷新(三模型共识辅因修复):OAuth 配置三键 + 授权完成态注册 GM_addValueChangeListener,
+    // 其他页面修改配置/完成回调后本页面板立即回填,避免陈旧面板把旧值写回 Storage,
+    // 以及发起页一直停在「等待回调」而回调页其实已成功(userscript 弹窗/跳转场景)。
     _crossPageWatchersInstalled: false,
+    // document-start 快照:Notion SPA 可能在 document-idle 前清掉 ?code&state
+    _callbackSnapshot: null,
+
+    captureCallbackSnapshot: (href) => {
+        const rawHref = typeof href === "string" && href
+            ? href
+            : (typeof window !== "undefined" ? String(window.location?.href || "") : "");
+        if (!rawHref) return null;
+        try {
+            const url = new URL(rawHref);
+            const code = url.searchParams.get("code");
+            const error = url.searchParams.get("error");
+            const state = url.searchParams.get("state");
+            // 仅在疑似 OAuth 回调时落快照(有 code/error);避免普通页面误捕获
+            if (!code && !error) return null;
+            NotionOAuth._callbackSnapshot = {
+                href: rawHref,
+                code,
+                error,
+                state,
+                capturedAt: Date.now(),
+            };
+            return NotionOAuth._callbackSnapshot;
+        } catch {
+            return null;
+        }
+    },
+
+    clearCallbackSnapshot: () => {
+        NotionOAuth._callbackSnapshot = null;
+    },
 
     installCrossPageWatchers: () => {
         if (NotionOAuth._crossPageWatchersInstalled) return;
         NotionOAuth._crossPageWatchersInstalled = true;
         if (typeof GM_addValueChangeListener !== "function") return;
-        const keys = [
+        const configKeys = [
             CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID,
             CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET,
             CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI,
         ];
+        // 授权完成态:回调页写入后,发起页(linux.do 等)须即时刷新状态/占位符
+        const authResultKeys = [
+            CONFIG.STORAGE_KEYS.NOTION_API_KEY,
+            CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE,
+            CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN,
+            CONFIG.STORAGE_KEYS.NOTION_OAUTH_META,
+            CONFIG.STORAGE_KEYS.NOTION_OAUTH_STATE,
+        ];
         try {
-            for (const key of keys) {
-                GM_addValueChangeListener(key, () => {
-                    try {
-                        NotionOAuth.syncRegisteredControls();
-                    } catch (error) {
-                        console.warn("[LD-Notion] OAuth 跨页同步失败", error?.message || error);
-                    }
-                });
+            const syncUi = () => {
+                try {
+                    NotionOAuth.syncApiKeyInputs();
+                    NotionOAuth.syncRegisteredControls();
+                } catch (error) {
+                    console.warn("[LD-Notion] OAuth 跨页同步失败", error?.message || error);
+                }
+            };
+            for (const key of configKeys) {
+                GM_addValueChangeListener(key, syncUi);
             }
+            for (const key of authResultKeys) {
+                GM_addValueChangeListener(key, syncUi);
+            }
+            GM_addValueChangeListener(CONFIG.STORAGE_KEYS.NOTION_OAUTH_NOTICE, (_name, _oldValue, newValue, remote) => {
+                if (!remote || !newValue) return;
+                try {
+                    const notice = Utils.safeJsonParse(newValue, null);
+                    if (!notice?.message) return;
+                    // 发起页即时刷新 OAuth 状态文案(回调页也会 consumeNotice;GM_notification 已在 pushNotice)
+                    NotionOAuth.syncApiKeyInputs();
+                    NotionOAuth.syncRegisteredControls();
+                } catch (error) {
+                    console.warn("[LD-Notion] OAuth 跨页通知同步失败", error?.message || error);
+                }
+            });
         } catch (error) {
             // 注册失败静默降级(仅失去跨页刷新),与 storage/index.js 既有先例一致
             console.warn("[LD-Notion] OAuth 跨页监听注册失败", error?.message || error);
@@ -1348,34 +1413,63 @@ const NotionOAuth = {
 
     handleRedirectCallback: async () => {
         const pending = NotionOAuth.getPendingState();
-        if (!pending?.state || !pending?.redirectUri) return false;
+        if (!pending?.state || !pending?.redirectUri) {
+            NotionOAuth.clearCallbackSnapshot();
+            return false;
+        }
 
         // OAuth 修复·次要项(用户选定):pending 10 分钟 TTL,防陈旧 code/state 残留重放干扰后续授权
         if (pending.createdAt && Date.now() - pending.createdAt > 10 * 60 * 1000) {
             NotionOAuth.clearPendingState();
+            NotionOAuth.clearCallbackSnapshot();
             Utils.cleanupUrlParams(["code", "state", "error"]);
             return false;
         }
 
-        let currentUrl;
-        try {
-            currentUrl = new URL(window.location.href);
-        } catch {
-            return false;
+        // Prefer document-start snapshot: Notion SPA may have already wiped live query
+        const snapshot = NotionOAuth._callbackSnapshot;
+        const snapshotFresh = !!(
+            snapshot
+            && (snapshot.code || snapshot.error)
+            && snapshot.capturedAt
+            && (Date.now() - snapshot.capturedAt <= 10 * 60 * 1000)
+        );
+
+        let callbackHref = "";
+        let code = null;
+        let error = null;
+        let state = null;
+
+        if (snapshotFresh) {
+            callbackHref = snapshot.href;
+            code = snapshot.code;
+            error = snapshot.error;
+            state = snapshot.state;
+        } else {
+            try {
+                callbackHref = window.location.href;
+                const currentUrl = new URL(callbackHref);
+                code = currentUrl.searchParams.get("code");
+                error = currentUrl.searchParams.get("error");
+                state = currentUrl.searchParams.get("state");
+            } catch {
+                NotionOAuth.clearCallbackSnapshot();
+                return false;
+            }
         }
 
-        const code = currentUrl.searchParams.get("code");
-        const error = currentUrl.searchParams.get("error");
-        const state = currentUrl.searchParams.get("state");
-
-        if (!code && !error) return false;
-        if (!NotionOAuth.matchesRedirectUri(window.location.href, pending.redirectUri)) {
+        if (!code && !error) {
+            NotionOAuth.clearCallbackSnapshot();
+            return false;
+        }
+        if (!NotionOAuth.matchesRedirectUri(callbackHref, pending.redirectUri)) {
             // 诊断化(三模型共识 R1):仅当 URL 携带 code/error 时提示差异,普通页面加载不打扰
-            const diff = describeRedirectUriMismatch(window.location.href, pending.redirectUri);
+            const diff = describeRedirectUriMismatch(callbackHref, pending.redirectUri);
             NotionOAuth.pushNotice(
                 `回调地址与 Redirect URI 不一致: 期望 ${diff.expected?.origin || "?"}${diff.expected?.pathname || ""} / 实际 ${diff.actual?.origin || "?"}${diff.actual?.pathname || ""}。请检查 Notion 集成后台的 Redirect URI 配置。`,
                 "error"
             );
+            NotionOAuth.clearCallbackSnapshot();
             return false;
         }
 
@@ -1404,6 +1498,7 @@ const NotionOAuth = {
             NotionOAuth.pushNotice(`Notion OAuth 授权失败: ${errorObj.message}`, "error");
         } finally {
             NotionOAuth.clearPendingState();
+            NotionOAuth.clearCallbackSnapshot();
             Utils.cleanupUrlParams(["code", "state", "error"]);
         }
 
