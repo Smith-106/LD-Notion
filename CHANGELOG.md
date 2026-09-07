@@ -3,6 +3,32 @@
 ## [Unreleased]
 
 
+## [3.14.13] - 2026-09-07
+
+### fix (更新路径 token invalid · 401 风暴消除 · 三模型 9 视角复核共识)
+
+**根因**：更新/自动导入路径（Bookmark/RSS）`buildSettings` 在 run 开头构建 `settings.apiKey` 快照并整轮复用——OAuth 续签后后续项仍直发失效 token，逐项 401 + 续签风暴；`processInBatches` 用 allSettled 吞掉 rejected；`setupDatabaseProperties`（GET /databases，token 失效最常见首触点）错误包装丢弃认证标记。
+
+**修复**：
+- **逐项重读 token**：`processBookmark`/`_syncSingleRssItem` 每项开工前经 `NotionOAuth.getAccessToken("")` 重读（对齐导出路径 v3.14.7 模式）；归档阶段 `processDeleted` 同款
+- **isAuthTerminal fail-fast**：终态错误抛原错误（透传 authCode）→ allSettled rejected 检查中止整批 → 外层 catch 按 authCode 分支场景文案；仅信 `error.isAuthTerminal === true` 标记，不误杀瞬态（冷却期/非 JSON 网关/5xx 均无标记）
+- **账本先行落盘（H1）**：fail-fast 前 `flushExported`——中止轮已建页的导出事实（不可再生账本）仅存内存，页面重载后丢失 → 手动导出去重失效 → 重复建页
+- **setup 首触点透传（M3）**：`setupDatabaseProperties` catch 返回 `isAuthTerminal`/`authCode`，两 importer 包装错误同款透传
+- **clearConnection 无条件清残留（P1-4）**：manual 模式下 OAuth 残留 access_token 也清（断开授权后定时更新不再直发残留 token 401）；清除按钮/toast 文案明示「清除全部本地凭据(含手动 API Key)」
+- **版本 bump 3.14.13**（UpdateChecker 依赖 `CONFIG.SCRIPT_VERSION` 比对）
+- 回归：`tests/update-token-failfast.test.js` +8（fail-fast 请求数/负向 400 不中止/flush 落盘断言/watermark 重试保留/setup 透传/clearConnection 双模式）
+
+## [3.14.12] - 2026-09-07
+
+### fix (token invalid 误判 · 粘贴污染 · 空 token 预检)
+
+**修复**：
+- 空 token 预检：`NotionAPI.request` 发请求前检查，空则抛 `EMPTY_TOKEN`（非终态）不发注定失败的请求
+- 401 细分：仅官方认证 code（`unauthorized`/`invalid_bearer_token`）判终态，代理/网关 401 非终态；终态错误透传 authCode（`export/index.js`、`github-obsidian-service.js`）
+- key 清洗：`getAccessToken`/`setManualApiKey` 剥不可见字符+换行制表符；`validateManualApiKey` 格式软校验（`secret_`/`ntn_` 前缀，不匹配仅警告不阻断）
+- UI 中止横幅按 authCode 分支文案，去误导性「无法自动续签」；docs/faq + guide/notion 补 token 前缀说明
+- 回归：`tests/auth-failfast.test.js` +3（空 token 预检/代理 401 非终态/官方 401 终态+authCode）、`tests/notion-oauth.test.js` +1
+
 ## [3.14.11] - 2026-09-07
 
 ### fix (对账 DedupStore batch 槽残留 → 自动去重/「待导出」复发)

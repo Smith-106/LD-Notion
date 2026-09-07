@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.11`
+- 当前仓库源码版本：`v3.14.13`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -388,6 +388,27 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.13
+
+### fix (更新路径 token invalid · 401 风暴消除 · 三模型复核共识)
+
+- **逐项重读 token**: Bookmark/RSS 自动导入器每项开工前经 `getAccessToken` 统一入口重读, OAuth 续签后不再整轮复用失效快照
+- **isAuthTerminal fail-fast**: 401/403 终态抛原错误中止整批(含归档阶段), 不再逐项重复注定失败的请求
+- **setup 首触点透传**: `GET /databases` 401 认证标记/authCode 透传, 场景文案分支可达
+- **账本先行落盘**: fail-fast 前 `flushExported`, 已建页导出事实不丢, 防重复建页
+- **clearConnection 无条件清残留**: manual 模式下 OAuth 残留 access_token 也清(断开授权后不再直发残留 token 401); 清除按钮文案明示清除范围
+- 回归测试 +8(`tests/update-token-failfast.test.js`)
+
+### v3.14.12
+
+### fix (token invalid 误判 · 粘贴污染 · 空 token 预检)
+
+- 空 token 预检: 不发请求, 直接提示保存 API Key
+- 401 细分: 仅官方认证 code 判终态, 代理/网关 401 非终态
+- key 清洗: 剥不可见字符+换行; `validateManualApiKey` 格式软校验(secret_/ntn_ 前缀)
+- 错误透传 authCode, 中止横幅按场景分支文案
+- 回归测试 +4
 
 ### v3.14.11
 

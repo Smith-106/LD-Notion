@@ -89,9 +89,15 @@ Notion 授权只说明 token 有机会访问 workspace，不保证目标已经�
 - **回调快照（#16）**：Notion SPA 常在 `document-idle` 前清掉 `?code&state`，userscript 包体大解析晚时 `handleRedirectCallback` 读不到授权码。修复：`document-start` 启动即 `captureCallbackSnapshot`，回调优先消费快照；跨页监听授权完成态；`matchesRedirectUri` 尾斜杠对齐诊断函数。
 - **request token 快照（#20）**：`NotionAPI`/`upload` 在 OAuth 可自动续签时忽略过期的 `apiKey` 快照（不再因旧快照误判 401 终态）。
 
-## Contract
+## v3.14.12–13 认证语义变更
 
-- OAuth 是推荐路径。
+- **空 token 预检（v3.14.12）**：`NotionAPI.request` 发请求前检查 token 为空则立即抛 `EMPTY_TOKEN`(非终态)，不发注定失败的请求；401 终态判定仅限官方认证 code(`unauthorized`/`invalid_bearer_token`)，代理/网关返回的 401 不再无条件判终态。
+- **key 清洗统一入口（v3.14.12）**：`getAccessToken`/`setManualApiKey` 剥不可见字符+换行制表符，`validateManualApiKey` 格式软校验(`secret_`/`ntn_` 前缀，不匹配仅警告不阻断)。
+- **更新路径 401 风暴消除（v3.14.13）**：Bookmark/RSS 自动导入器每项开工前经 `getAccessToken("")` 重读 token（对齐导出路径 v3.14.7 模式），`isAuthTerminal` 终态抛原错误 fail-fast 中止整批（含归档阶段），`autoImportAborted` 透传 authCode 供 UI 按场景分支文案。
+- **setup 首触点透传（v3.14.13）**：`setupDatabaseProperties` 的 `GET /databases` 错误透传 `isAuthTerminal`/`authCode`——token 失效最常见的首个触点此前被包装成普通 Error，场景文案分支不可达。
+- **clearConnection 无条件清残留（v3.14.13）**：断开授权/清除按钮无条件清 `NOTION_API_KEY`（此前仅 oauth 模式清，manual 模式下 OAuth 残留 access_token 覆盖的键永不清除 → 定时更新仍直发残留 token 401）；按钮文案明示「清除全部本地凭据(含手动 API Key)」。
+
+## Contract
 - manual token 是 advanced fallback。
 - Auth failure 必须在 OperationGuard 或目标 writer 前阻止写入。
 - 审计日志和示例不得包含真实 token、Client Secret 或 API Key。
