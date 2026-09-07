@@ -193,6 +193,31 @@ const GenericExporter = {
         return props;
     },
 
+    // Clipper（知乎/通用页）去重：与 ZhihuAdapter/GenericAdapter.getDedupKey 同构。
+    // 此前 GenericUI.doExport 成功后不 markSeen → 连点/重导出必建重复 Notion 页。
+    resolveClipperDedup: (meta = {}) => {
+        const url = String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim();
+        const site = SiteDetector.detect();
+        if (site === SiteDetector.SITES.ZHIHU || GenericExporter.resolveUnifiedSource(meta) === "知乎") {
+            return { sourceType: "zhihu", dedupKey: url ? `zhihu:${url}` : "" };
+        }
+        return { sourceType: "generic", dedupKey: url ? `generic:${url}` : "" };
+    },
+
+    isClipperExported: (meta = {}) => {
+        const { DedupStore } = require("../storage");
+        const { sourceType, dedupKey } = GenericExporter.resolveClipperDedup(meta);
+        if (!dedupKey) return false;
+        return DedupStore.isDuplicate(sourceType, dedupKey);
+    },
+
+    markClipperExported: (meta = {}) => {
+        const { DedupStore } = require("../storage");
+        const { sourceType, dedupKey } = GenericExporter.resolveClipperDedup(meta);
+        if (!dedupKey) return;
+        DedupStore.markSeen(sourceType, dedupKey);
+    },
+
     // 导出当前页面
     exportCurrentPage: async (settings) => {
         let meta, blocks;

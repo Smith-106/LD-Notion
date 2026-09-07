@@ -2576,6 +2576,18 @@
           if (manualValue) return manualValue;
           return String(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "") || "").trim();
         },
+        // OAuth 可续签时：请求层禁止用调用方快照遮蔽 Storage 中刚续签的新 token。
+        // 根因：getAccessToken(liveValue) 在 liveValue 非空时优先返回快照；AutoImporter /
+        // 批量导出若把 buildSettings 时的 access token 当 apiKey 传入，首项 401 续签成功后
+        // 后续项仍带旧 token → 再次 401 → refresh_token 轮换后 invalid_grant 整批中止
+        // （v3.14.7 仅修了手动 exportBookmarks 每项重解析；自动导入/上传分片仍中招）。
+        // 手动 Token 模式：仍尊重传入的 apiKey（含 UI live 覆盖）。
+        resolveRequestToken: (apiKey = "") => {
+          if (NotionOAuth2.canAutoRefresh()) {
+            return NotionOAuth2.getAccessToken("");
+          }
+          return NotionOAuth2.getAccessToken(apiKey);
+        },
         setManualApiKey: async (apiKey = "") => {
           const normalized = String(apiKey || "").trim();
           Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, normalized);
@@ -4561,7 +4573,7 @@ ${partNumber}\r
                   method: "POST",
                   url: NotionAPI2.Transport.buildUrl(`/file_uploads/${uploadId}/send`),
                   headers: {
-                    "Authorization": `Bearer ${NotionOAuth2.getAccessToken(apiKey)}`,
+                    "Authorization": `Bearer ${NotionOAuth2.resolveRequestToken(apiKey)}`,
                     "Notion-Version": CONFIG2.API.NOTION_VERSION,
                     "Content-Type": `multipart/form-data; boundary=${boundary}`
                   },
@@ -4844,7 +4856,7 @@ Content-Type: ${contentType}\r
           if (NotionAPI2._requestGate) {
             await NotionAPI2._requestGate();
           }
-          const doRequest = async (attempt, token = NotionOAuth2.getAccessToken(apiKey), allowRefresh = true) => {
+          const doRequest = async (attempt, token = NotionOAuth2.resolveRequestToken(apiKey), allowRefresh = true) => {
             var _a, _b;
             const response = await NotionAPI2.getTransport().request({
               method,
@@ -13592,6 +13604,28 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           return props;
         },
+        // Clipper（知乎/通用页）去重：与 ZhihuAdapter/GenericAdapter.getDedupKey 同构。
+        // 此前 GenericUI.doExport 成功后不 markSeen → 连点/重导出必建重复 Notion 页。
+        resolveClipperDedup: (meta = {}) => {
+          const url = String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim();
+          const site = SiteDetector2.detect();
+          if (site === SiteDetector2.SITES.ZHIHU || GenericExporter2.resolveUnifiedSource(meta) === "\u77E5\u4E4E") {
+            return { sourceType: "zhihu", dedupKey: url ? `zhihu:${url}` : "" };
+          }
+          return { sourceType: "generic", dedupKey: url ? `generic:${url}` : "" };
+        },
+        isClipperExported: (meta = {}) => {
+          const { DedupStore } = require_storage();
+          const { sourceType, dedupKey } = GenericExporter2.resolveClipperDedup(meta);
+          if (!dedupKey) return false;
+          return DedupStore.isDuplicate(sourceType, dedupKey);
+        },
+        markClipperExported: (meta = {}) => {
+          const { DedupStore } = require_storage();
+          const { sourceType, dedupKey } = GenericExporter2.resolveClipperDedup(meta);
+          if (!dedupKey) return;
+          DedupStore.markSeen(sourceType, dedupKey);
+        },
         // 导出当前页面
         exportCurrentPage: async (settings) => {
           let meta, blocks;
@@ -15288,6 +15322,7 @@ ${insight.summary || ""}`,
       var { CONFIG: CONFIG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
+      var { NotionOAuth: NotionOAuth2 } = require_auth();
       var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { emit } = require_event_bus();
@@ -15304,7 +15339,7 @@ ${insight.summary || ""}`,
           const username = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
           const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
           if (!username && !token) return false;
-          const apiKey = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "");
+          const apiKey = NotionOAuth2.getAccessToken("");
           const databaseId = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "");
           return !!(apiKey && databaseId);
         },
@@ -15314,7 +15349,7 @@ ${insight.summary || ""}`,
         },
         buildSettings: () => {
           return {
-            apiKey: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, ""),
+            apiKey: NotionOAuth2.getAccessToken(""),
             databaseId: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
             username: Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, ""),
             token: Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "")
@@ -15450,6 +15485,7 @@ ${insight.summary || ""}`,
               for (const k of Object.keys(properties)) {
                 if (properties[k] === void 0) delete properties[k];
               }
+              settings.apiKey = NotionOAuth2.getAccessToken("");
               const page = await NotionAPI2.request("POST", "/pages", {
                 parent: { database_id: settings.databaseId },
                 properties
@@ -15740,7 +15776,8 @@ ${insight.summary || ""}`,
         buildSettings: () => {
           const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
           return {
-            apiKey: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, ""),
+            // 与 Bookmark/RSS AutoImporter 对齐：经 getAccessToken 读取，避免绕过 OAuth 语义
+            apiKey: NotionOAuth2.getAccessToken(""),
             databaseId: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
             parentPageId: Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, ""),
             exportTargetType,
@@ -15903,6 +15940,7 @@ ${insight.summary || ""}`,
               const title = bookmark.title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
               AutoImporter2.updateStatus(`\u{1F4EC} \u5BFC\u5165\u4E2D (${i + 1}/${newBookmarks.length}): ${title}`);
               try {
+                settings.apiKey = NotionOAuth2.getAccessToken("");
                 await Exporter2.exportTopic(bookmark, settings);
                 success++;
                 successfulBookmarks.push(bookmark);
@@ -27298,6 +27336,10 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               }
               const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
               if (!noteResult.ok) throw new Error(noteResult.error);
+              GenericExporter2.markClipperExported({
+                url: location.href,
+                source: SiteDetector2.detect() === SiteDetector2.SITES.ZHIHU ? "\u77E5\u4E4E" : ""
+              });
               GenericUI2.showStatus(`Obsidian \u5BFC\u51FA\u6210\u529F\uFF1A${title}`, "success");
             } catch (error) {
               GenericUI2.showStatus(`Obsidian \u5BFC\u51FA\u5931\u8D25: ${error.message}`, "error");
@@ -27311,6 +27353,22 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         // 执行导出
         doExport: async () => {
           if (GenericUI2.isExporting) return;
+          const previewMeta = {
+            url: typeof location !== "undefined" ? location.href : "",
+            source: SiteDetector2.detect() === SiteDetector2.SITES.ZHIHU ? "\u77E5\u4E4E" : ""
+          };
+          if (GenericExporter2.isClipperExported(previewMeta)) {
+            const ok = await ConfirmationDialog2.show({
+              title: "\u5DF2\u5BFC\u51FA\u8FC7",
+              message: "\u8BE5\u9875\u9762\u5DF2\u5728\u5BFC\u51FA\u8D26\u672C\u4E2D\u3002\u518D\u6B21\u5BFC\u51FA\u5C06\u5728 Notion \u65B0\u5EFA\u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
+              confirmText: "\u4ECD\u8981\u5BFC\u51FA",
+              countdown: 0
+            });
+            if (!ok) {
+              GenericUI2.showStatus("\u5DF2\u53D6\u6D88\uFF1A\u9875\u9762\u6B64\u524D\u5DF2\u5BFC\u51FA", "info");
+              return;
+            }
+          }
           GenericUI2.isExporting = true;
           const btn = GenericUI2.panel.querySelector("#gclip-export");
           const floatBtn = GenericUI2.floatBtn;
@@ -27319,7 +27377,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           floatBtn.className = "gclip-float-btn exporting";
           GenericUI2.showStatus("\u6B63\u5728\u63D0\u53D6\u9875\u9762\u5185\u5BB9...", "info");
           try {
-            const apiKey = NotionOAuth2.getAccessToken();
+            const apiKey = NotionOAuth2.getAccessToken("");
             const exportState = TargetState2.getExportState();
             const imgMode = Storage2.get(CONFIG2.STORAGE_KEYS.IMG_MODE, CONFIG2.DEFAULTS.imgMode);
             const aiSettings = getAISettings();
@@ -27337,6 +27395,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             };
             GenericUI2.showStatus("\u6B63\u5728\u5BFC\u51FA\u5230 Notion...", "info");
             const { page, meta } = await GenericExporter2.exportCurrentPage(settings);
+            GenericExporter2.markClipperExported(meta);
             floatBtn.className = "gclip-float-btn success";
             GenericUI2.showStatus(`\u5BFC\u51FA\u6210\u529F: ${meta.title}`, "success");
             setTimeout(() => {

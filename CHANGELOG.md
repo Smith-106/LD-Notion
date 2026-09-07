@@ -29,6 +29,12 @@ Confirmed NEW bugs beyond PR #17 (reconcile beginBatch leak):
 3. **GitHubAutoImporter 导出 flush 无 finally** —— 与 `GitHubExporter` CC-10 对齐，异常路径也落盘已导出账本。
 4. **fix-p1 rebase 用例 GM 键假绿** —— `ldb_dedup_*` 从未被生产使用；改为 `DedupStore.keyFor`。
 
+### fix (userscript · OAuth 续签快照遮蔽 + 知乎/通用 clipper 去重)
+
+- **OAuth `resolveRequestToken`**：`NotionAPI.request` / 文件分片上传在可自动续签时始终读 Storage 最新 access token，禁止调用方 `settings.apiKey` 快照遮蔽续签结果（AutoImporter / GitHubAutoImporter 批量中项 401→二次续签→`invalid_grant` 整批中止）。手动 Token 模式仍尊重传入覆盖。LinuxDo/GitHub AutoImporter `buildSettings` 对齐 `getAccessToken`，每项开工前重读 token。
+- **知乎/通用 clipper mark-after-success**：`GenericExporter.markClipperExported` 与 Adapter `getDedupKey` 同构写入 DedupStore；`GenericUI.doExport` / Obsidian 导出成功后落账；已导出再次导出经 ConfirmationDialog 确认，避免连点重复建页。
+- 回归：`tests/oauth-request-token.test.js`、`tests/clipper-dedup-mark.test.js`
+
 ## [3.14.10] - 2026-09-07
 
 ### fix (userscript 一键授权 OAuth 回调竞态)
