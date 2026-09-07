@@ -58,6 +58,16 @@ facade 必须完整委托 V2 的**全部公共方法**。v3.14.0 曾因缺失 `g
 
 `DedupStore` 支持 `beginBatch(sourceType)` / `endBatch()` 批量模式。批量模式下，`isDuplicate` 和 `markSeen` 只操作内存缓存，`endBatch()` 时一次性写入 `GM_setValue`。`SyncCoordinator.sync()` 在同步循环中使用批量模式，避免每条记录都触发 IPC。
 
+### 批量模式账本一致性（v3.14.10–11）
+
+批量模式曾有三类账本一致性缺陷，v3.14.10–11 修复：
+
+- **batch 槽残留（#17）**：刷新工作区零命中时 `reconcile` 只 `beginBatch` 不 `endBatch`，后续 `markSeen` 仅驻内存，重载后账本丢失 → 自动去重/待导出复发。修复：无条件 `endBatch`，并对齐 LinuxDoAdapter 与导出账本的裸 `topicId` 键空间。
+- **unmark 墓碑（#19）**：`endBatch` rebase 会把已 `unmarkSeen` 的键从磁盘复活（dirtyKeys + deleted tombstones 未区分）。修复：rebase 不再复活墓碑键。
+- **wipe 复活（#18）**：`clearSeen` + `endBatch` 会把已清空的键从磁盘 rebase 回来。修复：清空后不再从磁盘回读。
+
+配套：GitHub 自动同步在 watermark 重置后尊重 `isExported`；RSS `allow_duplicates` 用 feed 感知的 DedupStore 键；Zhihu/Generic clipper 成功后 `markSeen`；去重键统一走 `normalizeDedupUrl`（含 Discourse `/t/slug/id` → `/t/id` 归一）。
+
 ### 基线重置（v3.13.0）
 
 `SyncState.resetSourceState(sourceType)` 将指定源的增量基线恢复为默认（watermark=null、lastOutcome=idle），下次同步退化为全量扫描。工作区洞察（统一同步中心）每张来源卡提供「重置基线」按钮；GitHub 按子类型（stars/repos/forks/gists）逐个重置。

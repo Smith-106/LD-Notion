@@ -84,6 +84,11 @@ Notion 授权只说明 token 有机会访问 workspace，不保证目标已经�
 - **空输入不再清 token**：站设置保存时仅显式编辑才清 token，`setManualApiKey` 空值不翻 manual 模式（保护 OAuth 续签状态）。
 - **终态降级清残留**：降级时同步清除残留的 `NOTION_API_KEY`，防止下次导出首项即报 token invalid。
 
+## v3.14.10–11 认证语义变更
+
+- **回调快照（#16）**：Notion SPA 常在 `document-idle` 前清掉 `?code&state`，userscript 包体大解析晚时 `handleRedirectCallback` 读不到授权码。修复：`document-start` 启动即 `captureCallbackSnapshot`，回调优先消费快照；跨页监听授权完成态；`matchesRedirectUri` 尾斜杠对齐诊断函数。
+- **request token 快照（#20）**：`NotionAPI`/`upload` 在 OAuth 可自动续签时忽略过期的 `apiKey` 快照（不再因旧快照误判 401 终态）。
+
 ## Contract
 
 - OAuth 是推荐路径。
