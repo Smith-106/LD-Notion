@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+
+## [3.14.10] - 2026-09-07
+
 ### fix (userscript 一键授权 OAuth 回调竞态)
 
 **根因（userscript 专属）**：`@run-at document-idle` + ~1.5MB 包体解析，晚于 Notion SPA 的 `history.replaceState` 清掉 `?code&state`，`handleRedirectCallback` 读不到授权码 → 一键授权看似无法完成。发起页亦未监听授权完成态 GM 键，回调成功后仍停在「等待回调」。
