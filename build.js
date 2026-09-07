@@ -26,11 +26,11 @@ const USERSCRIPT_HEADER = `// ==UserScript==
 // @match        https://*.notion.so/*
 // @match        https://github.com/*
 // @match        https://www.github.com/*
+// @match        https://gist.github.com/*
 // @match        https://www.zhihu.com/*
 // @match        https://zhuanlan.zhihu.com/*
 // (audit) broad include catch-all removed; supported sites use explicit @match above.
-// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so).
-// Gap: SiteDetector does not treat gist.github.com as GitHub; userscript likewise omits it.
+// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so / gist.github.com).
 // Generic sites: add Tampermonkey user @match as needed; extension still has http(s)://*/* ; @exclude retained as defense-in-depth.
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*

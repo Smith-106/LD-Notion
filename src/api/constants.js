@@ -18,7 +18,7 @@ const SiteDetector = {
         if (hostname === "notion.so" || hostname === "www.notion.so" || hostname.endsWith(".notion.so")) {
             return SiteDetector.SITES.NOTION;
         }
-        if (hostname === "github.com" || hostname === "www.github.com") {
+        if (hostname === "github.com" || hostname === "www.github.com" || hostname === "gist.github.com") {
             return SiteDetector.SITES.GITHUB;
         }
         if (hostname === "www.zhihu.com" || hostname === "zhuanlan.zhihu.com") {

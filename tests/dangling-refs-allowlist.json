@@ -1,0 +1,4 @@
+{
+  "$comment": "Intentional lazy-require / cycle-breaking free vars only (file:Symbol relative to src/). Scanner already treats require(\"mod\").Sym, DI params, and destructuring as resolved — keep this list empty unless a true free-var lazy pattern remains. Document why for each entry.",
+  "allow": {}
+}
