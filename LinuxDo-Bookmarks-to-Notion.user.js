@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.11
+// @version      3.14.12
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -74,7 +74,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.14.11",
+        SCRIPT_VERSION: "3.14.12",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -2574,9 +2574,9 @@
           Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, String(refreshToken || "").trim());
         },
         getAccessToken: (liveValue = "") => {
-          const manualValue = String(liveValue || "").trim();
+          const manualValue = String(liveValue || "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
           if (manualValue) return manualValue;
-          return String(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "") || "").trim();
+          return String(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "") || "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
         },
         // OAuth 可续签时：请求层禁止用调用方快照遮蔽 Storage 中刚续签的新 token。
         // 根因：getAccessToken(liveValue) 在 liveValue 非空时优先返回快照；AutoImporter /
@@ -2591,11 +2591,29 @@
           return NotionOAuth2.getAccessToken(apiKey);
         },
         setManualApiKey: async (apiKey = "") => {
-          const normalized = String(apiKey || "").trim();
+          const normalized = String(apiKey || "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
           Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, normalized);
           if (normalized) NotionOAuth2.setAuthMode("manual");
           NotionOAuth2.syncApiKeyInputs(normalized);
           NotionOAuth2.syncRegisteredControls();
+          if (normalized) {
+            const check = NotionOAuth2.validateManualApiKey(normalized);
+            if (!check.valid && check.code !== "EMPTY") {
+              console.warn(`[LD-Notion] API Key \u683C\u5F0F\u53EF\u7591(${check.code}): ${check.message}`);
+            }
+          }
+        },
+        // v3.14.12 (三模型共识): manual key 格式软校验——secret_/ntn_ 均合法,仅不匹配时警告不阻断
+        validateManualApiKey: (apiKey = "") => {
+          const raw = String(apiKey ?? "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
+          if (!raw) return { valid: false, code: "EMPTY", value: "", message: "\u8BF7\u5148\u586B\u5199 Notion API Key" };
+          if (!/^(secret_|ntn_)/i.test(raw)) {
+            return { valid: false, code: "FORMAT_SUSPECT", value: raw, message: "Notion API Key \u5E94\u4EE5 secret_ \u6216 ntn_ \u5F00\u5934\uFF1B\u5F53\u524D\u503C\u7591\u4F3C\u590D\u5236\u4E0D\u5B8C\u6574\u6216\u8BEF\u8D34\u5176\u4ED6\u51ED\u8BC1\uFF08\u5982 OAuth Client Secret / AI Key / GitHub token\uFF09" };
+          }
+          if (raw.length < 20) {
+            return { valid: false, code: "TOO_SHORT", value: raw, message: "Notion API Key \u957F\u5EA6\u5F02\u5E38\uFF08\u8FC7\u77ED\uFF09\uFF0C\u7591\u4F3C\u590D\u5236\u4E0D\u5B8C\u6574\uFF0C\u8BF7\u4ECE Notion \u96C6\u6210\u9875\u9762\u7528 Copy \u6309\u94AE\u5B8C\u6574\u590D\u5236" };
+          }
+          return { valid: true, code: "OK", value: raw, message: "" };
         },
         isOAuthReady: () => {
           const config = NotionOAuth2.getConfig();
@@ -4791,11 +4809,11 @@ Content-Type: ${contentType}\r
       var { ObsidianAPI: ObsidianAPI2, HTMLToMarkdown: HTMLToMarkdown2 } = require_obsidian();
       var { installUploadMethods } = require_notion_upload();
       var isAuthTerminalStatus = (status, result = {}) => {
-        if (status === 401) return true;
         const code = String((result == null ? void 0 : result.code) || "").toLowerCase();
-        if (code === "unauthorized" || code === "invalid_bearer_token") return true;
         const msg = String((result == null ? void 0 : result.message) || "").toLowerCase();
-        return msg.includes("api token is invalid") || msg.includes("unauthorized");
+        if (code === "unauthorized" || code === "invalid_bearer_token") return true;
+        if (msg.includes("api token is invalid") || msg.includes("unauthorized")) return true;
+        return false;
       };
       var NotionTransport2 = Object.freeze({
         buildUrl: (endpoint) => `https://api.notion.com/v1${endpoint}`,
@@ -4860,6 +4878,13 @@ Content-Type: ${contentType}\r
           }
           const doRequest = async (attempt, token = NotionOAuth2.resolveRequestToken(apiKey), allowRefresh = true) => {
             var _a, _b;
+            if (!token) {
+              const emptyError = new Error("Notion API Key \u4E3A\u7A7A: \u672A\u8BFB\u53D6\u5230\u5DF2\u4FDD\u5B58\u7684 API Key,\u8BF7\u91CD\u65B0\u4FDD\u5B58(\u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743)");
+              emptyError.authCode = "EMPTY_TOKEN";
+              emptyError.isAuthTerminal = true;
+              emptyError.statusCode = 0;
+              throw emptyError;
+            }
             const response = await NotionAPI2.getTransport().request({
               method,
               endpoint,
@@ -4900,6 +4925,7 @@ Content-Type: ${contentType}\r
               const authError = new Error(`Notion API \u9519\u8BEF: ${result.message || response.status}`);
               authError.isAuthTerminal = true;
               authError.statusCode = response.status;
+              authError.authCode = String((result == null ? void 0 : result.code) || "").toLowerCase() || "unauthorized";
               throw authError;
             }
             throw new Error(`Notion API \u9519\u8BEF: ${result.message || response.status}`);
@@ -14243,7 +14269,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   Exporter2.cancel();
                   results.authAborted = {
                     reason: error.message,
-                    at: completedCount + startIndex
+                    at: completedCount + startIndex,
+                    // v3.14.12 (三模型共识): 透传 authCode 供 UI 分支文案
+                    authCode: error.authCode || "unauthorized"
                   };
                   return;
                 }
@@ -20531,7 +20559,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                   GitHubAPI2.flushExported();
                   GitHubAPI2.flushGistsExported();
                 }
-                return { success, failed, skipped, authAborted: { reason: error.message, at: i + 1 } };
+                return { success, failed, skipped, authAborted: { reason: error.message, at: i + 1, authCode: error.authCode || "unauthorized" } };
               }
             }
             if (i < selectedItems.length - 1 && delay > 0) {
@@ -24683,10 +24711,23 @@ ${AIService2.isolateContent(JSON.stringify({
           html += '<div class="ldb-report-title">\u{1F4CA} \u5BFC\u51FA\u62A5\u544A</div>';
           const authAborted = results.authAborted || (results.aborted === true ? { reason: "\u8BA4\u8BC1\u5931\u8D25" } : null);
           if (authAborted) {
+            const authCode = String(authAborted.authCode || "").toLowerCase();
+            let authTitle = "\u26D4 \u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF1ANotion \u8BA4\u8BC1\u5931\u8D25\uFF08API token \u65E0\u6548\u4E14\u65E0\u6CD5\u81EA\u52A8\u7EED\u7B7E\uFF09";
+            let authHint = "\u8BF7\u68C0\u67E5 Notion API Key \u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743\u540E\uFF0C\u518D\u6B21\u70B9\u51FB\u5BFC\u51FA\u5373\u53EF\u7EED\u4F20\u5269\u4F59\u9879\u3002";
+            if (authCode === "empty_token") {
+              authTitle = "\u26D4 \u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF1A\u672A\u8BFB\u53D6\u5230\u5DF2\u4FDD\u5B58\u7684 Notion API Key";
+              authHint = "\u8BF7\u5230\u8BBE\u7F6E\u9875\u91CD\u65B0\u7C98\u8D34\u4FDD\u5B58 API Key\uFF08secret_/ntn_ \u5F00\u5934\uFF09\uFF0C\u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743\u3002";
+            } else if (authCode === "format_suspect") {
+              authTitle = "\u26D4 \u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF1ANotion API Key \u683C\u5F0F\u5F02\u5E38";
+              authHint = "Key \u5E94\u4EE5 secret_ \u6216 ntn_ \u5F00\u5934\uFF1B\u7591\u4F3C\u590D\u5236\u4E0D\u5B8C\u6574\u6216\u8BEF\u8D34\u5176\u4ED6\u51ED\u8BC1\uFF0C\u8BF7\u4ECE Notion \u96C6\u6210\u9875\u9762\u7528 Copy \u6309\u94AE\u91CD\u65B0\u590D\u5236\u3002";
+            } else if (authCode === "invalid_bearer_token" || authCode === "unauthorized") {
+              authTitle = "\u26D4 \u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF1ANotion \u62D2\u7EDD\u4E86\u8BE5 API Key";
+              authHint = "Key \u53EF\u80FD\u5DF2\u5931\u6548\uFF08\u96C6\u6210\u88AB\u5220\u9664/\u8F6E\u6362\uFF09\u6216\u590D\u5236\u4E0D\u5B8C\u6574\u3002\u8BF7\u5230 Notion Integrations \u91CD\u65B0\u590D\u5236\uFF08\u52FF\u542B\u7A7A\u683C/\u6362\u884C\uFF09\uFF0C\u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743\u3002";
+            }
             html += `<div class="ldb-report-item failed" style="padding:8px 12px;margin-bottom:6px;border-radius:6px;background:var(--ldb-ui-danger-alpha-12);">
-                <div>\u26D4 \u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF1ANotion \u8BA4\u8BC1\u5931\u8D25\uFF08API token \u65E0\u6548\u4E14\u65E0\u6CD5\u81EA\u52A8\u7EED\u7B7E\uFF09</div>
+                <div>${authTitle}</div>
                 <div style="margin-top:4px;font-size:12px;opacity:.85;">${Utils2.escapeHtml(Utils2.truncateText(String(authAborted.reason || ""), 160))}</div>
-                <div style="margin-top:4px;font-size:12px;opacity:.85;">\u8BF7\u68C0\u67E5 Notion API Key \u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743\u540E\uFF0C\u518D\u6B21\u70B9\u51FB\u5BFC\u51FA\u5373\u53EF\u7EED\u4F20\u5269\u4F59\u9879\u3002</div>
+                <div style="margin-top:4px;font-size:12px;opacity:.85;">${authHint}</div>
             </div>`;
           }
           if (success.length > 0) {
@@ -25748,7 +25789,7 @@ ${AIService2.isolateContent(JSON.stringify({
           };
           updateExportButtonState();
           refs.exportBtn.onclick = async () => {
-            var _a;
+            var _a, _b;
             if (refs.exportBtn.disabled) return;
             refs.exportBtn.disabled = true;
             const restoreExportBtn = () => {
@@ -25875,7 +25916,16 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               const skippedCount = ((_a = results.skipped) == null ? void 0 : _a.length) || 0;
               let statusMsg;
               if (results.authAborted || results.aborted === true) {
-                statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08Notion \u8BA4\u8BC1\u5931\u8D25\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u68C0\u67E5 API Key / OAuth \u6388\u6743\u540E\u91CD\u65B0\u5BFC\u51FA`;
+                const authCode = String(((_b = results.authAborted) == null ? void 0 : _b.authCode) || "").toLowerCase();
+                if (authCode === "empty_token") {
+                  statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08\u672A\u8BFB\u53D6\u5230 API Key\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u91CD\u65B0\u4FDD\u5B58 API Key \u540E\u91CD\u8BD5`;
+                } else if (authCode === "format_suspect") {
+                  statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08API Key \u683C\u5F0F\u5F02\u5E38\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u786E\u8BA4 Key \u4EE5 secret_/ntn_ \u5F00\u5934`;
+                } else if (authCode === "invalid_bearer_token" || authCode === "unauthorized") {
+                  statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08Notion \u62D2\u7EDD\u8BE5 Key\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u91CD\u65B0\u590D\u5236 API Key \u6216\u91CD\u65B0 OAuth \u6388\u6743`;
+                } else {
+                  statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08Notion \u8BA4\u8BC1\u5931\u8D25\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u68C0\u67E5 API Key / OAuth \u6388\u6743\u540E\u91CD\u65B0\u5BFC\u51FA`;
+                }
               } else {
                 statusMsg = `\u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${successCount} \u4E2A`;
                 if (failCount > 0) statusMsg += `\uFF0C\u5931\u8D25 ${failCount} \u4E2A`;

@@ -4,7 +4,7 @@
 
 检查以下几项：
 
-1. Internal Integration Token 是否完整，通常以 `secret_` 开头。
+1. Internal Integration Token 是否完整，以 `secret_`（旧版）或 `ntn_`（2024 后新版）开头；请用集成页面的 Copy 按钮完整复制，勿手动框选（避免截断/带入空格换行）。
 2. Integration 是否已经连接到目标数据库或页面。
 3. 是否先点击刷新工作区列表，并从下拉框选择目标。
 4. 手动输入 ID 时是否只填写 32 位 ID。

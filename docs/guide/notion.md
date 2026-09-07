@@ -82,7 +82,7 @@ flowchart TD
 
 优先检查：
 
-1. Token 是否完整，Internal Integration Token 应以 `secret_` 开头。
+1. Token 是否完整，Internal Integration Token 以 `secret_`（旧版）或 `ntn_`（2024 后新版）开头；用 Copy 按钮完整复制，勿手动框选。
 2. 是否已经把 Integration 连接到数据库或页面。
 3. 是否先刷新工作区列表并选择目标。
 4. 手动输入 ID 时是否只输入 32 位 ID，而不是整段 URL。

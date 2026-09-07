@@ -393,7 +393,7 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
                     GitHubAPI.flushExported();
                     GitHubAPI.flushGistsExported();
                 }
-                return { success, failed, skipped, authAborted: { reason: error.message, at: i + 1 } };
+                return { success, failed, skipped, authAborted: { reason: error.message, at: i + 1, authCode: error.authCode || "unauthorized" } };
             }
         }
 

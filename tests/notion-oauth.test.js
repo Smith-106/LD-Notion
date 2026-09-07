@@ -948,6 +948,29 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(status.text.includes('手动 API Key'));
     });
 
+    await runTest('v3.14.12: setManualApiKey 剥不可见字符 + validateManualApiKey 格式软校验', async () => {
+        const harness = createHarness();
+        // 零宽字符/换行残留 → 落盘前剥离
+        await harness.NotionOAuth.setManualApiKey('secret_abc\u200Bdef\n123');
+        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY], 'secret_abcdef123');
+        assert.strictEqual(harness.NotionOAuth.getAccessToken(), 'secret_abcdef123');
+        assert.strictEqual(harness.NotionOAuth.getAuthMode(), 'manual');
+
+        // 格式软校验: 合法前缀通过
+        assert.strictEqual(harness.NotionOAuth.validateManualApiKey('ntn_12345678901234567890').valid, true);
+        assert.strictEqual(harness.NotionOAuth.validateManualApiKey('secret_12345678901234567890').valid, true);
+        // 非 secret_/ntn_ 前缀 → FORMAT_SUSPECT(不阻断)
+        const suspect = harness.NotionOAuth.validateManualApiKey('ghp_abcdef1234567890');
+        assert.strictEqual(suspect.valid, false);
+        assert.strictEqual(suspect.code, 'FORMAT_SUSPECT');
+        // 过短 → TOO_SHORT
+        const short = harness.NotionOAuth.validateManualApiKey('secret_abc');
+        assert.strictEqual(short.valid, false);
+        assert.strictEqual(short.code, 'TOO_SHORT');
+        // 空值 → EMPTY
+        assert.strictEqual(harness.NotionOAuth.validateManualApiKey('').code, 'EMPTY');
+    });
+
     await runTest('NotionAPI.listComments: uses comments endpoint with the comment API version', async () => {
         const harness = createHarness();
         let capturedRequest = null;

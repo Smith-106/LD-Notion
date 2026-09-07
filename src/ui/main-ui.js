@@ -2515,10 +2515,25 @@ const UI = {
         const authAborted = results.authAborted
             || (results.aborted === true ? { reason: "认证失败" } : null);
         if (authAborted) {
+            // v3.14.12 (三模型共识): 按 authCode 分支文案——manual 模式无「续签」概念,
+            // 空 token/格式非法/官方拒绝分别提示,避免误导
+            const authCode = String(authAborted.authCode || "").toLowerCase();
+            let authTitle = "⛔ 已中止导出：Notion 认证失败（API token 无效且无法自动续签）";
+            let authHint = "请检查 Notion API Key 或重新 OAuth 一键授权后，再次点击导出即可续传剩余项。";
+            if (authCode === "empty_token") {
+                authTitle = "⛔ 已中止导出：未读取到已保存的 Notion API Key";
+                authHint = "请到设置页重新粘贴保存 API Key（secret_/ntn_ 开头），或重新 OAuth 一键授权。";
+            } else if (authCode === "format_suspect") {
+                authTitle = "⛔ 已中止导出：Notion API Key 格式异常";
+                authHint = "Key 应以 secret_ 或 ntn_ 开头；疑似复制不完整或误贴其他凭证，请从 Notion 集成页面用 Copy 按钮重新复制。";
+            } else if (authCode === "invalid_bearer_token" || authCode === "unauthorized") {
+                authTitle = "⛔ 已中止导出：Notion 拒绝了该 API Key";
+                authHint = "Key 可能已失效（集成被删除/轮换）或复制不完整。请到 Notion Integrations 重新复制（勿含空格/换行），或重新 OAuth 一键授权。";
+            }
             html += `<div class="ldb-report-item failed" style="padding:8px 12px;margin-bottom:6px;border-radius:6px;background:var(--ldb-ui-danger-alpha-12);">
-                <div>⛔ 已中止导出：Notion 认证失败（API token 无效且无法自动续签）</div>
+                <div>${authTitle}</div>
                 <div style="margin-top:4px;font-size:12px;opacity:.85;">${Utils.escapeHtml(Utils.truncateText(String(authAborted.reason || ""), 160))}</div>
-                <div style="margin-top:4px;font-size:12px;opacity:.85;">请检查 Notion API Key 或重新 OAuth 一键授权后，再次点击导出即可续传剩余项。</div>
+                <div style="margin-top:4px;font-size:12px;opacity:.85;">${authHint}</div>
             </div>`;
         }
 

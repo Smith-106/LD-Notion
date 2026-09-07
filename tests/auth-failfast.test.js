@@ -100,11 +100,61 @@ describe("R-AUTH-01: NotionAPI.request 认证终态标记", () => {
         expect(result.ok).toBe(true);
         expect(calls).toBe(3);
     });
+
+    it("空 token 预检(v3.14.12): 不发请求, 抛 EMPTY_TOKEN 终态错误", async () => {
+        let requestCount = 0;
+        global.__ldNotionResponder = (opts) => {
+            requestCount++;
+            opts.onload({ status: 401, responseText: JSON.stringify({ object: "error", status: 401, code: "unauthorized", message: "API token is invalid." }), responseHeaders: "" });
+        };
+        try {
+            await NotionAPI.request("POST", "/pages", {}, "", 3);
+            expect.unreachable("should have thrown");
+        } catch (error) {
+            expect(error.authCode).toBe("EMPTY_TOKEN");
+            // v3.14.12 复核: 空 token 整批必败, 标记终态 fail-fast(否则 empty_token UI 分支不可达)
+            expect(error.isAuthTerminal).toBe(true);
+            expect(error.message).toContain("API Key 为空");
+        }
+        expect(requestCount).toBe(0); // 未发出任何请求
+    });
+
+    it("401 无官方认证 code(代理/网关 HTML) → 非终态, 逐项失败留待下轮(v3.14.12)", async () => {
+        global.__ldNotionResponder = (opts) => opts.onload({
+            status: 401,
+            responseText: "<html>Unauthorized</html>", // 非 JSON, safeJsonParse 得 {}
+            responseHeaders: "",
+        });
+        try {
+            await NotionAPI.request("POST", "/pages", {}, "secret_ok", 3);
+            expect.unreachable("should have thrown");
+        } catch (error) {
+            expect(error.isAuthTerminal).toBeUndefined();
+            expect(error.message).toContain("401"); // 非终态错误不带 statusCode, 消息含状态码
+        }
+    });
+
+    it("401 官方 unauthorized code → 终态且透传 authCode(v3.14.12)", async () => {
+        global.__ldNotionResponder = (opts) => opts.onload({
+            status: 401,
+            responseText: JSON.stringify({ object: "error", status: 401, code: "unauthorized", message: "API token is invalid." }),
+            responseHeaders: "",
+        });
+        try {
+            await NotionAPI.request("POST", "/pages", {}, "secret_invalid", 3);
+            expect.unreachable("should have thrown");
+        } catch (error) {
+            expect(error.isAuthTerminal).toBe(true);
+            expect(error.authCode).toBe("unauthorized");
+        }
+    });
 });
 
 describe("R-AUTH-02: Exporter.exportBookmarks 认证中止", () => {
     it("第 1 项 401 终态 → 批次中止:failed=1, skipped=其余, authAborted 存在, 不再发请求", async () => {
         const bookmarks = Array.from({ length: 5 }, (_, idx) => ({ topic_id: 100 + idx, title: `Post ${idx}` }));
+        // v3.14.12 空 token 预检: 导出循环每项从 Storage 重解析, 须预置 key 才能走到 401 路径
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_dead");
         // LinuxDo fetchAllPosts 走 GM_xmlhttpRequest(同样 401 语义, 但 fetch 的是 linux.do——
         // 这里直接让 Notion createDatabasePage 401: 拦 LinuxDoAPI 返回正常数据
         const { LinuxDoAPI } = require("../src/export");
@@ -185,6 +235,8 @@ describe("R-AUTH-02: Exporter.exportBookmarks 认证中止", () => {
         NotionOAuth.isOAuthConnected = () => true;
         const origGetAuthMode = NotionOAuth.getAuthMode;
         NotionOAuth.getAuthMode = () => "oauth";
+        // v3.14.12 空 token 预检: OAuth 模式 getAccessToken("") 读 Storage, 须预置 key
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_oauth_expired");
 
         try {
             const results = await Exporter.exportBookmarks(bookmarks, { concurrency: 1, apiKey: "", databaseId: "db1", exportTargetType: "database" });

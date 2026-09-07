@@ -716,9 +716,9 @@ const NotionOAuth = {
     },
 
     getAccessToken: (liveValue = "") => {
-        const manualValue = String(liveValue || "").trim();
+        const manualValue = String(liveValue || "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
         if (manualValue) return manualValue;
-        return String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "") || "").trim();
+        return String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "") || "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
     },
 
     // OAuth 可续签时：请求层禁止用调用方快照遮蔽 Storage 中刚续签的新 token。
@@ -735,7 +735,8 @@ const NotionOAuth = {
     },
 
     setManualApiKey: async (apiKey = "") => {
-        const normalized = String(apiKey || "").trim();
+        // v3.14.12 (三模型共识): 剥不可见字符+换行/制表符(零宽/全角/换行残留)防粘贴污染致 401
+        const normalized = String(apiKey || "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
         Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, normalized);
         // v3.14.7 (AUD-ARCH-11 残余修复): 仅非空值才翻 manual——空值(清空覆盖)不应
         // 静默关闭 OAuth 自动续签。此前任何输入框清空/占位保存都会 setAuthMode("manual"),
@@ -743,6 +744,27 @@ const NotionOAuth = {
         if (normalized) NotionOAuth.setAuthMode("manual");
         NotionOAuth.syncApiKeyInputs(normalized);
         NotionOAuth.syncRegisteredControls();
+        // v3.14.12 复核(三模型): validateManualApiKey 接线——保存时软校验,
+        // 格式可疑仅 console 警告不阻断(兼容旧 secret_ 与新版 ntn_)
+        if (normalized) {
+            const check = NotionOAuth.validateManualApiKey(normalized);
+            if (!check.valid && check.code !== "EMPTY") {
+                console.warn(`[LD-Notion] API Key 格式可疑(${check.code}): ${check.message}`);
+            }
+        }
+    },
+
+    // v3.14.12 (三模型共识): manual key 格式软校验——secret_/ntn_ 均合法,仅不匹配时警告不阻断
+    validateManualApiKey: (apiKey = "") => {
+        const raw = String(apiKey ?? "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
+        if (!raw) return { valid: false, code: "EMPTY", value: "", message: "请先填写 Notion API Key" };
+        if (!/^(secret_|ntn_)/i.test(raw)) {
+            return { valid: false, code: "FORMAT_SUSPECT", value: raw, message: "Notion API Key 应以 secret_ 或 ntn_ 开头；当前值疑似复制不完整或误贴其他凭证（如 OAuth Client Secret / AI Key / GitHub token）" };
+        }
+        if (raw.length < 20) {
+            return { valid: false, code: "TOO_SHORT", value: raw, message: "Notion API Key 长度异常（过短），疑似复制不完整，请从 Notion 集成页面用 Copy 按钮完整复制" };
+        }
+        return { valid: true, code: "OK", value: raw, message: "" };
     },
 
     isOAuthReady: () => {

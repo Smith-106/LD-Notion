@@ -910,6 +910,8 @@ const Exporter = {
                         results.authAborted = {
                             reason: error.message,
                             at: completedCount + startIndex,
+                            // v3.14.12 (三模型共识): 透传 authCode 供 UI 分支文案
+                            authCode: error.authCode || "unauthorized",
                         };
                         return;
                     }

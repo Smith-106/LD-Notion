@@ -191,6 +191,8 @@ describe("AUD-ARCH-11: 续签失败分类 + 冷却", () => {
         NotionOAuth.refreshAccessToken = async () => { throw new Error("NetworkError: fetch failed (timeout)"); };
         NotionAPI._refreshCooldownUntil = null;
         global.__ldNotionResponder = terminal401;
+        // v3.14.12 空 token 预检: OAuth 模式 resolveRequestToken 读 Storage, 须预置 key
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_oauth_expired");
         try {
             let thrown = null;
             try {
@@ -220,6 +222,8 @@ describe("AUD-ARCH-11: 续签失败分类 + 冷却", () => {
         };
         NotionAPI._refreshCooldownUntil = null;
         global.__ldNotionResponder = terminal401;
+        // v3.14.12 空 token 预检: 须预置 Storage key 才能走到 401 续签路径
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_oauth_expired");
         try {
             let thrown = null;
             try {
@@ -247,6 +251,8 @@ describe("AUD-ARCH-11: 续签失败分类 + 冷却", () => {
         };
         NotionAPI._refreshCooldownUntil = null;
         global.__ldNotionResponder = terminal401;
+        // v3.14.12 空 token 预检: 须预置 Storage key 才能走到 401 续签路径
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_oauth_expired");
         try {
             for (let i = 0; i < 2; i++) {
                 try {

@@ -18,12 +18,15 @@ const { installUploadMethods } = require("./notion-upload");
 // 464 项全部报 "API token is invalid" 的根因)。
 // 消息关键词表:Notion 官方错误 code(API token is invalid / unauthorized)
 // 与 OAuth 终态(invalid_grant / invalid_client)均视为认证终态。
+// v3.14.12 (三模型共识): 401 不再无条件终态——仅官方认证类 code 才终态;
+// 空 token/格式非法/代理 401 等场景区分处理,避免误中止整批。
 const isAuthTerminalStatus = (status, result = {}) => {
-    if (status === 401) return true;
     const code = String(result?.code || "").toLowerCase();
-    if (code === "unauthorized" || code === "invalid_bearer_token") return true;
     const msg = String(result?.message || "").toLowerCase();
-    return msg.includes("api token is invalid") || msg.includes("unauthorized");
+    if (code === "unauthorized" || code === "invalid_bearer_token") return true;
+    if (msg.includes("api token is invalid") || msg.includes("unauthorized")) return true;
+    // 401 但无官方认证 code(如代理/网关 401 HTML): 非终态,逐项失败留待下轮
+    return false;
 };
 
 
@@ -101,6 +104,17 @@ const NotionAPI = {
         }
 
         const doRequest = async (attempt, token = NotionOAuth.resolveRequestToken(apiKey), allowRefresh = true) => {
+            // v3.14.12 (三模型共识): 空 token 预检——不发请求,本地抛配置错误,
+            // 避免空 Bearer 头得到同款 401 被误判认证终态中止整批。
+            // v3.14.12 复核(三模型): 空 token 对整批是确定性失败,标记终态 fail-fast,
+            // 否则 464 项逐项本地抛错进 failed 且 authAborted 不产生(empty_token UI 分支不可达)
+            if (!token) {
+                const emptyError = new Error("Notion API Key 为空: 未读取到已保存的 API Key,请重新保存(或重新 OAuth 一键授权)");
+                emptyError.authCode = "EMPTY_TOKEN";
+                emptyError.isAuthTerminal = true;
+                emptyError.statusCode = 0;
+                throw emptyError;
+            }
             const response = await NotionAPI.getTransport().request({
                 method,
                 endpoint,
@@ -151,6 +165,8 @@ const NotionAPI = {
                 const authError = new Error(`Notion API 错误: ${result.message || response.status}`);
                 authError.isAuthTerminal = true;
                 authError.statusCode = response.status;
+                // v3.14.12 (三模型共识): 透传官方 code 供 UI 按场景分支文案
+                authError.authCode = String(result?.code || "").toLowerCase() || "unauthorized";
                 throw authError;
             }
             throw new Error(`Notion API 错误: ${result.message || response.status}`);

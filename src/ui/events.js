@@ -1162,7 +1162,17 @@ const UIEvents = {
 
                 let statusMsg;
                 if (results.authAborted || results.aborted === true) {
-                    statusMsg = `⛔ 导出已中止（Notion 认证失败）：成功 ${successCount} 个，未尝试 ${skippedCount} 个。请检查 API Key / OAuth 授权后重新导出`;
+                    // v3.14.12 (三模型共识): 按 authCode 分支,manual 模式无「续签」概念
+                    const authCode = String(results.authAborted?.authCode || "").toLowerCase();
+                    if (authCode === "empty_token") {
+                        statusMsg = `⛔ 导出已中止（未读取到 API Key）：成功 ${successCount} 个，未尝试 ${skippedCount} 个。请重新保存 API Key 后重试`;
+                    } else if (authCode === "format_suspect") {
+                        statusMsg = `⛔ 导出已中止（API Key 格式异常）：成功 ${successCount} 个，未尝试 ${skippedCount} 个。请确认 Key 以 secret_/ntn_ 开头`;
+                    } else if (authCode === "invalid_bearer_token" || authCode === "unauthorized") {
+                        statusMsg = `⛔ 导出已中止（Notion 拒绝该 Key）：成功 ${successCount} 个，未尝试 ${skippedCount} 个。请重新复制 API Key 或重新 OAuth 授权`;
+                    } else {
+                        statusMsg = `⛔ 导出已中止（Notion 认证失败）：成功 ${successCount} 个，未尝试 ${skippedCount} 个。请检查 API Key / OAuth 授权后重新导出`;
+                    }
                 } else {
                     statusMsg = `导出完成：成功 ${successCount} 个`;
                     if (failCount > 0) statusMsg += `，失败 ${failCount} 个`;

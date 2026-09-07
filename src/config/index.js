@@ -5,7 +5,7 @@
 // ===========================================
 const CONFIG = {
     // Keep in sync with package.json + userscript @version + build.js header.
-    SCRIPT_VERSION: "3.14.11",
+    SCRIPT_VERSION: "3.14.12",
 
     // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
     // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
