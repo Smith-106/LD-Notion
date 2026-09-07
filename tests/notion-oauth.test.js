@@ -613,6 +613,18 @@ function createWorkspaceVisualizationFixture(harness) {
         );
     });
 
+    await runTest('matchesRedirectUri: trailing slash normalized for non-root paths', async () => {
+        const harness = createHarness();
+        assert.strictEqual(
+            harness.NotionOAuth.matchesRedirectUri('https://example.com/cb?code=abc', 'https://example.com/cb/'),
+            true
+        );
+        assert.strictEqual(
+            harness.NotionOAuth.matchesRedirectUri('https://example.com/cb/?code=abc', 'https://example.com/cb'),
+            true
+        );
+    });
+
     await runTest('getStatus: reports connected OAuth workspace when tokens are present', async () => {
         const harness = createHarness();
         harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'ntn_access_token';
@@ -6744,6 +6756,52 @@ function createWorkspaceVisualizationFixture(harness) {
         await harness.NotionOAuth.handleRedirectCallback();
         // state 校验失败 -> catch -> finally 清 pending(CSRF 防线)
         assert.strictEqual(harness.NotionOAuth.getPendingState(), null);
+    });
+
+    await runTest('T29 captureCallbackSnapshot + handleRedirectCallback survives SPA-stripped live URL', async () => {
+        const harness = createHarness();
+        await unlockCredentialVault(harness);
+        await harness.NotionOAuth.saveConfig({
+            clientId: VALID_CLIENT_ID,
+            clientSecret: 'secret_456',
+            redirectUri: 'https://www.notion.so/'
+        });
+        harness.NotionOAuth.setPendingState({
+            state: 'state_ok',
+            redirectUri: 'https://www.notion.so/',
+            createdAt: Date.now(),
+        });
+        // Simulate document-start capture, then Notion SPA wiping query before idle handler
+        const snap = harness.NotionOAuth.captureCallbackSnapshot(
+            'https://www.notion.so/?code=oauth_code_spa&state=state_ok'
+        );
+        assert.ok(snap);
+        assert.strictEqual(snap.code, 'oauth_code_spa');
+        harness.setLocation('https://www.notion.so/'); // live URL lost OAuth params
+        harness.setRequestHandler((options) => {
+            respondJson(options, 200, {
+                access_token: 'oauth_access_spa',
+                refresh_token: 'oauth_refresh_spa',
+                workspace_name: 'SPA Workspace',
+            });
+        });
+        const handled = await harness.NotionOAuth.handleRedirectCallback();
+        assert.strictEqual(handled, true);
+        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY], 'oauth_access_spa');
+        assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE], 'oauth');
+        assert.strictEqual(harness.NotionOAuth.getPendingState(), null);
+        assert.strictEqual(harness.NotionOAuth._callbackSnapshot, null);
+    });
+
+    await runTest('T30 userscript header uses @run-at document-start for OAuth capture', async () => {
+        assert.ok(
+            userScriptContent.includes('@run-at       document-start'),
+            'userscript must run at document-start so OAuth callback params are captured before Notion SPA strips them'
+        );
+        assert.ok(
+            !userScriptContent.includes('@run-at       document-idle'),
+            'document-idle lost the OAuth callback race on Notion SPA'
+        );
     });
 
 console.log('\nAll NotionOAuth tests passed successfully!');

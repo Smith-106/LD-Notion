@@ -38,6 +38,12 @@ Storage.CredentialVault = CredentialVault;
 // ===========================================
 BookmarkBridge.init();
 
+// Userscript OAuth: capture ?code&state ASAP (paired with @run-at document-start).
+// Notion SPA often history.replaceState-clears OAuth query before document-idle inject.
+try {
+    NotionOAuth.captureCallbackSnapshot();
+} catch (_) { /* 快照失败不阻断启动 */ }
+
 // 监听扩展 Popup 快捷操作（仅在 Chrome 扩展版中生效）
 window.addEventListener("ld-notion-popup-action", (event) => {
     const { action } = event.detail || {};

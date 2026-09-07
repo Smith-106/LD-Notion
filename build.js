@@ -63,7 +63,9 @@ const USERSCRIPT_HEADER = `// ==UserScript==
 // userscript 形态 Obsidian 请求被 TM 拒绝(扩展 manifest 已含, 不动)
 // @connect      127.0.0.1
 // @connect      localhost
-// @run-at       document-idle
+// v3.14.10: document-start so OAuth ?code&state are snapshotted before Notion SPA
+// history.replaceState strips them (document-idle + 1.5MB parse lost the race).
+// @run-at       document-start
 // ==/UserScript==
 `;
 
