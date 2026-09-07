@@ -16,9 +16,11 @@ const { DOMToNotion } = require("../src/api/DOMToNotion");
 const { RSSAutoImporter } = require("../src/bridge/RSSAutoImporter");
 const { RSSAdapter } = require("../src/adapter/RSSAdapter");
 
+// 必须与 DedupStore.keyFor 一致(ldb_exported_topics:{source})。
+// 旧键 ldb_dedup_* 从未被生产读写 → rebase 用例假绿(写错键、读错键)。
 const STORE_KEYS = Object.freeze({
-    bookmark: "ldb_dedup_bookmark",
-    rss: "ldb_dedup_rss",
+    bookmark: DedupStore.keyFor("bookmark"),
+    rss: DedupStore.keyFor("rss"),
 });
 
 describe("P1-CC-06: DedupStore beginBatch 幂等 + endBatch rebase", () => {
@@ -37,13 +39,15 @@ describe("P1-CC-06: DedupStore beginBatch 幂等 + endBatch rebase", () => {
     });
 
     it("endBatch rebase: 预置外部写入键(他 tab), batch 写回后键保留", () => {
-        // 模拟他 tab 在 batch 期间直接落盘
-        globalThis.GM_setValue(STORE_KEYS.bookmark, JSON.stringify({ "bookmark:external": 111 }));
+        // 模拟他 tab 在 batch 期间直接落盘(ts 须在 TTL 窗内, 否则 urlKeyed 写回会淘汰)
+        const externalTs = Date.now() - 1000;
         DedupStore.beginBatch("bookmark");
+        // begin 之后再写入, 验证 dirtyKeys-only merge 不会整集覆写丢掉他 tab 键
+        globalThis.GM_setValue(STORE_KEYS.bookmark, JSON.stringify({ "bookmark:external": externalTs }));
         DedupStore.markSeen("bookmark", "bookmark:local");
         DedupStore.endBatch("bookmark");
         const raw = JSON.parse(globalThis.GM_getValue(STORE_KEYS.bookmark, "{}"));
-        expect(raw["bookmark:external"]).toBe(111); // 他 tab 键保留(此前整集覆写会丢)
+        expect(raw["bookmark:external"]).toBe(externalTs); // 他 tab 键保留(此前整集覆写会丢)
         // urlKeyed 源本地双写哈希键 → 用 isDuplicate 断言本项已落账
         expect(DedupStore.isDuplicate("bookmark", "bookmark:local")).toBe(true);
     });

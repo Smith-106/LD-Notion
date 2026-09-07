@@ -69,7 +69,7 @@ const DedupStore = {
 
     // --- batch 模式: 减少 IPC 调用(全盘审计 find 7: 单槽 → 按 sourceType 分槽,
     // 多导入器并发时 A 的缓存被 B 覆盖丢失, 现每源独立缓存) ---
-    _batchCaches: {},    // sourceType → { set, dirty }
+    _batchCaches: {},    // sourceType → { set, dirty, dirtyKeys, deleted, wiped }
 
     /**
      * 开始批量模式 (SyncCoordinator 在 sync 循环前后调用)
@@ -78,7 +78,16 @@ const DedupStore = {
     beginBatch(sourceType) {
         // v3.14.6 (CC-06): 幂等 —— 槽已存在则复用(同源并发 batch 后开者不再覆盖先开者内存累积)
         if (this._batchCaches[sourceType]) return;
-        this._batchCaches[sourceType] = { set: this._loadSet(sourceType), dirty: false, wiped: false };
+        // dirtyKeys: 本 batch 内 markSeen 触及的键(仅这些参与 rebase 写回, 防陈旧快照复活他处已删键)
+        // deleted: 本 batch 内 unmarkSeen 墓碑(endBatch 从 fresh 删除, 防 rebase 并集复活)
+        // wiped: clearSeen 整本清空(#18) 时置位, endBatch 勿与盘上旧集并集复活
+        this._batchCaches[sourceType] = {
+            set: this._loadSet(sourceType),
+            dirty: false,
+            dirtyKeys: new Set(),
+            deleted: new Set(),
+            wiped: false,
+        };
     },
 
     /**
@@ -93,16 +102,24 @@ const DedupStore = {
         for (const src of targets) {
             const cache = this._batchCaches[src];
             if (cache && cache.dirty) {
-                // clearSeen 在 batch 内清空后必须整本落空: 不可再与盘上 fresh 并集,
-                // 否则 endBatch rebase 会把已清除键复活(用户点「清除去重」后仍显示已导出)。
                 let next;
+                // clearSeen 整本清空(#18 wiped): 不可再与盘上 fresh 并集, 否则已清除键复活
                 if (cache.wiped) {
                     next = { ...cache.set }; // 通常为空; 清后若又 markSeen 则仅保留清后新写入
                 } else {
+                    // 仅合并本 batch 触及的 dirtyKeys + 应用 deleted 墓碑。
+                    // 旧逻辑把 cache.set 全量并入 fresh → 快照里未改动的键会覆盖他处
+                    // 已 unmark 的落盘删除(「重新导出」后仍显示已导出)。
                     next = this._loadSet(src);
-                    for (const [k, ts] of Object.entries(cache.set)) {
+                    const dirtyKeys = cache.dirtyKeys || new Set();
+                    for (const k of dirtyKeys) {
+                        if (!Object.prototype.hasOwnProperty.call(cache.set, k)) continue;
+                        const ts = cache.set[k];
                         const prev = next[k];
                         if (prev === undefined || Number(ts) > Number(prev)) next[k] = ts;
+                    }
+                    if (cache.deleted) {
+                        for (const k of cache.deleted) delete next[k];
                     }
                 }
                 // v3.14.3: 与 _saveSet 同规则——URL 键源时间 TTL, id 键源容量上限
@@ -203,6 +220,14 @@ const DedupStore = {
         if (batch) {
             if (!batch.set[dedupKey] || batch.set[dedupKey] < stamp) batch.set[dedupKey] = stamp;
             if (hashed !== dedupKey && (!batch.set[hashed] || batch.set[hashed] < stamp)) batch.set[hashed] = stamp;
+            if (batch.dirtyKeys) {
+                batch.dirtyKeys.add(dedupKey);
+                if (hashed !== dedupKey) batch.dirtyKeys.add(hashed);
+            }
+            if (batch.deleted) {
+                batch.deleted.delete(dedupKey);
+                if (hashed !== dedupKey) batch.deleted.delete(hashed);
+            }
             batch.dirty = true;
             return;
         }
@@ -223,12 +248,20 @@ const DedupStore = {
         if (batch) {
             if (Object.prototype.hasOwnProperty.call(batch.set, dedupKey)) {
                 delete batch.set[dedupKey];
-                batch.dirty = true;
             }
             if (hashed !== dedupKey && Object.prototype.hasOwnProperty.call(batch.set, hashed)) {
                 delete batch.set[hashed];
-                batch.dirty = true;
             }
+            // 即便键仅在盘上、不在本批快照, 也记墓碑 —— endBatch 必须从 fresh 删掉
+            if (batch.deleted) {
+                batch.deleted.add(dedupKey);
+                if (hashed !== dedupKey) batch.deleted.add(hashed);
+            }
+            if (batch.dirtyKeys) {
+                batch.dirtyKeys.delete(dedupKey);
+                if (hashed !== dedupKey) batch.dirtyKeys.delete(hashed);
+            }
+            batch.dirty = true;
             return;
         }
         const set = this._loadSet(sourceType);
@@ -267,6 +300,8 @@ const DedupStore = {
             batch.set = {};
             batch.dirty = true;
             batch.wiped = true; // endBatch 勿与盘上旧集并集复活
+            if (batch.dirtyKeys) batch.dirtyKeys.clear();
+            if (batch.deleted) batch.deleted.clear();
             return;
         }
         GM_deleteValue(this.keyFor(sourceType));

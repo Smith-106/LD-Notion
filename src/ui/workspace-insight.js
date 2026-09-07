@@ -844,6 +844,7 @@ const WorkspaceInsight = {
     // v3.14.4 修复: ① LinuxDo 项 Discourse 原始 bookmark 对象无 url 字段(仅 bookmarkable_url 含 slug),
     // 旧实现 bookmark?.url 恒 undefined → LinuxDo 对账永不命中(死代码); 改按 topic_id 构造规范 URL
     // https://linux.do/t/{topicId}(与 LinuxDoAdapter.normalize 及导出写入“链接”属性同法, 无 slug)。
+    // Notion 侧若存带 slug 的链接, normalizeWorkspaceInsightUrl 会归一到 /t/{id} 再匹配。
     // ② 数据源改 getCombinedVisualBookmarks() 覆盖 LinuxDo+GitHub 两源(旧实现只查当前激活源)。
     // ③ 回填后调 renderBookmarkList() 刷新行内徽标, 与状态提示一致。
     // ④ 循环内仅 mutate 账本缓存, 循环末单次 flush(消除写侧 O(N²), 见 AGENTS.md 禁令)。

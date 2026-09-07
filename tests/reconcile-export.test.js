@@ -84,13 +84,19 @@ describe("R-REC-01: 对账回填索引构建语义(F-1 死代码回归护栏)", 
         });
         return m;
     };
-    // 与 workspace-visual.js normalizeWorkspaceInsightUrl 同构的最小实现
+    // 与 workspace-visual.js normalizeWorkspaceInsightUrl 同构的最小实现(含 Discourse slug 归一)
     const normalize = (raw) => {
         const s = String(raw || "").trim();
         if (!s) return "";
         try {
             const u = new URL(s);
-            return `${u.protocol.toLowerCase()}//${u.host.toLowerCase()}${u.pathname.replace(/\/+$/, "") || "/"}${u.search}`;
+            let pathname = u.pathname.replace(/\/+$/, "") || "/";
+            const host = u.host.toLowerCase();
+            if (host === "linux.do" || host.endsWith(".linux.do")) {
+                const m = pathname.match(/^\/t\/(?:[^/]+\/)?(\d+)(?:\/\d+)?$/i);
+                if (m) pathname = `/t/${m[1]}`;
+            }
+            return `${u.protocol.toLowerCase()}//${host}${pathname}${u.search}`;
         } catch {
             return s.toLowerCase().replace(/#.*$/, "").replace(/\/+$/, "");
         }
@@ -113,6 +119,19 @@ describe("R-REC-01: 对账回填索引构建语义(F-1 死代码回归护栏)", 
         expect(discourseBookmark.url).toBeUndefined();
     });
 
+    it("Notion「链接」带 Discourse slug 时仍与本地 /t/{id} 索引命中", () => {
+        const discourseBookmark = {
+            topic_id: 99901,
+            bookmarkable_id: 99901,
+            name: "slug 对账",
+        };
+        const idx = buildIndex([discourseBookmark], normalize);
+        // Notion 侧可能存带 slug / 楼层号的链接; 归一后应命中本地裸 id 键
+        expect(idx.get(normalize("https://linux.do/t/fancy-slug/99901"))).toBeTruthy();
+        expect(idx.get(normalize("https://linux.do/t/fancy-slug/99901/3"))).toBeTruthy();
+        expect(idx.get(normalize("https://linux.do/t/99901"))).toBeTruthy();
+    });
+
     it("GitHub 项: raw.html_url 与导出写入同串命中", () => {
         const gh = { source: "github", sourceType: "stars", itemKey: "user/repo", raw: { html_url: "https://github.com/user/repo" } };
         const idx = buildIndex([gh], normalize);
@@ -131,12 +150,14 @@ describe("R-REC-01: 对账回填索引构建语义(F-1 死代码回归护栏)", 
         expect(idx.get(normalize("https://linux.do/t/999/"))).toBeTruthy();
     });
 
-    it("含 slug 的 bookmarkable_url 与规范 URL 不混淆: slug 形式不产生额外索引键", () => {
+    it("含 slug 的 bookmarkable_url 与规范 URL 归一为同一索引键", () => {
         const b = { topic_id: 777, bookmarkable_url: "https://linux.do/t/slug-name/777" };
         const idx = buildIndex([b], normalize);
-        // 索引只含按 topic_id 构造的规范键, 不含 slug 变体
-        expect(idx.has(normalize("https://linux.do/t/slug-name/777"))).toBe(false);
+        // 索引按 topic_id 构造裸 /t/id; slug 变体经 normalize 后命中同一键(对账 Notion 带 slug 链接)
+        expect(normalize("https://linux.do/t/slug-name/777")).toBe(normalize("https://linux.do/t/777"));
+        expect(idx.has(normalize("https://linux.do/t/slug-name/777"))).toBe(true);
         expect(idx.has(normalize("https://linux.do/t/777"))).toBe(true);
+        expect(idx.size).toBe(1);
     });
 });
 
