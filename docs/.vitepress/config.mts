@@ -43,7 +43,8 @@ export default defineConfig({
           { text: 'Auth Model', link: '/concepts/auth-model' },
           { text: 'Prompt Injection Defense', link: '/concepts/prompt-injection-defense' },
           { text: 'SyncState V1/V2 迁移', link: '/concepts/syncstate-migration' },
-          { text: 'UI 设计系统', link: '/concepts/design-system' }
+          { text: 'UI 设计系统', link: '/concepts/design-system' },
+          { text: 'Extension Architecture', link: '/concepts/extension-architecture' }
         ]
       },
       {
@@ -65,20 +66,28 @@ export default defineConfig({
         ]
       },
       {
+        text: 'Architecture / 架构',
+        items: [
+          { text: '整体架构', link: '/architecture/overview' },
+          { text: '安全与权限', link: '/architecture/security' },
+          { text: '关键流程图', link: '/architecture/flows' }
+        ]
+      },
+      {
         text: 'Reference / 参考',
         items: [
           { text: 'Normalized Content Schema', link: '/reference/normalized-content-schema' },
           { text: 'Audit Events', link: '/reference/audit-events' },
           { text: 'Deployment', link: '/reference/deployment' },
-          { text: '安全与权限', link: '/architecture/security' },
-          { text: '关键流程图', link: '/architecture/flows' },
           { text: '常见问题', link: '/faq' }
         ]
       },
       {
         text: '维护',
         items: [
-          { text: '开发与验证', link: '/development' }
+          { text: '开发与验证', link: '/development' },
+          { text: 'OAuth 回调页', link: '/oauth-callback' },
+          { text: 'UI 回归清单', link: '/ui-regression-checklist' }
         ]
       }
     ],
