@@ -147,6 +147,15 @@ const GenericExporter = {
         };
     },
 
+    // 链接属性安全校验 —— 仅 http(s) 公网(拒内网/169.254/非 http 协议)
+    // 与 BookmarkExporter(hy3 LOW)/RSSAutoImporter(XN-03) 对称: 三 exporter 写入侧统一防线
+    _safeUrl: (url) => {
+        const raw = String(url || "").trim();
+        if (!raw) return null;
+        const { UrlValidator } = require("../security/UrlValidator");
+        return UrlValidator.validatePageExternalUrl(raw) ? raw.slice(0, 2000) : null;
+    },
+
     // 构建通用网页的 Notion 属性
     buildProperties: (meta) => {
         const source = GenericExporter.resolveUnifiedSource(meta);
@@ -156,7 +165,8 @@ const GenericExporter = {
                 title: [{ text: { content: meta.title || "无标题" } }]
             },
             "链接": {
-                url: meta.url
+                // U1(uibackend review): 仅 http(s) 公网才写入 url 属性; javascript:/data:/内网 置 null
+                url: GenericExporter._safeUrl(meta.url)
             },
             "来源": {
                 rich_text: [{ text: { content: source } }]

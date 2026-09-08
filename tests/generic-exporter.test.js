@@ -98,4 +98,31 @@ describe("AT-010: GenericExporter 纯函数", () => {
             expect(exampleCount).toBe(1);
         });
     });
+
+    describe("buildProperties 链接 url 白名单(U1 对称防线, hy3/XN-03 同模式)", () => {
+        it("http(s) 公网 url 原样写入", () => {
+            const props = GenericExporter.buildProperties({ title: "t", url: "https://example.com/a", source: "知乎" });
+            expect(props["链接"].url).toBe("https://example.com/a");
+        });
+
+        it("javascript: 危险 scheme → null", () => {
+            const props = GenericExporter.buildProperties({ title: "t", url: "javascript:alert(1)", source: "知乎" });
+            expect(props["链接"].url).toBeNull();
+        });
+
+        it("data: scheme → null", () => {
+            const props = GenericExporter.buildProperties({ title: "t", url: "data:text/html;base64,PHNjcmlwdD4=", source: "知乎" });
+            expect(props["链接"].url).toBeNull();
+        });
+
+        it("内网/链路本地地址(169.254.169.254) → null", () => {
+            const props = GenericExporter.buildProperties({ title: "t", url: "http://169.254.169.254/latest/meta-data", source: "知乎" });
+            expect(props["链接"].url).toBeNull();
+        });
+
+        it("空 url → null(不写链接属性)", () => {
+            const props = GenericExporter.buildProperties({ title: "t", url: "", source: "知乎" });
+            expect(props["链接"].url).toBeNull();
+        });
+    });
 });
