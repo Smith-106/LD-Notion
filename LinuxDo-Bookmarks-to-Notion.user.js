@@ -13861,6 +13861,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             inferredTags: GenericExporter2.inferTags(enriched)
           };
         },
+        // 链接属性安全校验 —— 仅 http(s) 公网(拒内网/169.254/非 http 协议)
+        // 与 BookmarkExporter(hy3 LOW)/RSSAutoImporter(XN-03) 对称: 三 exporter 写入侧统一防线
+        _safeUrl: (url) => {
+          const raw = String(url || "").trim();
+          if (!raw) return null;
+          const { UrlValidator } = require_UrlValidator();
+          return UrlValidator.validatePageExternalUrl(raw) ? raw.slice(0, 2e3) : null;
+        },
         // 构建通用网页的 Notion 属性
         buildProperties: (meta) => {
           const source = GenericExporter2.resolveUnifiedSource(meta);
@@ -13870,7 +13878,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               title: [{ text: { content: meta.title || "\u65E0\u6807\u9898" } }]
             },
             "\u94FE\u63A5": {
-              url: meta.url
+              // U1(uibackend review): 仅 http(s) 公网才写入 url 属性; javascript:/data:/内网 置 null
+              url: GenericExporter2._safeUrl(meta.url)
             },
             "\u6765\u6E90": {
               rich_text: [{ text: { content: source } }]
