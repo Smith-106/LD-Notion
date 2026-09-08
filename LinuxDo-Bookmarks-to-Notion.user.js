@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.14
+// @version      3.14.15
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -75,7 +75,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.14.14",
+        SCRIPT_VERSION: "3.14.15",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -2689,6 +2689,12 @@
           if (url.protocol === "http:" && !isLocalhost) return { valid: false, code: "HTTP_NOT_LOCALHOST", value: raw, message: "Redirect URI \u4EC5\u5141\u8BB8 https\uFF1Bhttp \u4EC5\u9650 http://localhost \u672C\u5730\u8C03\u8BD5\uFF0C\u8BF7\u52FF\u4F7F\u7528\u516C\u7F51 http \u5730\u5740" };
           if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalhost)) return { valid: false, code: "PROTOCOL", value: raw, message: "Redirect URI \u534F\u8BAE\u4E0D\u5408\u6CD5\uFF1A\u4EC5\u652F\u6301 https \u6216 http://localhost" };
           if (isLocalhost) return { valid: true, code: "LOCALHOST", value: url.toString(), message: "\u672C\u5730\u56DE\u8C03\u4EC5 Chrome \u6269\u5C55\u5F62\u6001\u53EF\u7528\uFF1Auserscript \u4E0D\u8FD0\u884C\u4E8E localhost \u9875\u9762\uFF0C\u56DE\u8C03\u65E0\u6CD5\u81EA\u52A8\u5B8C\u6210" };
+          const sharedCallback = "smith-106.github.io/LD-Notion/oauth-callback";
+          const isNotionDomain = url.hostname === "notion.so" || url.hostname.endsWith(".notion.so");
+          const isSharedCallback = url.hostname === new URL("https://" + sharedCallback).hostname && url.pathname.replace(/\/$/, "") === "/LD-Notion/oauth-callback";
+          if (!isSharedCallback && !isNotionDomain) {
+            return { valid: true, code: "CUSTOM", value: url.toString(), message: "\u81EA\u5B9A\u4E49 Redirect URI \u5DF2\u653E\u884C\uFF1A\u8BF7\u786E\u8BA4\u5DF2\u5728 Notion \u96C6\u6210\u540E\u53F0\u9010\u5B57\u7B26\u767B\u8BB0\u8BE5\u5730\u5740\uFF08\u5F53\u524D\u5171\u4EAB\u56DE\u8C03\uFF1Ahttps://" + sharedCallback + "\uFF09" };
+          }
           return { valid: true, code: "OK", value: url.toString(), message: "" };
         },
         buildAuthorizeUrl: (config, state) => {

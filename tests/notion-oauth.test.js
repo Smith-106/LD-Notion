@@ -5678,7 +5678,7 @@ function createWorkspaceVisualizationFixture(harness) {
                 'https://www.notion.so/*',
                 'https://notion.so/*',
                 'https://*.notion.so/*',
-                'https://smith-106.github.io/*',
+                'https://smith-106.github.io/LD-Notion/*',
                 'https://github.com/*',
                 'https://www.github.com/*',
                 'https://gist.github.com/*',
@@ -6676,6 +6676,17 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(r.valid, true);
         assert.strictEqual(r.code, 'OK');
         assert.ok(String(harness.CONFIG.DEFAULTS.notionOauthRedirectUri).includes('smith-106.github.io/LD-Notion/oauth-callback'));
+    });
+
+    await runTest('T10c validateOAuthRedirectUri: custom https callback allowed with CUSTOM warning', async () => {
+        const harness = createHarness();
+        const r = harness.NotionOAuth.validateOAuthRedirectUri('https://myapp.example.com/oauth/cb');
+        assert.strictEqual(r.valid, true);
+        assert.strictEqual(r.code, 'CUSTOM');
+        assert.ok(r.message.includes('共享回调'));
+        const notion = harness.NotionOAuth.validateOAuthRedirectUri('https://myapp.notion.so/oauth/cb');
+        assert.strictEqual(notion.valid, true);
+        assert.strictEqual(notion.code, 'OK');
     });
 
     await runTest('T11 validateOAuthRedirectUri: accepts http://localhost', async () => {

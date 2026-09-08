@@ -37,22 +37,8 @@ onMounted(() => {
   const errorDescription = params.get('error_description')
   const oauthState = params.get('state')
 
-  const payload = {
-    type: 'ld-notion-oauth-callback',
-    code,
-    error,
-    error_description: errorDescription,
-    state: oauthState,
-    href: window.location.href,
-  }
-
-  try {
-    if (window.opener && !window.opener.closed) {
-      window.opener.postMessage(payload, '*')
-    }
-  } catch (_) {
-    /* cross-origin opener may throw; ignore */
-  }
+  // 注: 不向 opener postMessage —— 脚本在回调页 @run-at document-start 直接捕获 URL 快照
+  // (main.js captureCallbackSnapshot → handleRedirectCallback 换票), 无需 message 通道; 见 v3.14.15 安全收窄。
 
   if (error) {
     status.value = 'error'
@@ -72,7 +58,7 @@ onMounted(() => {
   }
 
   // Keep query visible long enough for userscript/extension to read.
-  // Cosmetic cleanup only after a delay (and never before postMessage above).
+  // Cosmetic cleanup only after a delay.
   if (code || error) {
     window.setTimeout(() => {
       try {

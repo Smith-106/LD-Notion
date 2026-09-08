@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [3.14.15] - 2026-09-08
+
+### fix (Notion OAuth 安全收窄, 三模型共识 A+B+C)
+
+- 回调页移除冗余 postMessage(payload,'*') 通道(脚本走 document-start 快照捕获, 无 message 监听方, 减少授权码暴露面)
+- validateOAuthRedirectUri 宽松白名单: 共享回调 / *.notion.so / localhost 直通, 自定义 https 回调放行并按 CUSTOM 提醒(不误伤)
+- 扩展 contentScriptMatches 收窄为 https://smith-106.github.io/LD-Notion/*(与 userscript @match 路径级对齐)
+
 
 ## [3.14.14] - 2026-09-08
 

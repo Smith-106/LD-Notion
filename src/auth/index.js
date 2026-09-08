@@ -851,6 +851,16 @@ const NotionOAuth = {
         if (url.protocol === "http:" && !isLocalhost) return { valid: false, code: "HTTP_NOT_LOCALHOST", value: raw, message: "Redirect URI 仅允许 https；http 仅限 http://localhost 本地调试，请勿使用公网 http 地址" };
         if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalhost)) return { valid: false, code: "PROTOCOL", value: raw, message: "Redirect URI 协议不合法：仅支持 https 或 http://localhost" };
         if (isLocalhost) return { valid: true, code: "LOCALHOST", value: url.toString(), message: "本地回调仅 Chrome 扩展形态可用：userscript 不运行于 localhost 页面，回调无法自动完成" };
+        // 宽松白名单(v3.14.15): 共享回调与 Notion 域直通; 其他 https 自定义回调放行但提示
+        // (Notion 侧仍会在授权页强校验登记列表, 本地白名单仅作提前提醒, 不误伤自定义合法回调)
+        const sharedCallback = "smith-106.github.io/LD-Notion/oauth-callback";
+        const isNotionDomain = url.hostname === "notion.so" || url.hostname.endsWith(".notion.so");
+        const isSharedCallback =
+            url.hostname === new URL("https://" + sharedCallback).hostname &&
+            url.pathname.replace(/\/$/, "") === "/LD-Notion/oauth-callback";
+        if (!isSharedCallback && !isNotionDomain) {
+            return { valid: true, code: "CUSTOM", value: url.toString(), message: "自定义 Redirect URI 已放行：请确认已在 Notion 集成后台逐字符登记该地址（当前共享回调：https://" + sharedCallback + "）" };
+        }
         return { valid: true, code: "OK", value: url.toString(), message: "" };
     },
 
