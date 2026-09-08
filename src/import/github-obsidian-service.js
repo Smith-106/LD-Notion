@@ -294,6 +294,17 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
             message: "已有导出进行中，已跳过本次请求",
         };
     }
+    // v3.14.18 (D2/CC-04 补全): 跨 tab 租约 —— 与 LinuxDo 手动导出/自动同步共用 AUTO_SYNC_LEASE;
+    // 另一 tab 的手动导出/自动同步持有时本轮全量 skipped, TTL 兜底防崩溃锁泄漏
+    const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+    if (!lease) {
+        return {
+            success: [],
+            failed: [],
+            skipped: (selectedItems || []).map((item) => ({ title: item?.title || item?.itemKey || "GitHub" })),
+            message: "其他标签页正在导出/同步，已跳过本次请求",
+        };
+    }
     const { apiKey, databaseId } = settings;
     if (!apiKey || !databaseId) {
         throw new Error("请先配置 Notion API Key 和数据库 ID");
@@ -315,10 +326,19 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
     // 序列化的写侧 O(N²)(与 Obsidian 分支同构)
     let githubDirty = false;
     SyncLock.isExporting = true;
+    // 持有期间每 30s 续约(< 60s TTL); 续约失配置 leaseLost 中止(与 exportBookmarks 同构)
+    let leaseLost = false;
+    const renewTimer = setInterval(() => {
+        if (!SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+            leaseLost = true;
+            clearInterval(renewTimer);
+        }
+    }, 30000);
 
     try {
     for (let i = 0; i < selectedItems.length; i++) {
         if (control.isCancelled) break;
+        if (leaseLost) break;
         while (control.isPaused) {
             await Utils.sleep(200);
             if (control.isCancelled) break;
@@ -408,13 +428,15 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
             GitHubAPI.flushGistsExported();
         }
         // v3.14.7 (REV-01): 无论成败释放互斥锁(与 export/index.js finally 同构)
+        clearInterval(renewTimer);
+        SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
         SyncLock.isExporting = false;
     }
 
     return {
         success,
         failed,
-        skipped: control.isCancelled
+        skipped: (control.isCancelled || leaseLost)
             ? selectedItems.slice(success.length + failed.length).map((item) => ({
                 title: item.title || item.itemKey || "GitHub",
             }))

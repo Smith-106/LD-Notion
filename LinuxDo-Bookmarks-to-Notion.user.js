@@ -14452,9 +14452,28 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
             };
           }
+          const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+          if (!lease) {
+            return {
+              success: [],
+              failed: [],
+              skipped: bookmarks.slice(startIndex).map((b) => ({
+                topicId: b.topic_id || b.bookmarkable_id,
+                title: b.title || b.name || `\u5E16\u5B50 ${b.topic_id || b.bookmarkable_id}`
+              })),
+              message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
+            };
+          }
           const results = { success: [], failed: [], skipped: [] };
           Exporter2.reset();
           SyncLock.isExporting = true;
+          let leaseLost = false;
+          const renewTimer = setInterval(() => {
+            if (!SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+              leaseLost = true;
+              clearInterval(renewTimer);
+            }
+          }, 3e4);
           Exporter2.currentIndex = startIndex;
           const concurrency = settings.concurrency || 1;
           const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
@@ -14468,6 +14487,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 if (Exporter2.isCancelled) return;
               }
               if (Exporter2.isCancelled) return;
+              if (leaseLost) {
+                Exporter2.cancel();
+                results.leaseLost = true;
+                return;
+              }
               const i = remaining.shift();
               if (i === void 0) return;
               const bookmark = bookmarks[i];
@@ -14533,6 +14557,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
             await Promise.all(workers);
           } finally {
+            clearInterval(renewTimer);
+            SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
             SyncLock.isExporting = false;
           }
           if (Exporter2.isCancelled && remaining.length > 0) {
@@ -20735,6 +20761,15 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
           };
         }
+        const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        if (!lease) {
+          return {
+            success: [],
+            failed: [],
+            skipped: (selectedItems || []).map((item) => ({ title: (item == null ? void 0 : item.title) || (item == null ? void 0 : item.itemKey) || "GitHub" })),
+            message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
+          };
+        }
         const { apiKey, databaseId } = settings;
         if (!apiKey || !databaseId) {
           throw new Error("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
@@ -20751,9 +20786,17 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         const failed = [];
         let githubDirty = false;
         SyncLock.isExporting = true;
+        let leaseLost = false;
+        const renewTimer = setInterval(() => {
+          if (!SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+            leaseLost = true;
+            clearInterval(renewTimer);
+          }
+        }, 3e4);
         try {
           for (let i = 0; i < selectedItems.length; i++) {
             if (control.isCancelled) break;
+            if (leaseLost) break;
             while (control.isPaused) {
               await Utils2.sleep(200);
               if (control.isCancelled) break;
@@ -20843,12 +20886,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             GitHubAPI2.flushExported();
             GitHubAPI2.flushGistsExported();
           }
+          clearInterval(renewTimer);
+          SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
           SyncLock.isExporting = false;
         }
         return {
           success,
           failed,
-          skipped: control.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
+          skipped: control.isCancelled || leaseLost ? selectedItems.slice(success.length + failed.length).map((item) => ({
             title: item.title || item.itemKey || "GitHub"
           })) : []
         };

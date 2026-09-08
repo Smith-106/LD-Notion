@@ -18,6 +18,19 @@ vi.mock("../src/sync-lock", () => ({
         set isExporting(val) {
             this._exporting = Boolean(val);
         },
+        // v3.14.18 (D2): 租约三方法内存版(纯函数, 测试用 vi.spyOn 包装打桩), 供租约契约测试
+        __leaseStore: {},
+        acquireLease: async function (key) {
+            const s = this.__leaseStore;
+            if (s[key] && s[key].expiresAt > Date.now()) return null;
+            s[key] = { owner: `owner-${Math.random().toString(36).slice(2)}`, expiresAt: Date.now() + 60000 };
+            return s[key];
+        },
+        renewLease: function (key, lease) { return lease; },
+        releaseLease: function (key, lease) {
+            const s = this.__leaseStore;
+            if (s[key] && lease && s[key].owner === lease.owner) delete s[key];
+        },
     },
 }));
 
@@ -167,5 +180,66 @@ describe("AT-011: exportBookmarks 并发调度 (ISS-017)", () => {
 
         expect(seen).toEqual(["t3", "t4", "t5"]);
         expect(results.success).toHaveLength(N - startIndex);
+    });
+});
+
+describe("D2: 手动导出跨 tab 租约 (CC-04 补全, 与自动同步互斥)", () => {
+    const { SyncLock } = require("../src/sync-lock");
+    const LEASE_KEY = "ldb_auto_sync_lease";
+    const mkBookmarks = (n) => Array.from({ length: n }, (_, i) => ({ topic_id: `t${i}`, title: `P${i}` }));
+
+    beforeEach(() => {
+        vi.restoreAllMocks();
+        SyncLock.__leaseStore = {};
+        Exporter.reset();
+        Exporter.isPaused = false;
+        Exporter.isCancelled = false;
+    });
+
+    it("导出全程持有租约, 结束后释放(另一 tab 可接续)", async () => {
+        const acquire = vi.spyOn(SyncLock, "acquireLease");
+        const release = vi.spyOn(SyncLock, "releaseLease");
+        Exporter.exportTopic = vi.fn(async () => {});
+        const results = await Exporter.exportBookmarks(mkBookmarks(3), { concurrency: 1 }, undefined, 0);
+        expect(results.success).toHaveLength(3);
+        expect(acquire).toHaveBeenCalledWith(LEASE_KEY);
+        expect(release).toHaveBeenCalledWith(LEASE_KEY, expect.objectContaining({ owner: expect.any(String) }));
+        // 释放后 store 已清空(他 tab 可接续)
+        expect(SyncLock.__leaseStore[LEASE_KEY]).toBeUndefined();
+    });
+
+    it("租约被他 tab 持有时: 全量 skipped, 不执行任何导出", async () => {
+        vi.spyOn(SyncLock, "acquireLease").mockResolvedValue(null);
+        Exporter.exportTopic = vi.fn(async () => {});
+        const results = await Exporter.exportBookmarks(mkBookmarks(4), { concurrency: 1 }, undefined, 0);
+        expect(results.success).toHaveLength(0);
+        expect(results.failed).toHaveLength(0);
+        expect(results.skipped).toHaveLength(4);
+        expect(results.message).toContain("其他标签页");
+        expect(Exporter.exportTopic).not.toHaveBeenCalled();
+        expect(SyncLock.isExporting).toBe(false);
+    });
+
+    it("续约失配(被他 tab 抢占)置 leaseLost 中止批次, 剩余项进 skipped", async () => {
+        vi.useFakeTimers();
+        try {
+            vi.spyOn(SyncLock, "renewLease").mockReturnValue(false); // 续约即失配(模拟他 tab 抢占)
+            let count = 0;
+            Exporter.exportTopic = vi.fn(async () => {
+                count++;
+                await new Promise((r) => setTimeout(r, 60000)); // 挂起首项, 留出续约窗口
+            });
+            const promise = Exporter.exportBookmarks(mkBookmarks(5), { concurrency: 1 }, undefined, 0);
+            await vi.advanceTimersByTimeAsync(31000); // 仅 30s 续约器触发 → leaseLost
+            await vi.advanceTimersByTimeAsync(31000); // 60s 项目完成 → worker 顶部检查 leaseLost → 中止
+            const results = await promise;
+            expect(count).toBe(1); // 第 1 项后续约失配中止
+            expect(results.leaseLost).toBe(true);
+            expect(results.success).toHaveLength(1);
+            expect(results.skipped).toHaveLength(4);
+            expect(SyncLock.isExporting).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

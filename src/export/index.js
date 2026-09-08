@@ -834,9 +834,33 @@ const Exporter = {
                 message: "已有导出进行中，已跳过本次请求",
             };
         }
+        // v3.14.18 (D2/CC-04 补全): 跨 tab 租约 —— 与自动同步(Bookmark/RSS AutoImporter)共用
+        // AUTO_SYNC_LEASE 全局互斥键: 另一 tab 的手动导出/自动同步持有时本轮全量 skipped;
+        // TTL 兜底防崩溃锁泄漏。此前仅同 tab isExporting(CC-12), 跨 tab 双写 Notion 防线缺口。
+        const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        if (!lease) {
+            return {
+                success: [],
+                failed: [],
+                skipped: bookmarks.slice(startIndex).map((b) => ({
+                    topicId: b.topic_id || b.bookmarkable_id,
+                    title: b.title || b.name || `帖子 ${b.topic_id || b.bookmarkable_id}`,
+                })),
+                message: "其他标签页正在导出/同步，已跳过本次请求",
+            };
+        }
         const results = { success: [], failed: [], skipped: [] };
         Exporter.reset();
         SyncLock.isExporting = true;
+        // 持有期间每 30s 续约(< 60s TTL); 续约失配(被他 tab 抢占)置 leaseLost 中止批次,
+        // 绝不双持有并发写(S1 owner 复核语义, 与 BookmarkAutoImporter CC-04 同构)
+        let leaseLost = false;
+        const renewTimer = setInterval(() => {
+            if (!SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+                leaseLost = true;
+                clearInterval(renewTimer);
+            }
+        }, 30000);
         Exporter.currentIndex = startIndex;
         const concurrency = settings.concurrency || 1;
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
@@ -854,6 +878,13 @@ const Exporter = {
                     if (Exporter.isCancelled) return;
                 }
                 if (Exporter.isCancelled) return;
+
+                // 租约被他 tab 抢占: 中止批次(剩余项入 skipped), 不与他 tab 双持有并发写
+                if (leaseLost) {
+                    Exporter.cancel();
+                    results.leaseLost = true;
+                    return;
+                }
 
                 // 取任务（shift 在单线程事件循环下是原子的）
                 const i = remaining.shift();
@@ -940,6 +971,8 @@ const Exporter = {
             await Promise.all(workers);
         } finally {
             // worker 内 onProgress 抛错/任意异常都必须释放互斥锁, 否则自动同步永久瘫痪
+            clearInterval(renewTimer);
+            SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
             SyncLock.isExporting = false;
         }
 
