@@ -294,17 +294,6 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
             message: "已有导出进行中，已跳过本次请求",
         };
     }
-    // v3.14.18 (D2/CC-04 补全): 跨 tab 租约 —— 与 LinuxDo 手动导出/自动同步共用 AUTO_SYNC_LEASE;
-    // 另一 tab 的手动导出/自动同步持有时本轮全量 skipped, TTL 兜底防崩溃锁泄漏
-    const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
-    if (!lease) {
-        return {
-            success: [],
-            failed: [],
-            skipped: (selectedItems || []).map((item) => ({ title: item?.title || item?.itemKey || "GitHub" })),
-            message: "其他标签页正在导出/同步，已跳过本次请求",
-        };
-    }
     const { apiKey, databaseId } = settings;
     if (!apiKey || !databaseId) {
         throw new Error("请先配置 Notion API Key 和数据库 ID");
@@ -316,6 +305,19 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
     const setupResult = await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
     if (!setupResult.success) {
         throw new Error(`数据库配置失败: ${setupResult.error}`);
+    }
+
+    // F3(odyssey-review): 租约获取必须位于全部可抛前置校验之后 —
+    // 原 cdb0fb9 版本在 apiKey/dbId 校验与 setup 失败抛错路径之前取租约,
+    // 抛错发生在 try/finally 之前 → 租约泄漏 60s, 期间重试全被「其他标签页」跳过
+    const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+    if (!lease) {
+        return {
+            success: [],
+            failed: [],
+            skipped: (selectedItems || []).map((item) => ({ title: item?.title || item?.itemKey || "GitHub" })),
+            message: "其他标签页正在导出/同步，已跳过本次请求",
+        };
     }
 
     const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);

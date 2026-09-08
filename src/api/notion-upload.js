@@ -62,6 +62,10 @@ function getMimeType(ext) {
     return MIME_TYPES[(ext || "").toLowerCase()] || "application/octet-stream";
 }
 
+// F2(odyssey-review): multipart 头注入防护 — 文件名剥离双引号与 CR/LF,
+// 防止破坏 Content-Disposition 头结构(边界/伪头注入面); 源为本地文件名, 低危但可修复
+const sanitizeMultipartFilename = (name) => String(name || "").replace(/["\r\n]/g, "");
+
 /**
  * 将上传方法注入到 NotionAPI 对象（避免循环依赖）
  * @param {Object} NotionAPI - NotionAPI 核心对象
@@ -106,7 +110,7 @@ function installUploadMethods(NotionAPI) {
                     return;
                 }
                 const boundary = '----LDNotionFormBoundary' + Array.from(boundaryBytes, b => b.toString(16).padStart(2, "0")).join("");
-                const partName = filename || `part-${partNumber}.bin`;
+                const partName = sanitizeMultipartFilename(filename) || `part-${partNumber}.bin`;
                 const uint8Array = new Uint8Array(reader.result);
 
                 const fileHeader = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${partName}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
@@ -177,12 +181,15 @@ function installUploadMethods(NotionAPI) {
                 if (typeof crypto !== "undefined" && crypto.getRandomValues) {
                     crypto.getRandomValues(bytes);
                 } else {
-                    throw new Error("crypto.getRandomValues 不可用，无法生成 multipart boundary");
+                    // F1(odyssey-review): 事件回调内 throw 不达 reject — promise 永挂;
+                    // 必须走 reject(与 sendFilePart 同款对齐)
+                    reject(new Error("crypto.getRandomValues 不可用，无法生成 multipart boundary"));
+                    return;
                 }
                 const boundary = '----WebKitFormBoundary' + Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
                 const uint8Array = new Uint8Array(reader.result);
 
-                const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`;
+                const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${sanitizeMultipartFilename(filename)}"\r\nContent-Type: ${contentType}\r\n\r\n`;
                 const headerBytes = new TextEncoder().encode(header);
                 const footerBytes = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
 

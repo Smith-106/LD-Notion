@@ -4677,6 +4677,7 @@ ${quoted}
       function getMimeType3(ext) {
         return MIME_TYPES[(ext || "").toLowerCase()] || "application/octet-stream";
       }
+      var sanitizeMultipartFilename = (name) => String(name || "").replace(/["\r\n]/g, "");
       function installUploadMethods(NotionAPI2) {
         Object.assign(NotionAPI2, {
           // 创建文件上传 (single_part ≤ 20MB)
@@ -4715,7 +4716,7 @@ ${quoted}
                   return;
                 }
                 const boundary = "----LDNotionFormBoundary" + Array.from(boundaryBytes, (b) => b.toString(16).padStart(2, "0")).join("");
-                const partName = filename || `part-${partNumber}.bin`;
+                const partName = sanitizeMultipartFilename(filename) || `part-${partNumber}.bin`;
                 const uint8Array = new Uint8Array(reader.result);
                 const fileHeader = `--${boundary}\r
 Content-Disposition: form-data; name="file"; filename="${partName}"\r
@@ -4792,12 +4793,13 @@ ${partNumber}\r
                 if (typeof crypto !== "undefined" && crypto.getRandomValues) {
                   crypto.getRandomValues(bytes);
                 } else {
-                  throw new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 multipart boundary");
+                  reject(new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 multipart boundary"));
+                  return;
                 }
                 const boundary = "----WebKitFormBoundary" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
                 const uint8Array = new Uint8Array(reader.result);
                 const header = `--${boundary}\r
-Content-Disposition: form-data; name="file"; filename="${filename}"\r
+Content-Disposition: form-data; name="file"; filename="${sanitizeMultipartFilename(filename)}"\r
 Content-Type: ${contentType}\r
 \r
 `;
@@ -20761,15 +20763,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
           };
         }
-        const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
-        if (!lease) {
-          return {
-            success: [],
-            failed: [],
-            skipped: (selectedItems || []).map((item) => ({ title: (item == null ? void 0 : item.title) || (item == null ? void 0 : item.itemKey) || "GitHub" })),
-            message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
-          };
-        }
         const { apiKey, databaseId } = settings;
         if (!apiKey || !databaseId) {
           throw new Error("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
@@ -20780,6 +20773,15 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
         if (!setupResult.success) {
           throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+        }
+        const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        if (!lease) {
+          return {
+            success: [],
+            failed: [],
+            skipped: (selectedItems || []).map((item) => ({ title: (item == null ? void 0 : item.title) || (item == null ? void 0 : item.itemKey) || "GitHub" })),
+            message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
+          };
         }
         const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
         const success = [];

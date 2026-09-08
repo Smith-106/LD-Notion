@@ -435,3 +435,73 @@ describe("AUD-ARCH-09: 终态中止不重插毒项", () => {
         }
     });
 });
+
+describe("odyssey-review(codebase): F1/F2/F3 修复契约", () => {
+    it("F3: setup 失败路径不泄漏租约(未持有 AUTO_SYNC_LEASE)", async () => {
+        const { exportGitHubSelectedToNotion } = require("../src/import/github-obsidian-service");
+        const { GitHubExporter } = require("../src/import/GitHubExporter");
+        const origSetup = GitHubExporter.setupDatabaseProperties;
+        GitHubExporter.setupDatabaseProperties = async () => ({ success: false, error: "mock 404" });
+        try {
+            await expect(exportGitHubSelectedToNotion(
+                [{ itemKey: "o/r", title: "R", sourceType: "repos", raw: { html_url: "https://github.com/o/r" } }],
+                { apiKey: "secret", databaseId: "db-1" }
+            )).rejects.toThrow("数据库配置失败");
+            // 修复前: 租约在 setup 前获取且无释放路径 → 60s 泄漏; 修复后: 根本不取
+            expect(store.get(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE) || "{}").toBe("{}");
+        } finally {
+            GitHubExporter.setupDatabaseProperties = origSetup;
+        }
+    });
+
+    it("F3b: apiKey 缺失抛错路径同样不取租约", async () => {
+        const { exportGitHubSelectedToNotion } = require("../src/import/github-obsidian-service");
+        await expect(exportGitHubSelectedToNotion(
+            [{ itemKey: "o/r", title: "R", sourceType: "repos", raw: {} }],
+            { apiKey: "", databaseId: "db-1" }
+        )).rejects.toThrow("请先配置");
+        expect(store.get(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE) || "{}").toBe("{}");
+    });
+
+    it("F1: crypto 不可用时 uploadFileContent 走 reject 不永挂", async () => {
+        const { NotionAPI } = require("../src/api");
+        const origDesc = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+        const origFR = global.FileReader;
+        // Node24 crypto 为 getter-only, defineProperty 暂替为无 getRandomValues 的空对象
+        Object.defineProperty(globalThis, "crypto", { value: {}, configurable: true, writable: true });
+        global.FileReader = class { readAsArrayBuffer() { this.onload(); } };
+        try {
+            await expect(NotionAPI.uploadFileContent("https://presigned.example", {}, "text/plain", "f.bin"))
+                .rejects.toThrow("crypto.getRandomValues");
+        } finally {
+            if (origDesc && origDesc.get) Object.defineProperty(globalThis, "crypto", origDesc);
+            else Object.defineProperty(globalThis, "crypto", { value: undefined, configurable: true, writable: true });
+            if (origFR === undefined) delete global.FileReader; else global.FileReader = origFR;
+        }
+    });
+
+    it("F2: multipart filename 剥离双引号与 CRLF(头注入防护)", async () => {
+        const { NotionAPI } = require("../src/api");
+        const origFR = global.FileReader;
+        global.FileReader = class {
+            readAsArrayBuffer() {
+                Blob.prototype.arrayBuffer.call(this._blob || new Blob()).then(() => {});
+                this.result = new TextEncoder().encode("x").buffer;
+                this.onload();
+            }
+        };
+        let captured = null;
+        global.__ldNotionResponder = (opts) => { captured = opts; opts.onload({ status: 200, responseText: "{}" }); };
+        try {
+            const evil = 'a"b' + String.fromCharCode(13, 10) + 'X-Injected: 1.bin';
+            await NotionAPI.sendFilePart("upload-1", new Blob(["part"]), 1, "secret", evil);
+            expect(captured).toBeTruthy();
+            const decoded = new TextDecoder().decode(new Uint8Array(captured.data));
+            expect(decoded).not.toContain('a"b');
+            expect(decoded).toContain("abX-Injected: 1.bin");
+        } finally {
+            if (origFR === undefined) delete global.FileReader; else global.FileReader = origFR;
+            global.__ldNotionResponder = null;
+        }
+    });
+});
