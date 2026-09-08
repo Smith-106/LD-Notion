@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [3.14.18] - 2026-09-09
+
+### fix (odyssey 三轮审计修复: debug 双 bug + codebase review 三项 + UI 后端契约对账)
+
+- **跨 tab 导出互斥补全**（debug CC-04）：手动导出路径补跨 tab 租约——此前仅自动同步有租约，手动导出在多 tab 场景可并发写同一 Notion 库；与既有 4 租约入口同构
+- **AI 面板接线恢复 + 404 行动指引**（debug）：修复 AI 面板控件接线断裂；404 错误分类补充「未共享页面」场景指引（页面未分享给集成时给出明确下一步）
+- **GitHub 导出租约早获取泄漏**（review F3/high）：`exportGitHubSelectedToNotion` 租约获取移至全部可抛前置校验之后——配置错误时不再泄漏 60s 租约阻塞后续重试
+- **上传 promise 永挂**（review F1/medium）：`uploadFileContent` FileReader.onload 内 throw 改 reject（事件回调 throw 被吞 → await 永挂）；与 `sendFilePart` 对齐
+- **multipart 文件名注入面**（review F2/low）：上传 multipart Content-Disposition 文件名剥离引号/CRLF
+- **通用导出链接 url 白名单**（uibackend U1/low）：`GenericExporter` 链接属性补 http(s) 公网校验（与 BookmarkExporter hy3 / RSS XN-03 对称）；契约测试 +5
+- **UI 后端契约四面全对账零错配**（uibackend）：80 控件 0 死选项 / 108 存储键 0 孤键 / 26 select 值域 0 错配 / 6 buildProperties×schema 全对齐——附写入路径五形态枚举法与出口面统一枚举法两条方法沉淀
+- 测试 +11（回归租约/上传/文件名/url 白名单）；版本 bump 3.14.18
+
 ## [3.14.17] - 2026-09-08
 
 ### feat (错误处理可行动化 + 失败路径可见性 — 三模型共识 P0-1~4)
