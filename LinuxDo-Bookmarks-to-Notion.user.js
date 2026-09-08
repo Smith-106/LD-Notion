@@ -1943,9 +1943,18 @@
         },
         /**
          * 续约(持有期间定期调用, 防 TTL 中途过期)
+         * S1: 续约前复核 owner —— 后台节流可致续约延迟超 TTL, 期间租约可被其他 tab 抢占;
+         * 盲写续约会覆写新持有者的租约 → 双持有并发同步。owner 失配时返回 false 供调用方中止,
+         * 绝不触碰他方租约。
          */
         renewLease: (key, lease, ttlMs = 6e4) => {
           if (!lease || typeof GM_setValue !== "function") return lease;
+          if (typeof GM_getValue === "function") {
+            const current = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+            if (!current.owner || current.owner !== lease.owner) {
+              return false;
+            }
+          }
           lease.expiresAt = Date.now() + ttlMs;
           GM_setValue(key, JSON.stringify(lease));
           return lease;
@@ -3386,7 +3395,7 @@
           return {
             kind: "timeout",
             retryable: true,
-            action: "\u8FDE\u63A5\u8D85\u65F6\u6216\u5DF2\u4E2D\u65AD\uFF08\u811A\u672C 15 \u79D2\u8D85\u65F6\uFF09\u3002\u8BF7\u68C0\u67E5\u7F51\u7EDC\u4E0E\u672C\u5730\u4EE3\u7406\u8BBE\u7F6E\uFF0C\u7A0D\u540E\u91CD\u8BD5\uFF1B\u6279\u91CF\u5BFC\u51FA\u53EF\u5B89\u5168\u7EED\u4F20\uFF0C\u4E0D\u4F1A\u91CD\u590D\u5199\u5165"
+            action: "\u8FDE\u63A5\u8D85\u65F6\u6216\u5DF2\u4E2D\u65AD\uFF08\u811A\u672C 30 \u79D2\u8D85\u65F6\uFF09\u3002\u8BF7\u68C0\u67E5\u7F51\u7EDC\u4E0E\u672C\u5730\u4EE3\u7406\u8BBE\u7F6E\uFF0C\u7A0D\u540E\u91CD\u8BD5\uFF1B\u6279\u91CF\u5BFC\u51FA\u53EF\u5B89\u5168\u7EED\u4F20\uFF0C\u4E0D\u4F1A\u91CD\u590D\u5199\u5165"
           };
         }
         if ((error == null ? void 0 : error.statusCode) === 0) {
@@ -5037,13 +5046,13 @@ Content-Type: ${contentType}\r
               await Utils2.sleep(retryAfter * 1e3 + 500);
               return doRequest(attempt + 1, token, allowRefresh);
             }
+            const result = Utils2.safeJsonParse(response.responseText, {});
             if (response.status === 429) {
               const rateError = new Error(`Notion API \u901F\u7387\u9650\u5236: ${result.message || response.status}`);
               rateError.statusCode = response.status;
               rateError.retryCount = attempt + 1;
               throw ErrorModel.annotateError(rateError);
             }
-            const result = Utils2.safeJsonParse(response.responseText, {});
             if (response.status >= 200 && response.status < 300) {
               return result;
             }
@@ -12549,8 +12558,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return;
         }
         SyncLock.isExporting = true;
+        let leaseLost = false;
         const renewTimer = setInterval(() => {
-          SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          if (!SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+            leaseLost = true;
+            clearInterval(renewTimer);
+          }
         }, 3e4);
         const attemptAt = Date.now();
         try {
@@ -12594,7 +12607,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             let authAborted = false;
             let authAbortError = null;
             const processInBatches = async (items, processor) => {
-              for (let i = 0; i < items.length && !authAborted; i += CONCURRENCY) {
+              for (let i = 0; i < items.length && !authAborted && !leaseLost; i += CONCURRENCY) {
                 const batch = items.slice(i, i + CONCURRENCY);
                 const results = await Promise.allSettled(batch.map((item) => processor(item, i + batch.indexOf(item))));
                 for (const result of results) {
@@ -12655,6 +12668,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                       { bookmarkId, itemName: bookmark.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
                     );
                     deniedCount++;
+                    if (claimResolve) claimResolve(null);
                     if (snapshotEntry) nextSnapshot[bookmarkId] = snapshotEntry;
                     return;
                   }
@@ -12746,6 +12760,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             if (authAborted) {
               throw authAbortError;
             }
+            if (leaseLost) {
+              throw new Error("\u540C\u6B65\u79DF\u7EA6\u5DF2\u88AB\u5176\u4ED6\u6807\u7B7E\u9875\u63A5\u7BA1\uFF0C\u672C\u8F6E\u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u4E2D\u6B62");
+            }
             const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
             const processDeleted = async (bookmarkId, itemIndex) => {
               const snapshotEntry = previousSnapshot[bookmarkId];
@@ -12768,7 +12785,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                     source: "bookmark-auto-sync",
                     trigger: "auto_sync_archive"
                   }, { phase: "precheck", reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u5F52\u6863\u9700 level\u22652" });
-                  failed++;
+                  deniedCount++;
                   nextSnapshot[bookmarkId] = snapshotEntry;
                   return;
                 }
@@ -12813,7 +12830,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 updated,
                 archived,
                 unchanged,
-                failed
+                failed,
+                // F3: P0-4 的 deniedCount 须同落持久化, 否则同步中心读态丢失 denied 计数
+                denied: deniedCount
               }
             });
             if (created === 0 && updated === 0 && archived === 0 && failed === 0 && deniedCount === 0) {
@@ -13496,7 +13515,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               created,
               updated,
               unchanged,
-              failed
+              failed,
+              // R2: P0-4 的 stats.denied 须同落持久化, 否则同步中心读态丢失 denied 计数
+              denied: stats.denied || 0
             }
           };
           if (currentItems.length === 0) {
@@ -13553,6 +13574,20 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           RSSAutoImporter2.lastRunAt = now;
           RSSAutoImporter2.isRunning = true;
           SyncLock.isExporting = true;
+          const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+          if (!lease) {
+            RSSAutoImporter2.isRunning = false;
+            SyncLock.isExporting = false;
+            RSSAutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\uFF0C\u672C\u8F6E RSS \u540C\u6B65\u8DF3\u8FC7");
+            return;
+          }
+          let leaseLost = false;
+          const renewTimer = setInterval(() => {
+            if (!SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+              leaseLost = true;
+              clearInterval(renewTimer);
+            }
+          }, 3e4);
           const attemptAt = Date.now();
           try {
             const ctx = await RSSAutoImporter2._initSyncContext(settings, attemptAt);
@@ -13561,7 +13596,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             const { DedupStore } = require_storage();
             DedupStore.beginBatch("rss");
             try {
-              for (let i = 0; i < ctx.currentItems.length; i++) {
+              for (let i = 0; i < ctx.currentItems.length && !leaseLost; i++) {
                 const r = await RSSAutoImporter2._syncSingleRssItem(ctx.currentItems[i], {
                   settings,
                   index: ctx.index,
@@ -13582,6 +13617,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 }
               }
               RSSAutoImporter2._aggregateRssState(ctx, stats, successfulKeys, attemptAt);
+              if (leaseLost) {
+                RSSAutoImporter2.updateStatus("\u23F8 \u540C\u6B65\u79DF\u7EA6\u5DF2\u88AB\u5176\u4ED6\u6807\u7B7E\u9875\u63A5\u7BA1\uFF0C\u672C\u8F6E RSS \u540C\u6B65\u4E2D\u6B62\uFF08\u5DF2\u5904\u7406\u90E8\u5206\u5DF2\u8BB0\u5F55\uFF09");
+              }
             } finally {
               DedupStore.endBatch("rss");
             }
@@ -13602,6 +13640,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
             RSSAutoImporter2.updateStatus(statusText);
           } finally {
+            clearInterval(renewTimer);
+            SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
             RSSAutoImporter2.isRunning = false;
             SyncLock.isExporting = false;
             emit("sync:center-summary-updated");
@@ -25119,7 +25159,7 @@ ${AIService2.isolateContent(JSON.stringify({
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">\u274C \u5931\u8D25 (${failed.length})</div>`;
             if (!authAborted) {
-              const firstUx = ((_a = failed[0]) == null ? void 0 : _a.error) && failed[0].error.ux;
+              const firstUx = (_a = failed[0]) == null ? void 0 : _a.ux;
               if (firstUx && firstUx.action) {
                 html += `<div class="ldb-report-item" style="color: var(--ldb-ui-accent);padding:6px 12px;margin-bottom:8px;border-radius:6px;background:var(--ldb-ui-accent-alpha-12);">\u{1F4A1} \u5EFA\u8BAE\uFF1A${Utils2.escapeHtml(Utils2.truncateText(firstUx.action, 220))}</div>`;
               }

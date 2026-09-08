@@ -120,6 +120,24 @@ describe("NotionAPI", () => {
             expect(result.id).toBe("retry-ok");
             expect(mockTransport.request).toHaveBeenCalledTimes(2);
         });
+
+        it("H2: 429 重试耗尽 → 抛 rateError(retryCount/statusCode),不再 TDZ ReferenceError", async () => {
+            vi.spyOn(await import("../src/utils/index.js").then(m => m.Utils), "sleep").mockResolvedValue(undefined);
+
+            mockTransport.request.mockResolvedValue({
+                status: 429,
+                responseText: JSON.stringify({ message: "Rate limited" }),
+                responseHeaders: "retry-after: 1",
+            });
+
+            await expect(
+                NotionAPI.request("GET", "/databases/db-1", null, "fake-key", 1)
+            ).rejects.toMatchObject({
+                statusCode: 429,
+                retryCount: 2,
+            });
+            expect(mockTransport.request).toHaveBeenCalledTimes(2);
+        });
     });
 
     describe("NotionTransport", () => {

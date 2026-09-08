@@ -2599,7 +2599,9 @@ const UI = {
             // v3.14.17 (P0-1): 失败区顶部附可行动建议(分类函数产出的 action 字段)——
             // 用户无需点开每条错误即可获得下一步指引; 认证中止时横幅已有专属引导, 不重复
             if (!authAborted) {
-                const firstUx = failed[0]?.error && failed[0].error.ux;
+                // H1: ux 是 failed 项上的独立字段(error 才是 message 字符串),
+                // 此前读 failed[0].error.ux 恒 undefined → 「💡 建议」块永不渲染
+                const firstUx = failed[0]?.ux;
                 if (firstUx && firstUx.action) {
                     html += `<div class="ldb-report-item" style="color: var(--ldb-ui-accent);padding:6px 12px;margin-bottom:8px;border-radius:6px;background:var(--ldb-ui-accent-alpha-12);">💡 建议：${Utils.escapeHtml(Utils.truncateText(firstUx.action, 220))}</div>`;
                 }

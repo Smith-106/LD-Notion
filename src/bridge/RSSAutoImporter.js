@@ -721,6 +721,8 @@ const RSSAutoImporter = {
                 updated,
                 unchanged,
                 failed,
+                // R2: P0-4 的 stats.denied 须同落持久化, 否则同步中心读态丢失 denied 计数
+                denied: stats.denied || 0,
             },
         };
         if (currentItems.length === 0) {
@@ -786,6 +788,23 @@ const RSSAutoImporter = {
         RSSAutoImporter.isRunning = true;
         // v3.14.6 (CC-03): 占用导出互斥, 防并发交错; finally 复位
         SyncLock.isExporting = true;
+        // F8: 跨 tab 租约(CC-04 书签侧同款) —— 仅进程内 isExporting 防不住双 tab 并发建页竞态;
+        // 与书签共用 AUTO_SYNC_LEASE(全局自动同步互斥, 跨 tab RSS×书签也串行)
+        const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        if (!lease) {
+            RSSAutoImporter.isRunning = false;
+            SyncLock.isExporting = false;
+            RSSAutoImporter.updateStatus("⏸ 其他标签页正在同步，本轮 RSS 同步跳过");
+            return;
+        }
+        // S1: 持有期间每 30s 续约; 续约失配(租约被其他 tab 抢占)置 leaseLost 中止本轮
+        let leaseLost = false;
+        const renewTimer = setInterval(() => {
+            if (!SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+                leaseLost = true;
+                clearInterval(renewTimer);
+            }
+        }, 30000);
         const attemptAt = Date.now();
 
         try {
@@ -798,7 +817,7 @@ const RSSAutoImporter = {
             DedupStore.beginBatch("rss");
             try {
 
-            for (let i = 0; i < ctx.currentItems.length; i++) {
+            for (let i = 0; i < ctx.currentItems.length && !leaseLost; i++) {
                 const r = await RSSAutoImporter._syncSingleRssItem(ctx.currentItems[i], {
                     settings,
                     index: ctx.index,
@@ -821,6 +840,10 @@ const RSSAutoImporter = {
             }
 
             RSSAutoImporter._aggregateRssState(ctx, stats, successfulKeys, attemptAt);
+            // S1: 中止轮在持久化(聚合已落盘)后覆写状态文案, 已处理部分记录不丢
+            if (leaseLost) {
+                RSSAutoImporter.updateStatus("⏸ 同步租约已被其他标签页接管，本轮 RSS 同步中止（已处理部分已记录）");
+            }
             } finally {
                 // v3.14.6 (DC-004): 结束 batch —— 异常路径也单次 flush
                 DedupStore.endBatch("rss");
@@ -843,6 +866,8 @@ const RSSAutoImporter = {
             }
             RSSAutoImporter.updateStatus(statusText);
         } finally {
+            clearInterval(renewTimer);
+            SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
             RSSAutoImporter.isRunning = false;
             // v3.14.6 (CC-03): 复位互斥
             SyncLock.isExporting = false;

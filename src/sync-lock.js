@@ -53,9 +53,18 @@ const SyncLock = {
 
     /**
      * 续约(持有期间定期调用, 防 TTL 中途过期)
+     * S1: 续约前复核 owner —— 后台节流可致续约延迟超 TTL, 期间租约可被其他 tab 抢占;
+     * 盲写续约会覆写新持有者的租约 → 双持有并发同步。owner 失配时返回 false 供调用方中止,
+     * 绝不触碰他方租约。
      */
     renewLease: (key, lease, ttlMs = 60000) => {
         if (!lease || typeof GM_setValue !== "function") return lease;
+        if (typeof GM_getValue === "function") {
+            const current = Utils.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+            if (!current.owner || current.owner !== lease.owner) {
+                return false; // 租约已被其他 tab 抢占, 不覆写
+            }
+        }
         lease.expiresAt = Date.now() + ttlMs;
         GM_setValue(key, JSON.stringify(lease));
         return lease;

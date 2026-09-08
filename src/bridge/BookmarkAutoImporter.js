@@ -283,8 +283,13 @@ BookmarkAutoImporter.run = async () => {
     // v3.14.6 (CC-03): 占用导出互斥(租约获证后), 防手动/AI/自动并发交错; finally 复位
     SyncLock.isExporting = true;
     // 持有期间每 30s 续约(少于 60s TTL, 防中途过期被抢占)
+    // S1: 续约失配(租约被其他 tab 抢占)置 leaseLost 中止本轮, 防双持有并发同步
+    let leaseLost = false;
     const renewTimer = setInterval(() => {
-        SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+        if (!SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+            leaseLost = true;
+            clearInterval(renewTimer);
+        }
     }, 30000);
     const attemptAt = Date.now();
 
@@ -352,7 +357,7 @@ BookmarkAutoImporter.run = async () => {
         let authAborted = false;
         let authAbortError = null;
         const processInBatches = async (items, processor) => {
-            for (let i = 0; i < items.length && !authAborted; i += CONCURRENCY) {
+            for (let i = 0; i < items.length && !authAborted && !leaseLost; i += CONCURRENCY) {
                 const batch = items.slice(i, i + CONCURRENCY);
                 const results = await Promise.allSettled(batch.map((item) => processor(item, i + batch.indexOf(item))));
                 for (const result of results) {
@@ -423,6 +428,8 @@ BookmarkAutoImporter.run = async () => {
                         BookmarkAutoImporter._auditAutoSync("createDatabasePage", "denied",
                             { bookmarkId, itemName: bookmark.title, reason: "权限不足：自动同步建页需 level≥1" });
                         deniedCount++;
+                        // F1: 声明已登记必须决议(null), 否则同批同 URL await 方永久悬挂(run 卡死)
+                        if (claimResolve) claimResolve(null);
                         if (snapshotEntry) nextSnapshot[bookmarkId] = snapshotEntry;
                         return;
                     }
@@ -525,6 +532,11 @@ BookmarkAutoImporter.run = async () => {
         if (authAborted) {
             throw authAbortError;
         }
+        // S1: 续约失配 → 租约已被其他 tab 接管, 本轮中止防双持有并发同步
+        // (外层 catch 记 error 状态; finally 的 releaseLease owner 复核不会误清新持有者的租约)
+        if (leaseLost) {
+            throw new Error("同步租约已被其他标签页接管，本轮浏览器书签自动同步中止");
+        }
 
         const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
 
@@ -561,7 +573,9 @@ BookmarkAutoImporter.run = async () => {
                         source: "bookmark-auto-sync",
                         trigger: "auto_sync_archive",
                     }, { phase: "precheck", reason: "权限不足：自动归档需 level≥2" });
-                    failed++;
+                    // L3: 与 create/update 口径对齐 —— 权限跳过计入 deniedCount 而非 failed,
+                    // 下轮重试语义不变, 用户可见「N 项因权限不足跳过」而非误报「失败」
+                    deniedCount++;
                     nextSnapshot[bookmarkId] = snapshotEntry;
                     return;
                 }
@@ -608,6 +622,8 @@ BookmarkAutoImporter.run = async () => {
                 archived,
                 unchanged,
                 failed,
+                // F3: P0-4 的 deniedCount 须同落持久化, 否则同步中心读态丢失 denied 计数
+                denied: deniedCount,
             },
         });
 

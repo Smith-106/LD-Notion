@@ -132,15 +132,16 @@ const NotionAPI = {
                 return doRequest(attempt + 1, token, allowRefresh);
             }
 
+            const result = Utils.safeJsonParse(response.responseText, {});
+
             // v3.14.17 (P0-2): 重试耗尽后的 429 携带 retryCount,供 UI 展示"已自动重试 N 次仍被限流"
+            // (H2: 该分支此前在 result 声明之前引用 result → TDZ ReferenceError,已移至声明后)
             if (response.status === 429) {
                 const rateError = new Error(`Notion API 速率限制: ${result.message || response.status}`);
                 rateError.statusCode = response.status;
                 rateError.retryCount = attempt + 1;
                 throw ErrorModel.annotateError(rateError);
             }
-
-            const result = Utils.safeJsonParse(response.responseText, {});
             if (response.status >= 200 && response.status < 300) {
                 return result;
             }

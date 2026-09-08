@@ -352,6 +352,29 @@ describe("CC-04: 跨 tab 租约锁", () => {
         SyncLock.releaseLease("ldb_test_lease", leaseC);
         SyncLock.releaseLease("ldb_test_lease2", leaseD);
     });
+
+    it("S1: 续约 owner 复核 —— 本人可续约; 被抢占后失配不覆写并返回 false", async () => {
+        const { SyncLock } = require("../src/sync-lock");
+        const key = "ldb_test_lease_s1";
+        const leaseA = await SyncLock.acquireLease(key);
+        expect(leaseA).toBeTruthy();
+        // 本人续约: 成功且延长 expiresAt
+        const renewed = SyncLock.renewLease(key, leaseA);
+        expect(renewed).toBeTruthy();
+        expect(renewed.expiresAt).toBeGreaterThan(Date.now());
+        const stored = JSON.parse(store.get(key));
+        expect(stored.owner).toBe(leaseA.owner);
+        // 模拟后台节流超 TTL: 租约过期被 tab B 抢占
+        store.set(key, JSON.stringify({ owner: "tab-b", expiresAt: Date.now() + 60000 }));
+        // A 的续约定时器晚到: owner 失配 → 返回 false, 绝不覆写 B 的租约
+        const staleRenew = SyncLock.renewLease(key, leaseA);
+        expect(staleRenew).toBe(false);
+        const after = JSON.parse(store.get(key));
+        expect(after.owner).toBe("tab-b");
+        // A 释放被抢占的租约: owner 复核同样不误清 B 的租约
+        SyncLock.releaseLease(key, leaseA);
+        expect(JSON.parse(store.get(key)).owner).toBe("tab-b");
+    });
 });
 
 describe("AUD-ARCH-09: 终态中止不重插毒项", () => {

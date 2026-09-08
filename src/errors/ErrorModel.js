@@ -65,7 +65,7 @@ const classifyError = (error) => {
         return {
             kind: "timeout",
             retryable: true,
-            action: "连接超时或已中断（脚本 15 秒超时）。请检查网络与本地代理设置，稍后重试；批量导出可安全续传，不会重复写入",
+            action: "连接超时或已中断（脚本 30 秒超时）。请检查网络与本地代理设置，稍后重试；批量导出可安全续传，不会重复写入",
         };
     }
 
