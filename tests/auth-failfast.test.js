@@ -53,7 +53,7 @@ describe("R-AUTH-01: NotionAPI.request 认证终态标记", () => {
         Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_expired");
         Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "rt-about-to-die");
         Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "csecret");
-        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, "https://www.notion.so/");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, "https://smith-106.github.io/LD-Notion/oauth-callback");
         Storage.set(CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE, "oauth");
         const origExchange = NotionOAuth.exchangeToken;
         NotionOAuth.exchangeToken = async () => {

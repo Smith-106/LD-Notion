@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.13`
+- 当前仓库源码版本：`v3.14.14`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -216,13 +216,14 @@ node scripts/build-extension.js
 如果你不想手动粘贴 Token，现在也可以改用 Notion 公开集成的 OAuth 授权流：
 
 1. 在你的 Notion 集成设置里启用 Public/Distribution 能力
-2. 添加 Redirect URI
-   - 推荐填 `https://www.notion.so/`
-   - LD-Notion 的 userscript 和 `chrome-extension-full` 都能在这个地址接住回调
-3. 复制该公开集成的 `Client ID` 和 `Client Secret`
+2. 添加 Redirect URI（Notion「New connection」表单）
+   - **推荐（默认）填共享文档站回调**：`https://smith-106.github.io/LD-Notion/oauth-callback`
+   - 全体终端用户共用此地址，**无需各自搭建网站**；面板默认值与此一致，须与 Notion 后台逐字符相同
+   - **不要再填** `https://www.notion.so/`：Notion 新连接表单会报 “Enter a valid redirect URI”，旧「在 notion.so 页拦截 `?code=`」技巧已过时
+3. 复制该公开集成的 `Client ID` 和 `Client Secret`（个人自建集成仍可自行粘贴；Redirect URI 用上面的共享地址即可）
 4. 在 LD-Notion 面板里填写 `Client ID`、`Client Secret`、`Redirect URI`（无需预先初始化凭证保险箱）
 5. 点击 `🔐 一键授权`
-6. 完成 Notion 授权后，LD-Notion 会自动把 access token / refresh token 保存到浏览器本地（GM 存储），后续功能继续按原来的 API Key 流工作
+6. 完成 Notion 授权后会跳转到文档站回调页；已安装的 userscript / 扩展会读取 `?code=` 并自动把 access token / refresh token 保存到浏览器本地（GM 存储）
 
 注意：
 - 当前项目是纯前端运行，没有单独后端；Notion OAuth 三键（Client Secret、access/refresh token）保存在你的浏览器本地 GM 存储中，以保证授权回调跨页面可读（v3.12.0 起的存储模型）
@@ -388,6 +389,11 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.14
+
+- OAuth 默认 Redirect URI 改为作者托管的 GitHub Pages 回调：`https://smith-106.github.io/LD-Notion/oauth-callback`（Notion 新表单拒绝 `https://www.notion.so/`）
+- 新增文档站着陆页 `docs/oauth-callback.md`；userscript / 扩展可匹配该回调域
 
 ### v3.14.13
 

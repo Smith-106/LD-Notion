@@ -42,6 +42,7 @@ const MANIFEST_SHARED_DEFAULTS = Object.freeze({
         "https://www.notion.so/*",
         "https://notion.so/*",
         "https://*.notion.so/*",
+        "https://smith-106.github.io/*",
         "https://github.com/*",
         "https://www.github.com/*",
         "https://gist.github.com/*",

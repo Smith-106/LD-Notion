@@ -30,3 +30,27 @@ describe("OAuth callback snapshot (userscript SPA race)", () => {
         ).toBe(true);
     });
 });
+
+    it("matchesRedirectUri accepts GitHub Pages OAuth callback (canonical + trailing slash)", () => {
+        const canonical = "https://smith-106.github.io/LD-Notion/oauth-callback";
+        expect(
+            NotionOAuth.matchesRedirectUri(
+                `${canonical}?code=abc&state=xyz`,
+                canonical
+            )
+        ).toBe(true);
+        expect(
+            NotionOAuth.matchesRedirectUri(
+                `${canonical}/?code=abc&state=xyz`,
+                canonical
+            )
+        ).toBe(true);
+    });
+
+    it("captureCallbackSnapshot works on GitHub Pages callback href", () => {
+        const snap = NotionOAuth.captureCallbackSnapshot(
+            "https://smith-106.github.io/LD-Notion/oauth-callback?code=pg&state=st"
+        );
+        expect(snap).toMatchObject({ code: "pg", state: "st" });
+    });
+

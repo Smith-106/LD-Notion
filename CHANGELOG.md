@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 
+## [3.14.14] - 2026-09-08
+
+### fix (Notion OAuth Redirect URI → 共享 GitHub Pages 回调)
+
+**根因**：Notion「New connection」表单拒绝登记 `https://www.notion.so/`（“Enter a valid redirect URI”）。旧默认依赖在 Notion 页面拦截 `?code=`，已不可用。
+
+**修复**：
+- 默认 `CONFIG.DEFAULTS.notionOauthRedirectUri` → `https://smith-106.github.io/LD-Notion/oauth-callback`（VitePress `base: /LD-Notion/` + `cleanUrls: true`，无尾斜杠；`matchesRedirectUri` 仍容忍尾斜杠）
+- 新增文档站着陆页 `docs/oauth-callback.md`（中文成功/失败 UI、延迟清理 query、可选 `postMessage`）
+- userscript `@match` 与扩展 content script 覆盖 `smith-106.github.io`，以便回调页运行
+- 面板提示 / README / TUTORIAL / docs 同步：全体用户共用 Pages 回调，无需自建网站；个人 Client ID/Secret 模型不变
+- 版本 bump 3.14.14
+
 ## [3.14.13] - 2026-09-07
 
 ### fix (更新路径 token invalid · 401 风暴消除 · 三模型 9 视角复核共识)
