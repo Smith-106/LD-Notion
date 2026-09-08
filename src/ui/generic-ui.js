@@ -240,13 +240,28 @@ const GenericUI = {
 
                 <div id="gclip-settings" style="display: ${isConfigured ? 'none' : 'block'};">
                     <div class="gclip-field">
+                        <label>认证方式</label>
+                        <div style="display:flex;flex-wrap:wrap;gap:var(--ldb-ui-spacing-lg);align-items:center;margin-top:var(--ldb-ui-spacing-xs);" role="radiogroup" aria-label="Notion 认证方式">
+                            <label style="display:inline-flex;align-items:center;gap:var(--ldb-ui-spacing-sm);font-size:var(--ldb-ui-font-size-sm);cursor:pointer;">
+                                <input type="radio" name="gclip-auth-mode" data-ldb-auth-mode="manual" id="gclip-auth-mode-manual" value="manual">
+                                <span>使用 API Key（Internal）</span>
+                            </label>
+                            <label style="display:inline-flex;align-items:center;gap:var(--ldb-ui-spacing-sm);font-size:var(--ldb-ui-font-size-sm);cursor:pointer;">
+                                <input type="radio" name="gclip-auth-mode" data-ldb-auth-mode="oauth" id="gclip-auth-mode-oauth" value="oauth">
+                                <span>使用公开 OAuth</span>
+                            </label>
+                        </div>
+                        <div data-ldb-auth-mode-status id="gclip-auth-mode-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);">当前启用：API Key</div>
+                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">API Key 与 OAuth 凭证都可预先填写，但只有所选模式会被导出使用。</div>
+                    </div>
+                    <div class="gclip-field" data-ldb-auth-section="manual" id="gclip-auth-section-manual">
                         <label for="gclip-api-key-input">Notion API Key</label>
                         <div style="display:flex;align-items:center;gap:var(--ldb-ui-spacing-md);">
                             <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="${CredentialVault.getFieldPlaceholder(CONFIG.STORAGE_KEYS.NOTION_API_KEY, 'secret_...')}" value="" style="flex:1;font-size:var(--ldb-ui-font-size-sm);" autocomplete="off" />
                             <button class="gclip-btn" id="gclip-save-api-key" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">保存</button>
                         </div>
                     </div>
-                    <div class="gclip-field">
+                    <div class="gclip-field" data-ldb-auth-section="oauth" id="gclip-auth-section-oauth">
                         <label>Notion OAuth（公开集成）</label>
                         <input type="text" id="gclip-oauth-client-id" class="gclip-input" placeholder="Client ID" aria-label="OAuth Client ID">
                         <input type="password" id="gclip-oauth-client-secret" class="gclip-input" placeholder="Client Secret" aria-label="OAuth Client Secret" style="margin-top:var(--ldb-ui-spacing-md);">

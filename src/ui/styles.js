@@ -147,6 +147,15 @@ const UI_CSS = `
                 accent-color: var(--ldb-ui-accent);
             }
 
+            .ldb-auth-section-muted {
+                opacity: 0.55;
+                transition: opacity 0.15s ease;
+            }
+
+            .ldb-auth-section-active {
+                opacity: 1;
+            }
+
             .ldb-toggle-section {
                 display: flex;
                 justify-content: space-between;

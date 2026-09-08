@@ -965,6 +965,23 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(status.text.includes('手动 API Key'));
     });
 
+    await runTest('v3.14.16: setManualApiKey 不再静默翻 manual（单选为真相源）', async () => {
+        const harness = createHarness();
+        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE] = 'oauth';
+        await harness.NotionOAuth.setRefreshToken('refresh_keep');
+        await harness.NotionOAuth.setManualApiKey('secret_manual_should_not_steal_mode_xxxxxxxxxxxx');
+        assert.strictEqual(harness.NotionOAuth.getAuthMode(), 'oauth');
+        assert.strictEqual(
+            harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY],
+            'secret_manual_should_not_steal_mode_xxxxxxxxxxxx'
+        );
+        // 显式切换仍可用
+        harness.NotionOAuth.setAuthMode('manual');
+        assert.strictEqual(harness.NotionOAuth.getAuthMode(), 'manual');
+        harness.NotionOAuth.setAuthMode('oauth');
+        assert.strictEqual(harness.NotionOAuth.getAuthMode(), 'oauth');
+    });
+
     await runTest('v3.14.12: setManualApiKey 剥不可见字符 + validateManualApiKey 格式软校验', async () => {
         const harness = createHarness();
         // 零宽字符/换行残留 → 落盘前剥离

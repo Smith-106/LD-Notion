@@ -654,6 +654,8 @@ const NotionOAuth = {
 
     setAuthMode: (mode) => {
         Storage.set(CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE, mode === "oauth" ? "oauth" : "manual");
+        // v3.14.16: 显式模式切换后立即刷新各面板单选/状态行
+        NotionOAuth.syncRegisteredControls();
     },
 
     getConfig: () => ({
@@ -738,10 +740,8 @@ const NotionOAuth = {
         // v3.14.12 (三模型共识): 剥不可见字符+换行/制表符(零宽/全角/换行残留)防粘贴污染致 401
         const normalized = String(apiKey || "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
         Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, normalized);
-        // v3.14.7 (AUD-ARCH-11 残余修复): 仅非空值才翻 manual——空值(清空覆盖)不应
-        // 静默关闭 OAuth 自动续签。此前任何输入框清空/占位保存都会 setAuthMode("manual"),
-        // 用户在下一次 access token 过期后即遇「API token is invalid」全批失败。
-        if (normalized) NotionOAuth.setAuthMode("manual");
+        // v3.14.16: 认证方式单选为唯一真相源——保存非空 API Key 不再静默翻 manual
+        // (修复 v3.14.7 仍残留的「填 Key 偷走 OAuth」脚枪)。空值仍不改 mode。
         NotionOAuth.syncApiKeyInputs(normalized);
         NotionOAuth.syncRegisteredControls();
         // v3.14.12 复核(三模型): validateManualApiKey 接线——保存时软校验,
@@ -1062,6 +1062,38 @@ const NotionOAuth = {
         }
     },
 
+
+    // v3.14.16: 同步认证方式单选 / 状态行 / 分区弱化（主面板 / Notion 站 / 通用剪藏共用）
+    syncAuthModeUI: (root = document) => {
+        if (!root || typeof root.querySelector !== "function") return;
+        const mode = NotionOAuth.getAuthMode();
+        const manualRadio = root.querySelector("[data-ldb-auth-mode=\"manual\"]");
+        const oauthRadio = root.querySelector("[data-ldb-auth-mode=\"oauth\"]");
+        if (manualRadio) manualRadio.checked = mode === "manual";
+        if (oauthRadio) oauthRadio.checked = mode === "oauth";
+        const statusEl = root.querySelector("[data-ldb-auth-mode-status]");
+        if (statusEl) {
+            if (mode === "oauth") {
+                const connected = NotionOAuth.isOAuthConnected();
+                statusEl.textContent = connected
+                    ? "当前启用：OAuth（已连接）"
+                    : "当前启用：OAuth（未授权）";
+            } else {
+                statusEl.textContent = "当前启用：API Key";
+            }
+        }
+        const manualSection = root.querySelector("[data-ldb-auth-section=\"manual\"]");
+        const oauthSection = root.querySelector("[data-ldb-auth-section=\"oauth\"]");
+        if (manualSection) {
+            manualSection.classList.toggle("ldb-auth-section-muted", mode !== "manual");
+            manualSection.classList.toggle("ldb-auth-section-active", mode === "manual");
+        }
+        if (oauthSection) {
+            oauthSection.classList.toggle("ldb-auth-section-muted", mode !== "oauth");
+            oauthSection.classList.toggle("ldb-auth-section-active", mode === "oauth");
+        }
+    },
+
     attachControls: ({ root, selectors, notify } = {}) => {
         if (!root || !selectors) return;
         const get = (name) => root.querySelector(selectors[name]);
@@ -1114,6 +1146,7 @@ const NotionOAuth = {
             fields.clearBtn.disabled = !status.connected
                 && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN)
                 && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
+            NotionOAuth.syncAuthModeUI(root);
         };
 
         const saveFormConfig = async () => {
@@ -1141,6 +1174,28 @@ const NotionOAuth = {
         };
 
         let warnedDefaultRedirectUri = false;
+
+        // v3.14.16: 认证方式单选（若面板提供）
+        root.querySelectorAll("[data-ldb-auth-mode]").forEach((radio) => {
+            if (radio.dataset.ldbAuthModeBound === "1") return;
+            radio.dataset.ldbAuthModeBound = "1";
+            radio.addEventListener("change", async () => {
+                if (!radio.checked) return;
+                const next = radio.getAttribute("data-ldb-auth-mode") === "oauth" ? "oauth" : "manual";
+                NotionOAuth.setAuthMode(next);
+                // 切到 API Key 时：若输入框已预填，立即落盘（单选为真相源后不会再靠保存偷 mode）
+                if (next === "manual") {
+                    const apiInput = root.querySelector("#ldb-api-key, #ldb-notion-api-key, #gclip-api-key-input");
+                    const live = String(apiInput?.value || "").trim();
+                    if (live) {
+                        try { await NotionOAuth.setManualApiKey(live); } catch { /* 校验警告已在 setManualApiKey */ }
+                    }
+                }
+                if (typeof notify === "function") {
+                    notify(next === "oauth" ? "已切换为公开 OAuth" : "已切换为 API Key（Internal）", "success");
+                }
+            });
+        });
 
         [fields.clientIdInput, fields.clientSecretInput, fields.redirectUriInput].forEach((input) => {
             input.addEventListener("change", async () => {

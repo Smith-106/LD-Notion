@@ -102,6 +102,11 @@ Notion 授权只说明 token 有机会访问 workspace，不保证目标已经�
 - **共享 GitHub Pages 回调**：默认 Redirect URI 从 `https://www.notion.so/` 改为 `https://smith-106.github.io/LD-Notion/oauth-callback`（VitePress `cleanUrls`，无尾斜杠）。Notion 新连接表单拒绝登记 notion.so；旧「在 Notion 页面拦截 `?code=`」已过时。终端用户共用作者托管着陆页，不必自建站点；个人 Client ID/Secret 粘贴模型不变。
 - **匹配面**：userscript `@match` 与扩展 content script 覆盖 `smith-106.github.io`，以便在回调页读取 query。
 
+## v3.14.16 认证语义变更
+
+- **显式认证方式单选**：面板提供「使用 API Key（Internal）」/「使用公开 OAuth」；选择立即 `setAuthMode`，状态行显示当前启用模式。两者可同时预填，仅所选模式用于导出 / `getAccessToken`。
+- **`setManualApiKey` 不再隐式翻 manual**：保存非空 Key 只落盘，不偷走 OAuth 模式（单选为唯一真相源）；一键授权成功仍自动切到 `oauth`。
+
 ## Contract
 - manual token 是 advanced fallback。
 - Auth failure 必须在 OperationGuard 或目标 writer 前阻止写入。

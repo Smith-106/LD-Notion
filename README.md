@@ -213,6 +213,8 @@ node scripts/build-extension.js
 
 ### 1.1 可选：使用公开 OAuth 一键授权
 
+> **提示（v3.14.16）**：设置里可用单选切换「API Key」与「公开 OAuth」；两者都可预先填写，但只有当前选中的模式会实际用于导出。清空 Notion 后若「待导出」仍偏少，可将「导出状态依据」改为「Notion 工作区」并刷新工作区。
+
 如果你不想手动粘贴 Token，现在也可以改用 Notion 公开集成的 OAuth 授权流：
 
 1. 在你的 Notion 集成设置里启用 Public/Distribution 能力

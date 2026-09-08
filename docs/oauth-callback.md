@@ -103,3 +103,5 @@ onMounted(() => {
   border-color: var(--vp-c-brand-1);
 }
 </style>
+
+> 面板侧 v3.14.16 起可用「认证方式」单选在 API Key 与 OAuth 间切换；两者可同时填写，仅所选模式用于导出。

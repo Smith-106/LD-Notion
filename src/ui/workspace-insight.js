@@ -1009,6 +1009,10 @@ const WorkspaceInsight = {
             UI().workspaceInsightMarkdown = UI().buildWorkspaceInsightMarkdown(UI().buildWorkspaceVisualizationModel(UI().workspaceVisualSnapshot), "");
             UI().workspaceInsightUpdatedAt = Date.now();
             UI().renderWorkspaceVisualSummary();
+            // v3.14.16: Notion 导出状态依据依赖快照——刷新后重算 UI 徽标/待导出计数
+            if (typeof UI().recomputeExportStatusFromNotion === "function") {
+                try { UI().recomputeExportStatusFromNotion(); } catch { /* ignore */ }
+            }
 
             const model = UI().buildWorkspaceVisualizationModel();
             UI().setWorkspaceVisualStatus(

@@ -128,7 +128,86 @@ const BookmarkList = {
         return String(bookmark?.topic_id || bookmark?.bookmarkable_id || "");
     },
 
-    isBookmarkKeyExported: (bookmarkKey) => {
+    // v3.14.16: 导出状态依据（本地账本 | Notion 工作区快照只读覆盖）
+    getExportStatusSource: () => {
+        const value = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_STATUS_SOURCE, CONFIG.DEFAULTS.exportStatusSource);
+        return value === "notion" ? "notion" : "local";
+    },
+
+    setExportStatusSource: (source) => {
+        Storage.set(
+            CONFIG.STORAGE_KEYS.EXPORT_STATUS_SOURCE,
+            source === "notion" ? "notion" : "local"
+        );
+    },
+
+    hasWorkspaceExportSnapshot: () => {
+        const snap = UI().workspaceVisualSnapshot;
+        return !!(snap && snap.scannedAt);
+    },
+
+    getWorkspaceExportedUrlSet: () => {
+        const records = UI().workspaceVisualSnapshot?.records;
+        const set = new Set();
+        if (!Array.isArray(records)) return set;
+        records.forEach((record) => {
+            const url = UI().normalizeWorkspaceInsightUrl(record?.sourceUrl || record?.url || "");
+            if (url) set.add(url);
+        });
+        return set;
+    },
+
+    buildBookmarkCanonicalUrl: (bookmark) => {
+        if (!bookmark) return "";
+        if (bookmark.source === "github") {
+            return UI().normalizeWorkspaceInsightUrl(bookmark?.raw?.html_url || "");
+        }
+        const topicId = String(bookmark?.topic_id || bookmark?.bookmarkable_id || "");
+        if (!topicId) return "";
+        return UI().normalizeWorkspaceInsightUrl(`https://linux.do/t/${topicId}`);
+    },
+
+    buildBookmarkKeyCanonicalUrl: (bookmarkKey) => {
+        if (!bookmarkKey) return "";
+        if (!String(bookmarkKey).startsWith("gh:")) {
+            return UI().normalizeWorkspaceInsightUrl(`https://linux.do/t/${bookmarkKey}`);
+        }
+        const bookmarks = Array.isArray(UI().bookmarks) ? UI().bookmarks : [];
+        const hit = bookmarks.find((b) => UI().getBookmarkKey(b) === bookmarkKey);
+        if (hit) return UI().buildBookmarkCanonicalUrl(hit);
+        const parts = String(bookmarkKey).split(":");
+        const sourceType = parts[1] || "";
+        const itemKey = parts.slice(2).join(":");
+        if (!itemKey) return "";
+        if (sourceType === "gists") {
+            return UI().normalizeWorkspaceInsightUrl(`https://gist.github.com/${itemKey}`);
+        }
+        return UI().normalizeWorkspaceInsightUrl(`https://github.com/${itemKey}`);
+    },
+
+    // 只读覆盖：notion 模式查工作区快照；无快照时全部视为待导出（避免静默跳过）
+    isExportedForUi: (bookmarkOrKey) => {
+        const isKey = typeof bookmarkOrKey === "string" || typeof bookmarkOrKey === "number";
+        const bookmarkKey = isKey
+            ? String(bookmarkOrKey || "")
+            : UI().getBookmarkKey(bookmarkOrKey);
+        if (!bookmarkKey) return false;
+
+        if (UI().getExportStatusSource() === "notion") {
+            if (!UI().hasWorkspaceExportSnapshot()) return false;
+            // allow_duplicates：与本地模式一致，Linux.do 项不按已导出禁用
+            if (!bookmarkKey.startsWith("gh:") && !Utils.isLinuxDoDedupStrict()) return false;
+            const url = isKey
+                ? UI().buildBookmarkKeyCanonicalUrl(bookmarkKey)
+                : UI().buildBookmarkCanonicalUrl(bookmarkOrKey);
+            if (!url) return false;
+            return UI().getWorkspaceExportedUrlSet().has(url);
+        }
+
+        return UI().isBookmarkKeyExportedLocal(bookmarkKey);
+    },
+
+    isBookmarkKeyExportedLocal: (bookmarkKey) => {
         if (!bookmarkKey) return false;
         const dedupStrict = Utils.isLinuxDoDedupStrict();
         if (!bookmarkKey.startsWith("gh:")) {
@@ -144,8 +223,40 @@ const BookmarkList = {
         return GitHubAPI.isExported(itemKey);
     },
 
+    isBookmarkKeyExported: (bookmarkKey) => {
+        return UI().isExportedForUi(bookmarkKey);
+    },
+
     isBookmarkExported: (bookmark) => {
-        return UI().isBookmarkKeyExported(UI().getBookmarkKey(bookmark));
+        return UI().isExportedForUi(bookmark);
+    },
+
+    updateExportStatusTip: () => {
+        const tip = UI().refs?.exportStatusTip;
+        if (!tip) return;
+        const source = UI().getExportStatusSource();
+        if (source !== "notion") {
+            tip.textContent = "「本地账本」沿用去重/导出记录；切换到「Notion 工作区」后按最近一次工作区快照中的链接判定已导出（只读，不改本地账本）。";
+            return;
+        }
+        if (!UI().hasWorkspaceExportSnapshot()) {
+            tip.textContent = "请先刷新工作区：当前无 Notion 快照，已加载项均按待导出显示，避免误跳过导出。";
+            return;
+        }
+        tip.textContent = "导出状态依据 Notion 工作区快照（只读覆盖，不改本地账本）。清空 Notion 后刷新工作区即可全部回到待导出。";
+    },
+
+    recomputeExportStatusFromNotion: () => {
+        UI().updateExportStatusTip();
+        UI().recomputeExportStats?.();
+        UI().renderBookmarkList?.();
+        UI().updateSelectCount?.();
+        UI().renderVisualSummary?.();
+        return {
+            source: UI().getExportStatusSource(),
+            hasSnapshot: UI().hasWorkspaceExportSnapshot(),
+            urlCount: UI().getWorkspaceExportedUrlSet().size,
+        };
     },
 
     getSelectedBookmarks: () => {
