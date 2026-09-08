@@ -46,7 +46,9 @@ const classifyError = (error) => {
         return {
             kind: "not_found",
             retryable: false,
-            action: "目标数据库/页面不存在或已被删除/移动。请检查数据库 ID 与父页面 ID 是否仍有效",
+            // bug2: 404 除资源不存在/已删除外, OAuth 场景最常见为「未共享给当前集成」——
+            // Notion 原文提示 shared with your integration, 但未告知 OAuth 用户具体操作步骤
+            action: "目标数据库/页面不存在、已删除/移动，或未共享给当前集成：OAuth 用户请重新授权并勾选其所在页面（或在该资源页 ••• → 连接 → 勾选本集成）；API Key 用户请确认资源已连接本集成；并确认同一工作区",
         };
     }
 

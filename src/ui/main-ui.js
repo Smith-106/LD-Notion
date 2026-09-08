@@ -1040,6 +1040,12 @@ const UI = {
         // 绑定事件
         UI.bindEvents();
 
+        // bug1 修复(2978b01 拆分回归): god-module 拆分时丢失 ChatUI 初始化接线 —
+        // 主面板 AI Tab 的 发送/回车/清空/暂停分类/取消分类/welcome chip 按钮自此无监听器
+        // (唯一绑定体 ai/index.js ChatUI.bindEvents 仅被 Notion 站面板调用)。
+        // ChatUI.init = ChatState.load + renderMessages + bindEvents, 全 null 守卫。
+        ChatUI.init();
+
         // 加载保存的配置
         UI.loadConfig();
     },

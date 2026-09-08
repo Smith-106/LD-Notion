@@ -139,4 +139,26 @@ describe("v3.14.8 audit follow-ups", () => {
   });
 });
 
-
+describe("debug-ui-bugs: AI 面板接线回归守卫(2978b01 拆分丢失 ChatUI.init)", () => {
+    it("bug1: 主面板 initPanel 含 ChatUI.init 接线(拆分前 ui/index.js:4219 同款)", () => {
+        const src = fs.readFileSync("src/ui/main-ui.js", "utf8");
+        expect(src).toContain("ChatUI.init();");
+        // 绑定体仍在 ai/index.js(唯一归属)
+        const ai = fs.readFileSync("src/ai/index.js", "utf8");
+        expect(ai).toMatch(/bindEvents: \(\) => \{/);
+        expect(ai).toContain("#ldb-chat-send");
+    });
+    it("bug1: Notion 站面板接线仍完整(load+render+bind)", () => {
+        const src = fs.readFileSync("src/ui/notion-site-ui.js", "utf8");
+        expect(src).toContain("ChatState.load();");
+        expect(src).toContain("ChatUI.renderMessages();");
+        expect(src).toContain("ChatUI.bindEvents();");
+    });
+    it("bug2: 404 未共享指引存在于 api 抛错点与 ErrorModel 分类", () => {
+        const api = fs.readFileSync("src/api/index.js", "utf8");
+        expect(api).toContain("notFoundHint");
+        expect(api).toContain("重新授权并勾选");
+        const em = fs.readFileSync("src/errors/ErrorModel.js", "utf8");
+        expect(em).toContain("未共享给当前集成");
+    });
+});

@@ -179,7 +179,13 @@ const NotionAPI = {
                 authError.authCode = String(result?.code || "").toLowerCase() || "unauthorized";
                 throw ErrorModel.annotateError(authError);
             }
-            throw ErrorModel.annotateError(new Error(`Notion API 错误: ${result.message || response.status}`));
+            // bug2: 404「Could not find」= 资源未共享给当前集成/已删除/跨工作区 ——
+            // OAuth 用户最常见原因是授权时未勾选该资源所在页面, 原样透传英文原文无行动指引,
+            // 此处追加可行动中文提示(所有消费端 statusSpan/报告同步受益)
+            const notFoundHint = response.status === 404
+                ? "。该资源对当前集成不可见：OAuth 用户请重新授权并勾选其所在页面（或在该资源页 ••• → 连接 → 勾选本集成）；也可从工作区下拉选择集成可见的资源；并确认未删除、同一工作区"
+                : "";
+            throw ErrorModel.annotateError(new Error(`Notion API 错误: ${result.message || response.status}${notFoundHint}`));
         };
 
         try {

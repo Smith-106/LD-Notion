@@ -3381,7 +3381,9 @@
           return {
             kind: "not_found",
             retryable: false,
-            action: "\u76EE\u6807\u6570\u636E\u5E93/\u9875\u9762\u4E0D\u5B58\u5728\u6216\u5DF2\u88AB\u5220\u9664/\u79FB\u52A8\u3002\u8BF7\u68C0\u67E5\u6570\u636E\u5E93 ID \u4E0E\u7236\u9875\u9762 ID \u662F\u5426\u4ECD\u6709\u6548"
+            // bug2: 404 除资源不存在/已删除外, OAuth 场景最常见为「未共享给当前集成」——
+            // Notion 原文提示 shared with your integration, 但未告知 OAuth 用户具体操作步骤
+            action: "\u76EE\u6807\u6570\u636E\u5E93/\u9875\u9762\u4E0D\u5B58\u5728\u3001\u5DF2\u5220\u9664/\u79FB\u52A8\uFF0C\u6216\u672A\u5171\u4EAB\u7ED9\u5F53\u524D\u96C6\u6210\uFF1AOAuth \u7528\u6237\u8BF7\u91CD\u65B0\u6388\u6743\u5E76\u52FE\u9009\u5176\u6240\u5728\u9875\u9762\uFF08\u6216\u5728\u8BE5\u8D44\u6E90\u9875 \u2022\u2022\u2022 \u2192 \u8FDE\u63A5 \u2192 \u52FE\u9009\u672C\u96C6\u6210\uFF09\uFF1BAPI Key \u7528\u6237\u8BF7\u786E\u8BA4\u8D44\u6E90\u5DF2\u8FDE\u63A5\u672C\u96C6\u6210\uFF1B\u5E76\u786E\u8BA4\u540C\u4E00\u5DE5\u4F5C\u533A"
           };
         }
         if (status === 400 || status === 409) {
@@ -5082,7 +5084,8 @@ Content-Type: ${contentType}\r
               authError.authCode = String((result == null ? void 0 : result.code) || "").toLowerCase() || "unauthorized";
               throw ErrorModel.annotateError(authError);
             }
-            throw ErrorModel.annotateError(new Error(`Notion API \u9519\u8BEF: ${result.message || response.status}`));
+            const notFoundHint = response.status === 404 ? "\u3002\u8BE5\u8D44\u6E90\u5BF9\u5F53\u524D\u96C6\u6210\u4E0D\u53EF\u89C1\uFF1AOAuth \u7528\u6237\u8BF7\u91CD\u65B0\u6388\u6743\u5E76\u52FE\u9009\u5176\u6240\u5728\u9875\u9762\uFF08\u6216\u5728\u8BE5\u8D44\u6E90\u9875 \u2022\u2022\u2022 \u2192 \u8FDE\u63A5 \u2192 \u52FE\u9009\u672C\u96C6\u6210\uFF09\uFF1B\u4E5F\u53EF\u4ECE\u5DE5\u4F5C\u533A\u4E0B\u62C9\u9009\u62E9\u96C6\u6210\u53EF\u89C1\u7684\u8D44\u6E90\uFF1B\u5E76\u786E\u8BA4\u672A\u5220\u9664\u3001\u540C\u4E00\u5DE5\u4F5C\u533A" : "";
+            throw ErrorModel.annotateError(new Error(`Notion API \u9519\u8BEF: ${result.message || response.status}${notFoundHint}`));
           };
           try {
             return await doRequest(0);
@@ -23815,6 +23818,7 @@ ${AIService2.isolateContent(JSON.stringify({
           UI2.cacheRefs();
           DesignSystem2.applyTheme();
           UI2.bindEvents();
+          ChatUI2.init();
           UI2.loadConfig();
         },
         // 创建最小化按钮
