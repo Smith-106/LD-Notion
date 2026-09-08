@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.14`
+- 当前仓库源码版本：`v3.14.18`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -391,6 +391,23 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.18
+
+- 三轮 odyssey 审计修复：跨 tab 导出租约补全 / AI 面板接线 / 404 行动指引 / GitHub 导出租约早获取泄漏(high) / 上传 promise 永挂(medium) / multipart 文件名注入(low) / 通用导出链接 url 白名单(low)
+- UI 后端契约四面全对账零错配（80 控件 0 死选项 / 108 存储键 0 孤键 / 26 select 值域 0 错配 / 6 schema 全对齐）；测试 +11 至 855 全绿
+
+### v3.14.17
+
+- 错误处理可行动化：Notion API 错误统一分类 + 导出报告附「建议」下一步；429 重试可视化；401/403 一键「重新授权」；Database ID 前置识别；guard.denied 聚合可见
+
+### v3.14.16
+
+- 认证方式单选（API Key / 公开 OAuth）；修复保存非空 Key 静默翻模式；导出状态依据可切换「本地账本 / Notion 工作区」
+
+### v3.14.15
+
+- Notion OAuth 安全收窄（三模型共识）：回调页移除冗余 postMessage；validateOAuthRedirectUri 宽松白名单；扩展 contentScriptMatches 收窄与 userscript @match 对齐
 
 ### v3.14.14
 
