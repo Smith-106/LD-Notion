@@ -845,7 +845,7 @@ const NotionOAuth = {
         try {
             url = new URL(raw);
         } catch {
-            return { valid: false, code: "PARSE", value: "", message: "Redirect URI 格式不合法：必须是完整 URL（例如 https://www.notion.so/）" };
+            return { valid: false, code: "PARSE", value: "", message: "Redirect URI 格式不合法：必须是完整 URL（例如 https://smith-106.github.io/LD-Notion/oauth-callback）" };
         }
         const isLocalhost = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
         if (url.protocol === "http:" && !isLocalhost) return { valid: false, code: "HTTP_NOT_LOCALHOST", value: raw, message: "Redirect URI 仅允许 https；http 仅限 http://localhost 本地调试，请勿使用公网 http 地址" };
@@ -1154,7 +1154,7 @@ const NotionOAuth = {
                 if (!warnedDefaultRedirectUri && NotionOAuth.getConfig().redirectUri === CONFIG.DEFAULTS.notionOauthRedirectUri) {
                     warnedDefaultRedirectUri = true;
                     if (typeof notify === "function") {
-                        notify("当前 Redirect URI 为默认值 https://www.notion.so/。请确认已在 Notion 集成后台（OAuth 域和 URI）逐字符注册该地址（含末尾斜杠）；未注册时 Notion 授权后会报错且无法回调。", "info");
+                        notify("当前 Redirect URI 为默认共享回调 https://smith-106.github.io/LD-Notion/oauth-callback。请确认已在 Notion 集成后台（OAuth 域和 URI）逐字符注册该地址（勿用 https://www.notion.so/，新连接表单会拒绝）；未注册时 Notion 授权后会报错且无法回调。", "info");
                     }
                 }
                 // localhost 回调提示(三模型共识验证轮):userscript 不运行于 localhost 页,回调无法自动完成

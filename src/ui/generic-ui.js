@@ -256,7 +256,7 @@ const GenericUI = {
                             <button class="gclip-btn gclip-btn-secondary" id="gclip-oauth-clear" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">断开授权</button>
                         </div>
                         <div id="gclip-oauth-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);"></div>
-                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">公开 OAuth 适合个人自建集成；需在集成后台注册 Redirect URI（含末尾斜杠），且集成通过 Notion 审核后授权链接才生效。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID。敏感凭证保存在浏览器本地（GM 存储），脚本更新后无需重新输入。</div>
+                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">公开 OAuth 适合个人自建集成；Redirect URI 推荐共享回调 https://smith-106.github.io/LD-Notion/oauth-callback（与 Notion 后台一致；勿填 https://www.notion.so/），且集成通过 Notion 审核后授权链接才生效。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID。敏感凭证保存在浏览器本地（GM 存储），脚本更新后无需重新输入。</div>
                     </div>
                     <div class="gclip-field">
                         <label for="gclip-export-type">导出目标类型</label>

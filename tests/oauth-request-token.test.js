@@ -29,7 +29,7 @@ describe("NotionOAuth.resolveRequestToken", () => {
         store.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "access-new");
         store.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "11111111-1111-1111-1111-111111111111");
         store.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "secret");
-        store.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, "https://www.notion.so/");
+        store.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, "https://smith-106.github.io/LD-Notion/oauth-callback");
 
         expect(NotionOAuth.canAutoRefresh()).toBe(true);
         expect(NotionOAuth.resolveRequestToken("access-stale-snapshot")).toBe("access-new");
@@ -52,7 +52,7 @@ describe("NotionAPI.request uses resolveRequestToken", () => {
         store.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "access-new");
         store.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "11111111-1111-1111-1111-111111111111");
         store.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "secret");
-        store.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, "https://www.notion.so/");
+        store.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, "https://smith-106.github.io/LD-Notion/oauth-callback");
 
         let seenToken = null;
         const transport = {

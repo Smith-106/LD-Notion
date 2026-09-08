@@ -119,14 +119,15 @@ Notion 要求你创建一个 "Integration" 才能让外部程序访问你的数�
 
 1. 把这个集成改成 Public
 2. 在集成里加一个 Redirect URI
-   - 最省事直接填 `https://www.notion.so/`
+   - 填共享回调：`https://smith-106.github.io/LD-Notion/oauth-callback`（全体用户共用，不用自己建站）
+   - 不要填 `https://www.notion.so/`：Notion 新连接表单会直接拒绝
 3. 记下 `Client ID` 和 `Client Secret`
-4. 回到 LD-Notion 面板，把这三个值填进去
+4. 回到 LD-Notion 面板，把这三个值填进去（Redirect URI 与 Notion 后台保持一致；默认已是上面的共享地址）
 5. 点 `🔐 一键授权`
 
-授权成功后，脚本会自动把 access token 存到本地，后面还是按原来的 Notion 配置流程走。
+授权成功后会跳到文档站回调页，脚本 / 扩展会自动把 access token 存到本地，后面还是按原来的 Notion 配置流程走。
 
-注意：因为 LD-Notion 是纯前端脚本，`Client Secret` 也是保存在你自己的浏览器本地存储里，所以更适合你自己用、自己建集成。
+注意：因为 LD-Notion 是纯前端脚本，`Client Secret` 也是保存在你自己的浏览器本地存储里，所以更适合你自己用、自己建集成；Redirect URI 则用作者提供的共享 Pages 地址即可。
 另外，面板里的“断开授权”只是清除你本地保存的 OAuth 凭据，不会帮你去 Notion 后台撤销已经批准的授权。
 
 ### 建个数据库

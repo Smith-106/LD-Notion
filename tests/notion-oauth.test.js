@@ -625,6 +625,23 @@ function createWorkspaceVisualizationFixture(harness) {
         );
     });
 
+    await runTest('matchesRedirectUri: GitHub Pages shared OAuth callback', async () => {
+        const harness = createHarness();
+        const pages = 'https://smith-106.github.io/LD-Notion/oauth-callback';
+        assert.strictEqual(
+            harness.NotionOAuth.matchesRedirectUri(pages + '?code=abc&state=def', pages),
+            true
+        );
+        assert.strictEqual(
+            harness.NotionOAuth.matchesRedirectUri(pages + '/?code=abc', pages),
+            true
+        );
+        assert.strictEqual(
+            harness.NotionOAuth.matchesRedirectUri('https://smith-106.github.io/LD-Notion/other?code=abc', pages),
+            false
+        );
+    });
+
     await runTest('getStatus: reports connected OAuth workspace when tokens are present', async () => {
         const harness = createHarness();
         harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'ntn_access_token';
@@ -5661,6 +5678,7 @@ function createWorkspaceVisualizationFixture(harness) {
                 'https://www.notion.so/*',
                 'https://notion.so/*',
                 'https://*.notion.so/*',
+                'https://smith-106.github.io/*',
                 'https://github.com/*',
                 'https://www.github.com/*',
                 'https://gist.github.com/*',
@@ -6649,6 +6667,15 @@ function createWorkspaceVisualizationFixture(harness) {
         const r = harness.NotionOAuth.validateOAuthRedirectUri('https://www.notion.so/');
         assert.strictEqual(r.valid, true);
         assert.strictEqual(r.code, 'OK');
+    });
+
+    await runTest('T10b validateOAuthRedirectUri: accepts GitHub Pages default callback', async () => {
+        const harness = createHarness();
+        const pages = 'https://smith-106.github.io/LD-Notion/oauth-callback';
+        const r = harness.NotionOAuth.validateOAuthRedirectUri(pages);
+        assert.strictEqual(r.valid, true);
+        assert.strictEqual(r.code, 'OK');
+        assert.ok(String(harness.CONFIG.DEFAULTS.notionOauthRedirectUri).includes('smith-106.github.io/LD-Notion/oauth-callback'));
     });
 
     await runTest('T11 validateOAuthRedirectUri: accepts http://localhost', async () => {

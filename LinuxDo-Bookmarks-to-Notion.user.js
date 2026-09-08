@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.13
+// @version      3.14.14
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -12,6 +12,7 @@
 // @match        https://www.notion.so/*
 // @match        https://notion.so/*
 // @match        https://*.notion.so/*
+// @match        https://smith-106.github.io/LD-Notion/*
 // @match        https://github.com/*
 // @match        https://www.github.com/*
 // @match        https://gist.github.com/*
@@ -74,7 +75,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.14.13",
+        SCRIPT_VERSION: "3.14.14",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -217,7 +218,7 @@
         // 默认值
         DEFAULTS: {
           notionAuthMode: "manual",
-          notionOauthRedirectUri: "https://www.notion.so/",
+          notionOauthRedirectUri: "https://smith-106.github.io/LD-Notion/oauth-callback",
           onlyFirst: false,
           onlyOp: false,
           rangeStart: 1,
@@ -2682,7 +2683,7 @@
           try {
             url = new URL(raw);
           } catch {
-            return { valid: false, code: "PARSE", value: "", message: "Redirect URI \u683C\u5F0F\u4E0D\u5408\u6CD5\uFF1A\u5FC5\u987B\u662F\u5B8C\u6574 URL\uFF08\u4F8B\u5982 https://www.notion.so/\uFF09" };
+            return { valid: false, code: "PARSE", value: "", message: "Redirect URI \u683C\u5F0F\u4E0D\u5408\u6CD5\uFF1A\u5FC5\u987B\u662F\u5B8C\u6574 URL\uFF08\u4F8B\u5982 https://smith-106.github.io/LD-Notion/oauth-callback\uFF09" };
           }
           const isLocalhost = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
           if (url.protocol === "http:" && !isLocalhost) return { valid: false, code: "HTTP_NOT_LOCALHOST", value: raw, message: "Redirect URI \u4EC5\u5141\u8BB8 https\uFF1Bhttp \u4EC5\u9650 http://localhost \u672C\u5730\u8C03\u8BD5\uFF0C\u8BF7\u52FF\u4F7F\u7528\u516C\u7F51 http \u5730\u5740" };
@@ -2949,7 +2950,7 @@
               if (!warnedDefaultRedirectUri && NotionOAuth2.getConfig().redirectUri === CONFIG2.DEFAULTS.notionOauthRedirectUri) {
                 warnedDefaultRedirectUri = true;
                 if (typeof notify === "function") {
-                  notify("\u5F53\u524D Redirect URI \u4E3A\u9ED8\u8BA4\u503C https://www.notion.so/\u3002\u8BF7\u786E\u8BA4\u5DF2\u5728 Notion \u96C6\u6210\u540E\u53F0\uFF08OAuth \u57DF\u548C URI\uFF09\u9010\u5B57\u7B26\u6CE8\u518C\u8BE5\u5730\u5740\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF1B\u672A\u6CE8\u518C\u65F6 Notion \u6388\u6743\u540E\u4F1A\u62A5\u9519\u4E14\u65E0\u6CD5\u56DE\u8C03\u3002", "info");
+                  notify("\u5F53\u524D Redirect URI \u4E3A\u9ED8\u8BA4\u5171\u4EAB\u56DE\u8C03 https://smith-106.github.io/LD-Notion/oauth-callback\u3002\u8BF7\u786E\u8BA4\u5DF2\u5728 Notion \u96C6\u6210\u540E\u53F0\uFF08OAuth \u57DF\u548C URI\uFF09\u9010\u5B57\u7B26\u6CE8\u518C\u8BE5\u5730\u5740\uFF08\u52FF\u7528 https://www.notion.so/\uFF0C\u65B0\u8FDE\u63A5\u8868\u5355\u4F1A\u62D2\u7EDD\uFF09\uFF1B\u672A\u6CE8\u518C\u65F6 Notion \u6388\u6743\u540E\u4F1A\u62A5\u9519\u4E14\u65E0\u6CD5\u56DE\u8C03\u3002", "info");
                 }
               }
               const redirectCheck = NotionOAuth2.validateOAuthRedirectUri(NotionOAuth2.getConfig().redirectUri);
@@ -19537,7 +19538,7 @@ ${report}
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-oauth-clear" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">\u65AD\u5F00\u6388\u6743</button>
                         </div>
                         <div class="ldb-tip" id="ldb-notion-oauth-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                        <div class="ldb-tip">\u9002\u7528\u4E8E Notion \u516C\u5F00\u96C6\u6210\u3002\u8BF7\u786E\u8BA4\u5DF2\u5728\u96C6\u6210\u540E\u53F0\u9010\u5B57\u7B26\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF0C\u4E14\u96C6\u6210\u5DF2\u63D0\u4EA4 Notion \u5BA1\u6838\uFF08Authorization URL \u5728\u5BA1\u6838\u901A\u8FC7\u540E\u624D\u751F\u6548\uFF09\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\u3002\u654F\u611F\u51ED\u8BC1\u4FDD\u5B58\u5728\u6D4F\u89C8\u5668\u672C\u5730\uFF08GM \u5B58\u50A8\uFF09\uFF0C\u811A\u672C\u66F4\u65B0\u540E\u65E0\u9700\u91CD\u65B0\u8F93\u5165\u3002</div>
+                        <div class="ldb-tip">\u9002\u7528\u4E8E Notion \u516C\u5F00\u96C6\u6210\u3002Redirect URI \u63A8\u8350\u5171\u4EAB\u56DE\u8C03 https://smith-106.github.io/LD-Notion/oauth-callback\uFF08\u4E0E Notion \u540E\u53F0\u9010\u5B57\u7B26\u4E00\u81F4\uFF1B\u52FF\u518D\u586B https://www.notion.so/\uFF09\u3002\u96C6\u6210\u987B\u63D0\u4EA4 Notion \u5BA1\u6838\uFF08Authorization URL \u5728\u5BA1\u6838\u901A\u8FC7\u540E\u624D\u751F\u6548\uFF09\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\u3002\u654F\u611F\u51ED\u8BC1\u4FDD\u5B58\u5728\u6D4F\u89C8\u5668\u672C\u5730\uFF08GM \u5B58\u50A8\uFF09\uFF0C\u811A\u672C\u66F4\u65B0\u540E\u65E0\u9700\u91CD\u65B0\u8F93\u5165\u3002</div>
                     </div>
                     <div class="ldb-input-group">
                         <label class="ldb-label" for="ldb-notion-ai-target-db">\u6570\u636E\u5E93 / \u9875\u9762</label>
@@ -23021,7 +23022,7 @@ ${AIService2.isolateContent(JSON.stringify({
                                 <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">\u65AD\u5F00\u6388\u6743</button>
                             </div>
                             <div class="ldb-tip" id="ldb-oauth-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                            <div class="ldb-tip">\u5982\u679C\u4F60\u4F7F\u7528 Notion \u516C\u5F00\u96C6\u6210\uFF1A\u2460 \u5728\u96C6\u6210\u540E\u53F0\u9010\u5B57\u7B26\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF1B\u2461 Notion \u8981\u6C42\u516C\u5F00\u96C6\u6210<strong>\u63D0\u4EA4\u5BA1\u6838\u5E76\u901A\u8FC7\u540E</strong> Authorization URL \u624D\u4F1A\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\uFF08\u4E0D\u662F Client Secret\uFF09\u3001URI \u5DF2\u6CE8\u518C\u3001\u96C6\u6210\u5DF2\u901A\u8FC7\u5BA1\u6838\u3002\u654F\u611F\u51ED\u8BC1\u4FDD\u5B58\u5728\u6D4F\u89C8\u5668\u672C\u5730\uFF08GM \u5B58\u50A8\uFF09\uFF0C\u811A\u672C\u66F4\u65B0\u540E\u65E0\u9700\u91CD\u65B0\u8F93\u5165\u3002</div>
+                            <div class="ldb-tip">\u5982\u679C\u4F60\u4F7F\u7528 Notion \u516C\u5F00\u96C6\u6210\uFF1A\u2460 Redirect URI \u63A8\u8350\u586B\u5171\u4EAB\u56DE\u8C03 <code>https://smith-106.github.io/LD-Notion/oauth-callback</code>\uFF08\u987B\u4E0E Notion \u540E\u53F0\u9010\u5B57\u7B26\u4E00\u81F4\uFF1BNotion \u65B0\u8FDE\u63A5\u8868\u5355\u5DF2\u62D2\u7EDD <code>https://www.notion.so/</code>\uFF0C\u7EC8\u7AEF\u7528\u6237\u65E0\u9700\u81EA\u5EFA\u7F51\u7AD9\uFF09\uFF1B\u2461 Notion \u8981\u6C42\u516C\u5F00\u96C6\u6210<strong>\u63D0\u4EA4\u5BA1\u6838\u5E76\u901A\u8FC7\u540E</strong> Authorization URL \u624D\u4F1A\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\uFF08\u4E0D\u662F Client Secret\uFF09\u3001URI \u5DF2\u6CE8\u518C\u3001\u96C6\u6210\u5DF2\u901A\u8FC7\u5BA1\u6838\u3002\u654F\u611F\u51ED\u8BC1\u4FDD\u5B58\u5728\u6D4F\u89C8\u5668\u672C\u5730\uFF08GM \u5B58\u50A8\uFF09\uFF0C\u811A\u672C\u66F4\u65B0\u540E\u65E0\u9700\u91CD\u65B0\u8F93\u5165\u3002</div>
                         </div>
                         <div class="ldb-input-group">
                             <label class="ldb-label" for="ldb-workspace-select">\u6570\u636E\u5E93 / \u9875\u9762</label>
@@ -27063,7 +27064,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                             <button class="gclip-btn gclip-btn-secondary" id="gclip-oauth-clear" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">\u65AD\u5F00\u6388\u6743</button>
                         </div>
                         <div id="gclip-oauth-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);"></div>
-                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">\u516C\u5F00 OAuth \u9002\u5408\u4E2A\u4EBA\u81EA\u5EFA\u96C6\u6210\uFF1B\u9700\u5728\u96C6\u6210\u540E\u53F0\u6CE8\u518C Redirect URI\uFF08\u542B\u672B\u5C3E\u659C\u6760\uFF09\uFF0C\u4E14\u96C6\u6210\u901A\u8FC7 Notion \u5BA1\u6838\u540E\u6388\u6743\u94FE\u63A5\u624D\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\u3002\u654F\u611F\u51ED\u8BC1\u4FDD\u5B58\u5728\u6D4F\u89C8\u5668\u672C\u5730\uFF08GM \u5B58\u50A8\uFF09\uFF0C\u811A\u672C\u66F4\u65B0\u540E\u65E0\u9700\u91CD\u65B0\u8F93\u5165\u3002</div>
+                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">\u516C\u5F00 OAuth \u9002\u5408\u4E2A\u4EBA\u81EA\u5EFA\u96C6\u6210\uFF1BRedirect URI \u63A8\u8350\u5171\u4EAB\u56DE\u8C03 https://smith-106.github.io/LD-Notion/oauth-callback\uFF08\u4E0E Notion \u540E\u53F0\u4E00\u81F4\uFF1B\u52FF\u586B https://www.notion.so/\uFF09\uFF0C\u4E14\u96C6\u6210\u901A\u8FC7 Notion \u5BA1\u6838\u540E\u6388\u6743\u94FE\u63A5\u624D\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\u3002\u654F\u611F\u51ED\u8BC1\u4FDD\u5B58\u5728\u6D4F\u89C8\u5668\u672C\u5730\uFF08GM \u5B58\u50A8\uFF09\uFF0C\u811A\u672C\u66F4\u65B0\u540E\u65E0\u9700\u91CD\u65B0\u8F93\u5165\u3002</div>
                     </div>
                     <div class="gclip-field">
                         <label for="gclip-export-type">\u5BFC\u51FA\u76EE\u6807\u7C7B\u578B</label>

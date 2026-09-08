@@ -280,7 +280,7 @@ const NotionSiteUI = {
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-notion-oauth-clear" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-xl);">断开授权</button>
                         </div>
                         <div class="ldb-tip" id="ldb-notion-oauth-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                        <div class="ldb-tip">适用于 Notion 公开集成。请确认已在集成后台逐字符注册 Redirect URI（含末尾斜杠），且集成已提交 Notion 审核（Authorization URL 在审核通过后才生效）。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID。敏感凭证保存在浏览器本地（GM 存储），脚本更新后无需重新输入。</div>
+                        <div class="ldb-tip">适用于 Notion 公开集成。Redirect URI 推荐共享回调 https://smith-106.github.io/LD-Notion/oauth-callback（与 Notion 后台逐字符一致；勿再填 https://www.notion.so/）。集成须提交 Notion 审核（Authorization URL 在审核通过后才生效）。若授权页提示「客户端 ID 缺失或不完整」，请核对 Client ID 为完整 UUID。敏感凭证保存在浏览器本地（GM 存储），脚本更新后无需重新输入。</div>
                     </div>
                     <div class="ldb-input-group">
                         <label class="ldb-label" for="ldb-notion-ai-target-db">数据库 / 页面</label>

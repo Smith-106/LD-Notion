@@ -120,6 +120,7 @@ describe("AT-003: Config 纯函数", () => {
 
         it("specific default values are correct", () => {
             expect(CONFIG.DEFAULTS.notionAuthMode).toBe("manual");
+            expect(CONFIG.DEFAULTS.notionOauthRedirectUri).toBe("https://smith-106.github.io/LD-Notion/oauth-callback");
             expect(CONFIG.DEFAULTS.imgFilter).toBe("all");
             expect(CONFIG.DEFAULTS.imgMode).toBe("external");
             expect(CONFIG.DEFAULTS.permissionLevel).toBe(1);

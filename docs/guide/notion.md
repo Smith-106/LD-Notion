@@ -24,10 +24,11 @@ LD-Notion 需要 Notion 授权后才能读取工作区、创建数据库条目�
 如果你使用公开集成授权：
 
 1. 将 Notion 集成改为 Public。
-2. 添加 Redirect URI，推荐使用 `https://www.notion.so/`。
-3. 复制 `Client ID` 和 `Client Secret`。
-4. 在 LD-Notion 面板填写 OAuth 配置（无需预先初始化凭证保险箱）。
-5. 点击 `一键授权`，授权完成后自动把 access token / refresh token 保存到浏览器本地 GM 存储。
+2. 添加 Redirect URI，推荐使用共享文档站回调 `https://smith-106.github.io/LD-Notion/oauth-callback`（与面板默认值一致；终端用户无需自建网站）。
+3. **不要**再登记 `https://www.notion.so/`：Notion 新「New connection」表单会报 “Enter a valid redirect URI”，旧 notion.so 拦截技巧已过时。
+4. 复制 `Client ID` 和 `Client Secret`（个人自建集成仍可自行粘贴；Redirect URI 用共享地址）。
+5. 在 LD-Notion 面板填写 OAuth 配置（无需预先初始化凭证保险箱），Redirect URI 须与 Notion 后台逐字符一致。
+6. 点击 `一键授权`，授权完成后跳转到回调页，脚本 / 扩展自动把 access token / refresh token 保存到浏览器本地 GM 存储。
 
 ::: warning 注意
 LD-Notion 是纯前端运行。自 v3.12.0 起，OAuth 三键（`Client Secret`、access token、refresh token）与手动 `secret_` Token 保存在浏览器本地 GM 存储中，以保证授权回调跨页面可读；AI API Key、GitHub Token 等其它敏感凭证仍走本地加密保险箱。审计日志对所有敏感键统一脱敏。该模式更适合个人自建公开集成，不适合把共享生产级 secret 放到前端。

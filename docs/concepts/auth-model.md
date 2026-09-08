@@ -15,7 +15,7 @@ Auth Model 解释 LD-Notion 如何获得 Notion 访问能力。OAuth 是推荐�
 | Dimension | OAuth | manual token |
 | --- | --- | --- |
 | Recommended status | 推荐路径，适合日常使用。 | advanced fallback，适合个人集成、调试和 OAuth 不可用时使用。 |
-| Setup | 配置 Client ID、Client Secret、Redirect URI 后点击一键授权。 | 在 Notion 创建 Internal Integration，复制 `secret_` token。 |
+| Setup | 配置 Client ID、Client Secret、Redirect URI（推荐共享 Pages 回调 `https://smith-106.github.io/LD-Notion/oauth-callback`；勿用已失效的 `https://www.notion.so/`）后点击一键授权。 | 在 Notion 创建 Internal Integration，复制 `secret_` token。 |
 | Stored locally | `Client ID`、`Redirect URI`、workspace meta 保存在本地配置；所有敏感凭证自 v3.14.2 起统一保存在浏览器本地 GM 存储（明文）以保证跨页/更新后可读，审计日志由 `REDACT_IN_LOGS` 统一脱敏。 | Integration token 同样保存在浏览器本地 GM 存储。 |
 | Refresh | access token 可通过 refresh token 续签。 | 不支持自动 refresh；失效后需要重新复制。 |
 | User effort | 初次配置稍多，后续较少。 | 每个用户都需要理解 Integration 与 Connections。 |
@@ -71,7 +71,7 @@ Notion 授权只说明 token 有机会访问 workspace，不保证目标已经�
 
 | Failure | Likely cause | Fix |
 | --- | --- | --- |
-| OAuth callback failed | Redirect URI 不一致、state 过期或配置缺失。 | 对齐 Notion 后台与面板中的 Redirect URI。 |
+| OAuth callback failed | Redirect URI 不一致、state 过期或配置缺失；或仍使用已被 Notion 拒绝的 `https://www.notion.so/`。 | 双方改为共享回调 `https://smith-106.github.io/LD-Notion/oauth-callback` 并逐字符对齐。 |
 | Workspace list empty | Integration 未连接任何目标。 | 在 Notion 页面或数据库的 `Connections` 中添加 Integration。 |
 | `401` | token 过期、错误、撤销或被手动覆盖。 | OAuth 重新授权，或更新 manual token。 |
 | `403` | Integration 没有目标权限。 | 检查 Capabilities 与目标 Connections。 |
@@ -96,6 +96,11 @@ Notion 授权只说明 token 有机会访问 workspace，不保证目标已经�
 - **更新路径 401 风暴消除（v3.14.13）**：Bookmark/RSS 自动导入器每项开工前经 `getAccessToken("")` 重读 token（对齐导出路径 v3.14.7 模式），`isAuthTerminal` 终态抛原错误 fail-fast 中止整批（含归档阶段），`autoImportAborted` 透传 authCode 供 UI 按场景分支文案。
 - **setup 首触点透传（v3.14.13）**：`setupDatabaseProperties` 的 `GET /databases` 错误透传 `isAuthTerminal`/`authCode`——token 失效最常见的首个触点此前被包装成普通 Error，场景文案分支不可达。
 - **clearConnection 无条件清残留（v3.14.13）**：断开授权/清除按钮无条件清 `NOTION_API_KEY`（此前仅 oauth 模式清，manual 模式下 OAuth 残留 access_token 覆盖的键永不清除 → 定时更新仍直发残留 token 401）；按钮文案明示「清除全部本地凭据(含手动 API Key)」。
+
+## v3.14.14 认证语义变更
+
+- **共享 GitHub Pages 回调**：默认 Redirect URI 从 `https://www.notion.so/` 改为 `https://smith-106.github.io/LD-Notion/oauth-callback`（VitePress `cleanUrls`，无尾斜杠）。Notion 新连接表单拒绝登记 notion.so；旧「在 Notion 页面拦截 `?code=`」已过时。终端用户共用作者托管着陆页，不必自建站点；个人 Client ID/Secret 粘贴模型不变。
+- **匹配面**：userscript `@match` 与扩展 content script 覆盖 `smith-106.github.io`，以便在回调页读取 query。
 
 ## Contract
 - manual token 是 advanced fallback。
