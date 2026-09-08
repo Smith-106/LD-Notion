@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.15
+// @version      3.14.16
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -75,7 +75,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.14.15",
+        SCRIPT_VERSION: "3.14.16",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -169,6 +169,8 @@
           BOOKMARK_SOURCE: "ldb_bookmark_source",
           LINUXDO_IMPORT_DEDUP_MODE: "ldb_linuxdo_import_dedup_mode",
           BOOKMARK_IMPORT_DEDUP_MODE: "ldb_bookmark_import_dedup_mode",
+          // v3.14.16: 导出状态依据（本地账本 | Notion 工作区快照）
+          EXPORT_STATUS_SOURCE: "ldb_export_status_source",
           AI_CATEGORY_AUTO_DEDUP: "ldb_ai_category_auto_dedup",
           // 更新检查
           UPDATE_AUTO_CHECK_ENABLED: "ldb_update_auto_check_enabled",
@@ -218,6 +220,8 @@
         // 默认值
         DEFAULTS: {
           notionAuthMode: "manual",
+          exportStatusSource: "local",
+          // local | notion
           notionOauthRedirectUri: "https://smith-106.github.io/LD-Notion/oauth-callback",
           onlyFirst: false,
           onlyOp: false,
@@ -2527,6 +2531,7 @@
         },
         setAuthMode: (mode) => {
           Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_AUTH_MODE, mode === "oauth" ? "oauth" : "manual");
+          NotionOAuth2.syncRegisteredControls();
         },
         getConfig: () => ({
           // 纵深防御(三模型共识验证轮):存量脏值(隐形字符)在读取层剥离,续签/授权不再携带
@@ -2594,7 +2599,6 @@
         setManualApiKey: async (apiKey = "") => {
           const normalized = String(apiKey || "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
           Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, normalized);
-          if (normalized) NotionOAuth2.setAuthMode("manual");
           NotionOAuth2.syncApiKeyInputs(normalized);
           NotionOAuth2.syncRegisteredControls();
           if (normalized) {
@@ -2871,6 +2875,34 @@
             console.warn("[LD-Notion] OAuth \u8DE8\u9875\u76D1\u542C\u6CE8\u518C\u5931\u8D25", (error == null ? void 0 : error.message) || error);
           }
         },
+        // v3.14.16: 同步认证方式单选 / 状态行 / 分区弱化（主面板 / Notion 站 / 通用剪藏共用）
+        syncAuthModeUI: (root = document) => {
+          if (!root || typeof root.querySelector !== "function") return;
+          const mode = NotionOAuth2.getAuthMode();
+          const manualRadio = root.querySelector('[data-ldb-auth-mode="manual"]');
+          const oauthRadio = root.querySelector('[data-ldb-auth-mode="oauth"]');
+          if (manualRadio) manualRadio.checked = mode === "manual";
+          if (oauthRadio) oauthRadio.checked = mode === "oauth";
+          const statusEl = root.querySelector("[data-ldb-auth-mode-status]");
+          if (statusEl) {
+            if (mode === "oauth") {
+              const connected = NotionOAuth2.isOAuthConnected();
+              statusEl.textContent = connected ? "\u5F53\u524D\u542F\u7528\uFF1AOAuth\uFF08\u5DF2\u8FDE\u63A5\uFF09" : "\u5F53\u524D\u542F\u7528\uFF1AOAuth\uFF08\u672A\u6388\u6743\uFF09";
+            } else {
+              statusEl.textContent = "\u5F53\u524D\u542F\u7528\uFF1AAPI Key";
+            }
+          }
+          const manualSection = root.querySelector('[data-ldb-auth-section="manual"]');
+          const oauthSection = root.querySelector('[data-ldb-auth-section="oauth"]');
+          if (manualSection) {
+            manualSection.classList.toggle("ldb-auth-section-muted", mode !== "manual");
+            manualSection.classList.toggle("ldb-auth-section-active", mode === "manual");
+          }
+          if (oauthSection) {
+            oauthSection.classList.toggle("ldb-auth-section-muted", mode !== "oauth");
+            oauthSection.classList.toggle("ldb-auth-section-active", mode === "oauth");
+          }
+        },
         attachControls: ({ root, selectors, notify } = {}) => {
           if (!root || !selectors) return;
           const get = (name) => root.querySelector(selectors[name]);
@@ -2914,6 +2946,7 @@
             fields.authorizeBtn.textContent = status.connected ? "\u{1F504} \u91CD\u65B0\u6388\u6743" : "\u{1F510} \u4E00\u952E\u6388\u6743";
             fields.clearBtn.textContent = status.connected ? "\u65AD\u5F00 OAuth \u5E76\u6E05\u9664\u672C\u5730\u51ED\u636E" : "\u6E05\u9664\u672C\u5730\u51ED\u636E(\u542B\u624B\u52A8 API Key)";
             fields.clearBtn.disabled = !status.connected && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
+            NotionOAuth2.syncAuthModeUI(root);
           };
           const saveFormConfig = async () => {
             const clientIdRaw = fields.clientIdInput.value.trim();
@@ -2937,6 +2970,28 @@
             });
           };
           let warnedDefaultRedirectUri = false;
+          root.querySelectorAll("[data-ldb-auth-mode]").forEach((radio) => {
+            if (radio.dataset.ldbAuthModeBound === "1") return;
+            radio.dataset.ldbAuthModeBound = "1";
+            radio.addEventListener("change", async () => {
+              if (!radio.checked) return;
+              const next = radio.getAttribute("data-ldb-auth-mode") === "oauth" ? "oauth" : "manual";
+              NotionOAuth2.setAuthMode(next);
+              if (next === "manual") {
+                const apiInput = root.querySelector("#ldb-api-key, #ldb-notion-api-key, #gclip-api-key-input");
+                const live = String((apiInput == null ? void 0 : apiInput.value) || "").trim();
+                if (live) {
+                  try {
+                    await NotionOAuth2.setManualApiKey(live);
+                  } catch {
+                  }
+                }
+              }
+              if (typeof notify === "function") {
+                notify(next === "oauth" ? "\u5DF2\u5207\u6362\u4E3A\u516C\u5F00 OAuth" : "\u5DF2\u5207\u6362\u4E3A API Key\uFF08Internal\uFF09", "success");
+              }
+            });
+          });
           [fields.clientIdInput, fields.clientSecretInput, fields.redirectUriInput].forEach((input) => {
             input.addEventListener("change", async () => {
               try {
@@ -18505,6 +18560,15 @@ ${report}
                 accent-color: var(--ldb-ui-accent);
             }
 
+            .ldb-auth-section-muted {
+                opacity: 0.55;
+                transition: opacity 0.15s ease;
+            }
+
+            .ldb-auth-section-active {
+                opacity: 1;
+            }
+
             .ldb-toggle-section {
                 display: flex;
                 justify-content: space-between;
@@ -19531,10 +19595,25 @@ ${report}
                 </button>
                 <div class="ldb-notion-toggle-content collapsed" id="ldb-notion-settings-content">
                     <div class="ldb-input-group ldb-mt-12">
+                        <label class="ldb-label">\u8BA4\u8BC1\u65B9\u5F0F</label>
+                        <div class="ldb-checkbox-group ldb-mb-8" role="radiogroup" aria-label="Notion \u8BA4\u8BC1\u65B9\u5F0F">
+                            <label class="ldb-checkbox-item">
+                                <input type="radio" name="ldb-notion-auth-mode" data-ldb-auth-mode="manual" id="ldb-notion-auth-mode-manual" value="manual">
+                                <span>\u4F7F\u7528 API Key\uFF08Internal\uFF09</span>
+                            </label>
+                            <label class="ldb-checkbox-item">
+                                <input type="radio" name="ldb-notion-auth-mode" data-ldb-auth-mode="oauth" id="ldb-notion-auth-mode-oauth" value="oauth">
+                                <span>\u4F7F\u7528\u516C\u5F00 OAuth</span>
+                            </label>
+                        </div>
+                        <div class="ldb-tip" data-ldb-auth-mode-status id="ldb-notion-auth-mode-status">\u5F53\u524D\u542F\u7528\uFF1AAPI Key</div>
+                        <div class="ldb-tip">API Key \u4E0E OAuth \u51ED\u8BC1\u90FD\u53EF\u9884\u5148\u586B\u5199\uFF0C\u4F46\u53EA\u6709\u6240\u9009\u6A21\u5F0F\u4F1A\u88AB\u5BFC\u51FA\u4F7F\u7528\u3002</div>
+                    </div>
+                    <div class="ldb-input-group" data-ldb-auth-section="manual" id="ldb-notion-auth-section-manual">
                         <label class="ldb-label" for="ldb-notion-api-key">Notion API Key</label>
                         <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx..." data-touched="false">
                     </div>
-                    <div class="ldb-input-group">
+                    <div class="ldb-input-group" data-ldb-auth-section="oauth" id="ldb-notion-auth-section-oauth">
                         <label class="ldb-label">Notion OAuth\uFF08\u516C\u5F00\u96C6\u6210\uFF09</label>
                         <input type="text" class="ldb-input" id="ldb-notion-oauth-client-id" placeholder="Client ID" aria-label="OAuth Client ID">
                         <input type="password" class="ldb-input ldb-mt-8" id="ldb-notion-oauth-client-secret" placeholder="Client Secret" aria-label="OAuth Client Secret">
@@ -21278,7 +21357,74 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }
           return String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
         },
-        isBookmarkKeyExported: (bookmarkKey) => {
+        // v3.14.16: 导出状态依据（本地账本 | Notion 工作区快照只读覆盖）
+        getExportStatusSource: () => {
+          const value = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_STATUS_SOURCE, CONFIG2.DEFAULTS.exportStatusSource);
+          return value === "notion" ? "notion" : "local";
+        },
+        setExportStatusSource: (source) => {
+          Storage2.set(
+            CONFIG2.STORAGE_KEYS.EXPORT_STATUS_SOURCE,
+            source === "notion" ? "notion" : "local"
+          );
+        },
+        hasWorkspaceExportSnapshot: () => {
+          const snap = UI2().workspaceVisualSnapshot;
+          return !!(snap && snap.scannedAt);
+        },
+        getWorkspaceExportedUrlSet: () => {
+          var _a;
+          const records = (_a = UI2().workspaceVisualSnapshot) == null ? void 0 : _a.records;
+          const set = /* @__PURE__ */ new Set();
+          if (!Array.isArray(records)) return set;
+          records.forEach((record) => {
+            const url = UI2().normalizeWorkspaceInsightUrl((record == null ? void 0 : record.sourceUrl) || (record == null ? void 0 : record.url) || "");
+            if (url) set.add(url);
+          });
+          return set;
+        },
+        buildBookmarkCanonicalUrl: (bookmark) => {
+          var _a;
+          if (!bookmark) return "";
+          if (bookmark.source === "github") {
+            return UI2().normalizeWorkspaceInsightUrl(((_a = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _a.html_url) || "");
+          }
+          const topicId = String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
+          if (!topicId) return "";
+          return UI2().normalizeWorkspaceInsightUrl(`https://linux.do/t/${topicId}`);
+        },
+        buildBookmarkKeyCanonicalUrl: (bookmarkKey) => {
+          if (!bookmarkKey) return "";
+          if (!String(bookmarkKey).startsWith("gh:")) {
+            return UI2().normalizeWorkspaceInsightUrl(`https://linux.do/t/${bookmarkKey}`);
+          }
+          const bookmarks = Array.isArray(UI2().bookmarks) ? UI2().bookmarks : [];
+          const hit = bookmarks.find((b) => UI2().getBookmarkKey(b) === bookmarkKey);
+          if (hit) return UI2().buildBookmarkCanonicalUrl(hit);
+          const parts = String(bookmarkKey).split(":");
+          const sourceType = parts[1] || "";
+          const itemKey = parts.slice(2).join(":");
+          if (!itemKey) return "";
+          if (sourceType === "gists") {
+            return UI2().normalizeWorkspaceInsightUrl(`https://gist.github.com/${itemKey}`);
+          }
+          return UI2().normalizeWorkspaceInsightUrl(`https://github.com/${itemKey}`);
+        },
+        // 只读覆盖：notion 模式查工作区快照；无快照时全部视为待导出（避免静默跳过）
+        isExportedForUi: (bookmarkOrKey) => {
+          const isKey = typeof bookmarkOrKey === "string" || typeof bookmarkOrKey === "number";
+          const bookmarkKey = isKey ? String(bookmarkOrKey || "") : UI2().getBookmarkKey(bookmarkOrKey);
+          if (!bookmarkKey) return false;
+          if (UI2().getExportStatusSource() === "notion") {
+            if (!UI2().hasWorkspaceExportSnapshot()) return false;
+            if (!bookmarkKey.startsWith("gh:") && !Utils2.isLinuxDoDedupStrict()) return false;
+            const url = isKey ? UI2().buildBookmarkKeyCanonicalUrl(bookmarkKey) : UI2().buildBookmarkCanonicalUrl(bookmarkOrKey);
+            if (!url) return false;
+            return UI2().getWorkspaceExportedUrlSet().has(url);
+          }
+          return UI2().isBookmarkKeyExportedLocal(bookmarkKey);
+        },
+        isBookmarkKeyExportedLocal: (bookmarkKey) => {
           if (!bookmarkKey) return false;
           const dedupStrict = Utils2.isLinuxDoDedupStrict();
           if (!bookmarkKey.startsWith("gh:")) {
@@ -21293,8 +21439,39 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }
           return GitHubAPI2.isExported(itemKey);
         },
+        isBookmarkKeyExported: (bookmarkKey) => {
+          return UI2().isExportedForUi(bookmarkKey);
+        },
         isBookmarkExported: (bookmark) => {
-          return UI2().isBookmarkKeyExported(UI2().getBookmarkKey(bookmark));
+          return UI2().isExportedForUi(bookmark);
+        },
+        updateExportStatusTip: () => {
+          var _a;
+          const tip = (_a = UI2().refs) == null ? void 0 : _a.exportStatusTip;
+          if (!tip) return;
+          const source = UI2().getExportStatusSource();
+          if (source !== "notion") {
+            tip.textContent = "\u300C\u672C\u5730\u8D26\u672C\u300D\u6CBF\u7528\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55\uFF1B\u5207\u6362\u5230\u300CNotion \u5DE5\u4F5C\u533A\u300D\u540E\u6309\u6700\u8FD1\u4E00\u6B21\u5DE5\u4F5C\u533A\u5FEB\u7167\u4E2D\u7684\u94FE\u63A5\u5224\u5B9A\u5DF2\u5BFC\u51FA\uFF08\u53EA\u8BFB\uFF0C\u4E0D\u6539\u672C\u5730\u8D26\u672C\uFF09\u3002";
+            return;
+          }
+          if (!UI2().hasWorkspaceExportSnapshot()) {
+            tip.textContent = "\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\uFF1A\u5F53\u524D\u65E0 Notion \u5FEB\u7167\uFF0C\u5DF2\u52A0\u8F7D\u9879\u5747\u6309\u5F85\u5BFC\u51FA\u663E\u793A\uFF0C\u907F\u514D\u8BEF\u8DF3\u8FC7\u5BFC\u51FA\u3002";
+            return;
+          }
+          tip.textContent = "\u5BFC\u51FA\u72B6\u6001\u4F9D\u636E Notion \u5DE5\u4F5C\u533A\u5FEB\u7167\uFF08\u53EA\u8BFB\u8986\u76D6\uFF0C\u4E0D\u6539\u672C\u5730\u8D26\u672C\uFF09\u3002\u6E05\u7A7A Notion \u540E\u5237\u65B0\u5DE5\u4F5C\u533A\u5373\u53EF\u5168\u90E8\u56DE\u5230\u5F85\u5BFC\u51FA\u3002";
+        },
+        recomputeExportStatusFromNotion: () => {
+          var _a, _b, _c, _d, _e, _f, _g, _h;
+          UI2().updateExportStatusTip();
+          (_b = (_a = UI2()).recomputeExportStats) == null ? void 0 : _b.call(_a);
+          (_d = (_c = UI2()).renderBookmarkList) == null ? void 0 : _d.call(_c);
+          (_f = (_e = UI2()).updateSelectCount) == null ? void 0 : _f.call(_e);
+          (_h = (_g = UI2()).renderVisualSummary) == null ? void 0 : _h.call(_g);
+          return {
+            source: UI2().getExportStatusSource(),
+            hasSnapshot: UI2().hasWorkspaceExportSnapshot(),
+            urlCount: UI2().getWorkspaceExportedUrlSet().size
+          };
         },
         getSelectedBookmarks: () => {
           if (!Array.isArray(UI2().bookmarks) || UI2().bookmarks.length === 0) return [];
@@ -22342,6 +22519,12 @@ ${AIService2.isolateContent(JSON.stringify({
             UI2().workspaceInsightMarkdown = UI2().buildWorkspaceInsightMarkdown(UI2().buildWorkspaceVisualizationModel(UI2().workspaceVisualSnapshot), "");
             UI2().workspaceInsightUpdatedAt = Date.now();
             UI2().renderWorkspaceVisualSummary();
+            if (typeof UI2().recomputeExportStatusFromNotion === "function") {
+              try {
+                UI2().recomputeExportStatusFromNotion();
+              } catch {
+              }
+            }
             const model = UI2().buildWorkspaceVisualizationModel();
             UI2().setWorkspaceVisualStatus(
               reconciled > 0 ? `\u5DF2\u626B\u63CF ${model.totalPages} \u4E2A\u9875\u9762\uFF0C\u8986\u76D6 ${model.totalDatabases} \u4E2A\u6570\u636E\u5E93\uFF1B\u5E76\u5728\u5DE5\u4F5C\u533A\u4E2D\u8BC6\u522B\u5230 ${reconciled} \u9879\u5DF2\u5BFC\u51FA\u7684\u5185\u5BB9\uFF0C\u5DF2\u540C\u6B65\u66F4\u65B0\u5BFC\u51FA\u72B6\u6001\u3002` : `\u5DF2\u626B\u63CF ${model.totalPages} \u4E2A\u9875\u9762\uFF0C\u8986\u76D6 ${model.totalDatabases} \u4E2A\u6570\u636E\u5E93\u3002`,
@@ -22604,6 +22787,9 @@ ${AIService2.isolateContent(JSON.stringify({
             autoImportOptions: panel.querySelector("#ldb-auto-import-options"),
             autoImportInterval: panel.querySelector("#ldb-auto-import-interval"),
             linuxdoDedupModeSelect: panel.querySelector("#ldb-linuxdo-dedup-mode"),
+            exportStatusSourceSelect: panel.querySelector("#ldb-export-status-source"),
+            exportStatusTip: panel.querySelector("#ldb-export-status-tip"),
+            recomputeExportStatusBtn: panel.querySelector("#ldb-recompute-export-status"),
             bookmarkDedupModeSelect: panel.querySelector("#ldb-bookmark-dedup-mode"),
             aiCategoryAutoDedupCheckbox: panel.querySelector("#ldb-ai-category-auto-dedup"),
             crossSourceModeSelect: panel.querySelector("#ldb-cross-source-mode"),
@@ -22819,6 +23005,17 @@ ${AIService2.isolateContent(JSON.stringify({
                                 </select>
                             </div>
                             <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
+                                <label for="ldb-export-status-source" style="white-space: nowrap;">\u5BFC\u51FA\u72B6\u6001\u4F9D\u636E</label>
+                                <select id="ldb-export-status-source" class="ldb-input ldb-flex-1">
+                                    <option value="local">\u672C\u5730\u8D26\u672C</option>
+                                    <option value="notion">Notion \u5DE5\u4F5C\u533A</option>
+                                </select>
+                            </div>
+                            <div class="ldb-tip" id="ldb-export-status-tip">\u300C\u672C\u5730\u8D26\u672C\u300D\u6CBF\u7528\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55\uFF1B\u300CNotion \u5DE5\u4F5C\u533A\u300D\u6309\u6700\u8FD1\u4E00\u6B21\u5DE5\u4F5C\u533A\u5FEB\u7167\u4E2D\u7684\u94FE\u63A5\u5224\u5B9A\u5DF2\u5BFC\u51FA\uFF08\u53EA\u8BFB\uFF0C\u4E0D\u6539\u672C\u5730\u8D26\u672C\uFF09\u3002</div>
+                            <div class="ldb-setting-row ldb-mb-8">
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-recompute-export-status" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);">\u6309 Notion \u91CD\u7B97\u5BFC\u51FA\u72B6\u6001</button>
+                            </div>
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <label for="ldb-bookmark-dedup-mode" style="white-space: nowrap;">\u4E66\u7B7E\u5BFC\u5165\u53BB\u91CD</label>
                                 <select id="ldb-bookmark-dedup-mode" class="ldb-input ldb-flex-1">
                                     <option value="strict">\u81EA\u52A8\u53BB\u91CD</option>
@@ -23012,13 +23209,28 @@ ${AIService2.isolateContent(JSON.stringify({
                     <div class="ldb-section">
                         <div class="ldb-section-title">Notion \u914D\u7F6E</div>
                         <div class="ldb-input-group">
+                            <label class="ldb-label">\u8BA4\u8BC1\u65B9\u5F0F</label>
+                            <div class="ldb-checkbox-group ldb-mb-8" role="radiogroup" aria-label="Notion \u8BA4\u8BC1\u65B9\u5F0F">
+                                <label class="ldb-checkbox-item">
+                                    <input type="radio" name="ldb-auth-mode" data-ldb-auth-mode="manual" id="ldb-auth-mode-manual" value="manual">
+                                    <span>\u4F7F\u7528 API Key\uFF08Internal\uFF09</span>
+                                </label>
+                                <label class="ldb-checkbox-item">
+                                    <input type="radio" name="ldb-auth-mode" data-ldb-auth-mode="oauth" id="ldb-auth-mode-oauth" value="oauth">
+                                    <span>\u4F7F\u7528\u516C\u5F00 OAuth</span>
+                                </label>
+                            </div>
+                            <div class="ldb-tip" data-ldb-auth-mode-status id="ldb-auth-mode-status">\u5F53\u524D\u542F\u7528\uFF1AAPI Key</div>
+                            <div class="ldb-tip">API Key \u4E0E OAuth \u51ED\u8BC1\u90FD\u53EF\u9884\u5148\u586B\u5199\uFF0C\u4F46\u53EA\u6709\u4E0A\u65B9\u6240\u9009\u6A21\u5F0F\u4F1A\u88AB\u5BFC\u51FA / getAccessToken \u4F7F\u7528\u3002</div>
+                        </div>
+                        <div class="ldb-input-group" data-ldb-auth-section="manual" id="ldb-auth-section-manual">
                                                         <label class="ldb-label" for="ldb-api-key">API Key</label>
                             <input type="password" class="ldb-input" id="ldb-api-key" placeholder="secret_xxx...">
                             <div class="ldb-tip">
                                 \u5728 <a href="https://www.notion.so/my-integrations" target="_blank" class="ldb-link">Notion Integrations</a> \u521B\u5EFA
                             </div>
                         </div>
-                        <div class="ldb-input-group">
+                        <div class="ldb-input-group" data-ldb-auth-section="oauth" id="ldb-auth-section-oauth">
                             <label class="ldb-label">\u516C\u5F00 OAuth \u6388\u6743\uFF08\u53EF\u9009\uFF09</label>
                             <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID" aria-label="OAuth Client ID">
                             <input type="password" class="ldb-input ldb-mt-8" id="ldb-oauth-client-secret" placeholder="Client Secret" aria-label="OAuth Client Secret">
@@ -23439,7 +23651,7 @@ ${AIService2.isolateContent(JSON.stringify({
                             <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-github-exported">\u6E05\u9664 GitHub \u5DF2\u5BFC\u51FA\u8BB0\u5F55</button>
                             <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-bookmark-exported">\u6E05\u9664\u4E66\u7B7E\u5DF2\u5BFC\u51FA\u8BB0\u5F55</button>
                         </div>
-                        <div class="ldb-tip">\u4EC5\u6E05\u9664\u672C\u5730\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u4E0D\u5F71\u54CD Notion \u4E2D\u5DF2\u6709\u5185\u5BB9\uFF1B\u6E05\u9664\u540E\u5BF9\u5E94\u6765\u6E90\u53EF\u518D\u6B21\u5BFC\u51FA\u3002</div>
+                        <div class="ldb-tip">\u4EC5\u6E05\u9664\u672C\u5730\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u4E0D\u5F71\u54CD Notion \u4E2D\u5DF2\u6709\u5185\u5BB9\uFF1B\u6E05\u9664\u540E\u5BF9\u5E94\u6765\u6E90\u53EF\u518D\u6B21\u5BFC\u51FA\u3002\u82E5\u300C\u5BFC\u51FA\u72B6\u6001\u4F9D\u636E\u300D\u4E3A Notion \u5DE5\u4F5C\u533A\uFF0C\u6E05\u7A7A Notion \u540E\u5237\u65B0\u5DE5\u4F5C\u533A\u5373\u53EF\u5168\u90E8\u56DE\u5230\u5F85\u5BFC\u51FA\uFF0C\u65E0\u9700\u5148\u6E05\u672C\u5730\u8D26\u672C\u3002</div>
                         <!-- F-UI-04:AI \u8C03\u7528\u94FE\u8FFD\u8E2A\u53EF\u89C2\u6D4B\u5165\u53E3 -->
                         <div class="ldb-input-group ldb-mt-12">
                             <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-view-ai-traces">\u67E5\u770B AI \u8C03\u7528\u94FE</button>
@@ -24743,7 +24955,10 @@ ${AIService2.isolateContent(JSON.stringify({
           var _a;
           const count = ((_a = UI2.selectedBookmarks) == null ? void 0 : _a.size) || 0;
           const pendingCount = UI2.selectedUnexportedCount || 0;
-          UI2.refs.selectCount.textContent = `\u5DF2\u52A0\u8F7D ${count} \u4E2A\uFF0C\u5F85\u5BFC\u51FA ${Math.max(0, pendingCount)} \u4E2A`;
+          const statusSrc = typeof UI2.getExportStatusSource === "function" ? UI2.getExportStatusSource() : "local";
+          const srcTag = statusSrc === "notion" ? "\uFF08Notion\uFF09" : "\uFF08\u672C\u5730\uFF09";
+          UI2.refs.selectCount.textContent = `\u5DF2\u52A0\u8F7D ${count} \u4E2A\uFF0C\u5F85\u5BFC\u51FA ${Math.max(0, pendingCount)} \u4E2A${srcTag}`;
+          if (typeof UI2.updateExportStatusTip === "function") UI2.updateExportStatusTip();
           const selectAll = UI2.refs.selectAll;
           if (count === 0) {
             selectAll.checked = false;
@@ -25020,6 +25235,7 @@ ${AIService2.isolateContent(JSON.stringify({
       var { PanelResize: PanelResize2 } = require_panel_resize();
       var UIEvents2 = {
         bindEvents: () => {
+          var _a;
           const UI2 = require_main_ui().UI;
           const panel = UI2.panel;
           const refs = UI2.refs || {};
@@ -25570,11 +25786,40 @@ ${AIService2.isolateContent(JSON.stringify({
           bindImportNow(refs.importNowBookmarkBtn, "\u4E66\u7B7E\u5BFC\u5165", () => BookmarkAutoImporter2.run());
           bindImportNow(refs.importNowRssBtn, "RSS \u5BFC\u5165", () => RSSAutoImporter2.run());
           refs.linuxdoDedupModeSelect.onchange = (e) => {
+            var _a2;
             const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
             Storage2.set(CONFIG2.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE, mode);
             UI2.recomputeExportStats();
             UI2.renderBookmarkList();
+            (_a2 = UI2.updateExportStatusTip) == null ? void 0 : _a2.call(UI2);
           };
+          if (refs.exportStatusSourceSelect) {
+            refs.exportStatusSourceSelect.value = UI2.getExportStatusSource();
+            refs.exportStatusSourceSelect.onchange = (e) => {
+              const source = e.target.value === "notion" ? "notion" : "local";
+              UI2.setExportStatusSource(source);
+              UI2.recomputeExportStatusFromNotion();
+              UI2.showStatus(
+                source === "notion" ? "\u5BFC\u51FA\u72B6\u6001\u6539\u4E3A\u4F9D\u636E Notion \u5DE5\u4F5C\u533A\u5FEB\u7167" : "\u5BFC\u51FA\u72B6\u6001\u6539\u4E3A\u4F9D\u636E\u672C\u5730\u8D26\u672C",
+                "success"
+              );
+            };
+          }
+          if (refs.recomputeExportStatusBtn) {
+            refs.recomputeExportStatusBtn.onclick = () => {
+              const result = UI2.recomputeExportStatusFromNotion();
+              if (UI2.getExportStatusSource() !== "notion") {
+                UI2.showStatus("\u5F53\u524D\u4E3A\u672C\u5730\u8D26\u672C\u6A21\u5F0F\uFF1B\u5207\u6362\u5230\u300CNotion \u5DE5\u4F5C\u533A\u300D\u540E\u53EF\u6309\u5FEB\u7167\u91CD\u7B97\u3002", "info");
+                return;
+              }
+              if (!result.hasSnapshot) {
+                UI2.showStatus("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u540E\u518D\u6309 Notion \u91CD\u7B97\u5BFC\u51FA\u72B6\u6001", "error");
+                return;
+              }
+              UI2.showStatus(`\u5DF2\u6309 Notion \u5FEB\u7167\u91CD\u7B97\uFF08\u8BC6\u522B\u5230 ${result.urlCount} \u6761\u94FE\u63A5\uFF0C\u672A\u6539\u672C\u5730\u8D26\u672C\uFF09`, "success");
+            };
+          }
+          (_a = UI2.updateExportStatusTip) == null ? void 0 : _a.call(UI2);
           refs.bookmarkDedupModeSelect.onchange = (e) => {
             const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
             Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_IMPORT_DEDUP_MODE, mode);
@@ -25849,7 +26094,7 @@ ${AIService2.isolateContent(JSON.stringify({
           };
           updateExportButtonState();
           refs.exportBtn.onclick = async () => {
-            var _a, _b;
+            var _a2, _b;
             if (refs.exportBtn.disabled) return;
             refs.exportBtn.disabled = true;
             const restoreExportBtn = () => {
@@ -25973,7 +26218,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               UI2.renderBookmarkList();
               const successCount = results.success.length;
               const failCount = results.failed.length;
-              const skippedCount = ((_a = results.skipped) == null ? void 0 : _a.length) || 0;
+              const skippedCount = ((_a2 = results.skipped) == null ? void 0 : _a2.length) || 0;
               let statusMsg;
               if (results.authAborted || results.aborted === true) {
                 const authCode = String(((_b = results.authAborted) == null ? void 0 : _b.authCode) || "").toLowerCase();
@@ -27054,13 +27299,28 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
 
                 <div id="gclip-settings" style="display: ${isConfigured ? "none" : "block"};">
                     <div class="gclip-field">
+                        <label>\u8BA4\u8BC1\u65B9\u5F0F</label>
+                        <div style="display:flex;flex-wrap:wrap;gap:var(--ldb-ui-spacing-lg);align-items:center;margin-top:var(--ldb-ui-spacing-xs);" role="radiogroup" aria-label="Notion \u8BA4\u8BC1\u65B9\u5F0F">
+                            <label style="display:inline-flex;align-items:center;gap:var(--ldb-ui-spacing-sm);font-size:var(--ldb-ui-font-size-sm);cursor:pointer;">
+                                <input type="radio" name="gclip-auth-mode" data-ldb-auth-mode="manual" id="gclip-auth-mode-manual" value="manual">
+                                <span>\u4F7F\u7528 API Key\uFF08Internal\uFF09</span>
+                            </label>
+                            <label style="display:inline-flex;align-items:center;gap:var(--ldb-ui-spacing-sm);font-size:var(--ldb-ui-font-size-sm);cursor:pointer;">
+                                <input type="radio" name="gclip-auth-mode" data-ldb-auth-mode="oauth" id="gclip-auth-mode-oauth" value="oauth">
+                                <span>\u4F7F\u7528\u516C\u5F00 OAuth</span>
+                            </label>
+                        </div>
+                        <div data-ldb-auth-mode-status id="gclip-auth-mode-status" style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-sm);">\u5F53\u524D\u542F\u7528\uFF1AAPI Key</div>
+                        <div style="font-size:var(--ldb-ui-font-size-xs);color:var(--ldb-ui-muted);margin-top:var(--ldb-ui-spacing-xs);">API Key \u4E0E OAuth \u51ED\u8BC1\u90FD\u53EF\u9884\u5148\u586B\u5199\uFF0C\u4F46\u53EA\u6709\u6240\u9009\u6A21\u5F0F\u4F1A\u88AB\u5BFC\u51FA\u4F7F\u7528\u3002</div>
+                    </div>
+                    <div class="gclip-field" data-ldb-auth-section="manual" id="gclip-auth-section-manual">
                         <label for="gclip-api-key-input">Notion API Key</label>
                         <div style="display:flex;align-items:center;gap:var(--ldb-ui-spacing-md);">
                             <input type="password" id="gclip-api-key-input" class="gclip-input" placeholder="${CredentialVault2.getFieldPlaceholder(CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "secret_...")}" value="" style="flex:1;font-size:var(--ldb-ui-font-size-sm);" autocomplete="off" />
                             <button class="gclip-btn" id="gclip-save-api-key" style="padding:var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-xl);font-size:var(--ldb-ui-font-size-sm);">\u4FDD\u5B58</button>
                         </div>
                     </div>
-                    <div class="gclip-field">
+                    <div class="gclip-field" data-ldb-auth-section="oauth" id="gclip-auth-section-oauth">
                         <label>Notion OAuth\uFF08\u516C\u5F00\u96C6\u6210\uFF09</label>
                         <input type="text" id="gclip-oauth-client-id" class="gclip-input" placeholder="Client ID" aria-label="OAuth Client ID">
                         <input type="password" id="gclip-oauth-client-secret" class="gclip-input" placeholder="Client Secret" aria-label="OAuth Client Secret" style="margin-top:var(--ldb-ui-spacing-md);">

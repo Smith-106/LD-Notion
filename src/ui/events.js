@@ -682,7 +682,38 @@ const UIEvents = {
             Storage.set(CONFIG.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE, mode);
             UI.recomputeExportStats();
             UI.renderBookmarkList();
+            UI.updateExportStatusTip?.();
         };
+
+        if (refs.exportStatusSourceSelect) {
+            refs.exportStatusSourceSelect.value = UI.getExportStatusSource();
+            refs.exportStatusSourceSelect.onchange = (e) => {
+                const source = e.target.value === "notion" ? "notion" : "local";
+                UI.setExportStatusSource(source);
+                UI.recomputeExportStatusFromNotion();
+                UI.showStatus(
+                    source === "notion"
+                        ? "导出状态改为依据 Notion 工作区快照"
+                        : "导出状态改为依据本地账本",
+                    "success"
+                );
+            };
+        }
+        if (refs.recomputeExportStatusBtn) {
+            refs.recomputeExportStatusBtn.onclick = () => {
+                const result = UI.recomputeExportStatusFromNotion();
+                if (UI.getExportStatusSource() !== "notion") {
+                    UI.showStatus("当前为本地账本模式；切换到「Notion 工作区」后可按快照重算。", "info");
+                    return;
+                }
+                if (!result.hasSnapshot) {
+                    UI.showStatus("请先刷新工作区后再按 Notion 重算导出状态", "error");
+                    return;
+                }
+                UI.showStatus(`已按 Notion 快照重算（识别到 ${result.urlCount} 条链接，未改本地账本）`, "success");
+            };
+        }
+        UI.updateExportStatusTip?.();
 
         refs.bookmarkDedupModeSelect.onchange = (e) => {
             const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";

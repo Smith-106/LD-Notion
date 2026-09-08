@@ -5,7 +5,7 @@
 // ===========================================
 const CONFIG = {
     // Keep in sync with package.json + userscript @version + build.js header.
-    SCRIPT_VERSION: "3.14.15",
+    SCRIPT_VERSION: "3.14.16",
 
     // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
     // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
@@ -101,6 +101,8 @@ const CONFIG = {
         BOOKMARK_SOURCE: "ldb_bookmark_source",
         LINUXDO_IMPORT_DEDUP_MODE: "ldb_linuxdo_import_dedup_mode",
         BOOKMARK_IMPORT_DEDUP_MODE: "ldb_bookmark_import_dedup_mode",
+        // v3.14.16: 导出状态依据（本地账本 | Notion 工作区快照）
+        EXPORT_STATUS_SOURCE: "ldb_export_status_source",
         AI_CATEGORY_AUTO_DEDUP: "ldb_ai_category_auto_dedup",
         // 更新检查
         UPDATE_AUTO_CHECK_ENABLED: "ldb_update_auto_check_enabled",
@@ -150,6 +152,7 @@ const CONFIG = {
     // 默认值
     DEFAULTS: {
         notionAuthMode: "manual",
+        exportStatusSource: "local", // local | notion
         notionOauthRedirectUri: "https://smith-106.github.io/LD-Notion/oauth-callback",
         onlyFirst: false,
         onlyOp: false,

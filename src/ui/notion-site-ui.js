@@ -267,10 +267,25 @@ const NotionSiteUI = {
                 </button>
                 <div class="ldb-notion-toggle-content collapsed" id="ldb-notion-settings-content">
                     <div class="ldb-input-group ldb-mt-12">
+                        <label class="ldb-label">认证方式</label>
+                        <div class="ldb-checkbox-group ldb-mb-8" role="radiogroup" aria-label="Notion 认证方式">
+                            <label class="ldb-checkbox-item">
+                                <input type="radio" name="ldb-notion-auth-mode" data-ldb-auth-mode="manual" id="ldb-notion-auth-mode-manual" value="manual">
+                                <span>使用 API Key（Internal）</span>
+                            </label>
+                            <label class="ldb-checkbox-item">
+                                <input type="radio" name="ldb-notion-auth-mode" data-ldb-auth-mode="oauth" id="ldb-notion-auth-mode-oauth" value="oauth">
+                                <span>使用公开 OAuth</span>
+                            </label>
+                        </div>
+                        <div class="ldb-tip" data-ldb-auth-mode-status id="ldb-notion-auth-mode-status">当前启用：API Key</div>
+                        <div class="ldb-tip">API Key 与 OAuth 凭证都可预先填写，但只有所选模式会被导出使用。</div>
+                    </div>
+                    <div class="ldb-input-group" data-ldb-auth-section="manual" id="ldb-notion-auth-section-manual">
                         <label class="ldb-label" for="ldb-notion-api-key">Notion API Key</label>
                         <input type="password" class="ldb-input" id="ldb-notion-api-key" placeholder="secret_xxx..." data-touched="false">
                     </div>
-                    <div class="ldb-input-group">
+                    <div class="ldb-input-group" data-ldb-auth-section="oauth" id="ldb-notion-auth-section-oauth">
                         <label class="ldb-label">Notion OAuth（公开集成）</label>
                         <input type="text" class="ldb-input" id="ldb-notion-oauth-client-id" placeholder="Client ID" aria-label="OAuth Client ID">
                         <input type="password" class="ldb-input ldb-mt-8" id="ldb-notion-oauth-client-secret" placeholder="Client Secret" aria-label="OAuth Client Secret">

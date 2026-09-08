@@ -31,6 +31,7 @@ const WHITELIST = Object.freeze({
         ldb_rss_import_dedup_mode: { scope: "shared", kind: "string" },
         ldb_linuxdo_import_dedup_mode: { scope: "shared", kind: "string" },
         ldb_bookmark_import_dedup_mode: { scope: "shared", kind: "string" },
+        ldb_export_status_source: { scope: "shared", kind: "string" },
         ldb_ai_category_auto_dedup: { scope: "shared", kind: "boolean" },
         ldb_bookmark_source: { scope: "shared", kind: "string" },
         ldb_github_import_types: { scope: "shared", kind: "string" },

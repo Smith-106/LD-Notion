@@ -134,6 +134,9 @@ const UI = {
             autoImportOptions: panel.querySelector("#ldb-auto-import-options"),
             autoImportInterval: panel.querySelector("#ldb-auto-import-interval"),
             linuxdoDedupModeSelect: panel.querySelector("#ldb-linuxdo-dedup-mode"),
+            exportStatusSourceSelect: panel.querySelector("#ldb-export-status-source"),
+            exportStatusTip: panel.querySelector("#ldb-export-status-tip"),
+            recomputeExportStatusBtn: panel.querySelector("#ldb-recompute-export-status"),
             bookmarkDedupModeSelect: panel.querySelector("#ldb-bookmark-dedup-mode"),
             aiCategoryAutoDedupCheckbox: panel.querySelector("#ldb-ai-category-auto-dedup"),
             crossSourceModeSelect: panel.querySelector("#ldb-cross-source-mode"),
@@ -351,6 +354,17 @@ const UI = {
                                 </select>
                             </div>
                             <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
+                                <label for="ldb-export-status-source" style="white-space: nowrap;">导出状态依据</label>
+                                <select id="ldb-export-status-source" class="ldb-input ldb-flex-1">
+                                    <option value="local">本地账本</option>
+                                    <option value="notion">Notion 工作区</option>
+                                </select>
+                            </div>
+                            <div class="ldb-tip" id="ldb-export-status-tip">「本地账本」沿用去重/导出记录；「Notion 工作区」按最近一次工作区快照中的链接判定已导出（只读，不改本地账本）。</div>
+                            <div class="ldb-setting-row ldb-mb-8">
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-recompute-export-status" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);">按 Notion 重算导出状态</button>
+                            </div>
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <label for="ldb-bookmark-dedup-mode" style="white-space: nowrap;">书签导入去重</label>
                                 <select id="ldb-bookmark-dedup-mode" class="ldb-input ldb-flex-1">
                                     <option value="strict">自动去重</option>
@@ -544,13 +558,28 @@ const UI = {
                     <div class="ldb-section">
                         <div class="ldb-section-title">Notion 配置</div>
                         <div class="ldb-input-group">
+                            <label class="ldb-label">认证方式</label>
+                            <div class="ldb-checkbox-group ldb-mb-8" role="radiogroup" aria-label="Notion 认证方式">
+                                <label class="ldb-checkbox-item">
+                                    <input type="radio" name="ldb-auth-mode" data-ldb-auth-mode="manual" id="ldb-auth-mode-manual" value="manual">
+                                    <span>使用 API Key（Internal）</span>
+                                </label>
+                                <label class="ldb-checkbox-item">
+                                    <input type="radio" name="ldb-auth-mode" data-ldb-auth-mode="oauth" id="ldb-auth-mode-oauth" value="oauth">
+                                    <span>使用公开 OAuth</span>
+                                </label>
+                            </div>
+                            <div class="ldb-tip" data-ldb-auth-mode-status id="ldb-auth-mode-status">当前启用：API Key</div>
+                            <div class="ldb-tip">API Key 与 OAuth 凭证都可预先填写，但只有上方所选模式会被导出 / getAccessToken 使用。</div>
+                        </div>
+                        <div class="ldb-input-group" data-ldb-auth-section="manual" id="ldb-auth-section-manual">
                                                         <label class="ldb-label" for="ldb-api-key">API Key</label>
                             <input type="password" class="ldb-input" id="ldb-api-key" placeholder="secret_xxx...">
                             <div class="ldb-tip">
                                 在 <a href="https://www.notion.so/my-integrations" target="_blank" class="ldb-link">Notion Integrations</a> 创建
                             </div>
                         </div>
-                        <div class="ldb-input-group">
+                        <div class="ldb-input-group" data-ldb-auth-section="oauth" id="ldb-auth-section-oauth">
                             <label class="ldb-label">公开 OAuth 授权（可选）</label>
                             <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID" aria-label="OAuth Client ID">
                             <input type="password" class="ldb-input ldb-mt-8" id="ldb-oauth-client-secret" placeholder="Client Secret" aria-label="OAuth Client Secret">
@@ -971,7 +1000,7 @@ const UI = {
                             <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-github-exported">清除 GitHub 已导出记录</button>
                             <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-bookmark-exported">清除书签已导出记录</button>
                         </div>
-                        <div class="ldb-tip">仅清除本地去重/导出记录，不影响 Notion 中已有内容；清除后对应来源可再次导出。</div>
+                        <div class="ldb-tip">仅清除本地去重/导出记录，不影响 Notion 中已有内容；清除后对应来源可再次导出。若「导出状态依据」为 Notion 工作区，清空 Notion 后刷新工作区即可全部回到待导出，无需先清本地账本。</div>
                         <!-- F-UI-04:AI 调用链追踪可观测入口 -->
                         <div class="ldb-input-group ldb-mt-12">
                             <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-view-ai-traces">查看 AI 调用链</button>
@@ -2478,7 +2507,10 @@ const UI = {
         const pendingCount = UI.selectedUnexportedCount || 0;
 
         // F-UI-14:已选集合含已导出项(复选框 disabled),文案改为「已加载/待导出」避免误导
-        UI.refs.selectCount.textContent = `已加载 ${count} 个，待导出 ${Math.max(0, pendingCount)} 个`;
+        const statusSrc = typeof UI.getExportStatusSource === "function" ? UI.getExportStatusSource() : "local";
+        const srcTag = statusSrc === "notion" ? "（Notion）" : "（本地）";
+        UI.refs.selectCount.textContent = `已加载 ${count} 个，待导出 ${Math.max(0, pendingCount)} 个${srcTag}`;
+        if (typeof UI.updateExportStatusTip === "function") UI.updateExportStatusTip();
 
         // 更新全选框状态
         const selectAll = UI.refs.selectAll
