@@ -335,6 +335,8 @@ BookmarkAutoImporter.run = async () => {
         let archived = 0;
         let unchanged = 0;
         let failed = 0;
+        // v3.14.17 (P0-4): 权限不足跳过独立计数——与 failed 区分,聚合提示而非静默丢弃
+        let deniedCount = 0;
 
         // 分批并发处理（每批 3 个，避免 Notion API 速率限制）
         const CONCURRENCY = 3;
@@ -420,7 +422,7 @@ BookmarkAutoImporter.run = async () => {
                     if (!OperationGuard.canExecute("createDatabasePage")) {
                         BookmarkAutoImporter._auditAutoSync("createDatabasePage", "denied",
                             { bookmarkId, itemName: bookmark.title, reason: "权限不足：自动同步建页需 level≥1" });
-                        failed++;
+                        deniedCount++;
                         if (snapshotEntry) nextSnapshot[bookmarkId] = snapshotEntry;
                         return;
                     }
@@ -456,7 +458,7 @@ BookmarkAutoImporter.run = async () => {
                     if (!OperationGuard.canExecute("updatePage")) {
                         BookmarkAutoImporter._auditAutoSync("updatePage", "denied",
                             { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, reason: "权限不足：自动同步更新需 level≥1" });
-                        failed++;
+                        deniedCount++;
                         nextSnapshot[bookmarkId] = snapshotEntry || BookmarkAutoImporter.buildSnapshotEntry(bookmark, pageMeta.pageId);
                         return;
                     }
@@ -609,21 +611,23 @@ BookmarkAutoImporter.run = async () => {
             },
         });
 
-        if (created === 0 && updated === 0 && archived === 0 && failed === 0) {
+        if (created === 0 && updated === 0 && archived === 0 && failed === 0 && deniedCount === 0) {
             BookmarkAutoImporter.updateStatus(`✅ 浏览器书签已同步，无新增变更 (${new Date().toLocaleTimeString()})`);
             return;
         }
 
+        // v3.14.17 (P0-4): 权限不足聚合提示——不再静默丢弃(仅审计日志可见)
+        const deniedMsg = deniedCount > 0 ? `，${deniedCount} 项因权限不足跳过（可在设置中提升权限级别）` : "";
         BookmarkAutoImporter.updateStatus(
             `✅ 浏览器书签自动同步完成: 新增 ${created}，更新 ${updated}，归档 ${archived}，无变更 ${unchanged}`
-            + `${failed > 0 ? `，失败 ${failed}` : ""}`
+            + `${failed > 0 ? `，失败 ${failed}` : ""}${deniedMsg}`
             + ` (${new Date().toLocaleTimeString()})`
         );
 
         if ((created + updated + archived) > 0 && typeof GM_notification === "function") {
             GM_notification({
                 title: "浏览器书签自动同步完成",
-                text: `新增 ${created}，更新 ${updated}，归档 ${archived}${failed > 0 ? `，失败 ${failed}` : ""}`,
+                text: `新增 ${created}，更新 ${updated}，归档 ${archived}${failed > 0 ? `，失败 ${failed}` : ""}${deniedMsg}`,
                 timeout: 5000,
             });
         }

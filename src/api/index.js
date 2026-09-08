@@ -2,6 +2,7 @@
 
 // 依赖引入
 const { CONFIG, MSG, SUPPORTED_FILE_TYPES } = require("../config");
+const ErrorModel = require("../errors/ErrorModel");
 const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { NotionOAuth } = require("../auth");
@@ -131,6 +132,14 @@ const NotionAPI = {
                 return doRequest(attempt + 1, token, allowRefresh);
             }
 
+            // v3.14.17 (P0-2): 重试耗尽后的 429 携带 retryCount,供 UI 展示"已自动重试 N 次仍被限流"
+            if (response.status === 429) {
+                const rateError = new Error(`Notion API 速率限制: ${result.message || response.status}`);
+                rateError.statusCode = response.status;
+                rateError.retryCount = attempt + 1;
+                throw ErrorModel.annotateError(rateError);
+            }
+
             const result = Utils.safeJsonParse(response.responseText, {});
             if (response.status >= 200 && response.status < 300) {
                 return result;
@@ -167,16 +176,18 @@ const NotionAPI = {
                 authError.statusCode = response.status;
                 // v3.14.12 (三模型共识): 透传官方 code 供 UI 按场景分支文案
                 authError.authCode = String(result?.code || "").toLowerCase() || "unauthorized";
-                throw authError;
+                throw ErrorModel.annotateError(authError);
             }
-            throw new Error(`Notion API 错误: ${result.message || response.status}`);
+            throw ErrorModel.annotateError(new Error(`Notion API 错误: ${result.message || response.status}`));
         };
 
         try {
             return await doRequest(0);
         } catch (error) {
             if (error instanceof Error) {
-                throw error;
+                // v3.14.17 (P0-1): 兜底统一标注分类(已有 ux 的幂等跳过)——所有 Notion API 错误
+                // 均带可行动文案供 UI 呈现,不再出现无指引的裸错误
+                return Promise.reject(ErrorModel.annotateError(error));
             }
             throw new Error(`解析响应失败: ${error?.message || String(error)}`);
         }

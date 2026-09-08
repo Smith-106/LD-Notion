@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.16
+// @version      3.14.17
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -75,7 +75,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.14.16",
+        SCRIPT_VERSION: "3.14.17",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -3334,6 +3334,85 @@
     }
   });
 
+  // src/errors/ErrorModel.js
+  var require_ErrorModel = __commonJS({
+    "src/errors/ErrorModel.js"(exports, module) {
+      var classifyError = (error) => {
+        const status = Number((error == null ? void 0 : error.statusCode) || (error == null ? void 0 : error.status) || 0);
+        const authCode = String((error == null ? void 0 : error.authCode) || "").toLowerCase();
+        const message = String((error == null ? void 0 : error.message) || "").toLowerCase();
+        const name = String((error == null ? void 0 : error.name) || "").toLowerCase();
+        if ((error == null ? void 0 : error.isAuthTerminal) === true || status === 401) {
+          let action = "\u8BF7\u91CD\u65B0\u590D\u5236\u4FDD\u5B58 API Key\uFF08secret_/ntn_ \u5F00\u5934\uFF09\uFF0C\u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743\u540E\u91CD\u8BD5";
+          if (authCode === "empty_token") {
+            action = "\u8BF7\u5230\u8BBE\u7F6E\u9875\u91CD\u65B0\u7C98\u8D34\u4FDD\u5B58 API Key\uFF0C\u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743";
+          } else if (authCode === "format_suspect") {
+            action = "Key \u5E94\u4EE5 secret_ \u6216 ntn_ \u5F00\u5934\uFF0C\u8BF7\u4ECE Notion \u96C6\u6210\u9875\u9762\u7528 Copy \u6309\u94AE\u91CD\u65B0\u590D\u5236\uFF08\u52FF\u542B\u7A7A\u683C/\u6362\u884C\uFF09";
+          } else if (authCode === "invalid_bearer_token" || authCode === "unauthorized" || authCode === "invalid_grant" || authCode === "invalid_client") {
+            action = "Key \u53EF\u80FD\u5DF2\u5931\u6548\uFF08\u96C6\u6210\u88AB\u5220\u9664/\u8F6E\u6362\uFF09\u6216\u590D\u5236\u4E0D\u5B8C\u6574\uFF0C\u8BF7\u91CD\u65B0\u590D\u5236\u4FDD\u5B58\uFF0C\u6216\u70B9\u9762\u677F\u300E\u91CD\u65B0\u6388\u6743\u300F\u91CD\u65B0\u8D70 OAuth";
+          }
+          return { kind: "auth", retryable: false, action };
+        }
+        if (status === 403) {
+          return {
+            kind: "permission",
+            retryable: false,
+            action: "\u8BE5\u96C6\u6210\u53EF\u80FD\u672A\u5173\u8054\u76EE\u6807\u6570\u636E\u5E93/\u9875\u9762\uFF0C\u6216\u6CA1\u6709\u5199\u5165\u6743\u9650\u3002\u8BF7\u5230 Notion \u96C6\u6210\u540E\u53F0\u786E\u8BA4\u5DF2\u8FDE\u63A5\u76EE\u6807\u5E93\uFF0C\u5E76\u68C0\u67E5\u96C6\u6210\u80FD\u529B\u91CC\u5DF2\u52FE\u9009\u8BFB\u5199\u6743\u9650"
+          };
+        }
+        if (status === 429) {
+          const retryCount = (error == null ? void 0 : error.retryCount) || 0;
+          return {
+            kind: "rate_limit",
+            retryable: true,
+            action: retryCount > 0 ? `\u5DF2\u81EA\u52A8\u91CD\u8BD5 ${retryCount} \u6B21\u4ECD\u88AB\u9650\u6D41\u3002\u8BF7\u964D\u4F4E\u5BFC\u51FA\u901F\u5EA6\uFF08\u8BBE\u7F6E\u91CC\u7684\u8BF7\u6C42\u95F4\u9694\u8C03\u5927\uFF09\uFF0C\u7A0D\u540E\u518D\u8BD5` : "Notion API \u9650\u6D41\u3002\u8BF7\u964D\u4F4E\u5BFC\u51FA\u901F\u5EA6\uFF08\u8BF7\u6C42\u95F4\u9694\u8C03\u5927\uFF09\uFF0C\u7A0D\u540E\u518D\u8BD5"
+          };
+        }
+        if (status === 404) {
+          return {
+            kind: "not_found",
+            retryable: false,
+            action: "\u76EE\u6807\u6570\u636E\u5E93/\u9875\u9762\u4E0D\u5B58\u5728\u6216\u5DF2\u88AB\u5220\u9664/\u79FB\u52A8\u3002\u8BF7\u68C0\u67E5\u6570\u636E\u5E93 ID \u4E0E\u7236\u9875\u9762 ID \u662F\u5426\u4ECD\u6709\u6548"
+          };
+        }
+        if (status === 400 || status === 409) {
+          return {
+            kind: "schema",
+            retryable: false,
+            action: status === 409 ? "\u5C5E\u6027\u7C7B\u578B\u4E0D\u5339\u914D\uFF1A\u8BF7\u624B\u52A8\u4FEE\u6539 Notion \u6570\u636E\u5E93\u4E2D\u7684\u5C5E\u6027\u7C7B\u578B\uFF0C\u6216\u5220\u9664\u540E\u91CD\u65B0\u8FD0\u884C\u81EA\u52A8\u8BBE\u7F6E" : "\u8BF7\u6C42\u4F53\u4E0E\u6570\u636E\u5E93\u7ED3\u6784\u4E0D\u5339\u914D\uFF1A\u8BF7\u68C0\u67E5\u76EE\u6807\u6570\u636E\u5E93\u5C5E\u6027\u4E0E\u811A\u672C\u8981\u6C42\u662F\u5426\u4E00\u81F4\uFF0C\u5FC5\u8981\u65F6\u70B9\u300E\u81EA\u52A8\u8BBE\u7F6E\u6570\u636E\u5E93\u5C5E\u6027\u300F\u91CD\u5EFA"
+          };
+        }
+        if (name.includes("abort") || name.includes("timeout") || /timeout|timed out|abort|网络|连接/i.test(message)) {
+          return {
+            kind: "timeout",
+            retryable: true,
+            action: "\u8FDE\u63A5\u8D85\u65F6\u6216\u5DF2\u4E2D\u65AD\uFF08\u811A\u672C 15 \u79D2\u8D85\u65F6\uFF09\u3002\u8BF7\u68C0\u67E5\u7F51\u7EDC\u4E0E\u672C\u5730\u4EE3\u7406\u8BBE\u7F6E\uFF0C\u7A0D\u540E\u91CD\u8BD5\uFF1B\u6279\u91CF\u5BFC\u51FA\u53EF\u5B89\u5168\u7EED\u4F20\uFF0C\u4E0D\u4F1A\u91CD\u590D\u5199\u5165"
+          };
+        }
+        if ((error == null ? void 0 : error.statusCode) === 0) {
+          return { kind: "network", retryable: true, action: "\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u4E0E\u672C\u5730\u4EE3\u7406\u8BBE\u7F6E\u540E\u91CD\u8BD5" };
+        }
+        if (status >= 500) {
+          return { kind: "server", retryable: true, action: "Notion \u670D\u52A1\u7AEF\u4E34\u65F6\u6545\u969C\u3002\u8BF7\u7A0D\u540E\u91CD\u8BD5\uFF1B\u6279\u91CF\u5BFC\u51FA\u53EF\u5B89\u5168\u7EED\u4F20\uFF0C\u4E0D\u4F1A\u91CD\u590D\u5199\u5165" };
+        }
+        return { kind: "unknown", retryable: true, action: "\u8BF7\u590D\u5236\u4E0A\u65B9\u9519\u8BEF\u8BE6\u60C5\u53CD\u9988\u7ED9\u7EF4\u62A4\u8005\uFF08\u4E0D\u4F1A\u5305\u542B\u5BC6\u94A5\uFF09" };
+      };
+      var annotateError = (error, overrides = {}) => {
+        if (!error || typeof error !== "object") return error;
+        if (!error.ux) {
+          error.ux = { ...classifyError(error), ...overrides };
+        }
+        return error;
+      };
+      var summarize = (error) => {
+        const ux = (error == null ? void 0 : error.ux) || classifyError(error);
+        const title = (error == null ? void 0 : error.message) || "\u672A\u77E5\u9519\u8BEF";
+        return `${title}\uFF08${ux.action}\uFF09`;
+      };
+      module.exports = { classifyError, annotateError, summarize };
+    }
+  });
+
   // src/security/UrlValidator.js
   var require_UrlValidator = __commonJS({
     "src/security/UrlValidator.js"(exports, module) {
@@ -4859,6 +4938,7 @@ Content-Type: ${contentType}\r
     "src/api/index.js"(exports, module) {
       "use strict";
       var { CONFIG: CONFIG2, MSG: MSG2, SUPPORTED_FILE_TYPES: SUPPORTED_FILE_TYPES2 } = require_config();
+      var ErrorModel = require_ErrorModel();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
       var { NotionOAuth: NotionOAuth2 } = require_auth();
@@ -4957,6 +5037,12 @@ Content-Type: ${contentType}\r
               await Utils2.sleep(retryAfter * 1e3 + 500);
               return doRequest(attempt + 1, token, allowRefresh);
             }
+            if (response.status === 429) {
+              const rateError = new Error(`Notion API \u901F\u7387\u9650\u5236: ${result.message || response.status}`);
+              rateError.statusCode = response.status;
+              rateError.retryCount = attempt + 1;
+              throw ErrorModel.annotateError(rateError);
+            }
             const result = Utils2.safeJsonParse(response.responseText, {});
             if (response.status >= 200 && response.status < 300) {
               return result;
@@ -4985,15 +5071,15 @@ Content-Type: ${contentType}\r
               authError.isAuthTerminal = true;
               authError.statusCode = response.status;
               authError.authCode = String((result == null ? void 0 : result.code) || "").toLowerCase() || "unauthorized";
-              throw authError;
+              throw ErrorModel.annotateError(authError);
             }
-            throw new Error(`Notion API \u9519\u8BEF: ${result.message || response.status}`);
+            throw ErrorModel.annotateError(new Error(`Notion API \u9519\u8BEF: ${result.message || response.status}`));
           };
           try {
             return await doRequest(0);
           } catch (error) {
             if (error instanceof Error) {
-              throw error;
+              return Promise.reject(ErrorModel.annotateError(error));
             }
             throw new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${(error == null ? void 0 : error.message) || String(error)}`);
           }
@@ -12499,6 +12585,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           let archived = 0;
           let unchanged = 0;
           let failed = 0;
+          let deniedCount = 0;
           const CONCURRENCY = 3;
           const { DedupStore } = require_storage();
           DedupStore.beginBatch("bookmark");
@@ -12567,7 +12654,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                       "denied",
                       { bookmarkId, itemName: bookmark.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
                     );
-                    failed++;
+                    deniedCount++;
                     if (snapshotEntry) nextSnapshot[bookmarkId] = snapshotEntry;
                     return;
                   }
@@ -12603,7 +12690,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                       "denied",
                       { pageId: pageMeta.pageId, bookmarkId, itemName: bookmark.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u81EA\u52A8\u540C\u6B65\u66F4\u65B0\u9700 level\u22651" }
                     );
-                    failed++;
+                    deniedCount++;
                     nextSnapshot[bookmarkId] = snapshotEntry || BookmarkAutoImporter2.buildSnapshotEntry(bookmark, pageMeta.pageId);
                     return;
                   }
@@ -12729,17 +12816,18 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 failed
               }
             });
-            if (created === 0 && updated === 0 && archived === 0 && failed === 0) {
+            if (created === 0 && updated === 0 && archived === 0 && failed === 0 && deniedCount === 0) {
               BookmarkAutoImporter2.updateStatus(`\u2705 \u6D4F\u89C8\u5668\u4E66\u7B7E\u5DF2\u540C\u6B65\uFF0C\u65E0\u65B0\u589E\u53D8\u66F4 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
               return;
             }
+            const deniedMsg = deniedCount > 0 ? `\uFF0C${deniedCount} \u9879\u56E0\u6743\u9650\u4E0D\u8DB3\u8DF3\u8FC7\uFF08\u53EF\u5728\u8BBE\u7F6E\u4E2D\u63D0\u5347\u6743\u9650\u7EA7\u522B\uFF09` : "";
             BookmarkAutoImporter2.updateStatus(
-              `\u2705 \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5B8C\u6210: \u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u5F52\u6863 ${archived}\uFF0C\u65E0\u53D8\u66F4 ${unchanged}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
+              `\u2705 \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5B8C\u6210: \u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u5F52\u6863 ${archived}\uFF0C\u65E0\u53D8\u66F4 ${unchanged}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""}${deniedMsg} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
             );
             if (created + updated + archived > 0 && typeof GM_notification === "function") {
               GM_notification({
                 title: "\u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5B8C\u6210",
-                text: `\u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u5F52\u6863 ${archived}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""}`,
+                text: `\u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u5F52\u6863 ${archived}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""}${deniedMsg}`,
                 timeout: 5e3
               });
             }
@@ -13294,7 +13382,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const { settings, index, previousSnapshot, nextSnapshot, enrichContext, total } = ctx;
           const snapshotEntry = previousSnapshot[item.itemKey] || null;
           let pageMeta = (item.url ? index.byUrl.get(item.url) : null) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? index.byPageId.get(snapshotEntry.pageId) : null) || (item.title ? index.byTitle.get(item.title) : null);
-          let result = { created: 0, updated: 0, unchanged: 0, failed: 0, itemKey: item.itemKey };
+          let result = { created: 0, updated: 0, unchanged: 0, failed: 0, denied: 0, itemKey: item.itemKey };
           try {
             settings.apiKey = NotionOAuth2.getAccessToken("");
             if (!pageMeta) {
@@ -13306,7 +13394,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   "denied",
                   { itemKey: item.itemKey, itemName: item.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1ARSS \u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
                 );
-                result.failed = 1;
+                result.denied = 1;
                 if (snapshotEntry) nextSnapshot[item.itemKey] = snapshotEntry;
                 result.success = false;
                 return result;
@@ -13338,7 +13426,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   "denied",
                   { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1ARSS \u81EA\u52A8\u540C\u6B65\u66F4\u65B0\u9700 level\u22651" }
                 );
-                result.failed = 1;
+                result.denied = 1;
                 nextSnapshot[item.itemKey] = snapshotEntry || RSSAutoImporter2.buildSnapshotEntry(item, pageMeta.pageId);
                 result.success = false;
                 return result;
@@ -13430,12 +13518,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
           }
           SyncState2.updateRssState(statePatch);
-          if (created === 0 && updated === 0 && failed === 0) {
+          if (created === 0 && updated === 0 && failed === 0 && (stats.denied || 0) === 0) {
             RSSAutoImporter2.updateStatus(`RSS \u5DF2\u540C\u6B65\uFF0C\u65E0\u65B0\u589E\u53D8\u66F4 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
             return;
           }
+          const deniedMsg = (stats.denied || 0) > 0 ? `\uFF0C${stats.denied} \u9879\u56E0\u6743\u9650\u4E0D\u8DB3\u8DF3\u8FC7\uFF08\u53EF\u5728\u8BBE\u7F6E\u4E2D\u63D0\u5347\u6743\u9650\u7EA7\u522B\uFF09` : "";
           RSSAutoImporter2.updateStatus(
-            `RSS \u81EA\u52A8\u540C\u6B65\u5B8C\u6210\uFF1A\u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u65E0\u53D8\u66F4 ${unchanged}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
+            `RSS \u81EA\u52A8\u540C\u6B65\u5B8C\u6210\uFF1A\u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u65E0\u53D8\u66F4 ${unchanged}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""}${deniedMsg} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
           );
         },
         run: async () => {
@@ -13467,7 +13556,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const attemptAt = Date.now();
           try {
             const ctx = await RSSAutoImporter2._initSyncContext(settings, attemptAt);
-            const stats = { created: 0, updated: 0, unchanged: 0, failed: 0 };
+            const stats = { created: 0, updated: 0, unchanged: 0, failed: 0, denied: 0 };
             const successfulKeys = /* @__PURE__ */ new Set();
             const { DedupStore } = require_storage();
             DedupStore.beginBatch("rss");
@@ -13486,6 +13575,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 stats.updated += r.updated;
                 stats.unchanged += r.unchanged;
                 stats.failed += r.failed;
+                stats.denied += r.denied || 0;
                 if (r.success) successfulKeys.add(r.itemKey);
                 if (ctx.delay > 0 && i < ctx.currentItems.length - 1) {
                   await Utils2.sleep(ctx.delay);
@@ -14372,7 +14462,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 results.success.push({ topicId, title, url: `https://linux.do/t/${topicId}` });
               } catch (error) {
                 console.error(`[LD-Notion] \u5BFC\u51FA\u5931\u8D25: ${title}`, error);
-                results.failed.push({ topicId, title, error: error.message });
+                results.failed.push({ topicId, title, error: error.message, ux: error.ux || void 0 });
                 if (Exporter2.isAuthTerminalError(error)) {
                   Exporter2.cancel();
                   results.authAborted = {
@@ -24980,11 +25070,16 @@ ${AIService2.isolateContent(JSON.stringify({
         },
         // 显示导出报告
         showReport: (results) => {
+          var _a;
           const container = UI2.refs.reportContainer;
           const { success, failed, skipped } = results;
           let html = '<div class="ldb-report">';
           html += '<div class="ldb-report-title">\u{1F4CA} \u5BFC\u51FA\u62A5\u544A</div>';
           const authAborted = results.authAborted || (results.aborted === true ? { reason: "\u8BA4\u8BC1\u5931\u8D25" } : null);
+          let reauthorizeBtnHtml = "";
+          if (authAborted && NotionOAuth2.getConfig().clientId) {
+            reauthorizeBtnHtml = `<button type="button" class="ldb-btn ldb-btn-primary ldb-reauthorize-btn" style="margin-top:8px;">\u{1F504} \u91CD\u65B0\u6388\u6743</button>`;
+          }
           if (authAborted) {
             const authCode = String(authAborted.authCode || "").toLowerCase();
             let authTitle = "\u26D4 \u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF1ANotion \u8BA4\u8BC1\u5931\u8D25\uFF08API token \u65E0\u6548\u4E14\u65E0\u6CD5\u81EA\u52A8\u7EED\u7B7E\uFF09";
@@ -25003,6 +25098,7 @@ ${AIService2.isolateContent(JSON.stringify({
                 <div>${authTitle}</div>
                 <div style="margin-top:4px;font-size:12px;opacity:.85;">${Utils2.escapeHtml(Utils2.truncateText(String(authAborted.reason || ""), 160))}</div>
                 <div style="margin-top:4px;font-size:12px;opacity:.85;">${authHint}</div>
+                ${reauthorizeBtnHtml}
             </div>`;
           }
           if (success.length > 0) {
@@ -25022,6 +25118,12 @@ ${AIService2.isolateContent(JSON.stringify({
           if (failed.length > 0) {
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">\u274C \u5931\u8D25 (${failed.length})</div>`;
+            if (!authAborted) {
+              const firstUx = ((_a = failed[0]) == null ? void 0 : _a.error) && failed[0].error.ux;
+              if (firstUx && firstUx.action) {
+                html += `<div class="ldb-report-item" style="color: var(--ldb-ui-accent);padding:6px 12px;margin-bottom:8px;border-radius:6px;background:var(--ldb-ui-accent-alpha-12);">\u{1F4A1} \u5EFA\u8BAE\uFF1A${Utils2.escapeHtml(Utils2.truncateText(firstUx.action, 220))}</div>`;
+              }
+            }
             failed.slice(0, 20).forEach((item) => {
               const fullTitle = item.title || "";
               const fullError = item.error || "";
@@ -25048,8 +25150,18 @@ ${AIService2.isolateContent(JSON.stringify({
           container.innerHTML = html;
           container.querySelectorAll(".ldb-report-error").forEach((el) => {
             el.addEventListener("click", () => {
-              var _a;
-              (_a = navigator.clipboard) == null ? void 0 : _a.writeText(el.dataset.err || "");
+              var _a2;
+              (_a2 = navigator.clipboard) == null ? void 0 : _a2.writeText(el.dataset.err || "");
+            });
+          });
+          container.querySelectorAll(".ldb-reauthorize-btn").forEach((el) => {
+            el.addEventListener("click", () => {
+              try {
+                NotionOAuth2.startAuthorization();
+                UI2.showStatus("\u{1F510} \u5DF2\u6253\u5F00 Notion \u6388\u6743\u9875\uFF0C\u8BF7\u5728\u5F39\u51FA\u7684\u9875\u9762\u4E2D\u9009\u62E9\u6570\u636E\u5E93\u5E76\u5141\u8BB8", "info");
+              } catch (e) {
+                UI2.showStatus(`\u274C ${e.message}`, "error");
+              }
             });
           });
         },
@@ -25500,6 +25612,12 @@ ${AIService2.isolateContent(JSON.stringify({
             if (exportTargetType === "database" && !databaseId) {
               UI2.showStatus("\u8BF7\u586B\u5199\u6570\u636E\u5E93 ID", "error");
               return;
+            }
+            const rawDbId = refs.databaseIdInput.value.trim();
+            const extractedDbId = Utils2.extractNotionId(rawDbId);
+            if (exportTargetType === "database" && databaseId && extractedDbId && extractedDbId !== rawDbId) {
+              statusSpan.textContent = `\u{1F50D} \u5DF2\u4ECE\u94FE\u63A5\u8BC6\u522B\u5230\u6570\u636E\u5E93 ID: ${extractedDbId}`;
+              statusSpan.style.color = "var(--ldb-ui-accent)";
             }
             if (exportTargetType === "page" && !parentPageId) {
               UI2.showStatus("\u8BF7\u586B\u5199\u7236\u9875\u9762 ID", "error");

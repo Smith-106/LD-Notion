@@ -2543,9 +2543,14 @@ const UI = {
         let html = '<div class="ldb-report">';
         html += '<div class="ldb-report-title">📊 导出报告</div>';
 
-        // 认证中止横幅(v3.14.5):系统性 token 失败时批次已自动中止,提示修复入口
+        // v3.14.17 (P0-2): 认证中止时提供『重新授权』直达按钮(OAuth 已配置时)——
+        // 用户无需翻设置页,一次性走完重新授权流程
         const authAborted = results.authAborted
             || (results.aborted === true ? { reason: "认证失败" } : null);
+        let reauthorizeBtnHtml = "";
+        if (authAborted && NotionOAuth.getConfig().clientId) {
+            reauthorizeBtnHtml = `<button type="button" class="ldb-btn ldb-btn-primary ldb-reauthorize-btn" style="margin-top:8px;">🔄 重新授权</button>`;
+        }
         if (authAborted) {
             // v3.14.12 (三模型共识): 按 authCode 分支文案——manual 模式无「续签」概念,
             // 空 token/格式非法/官方拒绝分别提示,避免误导
@@ -2566,6 +2571,7 @@ const UI = {
                 <div>${authTitle}</div>
                 <div style="margin-top:4px;font-size:12px;opacity:.85;">${Utils.escapeHtml(Utils.truncateText(String(authAborted.reason || ""), 160))}</div>
                 <div style="margin-top:4px;font-size:12px;opacity:.85;">${authHint}</div>
+                ${reauthorizeBtnHtml}
             </div>`;
         }
 
@@ -2590,6 +2596,14 @@ const UI = {
         if (failed.length > 0) {
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">❌ 失败 (${failed.length})</div>`;
+            // v3.14.17 (P0-1): 失败区顶部附可行动建议(分类函数产出的 action 字段)——
+            // 用户无需点开每条错误即可获得下一步指引; 认证中止时横幅已有专属引导, 不重复
+            if (!authAborted) {
+                const firstUx = failed[0]?.error && failed[0].error.ux;
+                if (firstUx && firstUx.action) {
+                    html += `<div class="ldb-report-item" style="color: var(--ldb-ui-accent);padding:6px 12px;margin-bottom:8px;border-radius:6px;background:var(--ldb-ui-accent-alpha-12);">💡 建议：${Utils.escapeHtml(Utils.truncateText(firstUx.action, 220))}</div>`;
+                }
+            }
             failed.slice(0, 20).forEach(item => {
                 // P2:失败项 title 悬停显示完整标题,错误详情可点击复制
                 const fullTitle = item.title || "";
@@ -2622,6 +2636,17 @@ const UI = {
         container.querySelectorAll(".ldb-report-error").forEach((el) => {
             el.addEventListener("click", () => {
                 navigator.clipboard?.writeText(el.dataset.err || "");
+            });
+        });
+        // v3.14.17 (P0-2): 重新授权按钮直达 OAuth 流,避免用户翻设置页
+        container.querySelectorAll(".ldb-reauthorize-btn").forEach((el) => {
+            el.addEventListener("click", () => {
+                try {
+                    NotionOAuth.startAuthorization();
+                    UI.showStatus("🔐 已打开 Notion 授权页，请在弹出的页面中选择数据库并允许", "info");
+                } catch (e) {
+                    UI.showStatus(`❌ ${e.message}`, "error");
+                }
             });
         });
     },

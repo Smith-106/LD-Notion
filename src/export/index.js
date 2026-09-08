@@ -901,7 +901,8 @@ const Exporter = {
                     results.success.push({ topicId, title, url: `https://linux.do/t/${topicId}` });
                 } catch (error) {
                     console.error(`[LD-Notion] 导出失败: ${title}`, error);
-                    results.failed.push({ topicId, title, error: error.message });
+                    // v3.14.17 (P0-1): 透传 ux 分类供报告区展示可行动建议(字符串 message 之外附加,兼容旧消费方)
+                    results.failed.push({ topicId, title, error: error.message, ux: error.ux || undefined });
                     // 认证终态 fail-fast(v3.14.5):token 无效且无法续签时,
                     // 剩余项逐个请求只会重复注定失败的 401(此前 464 项全部报
                     // "API token is invalid")。中止批次,剩余项进 skipped 供重试。

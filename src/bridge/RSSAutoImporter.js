@@ -604,7 +604,7 @@ const RSSAutoImporter = {
             || (snapshotEntry?.pageId ? index.byPageId.get(snapshotEntry.pageId) : null)
             || (item.title ? index.byTitle.get(item.title) : null);
 
-        let result = { created: 0, updated: 0, unchanged: 0, failed: 0, itemKey: item.itemKey };
+        let result = { created: 0, updated: 0, unchanged: 0, failed: 0, denied: 0, itemKey: item.itemKey };
 
         try {
             // v3.14.13 (P1-3): 每项开工前重读 token——buildSettings 快照在 OAuth 续签后
@@ -617,7 +617,7 @@ const RSSAutoImporter = {
                 if (!OperationGuard.canExecute("createDatabasePage")) {
                     RSSAutoImporter._auditAutoSync("createDatabasePage", "denied",
                         { itemKey: item.itemKey, itemName: item.title, reason: "权限不足：RSS 自动同步建页需 level≥1" });
-                    result.failed = 1;
+                    result.denied = 1;
                     if (snapshotEntry) nextSnapshot[item.itemKey] = snapshotEntry;
                     result.success = false;
                     return result;
@@ -643,7 +643,7 @@ const RSSAutoImporter = {
                 if (!OperationGuard.canExecute("updatePage")) {
                     RSSAutoImporter._auditAutoSync("updatePage", "denied",
                         { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title, reason: "权限不足：RSS 自动同步更新需 level≥1" });
-                    result.failed = 1;
+                    result.denied = 1;
                     nextSnapshot[item.itemKey] = snapshotEntry || RSSAutoImporter.buildSnapshotEntry(item, pageMeta.pageId);
                     result.success = false;
                     return result;
@@ -743,14 +743,16 @@ const RSSAutoImporter = {
         }
         SyncState.updateRssState(statePatch);
 
-        if (created === 0 && updated === 0 && failed === 0) {
+        if (created === 0 && updated === 0 && failed === 0 && (stats.denied || 0) === 0) {
             RSSAutoImporter.updateStatus(`RSS 已同步，无新增变更 (${new Date().toLocaleTimeString()})`);
             return;
         }
 
+        // v3.14.17 (P0-4): 权限不足聚合提示——不再静默丢弃
+        const deniedMsg = (stats.denied || 0) > 0 ? `，${stats.denied} 项因权限不足跳过（可在设置中提升权限级别）` : "";
         RSSAutoImporter.updateStatus(
             `RSS 自动同步完成：新增 ${created}，更新 ${updated}，无变更 ${unchanged}`
-            + `${failed > 0 ? `，失败 ${failed}` : ""}`
+            + `${failed > 0 ? `，失败 ${failed}` : ""}${deniedMsg}`
             + ` (${new Date().toLocaleTimeString()})`
         );
     },
@@ -789,7 +791,7 @@ const RSSAutoImporter = {
         try {
             const ctx = await RSSAutoImporter._initSyncContext(settings, attemptAt);
 
-            const stats = { created: 0, updated: 0, unchanged: 0, failed: 0 };
+            const stats = { created: 0, updated: 0, unchanged: 0, failed: 0, denied: 0 };
             const successfulKeys = new Set();
             // v3.14.6 (DC-004): run 级 batch —— markItemSeen 落账缓存化, 单次 flush; finally 兜底
             const { DedupStore } = require("../storage");
@@ -810,6 +812,7 @@ const RSSAutoImporter = {
                 stats.updated += r.updated;
                 stats.unchanged += r.unchanged;
                 stats.failed += r.failed;
+                stats.denied += r.denied || 0;
                 if (r.success) successfulKeys.add(r.itemKey);
 
                 if (ctx.delay > 0 && i < ctx.currentItems.length - 1) {

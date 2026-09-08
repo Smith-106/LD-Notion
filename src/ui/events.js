@@ -349,6 +349,16 @@ const UIEvents = {
                 return;
             }
 
+            // v3.14.17 (P0-3): Database ID URL 预提取(warn-only,不阻断)——
+            // 用户粘贴 notion.so 链接时自动识别出 32 位 ID 并提示,
+            // 避免拿链接原文去请求必然失败后等 15s 超时才暴露
+            const rawDbId = refs.databaseIdInput.value.trim();
+            const extractedDbId = Utils.extractNotionId(rawDbId);
+            if (exportTargetType === "database" && databaseId && extractedDbId && extractedDbId !== rawDbId) {
+                statusSpan.textContent = `🔍 已从链接识别到数据库 ID: ${extractedDbId}`;
+                statusSpan.style.color = "var(--ldb-ui-accent)";
+            }
+
             if (exportTargetType === "page" && !parentPageId) {
                 UI.showStatus("请填写父页面 ID", "error");
                 return;
