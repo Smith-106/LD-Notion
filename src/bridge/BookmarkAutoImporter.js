@@ -286,7 +286,17 @@ BookmarkAutoImporter.run = async () => {
     BookmarkAutoImporter.lastRunAt = now;
     BookmarkAutoImporter.isRunning = true;
     // v3.14.6 (CC-04): 跨 tab 租约 —— 双 tab 同刻 run 仅一方建页; TTL 兜底防崩溃锁泄漏
-    const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+    // 三模型共识(P1): acquireLease 抛错必须复位 isRunning, 否则自动同步永久瘫痪
+    let lease = null;
+    try {
+        lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+    } catch (error) {
+        BookmarkAutoImporter.isRunning = false;
+        SyncLock.isExporting = false;
+        console.error("[LD-Notion] 浏览器书签自动同步获取租约失败:", error);
+        BookmarkAutoImporter.updateStatus("❌ 获取同步租约失败，本轮跳过");
+        return;
+    }
     if (!lease) {
         BookmarkAutoImporter.isRunning = false;
         BookmarkAutoImporter.updateStatus("⏸ 其他标签页正在同步浏览器书签，本轮跳过");
@@ -386,6 +396,8 @@ BookmarkAutoImporter.run = async () => {
         };
 
         const processBookmark = async (bookmark, itemIndex) => {
+            // S1: 租约已失(他 tab 接管)则不再开工新项, 缩小双持有写窗口
+            if (leaseLost) return;
             const bookmarkId = String(bookmark.id);
             const snapshotEntry = previousSnapshot[bookmarkId] || null;
             let pageMeta = pageIndex.byBookmarkId.get(bookmarkId)
@@ -534,6 +546,14 @@ BookmarkAutoImporter.run = async () => {
         await processInBatches(currentBookmarks, processBookmark);
         // v3.14.6 (CC-08): 批次完成清空声明(索引已回填, 声明使命结束)
         pendingUrlClaim.clear();
+        // 三模型共识(P1 数据丢失): 同轮「删除旧书签 + 新增同 URL 书签」时, 新书签经 byUrl
+        // 接管旧页, 旧 id 的归档会连带归档该页 → 新书签快照指向 archived 页, 下轮 F8
+        // 命中 archived 分支永久跳过(静默丢数据)。归档前排除已被当前项接管的页面。
+        const claimedPageIds = new Set();
+        for (const b of currentBookmarks) {
+            const entry = nextSnapshot[String(b.id)];
+            if (entry?.pageId) claimedPageIds.add(entry.pageId);
+        }
         // 批量回写已导出映射（DISCOVER P3 同类修复）：processBookmark 内 markExported 仅 mutate 内存缓存，
         // 批次全部完成后单次 flush，写侧从 O(N²)→O(N)。flush 内有 if(cache) 守卫，未 mutate 的缓存为 null 不写。
         // v3.14.13 (H1): 必须在 fail-fast 抛错前落盘——已成功项的导出事实(不可再生)仅存内存,
@@ -553,6 +573,8 @@ BookmarkAutoImporter.run = async () => {
         const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
 
         const processDeleted = async (bookmarkId, itemIndex) => {
+            // S1: 租约已失(他 tab 接管)则不再开工新项, 缩小双持有写窗口
+            if (leaseLost) return;
             const snapshotEntry = previousSnapshot[bookmarkId];
             const pageMeta = (snapshotEntry?.pageId ? pageIndex.byPageId.get(snapshotEntry.pageId) : null)
                 || pageIndex.byBookmarkId.get(bookmarkId)
@@ -560,6 +582,10 @@ BookmarkAutoImporter.run = async () => {
 
             if (!pageMeta?.pageId) {
                 archived++;
+                return;
+            }
+            // 页面已被本轮新书签接管(同 URL): 只移除旧 id 快照, 绝不归档他人在用的页面
+            if (claimedPageIds.has(pageMeta.pageId)) {
                 return;
             }
 

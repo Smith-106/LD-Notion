@@ -69,6 +69,7 @@ const SyncScheduler = {
     _retries: new Map(),   // sourceType → retryTimeoutId
     _retryCounts: new Map(), // sourceType → retry count
     _epochs: new Map(),    // sourceType → epoch (v3.14.6 CC-07: 取消在途)
+    _inFlight: new Set(),  // sourceType → 在途互斥(三模型共识 P1: 调度级串行)
 
     /**
      * 获取源的同步间隔 (分钟)
@@ -143,6 +144,8 @@ const SyncScheduler = {
             this._timers.delete(sourceType);
         }
         this._cancelRetry(sourceType);
+        // qwen P1 共识: 停止后重置失败计数, 否则重启后首次失败可能直接命中熔断跳过重试
+        this._retryCounts.set(sourceType, 0);
     },
 
     /**
@@ -189,6 +192,18 @@ const SyncScheduler = {
      * @param {string} sourceType
      */
     async _doSync(sourceType) {
+        // 三模型共识(P1): 调度级在途互斥 —— runner 级 isRunning 只能挡住写操作,
+        // 挡不住重叠调度对 _retryCounts/_cancelRetry 的交错(空跑会取消他轮重试并归零计数)
+        if (this._inFlight.has(sourceType)) return;
+        this._inFlight.add(sourceType);
+        try {
+            await this._doSyncOnce(sourceType);
+        } finally {
+            this._inFlight.delete(sourceType);
+        }
+    },
+
+    async _doSyncOnce(sourceType) {
         // v3.14.6 (CC-07): 捕获启动 epoch, 完成时与当前不符则丢弃(停止后不再调度重试/复位计数)
         const epoch = this._epochs.get(sourceType) || 0;
         try {
@@ -198,6 +213,8 @@ const SyncScheduler = {
             if (typeof runner === "function") {
                 await runner();
                 if (epoch !== (this._epochs.get(sourceType) || 0)) return; // 已停止: 丢弃
+                // qwen P1 共识: 成功后取消已排定的重试定时器, 否则稍后仍会触发一次多余同步
+                this._cancelRetry(sourceType);
                 this._retryCounts.set(sourceType, 0);
                 return;
             }
@@ -206,6 +223,7 @@ const SyncScheduler = {
             if (result.error) {
                 this._scheduleRetry(sourceType);
             } else {
+                this._cancelRetry(sourceType);
                 this._retryCounts.set(sourceType, 0);
             }
         } catch (error) {

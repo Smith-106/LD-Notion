@@ -798,7 +798,17 @@ const RSSAutoImporter = {
         SyncLock.isExporting = true;
         // F8: 跨 tab 租约(CC-04 书签侧同款) —— 仅进程内 isExporting 防不住双 tab 并发建页竞态;
         // 与书签共用 AUTO_SYNC_LEASE(全局自动同步互斥, 跨 tab RSS×书签也串行)
-        const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        // 三模型共识(P1): acquireLease 抛错必须复位 isRunning/isExporting, 否则永久瘫痪
+        let lease = null;
+        try {
+            lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        } catch (error) {
+            RSSAutoImporter.isRunning = false;
+            SyncLock.isExporting = false;
+            console.error("[LD-Notion] RSS 自动同步获取租约失败:", error);
+            RSSAutoImporter.updateStatus("❌ 获取同步租约失败，本轮跳过");
+            return;
+        }
         if (!lease) {
             RSSAutoImporter.isRunning = false;
             SyncLock.isExporting = false;

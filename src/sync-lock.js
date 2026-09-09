@@ -48,6 +48,14 @@ const SyncLock = {
         if (!reread.owner || reread.owner !== lease.owner) {
             return null; // 竞争失败(他 tab 同时写入覆盖)
         }
+        // 三模型共识(P1): 单轮复读只能挡住窗口内竞争 —— 跨 tab 写入传播延迟可超过 150ms,
+        // 后写者在其后覆盖仍会双方均“复读到自己” → 双持有。二次确认把窗口翻倍(双持有
+        // 需传播延迟 > 300ms), 与 renewLease 的 owner 复核共同构成防线。
+        await Utils.sleep(150);
+        const confirm = Utils.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+        if (!confirm.owner || confirm.owner !== lease.owner) {
+            return null; // 竞争失败(二次确认发现被后写者覆盖)
+        }
         return lease;
     },
 
