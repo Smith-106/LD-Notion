@@ -187,7 +187,11 @@ const NotionSiteUI = {
             NotionSiteUI.togglePanel();
         });
 
-        // Odyssey UI F5: 恢复位置时按当前视口钳制,避免缩小窗口后浮钮停在视口外
+        document.body.appendChild(btn);
+        NotionSiteUI.floatBtn = btn;
+        // Odyssey UI F5 / P3(qwen, 主 agent 复核): 位置钳制必须在 append 之后——
+        // 脱离文档的节点 offsetWidth/Height 为 0, 原顺序使 maxRight 恒等于视口宽度,
+        // 钳制完全失效(缩小窗口后浮钮可停在视口外)。
         const savedPosition = Storage.get(CONFIG.STORAGE_KEYS.FLOAT_BTN_POSITION, null);
         if (savedPosition) {
             try {
@@ -203,9 +207,6 @@ const NotionSiteUI = {
                 Storage.remove(CONFIG.STORAGE_KEYS.FLOAT_BTN_POSITION);
             }
         }
-
-        document.body.appendChild(btn);
-        NotionSiteUI.floatBtn = btn;
         // v3.14.7 (REV-05 UI-09): 动态创建后重应用主题偏好
         DesignSystem.applyTheme();
         return btn;
@@ -668,6 +669,9 @@ const NotionSiteUI = {
                     aiApiKey,
                     aiBaseUrl,
                 });
+                // P3 共识(dsf+glm): 等待期间用户可能已切换服务(onchange 已重置模型列表),
+                // 陈旧响应会把旧服务模型写回新状态并被保存按钮持久化。
+                if (panel.querySelector("#ldb-notion-ai-service")?.value !== aiService) return;
                 NotionSiteUI.updateAIModelOptions(aiService, models, true);
                 modelTip.textContent = `✅ 获取到 ${models.length} 个可用模型`;
                 modelTip.style.color = "var(--ldb-ui-success)";
@@ -776,6 +780,14 @@ const NotionSiteUI = {
             const optionExists = Array.from(modelSelect.options).some(opt => opt.value === savedModel);
             if (optionExists) {
                 modelSelect.value = savedModel;
+            } else {
+                // P3(glm, 主 agent 复核): 模型缓存失效/自定义模型不在静态列表时静默回退默认,
+                // 保存按钮会把默认值写回覆盖已存模型——补兼容选项(与目标下拉同款)。
+                const opt = document.createElement("option");
+                opt.value = savedModel;
+                opt.textContent = "已保存模型（当前列表之外）";
+                opt.selected = true;
+                modelSelect.appendChild(opt);
             }
         }
 
@@ -887,7 +899,8 @@ const NotionSiteUI = {
 
     // 更新数据库/页面下拉框
     updateAITargetDbOptions: (databases, pages = []) => {
-        const select = NotionSiteUI.panel.querySelector("#ldb-notion-ai-target-db");
+        // P3(qwen, 主 agent 复核): destroy 置 panel=null 后晚到的工作区刷新回调会裸解引用
+        const select = NotionSiteUI.panel?.querySelector("#ldb-notion-ai-target-db");
         if (!select) return;
 
         const storedTarget = TargetState.getStoredAITarget();
@@ -978,7 +991,9 @@ const NotionSiteUI = {
 
     // 显示状态
     showStatus: (message, type = "info") => {
-        const container = NotionSiteUI.panel.querySelector("#ldb-notion-status-container");
+        // P3 共识(dsf+glm): 面板懒加载未创建时(OAuth 回调页 applyPostAuthTarget)会裸解引用崩溃
+        const container = NotionSiteUI.panel?.querySelector("#ldb-notion-status-container");
+        if (!container) return;
 
         // 清除上一个定时器，避免新消息被旧定时器提前清除
         if (container._statusTimer) clearTimeout(container._statusTimer);
@@ -1107,6 +1122,9 @@ const NotionSiteUI = {
         // 检查是否需要展开
         if (!Storage.get(CONFIG.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, true)) {
             Utils.runWhenBrowserIdle(() => {
+                // P3(dsf, 主 agent 复核): 空闲回调排队期间用户可能已手动关闭面板,
+                // 重新读取持久化标记, 避免强制展开覆盖用户操作。
+                if (Storage.get(CONFIG.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, true)) return;
                 NotionSiteUI.ensurePanelReady();
                 NotionSiteUI.isMinimized = false;
                 NotionSiteUI.panel.classList.add("visible");
@@ -1123,6 +1141,9 @@ const NotionSiteUI = {
         NotionSiteUI.floatBtn?.remove();
         NotionSiteUI.floatBtn = null;
         NotionSiteUI.isPanelReady = false;
+        // P3(qwen, 主 agent 复核): 与 main-ui.destroy 一致复位最小化态, 避免重建后首次
+        // 点击浮钮方向相反(残留 false 导致首次点击变「关闭」)。
+        NotionSiteUI.isMinimized = true;
     },
 };
 

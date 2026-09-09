@@ -566,7 +566,14 @@ const ChatState = {
     load: () => {
         try {
             const data = Storage.get(CONFIG.STORAGE_KEYS.CHAT_HISTORY, "[]");
-            ChatState.messages = JSON.parse(data);
+            const parsed = JSON.parse(data);
+            // P3 共识(glm+qwen): 刷新/关闭页面时在途回复的 processing 占位已被持久化,
+            // 原样恢复会永久显示「思考中」——归一为 error 提示重试; 同时拒绝非数组脏数据。
+            ChatState.messages = (Array.isArray(parsed) ? parsed : [])
+                .filter((msg) => msg && typeof msg === "object")
+                .map((msg) => (msg.status === "processing"
+                    ? { ...msg, status: "error", content: "⚠️ 回复中断（页面刷新/关闭），请重试。" }
+                    : msg));
         } catch (error) {
             console.warn("[LD-Notion] 聊天历史加载失败:", error);
             ChatState.messages = [];
@@ -2244,7 +2251,9 @@ const ChatUI = {
 
         try {
             const response = await AIAssistant.handleMessage(message);
-            ChatState.updateLastMessage(response, "complete");
+            // P3(qwen, 主 agent 复核): handleMessage 可返回 {status:"error"} 结构化结果而非抛错,
+            // 原实现一律标 complete, UI 状态机与执行结果相反。
+            ChatState.updateLastMessage(response, AIAssistant._isErrorResult(response) ? "error" : "complete");
         } catch (error) {
             console.error("[LD-Notion] AI 处理失败:", error);
             ChatState.updateLastMessage(`❌ 处理失败: ${error.message}`, "error");
@@ -2570,7 +2579,14 @@ const AIClassifier = {
     pause: () => { AIClassifier.isPaused = true; },
     resume: () => { AIClassifier.isPaused = false; },
     cancel: () => { AIClassifier.isCancelled = true; },
-    reset: () => { AIClassifier.isPaused = false; AIClassifier.isCancelled = false; },
+    reset: () => {
+        AIClassifier.isPaused = false;
+        AIClassifier.isCancelled = false;
+        // P3 3/3 共识(dsf+glm+qwen): 按钮文案只在 onclick 内翻转, 批次 reset 只复位标志,
+        // 跨批次残留「▶️ 继续分类」与 isPaused=false 相反。
+        const pauseBtn = document.querySelector("#ldb-classify-pause");
+        if (pauseBtn) pauseBtn.textContent = "⏸️ 暂停分类";
+    },
 };
 
 Object.assign(AIAssistant, require("./guarded-write").GuardedWrite);
