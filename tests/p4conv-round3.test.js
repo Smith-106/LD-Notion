@@ -88,6 +88,13 @@ describe("P4 收敛(c13): events.js 跨闭包标识符与保存失败恢复", ()
         expect(src).toMatch(/\.then\(\(\) => true, \(error\) => \{/);
         expect(src).toMatch(/if \(!settingsSaved\) \{\s*restoreExportBtn\(\);/);
     });
+
+    it("源码: 图片 Markdown 替换用函数形式且进度回调校验来源", () => {
+        const src = fs.readFileSync("src/ui/events.js", "utf8");
+
+        expect(src).toMatch(/md\.replace\(img\.full, \(\) => `!\[\$\{img\.alt\}\]/);
+        expect(src).toMatch(/if \(loadSource !== UI\.getActiveBookmarkSource\(\)\) return;\s*\n\s*if \(UI\.refs\?\.bookmarkCount\)/);
+    });
 });
 
 describe("P4 收敛(c15): MainUI 长任务与防抖定时器", () => {
@@ -104,6 +111,20 @@ describe("P4 收敛(c15): MainUI 长任务与防抖定时器", () => {
         const matches = src.match(/String\(Storage\.get\(CONFIG\.STORAGE_KEYS\.GITHUB_(USERNAME|TOKEN), ""\) \?\? ""\)\.trim\(\)/g) || [];
 
         expect(matches.length).toBe(4);
+    });
+
+    it("源码: destroy 复位列表绑定标记与选中状态", () => {
+        const src = fs.readFileSync("src/ui/main-ui.js", "utf8");
+
+        expect(src).toMatch(/UI\.bookmarkListBound = false;\s*\n\s*UI\.bookmarks = \[\];\s*\n\s*UI\.selectedBookmarks = new Set\(\);/);
+    });
+
+    it("源码: 跨页同步回填 AI 目标下拉(AI_TARGET_DB 在监听键内)", () => {
+        const src = fs.readFileSync("src/ui/main-ui.js", "utf8");
+        const start = src.indexOf("const syncFromStorage = () => {");
+        const syncBlock = src.slice(start, start + 3000);
+
+        expect(syncBlock).toContain("UI.updateAITargetDbOptions(workspaceData.databases || [])");
     });
 });
 

@@ -1428,6 +1428,13 @@ const UI = {
                 }
                 UI.updateExportButtonState?.();
                 UI.updateExportTargetSummary();
+                // P4 收敛(c15): AI_TARGET_DB 也在监听键内, 必须回填 AI 目标下拉 ——
+                // 否则他端改动后本页陈旧选择会在保存时反向覆盖
+                if (refs.aiTargetDbSelect) {
+                    const workspaceData = Utils.safeJsonParse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}"), {}) || {};
+                    UI.updateAITargetDbOptions(workspaceData.databases || []);
+                    if (!TargetState.getDisplayAITargetState().value) refs.aiTargetDbSelect.value = "";
+                }
             } catch (error) {
                 console.warn("[LD-Notion] 导出目标跨页同步失败", error?.message || error);
             }
@@ -2910,6 +2917,11 @@ const UI = {
         UI.miniBtn?.remove();
         UI.miniBtn = null;
         UI.refs = null;
+        // P4 收敛(c15): 事件委托标记与列表状态随面板复位 —— 否则再次 init 时新列表
+        // 因 bookmarkListBound 仍为 true 而不绑定, 且残留选中集参与导出统计
+        UI.bookmarkListBound = false;
+        UI.bookmarks = [];
+        UI.selectedBookmarks = new Set();
         UI.isMinimized = true;
     },
 };

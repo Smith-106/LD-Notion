@@ -926,7 +926,9 @@ const UIEvents = {
                         return;
                     }
                     bookmarks = await LinuxDoAPI.fetchAllBookmarks(username, (count) => {
-                        UI.refs.bookmarkCount.textContent = count;
+                        // P4 收敛(c13): 加载期间切换来源后不再写计数(与最终结果丢弃同源)
+                        if (loadSource !== UI.getActiveBookmarkSource()) return;
+                        if (UI.refs?.bookmarkCount) UI.refs.bookmarkCount.textContent = count;
                     });
                 }
 
@@ -1405,7 +1407,9 @@ const UIEvents = {
                                         }
                                         const imgResult = await ObsidianAPI.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType(ext));
                                         if (!imgResult.ok) throw new Error(imgResult.error);
-                                        md = md.replace(img.full, `![${img.alt}](${encodeURI(imgPath)})`);
+                                        // P4 收敛(c13): 替换串中的 $&/$1/$$ 会被 String.replace 解释 ——
+                                        // 用函数形式避免 alt 含 $ 时损坏 Markdown
+                                        md = md.replace(img.full, () => `![${img.alt}](${encodeURI(imgPath)})`);
                                     } catch {
                                         // 图片下载失败，保留原始链接
                                         imageFailures++;
