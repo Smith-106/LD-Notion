@@ -308,7 +308,9 @@ _ensureAIProperty: async (databaseId, propertyName, propertyType, apiKey) => {
     const database = await NotionAPI.fetchDatabase(databaseId, apiKey);
     const properties = database.properties || {};
 
-    if (properties[propertyName]) return;
+    // P4 收敛(c02 2/3): 普通对象下标走原型链 —— propertyName="constructor" 会命中
+    // Object.prototype 而跳过创建, 后续 PATCH 写入不存在的属性被 Notion 400
+    if (Object.prototype.hasOwnProperty.call(properties, propertyName)) return;
 
     const propDef = {};
     if (propertyType === "multi_select") {
@@ -361,6 +363,11 @@ handleAIAutofill: async (params, settings, explanation) => {
             break;
         default:
             return `❌ 不支持的填充类型「${autofill_type}」。支持：summary/keywords/translation/custom`;
+    }
+
+    // P4 收敛(c02 2/3): 原型链键会让 updateProps 赋值静默失效(__proto__ 改原型而非自有属性)
+    if (["__proto__", "constructor", "prototype"].includes(propName)) {
+        return "❌ 属性名无效，请使用非保留名称。";
     }
 
     state().updateLastMessage(`正在准备 AI 属性填充（${propName}）...`, "processing");
@@ -528,7 +535,7 @@ ${searchTerm}`;
         // 拼接来源列表
         let sourceText = "\n\n📚 **信息来源**：\n";
         sourceList.forEach((s, i) => {
-            sourceText += `${i + 1}. ${s.title}${s.url ? ` ([链接](${s.url}))` : ""}\n`;
+            sourceText += `${i + 1}. ${Utils.mdText(s.title)}${s.url ? ` ([链接](${Utils.mdUrl(s.url)}))` : ""}\n`;
         });
 
         return aiAnswer + sourceText;
@@ -700,7 +707,7 @@ ${contentParts.join("\n\n---\n\n")}`;
         // 拼接来源列表
         let sourceText = "\n\n📚 **分析基础**：\n";
         sourceList.forEach((s, i) => {
-            sourceText += `${i + 1}. ${s.title}${s.url ? ` ([链接](${s.url}))` : ""}\n`;
+            sourceText += `${i + 1}. ${Utils.mdText(s.title)}${s.url ? ` ([链接](${Utils.mdUrl(s.url)}))` : ""}\n`;
         });
 
         const scopeLabel = useDatabaseScope

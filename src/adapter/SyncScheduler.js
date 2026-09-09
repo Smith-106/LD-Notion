@@ -70,6 +70,8 @@ const SyncScheduler = {
     _retryCounts: new Map(), // sourceType → retry count
     _epochs: new Map(),    // sourceType → epoch (v3.14.6 CC-07: 取消在途)
     _inFlight: new Set(),  // sourceType → 在途互斥(三模型共识 P1: 调度级串行)
+    _intervals: new Map(), // sourceType → 生效间隔(分钟, 含显式传入值)
+    _anchors: new Map(),   // sourceType → 定时器锚点(ms)
 
     /**
      * 获取源的同步间隔 (分钟)
@@ -111,6 +113,10 @@ const SyncScheduler = {
             : this.getIntervalMinutes(sourceType);
         if (intervalMin <= 0) return; // 0 = 仅手动同步
 
+        // P4 收敛(c01 2/3): 记录生效间隔与锚点 —— getStatus 原先只读存储键, 显式 intervalMinutes 启动时显示错误
+        this._intervals.set(sourceType, intervalMin);
+        this._anchors.set(sourceType, Date.now());
+
         const intervalMs = intervalMin * 60 * 1000;
         const runSync = () => {
             // qwen P1 共识: requestIdleCallback 排队到执行之间若发生 stop()/start()(epoch 变化),
@@ -121,7 +127,8 @@ const SyncScheduler = {
                 this._doSync(sourceType);
             };
             if (typeof globalThis.requestIdleCallback === "function") {
-                globalThis.requestIdleCallback(fire);
+                // P4 收敛(c01): 无 timeout 时后台标签页可能长时间不执行 idle 回调 → 自动同步停摆
+                globalThis.requestIdleCallback(fire, { timeout: 10000 });
             } else {
                 fire();
             }
@@ -144,6 +151,8 @@ const SyncScheduler = {
             this._timers.delete(sourceType);
         }
         this._cancelRetry(sourceType);
+        this._intervals.delete(sourceType);
+        this._anchors.delete(sourceType);
         // qwen P1 共识: 停止后重置失败计数, 否则重启后首次失败可能直接命中熔断跳过重试
         this._retryCounts.set(sourceType, 0);
     },
@@ -175,15 +184,23 @@ const SyncScheduler = {
      */
     getStatus(sourceType) {
         const state = SyncStateV2.getSourceState(sourceType);
-        const intervalMin = this.getIntervalMinutes(sourceType);
+        // P4 收敛(c01 2/3): 优先使用 start() 时记录的生效间隔, 否则与真实定时器不符
+        const intervalMin = this._intervals.has(sourceType)
+            ? this._intervals.get(sourceType)
+            : this.getIntervalMinutes(sourceType);
         const isRunning = this._timers.has(sourceType);
+        const anchor = this._anchors.get(sourceType);
+        const periodMs = intervalMin * 60 * 1000;
+        let nextSyncAt = null;
+        if (isRunning && anchor && periodMs > 0) {
+            const elapsed = Date.now() - anchor;
+            nextSyncAt = anchor + (Math.floor(elapsed / periodMs) + 1) * periodMs;
+        }
         return {
             intervalMinutes: intervalMin,
             lastSyncAt: state.lastSuccessAt || 0,
             lastOutcome: state.lastOutcome || "idle",
-            nextSyncAt: isRunning && state.lastSuccessAt
-                ? state.lastSuccessAt + intervalMin * 60 * 1000
-                : null,
+            nextSyncAt,
         };
     },
 
@@ -248,7 +265,12 @@ const SyncScheduler = {
         }
         this._retryCounts.set(sourceType, count);
         const delay = RETRY_DELAYS[Math.min(count - 1, RETRY_DELAYS.length - 1)];
-        const retryId = globalThis.setTimeout(() => this._doSync(sourceType), delay);
+        // P4 收敛(c01): 陈旧重试回调 —— stop()/start() 后已排队的重试仍会触发一次完整同步
+        const epoch = this._epochs.get(sourceType) || 0;
+        const retryId = globalThis.setTimeout(() => {
+            if (epoch !== (this._epochs.get(sourceType) || 0)) return;
+            this._doSync(sourceType);
+        }, delay);
         this._retries.set(sourceType, retryId);
     },
 

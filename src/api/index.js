@@ -546,7 +546,9 @@ const NotionAPI = {
         }
 
         // 清理块数据（移除不可复制的属性）
-        const cleanBlocks = allBlocks.map(block => {
+        // P4 收敛(c05): child_page/child_database 块无法经 children 数组创建(Notion 400) —— 跳过
+        const NON_CREATABLE_TYPES = new Set(["child_page", "child_database", "unsupported"]);
+        const cleanBlock = (block) => {
             const cleaned = { type: block.type };
             if (block[block.type]) {
                 cleaned[block.type] = { ...block[block.type] };
@@ -554,7 +556,41 @@ const NotionAPI = {
                 delete cleaned[block.type].children;
             }
             return cleaned;
-        });
+        };
+        // P4 收敛(c05): 递归抓取子块 —— 原先只取顶层块: table 缺 table_row 被 Notion 400 拒绝
+        // (整页复制失败), 嵌套列表内容静默丢失。Notion 单次 children 最多 2 层嵌套,
+        // 更深层级仍由后续 append 补齐(超出本轮修复范围, 行为与旧版一致)。
+        const fetchChildren = async (blockId, level) => {
+            if (level > 2) return [];
+            const children = [];
+            let childCursor = null;
+            const seen = new Set();
+            do {
+                const data = await NotionAPI.fetchBlocks(blockId, childCursor, apiKey);
+                for (const child of data.results || []) {
+                    if (NON_CREATABLE_TYPES.has(child.type)) continue;
+                    const cleaned = cleanBlock(child);
+                    if (child.has_children && level < 2) {
+                        cleaned[child.type].children = await fetchChildren(child.id, level + 1);
+                    }
+                    children.push(cleaned);
+                }
+                const next = data.has_more ? data.next_cursor : null;
+                childCursor = (next && !seen.has(next)) ? next : null;
+                if (childCursor) seen.add(next);
+            } while (childCursor);
+            return children;
+        };
+
+        const cleanBlocks = [];
+        for (const block of allBlocks) {
+            if (NON_CREATABLE_TYPES.has(block.type)) continue;
+            const cleaned = cleanBlock(block);
+            if (block.has_children) {
+                cleaned[block.type].children = await fetchChildren(block.id, 1);
+            }
+            cleanBlocks.push(cleaned);
+        }
 
         // 创建新页面
         // P4 共识(glm): 此前 parent 变量计算后未使用, parentType="page" 仍按 database_id 创建

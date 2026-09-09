@@ -602,6 +602,8 @@ module.exports = {
             if (!dbId) return "错误: 未配置数据库 ID。";
             if (settings.categories.length < 2) return "错误: 请先配置至少两个分类选项。";
 
+            // P4 收敛(c02): 上一轮取消/暂停标志为模块级共享状态 —— 新任务开始必须复位
+            AIClassifier.reset();
             await AIClassifier.ensureAICategoryProperty(settings);
             const pages = await AIClassifier.fetchAllPages(settings);
             if (pages.length === 0) return "数据库中没有页面。";

@@ -98,7 +98,12 @@ function installUploadMethods(NotionAPI) {
     // Context7 /websites/developers_notion_reference: send endpoint 用 multipart/form-data（unique to this endpoint），
     // file field 放原始二进制，part_number field(1-1000)。原 base64+JSON 实现违反契约且体积膨胀 33%。
     // 仿 uploadFileContent:931 multipart 模式，但走 Notion API endpoint + Authorization Bearer（非 S3 预签名 URL）。
-        sendFilePart: (uploadId, partBlob, partNumber, apiKey, filename) => {
+        sendFilePart: async (uploadId, partBlob, partNumber, apiKey, filename) => {
+        // P4 收敛(c05): 分片请求同样属于 Notion API 调用 —— 绕过 _requestGate 会使
+        // 「所有 Notion 请求共享 3 req/s 预算」的契约在多分片上传时失效
+        if (NotionAPI._requestGate) {
+            await NotionAPI._requestGate();
+        }
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => {

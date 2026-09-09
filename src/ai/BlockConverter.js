@@ -9,6 +9,22 @@
 const { Utils } = require("../utils");
 const { UrlValidator } = require("../security/UrlValidator");
 
+// Notion 单个 text.content 上限 2000 —— 文本/更新两条路径共用切分器
+const splitLongText = (str) => {
+    const maxLen = 2000;
+    const chunks = [];
+    if (str.length <= maxLen) {
+        chunks.push({ type: "text", text: { content: str } });
+    } else {
+        let remaining = str;
+        while (remaining.length > 0) {
+            chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
+            remaining = remaining.substring(maxLen);
+        }
+    }
+    return chunks;
+};
+
 const BlockConverter = {
     // markdown 文本 → Notion blocks 数组
     textToBlocks: (text) => {
@@ -50,21 +66,6 @@ const BlockConverter = {
             if (LANG_MAP[lower]) return LANG_MAP[lower];
             if (NOTION_LANGS.has(lower)) return lower;
             return "plain text";
-        };
-
-        const splitLongText = (str) => {
-            const maxLen = 2000;
-            const chunks = [];
-            if (str.length <= maxLen) {
-                chunks.push({ type: "text", text: { content: str } });
-            } else {
-                let remaining = str;
-                while (remaining.length > 0) {
-                    chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
-                    remaining = remaining.substring(maxLen);
-                }
-            }
-            return chunks;
         };
 
         for (const line of lines) {
@@ -142,7 +143,8 @@ const BlockConverter = {
         }
 
         const rawContent = String(content || "");
-        const richText = [{ type: "text", text: { content: String(content || "") } }];
+        // P4 收敛(c01 3/3): Notion 单个 text.content 上限 2000 —— 更新路径复用 splitLongText 切分
+        const richText = splitLongText(String(content || ""));
         const type = block.type;
         const current = block[type] || {};
 

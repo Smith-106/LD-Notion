@@ -179,7 +179,7 @@ const DOMToNotion = {
                     file: {
                         type: "external",
                         external: { url: full },
-                        caption: [{ type: "text", text: { content: fileName } }],
+                        caption: DOMToNotion.splitLongText(fileName),
                     },
                     _needsUpload: imgMode === "upload",
                     _originalUrl: full,
@@ -223,7 +223,7 @@ const DOMToNotion = {
     },
 
     // 列表 ul/ol
-    _cookList: (el, blocks) => {
+    _cookList: (el, blocks, imgMode) => {
         const tag = el.tagName.toLowerCase();
         const listType = tag === "ul" ? "bulleted_list_item" : "numbered_list_item";
         Array.from(el.children).forEach((li) => {
@@ -232,6 +232,9 @@ const DOMToNotion = {
                 if (richText.length > 0) {
                     blocks.push({ type: listType, [listType]: { rich_text: richText } });
                 }
+                // P4 收敛(c05): li 内嵌图片/附件此前静默丢弃 —— 与 _cookParagraph 同款补发块
+                li.querySelectorAll("img").forEach((img) => DOMToNotion._cookImage(img, blocks, imgMode));
+                li.querySelectorAll("a.attachment").forEach((a) => DOMToNotion._cookAttachment(a, blocks, imgMode));
             }
         });
     },
@@ -359,7 +362,9 @@ const DOMToNotion = {
                 const emojiMatch = src.match(/\/images\/emoji\/(?:twemoji|apple|google|twitter)\/([^/.]+)\.png/i);
                 if (emojiMatch) {
                     const emojiName = emojiMatch[1];
-                    const emoji = EMOJI_MAP[emojiName] || el.getAttribute("alt") || `:${emojiName}:`;
+                    const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP, emojiName)
+                        ? EMOJI_MAP[emojiName]
+                        : (el.getAttribute("alt") || `:${emojiName}:`);
                     if (emoji) result.push({ type: "text", text: { content: emoji }, annotations: { ...annotations } });
                 }
                 return;
@@ -492,7 +497,7 @@ const DOMToNotion = {
 
             // 处理列表
             if (tag === "ul" || tag === "ol") {
-                DOMToNotion._cookList(el, blocks);
+                DOMToNotion._cookList(el, blocks, imgMode);
                 return;
             }
 

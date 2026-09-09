@@ -656,6 +656,15 @@ BookmarkAutoImporter.run = async () => {
 
         await processInBatches(deletedIds, (id, idx) => processDeleted(id, idx));
 
+        // P4 收敛(c06): 归档阶段同样可能触发认证终态错误/失租 —— 不检查会落盘快照并报「同步完成」,
+        // 静默掩盖 token 失效(与建改阶段 581/586 同口径)。未归档项仍保留在 nextSnapshot, 下轮重试。
+        if (authAborted) {
+            throw authAbortError;
+        }
+        if (leaseLost) {
+            throw new Error("同步租约已被其他标签页接管，本轮浏览器书签自动同步中止");
+        }
+
         SyncState.updateBookmarkState({
             snapshot: nextSnapshot,
             // F7 共识: watermark 仅由成功项推进(created/updated/unchanged),

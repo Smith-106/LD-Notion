@@ -262,7 +262,16 @@ const CredentialVault = {
             return CredentialVault.getStatus();
         }
 
-        const payload = CredentialVault._readVaultPayload();
+        const payload = (() => {
+            // P4 收敛(c06): _readVaultPayload 对不完整 payload 抛错 —— 与 _decryptPayload 同口径
+            // 先 lock 再抛, 否则异常逃逸后 isUnlocked() 仍为 true(UI 显示已解锁但 sessionCache 未加载)
+            try {
+                return CredentialVault._readVaultPayload();
+            } catch {
+                CredentialVault.lock();
+                throw new Error("凭证保险箱内容损坏或不完整，无法解锁。");
+            }
+        })();
         let decrypted;
         try {
             decrypted = await CredentialVault._decryptPayload(payload, normalizedPassphrase);
@@ -1014,7 +1023,6 @@ const NotionOAuth = {
 
     installCrossPageWatchers: () => {
         if (NotionOAuth._crossPageWatchersInstalled) return;
-        NotionOAuth._crossPageWatchersInstalled = true;
         if (typeof GM_addValueChangeListener !== "function") return;
         const configKeys = [
             CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID,
@@ -1059,7 +1067,10 @@ const NotionOAuth = {
         } catch (error) {
             // 注册失败静默降级(仅失去跨页刷新),与 storage/index.js 既有先例一致
             console.warn("[LD-Notion] OAuth 跨页监听注册失败", error?.message || error);
+            return;
         }
+        // P4 收敛(c06): 注册全部成功后才置位 —— 中途抛错不再永久跳过剩余监听器
+        NotionOAuth._crossPageWatchersInstalled = true;
     },
 
 
@@ -1420,8 +1431,11 @@ const NotionOAuth = {
             // 其余等待 GM 值变化拿到新 token
             const { SyncLock } = require("../sync-lock");
             const leaseKey = CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_LEASE;
-            let lease = await SyncLock.acquireLease(leaseKey, 30000);
+            let lease = null;
             try {
+                // P4 收敛(c06 2/3): acquireLease 必须在 try 内 —— 在 try 外抛错时 finally 不执行,
+                // _refreshInFlight 永不复位, 后续续签全部复用同一个 rejected promise(永久失败)
+                lease = await SyncLock.acquireLease(leaseKey, 30000);
                 if (!lease) {
                     const rotated = await NotionOAuth._waitForTokenRotation(30000);
                     if (rotated) return rotated;

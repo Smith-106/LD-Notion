@@ -35,6 +35,8 @@ handleBatchClassify: async (params, settings, explanation) => {
     state().updateLastMessage(`正在准备批量分类...\n分类选项: ${settings.categories.join(", ")}`, "processing");
 
     try {
+        // P4 收敛(c02): 上一轮取消/暂停标志是模块级共享状态 —— 新任务开始必须复位, 否则直接空跑
+        AIClassifier.reset();
         // 确保数据库有 AI分类 属性
         await AIClassifier.ensureAICategoryProperty(settings);
 
@@ -314,6 +316,8 @@ ${AI().isolateContent(content)}`;
 
         let addedCount = 0;
         let failedCount = 0;
+        // P4 收敛(c02): 逐条 createPage 无节流 —— Notion 速率限制(约 3 req/s)下大条目量会 429
+        const entriesDelay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
         const titleProp = extractedData.properties.find(p => p.type === "title");
         const titleKey = titleProp ? titleProp.name : extractedData.properties[0].name;
 
@@ -339,6 +343,7 @@ ${AI().isolateContent(content)}`;
                 console.warn(`[LD-Notion] 条目创建失败 (#${failedCount}):`, error.message);
                 /* skip failed entries */
             }
+            if (entriesDelay > 0) await Utils.sleep(entriesDelay);
         }
 
         const failedLine = failedCount > 0 ? `\n- 失败: ${failedCount}（见控制台警告）` : "";

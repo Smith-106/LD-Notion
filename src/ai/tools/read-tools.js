@@ -193,6 +193,8 @@ module.exports = {
                 fallbackDatabaseId: settings.notionDatabaseId,
             });
             const { filter_field, filter_value, limit = 10 } = args;
+            // P4 收敛(c04): 负数 limit 使 slice(0, 负值) 反向取数并绕过数量限制
+            const safeLimit = Number.isFinite(Number(limit)) ? Math.max(0, Math.floor(Number(limit))) : 10;
 
             // 构建筛选条件
             let filter = null;
@@ -280,7 +282,7 @@ module.exports = {
             }
 
             const total = allPages.length;
-            const showCount = Math.min(limit, total);
+            const showCount = Math.min(safeLimit, total);
 
             // 统计分类
             const categoryCount = {};
@@ -712,7 +714,13 @@ module.exports = {
             let refPage = null;
             if (page_id) {
                 try {
-                    refPage = await NotionAPI.request("GET", `/pages/${page_id}`, null, settings.notionApiKey);
+                    // P4 收敛(c04): 原样拼入 API 路径 —— 含 ../ 的参数可改写请求路径
+                    const refId = Utils.extractNotionId(page_id);
+                    if (refId) {
+                        refPage = await NotionAPI.request("GET", `/pages/${refId}`, null, settings.notionApiKey);
+                    } else {
+                        console.warn("[LD-Notion] 无效的 page_id:", page_id);
+                    }
                 } catch (error) {
                     console.warn("[LD-Notion] 参考页面获取失败:", error);
                     /* page may not exist or be inaccessible */

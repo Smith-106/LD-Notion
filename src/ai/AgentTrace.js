@@ -126,6 +126,12 @@ const AgentTrace = {
                 if (r && typeof r.preview === "string") r.preview = CredentialVault.redactText(r.preview);
             }
         }
+        if (Array.isArray(trace.toolCalls)) {
+            // P4 收敛(c03): thought 是 AI 生成文本, 可能回显用户内容中的凭证 —— 与 results[].preview 同口径脱敏
+            for (const tc of trace.toolCalls) {
+                if (tc && typeof tc.thought === "string") tc.thought = CredentialVault.redactText(tc.thought);
+            }
+        }
         if (Array.isArray(trace.errors)) {
             trace.errors = trace.errors.map((e) => CredentialVault.redactText(e));
         }

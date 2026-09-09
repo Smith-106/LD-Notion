@@ -208,6 +208,12 @@ const Utils = {
             .replace(/"/g, "&quot;");
     },
 
+    // P4 收敛(c02/c05): Markdown 链接输出净化 —— 不可信标题/URL 含 ]( 等元字符
+    // 可破坏链接结构并注入链接目标（标题来自 Notion 页面/搜索结果）。
+    mdText: (text) => String(text ?? "").replace(/[\[\]]/g, ""),
+    mdUrl: (url) => String(url ?? "").replace(/[\s)]/g, ""),
+    mdLink: (text, url) => `[${Utils.mdText(text)}](${Utils.mdUrl(url)})`,
+
     // GM_xmlhttpRequest onerror 回调参数为对象（如 { error, type }），直接模板串化
     // 会得到 "[object Object]" 吞掉真实原因；按常见字段优先级提取，
     // 普通串原样返回，对象兑底 JSON 序列化（截断）。

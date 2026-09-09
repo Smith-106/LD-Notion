@@ -73,7 +73,8 @@ const BookmarkAdapter = Object.assign(Object.create(SourceAdapter), {
             .filter((b) => b.url && isHttpUrl(b.url))
             .map((b) => this.normalize(b));
         if (watermark && watermark.time) {
-            return items.filter((item) => item.createdAt > watermark.time);
+            // P4 收敛(c01 2/3): createdAt 缺失/非法为空串 → 与 ISO 水位比较恒 false, 该书签永不增量同步
+            return items.filter((item) => !item.createdAt || item.createdAt > watermark.time);
         }
         return items;
     },

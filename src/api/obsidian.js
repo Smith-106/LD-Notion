@@ -169,7 +169,8 @@ const HTMLToMarkdown = {
                 const items = node.querySelectorAll(":scope > li");
                 let idx = 1;
                 return Array.from(items).map((li) => {
-                    const md = HTMLToMarkdown._convertNode(li).trim();
+                    // P4 收敛(c05 2/3): li 分支已输出 "- " 前缀 —— 有序列表需剥离, 否则 "1. - x"
+                    const md = HTMLToMarkdown._convertNode(li).trim().replace(/^-\s+/, "");
                     const result = `${idx}. ${md}\n`;
                     idx++;
                     return result;

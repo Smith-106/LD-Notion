@@ -160,6 +160,8 @@ const AIService = {
         if (!response) return categories[categories.length - 1]; // 默认最后一个
 
         const cleaned = response.trim().replace(/[。，,.!！?？]/g, "");
+        // P4 收敛(c03): 纯标点响应清洗后为空串 —— cat.includes("") 恒真, 会误命中首个分类
+        if (!cleaned) return categories[categories.length - 1];
 
         // 精确匹配
         for (const cat of categories) {
@@ -209,7 +211,9 @@ const AIService = {
                 lastError = error;
                 const msg = String(error?.message || error);
                 // 不可重试：鉴权失败/参数错误（401/403/400），直接抛出
-                if (/401|403|400|鉴权|授权|invalid|unauthorized|forbidden/i.test(msg)) {
+                // P4 收敛(c03): 裸 invalid 子串会误伤瞬时错误(如 "invalid upstream response"/"500 invalid JSON")
+                // → 收紧为状态码词边界 + 具体凭证/请求类错误码
+                if (/\b(401|403|400)\b|鉴权|授权|unauthorized|forbidden|invalid[_ -]?(api[ _-]?key|token|client|grant|request|param)/i.test(msg)) {
                     throw error;
                 }
                 if (attempt < retries) {
@@ -1862,7 +1866,10 @@ compound 格式（仅当 intent 为 compound 时使用）：
     },
 
     _resolveIntentExecutor: (intent) => {
-        const handlerName = AIAssistant._INTENT_HANDLER_MAP[intent];
+        // P4 收敛(c03): 普通对象下标走原型链 —— intent="constructor" 返回函数, 绕过降级并抛异常
+        const handlerName = Object.prototype.hasOwnProperty.call(AIAssistant._INTENT_HANDLER_MAP, intent)
+            ? AIAssistant._INTENT_HANDLER_MAP[intent]
+            : null;
         if (handlerName) {
             return {
                 source: "intent",
@@ -1884,7 +1891,11 @@ compound 格式（仅当 intent 为 compound 时使用）：
             };
         }
 
-        const tool = AIAssistant.AGENT_TOOLS[intent];
+        // P4 收敛(c03 补): 工具名查找同样走原型链 —— intent="constructor" 会命中
+        // Object.prototype.constructor(函数) 而返回 execute 不存在的伪工具
+        const tool = Object.prototype.hasOwnProperty.call(AIAssistant.AGENT_TOOLS, intent)
+            ? AIAssistant.AGENT_TOOLS[intent]
+            : null;
         if (tool) {
             return {
                 source: "tool",
@@ -2435,6 +2446,10 @@ const AIClassifier = {
         const { notionApiKey, notionDatabaseId } = settings;
         const pages = [];
         let cursor = null;
+        // P4 收敛(c03): 原循环无游标守卫与页数上限 —— 重复游标会死循环, 超大库无界增长
+        const seenCursors = new Set();
+        const MAX_PAGES = 100;
+        let pageCount = 0;
 
         do {
             const response = await NotionAPI.queryDatabase(
@@ -2445,8 +2460,14 @@ const AIClassifier = {
                 notionApiKey
             );
             pages.push(...(response.results || []));
-            cursor = response.has_more ? response.next_cursor : null;
-        } while (cursor);
+            pageCount++;
+            const nextCursor = response.has_more ? response.next_cursor : null;
+            cursor = (nextCursor && !seenCursors.has(nextCursor)) ? nextCursor : null;
+            if (cursor) seenCursors.add(cursor);
+        } while (cursor && pageCount < MAX_PAGES);
+        if (cursor) {
+            console.warn(`[LD-Notion] 分页已达上限 ${MAX_PAGES} 页, 剩余页面未加载`);
+        }
 
         return pages;
     },

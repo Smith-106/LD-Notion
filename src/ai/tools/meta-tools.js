@@ -33,7 +33,14 @@ module.exports = {
 
             // 获取数据库 schema 作为上下文
             let schemaDesc = "";
-            const dbId = database_id || settings.notionDatabaseId;
+            // P4 收敛(c04): 声明了 database_name 却始终忽略 —— 复用统一名称解析
+            let dbId = database_id;
+            if (!dbId && database_name) {
+                const resolved = await AI()._resolveDatabaseId(database_name, null, settings.notionApiKey);
+                if (resolved?.error) return `错误: ${resolved.error}`;
+                dbId = resolved?.id || null;
+            }
+            if (!dbId) dbId = settings.notionDatabaseId;
             if (dbId) {
                 try {
                     const database = await NotionAPI.fetchDatabase(dbId, settings.notionApiKey);

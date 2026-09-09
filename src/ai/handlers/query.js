@@ -15,9 +15,7 @@ const { NameResolver } = require("../NameResolver");
 const { AgentTrace } = require("../AgentTrace");
 const { getAI: AI, getState: state, getService: svc } = require("../deps");
 
-// P4 共识(glm): 标题/URL 直插 Markdown 链接语法, 含 ]( 的标题可破坏链接结构并注入链接目标。
-// 输出层净化: 链接文本剥离方括号, URL 剥离空白/右括号(Notion 页面 URL 不含这些字符)。
-const mdLink = (text, url) => `[${String(text || "").replace(/[\[\]]/g, "")}](${String(url || "").replace(/[\s)]/g, "")})`;
+// P4 收敛(c02/c05): Markdown 链接净化已上提到 Utils.mdLink/mdText/mdUrl(共享输出净化原语)
 
 module.exports = {
 handleQuery: async (params, settings, explanation) => {
@@ -223,7 +221,7 @@ handleSearch: async (params, settings, explanation) => {
         pages.slice(0, limit).forEach((page, i) => {
             const title = Utils.getPageTitle(page);
             const url = page.url || "";
-            result += `${i + 1}. ${mdLink(title, url)}\n`;
+            result += `${i + 1}. ${Utils.mdLink(title, url)}\n`;
         });
 
         if (pages.length > limit) {
@@ -305,7 +303,7 @@ handleWorkspaceSearch: async (params, settings, explanation) => {
                 const title = db.title?.[0]?.plain_text || "无标题数据库";
                 const url = db.url || "";
                 const id = db.id?.replace(/-/g, "") || "";
-                result += `${i + 1}. ${mdLink(title, url)}\n`;
+                result += `${i + 1}. ${Utils.mdLink(title, url)}\n`;
                 result += `   ID: \`${id}\`\n`;
             });
             if (databases.length > limit) {
@@ -330,7 +328,7 @@ handleWorkspaceSearch: async (params, settings, explanation) => {
                     parentLabel = "🌐 工作区页面";
                 }
 
-                result += `${i + 1}. ${mdLink(title, url)}`;
+                result += `${i + 1}. ${Utils.mdLink(title, url)}`;
                 if (parentLabel) {
                     result += ` - ${parentLabel}`;
                 }

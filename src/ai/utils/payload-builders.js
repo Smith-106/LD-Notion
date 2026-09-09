@@ -4,6 +4,7 @@
 // 从 AIAssistant 提取的纯函数，不依赖 this 或其他 AIAssistant 方法。
 
 const { Utils } = require("../../utils");
+const { UrlValidator } = require("../../security/UrlValidator");
 
 module.exports = {
 
@@ -48,11 +49,15 @@ _buildPropertyValuePayload: (type, value) => {
         case "number":
             return { number: value != null ? Number(value) : null };
         case "checkbox":
-            return { checkbox: Boolean(value) };
+            // P4 收敛(c04 2/3): Boolean("false")===true —— 与 schema.js 同口径严格真值
+            return { checkbox: value === true || value === 1 || String(value).trim().toLowerCase() === "true" };
         case "date":
             return value ? { date: { start: String(value) } } : { date: null };
         case "url":
-            return value ? { url: String(value) } : { url: null };
+            // P4 收敛(c04 2/3): 与 schema.js S-07 同口径 —— 拒 javascript:/data:/内网/169.254
+            return value && UrlValidator.validatePageExternalUrl(String(value).trim())
+                ? { url: String(value).trim() }
+                : { url: null };
         case "email":
             return value ? { email: String(value) } : { email: null };
         case "phone_number":
