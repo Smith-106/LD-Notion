@@ -21,6 +21,9 @@ const DesignSystem = {
         DesignSystem._theme = Storage.get(CONFIG.STORAGE_KEYS.THEME_PREFERENCE, CONFIG.DEFAULTS.themePreference);
         DesignSystem._applyTheme();
         // 监听系统主题变化（auto 模式下自动跟随）
+        // P3 3/3 共识(dsf+glm+qwen): 幂等——重复调用会累积 change 监听, 且旧 MediaQueryList
+        // 引用被覆盖后无法解绑(handler 动态读取 _theme, 无需重新绑定)。
+        if (DesignSystem._mediaQuery) return;
         DesignSystem._mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
         DesignSystem._mediaQuery.addEventListener("change", () => {
             if (DesignSystem._theme === "auto") DesignSystem._applyTheme();
@@ -800,23 +803,25 @@ const DesignSystem = {
             background: var(--ldb-ui-accent);
             transition: width 1s linear;
         }
-        .ldb-btn {
+        /* P3(glm, 主 agent 按 CSS 层叠复核): 原规则无作用域前缀且位于令牌样式之后,
+           同特异性覆盖全局 .ldb-btn-secondary/.ldb-btn-danger 的渐变与边框——收窄到确认框。 */
+        .ldb-confirm-dialog .ldb-btn {
             padding: 6px 14px;
             border-radius: var(--ldb-ui-radius-sm);
             border: 1px solid var(--ldb-ui-border);
             cursor: pointer;
             font-size: var(--ldb-ui-font-size-sm);
         }
-        .ldb-btn-secondary {
+        .ldb-confirm-dialog .ldb-btn-secondary {
             background: var(--ldb-ui-surface-3);
             color: inherit;
         }
-        .ldb-btn-danger {
+        .ldb-confirm-dialog .ldb-btn-danger {
             background: var(--ldb-ui-danger);
             color: #fff;
             border-color: transparent;
         }
-        .ldb-btn:disabled {
+        .ldb-confirm-dialog .ldb-btn:disabled {
             opacity: 0.55;
             cursor: not-allowed;
         }

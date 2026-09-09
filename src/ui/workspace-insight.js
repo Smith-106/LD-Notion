@@ -939,6 +939,10 @@ const WorkspaceInsight = {
             UI().setWorkspaceVisualStatus(MSG.NO_NOTION_KEY, "error");
             throw new Error(MSG.NO_NOTION_KEY);
         }
+        // P3 3/3 共识(dsf+glm+qwen): 并发刷新无请求序号——旧扫描晚到会覆盖新快照/状态。
+        const epoch = (UI()._workspaceRefreshEpoch || 0) + 1;
+        UI()._workspaceRefreshEpoch = epoch;
+        const isStale = () => epoch !== UI()._workspaceRefreshEpoch;
 
         const maxPages = parseInt(UI().refs?.workspaceMaxPagesSelect?.value, 10)
             || parseInt(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages), 10)
@@ -962,11 +966,13 @@ const WorkspaceInsight = {
                     }
                 },
                 onWorkspaceData: (partialData) => {
+                    if (isStale()) return;
                     UI().updateWorkspaceSelect(partialData);
                     UI().updateAITargetDbOptions(partialData.databases || []);
                 },
             });
 
+            if (isStale()) return;
             UI().setWorkspaceVisualStatus("数据库已就绪，正在分析页面属性...", "");
 
             const pageObjects = await WorkspaceService.fetchWorkspacePageObjects(apiKey, {
@@ -977,6 +983,7 @@ const WorkspaceInsight = {
                 },
             });
 
+            if (isStale()) return;
             const databasesMap = new Map(databases.map((d) => [d.id, d]));
             const pages = [];
             const records = [];
@@ -1026,7 +1033,8 @@ const WorkspaceInsight = {
             UI().setWorkspaceVisualStatus(`工作区视图刷新失败：${error.message}`, "error");
             throw error;
         } finally {
-            if (refreshBtn) {
+            // 陈旧请求不解除最新请求的「扫描中」态
+            if (refreshBtn && !isStale()) {
                 refreshBtn.disabled = false;
                 refreshBtn.textContent = "刷新工作区视图";
             }
