@@ -25,7 +25,10 @@ const isAuthTerminalStatus = (status, result = {}) => {
     const code = String(result?.code || "").toLowerCase();
     const msg = String(result?.message || "").toLowerCase();
     if (code === "unauthorized" || code === "invalid_bearer_token") return true;
-    if (msg.includes("api token is invalid") || msg.includes("unauthorized")) return true;
+    // P4 共识(dsf): status 参数此前未参与判定——非 401 响应体(网关/代理 4xx-5xx HTML)
+    // 含 unauthorized 关键词会被误判认证终态, fail-fast 中止整批丢失可重试项。
+    // 关键词启发式仅对 401 生效; 官方 code 判定不限状态(Notion 仅在认证失败时返回)。
+    if (status === 401 && (msg.includes("api token is invalid") || msg.includes("unauthorized"))) return true;
     // 401 但无官方认证 code(如代理/网关 401 HTML): 非终态,逐项失败留待下轮
     return false;
 };
@@ -126,13 +129,17 @@ const NotionAPI = {
 
             // 处理速率限制
             if (response.status === 429 && attempt < retries) {
-                const retryAfter = parseInt(response.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 1;
+                // P4 共识(qwen): Retry-After 上限 60s——异常/恶意响应头可导致长时间挂起与队列饥饿
+                const retryAfter = Math.min(parseInt(response.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 1, 60);
                 console.warn(`Notion API 速率限制，${retryAfter}秒后重试 (${attempt + 1}/${retries})`);
                 await Utils.sleep(retryAfter * 1000 + 500);
                 return doRequest(attempt + 1, token, allowRefresh);
             }
 
-            const result = Utils.safeJsonParse(response.responseText, {});
+            // P4 共识(glm): 区分“空响应体”(容忍, 回退 {})与“非空但非法 JSON”(代理/网关 HTML)——
+            // 后者当成功返回会让下游拿到 result.id=undefined 并发起误导性请求
+            const parsedBody = Utils.safeJsonParse(response.responseText, null);
+            const result = parsedBody === null ? {} : parsedBody;
 
             // v3.14.17 (P0-2): 重试耗尽后的 429 携带 retryCount,供 UI 展示"已自动重试 N 次仍被限流"
             // (H2: 该分支此前在 result 声明之前引用 result → TDZ ReferenceError,已移至声明后)
@@ -143,6 +150,12 @@ const NotionAPI = {
                 throw ErrorModel.annotateError(rateError);
             }
             if (response.status >= 200 && response.status < 300) {
+                // P4 共识(glm): 2xx 但响应体非空且无法解析为 JSON 不可当成功
+                if (parsedBody === null && String(response.responseText || "").trim()) {
+                    const parseError = new Error(`Notion API 响应解析失败: HTTP ${response.status} 返回非 JSON 内容`);
+                    parseError.statusCode = response.status;
+                    throw ErrorModel.annotateError(parseError);
+                }
                 return result;
             }
             if (response.status === 401 && allowRefresh && NotionOAuth.canAutoRefresh()) {
@@ -403,13 +416,24 @@ const NotionAPI = {
     appendBlockChildren: async (blockId, children, apiKey, options = {}) => {
         const safeChildren = Array.isArray(children) ? children : [];
         const endpoint = `/blocks/${blockId}/children`;
-        const payload = { children: safeChildren };
 
-        if (options.after) {
-            payload.after = String(options.after);
+        // P4 共识(glm): Notion 单次追加上限 100 块, 超限整包 400 导致全部丢失。
+        // 分片提交, 仅首个分片携带 after 插入锚点(后续按顺序追加)。
+        const chunks = [];
+        for (let i = 0; i < safeChildren.length; i += 100) {
+            chunks.push(safeChildren.slice(i, i + 100));
         }
+        if (chunks.length === 0) chunks.push([]);
 
-        return await NotionAPI.request("PATCH", endpoint, payload, apiKey);
+        let lastResult = null;
+        for (let i = 0; i < chunks.length; i++) {
+            const payload = { children: chunks[i] };
+            if (options.after && i === 0) {
+                payload.after = String(options.after);
+            }
+            lastResult = await NotionAPI.request("PATCH", endpoint, payload, apiKey);
+        }
+        return lastResult;
     },
 
     // 获取数据库信息
@@ -490,10 +514,14 @@ const NotionAPI = {
         // 获取原页面的所有块
         const allBlocks = [];
         let cursor = null;
+        const seenCursors = new Set();
         do {
             const blocksData = await NotionAPI.fetchBlocks(pageId, cursor, apiKey);
             allBlocks.push(...(blocksData.results || []));
-            cursor = blocksData.has_more ? blocksData.next_cursor : null;
+            const nextCursor = blocksData.has_more ? blocksData.next_cursor : null;
+            // P4 共识(dsf+qwen): 游标为空/重复时终止, 防 has_more=true 却静默丢块或死循环
+            cursor = (nextCursor && !seenCursors.has(nextCursor)) ? nextCursor : null;
+            if (cursor) seenCursors.add(cursor);
         } while (cursor);
 
         // 准备新页面数据
@@ -529,12 +557,25 @@ const NotionAPI = {
         });
 
         // 创建新页面
-        const newPage = await NotionAPI.createDatabasePage(
-            targetParentId,
-            properties,
-            cleanBlocks.slice(0, 100),
-            apiKey
-        );
+        // P4 共识(glm): 此前 parent 变量计算后未使用, parentType="page" 仍按 database_id 创建
+        // → Notion 400 Could not find database。数据库父级走原路径(字节级不变), 页面父级用 parent。
+        let newPage;
+        if (parentType === "database") {
+            newPage = await NotionAPI.createDatabasePage(
+                targetParentId,
+                properties,
+                cleanBlocks.slice(0, 100),
+                apiKey
+            );
+        } else {
+            const titleProp = Object.values(properties || {}).find((prop) => prop?.type === "title");
+            const titleText = titleProp?.title?.map((t) => t?.plain_text ?? t?.text?.content ?? "").join("") || "无标题";
+            newPage = await NotionAPI.request("POST", "/pages", {
+                parent,
+                properties: { title: { title: [{ text: { content: titleText } }] } },
+                children: cleanBlocks.slice(0, 100),
+            }, apiKey);
+        }
 
         // 如果有更多块，追加
         if (cleanBlocks.length > 100) {

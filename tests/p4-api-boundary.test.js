@@ -1,0 +1,196 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+
+// P4 第一批回归: API 传输层边界/错误处理 + content handler 降级
+const { AIHandlers, AIAssistant, AIService, ChatState, AIClassifier } = require("../src/ai/index.js");
+const { NotionAPI } = require("../src/api");
+const { OperationGuard } = require("../src/security");
+const { Storage } = require("../src/storage");
+const { CONFIG } = require("../src/config");
+const { Utils } = require("../src/utils");
+
+const ok = (body) => ({ status: 200, responseText: JSON.stringify(body), responseHeaders: "" });
+
+describe("P4: NotionAPI 请求边界", () => {
+    afterEach(() => NotionAPI.resetTransport());
+
+    it("429 Retry-After 超过 60s 被钳制", async () => {
+        const origSleep = Utils.sleep;
+        const delays = [];
+        Utils.sleep = async (ms) => { delays.push(ms); };
+        let calls = 0;
+        NotionAPI.configureTransport({
+            request: async () => {
+                calls++;
+                return calls === 1
+                    ? { status: 429, responseText: "{}", responseHeaders: "retry-after: 999999" }
+                    : ok({ ok: true });
+            },
+        });
+        try {
+            const result = await NotionAPI.request("GET", "/pages/x", null, "secret_ok", 3);
+            expect(result.ok).toBe(true);
+            expect(delays[0]).toBe(60 * 1000 + 500);
+        } finally {
+            Utils.sleep = origSleep;
+        }
+    });
+
+    it("2xx 非空但非法 JSON 抛解析错误", async () => {
+        NotionAPI.configureTransport({
+            request: async () => ({ status: 200, responseText: "<html>gateway</html>", responseHeaders: "" }),
+        });
+        await expect(NotionAPI.request("GET", "/pages/x", null, "secret_ok", 3))
+            .rejects.toThrow(/响应解析失败/);
+    });
+
+    it("2xx 空响应体仍容忍返回空对象", async () => {
+        NotionAPI.configureTransport({
+            request: async () => ({ status: 200, responseText: "", responseHeaders: "" }),
+        });
+        await expect(NotionAPI.request("GET", "/pages/x", null, "secret_ok", 3)).resolves.toEqual({});
+    });
+
+    it("非 401 响应体含 unauthorized 不误判认证终态", async () => {
+        NotionAPI.configureTransport({
+            request: async () => ({ status: 500, responseText: JSON.stringify({ message: "upstream unauthorized" }), responseHeaders: "" }),
+        });
+        try {
+            await NotionAPI.request("GET", "/pages/x", null, "secret_ok", 3);
+            expect.unreachable("should have thrown");
+        } catch (error) {
+            expect(error.isAuthTerminal).toBeUndefined();
+        }
+    });
+
+    it("401 含 unauthorized 仍判认证终态", async () => {
+        NotionAPI.configureTransport({
+            request: async () => ({ status: 401, responseText: JSON.stringify({ message: "API token is invalid." }), responseHeaders: "" }),
+        });
+        try {
+            await NotionAPI.request("GET", "/pages/x", null, "secret_ok", 3);
+            expect.unreachable("should have thrown");
+        } catch (error) {
+            expect(error.isAuthTerminal).toBe(true);
+        }
+    });
+
+    it("appendBlockChildren 超过 100 块分片提交且 after 仅在首片", async () => {
+        const calls = [];
+        NotionAPI.configureTransport({
+            request: async (opts) => { calls.push(opts); return ok({}); },
+        });
+        const children = Array.from({ length: 250 }, (_, i) => ({ type: "paragraph", paragraph: { rich_text: [] } }));
+        await NotionAPI.appendBlockChildren("blk1", children, "secret_ok", { after: "anchor" });
+
+        expect(calls.length).toBe(3);
+        expect(calls.map((c) => c.data.children.length)).toEqual([100, 100, 50]);
+        expect(calls[0].data.after).toBe("anchor");
+        expect(calls[1].data.after).toBeUndefined();
+        expect(calls[2].data.after).toBeUndefined();
+    });
+
+    it("appendBlockChildren 空数组仍发一次请求", async () => {
+        const calls = [];
+        NotionAPI.configureTransport({ request: async (opts) => { calls.push(opts); return ok({}); } });
+        await NotionAPI.appendBlockChildren("blk1", [], "secret_ok");
+        expect(calls.length).toBe(1);
+        expect(calls[0].data.children).toEqual([]);
+    });
+
+    it("duplicatePage 游标重复时终止且 parentType=page 使用 page_id 父级", async () => {
+        const calls = [];
+        let blockCalls = 0;
+        NotionAPI.configureTransport({
+            request: async (opts) => {
+                calls.push(opts);
+                if (opts.method === "GET" && opts.endpoint.startsWith("/pages/")) {
+                    return ok({ properties: {} });
+                }
+                if (opts.method === "GET" && opts.endpoint.startsWith("/blocks/")) {
+                    blockCalls++;
+                    return ok({ results: [{ type: "paragraph", paragraph: {} }], has_more: true, next_cursor: "same" });
+                }
+                if (opts.method === "POST" && opts.endpoint === "/pages") {
+                    return ok({ id: "newpage" });
+                }
+                return ok({});
+            },
+        });
+
+        const page = await NotionAPI.duplicatePage("p1", "parentPage", "page", "secret_ok");
+        expect(page.id).toBe("newpage");
+        expect(blockCalls).toBe(2);
+
+        const create = calls.find((c) => c.method === "POST" && c.endpoint === "/pages");
+        expect(create.data.parent).toEqual({ page_id: "parentPage" });
+        expect(create.data.properties.title.title[0].text.content).toBe("无标题");
+    });
+});
+
+describe("P4: content handler 边界与降级", () => {
+    const saved = {};
+
+    beforeEach(() => {
+        saved.checkConfig = AIAssistant.checkConfig;
+        saved.resolvePageId = AIAssistant._resolvePageId;
+        saved.updateLastMessage = ChatState.updateLastMessage;
+        saved.requestChat = AIService.requestChat;
+        saved.canExecute = OperationGuard.canExecute;
+        saved.fetchPageMarkdown = NotionAPI.fetchPageMarkdown;
+        saved.fetchBlocks = NotionAPI.fetchBlocks;
+        saved.extractText = AIClassifier.extractText;
+
+        AIAssistant.checkConfig = () => ({ valid: true });
+        ChatState.updateLastMessage = () => {};
+        OperationGuard.canExecute = () => true;
+    });
+
+    afterEach(() => {
+        AIAssistant.checkConfig = saved.checkConfig;
+        AIAssistant._resolvePageId = saved.resolvePageId;
+        ChatState.updateLastMessage = saved.updateLastMessage;
+        AIService.requestChat = saved.requestChat;
+        OperationGuard.canExecute = saved.canExecute;
+        NotionAPI.fetchPageMarkdown = saved.fetchPageMarkdown;
+        NotionAPI.fetchBlocks = saved.fetchBlocks;
+        AIClassifier.extractText = saved.extractText;
+        Storage.remove(CONFIG.STORAGE_KEYS.AI_TEMPLATES);
+    });
+
+    it("_extractPageContent 游标重复时终止", async () => {
+        let calls = 0;
+        NotionAPI.fetchPageMarkdown = async () => ({ markdown: "" });
+        NotionAPI.fetchBlocks = async () => {
+            calls++;
+            return { results: [{ type: "paragraph" }], has_more: true, next_cursor: "same" };
+        };
+        AIClassifier.extractText = (blocks) => `blocks:${blocks.length}`;
+
+        const text = await AIHandlers._extractPageContent("page1", "secret_ok", 100);
+        expect(calls).toBe(2);
+        expect(text).toBe("blocks:2");
+    });
+
+    it("handleBrainstorm 解析返回 error 时给出页面解析失败提示", async () => {
+        AIAssistant._resolvePageId = async () => ({ error: "网络失败" });
+        const result = await AIHandlers.handleBrainstorm({ brainstorm_topic: "远程办公", page_name: "P" }, { notionApiKey: "k" }, "");
+        expect(result).toContain("页面解析失败");
+        expect(result).toContain("网络失败");
+    });
+
+    it("handleBrainstorm 读取参考页面抛错时降级为可见错误", async () => {
+        AIAssistant._resolvePageId = async () => { throw new Error("timeout"); };
+        const result = await AIHandlers.handleBrainstorm({ brainstorm_topic: "远程办公", page_name: "P" }, { notionApiKey: "k" }, "");
+        expect(result).toContain("读取参考页面失败");
+        expect(result).toContain("timeout");
+    });
+
+    it("handleTemplateOutput 生成阶段抛错时返回模板输出失败提示", async () => {
+        Storage.set(CONFIG.STORAGE_KEYS.AI_TEMPLATES, JSON.stringify([{ icon: "📄", name: "周报", prompt: "生成周报" }]));
+        AIService.requestChat = async () => { throw new Error("ai down"); };
+
+        const result = await AIHandlers.handleTemplateOutput({ template_name: "周报" }, { notionApiKey: "k" }, "");
+        expect(result).toContain("❌ 模板输出失败");
+        expect(result).toContain("ai down");
+    });
+});

@@ -42,10 +42,14 @@ _extractPageContent: async (pageId, apiKey, maxChars = 4000) => {
 
     const allBlocks = [];
     let cursor = null;
+    const seenCursors = new Set();
     do {
         const data = await NotionAPI.fetchBlocks(pageId, cursor, apiKey);
         allBlocks.push(...(data.results || []));
-        cursor = data.has_more ? data.next_cursor : null;
+        const nextCursor = data.has_more ? data.next_cursor : null;
+        // P4 3/3 共识(dsf+glm+qwen): has_more=true 但游标为空/重复时终止, 防静默截断与死循环
+        cursor = (nextCursor && !seenCursors.has(nextCursor)) ? nextCursor : null;
+        if (cursor) seenCursors.add(cursor);
     } while (cursor);
     return AIClassifier.extractText(allBlocks).slice(0, maxChars);
 },
@@ -368,10 +372,14 @@ handleAIAutofill: async (params, settings, explanation) => {
 
         const allPages = [];
         let cursor = null;
+        const seenCursors = new Set();
         do {
             const response = await NotionAPI.queryDatabase(settings.notionDatabaseId, null, null, cursor, settings.notionApiKey);
             allPages.push(...(response.results || []));
-            cursor = response.has_more ? response.next_cursor : null;
+            const nextCursor = response.has_more ? response.next_cursor : null;
+            // P4 共识(dsf+glm): 同 _extractPageContent, 游标为空/重复时终止
+            cursor = (nextCursor && !seenCursors.has(nextCursor)) ? nextCursor : null;
+            if (cursor) seenCursors.add(cursor);
         } while (cursor);
 
         if (allPages.length === 0) {
@@ -764,9 +772,16 @@ handleBrainstorm: async (params, settings, explanation) => {
     let pageContext = "";
     if (page_name || page_id) {
         state().updateLastMessage("正在读取页面内容作为参考...", "processing");
-        const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-        if (targetPage) {
-            pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 3000);
+        // P4 3/3 共识(dsf+glm+qwen): 解析/读取此前在 try 之外且未校验 error 形态,
+        // 网络异常直接逃逸 handler, {error} 对象还会以 undefined pageId 继续发起请求
+        try {
+            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage?.error) return `❌ 页面解析失败：${targetPage.error}`;
+            if (targetPage) {
+                pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 3000);
+            }
+        } catch (error) {
+            return `❌ 读取参考页面失败: ${error.message}`;
         }
     }
 
@@ -874,28 +889,29 @@ handleTemplateOutput: async (params, settings, explanation) => {
         return `❌ 找不到模板「${template_name}」。\n\n可用模板: ${list}`;
     }
 
-    // 获取页面上下文（如指定了页面）
-    let pageContext = "";
-    let targetPage = null;
-    if (page_name || page_id) {
-        state().updateLastMessage("正在读取页面内容...", "processing");
-        targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-        if (targetPage?.error) return `❌ 页面解析失败：${targetPage.error}`;
-        if (targetPage) {
-            pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 4000);
+    try {
+        // 获取页面上下文（如指定了页面）
+        let pageContext = "";
+        let targetPage = null;
+        if (page_name || page_id) {
+            state().updateLastMessage("正在读取页面内容...", "processing");
+            targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+            if (targetPage?.error) return `❌ 页面解析失败：${targetPage.error}`;
+            if (targetPage) {
+                pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 4000);
+            }
         }
-    }
 
-    // 组合 prompt
-    state().updateLastMessage(`${template.icon} 正在使用「${template.name}」模板生成...`, "processing");
+        // 组合 prompt
+        state().updateLastMessage(`${template.icon} 正在使用「${template.name}」模板生成...`, "processing");
 
-    const contextBlock = pageContext ? `\n\n以下是参考内容：\n${pageContext}` : "";
-    const customBlock = custom_context ? `\n\n用户补充说明：${custom_context}` : "";
-    const fullPrompt = `${template.prompt}${contextBlock}${customBlock}\n\n请使用 Markdown 格式输出。`;
+        const contextBlock = pageContext ? `\n\n以下是参考内容：\n${pageContext}` : "";
+        const customBlock = custom_context ? `\n\n用户补充说明：${custom_context}` : "";
+        const fullPrompt = `${template.prompt}${contextBlock}${customBlock}\n\n请使用 Markdown 格式输出。`;
 
-    const aiResponse = await svc().requestChat(fullPrompt, settings, 3000);
+        const aiResponse = await svc().requestChat(fullPrompt, settings, 3000);
 
-    // 如果有目标页面，写入 Notion
+        // 如果有目标页面，写入 Notion
         if (targetPage) {
             state().updateLastMessage("正在写入页面...", "processing");
             const contentBlocks = AI()._textToBlocks(aiResponse);
@@ -912,7 +928,12 @@ handleTemplateOutput: async (params, settings, explanation) => {
             return `✅ **${template.icon} ${template.name}** 已生成并写入页面「${targetPage.name}」\n\n${aiResponse}`;
         }
 
-    return `${template.icon} **${template.name}**\n\n${aiResponse}\n\n💡 如需写入页面，请指定目标页面：「用${template.name}模板处理 xxx 页面」`;
+        return `${template.icon} **${template.name}**\n\n${aiResponse}\n\n💡 如需写入页面，请指定目标页面：「用${template.name}模板处理 xxx 页面」`;
+    } catch (error) {
+        // P4 3/3 共识(dsf+glm+qwen): 解析/读取/生成/写入任一步网络失败此前直接逃逸,
+        // 仅靠上游 IntentDispatcher 泛化兜底(无本 handler 语义文案)
+        return `❌ 模板输出失败: ${error.message}`;
+    }
 },
 
 };
