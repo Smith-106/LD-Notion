@@ -300,7 +300,8 @@ BookmarkAutoImporter.run = async () => {
         lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
     } catch (error) {
         BookmarkAutoImporter.isRunning = false;
-        SyncLock.isExporting = false;
+        // qwen P1 共识: isExporting 在租约成功后才置位(下方), 此路径从未持有 ——
+        // 无条件清 false 会误释放并发导出已置位的互斥(与 GitHubAutoImporter 同型)
         console.error("[LD-Notion] 浏览器书签自动同步获取租约失败:", error);
         BookmarkAutoImporter.updateStatus("❌ 获取同步租约失败，本轮跳过");
         return;

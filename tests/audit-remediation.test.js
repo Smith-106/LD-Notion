@@ -356,3 +356,32 @@ describe("P1 共识第五轮守卫(GitHub 批量写页 leaseLost / 误清 isExpo
         expect(rt).toContain("catch (renewError)");
     });
 });
+
+describe("P1 共识第六轮守卫(Bookmark 误清互斥 / 导出 reset 顺序 / 权限复查)", () => {
+    it("BookmarkAutoImporter 租约异常路径不得清 isExporting(该路径从未持有)", () => {
+        const src = fs.readFileSync("src/bridge/BookmarkAutoImporter.js", "utf8");
+        const start = src.indexOf("} catch (error) {", src.indexOf("let lease = null;"));
+        const block = src.slice(start, src.indexOf("return;", start));
+        expect(block).not.toMatch(/SyncLock\.isExporting\s*=/);
+    });
+    it("RSS 侧租约异常路径可以清 isExporting(置位在取租约之前)", () => {
+        const src = fs.readFileSync("src/bridge/RSSAutoImporter.js", "utf8");
+        const setIdx = src.indexOf("SyncLock.isExporting = true;");
+        const leaseIdx = src.indexOf("SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE)");
+        expect(setIdx).toBeGreaterThan(-1);
+        expect(leaseIdx).toBeGreaterThan(setIdx);
+    });
+    it("导出 reset 必须在取租约之前(取租约期间取消不得被清除)", () => {
+        const src = fs.readFileSync("src/export/index.js", "utf8");
+        const resetIdx = src.indexOf("Exporter.reset();", src.indexOf("exportBookmarks: async"));
+        const leaseIdx = src.indexOf("SyncLock.acquireLease", src.indexOf("exportBookmarks: async"));
+        expect(resetIdx).toBeGreaterThan(-1);
+        expect(resetIdx).toBeLessThan(leaseIdx);
+    });
+    it("OperationGuard.execute 确认后必须复查权限", () => {
+        const src = fs.readFileSync("src/security/index.js", "utf8");
+        const fn = src.slice(src.indexOf("execute: async (operation, executor"), src.indexOf("OperationLog.add({", src.indexOf("execute: async (operation, executor")));
+        const calls = fn.match(/OperationGuard\.canExecute\(operation\)/g) || [];
+        expect(calls.length).toBeGreaterThanOrEqual(2);
+    });
+});

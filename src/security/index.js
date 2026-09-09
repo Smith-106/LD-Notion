@@ -164,14 +164,19 @@ const OperationGuard = {
         const startedAt = Date.now();
 
         // 检查权限
-        if (!OperationGuard.canExecute(operation)) {
+        // qwen P1 共识: 权限判定与执行之间存在确认对话框 await(可长达数十秒),
+        // 权限级别存于跨 tab GM 存储, 期间可能被下调 → 执行前必须复查(TOCTOU)。
+        const buildDenial = () => {
             const requiredName = CONFIG.PERMISSION_NAMES[requiredLevelForOp];
             const denialReason = requiredLevelForOp === undefined
                 ? `未定义权限级别: ${operation}`
                 : `权限不足：需要"${requiredName}"及以上权限才能执行此操作。可在主面板「权限控制」中调整权限级别。`;
             // v3.14.6 (XN-06): 统一构造器(phase=execute, status=denied)
             OperationGuard.auditDenied(operation, context, { phase: "execute", reason: denialReason });
-            throw new Error(denialReason);
+            return new Error(denialReason);
+        };
+        if (!OperationGuard.canExecute(operation)) {
+            throw buildDenial();
         }
 
         // 危险操作需要确认; v3.14.6 (S-04): context.requireConfirm 使 AI 常规写也走确认(AI 写零确认缺口)
@@ -192,6 +197,11 @@ const OperationGuard = {
                 // v3.14.6 (S-05/XN-06): 确认取消独立事件 guard.cancelled + status=cancelled
                 OperationGuard.auditDenied(operation, context, { phase: "cancelled", reason: "user_cancelled_confirmation" });
                 throw new Error("操作已取消");
+            }
+
+            // 确认期间权限可能被下调(跨 tab 设置同步) — 执行前复查
+            if (!OperationGuard.canExecute(operation)) {
+                throw buildDenial();
             }
         }
 
@@ -841,7 +851,8 @@ const UndoManager = {
             const description = pending?.description || "";
             await pending.undoAction();
             UndoManager.hideToast();
-            UndoManager.clear();
+            // qwen P1 共识: 撤销请求等待期间可能已注册新撤销 — 无条件 clear 会清掉新入口
+            if (UndoManager.pendingUndo === null) UndoManager.clear();
 
             // 记录撤销操作
             OperationLog.add({
@@ -870,6 +881,8 @@ const UndoManager = {
             return true;
         } catch (error) {
             console.error("[LD-Notion] 撤销失败:", error);
+            // glm P1 共识: 入口已清 timeoutId, 失败路径不隐藏则 toast 永久滞留 DOM
+            UndoManager.hideToast();
             const description = pending?.description || "";
             OperationLog.add({
                 audit_event: OperationLog.inferAuditEvent("undo", "failed"),
@@ -945,19 +958,18 @@ const UndoManager = {
 
     // 隐藏撤销提示
     hideToast: () => {
-        if (UndoManager._hideTimeout) clearTimeout(UndoManager._hideTimeout);
-        // dsf P1 共识: 捕获本次要隐藏的元素 —— 否则 300ms 后读到的可能是新 toast,
-        // 把刚弹出的新提示移出 DOM(撤销入口消失)。只移除本次捕获的旧 toast。
+        // qwen P1 共识: 单例 _hideTimeout 会被下一次 hideToast 清除, 使前一个 toast
+        // 的移除定时器永久丢失而滞留 DOM — 定时器改为按 toast 元素存放。
         const toast = UndoManager.toastElement;
-        if (toast) {
-            toast.classList.remove("visible");
-            UndoManager._hideTimeout = setTimeout(() => {
-                toast.remove();
-                if (UndoManager.toastElement === toast) {
-                    UndoManager.toastElement = null;
-                }
-            }, 300);
-        }
+        if (!toast) return;
+        if (toast._hideTimer) clearTimeout(toast._hideTimer);
+        toast.classList.remove("visible");
+        toast._hideTimer = setTimeout(() => {
+            toast.remove();
+            if (UndoManager.toastElement === toast) {
+                UndoManager.toastElement = null;
+            }
+        }, 300);
     },
 
     // 检查是否有待撤销操作

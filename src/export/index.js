@@ -847,6 +847,9 @@ const Exporter = {
         // v3.14.18 (D2/CC-04 补全): 跨 tab 租约 —— 与自动同步(Bookmark/RSS AutoImporter)共用
         // AUTO_SYNC_LEASE 全局互斥键: 另一 tab 的手动导出/自动同步持有时本轮全量 skipped;
         // TTL 兜底防崩溃锁泄漏。此前仅同 tab isExporting(CC-12), 跨 tab 双写 Notion 防线缺口。
+        // qwen P1 共识: reset 必须在取租约之前 —— 取租约 await 期间用户点取消, 原顺序
+        // 会把它清除导致取消被忽略。
+        Exporter.reset();
         const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
         if (!lease) {
             return {
@@ -860,7 +863,6 @@ const Exporter = {
             };
         }
         const results = { success: [], failed: [], skipped: [] };
-        Exporter.reset();
         SyncLock.isExporting = true;
         // 持有期间每 30s 续约(< 60s TTL); 续约失配(被他 tab 抢占)置 leaseLost 中止批次,
         // 绝不双持有并发写(S1 owner 复核语义, 与 BookmarkAutoImporter CC-04 同构)

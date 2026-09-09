@@ -198,8 +198,9 @@ describe("P1 共识: UndoManager toast 误删与撤销重入(security)", () => {
         vi.useRealTimers();
         UndoManager.pendingUndo = null;
         UndoManager.toastElement = null;
-        if (UndoManager._hideTimeout) clearTimeout(UndoManager._hideTimeout);
-        UndoManager._hideTimeout = null;
+        if (UndoManager.toastElement && UndoManager.toastElement._hideTimer) {
+            clearTimeout(UndoManager.toastElement._hideTimer);
+        }
     });
 
     it("hideToast 延迟回调只移除旧 toast, 不得删除新 toast", () => {
@@ -285,5 +286,62 @@ describe("P1 共识: UpdateChecker 悬挂/标志卡死(3 模型)", () => {
     it("fetchLatestVersion: 非 200 必须 reject", async () => {
         global.GM_xmlhttpRequest = (opts) => opts.onload({ status: 404, responseText: "{}" });
         await expect(UpdateChecker.fetchLatestVersion()).rejects.toThrow("HTTP 404");
+    });
+});
+
+describe("P1 共识第六轮: 权限 TOCTOU / 撤销失败 toast / 多次 toast 移除", () => {
+    const { OperationGuard, ConfirmationDialog, UndoManager } = require("../src/security");
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+        UndoManager.pendingUndo = null;
+        UndoManager.toastElement = null;
+    });
+
+    it("确认对话框返回后必须复查权限(跨 tab 降级窗口)", async () => {
+        const exec = vi.fn(async () => "done");
+        vi.spyOn(OperationGuard, "canExecute").mockReturnValueOnce(true).mockReturnValueOnce(false);
+        vi.spyOn(ConfirmationDialog, "show").mockResolvedValue(true);
+        vi.spyOn(OperationGuard, "auditDenied").mockImplementation(() => {});
+        await expect(
+            OperationGuard.execute("createDatabasePage", exec, { itemName: "x", requireConfirm: true })
+        ).rejects.toThrow("权限不足");
+        expect(exec).not.toHaveBeenCalled();
+    });
+
+    it("撤销失败路径必须隐藏 toast(否则永久滞留 DOM)", async () => {
+        const hide = vi.spyOn(UndoManager, "hideToast").mockImplementation(() => {});
+        UndoManager.pendingUndo = {
+            description: "失败撤销",
+            registeredAt: Date.now(),
+            undoAction: async () => { throw new Error("boom"); },
+        };
+        const ok = await UndoManager.execute();
+        expect(ok).toBe(false);
+        expect(hide).toHaveBeenCalled();
+    });
+
+    it("前一个 toast 的移除定时器不得被后续 clear 抹除", () => {
+        vi.useFakeTimers();
+        global.requestAnimationFrame = (cb) => cb();
+        global.document.createElement = vi.fn(() => ({
+            classList: { add: vi.fn(), remove: vi.fn() },
+            remove: vi.fn(),
+            style: {},
+            appendChild: vi.fn(),
+            querySelector: () => ({ set onclick(_v) {} }),
+            innerHTML: "",
+        }));
+
+        UndoManager.register({ description: "A", undoAction: async () => {} });
+        const toastA = UndoManager.toastElement;
+        UndoManager.register({ description: "B", undoAction: async () => {} });
+        const toastB = UndoManager.toastElement;
+        UndoManager.clear();
+
+        vi.advanceTimersByTime(400);
+        expect(toastA.remove).toHaveBeenCalled();
+        expect(toastB.remove).toHaveBeenCalled();
     });
 });
