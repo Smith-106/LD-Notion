@@ -1032,6 +1032,8 @@ const UI = {
 
         document.body.appendChild(panel);
         UI.panel = panel;
+        // P4 收敛(c15): destroy 时中止在途的长任务(如逐条保存统一候选), 与 NotionSiteUI 同构
+        UI._abortController = new AbortController();
         UI.cacheRefs();
         // v3.14.7 (REV-05 UI-09): 动态创建后重应用主题偏好(仅 data-ldb-root 不带 data-ldb-theme 时
         // 主题被忽略; 与 notion-site/generic 面板同根因同修复)
@@ -1453,8 +1455,8 @@ const UI = {
         const isUserscriptMode = Utils.isUserscriptMode();
         const hasBridgeMarker = BookmarkBridge.isExtensionAvailable();
         const bookmarkSource = UI.getActiveBookmarkSource();
-        const hasGitHubUsername = !!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
-        const hasGitHubToken = !!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "").trim();
+        const hasGitHubUsername = !!String(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "") ?? "").trim();
+        const hasGitHubToken = !!String(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "") ?? "").trim();
 
         const checks = [
             {
@@ -1548,8 +1550,9 @@ const UI = {
         const isUserscriptMode = Utils.isUserscriptMode();
         const hasBridgeMarker = BookmarkBridge.isExtensionAvailable();
         const bookmarkSource = UI.getActiveBookmarkSource();
-        const hasGitHubUsername = !!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
-        const hasGitHubToken = !!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "").trim();
+        // P4 收敛(c15): 非字符串脏值(跨设备同步/历史存储)会让 .trim() 抛 TypeError
+        const hasGitHubUsername = !!String(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "") ?? "").trim();
+        const hasGitHubToken = !!String(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "") ?? "").trim();
         const activeTab = Storage.get(CONFIG.STORAGE_KEYS.ACTIVE_TAB, CONFIG.DEFAULTS.activeTab);
         const updateLastResultRaw = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_LAST_RESULT, "");
         const updateLastSeenVersion = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_LAST_SEEN_VERSION, "");
@@ -2272,6 +2275,8 @@ const UI = {
         }
 
         for (let index = 0; index < model.connectionCandidates.length; index++) {
+            // P4 收敛(c15): 面板销毁(_abortController.abort)后不得继续逐条 AI 调用 + Notion 写入
+            if (UI._abortController?.signal?.aborted) break;
             const candidate = model.connectionCandidates[index];
             const aiDraft = await UI.buildWorkspaceConnectionCandidateAIDraft(candidate, aiSettings);
             const candidateTitle = UI.buildWorkspaceConnectionCandidateTitle(candidate, index, aiDraft);
@@ -2884,6 +2889,11 @@ const UI = {
     destroy: () => {
         UI._abortController?.abort();
         UI._abortController = null;
+        // P4 收敛(c15): oplog:changed 防抖定时器已排队时 destroy 仍会触发一次渲染
+        if (UI._oplogDebounceTimer) {
+            clearTimeout(UI._oplogDebounceTimer);
+            UI._oplogDebounceTimer = null;
+        }
         // P3 共识(glm+qwen): 注销 init 注册的事件总线 handler——此前悬挂回调在面板
         // 销毁后仍触发渲染(裸解引用 refs), destroy→init 还会叠加订阅。
         if (UI._busHandlers) {

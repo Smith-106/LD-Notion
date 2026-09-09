@@ -469,7 +469,7 @@ const WorkspaceVisual = {
             .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
             .slice(0, 10);
 
-        const duplicateCandidates = Array.from(duplicateGroups.values())
+        const duplicateCandidatesSorted = Array.from(duplicateGroups.values())
             .filter((group) => group.items.length > 1)
             .map((group) => {
                 const sourceList = Array.from(group.sources).sort((a, b) => a.localeCompare(b));
@@ -482,8 +482,11 @@ const WorkspaceVisual = {
                     items: group.items,
                 };
             })
-            .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
-            .slice(0, 8);
+            .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+        // P4 收敛(c17): 展示列表取前 8, 但跨源候选判定必须用全量 ——
+        // 先 slice 再过滤会使排在 9+ 的跨源同标题候选被静默丢弃
+        const duplicateCandidates = duplicateCandidatesSorted.slice(0, 8);
 
         const linkConnectionCandidates = Array.from(linkGroups.values())
             .filter((group) => group.items.length > 1 && group.sources.size > 1)
@@ -498,7 +501,7 @@ const WorkspaceVisual = {
             }));
 
         const connectionCandidates = Array.from(new Map([
-            ...duplicateCandidates
+            ...duplicateCandidatesSorted
                 .filter((group) => group.sourceCount > 1)
                 .map((group) => [group.key, {
                     key: `title:${group.key}`,

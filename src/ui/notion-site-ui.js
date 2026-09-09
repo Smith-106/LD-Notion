@@ -196,8 +196,11 @@ const NotionSiteUI = {
         if (savedPosition) {
             try {
                 const pos = JSON.parse(savedPosition);
-                const savedRight = parseFloat(pos.right) || 24;
-                const savedBottom = parseFloat(pos.bottom) || 24;
+                // P4 收敛(c16): 0 为合法坐标 —— `|| 24` 会把钳制到 0 的位置静默改回 24
+                const parsedRight = parseFloat(pos.right);
+                const parsedBottom = parseFloat(pos.bottom);
+                const savedRight = Number.isFinite(parsedRight) ? parsedRight : 24;
+                const savedBottom = Number.isFinite(parsedBottom) ? parsedBottom : 24;
                 const maxRight = Math.max(0, window.innerWidth - btn.offsetWidth);
                 const maxBottom = Math.max(0, window.innerHeight - btn.offsetHeight);
                 btn.style.right = Math.min(savedRight, maxRight) + "px";
@@ -575,7 +578,11 @@ const NotionSiteUI = {
                 NotionSiteUI.showStatus(`设置保存失败：${error.message}`, "error");
             } finally {
                 // v3.14.7: 保存后重置显式编辑标记(syncApiKeyInputs 的程序性清空不算用户编辑)
+                // P4 收敛(c16): 三处 touched 均须复位 —— syncSensitiveInput 会程序性清空
+                // AI Key/GitHub Token 输入框, 遗留 touched="true" 使下一次保存把空值当显式清除
                 panel.querySelector("#ldb-notion-api-key").dataset.touched = "false";
+                panel.querySelector("#ldb-notion-ai-api-key").dataset.touched = "false";
+                panel.querySelector("#ldb-notion-github-token").dataset.touched = "false";
                 saveBtn.textContent = originalText;
                 saveBtn.disabled = false;
             }
@@ -811,8 +818,13 @@ const NotionSiteUI = {
         if (savedPosition) {
             try {
                 const pos = JSON.parse(savedPosition);
-                panel.style.right = pos.right || "24px";
-                panel.style.bottom = pos.bottom || "96px";
+                // P4 收敛(c16): 与浮钮同款视口钳制 —— 小屏/换屏后旧 right/bottom 可把面板推出视口
+                const panelRight = parseFloat(pos.right);
+                const panelBottom = parseFloat(pos.bottom);
+                const maxPanelRight = Math.max(0, window.innerWidth - panel.offsetWidth);
+                const maxPanelBottom = Math.max(0, window.innerHeight - panel.offsetHeight);
+                panel.style.right = Math.min(Number.isFinite(panelRight) ? panelRight : 24, maxPanelRight) + "px";
+                panel.style.bottom = Math.min(Number.isFinite(panelBottom) ? panelBottom : 96, maxPanelBottom) + "px";
             } catch (e) {
                 console.warn("[LD-Notion] corrupted panel position, resetting");
                 Storage.remove(CONFIG.STORAGE_KEYS.NOTION_PANEL_POSITION);
@@ -982,7 +994,8 @@ const NotionSiteUI = {
 
     // 更新 AI 模型选项
     updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
-        const modelSelect = NotionSiteUI.panel.querySelector("#ldb-notion-ai-model");
+        // P4 收敛(c16): destroy 置 panel=null 后晚到的模型列表回调会裸解引用(同 updateAITargetDbOptions)
+        const modelSelect = NotionSiteUI.panel?.querySelector("#ldb-notion-ai-model");
         const provider = AIService.PROVIDERS[service];
 
         if (!provider || !modelSelect) return;

@@ -151,7 +151,17 @@ const Utils = {
 
     base64Encode: (input) => {
         const normalized = String(input ?? "");
-        if (typeof btoa === "function") return btoa(normalized);
+        if (typeof btoa === "function") {
+            try {
+                return btoa(normalized);
+            } catch {
+                // P4 收敛(c17): btoa 仅接受 Latin-1 —— 非 ASCII 输入与 base64DecodeUnicode 对称走 UTF-8
+                const bytes = new TextEncoder().encode(normalized);
+                let binary = "";
+                for (const b of bytes) binary += String.fromCharCode(b);
+                return btoa(binary);
+            }
+        }
         if (typeof Buffer !== "undefined") return Buffer.from(normalized, "utf8").toString("base64");
         throw new Error("当前环境不支持 Base64 编码");
     },
@@ -200,7 +210,8 @@ const Utils = {
     // 避免每次调用创建一次性 DOM 节点——escapeHtml 在批量渲染热路径
     // （renderBookmarkList/updateLogPanel 等）被调用 60+ 处，DOM 节点创建放大 GC。
     escapeHtml: (text) => {
-        if (!text) return "";
+        // P4 收敛(c17): `!text` 把 0/false 当空串丢弃 —— 仅 null/undefined 为无值
+        if (text == null) return "";
         return String(text)
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
@@ -248,6 +259,8 @@ const Utils = {
             for (const p of trackingParams) parsed.searchParams.delete(p);
             let normalized = parsed.toString();
             // 去尾部斜杠(根路径 https://a.com/ → https://a.com)
+            // P4 收敛(c17) 裁决: 查询串内的尾斜杠已被 searchParams 序列化编码为 %2F,
+            // 本正则不会触及; 改按 pathname 去斜杠反而会改变既有去重键(存量迁移失配) → 保持原实现
             normalized = normalized.replace(/\/+$/, "");
             return normalized;
         } catch {

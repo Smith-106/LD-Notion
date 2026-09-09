@@ -379,6 +379,8 @@ const GenericUI = {
         const restoreValue = exportType === CONFIG.EXPORT_TARGET_TYPES.PAGE
             ? (exportState.parentPageId ? `page:${exportState.parentPageId}` : "")
             : exportState.databaseId;
+        // P4 收敛(c14): 刷新期间用户的新选择(仍在新列表中)不得被持久化旧值覆盖
+        const currentSelection = select.value;
 
         let options = '<option value="">未选择</option>';
         const known = new Set();
@@ -406,6 +408,9 @@ const GenericUI = {
         select.innerHTML = options;
         if (restoreValue) {
             select.value = restoreValue;
+        }
+        if (currentSelection && known.has(currentSelection)) {
+            select.value = currentSelection;
         }
     },
 
@@ -439,7 +444,8 @@ const GenericUI = {
                 apiKey,
                 includePages: true,
                 onProgress: (progress) => {
-                    if (!tip) return;
+                    // P4 收敛(c14): 陈旧请求不得写状态栏
+                    if (!tip || isStale()) return;
                     if (progress.phase === "databases") {
                         tip.textContent = `正在获取数据库列表... 已加载 ${progress.loaded} 个`;
                     } else if (progress.phase === "pages") {
@@ -461,7 +467,8 @@ const GenericUI = {
                 tip.textContent = `已加载 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.filter(p => p.parent === "workspace").length} 个页面`;
             }
         } catch (error) {
-            if (tip) {
+            // P4 收敛(c14): 陈旧请求的失败不得覆盖最新刷新状态
+            if (tip && !isStale()) {
                 tip.textContent = `加载失败：${error.message}`;
             }
         } finally {
@@ -515,6 +522,8 @@ const GenericUI = {
         panel.querySelector("#gclip-export-type").addEventListener("change", () => {
             const isPage = panel.querySelector("#gclip-export-type").value === "page";
             panel.querySelector("#gclip-target-label").textContent = isPage ? "父页面" : "数据库";
+            // P4 收敛(c14): 手输目标 ID 属于旧类型 —— 不清空会把数据库 ID 当父页面 ID 保存
+            panel.querySelector("#gclip-target-id").value = "";
             GenericUI.loadTargetOptionsFromCache(NotionOAuth.getAccessToken(panel.querySelector("#gclip-api-key-input").value.trim()));
         });
 
@@ -568,8 +577,15 @@ const GenericUI = {
             Storage.set(CONFIG.STORAGE_KEYS.OBS_API_URL, url);
             // v3.14.7 (REV-08): setSecret 已随 v3.14.2 保险箱退役删除, 恒抛 TypeError——
             // 改走统一明文存储入口 CredentialVault.set(非敏感键直落 GM 明文, 审计由 REDACT_IN_LOGS 脱敏)
-            await CredentialVault.set(CONFIG.STORAGE_KEYS.OBS_API_KEY, key);
-            Storage.set(CONFIG.STORAGE_KEYS.OBS_DIR, dir || CONFIG.DEFAULTS.obsDir);
+            try {
+                await CredentialVault.set(CONFIG.STORAGE_KEYS.OBS_API_KEY, key);
+                Storage.set(CONFIG.STORAGE_KEYS.OBS_DIR, dir || CONFIG.DEFAULTS.obsDir);
+            } catch (error) {
+                // P4 收敛(c14): 存储失败须可见 —— 异常此前直接逃逸 click 监听
+                obsStatusEl.textContent = `❌ 保存失败: ${error.message}`;
+                obsStatusEl.style.color = "var(--ldb-ui-danger)";
+                return;
+            }
             panel.querySelector("#gclip-obs-key").value = "";
             obsStatusEl.textContent = "✅ Obsidian 配置已保存";
             obsStatusEl.style.color = "var(--ldb-ui-success)";
@@ -618,7 +634,7 @@ const GenericUI = {
             if (exportType === "database") {
                 GenericUI.showStatus("正在配置数据库属性...", "info");
             }
-            const { setupResult } = await UICommandService.execute("save_command_boundary_settings", {
+            const saveResult = await UICommandService.execute("save_command_boundary_settings", {
                 scope: "generic-export-target",
                 liveApiKey: liveKey,
                 apiKey,
@@ -626,7 +642,13 @@ const GenericUI = {
                 targetId,
                 imgMode,
                 autoSetupDatabaseProperties: exportType === "database",
+            }).catch((error) => {
+                // P4 收敛(c14): 保存失败须可见 —— 异常此前直接逃逸 click 监听(无任何提示)
+                GenericUI.showStatus(`保存失败: ${error.message}`, "error");
+                return null;
             });
+            if (!saveResult) return;
+            const { setupResult } = saveResult;
             // v3.14.8: 目标已写入 TargetState；即便 setupDatabaseProperties 失败也进入导出区并警告
             GenericUI.loadTargetOptionsFromCache(apiKey);
             panel.querySelector("#gclip-settings").style.display = "none";
@@ -724,13 +746,14 @@ const GenericUI = {
                     title = content.title || title;
                     const meta = { title, url: location.href, author: content.author };
                     md = HTMLToMarkdown.buildFrontmatter(meta);
-                    md += `> [!info] 页面信息\n> - **来源**: 知乎\n> - **链接**: [${title}](${location.href})\n> - **作者**: ${content.author || "未知"}\n> - **导出时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
+                    // P4 收敛(c14): 标题/作者为页面不可信内容 —— 经 mdText/mdLink 净化防链接结构破坏与注入
+                    md += `> [!info] 页面信息\n> - **来源**: 知乎\n> - **链接**: ${Utils.mdLink(title, location.href)}\n> - **作者**: ${Utils.mdText(content.author || "未知")}\n> - **导出时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
 
                     if (content.detail) md += HTMLToMarkdown.convert(content.detail) + "\n\n";
                     if (content.html) md += HTMLToMarkdown.convert(content.html) + "\n\n";
                     if (content.answers) {
                         content.answers.forEach((ans, i) => {
-                            md += `> [!note]+ #${i + 1} ${ans.author} · 👍 ${ans.voteCount}\n`;
+                            md += `> [!note]+ #${i + 1} ${Utils.mdText(ans.author || "匿名")} · 👍 ${ans.voteCount}\n`;
                             const lines = HTMLToMarkdown.convert(ans.html || "").trim().split("\n");
                             md += lines.map(l => `> ${l}`).join("\n") + "\n\n";
                         });
@@ -738,7 +761,7 @@ const GenericUI = {
                 } else {
                     const meta = { title, url: location.href };
                     md = HTMLToMarkdown.buildFrontmatter(meta);
-                    md += `> [!info] 页面信息\n> - **链接**: [${title}](${location.href})\n> - **导出时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
+                    md += `> [!info] 页面信息\n> - **链接**: ${Utils.mdLink(title, location.href)}\n> - **导出时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
                     const body = document.querySelector("article") || document.querySelector("main") || document.body;
                     md += HTMLToMarkdown.convert(body.innerHTML) + "\n";
                 }

@@ -134,7 +134,8 @@ const WorkspaceInsight = {
             },
         };
 
-        const preset = presets[normalized] || presets.review;
+        // P4 收敛(c17): 原型链键守卫 —— AI 可回传 constructor/__proto__ 使 presets[key] 取到 Object 原型成员
+        const preset = Object.prototype.hasOwnProperty.call(presets, normalized) ? presets[normalized] : presets.review;
         return {
             recommendedAction: normalized || "review",
             actionLabel: preset.actionLabel,
@@ -961,6 +962,8 @@ const WorkspaceInsight = {
                 includePages: false,
                 maxPages,
                 onProgress: (progress) => {
+                    // P4 收敛(c17): 陈旧请求不得覆盖最新请求的状态文案
+                    if (isStale()) return;
                     if (progress.phase === "databases") {
                         UI().setWorkspaceVisualStatus(`正在扫描工作区数据库... 已加载 ${progress.loaded} 个数据库`, "");
                     }
@@ -979,6 +982,7 @@ const WorkspaceInsight = {
                 maxPages,
                 phase: "workspace_visual_pages",
                 onProgress: (progress) => {
+                    if (isStale()) return;
                     UI().setWorkspaceVisualStatus(`正在分析页面属性... 已扫描 ${progress.loaded} 个页面`, "");
                 },
             });
@@ -1030,7 +1034,10 @@ const WorkspaceInsight = {
             );
             return model;
         } catch (error) {
-            UI().setWorkspaceVisualStatus(`工作区视图刷新失败：${error.message}`, "error");
+            // P4 收敛(c17): 陈旧请求的失败不得覆盖最新刷新的状态
+            if (!isStale()) {
+                UI().setWorkspaceVisualStatus(`工作区视图刷新失败：${error.message}`, "error");
+            }
             throw error;
         } finally {
             // 陈旧请求不解除最新请求的「扫描中」态

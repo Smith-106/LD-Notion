@@ -126,7 +126,12 @@ const PanelResize = {
                     // Odyssey Review F7(hy3): 视口尺寸随窗口变化,valuemax 与 End 上限实时计算
                     const liveMax = maxViewportHeight();
                     handle.setAttribute("aria-valuemax", String(liveMax));
-                    let newHeight = element.offsetHeight;
+                    // P4 收敛(c16): 与 syncValueNow 同口径 —— 内容不足时 offsetHeight 不随按键变化,
+                    // 以已钳制的 maxHeight 为基准, 否则短内容下键盘缩放无任何效果
+                    const parsedMaxHeight = parseFloat(element.style.maxHeight);
+                    let newHeight = (Number.isFinite(parsedMaxHeight) && parsedMaxHeight > 0)
+                        ? parsedMaxHeight
+                        : element.offsetHeight;
                     if (e.key === 'ArrowUp') {
                         newHeight = Math.min(liveMax, newHeight + step);
                         handled = true;

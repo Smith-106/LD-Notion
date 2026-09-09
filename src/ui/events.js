@@ -1,7 +1,7 @@
 "use strict";
 
 // 依赖引入
-const { CONFIG, MSG } = require("../config");
+const { CONFIG, MSG, getMimeType } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState, DedupStore } = require("../storage");
 const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
@@ -1141,7 +1141,7 @@ const UIEvents = {
             };
 
             // 保存设置
-            await UICommandService.execute("save_command_boundary_settings", {
+            const settingsSaved = await UICommandService.execute("save_command_boundary_settings", {
                 scope: "main-export-session",
                 liveApiKey,
                 exportState: {
@@ -1167,7 +1167,15 @@ const UIEvents = {
                     [CONFIG.STORAGE_KEYS.AI_API_KEY]: getInputValue(refs.aiApiKeyInput),
                     [CONFIG.STORAGE_KEYS.GITHUB_TOKEN]: getInputValue(refs.githubTokenInput),
                 },
+            }).then(() => true, (error) => {
+                // P4 收敛(c13): 保存失败不得使导出按钮永久禁用(异常此前直接逃逸 onclick)
+                UI.showStatus(`保存设置失败: ${error.message}`, "error");
+                return false;
             });
+            if (!settingsSaved) {
+                restoreExportBtn();
+                return;
+            }
 
             // 显示控制按钮，隐藏导出按钮
             refs.exportBtn.disabled = true;
@@ -1274,6 +1282,10 @@ const UIEvents = {
             refs.obsExportBtn.disabled = true;
             refs.exportBtns.style.display = "none";
             refs.controlBtns.style.display = "flex";
+            // P4 收敛(c13): 与 Notion 导出同款重置 —— 上轮暂停态标签/样式不得残留到本轮
+            refs.pauseBtn.innerHTML = "⏸️ 暂停";
+            refs.pauseBtn.classList.add("ldb-btn-warning");
+            refs.pauseBtn.classList.remove("ldb-btn-primary");
             UI.refs.reportContainer.innerHTML = "";
 
             const results = { success: [], failed: [], skipped: [] };
