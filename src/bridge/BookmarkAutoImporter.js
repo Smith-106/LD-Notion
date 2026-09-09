@@ -14,6 +14,7 @@ const { emit } = require("../coordination/event-bus");
 const BookmarkAutoImporter = {
     isRunning: false,
     timerId: null,
+    initTimerId: null,
     deferredWhileHidden: false,
     visibilityListenerBound: false,
     lastRunAt: 0,
@@ -56,6 +57,13 @@ const BookmarkAutoImporter = {
     },
 
     stopPolling: () => {
+        // 清理 init 的 3s 延迟启动: 否则禁用后延迟回调仍会 run + 复活轮询(qwen P1 共识发现)
+        if (BookmarkAutoImporter.initTimerId) {
+            clearTimeout(BookmarkAutoImporter.initTimerId);
+            BookmarkAutoImporter.initTimerId = null;
+        }
+        // 重置 hidden 推迟标记: 否则禁用后切回可见仍会经 visibilitychange 补跑同步
+        BookmarkAutoImporter.deferredWhileHidden = false;
         if (BookmarkAutoImporter.timerId) {
             clearInterval(BookmarkAutoImporter.timerId);
             BookmarkAutoImporter.timerId = null;
@@ -236,7 +244,11 @@ const BookmarkAutoImporter = {
     init: () => {
         if (!BookmarkAutoImporter.canStart()) return;
         BookmarkAutoImporter.ensureVisibilityListener();
-        setTimeout(() => {
+        if (BookmarkAutoImporter.initTimerId) clearTimeout(BookmarkAutoImporter.initTimerId);
+        BookmarkAutoImporter.initTimerId = setTimeout(() => {
+            BookmarkAutoImporter.initTimerId = null;
+            // 延迟窗口内可能已被禁用(stopPolling 已清理时此路不达; 双保险防竞态)
+            if (!Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, false)) return;
             Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.run());
             const interval = Storage.get(
                 CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL,

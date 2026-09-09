@@ -15,6 +15,7 @@ const { emit } = require("../coordination/event-bus");
 const RSSAutoImporter = {
     isRunning: false,
     timerId: null,
+    initTimerId: null,
     deferredWhileHidden: false,
     visibilityListenerBound: false,
     lastRunAt: 0,
@@ -72,6 +73,13 @@ const RSSAutoImporter = {
     },
 
     stopPolling: () => {
+        // 清理 init 的 3s 延迟启动: 否则禁用后延迟回调仍会 run + 复活轮询(qwen P1 共识发现)
+        if (RSSAutoImporter.initTimerId) {
+            clearTimeout(RSSAutoImporter.initTimerId);
+            RSSAutoImporter.initTimerId = null;
+        }
+        // 重置 hidden 推迟标记: 否则禁用后切回可见仍会经 visibilitychange 补跑同步
+        RSSAutoImporter.deferredWhileHidden = false;
         const { SyncScheduler } = require("../adapter/SyncScheduler");
         SyncScheduler.stop("rss");
     },
@@ -878,7 +886,11 @@ const RSSAutoImporter = {
     init: () => {
         if (!RSSAutoImporter.canStart()) return;
         RSSAutoImporter.ensureVisibilityListener();
-        setTimeout(() => {
+        if (RSSAutoImporter.initTimerId) clearTimeout(RSSAutoImporter.initTimerId);
+        RSSAutoImporter.initTimerId = setTimeout(() => {
+            RSSAutoImporter.initTimerId = null;
+            // 延迟窗口内可能已被禁用(stopPolling 已清理时此路不达; 双保险防竞态)
+            if (!Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return;
             Utils.runWhenBrowserIdle(() => RSSAutoImporter.run());
             const interval = Storage.get(
                 CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL,

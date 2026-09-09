@@ -78,7 +78,9 @@ const SyncScheduler = {
         const key = SOURCE_INTERVAL_KEYS[sourceType];
         const def = SOURCE_INTERVAL_DEFAULTS[sourceType] || 30;
         if (!key) return def;
-        return Number(Storage.getRaw(key, def)) || def;
+        // 0 是有效值(仅手动同步): 不能被 || def 吞掉而回退默认间隔(dsf P1 共识)
+        const raw = Number(Storage.getRaw(key, def));
+        return Number.isFinite(raw) && raw >= 0 ? raw : def;
     },
 
     /**
@@ -102,17 +104,25 @@ const SyncScheduler = {
         this.stop(sourceType);
         // v3.14.6 (CC-07): 递增 epoch, 使此前在途 _doSync 完成时判旧丢弃
         this._epochs.set(sourceType, (this._epochs.get(sourceType) || 0) + 1);
-        const intervalMin = Number.isFinite(intervalMinutes) && intervalMinutes > 0
+        // dsf P1 共识: 显式传入的 0(仅手动)必须优先于存储/默认值, 不得回退启动定时器
+        const intervalMin = Number.isFinite(intervalMinutes)
             ? intervalMinutes
             : this.getIntervalMinutes(sourceType);
         if (intervalMin <= 0) return; // 0 = 仅手动同步
 
         const intervalMs = intervalMin * 60 * 1000;
         const runSync = () => {
-            if (typeof globalThis.requestIdleCallback === "function") {
-                globalThis.requestIdleCallback(() => this._doSync(sourceType));
-            } else {
+            // qwen P1 共识: requestIdleCallback 排队到执行之间若发生 stop()/start()(epoch 变化),
+            // 已排队回调仍会执行一次完整同步(写 Notion), 绕过「已停止」意图 — 执行前复核 epoch
+            const epoch = this._epochs.get(sourceType) || 0;
+            const fire = () => {
+                if (epoch !== (this._epochs.get(sourceType) || 0)) return; // 已停止: 丢弃本次调度
                 this._doSync(sourceType);
+            };
+            if (typeof globalThis.requestIdleCallback === "function") {
+                globalThis.requestIdleCallback(fire);
+            } else {
+                fire();
             }
         };
 

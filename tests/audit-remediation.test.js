@@ -206,3 +206,43 @@ describe("agent-executor deps getter 调用守卫(修复 ChatState2.updateLastMe
         expect(typeof getService().requestChat).toBe("function");
     });
 });
+
+describe("P1 三模型共识修复守卫(异步/定时器/禁用绕过)", () => {
+    it("Bookmark/RSS init 延迟启动定时器必须可被 stopPolling 清理", () => {
+        for (const f of ["src/bridge/BookmarkAutoImporter.js", "src/bridge/RSSAutoImporter.js"]) {
+            const src = fs.readFileSync(f, "utf8");
+            expect(src).toContain("initTimerId");
+            // stopPolling 内必须清理 initTimerId, 否则禁用后延迟回调仍 run + 复活轮询
+            const stopBody = src.slice(src.indexOf("stopPolling: () =>"), src.indexOf("startPolling:"));
+            expect(stopBody).toContain("clearTimeout(");
+            expect(stopBody).toContain("initTimerId = null");
+            // 禁用后不得再经 visibilitychange 补跑
+            expect(stopBody).toContain("deferredWhileHidden = false");
+        }
+    });
+    it("SyncScheduler 已排队 idle 回调在 stop 后必须丢弃(epoch 复核)", () => {
+        const src = fs.readFileSync("src/adapter/SyncScheduler.js", "utf8");
+        // runSync 内先捕获 epoch, 再在执行前比对 — 防 stop 后仍同步
+        expect(src).toMatch(/const runSync = \(\) => \{[\s\S]{0,400}const epoch = this\._epochs\.get\(sourceType\)[\s\S]{0,300}if \(epoch !== \(this\._epochs\.get\(sourceType\)/);
+    });
+    it("init 延迟回调执行前复核 enabled(防延迟窗口内禁用)", () => {
+        for (const [f, key] of [["src/bridge/BookmarkAutoImporter.js", "BOOKMARK_AUTO_IMPORT_ENABLED"], ["src/bridge/RSSAutoImporter.js", "RSS_AUTO_IMPORT_ENABLED"]]) {
+            const src = fs.readFileSync(f, "utf8");
+            const start = src.indexOf("initTimerId = setTimeout");
+            const end = src.indexOf("}, 3000)", start);
+            expect(start).toBeGreaterThan(-1);
+            expect(end).toBeGreaterThan(start);
+            expect(src.slice(start, end)).toContain(key);
+        }
+    });
+
+    it("显式 0 间隔(仅手动)不得回退默认并启动定时器", () => {
+        const src = fs.readFileSync("src/adapter/SyncScheduler.js", "utf8");
+        // getIntervalMinutes 不得用 || def 吞掉 0
+        const gi = src.slice(src.indexOf("getIntervalMinutes(sourceType)"), src.indexOf("getIntervalMinutes(sourceType)") + 420);
+        expect(gi).not.toMatch(/return Number\(Storage\.getRaw\(key, def\)\) \|\| def;/);
+        expect(gi).toContain("raw >= 0");
+        // start 中显式 interval 优先(含 0), 不再要求 > 0 才采用
+        expect(src).toMatch(/const intervalMin = Number\.isFinite\(intervalMinutes\)[\s\S]{0,60}\? intervalMinutes/);
+    });
+});
