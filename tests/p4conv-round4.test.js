@@ -7,6 +7,7 @@ const { AIService } = require("../src/ai/index.js");
 const { getMimeType, getFileCategory } = require("../src/config");
 const { getMimeType: uploadGetMimeType } = require("../src/api/notion-upload.js");
 const { Storage } = require("../src/storage");
+const { LinuxDoAPI } = require("../src/extract/LinuxDoAPI.js");
 
 const read = (p) => fs.readFileSync(p, "utf8");
 
@@ -176,5 +177,52 @@ describe("P4 收敛(c01/c02/c05/c06/c07/c12): 源码级锁定", () => {
         const css = read("src/ui/design-system.js");
         expect(css).toContain('[data-ldb-theme="dark"].ldb-confirm-dialog,');
         expect(css).toContain('[data-ldb-theme="dark"] .ldb-confirm-dialog {');
+    });
+});
+
+describe("P4 收敛(c04-c08): 三模型复审第二批", () => {
+    it("fetchJson 对 404 立即短路不重试(永久性资源缺失)", async () => {
+        let calls = 0;
+        const savedFetch = globalThis.fetch;
+        globalThis.fetch = async () => {
+            calls++;
+            return { ok: false, status: 404, json: async () => ({}) };
+        };
+        try {
+            await expect(LinuxDoAPI.fetchJson("https://linux.do/t/1.json")).rejects.toThrow("HTTP 404");
+            expect(calls).toBe(1);
+        } finally {
+            globalThis.fetch = savedFetch;
+        }
+    });
+
+    it("update_page_property number 分支拒绝非有限数(不再静默写 null)", () => {
+        const src = read("src/ai/tools/write-tools.js");
+        expect(src).toContain("if (!Number.isFinite(num)) {");
+        expect(src).toContain("需要数字值");
+    });
+
+    it("Obsidian 表格单元格转义竖线 + 楼层头部不重复 handle", () => {
+        const src = read("src/api/obsidian.js");
+        expect(src).toContain('.replace(/\\|/g, "\\\\|")');
+        expect(src).toContain("const handle = post.username && post.username !== username ?");
+    });
+
+    it("RSS needsUpdate 与写入侧同口径(用 _safeUrl 比较)", () => {
+        const src = read("src/bridge/RSSAutoImporter.js");
+        expect(src).toContain('if (String(pageMeta.url || "") !== RSSAutoImporter._safeUrl(item.url)) return true;');
+    });
+
+    it("strict 去重含本批内重复 URL", () => {
+        const src = read("src/bridge/BookmarkExporter.js");
+        expect(src).toContain("const seenUrls = new Set();");
+        expect(src).toMatch(/let newBookmarks = dedupStrict/);
+    });
+
+    it("上传替换在覆盖 block[blockKey] 之前捕获 caption", () => {
+        const src = read("src/export/index.js");
+        expect(src).toContain('const originalCaption = block._fileType === "file" ? block.file?.caption : null;');
+        expect(src).toContain('if (blockKey === "file" && originalCaption) {');
+        expect(src).toContain('if (fallbackKey === "file" && originalCaption) {');
     });
 });

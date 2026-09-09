@@ -506,7 +506,9 @@ const RSSAutoImporter = {
     needsUpdate: (item, snapshotEntry, pageMeta) => {
         if (!pageMeta) return true;
         if (!snapshotEntry) return false;
-        if (String(pageMeta.url || "") !== String(item.url || "")) return true;
+        // P4 收敛(c07): 与写入侧同口径——_safeUrl 拒绝的链接不写入「链接」属性,
+        // 直接比对 item.url 会每轮误判需更新(永不收敛)
+        if (String(pageMeta.url || "") !== RSSAutoImporter._safeUrl(item.url)) return true;
         if (String(pageMeta.title || "") !== String(item.title || "")) return true;
         if (String(pageMeta.summary || "") !== String(item.summary || "")) return true;
         return SyncState.normalizeTime(pageMeta.publishedAt) !== SyncState.normalizeTime(item.publishedAt);

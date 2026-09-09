@@ -1,6 +1,7 @@
 "use strict";
 
 const { UrlValidator } = require("../security/UrlValidator");
+const { Utils } = require("../utils");
 
 const ObsidianAPI = {
     // P4 共识(dsf): 整路径 encodeURIComponent 会把子目录的 "/" 编成 %2F, 且 ".." 段可越权写入。
@@ -106,8 +107,9 @@ const ObsidianAPI = {
 
 const HTMLToMarkdown = {
     // P4 共识(glm+qwen): 链接文本/alt 与 href/src 未净化, 含 ]( 的不可信内容可逃逸链接语法。
+    // P4 收敛(c05): URL 改用百分号编码(与 Utils.mdUrl 同口径), 删除字符会改写链接目标
     _mdText: (s) => String(s ?? "").replace(/[\[\]]/g, ""),
-    _mdUrl: (s) => String(s ?? "").replace(/[\s()<>]/g, ""),
+    _mdUrl: (s) => Utils.mdUrl(s),
 
     convert: (html) => {
         const doc = new DOMParser().parseFromString(html, "text/html");
@@ -211,7 +213,8 @@ const HTMLToMarkdown = {
         const result = [];
         rows.forEach((row, i) => {
             const cells = Array.from(row.querySelectorAll("th, td")).map((c) => {
-                return HTMLToMarkdown._convertChildren(c).replace(/\n/g, " ").trim();
+                // P4 收敛(c05): 单元格内的竖线会破坏表格列结构
+                return HTMLToMarkdown._convertChildren(c).replace(/\n/g, " ").replace(/\|/g, "\\|").trim();
             });
             result.push(`| ${cells.join(" | ")} |`);
             if (i === 0) {
@@ -260,12 +263,13 @@ const HTMLToMarkdown = {
     buildPostCallout: (post, index, isOp) => {
         const type = isOp ? "success" : "note";
         const collapsed = index > 0 ? "+" : "";
-        const username = post.username || "未知";
+        const username = post.name || post.username || "未知";
+        const handle = post.username && post.username !== username ? ` (@${post.username})` : "";
         const postNum = post.post_number || (index + 1);
         const date = post.created_at
             ? new Date(post.created_at).toLocaleString("zh-CN")
             : "未知时间";
-        const header = `#${postNum} ${username}${post.username ? ` (@${post.username})` : ""}${isOp ? " 楼主" : ""} · ${date}`;
+        const header = `#${postNum} ${username}${handle}${isOp ? " 楼主" : ""} · ${date}`;
         const content = HTMLToMarkdown.convert(post.cooked || "");
         const lines = content.trim().split("\n");
         const quoted = lines.map((l) => `> ${l}`).join("\n");

@@ -148,6 +148,7 @@ describe("P4: Obsidian 边界", () => {
 
     it("Markdown 文本/URL 净化剥离元字符", () => {
         expect(HTMLToMarkdown._mdText("标题](https://evil)")).toBe("标题(https://evil)");
-        expect(HTMLToMarkdown._mdUrl("https://a.example/x)y z")).toBe("https://a.example/xyz");
+        // P4 收敛(c05): URL 用百分号编码保留目标(删除会改写链接)
+        expect(HTMLToMarkdown._mdUrl("https://a.example/x)y z")).toBe("https://a.example/x%29y%20z");
     });
 });

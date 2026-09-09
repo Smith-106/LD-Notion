@@ -317,9 +317,15 @@ module.exports = {
                     const tags = String(value).split(/[,，]/).map(t => ({ name: t.trim() })).filter(t => t.name);
                     updateProps[property] = { multi_select: tags };
                     break;
-                case "number":
-                    updateProps[property] = { number: Number(value) };
+                case "number": {
+                    // P4 收敛(c04): NaN 经 JSON 序列化为 null —— Notion 会静默清空原属性值
+                    const num = Number(value);
+                    if (!Number.isFinite(num)) {
+                        return `错误: 属性「${property}」需要数字值，收到「${String(value).slice(0, 40)}」。`;
+                    }
+                    updateProps[property] = { number: num };
                     break;
+                }
                 case "date":
                     updateProps[property] = { date: { start: String(value) } };
                     break;

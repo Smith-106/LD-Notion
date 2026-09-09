@@ -4,6 +4,9 @@ const { CONFIG } = require("../config");
 const { Storage } = require("../storage");
 const { sha256HexSync } = require("./sha256");
 
+// Markdown 链接目标需转义字符（百分号编码，不删除字符）
+const MD_URL_ESCAPE = { "(": "%28", ")": "%29", "<": "%3C", ">": "%3E", " ": "%20" };
+
 // ===========================================
 // 工具函数
 // ===========================================
@@ -222,7 +225,8 @@ const Utils = {
     // P4 收敛(c02/c05): Markdown 链接输出净化 —— 不可信标题/URL 含 ]( 等元字符
     // 可破坏链接结构并注入链接目标（标题来自 Notion 页面/搜索结果）。
     mdText: (text) => String(text ?? "").replace(/[\[\]]/g, ""),
-    mdUrl: (url) => String(url ?? "").replace(/[\s)]/g, ""),
+    // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
+    mdUrl: (url) => String(url ?? "").replace(/[\s<>()]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
     mdLink: (text, url) => `[${Utils.mdText(text)}](${Utils.mdUrl(url)})`,
 
     // GM_xmlhttpRequest onerror 回调参数为对象（如 { error, type }），直接模板串化

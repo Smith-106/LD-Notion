@@ -690,6 +690,8 @@ const Exporter = {
             for (const block of (items || [])) {
                 if (block._needsUpload && block._originalUrl) {
                     const uploadResult = fileUrlCache.get(block._originalUrl);
+                    // P4 收敛(c08): caption 必须在覆盖 block[blockKey] 之前捕获——覆盖后原属性已丢
+                    const originalCaption = block._fileType === "file" ? block.file?.caption : null;
                     if (uploadResult?.fileId) {
                         const blockType = uploadResult.blockType || block._fileType || "image";
                         const blockKey = blockType === "image" ? "image" : blockType === "video" ? "video" : blockType === "audio" ? "audio" : "file";
@@ -698,8 +700,8 @@ const Exporter = {
                         ["image", "file", "video", "audio"].forEach(k => {
                             if (k !== blockKey) delete block[k];
                         });
-                        if (block._fileType === "file" && block.file?.caption) {
-                            block[blockKey].caption = block.file.caption;
+                        if (blockKey === "file" && originalCaption) {
+                            block[blockKey].caption = originalCaption;
                         }
                         block.type = blockKey;
                         block._uploaded = true;
@@ -713,8 +715,8 @@ const Exporter = {
                             type: "external",
                             external: { url: block._originalUrl },
                         };
-                        if (fallbackKey === "file" && block.file?.caption) {
-                            block[fallbackBlockKey].caption = block.file.caption;
+                        if (fallbackKey === "file" && originalCaption) {
+                            block[fallbackBlockKey].caption = originalCaption;
                         }
                         ["image", "file", "video", "audio"].forEach(k => {
                             if (k !== fallbackBlockKey) delete block[k];

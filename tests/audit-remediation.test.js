@@ -24,7 +24,7 @@ describe("audit remediation", () => {
   it("4xx short-circuit present in LinuxDoAPI and RSS", () => {
     const ld = fs.readFileSync("src/extract/LinuxDoAPI.js","utf8");
     const rss = fs.readFileSync("src/bridge/RSSAutoImporter.js","utf8");
-    expect(ld).toContain("40[013]");
+    expect(ld).toContain("40[0134]");
     expect(rss).toContain("40[013]");
   });
 });

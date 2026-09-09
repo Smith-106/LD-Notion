@@ -54,9 +54,9 @@ const LinuxDoAPI = {
                 return await res.json();
             } catch (e) {
                 lastErr = e;
-                // 400/401/403 为客户端错误，退避重试无意义，立即短路
+                // 400/401/403/404 为客户端错误(404 = 已删除/不存在, 永久性), 退避重试无意义
                 const msg = String(e && e.message || e || "");
-                if (/\bHTTP\s+40[013]\b/.test(msg)) throw e;
+                if (/\bHTTP\s+40[0134]\b/.test(msg)) throw e;
                 // 铁律⑩: 指数退避 1000*2^attempt(此前线性 250*(i+1), 全盘审计 find 修正)
                 if (i < retries) await Utils.sleep(1000 * Math.pow(2, i));
             } finally {

@@ -680,9 +680,20 @@ const BookmarkExporter = {
 
         // 过滤已导出的
         const dedupStrict = Utils.isBookmarkDedupStrict();
-        const newBookmarks = dedupStrict
+        let newBookmarks = dedupStrict
             ? bookmarks.filter(b => !BookmarkExporter.isExported(b.url))
             : bookmarks.slice();
+        // P4 收敛(c07): strict 去重需含本批内重复 URL —— 循环前仅按历史账本过滤,
+        // 同批内相同 URL(多文件夹)会各自建页
+        if (dedupStrict) {
+            const seenUrls = new Set();
+            newBookmarks = newBookmarks.filter((b) => {
+                const key = Utils.normalizeDedupUrl(b.url);
+                if (seenUrls.has(key)) return false;
+                seenUrls.add(key);
+                return true;
+            });
+        }
         if (newBookmarks.length === 0) {
             return { total: bookmarks.length, exported: 0, message: "没有新的书签需要导出" };
         }

@@ -13,9 +13,12 @@ const payloadBuilders = require("../src/ai/utils/payload-builders.js");
 const ok = (body) => ({ status: 200, responseText: JSON.stringify(body), responseHeaders: "" });
 
 describe("P4 收敛: Utils Markdown 输出净化 (c02/c05)", () => {
-    it("mdText 剥离方括号, mdUrl 剥离空白/右括号, mdLink 组合", () => {
+    it("mdText 剥离方括号, mdUrl 百分号编码保留链接目标, mdLink 组合", () => {
         expect(Utils.mdText("a](b)")).toBe("a(b)");
-        expect(Utils.mdUrl("https://x.com/a b)")).toBe("https://x.com/ab");
+        // P4 收敛(c05): 删除字符会改写链接目标(Wikipedia 带括号条目→404)
+        expect(Utils.mdUrl("https://x.com/a b)")).toBe("https://x.com/a%20b%29");
+        expect(Utils.mdUrl("https://en.wikipedia.org/wiki/Python_(programming_language)"))
+            .toBe("https://en.wikipedia.org/wiki/Python_%28programming_language%29");
         expect(Utils.mdLink("标题](x", "https://a.com/1")).toBe("[标题(x](https://a.com/1)");
     });
 });
