@@ -36,11 +36,15 @@ handleUpdate: async (params, settings, explanation) => {
             return "❌ 没有找到可更新的页面。请提供 page_name/page_id/page_ids，或提供数据库 + page_title。";
         }
 
-        const batchMode = !!params.batch || Array.isArray(params.page_ids) || !!params.page_title || targets.length > 1;
-        if (!batchMode && targets.length > 1) {
+        const explicitBatch = !!params.batch || Array.isArray(params.page_ids) || !!params.page_title;
+        // P4 共识(glm): batchMode 此前含 targets.length>1, 使下方歧义守卫成为不可达死代码,
+        // 单个 page_name 匹配多页时静默批量更新。歧义仅当用户未显式要求批量时提示。
+        if (!explicitBatch && targets.length > 1) {
             const names = targets.map(t => `「${t.name}」`).join("、");
             return `❌ 找到多个页面：${names}。请提供更精确的 page_name 或直接提供 page_id。`;
         }
+
+        const batchMode = explicitBatch || targets.length > 1;
 
         const { success, failed } = await AI()._applyPageUpdatesToTargets(targets, params, settings);
 
@@ -62,11 +66,15 @@ _resolveDatabaseId: async (name, id, apiKey) => {
 _fetchSourcePages: async (databaseId, apiKey, pageTitle) => {
     const allPages = [];
     let cursor = null;
+    const seenCursors = new Set();
 
     do {
         const response = await NotionAPI.queryDatabase(databaseId, null, null, cursor, apiKey);
         allPages.push(...(response.results || []));
-        cursor = response.has_more ? response.next_cursor : null;
+        const nextCursor = response.has_more ? response.next_cursor : null;
+        // P4 3/3 共识(dsf+glm+qwen): 游标为空/重复时终止, 防静默截断与死循环
+        cursor = (nextCursor && !seenCursors.has(nextCursor)) ? nextCursor : null;
+        if (cursor) seenCursors.add(cursor);
     } while (cursor);
 
     // 如果指定了标题关键词，按标题过滤
@@ -368,12 +376,23 @@ handleCreateDatabase: async (params, settings, explanation) => {
         // 未指定父页面，搜索工作区页面供选择
         else {
             state().updateLastMessage("未指定父页面，正在搜索工作区页面...", "processing");
-            const response = await NotionAPI.search(
-                "",
-                { property: "object", value: "page" },
-                settings.notionApiKey
-            );
-            const pages = (response.results || []).filter(p => !p.archived && p.parent?.type === "workspace");
+            // P4 3/3 共识(dsf+glm+qwen): 仅消费首页(默认 100 条)会在顶级页面排后时误报
+            // "没有可用父页面"并拒绝建库。跟随 next_cursor 分页, 找到首个 workspace 页面即停。
+            const pages = [];
+            let searchCursor = null;
+            const seenSearchCursors = new Set();
+            do {
+                const response = await NotionAPI.search(
+                    "",
+                    { property: "object", value: "page" },
+                    settings.notionApiKey,
+                    searchCursor
+                );
+                pages.push(...(response.results || []).filter(p => !p.archived && p.parent?.type === "workspace"));
+                const nextCursor = response.has_more ? response.next_cursor : null;
+                searchCursor = (nextCursor && !seenSearchCursors.has(nextCursor)) ? nextCursor : null;
+                if (searchCursor) seenSearchCursors.add(searchCursor);
+            } while (searchCursor && pages.length === 0);
 
             if (pages.length === 0) {
                 return "❌ 工作区中没有找到可用的页面作为父页面。\n\n💡 请先在 Notion 中创建一个页面，或指定父页面名称。\n\n示例：「在 xxx 页面下创建一个叫技术文档的数据库」";

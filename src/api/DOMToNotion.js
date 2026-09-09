@@ -45,7 +45,8 @@ const DOMToNotion = {
                 file: {
                     type: "external",
                     external: { url: full },
-                    caption: [{ type: "text", text: { content: fileName } }],
+                    // P4 共识(glm+qwen): fileName 未切分, 超 2000 字符触发 Notion 400(整批失败)
+                    caption: DOMToNotion.splitLongText(fileName),
                 },
                 _needsUpload: imgMode === "upload",
                 _originalUrl: full,
@@ -70,10 +71,20 @@ const DOMToNotion = {
                     _originalUrl: full,
                     _fileType: "video",
                 });
-            } else {
+            } else if (DOMToNotion._isAllowedEmbedHost(full)) {
                 blocks.push({
                     type: "embed",
                     embed: { url: full },
+                });
+            } else {
+                // P4 共识(dsf): 非白名单宿主的 embed.url 会绕过 _cookIframe 的 SSRF 收窄
+                // (embed.url 由 Notion 服务端抓取), 降级为 video external(客户端播放)
+                blocks.push({
+                    type: "video",
+                    video: { type: "external", external: { url: full } },
+                    _needsUpload: imgMode === "upload",
+                    _originalUrl: full,
+                    _fileType: "video",
                 });
             }
         }
@@ -96,23 +107,28 @@ const DOMToNotion = {
     },
 
     // iframe 嵌入，返回 true 表示已处理（视频 src），false 表示未匹配需 fallthrough
+    // v3.14.6 (XN-04) 抽出的共享白名单: embed.url 由 Notion 服务端抓取(CWE-918),
+    // 仅显式视频宿主可写入(_cookIframe / _cookVideo 双消费点保持一致)
+    _isAllowedEmbedHost: (url) => {
+        let host = "";
+        try { host = new URL(url).hostname; } catch { return false; }
+        return host === "youtube.com" || host.endsWith(".youtube.com") ||
+            host === "youtu.be" || host.endsWith(".youtu.be") ||
+            host === "vimeo.com" || host.endsWith(".vimeo.com") ||
+            host === "bilibili.com" || host.endsWith(".bilibili.com");
+    },
+
     _cookIframe: (el, blocks) => {
         const src = el.getAttribute("src") || "";
         if (!src) return false;
         // 子串匹配（src.includes）可被 evil.com/youtube.com 或 169.254.169.254/player.html 绕过
         // 写入 Notion embed.url（服务端抓取触发 SSRF，CWE-918，ISS-009 sibling 补全）。
         // 改 hostname 严格白名单 + _safeExternalUrl 校验（拒内网/169.254/非 http(s)）。
-        let host = "";
-        try { host = new URL(Utils.absoluteUrl(src)).hostname; } catch { return false; }
-        const isAllowedEmbedHost =
-            host === "youtube.com" || host.endsWith(".youtube.com") ||
-            host === "youtu.be" || host.endsWith(".youtu.be") ||
-            host === "vimeo.com" || host.endsWith(".vimeo.com") ||
-            host === "bilibili.com" || host.endsWith(".bilibili.com");
+        const absoluteSrc = Utils.absoluteUrl(src);
         // v3.14.6 (XN-04): player. 子串兜底移除 —— 任意公网域 player.evil.com 可被放行写入
         // embed.url(服务端抓取 SSRF); 仅显式视频宿主白名单 + _safeExternalUrl 双保险
-        if (isAllowedEmbedHost) {
-            const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
+        if (DOMToNotion._isAllowedEmbedHost(absoluteSrc)) {
+            const full = DOMToNotion._safeExternalUrl(absoluteSrc);
             if (full) {
                 blocks.push({ type: "embed", embed: { url: full } });
                 return true;
@@ -255,13 +271,19 @@ const DOMToNotion = {
 
         if (rows.length > 0) {
             const tableWidth = Math.max(1, ...rows.map(r => r.length));
+            // P4 3/3 共识(dsf+glm+qwen): Notion 要求每个 table_row.cells 长度等于 table_width,
+            // 短行(空单元格/colspan)未补齐会被 400 拒绝并整批上传失败
+            const paddedRows = rows.map((cells) => cells.length >= tableWidth
+                ? cells
+                : cells.concat(Array.from({ length: tableWidth - cells.length },
+                    () => [{ type: "text", text: { content: "" } }])));
             blocks.push({
                 type: "table",
                 table: {
                     table_width: tableWidth,
                     has_column_header: hasHeader,
                     has_row_header: false,
-                    children: rows.map(cells => ({
+                    children: paddedRows.map(cells => ({
                         type: "table_row",
                         table_row: { cells }
                     }))
@@ -301,6 +323,14 @@ const DOMToNotion = {
                 const chunk = remaining.substring(0, maxLength);
                 chunks.push({ type: "text", text: { content: chunk }, annotations: { ...annotations } });
                 remaining = remaining.substring(maxLength);
+            }
+            // P4 共识(glm+qwen): 达 100 项上限后剩余文本此前静默丢弃——末块尾插入截断标记,
+            // 保留用户可见状态(项目约定: 不静默丢弃)
+            if (remaining.length > 0 && chunks.length > 0) {
+                const marker = `…（内容过长，已截断 ${remaining.length} 字符）`;
+                const last = chunks[chunks.length - 1];
+                last.text.content = last.text.content.slice(0, Math.max(0, maxLength - marker.length)) + marker;
+                console.warn(`[LD-Notion] rich_text 达 ${maxItems} 项上限, 已截断 ${remaining.length} 字符`);
             }
         }
         return chunks;
@@ -381,7 +411,12 @@ const DOMToNotion = {
 
         processNode(node);
         // Notion API 限制 rich_text 数组最多 100 个元素
-        return result.slice(0, 100);
+        // P4 共识(dsf): 超限此前静默 slice, 补告警(内联节点数异常时用户可见)
+        if (result.length > 100) {
+            console.warn(`[LD-Notion] rich_text 节点数 ${result.length} 超 Notion 上限 100, 已截断`);
+            return result.slice(0, 100);
+        }
+        return result;
     },
 
     cookedToBlocks: (cookedHtml, imgMode = "upload") => {
