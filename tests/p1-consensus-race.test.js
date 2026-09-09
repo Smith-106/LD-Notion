@@ -162,4 +162,31 @@ describe("P1 共识: acquireLease 二次确认(跨 tab 写入传播延迟)", () 
         expect(lease).not.toBeNull();
         expect(lease.owner).toBeTruthy();
     });
+
+    it("renewLease 写后复读发现被他人覆盖 → 返回 false(2/3 共识)", () => {
+        let reads = 0;
+        global.GM_getValue = (k, d) => {
+            if (k !== KEY) return d;
+            reads += 1;
+            if (reads === 1) return JSON.stringify({ owner: "me", expiresAt: Date.now() + 60000 });
+            return JSON.stringify({ owner: "rival-tab", expiresAt: Date.now() + 60000 });
+        };
+        global.GM_setValue = () => {};
+        const lease = { owner: "me", expiresAt: Date.now() + 1000 };
+        expect(SyncLock.renewLease(KEY, lease)).toBe(false);
+    });
+
+    it("renewLease 写后复读仍为自己 → 续约成功", () => {
+        global.GM_getValue = (k, d) => (k === KEY ? JSON.stringify({ owner: "me", expiresAt: Date.now() + 60000 }) : d);
+        global.GM_setValue = () => {};
+        const lease = { owner: "me", expiresAt: Date.now() + 1000 };
+        expect(SyncLock.renewLease(KEY, lease)).toBe(lease);
+    });
+
+    it("releaseLease(null) 不得清除他人持有的互斥标志(2/3 共识)", () => {
+        SyncLock.isExporting = true;
+        SyncLock.releaseLease(KEY, null);
+        expect(SyncLock.isExporting).toBe(true);
+        SyncLock.isExporting = false;
+    });
 });

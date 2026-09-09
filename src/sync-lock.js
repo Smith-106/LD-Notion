@@ -56,6 +56,17 @@ const SyncLock = {
         if (!confirm.owner || confirm.owner !== lease.owner) {
             return null; // 竞争失败(二次确认发现被后写者覆盖)
         }
+        // glm P1 共识: 后台 tab 定时器节流可把 sleep 拉长到 ≥ TTL, 此时租约已过期,
+        // 仅比对 owner 会把「已过期租约」当成获取成功 → 他 tab 可立即抢占 → 双持有。
+        // 过期则刷新有效期后重写并再次校验(校验失败说明已被抢占)。
+        if (lease.expiresAt <= Date.now()) {
+            lease.expiresAt = Date.now() + ttlMs;
+            GM_setValue(key, JSON.stringify(lease));
+            const refreshed = Utils.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+            if (!refreshed.owner || refreshed.owner !== lease.owner) {
+                return null;
+            }
+        }
         return lease;
     },
 
@@ -75,6 +86,15 @@ const SyncLock = {
         }
         lease.expiresAt = Date.now() + ttlMs;
         GM_setValue(key, JSON.stringify(lease));
+        // 2/3 共识(dsf+glm): 写后复读校验与 acquireLease 对称 —— 读-写间隙他 tab
+        // 可能已写入新租约; 本写覆盖它则复读看到自己(抢占方复读也会看到本写而退出),
+        // 若复读看到他方 owner 则说明本写被后写覆盖, 返回 false 中止本轮。
+        if (typeof GM_getValue === "function") {
+            const after = Utils.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+            if (!after.owner || after.owner !== lease.owner) {
+                return false;
+            }
+        }
         return lease;
     },
 
@@ -82,7 +102,10 @@ const SyncLock = {
      * 释放租约(仅 owner 本人删除; finally 中调用)
      */
     releaseLease: (key, lease) => {
-        if (!lease || typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
+        // 2/3 共识(dsf+glm): 未持租约者(lease 为 null)不得解除互斥标志 ——
+        // 原实现在此分支无条件清 isExporting, 会误清他人持有的锁。
+        if (!lease) return;
+        if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
             SyncLock.isExporting = false;
             return;
         }

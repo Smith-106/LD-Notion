@@ -246,3 +246,49 @@ describe("P1 三模型共识修复守卫(异步/定时器/禁用绕过)", () => 
         expect(src).toMatch(/const intervalMin = Number\.isFinite\(intervalMinutes\)[\s\S]{0,60}\? intervalMinutes/);
     });
 });
+
+describe("P1 共识第三轮守卫(GitHub 互斥/定时器/续约健壮性)", () => {
+    it("GitHubAutoImporter 必须与其余导入器同构: 取租约 + 占互斥 + finally 释放", () => {
+        const src = fs.readFileSync("src/import/GitHubAutoImporter.js", "utf8");
+        expect(src).toContain("SyncLock.acquireLease");
+        expect(src).toContain("SyncLock.isExporting = true");
+        expect(src).toContain("SyncLock.releaseLease");
+        expect(src).toContain("clearInterval(renewTimer)");
+        // init 延迟定时器可被 stopPolling 清理
+        expect(src).toContain("initTimerId");
+        const stopBody = src.slice(src.indexOf("stopPolling: () =>"), src.indexOf("init: () =>"));
+        expect(stopBody).toContain("clearTimeout(");
+        expect(stopBody).toContain("deferredWhileHidden = false");
+    });
+    it("三个导入器 + 导出路径的续约回调必须捕获异常并视为失租", () => {
+        for (const f of ["src/bridge/BookmarkAutoImporter.js", "src/bridge/RSSAutoImporter.js", "src/import/GitHubAutoImporter.js", "src/export/index.js"]) {
+            const src = fs.readFileSync(f, "utf8");
+            const i = src.indexOf("renewTimer = setInterval");
+            const block = src.slice(i, src.indexOf("}, 30000)", i));
+            expect(block).toContain("try {");
+            expect(block).toContain("renewed = false");
+            expect(block).toContain("leaseLost = true");
+        }
+    });
+    it("visibilitychange 排队的 idle 回调必须复核启用态(三个导入器)", () => {
+        const pairs = [
+            ["src/bridge/BookmarkAutoImporter.js", "BOOKMARK_AUTO_IMPORT_ENABLED"],
+            ["src/bridge/RSSAutoImporter.js", "RSS_AUTO_IMPORT_ENABLED"],
+            ["src/import/GitHubAutoImporter.js", "GITHUB_AUTO_IMPORT_ENABLED"],
+        ];
+        for (const [f, key] of pairs) {
+            const src = fs.readFileSync(f, "utf8");
+            const i = src.indexOf("visibilitychange");
+            const block = src.slice(i, src.indexOf("visibilityListenerBound = true", i));
+            expect(block).toContain(key);
+        }
+    });
+    it("sync-lock 续约写后校验 + releaseLease 未持锁不清标志", () => {
+        const src = fs.readFileSync("src/sync-lock.js", "utf8");
+        const renewBody = src.slice(src.indexOf("renewLease: ("), src.indexOf("releaseLease: ("));
+        expect(renewBody).toContain("const after =");
+        expect(renewBody).toContain("after.owner !== lease.owner");
+        const releaseBody = src.slice(src.indexOf("releaseLease: ("));
+        expect(releaseBody).toMatch(/if \(!lease\) return;/);
+    });
+});

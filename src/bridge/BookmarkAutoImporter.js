@@ -50,7 +50,11 @@ const BookmarkAutoImporter = {
         document.addEventListener("visibilitychange", () => {
             if (!document.hidden && BookmarkAutoImporter.deferredWhileHidden) {
                 BookmarkAutoImporter.deferredWhileHidden = false;
-                Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.run());
+                Utils.runWhenBrowserIdle(() => {
+                    // dsf P1 共识: 回调排队期间可能已被禁用, 执行前复核
+                    if (!Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, false)) return;
+                    BookmarkAutoImporter.run();
+                });
             }
         });
         BookmarkAutoImporter.visibilityListenerBound = true;
@@ -308,7 +312,15 @@ BookmarkAutoImporter.run = async () => {
     // S1: 续约失配(租约被其他 tab 抢占)置 leaseLost 中止本轮, 防双持有并发同步
     let leaseLost = false;
     const renewTimer = setInterval(() => {
-        if (!SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+        // dsf P1 共识: 续约抛错必须视为失租, 否则异常逃逸且 leaseLost 永不置位
+        let renewed;
+        try {
+            renewed = SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+        } catch (renewError) {
+            console.warn("[LD-Notion] 浏览器书签自动同步续约失败:", renewError);
+            renewed = false;
+        }
+        if (!renewed) {
             leaseLost = true;
             clearInterval(renewTimer);
         }

@@ -66,7 +66,11 @@ const RSSAutoImporter = {
         document.addEventListener("visibilitychange", () => {
             if (!document.hidden && RSSAutoImporter.deferredWhileHidden) {
                 RSSAutoImporter.deferredWhileHidden = false;
-                Utils.runWhenBrowserIdle(() => RSSAutoImporter.run());
+                Utils.runWhenBrowserIdle(() => {
+                    // dsf P1 共识: 回调排队期间可能已被禁用, 执行前复核
+                    if (!Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return;
+                    RSSAutoImporter.run();
+                });
             }
         });
         RSSAutoImporter.visibilityListenerBound = true;
@@ -818,7 +822,15 @@ const RSSAutoImporter = {
         // S1: 持有期间每 30s 续约; 续约失配(租约被其他 tab 抢占)置 leaseLost 中止本轮
         let leaseLost = false;
         const renewTimer = setInterval(() => {
-            if (!SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+            // dsf P1 共识: 续约抛错必须视为失租, 否则异常逃逸且 leaseLost 永不置位
+            let renewed;
+            try {
+                renewed = SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+            } catch (renewError) {
+                console.warn("[LD-Notion] RSS 自动同步续约失败:", renewError);
+                renewed = false;
+            }
+            if (!renewed) {
                 leaseLost = true;
                 clearInterval(renewTimer);
             }

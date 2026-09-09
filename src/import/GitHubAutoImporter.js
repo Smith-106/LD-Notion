@@ -12,6 +12,7 @@ const { SyncLock } = require("../sync-lock");
 const GitHubAutoImporter = {
     isRunning: false,
     timerId: null,
+    initTimerId: null,
     deferredWhileHidden: false,
     visibilityListenerBound: false,
     lastRunAt: 0,
@@ -89,7 +90,11 @@ const GitHubAutoImporter = {
         document.addEventListener("visibilitychange", () => {
             if (!document.hidden && GitHubAutoImporter.deferredWhileHidden) {
                 GitHubAutoImporter.deferredWhileHidden = false;
-                Utils.runWhenBrowserIdle(() => GitHubAutoImporter.run());
+                Utils.runWhenBrowserIdle(() => {
+                    // 2/3 共识(dsf+qwen): 回调排队期间可能已被禁用, 执行前复核
+                    if (!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return;
+                    GitHubAutoImporter.run();
+                });
             }
         });
         GitHubAutoImporter.visibilityListenerBound = true;
@@ -107,6 +112,12 @@ const GitHubAutoImporter = {
     },
 
     stopPolling: () => {
+        // 2/3 共识(dsf+qwen): 清理 init 的 3s 延迟启动, 否则禁用后延迟回调仍 run + 复活轮询
+        if (GitHubAutoImporter.initTimerId) {
+            clearTimeout(GitHubAutoImporter.initTimerId);
+            GitHubAutoImporter.initTimerId = null;
+        }
+        GitHubAutoImporter.deferredWhileHidden = false;
         const { SyncScheduler } = require("../adapter/SyncScheduler");
         const types = GitHubAPI.getImportTypes();
         for (const type of types) {
@@ -117,7 +128,11 @@ const GitHubAutoImporter = {
     init: () => {
         if (!GitHubAutoImporter.canStart()) return;
         GitHubAutoImporter.ensureVisibilityListener();
-        setTimeout(() => {
+        if (GitHubAutoImporter.initTimerId) clearTimeout(GitHubAutoImporter.initTimerId);
+        GitHubAutoImporter.initTimerId = setTimeout(() => {
+            GitHubAutoImporter.initTimerId = null;
+            // 延迟窗口内可能已被禁用
+            if (!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return;
             Utils.runWhenBrowserIdle(() => GitHubAutoImporter.run());
             const interval = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.githubAutoImportInterval);
             if (interval > 0) GitHubAutoImporter.startPolling(interval);
@@ -439,6 +454,40 @@ GitHubAutoImporter.run = async () => {
     GitHubAutoImporter.isRunning = true;
     const attemptAt = Date.now();
 
+    // 2/3 共识(qwen+dsf): 仅读 isExporting 而不上锁 —— 自动导入进入异步写页后
+    // 手动导出可并发启动(检查时仍为 false), 两路竞速写 Notion/互相覆盖导出标记。
+    // 与 Bookmark/RSS/export 同构: 取跨 tab 租约 + 占用进程内互斥, finally 释放。
+    let lease = null;
+    try {
+        lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+    } catch (leaseError) {
+        GitHubAutoImporter.isRunning = false;
+        SyncLock.isExporting = false;
+        console.error("[LD-Notion] GitHub 自动导入获取租约失败:", leaseError);
+        GitHubAutoImporter.updateStatus("❌ 获取同步租约失败，本轮跳过");
+        return;
+    }
+    if (!lease) {
+        GitHubAutoImporter.isRunning = false;
+        GitHubAutoImporter.updateStatus("⏸ 其他标签页正在同步，本轮 GitHub 同步跳过");
+        return;
+    }
+    SyncLock.isExporting = true;
+    let leaseLost = false;
+    const renewTimer = setInterval(() => {
+        let renewed;
+        try {
+            renewed = SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+        } catch (renewError) {
+            console.warn("[LD-Notion] GitHub 自动导入续约失败:", renewError);
+            renewed = false;
+        }
+        if (!renewed) {
+            leaseLost = true;
+            clearInterval(renewTimer);
+        }
+    }, 30000);
+
     try {
         GitHubAutoImporter.updateStatus("📧 正在检查 GitHub 新收藏...");
 
@@ -460,6 +509,8 @@ GitHubAutoImporter.run = async () => {
         const syncErrors = [];
 
         for (const type of types) {
+            // 租约被他 tab 接管: 不再开工新类型, 避免双持有并发写
+            if (leaseLost) break;
             const r = await GitHubAutoImporter._syncSingleType(type, settings, attemptAt);
             successCount += r.success;
             failedCount += r.failed;
@@ -488,6 +539,9 @@ GitHubAutoImporter.run = async () => {
         });
         GitHubAutoImporter.updateStatus(`❌ GitHub 自动导入出错: ${error.message}`);
     } finally {
+        clearInterval(renewTimer);
+        SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+        SyncLock.isExporting = false;
         GitHubAutoImporter.isRunning = false;
         // v3.14.7 (REV-06): 补 emit bookmarks:updated——收藏列表唯一自动重渲染触发是
         // bookmarks:updated(main-ui.js:2638-2642), 此前只 emit sync:center-summary-updated

@@ -866,7 +866,15 @@ const Exporter = {
         // 绝不双持有并发写(S1 owner 复核语义, 与 BookmarkAutoImporter CC-04 同构)
         let leaseLost = false;
         const renewTimer = setInterval(() => {
-            if (!SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+            // dsf P1 共识: 续约抛错必须视为失租, 否则异常逃逸且 leaseLost 永不置位
+            let renewed;
+            try {
+                renewed = SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+            } catch (renewError) {
+                console.warn("[LD-Notion] 导出续约失败:", renewError);
+                renewed = false;
+            }
+            if (!renewed) {
                 leaseLost = true;
                 clearInterval(renewTimer);
             }
