@@ -250,8 +250,8 @@ const BookmarkList = {
         UI().updateExportStatusTip();
         UI().recomputeExportStats?.();
         UI().renderBookmarkList?.();
-        UI().updateSelectCount?.();
-        UI().renderVisualSummary?.();
+        // P3 共识(dsf+glm): renderBookmarkList 内部已调 updateSelectCount → renderVisualSummary,
+        // 原实现再显式调用造成同轮双渲染。
         return {
             source: UI().getExportStatusSource(),
             hasSnapshot: UI().hasWorkspaceExportSnapshot(),
@@ -296,7 +296,9 @@ const BookmarkList = {
 
     // 渲染收藏列表
     renderBookmarkList: () => {
-        const list = UI().refs.bookmarkList
+        // P3 3/3 共识(dsf+glm+qwen): refs 未就绪/面板销毁后调用会裸解引用抛错
+        const list = UI().refs?.bookmarkList;
+        if (!list) return;
         UI().recomputeExportStats();
         UI().renderJobId += 1;
         const renderJobId = UI().renderJobId;
@@ -312,6 +314,8 @@ const BookmarkList = {
             `;
             // Bind import button event
             setTimeout(() => {
+                // P3 共识(glm+qwen): 晚到绑定须校验渲染代次——否则旧闭包 isGitHub 覆盖新按钮
+                if (renderJobId !== UI().renderJobId) return;
                 const importBtn = list.querySelector("#ldb-import-bookmarks-btn");
                 if (importBtn) {
                     importBtn.onclick = () => {

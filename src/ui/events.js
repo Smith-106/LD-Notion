@@ -1263,7 +1263,9 @@ const UIEvents = {
                 return;
             }
 
-            const selected = UI.getSelectedBookmarks();
+            // P3(qwen, 主 agent 复核): 与 Notion 导出同款过滤——已导出项复选框 disabled
+            // 却因初始全选残留在 selectedBookmarks, 会被重复导出到 Obsidian。
+            const selected = UI.getSelectedBookmarks().filter((b) => !UI.isBookmarkKeyExported(UI.getBookmarkKey(b)));
             if (selected.length === 0) {
                 UI.showStatus("请先选择要导出的帖子", "error");
                 return;
