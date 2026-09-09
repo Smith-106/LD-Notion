@@ -1413,6 +1413,18 @@ const UI = {
                 const isPage = exportState.targetType === CONFIG.EXPORT_TARGET_TYPES.PAGE;
                 if (refs.exportTargetPageRadio) refs.exportTargetPageRadio.checked = isPage;
                 if (refs.exportTargetDatabaseRadio) refs.exportTargetDatabaseRadio.checked = !isPage;
+                // P3(qwen, 主 agent 复核): 只切单选框会让父页面/手动 DB 区域与提示残留旧态
+                if (refs.parentPageGroup) refs.parentPageGroup.style.display = isPage ? "block" : "none";
+                if (refs.manualDbWrap) {
+                    const hasManualDb = !!String(refs.databaseIdInput?.value || "").trim();
+                    refs.manualDbWrap.style.display = isPage ? "none" : (hasManualDb ? "block" : "none");
+                }
+                if (refs.exportTargetTip) {
+                    refs.exportTargetTip.textContent = isPage
+                        ? "导出为子页面，包含完整内容"
+                        : "导出为数据库条目，支持筛选和排序";
+                }
+                UI.updateExportButtonState?.();
                 UI.updateExportTargetSummary();
             } catch (error) {
                 console.warn("[LD-Notion] 导出目标跨页同步失败", error?.message || error);
@@ -1507,6 +1519,31 @@ const UI = {
         resultEl.textContent = lines.join("\n");
     },
 
+    // P3 共识(dsf+qwen+glm): 剪贴板写入统一入口——await 失败不再静默,
+    // execCommand 降级校验返回值, 失败抛错由调用方提示。
+    copyTextToClipboard: async (text) => {
+        const value = String(text || "");
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(value);
+            return true;
+        }
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.setAttribute("readonly", "readonly");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        let copied = false;
+        try {
+            copied = typeof document.execCommand === "function" && document.execCommand("copy");
+        } finally {
+            textarea.remove();
+        }
+        if (!copied) throw new Error("浏览器未允许复制到剪贴板");
+        return true;
+    },
+
     copyDiagnostics: async () => {
         const isUserscriptMode = Utils.isUserscriptMode();
         const hasBridgeMarker = BookmarkBridge.isExtensionAvailable();
@@ -1592,19 +1629,7 @@ const UI = {
         ].join("\n");
 
         try {
-            if (navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(diagnostics);
-            } else {
-                const textarea = document.createElement("textarea");
-                textarea.value = diagnostics;
-                textarea.setAttribute("readonly", "readonly");
-                textarea.style.position = "fixed";
-                textarea.style.opacity = "0";
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand("copy");
-                textarea.remove();
-            }
+            await UI.copyTextToClipboard(diagnostics);
             UI.showStatus("诊断信息已复制（v2）", "success");
         } catch (error) {
             UI.showStatus(`复制失败: ${error.message || error}`, "error");
@@ -1960,19 +1985,7 @@ const UI = {
 
         const markdown = UI.workspaceInsightMarkdown || UI.buildWorkspaceInsightMarkdown(model);
         try {
-            if (navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(markdown);
-            } else {
-                const textarea = document.createElement("textarea");
-                textarea.value = markdown;
-                textarea.setAttribute("readonly", "readonly");
-                textarea.style.position = "fixed";
-                textarea.style.opacity = "0";
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand("copy");
-                textarea.remove();
-            }
+            await UI.copyTextToClipboard(markdown);
             UI.workspaceInsightMarkdown = markdown;
             UI.workspaceInsightUpdatedAt = Date.now();
             UI.showStatus("工作区洞察报告已复制。", "success");
@@ -2553,26 +2566,32 @@ const UI = {
 
     // 更新选中数量
     updateSelectCount: () => {
+        // P3 共识(dsf+glm): destroy 置 UI.refs=null 后晚到的异步回调(加载/导出完成)
+        // 会裸解引用 selectCount 抛 TypeError, 中断计数与全选框更新。
+        const refs = UI.refs;
+        if (!refs?.selectCount) return;
         const count = UI.selectedBookmarks?.size || 0;
         const pendingCount = UI.selectedUnexportedCount || 0;
 
         // F-UI-14:已选集合含已导出项(复选框 disabled),文案改为「已加载/待导出」避免误导
         const statusSrc = typeof UI.getExportStatusSource === "function" ? UI.getExportStatusSource() : "local";
         const srcTag = statusSrc === "notion" ? "（Notion）" : "（本地）";
-        UI.refs.selectCount.textContent = `已加载 ${count} 个，待导出 ${Math.max(0, pendingCount)} 个${srcTag}`;
+        refs.selectCount.textContent = `已加载 ${count} 个，待导出 ${Math.max(0, pendingCount)} 个${srcTag}`;
         if (typeof UI.updateExportStatusTip === "function") UI.updateExportStatusTip();
 
         // 更新全选框状态
-        const selectAll = UI.refs.selectAll
-        if (count === 0) {
-            selectAll.checked = false;
-            selectAll.indeterminate = false;
-        } else if (UI.totalUnexportedCount > 0 && pendingCount === UI.totalUnexportedCount) {
-            selectAll.checked = true;
-            selectAll.indeterminate = false;
-        } else {
-            selectAll.checked = false;
-            selectAll.indeterminate = true;
+        const selectAll = refs.selectAll;
+        if (selectAll) {
+            if (count === 0) {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+            } else if (UI.totalUnexportedCount > 0 && pendingCount === UI.totalUnexportedCount) {
+                selectAll.checked = true;
+                selectAll.indeterminate = false;
+            } else {
+                selectAll.checked = false;
+                selectAll.indeterminate = true;
+            }
         }
         // v3.14.7 (REV-31 UI-27): renderVisualSummary 微任务合并——逐项选择几十项时
         // 每次 updateSelectCount 都全量重渲染概览致抖动; 合并到同轮宏任务末只渲染一次。
@@ -2580,6 +2599,7 @@ const UI = {
             UI._selectCountRenderScheduled = true;
             Promise.resolve().then(() => {
                 UI._selectCountRenderScheduled = false;
+                if (!UI.refs) return;
                 UI.renderVisualSummary();
             });
         }
@@ -2587,7 +2607,9 @@ const UI = {
 
     // 显示导出报告
     showReport: (results) => {
-        const container = UI.refs.reportContainer
+        // P3 共识(dsf+glm): destroy 置 UI.refs=null 后晚到导出回调会裸解引用崩溃
+        const container = UI.refs?.reportContainer;
+        if (!container) return;
         const { success, failed, skipped } = results;
 
         let html = '<div class="ldb-report">';
@@ -2686,8 +2708,14 @@ const UI = {
         // 失败项错误复制: data-err 属性 + addEventListener(替代内联 onclick JSON 拼接——
         // 首字符引号截断属性致按钮恒失效且可属性注入, 全盘审计修复)
         container.querySelectorAll(".ldb-report-error").forEach((el) => {
-            el.addEventListener("click", () => {
-                navigator.clipboard?.writeText(el.dataset.err || "");
+            el.addEventListener("click", async () => {
+                // P3 共识(dsf+qwen): 原实现未 await/未捕获, 剪贴板失败完全静默
+                try {
+                    await UI.copyTextToClipboard(el.dataset.err || "");
+                    UI.showStatus("错误信息已复制", "success");
+                } catch (error) {
+                    UI.showStatus(`复制失败: ${error.message || error}`, "error");
+                }
             });
         });
         // v3.14.17 (P0-2): 重新授权按钮直达 OAuth 流,避免用户翻设置页
@@ -2796,8 +2824,15 @@ const UI = {
         UI.miniBtn = UI.createMiniButton();
 
         // 事件总线订阅（security 解耦后，oplog/notify 通过总线触达 UI）
-        const { on } = require("../coordination/event-bus");
-        on("oplog:changed", () => {
+        // P3 共识(glm+qwen): 记录 handler 供 destroy 注销——此前匿名订阅在面板销毁后
+        // 仍被总线回调(renderBookmarkList 等裸解引用 refs), destroy→init 还会叠加订阅。
+        const { on, off } = require("../coordination/event-bus");
+        const busHandlers = (UI._busHandlers = []);
+        const subscribe = (event, handler) => {
+            on(event, handler);
+            busHandlers.push([event, handler]);
+        };
+        subscribe("oplog:changed", () => {
             // v3.14.7 (REV-15 UI-17): 修正折叠守卫——此前检查 #ldb-log-panel(存在性容器
             // 恒不 collapsed)恒真, 审计关闭/折叠时仍全量重渲染; 改查真实折叠元素
             // #ldb-log-content。另加防抖: 批量导出 O(N) 次 OperationLog.add 每项都
@@ -2810,10 +2845,10 @@ const UI = {
                 }
             }, 120);
         });
-        on("notify", ({ message, type }) => {
+        subscribe("notify", ({ message, type }) => {
             UI.showStatus(message, type);
         });
-        on("sync:center-summary-updated", () => {
+        subscribe("sync:center-summary-updated", () => {
             if (typeof UI.renderSyncCenterSummary === "function") {
                 try { UI.renderSyncCenterSummary(); } catch (e) { console.warn("[LD-Notion] 同步中心面板渲染失败:", e); }
             }
@@ -2823,7 +2858,7 @@ const UI = {
             try { UI.renderSyncChainStatus(); } catch (e) { console.warn("[LD-Notion] 同步链状态渲染失败:", e); }
             try { UI.updateExportTargetSummary(); } catch (e) { console.warn("[LD-Notion] 导出目标摘要渲染失败:", e); }
         });
-        on("bookmarks:updated", () => {
+        subscribe("bookmarks:updated", () => {
             if (typeof UI.renderBookmarkList === "function") {
                 try { UI.renderBookmarkList(); } catch (e) { console.warn("[LD-Notion] 书签列表渲染失败:", e); }
             }
@@ -2849,6 +2884,13 @@ const UI = {
     destroy: () => {
         UI._abortController?.abort();
         UI._abortController = null;
+        // P3 共识(glm+qwen): 注销 init 注册的事件总线 handler——此前悬挂回调在面板
+        // 销毁后仍触发渲染(裸解引用 refs), destroy→init 还会叠加订阅。
+        if (UI._busHandlers) {
+            const { off } = require("../coordination/event-bus");
+            UI._busHandlers.forEach(([event, handler]) => off(event, handler));
+            UI._busHandlers = null;
+        }
         if (UI._escMinimizeHandler) {
             document.removeEventListener("keydown", UI._escMinimizeHandler);
             UI._escMinimizeHandler = null;

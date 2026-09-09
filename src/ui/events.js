@@ -883,6 +883,8 @@ const UIEvents = {
             const btn = refs.loadBookmarksBtn
             btn.disabled = true;
             btn.innerHTML = '<span class="ldb-spin">🔄</span> 加载中...';
+            // P3 共识(dsf+qwen): 记录发起时来源, await 期间用户可能切换来源
+            const loadSource = UI.getActiveBookmarkSource();
 
             try {
                 let bookmarks = [];
@@ -928,6 +930,9 @@ const UIEvents = {
                     });
                 }
 
+                // P3 共识(dsf+qwen): 加载期间切换来源时丢弃陈旧结果——否则旧来源数据
+                // 覆盖新来源列表与选中集, 展示与导出统计错配。
+                if (loadSource !== UI.getActiveBookmarkSource()) return;
                 UI.bookmarks = bookmarks;
                 UI.updateVisualSnapshot(UI.getActiveBookmarkSource(), bookmarks);
                 UI.selectedBookmarks = new Set(bookmarks.map(b => UI.getBookmarkKey(b)));
@@ -1051,6 +1056,8 @@ const UIEvents = {
             refs.exportBtn.title = ready ? "" : "请先完成 Notion 配置（API Key 与导出目标）";
         };
         updateExportButtonState();
+        // P3: 暴露给跨页同步/工作区选择回填复用(避免程序赋值绕过就绪判定)
+        UI.updateExportButtonState = updateExportButtonState;
 
         // 开始导出
         refs.exportBtn.onclick = async () => {
@@ -1233,8 +1240,9 @@ const UIEvents = {
             } catch (error) {
                 UI.showStatus(`导出出错: ${error.message}`, "error");
             } finally {
-                // 恢复按钮状态
-                refs.exportBtn.disabled = false;
+                // P3(qwen, 主 agent 复核): 按当前配置完整性恢复按钮——无条件启用会与
+                // updateExportButtonState 守卫矛盾(导出期间用户清空 Key/目标后仍可点)。
+                updateExportButtonState();
                 refs.exportBtns.style.display = "flex";
                 refs.controlBtns.style.display = "none";
                 Exporter.reset();
@@ -1866,9 +1874,9 @@ const UIEvents = {
                     refs.parentPageIdInput.value = id;
                     // 自动切换到页面导出模式
                     refs.exportTargetPageRadio.checked = true;
-                    refs.parentPageGroup.style.display = "block";
-                    refs.manualDbWrap.style.display = "none";
-                    refs.exportTargetTip.textContent = "导出为子页面，包含完整内容";
+                    // P3 共识(dsf+glm): 程序赋值不触发 onchange, 需显式刷新按钮可用性/
+                    // 目标摘要/区域显示态, 与 database 分支保持一致。
+                    handleExportTargetChange({ target: { value: CONFIG.EXPORT_TARGET_TYPES.PAGE } });
                     void UICommandService.execute("apply_workspace_selection", { selectedValue: `page:${id}` });
                     UI.showStatus("已选择页面，自动切换为页面导出模式", "info");
                 }
