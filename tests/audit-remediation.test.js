@@ -191,3 +191,18 @@ describe("debug-aipanel-keys: 确认对话框可见性 + 请求错误文案回�
         }
     });
 });
+
+describe("agent-executor deps getter 调用守卫(修复 ChatState2.updateLastMessage is not a function)", () => {
+    it("deps.js getter 误当对象裸用 — ChatState/AIService 必须 getter 调用", () => {
+        const src = fs.readFileSync("src/ai/agent-executor.js", "utf8");
+        // 定义行除外: getState: ChatState 是绑定 getter 本身
+        const callLines = src.split("\n").filter(l => /(^|[^()\w])(ChatState|AIService)\.[a-zA-Z]/.test(l) && !/get(State|Service): /.test(l));
+        expect(callLines).toEqual([]);
+    });
+    it("deps getter 返回真对象(updateLastMessage 可用)", () => {
+        const { getState, getService } = require("../src/ai/deps");
+        const st = getState();
+        expect(typeof st.updateLastMessage).toBe("function");
+        expect(typeof getService().requestChat).toBe("function");
+    });
+});

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.19
+// @version      3.14.20
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -28426,7 +28426,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
 }
 
 \u7528\u6237\u4EFB\u52A1\uFF1A${task_description}`;
-          const planResponse = await AIService2.requestChat(planPrompt, settings, 1500);
+          const planResponse = await AIService2().requestChat(planPrompt, settings, 1500);
           const planResult = AISchema.parseAIJson("agentPlan", planResponse);
           if (!planResult.ok) {
             console.warn("[LD-Notion] Agent \u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", planResult.reason);
@@ -28444,7 +28444,7 @@ ${plan.explanation || ""}
             planMsg += `${i + 1}. ${step.explanation}
 `;
           });
-          ChatState2.updateLastMessage(planMsg + "\n\u23F3 \u7B49\u5F85\u786E\u8BA4...", "processing");
+          ChatState2().updateLastMessage(planMsg + "\n\u23F3 \u7B49\u5F85\u786E\u8BA4...", "processing");
           const confirmed = await ConfirmationDialog2.show({
             title: "\u{1F916} Agent \u6267\u884C\u8BA1\u5212\u786E\u8BA4",
             message: plan.plan.map((s, i) => `${i + 1}. ${s.explanation}`).join("\n"),
@@ -28464,7 +28464,7 @@ ${plan.explanation || ""}
           let aborted = false;
           for (let i = 0; i < plan.plan.length; i++) {
             const step = plan.plan[i];
-            ChatState2.updateLastMessage(
+            ChatState2().updateLastMessage(
               `${planMsg}
 \u23F3 \u6B65\u9AA4 ${i + 1}/${plan.plan.length}: ${step.explanation}`,
               "processing"
@@ -28529,7 +28529,7 @@ ${AI()._resultToText(r.result)}
           if (!task_description) {
             return "\u274C \u8BF7\u63CF\u8FF0\u4F60\u60F3\u8BA9 Agent \u5B8C\u6210\u7684\u4EFB\u52A1\u3002\n\n\u{1F4A1} \u793A\u4F8B\uFF1A\u300C\u5E2E\u6211\u6574\u7406\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50\u5E76\u751F\u6210\u6458\u8981\u300D";
           }
-          ChatState2.updateLastMessage("\u{1F916} Agent \u6B63\u5728\u89C4\u5212\u4EFB\u52A1...", "processing");
+          ChatState2().updateLastMessage("\u{1F916} Agent \u6B63\u5728\u89C4\u5212\u4EFB\u52A1...", "processing");
           try {
             const generated = await AI()._generateAgentPlan(params, settings);
             if (typeof generated === "string") return generated;
@@ -28709,13 +28709,13 @@ ${AI().isolateContent(content)}
           while (iteration < maxIterations) {
             iteration++;
             trace.iterations = iteration;
-            ChatState2.updateLastMessage(
+            ChatState2().updateLastMessage(
               `\u{1F916} Agent \u601D\u8003\u4E2D... (${iteration}/${maxIterations})`,
               "processing"
             );
             let response;
             try {
-              response = await AIService2.requestAgentChat(
+              response = await AIService2().requestAgentChat(
                 systemPrompt,
                 messages,
                 settings,
@@ -28734,7 +28734,7 @@ ${AI().isolateContent(content)}
             messages.push({ role: "assistant", content: response });
             const thoughtText = toolCall.thought ? `
 \u{1F4AD} ${toolCall.thought}` : "";
-            ChatState2.updateLastMessage(
+            ChatState2().updateLastMessage(
               `\u{1F916} \u6B63\u5728\u6267\u884C: ${toolCall.tool}...${thoughtText}`,
               "processing"
             );

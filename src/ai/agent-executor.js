@@ -33,7 +33,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
 
 用户任务：${task_description}`;
 
-        const planResponse = await AIService.requestChat(planPrompt, settings, 1500);
+        const planResponse = await AIService().requestChat(planPrompt, settings, 1500);
 
         // ISS-013: 统一走 parseAIJson 接缝（arch-013），消除手工 jsonMatch+JSON.parse 三段式。
         // validateAgentPlanSchema 校验 plan 为非空 Array 且每项含 explanation；ok=false 返回错误提示。
@@ -54,7 +54,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
             planMsg += `${i + 1}. ${step.explanation}\n`;
         });
 
-        ChatState.updateLastMessage(planMsg + "\n⏳ 等待确认...", "processing");
+        ChatState().updateLastMessage(planMsg + "\n⏳ 等待确认...", "processing");
 
         const confirmed = await ConfirmationDialog.show({
             title: "🤖 Agent 执行计划确认",
@@ -81,7 +81,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
         for (let i = 0; i < plan.plan.length; i++) {
             const step = plan.plan[i];
 
-            ChatState.updateLastMessage(
+            ChatState().updateLastMessage(
                 `${planMsg}\n⏳ 步骤 ${i + 1}/${plan.plan.length}: ${step.explanation}`,
                 "processing"
             );
@@ -146,7 +146,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
             return "❌ 请描述你想让 Agent 完成的任务。\n\n💡 示例：「帮我整理所有未分类的帖子并生成摘要」";
         }
 
-        ChatState.updateLastMessage("🤖 Agent 正在规划任务...", "processing");
+        ChatState().updateLastMessage("🤖 Agent 正在规划任务...", "processing");
 
         try {
             const generated = await AI()._generateAgentPlan(params, settings);
@@ -346,7 +346,7 @@ ${availableTools}
         while (iteration < maxIterations) {
             iteration++;
             trace.iterations = iteration;
-            ChatState.updateLastMessage(
+            ChatState().updateLastMessage(
                 `🤖 Agent 思考中... (${iteration}/${maxIterations})`,
                 "processing"
             );
@@ -354,7 +354,7 @@ ${availableTools}
             // 调用 AI
             let response;
             try {
-                response = await AIService.requestAgentChat(
+                response = await AIService().requestAgentChat(
                     systemPrompt, messages, settings, 1500
                 );
             } catch (error) {
@@ -377,7 +377,7 @@ ${availableTools}
 
             // 执行工具
             const thoughtText = toolCall.thought ? `\n💭 ${toolCall.thought}` : "";
-            ChatState.updateLastMessage(
+            ChatState().updateLastMessage(
                 `🤖 正在执行: ${toolCall.tool}...${thoughtText}`,
                 "processing"
             );

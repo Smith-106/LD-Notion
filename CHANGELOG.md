@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [3.14.20] - 2026-09-10
+
+### fix (debug goal-mode 第2轮: Agent Loop 100% 必炸运行时缺陷)
+
+- **Agent Loop 全路径修复**（实测抓到）：`agent-executor.js` 将 deps.js 的 getter 函数 `getState: ChatState`/`getService: AIService` 误当对象直接 `.method()` 调用（5 处 `updateLastMessage` + 2 处 `requestChat/requestAgentChat`）——自 v3.10.0（8db1dec AI 域拆分）起，任何非帮助/问候类消息（意图解析→executeIntent/Agent Loop 全路径）100% 报「❌ 处理失败: ChatState2.updateLastMessage is not a function」。修复：统一补 getter 调用 `ChatState()`/`AIService()`，对齐文件内既有 `AI()` 惯例
+
+### test
+
+- 回归守卫 +2：agent-executor 源码禁裸 getter 调用（ChatState/AIService 直接 `.method` 即报）+ deps getter 返回真对象断言（860 全绿）
+
 ## [3.14.19] - 2026-09-10
 
 ### fix (debug: 浮层可见性诞生缺陷 + 错误文案可诊断化)
