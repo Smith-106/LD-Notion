@@ -168,6 +168,15 @@ const GenericUI = {
                 color: var(--ldb-ui-text);
             }
 
+            /* P3(glm, 主 agent 复核): 基础规则 display:none, 仅 info/success/error 有展示规则,
+               showStatus(..., "warning") 因此静默不可见——补齐警告样式。 */
+            .gclip-status.warning {
+                display: block;
+                border-color: var(--ldb-ui-warning-alpha-35);
+                background: rgba(217, 119, 6, 0.12);
+                color: var(--ldb-ui-text);
+            }
+
             .gclip-btn-primary {
                 /* alias for .gclip-btn */
             }
@@ -234,7 +243,7 @@ const GenericUI = {
                     <div class="meta">
                         ${meta.author ? `作者: ${Utils.escapeHtml(meta.author)}<br>` : ""}
                         ${meta.siteName ? `来源: ${Utils.escapeHtml(meta.siteName)}` : ""}
-                        ${meta.publishDate ? ` · ${meta.publishDate}` : ""}
+                        ${meta.publishDate ? ` · ${Utils.escapeHtml(String(meta.publishDate))}` : ""}
                     </div>
                 </div>
 
@@ -403,6 +412,11 @@ const GenericUI = {
     refreshWorkspaceTargets: async (apiKey, silent = false) => {
         const panel = GenericUI.panel;
         if (!panel) return;
+        // P3 共识(glm+qwen): 无请求序号——晚到响应会重建目标下拉并回填持久化旧值,
+        // 覆盖用户在网络等待期间的新选择。
+        const epoch = (GenericUI._workspaceTargetsEpoch || 0) + 1;
+        GenericUI._workspaceTargetsEpoch = epoch;
+        const isStale = () => epoch !== GenericUI._workspaceTargetsEpoch;
 
         const refreshBtn = panel.querySelector("#gclip-refresh-workspace");
         const tip = panel.querySelector("#gclip-target-tip");
@@ -433,6 +447,7 @@ const GenericUI = {
                     }
                 },
                 onWorkspaceData: (workspaceData, meta) => {
+                    if (isStale()) return;
                     GenericUI.updateTargetSelectOptions(workspaceData.databases, workspaceData.pages);
                     if (tip && meta.phase === "databases") {
                         tip.textContent = `✅ 已加载 ${workspaceData.databases.length} 个数据库，可先选择目标；页面列表继续加载中...`;
@@ -440,6 +455,7 @@ const GenericUI = {
                 },
             });
 
+            if (isStale()) return;
             GenericUI.updateTargetSelectOptions(workspaceData.databases, workspaceData.pages);
             if (tip) {
                 tip.textContent = `已加载 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.filter(p => p.parent === "workspace").length} 个页面`;
@@ -449,7 +465,7 @@ const GenericUI = {
                 tip.textContent = `加载失败：${error.message}`;
             }
         } finally {
-            if (refreshBtn) {
+            if (refreshBtn && !isStale()) {
                 refreshBtn.disabled = false;
                 refreshBtn.textContent = "刷新";
             }
@@ -758,6 +774,8 @@ const GenericUI = {
     // 执行导出
     doExport: async () => {
         if (GenericUI.isExporting) return;
+        // P3(dsf, 主 agent 复核): 提前占位——确认弹窗挂起期间守卫此前失效, 双击会并行两次导出。
+        GenericUI.isExporting = true;
 
         // 去重前置：已导出过则确认是否仍要再建页（clipper 此前零 markSeen → 连点必重复）
         const previewMeta = {
@@ -772,17 +790,18 @@ const GenericUI = {
                 countdown: 0,
             });
             if (!ok) {
+                GenericUI.isExporting = false;
                 GenericUI.showStatus("已取消：页面此前已导出", "info");
                 return;
             }
         }
 
-        GenericUI.isExporting = true;
-
         const btn = GenericUI.panel.querySelector("#gclip-export");
         const floatBtn = GenericUI.floatBtn;
         btn.disabled = true;
         btn.textContent = "导出中...";
+        // P3(dsf, 主 agent 复核): 清理上一轮未触发的恢复定时器, 避免晚到回调冲掉本轮状态
+        clearTimeout(GenericUI._floatResetTimer);
         floatBtn.className = "gclip-float-btn exporting";
         GenericUI.showStatus("正在提取页面内容...", "info");
 
@@ -812,14 +831,16 @@ const GenericUI = {
             floatBtn.className = "gclip-float-btn success";
             GenericUI.showStatus(`导出成功: ${meta.title}`, "success");
 
-            // 3 秒后恢复按钮状态
-            setTimeout(() => {
+            // 3 秒后恢复按钮状态(句柄可清理, 防晚到回调覆盖下一轮)
+            clearTimeout(GenericUI._floatResetTimer);
+            GenericUI._floatResetTimer = setTimeout(() => {
                 floatBtn.className = "gclip-float-btn";
             }, 3000);
         } catch (error) {
             floatBtn.className = "gclip-float-btn error";
             GenericUI.showStatus(`导出失败: ${error.message}`, "error");
-            setTimeout(() => {
+            clearTimeout(GenericUI._floatResetTimer);
+            GenericUI._floatResetTimer = setTimeout(() => {
                 floatBtn.className = "gclip-float-btn";
             }, 3000);
         } finally {
