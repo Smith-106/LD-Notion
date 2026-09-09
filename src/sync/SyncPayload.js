@@ -21,6 +21,20 @@ const watermarkCompare = (a, b) => {
     return 0;
 };
 
+// settings 条目全序比较: updatedAt → deviceId → value 序列化(平局确定性, 保证交换律)
+const compareSettingEntries = (a, b) => {
+    const ua = String(a?.updatedAt || "");
+    const ub = String(b?.updatedAt || "");
+    if (ua !== ub) return ua > ub ? 1 : -1;
+    const da = String(a?.deviceId || "");
+    const db = String(b?.deviceId || "");
+    if (da !== db) return da > db ? 1 : -1;
+    const va = JSON.stringify(a?.value ?? null) || "";
+    const vb = JSON.stringify(b?.value ?? null) || "";
+    if (va !== vb) return va > vb ? 1 : -1;
+    return 0;
+};
+
 /**
  * SyncPayload — 多端同步数据模型 + 纯函数 merge(join-semilattice)
  * 结构:
@@ -68,10 +82,12 @@ const SyncPayload = {
         };
 
         // ① dedup: union + max ts
-        const dedupSources = new Set([...Object.keys(a.dedup || {}), ...Object.keys(b.dedup || {})]);
+        const aDedup = a.dedup || {};
+        const bDedup = b.dedup || {};
+        const dedupSources = new Set([...Object.keys(aDedup), ...Object.keys(bDedup)]);
         for (const src of dedupSources) {
-            const A = a.dedup[src] || {};
-            const B = b.dedup[src] || {};
+            const A = aDedup[src] || {};
+            const B = bDedup[src] || {};
             const merged = {};
             const keys = new Set([...Object.keys(A), ...Object.keys(B)]);
             for (const k of keys) {
@@ -99,17 +115,16 @@ const SyncPayload = {
             }
         }
 
-        // ③ settings: (updatedAt, deviceId) 全序 LWW
+        // ③ settings: (updatedAt, deviceId, value) 全序 LWW
+        // 2/3 共识(dsf+glm): 仅比 (updatedAt, deviceId) 时, 同刻同设备的不同值会依赖入参顺序
+        // (破坏文档声明的交换律)。追加 value 字典序作为最终平局规则。
         const settingKeys = new Set([...Object.keys(a.settings || {}), ...Object.keys(b.settings || {})]);
         for (const k of settingKeys) {
             const A = a.settings[k];
             const B = b.settings[k];
             if (!isPlainObject(A)) { out.settings[k] = clone(B); continue; }
             if (!isPlainObject(B)) { out.settings[k] = clone(A); continue; }
-            const cmp = (A.updatedAt || "") === (B.updatedAt || "")
-                ? String(A.deviceId || "").localeCompare(String(B.deviceId || ""))
-                : ((A.updatedAt || "") > (B.updatedAt || "") ? 1 : -1);
-            out.settings[k] = clone(cmp >= 0 ? A : B);
+            out.settings[k] = clone(compareSettingEntries(A, B) >= 0 ? A : B);
         }
 
         return out;
@@ -185,8 +200,24 @@ const SyncPayload = {
         for (const [src, remoteWm] of Object.entries(remoteSafe.watermarks || {})) {
             if (!isPlainObject(remoteWm)) continue;
             const localWm = localSafe.watermarks?.[src];
-            if (!isPlainObject(localWm) || watermarkCompare(remoteWm, localWm) > 0) {
+            if (!isPlainObject(localWm)) {
                 watermarkWinners.push({ source: src, watermark: clone(remoteWm) });
+                continue;
+            }
+            const cmp = watermarkCompare(remoteWm, localWm);
+            if (cmp > 0) {
+                watermarkWinners.push({ source: src, watermark: clone(remoteWm) });
+                continue;
+            }
+            // 3/3 共识(dsf+glm+qwen): (epoch,time) 平局时 merge 定义为 ids 并集, 但应用路径
+            // 只在严格大于时胜出 → 同刻对端新增 id 永远学不到, 这些条目被反复重拉。平局时
+            // 返回并集水位(收敛到 merge 固定点)。
+            if (cmp === 0) {
+                const localIds = Array.isArray(localWm.ids) ? localWm.ids : [];
+                const union = Array.from(new Set([...localIds, ...(Array.isArray(remoteWm.ids) ? remoteWm.ids : [])]));
+                if (union.length !== localIds.length) {
+                    watermarkWinners.push({ source: src, watermark: { ...clone(remoteWm), ids: union } });
+                }
             }
         }
 
@@ -197,10 +228,9 @@ const SyncPayload = {
                 settingsWinners.push({ key: k, entry: clone(remoteEntry) });
                 continue;
             }
-            const cmp = (remoteEntry.updatedAt || "") === (localEntry.updatedAt || "")
-                ? String(remoteEntry.deviceId || "").localeCompare(String(localEntry.deviceId || ""))
-                : ((remoteEntry.updatedAt || "") > (localEntry.updatedAt || "") ? 1 : -1);
-            if (cmp > 0) settingsWinners.push({ key: k, entry: clone(remoteEntry) });
+            if (compareSettingEntries(remoteEntry, localEntry) > 0) {
+                settingsWinners.push({ key: k, entry: clone(remoteEntry) });
+            }
         }
 
         return { dedupEntries, watermarkWinners, settingsWinners };

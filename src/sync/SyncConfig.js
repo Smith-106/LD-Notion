@@ -90,12 +90,37 @@ const SyncConfig = {
     },
 
     isPassphraseSet() {
-        return GM_getValue(CONFIG.STORAGE_KEYS.SYNC_PASSPHRASE_SET, false) === true;
+        // 兼容字符串 "true"(旧版/手动编辑存储), 与 isEnabled 同一先例(全盘审计 find 22)
+        const raw = GM_getValue(CONFIG.STORAGE_KEYS.SYNC_PASSPHRASE_SET, false);
+        return raw === true || raw === "true";
     },
 
     setPassphraseSet(v) {
         GM_setValue(CONFIG.STORAGE_KEYS.SYNC_PASSPHRASE_SET, !!v);
     },
+
+    /**
+     * 多标签页 deviceId 收敛(3/3 共识 dsf+glm+qwen):
+     * 两标签页同时首建时各自生成并先后写入(后写覆盖先写), 内存缓存又永不回读,
+     * 导致同一浏览器持两个设备身份(按设备分键的同步行/租约分裂)。
+     * 监听远端写入并失效/同步内存缓存。
+     */
+    _installDeviceIdWatcher() {
+        if (SyncConfig._deviceIdWatcherInstalled) return;
+        SyncConfig._deviceIdWatcherInstalled = true;
+        if (typeof GM_addValueChangeListener !== "function") return;
+        try {
+            GM_addValueChangeListener(CONFIG.STORAGE_KEYS.SYNC_DEVICE_ID, (_name, _oldValue, newValue, remote) => {
+                if (!remote) return;
+                const value = String(newValue || "");
+                if (/^[0-9a-f]{32}$/.test(value)) SyncConfig._deviceId = value;
+            });
+        } catch (error) {
+            console.warn("[LD-Notion] deviceId 跨页监听注册失败", error?.message || error);
+        }
+    },
 };
+
+SyncConfig._installDeviceIdWatcher();
 
 module.exports = { SyncConfig };
