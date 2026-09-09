@@ -15,6 +15,10 @@ const { NameResolver } = require("../NameResolver");
 const { AgentTrace } = require("../AgentTrace");
 const { getAI: AI, getState: state, getService: svc } = require("../deps");
 
+// P4 共识(glm): 标题/URL 直插 Markdown 链接语法, 含 ]( 的标题可破坏链接结构并注入链接目标。
+// 输出层净化: 链接文本剥离方括号, URL 剥离空白/右括号(Notion 页面 URL 不含这些字符)。
+const mdLink = (text, url) => `[${String(text || "").replace(/[\[\]]/g, "")}](${String(url || "").replace(/[\s)]/g, "")})`;
+
 module.exports = {
 handleQuery: async (params, settings, explanation) => {
     // 检查数据库 ID 配置
@@ -65,6 +69,10 @@ handleQuery: async (params, settings, explanation) => {
         const maxPages = 10; // 最多查询 10 页（1000 条），防止无限循环
         let pageCount = 0;
         let querySorts = [];
+        // P4 共识(3/3): has_more=true 但 next_cursor 为空/重复时, 循环会以同一游标重复拉取
+        // 同一页(最多 maxPages 次), 产生重复条目与错误统计。
+        const seenCursors = new Set();
+        let cursorTruncated = false;
 
         while (hasMore && pageCount < maxPages) {
             // 首次尝试按"收藏时间"排序，失败则按创建时间排序
@@ -99,6 +107,14 @@ handleQuery: async (params, settings, explanation) => {
             cursor = response.next_cursor;
             pageCount++;
 
+            if (hasMore && (!cursor || seenCursors.has(cursor))) {
+                // 游标缺失/回退：终止分页并标记截断，避免重复拉取同一页
+                hasMore = false;
+                cursorTruncated = true;
+            } else if (hasMore) {
+                seenCursors.add(cursor);
+            }
+
             // 更新进度
             if (hasMore) {
                 state().updateLastMessage(`正在查询数据库... (已获取 ${allPages.length} 条)`, "processing");
@@ -107,7 +123,7 @@ handleQuery: async (params, settings, explanation) => {
 
         const pages = allPages;
         const total = pages.length;
-        const isTruncated = hasMore; // 如果还有更多，说明被截断了
+        const isTruncated = hasMore || cursorTruncated; // 还有更多或游标异常即已截断
 
         if (total === 0) {
             return `📊 数据库中没有找到符合条件的帖子。${filter ? `\n筛选条件：${filter_field} 包含 "${filter_value}"` : ""}`;
@@ -168,14 +184,33 @@ handleSearch: async (params, settings, explanation) => {
             return "请告诉我你想搜索什么关键词？";
         }
 
-        // 使用 Notion 搜索
-        const response = await NotionAPI.search(
-            keyword,
-            { property: "object", value: "page" },
-            settings.notionApiKey
-        );
+        // P4 共识(3/3): 仅取搜索首页, has_more/next_cursor 被忽略 → 结果静默截断。
+        // 分页续拉(最多 10 页), 游标为空/重复即终止并标记截断。
+        const allResults = [];
+        const seenSearchCursors = new Set();
+        let searchCursor;
+        let searchPageCount = 0;
+        let searchTruncated = false;
+        do {
+            const response = await NotionAPI.search(
+                keyword,
+                { property: "object", value: "page" },
+                settings.notionApiKey,
+                searchCursor
+            );
+            allResults.push(...(response.results || []));
+            searchPageCount++;
+            const nextCursor = response.has_more ? response.next_cursor : undefined;
+            if (response.has_more && (!nextCursor || seenSearchCursors.has(nextCursor))) {
+                searchTruncated = true;
+                searchCursor = undefined;
+            } else {
+                if (nextCursor) seenSearchCursors.add(nextCursor);
+                searchCursor = nextCursor;
+            }
+        } while (searchCursor && searchPageCount < 10);
 
-        const pages = (response.results || [])
+        const pages = allResults
             .filter(p => p.parent?.database_id?.replace(/-/g, "") === settings.notionDatabaseId.replace(/-/g, ""));
 
         if (pages.length === 0) {
@@ -188,11 +223,14 @@ handleSearch: async (params, settings, explanation) => {
         pages.slice(0, limit).forEach((page, i) => {
             const title = Utils.getPageTitle(page);
             const url = page.url || "";
-            result += `${i + 1}. [${title}](${url})\n`;
+            result += `${i + 1}. ${mdLink(title, url)}\n`;
         });
 
         if (pages.length > limit) {
             result += `\n... 还有 ${pages.length - limit} 条结果`;
+        }
+        if (searchTruncated || (searchCursor && searchPageCount >= 10)) {
+            result += `\n⚠️ 结果可能不完整（搜索已达分页上限）`;
         }
 
         return result;
@@ -219,11 +257,21 @@ handleWorkspaceSearch: async (params, settings, explanation) => {
         let allResults = [];
         let cursor = undefined;
         let searchPageCount = 0;
+        let wsTruncated = false;
+        const seenWsCursors = new Set();
         do {
             const response = await NotionAPI.search(keyword, filter, settings.notionApiKey, cursor);
             allResults = allResults.concat(response.results || []);
-            cursor = response.has_more ? response.next_cursor : undefined;
             searchPageCount++;
+            // P4 共识(dsf+qwen): has_more=true 但 next_cursor 为空时静默终止且不提示截断。
+            const nextCursor = response.has_more ? response.next_cursor : undefined;
+            if (response.has_more && (!nextCursor || seenWsCursors.has(nextCursor))) {
+                wsTruncated = true;
+                cursor = undefined;
+            } else {
+                if (nextCursor) seenWsCursors.add(nextCursor);
+                cursor = nextCursor;
+            }
         } while (cursor && searchPageCount < 10);
 
         const results = allResults;
@@ -257,7 +305,7 @@ handleWorkspaceSearch: async (params, settings, explanation) => {
                 const title = db.title?.[0]?.plain_text || "无标题数据库";
                 const url = db.url || "";
                 const id = db.id?.replace(/-/g, "") || "";
-                result += `${i + 1}. [${title}](${url})\n`;
+                result += `${i + 1}. ${mdLink(title, url)}\n`;
                 result += `   ID: \`${id}\`\n`;
             });
             if (databases.length > limit) {
@@ -282,7 +330,7 @@ handleWorkspaceSearch: async (params, settings, explanation) => {
                     parentLabel = "🌐 工作区页面";
                 }
 
-                result += `${i + 1}. [${title}](${url})`;
+                result += `${i + 1}. ${mdLink(title, url)}`;
                 if (parentLabel) {
                     result += ` - ${parentLabel}`;
                 }
@@ -294,6 +342,9 @@ handleWorkspaceSearch: async (params, settings, explanation) => {
         }
 
         result += `\n💡 提示：复制数据库 ID 可以配置到设置中使用更多功能。`;
+        if (wsTruncated || (cursor && searchPageCount >= 10)) {
+            result += `\n⚠️ 结果可能不完整（搜索已达分页上限）`;
+        }
 
         return result;
     } catch (error) {
