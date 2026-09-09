@@ -42,7 +42,12 @@ const UrlValidator = {
         } catch {
             return false;
         }
-        return UrlValidator.LOCAL_HOSTS.has(parsed.hostname);
+        // P4 共识(qwen): 未校验协议 —— file://127.0.0.1 等非 http(s) 也会通过 hostname 检查
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+        // P4: WHATWG hostname 对 IPv6 保留方括号("[::1]"), LOCAL_HOSTS 存 "::1" → 字面匹配恒 false,
+        // 声明支持的 http://[::1]:27123 反而被拒
+        const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+        return UrlValidator.LOCAL_HOSTS.has(host);
     },
 
     // 校验 AI 返回的页面外部 URL（icon/cover external.url）。
@@ -97,7 +102,7 @@ const UrlValidator = {
         // IPv6 私有段/回环(new URL 可规范化的形式)
         if (normalized.startsWith("[")) {
             const bare = normalized.replace(/^\[|\]$/g, "");
-            if (bare === "::1" || bare === "::" || bare.startsWith("fe80:") || bare.startsWith("fc") || bare.startsWith("fd") || bare.startsWith("::ffff:127.")) return true;
+            if (bare === "::1" || bare === "::" || /^fe[89ab][0-9a-f]{0,2}(:|$)/.test(bare) || bare.startsWith("fc") || bare.startsWith("fd") || bare.startsWith("::ffff:127.")) return true;
             // IPv4-mapped 私有段 ::ffff:a.b.c.d
             const v4m = bare.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
             if (v4m) return UrlValidator._isPrivateHost(v4m.slice(1).join("."));
@@ -106,6 +111,14 @@ const UrlValidator = {
             if (v4mHex) {
                 const hi = parseInt(v4mHex[1], 16);
                 const lo = parseInt(v4mHex[2], 16);
+                return UrlValidator._isPrivateHost(`${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`);
+            }
+            // P4 共识(dsf+qwen): IPv4-compatible 形态 ::x:y 未覆盖 ——
+            // new URL("http://[::127.0.0.1]").hostname = "[::7f00:1]", 回环/云元数据(::a9fe:a9fe)可绕过
+            const v4Compat = bare.match(/^::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+            if (v4Compat) {
+                const hi = parseInt(v4Compat[1], 16);
+                const lo = parseInt(v4Compat[2], 16);
                 return UrlValidator._isPrivateHost(`${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`);
             }
         }

@@ -133,7 +133,8 @@ const NOTION_LANGUAGES = new Set([
 ]);
 
 const normalizeLanguage = (lang) => {
-    if (!lang) return "plain text";
+    // P4 共识(3/3): 仅拦假值 —— 数字/数组等非字符串真值调 toLowerCase 抛 TypeError
+    if (typeof lang !== "string" || !lang) return "plain text";
     const lower = lang.toLowerCase().trim();
     if (NOTION_LANGUAGES.has(lower)) return lower;
 
@@ -142,7 +143,8 @@ const normalizeLanguage = (lang) => {
         rb: "ruby", sh: "shell", yml: "yaml", md: "markdown",
         cpp: "c++", csharp: "c#", cs: "c#", golang: "go", rs: "rust",
     };
-    return aliases[lower] || "plain text";
+    // P4 共识(3/3): 普通对象下标会走原型链 —— "constructor"/"__proto__" 返回非字符串真值
+    return Object.prototype.hasOwnProperty.call(aliases, lower) ? aliases[lower] : "plain text";
 };
 
 module.exports = { SiteDetector, InstallHelper, EMOJI_MAP, NOTION_LANGUAGES, normalizeLanguage };

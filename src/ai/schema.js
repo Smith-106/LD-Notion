@@ -84,7 +84,8 @@ const AISchema = {
                 return n;
             }
             case "checkbox":
-                return Boolean(val);
+                // P4 共识(dsf): Boolean("false")===true —— 字符串假值会被写成 true
+                return val === true || val === 1 || String(val).trim().toLowerCase() === "true";
             case "date":
                 return AISchema.ISO_DATE_RE.test(String(val).trim()) ? String(val).trim() : null;
             case "url":
@@ -104,9 +105,9 @@ const AISchema = {
     validateEmoji: (emoji) => {
         const e = String(emoji || "").trim();
         if (!e) return "";
-        if (e.length > AISchema.MAX_EMOJI) return e.slice(0, AISchema.MAX_EMOJI);
-        // 拒控制字符（除普通空格）
+        // P4 共识(dsf+glm): 控制字符过滤必须在前 —— 原实现超长分支先 return 截断值, 绕过过滤
         if (/[\x00-\x1f\x7f]/.test(e)) return "";
+        if (e.length > AISchema.MAX_EMOJI) return e.slice(0, AISchema.MAX_EMOJI);
         return e;
     },
 
@@ -254,6 +255,8 @@ const AISchema = {
     // 返回 { ok: true, value } 或 { ok: false, reason }。
     parseAIJson: (name, rawText) => {
         if (!rawText) return { ok: false, reason: "AI 响应为空" };
+        // P4 共识(3/3): 非字符串 truthy 值(对象/数组/数字)直接 .match 抛 TypeError 逃逸 {ok:false} 契约
+        if (typeof rawText !== "string") return { ok: false, reason: "AI 响应不是字符串" };
         const jsonMatch = rawText.match(/\{[\s\S]*\}/);
         if (!jsonMatch) return { ok: false, reason: "AI 响应中未找到 JSON" };
         let parsed;
