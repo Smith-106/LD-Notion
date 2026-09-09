@@ -14,6 +14,8 @@ const BookmarkExporter = {
     // FIFO 上限（PERF-005）：_pageInsightCache 原为无界普通对象，长会话累积内存泄漏。
     // 超 MAX_INSIGHT_CACHE 时删最旧 key（Object.keys 保插入顺序），仿 AgentTrace.MAX_TRACES=50 的 FIFO rotate 模式。
     MAX_INSIGHT_CACHE: 50,
+    // P4 共识(glm+qwen): 页面洞察只取 <head> 元信息, 响应字节上限 2MB 防超大页面内存耗尽/多次全量解码卡死
+    MAX_INSIGHT_BYTES: 2 * 1024 * 1024,
     // 已导出书签映射缓存（H5：消除循环内逐条 JSON.parse+stringify 的 O(N²)）。
     // getExported 命中缓存返对象引用，markExported 就地 mutate 缓存 + 单次 stringify 写回。
     _exportedCache: null,
@@ -116,8 +118,12 @@ const BookmarkExporter = {
 
     decodeHtmlFromResponse: (response) => {
         const fallbackText = String(response?.responseText || "");
-        const bytes = BookmarkExporter.getResponseBytes(response);
-        if (!bytes || bytes.length === 0) return fallbackText;
+        const rawBytes = BookmarkExporter.getResponseBytes(response);
+        if (!rawBytes || rawBytes.length === 0) return fallbackText;
+        // P4 共识(glm+qwen): 无字节上限 —— 超大响应会内存耗尽/多次全量解码卡死。
+        const bytes = rawBytes.length > BookmarkExporter.MAX_INSIGHT_BYTES
+            ? rawBytes.subarray(0, BookmarkExporter.MAX_INSIGHT_BYTES)
+            : rawBytes;
 
         const headerCharset = BookmarkExporter.extractCharsetFromHeaders(response?.responseHeaders || "");
         const htmlCharset = BookmarkExporter.extractCharsetFromHtmlHead(bytes);
@@ -191,6 +197,13 @@ const BookmarkExporter = {
     },
 
     fetchPageInsight: (url) => {
+        // P4 共识(glm): 书签 URL 可指向内网/云元数据(127.0.0.1/10.x/169.254.169.254),
+        // GM_xmlhttpRequest 会以用户会话抓取 → 标题摘要入 Notion 造成内网数据外泄。
+        // 复用 UrlValidator(http(s) 且非内网/可疑宿主), 与 DOMToNotion._safeExternalUrl 同源。
+        const { UrlValidator } = require("../security/UrlValidator");
+        if (!UrlValidator.validatePageExternalUrl(url)) {
+            return Promise.reject(new Error("URL 未通过安全校验(非 http(s) 或内网地址)"));
+        }
         const cached = BookmarkExporter._pageInsightCache[url];
         if (cached) return Promise.resolve(cached);
 
@@ -353,6 +366,9 @@ const BookmarkExporter = {
             const canUseAI = !!(settings?.aiApiKey && settings?.aiService);
             const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
             if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
+                // P4 共识(dsf): 计数此前在两次 await 之后 —— 失败路径不计入, 上限可被突破。
+                // 改为请求前预占(成本闸门语义: 计入已发起的调用)。
+                context.aiUsedCount = (context.aiUsedCount || 0) + 1;
                 const aiResult = await BookmarkExporter.generateAISummary(bookmark, insight, settings);
                 if (aiResult?.title) {
                     enriched.generatedTitle = BookmarkExporter.composeTitleWithPrefix(prefix, aiResult.title, 180);
@@ -367,7 +383,6 @@ const BookmarkExporter = {
                 if (aiCategory && (settings?.categories || []).some(c => String(c).trim().toLowerCase() === String(aiCategory).trim().toLowerCase())) {
                     inferredCategory = aiCategory;
                 }
-                context.aiUsedCount = (context.aiUsedCount || 0) + 1;
             }
             enriched.inferredCategory = inferredCategory;
         } catch (error) {
@@ -639,7 +654,13 @@ const BookmarkExporter = {
         }
         const setupResult = await BookmarkExporter.setupDatabaseProperties(databaseId, apiKey);
         if (!setupResult.success) {
-            throw new Error(`数据库配置失败: ${setupResult.error}`);
+            const setupError = new Error(`数据库配置失败: ${setupResult.error}`);
+            // P4 共识(glm): 透传认证终态标记 —— 否则死 token 下调用方无法 fail-fast/走重授权分支
+            if (setupResult.isAuthTerminal) {
+                setupError.isAuthTerminal = true;
+                setupError.authCode = setupResult.authCode;
+            }
+            throw setupError;
         }
 
         // 过滤已导出的
