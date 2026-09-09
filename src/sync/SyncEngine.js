@@ -162,6 +162,35 @@ const SyncEngine = {
                     if (parsed) index.set(`${parsed.kind}:${parsed.key}`, parsed);
                 }
 
+                // 陈旧行清理(主 agent 发现): 介质行 append-only, 某源停用 >90 天后其行内条目
+                // 全部过期, 而 validateRemote 对过期 ts 整包拒绝(F-2 契约) → 所有设备 pull
+                // 永久失败直到该源再次产出。此处仅当该源行内条目全部过期且本轮无新鲜投影时,
+                // 用空集重写该行(不会覆盖他端的新鲜投影)。
+                const tsFloor = Date.now() - SyncConstants.TS_PAST_TTL_MS;
+                const staleRows = [];
+                for (const [id, prior] of index) {
+                    if (!id.startsWith("dedup:") || !prior.pageId) continue;
+                    const src = id.slice("dedup:".length);
+                    if (payload.dedup[src]) continue; // 本轮有新鲜条目 → 正常重写
+                    const set = prior.payload?.dedup?.[src];
+                    if (!set || typeof set !== "object") continue;
+                    const entries = Object.entries(set);
+                    if (entries.length === 0) continue;
+                    const allExpired = entries.every(([, ts]) => !(Number(ts) >= tsFloor));
+                    if (!allExpired) continue;
+                    staleRows.push({
+                        pageId: prior.pageId,
+                        row: {
+                            kind: "dedup",
+                            key: src,
+                            version: payload.version || 0,
+                            updatedAt: payload.updatedAt,
+                            deviceId: payload.deviceId,
+                            payload: { dedup: { [src]: {} } },
+                        },
+                    });
+                }
+
                 // v3.14.6 (DC-003): 行预算逐级截断 —— watermark ids/settings 行此前无预算,
                 // 超 SyncLedger 2000 硬限整行失败; 现在构造后量长, 超限逐级裁剪
                 const budgetedRows = SyncEngine._enforceRowBudget(rows);
@@ -173,6 +202,9 @@ const SyncEngine = {
                     } else {
                         await SyncLedger.createRow({ NotionAPI, apiKey, databaseId, row, context: { reason } });
                     }
+                }
+                for (const stale of staleRows) {
+                    await SyncLedger.pushRow({ NotionAPI, apiKey, databaseId, pageId: stale.pageId, row: stale.row, context: { reason } });
                 }
             }, { trigger: "multi_device_sync", reason });
             SyncConfig.setLastPushAt(Date.now());
