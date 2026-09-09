@@ -62,11 +62,16 @@ describe("P4 收敛(c16): NotionSiteUI 销毁后回调与坐标恢复", () => {
 
     it("源码: 保存 finally 复位三处 touched 标记", () => {
         const src = fs.readFileSync("src/ui/notion-site-ui.js", "utf8");
-        const finallyBlock = src.slice(src.indexOf("NotionSiteUI.showStatus(`设置保存失败"));
 
-        expect(finallyBlock).toContain('#ldb-notion-api-key").dataset.touched = "false"');
-        expect(finallyBlock).toContain('#ldb-notion-ai-api-key").dataset.touched = "false"');
-        expect(finallyBlock).toContain('#ldb-notion-github-token").dataset.touched = "false"');
+        // 三行必须连续出现(仅 finally 块内为连续序列; loadConfig 处另有 P4 注释隔开)
+        expect(src).toMatch(/#ldb-notion-api-key"\)\.dataset\.touched = "false";\s*\n\s*panel\.querySelector\("#ldb-notion-ai-api-key"\)\.dataset\.touched = "false";\s*\n\s*panel\.querySelector\("#ldb-notion-github-token"\)\.dataset\.touched = "false";/);
+    });
+
+    it("源码: 加载配置时两密钥输入框 touched 初始为 false", () => {
+        const src = fs.readFileSync("src/ui/notion-site-ui.js", "utf8");
+
+        expect(src).toMatch(/#ldb-notion-ai-api-key"\)\.value = "";\s*\n\s*\/\/ P4 收敛[^\n]*\n\s*panel\.querySelector\("#ldb-notion-ai-api-key"\)\.dataset\.touched = "false";/);
+        expect(src).toMatch(/#ldb-notion-github-token"\)\.value = "";\s*\n\s*panel\.querySelector\("#ldb-notion-github-token"\)\.dataset\.touched = "false";/);
     });
 });
 
