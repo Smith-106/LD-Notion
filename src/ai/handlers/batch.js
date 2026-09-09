@@ -144,10 +144,15 @@ handleBatchTranslate: async (params, settings, explanation) => {
             return `❌ 数据库中没有可翻译的页面。`;
         }
 
+        // P4 3/3 共识(dsf+glm+qwen): 固定 page_size=20 且不翻页, 须显式告知存在截断
+        const truncationNote = queryResp.has_more
+            ? "\n⚠️ 本次仅处理前 20 个页面（数据库还有更多，可分批执行）。"
+            : "";
+
         // 确认操作
         const confirmed = await ConfirmationDialog.show({
             title: `🌐 批量翻译确认`,
-            message: `即将翻译 ${pages.length} 个页面为${lang}。\n翻译后的内容将追加到每个页面末尾（原内容保留）。`,
+            message: `即将翻译 ${pages.length} 个页面为${lang}。\n翻译后的内容将追加到每个页面末尾（原内容保留）。${truncationNote}`,
             confirmText: "开始翻译",
             cancelText: "取消"
         });
@@ -225,7 +230,7 @@ handleExtractToDatabase: async (params, settings, explanation) => {
 
         const analyzePrompt = `你是一个数据提取专家。分析以下页面内容，提取结构化信息。
 
-提取要求：${extractHint}
+提取要求：${AI().isolateContent(extractHint)}
 
 请返回 JSON 格式（只返回 JSON）：
 {
@@ -402,7 +407,11 @@ ${structure_prompt ? `补充要求：${AI().isolateContent(structure_prompt)}` :
             return `❌ AI 未能规划出有效的子页面结构。`;
         }
         const MAX_CHILD_DESC = 2000;
-        plan.children = plan.children.map((c) => ({
+        // P4 共识(qwen): AI 返回的 children 数量无上限, 超量会触发大量建页/写块请求。
+        // 按批量上限 20 截断(与 handleBatchAnalyze limit 上限一致), 截断数在结果中告知。
+        const MAX_GENERATED_CHILDREN = 20;
+        const requestedChildCount = plan.children.length;
+        plan.children = plan.children.slice(0, MAX_GENERATED_CHILDREN).map((c) => ({
             ...c,
             title: AISchema.validatePropertyValue(c?.title, "title"),
             icon: AISchema.validateEmoji(c?.icon),
@@ -499,7 +508,7 @@ ${structure_prompt ? `补充要求：${AI().isolateContent(structure_prompt)}` :
             }
         }
 
-        return `📑 **多页面内容生成完成**\n\n- 父页面: ${plan.parent_title}\n- 子页面: ${createdCount}/${plan.children.length} 创建成功\n\n💡 所有页面已创建并填充内容。`;
+        return `📑 **多页面内容生成完成**\n\n- 父页面: ${plan.parent_title}\n- 子页面: ${createdCount}/${plan.children.length} 创建成功${requestedChildCount > MAX_GENERATED_CHILDREN ? `\n- ⚠️ AI 规划了 ${requestedChildCount} 个子页面，已按上限 ${MAX_GENERATED_CHILDREN} 创建` : ""}\n\n💡 所有页面已创建并填充内容。`;
     } catch (error) {
         return `❌ 页面生成失败: ${error.message}`;
     }
@@ -522,7 +531,8 @@ handleBatchAnalyze: async (params, settings, explanation) => {
     state().updateLastMessage("正在查找数据库...", "processing");
 
     try {
-        let dbId = database_id || settings.notionDatabaseId;
+        // P4 共识(glm): 显式指定 database_name 时应优先按名搜索, 不被默认库 ID 覆盖
+        let dbId = database_id || (database_name ? null : settings.notionDatabaseId);
         if (!dbId && database_name) {
             const searchResp = await NotionAPI.search(database_name, "database", settings.notionApiKey);
             const db = (searchResp.results || []).find(r => !r.archived);
@@ -548,8 +558,15 @@ handleBatchAnalyze: async (params, settings, explanation) => {
             const title = Utils.getPageTitle(page);
             state().updateLastMessage(`🔎 提取中 (${i + 1}/${pages.length}): ${title}...`, "processing");
 
-            const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 2000);
-            contentParts.push(`## ${title}\n${content || "（无内容）"}`);
+            // P4 共识(dsf+glm): 单页提取失败此前抛到外层 catch 中止整批, 已提取内容作废。
+            // 逐页隔离, 失败页以占位符继续(与 handleBatchTranslate 同型)。
+            try {
+                const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 2000);
+                contentParts.push(`## ${title}\n${content || "（无内容）"}`);
+            } catch (error) {
+                console.warn(`[LD-Notion] 页面提取失败: ${title}`, error);
+                contentParts.push(`## ${title}\n（内容提取失败: ${error.message}）`);
+            }
         }
 
         // AI 生成综合分析
@@ -559,7 +576,7 @@ handleBatchAnalyze: async (params, settings, explanation) => {
 
         const prompt = `你是一个数据分析师。根据以下来自数据库的多个页面内容进行综合分析。
 
-分析要求：${analysisGoal}
+分析要求：${AI().isolateContent(analysisGoal)}
 
 请使用 Markdown 格式输出分析报告，包含：
 1. 概述（总体情况摘要）
@@ -616,12 +633,14 @@ handleGitHubImport: async (params, settings, explanation) => {
         let response = `✅ **GitHub 导入完成**\n\n`;
         let totalExported = 0;
         let totalFailed = 0;
+        let totalErrors = 0;
 
         const typeNames = { stars: "Stars", repos: "Repos", forks: "Forks", gists: "Gists" };
         for (const type of importTypes) {
             const r = allResults[type];
             if (!r) continue;
             if (r.error) {
+                totalErrors++;
                 response += `❌ ${typeNames[type]}: ${r.error}\n`;
             } else {
                 response += `📊 ${typeNames[type]}: 共 ${r.total} 个，导出 ${r.exported} 个`;
@@ -632,7 +651,7 @@ handleGitHubImport: async (params, settings, explanation) => {
             }
         }
 
-        if (totalExported === 0 && totalFailed === 0) {
+        if (totalExported === 0 && totalFailed === 0 && totalErrors === 0) {
             response += `\n所有内容已是最新状态。`;
         }
 
