@@ -81,8 +81,9 @@ const SyncStateV2 = {
         if (!watermark || typeof watermark !== "object") return null;
         const time = this.normalizeTime(watermark.time);
         if (!time) return null;
+        // P4 收敛(c10): 与 buildWatermark 同口径 —— 容量上限否则远端/历史脏 ids 无界持久化
         const ids = Array.isArray(watermark.ids)
-            ? Array.from(new Set(watermark.ids.map((id) => String(id || "")).filter(Boolean)))
+            ? Array.from(new Set(watermark.ids.map((id) => String(id || "")).filter(Boolean))).slice(0, MAX_WATERMARK_IDS)
             : [];
         return { time, ids };
     },
