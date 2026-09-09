@@ -36,6 +36,7 @@ describe("v3.14.8 audit follow-ups", () => {
     const body = { children: [], appendChild(n){ this.children.push(n); return n; } };
     global.document = {
       body,
+      querySelector: () => null,
       createElement(tag) {
         const el = {
           tagName: tag.toUpperCase(),

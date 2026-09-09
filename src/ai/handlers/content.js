@@ -755,7 +755,11 @@ handleSummarize: async (params, settings, explanation) => {
             bullet: "以要点列表形式总结，每个要点一行，提炼关键信息。"
         };
 
-        const prompt = `你是一个内容摘要助手。${styleInstructions[style] || styleInstructions.brief}\n\n使用 Markdown 格式输出。\n\n以下是需要总结的内容：\n${existingContent}`;
+        // P4 收敛(c02): style 来自 AI/用户参数——原型链键会取到继承属性而非默认文案
+        const styleText = Object.prototype.hasOwnProperty.call(styleInstructions, style)
+            ? styleInstructions[style]
+            : styleInstructions.brief;
+        const prompt = `你是一个内容摘要助手。${styleText}\n\n使用 Markdown 格式输出。\n\n以下是需要总结的内容：\n${existingContent}`;
         const aiResponse = await svc().requestChat(prompt, settings, 2000);
 
         return `📝 **页面摘要：${targetPage.name}**\n\n${aiResponse}\n\n---\n📄 摘要风格: ${style === "brief" ? "简短" : style === "detailed" ? "详细" : "要点列表"}`;
@@ -876,6 +880,11 @@ handleTemplateOutput: async (params, settings, explanation) => {
         templates = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.AI_TEMPLATES, CONFIG.DEFAULTS.aiTemplates));
     } catch (error) {
         console.warn("[LD-Notion] AI 模板加载失败，使用默认模板:", error);
+        templates = JSON.parse(CONFIG.DEFAULTS.aiTemplates);
+    }
+    // P4 收敛(c02): 合法 JSON 但形状异常(null/{}/[null])会让 .map/.name 抛 TypeError
+    if (!Array.isArray(templates) || templates.some((t) => !t || typeof t !== "object" || typeof t.name !== "string")) {
+        console.warn("[LD-Notion] AI 模板形状异常，使用默认模板");
         templates = JSON.parse(CONFIG.DEFAULTS.aiTemplates);
     }
 

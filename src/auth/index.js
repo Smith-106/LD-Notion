@@ -955,7 +955,10 @@ const NotionOAuth = {
         document.querySelectorAll("#ldb-api-key, #ldb-notion-api-key").forEach((input) => {
             if (!input) return;
             if (NotionOAuth.isOAuthConnected()) {
-                input.value = "";
+                // P4 收敛(c06): 与 gclip 分支/syncSensitiveInput 对齐——用户正在输入时不得清空
+                if (document.activeElement !== input) {
+                    input.value = "";
+                }
                 input.placeholder = status.apiKeyPlaceholder;
             } else {
                 CredentialVault.syncSensitiveInput(input, CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_xxx...");

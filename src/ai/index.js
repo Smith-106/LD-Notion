@@ -387,7 +387,11 @@ const AIService = {
 
     getCachedModels: (service) => {
         const cache = AIService.getFetchedModelsCache();
-        return Array.isArray(cache[service]?.models) ? cache[service].models : [];
+        const entry = cache[service];
+        if (!Array.isArray(entry?.models)) return [];
+        // P4 收敛(c03): 指纹校验——端点/密钥变更后旧缓存不再生效(避免下拉展示旧端点模型)
+        if (entry.fingerprint !== AIService.getModelsCacheFingerprint()) return [];
+        return entry.models;
     },
 
     getAvailableModels: (service) => {
@@ -396,10 +400,21 @@ const AIService = {
         return AIService.PROVIDERS[service]?.models || [];
     },
 
+    // 模型缓存指纹: 端点 + 密钥单向哈希(禁止明文子串), 变更即失效
+    getModelsCacheFingerprint: () => {
+        const baseUrl = String(Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, "") || "");
+        const keyHash = Utils.apiKeyHash(String(Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "") || ""));
+        return `${baseUrl}|${keyHash}`;
+    },
+
     persistFetchedModels: (service, models) => {
         const normalizedModels = Array.isArray(models) ? models : [];
         const cache = AIService.getFetchedModelsCache();
-        const snapshot = { models: normalizedModels, timestamp: Date.now() };
+        const snapshot = {
+            models: normalizedModels,
+            timestamp: Date.now(),
+            fingerprint: AIService.getModelsCacheFingerprint(),
+        };
         cache[service] = snapshot;
         Storage.set(CONFIG.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(cache));
         return snapshot;
@@ -2509,12 +2524,23 @@ const AIClassifier = {
     fetchPageBlocks: async (pageId, apiKey) => {
         const blocks = [];
         let cursor = null;
+        // P4 收敛(c03): 与 fetchAllPages 同口径——重复 next_cursor 会死循环, 超大页面无界增长
+        const seenCursors = new Set();
+        const MAX_PAGES = 100;
+        let pageCount = 0;
 
         do {
             const response = await NotionAPI.fetchBlocks(pageId, cursor, apiKey);
             blocks.push(...(response.results || []));
-            cursor = response.has_more ? response.next_cursor : null;
-        } while (cursor);
+            pageCount++;
+            const nextCursor = response.has_more ? response.next_cursor : null;
+            cursor = (nextCursor && !seenCursors.has(nextCursor)) ? nextCursor : null;
+            if (cursor) seenCursors.add(nextCursor);
+        } while (cursor && pageCount < MAX_PAGES);
+
+        if (cursor) {
+            console.warn(`[LD-Notion] 块分页已达上限 ${MAX_PAGES} 页, 剩余子块未加载`);
+        }
 
         return blocks;
     },

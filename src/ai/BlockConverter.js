@@ -18,8 +18,14 @@ const splitLongText = (str) => {
     } else {
         let remaining = str;
         while (remaining.length > 0) {
-            chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
-            remaining = remaining.substring(maxLen);
+            // P4 收敛(c01): 不得在高代理与低代理之间切断——否则 rich_text 含孤立代理, Notion 拒写
+            let cut = Math.min(maxLen, remaining.length);
+            if (cut < remaining.length) {
+                const code = remaining.charCodeAt(cut - 1);
+                if (code >= 0xd800 && code <= 0xdbff) cut -= 1;
+            }
+            chunks.push({ type: "text", text: { content: remaining.substring(0, cut) } });
+            remaining = remaining.substring(cut);
         }
     }
     return chunks;
@@ -63,7 +69,9 @@ const BlockConverter = {
         const normalizeLanguage = (lang) => {
             const lower = (lang || "").toLowerCase().trim();
             if (!lower) return "plain text";
-            if (LANG_MAP[lower]) return LANG_MAP[lower];
+            // P4 收敛(c01): LANG_MAP 为字面量对象——原型链键(constructor/__proto__)
+            // 会返回函数/对象并序列化为非法 language
+            if (Object.prototype.hasOwnProperty.call(LANG_MAP, lower)) return LANG_MAP[lower];
             if (NOTION_LANGS.has(lower)) return lower;
             return "plain text";
         };

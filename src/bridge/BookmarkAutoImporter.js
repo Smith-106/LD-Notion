@@ -431,6 +431,8 @@ BookmarkAutoImporter.run = async () => {
                 || (snapshotEntry?.pageId ? pageIndex.byPageId.get(snapshotEntry.pageId) : null);
             // v3.14.6 (CC-08): 本项声明回调(创建失败/完成时决议, 防 await 方悬挂)
             let claimResolve = null;
+            // P4 收敛(c06): 失败审计操作名随分支变化(默认建页, 更新分支改 updatePage)
+            let auditOp = "createDatabasePage";
 
             try {
                 // v3.14.13 (P1-3): 每项开工前重读 token——buildSettings 快照在 OAuth 续签后
@@ -511,6 +513,7 @@ BookmarkAutoImporter.run = async () => {
                 } else if (!BookmarkAutoImporter.isSharedWithLiveBookmark(bookmark, pageMeta, currentBookmarks)
                     && BookmarkAutoImporter.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
                     BookmarkAutoImporter.updateStatus(`📧 正在更新书签 (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                    auditOp = "updatePage";
                     // updatePage 是 level 1 写操作，同样过 canExecute 闸门 + 审计（C1）。
                     const { OperationGuard } = require("../security");
                     if (!OperationGuard.canExecute("updatePage")) {
@@ -557,7 +560,8 @@ BookmarkAutoImporter.run = async () => {
                     throw error;
                 }
                 console.error(`[LD-Notion] 浏览器书签自动同步失败: ${bookmark.title || bookmark.url}`, error);
-                BookmarkAutoImporter._auditAutoSync("createDatabasePage", "failed",
+                // P4 收敛(c06): 共用 catch 的审计操作名须与分支一致——否则更新失败被记成建页失败
+                BookmarkAutoImporter._auditAutoSync(auditOp, "failed",
                     { bookmarkId, itemName: bookmark.title || bookmark.url, reason: String(error?.message || error) });
                 failed++;
                 if (snapshotEntry) {

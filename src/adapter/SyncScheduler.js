@@ -226,7 +226,9 @@ const SyncScheduler = {
         try {
             // F-UI-02 修复:定时路径走完整同步 runner(写 Notion + 推进水位),
             // 与手动路径一致;SyncCoordinator 保留给手动全量同步。
-            const runner = SOURCE_RUNNERS[sourceType];
+            const runner = Object.prototype.hasOwnProperty.call(SOURCE_RUNNERS, sourceType)
+                ? SOURCE_RUNNERS[sourceType]
+                : undefined;
             if (typeof runner === "function") {
                 await runner();
                 if (epoch !== (this._epochs.get(sourceType) || 0)) return; // 已停止: 丢弃

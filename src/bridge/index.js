@@ -54,7 +54,11 @@ const BookmarkBridge = {
     init: () => {
         window.addEventListener("ld-notion-bookmarks-data", (event) => {
             const { requestId, success, data, error } = event.detail || {};
-            const pending = BookmarkBridge._pendingRequests[requestId];
+            // P4 收敛(c07): requestId 来自 window 事件——原型链键(constructor/__proto__)
+            // 会命中继承属性, pending.resolve 为 undefined 抛未捕获 TypeError
+            const pending = Object.prototype.hasOwnProperty.call(BookmarkBridge._pendingRequests, requestId)
+                ? BookmarkBridge._pendingRequests[requestId]
+                : null;
             if (!pending) return;
 
             clearTimeout(pending.timeout);

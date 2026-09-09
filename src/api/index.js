@@ -529,10 +529,15 @@ const NotionAPI = {
             ? { database_id: targetParentId }
             : { page_id: targetParentId };
 
-        // 复制属性（排除系统生成的属性）
+        // 复制属性（排除系统生成/只读属性）
+        // P4 收敛(c05): 只读属性不止 4 种——formula/rollup/unique_id 原样回写会被 Notion 400 拒统
+        const READONLY_PROPERTY_TYPES = new Set([
+            "created_time", "created_by", "last_edited_time", "last_edited_by",
+            "formula", "rollup", "unique_id", "button",
+        ]);
         const properties = {};
         for (const [key, value] of Object.entries(originalPage.properties || {})) {
-            if (!["created_time", "created_by", "last_edited_time", "last_edited_by"].includes(value.type)) {
+            if (!READONLY_PROPERTY_TYPES.has(value?.type)) {
                 properties[key] = value;
             }
         }

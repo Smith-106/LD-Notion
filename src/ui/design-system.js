@@ -202,13 +202,15 @@ const DesignSystem = {
         [data-ldb-theme="dark"].ldb-mini-btn,
         [data-ldb-theme="dark"].gclip-float-btn,
         [data-ldb-theme="dark"].ldb-undo-toast,
+        [data-ldb-theme="dark"].ldb-confirm-dialog,
         [data-ldb-theme="dark"] .ldb-panel,
         [data-ldb-theme="dark"] .ldb-notion-panel,
         [data-ldb-theme="dark"] .gclip-panel,
         [data-ldb-theme="dark"] .ldb-notion-float-btn,
         [data-ldb-theme="dark"] .ldb-mini-btn,
         [data-ldb-theme="dark"] .gclip-float-btn,
-        [data-ldb-theme="dark"] .ldb-undo-toast {
+        [data-ldb-theme="dark"] .ldb-undo-toast,
+        [data-ldb-theme="dark"] .ldb-confirm-dialog {
             --ldb-ui-text: #e5e7eb;
             --ldb-ui-muted: #9ca3af;
             --ldb-ui-border: rgba(148, 163, 184, 0.22);

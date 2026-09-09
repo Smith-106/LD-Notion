@@ -11,8 +11,9 @@ const { DedupStore } = require("../storage/DedupStore");
 let _adaptersRegistered = false;
 function ensureAdaptersRegistered() {
     if (_adaptersRegistered) return;
-    _adaptersRegistered = true;
+    // P4 收敛(c01): 标志必须在 require 成功之后置位——否则首次加载报错后永久跳过注册
     require("./index");
+    _adaptersRegistered = true;
 }
 
 /**

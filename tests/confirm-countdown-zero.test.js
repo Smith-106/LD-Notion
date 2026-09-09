@@ -21,6 +21,7 @@ describe("ConfirmationDialog countdown:0", () => {
         };
         global.document = {
             body,
+            querySelector: () => null,
             createElement(tag) {
                 const el = {
                     tagName: tag.toUpperCase(),

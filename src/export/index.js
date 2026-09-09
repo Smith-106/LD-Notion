@@ -290,9 +290,16 @@ const GenericExporter = {
                 blocks = GenericExtractor.toNotionBlocks(contentEl, settings.imgMode || CONFIG.DEFAULTS.imgMode);
             }
         } else if (SiteDetector.detect() === SiteDetector.SITES.LINUX_DO) {
-            const topicMatch = window.location.pathname.match(/\/t\/([^/]+)/);
-            if (topicMatch) {
-                const topicId = topicMatch[1];
+            // P4 收敛(c08): Discourse 主题 URL 为 /t/slug/12345 —— 旧正则取到 slug,
+            // 后续 /t/{slug}/post_ids.json 等接口 404/非 JSON。
+            // 取 /t/ 之后首个纯数字段(/t/12345、/t/slug/12345、/t/12345/7 均取主题 ID)。
+            const pathSegments = window.location.pathname.split("/").filter(Boolean);
+            const tIndex = pathSegments.indexOf("t");
+            const numericTopicId = tIndex >= 0
+                ? pathSegments.slice(tIndex + 1).find((seg) => /^\d+$/.test(seg))
+                : null;
+            const topicId = numericTopicId || window.location.pathname.match(/\/t\/([^/]+)/)?.[1] || "";
+            if (topicId) {
                 const { topic, posts } = await LinuxDoAPI.fetchAllPosts(topicId);
                 const filteredPosts = Exporter.filterPosts(posts, topic, settings);
                 meta = {

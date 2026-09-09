@@ -673,6 +673,14 @@ const ConfirmationDialog = {
             if (nameInputEl) nameInputEl.placeholder = rawItemName;
 
             document.body.appendChild(dialog);
+            // P4 收敛(c12): 确认框挂在 body 下, 不在任何 [data-ldb-theme] 根内 —— 显式暗色时
+            // 属性选择器不命中而媒体回退(.ldb-confirm-dialog:not([data-ldb-theme]))仍生效,
+            // 导致主题与确认框不一致。从已盖章的根读取生效主题并盖到对话框自身。
+            const themedRoot = document.querySelector("[data-ldb-theme]");
+            const dialogPanel = dialog.querySelector(".ldb-confirm-dialog");
+            if (themedRoot && dialogPanel) {
+                dialogPanel.setAttribute("data-ldb-theme", themedRoot.getAttribute("data-ldb-theme"));
+            }
             ConfirmationDialog.dialogElement = dialog;
             ConfirmationDialog._activeResolve = resolve;
 

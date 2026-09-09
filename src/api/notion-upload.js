@@ -59,7 +59,9 @@ function getFileCategory(ext) {
 }
 
 function getMimeType(ext) {
-    return MIME_TYPES[(ext || "").toLowerCase()] || "application/octet-stream";
+    // P4 收敛(c07): 字面量对象的原型链键(constructor/toString)会返回非字符串值
+    const key = (ext || "").toLowerCase();
+    return Object.prototype.hasOwnProperty.call(MIME_TYPES, key) ? MIME_TYPES[key] : "application/octet-stream";
 }
 
 // F2(odyssey-review): multipart 头注入防护 — 文件名剥离双引号与 CR/LF,

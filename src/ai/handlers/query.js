@@ -17,6 +17,13 @@ const { getAI: AI, getState: state, getService: svc } = require("../deps");
 
 // P4 收敛(c02/c05): Markdown 链接净化已上提到 Utils.mdLink/mdText/mdUrl(共享输出净化原语)
 
+// P4 收敛(c02): 意图参数 limit 未经归一 —— 负数使 slice(0, 负值) 反向取数, NaN/0 使结果为空
+const normalizeLimit = (value, fallback = 10, max = 100) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(1, Math.min(Math.floor(n), max));
+};
+
 module.exports = {
 handleQuery: async (params, settings, explanation) => {
     // 检查数据库 ID 配置
@@ -27,7 +34,8 @@ handleQuery: async (params, settings, explanation) => {
     state().updateLastMessage(`正在查询数据库...`, "processing");
 
     try {
-        const { limit = 10, filter_field, filter_value } = params;
+        const { limit: rawLimit = 10, filter_field, filter_value } = params;
+        const limit = normalizeLimit(rawLimit, 10);
 
         // 构建过滤条件
         let filter = null;
@@ -139,7 +147,9 @@ handleQuery: async (params, settings, explanation) => {
 
         if (params.keyword?.includes("统计") || params.keyword?.includes("分类")) {
             // 统计分类
-            const categoryCount = {};
+            // P4 收敛(c02): null 原型——分类名取自页面数据, 原型链键(constructor/__proto__)
+            // 会命中继承属性导致计数变成函数源码拼接
+            const categoryCount = Object.create(null);
             pages.forEach(page => {
                 const cat = page.properties["AI分类"]?.select?.name ||
                            page.properties["分类"]?.rich_text?.[0]?.plain_text || "未分类";
@@ -179,7 +189,8 @@ handleSearch: async (params, settings, explanation) => {
     state().updateLastMessage(`正在搜索...`, "processing");
 
     try {
-        const { keyword, limit = 10 } = params;
+        const { keyword, limit: rawLimit = 10 } = params;
+        const limit = normalizeLimit(rawLimit, 10);
 
         if (!keyword) {
             return "请告诉我你想搜索什么关键词？";
@@ -244,7 +255,8 @@ handleWorkspaceSearch: async (params, settings, explanation) => {
     state().updateLastMessage(`正在搜索整个工作区...`, "processing");
 
     try {
-        const { keyword = "", limit = 10, object_type } = params;
+        const { keyword = "", limit: rawLimit = 10, object_type } = params;
+        const limit = normalizeLimit(rawLimit, 10);
 
         // 构建过滤器
         let filter = null;

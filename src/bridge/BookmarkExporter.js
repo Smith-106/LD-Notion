@@ -616,6 +616,9 @@ const BookmarkExporter = {
                 if (merged[norm] === undefined || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
             }
             BookmarkExporter._exportedCache = merged;
+            // P4 收敛(c07): 容量淘汰必须在 rebase 之后——先淘汰再并入会让被淘汰键经 remote 复活,
+            // 账本规模永不回落(上限实际失效)
+            BookmarkExporter._evictByCapacity(merged);
             Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(merged));
         }
     },

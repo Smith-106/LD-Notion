@@ -329,11 +329,14 @@ function isSupportedFileType(ext) {
 }
 
 function getMimeType(ext, fallback = "application/octet-stream") {
-    return EXT_TO_MIME[(ext || "").toLowerCase()] || fallback;
+    // P4 收敛(c07): 字面量对象的原型链键(constructor/toString)会返回非字符串值
+    const key = (ext || "").toLowerCase();
+    return Object.prototype.hasOwnProperty.call(EXT_TO_MIME, key) ? EXT_TO_MIME[key] : fallback;
 }
 
 function getFileCategory(ext) {
-    return FILE_TYPE_CATEGORY[(ext || "").toLowerCase()] || "file";
+    const key = (ext || "").toLowerCase();
+    return Object.prototype.hasOwnProperty.call(FILE_TYPE_CATEGORY, key) ? FILE_TYPE_CATEGORY[key] : "file";
 }
 
 // 通用提示消息

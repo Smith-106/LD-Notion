@@ -162,6 +162,8 @@ handleBatchTranslate: async (params, settings, explanation) => {
 
         let successCount = 0;
         let failCount = 0;
+        // P4 收敛(c02): 与其他批处理 handler 对齐——逐页无间隔请求会触发 Notion 429
+        const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
 
         for (let i = 0; i < pages.length; i++) {
             const page = pages[i];
@@ -189,6 +191,10 @@ handleBatchTranslate: async (params, settings, explanation) => {
             } catch (error) {
                 console.warn(`[LD-Notion] 页面创建失败: ${title}`, error);
                 failCount++;
+            }
+
+            if (delay > 0 && i < pages.length - 1) {
+                await Utils.sleep(delay);
             }
         }
 
