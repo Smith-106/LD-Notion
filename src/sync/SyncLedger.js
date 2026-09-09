@@ -23,13 +23,24 @@ const SyncLedger = {
      * @returns {Promise<{databaseId: string, created: boolean}>}
      */
     async provision({ NotionAPI, OperationGuard, apiKey, parentPageId, context = {} }) {
-        // 搜索已有库(来源=LD-Sync 的数据库)
-        const searchFilter = { property: "来源", rich_text: { equals: "LD-Sync" } };
-        const existing = await NotionAPI.queryDatabase(
-            parentPageId, searchFilter, null, null, apiKey
-        ).catch(() => ({ results: [] }));
-        if (existing?.results?.[0]?.id) {
-            return { databaseId: existing.results[0].id, created: false };
+        // 3/3 共识(dsf+glm+qwen): 原实现把父页面 id 当数据库 id 查询(/databases/<pageId>/query
+        // 恒 400), 又把异常吞为空结果 → 每次 provision 都新建同步库, 各端绑定不同空库。
+        // 改为 /search 按标题+父页面匹配(幂等检查), 查询异常向上抛出避免重复建库。
+        const SYNC_DB_TITLE = "LD-Notion 多端同步";
+        const searchResult = await NotionAPI.search(
+            SYNC_DB_TITLE,
+            { property: "object", value: "database" },
+            apiKey
+        );
+        const normalizeId = (value) => String(value || "").replace(/-/g, "").toLowerCase();
+        const existing = (searchResult?.results || []).find((item) => {
+            if (item?.object !== "database") return false;
+            const title = (item.title || []).map((t) => t?.plain_text || "").join("");
+            if (title !== SYNC_DB_TITLE) return false;
+            return !parentPageId || normalizeId(item.parent?.page_id) === normalizeId(parentPageId);
+        });
+        if (existing?.id) {
+            return { databaseId: existing.id, created: false };
         }
 
         // 创建同步库(level 2, DANGEROUS 无, execute 收口)
@@ -38,8 +49,7 @@ const SyncLedger = {
                 title: [{ type: "text", text: { content: "LD-Notion 多端同步" } }],
                 properties: SyncLedger._buildSchema(),
             }, apiKey);
-            return { databaseId: String(db?.id || ""), created: true };
-        }, { ...context, actor: "system", source: "sync-ledger" });
+            return { databaseId: String(db?.id || ""), created: true };        }, { ...context, actor: "system", source: "sync-ledger" });
     },
 
     _buildSchema() {
@@ -68,7 +78,10 @@ const SyncLedger = {
             await SyncRateLimiter.acquire();
             const response = await NotionAPI.queryDatabase(databaseId, undefined, null, cursor, apiKey);
             rows.push(...(response?.results || []));
-            cursor = response?.has_more ? response.next_cursor : null;
+            const nextCursor = response?.has_more ? response.next_cursor : null;
+            // dsf P2 共识: 游标不前进时原 while 会死循环(异常 API 行为/代理重放)
+            if (nextCursor && nextCursor === cursor) break;
+            cursor = nextCursor;
         } while (cursor);
         return rows;
     },
@@ -125,8 +138,10 @@ const SyncLedger = {
         if (!page?.properties) return null;
         const get = (name) => {
             const prop = page.properties[name];
-            if (prop?.title?.[0]?.plain_text) return prop.title[0].plain_text;
-            if (prop?.rich_text?.[0]?.plain_text) return prop.rich_text[0].plain_text;
+            // 2/3 共识(dsf+glm): 长文本/手工编辑会使 rich_text 拆成多段, 只取 [0] 会得到残缺
+            // JSON → JSON.parse 失败 → 整行被当损坏丢弃。多段拼接还原原文。
+            if (prop?.title?.length) return prop.title.map((t) => t?.plain_text || "").join("");
+            if (prop?.rich_text?.length) return prop.rich_text.map((t) => t?.plain_text || "").join("");
             if (prop?.number !== undefined && prop?.number !== null) return String(prop.number);
             return "";
         };

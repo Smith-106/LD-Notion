@@ -7,6 +7,11 @@ const { emit } = require("../coordination/event-bus");
 const _getRaw = (key, defaultVal) => GM_getValue(key, defaultVal);
 const _setRaw = (key, val) => GM_setValue(key, val);
 
+// 2/3 共识(dsf+qwen): watermark.ids 记录同一最新时间戳的全部 id, 大量同刻条目时
+// 持久化体积无界增长(AUTO_SYNC_STATE 单键)。超上限截断仅使多余条目下轮被重新拉取,
+// 去重账本仍拦截重复导出(安全方向)。
+const MAX_WATERMARK_IDS = 500;
+
 /**
  * SyncState V2 — 统一的每源同步状态管理
  * 兼容 V1 旧数据结构的迁移
@@ -155,7 +160,12 @@ const SyncStateV2 = {
         }
 
         // 检测并迁移 V1 结构
-        if (parsed.version < this.VERSION || (!parsed.version && parsed.linuxdo)) {
+        // 2/3 共识(dsf+qwen): 旧条件要求 parsed.linuxdo 存在 —— 仅同步过 bookmark/rss/
+        // github 的 V1 状态(无 version、无 linuxdo)被跳过迁移, watermark/snapshot 被默认值
+        // 覆盖 → 增量基线丢失、全量重扫与重复投递。改为识别完整 V1 形态。
+        const hasV1Shape = !parsed.version
+            && (parsed.linuxdo || parsed.github || parsed.bookmarks || parsed.rss);
+        if (parsed.version < this.VERSION || hasV1Shape) {
             parsed = this._migrateV1toV2(parsed);
         }
 
@@ -206,7 +216,17 @@ const SyncStateV2 = {
         this._savePending = false;
         if (!this._dirty) return;
         this._dirty = false;
-        _setRaw(CONFIG.STORAGE_KEYS.AUTO_SYNC_STATE, JSON.stringify(this._cache));
+        // 3/3 共识(dsf+glm+qwen): 远端变更已将 _cache 置 null 时不得写出 JSON.stringify(null)
+        // ("null" 会清空全部源 watermark/epoch)。
+        if (!this._cache) return;
+        try {
+            _setRaw(CONFIG.STORAGE_KEYS.AUTO_SYNC_STATE, JSON.stringify(this._cache));
+        } catch (error) {
+            // glm P2 共识: 写失败不得静默丢弃待写状态 —— 恢复 _dirty 供下次保存重试
+            this._dirty = true;
+            console.warn("[LD-Notion] 同步状态写入失败, 已保留待写状态:", error);
+            return;
+        }
         // F-SYNC-11: storage→event-bus 零依赖边(无订阅者时 emit 静默),多端同步引擎
         // 订阅该事件感知本地状态变更(F1 的 DedupStore emit 在 DedupStore.endBatch 侧)。
         emit("storage:state-committed", { kind: "watermark" });
@@ -246,15 +266,21 @@ const SyncStateV2 = {
     updateSourceState(sourceType, patch = {}) {
         const state = this._load();
         const withSnapshot = sourceType === "bookmark" || sourceType === "rss";
+        // dsf P2 共识: 过滤值为 undefined 的键 —— {...patch} 中显式 snapshot: undefined
+        // 会覆盖已有快照, 随后 normalize 将其重置为空对象(静默丢数据)。
+        const cleanPatch = {};
+        for (const [k, v] of Object.entries(patch)) {
+            if (v !== undefined) cleanPatch[k] = v;
+        }
         state.sources[sourceType] = this.normalizeSyncRecord({
             ...(state.sources[sourceType] || this._makeSourceDefault(withSnapshot)),
-            ...patch,
-            watermark: patch.watermark === undefined
+            ...cleanPatch,
+            watermark: cleanPatch.watermark === undefined
                 ? (state.sources[sourceType]?.watermark || null)
-                : patch.watermark,
+                : cleanPatch.watermark,
         }, { keepSnapshot: withSnapshot });
-        if (withSnapshot && patch.snapshot !== undefined) {
-            state.sources[sourceType].snapshot = patch.snapshot;
+        if (withSnapshot && cleanPatch.snapshot !== undefined) {
+            state.sources[sourceType].snapshot = cleanPatch.snapshot;
         }
         this._save(state);
         return this._clone(state.sources[sourceType]);
@@ -300,7 +326,7 @@ const SyncStateV2 = {
                 if (id) { ids.push(id); idSet.add(id); }
                 return;
             }
-            if (timeMs === latestMs && id && !idSet.has(id)) {
+            if (timeMs === latestMs && id && !idSet.has(id) && ids.length < MAX_WATERMARK_IDS) {
                 ids.push(id);
                 idSet.add(id);
             }
@@ -362,7 +388,17 @@ module.exports = { SyncStateV2 };
 if (typeof GM_addValueChangeListener === "function") {
     try {
         GM_addValueChangeListener(CONFIG.STORAGE_KEYS.AUTO_SYNC_STATE, (key, oldValue, newValue, remote) => {
-            if (remote) SyncStateV2._cache = null;
+            if (!remote) return;
+            // 3/3 共识(dsf+glm+qwen): 仅置空 _cache 不够 —— 已排队的 flush 仍会执行, 若
+            // _dirty 为 true 则把 null 序列化写回("null" 清空全部水位/epoch)。远端为新值,
+            // 本地待写状态已陈旧(LWW), 直接丢弃。
+            SyncStateV2._cache = null;
+            SyncStateV2._dirty = false;
+            SyncStateV2._savePending = false;
+            if (SyncStateV2._saveTimerId !== null && SyncStateV2._saveTimerId !== undefined) {
+                globalThis.clearTimeout?.(SyncStateV2._saveTimerId);
+                SyncStateV2._saveTimerId = null;
+            }
         });
     } catch {
         // 无 GM 环境(测试)下静默
