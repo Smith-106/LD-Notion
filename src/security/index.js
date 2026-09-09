@@ -828,11 +828,18 @@ const UndoManager = {
 
     // 执行撤销
     execute: async () => {
-        if (!UndoManager.pendingUndo) return false;
+        const pending = UndoManager.pendingUndo;
+        if (!pending) return false;
+        // dsf P1 共识: 先摘除再 await —— 撤销请求网络耗时期间重复点击不得重入执行同一撤销
+        UndoManager.pendingUndo = null;
+        if (UndoManager.timeoutId) {
+            clearTimeout(UndoManager.timeoutId);
+            UndoManager.timeoutId = null;
+        }
 
         try {
-            const description = UndoManager.pendingUndo?.description || "";
-            await UndoManager.pendingUndo.undoAction();
+            const description = pending?.description || "";
+            await pending.undoAction();
             UndoManager.hideToast();
             UndoManager.clear();
 
@@ -863,7 +870,7 @@ const UndoManager = {
             return true;
         } catch (error) {
             console.error("[LD-Notion] 撤销失败:", error);
-            const description = UndoManager.pendingUndo?.description || "";
+            const description = pending?.description || "";
             OperationLog.add({
                 audit_event: OperationLog.inferAuditEvent("undo", "failed"),
                 actor: "user",
@@ -939,11 +946,14 @@ const UndoManager = {
     // 隐藏撤销提示
     hideToast: () => {
         if (UndoManager._hideTimeout) clearTimeout(UndoManager._hideTimeout);
-        if (UndoManager.toastElement) {
-            UndoManager.toastElement.classList.remove("visible");
+        // dsf P1 共识: 捕获本次要隐藏的元素 —— 否则 300ms 后读到的可能是新 toast,
+        // 把刚弹出的新提示移出 DOM(撤销入口消失)。只移除本次捕获的旧 toast。
+        const toast = UndoManager.toastElement;
+        if (toast) {
+            toast.classList.remove("visible");
             UndoManager._hideTimeout = setTimeout(() => {
-                if (UndoManager.toastElement) {
-                    UndoManager.toastElement.remove();
+                toast.remove();
+                if (UndoManager.toastElement === toast) {
                     UndoManager.toastElement = null;
                 }
             }, 300);

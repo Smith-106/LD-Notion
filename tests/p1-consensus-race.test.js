@@ -190,3 +190,65 @@ describe("P1 共识: acquireLease 二次确认(跨 tab 写入传播延迟)", () 
         SyncLock.isExporting = false;
     });
 });
+
+describe("P1 共识: UndoManager toast 误删与撤销重入(security)", () => {
+    const { UndoManager } = require("../src/security");
+
+    afterEach(() => {
+        vi.useRealTimers();
+        UndoManager.pendingUndo = null;
+        UndoManager.toastElement = null;
+        if (UndoManager._hideTimeout) clearTimeout(UndoManager._hideTimeout);
+        UndoManager._hideTimeout = null;
+    });
+
+    it("hideToast 延迟回调只移除旧 toast, 不得删除新 toast", () => {
+        vi.useFakeTimers();
+        global.requestAnimationFrame = (cb) => cb();
+        const made = [];
+        global.document.createElement = vi.fn(() => {
+            const el = {
+                classList: { add: vi.fn(), remove: vi.fn() },
+                remove: vi.fn(),
+                style: {},
+                appendChild: vi.fn(),
+                querySelector: () => ({ set onclick(_v) {} }),
+                innerHTML: "",
+            };
+            made.push(el);
+            return el;
+        });
+
+        UndoManager.showToast("旧提示");
+        const oldToast = UndoManager.toastElement;
+        UndoManager.showToast("新提示");
+        const newToast = UndoManager.toastElement;
+        expect(newToast).not.toBe(oldToast);
+
+        vi.advanceTimersByTime(400);
+
+        expect(oldToast.remove).toHaveBeenCalled();
+        expect(newToast.remove).not.toHaveBeenCalled();
+        expect(UndoManager.toastElement).toBe(newToast);
+    });
+
+    it("撤销执行中重复点击不得重入(先摘除再 await)", async () => {
+        let calls = 0;
+        let release;
+        UndoManager.pendingUndo = {
+            description: "测试撤销",
+            undoAction: () => {
+                calls += 1;
+                return new Promise((resolve) => { release = resolve; });
+            },
+        };
+
+        const first = UndoManager.execute();
+        const second = await UndoManager.execute();
+        expect(second).toBe(false);
+
+        release();
+        expect(await first).toBe(true);
+        expect(calls).toBe(1);
+    });
+});
