@@ -260,6 +260,69 @@ const DesignSystem = {
             color: var(--ldb-ui-text);
         }
 
+        /* UndoManager 撤销 toast — 与 .ldb-confirm-overlay 同型诞生缺陷: 无布局样式时
+           裸 block append 到 body 末尾, 长页面下视口外不可见, 用户删错无法撤销 */
+        .ldb-undo-toast {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            z-index: 2147483641;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--ldb-ui-surface);
+            border: 1px solid var(--ldb-ui-border);
+            border-radius: var(--ldb-ui-radius-sm);
+            box-shadow: var(--ldb-ui-shadow);
+            padding: 10px 14px;
+            max-width: min(420px, calc(100vw - 48px));
+            overflow: hidden;
+        }
+        .ldb-undo-message {
+            flex: 1;
+            font-size: var(--ldb-ui-font-size-sm);
+        }
+        .ldb-undo-btn {
+            flex-shrink: 0;
+            padding: 4px 12px;
+            border-radius: var(--ldb-ui-radius-xs);
+            border: 1px solid transparent;
+            background: var(--ldb-ui-accent);
+            color: #fff;
+            cursor: pointer;
+            font-size: var(--ldb-ui-font-size-sm);
+        }
+        .ldb-undo-progress {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            height: 3px;
+            background: var(--ldb-ui-accent);
+        }
+        .ldb-undo-progress-bar {
+            height: 100%;
+            background: var(--ldb-ui-accent-2);
+            /* JS 未驱动宽度: 纯 CSS 动画对齐 CONFIG.API.UNDO_TIMEOUT(5000ms)撤销窗口 */
+            animation: ldb-undo-countdown 5s linear forwards;
+        }
+        @keyframes ldb-undo-countdown {
+            from { width: 100%; }
+            to { width: 0%; }
+        }
+        /* UndoManager 依 remove/add .visible 控制淡入淡出(hideToast 后 300ms remove) */
+        .ldb-undo-toast {
+            opacity: 0;
+            transform: translateY(8px);
+            transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+            pointer-events: none;
+        }
+        .ldb-undo-toast.visible {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
         .ldb-panel *,
         .ldb-notion-panel *,
         .gclip-panel *,

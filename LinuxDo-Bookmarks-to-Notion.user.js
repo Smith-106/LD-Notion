@@ -4879,7 +4879,7 @@ Content-Type: ${contentType}\r
                   if (r.status >= 200 && r.status < 300) resolve(r.response);
                   else reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${r.status}`));
                 },
-                onerror: (e) => reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${e}`)),
+                onerror: (e) => reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${Utils2.formatRequestError(e)}`)),
                 ontimeout: () => reject(new Error("\u4E0B\u8F7D\u8D85\u65F6"))
               });
             });
@@ -4940,7 +4940,7 @@ Content-Type: ${contentType}\r
                       if (r.status >= 200 && r.status < 300) resolve(r.response);
                       else reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${r.status}`));
                     },
-                    onerror: (e) => reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${e}`)),
+                    onerror: (e) => reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${Utils2.formatRequestError(e)}`)),
                     ontimeout: () => reject(new Error("\u4E0B\u8F7D\u8D85\u65F6"))
                   });
                 });
@@ -17391,6 +17391,69 @@ ${report}
         .gclip-panel,
         .ldb-undo-toast {
             color: var(--ldb-ui-text);
+        }
+
+        /* UndoManager \u64A4\u9500 toast \u2014 \u4E0E .ldb-confirm-overlay \u540C\u578B\u8BDE\u751F\u7F3A\u9677: \u65E0\u5E03\u5C40\u6837\u5F0F\u65F6
+           \u88F8 block append \u5230 body \u672B\u5C3E, \u957F\u9875\u9762\u4E0B\u89C6\u53E3\u5916\u4E0D\u53EF\u89C1, \u7528\u6237\u5220\u9519\u65E0\u6CD5\u64A4\u9500 */
+        .ldb-undo-toast {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            z-index: 2147483641;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--ldb-ui-surface);
+            border: 1px solid var(--ldb-ui-border);
+            border-radius: var(--ldb-ui-radius-sm);
+            box-shadow: var(--ldb-ui-shadow);
+            padding: 10px 14px;
+            max-width: min(420px, calc(100vw - 48px));
+            overflow: hidden;
+        }
+        .ldb-undo-message {
+            flex: 1;
+            font-size: var(--ldb-ui-font-size-sm);
+        }
+        .ldb-undo-btn {
+            flex-shrink: 0;
+            padding: 4px 12px;
+            border-radius: var(--ldb-ui-radius-xs);
+            border: 1px solid transparent;
+            background: var(--ldb-ui-accent);
+            color: #fff;
+            cursor: pointer;
+            font-size: var(--ldb-ui-font-size-sm);
+        }
+        .ldb-undo-progress {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            height: 3px;
+            background: var(--ldb-ui-accent);
+        }
+        .ldb-undo-progress-bar {
+            height: 100%;
+            background: var(--ldb-ui-accent-2);
+            /* JS \u672A\u9A71\u52A8\u5BBD\u5EA6: \u7EAF CSS \u52A8\u753B\u5BF9\u9F50 CONFIG.API.UNDO_TIMEOUT(5000ms)\u64A4\u9500\u7A97\u53E3 */
+            animation: ldb-undo-countdown 5s linear forwards;
+        }
+        @keyframes ldb-undo-countdown {
+            from { width: 100%; }
+            to { width: 0%; }
+        }
+        /* UndoManager \u4F9D remove/add .visible \u63A7\u5236\u6DE1\u5165\u6DE1\u51FA(hideToast \u540E 300ms remove) */
+        .ldb-undo-toast {
+            opacity: 0;
+            transform: translateY(8px);
+            transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+            pointer-events: none;
+        }
+        .ldb-undo-toast.visible {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
         }
 
         .ldb-panel *,
