@@ -1707,6 +1707,23 @@
           if (!text) return "";
           return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         },
+        // GM_xmlhttpRequest onerror 回调参数为对象（如 { error, type }），直接模板串化
+        // 会得到 "[object Object]" 吞掉真实原因；按常见字段优先级提取，
+        // 普通串原样返回，对象兑底 JSON 序列化（截断）。
+        formatRequestError: (error) => {
+          if (error == null) return "\u672A\u77E5\u9519\u8BEF";
+          if (typeof error === "string") return error;
+          if (typeof error === "object") {
+            const detail = error.error || error.message || error.type;
+            if (detail) return String(detail);
+            try {
+              return Utils2.truncateText(JSON.stringify(error), 200) || "\u672A\u77E5\u9519\u8BEF";
+            } catch {
+              return "\u672A\u77E5\u9519\u8BEF";
+            }
+          }
+          return String(error);
+        },
         // R9 共识(URL 规范化去重键): 同一页面以不同 URL 形态收藏(http/https、尾斜杠、
         // fragment、tracking 参数)此前各算一条 → 重复导入。规范化后读写对称,
         // 存量旧键在 BookmarkExporter.getExported 内一次性迁移。
@@ -4761,7 +4778,7 @@ ${partNumber}\r
                       reject(new Error(`\u53D1\u9001\u5206\u7247\u5931\u8D25: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
                     }
                   },
-                  onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
+                  onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
                   ontimeout: () => reject(new Error("\u53D1\u9001\u5206\u7247\u8D85\u65F6"))
                 });
               };
@@ -4827,7 +4844,7 @@ Content-Type: ${contentType}\r
                       reject(new Error(`\u4E0A\u4F20\u6587\u4EF6\u5931\u8D25: ${response.status}`));
                     }
                   },
-                  onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
+                  onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
                   timeout: 6e4,
                   ontimeout: () => reject(new Error("\u6587\u4EF6\u4E0A\u4F20\u8D85\u65F6"))
                 });
@@ -17767,6 +17784,112 @@ ${report}
                 scroll-behavior: auto !important;
             }
         }
+
+        /* ConfirmationDialog \u5168\u5C4F\u906E\u7F69 + \u5C45\u4E2D\u5361\u7247 \u2014 \u8BDE\u751F\u7F3A\u9677\u8865\u9F50(v2.5.0 \u8D77 .ldb-confirm-overlay
+           \u4ECE\u672A\u6709\u8FC7 CSS, \u5BF9\u8BDD\u6846\u88F8 display:block \u6D41\u5F0F append \u5230 body \u672B\u5C3E, \u957F\u9875\u9762\u4E0B\u89C6\u53E3\u5916\u4E0D\u53EF\u89C1,
+           \u6E05\u7A7A\u5BF9\u8BDD/\u5173\u95ED\u9762\u677F\u7B49\u6240\u6709\u786E\u8BA4\u7C7B\u64CD\u4F5C\u5BF9\u7528\u6237\u8868\u73B0\u4E3A\u300C\u6309\u952E\u5931\u6548\u300D) */
+        .ldb-confirm-overlay {
+            position: fixed;
+            inset: 0;
+            /* \u9762\u677F zIndex \u4E3A 2147483640, \u906E\u7F69\u5FC5\u987B\u66F4\u9AD8\u624D\u80FD\u76D6\u4F4F\u9762\u677F\u81EA\u8EAB\u5F39\u51FA\u7684\u786E\u8BA4\u6846 */
+            z-index: 2147483641;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(2, 6, 23, 0.45);
+        }
+        .ldb-confirm-dialog {
+            background: var(--ldb-ui-surface-2);
+            color: var(--ldb-ui-text);
+            border: 1px solid var(--ldb-ui-border);
+            border-radius: var(--ldb-ui-radius-md);
+            box-shadow: var(--ldb-ui-shadow);
+            max-width: 420px;
+            width: calc(100vw - 48px);
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 18px 20px;
+            box-sizing: border-box;
+        }
+        .ldb-confirm-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .ldb-confirm-title {
+            font-weight: 600;
+            font-size: var(--ldb-ui-font-size-md);
+        }
+        .ldb-confirm-body {
+            margin-bottom: 14px;
+        }
+        .ldb-confirm-message {
+            margin: 0 0 6px;
+            line-height: 1.5;
+        }
+        .ldb-confirm-item-name {
+            word-break: break-all;
+        }
+        .ldb-confirm-hint {
+            font-size: var(--ldb-ui-font-size-sm);
+            opacity: 0.75;
+            margin-top: 4px;
+        }
+        .ldb-confirm-input-group {
+            margin-top: 8px;
+        }
+        .ldb-confirm-input-group label {
+            display: block;
+            margin-bottom: 4px;
+        }
+        .ldb-confirm-input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 6px 8px;
+            border: 1px solid var(--ldb-ui-border);
+            border-radius: var(--ldb-ui-radius-sm);
+            background: var(--ldb-ui-surface-3);
+            color: inherit;
+        }
+        .ldb-confirm-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .ldb-confirm-countdown-bar {
+            flex: 1;
+            height: 3px;
+            background: var(--ldb-ui-border);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .ldb-confirm-countdown-fill {
+            height: 100%;
+            background: var(--ldb-ui-accent);
+            transition: width 1s linear;
+        }
+        .ldb-btn {
+            padding: 6px 14px;
+            border-radius: var(--ldb-ui-radius-sm);
+            border: 1px solid var(--ldb-ui-border);
+            cursor: pointer;
+            font-size: var(--ldb-ui-font-size-sm);
+        }
+        .ldb-btn-secondary {
+            background: var(--ldb-ui-surface-3);
+            color: inherit;
+        }
+        .ldb-btn-danger {
+            background: var(--ldb-ui-danger);
+            color: #fff;
+            border-color: transparent;
+        }
+        .ldb-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
     `,
         getChatCSS: () => `
         /* LDB_UI_CHAT */
@@ -28775,7 +28898,7 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
                   reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
                 }
               },
-              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
+              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
               timeout,
               ontimeout: () => reject(new Error("AI \u5BF9\u8BDD\u8BF7\u6C42\u8D85\u65F6"))
             });
@@ -28975,7 +29098,7 @@ ${systemText}
                   reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
                 }
               },
-              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
+              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
               timeout: 15e3,
               ontimeout: () => reject(new Error("\u83B7\u53D6\u6A21\u578B\u5217\u8868\u8D85\u65F6"))
             });
@@ -29018,7 +29141,7 @@ ${systemText}
                   reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
                 }
               },
-              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${error}`)),
+              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
               timeout: 15e3,
               ontimeout: () => reject(new Error("\u83B7\u53D6\u6A21\u578B\u5217\u8868\u8D85\u65F6"))
             });

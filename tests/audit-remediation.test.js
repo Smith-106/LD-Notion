@@ -162,3 +162,32 @@ describe("debug-ui-bugs: AI 面板接线回归守卫(2978b01 拆分丢失 ChatUI
         expect(em).toContain("未共享给当前集成");
     });
 });
+
+describe("debug-aipanel-keys: 确认对话框可见性 + 请求错误文案回归守卫", () => {
+    it("Utils.formatRequestError: 对象提取常见字段, 字符串原样, 空值兑底", () => {
+        expect(Utils.formatRequestError({ error: "net::ERR_CONNECTION_REFUSED" })).toBe("net::ERR_CONNECTION_REFUSED");
+        expect(Utils.formatRequestError({ message: "timeout of 15000ms" })).toBe("timeout of 15000ms");
+        expect(Utils.formatRequestError({ type: "error" })).toBe("error");
+        expect(Utils.formatRequestError("plain failure")).toBe("plain failure");
+        expect(Utils.formatRequestError(null)).toBe("未知错误");
+        // 无常见字段的对象 JSON 序列化兑底(不再 [object Object])
+        expect(Utils.formatRequestError({ foo: 1 })).toContain("foo");
+    });
+    it("确认对话框遮罩样式存在于 BASE CSS 且可覆盖面板(修复 v2.5.0 起无 CSS 的诞生缺陷)", () => {
+        const { DesignSystem } = require("../src/ui/design-system");
+        const css = DesignSystem.getBaseCSS();
+        expect(css).toContain(".ldb-confirm-overlay");
+        // fixed 全屏居中 — 否则裸 block 流式 append 到 body 末尾, 长页面下视口外不可见
+        expect(css).toMatch(/\.ldb-confirm-overlay\s*\{[^}]*position:\s*fixed/);
+        // 遮罩 z-index 必须高于面板(2147483640), 否则被面板自身盖住
+        expect(css).toMatch(/\.ldb-confirm-overlay\s*\{[^}]*z-index:\s*2147483641/);
+        expect(css).toContain(".ldb-confirm-dialog");
+    });
+    it("AI/上传 onerror 不再裸串化对象参数(全部走 Utils.formatRequestError)", () => {
+        for (const f of ["src/ai/index.js", "src/api/notion-upload.js"]) {
+            const src = fs.readFileSync(f, "utf8");
+            expect(src).not.toContain("网络请求失败: ${error}");
+            expect(src).toContain("Utils.formatRequestError(error)");
+        }
+    });
+});

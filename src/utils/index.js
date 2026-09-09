@@ -208,6 +208,24 @@ const Utils = {
             .replace(/"/g, "&quot;");
     },
 
+    // GM_xmlhttpRequest onerror 回调参数为对象（如 { error, type }），直接模板串化
+    // 会得到 "[object Object]" 吞掉真实原因；按常见字段优先级提取，
+    // 普通串原样返回，对象兑底 JSON 序列化（截断）。
+    formatRequestError: (error) => {
+        if (error == null) return "未知错误";
+        if (typeof error === "string") return error;
+        if (typeof error === "object") {
+            const detail = error.error || error.message || error.type;
+            if (detail) return String(detail);
+            try {
+                return Utils.truncateText(JSON.stringify(error), 200) || "未知错误";
+            } catch {
+                return "未知错误";
+            }
+        }
+        return String(error);
+    },
+
     // R9 共识(URL 规范化去重键): 同一页面以不同 URL 形态收藏(http/https、尾斜杠、
     // fragment、tracking 参数)此前各算一条 → 重复导入。规范化后读写对称,
     // 存量旧键在 BookmarkExporter.getExported 内一次性迁移。

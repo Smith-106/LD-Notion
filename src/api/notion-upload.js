@@ -146,7 +146,7 @@ function installUploadMethods(NotionAPI) {
                             reject(new Error(`发送分片失败: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
                         }
                     },
-                    onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                    onerror: (error) => reject(new Error(`网络请求失败: ${Utils.formatRequestError(error)}`)),
                     ontimeout: () => reject(new Error("发送分片超时")),
                 });
             };
@@ -214,7 +214,7 @@ function installUploadMethods(NotionAPI) {
                             reject(new Error(`上传文件失败: ${response.status}`));
                         }
                     },
-                    onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                    onerror: (error) => reject(new Error(`网络请求失败: ${Utils.formatRequestError(error)}`)),
                 timeout: 60000,
                 ontimeout: () => reject(new Error("文件上传超时")),
                 });

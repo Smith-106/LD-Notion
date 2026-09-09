@@ -246,7 +246,7 @@ const AIService = {
                         reject(new Error(`解析响应失败: ${e.message}`));
                     }
                 },
-                onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                onerror: (error) => reject(new Error(`网络请求失败: ${Utils.formatRequestError(error)}`)),
                 timeout: timeout,
                 ontimeout: () => reject(new Error("AI 对话请求超时")),
             });
@@ -460,7 +460,7 @@ const AIService = {
                         reject(new Error(`解析响应失败: ${e.message}`));
                     }
                 },
-                onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                onerror: (error) => reject(new Error(`网络请求失败: ${Utils.formatRequestError(error)}`)),
                 timeout: 15000,
                 ontimeout: () => reject(new Error("获取模型列表超时")),
             });
@@ -510,7 +510,7 @@ const AIService = {
                         reject(new Error(`解析响应失败: ${e.message}`));
                     }
                 },
-                onerror: (error) => reject(new Error(`网络请求失败: ${error}`)),
+                onerror: (error) => reject(new Error(`网络请求失败: ${Utils.formatRequestError(error)}`)),
                 timeout: 15000,
                 ontimeout: () => reject(new Error("获取模型列表超时")),
             });

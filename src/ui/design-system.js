@@ -651,6 +651,112 @@ const DesignSystem = {
                 scroll-behavior: auto !important;
             }
         }
+
+        /* ConfirmationDialog 全屏遮罩 + 居中卡片 — 诞生缺陷补齐(v2.5.0 起 .ldb-confirm-overlay
+           从未有过 CSS, 对话框裸 display:block 流式 append 到 body 末尾, 长页面下视口外不可见,
+           清空对话/关闭面板等所有确认类操作对用户表现为「按键失效」) */
+        .ldb-confirm-overlay {
+            position: fixed;
+            inset: 0;
+            /* 面板 zIndex 为 2147483640, 遮罩必须更高才能盖住面板自身弹出的确认框 */
+            z-index: 2147483641;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(2, 6, 23, 0.45);
+        }
+        .ldb-confirm-dialog {
+            background: var(--ldb-ui-surface-2);
+            color: var(--ldb-ui-text);
+            border: 1px solid var(--ldb-ui-border);
+            border-radius: var(--ldb-ui-radius-md);
+            box-shadow: var(--ldb-ui-shadow);
+            max-width: 420px;
+            width: calc(100vw - 48px);
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 18px 20px;
+            box-sizing: border-box;
+        }
+        .ldb-confirm-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .ldb-confirm-title {
+            font-weight: 600;
+            font-size: var(--ldb-ui-font-size-md);
+        }
+        .ldb-confirm-body {
+            margin-bottom: 14px;
+        }
+        .ldb-confirm-message {
+            margin: 0 0 6px;
+            line-height: 1.5;
+        }
+        .ldb-confirm-item-name {
+            word-break: break-all;
+        }
+        .ldb-confirm-hint {
+            font-size: var(--ldb-ui-font-size-sm);
+            opacity: 0.75;
+            margin-top: 4px;
+        }
+        .ldb-confirm-input-group {
+            margin-top: 8px;
+        }
+        .ldb-confirm-input-group label {
+            display: block;
+            margin-bottom: 4px;
+        }
+        .ldb-confirm-input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 6px 8px;
+            border: 1px solid var(--ldb-ui-border);
+            border-radius: var(--ldb-ui-radius-sm);
+            background: var(--ldb-ui-surface-3);
+            color: inherit;
+        }
+        .ldb-confirm-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .ldb-confirm-countdown-bar {
+            flex: 1;
+            height: 3px;
+            background: var(--ldb-ui-border);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .ldb-confirm-countdown-fill {
+            height: 100%;
+            background: var(--ldb-ui-accent);
+            transition: width 1s linear;
+        }
+        .ldb-btn {
+            padding: 6px 14px;
+            border-radius: var(--ldb-ui-radius-sm);
+            border: 1px solid var(--ldb-ui-border);
+            cursor: pointer;
+            font-size: var(--ldb-ui-font-size-sm);
+        }
+        .ldb-btn-secondary {
+            background: var(--ldb-ui-surface-3);
+            color: inherit;
+        }
+        .ldb-btn-danger {
+            background: var(--ldb-ui-danger);
+            color: #fff;
+            border-color: transparent;
+        }
+        .ldb-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
     `,
 
     getChatCSS: () => `
