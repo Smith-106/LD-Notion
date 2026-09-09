@@ -89,6 +89,9 @@ const SyncEngine = {
      */
     async push({ reason = "manual" } = {}) {
         if (SyncEngine._running) return { ok: false, outcome: "busy" };
+        // 2/3 共识(glm+qwen): push 缺运行期禁用闸门 —— 防抖回调(状态提交 5s 后)可能落在
+        // 用户禁用同步之后, 仍把本地状态写入介质(与 pull 的禁用防御不对称)。
+        if (!SyncConfig.isEnabled()) return { ok: false, outcome: "disabled" };
         const { OperationGuard, OperationLog, NotionAPI } = SyncEngine._getDeps();
         if (!OperationGuard.canExecute("sync.state.push")) {
             // v3.14.6 (XN-06): 统一构造器(phase=precheck, force 保审计可见)
@@ -246,8 +249,14 @@ const SyncEngine = {
             // ① dedup 集进一步按剩余预算截断(watermark 开销已占用预算)
             if (row.payload && row.payload.dedup) {
                 const src = Object.keys(row.payload.dedup)[0];
-                const wmText = JSON.stringify(row.payload.watermarks || {});
-                const remain = budgetChars - 11 - wmText.length; // 含 {"dedup":…} 包装开销
+                // glm P2 共识: 包装开销必须实测(旧常量 11 低估了 {"dedup":{"<src>":…}}
+                // 与 ,"watermarks": 的真实开销 → 截断后行仍可超 1900, 无 ids 可截时
+                // 整行被 SyncLedger 拒绝导致整个 push 失败。
+                const overhead = JSON.stringify({
+                    dedup: { [src]: {} },
+                    watermarks: row.payload.watermarks || {},
+                }).length;
+                const remain = budgetChars - overhead;
                 if (remain > 50) {
                     row.payload.dedup = { [src]: SyncEngine._truncateSetForRow(src, row.payload.dedup[src], remain) };
                 }
@@ -295,39 +304,68 @@ const SyncEngine = {
     },
 
     /**
-     * v3.14.6 (DC-003): settings 行按字段拆分 —— 字段级 LWW 语义下拆行不影响
-     * pull 侧 merge(SyncPayload.merge 按 key 并集), 每片 ≤ budgetChars, ≤8 片封顶。
+     * v3.14.6 (DC-003) + P2 共识(2/3 dsf+glm): settings 行按字段拆分 —— 字段级 LWW 语义下
+     * 拆行不影响 pull 侧 merge(SyncPayload.merge 按 key 并集), 每片 ≤ budgetChars。
+     * 分片键必须与字段绑定(而非位置序号): 位置序号会让各端因值大小差异产生不同分片边界
+     * 互相覆盖(字段从介质丢失后默认值回灌), 且分片数缩减后残留的高位行永不删除。
+     * 现按字段名哈希稳定分桶(settings#<0-7>), 同一字段在任何设备都落入同一行;
+     * 桶超预算时桶内再切子片(settings#<b>-<n>); 总片数仍封顶 8(超出并入末片)。
      */
     _splitSettingsRow(row, budgetChars = 1900) {
         const entries = Object.entries(row.payload.settings || {});
         if (entries.length <= 1) return []; // 单字段无法拆(超限交 SyncLedger 显式拒绝)
-        const shards = [];
-        let cur = {};
-        const flush = () => {
-            if (Object.keys(cur).length === 0) return;
-            shards.push({
-                kind: "settings",
-                key: `settings#${shards.length}`,
-                version: row.version || 0,
-                updatedAt: row.updatedAt || "",
-                deviceId: row.deviceId || "",
-                payload: { settings: cur },
-            });
-            cur = {};
-        };
+        const buckets = new Map();
         for (const [k, v] of entries) {
-            // 预算按含包装的整行 payload 测量(与 SyncLedger 硬限同基准)
-            const inc = JSON.stringify({ settings: { ...cur, [k]: v } }).length;
-            if (inc > budgetChars && Object.keys(cur).length > 0) flush();
-            if (shards.length >= 8) {
-                // 8 片封顶: 余下字段并入当前片(超限仍由 SyncLedger 显式拒绝, 不静默截断)
-                cur[k] = v;
-                continue;
-            }
-            cur[k] = v;
+            const b = SyncEngine._settingsBucket(k);
+            if (!buckets.has(b)) buckets.set(b, {});
+            buckets.get(b)[k] = v;
         }
-        flush();
+        const shards = [];
+        const makeShard = (key, fields) => ({
+            kind: "settings",
+            key,
+            version: row.version || 0,
+            updatedAt: row.updatedAt || "",
+            deviceId: row.deviceId || "",
+            payload: { settings: fields },
+        });
+        for (const b of [...buckets.keys()].sort((x, y) => x - y)) {
+            const fields = buckets.get(b);
+            let cur = {};
+            let sub = 0;
+            const flush = () => {
+                if (Object.keys(cur).length === 0) return;
+                shards.push(makeShard(sub === 0 ? `settings#${b}` : `settings#${b}-${sub}`, cur));
+                cur = {};
+            };
+            for (const [k, v] of Object.entries(fields)) {
+                const inc = JSON.stringify({ settings: { ...cur, [k]: v } }).length;
+                if (inc > budgetChars && Object.keys(cur).length > 0) {
+                    flush();
+                    sub++;
+                }
+                cur[k] = v;
+            }
+            flush();
+        }
+        // 总片数封顶 8: 溢出片并入末片(单行可超预算, 由 SyncLedger 显式拒绝, 不静默截断)
+        if (shards.length > 8) {
+            const overflow = shards.splice(8);
+            const target = shards[7].payload.settings;
+            for (const s of overflow) Object.assign(target, s.payload.settings);
+        }
         return shards;
+    },
+
+    // 字段名 → 稳定桶号(FNV-1a 32bit % 8), 仅用于行分片, 与安全无关
+    _settingsBucket(key) {
+        let h = 0x811c9dc5;
+        const s = String(key);
+        for (let i = 0; i < s.length; i++) {
+            h ^= s.charCodeAt(i);
+            h = Math.imul(h, 0x01000193) >>> 0;
+        }
+        return h % 8;
     },
 
     /**
@@ -483,7 +521,10 @@ const SyncEngine = {
             const apiKey = SyncEngine._getApiKey();
             const databaseId = SyncConfig.getDatabaseId();
             if (databaseId) {
-                await NotionAPI.deletePage(databaseId, apiKey).catch(() => {});
+                // dsf P2 共识: deletePage 走 PATCH /pages/<id>(数据库 id 必 400)且失败被吞后
+                // 仍清空本地 databaseId → 用户以为已清空而介质残留。改为归档数据库并向上抛错,
+                // 仅在成功后清本地引用。
+                await NotionAPI.request("PATCH", `/databases/${databaseId}`, { archived: true }, apiKey);
             }
             SyncConfig.setDatabaseId("");
             SyncConfig.setLastOutcome("reset");

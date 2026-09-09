@@ -109,7 +109,10 @@ const SyncCrypto = {
             const { createCipheriv } = require("crypto");
             const key = require("crypto").pbkdf2Sync(passphrase, salt, 200000, 32, "sha256");
             const cipher = createCipheriv("aes-256-gcm", key, iv);
-            ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+            const body = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+            // 3/3 共识(dsf+glm+qwen): Node 兼底必须追加 16B GCM 认证标签, 否则 ct 与
+            // WebCrypto 输出格式不一致 → 自解与跨端解密均必失败(静默不可恢复)。
+            ciphertext = Buffer.concat([body, cipher.getAuthTag()]);
         }
         return {
             v: 1,
@@ -143,8 +146,11 @@ const SyncCrypto = {
         const { createDecipheriv } = require("crypto");
         const key = require("crypto").pbkdf2Sync(passphrase, salt, 200000, 32, "sha256");
         try {
+            if (ct.length <= 16) throw new Error("密文过短");
             const decipher = createDecipheriv("aes-256-gcm", key, iv);
-            return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
+            // GCM 标签为末 16 字节(与 WebCrypto 输出一致)
+            decipher.setAuthTag(ct.subarray(ct.length - 16));
+            return Buffer.concat([decipher.update(ct.subarray(0, ct.length - 16)), decipher.final()]).toString("utf8");
         } catch (e) {
             throw new Error("口令错误或数据损坏");
         }
