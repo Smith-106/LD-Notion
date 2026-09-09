@@ -45,7 +45,15 @@ const RSSAutoImporter = {
             .map((item) => item.trim())
             .filter(Boolean)
             .filter((item) => /^https?:\/\//i.test(item));
-        return Array.from(new Set(urls));
+        // P4 收敛(c07): feed 地址为出站请求目标 —— 与 _safeUrl 同口径拒内网/169.254/可疑域名
+        // (设置可跨设备同步, 脏值不得把用户浏览器当 SSRF 代理)
+        const { UrlValidator } = require("../security/UrlValidator");
+        const safe = urls.filter((item) => {
+            const ok = UrlValidator.validatePageExternalUrl(item);
+            if (!ok) console.warn("[LD-Notion] RSS feed 地址被拒(非公网 http(s)):", item);
+            return ok;
+        });
+        return Array.from(new Set(safe));
     },
 
     getDedupMode: () => {

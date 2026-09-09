@@ -227,11 +227,34 @@ describe("P4 收敛(c07): Atom link 属性顺序无关", () => {
     });
 });
 
+describe("P4 收敛(c07): RSS feed 地址 SSRF 过滤", () => {
+    it("内网/元数据地址被拒, 公网保留", () => {
+        const urls = RSSAutoImporter.getFeedUrls([
+            "https://example.com/feed.xml",
+            "http://127.0.0.1:8756/x",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://192.168.1.1/rss",
+        ].join("\n"));
+
+        expect(urls).toEqual(["https://example.com/feed.xml"]);
+    });
+});
+
 describe("P4 收敛(c06): redactText 覆盖 secret_ 形态凭证", () => {
     it("secret_ 前缀凭证明文被脱敏", () => {
         const out = CredentialVault.redactText("key=secret_abcdefghijklmnopqrstuvwxyz0123456789 done");
 
         expect(out).not.toContain("secret_abcdefghijklmnopqrstuvwxyz0123456789");
         expect(out).toContain("***REDACTED***");
+    });
+});
+
+describe("P4 收敛(c10): normalizeWatermark 容量上限", () => {
+    it("超量 ids 被截断到 MAX_WATERMARK_IDS", () => {
+        const ids = Array.from({ length: 600 }, (_, i) => `id-${i}`);
+
+        const wm = SyncStateV2.normalizeWatermark({ time: "2026-01-01T00:00:00.000Z", ids });
+
+        expect(wm.ids.length).toBe(500);
     });
 });
