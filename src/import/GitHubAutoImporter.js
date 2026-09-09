@@ -13,6 +13,9 @@ const GitHubAutoImporter = {
     isRunning: false,
     timerId: null,
     initTimerId: null,
+    // glm P1 共识: 租约丢失标志需下沉到模块级 —— 批量写页在 _exportViaGitHubExporter
+    // 内逐项执行, 原先仅类型循环边界可见 leaseLost, 单类型内继续写 Notion
+    _leaseLost: false,
     deferredWhileHidden: false,
     visibilityListenerBound: false,
     lastRunAt: 0,
@@ -190,6 +193,8 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
     }
     try {
     for (let i = 0; i < toExport.length; i++) {
+        // glm P1 共识: 单类型批量写页可能耗时数分钟, 租约丢失须逐项中止(原仅类型边界检查)
+        if (GitHubAutoImporter._leaseLost) break;
         const item = toExport[i];
         const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
         try {
@@ -466,7 +471,8 @@ GitHubAutoImporter.run = async () => {
         lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
     } catch (leaseError) {
         GitHubAutoImporter.isRunning = false;
-        SyncLock.isExporting = false;
+        // glm P1 共识: 此路径尚未置位 isExporting(置位在租约成功之后), 无条件清 false
+        // 会误清并发手动导出已置位的互斥标志
         console.error("[LD-Notion] GitHub 自动导入获取租约失败:", leaseError);
         GitHubAutoImporter.updateStatus("❌ 获取同步租约失败，本轮跳过");
         return;
@@ -477,7 +483,7 @@ GitHubAutoImporter.run = async () => {
         return;
     }
     SyncLock.isExporting = true;
-    let leaseLost = false;
+    GitHubAutoImporter._leaseLost = false;
     const renewTimer = setInterval(() => {
         let renewed;
         try {
@@ -487,7 +493,7 @@ GitHubAutoImporter.run = async () => {
             renewed = false;
         }
         if (!renewed) {
-            leaseLost = true;
+            GitHubAutoImporter._leaseLost = true;
             clearInterval(renewTimer);
         }
     }, 30000);
@@ -514,7 +520,7 @@ GitHubAutoImporter.run = async () => {
 
         for (const type of types) {
             // 租约被他 tab 接管: 不再开工新类型, 避免双持有并发写
-            if (leaseLost) break;
+            if (GitHubAutoImporter._leaseLost) break;
             const r = await GitHubAutoImporter._syncSingleType(type, settings, attemptAt);
             successCount += r.success;
             failedCount += r.failed;
@@ -546,6 +552,7 @@ GitHubAutoImporter.run = async () => {
         clearInterval(renewTimer);
         SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
         SyncLock.isExporting = false;
+        GitHubAutoImporter._leaseLost = false;
         GitHubAutoImporter.isRunning = false;
         // v3.14.7 (REV-06): 补 emit bookmarks:updated——收藏列表唯一自动重渲染触发是
         // bookmarks:updated(main-ui.js:2638-2642), 此前只 emit sync:center-summary-updated

@@ -328,10 +328,18 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
     // 序列化的写侧 O(N²)(与 Obsidian 分支同构)
     let githubDirty = false;
     SyncLock.isExporting = true;
-    // 持有期间每 30s 续约(< 60s TTL); 续约失配置 leaseLost 中止(与 exportBookmarks 同构)
+    // 持有期间每 30s 续约(< 180s TTL); 续约失败置 leaseLost 中止(与 exportBookmarks 同构)
     let leaseLost = false;
     const renewTimer = setInterval(() => {
-        if (!SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+        // 续约抛错必须视为失租(与 Bookmark/RSS/export 同构)
+        let renewed;
+        try {
+            renewed = SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+        } catch (renewError) {
+            console.warn("[GitHubObsidianService] 续约失败:", renewError);
+            renewed = false;
+        }
+        if (!renewed) {
             leaseLost = true;
             clearInterval(renewTimer);
         }
@@ -343,9 +351,10 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
         if (leaseLost) break;
         while (control.isPaused) {
             await Utils.sleep(200);
-            if (control.isCancelled) break;
+            // 2/3 共识(dsf+qwen): 暂停期间租约可能被他 tab 接管 — 不得仅靠取消退出
+            if (control.isCancelled || leaseLost) break;
         }
-        if (control.isCancelled) break;
+        if (control.isCancelled || leaseLost) break;
 
         const item = selectedItems[i];
         const bookmark = item.raw;
@@ -369,6 +378,8 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
             for (const key of Object.keys(properties)) {
                 if (properties[key] === undefined) delete properties[key];
             }
+            // qwen P1 共识: enrichRepo/暂停等长异步后租约可能已失效 — 建页前复核
+            if (leaseLost) break;
             if (!OperationGuard.canExecute("createDatabasePage")) {
                 GitHubExporter._auditExport("createDatabasePage", "denied",
                     { itemKey: item.itemKey, sourceType, itemName: item.title || item.itemKey, reason: "权限不足：手动导出建页需 level≥1" });

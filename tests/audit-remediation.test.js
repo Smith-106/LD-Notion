@@ -331,3 +331,28 @@ describe("P1 共识第四轮守卫(UpdateChecker / idle 回调复核)", () => {
         expect(src).toContain("ttlMs = 180000");
     });
 });
+
+describe("P1 共识第五轮守卫(GitHub 批量写页 leaseLost / 误清 isExporting)", () => {
+    const src = fs.readFileSync("src/import/GitHubAutoImporter.js", "utf8");
+    it("租约获取失败路径不得清 isExporting(该路径从未置位)", () => {
+        const start = src.indexOf("} catch (leaseError) {");
+        const block = src.slice(start, src.indexOf("}", start + 25));
+        expect(block).not.toMatch(/SyncLock\.isExporting\s*=/);
+    });
+    it("批量写页循环内必须逐项复核租约丢失", () => {
+        const i = src.indexOf("for (let i = 0; i < toExport.length; i++) {");
+        const body = src.slice(i, i + 300);
+        expect(body).toContain("_leaseLost) break");
+    });
+    it("run() finally 必须复位 _leaseLost", () => {
+        const i = src.indexOf("} finally {", src.indexOf("GitHubAutoImporter.run = async"));
+        expect(src.slice(i, i + 300)).toContain("GitHubAutoImporter._leaseLost = false");
+    });
+    it("github-obsidian-service: 暂停循环/建页前必须复核 leaseLost + 续约抛错视为失租", () => {
+        const obs = fs.readFileSync("src/import/github-obsidian-service.js", "utf8");
+        expect(obs).toContain("if (control.isCancelled || leaseLost) break;");
+        expect(obs).toMatch(/if \(leaseLost\) break;\s+if \(!OperationGuard\.canExecute\("createDatabasePage"\)\)/);
+        const rt = obs.slice(obs.indexOf("const renewTimer = setInterval"), obs.indexOf("}, 30000);"));
+        expect(rt).toContain("catch (renewError)");
+    });
+});
