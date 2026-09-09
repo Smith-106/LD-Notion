@@ -3896,7 +3896,9 @@ function createWorkspaceVisualizationFixture(harness) {
         });
 
         assert.strictEqual(writes.length, 1);
-        assert.ok(writes[0].url.includes('GitHub%20Vault%2FUseful%20Snippet.md'), writes[0].url);
+        // P4 收敛(3/3 共识): 路径逐段编码——子目录分隔符为真实 "/", 段内空格编码为 %20;
+        // 旧断言锁定的是整路径 encodeURIComponent(子目录变 %2F 且 ".." 可越权写入)的缺陷行为
+        assert.ok(writes[0].url.includes('/vault/GitHub%20Vault/Useful%20Snippet.md'), writes[0].url);
         assert.strictEqual(writes[0].auth, 'Bearer obs-key');
         assert.ok(String(writes[0].body).includes('GitHub Gist'), String(writes[0].body));
         assert.deepStrictEqual(results, {

@@ -9,11 +9,43 @@ const path = require("path");
 const SRC = path.resolve(__dirname, "..", "src");
 const ALLOWLIST_PATH = path.resolve(__dirname, "dangling-refs-allowlist.json");
 
-/** 跳过字符串/模板/注释；返回同长度掩码文本（非代码处置空格，换行保留） */
+/** 跳过字符串/模板/注释/正则字面量；返回同长度掩码文本（非代码处置空格，换行保留） */
 function maskNoise(content) {
     const out = [];
     let i = 0;
     while (i < content.length) {
+        // 正则字面量: 仅当左侧有效字符不是 [标识符/)]} ] 且同行内可闭合时才视为正则,
+        // 否则把除法误判为正则会吞掉后续代码(字符类内的引号曾破坏字符串屏蔽)。
+        if (content[i] === "/" && content[i + 1] !== "/" && content[i + 1] !== "*") {
+            const prevSignificant = content.slice(0, i).replace(/\s+$/, "").slice(-1);
+            if (!/[A-Za-z0-9_$)\]}]/.test(prevSignificant || "(")) {
+                let j = i + 1;
+                let inClass = false;
+                let closed = -1;
+                while (j < content.length && content[j] !== "\n") {
+                    if (content[j] === "\\") {
+                        j += 2;
+                        continue;
+                    }
+                    if (content[j] === "[") inClass = true;
+                    else if (content[j] === "]") inClass = false;
+                    else if (content[j] === "/" && !inClass) {
+                        closed = j;
+                        break;
+                    }
+                    j++;
+                }
+                if (closed > i) {
+                    for (let k = i; k <= closed; k++) out.push(" ");
+                    i = closed + 1;
+                    while (i < content.length && /[a-z]/i.test(content[i])) {
+                        out.push(" ");
+                        i++;
+                    }
+                    continue;
+                }
+            }
+        }
         if (content[i] === "/" && content[i + 1] === "/") {
             while (i < content.length && content[i] !== "\n") {
                 out.push(" ");

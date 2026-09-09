@@ -532,7 +532,7 @@
       function isSupportedFileType2(ext) {
         return SUPPORTED_FILE_TYPES2.has((ext || "").toLowerCase());
       }
-      function getMimeType3(ext, fallback = "application/octet-stream") {
+      function getMimeType2(ext, fallback = "application/octet-stream") {
         return EXT_TO_MIME2[(ext || "").toLowerCase()] || fallback;
       }
       function getFileCategory2(ext) {
@@ -551,7 +551,7 @@
         SUPPORTED_IMAGE_TYPES: SUPPORTED_IMAGE_TYPES2,
         MULTI_PART_THRESHOLD: MULTI_PART_THRESHOLD2,
         isSupportedFileType: isSupportedFileType2,
-        getMimeType: getMimeType3,
+        getMimeType: getMimeType2,
         getFileCategory: getFileCategory2,
         MSG: MSG2
       };
@@ -617,6 +617,7 @@
       var { emit } = require_event_bus();
       var _getRaw = (key, defaultVal) => GM_getValue(key, defaultVal);
       var _setRaw = (key, val) => GM_setValue(key, val);
+      var MAX_WATERMARK_IDS = 500;
       var SyncStateV2 = {
         VERSION: 2,
         _cache: null,
@@ -677,7 +678,7 @@
           if (!watermark || typeof watermark !== "object") return null;
           const time = this.normalizeTime(watermark.time);
           if (!time) return null;
-          const ids = Array.isArray(watermark.ids) ? Array.from(new Set(watermark.ids.map((id) => String(id || "")).filter(Boolean))) : [];
+          const ids = Array.isArray(watermark.ids) ? Array.from(new Set(watermark.ids.map((id) => String(id || "")).filter(Boolean))).slice(0, MAX_WATERMARK_IDS) : [];
           return { time, ids };
         },
         normalizeSyncRecord(record, { keepSnapshot = false } = {}) {
@@ -733,7 +734,8 @@
           } catch {
             parsed = {};
           }
-          if (parsed.version < this.VERSION || !parsed.version && parsed.linuxdo) {
+          const hasV1Shape = !parsed.version && (parsed.linuxdo || parsed.github || parsed.bookmarks || parsed.rss);
+          if (parsed.version < this.VERSION || hasV1Shape) {
             parsed = this._migrateV1toV2(parsed);
           }
           if (parsed.sources && parsed.sources.bookmarks && !parsed.sources.bookmark) {
@@ -777,7 +779,14 @@
           this._savePending = false;
           if (!this._dirty) return;
           this._dirty = false;
-          _setRaw(CONFIG2.STORAGE_KEYS.AUTO_SYNC_STATE, JSON.stringify(this._cache));
+          if (!this._cache) return;
+          try {
+            _setRaw(CONFIG2.STORAGE_KEYS.AUTO_SYNC_STATE, JSON.stringify(this._cache));
+          } catch (error) {
+            this._dirty = true;
+            console.warn("[LD-Notion] \u540C\u6B65\u72B6\u6001\u5199\u5165\u5931\u8D25, \u5DF2\u4FDD\u7559\u5F85\u5199\u72B6\u6001:", error);
+            return;
+          }
           emit("storage:state-committed", { kind: "watermark" });
         },
         /**
@@ -813,13 +822,17 @@
           var _a;
           const state = this._load();
           const withSnapshot = sourceType === "bookmark" || sourceType === "rss";
+          const cleanPatch = {};
+          for (const [k, v] of Object.entries(patch)) {
+            if (v !== void 0) cleanPatch[k] = v;
+          }
           state.sources[sourceType] = this.normalizeSyncRecord({
             ...state.sources[sourceType] || this._makeSourceDefault(withSnapshot),
-            ...patch,
-            watermark: patch.watermark === void 0 ? ((_a = state.sources[sourceType]) == null ? void 0 : _a.watermark) || null : patch.watermark
+            ...cleanPatch,
+            watermark: cleanPatch.watermark === void 0 ? ((_a = state.sources[sourceType]) == null ? void 0 : _a.watermark) || null : cleanPatch.watermark
           }, { keepSnapshot: withSnapshot });
-          if (withSnapshot && patch.snapshot !== void 0) {
-            state.sources[sourceType].snapshot = patch.snapshot;
+          if (withSnapshot && cleanPatch.snapshot !== void 0) {
+            state.sources[sourceType].snapshot = cleanPatch.snapshot;
           }
           this._save(state);
           return this._clone(state.sources[sourceType]);
@@ -840,6 +853,22 @@
           state.sources[sourceType].epoch = (Number(previous.epoch) || 0) + 1;
           this._save(state);
           return this.getSourceState(sourceType);
+        },
+        /**
+         * 设置项 LWW 时间戳(仅本地持久化, 不参与同步投影)
+         * 3/3 共识(dsf+glm+qwen): 推送时若对所有白名单键盖 now, 未修改设置的设备会把陈旧值
+         * 盖上新时间戳, 在合并时覆盖他端更新的修改。{key: {h: 值哈希, t: iso}} 供 buildPayload
+         * 判断“值未变则复用旧时间戳”。容量天然受白名单键数上限约束(≤38 键)。
+         */
+        getSettingsStamps() {
+          const state = this._load();
+          const stamps = state.settingsStamps;
+          return stamps && typeof stamps === "object" ? stamps : {};
+        },
+        setSettingsStamps(stamps) {
+          const state = this._load();
+          state.settingsStamps = stamps && typeof stamps === "object" ? stamps : {};
+          this._save(state);
         },
         buildWatermark(items = [], getTime, getId) {
           if (!Array.isArray(items) || items.length === 0) return null;
@@ -864,7 +893,7 @@
               }
               return;
             }
-            if (timeMs === latestMs && id && !idSet.has(id)) {
+            if (timeMs === latestMs && id && !idSet.has(id) && ids.length < MAX_WATERMARK_IDS) {
               ids.push(id);
               idSet.add(id);
             }
@@ -924,7 +953,15 @@
       if (typeof GM_addValueChangeListener === "function") {
         try {
           GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.AUTO_SYNC_STATE, (key, oldValue, newValue, remote) => {
-            if (remote) SyncStateV2._cache = null;
+            var _a;
+            if (!remote) return;
+            SyncStateV2._cache = null;
+            SyncStateV2._dirty = false;
+            SyncStateV2._savePending = false;
+            if (SyncStateV2._saveTimerId !== null && SyncStateV2._saveTimerId !== void 0) {
+              (_a = globalThis.clearTimeout) == null ? void 0 : _a.call(globalThis, SyncStateV2._saveTimerId);
+              SyncStateV2._saveTimerId = null;
+            }
           });
         } catch {
         }
@@ -1129,6 +1166,7 @@
             const parsed = JSON.parse(raw);
             return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
           } catch {
+            console.warn(`[LD-Notion] \u53BB\u91CD\u8D26\u672C\u89E3\u6790\u5931\u8D25(${sourceType}), \u5DF2\u964D\u7EA7\u4E3A\u7A7A\u96C6`);
             return {};
           }
         },
@@ -1139,10 +1177,11 @@
             this._evictByCapacity(set);
           }
           GM_setValue(this.keyFor(sourceType), JSON.stringify(set));
+          emit("storage:state-committed", { sourceType, kind: "dedup" });
         },
         // --- batch 模式: 减少 IPC 调用(全盘审计 find 7: 单槽 → 按 sourceType 分槽,
         // 多导入器并发时 A 的缓存被 B 覆盖丢失, 现每源独立缓存) ---
-        _batchCaches: {},
+        _batchCaches: /* @__PURE__ */ Object.create(null),
         // sourceType → { set, dirty, dirtyKeys, deleted, wiped }
         /**
          * 开始批量模式 (SyncCoordinator 在 sync 循环前后调用)
@@ -1154,7 +1193,7 @@
             set: this._loadSet(sourceType),
             dirty: false,
             dirtyKeys: /* @__PURE__ */ new Set(),
-            deleted: /* @__PURE__ */ new Set(),
+            deleted: /* @__PURE__ */ new Map(),
             wiped: false
           };
         },
@@ -1183,7 +1222,9 @@
                   if (prev === void 0 || Number(ts) > Number(prev)) next[k] = ts;
                 }
                 if (cache.deleted) {
-                  for (const k of cache.deleted) delete next[k];
+                  for (const [k, delTs] of cache.deleted) {
+                    if (next[k] === void 0 || Number(next[k]) <= Number(delTs)) delete next[k];
+                  }
                 }
               }
               if (URL_KEYED_SOURCES.includes(src)) {
@@ -1193,13 +1234,12 @@
               }
               this._saveSet(src, next);
               cache.set = next;
-              emit("storage:state-committed", { sourceType: src, kind: "dedup" });
             }
           }
           if (sourceType) {
             delete this._batchCaches[sourceType];
           } else {
-            this._batchCaches = {};
+            this._batchCaches = /* @__PURE__ */ Object.create(null);
           }
         },
         _batchGet(sourceType) {
@@ -1306,8 +1346,9 @@
               delete batch.set[hashed];
             }
             if (batch.deleted) {
-              batch.deleted.add(dedupKey);
-              if (hashed !== dedupKey) batch.deleted.add(hashed);
+              const delTs = Date.now();
+              batch.deleted.set(dedupKey, delTs);
+              if (hashed !== dedupKey) batch.deleted.set(hashed, delTs);
             }
             if (batch.dirtyKeys) {
               batch.dirtyKeys.delete(dedupKey);
@@ -1355,6 +1396,7 @@
             return;
           }
           GM_deleteValue(this.keyFor(sourceType));
+          emit("storage:state-committed", { sourceType, kind: "dedup" });
         }
       };
       module.exports = { DedupStore };
@@ -1487,6 +1529,7 @@
         clearExportedTopics: () => {
           Storage2._exportedTopicsCache = {};
           DedupStore.clearSeen("linuxdo");
+          Storage2.remove(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS);
         }
       };
       var SyncState2 = {
@@ -1505,6 +1548,9 @@
         getSourceState: (sourceType) => SyncStateV2.getSourceState(sourceType),
         updateSourceState: (sourceType, patch) => SyncStateV2.updateSourceState(sourceType, patch),
         forceFlush: () => SyncStateV2.forceFlush(),
+        // 设置项 LWW 时间戳(仅本地持久化; 同步投影复用旧时间戳防止未修改设备覆盖他端修改)
+        getSettingsStamps: () => SyncStateV2.getSettingsStamps(),
+        setSettingsStamps: (stamps) => SyncStateV2.setSettingsStamps(stamps),
         // V1 兼容 API 代理到 V2
         getLinuxDoState: () => SyncStateV2.getSourceState("linuxdo"),
         updateLinuxDoState: (patch) => SyncStateV2.updateSourceState("linuxdo", patch),
@@ -1657,7 +1703,16 @@
         },
         base64Encode: (input) => {
           const normalized = String(input ?? "");
-          if (typeof btoa === "function") return btoa(normalized);
+          if (typeof btoa === "function") {
+            try {
+              return btoa(normalized);
+            } catch {
+              const bytes = new TextEncoder().encode(normalized);
+              let binary = "";
+              for (const b of bytes) binary += String.fromCharCode(b);
+              return btoa(binary);
+            }
+          }
           if (typeof Buffer !== "undefined") return Buffer.from(normalized, "utf8").toString("base64");
           throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301 Base64 \u7F16\u7801");
         },
@@ -1704,9 +1759,14 @@
         // 避免每次调用创建一次性 DOM 节点——escapeHtml 在批量渲染热路径
         // （renderBookmarkList/updateLogPanel 等）被调用 60+ 处，DOM 节点创建放大 GC。
         escapeHtml: (text) => {
-          if (!text) return "";
+          if (text == null) return "";
           return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         },
+        // P4 收敛(c02/c05): Markdown 链接输出净化 —— 不可信标题/URL 含 ]( 等元字符
+        // 可破坏链接结构并注入链接目标（标题来自 Notion 页面/搜索结果）。
+        mdText: (text) => String(text ?? "").replace(/[\[\]]/g, ""),
+        mdUrl: (url) => String(url ?? "").replace(/[\s)]/g, ""),
+        mdLink: (text, url) => `[${Utils2.mdText(text)}](${Utils2.mdUrl(url)})`,
         // GM_xmlhttpRequest onerror 回调参数为对象（如 { error, type }），直接模板串化
         // 会得到 "[object Object]" 吞掉真实原因；按常见字段优先级提取，
         // 普通串原样返回，对象兑底 JSON 序列化（截断）。
@@ -1926,6 +1986,8 @@
       var { Utils: Utils2 } = require_utils();
       var SyncLock = {
         _exporting: false,
+        // 无 GM 环境的按 key 租约槽(浏览器/GM 环境不参与)
+        _localLeases: /* @__PURE__ */ new Map(),
         get isExporting() {
           return this._exporting;
         },
@@ -1935,14 +1997,18 @@
         /**
          * 尝试获取跨 tab 租约(owner + expiresAt, TTL 兜底)
          * @param {string} key - 租约存储键(建议 per-source, 如 CONFIG.STORAGE_KEYS.XXX + ":lease")
-         * @param {number} ttlMs - 租约有效期(默认 60s)
+         * @param {number} ttlMs - 租约有效期(默认 180s: 续约 30s 一次, 隐藏标签页定时器
+         *   节流后最多 ~60s 一次, 3× 余量确保节流下不会中途过期被抢占)
          * @returns {Promise<{owner: string, expiresAt: number}|null>} 成功返回租约, 失败/被占返回 null
          */
-        acquireLease: async (key, ttlMs = 6e4) => {
+        acquireLease: async (key, ttlMs = 18e4) => {
           if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
-            if (SyncLock.isExporting) return null;
+            const held = SyncLock._localLeases.get(key);
+            if (held && Number(held.expiresAt) > Date.now()) return null;
+            const lease2 = { owner: Utils2.randomToken(), expiresAt: Date.now() + ttlMs };
+            SyncLock._localLeases.set(key, lease2);
             SyncLock.isExporting = true;
-            return { owner: "local", expiresAt: Date.now() + ttlMs };
+            return lease2;
           }
           const now = Date.now();
           const existing = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
@@ -1956,6 +2022,20 @@
           if (!reread.owner || reread.owner !== lease.owner) {
             return null;
           }
+          await Utils2.sleep(150);
+          const confirm = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+          if (!confirm.owner || confirm.owner !== lease.owner) {
+            return null;
+          }
+          if (lease.expiresAt <= Date.now()) {
+            lease.expiresAt = Date.now() + ttlMs;
+            GM_setValue(key, JSON.stringify(lease));
+            await Utils2.sleep(150);
+            const refreshed = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+            if (!refreshed.owner || refreshed.owner !== lease.owner) {
+              return null;
+            }
+          }
           return lease;
         },
         /**
@@ -1964,7 +2044,7 @@
          * 盲写续约会覆写新持有者的租约 → 双持有并发同步。owner 失配时返回 false 供调用方中止,
          * 绝不触碰他方租约。
          */
-        renewLease: (key, lease, ttlMs = 6e4) => {
+        renewLease: (key, lease, ttlMs = 18e4) => {
           if (!lease || typeof GM_setValue !== "function") return lease;
           if (typeof GM_getValue === "function") {
             const current = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
@@ -1974,13 +2054,22 @@
           }
           lease.expiresAt = Date.now() + ttlMs;
           GM_setValue(key, JSON.stringify(lease));
+          if (typeof GM_getValue === "function") {
+            const after = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+            if (!after.owner || after.owner !== lease.owner) {
+              return false;
+            }
+          }
           return lease;
         },
         /**
          * 释放租约(仅 owner 本人删除; finally 中调用)
          */
         releaseLease: (key, lease) => {
-          if (!lease || typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
+          if (!lease) return;
+          if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
+            const held = SyncLock._localLeases.get(key);
+            if (held && held.owner === lease.owner) SyncLock._localLeases.delete(key);
             SyncLock.isExporting = false;
             return;
           }
@@ -2038,7 +2127,7 @@
           for (const key of CredentialVault2.REDACT_IN_LOGS) {
             out = out.split(key).join("***REDACTED***");
           }
-          return out.replace(/ntn_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/sk-[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/Bearer\s+[A-Za-z0-9._\-]{10,}/gi, "Bearer ***REDACTED***").replace(/github_pat_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/ghp_[A-Za-z0-9]{20,}/g, "***REDACTED***").replace(/gho_[A-Za-z0-9]{20,}/g, "***REDACTED***");
+          return out.replace(/ntn_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/secret_[A-Za-z0-9]{20,}/g, "***REDACTED***").replace(/sk-[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/Bearer\s+[A-Za-z0-9._\-]{10,}/gi, "Bearer ***REDACTED***").replace(/github_pat_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/ghp_[A-Za-z0-9]{20,}/g, "***REDACTED***").replace(/gho_[A-Za-z0-9]{20,}/g, "***REDACTED***");
         },
         hasVault: () => !!CredentialVault2._getVaultPayloadRaw(),
         isUnlocked: () => CredentialVault2._unlocked,
@@ -2217,7 +2306,14 @@
             CredentialVault2.syncRegisteredControls();
             return CredentialVault2.getStatus();
           }
-          const payload = CredentialVault2._readVaultPayload();
+          const payload = (() => {
+            try {
+              return CredentialVault2._readVaultPayload();
+            } catch {
+              CredentialVault2.lock();
+              throw new Error("\u51ED\u8BC1\u4FDD\u9669\u7BB1\u5185\u5BB9\u635F\u574F\u6216\u4E0D\u5B8C\u6574\uFF0C\u65E0\u6CD5\u89E3\u9501\u3002");
+            }
+          })();
           let decrypted;
           try {
             decrypted = await CredentialVault2._decryptPayload(payload, normalizedPassphrase);
@@ -2803,7 +2899,9 @@
           });
           const genericInput = document.querySelector("#gclip-api-key-input");
           if (genericInput) {
-            genericInput.value = "";
+            if (document.activeElement !== genericInput) {
+              genericInput.value = "";
+            }
             if (NotionOAuth2.isOAuthConnected()) {
               genericInput.placeholder = "\u5DF2\u901A\u8FC7 OAuth \u6388\u6743\uFF08\u5982\u9700\u8986\u76D6\uFF0C\u53EF\u624B\u52A8\u8F93\u5165\uFF09";
             } else {
@@ -2857,7 +2955,6 @@
         },
         installCrossPageWatchers: () => {
           if (NotionOAuth2._crossPageWatchersInstalled) return;
-          NotionOAuth2._crossPageWatchersInstalled = true;
           if (typeof GM_addValueChangeListener !== "function") return;
           const configKeys = [
             CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID,
@@ -2899,7 +2996,9 @@
             });
           } catch (error) {
             console.warn("[LD-Notion] OAuth \u8DE8\u9875\u76D1\u542C\u6CE8\u518C\u5931\u8D25", (error == null ? void 0 : error.message) || error);
+            return;
           }
+          NotionOAuth2._crossPageWatchersInstalled = true;
         },
         // v3.14.16: 同步认证方式单选 / 状态行 / 分区弱化（主面板 / Notion 站 / 通用剪藏共用）
         syncAuthModeUI: (root = document) => {
@@ -2971,7 +3070,7 @@
             }
             fields.authorizeBtn.textContent = status.connected ? "\u{1F504} \u91CD\u65B0\u6388\u6743" : "\u{1F510} \u4E00\u952E\u6388\u6743";
             fields.clearBtn.textContent = status.connected ? "\u65AD\u5F00 OAuth \u5E76\u6E05\u9664\u672C\u5730\u51ED\u636E" : "\u6E05\u9664\u672C\u5730\u51ED\u636E(\u542B\u624B\u52A8 API Key)";
-            fields.clearBtn.disabled = !status.connected && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
+            fields.clearBtn.disabled = !status.connected && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN) && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_API_KEY) && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID) && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET) && !CredentialVault2.hasPersistedValue(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI);
             NotionOAuth2.syncAuthModeUI(root);
           };
           const saveFormConfig = async () => {
@@ -3201,8 +3300,9 @@
           NotionOAuth2._refreshInFlight = (async () => {
             const { SyncLock } = require_sync_lock();
             const leaseKey = CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_LEASE;
-            let lease = await SyncLock.acquireLease(leaseKey, 3e4);
+            let lease = null;
             try {
+              lease = await SyncLock.acquireLease(leaseKey, 3e4);
               if (!lease) {
                 const rotated = await NotionOAuth2._waitForTokenRotation(3e4);
                 if (rotated) return rotated;
@@ -3481,7 +3581,9 @@
           } catch {
             return false;
           }
-          return UrlValidator.LOCAL_HOSTS.has(parsed.hostname);
+          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+          const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+          return UrlValidator.LOCAL_HOSTS.has(host);
         },
         // 校验 AI 返回的页面外部 URL（icon/cover external.url）。
         // 与 validateAiBaseUrl 语义不同：这是 Notion 页面属性的外部资源 URL，
@@ -3525,13 +3627,19 @@
           }
           if (normalized.startsWith("[")) {
             const bare = normalized.replace(/^\[|\]$/g, "");
-            if (bare === "::1" || bare === "::" || bare.startsWith("fe80:") || bare.startsWith("fc") || bare.startsWith("fd") || bare.startsWith("::ffff:127.")) return true;
+            if (bare === "::1" || bare === "::" || /^fe[89ab][0-9a-f]{0,2}(:|$)/.test(bare) || bare.startsWith("fc") || bare.startsWith("fd") || bare.startsWith("::ffff:127.")) return true;
             const v4m = bare.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
             if (v4m) return UrlValidator._isPrivateHost(v4m.slice(1).join("."));
             const v4mHex = bare.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
             if (v4mHex) {
               const hi = parseInt(v4mHex[1], 16);
               const lo = parseInt(v4mHex[2], 16);
+              return UrlValidator._isPrivateHost(`${hi >> 8 & 255}.${hi & 255}.${lo >> 8 & 255}.${lo & 255}`);
+            }
+            const v4Compat = bare.match(/^::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+            if (v4Compat) {
+              const hi = parseInt(v4Compat[1], 16);
+              const lo = parseInt(v4Compat[2], 16);
               return UrlValidator._isPrivateHost(`${hi >> 8 & 255}.${hi & 255}.${lo >> 8 & 255}.${lo & 255}`);
             }
           }
@@ -3833,7 +3941,7 @@
         "plain text"
       ]);
       var normalizeLanguage2 = (lang) => {
-        if (!lang) return "plain text";
+        if (typeof lang !== "string" || !lang) return "plain text";
         const lower = lang.toLowerCase().trim();
         if (NOTION_LANGUAGES2.has(lower)) return lower;
         const aliases = {
@@ -3850,7 +3958,7 @@
           golang: "go",
           rs: "rust"
         };
-        return aliases[lower] || "plain text";
+        return Object.prototype.hasOwnProperty.call(aliases, lower) ? aliases[lower] : "plain text";
       };
       module.exports = { SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, EMOJI_MAP: EMOJI_MAP2, NOTION_LANGUAGES: NOTION_LANGUAGES2, normalizeLanguage: normalizeLanguage2 };
     }
@@ -3902,7 +4010,8 @@
               file: {
                 type: "external",
                 external: { url: full },
-                caption: [{ type: "text", text: { content: fileName } }]
+                // P4 共识(glm+qwen): fileName 未切分, 超 2000 字符触发 Notion 400(整批失败)
+                caption: DOMToNotion2.splitLongText(fileName)
               },
               _needsUpload: imgMode === "upload",
               _originalUrl: full,
@@ -3926,10 +4035,18 @@
                 _originalUrl: full,
                 _fileType: "video"
               });
-            } else {
+            } else if (DOMToNotion2._isAllowedEmbedHost(full)) {
               blocks.push({
                 type: "embed",
                 embed: { url: full }
+              });
+            } else {
+              blocks.push({
+                type: "video",
+                video: { type: "external", external: { url: full } },
+                _needsUpload: imgMode === "upload",
+                _originalUrl: full,
+                _fileType: "video"
               });
             }
           }
@@ -3950,18 +4067,23 @@
           }
         },
         // iframe 嵌入，返回 true 表示已处理（视频 src），false 表示未匹配需 fallthrough
-        _cookIframe: (el, blocks) => {
-          const src = el.getAttribute("src") || "";
-          if (!src) return false;
+        // v3.14.6 (XN-04) 抽出的共享白名单: embed.url 由 Notion 服务端抓取(CWE-918),
+        // 仅显式视频宿主可写入(_cookIframe / _cookVideo 双消费点保持一致)
+        _isAllowedEmbedHost: (url) => {
           let host = "";
           try {
-            host = new URL(Utils2.absoluteUrl(src)).hostname;
+            host = new URL(url).hostname;
           } catch {
             return false;
           }
-          const isAllowedEmbedHost = host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtu.be" || host.endsWith(".youtu.be") || host === "vimeo.com" || host.endsWith(".vimeo.com") || host === "bilibili.com" || host.endsWith(".bilibili.com");
-          if (isAllowedEmbedHost) {
-            const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
+          return host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtu.be" || host.endsWith(".youtu.be") || host === "vimeo.com" || host.endsWith(".vimeo.com") || host === "bilibili.com" || host.endsWith(".bilibili.com");
+        },
+        _cookIframe: (el, blocks) => {
+          const src = el.getAttribute("src") || "";
+          if (!src) return false;
+          const absoluteSrc = Utils2.absoluteUrl(src);
+          if (DOMToNotion2._isAllowedEmbedHost(absoluteSrc)) {
+            const full = DOMToNotion2._safeExternalUrl(absoluteSrc);
             if (full) {
               blocks.push({ type: "embed", embed: { url: full } });
               return true;
@@ -4011,7 +4133,7 @@
                 file: {
                   type: "external",
                   external: { url: full },
-                  caption: [{ type: "text", text: { content: fileName } }]
+                  caption: DOMToNotion2.splitLongText(fileName)
                 },
                 _needsUpload: imgMode === "upload",
                 _originalUrl: full,
@@ -4051,7 +4173,7 @@
           }
         },
         // 列表 ul/ol
-        _cookList: (el, blocks) => {
+        _cookList: (el, blocks, imgMode) => {
           const tag = el.tagName.toLowerCase();
           const listType = tag === "ul" ? "bulleted_list_item" : "numbered_list_item";
           Array.from(el.children).forEach((li) => {
@@ -4060,6 +4182,8 @@
               if (richText.length > 0) {
                 blocks.push({ type: listType, [listType]: { rich_text: richText } });
               }
+              li.querySelectorAll("img").forEach((img) => DOMToNotion2._cookImage(img, blocks, imgMode));
+              li.querySelectorAll("a.attachment").forEach((a) => DOMToNotion2._cookAttachment(a, blocks, imgMode));
             }
           });
         },
@@ -4094,13 +4218,17 @@
           });
           if (rows.length > 0) {
             const tableWidth = Math.max(1, ...rows.map((r) => r.length));
+            const paddedRows = rows.map((cells) => cells.length >= tableWidth ? cells : cells.concat(Array.from(
+              { length: tableWidth - cells.length },
+              () => [{ type: "text", text: { content: "" } }]
+            )));
             blocks.push({
               type: "table",
               table: {
                 table_width: tableWidth,
                 has_column_header: hasHeader,
                 has_row_header: false,
-                children: rows.map((cells) => ({
+                children: paddedRows.map((cells) => ({
                   type: "table_row",
                   table_row: { cells }
                 }))
@@ -4138,6 +4266,12 @@
               chunks.push({ type: "text", text: { content: chunk }, annotations: { ...annotations } });
               remaining = remaining.substring(maxLength);
             }
+            if (remaining.length > 0 && chunks.length > 0) {
+              const marker = `\u2026\uFF08\u5185\u5BB9\u8FC7\u957F\uFF0C\u5DF2\u622A\u65AD ${remaining.length} \u5B57\u7B26\uFF09`;
+              const last = chunks[chunks.length - 1];
+              last.text.content = last.text.content.slice(0, Math.max(0, maxLength - marker.length)) + marker;
+              console.warn(`[LD-Notion] rich_text \u8FBE ${maxItems} \u9879\u4E0A\u9650, \u5DF2\u622A\u65AD ${remaining.length} \u5B57\u7B26`);
+            }
           }
           return chunks;
         },
@@ -4158,7 +4292,7 @@
               const emojiMatch = src.match(/\/images\/emoji\/(?:twemoji|apple|google|twitter)\/([^/.]+)\.png/i);
               if (emojiMatch) {
                 const emojiName = emojiMatch[1];
-                const emoji = EMOJI_MAP2[emojiName] || el.getAttribute("alt") || `:${emojiName}:`;
+                const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP2, emojiName) ? EMOJI_MAP2[emojiName] : el.getAttribute("alt") || `:${emojiName}:`;
                 if (emoji) result.push({ type: "text", text: { content: emoji }, annotations: { ...annotations } });
               }
               return;
@@ -4203,7 +4337,11 @@
             Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
           };
           processNode(node);
-          return result.slice(0, 100);
+          if (result.length > 100) {
+            console.warn(`[LD-Notion] rich_text \u8282\u70B9\u6570 ${result.length} \u8D85 Notion \u4E0A\u9650 100, \u5DF2\u622A\u65AD`);
+            return result.slice(0, 100);
+          }
+          return result;
         },
         cookedToBlocks: (cookedHtml, imgMode = "upload") => {
           const parser = new DOMParser();
@@ -4252,7 +4390,7 @@
               return;
             }
             if (tag === "ul" || tag === "ol") {
-              DOMToNotion2._cookList(el, blocks);
+              DOMToNotion2._cookList(el, blocks, imgMode);
               return;
             }
             if (tag === "table" || el.classList && el.classList.contains("md-table")) {
@@ -4279,22 +4417,30 @@
       "use strict";
       var { UrlValidator } = require_UrlValidator();
       var ObsidianAPI2 = {
+        // P4 共识(dsf): 整路径 encodeURIComponent 会把子目录的 "/" 编成 %2F, 且 ".." 段可越权写入。
+        // 逐段编码并剔除空/./.. 段。
+        _safeVaultPath: (path) => String(path || "").replace(/\\/g, "/").split("/").filter((seg) => seg && seg !== "." && seg !== "..").map((seg) => encodeURIComponent(seg)).join("/"),
         testConnection: async (apiUrl, apiKey) => {
           if (!UrlValidator.validateObsidianUrl(apiUrl)) {
             return { ok: false, error: "Obsidian API URL \u5B89\u5168\u6821\u9A8C\u5931\u8D25\uFF1A\u4EC5\u5141\u8BB8\u672C\u5730\u5730\u5740 (127.0.0.1/localhost)" };
           }
-          const resp = await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "GET",
-              url: `${apiUrl}/vault/`,
-              headers: { Authorization: `Bearer ${apiKey}` },
-              responseType: "json",
-              timeout: 1e4,
-              onload: (r) => resolve(r),
-              onerror: (e) => reject(e),
-              ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
+          let resp;
+          try {
+            resp = await new Promise((resolve, reject) => {
+              GM_xmlhttpRequest({
+                method: "GET",
+                url: `${apiUrl}/vault/`,
+                headers: { Authorization: `Bearer ${apiKey}` },
+                responseType: "json",
+                timeout: 1e4,
+                onload: (r) => resolve(r),
+                onerror: (e) => reject(e),
+                ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
+              });
             });
-          });
+          } catch (error) {
+            return { ok: false, error: `Obsidian API \u8BF7\u6C42\u5931\u8D25: ${(error == null ? void 0 : error.message) || error}` };
+          }
           if (resp.status === 200 || resp.status === 204) return { ok: true };
           return { ok: false, error: `HTTP ${resp.status}: ${resp.statusText}` };
         },
@@ -4302,21 +4448,28 @@
           if (!UrlValidator.validateObsidianUrl(apiUrl)) {
             return { ok: false, error: "Obsidian API URL \u5B89\u5168\u6821\u9A8C\u5931\u8D25\uFF1A\u4EC5\u5141\u8BB8\u672C\u5730\u5730\u5740 (127.0.0.1/localhost)" };
           }
-          const resp = await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "PUT",
-              url: `${apiUrl}/vault/${encodeURIComponent(path)}`,
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "Content-Type": "text/markdown"
-              },
-              data: content,
-              timeout: 3e4,
-              onload: (r) => resolve(r),
-              onerror: (e) => reject(e),
-              ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
+          const safePath = ObsidianAPI2._safeVaultPath(path);
+          if (!safePath) return { ok: false, error: "\u65E0\u6548\u7684\u7B14\u8BB0\u8DEF\u5F84" };
+          let resp;
+          try {
+            resp = await new Promise((resolve, reject) => {
+              GM_xmlhttpRequest({
+                method: "PUT",
+                url: `${apiUrl}/vault/${safePath}`,
+                headers: {
+                  Authorization: `Bearer ${apiKey}`,
+                  "Content-Type": "text/markdown"
+                },
+                data: content,
+                timeout: 3e4,
+                onload: (r) => resolve(r),
+                onerror: (e) => reject(e),
+                ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
+              });
             });
-          });
+          } catch (error) {
+            return { ok: false, error: `Obsidian API \u8BF7\u6C42\u5931\u8D25: ${(error == null ? void 0 : error.message) || error}` };
+          }
           if (resp.status === 200 || resp.status === 204 || resp.status === 201) {
             return { ok: true };
           }
@@ -4326,21 +4479,28 @@
           if (!UrlValidator.validateObsidianUrl(apiUrl)) {
             return { ok: false, error: "Obsidian API URL \u5B89\u5168\u6821\u9A8C\u5931\u8D25\uFF1A\u4EC5\u5141\u8BB8\u672C\u5730\u5730\u5740 (127.0.0.1/localhost)" };
           }
-          const resp = await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "PUT",
-              url: `${apiUrl}/vault/${encodeURIComponent(path)}`,
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "Content-Type": contentType || "application/octet-stream"
-              },
-              data: blob,
-              timeout: 6e4,
-              onload: (r) => resolve(r),
-              onerror: (e) => reject(e),
-              ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
+          const safePath = ObsidianAPI2._safeVaultPath(path);
+          if (!safePath) return { ok: false, error: "\u65E0\u6548\u7684\u56FE\u7247\u8DEF\u5F84" };
+          let resp;
+          try {
+            resp = await new Promise((resolve, reject) => {
+              GM_xmlhttpRequest({
+                method: "PUT",
+                url: `${apiUrl}/vault/${safePath}`,
+                headers: {
+                  Authorization: `Bearer ${apiKey}`,
+                  "Content-Type": contentType || "application/octet-stream"
+                },
+                data: blob,
+                timeout: 6e4,
+                onload: (r) => resolve(r),
+                onerror: (e) => reject(e),
+                ontimeout: () => reject(new Error("Obsidian API \u8BF7\u6C42\u8D85\u65F6"))
+              });
             });
-          });
+          } catch (error) {
+            return { ok: false, error: `Obsidian API \u8BF7\u6C42\u5931\u8D25: ${(error == null ? void 0 : error.message) || error}` };
+          }
           if (resp.status === 200 || resp.status === 204 || resp.status === 201) {
             return { ok: true };
           }
@@ -4348,6 +4508,9 @@
         }
       };
       var HTMLToMarkdown2 = {
+        // P4 共识(glm+qwen): 链接文本/alt 与 href/src 未净化, 含 ]( 的不可信内容可逃逸链接语法。
+        _mdText: (s) => String(s ?? "").replace(/[\[\]]/g, ""),
+        _mdUrl: (s) => String(s ?? "").replace(/[\s()<>]/g, ""),
         convert: (html) => {
           const doc = new DOMParser().parseFromString(html, "text/html");
           return HTMLToMarkdown2._convertNode(doc.body);
@@ -4411,7 +4574,9 @@
               const codeEl = node.querySelector("code");
               const lang = ((_b = (_a = codeEl == null ? void 0 : codeEl.className) == null ? void 0 : _a.match(/language-(\w+)/)) == null ? void 0 : _b[1]) || "";
               const text = codeEl ? codeEl.textContent : node.textContent;
-              return "```" + lang + "\n" + text + "\n```\n\n";
+              const longestRun = (String(text).match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
+              const fence = "`".repeat(Math.max(3, longestRun + 1));
+              return fence + lang + "\n" + text + "\n" + fence + "\n\n";
             }
             case "blockquote": {
               const lines = children.trim().split("\n");
@@ -4419,13 +4584,13 @@
             }
             case "a": {
               const href = node.getAttribute("href") || "";
-              if (href.startsWith("http")) return `[${children}](${href})`;
+              if (href.startsWith("http")) return `[${HTMLToMarkdown2._mdText(children)}](${HTMLToMarkdown2._mdUrl(href)})`;
               return children;
             }
             case "img": {
               const src = node.getAttribute("src") || "";
               const alt = node.getAttribute("alt") || "";
-              return `![${alt}](${src})`;
+              return `![${HTMLToMarkdown2._mdText(alt)}](${HTMLToMarkdown2._mdUrl(src)})`;
             }
             case "ul":
               return children;
@@ -4433,7 +4598,7 @@
               const items = node.querySelectorAll(":scope > li");
               let idx = 1;
               return Array.from(items).map((li) => {
-                const md = HTMLToMarkdown2._convertNode(li).trim();
+                const md = HTMLToMarkdown2._convertNode(li).trim().replace(/^-\s+/, "");
                 const result = `${idx}. ${md}
 `;
                 idx++;
@@ -4447,19 +4612,19 @@
               return HTMLToMarkdown2._convertTable(node) + "\n\n";
             case "iframe": {
               const src = node.getAttribute("src") || "";
-              return `[\u5D4C\u5165\u5185\u5BB9](${src})
+              return `[\u5D4C\u5165\u5185\u5BB9](${HTMLToMarkdown2._mdUrl(src)})
 
 `;
             }
             case "video": {
               const src = node.getAttribute("src") || ((_c = node.querySelector("source")) == null ? void 0 : _c.getAttribute("src")) || "";
-              return `[\u89C6\u9891](${src})
+              return `[\u89C6\u9891](${HTMLToMarkdown2._mdUrl(src)})
 
 `;
             }
             case "audio": {
               const src = node.getAttribute("src") || "";
-              return `[\u97F3\u9891](${src})
+              return `[\u97F3\u9891](${HTMLToMarkdown2._mdUrl(src)})
 
 `;
             }
@@ -4497,13 +4662,17 @@
         },
         buildFrontmatter: (meta) => {
           const lines = ["---"];
-          const esc = (s) => String(s || "").replace(/"/g, '\\"');
+          const esc = (s) => String(s ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n\u2028\u2029]/g, " ").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+          const numOrQuoted = (key, value) => {
+            const num = Number(value);
+            return Number.isFinite(num) ? `${key}: ${num}` : `${key}: "${esc(value)}"`;
+          };
           if (meta.title) lines.push(`title: "${esc(meta.title)}"`);
           if (meta.url) lines.push(`url: "${esc(meta.url)}"`);
           if (meta.author) lines.push(`author: "${esc(meta.author)}"`);
           if (meta.source) lines.push(`source: "${esc(meta.source)}"`);
           if (meta.sourceType) lines.push(`source_type: "${esc(meta.sourceType)}"`);
-          if (meta.topicId) lines.push(`topic_id: ${meta.topicId}`);
+          if (meta.topicId) lines.push(numOrQuoted("topic_id", meta.topicId));
           if (meta.owner) lines.push(`owner: "${esc(meta.owner)}"`);
           if (meta.repo) lines.push(`repo: "${esc(meta.repo)}"`);
           if (meta.gistId) lines.push(`gist_id: "${esc(meta.gistId)}"`);
@@ -4516,7 +4685,7 @@
             meta.tags.forEach((t) => lines.push(`  - "${esc(t)}"`));
           }
           lines.push(`export_time: "${(/* @__PURE__ */ new Date()).toISOString()}"`);
-          if (meta.floors !== void 0) lines.push(`floors: ${meta.floors}`);
+          if (meta.floors !== void 0) lines.push(numOrQuoted("floors", meta.floors));
           lines.push("---");
           return lines.join("\n") + "\n\n";
         },
@@ -4691,7 +4860,7 @@ ${quoted}
         }
         return "file";
       }
-      function getMimeType3(ext) {
+      function getMimeType2(ext) {
         return MIME_TYPES[(ext || "").toLowerCase()] || "application/octet-stream";
       }
       var sanitizeMultipartFilename = (name) => String(name || "").replace(/["\r\n]/g, "");
@@ -4721,66 +4890,73 @@ ${quoted}
           // Context7 /websites/developers_notion_reference: send endpoint 用 multipart/form-data（unique to this endpoint），
           // file field 放原始二进制，part_number field(1-1000)。原 base64+JSON 实现违反契约且体积膨胀 33%。
           // 仿 uploadFileContent:931 multipart 模式，但走 Notion API endpoint + Authorization Bearer（非 S3 预签名 URL）。
-          sendFilePart: (uploadId, partBlob, partNumber, apiKey, filename) => {
+          sendFilePart: async (uploadId, partBlob, partNumber, apiKey, filename) => {
+            if (NotionAPI2._requestGate) {
+              await NotionAPI2._requestGate();
+            }
             return new Promise((resolve, reject) => {
               const reader = new FileReader();
               reader.onload = () => {
-                const boundaryBytes = new Uint8Array(8);
-                if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-                  crypto.getRandomValues(boundaryBytes);
-                } else {
-                  reject(new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 multipart boundary"));
-                  return;
-                }
-                const boundary = "----LDNotionFormBoundary" + Array.from(boundaryBytes, (b) => b.toString(16).padStart(2, "0")).join("");
-                const partName = sanitizeMultipartFilename(filename) || `part-${partNumber}.bin`;
-                const uint8Array = new Uint8Array(reader.result);
-                const fileHeader = `--${boundary}\r
+                try {
+                  const boundaryBytes = new Uint8Array(8);
+                  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                    crypto.getRandomValues(boundaryBytes);
+                  } else {
+                    reject(new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 multipart boundary"));
+                    return;
+                  }
+                  const boundary = "----LDNotionFormBoundary" + Array.from(boundaryBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+                  const partName = sanitizeMultipartFilename(filename) || `part-${partNumber}.bin`;
+                  const uint8Array = new Uint8Array(reader.result);
+                  const fileHeader = `--${boundary}\r
 Content-Disposition: form-data; name="file"; filename="${partName}"\r
 Content-Type: application/octet-stream\r
 \r
 `;
-                const partNumberField = `\r
+                  const partNumberField = `\r
 --${boundary}\r
 Content-Disposition: form-data; name="part_number"\r
 \r
 ${partNumber}\r
 `;
-                const footer = `--${boundary}--\r
+                  const footer = `--${boundary}--\r
 `;
-                const headerBytes = new TextEncoder().encode(fileHeader);
-                const partNumberBytes = new TextEncoder().encode(partNumberField);
-                const footerBytes = new TextEncoder().encode(footer);
-                const body = new Uint8Array(headerBytes.length + uint8Array.length + partNumberBytes.length + footerBytes.length);
-                body.set(headerBytes, 0);
-                body.set(uint8Array, headerBytes.length);
-                body.set(partNumberBytes, headerBytes.length + uint8Array.length);
-                body.set(footerBytes, headerBytes.length + uint8Array.length + partNumberBytes.length);
-                GM_xmlhttpRequest({
-                  method: "POST",
-                  url: NotionAPI2.Transport.buildUrl(`/file_uploads/${uploadId}/send`),
-                  headers: {
-                    "Authorization": `Bearer ${NotionOAuth2.resolveRequestToken(apiKey)}`,
-                    "Notion-Version": CONFIG2.API.NOTION_VERSION,
-                    "Content-Type": `multipart/form-data; boundary=${boundary}`
-                  },
-                  data: body.buffer,
-                  binary: true,
-                  timeout: 12e4,
-                  onload: (response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                      try {
-                        resolve(Utils2.safeJsonParse(response.responseText, {}));
-                      } catch {
-                        resolve({});
+                  const headerBytes = new TextEncoder().encode(fileHeader);
+                  const partNumberBytes = new TextEncoder().encode(partNumberField);
+                  const footerBytes = new TextEncoder().encode(footer);
+                  const body = new Uint8Array(headerBytes.length + uint8Array.length + partNumberBytes.length + footerBytes.length);
+                  body.set(headerBytes, 0);
+                  body.set(uint8Array, headerBytes.length);
+                  body.set(partNumberBytes, headerBytes.length + uint8Array.length);
+                  body.set(footerBytes, headerBytes.length + uint8Array.length + partNumberBytes.length);
+                  GM_xmlhttpRequest({
+                    method: "POST",
+                    url: NotionAPI2.Transport.buildUrl(`/file_uploads/${uploadId}/send`),
+                    headers: {
+                      "Authorization": `Bearer ${NotionOAuth2.resolveRequestToken(apiKey)}`,
+                      "Notion-Version": CONFIG2.API.NOTION_VERSION,
+                      "Content-Type": `multipart/form-data; boundary=${boundary}`
+                    },
+                    data: body.buffer,
+                    binary: true,
+                    timeout: 12e4,
+                    onload: (response) => {
+                      if (response.status >= 200 && response.status < 300) {
+                        try {
+                          resolve(Utils2.safeJsonParse(response.responseText, {}));
+                        } catch {
+                          resolve({});
+                        }
+                      } else {
+                        reject(new Error(`\u53D1\u9001\u5206\u7247\u5931\u8D25: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
                       }
-                    } else {
-                      reject(new Error(`\u53D1\u9001\u5206\u7247\u5931\u8D25: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
-                    }
-                  },
-                  onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
-                  ontimeout: () => reject(new Error("\u53D1\u9001\u5206\u7247\u8D85\u65F6"))
-                });
+                    },
+                    onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
+                    ontimeout: () => reject(new Error("\u53D1\u9001\u5206\u7247\u8D85\u65F6"))
+                  });
+                } catch (error) {
+                  reject(error instanceof Error ? error : new Error(String(error)));
+                }
               };
               reader.onerror = () => reject(new Error("\u8BFB\u53D6\u5206\u7247\u6570\u636E\u5931\u8D25"));
               reader.readAsArrayBuffer(partBlob);
@@ -4806,48 +4982,53 @@ ${partNumber}\r
             return new Promise((resolve, reject) => {
               const reader = new FileReader();
               reader.onload = () => {
-                const bytes = new Uint8Array(8);
-                if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-                  crypto.getRandomValues(bytes);
-                } else {
-                  reject(new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 multipart boundary"));
-                  return;
-                }
-                const boundary = "----WebKitFormBoundary" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-                const uint8Array = new Uint8Array(reader.result);
-                const header = `--${boundary}\r
+                try {
+                  const bytes = new Uint8Array(8);
+                  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                    crypto.getRandomValues(bytes);
+                  } else {
+                    reject(new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 multipart boundary"));
+                    return;
+                  }
+                  const boundary = "----WebKitFormBoundary" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+                  const uint8Array = new Uint8Array(reader.result);
+                  const safeContentType = String(contentType || "application/octet-stream").replace(/[\r\n"]/g, "") || "application/octet-stream";
+                  const header = `--${boundary}\r
 Content-Disposition: form-data; name="file"; filename="${sanitizeMultipartFilename(filename)}"\r
-Content-Type: ${contentType}\r
+Content-Type: ${safeContentType}\r
 \r
 `;
-                const headerBytes = new TextEncoder().encode(header);
-                const footerBytes = new TextEncoder().encode(`\r
+                  const headerBytes = new TextEncoder().encode(header);
+                  const footerBytes = new TextEncoder().encode(`\r
 --${boundary}--\r
 `);
-                const body = new Uint8Array(headerBytes.length + uint8Array.length + footerBytes.length);
-                body.set(headerBytes, 0);
-                body.set(uint8Array, headerBytes.length);
-                body.set(footerBytes, headerBytes.length + uint8Array.length);
-                GM_xmlhttpRequest({
-                  method: "POST",
-                  url: uploadUrl,
-                  headers: {
-                    // 预签名 URL 已包含授权信息，发送 API Key 会造成安全泄露
-                    "Content-Type": `multipart/form-data; boundary=${boundary}`
-                  },
-                  data: body.buffer,
-                  binary: true,
-                  onload: (response) => {
-                    if (response.status === 200 || response.status === 204) {
-                      resolve();
-                    } else {
-                      reject(new Error(`\u4E0A\u4F20\u6587\u4EF6\u5931\u8D25: ${response.status}`));
-                    }
-                  },
-                  onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
-                  timeout: 6e4,
-                  ontimeout: () => reject(new Error("\u6587\u4EF6\u4E0A\u4F20\u8D85\u65F6"))
-                });
+                  const body = new Uint8Array(headerBytes.length + uint8Array.length + footerBytes.length);
+                  body.set(headerBytes, 0);
+                  body.set(uint8Array, headerBytes.length);
+                  body.set(footerBytes, headerBytes.length + uint8Array.length);
+                  GM_xmlhttpRequest({
+                    method: "POST",
+                    url: uploadUrl,
+                    headers: {
+                      // 预签名 URL 已包含授权信息，发送 API Key 会造成安全泄露
+                      "Content-Type": `multipart/form-data; boundary=${boundary}`
+                    },
+                    data: body.buffer,
+                    binary: true,
+                    onload: (response) => {
+                      if (response.status === 200 || response.status === 204) {
+                        resolve();
+                      } else {
+                        reject(new Error(`\u4E0A\u4F20\u6587\u4EF6\u5931\u8D25: ${response.status}`));
+                      }
+                    },
+                    onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
+                    timeout: 6e4,
+                    ontimeout: () => reject(new Error("\u6587\u4EF6\u4E0A\u4F20\u8D85\u65F6"))
+                  });
+                } catch (error) {
+                  reject(error instanceof Error ? error : new Error(String(error)));
+                }
               };
               reader.onerror = () => reject(new Error("\u8BFB\u53D6\u6587\u4EF6\u6570\u636E\u5931\u8D25"));
               reader.readAsArrayBuffer(blob);
@@ -4876,14 +5057,14 @@ Content-Type: ${contentType}\r
                 responseType: "blob",
                 timeout: 6e4,
                 onload: (r) => {
-                  if (r.status >= 200 && r.status < 300) resolve(r.response);
+                  if (r.status >= 200 && r.status < 300 && r.response) resolve(r.response);
                   else reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${r.status}`));
                 },
                 onerror: (e) => reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${Utils2.formatRequestError(e)}`)),
                 ontimeout: () => reject(new Error("\u4E0B\u8F7D\u8D85\u65F6"))
               });
             });
-            const contentType = blob.type || getMimeType3(ext);
+            const contentType = blob.type || getMimeType2(ext);
             const category = getFileCategory2(ext);
             let blockType = "image";
             if (category === "video") blockType = "video";
@@ -4893,6 +5074,9 @@ Content-Type: ${contentType}\r
             if (blob.size > MULTI_PART_THRESHOLD2) {
               const PART_SIZE = 20 * 1024 * 1024;
               const totalParts = Math.ceil(blob.size / PART_SIZE);
+              if (totalParts > 1e3) {
+                throw new Error(`\u6587\u4EF6\u8FC7\u5927: \u9700 ${totalParts} \u4E2A\u5206\u7247\uFF0C\u8D85\u8FC7 Notion \u5355\u6587\u4EF6 1000 \u5206\u7247\u4E0A\u9650`);
+              }
               const multiUpload = await NotionAPI2.createMultiPartUpload(
                 filename,
                 contentType,
@@ -4937,7 +5121,7 @@ Content-Type: ${contentType}\r
                     responseType: "blob",
                     timeout: 6e4,
                     onload: (r) => {
-                      if (r.status >= 200 && r.status < 300) resolve(r.response);
+                      if (r.status >= 200 && r.status < 300 && r.response) resolve(r.response);
                       else reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${r.status}`));
                     },
                     onerror: (e) => reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${Utils2.formatRequestError(e)}`)),
@@ -4945,6 +5129,29 @@ Content-Type: ${contentType}\r
                   });
                 });
                 const filename = `file-${Date.now()}.bin`;
+                if (blob.size > MULTI_PART_THRESHOLD2) {
+                  const PART_SIZE = 20 * 1024 * 1024;
+                  const totalParts = Math.ceil(blob.size / PART_SIZE);
+                  if (totalParts > 1e3) {
+                    throw new Error(`\u6587\u4EF6\u8FC7\u5927: \u9700 ${totalParts} \u4E2A\u5206\u7247\uFF0C\u8D85\u8FC7 Notion \u5355\u6587\u4EF6 1000 \u5206\u7247\u4E0A\u9650`);
+                  }
+                  const multiUpload = await NotionAPI2.createMultiPartUpload(
+                    filename,
+                    "application/octet-stream",
+                    blob.size,
+                    apiKey,
+                    totalParts
+                  );
+                  if (!(multiUpload == null ? void 0 : multiUpload.id)) throw new Error("\u521B\u5EFA\u591A\u5206\u7247\u4E0A\u4F20\u5931\u8D25");
+                  for (let i = 0; i < totalParts; i++) {
+                    const partBlob = blob.slice(i * PART_SIZE, Math.min((i + 1) * PART_SIZE, blob.size));
+                    await NotionAPI2.sendFilePart(multiUpload.id, partBlob, i + 1, apiKey, filename);
+                  }
+                  await NotionAPI2.completeFileUpload(multiUpload.id, apiKey);
+                  const result2 = { fileId: multiUpload.id, blockType: "file" };
+                  if (!returnDetails) return result2.fileId;
+                  return result2;
+                }
                 const fileUpload = await NotionAPI2.createFileUpload(filename, "application/octet-stream", apiKey);
                 if (!(fileUpload == null ? void 0 : fileUpload.upload_url) || !(fileUpload == null ? void 0 : fileUpload.id)) throw new Error("\u521B\u5EFA\u4E0A\u4F20\u5931\u8D25");
                 await NotionAPI2.uploadFileContent(fileUpload.upload_url, blob, "application/octet-stream", filename);
@@ -4959,7 +5166,7 @@ Content-Type: ${contentType}\r
           }
         });
       }
-      module.exports = { installUploadMethods, isSupportedFileType: isSupportedFileType2, getFileCategory: getFileCategory2, getMimeType: getMimeType3, MULTI_PART_THRESHOLD: MULTI_PART_THRESHOLD2 };
+      module.exports = { installUploadMethods, isSupportedFileType: isSupportedFileType2, getFileCategory: getFileCategory2, getMimeType: getMimeType2, MULTI_PART_THRESHOLD: MULTI_PART_THRESHOLD2 };
     }
   });
 
@@ -4981,7 +5188,7 @@ Content-Type: ${contentType}\r
         const code = String((result == null ? void 0 : result.code) || "").toLowerCase();
         const msg = String((result == null ? void 0 : result.message) || "").toLowerCase();
         if (code === "unauthorized" || code === "invalid_bearer_token") return true;
-        if (msg.includes("api token is invalid") || msg.includes("unauthorized")) return true;
+        if (status === 401 && (msg.includes("api token is invalid") || msg.includes("unauthorized"))) return true;
         return false;
       };
       var NotionTransport2 = Object.freeze({
@@ -5062,12 +5269,13 @@ Content-Type: ${contentType}\r
               notionVersion
             });
             if (response.status === 429 && attempt < retries) {
-              const retryAfter = parseInt((_b = (_a = response.responseHeaders) == null ? void 0 : _a.match(/retry-after:\s*(\d+)/i)) == null ? void 0 : _b[1]) || 1;
+              const retryAfter = Math.min(parseInt((_b = (_a = response.responseHeaders) == null ? void 0 : _a.match(/retry-after:\s*(\d+)/i)) == null ? void 0 : _b[1]) || 1, 60);
               console.warn(`Notion API \u901F\u7387\u9650\u5236\uFF0C${retryAfter}\u79D2\u540E\u91CD\u8BD5 (${attempt + 1}/${retries})`);
               await Utils2.sleep(retryAfter * 1e3 + 500);
               return doRequest(attempt + 1, token, allowRefresh);
             }
-            const result = Utils2.safeJsonParse(response.responseText, {});
+            const parsedBody = Utils2.safeJsonParse(response.responseText, null);
+            const result = parsedBody === null ? {} : parsedBody;
             if (response.status === 429) {
               const rateError = new Error(`Notion API \u901F\u7387\u9650\u5236: ${result.message || response.status}`);
               rateError.statusCode = response.status;
@@ -5075,6 +5283,11 @@ Content-Type: ${contentType}\r
               throw ErrorModel.annotateError(rateError);
             }
             if (response.status >= 200 && response.status < 300) {
+              if (parsedBody === null && String(response.responseText || "").trim()) {
+                const parseError = new Error(`Notion API \u54CD\u5E94\u89E3\u6790\u5931\u8D25: HTTP ${response.status} \u8FD4\u56DE\u975E JSON \u5185\u5BB9`);
+                parseError.statusCode = response.status;
+                throw ErrorModel.annotateError(parseError);
+              }
               return result;
             }
             if (response.status === 401 && allowRefresh && NotionOAuth2.canAutoRefresh()) {
@@ -5278,11 +5491,20 @@ Content-Type: ${contentType}\r
         appendBlockChildren: async (blockId, children, apiKey, options = {}) => {
           const safeChildren = Array.isArray(children) ? children : [];
           const endpoint = `/blocks/${blockId}/children`;
-          const payload = { children: safeChildren };
-          if (options.after) {
-            payload.after = String(options.after);
+          const chunks = [];
+          for (let i = 0; i < safeChildren.length; i += 100) {
+            chunks.push(safeChildren.slice(i, i + 100));
           }
-          return await NotionAPI2.request("PATCH", endpoint, payload, apiKey);
+          if (chunks.length === 0) chunks.push([]);
+          let lastResult = null;
+          for (let i = 0; i < chunks.length; i++) {
+            const payload = { children: chunks[i] };
+            if (options.after && i === 0) {
+              payload.after = String(options.after);
+            }
+            lastResult = await NotionAPI2.request("PATCH", endpoint, payload, apiKey);
+          }
+          return lastResult;
         },
         // 获取数据库信息
         fetchDatabase: async (databaseId, apiKey) => {
@@ -5340,14 +5562,17 @@ Content-Type: ${contentType}\r
         },
         // 复制页面 (获取内容后创建新页面)
         duplicatePage: async (pageId, targetParentId, parentType, apiKey) => {
-          var _a;
+          var _a, _b;
           const originalPage = await NotionAPI2.fetchPage(pageId, apiKey);
           const allBlocks = [];
           let cursor = null;
+          const seenCursors = /* @__PURE__ */ new Set();
           do {
             const blocksData = await NotionAPI2.fetchBlocks(pageId, cursor, apiKey);
             allBlocks.push(...blocksData.results || []);
-            cursor = blocksData.has_more ? blocksData.next_cursor : null;
+            const nextCursor = blocksData.has_more ? blocksData.next_cursor : null;
+            cursor = nextCursor && !seenCursors.has(nextCursor) ? nextCursor : null;
+            if (cursor) seenCursors.add(cursor);
           } while (cursor);
           const parent = parentType === "database" ? { database_id: targetParentId } : { page_id: targetParentId };
           const properties = {};
@@ -5362,20 +5587,65 @@ Content-Type: ${contentType}\r
               title: [{ text: { content: `${originalTitle} (\u526F\u672C)` } }]
             };
           }
-          const cleanBlocks = allBlocks.map((block) => {
+          const NON_CREATABLE_TYPES = /* @__PURE__ */ new Set(["child_page", "child_database", "unsupported"]);
+          const cleanBlock = (block) => {
             const cleaned = { type: block.type };
             if (block[block.type]) {
               cleaned[block.type] = { ...block[block.type] };
               delete cleaned[block.type].children;
             }
             return cleaned;
-          });
-          const newPage = await NotionAPI2.createDatabasePage(
-            targetParentId,
-            properties,
-            cleanBlocks.slice(0, 100),
-            apiKey
-          );
+          };
+          const fetchChildren = async (blockId, level) => {
+            if (level > 2) return [];
+            const children = [];
+            let childCursor = null;
+            const seen = /* @__PURE__ */ new Set();
+            do {
+              const data = await NotionAPI2.fetchBlocks(blockId, childCursor, apiKey);
+              for (const child of data.results || []) {
+                if (NON_CREATABLE_TYPES.has(child.type)) continue;
+                const cleaned = cleanBlock(child);
+                if (child.has_children && level < 2) {
+                  cleaned[child.type].children = await fetchChildren(child.id, level + 1);
+                }
+                children.push(cleaned);
+              }
+              const next = data.has_more ? data.next_cursor : null;
+              childCursor = next && !seen.has(next) ? next : null;
+              if (childCursor) seen.add(next);
+            } while (childCursor);
+            return children;
+          };
+          const cleanBlocks = [];
+          for (const block of allBlocks) {
+            if (NON_CREATABLE_TYPES.has(block.type)) continue;
+            const cleaned = cleanBlock(block);
+            if (block.has_children) {
+              cleaned[block.type].children = await fetchChildren(block.id, 1);
+            }
+            cleanBlocks.push(cleaned);
+          }
+          let newPage;
+          if (parentType === "database") {
+            newPage = await NotionAPI2.createDatabasePage(
+              targetParentId,
+              properties,
+              cleanBlocks.slice(0, 100),
+              apiKey
+            );
+          } else {
+            const titleProp = Object.values(properties || {}).find((prop) => (prop == null ? void 0 : prop.type) === "title");
+            const titleText = ((_b = titleProp == null ? void 0 : titleProp.title) == null ? void 0 : _b.map((t) => {
+              var _a2;
+              return (t == null ? void 0 : t.plain_text) ?? ((_a2 = t == null ? void 0 : t.text) == null ? void 0 : _a2.content) ?? "";
+            }).join("")) || "\u65E0\u6807\u9898";
+            newPage = await NotionAPI2.request("POST", "/pages", {
+              parent,
+              properties: { title: { title: [{ text: { content: titleText } }] } },
+              children: cleanBlocks.slice(0, 100)
+            }, apiKey);
+          }
           if (cleanBlocks.length > 100) {
             await NotionAPI2.appendBlocks(newPage.id, cleanBlocks.slice(100), apiKey);
           }
@@ -5738,11 +6008,14 @@ Content-Type: ${contentType}\r
           const source = OperationGuard2._inferSource(context);
           const requiredLevelForOp = OperationGuard2.OPERATION_LEVELS[operation];
           const startedAt = Date.now();
-          if (!OperationGuard2.canExecute(operation)) {
+          const buildDenial = () => {
             const requiredName = CONFIG2.PERMISSION_NAMES[requiredLevelForOp];
             const denialReason = requiredLevelForOp === void 0 ? `\u672A\u5B9A\u4E49\u6743\u9650\u7EA7\u522B: ${operation}` : `\u6743\u9650\u4E0D\u8DB3\uFF1A\u9700\u8981"${requiredName}"\u53CA\u4EE5\u4E0A\u6743\u9650\u624D\u80FD\u6267\u884C\u6B64\u64CD\u4F5C\u3002\u53EF\u5728\u4E3B\u9762\u677F\u300C\u6743\u9650\u63A7\u5236\u300D\u4E2D\u8C03\u6574\u6743\u9650\u7EA7\u522B\u3002`;
             OperationGuard2.auditDenied(operation, context, { phase: "execute", reason: denialReason });
-            throw new Error(denialReason);
+            return new Error(denialReason);
+          };
+          if (!OperationGuard2.canExecute(operation)) {
+            throw buildDenial();
           }
           if (OperationGuard2.isDangerous(operation) && OperationGuard2.requiresConfirm() || context.requireConfirm === true) {
             const isPermanent = false;
@@ -5758,6 +6031,9 @@ Content-Type: ${contentType}\r
             if (!confirmed) {
               OperationGuard2.auditDenied(operation, context, { phase: "cancelled", reason: "user_cancelled_confirmation" });
               throw new Error("\u64CD\u4F5C\u5DF2\u53D6\u6D88");
+            }
+            if (!OperationGuard2.canExecute(operation)) {
+              throw buildDenial();
             }
           }
           OperationLog2.add({
@@ -6005,7 +6281,7 @@ Content-Type: ${contentType}\r
         redactSensitiveFields: (entry) => {
           if (!entry || typeof entry !== "object") return entry;
           const redacted = { ...entry };
-          const context = redacted.context || {};
+          const context = { ...entry.context || {} };
           const sensitiveKeys = CredentialVault2 && CredentialVault2.REDACT_IN_LOGS ? CredentialVault2.REDACT_IN_LOGS : /* @__PURE__ */ new Set();
           for (const key of sensitiveKeys) {
             if (Object.prototype.hasOwnProperty.call(context, key)) {
@@ -6302,13 +6578,20 @@ Content-Type: ${contentType}\r
         },
         // 执行撤销
         execute: async () => {
-          var _a, _b;
-          if (!UndoManager2.pendingUndo) return false;
+          const pending = UndoManager2.pendingUndo;
+          if (!pending) return false;
+          UndoManager2.pendingUndo = null;
+          if (UndoManager2.timeoutId) {
+            clearTimeout(UndoManager2.timeoutId);
+            UndoManager2.timeoutId = null;
+          }
           try {
-            const description = ((_a = UndoManager2.pendingUndo) == null ? void 0 : _a.description) || "";
-            await UndoManager2.pendingUndo.undoAction();
-            UndoManager2.hideToast();
-            UndoManager2.clear();
+            const description = (pending == null ? void 0 : pending.description) || "";
+            await pending.undoAction();
+            if (UndoManager2.pendingUndo === null) {
+              UndoManager2.hideToast();
+              UndoManager2.clear();
+            }
             OperationLog2.add({
               audit_event: OperationLog2.inferAuditEvent("undo", "success"),
               actor: "user",
@@ -6334,7 +6617,8 @@ Content-Type: ${contentType}\r
             return true;
           } catch (error) {
             console.error("[LD-Notion] \u64A4\u9500\u5931\u8D25:", error);
-            const description = ((_b = UndoManager2.pendingUndo) == null ? void 0 : _b.description) || "";
+            if (UndoManager2.pendingUndo === null) UndoManager2.hideToast();
+            const description = (pending == null ? void 0 : pending.description) || "";
             OperationLog2.add({
               audit_event: OperationLog2.inferAuditEvent("undo", "failed"),
               actor: "user",
@@ -6400,16 +6684,16 @@ Content-Type: ${contentType}\r
         },
         // 隐藏撤销提示
         hideToast: () => {
-          if (UndoManager2._hideTimeout) clearTimeout(UndoManager2._hideTimeout);
-          if (UndoManager2.toastElement) {
-            UndoManager2.toastElement.classList.remove("visible");
-            UndoManager2._hideTimeout = setTimeout(() => {
-              if (UndoManager2.toastElement) {
-                UndoManager2.toastElement.remove();
-                UndoManager2.toastElement = null;
-              }
-            }, 300);
-          }
+          const toast = UndoManager2.toastElement;
+          if (!toast) return;
+          if (toast._hideTimer) clearTimeout(toast._hideTimer);
+          toast.classList.remove("visible");
+          toast._hideTimer = setTimeout(() => {
+            toast.remove();
+            if (UndoManager2.toastElement === toast) {
+              UndoManager2.toastElement = null;
+            }
+          }, 300);
         },
         // 检查是否有待撤销操作
         hasPending: () => {
@@ -6935,7 +7219,18 @@ Content-Type: ${contentType}\r
             onProgress: options.onProgress,
             onPhaseComplete: (phase, partialWorkspace) => {
               var _a2;
-              lastWorkspaceData = WorkspaceService2.persistWorkspaceData(apiKey, partialWorkspace);
+              let toPersist = partialWorkspace;
+              if (phase === "databases" && includePages) {
+                try {
+                  const cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
+                  const sameKey = (cached == null ? void 0 : cached.apiKeyHash) && cached.apiKeyHash === Utils2.apiKeyHash(apiKey);
+                  if (sameKey && Array.isArray(cached.pages) && cached.pages.length > 0) {
+                    toPersist = { databases: partialWorkspace.databases, pages: cached.pages };
+                  }
+                } catch {
+                }
+              }
+              lastWorkspaceData = WorkspaceService2.persistWorkspaceData(apiKey, toPersist);
               finalPhaseHandled = phase === "pages" || !includePages && phase === "databases";
               notifyWorkspaceData == null ? void 0 : notifyWorkspaceData(lastWorkspaceData, { phase, isFinal: finalPhaseHandled });
               (_a2 = options.onPhaseComplete) == null ? void 0 : _a2.call(options, phase, partialWorkspace, lastWorkspaceData);
@@ -7053,7 +7348,7 @@ Content-Type: ${contentType}\r
               return n;
             }
             case "checkbox":
-              return Boolean(val);
+              return val === true || val === 1 || String(val).trim().toLowerCase() === "true";
             case "date":
               return AISchema.ISO_DATE_RE.test(String(val).trim()) ? String(val).trim() : null;
             case "url":
@@ -7069,8 +7364,8 @@ Content-Type: ${contentType}\r
         validateEmoji: (emoji) => {
           const e = String(emoji || "").trim();
           if (!e) return "";
-          if (e.length > AISchema.MAX_EMOJI) return e.slice(0, AISchema.MAX_EMOJI);
           if (/[\x00-\x1f\x7f]/.test(e)) return "";
+          if (e.length > AISchema.MAX_EMOJI) return e.slice(0, AISchema.MAX_EMOJI);
           return e;
         },
         // 规范化 _normalizeNotionProperties 的对象值：仅允许 ALLOWED_OBJECT_VALUE_TYPES 顶层键，
@@ -7208,6 +7503,7 @@ Content-Type: ${contentType}\r
         // 返回 { ok: true, value } 或 { ok: false, reason }。
         parseAIJson: (name, rawText) => {
           if (!rawText) return { ok: false, reason: "AI \u54CD\u5E94\u4E3A\u7A7A" };
+          if (typeof rawText !== "string") return { ok: false, reason: "AI \u54CD\u5E94\u4E0D\u662F\u5B57\u7B26\u4E32" };
           const jsonMatch = rawText.match(/\{[\s\S]*\}/);
           if (!jsonMatch) return { ok: false, reason: "AI \u54CD\u5E94\u4E2D\u672A\u627E\u5230 JSON" };
           let parsed;
@@ -7334,6 +7630,11 @@ Content-Type: ${contentType}\r
               if (r && typeof r.preview === "string") r.preview = CredentialVault2.redactText(r.preview);
             }
           }
+          if (Array.isArray(trace.toolCalls)) {
+            for (const tc of trace.toolCalls) {
+              if (tc && typeof tc.thought === "string") tc.thought = CredentialVault2.redactText(tc.thought);
+            }
+          }
           if (Array.isArray(trace.errors)) {
             trace.errors = trace.errors.map((e) => CredentialVault2.redactText(e));
           }
@@ -7371,6 +7672,20 @@ Content-Type: ${contentType}\r
       "use strict";
       var { Utils: Utils2 } = require_utils();
       var { UrlValidator } = require_UrlValidator();
+      var splitLongText = (str) => {
+        const maxLen = 2e3;
+        const chunks = [];
+        if (str.length <= maxLen) {
+          chunks.push({ type: "text", text: { content: str } });
+        } else {
+          let remaining = str;
+          while (remaining.length > 0) {
+            chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
+            remaining = remaining.substring(maxLen);
+          }
+        }
+        return chunks;
+      };
       var BlockConverter = {
         // markdown 文本 → Notion blocks 数组
         textToBlocks: (text) => {
@@ -7500,20 +7815,6 @@ Content-Type: ${contentType}\r
             if (NOTION_LANGS.has(lower)) return lower;
             return "plain text";
           };
-          const splitLongText = (str) => {
-            const maxLen = 2e3;
-            const chunks = [];
-            if (str.length <= maxLen) {
-              chunks.push({ type: "text", text: { content: str } });
-            } else {
-              let remaining = str;
-              while (remaining.length > 0) {
-                chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
-                remaining = remaining.substring(maxLen);
-              }
-            }
-            return chunks;
-          };
           for (const line of lines) {
             if (line.startsWith("```")) {
               if (inCodeBlock) {
@@ -7568,7 +7869,7 @@ Content-Type: ${contentType}\r
             throw new Error("\u65E0\u6CD5\u8BC6\u522B\u5757\u7C7B\u578B");
           }
           const rawContent = String(content || "");
-          const richText = [{ type: "text", text: { content: String(content || "") } }];
+          const richText = splitLongText(String(content || ""));
           const type = block.type;
           const current = block[type] || {};
           switch (type) {
@@ -7945,6 +8246,7 @@ Content-Type: ${contentType}\r
               fallbackDatabaseId: settings.notionDatabaseId
             });
             const { filter_field, filter_value, limit = 10 } = args;
+            const safeLimit = Number.isFinite(Number(limit)) ? Math.max(0, Math.floor(Number(limit))) : 10;
             let filter = null;
             if (filter_field && filter_value) {
               const fieldConfig = {
@@ -8032,7 +8334,7 @@ Content-Type: ${contentType}\r
               return filter ? `\u6CA1\u6709\u627E\u5230\u5339\u914D ${filter_field}="${filter_value}" \u7684\u9875\u9762\u3002` : "\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u9875\u9762\u3002";
             }
             const total = allPages.length;
-            const showCount = Math.min(limit, total);
+            const showCount = Math.min(safeLimit, total);
             const categoryCount = {};
             allPages.forEach((page) => {
               var _a, _b, _c, _d, _e;
@@ -8408,7 +8710,12 @@ Content-Type: ${contentType}\r
             let refPage = null;
             if (page_id) {
               try {
-                refPage = await NotionAPI2.request("GET", `/pages/${page_id}`, null, settings.notionApiKey);
+                const refId = Utils2.extractNotionId(page_id);
+                if (refId) {
+                  refPage = await NotionAPI2.request("GET", `/pages/${refId}`, null, settings.notionApiKey);
+                } else {
+                  console.warn("[LD-Notion] \u65E0\u6548\u7684 page_id:", page_id);
+                }
               } catch (error) {
                 console.warn("[LD-Notion] \u53C2\u8003\u9875\u9762\u83B7\u53D6\u5931\u8D25:", error);
               }
@@ -9037,6 +9344,7 @@ ${candidateList}
             const dbId = settings.notionDatabaseId;
             if (!dbId) return "\u9519\u8BEF: \u672A\u914D\u7F6E\u6570\u636E\u5E93 ID\u3002";
             if (settings.categories.length < 2) return "\u9519\u8BEF: \u8BF7\u5148\u914D\u7F6E\u81F3\u5C11\u4E24\u4E2A\u5206\u7C7B\u9009\u9879\u3002";
+            AIClassifier2.reset();
             await AIClassifier2.ensureAICategoryProperty(settings);
             const pages = await AIClassifier2.fetchAllPages(settings);
             if (pages.length === 0) return "\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u9875\u9762\u3002";
@@ -9262,7 +9570,13 @@ ${candidateList}
             const { description, database_name, database_id, property_name } = args;
             if (!description) return "\u9519\u8BEF: \u8BF7\u63CF\u8FF0\u4F60\u60F3\u8981\u7684\u516C\u5F0F\u529F\u80FD\u3002";
             let schemaDesc = "";
-            const dbId = database_id || settings.notionDatabaseId;
+            let dbId = database_id;
+            if (!dbId && database_name) {
+              const resolved = await AI()._resolveDatabaseId(database_name, null, settings.notionApiKey);
+              if (resolved == null ? void 0 : resolved.error) return `\u9519\u8BEF: ${resolved.error}`;
+              dbId = (resolved == null ? void 0 : resolved.id) || null;
+            }
+            if (!dbId) dbId = settings.notionDatabaseId;
             if (dbId) {
               try {
                 const database = await NotionAPI2.fetchDatabase(dbId, settings.notionApiKey);
@@ -9403,7 +9717,7 @@ ${result}`;
                 "\u6807\u7B7E": { name: "\u6807\u7B7E", type: "multi_select" },
                 "AI\u5206\u7C7B": { name: "AI\u5206\u7C7B", type: "select" }
               };
-              const config = fieldConfig[filter_field] || { name: filter_field, type: "rich_text" };
+              const config = Object.prototype.hasOwnProperty.call(fieldConfig, filter_field) ? fieldConfig[filter_field] : { name: filter_field, type: "rich_text" };
               if (config.type === "select") {
                 filter = {
                   property: config.name,
@@ -9427,6 +9741,8 @@ ${result}`;
             const maxPages = 10;
             let pageCount = 0;
             let querySorts = [];
+            const seenCursors = /* @__PURE__ */ new Set();
+            let cursorTruncated = false;
             while (hasMore && pageCount < maxPages) {
               let response;
               try {
@@ -9456,13 +9772,19 @@ ${result}`;
               hasMore = response.has_more;
               cursor = response.next_cursor;
               pageCount++;
+              if (hasMore && (!cursor || seenCursors.has(cursor))) {
+                hasMore = false;
+                cursorTruncated = true;
+              } else if (hasMore) {
+                seenCursors.add(cursor);
+              }
               if (hasMore) {
                 state().updateLastMessage(`\u6B63\u5728\u67E5\u8BE2\u6570\u636E\u5E93... (\u5DF2\u83B7\u53D6 ${allPages.length} \u6761)`, "processing");
               }
             }
             const pages = allPages;
             const total = pages.length;
-            const isTruncated = hasMore;
+            const isTruncated = hasMore || cursorTruncated;
             if (total === 0) {
               return `\u{1F4CA} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u7B26\u5408\u6761\u4EF6\u7684\u5E16\u5B50\u3002${filter ? `
 \u7B5B\u9009\u6761\u4EF6\uFF1A${filter_field} \u5305\u542B "${filter_value}"` : ""}`;
@@ -9518,12 +9840,30 @@ ${result}`;
             if (!keyword) {
               return "\u8BF7\u544A\u8BC9\u6211\u4F60\u60F3\u641C\u7D22\u4EC0\u4E48\u5173\u952E\u8BCD\uFF1F";
             }
-            const response = await NotionAPI2.search(
-              keyword,
-              { property: "object", value: "page" },
-              settings.notionApiKey
-            );
-            const pages = (response.results || []).filter((p) => {
+            const allResults = [];
+            const seenSearchCursors = /* @__PURE__ */ new Set();
+            let searchCursor;
+            let searchPageCount = 0;
+            let searchTruncated = false;
+            do {
+              const response = await NotionAPI2.search(
+                keyword,
+                { property: "object", value: "page" },
+                settings.notionApiKey,
+                searchCursor
+              );
+              allResults.push(...response.results || []);
+              searchPageCount++;
+              const nextCursor = response.has_more ? response.next_cursor : void 0;
+              if (response.has_more && (!nextCursor || seenSearchCursors.has(nextCursor))) {
+                searchTruncated = true;
+                searchCursor = void 0;
+              } else {
+                if (nextCursor) seenSearchCursors.add(nextCursor);
+                searchCursor = nextCursor;
+              }
+            } while (searchCursor && searchPageCount < 10);
+            const pages = allResults.filter((p) => {
               var _a, _b;
               return ((_b = (_a = p.parent) == null ? void 0 : _a.database_id) == null ? void 0 : _b.replace(/-/g, "")) === settings.notionDatabaseId.replace(/-/g, "");
             });
@@ -9539,12 +9879,16 @@ ${result}`;
             pages.slice(0, limit).forEach((page, i) => {
               const title = Utils2.getPageTitle(page);
               const url = page.url || "";
-              result += `${i + 1}. [${title}](${url})
+              result += `${i + 1}. ${Utils2.mdLink(title, url)}
 `;
             });
             if (pages.length > limit) {
               result += `
 ... \u8FD8\u6709 ${pages.length - limit} \u6761\u7ED3\u679C`;
+            }
+            if (searchTruncated || searchCursor && searchPageCount >= 10) {
+              result += `
+\u26A0\uFE0F \u7ED3\u679C\u53EF\u80FD\u4E0D\u5B8C\u6574\uFF08\u641C\u7D22\u5DF2\u8FBE\u5206\u9875\u4E0A\u9650\uFF09`;
             }
             return result;
           } catch (error) {
@@ -9564,11 +9908,20 @@ ${result}`;
             let allResults = [];
             let cursor = void 0;
             let searchPageCount = 0;
+            let wsTruncated = false;
+            const seenWsCursors = /* @__PURE__ */ new Set();
             do {
               const response = await NotionAPI2.search(keyword, filter, settings.notionApiKey, cursor);
               allResults = allResults.concat(response.results || []);
-              cursor = response.has_more ? response.next_cursor : void 0;
               searchPageCount++;
+              const nextCursor = response.has_more ? response.next_cursor : void 0;
+              if (response.has_more && (!nextCursor || seenWsCursors.has(nextCursor))) {
+                wsTruncated = true;
+                cursor = void 0;
+              } else {
+                if (nextCursor) seenWsCursors.add(nextCursor);
+                cursor = nextCursor;
+              }
             } while (cursor && searchPageCount < 10);
             const results = allResults;
             if (results.length === 0) {
@@ -9599,7 +9952,7 @@ ${result}`;
                 const title = ((_b = (_a = db.title) == null ? void 0 : _a[0]) == null ? void 0 : _b.plain_text) || "\u65E0\u6807\u9898\u6570\u636E\u5E93";
                 const url = db.url || "";
                 const id = ((_c = db.id) == null ? void 0 : _c.replace(/-/g, "")) || "";
-                result += `${i + 1}. [${title}](${url})
+                result += `${i + 1}. ${Utils2.mdLink(title, url)}
 `;
                 result += `   ID: \`${id}\`
 `;
@@ -9627,7 +9980,7 @@ ${result}`;
                 } else if (parentType === "workspace") {
                   parentLabel = "\u{1F310} \u5DE5\u4F5C\u533A\u9875\u9762";
                 }
-                result += `${i + 1}. [${title}](${url})`;
+                result += `${i + 1}. ${Utils2.mdLink(title, url)}`;
                 if (parentLabel) {
                   result += ` - ${parentLabel}`;
                 }
@@ -9641,6 +9994,10 @@ ${result}`;
             }
             result += `
 \u{1F4A1} \u63D0\u793A\uFF1A\u590D\u5236\u6570\u636E\u5E93 ID \u53EF\u4EE5\u914D\u7F6E\u5230\u8BBE\u7F6E\u4E2D\u4F7F\u7528\u66F4\u591A\u529F\u80FD\u3002`;
+            if (wsTruncated || cursor && searchPageCount >= 10) {
+              result += `
+\u26A0\uFE0F \u7ED3\u679C\u53EF\u80FD\u4E0D\u5B8C\u6574\uFF08\u641C\u7D22\u5DF2\u8FBE\u5206\u9875\u4E0A\u9650\uFF09`;
+            }
             return result;
           } catch (error) {
             return `\u274C \u5DE5\u4F5C\u533A\u641C\u7D22\u5931\u8D25: ${error.message}`;
@@ -9682,11 +10039,12 @@ ${result}`;
             if (!targets || targets.length === 0) {
               return "\u274C \u6CA1\u6709\u627E\u5230\u53EF\u66F4\u65B0\u7684\u9875\u9762\u3002\u8BF7\u63D0\u4F9B page_name/page_id/page_ids\uFF0C\u6216\u63D0\u4F9B\u6570\u636E\u5E93 + page_title\u3002";
             }
-            const batchMode = !!params.batch || Array.isArray(params.page_ids) || !!params.page_title || targets.length > 1;
-            if (!batchMode && targets.length > 1) {
+            const explicitBatch = !!params.batch || Array.isArray(params.page_ids) || !!params.page_title;
+            if (!explicitBatch && targets.length > 1) {
               const names = targets.map((t) => `\u300C${t.name}\u300D`).join("\u3001");
               return `\u274C \u627E\u5230\u591A\u4E2A\u9875\u9762\uFF1A${names}\u3002\u8BF7\u63D0\u4F9B\u66F4\u7CBE\u786E\u7684 page_name \u6216\u76F4\u63A5\u63D0\u4F9B page_id\u3002`;
             }
+            const batchMode = explicitBatch || targets.length > 1;
             const { success, failed } = await AI()._applyPageUpdatesToTargets(targets, params, settings);
             if (!batchMode && success === 1 && failed === 0) {
               return `\u2705 \u5DF2\u66F4\u65B0\u9875\u9762\u300C${targets[0].name}\u300D\u3002`;
@@ -9702,10 +10060,13 @@ ${result}`;
         _fetchSourcePages: async (databaseId, apiKey, pageTitle) => {
           const allPages = [];
           let cursor = null;
+          const seenCursors = /* @__PURE__ */ new Set();
           do {
             const response = await NotionAPI2.queryDatabase(databaseId, null, null, cursor, apiKey);
             allPages.push(...response.results || []);
-            cursor = response.has_more ? response.next_cursor : null;
+            const nextCursor = response.has_more ? response.next_cursor : null;
+            cursor = nextCursor && !seenCursors.has(nextCursor) ? nextCursor : null;
+            if (cursor) seenCursors.add(cursor);
           } while (cursor);
           if (pageTitle) {
             return allPages.filter((page) => {
@@ -9968,15 +10329,24 @@ ${AI()._resultToText(r.result)}
               }
             } else {
               state().updateLastMessage("\u672A\u6307\u5B9A\u7236\u9875\u9762\uFF0C\u6B63\u5728\u641C\u7D22\u5DE5\u4F5C\u533A\u9875\u9762...", "processing");
-              const response = await NotionAPI2.search(
-                "",
-                { property: "object", value: "page" },
-                settings.notionApiKey
-              );
-              const pages = (response.results || []).filter((p) => {
-                var _a2;
-                return !p.archived && ((_a2 = p.parent) == null ? void 0 : _a2.type) === "workspace";
-              });
+              const pages = [];
+              let searchCursor = null;
+              const seenSearchCursors = /* @__PURE__ */ new Set();
+              do {
+                const response = await NotionAPI2.search(
+                  "",
+                  { property: "object", value: "page" },
+                  settings.notionApiKey,
+                  searchCursor
+                );
+                pages.push(...(response.results || []).filter((p) => {
+                  var _a2;
+                  return !p.archived && ((_a2 = p.parent) == null ? void 0 : _a2.type) === "workspace";
+                }));
+                const nextCursor = response.has_more ? response.next_cursor : null;
+                searchCursor = nextCursor && !seenSearchCursors.has(nextCursor) ? nextCursor : null;
+                if (searchCursor) seenSearchCursors.add(searchCursor);
+              } while (searchCursor && pages.length === 0);
               if (pages.length === 0) {
                 return "\u274C \u5DE5\u4F5C\u533A\u4E2D\u6CA1\u6709\u627E\u5230\u53EF\u7528\u7684\u9875\u9762\u4F5C\u4E3A\u7236\u9875\u9762\u3002\n\n\u{1F4A1} \u8BF7\u5148\u5728 Notion \u4E2D\u521B\u5EFA\u4E00\u4E2A\u9875\u9762\uFF0C\u6216\u6307\u5B9A\u7236\u9875\u9762\u540D\u79F0\u3002\n\n\u793A\u4F8B\uFF1A\u300C\u5728 xxx \u9875\u9762\u4E0B\u521B\u5EFA\u4E00\u4E2A\u53EB\u6280\u672F\u6587\u6863\u7684\u6570\u636E\u5E93\u300D";
               }
@@ -10057,10 +10427,13 @@ ${AI()._resultToText(r.result)}
           }
           const allBlocks = [];
           let cursor = null;
+          const seenCursors = /* @__PURE__ */ new Set();
           do {
             const data = await NotionAPI2.fetchBlocks(pageId, cursor, apiKey);
             allBlocks.push(...data.results || []);
-            cursor = data.has_more ? data.next_cursor : null;
+            const nextCursor = data.has_more ? data.next_cursor : null;
+            cursor = nextCursor && !seenCursors.has(nextCursor) ? nextCursor : null;
+            if (cursor) seenCursors.add(cursor);
           } while (cursor);
           return AIClassifier2.extractText(allBlocks).slice(0, maxChars);
         },
@@ -10309,7 +10682,7 @@ ${existingContent}`;
         _ensureAIProperty: async (databaseId, propertyName, propertyType, apiKey) => {
           const database = await NotionAPI2.fetchDatabase(databaseId, apiKey);
           const properties = database.properties || {};
-          if (properties[propertyName]) return;
+          if (Object.prototype.hasOwnProperty.call(properties, propertyName)) return;
           const propDef = {};
           if (propertyType === "multi_select") {
             propDef[propertyName] = { multi_select: { options: [] } };
@@ -10358,16 +10731,22 @@ ${existingContent}`;
             default:
               return `\u274C \u4E0D\u652F\u6301\u7684\u586B\u5145\u7C7B\u578B\u300C${autofill_type}\u300D\u3002\u652F\u6301\uFF1Asummary/keywords/translation/custom`;
           }
+          if (["__proto__", "constructor", "prototype"].includes(propName)) {
+            return "\u274C \u5C5E\u6027\u540D\u65E0\u6548\uFF0C\u8BF7\u4F7F\u7528\u975E\u4FDD\u7559\u540D\u79F0\u3002";
+          }
           state().updateLastMessage(`\u6B63\u5728\u51C6\u5907 AI \u5C5E\u6027\u586B\u5145\uFF08${propName}\uFF09...`, "processing");
           try {
             await AI()._ensureAIProperty(settings.notionDatabaseId, propName, propType, settings.notionApiKey);
             state().updateLastMessage("\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...", "processing");
             const allPages = [];
             let cursor = null;
+            const seenCursors = /* @__PURE__ */ new Set();
             do {
               const response = await NotionAPI2.queryDatabase(settings.notionDatabaseId, null, null, cursor, settings.notionApiKey);
               allPages.push(...response.results || []);
-              cursor = response.has_more ? response.next_cursor : null;
+              const nextCursor = response.has_more ? response.next_cursor : null;
+              cursor = nextCursor && !seenCursors.has(nextCursor) ? nextCursor : null;
+              if (cursor) seenCursors.add(cursor);
             } while (cursor);
             if (allPages.length === 0) {
               return "\u{1F4ED} \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762\u3002";
@@ -10412,7 +10791,7 @@ ${existingContent}`;
                 );
                 const updateProps = {};
                 if (propType === "multi_select") {
-                  const keywords = aiResult.split(/[,，]/).map((k) => k.trim()).filter(Boolean).slice(0, 10);
+                  const keywords = aiResult.split(/[,，]/).map((k) => k.trim().slice(0, 100)).filter(Boolean).slice(0, 10);
                   updateProps[propName] = { multi_select: keywords.map((k) => ({ name: k })) };
                 } else {
                   const trimmed = aiResult.slice(0, 2e3);
@@ -10498,7 +10877,7 @@ ${searchTerm}`;
             const aiAnswer = await svc().requestChat(ragPrompt, settings, 2e3);
             let sourceText = "\n\n\u{1F4DA} **\u4FE1\u606F\u6765\u6E90**\uFF1A\n";
             sourceList.forEach((s, i) => {
-              sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
+              sourceText += `${i + 1}. ${Utils2.mdText(s.title)}${s.url ? ` ([\u94FE\u63A5](${Utils2.mdUrl(s.url)}))` : ""}
 `;
             });
             return aiAnswer + sourceText;
@@ -10643,7 +11022,7 @@ ${contentParts.join("\n\n---\n\n")}`;
             const report = await svc().requestChat(reportPrompt, settings, 4e3);
             let sourceText = "\n\n\u{1F4DA} **\u5206\u6790\u57FA\u7840**\uFF1A\n";
             sourceList.forEach((s, i) => {
-              sourceText += `${i + 1}. ${s.title}${s.url ? ` ([\u94FE\u63A5](${s.url}))` : ""}
+              sourceText += `${i + 1}. ${Utils2.mdText(s.title)}${s.url ? ` ([\u94FE\u63A5](${Utils2.mdUrl(s.url)}))` : ""}
 `;
             });
             const scopeLabel = useDatabaseScope ? `\u6570\u636E\u5E93\u300C${(scopedDatabaseInfo == null ? void 0 : scopedDatabaseInfo.title) || "\u76EE\u6807\u6570\u636E\u5E93"}\u300D` : "\u5DE5\u4F5C\u533A";
@@ -10708,9 +11087,14 @@ ${aiResponse}
           let pageContext = "";
           if (page_name || page_id) {
             state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9\u4F5C\u4E3A\u53C2\u8003...", "processing");
-            const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage) {
-              pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 3e3);
+            try {
+              const targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+              if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+              if (targetPage) {
+                pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 3e3);
+              }
+            } catch (error) {
+              return `\u274C \u8BFB\u53D6\u53C2\u8003\u9875\u9762\u5931\u8D25: ${error.message}`;
             }
           }
           state().updateLastMessage("\u{1F4A1} \u6B63\u5728\u5934\u8111\u98CE\u66B4...", "processing");
@@ -10806,52 +11190,56 @@ ${list}
 
 \u53EF\u7528\u6A21\u677F: ${list}`;
           }
-          let pageContext = "";
-          let targetPage = null;
-          if (page_name || page_id) {
-            state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
-            targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
-            if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
-            if (targetPage) {
-              pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 4e3);
+          try {
+            let pageContext = "";
+            let targetPage = null;
+            if (page_name || page_id) {
+              state().updateLastMessage("\u6B63\u5728\u8BFB\u53D6\u9875\u9762\u5185\u5BB9...", "processing");
+              targetPage = await AI()._resolvePageId(page_name, page_id, settings.notionApiKey);
+              if (targetPage == null ? void 0 : targetPage.error) return `\u274C \u9875\u9762\u89E3\u6790\u5931\u8D25\uFF1A${targetPage.error}`;
+              if (targetPage) {
+                pageContext = await AI()._extractPageContent(targetPage.id, settings.notionApiKey, 4e3);
+              }
             }
-          }
-          state().updateLastMessage(`${template.icon} \u6B63\u5728\u4F7F\u7528\u300C${template.name}\u300D\u6A21\u677F\u751F\u6210...`, "processing");
-          const contextBlock = pageContext ? `
+            state().updateLastMessage(`${template.icon} \u6B63\u5728\u4F7F\u7528\u300C${template.name}\u300D\u6A21\u677F\u751F\u6210...`, "processing");
+            const contextBlock = pageContext ? `
 
 \u4EE5\u4E0B\u662F\u53C2\u8003\u5185\u5BB9\uFF1A
 ${pageContext}` : "";
-          const customBlock = custom_context ? `
+            const customBlock = custom_context ? `
 
 \u7528\u6237\u8865\u5145\u8BF4\u660E\uFF1A${custom_context}` : "";
-          const fullPrompt = `${template.prompt}${contextBlock}${customBlock}
+            const fullPrompt = `${template.prompt}${contextBlock}${customBlock}
 
 \u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002`;
-          const aiResponse = await svc().requestChat(fullPrompt, settings, 3e3);
-          if (targetPage) {
-            state().updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
-            const contentBlocks = AI()._textToBlocks(aiResponse);
-            const blocks = [
-              { type: "divider", divider: {} },
-              { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `${template.icon} ${template.name}` } }] } },
-              ...contentBlocks
-            ];
-            await AI()._executeGuardedPageWrite(
-              "appendBlocks",
-              targetPage,
-              () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
-              settings,
-              { itemName: targetPage.name }
-            );
-            return `\u2705 **${template.icon} ${template.name}** \u5DF2\u751F\u6210\u5E76\u5199\u5165\u9875\u9762\u300C${targetPage.name}\u300D
+            const aiResponse = await svc().requestChat(fullPrompt, settings, 3e3);
+            if (targetPage) {
+              state().updateLastMessage("\u6B63\u5728\u5199\u5165\u9875\u9762...", "processing");
+              const contentBlocks = AI()._textToBlocks(aiResponse);
+              const blocks = [
+                { type: "divider", divider: {} },
+                { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: `${template.icon} ${template.name}` } }] } },
+                ...contentBlocks
+              ];
+              await AI()._executeGuardedPageWrite(
+                "appendBlocks",
+                targetPage,
+                () => NotionAPI2.appendBlocks(targetPage.id, blocks, settings.notionApiKey),
+                settings,
+                { itemName: targetPage.name }
+              );
+              return `\u2705 **${template.icon} ${template.name}** \u5DF2\u751F\u6210\u5E76\u5199\u5165\u9875\u9762\u300C${targetPage.name}\u300D
 
 ${aiResponse}`;
-          }
-          return `${template.icon} **${template.name}**
+            }
+            return `${template.icon} **${template.name}**
 
 ${aiResponse}
 
 \u{1F4A1} \u5982\u9700\u5199\u5165\u9875\u9762\uFF0C\u8BF7\u6307\u5B9A\u76EE\u6807\u9875\u9762\uFF1A\u300C\u7528${template.name}\u6A21\u677F\u5904\u7406 xxx \u9875\u9762\u300D`;
+          } catch (error) {
+            return `\u274C \u6A21\u677F\u8F93\u51FA\u5931\u8D25: ${error.message}`;
+          }
         }
       };
     }
@@ -10872,6 +11260,8 @@ ${aiResponse}
         // FIFO 上限（PERF-005）：_pageInsightCache 原为无界普通对象，长会话累积内存泄漏。
         // 超 MAX_INSIGHT_CACHE 时删最旧 key（Object.keys 保插入顺序），仿 AgentTrace.MAX_TRACES=50 的 FIFO rotate 模式。
         MAX_INSIGHT_CACHE: 50,
+        // P4 共识(glm+qwen): 页面洞察只取 <head> 元信息, 响应字节上限 2MB 防超大页面内存耗尽/多次全量解码卡死
+        MAX_INSIGHT_BYTES: 2 * 1024 * 1024,
         // 已导出书签映射缓存（H5：消除循环内逐条 JSON.parse+stringify 的 O(N²)）。
         // getExported 命中缓存返对象引用，markExported 就地 mutate 缓存 + 单次 stringify 写回。
         _exportedCache: null,
@@ -10961,8 +11351,9 @@ ${aiResponse}
         },
         decodeHtmlFromResponse: (response) => {
           const fallbackText = String((response == null ? void 0 : response.responseText) || "");
-          const bytes = BookmarkExporter2.getResponseBytes(response);
-          if (!bytes || bytes.length === 0) return fallbackText;
+          const rawBytes = BookmarkExporter2.getResponseBytes(response);
+          if (!rawBytes || rawBytes.length === 0) return fallbackText;
+          const bytes = rawBytes.length > BookmarkExporter2.MAX_INSIGHT_BYTES ? rawBytes.subarray(0, BookmarkExporter2.MAX_INSIGHT_BYTES) : rawBytes;
           const headerCharset = BookmarkExporter2.extractCharsetFromHeaders((response == null ? void 0 : response.responseHeaders) || "");
           const htmlCharset = BookmarkExporter2.extractCharsetFromHtmlHead(bytes);
           const candidates = [headerCharset, htmlCharset, "utf-8", "gb18030", "big5", "shift_jis"];
@@ -11020,6 +11411,10 @@ ${aiResponse}
           };
         },
         fetchPageInsight: (url) => {
+          const { UrlValidator } = require_UrlValidator();
+          if (!UrlValidator.validatePageExternalUrl(url)) {
+            return Promise.reject(new Error("URL \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C(\u975E http(s) \u6216\u5185\u7F51\u5730\u5740)"));
+          }
           const cached = BookmarkExporter2._pageInsightCache[url];
           if (cached) return Promise.resolve(cached);
           return new Promise((resolve, reject) => {
@@ -11169,6 +11564,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             const canUseAI = !!((settings == null ? void 0 : settings.aiApiKey) && (settings == null ? void 0 : settings.aiService));
             const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
             if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
+              context.aiUsedCount = (context.aiUsedCount || 0) + 1;
               const aiResult = await BookmarkExporter2.generateAISummary(bookmark, insight, settings);
               if (aiResult == null ? void 0 : aiResult.title) {
                 enriched.generatedTitle = BookmarkExporter2.composeTitleWithPrefix(prefix, aiResult.title, 180);
@@ -11180,7 +11576,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               if (aiCategory && ((settings == null ? void 0 : settings.categories) || []).some((c) => String(c).trim().toLowerCase() === String(aiCategory).trim().toLowerCase())) {
                 inferredCategory = aiCategory;
               }
-              context.aiUsedCount = (context.aiUsedCount || 0) + 1;
             }
             enriched.inferredCategory = inferredCategory;
           } catch (error) {
@@ -11365,9 +11760,17 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。语义与逐条 markExported 等价。
         // v3.14.3: 改容量上限淘汰（用户书签数天然有界），不再按 90 天时间 TTL 误删导出事实。
         // v3.14.6 (CC-05): 写前 rebase(重读-并集-max ts) —— 跨 tab 他端新增键不可丢(导出账本不可再生)
-        flushExported: () => {
+        // P4 收敛(c07): 可选 pending —— 跨 tab watcher 会把 _exportedCache 置 null,
+        // 调用方持有的本轮引用须一并并集落盘, 否则本轮已标记的导出事实丢失(下轮重复建页)
+        flushExported: (pending = null) => {
           if (BookmarkExporter2._exportedCache) {
             BookmarkExporter2._evictByCapacity(BookmarkExporter2._exportedCache);
+          }
+          if (pending && pending !== BookmarkExporter2._exportedCache) {
+            BookmarkExporter2._evictByCapacity(pending);
+          }
+          if (!BookmarkExporter2._exportedCache && !pending) return;
+          {
             let remote = {};
             try {
               remote = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}")) || {};
@@ -11379,7 +11782,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               const norm = Utils2.normalizeDedupUrl(key);
               if (merged[norm] === void 0 || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
             }
-            for (const [key, ts] of Object.entries(BookmarkExporter2._exportedCache)) {
+            for (const [key, ts] of Object.entries(BookmarkExporter2._exportedCache || {})) {
+              const norm = Utils2.normalizeDedupUrl(key);
+              if (merged[norm] === void 0 || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
+            }
+            for (const [key, ts] of Object.entries(pending || {})) {
               const norm = Utils2.normalizeDedupUrl(key);
               if (merged[norm] === void 0 || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
             }
@@ -11429,7 +11836,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           const setupResult = await BookmarkExporter2.setupDatabaseProperties(databaseId, apiKey);
           if (!setupResult.success) {
-            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+            const setupError = new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+            if (setupResult.isAuthTerminal) {
+              setupError.isAuthTerminal = true;
+              setupError.authCode = setupResult.authCode;
+            }
+            throw setupError;
           }
           const dedupStrict = Utils2.isBookmarkDedupStrict();
           const newBookmarks = dedupStrict ? bookmarks.filter((b) => !BookmarkExporter2.isExported(b.url)) : bookmarks.slice();
@@ -11439,6 +11851,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
           let success = 0, failed = 0;
           const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+          const pendingExported = BookmarkExporter2.getExported();
           try {
             for (let i = 0; i < newBookmarks.length; i++) {
               const bm = newBookmarks[i];
@@ -11465,8 +11878,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   parent: { database_id: databaseId },
                   properties
                 }, apiKey);
-                BookmarkExporter2._exportedCache = BookmarkExporter2._exportedCache || {};
-                BookmarkExporter2._exportedCache[Utils2.normalizeDedupUrl(bm.url)] = Date.now();
+                pendingExported[Utils2.normalizeDedupUrl(bm.url)] = Date.now();
                 BookmarkExporter2._auditExport(
                   "createDatabasePage",
                   "success",
@@ -11482,7 +11894,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 );
                 failed++;
                 if (e && e.isAuthTerminal === true) {
-                  BookmarkExporter2.flushExported();
+                  BookmarkExporter2.flushExported(pendingExported);
                   const remainingCount = newBookmarks.length - i - 1;
                   return {
                     total: bookmarks.length,
@@ -11499,7 +11911,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               }
             }
           } finally {
-            BookmarkExporter2.flushExported();
+            BookmarkExporter2.flushExported(pendingExported);
           }
           return { total: bookmarks.length, exported: success, failed, newCount: newBookmarks.length };
         }
@@ -11788,7 +12200,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           };
           const items = flat.filter((b) => b.url && isHttpUrl(b.url)).map((b) => this.normalize(b));
           if (watermark && watermark.time) {
-            return items.filter((item) => item.createdAt > watermark.time);
+            return items.filter((item) => !item.createdAt || item.createdAt > watermark.time);
           }
           return items;
         },
@@ -12168,6 +12580,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // sourceType → retry count
         _epochs: /* @__PURE__ */ new Map(),
         // sourceType → epoch (v3.14.6 CC-07: 取消在途)
+        _inFlight: /* @__PURE__ */ new Set(),
+        // sourceType → 在途互斥(三模型共识 P1: 调度级串行)
+        _intervals: /* @__PURE__ */ new Map(),
+        // sourceType → 生效间隔(分钟, 含显式传入值)
+        _anchors: /* @__PURE__ */ new Map(),
+        // sourceType → 定时器锚点(ms)
         /**
          * 获取源的同步间隔 (分钟)
          * @param {string} sourceType
@@ -12176,7 +12594,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const key = SOURCE_INTERVAL_KEYS[sourceType];
           const def = SOURCE_INTERVAL_DEFAULTS[sourceType] || 30;
           if (!key) return def;
-          return Number(Storage2.getRaw(key, def)) || def;
+          const raw = Number(Storage2.getRaw(key, def));
+          return Number.isFinite(raw) && raw >= 0 ? raw : def;
         },
         /**
          * 检查源是否启用了自动同步
@@ -12197,14 +12616,21 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         start(sourceType, intervalMinutes) {
           this.stop(sourceType);
           this._epochs.set(sourceType, (this._epochs.get(sourceType) || 0) + 1);
-          const intervalMin = Number.isFinite(intervalMinutes) && intervalMinutes > 0 ? intervalMinutes : this.getIntervalMinutes(sourceType);
+          const intervalMin = Number.isFinite(intervalMinutes) ? intervalMinutes : this.getIntervalMinutes(sourceType);
           if (intervalMin <= 0) return;
+          this._intervals.set(sourceType, intervalMin);
+          this._anchors.set(sourceType, Date.now());
           const intervalMs = intervalMin * 60 * 1e3;
           const runSync = () => {
-            if (typeof globalThis.requestIdleCallback === "function") {
-              globalThis.requestIdleCallback(() => this._doSync(sourceType));
-            } else {
+            const epoch = this._epochs.get(sourceType) || 0;
+            const fire = () => {
+              if (epoch !== (this._epochs.get(sourceType) || 0)) return;
               this._doSync(sourceType);
+            };
+            if (typeof globalThis.requestIdleCallback === "function") {
+              globalThis.requestIdleCallback(fire, { timeout: 1e4 });
+            } else {
+              fire();
             }
           };
           const timerId = globalThis.setInterval(runSync, intervalMs);
@@ -12222,6 +12648,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             this._timers.delete(sourceType);
           }
           this._cancelRetry(sourceType);
+          this._intervals.delete(sourceType);
+          this._anchors.delete(sourceType);
+          this._retryCounts.set(sourceType, 0);
         },
         /**
          * 启动所有已启用源的定时同步
@@ -12248,13 +12677,20 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
          */
         getStatus(sourceType) {
           const state = SyncStateV2.getSourceState(sourceType);
-          const intervalMin = this.getIntervalMinutes(sourceType);
+          const intervalMin = this._intervals.has(sourceType) ? this._intervals.get(sourceType) : this.getIntervalMinutes(sourceType);
           const isRunning = this._timers.has(sourceType);
+          const anchor = this._anchors.get(sourceType);
+          const periodMs = intervalMin * 60 * 1e3;
+          let nextSyncAt = null;
+          if (isRunning && anchor && periodMs > 0) {
+            const elapsed = Date.now() - anchor;
+            nextSyncAt = anchor + (Math.floor(elapsed / periodMs) + 1) * periodMs;
+          }
           return {
             intervalMinutes: intervalMin,
             lastSyncAt: state.lastSuccessAt || 0,
             lastOutcome: state.lastOutcome || "idle",
-            nextSyncAt: isRunning && state.lastSuccessAt ? state.lastSuccessAt + intervalMin * 60 * 1e3 : null
+            nextSyncAt
           };
         },
         /**
@@ -12262,12 +12698,22 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
          * @param {string} sourceType
          */
         async _doSync(sourceType) {
+          if (this._inFlight.has(sourceType)) return;
+          this._inFlight.add(sourceType);
+          try {
+            await this._doSyncOnce(sourceType);
+          } finally {
+            this._inFlight.delete(sourceType);
+          }
+        },
+        async _doSyncOnce(sourceType) {
           const epoch = this._epochs.get(sourceType) || 0;
           try {
             const runner = SOURCE_RUNNERS[sourceType];
             if (typeof runner === "function") {
               await runner();
               if (epoch !== (this._epochs.get(sourceType) || 0)) return;
+              this._cancelRetry(sourceType);
               this._retryCounts.set(sourceType, 0);
               return;
             }
@@ -12276,6 +12722,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             if (result.error) {
               this._scheduleRetry(sourceType);
             } else {
+              this._cancelRetry(sourceType);
               this._retryCounts.set(sourceType, 0);
             }
           } catch (error) {
@@ -12298,7 +12745,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           this._retryCounts.set(sourceType, count);
           const delay = RETRY_DELAYS[Math.min(count - 1, RETRY_DELAYS.length - 1)];
-          const retryId = globalThis.setTimeout(() => this._doSync(sourceType), delay);
+          const epoch = this._epochs.get(sourceType) || 0;
+          const retryId = globalThis.setTimeout(() => {
+            if (epoch !== (this._epochs.get(sourceType) || 0)) return;
+            this._doSync(sourceType);
+          }, delay);
           this._retries.set(sourceType, retryId);
         },
         /**
@@ -12333,6 +12784,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var BookmarkAutoImporter2 = {
         isRunning: false,
         timerId: null,
+        initTimerId: null,
         deferredWhileHidden: false,
         visibilityListenerBound: false,
         lastRunAt: 0,
@@ -12364,12 +12816,20 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           document.addEventListener("visibilitychange", () => {
             if (!document.hidden && BookmarkAutoImporter2.deferredWhileHidden) {
               BookmarkAutoImporter2.deferredWhileHidden = false;
-              Utils2.runWhenBrowserIdle(() => BookmarkAutoImporter2.run());
+              Utils2.runWhenBrowserIdle(() => {
+                if (!Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, false)) return;
+                BookmarkAutoImporter2.run();
+              });
             }
           });
           BookmarkAutoImporter2.visibilityListenerBound = true;
         },
         stopPolling: () => {
+          if (BookmarkAutoImporter2.initTimerId) {
+            clearTimeout(BookmarkAutoImporter2.initTimerId);
+            BookmarkAutoImporter2.initTimerId = null;
+          }
+          BookmarkAutoImporter2.deferredWhileHidden = false;
           if (BookmarkAutoImporter2.timerId) {
             clearInterval(BookmarkAutoImporter2.timerId);
             BookmarkAutoImporter2.timerId = null;
@@ -12512,6 +12972,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (!snapshotEntry) return false;
           return String(snapshotEntry.url || "") !== String(bookmark.url || "");
         },
+        // P4 收敛(c06): 同 URL 不同 ID 的两书签共用一页(F9) —— 页面 书签ID 只属于先建页者。
+        // 若该 id 仍在本次书签集中且 URL 相同, 则为共享页(记 unchanged); 否则视为接管(走 needsUpdate)。
+        isSharedWithLiveBookmark: (bookmark, pageMeta, currentBookmarks = []) => {
+          const owner = String((pageMeta == null ? void 0 : pageMeta.bookmarkId) || "").trim();
+          if (!owner || owner === String(bookmark.id || "").trim()) return false;
+          const url = String(bookmark.url || "").trim();
+          return currentBookmarks.some((b) => String(b.id || "").trim() === owner && String(b.url || "").trim() === url);
+        },
         needsUpdate: (bookmark, snapshotEntry, pageMeta) => {
           if (!pageMeta) return true;
           if (pageMeta.bookmarkId !== String(bookmark.id || "").trim()) return true;
@@ -12539,8 +13007,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         init: () => {
           if (!BookmarkAutoImporter2.canStart()) return;
           BookmarkAutoImporter2.ensureVisibilityListener();
-          setTimeout(() => {
-            Utils2.runWhenBrowserIdle(() => BookmarkAutoImporter2.run());
+          if (BookmarkAutoImporter2.initTimerId) clearTimeout(BookmarkAutoImporter2.initTimerId);
+          BookmarkAutoImporter2.initTimerId = setTimeout(() => {
+            BookmarkAutoImporter2.initTimerId = null;
+            if (!Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, false)) return;
+            Utils2.runWhenBrowserIdle(() => {
+              if (!Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, false)) return;
+              BookmarkAutoImporter2.run();
+            });
             const interval = Storage2.get(
               CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL,
               CONFIG2.DEFAULTS.bookmarkAutoImportInterval
@@ -12573,7 +13047,15 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         if (now - BookmarkAutoImporter2.lastRunAt < BookmarkAutoImporter2.minimumRunGapMs) return;
         BookmarkAutoImporter2.lastRunAt = now;
         BookmarkAutoImporter2.isRunning = true;
-        const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        let lease = null;
+        try {
+          lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        } catch (error) {
+          BookmarkAutoImporter2.isRunning = false;
+          console.error("[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u83B7\u53D6\u79DF\u7EA6\u5931\u8D25:", error);
+          BookmarkAutoImporter2.updateStatus("\u274C \u83B7\u53D6\u540C\u6B65\u79DF\u7EA6\u5931\u8D25\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
+          return;
+        }
         if (!lease) {
           BookmarkAutoImporter2.isRunning = false;
           BookmarkAutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\u6D4F\u89C8\u5668\u4E66\u7B7E\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
@@ -12582,7 +13064,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         SyncLock.isExporting = true;
         let leaseLost = false;
         const renewTimer = setInterval(() => {
-          if (!SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+          let renewed;
+          try {
+            renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          } catch (renewError) {
+            console.warn("[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u7EED\u7EA6\u5931\u8D25:", renewError);
+            renewed = false;
+          }
+          if (!renewed) {
             leaseLost = true;
             clearInterval(renewTimer);
           }
@@ -12645,6 +13134,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               }
             };
             const processBookmark = async (bookmark, itemIndex) => {
+              if (leaseLost) return;
               const bookmarkId = String(bookmark.id);
               const snapshotEntry = previousSnapshot[bookmarkId] || null;
               let pageMeta = pageIndex.byBookmarkId.get(bookmarkId) || pageIndex.byUrl.get(bookmark.url) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? pageIndex.byPageId.get(snapshotEntry.pageId) : null);
@@ -12717,7 +13207,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   SyncCoordinator.markItemSeen("bookmark", `bookmark:${bookmarkId}`);
                   created++;
                   successfulIds.add(bookmarkId);
-                } else if (BookmarkAutoImporter2.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
+                } else if (!BookmarkAutoImporter2.isSharedWithLiveBookmark(bookmark, pageMeta, currentBookmarks) && BookmarkAutoImporter2.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
                   BookmarkAutoImporter2.updateStatus(`\u{1F4E7} \u6B63\u5728\u66F4\u65B0\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
                   const { OperationGuard: OperationGuard2 } = require_security();
                   if (!OperationGuard2.canExecute("updatePage")) {
@@ -12778,6 +13268,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             };
             await processInBatches(currentBookmarks, processBookmark);
             pendingUrlClaim.clear();
+            const claimedPageIds = /* @__PURE__ */ new Set();
+            for (const b of currentBookmarks) {
+              const entry = nextSnapshot[String(b.id)];
+              if (entry == null ? void 0 : entry.pageId) claimedPageIds.add(entry.pageId);
+            }
             BookmarkExporter2.flushExported();
             if (authAborted) {
               throw authAbortError;
@@ -12787,10 +13282,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
             const deletedIds = Object.keys(previousSnapshot).filter((bookmarkId) => !currentMap.has(bookmarkId));
             const processDeleted = async (bookmarkId, itemIndex) => {
+              if (leaseLost) return;
               const snapshotEntry = previousSnapshot[bookmarkId];
               const pageMeta = ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? pageIndex.byPageId.get(snapshotEntry.pageId) : null) || pageIndex.byBookmarkId.get(bookmarkId) || ((snapshotEntry == null ? void 0 : snapshotEntry.url) ? pageIndex.byUrl.get(snapshotEntry.url) : null);
               if (!(pageMeta == null ? void 0 : pageMeta.pageId)) {
                 archived++;
+                return;
+              }
+              if (claimedPageIds.has(pageMeta.pageId)) {
                 return;
               }
               try {
@@ -12834,6 +13333,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               }
             };
             await processInBatches(deletedIds, (id, idx) => processDeleted(id, idx));
+            if (authAborted) {
+              throw authAbortError;
+            }
+            if (leaseLost) {
+              throw new Error("\u540C\u6B65\u79DF\u7EA6\u5DF2\u88AB\u5176\u4ED6\u6807\u7B7E\u9875\u63A5\u7BA1\uFF0C\u672C\u8F6E\u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u4E2D\u6B62");
+            }
             SyncState2.updateBookmarkState({
               snapshot: nextSnapshot,
               // F7 共识: watermark 仅由成功项推进(created/updated/unchanged),
@@ -12920,6 +13425,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var RSSAutoImporter2 = {
         isRunning: false,
         timerId: null,
+        initTimerId: null,
         deferredWhileHidden: false,
         visibilityListenerBound: false,
         lastRunAt: 0,
@@ -12942,7 +13448,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         }),
         getFeedUrls: (raw = Storage2.get(CONFIG2.STORAGE_KEYS.RSS_FEED_URLS, CONFIG2.DEFAULTS.rssFeedUrls)) => {
           const urls = String(raw || "").split(/[\n,，;；]/).map((item) => item.trim()).filter(Boolean).filter((item) => /^https?:\/\//i.test(item));
-          return Array.from(new Set(urls));
+          const { UrlValidator } = require_UrlValidator();
+          const safe = urls.filter((item) => {
+            const ok = UrlValidator.validatePageExternalUrl(item);
+            if (!ok) console.warn("[LD-Notion] RSS feed \u5730\u5740\u88AB\u62D2(\u975E\u516C\u7F51 http(s)):", item);
+            return ok;
+          });
+          return Array.from(new Set(safe));
         },
         getDedupMode: () => {
           const mode = Storage2.get(CONFIG2.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE, CONFIG2.DEFAULTS.rssImportDedupMode);
@@ -12958,12 +13470,20 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           document.addEventListener("visibilitychange", () => {
             if (!document.hidden && RSSAutoImporter2.deferredWhileHidden) {
               RSSAutoImporter2.deferredWhileHidden = false;
-              Utils2.runWhenBrowserIdle(() => RSSAutoImporter2.run());
+              Utils2.runWhenBrowserIdle(() => {
+                if (!Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return;
+                RSSAutoImporter2.run();
+              });
             }
           });
           RSSAutoImporter2.visibilityListenerBound = true;
         },
         stopPolling: () => {
+          if (RSSAutoImporter2.initTimerId) {
+            clearTimeout(RSSAutoImporter2.initTimerId);
+            RSSAutoImporter2.initTimerId = null;
+          }
+          RSSAutoImporter2.deferredWhileHidden = false;
           const { SyncScheduler } = require_SyncScheduler();
           SyncScheduler.stop("rss");
         },
@@ -13013,12 +13533,19 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return values;
         },
         extractLink: (block, isAtom = false) => {
+          var _a, _b, _c;
           const source = String(block || "");
           if (isAtom) {
-            const alternateMatch = source.match(/<link\b[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["'][^>]*\/?>/i);
-            if (alternateMatch == null ? void 0 : alternateMatch[1]) return RSSAutoImporter2.decodeXmlEntities(alternateMatch[1]).trim();
-            const hrefMatch = source.match(/<link\b[^>]*href=["']([^"']+)["'][^>]*\/?>/i);
-            if (hrefMatch == null ? void 0 : hrefMatch[1]) return RSSAutoImporter2.decodeXmlEntities(hrefMatch[1]).trim();
+            const linkTags = source.match(/<link\b[^>]*\/?>/gi) || [];
+            let firstHref = "";
+            for (const tag of linkTags) {
+              const href = (_a = tag.match(/href=["']([^"']+)["']/i)) == null ? void 0 : _a[1];
+              if (!href) continue;
+              const rel = (_c = (_b = tag.match(/rel=["']([^"']*)["']/i)) == null ? void 0 : _b[1]) == null ? void 0 : _c.toLowerCase();
+              if (rel === "alternate") return RSSAutoImporter2.decodeXmlEntities(href).trim();
+              if (!rel && !firstHref) firstHref = href;
+            }
+            if (firstHref) return RSSAutoImporter2.decodeXmlEntities(firstHref).trim();
           }
           return RSSAutoImporter2.extractTagText(source, ["link"]);
         },
@@ -13289,6 +13816,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const canUseAI = !!((settings == null ? void 0 : settings.aiApiKey) && (settings == null ? void 0 : settings.aiService) && Array.isArray(settings == null ? void 0 : settings.categories) && settings.categories.length > 0);
           const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
           if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
+            context.aiUsedCount = (context.aiUsedCount || 0) + 1;
             try {
               const aiCategory = await BookmarkExporter2.generateAICategory(
                 { title: normalized.title, url: normalized.url },
@@ -13305,7 +13833,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   console.warn(`[LD-Notion] RSS AI \u5206\u7C7B\u4E0D\u5728\u767D\u540D\u5355\uFF0C\u4F7F\u7528\u542F\u53D1\u5F0F fallback: ${aiCategory}`);
                 }
               }
-              context.aiUsedCount = (context.aiUsedCount || 0) + 1;
             } catch (e) {
               console.warn("[LD-Notion] RSS AI \u5206\u7C7B\u5931\u8D25\uFF0C\u4F7F\u7528\u542F\u53D1\u5F0F fallback:", e);
               context.aiFailureCount = (context.aiFailureCount || 0) + 1;
@@ -13400,10 +13927,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }));
           }
           let feedCount = RSSAutoImporter2.getFeedUrls().length;
+          let hasFullItemSet = false;
           if (currentItems.length === 0) {
             const fallback = await RSSAutoImporter2.loadCurrentItems();
             currentItems = fallback.items || [];
             feedCount = fallback.feedCount || feedCount;
+            hasFullItemSet = true;
           }
           const trackedPages = await RSSAutoImporter2.fetchTrackedPages(settings.databaseId, settings.apiKey);
           const index = RSSAutoImporter2.buildPageIndex(trackedPages);
@@ -13412,6 +13941,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             previousSnapshot,
             currentItems,
             feedCount,
+            hasFullItemSet,
             index,
             nextSnapshot: { ...previousSnapshot },
             delay: Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay),
@@ -13422,7 +13952,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         _syncSingleRssItem: async (item, ctx) => {
           const { settings, index, previousSnapshot, nextSnapshot, enrichContext, total } = ctx;
           const snapshotEntry = previousSnapshot[item.itemKey] || null;
-          let pageMeta = (item.url ? index.byUrl.get(item.url) : null) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? index.byPageId.get(snapshotEntry.pageId) : null) || (item.title ? index.byTitle.get(item.title) : null);
+          const titleMatch = item.title ? index.byTitle.get(item.title) : null;
+          const safeTitleMatch = titleMatch && (!titleMatch.url || !item.url || titleMatch.url === item.url) ? titleMatch : null;
+          let pageMeta = (item.url ? index.byUrl.get(item.url) : null) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? index.byPageId.get(snapshotEntry.pageId) : null) || safeTitleMatch;
           let result = { created: 0, updated: 0, unchanged: 0, failed: 0, denied: 0, itemKey: item.itemKey };
           try {
             settings.apiKey = NotionOAuth2.getAccessToken("");
@@ -13468,7 +14000,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1ARSS \u81EA\u52A8\u540C\u6B65\u66F4\u65B0\u9700 level\u22651" }
                 );
                 result.denied = 1;
-                nextSnapshot[item.itemKey] = snapshotEntry || RSSAutoImporter2.buildSnapshotEntry(item, pageMeta.pageId);
+                if (snapshotEntry) nextSnapshot[item.itemKey] = snapshotEntry;
                 result.success = false;
                 return result;
               }
@@ -13520,11 +14052,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         // 汇总 RSS 同步状态与 watermark（MNT-002 提取自 run）
         _aggregateRssState: (ctx, stats, successfulKeys, attemptAt) => {
-          const { currentItems, feedCount, nextSnapshot } = ctx;
+          const { currentItems, feedCount, nextSnapshot, hasFullItemSet } = ctx;
           const { created, updated, unchanged, failed } = stats;
-          const keptKeys = new Set(currentItems.map((item) => item.itemKey));
-          for (const key of Object.keys(nextSnapshot)) {
-            if (!keptKeys.has(key)) delete nextSnapshot[key];
+          if (hasFullItemSet && currentItems.length > 0) {
+            const keptKeys = new Set(currentItems.map((item) => item.itemKey));
+            for (const key of Object.keys(nextSnapshot)) {
+              if (!keptKeys.has(key)) delete nextSnapshot[key];
+            }
           }
           const statePatch = {
             snapshot: nextSnapshot,
@@ -13596,7 +14130,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           RSSAutoImporter2.lastRunAt = now;
           RSSAutoImporter2.isRunning = true;
           SyncLock.isExporting = true;
-          const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+          let lease = null;
+          try {
+            lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+          } catch (error) {
+            RSSAutoImporter2.isRunning = false;
+            SyncLock.isExporting = false;
+            console.error("[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u83B7\u53D6\u79DF\u7EA6\u5931\u8D25:", error);
+            RSSAutoImporter2.updateStatus("\u274C \u83B7\u53D6\u540C\u6B65\u79DF\u7EA6\u5931\u8D25\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
+            return;
+          }
           if (!lease) {
             RSSAutoImporter2.isRunning = false;
             SyncLock.isExporting = false;
@@ -13605,7 +14148,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           let leaseLost = false;
           const renewTimer = setInterval(() => {
-            if (!SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+            let renewed;
+            try {
+              renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+            } catch (renewError) {
+              console.warn("[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u7EED\u7EA6\u5931\u8D25:", renewError);
+              renewed = false;
+            }
+            if (!renewed) {
               leaseLost = true;
               clearInterval(renewTimer);
             }
@@ -13672,8 +14222,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         init: () => {
           if (!RSSAutoImporter2.canStart()) return;
           RSSAutoImporter2.ensureVisibilityListener();
-          setTimeout(() => {
-            Utils2.runWhenBrowserIdle(() => RSSAutoImporter2.run());
+          if (RSSAutoImporter2.initTimerId) clearTimeout(RSSAutoImporter2.initTimerId);
+          RSSAutoImporter2.initTimerId = setTimeout(() => {
+            RSSAutoImporter2.initTimerId = null;
+            if (!Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return;
+            Utils2.runWhenBrowserIdle(() => {
+              if (!Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return;
+              RSSAutoImporter2.run();
+            });
             const interval = Storage2.get(
               CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL,
               CONFIG2.DEFAULTS.rssAutoImportInterval
@@ -14106,7 +14662,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             const database = await NotionAPI2.request("GET", `/databases/${databaseId}`, null, apiKey);
             const existingProps = database.properties || {};
             const propsToAdd = {};
-            const propsToUpdate = {};
+            const propsToUpdate = /* @__PURE__ */ Object.create(null);
             const typeConflicts = [];
             for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
               const existingProp = existingProps[name];
@@ -14378,13 +14934,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           applyUploadedRefs(blocks);
         },
         _getChildContainers: (block) => {
-          var _a, _b, _c, _d, _e;
+          var _a, _b, _c, _d, _e, _f;
           const containers = [];
           if ((_a = block.callout) == null ? void 0 : _a.children) containers.push(block.callout);
           if ((_b = block.quote) == null ? void 0 : _b.children) containers.push(block.quote);
           if ((_c = block.synced_block) == null ? void 0 : _c.children) containers.push(block.synced_block);
           if ((_d = block.column_list) == null ? void 0 : _d.children) containers.push(block.column_list);
-          if ((_e = block.toggle) == null ? void 0 : _e.children) containers.push(block.toggle);
+          if ((_e = block.column) == null ? void 0 : _e.children) containers.push(block.column);
+          if ((_f = block.toggle) == null ? void 0 : _f.children) containers.push(block.toggle);
           return containers;
         },
         // 导出单个帖子
@@ -14480,6 +15037,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
             };
           }
+          Exporter2.reset();
           const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
           if (!lease) {
             return {
@@ -14493,11 +15051,17 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             };
           }
           const results = { success: [], failed: [], skipped: [] };
-          Exporter2.reset();
           SyncLock.isExporting = true;
           let leaseLost = false;
           const renewTimer = setInterval(() => {
-            if (!SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+            let renewed;
+            try {
+              renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+            } catch (renewError) {
+              console.warn("[LD-Notion] \u5BFC\u51FA\u7EED\u7EA6\u5931\u8D25:", renewError);
+              renewed = false;
+            }
+            if (!renewed) {
               leaseLost = true;
               clearInterval(renewTimer);
             }
@@ -14509,17 +15073,20 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           for (let i = startIndex; i < bookmarks.length; i++) remaining.push(i);
           let completedCount = 0;
           const worker = async () => {
+            const abortIfLeaseLost = () => {
+              if (!leaseLost) return false;
+              Exporter2.cancel();
+              results.leaseLost = true;
+              return true;
+            };
             while (true) {
               while (Exporter2.isPaused) {
                 await Utils2.sleep(200);
                 if (Exporter2.isCancelled) return;
+                if (abortIfLeaseLost()) return;
               }
               if (Exporter2.isCancelled) return;
-              if (leaseLost) {
-                Exporter2.cancel();
-                results.leaseLost = true;
-                return;
-              }
+              if (abortIfLeaseLost()) return;
               const i = remaining.shift();
               if (i === void 0) return;
               const bookmark = bookmarks[i];
@@ -14610,6 +15177,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var UpdateChecker2 = {
         timerId: null,
         isChecking: false,
+        _epoch: 0,
         shouldCheckNow: (intervalHours) => {
           const intervalMs = (parseInt(intervalHours, 10) || 0) * 60 * 60 * 1e3;
           if (intervalMs <= 0) return true;
@@ -14647,12 +15215,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               },
               timeout: 15e3,
               onload: (response) => {
-                if (response.status !== 200) {
-                  reject(new Error(`\u66F4\u65B0\u68C0\u67E5\u5931\u8D25: HTTP ${response.status}`));
+                const status = response == null ? void 0 : response.status;
+                if (status !== 200) {
+                  reject(new Error(`\u66F4\u65B0\u68C0\u67E5\u5931\u8D25: HTTP ${status ?? "\u65E0\u54CD\u5E94"}`));
                   return;
                 }
                 try {
-                  const data = JSON.parse(response.responseText || "{}");
+                  const data = JSON.parse((response == null ? void 0 : response.responseText) || "{}");
                   const version = String(data.tag_name || data.name || "").replace(/^v/i, "").trim();
                   if (!version) {
                     reject(new Error("\u672A\u83B7\u53D6\u5230\u7248\u672C\u53F7"));
@@ -14664,7 +15233,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 }
               },
               ontimeout: () => reject(new Error("\u66F4\u65B0\u68C0\u67E5\u8D85\u65F6")),
-              onerror: () => reject(new Error("\u7F51\u7EDC\u9519\u8BEF\uFF0C\u65E0\u6CD5\u68C0\u67E5\u66F4\u65B0"))
+              onerror: () => reject(new Error("\u7F51\u7EDC\u9519\u8BEF\uFF0C\u65E0\u6CD5\u68C0\u67E5\u66F4\u65B0")),
+              // 2/3 共识(dsf+qwen): 缺少 onabort 时请求被中止 → Promise 永不 settle,
+              // isChecking 永久为 true 阻塞后续检查。
+              onabort: () => reject(new Error("\u66F4\u65B0\u68C0\u67E5\u5DF2\u4E2D\u6B62"))
             });
           });
         },
@@ -14747,12 +15319,18 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           UpdateChecker2.stopPolling();
           const intervalHours = parseInt(hours, 10) || 0;
           if (intervalHours > 0) {
+            const intervalMs = Math.min(intervalHours * 60 * 60 * 1e3, 2147483647);
             UpdateChecker2.timerId = setInterval(() => {
-              Utils2.runWhenBrowserIdle(() => UpdateChecker2.check({ manual: false }));
-            }, intervalHours * 60 * 60 * 1e3);
+              const epoch = UpdateChecker2._epoch;
+              Utils2.runWhenBrowserIdle(() => {
+                if (epoch !== UpdateChecker2._epoch) return;
+                UpdateChecker2.check({ manual: false });
+              });
+            }, intervalMs);
           }
         },
         stopPolling: () => {
+          UpdateChecker2._epoch += 1;
           if (UpdateChecker2.timerId) {
             clearInterval(UpdateChecker2.timerId);
             UpdateChecker2.timerId = null;
@@ -14764,10 +15342,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           UpdateChecker2.stopPolling();
           UpdateChecker2.renderLastStatus();
           if (enabled) {
-            if (UpdateChecker2.shouldCheckNow(intervalHours)) {
-              Utils2.runWhenBrowserIdle(() => UpdateChecker2.check({ manual: false }));
-            }
             UpdateChecker2.startPolling(intervalHours);
+            if (UpdateChecker2.shouldCheckNow(intervalHours)) {
+              const epoch = UpdateChecker2._epoch;
+              Utils2.runWhenBrowserIdle(() => {
+                if (epoch !== UpdateChecker2._epoch) return;
+                UpdateChecker2.check({ manual: false });
+              });
+            }
           }
         }
       };
@@ -14938,7 +15520,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。与 BookmarkExporter.flushExported 同构。
         // v3.14.3: 导出账本改容量上限淘汰（repo full_name 天然有界），不再按 90 天时间 TTL 误删导出事实。
         // v3.14.6 (CC-05): 写前 rebase(重读-并集-max ts) —— 跨 tab 他端新增键不可丢
-        flushExported: () => {
+        // P4 收敛(c08): removedKeys —— 写前 rebase 会把存储旧值并集回写, 刚删除的键被复活
+        // (unmarkExported 返回 true 但账本仍含该项, 重新导出入口静默失效)
+        flushExported: (removedKeys = null) => {
           if (GitHubAPI2._exportedCache) {
             GitHubAPI2._evictByCapacity(GitHubAPI2._exportedCache);
             let remote = {};
@@ -14948,6 +15532,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               remote = {};
             }
             const merged = { ...remote };
+            if (removedKeys) for (const key of removedKeys) delete merged[key];
             for (const [key, ts] of Object.entries(GitHubAPI2._exportedCache)) {
               if (merged[key] === void 0 || Number(merged[key]) < Number(ts)) merged[key] = ts;
             }
@@ -14970,7 +15555,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           GitHubAPI2.markGistExported(gistId);
           GitHubAPI2.flushGistsExported();
         },
-        flushGistsExported: () => {
+        flushGistsExported: (removedKeys = null) => {
           if (GitHubAPI2._exportedGistsCache) {
             GitHubAPI2._evictByCapacity(GitHubAPI2._exportedGistsCache);
             let remote = {};
@@ -14980,6 +15565,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               remote = {};
             }
             const merged = { ...remote };
+            if (removedKeys) for (const key of removedKeys) delete merged[key];
             for (const [key, ts] of Object.entries(GitHubAPI2._exportedGistsCache)) {
               if (merged[key] === void 0 || Number(merged[key]) < Number(ts)) merged[key] = ts;
             }
@@ -15012,14 +15598,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const exported = GitHubAPI2.getExported();
           if (!Object.prototype.hasOwnProperty.call(exported, repoFullName)) return false;
           delete exported[repoFullName];
-          GitHubAPI2.flushExported();
+          GitHubAPI2.flushExported([repoFullName]);
           return true;
         },
         unmarkGistExported: (gistId) => {
           const exported = GitHubAPI2.getExportedGists();
           if (!Object.prototype.hasOwnProperty.call(exported, gistId)) return false;
           delete exported[gistId];
-          GitHubAPI2.flushGistsExported();
+          GitHubAPI2.flushGistsExported([gistId]);
           return true;
         },
         // 获取启用的导入类型
@@ -15072,16 +15658,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                     return;
                   }
                 }
-                GitHubAPI2._cacheReadme(cacheKey, "");
+                if (response.status === 404) GitHubAPI2._cacheReadme(cacheKey, "");
                 resolve("");
               },
               onerror: () => {
-                GitHubAPI2._cacheReadme(cacheKey, "");
                 resolve("");
               },
               timeout: 15e3,
               ontimeout: () => {
-                GitHubAPI2._cacheReadme(cacheKey, "");
                 resolve("");
               }
             });
@@ -15482,7 +16066,10 @@ ${insight.summary || ""}`,
             throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
           }
           if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+          const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+          if (!setupResult.success) {
+            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+          }
           if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Repos...", 5);
           const repos = await GitHubAPI2.fetchUserRepos(username, token);
           const ownRepos = repos.filter((r) => !r.fork);
@@ -15505,7 +16092,10 @@ ${insight.summary || ""}`,
             throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
           }
           if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+          const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+          if (!setupResult.success) {
+            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+          }
           if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Forks...", 5);
           const forks = await GitHubAPI2.fetchForkedRepos(username, token);
           return GitHubExporter2._exportItems(
@@ -15527,7 +16117,10 @@ ${insight.summary || ""}`,
             throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
           }
           if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+          const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+          if (!setupResult.success) {
+            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+          }
           if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Gists...", 5);
           const gists = await GitHubAPI2.fetchUserGists(username, token);
           return GitHubExporter2._exportItems(
@@ -15683,6 +16276,10 @@ ${insight.summary || ""}`,
       var GitHubAutoImporter2 = {
         isRunning: false,
         timerId: null,
+        initTimerId: null,
+        // glm P1 共识: 租约丢失标志需下沉到模块级 —— 批量写页在 _exportViaGitHubExporter
+        // 内逐项执行, 原先仅类型循环边界可见 leaseLost, 单类型内继续写 Notion
+        _leaseLost: false,
         deferredWhileHidden: false,
         visibilityListenerBound: false,
         lastRunAt: 0,
@@ -15754,7 +16351,10 @@ ${insight.summary || ""}`,
           document.addEventListener("visibilitychange", () => {
             if (!document.hidden && GitHubAutoImporter2.deferredWhileHidden) {
               GitHubAutoImporter2.deferredWhileHidden = false;
-              Utils2.runWhenBrowserIdle(() => GitHubAutoImporter2.run());
+              Utils2.runWhenBrowserIdle(() => {
+                if (!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return;
+                GitHubAutoImporter2.run();
+              });
             }
           });
           GitHubAutoImporter2.visibilityListenerBound = true;
@@ -15767,6 +16367,11 @@ ${insight.summary || ""}`,
           }
         },
         stopPolling: () => {
+          if (GitHubAutoImporter2.initTimerId) {
+            clearTimeout(GitHubAutoImporter2.initTimerId);
+            GitHubAutoImporter2.initTimerId = null;
+          }
+          GitHubAutoImporter2.deferredWhileHidden = false;
           const { SyncScheduler } = require_SyncScheduler();
           const types = GitHubAPI2.getImportTypes();
           for (const type of types) {
@@ -15776,8 +16381,14 @@ ${insight.summary || ""}`,
         init: () => {
           if (!GitHubAutoImporter2.canStart()) return;
           GitHubAutoImporter2.ensureVisibilityListener();
-          setTimeout(() => {
-            Utils2.runWhenBrowserIdle(() => GitHubAutoImporter2.run());
+          if (GitHubAutoImporter2.initTimerId) clearTimeout(GitHubAutoImporter2.initTimerId);
+          GitHubAutoImporter2.initTimerId = setTimeout(() => {
+            GitHubAutoImporter2.initTimerId = null;
+            if (!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return;
+            Utils2.runWhenBrowserIdle(() => {
+              if (!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return;
+              GitHubAutoImporter2.run();
+            });
             const interval = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.githubAutoImportInterval);
             if (interval > 0) GitHubAutoImporter2.startPolling(interval);
           }, 3e3);
@@ -15815,6 +16426,7 @@ ${insight.summary || ""}`,
         }
         try {
           for (let i = 0; i < toExport.length; i++) {
+            if (GitHubAutoImporter2._leaseLost) break;
             const item = toExport[i];
             const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
             try {
@@ -15832,7 +16444,7 @@ ${insight.summary || ""}`,
                 failedEntries.push({ itemKey, title: item.title || itemKey });
                 continue;
               }
-              const enriched = await GitHubExporter2.enrichRepo(raw, settings, enrichContext);
+              const enriched = type === "gists" ? raw : await GitHubExporter2.enrichRepo(raw, settings, enrichContext);
               const buildFn = type === "gists" ? GitHubExporter2.buildGistProperties : (r) => GitHubExporter2.buildRepoProperties(r, meta.label);
               const properties = buildFn(enriched);
               for (const k of Object.keys(properties)) {
@@ -15858,6 +16470,7 @@ ${insight.summary || ""}`,
               }
               successEntries.push({ itemKey });
             } catch (e) {
+              const authTerminal = e && e.isAuthTerminal === true;
               console.warn(`[GitHubAutoImporter] \u5BFC\u51FA\u5931\u8D25: ${itemKey}`, e);
               try {
                 const { OperationLog: OperationLog2 } = require_security();
@@ -15872,6 +16485,7 @@ ${insight.summary || ""}`,
               } catch (_) {
               }
               failedEntries.push({ itemKey, title: item.title || itemKey });
+              if (authTerminal) break;
             }
             if (i < toExport.length - 1) {
               await Utils2.sleep(delay);
@@ -16050,6 +16664,35 @@ ${insight.summary || ""}`,
         GitHubAutoImporter2.lastRunAt = now;
         GitHubAutoImporter2.isRunning = true;
         const attemptAt = Date.now();
+        let lease = null;
+        try {
+          lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        } catch (leaseError) {
+          GitHubAutoImporter2.isRunning = false;
+          console.error("[LD-Notion] GitHub \u81EA\u52A8\u5BFC\u5165\u83B7\u53D6\u79DF\u7EA6\u5931\u8D25:", leaseError);
+          GitHubAutoImporter2.updateStatus("\u274C \u83B7\u53D6\u540C\u6B65\u79DF\u7EA6\u5931\u8D25\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
+          return;
+        }
+        if (!lease) {
+          GitHubAutoImporter2.isRunning = false;
+          GitHubAutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\uFF0C\u672C\u8F6E GitHub \u540C\u6B65\u8DF3\u8FC7");
+          return;
+        }
+        SyncLock.isExporting = true;
+        GitHubAutoImporter2._leaseLost = false;
+        const renewTimer = setInterval(() => {
+          let renewed;
+          try {
+            renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          } catch (renewError) {
+            console.warn("[LD-Notion] GitHub \u81EA\u52A8\u5BFC\u5165\u7EED\u7EA6\u5931\u8D25:", renewError);
+            renewed = false;
+          }
+          if (!renewed) {
+            GitHubAutoImporter2._leaseLost = true;
+            clearInterval(renewTimer);
+          }
+        }, 3e4);
         try {
           GitHubAutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u68C0\u67E5 GitHub \u65B0\u6536\u85CF...");
           const types = GitHubAPI2.getImportTypes();
@@ -16068,6 +16711,7 @@ ${insight.summary || ""}`,
           let failedCount = 0;
           const syncErrors = [];
           for (const type of types) {
+            if (GitHubAutoImporter2._leaseLost) break;
             const r = await GitHubAutoImporter2._syncSingleType(type, settings, attemptAt);
             successCount += r.success;
             failedCount += r.failed;
@@ -16094,6 +16738,10 @@ ${insight.summary || ""}`,
           });
           GitHubAutoImporter2.updateStatus(`\u274C GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
         } finally {
+          clearInterval(renewTimer);
+          SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          SyncLock.isExporting = false;
+          GitHubAutoImporter2._leaseLost = false;
           GitHubAutoImporter2.isRunning = false;
           emit("bookmarks:updated");
           emit("sync:center-summary-updated");
@@ -16178,19 +16826,26 @@ ${insight.summary || ""}`,
           document.addEventListener("visibilitychange", () => {
             if (!document.hidden && AutoImporter2.deferredWhileHidden) {
               AutoImporter2.deferredWhileHidden = false;
+              if (!AutoImporter2.canStart()) return;
               Utils2.runWhenBrowserIdle(() => AutoImporter2.run());
             }
           });
           AutoImporter2.visibilityListenerBound = true;
         },
         stopPolling: () => {
+          if (AutoImporter2._initTimer) {
+            clearTimeout(AutoImporter2._initTimer);
+            AutoImporter2._initTimer = null;
+          }
           const { SyncScheduler } = require_SyncScheduler();
           SyncScheduler.stop("linuxdo");
         },
         init: () => {
           if (!AutoImporter2.canStart()) return;
           AutoImporter2.ensureVisibilityListener();
-          setTimeout(() => {
+          AutoImporter2._initTimer = setTimeout(() => {
+            AutoImporter2._initTimer = null;
+            if (!AutoImporter2.canStart()) return;
             Utils2.runWhenBrowserIdle(() => AutoImporter2.run());
             const interval = Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.autoImportInterval);
             if (interval > 0) AutoImporter2.startPolling(interval);
@@ -16223,6 +16878,36 @@ ${insight.summary || ""}`,
         AutoImporter2.lastRunAt = now;
         AutoImporter2.isRunning = true;
         SyncLock.isExporting = true;
+        let lease = null;
+        try {
+          lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        } catch (leaseError) {
+          AutoImporter2.isRunning = false;
+          SyncLock.isExporting = false;
+          console.error("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u83B7\u53D6\u79DF\u7EA6\u5931\u8D25:", leaseError);
+          AutoImporter2.updateStatus("\u274C \u83B7\u53D6\u540C\u6B65\u79DF\u7EA6\u5931\u8D25\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
+          return;
+        }
+        if (!lease) {
+          AutoImporter2.isRunning = false;
+          SyncLock.isExporting = false;
+          AutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\uFF0C\u672C\u8F6E\u81EA\u52A8\u5BFC\u5165\u8DF3\u8FC7");
+          return;
+        }
+        AutoImporter2._leaseLost = false;
+        const renewTimer = setInterval(() => {
+          let renewed;
+          try {
+            renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          } catch (renewError) {
+            console.warn("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u7EED\u7EA6\u5931\u8D25:", renewError);
+            renewed = false;
+          }
+          if (!renewed) {
+            AutoImporter2._leaseLost = true;
+            clearInterval(renewTimer);
+          }
+        }, 3e4);
         const attemptAt = Date.now();
         const exportBtn = document.querySelector("#ldb-export");
         try {
@@ -16286,6 +16971,7 @@ ${insight.summary || ""}`,
           const remaining = Array.from({ length: newBookmarks.length }, (_, k) => k);
           const worker = async () => {
             while (true) {
+              if (AutoImporter2._leaseLost || autoImportAborted) break;
               const i = remaining.shift();
               if (i === void 0) return;
               const bookmark = newBookmarks[i];
@@ -16369,6 +17055,9 @@ ${insight.summary || ""}`,
           });
           AutoImporter2.updateStatus(`\u274C \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
         } finally {
+          clearInterval(renewTimer);
+          SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          AutoImporter2._leaseLost = false;
           AutoImporter2.isRunning = false;
           SyncLock.isExporting = false;
           if (exportBtn) exportBtn.disabled = false;
@@ -16411,6 +17100,7 @@ ${insight.summary || ""}`,
           state().updateLastMessage(`\u6B63\u5728\u51C6\u5907\u6279\u91CF\u5206\u7C7B...
 \u5206\u7C7B\u9009\u9879: ${settings.categories.join(", ")}`, "processing");
           try {
+            AIClassifier2.reset();
             await AIClassifier2.ensureAICategoryProperty(settings);
             state().updateLastMessage(`\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u9875\u9762...`, "processing");
             const pages = await AIClassifier2.fetchAllPages(settings);
@@ -16504,10 +17194,11 @@ ${insight.summary || ""}`,
             if (pages.length === 0) {
               return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u7FFB\u8BD1\u7684\u9875\u9762\u3002`;
             }
+            const truncationNote = queryResp.has_more ? "\n\u26A0\uFE0F \u672C\u6B21\u4EC5\u5904\u7406\u524D 20 \u4E2A\u9875\u9762\uFF08\u6570\u636E\u5E93\u8FD8\u6709\u66F4\u591A\uFF0C\u53EF\u5206\u6279\u6267\u884C\uFF09\u3002" : "";
             const confirmed = await ConfirmationDialog2.show({
               title: `\u{1F310} \u6279\u91CF\u7FFB\u8BD1\u786E\u8BA4`,
               message: `\u5373\u5C06\u7FFB\u8BD1 ${pages.length} \u4E2A\u9875\u9762\u4E3A${lang}\u3002
-\u7FFB\u8BD1\u540E\u7684\u5185\u5BB9\u5C06\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002`,
+\u7FFB\u8BD1\u540E\u7684\u5185\u5BB9\u5C06\u8FFD\u52A0\u5230\u6BCF\u4E2A\u9875\u9762\u672B\u5C3E\uFF08\u539F\u5185\u5BB9\u4FDD\u7559\uFF09\u3002${truncationNote}`,
               confirmText: "\u5F00\u59CB\u7FFB\u8BD1",
               cancelText: "\u53D6\u6D88"
             });
@@ -16583,7 +17274,7 @@ ${AI().isolateContent(content)}`;
             const extractHint = extraction_prompt || explanation || "\u63D0\u53D6\u6240\u6709\u7ED3\u6784\u5316\u6761\u76EE";
             const analyzePrompt = `\u4F60\u662F\u4E00\u4E2A\u6570\u636E\u63D0\u53D6\u4E13\u5BB6\u3002\u5206\u6790\u4EE5\u4E0B\u9875\u9762\u5185\u5BB9\uFF0C\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002
 
-\u63D0\u53D6\u8981\u6C42\uFF1A${extractHint}
+\u63D0\u53D6\u8981\u6C42\uFF1A${AI().isolateContent(extractHint)}
 
 \u8BF7\u8FD4\u56DE JSON \u683C\u5F0F\uFF08\u53EA\u8FD4\u56DE JSON\uFF09\uFF1A
 {
@@ -16622,6 +17313,10 @@ ${AI().isolateContent(content)}`;
               return `\u274C AI \u8FD4\u56DE\u7684\u5C5E\u6027\u5747\u65E0\u6548\uFF0C\u65E0\u6CD5\u521B\u5EFA\u6570\u636E\u5E93\u3002`;
             }
             extractedData.properties = validProps;
+            if (!extractedData.properties.some((prop) => prop.type === "title")) {
+              extractedData.properties[0].type = "title";
+              console.warn("[LD-Notion] AI \u672A\u8FD4\u56DE title \u5C5E\u6027\uFF0C\u5DF2\u5C06\u9996\u4E2A\u5C5E\u6027\u964D\u7EA7\u4E3A title");
+            }
             const confirmed = await ConfirmationDialog2.show({
               title: "\u{1F4CA} \u521B\u5EFA\u6570\u636E\u5E93\u786E\u8BA4",
               message: `\u5C06\u4ECE\u300C${sourcePage.name}\u300D\u63D0\u53D6 ${extractedData.entries.length} \u4E2A\u6761\u76EE\u3002
@@ -16656,6 +17351,7 @@ ${AI().isolateContent(content)}`;
             state().updateLastMessage(`\u{1F4DD} \u6B63\u5728\u586B\u5145 ${extractedData.entries.length} \u4E2A\u6761\u76EE...`, "processing");
             let addedCount = 0;
             let failedCount = 0;
+            const entriesDelay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
             const titleProp = extractedData.properties.find((p) => p.type === "title");
             const titleKey = titleProp ? titleProp.name : extractedData.properties[0].name;
             for (const entry of extractedData.entries) {
@@ -16679,6 +17375,7 @@ ${AI().isolateContent(content)}`;
                 failedCount++;
                 console.warn(`[LD-Notion] \u6761\u76EE\u521B\u5EFA\u5931\u8D25 (#${failedCount}):`, error.message);
               }
+              if (entriesDelay > 0) await Utils2.sleep(entriesDelay);
             }
             const failedLine = failedCount > 0 ? `
 - \u5931\u8D25: ${failedCount}\uFF08\u89C1\u63A7\u5236\u53F0\u8B66\u544A\uFF09` : "";
@@ -16740,7 +17437,9 @@ ${structure_prompt ? `\u8865\u5145\u8981\u6C42\uFF1A${AI().isolateContent(struct
               return `\u274C AI \u672A\u80FD\u89C4\u5212\u51FA\u6709\u6548\u7684\u5B50\u9875\u9762\u7ED3\u6784\u3002`;
             }
             const MAX_CHILD_DESC = 2e3;
-            plan.children = plan.children.map((c) => ({
+            const MAX_GENERATED_CHILDREN = 20;
+            const requestedChildCount = plan.children.length;
+            plan.children = plan.children.slice(0, MAX_GENERATED_CHILDREN).map((c) => ({
               ...c,
               title: AISchema.validatePropertyValue(c == null ? void 0 : c.title, "title"),
               icon: AISchema.validateEmoji(c == null ? void 0 : c.icon),
@@ -16838,7 +17537,8 @@ ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}**
             return `\u{1F4D1} **\u591A\u9875\u9762\u5185\u5BB9\u751F\u6210\u5B8C\u6210**
 
 - \u7236\u9875\u9762: ${plan.parent_title}
-- \u5B50\u9875\u9762: ${createdCount}/${plan.children.length} \u521B\u5EFA\u6210\u529F
+- \u5B50\u9875\u9762: ${createdCount}/${plan.children.length} \u521B\u5EFA\u6210\u529F${requestedChildCount > MAX_GENERATED_CHILDREN ? `
+- \u26A0\uFE0F AI \u89C4\u5212\u4E86 ${requestedChildCount} \u4E2A\u5B50\u9875\u9762\uFF0C\u5DF2\u6309\u4E0A\u9650 ${MAX_GENERATED_CHILDREN} \u521B\u5EFA` : ""}
 
 \u{1F4A1} \u6240\u6709\u9875\u9762\u5DF2\u521B\u5EFA\u5E76\u586B\u5145\u5185\u5BB9\u3002`;
           } catch (error) {
@@ -16857,7 +17557,7 @@ ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}**
           }
           state().updateLastMessage("\u6B63\u5728\u67E5\u627E\u6570\u636E\u5E93...", "processing");
           try {
-            let dbId = database_id || settings.notionDatabaseId;
+            let dbId = database_id || (database_name ? null : settings.notionDatabaseId);
             if (!dbId && database_name) {
               const searchResp = await NotionAPI2.search(database_name, "database", settings.notionApiKey);
               const db = (searchResp.results || []).find((r) => !r.archived);
@@ -16876,15 +17576,21 @@ ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}**
               const page = pages[i];
               const title = Utils2.getPageTitle(page);
               state().updateLastMessage(`\u{1F50E} \u63D0\u53D6\u4E2D (${i + 1}/${pages.length}): ${title}...`, "processing");
-              const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 2e3);
-              contentParts.push(`## ${title}
+              try {
+                const content = await AI()._extractPageContent(page.id, settings.notionApiKey, 2e3);
+                contentParts.push(`## ${title}
 ${content || "\uFF08\u65E0\u5185\u5BB9\uFF09"}`);
+              } catch (error) {
+                console.warn(`[LD-Notion] \u9875\u9762\u63D0\u53D6\u5931\u8D25: ${title}`, error);
+                contentParts.push(`## ${title}
+\uFF08\u5185\u5BB9\u63D0\u53D6\u5931\u8D25: ${error.message}\uFF09`);
+              }
             }
             state().updateLastMessage("\u{1F4CA} \u6B63\u5728\u751F\u6210\u7EFC\u5408\u5206\u6790...", "processing");
             const analysisGoal = analysis_prompt || explanation || "\u7EFC\u5408\u5206\u6790\u6240\u6709\u9875\u9762\u5185\u5BB9\uFF0C\u627E\u51FA\u5173\u952E\u4E3B\u9898\u3001\u8D8B\u52BF\u548C\u5EFA\u8BAE";
             const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u6570\u636E\u5206\u6790\u5E08\u3002\u6839\u636E\u4EE5\u4E0B\u6765\u81EA\u6570\u636E\u5E93\u7684\u591A\u4E2A\u9875\u9762\u5185\u5BB9\u8FDB\u884C\u7EFC\u5408\u5206\u6790\u3002
 
-\u5206\u6790\u8981\u6C42\uFF1A${analysisGoal}
+\u5206\u6790\u8981\u6C42\uFF1A${AI().isolateContent(analysisGoal)}
 
 \u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u5206\u6790\u62A5\u544A\uFF0C\u5305\u542B\uFF1A
 1. \u6982\u8FF0\uFF08\u603B\u4F53\u60C5\u51B5\u6458\u8981\uFF09
@@ -16941,11 +17647,13 @@ ${report}
 `;
             let totalExported = 0;
             let totalFailed = 0;
+            let totalErrors = 0;
             const typeNames = { stars: "Stars", repos: "Repos", forks: "Forks", gists: "Gists" };
             for (const type of importTypes) {
               const r = allResults[type];
               if (!r) continue;
               if (r.error) {
+                totalErrors++;
                 response += `\u274C ${typeNames[type]}: ${r.error}
 `;
               } else {
@@ -16957,7 +17665,7 @@ ${report}
                 totalFailed += r.failed || 0;
               }
             }
-            if (totalExported === 0 && totalFailed === 0) {
+            if (totalExported === 0 && totalFailed === 0 && totalErrors === 0) {
               response += `
 \u6240\u6709\u5185\u5BB9\u5DF2\u662F\u6700\u65B0\u72B6\u6001\u3002`;
             }
@@ -17165,6 +17873,7 @@ ${report}
         initTheme: () => {
           DesignSystem2._theme = Storage2.get(CONFIG2.STORAGE_KEYS.THEME_PREFERENCE, CONFIG2.DEFAULTS.themePreference);
           DesignSystem2._applyTheme();
+          if (DesignSystem2._mediaQuery) return;
           DesignSystem2._mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
           DesignSystem2._mediaQuery.addEventListener("change", () => {
             if (DesignSystem2._theme === "auto") DesignSystem2._applyTheme();
@@ -17219,7 +17928,8 @@ ${report}
         .ldb-notion-float-btn,
         .ldb-mini-btn,
         .gclip-float-btn,
-        .ldb-undo-toast {
+        .ldb-undo-toast,
+        .ldb-confirm-dialog {
             --ldb-ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
             --ldb-ui-radius: 14px;
@@ -17365,6 +18075,7 @@ ${report}
             .ldb-notion-float-btn:not([data-ldb-theme]),
             .ldb-mini-btn:not([data-ldb-theme]),
             .gclip-float-btn:not([data-ldb-theme]),
+            .ldb-confirm-dialog:not([data-ldb-theme]),
             .ldb-undo-toast:not([data-ldb-theme]) {
                 --ldb-ui-text: #e5e7eb;
                 --ldb-ui-muted: #9ca3af;
@@ -17933,23 +18644,25 @@ ${report}
             background: var(--ldb-ui-accent);
             transition: width 1s linear;
         }
-        .ldb-btn {
+        /* P3(glm, \u4E3B agent \u6309 CSS \u5C42\u53E0\u590D\u6838): \u539F\u89C4\u5219\u65E0\u4F5C\u7528\u57DF\u524D\u7F00\u4E14\u4F4D\u4E8E\u4EE4\u724C\u6837\u5F0F\u4E4B\u540E,
+           \u540C\u7279\u5F02\u6027\u8986\u76D6\u5168\u5C40 .ldb-btn-secondary/.ldb-btn-danger \u7684\u6E10\u53D8\u4E0E\u8FB9\u6846\u2014\u2014\u6536\u7A84\u5230\u786E\u8BA4\u6846\u3002 */
+        .ldb-confirm-dialog .ldb-btn {
             padding: 6px 14px;
             border-radius: var(--ldb-ui-radius-sm);
             border: 1px solid var(--ldb-ui-border);
             cursor: pointer;
             font-size: var(--ldb-ui-font-size-sm);
         }
-        .ldb-btn-secondary {
+        .ldb-confirm-dialog .ldb-btn-secondary {
             background: var(--ldb-ui-surface-3);
             color: inherit;
         }
-        .ldb-btn-danger {
+        .ldb-confirm-dialog .ldb-btn-danger {
             background: var(--ldb-ui-danger);
             color: #fff;
             border-color: transparent;
         }
-        .ldb-btn:disabled {
+        .ldb-confirm-dialog .ldb-btn:disabled {
             opacity: 0.55;
             cursor: not-allowed;
         }
@@ -18262,6 +18975,8 @@ ${report}
           document.head.appendChild(style);
         },
         makeResizable: (element, options = {}) => {
+          if (!element || element._ldbResizable) return;
+          element._ldbResizable = true;
           const {
             edges = ["l", "t"],
             storageKey = null,
@@ -18275,8 +18990,13 @@ ${report}
           }
           PanelResize2.resetSize = (key) => {
             const targets = PanelResize2._resizeTargets || /* @__PURE__ */ new Map();
-            const target = key && targets.get(key) || (targets.size > 0 ? targets.values().next().value : null);
-            if (key) Storage2.remove(key);
+            let resolvedKey = key || "";
+            if (!resolvedKey || !targets.has(resolvedKey)) {
+              const first = targets.keys().next();
+              if (!first.done) resolvedKey = first.value;
+            }
+            const target = resolvedKey && targets.get(resolvedKey) || null;
+            if (resolvedKey) Storage2.remove(resolvedKey);
             if (target) {
               target.style.width = "";
               target.style.maxHeight = "";
@@ -18316,7 +19036,8 @@ ${report}
               if (vertical) {
                 const liveMax = maxViewportHeight();
                 handle.setAttribute("aria-valuemax", String(liveMax));
-                let newHeight = element.offsetHeight;
+                const parsedMaxHeight = parseFloat(element.style.maxHeight);
+                let newHeight = Number.isFinite(parsedMaxHeight) && parsedMaxHeight > 0 ? parsedMaxHeight : element.offsetHeight;
                 if (e.key === "ArrowUp") {
                   newHeight = Math.min(liveMax, newHeight + step);
                   handled = true;
@@ -18368,10 +19089,13 @@ ${report}
               const startHeight = element.offsetHeight;
               document.body.style.userSelect = "none";
               element.style.transition = "none";
+              let captured = false;
               try {
                 handle.setPointerCapture(e.pointerId);
+                captured = true;
               } catch (_) {
               }
+              const moveTarget = captured ? handle : document;
               const onMove = (ev) => {
                 if (edge.includes("l")) {
                   const dx = startX - ev.clientX;
@@ -18387,21 +19111,23 @@ ${report}
                 }
               };
               const endResize = (ev) => {
-                handle.removeEventListener("pointermove", onMove);
-                handle.removeEventListener("pointerup", endResize);
-                handle.removeEventListener("pointercancel", endResize);
+                moveTarget.removeEventListener("pointermove", onMove);
+                moveTarget.removeEventListener("pointerup", endResize);
+                moveTarget.removeEventListener("pointercancel", endResize);
                 document.body.style.userSelect = "";
                 element.style.transition = "";
-                try {
-                  handle.releasePointerCapture(ev.pointerId);
-                } catch (_) {
+                if (captured) {
+                  try {
+                    handle.releasePointerCapture(ev.pointerId);
+                  } catch (_) {
+                  }
                 }
                 syncValueNow();
                 persist();
               };
-              handle.addEventListener("pointermove", onMove);
-              handle.addEventListener("pointerup", endResize);
-              handle.addEventListener("pointercancel", endResize);
+              moveTarget.addEventListener("pointermove", onMove);
+              moveTarget.addEventListener("pointerup", endResize);
+              moveTarget.addEventListener("pointercancel", endResize);
             });
           });
           if (storageKey) {
@@ -18412,13 +19138,14 @@ ${report}
                 if (size.width) {
                   const savedWidth = parseFloat(size.width);
                   if (!Number.isNaN(savedWidth)) {
-                    element.style.width = Math.min(savedWidth, window.innerWidth - 16) + "px";
+                    const viewportCap = Math.max(0, window.innerWidth - 16);
+                    element.style.width = Math.min(Math.max(savedWidth, minWidth), maxWidth, viewportCap) + "px";
                   }
                 }
                 if (size.maxHeight) {
                   const savedMaxHeight = parseFloat(size.maxHeight);
                   if (!Number.isNaN(savedMaxHeight)) {
-                    element.style.maxHeight = Math.min(savedMaxHeight, window.innerHeight * 0.9) + "px";
+                    element.style.maxHeight = Math.min(Math.max(savedMaxHeight, minHeight), window.innerHeight * 0.9) + "px";
                   }
                 }
               } catch (e) {
@@ -18488,7 +19215,9 @@ ${report}
             aiTargetValue = "",
             aiService = CONFIG2.DEFAULTS.aiService,
             aiModel = "",
-            aiApiKey = "",
+            // P4 收敛(c07): 不能给密钥字段默认 "" —— 未携带该字段的调用方会被当成
+            // “用户清空”而 Storage.remove 掉已存密钥。仅 undefined 表示未提供(跳过), "" 仍表示显式清空。
+            aiApiKey,
             aiBaseUrl = "",
             aiCategories = CONFIG2.DEFAULTS.aiCategories,
             workspaceMaxPages = 0,
@@ -18497,7 +19226,7 @@ ${report}
             personaExpertise = CONFIG2.DEFAULTS.agentPersonaExpertise,
             personaInstructions = "",
             githubUsername = "",
-            githubToken = "",
+            githubToken,
             githubImportTypes = ["stars"],
             auditEnabled = null
           } = payload;
@@ -18525,8 +19254,8 @@ ${report}
             });
           }
           await UICommandService2._persistProvidedSensitiveEntries({
-            [CONFIG2.STORAGE_KEYS.AI_API_KEY]: aiApiKey,
-            [CONFIG2.STORAGE_KEYS.GITHUB_TOKEN]: githubToken
+            ...aiApiKey === void 0 ? {} : { [CONFIG2.STORAGE_KEYS.AI_API_KEY]: aiApiKey },
+            ...githubToken === void 0 ? {} : { [CONFIG2.STORAGE_KEYS.GITHUB_TOKEN]: githubToken }
           });
           require_import().GitHubAPI.setImportTypes(Array.isArray(githubImportTypes) && githubImportTypes.length > 0 ? githubImportTypes : ["stars"]);
           return {
@@ -19875,12 +20604,16 @@ ${report}
             NotionSiteUI2.ensurePanelReady();
             NotionSiteUI2.togglePanel();
           });
+          document.body.appendChild(btn);
+          NotionSiteUI2.floatBtn = btn;
           const savedPosition = Storage2.get(CONFIG2.STORAGE_KEYS.FLOAT_BTN_POSITION, null);
           if (savedPosition) {
             try {
               const pos = JSON.parse(savedPosition);
-              const savedRight = parseFloat(pos.right) || 24;
-              const savedBottom = parseFloat(pos.bottom) || 24;
+              const parsedRight = parseFloat(pos.right);
+              const parsedBottom = parseFloat(pos.bottom);
+              const savedRight = Number.isFinite(parsedRight) ? parsedRight : 24;
+              const savedBottom = Number.isFinite(parsedBottom) ? parsedBottom : 24;
               const maxRight = Math.max(0, window.innerWidth - btn.offsetWidth);
               const maxBottom = Math.max(0, window.innerHeight - btn.offsetHeight);
               btn.style.right = Math.min(savedRight, maxRight) + "px";
@@ -19890,8 +20623,6 @@ ${report}
               Storage2.remove(CONFIG2.STORAGE_KEYS.FLOAT_BTN_POSITION);
             }
           }
-          document.body.appendChild(btn);
-          NotionSiteUI2.floatBtn = btn;
           DesignSystem2.applyTheme();
           return btn;
         },
@@ -20203,7 +20934,7 @@ ${report}
                 aiTargetValue: panel.querySelector("#ldb-notion-ai-target-db").value,
                 aiService: panel.querySelector("#ldb-notion-ai-service").value,
                 aiModel: panel.querySelector("#ldb-notion-ai-model").value,
-                aiApiKey: panel.querySelector("#ldb-notion-ai-api-key").value.trim(),
+                aiApiKey: panel.querySelector("#ldb-notion-ai-api-key").dataset.touched === "true" ? panel.querySelector("#ldb-notion-ai-api-key").value.trim() : void 0,
                 aiBaseUrl: panel.querySelector("#ldb-notion-ai-base-url").value.trim(),
                 aiCategories: panel.querySelector("#ldb-notion-ai-categories").value.trim(),
                 workspaceMaxPages: parseInt(panel.querySelector("#ldb-notion-workspace-max-pages").value) || 0,
@@ -20212,7 +20943,9 @@ ${report}
                 personaExpertise: panel.querySelector("#ldb-notion-persona-expertise").value.trim() || CONFIG2.DEFAULTS.agentPersonaExpertise,
                 personaInstructions: panel.querySelector("#ldb-notion-persona-instructions").value.trim(),
                 githubUsername: panel.querySelector("#ldb-notion-github-username").value.trim(),
-                githubToken: panel.querySelector("#ldb-notion-github-token").value.trim(),
+                // P4 收敛(c07): 与 API Key 同构 —— 未编辑时传 undefined(保留已存值),
+                // 否则面板加载即置空的输入框会在保存时 Storage.remove 掉已存 token
+                githubToken: panel.querySelector("#ldb-notion-github-token").dataset.touched === "true" ? panel.querySelector("#ldb-notion-github-token").value.trim() : void 0,
                 githubImportTypes: [...panel.querySelectorAll(".ldb-notion-github-type:checked")].map((cb) => cb.value),
                 auditEnabled: panel.querySelector("#ldb-notion-audit-enabled").checked
               });
@@ -20224,6 +20957,8 @@ ${report}
               NotionSiteUI2.showStatus(`\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25\uFF1A${error.message}`, "error");
             } finally {
               panel.querySelector("#ldb-notion-api-key").dataset.touched = "false";
+              panel.querySelector("#ldb-notion-ai-api-key").dataset.touched = "false";
+              panel.querySelector("#ldb-notion-github-token").dataset.touched = "false";
               saveBtn.textContent = originalText;
               saveBtn.disabled = false;
             }
@@ -20285,6 +21020,7 @@ ${report}
             }
           };
           panel.querySelector("#ldb-notion-ai-fetch-models").onclick = async () => {
+            var _a;
             const aiApiKey = panel.querySelector("#ldb-notion-ai-api-key").value.trim() || String(Storage2.get(CONFIG2.STORAGE_KEYS.AI_API_KEY, "") || "").trim();
             const aiService = panel.querySelector("#ldb-notion-ai-service").value;
             const aiBaseUrl = panel.querySelector("#ldb-notion-ai-base-url").value.trim();
@@ -20303,6 +21039,7 @@ ${report}
                 aiApiKey,
                 aiBaseUrl
               });
+              if (((_a = panel.querySelector("#ldb-notion-ai-service")) == null ? void 0 : _a.value) !== aiService) return;
               NotionSiteUI2.updateAIModelOptions(aiService, models, true);
               modelTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${models.length} \u4E2A\u53EF\u7528\u6A21\u578B`;
               modelTip.style.color = "var(--ldb-ui-success)";
@@ -20341,6 +21078,10 @@ ${report}
           };
           panel.querySelector("#ldb-notion-ai-service").value = Storage2.get(CONFIG2.STORAGE_KEYS.AI_SERVICE, CONFIG2.DEFAULTS.aiService);
           panel.querySelector("#ldb-notion-ai-api-key").value = "";
+          panel.querySelector("#ldb-notion-ai-api-key").dataset.touched = "false";
+          panel.querySelector("#ldb-notion-ai-api-key").oninput = () => {
+            panel.querySelector("#ldb-notion-ai-api-key").dataset.touched = "true";
+          };
           panel.querySelector("#ldb-notion-ai-base-url").value = Storage2.get(CONFIG2.STORAGE_KEYS.AI_BASE_URL, "");
           panel.querySelector("#ldb-notion-ai-categories").value = Storage2.get(CONFIG2.STORAGE_KEYS.AI_CATEGORIES, CONFIG2.DEFAULTS.aiCategories);
           panel.querySelector("#ldb-notion-workspace-max-pages").value = Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages);
@@ -20350,6 +21091,10 @@ ${report}
           panel.querySelector("#ldb-notion-persona-instructions").value = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG2.DEFAULTS.agentPersonaInstructions);
           panel.querySelector("#ldb-notion-github-username").value = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
           panel.querySelector("#ldb-notion-github-token").value = "";
+          panel.querySelector("#ldb-notion-github-token").dataset.touched = "false";
+          panel.querySelector("#ldb-notion-github-token").oninput = () => {
+            panel.querySelector("#ldb-notion-github-token").dataset.touched = "true";
+          };
           const savedGHTypes = GitHubAPI2.getImportTypes();
           panel.querySelectorAll(".ldb-notion-github-type").forEach((cb) => {
             cb.checked = savedGHTypes.includes(cb.value);
@@ -20393,14 +21138,24 @@ ${report}
             const optionExists = Array.from(modelSelect.options).some((opt) => opt.value === savedModel);
             if (optionExists) {
               modelSelect.value = savedModel;
+            } else {
+              const opt = document.createElement("option");
+              opt.value = savedModel;
+              opt.textContent = "\u5DF2\u4FDD\u5B58\u6A21\u578B\uFF08\u5F53\u524D\u5217\u8868\u4E4B\u5916\uFF09";
+              opt.selected = true;
+              modelSelect.appendChild(opt);
             }
           }
           const savedPosition = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_PANEL_POSITION, null);
           if (savedPosition) {
             try {
               const pos = JSON.parse(savedPosition);
-              panel.style.right = pos.right || "24px";
-              panel.style.bottom = pos.bottom || "96px";
+              const panelRight = parseFloat(pos.right);
+              const panelBottom = parseFloat(pos.bottom);
+              const maxPanelRight = Math.max(0, window.innerWidth - panel.offsetWidth);
+              const maxPanelBottom = Math.max(0, window.innerHeight - panel.offsetHeight);
+              panel.style.right = Math.min(Number.isFinite(panelRight) ? panelRight : 24, maxPanelRight) + "px";
+              panel.style.bottom = Math.min(Number.isFinite(panelBottom) ? panelBottom : 96, maxPanelBottom) + "px";
             } catch (e) {
               console.warn("[LD-Notion] corrupted panel position, resetting");
               Storage2.remove(CONFIG2.STORAGE_KEYS.NOTION_PANEL_POSITION);
@@ -20486,7 +21241,8 @@ ${report}
         },
         // 更新数据库/页面下拉框
         updateAITargetDbOptions: (databases, pages = []) => {
-          const select = NotionSiteUI2.panel.querySelector("#ldb-notion-ai-target-db");
+          var _a;
+          const select = (_a = NotionSiteUI2.panel) == null ? void 0 : _a.querySelector("#ldb-notion-ai-target-db");
           if (!select) return;
           const storedTarget = TargetState2.getStoredAITarget();
           const savedValue = storedTarget.exists ? storedTarget.state.value : "";
@@ -20541,7 +21297,8 @@ ${report}
         },
         // 更新 AI 模型选项
         updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
-          const modelSelect = NotionSiteUI2.panel.querySelector("#ldb-notion-ai-model");
+          var _a;
+          const modelSelect = (_a = NotionSiteUI2.panel) == null ? void 0 : _a.querySelector("#ldb-notion-ai-model");
           const provider = AIService2.PROVIDERS[service];
           if (!provider || !modelSelect) return;
           const models = customModels || provider.models;
@@ -20556,7 +21313,9 @@ ${report}
         },
         // 显示状态
         showStatus: (message, type = "info") => {
-          const container = NotionSiteUI2.panel.querySelector("#ldb-notion-status-container");
+          var _a;
+          const container = (_a = NotionSiteUI2.panel) == null ? void 0 : _a.querySelector("#ldb-notion-status-container");
+          if (!container) return;
           if (container._statusTimer) clearTimeout(container._statusTimer);
           container.innerHTML = `
             <div class="ldb-status ${Utils2.escapeHtml(type)}">
@@ -20671,6 +21430,7 @@ ${report}
           NotionSiteUI2.initAIAssistant();
           if (!Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, true)) {
             Utils2.runWhenBrowserIdle(() => {
+              if (Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, true)) return;
               NotionSiteUI2.ensurePanelReady();
               NotionSiteUI2.isMinimized = false;
               NotionSiteUI2.panel.classList.add("visible");
@@ -20686,6 +21446,7 @@ ${report}
           (_c = NotionSiteUI2.floatBtn) == null ? void 0 : _c.remove();
           NotionSiteUI2.floatBtn = null;
           NotionSiteUI2.isPanelReady = false;
+          NotionSiteUI2.isMinimized = true;
         }
       };
       ;
@@ -20731,7 +21492,7 @@ ${report}
           };
         }).filter((item) => !!item.itemKey);
       };
-      var buildGitHubObsidianMarkdown = async (item, settings = {}) => {
+      var buildGitHubObsidianMarkdown = async (item, settings = {}, enrichContext = null) => {
         var _a, _b;
         if (!(item == null ? void 0 : item.raw)) {
           throw new Error("GitHub \u6761\u76EE\u6570\u636E\u4E0D\u5B8C\u6574");
@@ -20814,7 +21575,7 @@ ${bookmark.description}
             url: meta2.url
           };
         }
-        const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
+        const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, enrichContext || { aiUsedCount: 0, aiMaxItems: 20 });
         const title = enriched.generatedTitle || item.title || enriched.full_name || enriched.name || "\u672A\u547D\u540D\u4ED3\u5E93";
         const meta = {
           title,
@@ -20893,6 +21654,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
         let githubDirty = false;
         let authAbortInfo = null;
+        const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
         try {
           for (let i = 0; i < selectedItems.length; i++) {
             if (control.isCancelled) break;
@@ -20904,7 +21666,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             const item = selectedItems[i];
             onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
             try {
-              const note = await buildGitHubObsidianMarkdown(item, settings);
+              const note = await buildGitHubObsidianMarkdown(item, settings, enrichContext);
               assertObsidianWriteAllowed("obsidian.writeNote", { itemKey: item.itemKey, sourceType: item.sourceType, itemName: item.title || item.itemKey });
               const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
               if (!noteResult.ok) throw new Error(noteResult.error);
@@ -20985,20 +21747,28 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         SyncLock.isExporting = true;
         let leaseLost = false;
         const renewTimer = setInterval(() => {
-          if (!SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease)) {
+          let renewed;
+          try {
+            renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          } catch (renewError) {
+            console.warn("[GitHubObsidianService] \u7EED\u7EA6\u5931\u8D25:", renewError);
+            renewed = false;
+          }
+          if (!renewed) {
             leaseLost = true;
             clearInterval(renewTimer);
           }
         }, 3e4);
+        const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
         try {
           for (let i = 0; i < selectedItems.length; i++) {
             if (control.isCancelled) break;
             if (leaseLost) break;
             while (control.isPaused) {
               await Utils2.sleep(200);
-              if (control.isCancelled) break;
+              if (control.isCancelled || leaseLost) break;
             }
-            if (control.isCancelled) break;
+            if (control.isCancelled || leaseLost) break;
             const item = selectedItems[i];
             const bookmark = item.raw;
             const sourceType = item.sourceType;
@@ -21014,12 +21784,13 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 properties = GitHubExporter2.buildGistProperties(bookmark);
               } else {
                 const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
-                const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
+                const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, enrichContext);
                 properties = GitHubExporter2.buildRepoProperties(enriched, sourceMap[sourceType] || "Star");
               }
               for (const key of Object.keys(properties)) {
                 if (properties[key] === void 0) delete properties[key];
               }
+              if (leaseLost) break;
               if (!OperationGuard2.canExecute("createDatabasePage")) {
                 GitHubExporter2._auditExport(
                   "createDatabasePage",
@@ -21515,7 +22286,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             ...item,
             pct: UI2().getViewPct(item.count, totalPages)
           })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).slice(0, 10);
-          const duplicateCandidates = Array.from(duplicateGroups.values()).filter((group) => group.items.length > 1).map((group) => {
+          const duplicateCandidatesSorted = Array.from(duplicateGroups.values()).filter((group) => group.items.length > 1).map((group) => {
             const sourceList = Array.from(group.sources).sort((a, b) => a.localeCompare(b));
             return {
               key: group.key,
@@ -21525,7 +22296,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               sources: sourceList,
               items: group.items
             };
-          }).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).slice(0, 8);
+          }).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+          const duplicateCandidates = duplicateCandidatesSorted.slice(0, 8);
           const linkConnectionCandidates = Array.from(linkGroups.values()).filter((group) => group.items.length > 1 && group.sources.size > 1).map((group) => ({
             key: `url:${group.key}`,
             label: `${group.title} \xB7 ${Array.from(group.sources).sort((a, b) => a.localeCompare(b)).join(" + ")}`,
@@ -21536,7 +22308,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             url: group.url
           }));
           const connectionCandidates = Array.from(new Map([
-            ...duplicateCandidates.filter((group) => group.sourceCount > 1).map((group) => [group.key, {
+            ...duplicateCandidatesSorted.filter((group) => group.sourceCount > 1).map((group) => [group.key, {
               key: `title:${group.key}`,
               label: `${group.label} \xB7 ${group.sources.join(" + ")}`,
               count: group.count,
@@ -21748,14 +22520,17 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           return !!(snap && snap.scannedAt);
         },
         getWorkspaceExportedUrlSet: () => {
-          var _a;
-          const records = (_a = UI2().workspaceVisualSnapshot) == null ? void 0 : _a.records;
+          const snap = UI2().workspaceVisualSnapshot;
+          const records = snap == null ? void 0 : snap.records;
+          if (!Array.isArray(records)) return /* @__PURE__ */ new Set();
+          const cache = UI2()._workspaceExportUrlSetCache;
+          if (cache && cache.snap === snap && cache.len === records.length) return cache.set;
           const set = /* @__PURE__ */ new Set();
-          if (!Array.isArray(records)) return set;
           records.forEach((record) => {
             const url = UI2().normalizeWorkspaceInsightUrl((record == null ? void 0 : record.sourceUrl) || (record == null ? void 0 : record.url) || "");
             if (url) set.add(url);
           });
+          UI2()._workspaceExportUrlSetCache = { snap, len: records.length, set };
           return set;
         },
         buildBookmarkCanonicalUrl: (bookmark) => {
@@ -21836,12 +22611,10 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           tip.textContent = "\u5BFC\u51FA\u72B6\u6001\u4F9D\u636E Notion \u5DE5\u4F5C\u533A\u5FEB\u7167\uFF08\u53EA\u8BFB\u8986\u76D6\uFF0C\u4E0D\u6539\u672C\u5730\u8D26\u672C\uFF09\u3002\u6E05\u7A7A Notion \u540E\u5237\u65B0\u5DE5\u4F5C\u533A\u5373\u53EF\u5168\u90E8\u56DE\u5230\u5F85\u5BFC\u51FA\u3002";
         },
         recomputeExportStatusFromNotion: () => {
-          var _a, _b, _c, _d, _e, _f, _g, _h;
+          var _a, _b, _c, _d;
           UI2().updateExportStatusTip();
           (_b = (_a = UI2()).recomputeExportStats) == null ? void 0 : _b.call(_a);
           (_d = (_c = UI2()).renderBookmarkList) == null ? void 0 : _d.call(_c);
-          (_f = (_e = UI2()).updateSelectCount) == null ? void 0 : _f.call(_e);
-          (_h = (_g = UI2()).renderVisualSummary) == null ? void 0 : _h.call(_g);
           return {
             source: UI2().getExportStatusSource(),
             hasSnapshot: UI2().hasWorkspaceExportSnapshot(),
@@ -21878,7 +22651,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         },
         // 渲染收藏列表
         renderBookmarkList: () => {
-          const list = UI2().refs.bookmarkList;
+          var _a;
+          const list = (_a = UI2().refs) == null ? void 0 : _a.bookmarkList;
+          if (!list) return;
           UI2().recomputeExportStats();
           UI2().renderJobId += 1;
           const renderJobId = UI2().renderJobId;
@@ -21892,6 +22667,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
                 </div>
             `;
             setTimeout(() => {
+              if (renderJobId !== UI2().renderJobId) return;
               const importBtn = list.querySelector("#ldb-import-bookmarks-btn");
               if (importBtn) {
                 importBtn.onclick = () => {
@@ -22108,7 +22884,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               defaultNextStep: "\u6682\u7F13\u5904\u7406\uFF0C\u4FDD\u7559\u5019\u9009\u4EE5\u5907\u540E\u7EED\u590D\u6838\u3002"
             }
           };
-          const preset = presets[normalized] || presets.review;
+          const preset = Object.prototype.hasOwnProperty.call(presets, normalized) ? presets[normalized] : presets.review;
           return {
             recommendedAction: normalized || "review",
             actionLabel: preset.actionLabel,
@@ -22837,6 +23613,9 @@ ${AIService2.isolateContent(JSON.stringify({
             UI2().setWorkspaceVisualStatus(MSG2.NO_NOTION_KEY, "error");
             throw new Error(MSG2.NO_NOTION_KEY);
           }
+          const epoch = (UI2()._workspaceRefreshEpoch || 0) + 1;
+          UI2()._workspaceRefreshEpoch = epoch;
+          const isStale = () => epoch !== UI2()._workspaceRefreshEpoch;
           const maxPages = parseInt((_b2 = (_a2 = UI2().refs) == null ? void 0 : _a2.workspaceMaxPagesSelect) == null ? void 0 : _b2.value, 10) || parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
           const refreshBtn = (_c = UI2().refs) == null ? void 0 : _c.viewRefreshWorkspaceBtn;
           if (refreshBtn) {
@@ -22849,23 +23628,28 @@ ${AIService2.isolateContent(JSON.stringify({
               includePages: false,
               maxPages,
               onProgress: (progress) => {
+                if (isStale()) return;
                 if (progress.phase === "databases") {
                   UI2().setWorkspaceVisualStatus(`\u6B63\u5728\u626B\u63CF\u5DE5\u4F5C\u533A\u6570\u636E\u5E93... \u5DF2\u52A0\u8F7D ${progress.loaded} \u4E2A\u6570\u636E\u5E93`, "");
                 }
               },
               onWorkspaceData: (partialData) => {
+                if (isStale()) return;
                 UI2().updateWorkspaceSelect(partialData);
                 UI2().updateAITargetDbOptions(partialData.databases || []);
               }
             });
+            if (isStale()) return;
             UI2().setWorkspaceVisualStatus("\u6570\u636E\u5E93\u5DF2\u5C31\u7EEA\uFF0C\u6B63\u5728\u5206\u6790\u9875\u9762\u5C5E\u6027...", "");
             const pageObjects = await WorkspaceService2.fetchWorkspacePageObjects(apiKey, {
               maxPages,
               phase: "workspace_visual_pages",
               onProgress: (progress) => {
+                if (isStale()) return;
                 UI2().setWorkspaceVisualStatus(`\u6B63\u5728\u5206\u6790\u9875\u9762\u5C5E\u6027... \u5DF2\u626B\u63CF ${progress.loaded} \u4E2A\u9875\u9762`, "");
               }
             });
+            if (isStale()) return;
             const databasesMap = new Map(databases.map((d) => [d.id, d]));
             const pages = [];
             const records = [];
@@ -22907,10 +23691,12 @@ ${AIService2.isolateContent(JSON.stringify({
             );
             return model;
           } catch (error) {
-            UI2().setWorkspaceVisualStatus(`\u5DE5\u4F5C\u533A\u89C6\u56FE\u5237\u65B0\u5931\u8D25\uFF1A${error.message}`, "error");
+            if (!isStale()) {
+              UI2().setWorkspaceVisualStatus(`\u5DE5\u4F5C\u533A\u89C6\u56FE\u5237\u65B0\u5931\u8D25\uFF1A${error.message}`, "error");
+            }
             throw error;
           } finally {
-            if (refreshBtn) {
+            if (refreshBtn && !isStale()) {
               refreshBtn.disabled = false;
               refreshBtn.textContent = "\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE";
             }
@@ -24057,6 +24843,7 @@ ${AIService2.isolateContent(JSON.stringify({
         `;
           document.body.appendChild(panel);
           UI2.panel = panel;
+          UI2._abortController = new AbortController();
           UI2.cacheRefs();
           DesignSystem2.applyTheme();
           UI2.bindEvents();
@@ -24336,6 +25123,62 @@ ${AIService2.isolateContent(JSON.stringify({
           const authMode = NotionOAuth2.getAuthMode() === "oauth" ? "OAuth" : "Manual";
           el.textContent = `\u5BFC\u51FA\u76EE\u6807:${targetType} ${targetId ? targetId.slice(0, 12) : "\u672A\u914D\u7F6E"} \xB7 \u6743\u9650:${levelLabels[level] || level} \xB7 \u6388\u6743:${authMode}`;
         },
+        // 跨页配置同步(3/3 共识 dsf+glm+qwen):其他标签页修改导出/AI 目标时回填本页输入与摘要。
+        // 否则陈旧面板保存(events.js 从 refs 读取目标)会把他端新配置覆盖回旧值。
+        installTargetCrossPageWatchers: () => {
+          if (UI2._targetWatchersInstalled) return;
+          UI2._targetWatchersInstalled = true;
+          if (typeof GM_addValueChangeListener !== "function") return;
+          const keys = [
+            CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID,
+            CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID,
+            CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE,
+            CONFIG2.STORAGE_KEYS.AI_TARGET_DB
+          ];
+          const syncFromStorage = () => {
+            var _a, _b;
+            if (!UI2.panel) return;
+            try {
+              const refs = UI2.refs || {};
+              const exportState = TargetState2.getExportState();
+              if (refs.databaseIdInput && document.activeElement !== refs.databaseIdInput) {
+                refs.databaseIdInput.value = exportState.databaseId;
+              }
+              if (refs.parentPageIdInput && document.activeElement !== refs.parentPageIdInput) {
+                refs.parentPageIdInput.value = exportState.parentPageId;
+              }
+              const isPage = exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE;
+              if (refs.exportTargetPageRadio) refs.exportTargetPageRadio.checked = isPage;
+              if (refs.exportTargetDatabaseRadio) refs.exportTargetDatabaseRadio.checked = !isPage;
+              if (refs.parentPageGroup) refs.parentPageGroup.style.display = isPage ? "block" : "none";
+              if (refs.manualDbWrap) {
+                const hasManualDb = !!String(((_a = refs.databaseIdInput) == null ? void 0 : _a.value) || "").trim();
+                refs.manualDbWrap.style.display = isPage ? "none" : hasManualDb ? "block" : "none";
+              }
+              if (refs.exportTargetTip) {
+                refs.exportTargetTip.textContent = isPage ? "\u5BFC\u51FA\u4E3A\u5B50\u9875\u9762\uFF0C\u5305\u542B\u5B8C\u6574\u5185\u5BB9" : "\u5BFC\u51FA\u4E3A\u6570\u636E\u5E93\u6761\u76EE\uFF0C\u652F\u6301\u7B5B\u9009\u548C\u6392\u5E8F";
+              }
+              (_b = UI2.updateExportButtonState) == null ? void 0 : _b.call(UI2);
+              UI2.updateExportTargetSummary();
+              if (refs.aiTargetDbSelect) {
+                const workspaceData = Utils2.safeJsonParse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"), {}) || {};
+                UI2.updateAITargetDbOptions(workspaceData.databases || []);
+                if (!TargetState2.getDisplayAITargetState().value) refs.aiTargetDbSelect.value = "";
+              }
+            } catch (error) {
+              console.warn("[LD-Notion] \u5BFC\u51FA\u76EE\u6807\u8DE8\u9875\u540C\u6B65\u5931\u8D25", (error == null ? void 0 : error.message) || error);
+            }
+          };
+          try {
+            for (const key of keys) {
+              GM_addValueChangeListener(key, (_name, _oldValue, _newValue, remote) => {
+                if (remote) syncFromStorage();
+              });
+            }
+          } catch (error) {
+            console.warn("[LD-Notion] \u5BFC\u51FA\u76EE\u6807\u8DE8\u9875\u76D1\u542C\u6CE8\u518C\u5931\u8D25", (error == null ? void 0 : error.message) || error);
+          }
+        },
         renderSelfCheckResult: () => {
           const panel = UI2.panel;
           if (!panel) return;
@@ -24345,8 +25188,8 @@ ${AIService2.isolateContent(JSON.stringify({
           const isUserscriptMode = Utils2.isUserscriptMode();
           const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           const bookmarkSource = UI2.getActiveBookmarkSource();
-          const hasGitHubUsername = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
-          const hasGitHubToken = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "").trim();
+          const hasGitHubUsername = !!String(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "") ?? "").trim();
+          const hasGitHubToken = !!String(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "") ?? "").trim();
           const checks = [
             {
               ok: true,
@@ -24406,13 +25249,37 @@ ${AIService2.isolateContent(JSON.stringify({
           resultEl.style.whiteSpace = "pre-line";
           resultEl.textContent = lines.join("\n");
         },
-        copyDiagnostics: async () => {
+        // P3 共识(dsf+qwen+glm): 剪贴板写入统一入口——await 失败不再静默,
+        // execCommand 降级校验返回值, 失败抛错由调用方提示。
+        copyTextToClipboard: async (text) => {
           var _a;
+          const value = String(text || "");
+          if ((_a = navigator.clipboard) == null ? void 0 : _a.writeText) {
+            await navigator.clipboard.writeText(value);
+            return true;
+          }
+          const textarea = document.createElement("textarea");
+          textarea.value = value;
+          textarea.setAttribute("readonly", "readonly");
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          let copied = false;
+          try {
+            copied = typeof document.execCommand === "function" && document.execCommand("copy");
+          } finally {
+            textarea.remove();
+          }
+          if (!copied) throw new Error("\u6D4F\u89C8\u5668\u672A\u5141\u8BB8\u590D\u5236\u5230\u526A\u8D34\u677F");
+          return true;
+        },
+        copyDiagnostics: async () => {
           const isUserscriptMode = Utils2.isUserscriptMode();
           const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           const bookmarkSource = UI2.getActiveBookmarkSource();
-          const hasGitHubUsername = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "").trim();
-          const hasGitHubToken = !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "").trim();
+          const hasGitHubUsername = !!String(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "") ?? "").trim();
+          const hasGitHubToken = !!String(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "") ?? "").trim();
           const activeTab = Storage2.get(CONFIG2.STORAGE_KEYS.ACTIVE_TAB, CONFIG2.DEFAULTS.activeTab);
           const updateLastResultRaw = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_RESULT, "");
           const updateLastSeenVersion = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_SEEN_VERSION, "");
@@ -24428,8 +25295,8 @@ ${AIService2.isolateContent(JSON.stringify({
           const auditEnabled = Storage2.get(CONFIG2.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG2.DEFAULTS.enableAuditLog);
           const syncState = Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_SYNC_STATE, {});
           const syncStateSummary = syncState && typeof syncState === "object" ? Object.keys(syncState).map((k) => {
-            var _a2;
-            return `${k}=${((_a2 = syncState[k]) == null ? void 0 : _a2.lastSyncAt) ? "synced" : "idle"}`;
+            var _a;
+            return `${k}=${((_a = syncState[k]) == null ? void 0 : _a.lastSyncAt) ? "synced" : "idle"}`;
           }).join(",") : "";
           const issues = [];
           if (!hasBridgeMarker) {
@@ -24486,19 +25353,7 @@ ${AIService2.isolateContent(JSON.stringify({
             `time=${(/* @__PURE__ */ new Date()).toISOString()}`
           ].join("\n");
           try {
-            if ((_a = navigator.clipboard) == null ? void 0 : _a.writeText) {
-              await navigator.clipboard.writeText(diagnostics);
-            } else {
-              const textarea = document.createElement("textarea");
-              textarea.value = diagnostics;
-              textarea.setAttribute("readonly", "readonly");
-              textarea.style.position = "fixed";
-              textarea.style.opacity = "0";
-              document.body.appendChild(textarea);
-              textarea.select();
-              document.execCommand("copy");
-              textarea.remove();
-            }
+            await UI2.copyTextToClipboard(diagnostics);
             UI2.showStatus("\u8BCA\u65AD\u4FE1\u606F\u5DF2\u590D\u5236\uFF08v2\uFF09", "success");
           } catch (error) {
             UI2.showStatus(`\u590D\u5236\u5931\u8D25: ${error.message || error}`, "error");
@@ -24778,26 +25633,13 @@ ${AIService2.isolateContent(JSON.stringify({
           ].join("\n");
         },
         copyWorkspaceInsightReport: async () => {
-          var _a;
           const model = UI2.buildWorkspaceVisualizationModel();
           if (!(model == null ? void 0 : model.scannedAt)) {
             throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
           }
           const markdown = UI2.workspaceInsightMarkdown || UI2.buildWorkspaceInsightMarkdown(model);
           try {
-            if ((_a = navigator.clipboard) == null ? void 0 : _a.writeText) {
-              await navigator.clipboard.writeText(markdown);
-            } else {
-              const textarea = document.createElement("textarea");
-              textarea.value = markdown;
-              textarea.setAttribute("readonly", "readonly");
-              textarea.style.position = "fixed";
-              textarea.style.opacity = "0";
-              document.body.appendChild(textarea);
-              textarea.select();
-              document.execCommand("copy");
-              textarea.remove();
-            }
+            await UI2.copyTextToClipboard(markdown);
             UI2.workspaceInsightMarkdown = markdown;
             UI2.workspaceInsightUpdatedAt = Date.now();
             UI2.showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u590D\u5236\u3002", "success");
@@ -25027,7 +25869,7 @@ ${AIService2.isolateContent(JSON.stringify({
           };
         },
         saveWorkspaceConnectionCandidatesToNotion: async () => {
-          var _a, _b, _c, _d;
+          var _a, _b, _c, _d, _e, _f;
           const model = UI2.buildWorkspaceVisualizationModel();
           if (!(model == null ? void 0 : model.scannedAt)) {
             throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
@@ -25058,6 +25900,7 @@ ${AIService2.isolateContent(JSON.stringify({
             database = await UI2.ensureWorkspaceConnectionCandidateDatabaseSchema(exportState.databaseId, apiKey, database);
           }
           for (let index = 0; index < model.connectionCandidates.length; index++) {
+            if ((_e = (_d = UI2._abortController) == null ? void 0 : _d.signal) == null ? void 0 : _e.aborted) break;
             const candidate = model.connectionCandidates[index];
             const aiDraft = await UI2.buildWorkspaceConnectionCandidateAIDraft(candidate, aiSettings);
             const candidateTitle = UI2.buildWorkspaceConnectionCandidateTitle(candidate, index, aiDraft);
@@ -25115,7 +25958,7 @@ ${AIService2.isolateContent(JSON.stringify({
             }
           }
           if (createdPages.length === 0) {
-            throw new Error(((_d = failedCandidates[0]) == null ? void 0 : _d.error) || "\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u5931\u8D25\u3002");
+            throw new Error(((_f = failedCandidates[0]) == null ? void 0 : _f.error) || "\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u5931\u8D25\u3002");
           }
           const targetLabel = exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93";
           const statusMessage = failedCandidates.length > 0 ? `\u7EDF\u4E00\u5019\u9009\u5DF2\u90E8\u5206\u4FDD\u5B58\u5230 Notion\uFF08${targetLabel}\uFF09\uFF1A\u6210\u529F ${createdPages.length} \u6761\uFF0C\u5931\u8D25 ${failedCandidates.length} \u6761\u3002` : `\u7EDF\u4E00\u5019\u9009\u5DF2\u4FDD\u5B58\u5230 Notion\uFF08${targetLabel}\uFF09\uFF1A\u5171 ${createdPages.length} \u6761\u3002`;
@@ -25329,35 +26172,41 @@ ${AIService2.isolateContent(JSON.stringify({
         // 更新选中数量
         updateSelectCount: () => {
           var _a;
+          const refs = UI2.refs;
+          if (!(refs == null ? void 0 : refs.selectCount)) return;
           const count = ((_a = UI2.selectedBookmarks) == null ? void 0 : _a.size) || 0;
           const pendingCount = UI2.selectedUnexportedCount || 0;
           const statusSrc = typeof UI2.getExportStatusSource === "function" ? UI2.getExportStatusSource() : "local";
           const srcTag = statusSrc === "notion" ? "\uFF08Notion\uFF09" : "\uFF08\u672C\u5730\uFF09";
-          UI2.refs.selectCount.textContent = `\u5DF2\u52A0\u8F7D ${count} \u4E2A\uFF0C\u5F85\u5BFC\u51FA ${Math.max(0, pendingCount)} \u4E2A${srcTag}`;
+          refs.selectCount.textContent = `\u5DF2\u52A0\u8F7D ${count} \u4E2A\uFF0C\u5F85\u5BFC\u51FA ${Math.max(0, pendingCount)} \u4E2A${srcTag}`;
           if (typeof UI2.updateExportStatusTip === "function") UI2.updateExportStatusTip();
-          const selectAll = UI2.refs.selectAll;
-          if (count === 0) {
-            selectAll.checked = false;
-            selectAll.indeterminate = false;
-          } else if (UI2.totalUnexportedCount > 0 && pendingCount === UI2.totalUnexportedCount) {
-            selectAll.checked = true;
-            selectAll.indeterminate = false;
-          } else {
-            selectAll.checked = false;
-            selectAll.indeterminate = true;
+          const selectAll = refs.selectAll;
+          if (selectAll) {
+            if (count === 0) {
+              selectAll.checked = false;
+              selectAll.indeterminate = false;
+            } else if (UI2.totalUnexportedCount > 0 && pendingCount === UI2.totalUnexportedCount) {
+              selectAll.checked = true;
+              selectAll.indeterminate = false;
+            } else {
+              selectAll.checked = false;
+              selectAll.indeterminate = true;
+            }
           }
           if (!UI2._selectCountRenderScheduled) {
             UI2._selectCountRenderScheduled = true;
             Promise.resolve().then(() => {
               UI2._selectCountRenderScheduled = false;
+              if (!UI2.refs) return;
               UI2.renderVisualSummary();
             });
           }
         },
         // 显示导出报告
         showReport: (results) => {
-          var _a;
-          const container = UI2.refs.reportContainer;
+          var _a, _b;
+          const container = (_a = UI2.refs) == null ? void 0 : _a.reportContainer;
+          if (!container) return;
           const { success, failed, skipped } = results;
           let html = '<div class="ldb-report">';
           html += '<div class="ldb-report-title">\u{1F4CA} \u5BFC\u51FA\u62A5\u544A</div>';
@@ -25405,7 +26254,7 @@ ${AIService2.isolateContent(JSON.stringify({
             html += '<div class="ldb-report-section">';
             html += `<div class="ldb-report-section-title">\u274C \u5931\u8D25 (${failed.length})</div>`;
             if (!authAborted) {
-              const firstUx = (_a = failed[0]) == null ? void 0 : _a.ux;
+              const firstUx = (_b = failed[0]) == null ? void 0 : _b.ux;
               if (firstUx && firstUx.action) {
                 html += `<div class="ldb-report-item" style="color: var(--ldb-ui-accent);padding:6px 12px;margin-bottom:8px;border-radius:6px;background:var(--ldb-ui-accent-alpha-12);">\u{1F4A1} \u5EFA\u8BAE\uFF1A${Utils2.escapeHtml(Utils2.truncateText(firstUx.action, 220))}</div>`;
               }
@@ -25435,9 +26284,13 @@ ${AIService2.isolateContent(JSON.stringify({
           html += "</div>";
           container.innerHTML = html;
           container.querySelectorAll(".ldb-report-error").forEach((el) => {
-            el.addEventListener("click", () => {
-              var _a2;
-              (_a2 = navigator.clipboard) == null ? void 0 : _a2.writeText(el.dataset.err || "");
+            el.addEventListener("click", async () => {
+              try {
+                await UI2.copyTextToClipboard(el.dataset.err || "");
+                UI2.showStatus("\u9519\u8BEF\u4FE1\u606F\u5DF2\u590D\u5236", "success");
+              } catch (error) {
+                UI2.showStatus(`\u590D\u5236\u5931\u8D25: ${error.message || error}`, "error");
+              }
             });
           });
           container.querySelectorAll(".ldb-reauthorize-btn").forEach((el) => {
@@ -25531,8 +26384,13 @@ ${AIService2.isolateContent(JSON.stringify({
           UI2.injectStyles();
           UI2.createPanel();
           UI2.miniBtn = UI2.createMiniButton();
-          const { on } = require_event_bus();
-          on("oplog:changed", () => {
+          const { on, off } = require_event_bus();
+          const busHandlers = UI2._busHandlers = [];
+          const subscribe = (event, handler) => {
+            on(event, handler);
+            busHandlers.push([event, handler]);
+          };
+          subscribe("oplog:changed", () => {
             clearTimeout(UI2._oplogDebounceTimer);
             UI2._oplogDebounceTimer = setTimeout(() => {
               var _a;
@@ -25546,10 +26404,10 @@ ${AIService2.isolateContent(JSON.stringify({
               }
             }, 120);
           });
-          on("notify", ({ message, type }) => {
+          subscribe("notify", ({ message, type }) => {
             UI2.showStatus(message, type);
           });
-          on("sync:center-summary-updated", () => {
+          subscribe("sync:center-summary-updated", () => {
             if (typeof UI2.renderSyncCenterSummary === "function") {
               try {
                 UI2.renderSyncCenterSummary();
@@ -25568,7 +26426,7 @@ ${AIService2.isolateContent(JSON.stringify({
               console.warn("[LD-Notion] \u5BFC\u51FA\u76EE\u6807\u6458\u8981\u6E32\u67D3\u5931\u8D25:", e);
             }
           });
-          on("bookmarks:updated", () => {
+          subscribe("bookmarks:updated", () => {
             if (typeof UI2.renderBookmarkList === "function") {
               try {
                 UI2.renderBookmarkList();
@@ -25593,6 +26451,15 @@ ${AIService2.isolateContent(JSON.stringify({
           var _a, _b, _c;
           (_a = UI2._abortController) == null ? void 0 : _a.abort();
           UI2._abortController = null;
+          if (UI2._oplogDebounceTimer) {
+            clearTimeout(UI2._oplogDebounceTimer);
+            UI2._oplogDebounceTimer = null;
+          }
+          if (UI2._busHandlers) {
+            const { off } = require_event_bus();
+            UI2._busHandlers.forEach(([event, handler]) => off(event, handler));
+            UI2._busHandlers = null;
+          }
           if (UI2._escMinimizeHandler) {
             document.removeEventListener("keydown", UI2._escMinimizeHandler);
             UI2._escMinimizeHandler = null;
@@ -25602,6 +26469,9 @@ ${AIService2.isolateContent(JSON.stringify({
           (_c = UI2.miniBtn) == null ? void 0 : _c.remove();
           UI2.miniBtn = null;
           UI2.refs = null;
+          UI2.bookmarkListBound = false;
+          UI2.bookmarks = [];
+          UI2.selectedBookmarks = /* @__PURE__ */ new Set();
           UI2.isMinimized = true;
         }
       };
@@ -25617,7 +26487,7 @@ ${AIService2.isolateContent(JSON.stringify({
   var require_events = __commonJS({
     "src/ui/events.js"(exports, module) {
       "use strict";
-      var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
+      var { CONFIG: CONFIG2, MSG: MSG2, getMimeType: getMimeType2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
@@ -26350,6 +27220,7 @@ ${AIService2.isolateContent(JSON.stringify({
             const btn = refs.loadBookmarksBtn;
             btn.disabled = true;
             btn.innerHTML = '<span class="ldb-spin">\u{1F504}</span> \u52A0\u8F7D\u4E2D...';
+            const loadSource = UI2.getActiveBookmarkSource();
             try {
               let bookmarks = [];
               if (UI2.isActiveGitHubSource()) {
@@ -26386,9 +27257,12 @@ ${AIService2.isolateContent(JSON.stringify({
                   return;
                 }
                 bookmarks = await LinuxDoAPI2.fetchAllBookmarks(username, (count) => {
-                  UI2.refs.bookmarkCount.textContent = count;
+                  var _a2;
+                  if (loadSource !== UI2.getActiveBookmarkSource()) return;
+                  if ((_a2 = UI2.refs) == null ? void 0 : _a2.bookmarkCount) UI2.refs.bookmarkCount.textContent = count;
                 });
               }
+              if (loadSource !== UI2.getActiveBookmarkSource()) return;
               UI2.bookmarks = bookmarks;
               UI2.updateVisualSnapshot(UI2.getActiveBookmarkSource(), bookmarks);
               UI2.selectedBookmarks = new Set(bookmarks.map((b) => UI2.getBookmarkKey(b)));
@@ -26497,6 +27371,7 @@ ${AIService2.isolateContent(JSON.stringify({
             refs.exportBtn.title = ready ? "" : "\u8BF7\u5148\u5B8C\u6210 Notion \u914D\u7F6E\uFF08API Key \u4E0E\u5BFC\u51FA\u76EE\u6807\uFF09";
           };
           updateExportButtonState();
+          UI2.updateExportButtonState = updateExportButtonState;
           refs.exportBtn.onclick = async () => {
             var _a2, _b;
             if (refs.exportBtn.disabled) return;
@@ -26566,7 +27441,7 @@ ${AIService2.isolateContent(JSON.stringify({
               filterExclude: refs.filterExcludeInput.value.trim(),
               filterMinLen: parseInt(refs.filterMinLenInput.value) || 0
             };
-            await UICommandService2.execute("save_command_boundary_settings", {
+            const settingsSaved = await UICommandService2.execute("save_command_boundary_settings", {
               scope: "main-export-session",
               liveApiKey,
               exportState: {
@@ -26592,7 +27467,14 @@ ${AIService2.isolateContent(JSON.stringify({
                 [CONFIG2.STORAGE_KEYS.AI_API_KEY]: getInputValue(refs.aiApiKeyInput),
                 [CONFIG2.STORAGE_KEYS.GITHUB_TOKEN]: getInputValue(refs.githubTokenInput)
               }
+            }).then(() => true, (error) => {
+              UI2.showStatus(`\u4FDD\u5B58\u8BBE\u7F6E\u5931\u8D25: ${error.message}`, "error");
+              return false;
             });
+            if (!settingsSaved) {
+              restoreExportBtn();
+              return;
+            }
             refs.exportBtn.disabled = true;
             refs.exportBtns.style.display = "none";
             refs.controlBtns.style.display = "flex";
@@ -26651,7 +27533,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             } catch (error) {
               UI2.showStatus(`\u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
             } finally {
-              refs.exportBtn.disabled = false;
+              updateExportButtonState();
               refs.exportBtns.style.display = "flex";
               refs.controlBtns.style.display = "none";
               Exporter2.reset();
@@ -26668,7 +27550,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               UI2.showStatus("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E Obsidian API \u5730\u5740\u548C Key", "error");
               return;
             }
-            const selected = UI2.getSelectedBookmarks();
+            const selected = UI2.getSelectedBookmarks().filter((b) => !UI2.isBookmarkKeyExported(UI2.getBookmarkKey(b)));
             if (selected.length === 0) {
               UI2.showStatus("\u8BF7\u5148\u9009\u62E9\u8981\u5BFC\u51FA\u7684\u5E16\u5B50", "error");
               return;
@@ -26676,6 +27558,9 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             refs.obsExportBtn.disabled = true;
             refs.exportBtns.style.display = "none";
             refs.controlBtns.style.display = "flex";
+            refs.pauseBtn.innerHTML = "\u23F8\uFE0F \u6682\u505C";
+            refs.pauseBtn.classList.add("ldb-btn-warning");
+            refs.pauseBtn.classList.remove("ldb-btn-primary");
             UI2.refs.reportContainer.innerHTML = "";
             const results = { success: [], failed: [], skipped: [] };
             let imageFailures = 0;
@@ -26789,9 +27674,9 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                             });
                             throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u56FE\u7247\u5199\u5165\u9700\u8981 level\u22651");
                           }
-                          const imgResult = await ObsidianAPI2.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType(ext));
+                          const imgResult = await ObsidianAPI2.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType2(ext));
                           if (!imgResult.ok) throw new Error(imgResult.error);
-                          md = md.replace(img.full, `![${img.alt}](${encodeURI(imgPath)})`);
+                          md = md.replace(img.full, () => `![${img.alt}](${encodeURI(imgPath)})`);
                         } catch {
                           imageFailures++;
                         }
@@ -27209,9 +28094,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               } else if (type === "page") {
                 refs.parentPageIdInput.value = id;
                 refs.exportTargetPageRadio.checked = true;
-                refs.parentPageGroup.style.display = "block";
-                refs.manualDbWrap.style.display = "none";
-                refs.exportTargetTip.textContent = "\u5BFC\u51FA\u4E3A\u5B50\u9875\u9762\uFF0C\u5305\u542B\u5B8C\u6574\u5185\u5BB9";
+                handleExportTargetChange({ target: { value: CONFIG2.EXPORT_TARGET_TYPES.PAGE } });
                 void UICommandService2.execute("apply_workspace_selection", { selectedValue: `page:${id}` });
                 UI2.showStatus("\u5DF2\u9009\u62E9\u9875\u9762\uFF0C\u81EA\u52A8\u5207\u6362\u4E3A\u9875\u9762\u5BFC\u51FA\u6A21\u5F0F", "info");
               }
@@ -27641,6 +28524,15 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 color: var(--ldb-ui-text);
             }
 
+            /* P3(glm, \u4E3B agent \u590D\u6838): \u57FA\u7840\u89C4\u5219 display:none, \u4EC5 info/success/error \u6709\u5C55\u793A\u89C4\u5219,
+               showStatus(..., "warning") \u56E0\u6B64\u9759\u9ED8\u4E0D\u53EF\u89C1\u2014\u2014\u8865\u9F50\u8B66\u544A\u6837\u5F0F\u3002 */
+            .gclip-status.warning {
+                display: block;
+                border-color: var(--ldb-ui-warning-alpha-35);
+                background: rgba(217, 119, 6, 0.12);
+                color: var(--ldb-ui-text);
+            }
+
             .gclip-btn-primary {
                 /* alias for .gclip-btn */
             }
@@ -27697,7 +28589,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                     <div class="meta">
                         ${meta.author ? `\u4F5C\u8005: ${Utils2.escapeHtml(meta.author)}<br>` : ""}
                         ${meta.siteName ? `\u6765\u6E90: ${Utils2.escapeHtml(meta.siteName)}` : ""}
-                        ${meta.publishDate ? ` \xB7 ${meta.publishDate}` : ""}
+                        ${meta.publishDate ? ` \xB7 ${Utils2.escapeHtml(String(meta.publishDate))}` : ""}
                     </div>
                 </div>
 
@@ -27822,6 +28714,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           if (!select) return;
           const exportState = TargetState2.getExportState();
           const restoreValue = exportType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? exportState.parentPageId ? `page:${exportState.parentPageId}` : "" : exportState.databaseId;
+          const currentSelection = select.value;
           let options = '<option value="">\u672A\u9009\u62E9</option>';
           const known = /* @__PURE__ */ new Set();
           if (exportType === "page") {
@@ -27845,10 +28738,16 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           if (restoreValue) {
             select.value = restoreValue;
           }
+          if (currentSelection && known.has(currentSelection)) {
+            select.value = currentSelection;
+          }
         },
         refreshWorkspaceTargets: async (apiKey, silent = false) => {
           const panel = GenericUI2.panel;
           if (!panel) return;
+          const epoch = (GenericUI2._workspaceTargetsEpoch || 0) + 1;
+          GenericUI2._workspaceTargetsEpoch = epoch;
+          const isStale = () => epoch !== GenericUI2._workspaceTargetsEpoch;
           const refreshBtn = panel.querySelector("#gclip-refresh-workspace");
           const tip = panel.querySelector("#gclip-target-tip");
           if (!apiKey) {
@@ -27867,7 +28766,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               apiKey,
               includePages: true,
               onProgress: (progress) => {
-                if (!tip) return;
+                if (!tip || isStale()) return;
                 if (progress.phase === "databases") {
                   tip.textContent = `\u6B63\u5728\u83B7\u53D6\u6570\u636E\u5E93\u5217\u8868... \u5DF2\u52A0\u8F7D ${progress.loaded} \u4E2A`;
                 } else if (progress.phase === "pages") {
@@ -27875,22 +28774,24 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 }
               },
               onWorkspaceData: (workspaceData2, meta) => {
+                if (isStale()) return;
                 GenericUI2.updateTargetSelectOptions(workspaceData2.databases, workspaceData2.pages);
                 if (tip && meta.phase === "databases") {
                   tip.textContent = `\u2705 \u5DF2\u52A0\u8F7D ${workspaceData2.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C\u53EF\u5148\u9009\u62E9\u76EE\u6807\uFF1B\u9875\u9762\u5217\u8868\u7EE7\u7EED\u52A0\u8F7D\u4E2D...`;
                 }
               }
             });
+            if (isStale()) return;
             GenericUI2.updateTargetSelectOptions(workspaceData.databases, workspaceData.pages);
             if (tip) {
               tip.textContent = `\u5DF2\u52A0\u8F7D ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.filter((p) => p.parent === "workspace").length} \u4E2A\u9875\u9762`;
             }
           } catch (error) {
-            if (tip) {
+            if (tip && !isStale()) {
               tip.textContent = `\u52A0\u8F7D\u5931\u8D25\uFF1A${error.message}`;
             }
           } finally {
-            if (refreshBtn) {
+            if (refreshBtn && !isStale()) {
               refreshBtn.disabled = false;
               refreshBtn.textContent = "\u5237\u65B0";
             }
@@ -27931,6 +28832,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           panel.querySelector("#gclip-export-type").addEventListener("change", () => {
             const isPage = panel.querySelector("#gclip-export-type").value === "page";
             panel.querySelector("#gclip-target-label").textContent = isPage ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93";
+            panel.querySelector("#gclip-target-id").value = "";
             GenericUI2.loadTargetOptionsFromCache(NotionOAuth2.getAccessToken(panel.querySelector("#gclip-api-key-input").value.trim()));
           });
           panel.querySelector("#gclip-refresh-workspace").addEventListener("click", async () => {
@@ -27974,8 +28876,14 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               return;
             }
             Storage2.set(CONFIG2.STORAGE_KEYS.OBS_API_URL, url);
-            await CredentialVault2.set(CONFIG2.STORAGE_KEYS.OBS_API_KEY, key);
-            Storage2.set(CONFIG2.STORAGE_KEYS.OBS_DIR, dir || CONFIG2.DEFAULTS.obsDir);
+            try {
+              await CredentialVault2.set(CONFIG2.STORAGE_KEYS.OBS_API_KEY, key);
+              Storage2.set(CONFIG2.STORAGE_KEYS.OBS_DIR, dir || CONFIG2.DEFAULTS.obsDir);
+            } catch (error) {
+              obsStatusEl.textContent = `\u274C \u4FDD\u5B58\u5931\u8D25: ${error.message}`;
+              obsStatusEl.style.color = "var(--ldb-ui-danger)";
+              return;
+            }
             panel.querySelector("#gclip-obs-key").value = "";
             obsStatusEl.textContent = "\u2705 Obsidian \u914D\u7F6E\u5DF2\u4FDD\u5B58";
             obsStatusEl.style.color = "var(--ldb-ui-success)";
@@ -28019,7 +28927,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             if (exportType === "database") {
               GenericUI2.showStatus("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u5C5E\u6027...", "info");
             }
-            const { setupResult } = await UICommandService2.execute("save_command_boundary_settings", {
+            const saveResult = await UICommandService2.execute("save_command_boundary_settings", {
               scope: "generic-export-target",
               liveApiKey: liveKey,
               apiKey,
@@ -28027,7 +28935,12 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               targetId,
               imgMode,
               autoSetupDatabaseProperties: exportType === "database"
+            }).catch((error) => {
+              GenericUI2.showStatus(`\u4FDD\u5B58\u5931\u8D25: ${error.message}`, "error");
+              return null;
             });
+            if (!saveResult) return;
+            const { setupResult } = saveResult;
             GenericUI2.loadTargetOptionsFromCache(apiKey);
             panel.querySelector("#gclip-settings").style.display = "none";
             panel.querySelector("#gclip-export").style.display = "block";
@@ -28104,8 +29017,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 md = HTMLToMarkdown2.buildFrontmatter(meta);
                 md += `> [!info] \u9875\u9762\u4FE1\u606F
 > - **\u6765\u6E90**: \u77E5\u4E4E
-> - **\u94FE\u63A5**: [${title}](${location.href})
-> - **\u4F5C\u8005**: ${content.author || "\u672A\u77E5"}
+> - **\u94FE\u63A5**: ${Utils2.mdLink(title, location.href)}
+> - **\u4F5C\u8005**: ${Utils2.mdText(content.author || "\u672A\u77E5")}
 > - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
 
 `;
@@ -28113,7 +29026,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 if (content.html) md += HTMLToMarkdown2.convert(content.html) + "\n\n";
                 if (content.answers) {
                   content.answers.forEach((ans, i) => {
-                    md += `> [!note]+ #${i + 1} ${ans.author} \xB7 \u{1F44D} ${ans.voteCount}
+                    md += `> [!note]+ #${i + 1} ${Utils2.mdText(ans.author || "\u533F\u540D")} \xB7 \u{1F44D} ${ans.voteCount}
 `;
                     const lines = HTMLToMarkdown2.convert(ans.html || "").trim().split("\n");
                     md += lines.map((l) => `> ${l}`).join("\n") + "\n\n";
@@ -28123,7 +29036,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 const meta = { title, url: location.href };
                 md = HTMLToMarkdown2.buildFrontmatter(meta);
                 md += `> [!info] \u9875\u9762\u4FE1\u606F
-> - **\u94FE\u63A5**: [${title}](${location.href})
+> - **\u94FE\u63A5**: ${Utils2.mdLink(title, location.href)}
 > - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
 
 `;
@@ -28157,6 +29070,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         // 执行导出
         doExport: async () => {
           if (GenericUI2.isExporting) return;
+          GenericUI2.isExporting = true;
           const previewMeta = {
             url: typeof location !== "undefined" ? location.href : "",
             source: SiteDetector2.detect() === SiteDetector2.SITES.ZHIHU ? "\u77E5\u4E4E" : ""
@@ -28169,15 +29083,16 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               countdown: 0
             });
             if (!ok) {
+              GenericUI2.isExporting = false;
               GenericUI2.showStatus("\u5DF2\u53D6\u6D88\uFF1A\u9875\u9762\u6B64\u524D\u5DF2\u5BFC\u51FA", "info");
               return;
             }
           }
-          GenericUI2.isExporting = true;
           const btn = GenericUI2.panel.querySelector("#gclip-export");
           const floatBtn = GenericUI2.floatBtn;
           btn.disabled = true;
           btn.textContent = "\u5BFC\u51FA\u4E2D...";
+          clearTimeout(GenericUI2._floatResetTimer);
           floatBtn.className = "gclip-float-btn exporting";
           GenericUI2.showStatus("\u6B63\u5728\u63D0\u53D6\u9875\u9762\u5185\u5BB9...", "info");
           try {
@@ -28202,13 +29117,15 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             GenericExporter2.markClipperExported(meta);
             floatBtn.className = "gclip-float-btn success";
             GenericUI2.showStatus(`\u5BFC\u51FA\u6210\u529F: ${meta.title}`, "success");
-            setTimeout(() => {
+            clearTimeout(GenericUI2._floatResetTimer);
+            GenericUI2._floatResetTimer = setTimeout(() => {
               floatBtn.className = "gclip-float-btn";
             }, 3e3);
           } catch (error) {
             floatBtn.className = "gclip-float-btn error";
             GenericUI2.showStatus(`\u5BFC\u51FA\u5931\u8D25: ${error.message}`, "error");
-            setTimeout(() => {
+            clearTimeout(GenericUI2._floatResetTimer);
+            GenericUI2._floatResetTimer = setTimeout(() => {
               floatBtn.className = "gclip-float-btn";
             }, 3e3);
           } finally {
@@ -28425,7 +29342,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
   "explanation": "\u6574\u4F53\u8BA1\u5212\u8BF4\u660E"
 }
 
-\u7528\u6237\u4EFB\u52A1\uFF1A${task_description}`;
+\u7528\u6237\u4EFB\u52A1\uFF1A${AI().isolateContent(task_description)}`;
           const planResponse = await AIService2().requestChat(planPrompt, settings, 1500);
           const planResult = AISchema.parseAIJson("agentPlan", planResponse);
           if (!planResult.ok) {
@@ -28551,8 +29468,7 @@ ${AI()._resultToText(r.result)}
           }
           const parsed = result.value;
           if (parsed.tool && typeof parsed.tool === "string") {
-            const toolDef = AI_AGENT_TOOLS2[parsed.tool];
-            if (!toolDef) {
+            if (!Object.prototype.hasOwnProperty.call(AI_AGENT_TOOLS2, parsed.tool)) {
               console.warn(`[LD-Notion] _tryParseToolCall: \u62D2\u7EDD\u672A\u77E5\u5DE5\u5177 "${parsed.tool}"`);
               return null;
             }
@@ -28696,8 +29612,11 @@ ${availableTools}
           return result;
         },
         // 核心 Agent 循环
-        runAgentLoop: async (userMessage, settings, maxIterations = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG2.DEFAULTS.agentMaxIterations)) => {
+        runAgentLoop: async (userMessage, settings, maxIterations) => {
           const permLevel = OperationGuard2.getLevel();
+          const rawMax = maxIterations ?? Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG2.DEFAULTS.agentMaxIterations);
+          const parsedMax = parseInt(rawMax, 10);
+          const effectiveMaxIterations = Number.isFinite(parsedMax) && parsedMax > 0 ? Math.min(parsedMax, 20) : CONFIG2.DEFAULTS.agentMaxIterations;
           const trace = AgentTrace.create(userMessage);
           const availableTools = Object.entries(AI().AGENT_TOOLS).filter(([_, tool]) => tool.level <= permLevel).map(([name, tool]) => `- ${name}: ${tool.description} | \u53C2\u6570: ${tool.params}`).join("\n");
           const systemPrompt = AI()._buildAgentSystemPrompt(permLevel, availableTools, settings);
@@ -28706,11 +29625,11 @@ ${AI().isolateContent(content)}
 </user_input>`;
           const messages = [{ role: "user", content: isolate(userMessage) }];
           let iteration = 0;
-          while (iteration < maxIterations) {
+          while (iteration < effectiveMaxIterations) {
             iteration++;
             trace.iterations = iteration;
             ChatState2().updateLastMessage(
-              `\u{1F916} Agent \u601D\u8003\u4E2D... (${iteration}/${maxIterations})`,
+              `\u{1F916} Agent \u601D\u8003\u4E2D... (${iteration}/${effectiveMaxIterations})`,
               "processing"
             );
             let response;
@@ -28887,6 +29806,7 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
         matchCategory: (response, categories) => {
           if (!response) return categories[categories.length - 1];
           const cleaned = response.trim().replace(/[。，,.!！?？]/g, "");
+          if (!cleaned) return categories[categories.length - 1];
           for (const cat of categories) {
             if (cleaned === cat || cleaned.toLowerCase() === cat.toLowerCase()) {
               return cat;
@@ -28925,7 +29845,7 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
             } catch (error) {
               lastError = error;
               const msg = String((error == null ? void 0 : error.message) || error);
-              if (/401|403|400|鉴权|授权|invalid|unauthorized|forbidden/i.test(msg)) {
+              if (/\b(401|403|400)\b|鉴权|授权|unauthorized|forbidden|invalid[_ -]?(api[ _-]?key|token|client|grant|request|param)/i.test(msg)) {
                 throw error;
               }
               if (attempt < retries) {
@@ -29253,7 +30173,8 @@ ${systemText}
         load: () => {
           try {
             const data = Storage2.get(CONFIG2.STORAGE_KEYS.CHAT_HISTORY, "[]");
-            ChatState2.messages = JSON.parse(data);
+            const parsed = JSON.parse(data);
+            ChatState2.messages = (Array.isArray(parsed) ? parsed : []).filter((msg) => msg && typeof msg === "object").map((msg) => msg.status === "processing" ? { ...msg, status: "error", content: "\u26A0\uFE0F \u56DE\u590D\u4E2D\u65AD\uFF08\u9875\u9762\u5237\u65B0/\u5173\u95ED\uFF09\uFF0C\u8BF7\u91CD\u8BD5\u3002" } : msg);
           } catch (error) {
             console.warn("[LD-Notion] \u804A\u5929\u5386\u53F2\u52A0\u8F7D\u5931\u8D25:", error);
             ChatState2.messages = [];
@@ -29733,7 +30654,10 @@ ${systemText}
         },
         _resultToText: (result) => AIAssistant2._normalizeExecutionResult(result).text,
         _resultToAgentPayload: (result) => {
-          return CredentialVault2.redactText(JSON.stringify(AIAssistant2._normalizeExecutionResult(result), null, 2));
+          const payload = CredentialVault2.redactText(JSON.stringify(AIAssistant2._normalizeExecutionResult(result), null, 2));
+          const MAX_PAYLOAD_CHARS = 2e4;
+          return payload.length > MAX_PAYLOAD_CHARS ? `${payload.slice(0, MAX_PAYLOAD_CHARS)}
+\u2026\uFF08\u5DE5\u5177\u7ED3\u679C\u8FC7\u957F\u5DF2\u622A\u65AD ${payload.length - MAX_PAYLOAD_CHARS} \u5B57\u7B26\uFF09` : payload;
         },
         _isErrorResult: (result) => AIAssistant2._normalizeExecutionResult(result).status === "error",
         _buildPageIconPayload: (args = {}) => {
@@ -30448,7 +31372,7 @@ ${isolateContent(userMessage)}
           help: true
         },
         _resolveIntentExecutor: (intent) => {
-          const handlerName = AIAssistant2._INTENT_HANDLER_MAP[intent];
+          const handlerName = Object.prototype.hasOwnProperty.call(AIAssistant2._INTENT_HANDLER_MAP, intent) ? AIAssistant2._INTENT_HANDLER_MAP[intent] : null;
           if (handlerName) {
             return {
               source: "intent",
@@ -30468,7 +31392,7 @@ ${isolateContent(userMessage)}
               }
             };
           }
-          const tool = AIAssistant2.AGENT_TOOLS[intent];
+          const tool = Object.prototype.hasOwnProperty.call(AIAssistant2.AGENT_TOOLS, intent) ? AIAssistant2.AGENT_TOOLS[intent] : null;
           if (tool) {
             return {
               source: "tool",
@@ -30724,7 +31648,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           ChatState2.addMessage("assistant", "\u601D\u8003\u4E2D...", "processing");
           try {
             const response = await AIAssistant2.handleMessage(message);
-            ChatState2.updateLastMessage(response, "complete");
+            ChatState2.updateLastMessage(response, AIAssistant2._isErrorResult(response) ? "error" : "complete");
           } catch (error) {
             console.error("[LD-Notion] AI \u5904\u7406\u5931\u8D25:", error);
             ChatState2.updateLastMessage(`\u274C \u5904\u7406\u5931\u8D25: ${error.message}`, "error");
@@ -30865,6 +31789,9 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           const { notionApiKey, notionDatabaseId } = settings;
           const pages = [];
           let cursor = null;
+          const seenCursors = /* @__PURE__ */ new Set();
+          const MAX_PAGES = 100;
+          let pageCount = 0;
           do {
             const response = await NotionAPI2.queryDatabase(
               notionDatabaseId,
@@ -30874,8 +31801,14 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
               notionApiKey
             );
             pages.push(...response.results || []);
-            cursor = response.has_more ? response.next_cursor : null;
-          } while (cursor);
+            pageCount++;
+            const nextCursor = response.has_more ? response.next_cursor : null;
+            cursor = nextCursor && !seenCursors.has(nextCursor) ? nextCursor : null;
+            if (cursor) seenCursors.add(cursor);
+          } while (cursor && pageCount < MAX_PAGES);
+          if (cursor) {
+            console.warn(`[LD-Notion] \u5206\u9875\u5DF2\u8FBE\u4E0A\u9650 ${MAX_PAGES} \u9875, \u5269\u4F59\u9875\u9762\u672A\u52A0\u8F7D`);
+          }
           return pages;
         },
         // 获取页面标题（复用 Utils.getPageTitle）
@@ -30990,6 +31923,8 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         reset: () => {
           AIClassifier2.isPaused = false;
           AIClassifier2.isCancelled = false;
+          const pauseBtn = document.querySelector("#ldb-classify-pause");
+          if (pauseBtn) pauseBtn.textContent = "\u23F8\uFE0F \u6682\u505C\u5206\u7C7B";
         }
       };
       Object.assign(AIAssistant2, require_guarded_write().GuardedWrite);
@@ -31013,7 +31948,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   });
 
   // src/main.js
-  var { CONFIG, SUPPORTED_FILE_TYPES, EXT_TO_MIME, FILE_TYPE_CATEGORY, SUPPORTED_IMAGE_TYPES, MULTI_PART_THRESHOLD, isSupportedFileType, getMimeType: getMimeType2, getFileCategory, MSG } = require_config();
+  var { CONFIG, SUPPORTED_FILE_TYPES, EXT_TO_MIME, FILE_TYPE_CATEGORY, SUPPORTED_IMAGE_TYPES, MULTI_PART_THRESHOLD, isSupportedFileType, getMimeType, getFileCategory, MSG } = require_config();
   var { Utils } = require_utils();
   var { Storage, SyncState } = require_storage();
   var { CredentialVault, TargetState, NotionOAuth } = require_auth();
@@ -31061,7 +31996,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       "import-bookmarks": "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E",
       "import-github": "\u5BFC\u5165GitHub\u6536\u85CF"
     };
-    const cmd = cmdMap[action];
+    const cmd = Object.prototype.hasOwnProperty.call(cmdMap, action) ? cmdMap[action] : void 0;
     if (!cmd) return;
     const input = document.querySelector("#ldb-chat-input");
     if (input && ChatUI.sendMessage) {
@@ -31075,6 +32010,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       await UICommandService.execute("discover_export_target_after_auth", { accessToken, source });
     });
     NotionOAuth.installCrossPageWatchers();
+    UI.installTargetCrossPageWatchers();
     const initUI = async () => {
       try {
         DesignSystem.initTheme();
