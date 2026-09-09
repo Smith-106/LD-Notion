@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [3.14.19] - 2026-09-10
+
+### fix (debug: 浮层可见性诞生缺陷 + 错误文案可诊断化)
+
+- **确认对话框可见性修复**（debug 实测定案）：`.ldb-confirm-overlay` 自 v2.5.0 引入起从未有 CSS 定义，对话框裸 block 流式追加到 body 末尾，linux.do 等无限流长页面下落在视口外（实测页面底部横条 0,1101 2545×114）——清空对话/关闭面板/删除模板等所有确认类操作对用户表现为「按键失效」且无任何控制台报错；v3.14.7 将清空对话从原生 confirm 迁移至此后症状暴露。修复：BASE CSS 补全屏 fixed 遮罩 + 居中卡片 + 全套子元素样式（z-index 2147483641 高于面板），使用现有 --ldb-ui-* token 支持亮暗主题
+- **撤销 toast 同型缺陷修复**：UndoManager 的 `.ldb-undo-toast` 同样无布局样式（仅 token 声明）——删除后撤销提示同样掉到页面底部不可见，用户删错内容无法撤销；补右下角 fixed 定位 + `.visible` 淡入淡出（对齐 hideToast 300ms）+ 进度条纯 CSS 5s 倒计时动画（对齐 CONFIG.API.UNDO_TIMEOUT）
+- **AI 请求/上传下载错误文案可诊断化**：GM_xmlhttpRequest onerror 参数为对象，ai/index.js 三 provider 与 notion-upload.js 上传/下载共 5 处裸 `${error}` 串化成「网络请求失败： [object Object]」吞掉真实原因；新增 `Utils.formatRequestError`（对象字段提取 → 字符串原样 → JSON 兼底），用户可自见真实网络错误
+
+### test
+
+- 回归守卫 +3：formatRequestError 行为断言 / BASE CSS 遮罩存在且 z-index 可覆盖面板 / onerror 禁止裸串化（858 全绿）
+
 ## [3.14.18] - 2026-09-09
 
 ### fix (odyssey 三轮审计修复: debug 双 bug + codebase review 三项 + UI 后端契约对账)
