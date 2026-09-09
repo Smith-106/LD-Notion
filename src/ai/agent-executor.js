@@ -31,7 +31,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
   "explanation": "整体计划说明"
 }
 
-用户任务：${task_description}`;
+用户任务：${AI().isolateContent(task_description)}`;
 
         const planResponse = await AIService().requestChat(planPrompt, settings, 1500);
 
@@ -173,8 +173,9 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
         const parsed = result.value;
         if (parsed.tool && typeof parsed.tool === "string") {
             // 白名单校验：tool 必须在 AI_AGENT_TOOLS 中定义
-            const toolDef = AI_AGENT_TOOLS[parsed.tool];
-            if (!toolDef) {
+            // P4 共识(dsf): 对象真值判断会放行原型链键(constructor/toString/__proto__),
+            // 必须用 hasOwnProperty 限定自有属性
+            if (!Object.prototype.hasOwnProperty.call(AI_AGENT_TOOLS, parsed.tool)) {
                 console.warn(`[LD-Notion] _tryParseToolCall: 拒绝未知工具 "${parsed.tool}"`);
                 return null;
             }
@@ -322,8 +323,16 @@ ${availableTools}
     },
 
     // 核心 Agent 循环
-    runAgentLoop: async (userMessage, settings, maxIterations = Storage.get(CONFIG.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG.DEFAULTS.agentMaxIterations)) => {
+    runAgentLoop: async (userMessage, settings, maxIterations) => {
         const permLevel = OperationGuard.getLevel();
+
+        // P4 共识(dsf): 存储值可能非法(字符串/NaN/0/超大) —— 归一为正整数并夹在 1..20,
+        // 否则非法值使循环零次执行(却回显达到最大步数)或近似无限调用 AI
+        const rawMax = maxIterations ?? Storage.get(CONFIG.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG.DEFAULTS.agentMaxIterations);
+        const parsedMax = parseInt(rawMax, 10);
+        const effectiveMaxIterations = Number.isFinite(parsedMax) && parsedMax > 0
+            ? Math.min(parsedMax, 20)
+            : CONFIG.DEFAULTS.agentMaxIterations;
 
         // ISS-012 MAINT-002: 创建调用链路 trace（observability），出口 persist 落盘。
         const trace = AgentTrace.create(userMessage);
@@ -343,11 +352,11 @@ ${availableTools}
         const messages = [{ role: "user", content: isolate(userMessage) }];
         let iteration = 0;
 
-        while (iteration < maxIterations) {
+        while (iteration < effectiveMaxIterations) {
             iteration++;
             trace.iterations = iteration;
             ChatState().updateLastMessage(
-                `🤖 Agent 思考中... (${iteration}/${maxIterations})`,
+                `🤖 Agent 思考中... (${iteration}/${effectiveMaxIterations})`,
                 "processing"
             );
 

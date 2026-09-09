@@ -1077,7 +1077,12 @@ const AIAssistant = {
 
     _resultToAgentPayload: (result) => {
         // v3.14.6 (S-08): 回喂模型前脱敏 —— 错误信息/reason 可携带凭证片段, 不回显
-        return CredentialVault.redactText(JSON.stringify(AIAssistant._normalizeExecutionResult(result), null, 2));
+        const payload = CredentialVault.redactText(JSON.stringify(AIAssistant._normalizeExecutionResult(result), null, 2));
+        // P4 共识(qwen): 工具结果无大小上限, 大结果(如全库页面列表)会撑爆后续请求体
+        const MAX_PAYLOAD_CHARS = 20000;
+        return payload.length > MAX_PAYLOAD_CHARS
+            ? `${payload.slice(0, MAX_PAYLOAD_CHARS)}\n…（工具结果过长已截断 ${payload.length - MAX_PAYLOAD_CHARS} 字符）`
+            : payload;
     },
 
     _isErrorResult: (result) => AIAssistant._normalizeExecutionResult(result).status === "error",

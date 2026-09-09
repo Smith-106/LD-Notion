@@ -102,53 +102,59 @@ function installUploadMethods(NotionAPI) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => {
-                const boundaryBytes = new Uint8Array(8);
-                if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-                    crypto.getRandomValues(boundaryBytes);
-                } else {
-                    reject(new Error("crypto.getRandomValues 不可用，无法生成 multipart boundary"));
-                    return;
+                // P4 共识(qwen): onload 内构造请求头抛错不会到达 reject —— Promise 永挂。
+                // 全量包 try/catch 转 reject(与 uploadFileContent 同款)。
+                try {
+                    const boundaryBytes = new Uint8Array(8);
+                    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                        crypto.getRandomValues(boundaryBytes);
+                    } else {
+                        reject(new Error("crypto.getRandomValues 不可用，无法生成 multipart boundary"));
+                        return;
+                    }
+                    const boundary = '----LDNotionFormBoundary' + Array.from(boundaryBytes, b => b.toString(16).padStart(2, "0")).join("");
+                    const partName = sanitizeMultipartFilename(filename) || `part-${partNumber}.bin`;
+                    const uint8Array = new Uint8Array(reader.result);
+
+                    const fileHeader = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${partName}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
+                    const partNumberField = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="part_number"\r\n\r\n${partNumber}\r\n`;
+                    const footer = `--${boundary}--\r\n`;
+
+                    const headerBytes = new TextEncoder().encode(fileHeader);
+                    const partNumberBytes = new TextEncoder().encode(partNumberField);
+                    const footerBytes = new TextEncoder().encode(footer);
+
+                    const body = new Uint8Array(headerBytes.length + uint8Array.length + partNumberBytes.length + footerBytes.length);
+                    body.set(headerBytes, 0);
+                    body.set(uint8Array, headerBytes.length);
+                    body.set(partNumberBytes, headerBytes.length + uint8Array.length);
+                    body.set(footerBytes, headerBytes.length + uint8Array.length + partNumberBytes.length);
+
+                    GM_xmlhttpRequest({
+                        method: 'POST',
+                        url: NotionAPI.Transport.buildUrl(`/file_uploads/${uploadId}/send`),
+                        headers: {
+                            'Authorization': `Bearer ${NotionOAuth.resolveRequestToken(apiKey)}`,
+                            'Notion-Version': CONFIG.API.NOTION_VERSION,
+                            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                        },
+                        data: body.buffer,
+                        binary: true,
+                        timeout: 120000,
+                        onload: (response) => {
+                            if (response.status >= 200 && response.status < 300) {
+                                try { resolve(Utils.safeJsonParse(response.responseText, {})); }
+                                catch { resolve({}); }
+                            } else {
+                                reject(new Error(`发送分片失败: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
+                            }
+                        },
+                        onerror: (error) => reject(new Error(`网络请求失败: ${Utils.formatRequestError(error)}`)),
+                        ontimeout: () => reject(new Error("发送分片超时")),
+                    });
+                } catch (error) {
+                    reject(error instanceof Error ? error : new Error(String(error)));
                 }
-                const boundary = '----LDNotionFormBoundary' + Array.from(boundaryBytes, b => b.toString(16).padStart(2, "0")).join("");
-                const partName = sanitizeMultipartFilename(filename) || `part-${partNumber}.bin`;
-                const uint8Array = new Uint8Array(reader.result);
-
-                const fileHeader = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${partName}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
-                const partNumberField = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="part_number"\r\n\r\n${partNumber}\r\n`;
-                const footer = `--${boundary}--\r\n`;
-
-                const headerBytes = new TextEncoder().encode(fileHeader);
-                const partNumberBytes = new TextEncoder().encode(partNumberField);
-                const footerBytes = new TextEncoder().encode(footer);
-
-                const body = new Uint8Array(headerBytes.length + uint8Array.length + partNumberBytes.length + footerBytes.length);
-                body.set(headerBytes, 0);
-                body.set(uint8Array, headerBytes.length);
-                body.set(partNumberBytes, headerBytes.length + uint8Array.length);
-                body.set(footerBytes, headerBytes.length + uint8Array.length + partNumberBytes.length);
-
-                GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: NotionAPI.Transport.buildUrl(`/file_uploads/${uploadId}/send`),
-                    headers: {
-                        'Authorization': `Bearer ${NotionOAuth.resolveRequestToken(apiKey)}`,
-                        'Notion-Version': CONFIG.API.NOTION_VERSION,
-                        'Content-Type': `multipart/form-data; boundary=${boundary}`,
-                    },
-                    data: body.buffer,
-                    binary: true,
-                    timeout: 120000,
-                    onload: (response) => {
-                        if (response.status >= 200 && response.status < 300) {
-                            try { resolve(Utils.safeJsonParse(response.responseText, {})); }
-                            catch { resolve({}); }
-                        } else {
-                            reject(new Error(`发送分片失败: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
-                        }
-                    },
-                    onerror: (error) => reject(new Error(`网络请求失败: ${Utils.formatRequestError(error)}`)),
-                    ontimeout: () => reject(new Error("发送分片超时")),
-                });
             };
             reader.onerror = () => reject(new Error("读取分片数据失败"));
             reader.readAsArrayBuffer(partBlob);
@@ -177,47 +183,54 @@ function installUploadMethods(NotionAPI) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => {
-                const bytes = new Uint8Array(8);
-                if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-                    crypto.getRandomValues(bytes);
-                } else {
-                    // F1(odyssey-review): 事件回调内 throw 不达 reject — promise 永挂;
-                    // 必须走 reject(与 sendFilePart 同款对齐)
-                    reject(new Error("crypto.getRandomValues 不可用，无法生成 multipart boundary"));
-                    return;
+                // P4 共识(qwen): onload 内构造请求头/编码抛错不会到达 reject —— Promise 永挂。
+                try {
+                    const bytes = new Uint8Array(8);
+                    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                        crypto.getRandomValues(bytes);
+                    } else {
+                        // F1(odyssey-review): 事件回调内 throw 不达 reject — promise 永挂;
+                        // 必须走 reject(与 sendFilePart 同款对齐)
+                        reject(new Error("crypto.getRandomValues 不可用，无法生成 multipart boundary"));
+                        return;
+                    }
+                    const boundary = '----WebKitFormBoundary' + Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+                    const uint8Array = new Uint8Array(reader.result);
+
+                    // P4 共识(qwen): contentType 源于远端 blob.type, 剥离 CR/LF/引号防 multipart 头注入
+                    const safeContentType = String(contentType || "application/octet-stream").replace(/[\r\n"]/g, "") || "application/octet-stream";
+                    const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${sanitizeMultipartFilename(filename)}"\r\nContent-Type: ${safeContentType}\r\n\r\n`;
+                    const headerBytes = new TextEncoder().encode(header);
+                    const footerBytes = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
+
+                    const body = new Uint8Array(headerBytes.length + uint8Array.length + footerBytes.length);
+                    body.set(headerBytes, 0);
+                    body.set(uint8Array, headerBytes.length);
+                    body.set(footerBytes, headerBytes.length + uint8Array.length);
+
+                    GM_xmlhttpRequest({
+                        method: 'POST',
+                        url: uploadUrl,
+                        headers: {
+                            // 预签名 URL 已包含授权信息，发送 API Key 会造成安全泄露
+                            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                        },
+                        data: body.buffer,
+                        binary: true,
+                        onload: (response) => {
+                            if (response.status === 200 || response.status === 204) {
+                                resolve();
+                            } else {
+                                reject(new Error(`上传文件失败: ${response.status}`));
+                            }
+                        },
+                        onerror: (error) => reject(new Error(`网络请求失败: ${Utils.formatRequestError(error)}`)),
+                        timeout: 60000,
+                        ontimeout: () => reject(new Error("文件上传超时")),
+                    });
+                } catch (error) {
+                    reject(error instanceof Error ? error : new Error(String(error)));
                 }
-                const boundary = '----WebKitFormBoundary' + Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
-                const uint8Array = new Uint8Array(reader.result);
-
-                const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${sanitizeMultipartFilename(filename)}"\r\nContent-Type: ${contentType}\r\n\r\n`;
-                const headerBytes = new TextEncoder().encode(header);
-                const footerBytes = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
-
-                const body = new Uint8Array(headerBytes.length + uint8Array.length + footerBytes.length);
-                body.set(headerBytes, 0);
-                body.set(uint8Array, headerBytes.length);
-                body.set(footerBytes, headerBytes.length + uint8Array.length);
-
-                GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: uploadUrl,
-                    headers: {
-                        // 预签名 URL 已包含授权信息，发送 API Key 会造成安全泄露
-                        'Content-Type': `multipart/form-data; boundary=${boundary}`,
-                    },
-                    data: body.buffer,
-                    binary: true,
-                    onload: (response) => {
-                        if (response.status === 200 || response.status === 204) {
-                            resolve();
-                        } else {
-                            reject(new Error(`上传文件失败: ${response.status}`));
-                        }
-                    },
-                    onerror: (error) => reject(new Error(`网络请求失败: ${Utils.formatRequestError(error)}`)),
-                timeout: 60000,
-                ontimeout: () => reject(new Error("文件上传超时")),
-                });
             };
             reader.onerror = () => reject(new Error("读取文件数据失败"));
             reader.readAsArrayBuffer(blob);
@@ -254,7 +267,8 @@ function installUploadMethods(NotionAPI) {
                 responseType: "blob",
                 timeout: 60000,
                 onload: (r) => {
-                    if (r.status >= 200 && r.status < 300) resolve(r.response);
+                    // P4 共识(qwen): 2xx 但 response 为空时直接 resolve 会让下游 blob.type 抛错
+                    if (r.status >= 200 && r.status < 300 && r.response) resolve(r.response);
                     else reject(new Error(`下载失败: ${r.status}`));
                 },
                 onerror: (e) => reject(new Error(`下载失败: ${Utils.formatRequestError(e)}`)),
@@ -276,6 +290,10 @@ function installUploadMethods(NotionAPI) {
         if (blob.size > MULTI_PART_THRESHOLD) {
             const PART_SIZE = 20 * 1024 * 1024; // 每片 20MB
             const totalParts = Math.ceil(blob.size / PART_SIZE);
+            // P4 共识(glm): part_number 契约上限 1000 —— 超限预检短路, 避免传完 ~20GB 才 400
+            if (totalParts > 1000) {
+                throw new Error(`文件过大: 需 ${totalParts} 个分片，超过 Notion 单文件 1000 分片上限`);
+            }
 
             // ISS-019/F2：multi_part 契约要求 createMultiPartUpload 声明 number_of_parts
             const multiUpload = await NotionAPI.createMultiPartUpload(
@@ -328,7 +346,7 @@ function installUploadMethods(NotionAPI) {
                         responseType: "blob",
                         timeout: 60000,
                         onload: (r) => {
-                            if (r.status >= 200 && r.status < 300) resolve(r.response);
+                            if (r.status >= 200 && r.status < 300 && r.response) resolve(r.response);
                             else reject(new Error(`下载失败: ${r.status}`));
                         },
                         onerror: (e) => reject(new Error(`下载失败: ${Utils.formatRequestError(e)}`)),
@@ -336,6 +354,27 @@ function installUploadMethods(NotionAPI) {
                     });
                 });
                 const filename = `file-${Date.now()}.bin`;
+                // P4 共识(dsf): 回退路径此前忽略大小直接走 single_part(20MB 上限) 必然失败;
+                // 超阈时改走 multi_part 分片上传
+                if (blob.size > MULTI_PART_THRESHOLD) {
+                    const PART_SIZE = 20 * 1024 * 1024;
+                    const totalParts = Math.ceil(blob.size / PART_SIZE);
+                    if (totalParts > 1000) {
+                        throw new Error(`文件过大: 需 ${totalParts} 个分片，超过 Notion 单文件 1000 分片上限`);
+                    }
+                    const multiUpload = await NotionAPI.createMultiPartUpload(
+                        filename, "application/octet-stream", blob.size, apiKey, totalParts
+                    );
+                    if (!multiUpload?.id) throw new Error("创建多分片上传失败");
+                    for (let i = 0; i < totalParts; i++) {
+                        const partBlob = blob.slice(i * PART_SIZE, Math.min((i + 1) * PART_SIZE, blob.size));
+                        await NotionAPI.sendFilePart(multiUpload.id, partBlob, i + 1, apiKey, filename);
+                    }
+                    await NotionAPI.completeFileUpload(multiUpload.id, apiKey);
+                    const result = { fileId: multiUpload.id, blockType: "file" };
+                    if (!returnDetails) return result.fileId;
+                    return result;
+                }
                 const fileUpload = await NotionAPI.createFileUpload(filename, "application/octet-stream", apiKey);
                 if (!fileUpload?.upload_url || !fileUpload?.id) throw new Error("创建上传失败");
                 await NotionAPI.uploadFileContent(fileUpload.upload_url, blob, "application/octet-stream", filename);
