@@ -51,6 +51,8 @@ const DedupStore = {
             // 损坏存储兜底: 非纯对象(数组/null/原始值)时严格模式赋值会抛 TypeError
             return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
         } catch {
+            // dsf P2 共识: 静默返回空集后下一次写回会以空集覆盖原账本 — 至少留痕
+            console.warn(`[LD-Notion] 去重账本解析失败(${sourceType}), 已降级为空集`);
             return {};
         }
     },
@@ -65,11 +67,15 @@ const DedupStore = {
             this._evictByCapacity(set);
         }
         GM_setValue(this.keyFor(sourceType), JSON.stringify(set));
+        // 3/3 共识(dsf+glm+qwen): 非 batch 写回(markTopicExported / markClipperExported /
+        // markItemSeen / unmarkSeen)此前不发事件 → SyncEngine 唯一 push 触发源缺失,
+        // 手动导出的账本永不推送他端 → 跨设备重复导出。事件下沉到唯一持久化出口。
+        emit("storage:state-committed", { sourceType, kind: "dedup" });
     },
 
     // --- batch 模式: 减少 IPC 调用(全盘审计 find 7: 单槽 → 按 sourceType 分槽,
     // 多导入器并发时 A 的缓存被 B 覆盖丢失, 现每源独立缓存) ---
-    _batchCaches: {},    // sourceType → { set, dirty, dirtyKeys, deleted, wiped }
+    _batchCaches: Object.create(null),    // sourceType → { set, dirty, dirtyKeys, deleted, wiped }
 
     /**
      * 开始批量模式 (SyncCoordinator 在 sync 循环前后调用)
@@ -79,13 +85,14 @@ const DedupStore = {
         // v3.14.6 (CC-06): 幂等 —— 槽已存在则复用(同源并发 batch 后开者不再覆盖先开者内存累积)
         if (this._batchCaches[sourceType]) return;
         // dirtyKeys: 本 batch 内 markSeen 触及的键(仅这些参与 rebase 写回, 防陈旧快照复活他处已删键)
-        // deleted: 本 batch 内 unmarkSeen 墓碑(endBatch 从 fresh 删除, 防 rebase 并集复活)
+        // deleted: 本 batch 内 unmarkSeen 墓碑(键 → 删除时刻; endBatch 仅在盘上值不新于墓碑时删除,
+        // 防 rebase 并集复活, 也防覆盖他 tab 在墓碑之后的重新标记)
         // wiped: clearSeen 整本清空(#18) 时置位, endBatch 勿与盘上旧集并集复活
         this._batchCaches[sourceType] = {
             set: this._loadSet(sourceType),
             dirty: false,
             dirtyKeys: new Set(),
-            deleted: new Set(),
+            deleted: new Map(),
             wiped: false,
         };
     },
@@ -119,7 +126,10 @@ const DedupStore = {
                         if (prev === undefined || Number(ts) > Number(prev)) next[k] = ts;
                     }
                     if (cache.deleted) {
-                        for (const k of cache.deleted) delete next[k];
+                        // glm P2 共识: 墓碑带时间戳 —— 盘上更新(他 tab 在删除后重新标记)不得被抹除
+                        for (const [k, delTs] of cache.deleted) {
+                            if (next[k] === undefined || Number(next[k]) <= Number(delTs)) delete next[k];
+                        }
                     }
                 }
                 // v3.14.3: 与 _saveSet 同规则——URL 键源时间 TTL, id 键源容量上限
@@ -128,16 +138,14 @@ const DedupStore = {
                 } else {
                     this._evictByCapacity(next);
                 }
-                this._saveSet(src, next);
+                this._saveSet(src, next);   // 内含 storage:state-committed 事件
                 cache.set = next;
-                // F-SYNC-11: 去重账本变更事件(零订阅者静默),多端同步引擎据此触发 push。
-                emit("storage:state-committed", { sourceType: src, kind: "dedup" });
             }
         }
         if (sourceType) {
             delete this._batchCaches[sourceType];
         } else {
-            this._batchCaches = {};
+            this._batchCaches = Object.create(null);
         }
     },
 
@@ -254,8 +262,9 @@ const DedupStore = {
             }
             // 即便键仅在盘上、不在本批快照, 也记墓碑 —— endBatch 必须从 fresh 删掉
             if (batch.deleted) {
-                batch.deleted.add(dedupKey);
-                if (hashed !== dedupKey) batch.deleted.add(hashed);
+                const delTs = Date.now();
+                batch.deleted.set(dedupKey, delTs);
+                if (hashed !== dedupKey) batch.deleted.set(hashed, delTs);
             }
             if (batch.dirtyKeys) {
                 batch.dirtyKeys.delete(dedupKey);
@@ -305,6 +314,8 @@ const DedupStore = {
             return;
         }
         GM_deleteValue(this.keyFor(sourceType));
+        // 3/3 共识: 非 batch 清空同样必须通知同步引擎(否则他端 pull 回旧账本使删除复活)
+        emit("storage:state-committed", { sourceType, kind: "dedup" });
     },
 };
 

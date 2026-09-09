@@ -142,6 +142,8 @@ const Storage = {
     clearExportedTopics: () => {
         Storage._exportedTopicsCache = {};
         DedupStore.clearSeen("linuxdo");
+        // 2/3 共识(dsf+qwen): legacy 键未删则后续迁移会把已清除记录重新迁回
+        Storage.remove(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS);
     },
 };
 
