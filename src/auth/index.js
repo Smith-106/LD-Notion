@@ -48,6 +48,9 @@ const CredentialVault = {
         }
         return out
             .replace(/ntn_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***")
+            // P4 收敛(c06): secret_ 为 Notion 旧版 manual Key 与 OAuth Client Secret 形态
+            // (validateManualApiKey 明确接受), 原清单遗漏 → 明文穿透脱敏
+            .replace(/secret_[A-Za-z0-9]{20,}/g, "***REDACTED***")
             .replace(/sk-[A-Za-z0-9_\-]{20,}/g, "***REDACTED***")
             .replace(/Bearer\s+[A-Za-z0-9._\-]{10,}/gi, "Bearer ***REDACTED***")
             .replace(/github_pat_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***")
@@ -961,7 +964,10 @@ const NotionOAuth = {
 
         const genericInput = document.querySelector("#gclip-api-key-input");
         if (genericInput) {
-            genericInput.value = "";
+            // P4 收敛(c06): 与 syncSensitiveInput 对齐 —— 用户正在输入时不得清空
+            if (document.activeElement !== genericInput) {
+                genericInput.value = "";
+            }
             if (NotionOAuth.isOAuthConnected()) {
                 genericInput.placeholder = "已通过 OAuth 授权（如需覆盖，可手动输入）";
             } else {
@@ -1156,7 +1162,12 @@ const NotionOAuth = {
             fields.clearBtn.textContent = status.connected ? "断开 OAuth 并清除本地凭据" : "清除本地凭据(含手动 API Key)";
             fields.clearBtn.disabled = !status.connected
                 && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN)
-                && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_API_KEY);
+                && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_API_KEY)
+                // P4 收敛(c06): clearConnection 会清除 OAuth 配置三键 —— 按钮判定必须对称,
+                // 否则仅存配置未授权时清除入口禁用, 错误配置只能覆盖不能清除
+                && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID)
+                && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET)
+                && !CredentialVault.hasPersistedValue(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI);
             NotionOAuth.syncAuthModeUI(root);
         };
 

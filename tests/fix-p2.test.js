@@ -219,13 +219,31 @@ describe("P2-DC-006: RSS nextSnapshot 收尾剪枝(只增不删 → 无界增长
             stale_removed: { pageId: "p3", title: "已移除feed旧条目" }, // → 剪除
         };
         RSSAutoImporter._aggregateRssState(
-            { currentItems, feedCount: 2, nextSnapshot },
+            { currentItems, feedCount: 2, nextSnapshot, hasFullItemSet: true },
             { created: 1, updated: 0, unchanged: 1, failed: 0 },
             new Set(["k1", "k2"]),
             1234567
         );
         const state = SyncState.getSourceState("rss");
         expect(Object.keys(state.snapshot).sort()).toEqual(["k1", "k2"]);
+    });
+
+    it("P4 收敛: 增量路径(hasFullItemSet=false)不得按 newItems 剪枝历史快照", () => {
+        const currentItems = [
+            { id: "a1", itemKey: "k1", title: "本轮新条目" },
+        ];
+        const nextSnapshot = {
+            k1: { pageId: "p1", title: "本轮新条目" },
+            history: { pageId: "p2", title: "历史已同步条目" },
+        };
+        RSSAutoImporter._aggregateRssState(
+            { currentItems, feedCount: 2, nextSnapshot, hasFullItemSet: false },
+            { created: 1, updated: 0, unchanged: 0, failed: 0 },
+            new Set(["k1"]),
+            1234567
+        );
+        const state = SyncState.getSourceState("rss");
+        expect(Object.keys(state.snapshot).sort()).toEqual(["history", "k1"]);
     });
 
     it("失败项也在 currentItems 中, 剪枝不丢失败重试上下文", () => {
@@ -237,7 +255,7 @@ describe("P2-DC-006: RSS nextSnapshot 收尾剪枝(只增不删 → 无界增长
             old: { pageId: "p9" },
         };
         RSSAutoImporter._aggregateRssState(
-            { currentItems, feedCount: 1, nextSnapshot },
+            { currentItems, feedCount: 1, nextSnapshot, hasFullItemSet: true },
             { created: 0, updated: 0, unchanged: 0, failed: 1 },
             new Set(),
             1234567

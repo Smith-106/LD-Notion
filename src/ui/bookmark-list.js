@@ -147,13 +147,19 @@ const BookmarkList = {
     },
 
     getWorkspaceExportedUrlSet: () => {
-        const records = UI().workspaceVisualSnapshot?.records;
+        const snap = UI().workspaceVisualSnapshot;
+        const records = snap?.records;
+        if (!Array.isArray(records)) return new Set();
+        // P4 收敛(c11 2/3): 收藏列表逐行调用本函数 → 每次重建全量集合(O(N×M))。
+        // 快照对象仅在刷新时整体替换(workspace-insight.js:1008), 故按对象+长度记忆安全。
+        const cache = UI()._workspaceExportUrlSetCache;
+        if (cache && cache.snap === snap && cache.len === records.length) return cache.set;
         const set = new Set();
-        if (!Array.isArray(records)) return set;
         records.forEach((record) => {
             const url = UI().normalizeWorkspaceInsightUrl(record?.sourceUrl || record?.url || "");
             if (url) set.add(url);
         });
+        UI()._workspaceExportUrlSetCache = { snap, len: records.length, set };
         return set;
     },
 

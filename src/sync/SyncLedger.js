@@ -5,6 +5,7 @@
 // 行模型: { kind, source, key, version, updatedAt, deviceId, payload, checksum }
 // 介质形态: 同步库每行一个 page, payload 为 rich_text 属性(经 Fragmenter 分片)。
 
+const { SyncConstants } = require("./constants");
 const { SyncFragmenter } = require("./SyncFragmenter");
 const { SyncRateLimiter } = require("./SyncRateLimiter");
 
@@ -78,6 +79,12 @@ const SyncLedger = {
             await SyncRateLimiter.acquire();
             const response = await NotionAPI.queryDatabase(databaseId, undefined, null, cursor, apiKey);
             rows.push(...(response?.results || []));
+            // P4 收敛(c11 2/3): H-3 声明的 MAX_ROWS 此前从未生效 —— 介质行数无界累积
+            if (rows.length >= SyncConstants.MAX_ROWS) {
+                rows.length = SyncConstants.MAX_ROWS;
+                console.warn(`[LD-Notion] 同步介质行数达上限 ${SyncConstants.MAX_ROWS}, 剩余行已忽略`);
+                break;
+            }
             const nextCursor = response?.has_more ? response.next_cursor : null;
             // dsf P2 共识: 游标不前进时原 while 会死循环(异常 API 行为/代理重放)
             if (nextCursor && nextCursor === cursor) break;

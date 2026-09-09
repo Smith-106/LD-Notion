@@ -277,6 +277,12 @@ ${AI().isolateContent(content)}`;
             return `❌ AI 返回的属性均无效，无法创建数据库。`;
         }
         extractedData.properties = validProps;
+        // P4 收敛(c02): createDatabase 必须含 title 属性 —— AI 省略或名称校验过滤后
+        // 无 title 时 Notion 必 400(用户确认后整体失败), 降级首个属性为 title
+        if (!extractedData.properties.some((prop) => prop.type === "title")) {
+            extractedData.properties[0].type = "title";
+            console.warn("[LD-Notion] AI 未返回 title 属性，已将首个属性降级为 title");
+        }
 
         // 确认操作
         const confirmed = await ConfirmationDialog.show({

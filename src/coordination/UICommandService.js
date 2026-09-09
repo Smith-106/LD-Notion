@@ -70,7 +70,9 @@ const UICommandService = Object.freeze({
             aiTargetValue = "",
             aiService = CONFIG.DEFAULTS.aiService,
             aiModel = "",
-            aiApiKey = "",
+            // P4 收敛(c07): 不能给密钥字段默认 "" —— 未携带该字段的调用方会被当成
+            // “用户清空”而 Storage.remove 掉已存密钥。仅 undefined 表示未提供(跳过), "" 仍表示显式清空。
+            aiApiKey,
             aiBaseUrl = "",
             aiCategories = CONFIG.DEFAULTS.aiCategories,
             workspaceMaxPages = 0,
@@ -79,7 +81,7 @@ const UICommandService = Object.freeze({
             personaExpertise = CONFIG.DEFAULTS.agentPersonaExpertise,
             personaInstructions = "",
             githubUsername = "",
-            githubToken = "",
+            githubToken,
             githubImportTypes = ["stars"],
             auditEnabled = null,
         } = payload;
@@ -110,8 +112,8 @@ const UICommandService = Object.freeze({
             });
         }
         await UICommandService._persistProvidedSensitiveEntries({
-            [CONFIG.STORAGE_KEYS.AI_API_KEY]: aiApiKey,
-            [CONFIG.STORAGE_KEYS.GITHUB_TOKEN]: githubToken,
+            ...(aiApiKey === undefined ? {} : { [CONFIG.STORAGE_KEYS.AI_API_KEY]: aiApiKey }),
+            ...(githubToken === undefined ? {} : { [CONFIG.STORAGE_KEYS.GITHUB_TOKEN]: githubToken }),
         });
         (require("../import").GitHubAPI).setImportTypes(Array.isArray(githubImportTypes) && githubImportTypes.length > 0 ? githubImportTypes : ["stars"]);
 

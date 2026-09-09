@@ -89,7 +89,8 @@ const DesignSystem = {
         .ldb-notion-float-btn,
         .ldb-mini-btn,
         .gclip-float-btn,
-        .ldb-undo-toast {
+        .ldb-undo-toast,
+        .ldb-confirm-dialog {
             --ldb-ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
             --ldb-ui-radius: 14px;
@@ -235,6 +236,7 @@ const DesignSystem = {
             .ldb-notion-float-btn:not([data-ldb-theme]),
             .ldb-mini-btn:not([data-ldb-theme]),
             .gclip-float-btn:not([data-ldb-theme]),
+            .ldb-confirm-dialog:not([data-ldb-theme]),
             .ldb-undo-toast:not([data-ldb-theme]) {
                 --ldb-ui-text: #e5e7eb;
                 --ldb-ui-muted: #9ca3af;

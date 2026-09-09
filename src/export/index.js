@@ -399,7 +399,8 @@ const GenericExporter = {
             const database = await NotionAPI.request("GET", `/databases/${databaseId}`, null, apiKey);
             const existingProps = database.properties || {};
             const propsToAdd = {};
-            const propsToUpdate = {};
+            // P4 收敛(c08): null 原型 —— 标题属性名若为 __proto__ 时普通对象赋值会改原型而非自有属性
+            const propsToUpdate = Object.create(null);
 
             const typeConflicts = [];
             for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
@@ -735,6 +736,8 @@ const Exporter = {
         if (block.quote?.children) containers.push(block.quote);
         if (block.synced_block?.children) containers.push(block.synced_block);
         if (block.column_list?.children) containers.push(block.column_list);
+        // P4 收敛(c08): column 容器缺失 —— 列内块(图片/文件)既不收集上传也不做引用替换
+        if (block.column?.children) containers.push(block.column);
         if (block.toggle?.children) containers.push(block.toggle);
         return containers;
     },

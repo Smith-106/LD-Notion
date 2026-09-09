@@ -428,7 +428,12 @@ const GitHubExporter = {
         }
 
         if (onProgress) onProgress("正在配置数据库结构...", 0);
-        await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
+        // P4 收敛(c09): 与 exportStars 对齐 —— setup 失败时 fail-fast,
+        // 否则每项仍会先 enrich(README/AI) 再注定失败
+        const setupResult = await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
+        if (!setupResult.success) {
+            throw new Error(`数据库配置失败: ${setupResult.error}`);
+        }
 
         if (onProgress) onProgress("正在获取 GitHub Repos...", 5);
         const repos = await GitHubAPI.fetchUserRepos(username, token);
@@ -451,7 +456,10 @@ const GitHubExporter = {
         }
 
         if (onProgress) onProgress("正在配置数据库结构...", 0);
-        await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
+        const setupResult = await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
+        if (!setupResult.success) {
+            throw new Error(`数据库配置失败: ${setupResult.error}`);
+        }
 
         if (onProgress) onProgress("正在获取 GitHub Forks...", 5);
         const forks = await GitHubAPI.fetchForkedRepos(username, token);
@@ -473,7 +481,10 @@ const GitHubExporter = {
         }
 
         if (onProgress) onProgress("正在配置数据库结构...", 0);
-        await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
+        const setupResult = await GitHubExporter.setupDatabaseProperties(databaseId, apiKey);
+        if (!setupResult.success) {
+            throw new Error(`数据库配置失败: ${setupResult.error}`);
+        }
 
         if (onProgress) onProgress("正在获取 GitHub Gists...", 5);
         const gists = await GitHubAPI.fetchUserGists(username, token);

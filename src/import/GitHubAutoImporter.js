@@ -211,7 +211,9 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
                 failedEntries.push({ itemKey, title: item.title || itemKey });
                 continue;
             }
-            const enriched = await GitHubExporter.enrichRepo(raw, settings, enrichContext);
+            // P4 收敛(c09): gists 不经过 enrichRepo —— buildGistProperties 只消费 gist.files/
+            // description/html_url, 富化结果被丢弃却白付 README 请求 + AI 配额
+            const enriched = type === "gists" ? raw : await GitHubExporter.enrichRepo(raw, settings, enrichContext);
             const buildFn = type === "gists"
                 ? GitHubExporter.buildGistProperties
                 : (r) => GitHubExporter.buildRepoProperties(r, meta.label);
@@ -238,6 +240,9 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
             }
             successEntries.push({ itemKey });
         } catch (e) {
+            // P4 收敛(c09): 认证终态(401/403/空 token, 由 api 层标 isAuthTerminal)不吞 ——
+            // 继续逐项只会重复注定失败的请求(401 风暴 + 速率浪费); 未尝试项留给下轮重试
+            const authTerminal = e && e.isAuthTerminal === true;
             console.warn(`[GitHubAutoImporter] 导出失败: ${itemKey}`, e);
             try {
                 const { OperationLog } = require("../security");
@@ -249,6 +254,7 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
                 });
             } catch (_) { /* 审计失败不阻断降级 */ }
             failedEntries.push({ itemKey, title: item.title || itemKey });
+            if (authTerminal) break;
         }
         if (i < toExport.length - 1) {
             await Utils.sleep(delay);

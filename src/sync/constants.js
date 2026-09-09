@@ -29,6 +29,10 @@ const SyncConstants = Object.freeze({
     TS_FUTURE_SKEW_MS: 5 * 60 * 1000,
     TS_PAST_TTL_MS: 90 * 24 * 60 * 60 * 1000,
 
+    // 设置项 LWW 时间戳复用上限: 值未变时复用旧戳, 但复用不得超过此年龄,
+    // 否则会落出 TS_PAST_TTL_MS 窗口被 validateRemote 整包拒绝(且永不自愈)
+    SETTINGS_STAMP_MAX_REUSE_MS: 45 * 24 * 60 * 60 * 1000,
+
     // epoch 通胀上限: 远端 epoch ≤ 本地+1(H-5)
     MAX_EPOCH_LEAD: 1,
 

@@ -78,6 +78,30 @@ describe("P1 共识: 同轮「删除旧书签 + 新增同 URL 书签」不得归
         expect(state.snapshot["new-2"]?.pageId).toBe("page-P");
         expect(state.snapshot["old-1"]).toBeUndefined();
     });
+
+    it("同 URL 两书签均在线时, 非建页方记 unchanged 且不交替改写页面", async () => {
+        const ownerBookmark = { id: "old-1", title: "旧标题", url: SAME_URL, folderPath: "", dateAdded: "2026-01-01T00:00:00.000Z" };
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_test");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "db1");
+        SyncState.updateSourceState("bookmark", {
+            snapshot: {
+                "new-2": { pageId: "page-P", url: SAME_URL, title: "新标题", folderPath: "", dateAdded: "2026-02-02T00:00:00.000Z" },
+            },
+        });
+        stubRunDeps();
+        BookmarkAutoImporter.loadCurrentBookmarks.mockResolvedValue([ownerBookmark, newBookmark]);
+        const updateSpy = vi.spyOn(NotionAPI, "updatePage").mockResolvedValue({});
+        const deleteSpy = vi.spyOn(NotionAPI, "deletePage").mockResolvedValue({});
+
+        await BookmarkAutoImporter.run();
+
+        // P4 收敛(c06): 共享页不得被非建页方逐轮改写
+        expect(updateSpy).not.toHaveBeenCalled();
+        expect(deleteSpy).not.toHaveBeenCalled();
+        const state = SyncState.getSourceState("bookmark");
+        expect(state.snapshot["new-2"]?.pageId).toBe("page-P");
+        expect(state.snapshot["old-1"]?.pageId).toBe("page-P");
+    });
 });
 
 describe("P1 共识: SyncScheduler 重试计数生命周期", () => {

@@ -548,7 +548,9 @@ const NotionSiteUI = {
                     aiTargetValue: panel.querySelector("#ldb-notion-ai-target-db").value,
                     aiService: panel.querySelector("#ldb-notion-ai-service").value,
                     aiModel: panel.querySelector("#ldb-notion-ai-model").value,
-                    aiApiKey: panel.querySelector("#ldb-notion-ai-api-key").value.trim(),
+                    aiApiKey: panel.querySelector("#ldb-notion-ai-api-key").dataset.touched === "true"
+                        ? panel.querySelector("#ldb-notion-ai-api-key").value.trim()
+                        : undefined,
                     aiBaseUrl: panel.querySelector("#ldb-notion-ai-base-url").value.trim(),
                     aiCategories: panel.querySelector("#ldb-notion-ai-categories").value.trim(),
                     workspaceMaxPages: parseInt(panel.querySelector("#ldb-notion-workspace-max-pages").value) || 0,
@@ -557,7 +559,11 @@ const NotionSiteUI = {
                     personaExpertise: panel.querySelector("#ldb-notion-persona-expertise").value.trim() || CONFIG.DEFAULTS.agentPersonaExpertise,
                     personaInstructions: panel.querySelector("#ldb-notion-persona-instructions").value.trim(),
                     githubUsername: panel.querySelector("#ldb-notion-github-username").value.trim(),
-                    githubToken: panel.querySelector("#ldb-notion-github-token").value.trim(),
+                    // P4 收敛(c07): 与 API Key 同构 —— 未编辑时传 undefined(保留已存值),
+                    // 否则面板加载即置空的输入框会在保存时 Storage.remove 掉已存 token
+                    githubToken: panel.querySelector("#ldb-notion-github-token").dataset.touched === "true"
+                        ? panel.querySelector("#ldb-notion-github-token").value.trim()
+                        : undefined,
                     githubImportTypes: [...panel.querySelectorAll(".ldb-notion-github-type:checked")].map(cb => cb.value),
                     auditEnabled: panel.querySelector("#ldb-notion-audit-enabled").checked,
                 });
@@ -716,6 +722,11 @@ const NotionSiteUI = {
         };
         panel.querySelector("#ldb-notion-ai-service").value = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
         panel.querySelector("#ldb-notion-ai-api-key").value = "";
+        // P4 收敛(c07): 显式编辑标记 —— 保存时仅 touched 才写/清 AI Key 与 GitHub Token
+        panel.querySelector("#ldb-notion-ai-api-key").dataset.touched = "false";
+        panel.querySelector("#ldb-notion-ai-api-key").oninput = () => {
+            panel.querySelector("#ldb-notion-ai-api-key").dataset.touched = "true";
+        };
         panel.querySelector("#ldb-notion-ai-base-url").value = Storage.get(CONFIG.STORAGE_KEYS.AI_BASE_URL, "");
         panel.querySelector("#ldb-notion-ai-categories").value = Storage.get(CONFIG.STORAGE_KEYS.AI_CATEGORIES, CONFIG.DEFAULTS.aiCategories);
         panel.querySelector("#ldb-notion-workspace-max-pages").value = Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG.DEFAULTS.workspaceMaxPages);
@@ -729,6 +740,10 @@ const NotionSiteUI = {
         // 加载 GitHub 设置
         panel.querySelector("#ldb-notion-github-username").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
         panel.querySelector("#ldb-notion-github-token").value = "";
+        panel.querySelector("#ldb-notion-github-token").dataset.touched = "false";
+        panel.querySelector("#ldb-notion-github-token").oninput = () => {
+            panel.querySelector("#ldb-notion-github-token").dataset.touched = "true";
+        };
         // 加载 GitHub 导入类型
         const savedGHTypes = GitHubAPI.getImportTypes();
         panel.querySelectorAll(".ldb-notion-github-type").forEach(cb => {

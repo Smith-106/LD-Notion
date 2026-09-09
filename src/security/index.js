@@ -477,7 +477,10 @@ const OperationLog = {
     redactSensitiveFields: (entry) => {
         if (!entry || typeof entry !== "object") return entry;
         const redacted = { ...entry };
-        const context = redacted.context || {};
+        // P4 收敛(c10 2/3): 浅拷贝的 context 与调用方同引用 —— 原地脱敏会污染调用方对象。
+        // OperationGuard.execute 在写 guard.decision 审计后仍用同一 context 注册撤销
+        // (NotionAPI.restorePage(context.pageId, context.apiKey)) → 拿到占位串 401, 删除无法恢复。
+        const context = { ...(entry.context || {}) };
         const sensitiveKeys = (CredentialVault && CredentialVault.REDACT_IN_LOGS)
             ? CredentialVault.REDACT_IN_LOGS
             : new Set();
@@ -850,9 +853,11 @@ const UndoManager = {
         try {
             const description = pending?.description || "";
             await pending.undoAction();
-            UndoManager.hideToast();
-            // qwen P1 共识: 撤销请求等待期间可能已注册新撤销 — 无条件 clear 会清掉新入口
-            if (UndoManager.pendingUndo === null) UndoManager.clear();
+            // P4 收敛: await 期间可能已注册新撤销 —— hideToast/clear 仅在无新入口时执行
+            if (UndoManager.pendingUndo === null) {
+                UndoManager.hideToast();
+                UndoManager.clear();
+            }
 
             // 记录撤销操作
             OperationLog.add({
@@ -882,7 +887,8 @@ const UndoManager = {
         } catch (error) {
             console.error("[LD-Notion] 撤销失败:", error);
             // glm P1 共识: 入口已清 timeoutId, 失败路径不隐藏则 toast 永久滞留 DOM
-            UndoManager.hideToast();
+            // P4 收敛: 但 await 期间新注册的撤销入口不得被隐藏
+            if (UndoManager.pendingUndo === null) UndoManager.hideToast();
             const description = pending?.description || "";
             OperationLog.add({
                 audit_event: OperationLog.inferAuditEvent("undo", "failed"),

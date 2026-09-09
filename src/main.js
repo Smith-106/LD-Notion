@@ -74,7 +74,8 @@ window.addEventListener("ld-notion-popup-action", (event) => {
         "import-bookmarks": "导入浏览器书签",
         "import-github": "导入GitHub收藏",
     };
-    const cmd = cmdMap[action];
+    // P4 收敛(c09): 原型链键(constructor/toString)会命中继承属性 —— 必须自有属性校验
+    const cmd = Object.prototype.hasOwnProperty.call(cmdMap, action) ? cmdMap[action] : undefined;
     if (!cmd) return;
 
     const input = document.querySelector("#ldb-chat-input");

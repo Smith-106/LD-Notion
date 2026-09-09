@@ -218,6 +218,15 @@ const BookmarkAutoImporter = {
         return String(snapshotEntry.url || "") !== String(bookmark.url || "");
     },
 
+    // P4 收敛(c06): 同 URL 不同 ID 的两书签共用一页(F9) —— 页面 书签ID 只属于先建页者。
+    // 若该 id 仍在本次书签集中且 URL 相同, 则为共享页(记 unchanged); 否则视为接管(走 needsUpdate)。
+    isSharedWithLiveBookmark: (bookmark, pageMeta, currentBookmarks = []) => {
+        const owner = String(pageMeta?.bookmarkId || "").trim();
+        if (!owner || owner === String(bookmark.id || "").trim()) return false;
+        const url = String(bookmark.url || "").trim();
+        return currentBookmarks.some((b) => String(b.id || "").trim() === owner && String(b.url || "").trim() === url);
+    },
+
     needsUpdate: (bookmark, snapshotEntry, pageMeta) => {
         if (!pageMeta) return true;
         if (pageMeta.bookmarkId !== String(bookmark.id || "").trim()) return true;
@@ -499,7 +508,8 @@ BookmarkAutoImporter.run = async () => {
                     SyncCoordinator.markItemSeen("bookmark", `bookmark:${bookmarkId}`);
                     created++;
                     successfulIds.add(bookmarkId);
-                } else if (BookmarkAutoImporter.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
+                } else if (!BookmarkAutoImporter.isSharedWithLiveBookmark(bookmark, pageMeta, currentBookmarks)
+                    && BookmarkAutoImporter.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
                     BookmarkAutoImporter.updateStatus(`📧 正在更新书签 (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
                     // updatePage 是 level 1 写操作，同样过 canExecute 闸门 + 审计（C1）。
                     const { OperationGuard } = require("../security");

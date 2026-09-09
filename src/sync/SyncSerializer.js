@@ -280,7 +280,12 @@ const SyncSerializer = {
             }
             const hash = await SyncCrypto.sha256Hex(JSON.stringify([def.kind, clean]));
             const prev = stamps[key];
-            const updatedAt = prev && prev.h === hash && typeof prev.t === "string"
+            // P4 收敛(c11, high): 旧戳无限复用会让 updatedAt 落出 validateRemote 的
+            // [now-90d, now+5min] 窗口 → 全设备 pull 整包拒绝且值不变永不刷新。
+            const prevAge = prev && prev.h === hash && typeof prev.t === "string"
+                ? now - Date.parse(prev.t)
+                : Number.NaN;
+            const updatedAt = Number.isFinite(prevAge) && prevAge < SyncConstants.SETTINGS_STAMP_MAX_REUSE_MS
                 ? prev.t
                 : new Date(now).toISOString();
             nextStamps[key] = { h: hash, t: updatedAt };

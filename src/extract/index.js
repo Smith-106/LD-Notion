@@ -404,7 +404,20 @@ const WorkspaceService = {
             maxPages: options.maxPages,
             onProgress: options.onProgress,
             onPhaseComplete: (phase, partialWorkspace) => {
-                lastWorkspaceData = WorkspaceService.persistWorkspaceData(apiKey, partialWorkspace);
+                // P4 收敛(c08): databases 阶段落盘的 pages:[] 会摧毁上次完整快照 ——
+                // 若后续 pages 阶段失败, 读缓存的目标选择/可视化将得到空页面列表。
+                // 同 apiKey 时保留旧页面列表, 仅更新 databases。
+                let toPersist = partialWorkspace;
+                if (phase === "databases" && includePages) {
+                    try {
+                        const cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
+                        const sameKey = cached?.apiKeyHash && cached.apiKeyHash === Utils.apiKeyHash(apiKey);
+                        if (sameKey && Array.isArray(cached.pages) && cached.pages.length > 0) {
+                            toPersist = { databases: partialWorkspace.databases, pages: cached.pages };
+                        }
+                    } catch { /* 缓存损坏则按原样落盘 */ }
+                }
+                lastWorkspaceData = WorkspaceService.persistWorkspaceData(apiKey, toPersist);
                 finalPhaseHandled = phase === "pages" || (!includePages && phase === "databases");
                 notifyWorkspaceData?.(lastWorkspaceData, { phase, isFinal: finalPhaseHandled });
                 options.onPhaseComplete?.(phase, partialWorkspace, lastWorkspaceData);

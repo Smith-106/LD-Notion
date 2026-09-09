@@ -441,7 +441,8 @@ handleAIAutofill: async (params, settings, explanation) => {
                 // 更新页面属性
                 const updateProps = {};
                 if (propType === "multi_select") {
-                    const keywords = aiResult.split(/[,，]/).map(k => k.trim()).filter(Boolean).slice(0, 10);
+                    // P4 收敛(c02): Notion 选项名上限 100 —— AI 无视分隔符返回整句时 PATCH 400
+                    const keywords = aiResult.split(/[,，]/).map(k => k.trim().slice(0, 100)).filter(Boolean).slice(0, 10);
                     updateProps[propName] = { multi_select: keywords.map(k => ({ name: k })) };
                 } else {
                     const trimmed = aiResult.slice(0, 2000);

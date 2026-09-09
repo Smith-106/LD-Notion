@@ -585,9 +585,17 @@ const BookmarkExporter = {
     // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。语义与逐条 markExported 等价。
     // v3.14.3: 改容量上限淘汰（用户书签数天然有界），不再按 90 天时间 TTL 误删导出事实。
     // v3.14.6 (CC-05): 写前 rebase(重读-并集-max ts) —— 跨 tab 他端新增键不可丢(导出账本不可再生)
-    flushExported: () => {
+    // P4 收敛(c07): 可选 pending —— 跨 tab watcher 会把 _exportedCache 置 null,
+    // 调用方持有的本轮引用须一并并集落盘, 否则本轮已标记的导出事实丢失(下轮重复建页)
+    flushExported: (pending = null) => {
         if (BookmarkExporter._exportedCache) {
             BookmarkExporter._evictByCapacity(BookmarkExporter._exportedCache);
+        }
+        if (pending && pending !== BookmarkExporter._exportedCache) {
+            BookmarkExporter._evictByCapacity(pending);
+        }
+        if (!BookmarkExporter._exportedCache && !pending) return;
+        {
             let remote = {};
             try {
                 remote = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}")) || {};
@@ -599,7 +607,11 @@ const BookmarkExporter = {
                 const norm = Utils.normalizeDedupUrl(key);
                 if (merged[norm] === undefined || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
             }
-            for (const [key, ts] of Object.entries(BookmarkExporter._exportedCache)) {
+            for (const [key, ts] of Object.entries(BookmarkExporter._exportedCache || {})) {
+                const norm = Utils.normalizeDedupUrl(key);
+                if (merged[norm] === undefined || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
+            }
+            for (const [key, ts] of Object.entries(pending || {})) {
                 const norm = Utils.normalizeDedupUrl(key);
                 if (merged[norm] === undefined || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
             }
@@ -675,6 +687,9 @@ const BookmarkExporter = {
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
         let success = 0, failed = 0;
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+        // P4 收敛(c07): 持有本轮缓存引用 —— 跨 tab watcher 可能把模块字段置 null,
+        // 循环内直接读写模块字段会丢掉此前已标记的导出事实
+        const pendingExported = BookmarkExporter.getExported();
 
         // v3.14.6 (CC-10): 循环包 try/finally flush —— onProgress 抛错/异常路径也不丢导出账本
         try {
@@ -703,10 +718,9 @@ const BookmarkExporter = {
                     parent: { database_id: databaseId },
                     properties,
                 }, apiKey);
-                // 循环内仅 mutate 内存缓存（getExported 返引用），避免逐条 JSON.stringify 写侧 O(N²)（PERF-003）。
-                // 循环末尾 BookmarkExporter.flushExported() 单次回写。
-                BookmarkExporter._exportedCache = BookmarkExporter._exportedCache || {};
-                BookmarkExporter._exportedCache[Utils.normalizeDedupUrl(bm.url)] = Date.now();
+                // 循环内仅 mutate 本轮缓存引用（避免逐条 JSON.stringify 写侧 O(N²)，PERF-003）。
+                // 循环末尾 BookmarkExporter.flushExported(pendingExported) 单次回写。
+                pendingExported[Utils.normalizeDedupUrl(bm.url)] = Date.now();
                 BookmarkExporter._auditExport("createDatabasePage", "success",
                     { pageId: String(page?.id || ""), bookmarkUrl: bm.url, itemName: bm.title, databaseId });
                 success++;
@@ -719,7 +733,7 @@ const BookmarkExporter = {
                 // v3.14.7: 仅信 isAuthTerminal 标记(与 api 层终态/瞬态区分对齐), 消息子串会误杀瞬态续签失败
                 if (e && e.isAuthTerminal === true) {
                     // 已成功项的导出事实必须先落盘(flushExported 幂等,与正常路径末次 flush 对称)
-                    BookmarkExporter.flushExported();
+                    BookmarkExporter.flushExported(pendingExported);
                     const remainingCount = newBookmarks.length - i - 1;
                     return {
                         total: bookmarks.length,
@@ -739,7 +753,7 @@ const BookmarkExporter = {
         } finally {
             // 批量回写已导出映射（PERF-003）：无论 success/failed/异常，循环结束单次 flush，
             // 写侧从 O(N²)→O(N)。v3.14.6 (CC-10): finally 保证 onProgress 抛错也不丢账本
-            BookmarkExporter.flushExported();
+            BookmarkExporter.flushExported(pendingExported);
         }
 
         return { total: bookmarks.length, exported: success, failed, newCount: newBookmarks.length };

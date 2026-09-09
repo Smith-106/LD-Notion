@@ -66,7 +66,7 @@ const mapGitHubItemsToBookmarks = (items, sourceType) => {
  * @param {Object} item - mapped GitHub item (with .raw, .sourceType, .title, .itemKey)
  * @param {Object} settings - { token, aiApiKey, ... }
  */
-const buildGitHubObsidianMarkdown = async (item, settings = {}) => {
+const buildGitHubObsidianMarkdown = async (item, settings = {}, enrichContext = null) => {
     if (!item?.raw) {
         throw new Error("GitHub 条目数据不完整");
     }
@@ -138,7 +138,9 @@ const buildGitHubObsidianMarkdown = async (item, settings = {}) => {
         };
     }
 
-    const enriched = await GitHubExporter.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
+    // P4 收敛(c09): 富化上下文由调用方跨项复用 —— 逐项新建 {aiUsedCount:0} 会
+    // 使 aiMaxItems 限额被重置, AI 调用量随选中项数无界增长
+    const enriched = await GitHubExporter.enrichRepo(bookmark, settings, enrichContext || { aiUsedCount: 0, aiMaxItems: 20 });
     const title = enriched.generatedTitle || item.title || enriched.full_name || enriched.name || "未命名仓库";
     const meta = {
         title,
@@ -208,6 +210,8 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
     let githubDirty = false;
     // v3.14.5: Obsidian 认证/连接终态中止标记
     let authAbortInfo = null;
+    // P4 收敛(c09): 跨项复用 AI 限额上下文(同 buildGitHubObsidianMarkdown)
+    const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
 
     try {
     for (let i = 0; i < selectedItems.length; i++) {
@@ -222,7 +226,7 @@ const exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgres
         onProgress?.(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
 
         try {
-            const note = await buildGitHubObsidianMarkdown(item, settings);
+            const note = await buildGitHubObsidianMarkdown(item, settings, enrichContext);
             // v3.14.7 (REV-03 UI-07): Obsidian 写入经 OperationGuard 闸门(此前裸调零审计)
             assertObsidianWriteAllowed("obsidian.writeNote", { itemKey: item.itemKey, sourceType: item.sourceType, itemName: item.title || item.itemKey });
             const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
@@ -345,6 +349,7 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
         }
     }, 30000);
 
+    const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
     try {
     for (let i = 0; i < selectedItems.length; i++) {
         if (control.isCancelled) break;
@@ -372,7 +377,7 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
                 properties = GitHubExporter.buildGistProperties(bookmark);
             } else {
                 const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
-                const enriched = await GitHubExporter.enrichRepo(bookmark, settings, { aiUsedCount: 0, aiMaxItems: 20 });
+                const enriched = await GitHubExporter.enrichRepo(bookmark, settings, enrichContext);
                 properties = GitHubExporter.buildRepoProperties(enriched, sourceMap[sourceType] || "Star");
             }
             for (const key of Object.keys(properties)) {

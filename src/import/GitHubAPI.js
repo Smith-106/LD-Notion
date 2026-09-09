@@ -181,7 +181,9 @@ const GitHubAPI = {
     // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。与 BookmarkExporter.flushExported 同构。
     // v3.14.3: 导出账本改容量上限淘汰（repo full_name 天然有界），不再按 90 天时间 TTL 误删导出事实。
     // v3.14.6 (CC-05): 写前 rebase(重读-并集-max ts) —— 跨 tab 他端新增键不可丢
-    flushExported: () => {
+    // P4 收敛(c08): removedKeys —— 写前 rebase 会把存储旧值并集回写, 刚删除的键被复活
+    // (unmarkExported 返回 true 但账本仍含该项, 重新导出入口静默失效)
+    flushExported: (removedKeys = null) => {
         if (GitHubAPI._exportedCache) {
             GitHubAPI._evictByCapacity(GitHubAPI._exportedCache);
             let remote = {};
@@ -189,6 +191,7 @@ const GitHubAPI = {
                 remote = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}")) || {};
             } catch { remote = {}; }
             const merged = { ...remote };
+            if (removedKeys) for (const key of removedKeys) delete merged[key];
             for (const [key, ts] of Object.entries(GitHubAPI._exportedCache)) {
                 if (merged[key] === undefined || Number(merged[key]) < Number(ts)) merged[key] = ts;
             }
@@ -215,7 +218,7 @@ const GitHubAPI = {
         GitHubAPI.flushGistsExported();
     },
 
-    flushGistsExported: () => {
+    flushGistsExported: (removedKeys = null) => {
         if (GitHubAPI._exportedGistsCache) {
             GitHubAPI._evictByCapacity(GitHubAPI._exportedGistsCache);
             // v3.14.6 (CC-05): 写前 rebase(重读-并集-max ts)
@@ -224,6 +227,8 @@ const GitHubAPI = {
                 remote = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}")) || {};
             } catch { remote = {}; }
             const merged = { ...remote };
+            // P4 收敛(c08): 同 flushExported —— rebase 不得复活已撤销键
+            if (removedKeys) for (const key of removedKeys) delete merged[key];
             for (const [key, ts] of Object.entries(GitHubAPI._exportedGistsCache)) {
                 if (merged[key] === undefined || Number(merged[key]) < Number(ts)) merged[key] = ts;
             }
@@ -260,7 +265,7 @@ const GitHubAPI = {
         const exported = GitHubAPI.getExported();
         if (!Object.prototype.hasOwnProperty.call(exported, repoFullName)) return false;
         delete exported[repoFullName];
-        GitHubAPI.flushExported();
+        GitHubAPI.flushExported([repoFullName]);
         return true;
     },
 
@@ -268,7 +273,7 @@ const GitHubAPI = {
         const exported = GitHubAPI.getExportedGists();
         if (!Object.prototype.hasOwnProperty.call(exported, gistId)) return false;
         delete exported[gistId];
-        GitHubAPI.flushGistsExported();
+        GitHubAPI.flushGistsExported([gistId]);
         return true;
     },
 
@@ -328,17 +333,19 @@ const GitHubAPI = {
                             return;
                         }
                     }
-                    GitHubAPI._cacheReadme(cacheKey, "");
+                    // P4 收敛(c08 2/3): 仅 404(确实无 readme)才负缓存 —— 限流/网关/5xx 等瞬态失败
+                    // 负缓存会让该 repo 在 FIFO 淘汰前永久命中空串(导出内容静默缺失)
+                    if (response.status === 404) GitHubAPI._cacheReadme(cacheKey, "");
                     resolve("");
                 },
                 onerror: () => {
-                    GitHubAPI._cacheReadme(cacheKey, "");
+                    // 瞬态网络错误不缓存
                     resolve("");
                 },
                 timeout: 15000,
                 ontimeout: () => {
-                    GitHubAPI._cacheReadme(cacheKey, "");
-                    resolve(""); // 超时降级为空，与其他错误路径一致
+                    // 瞬态超时不缓存(与其他错误路径一致: 降级为空但不落负缓存)
+                    resolve("");
                 },
             });
         });

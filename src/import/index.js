@@ -82,6 +82,8 @@ const AutoImporter = {
         document.addEventListener("visibilitychange", () => {
             if (!document.hidden && AutoImporter.deferredWhileHidden) {
                 AutoImporter.deferredWhileHidden = false;
+                // P4 收敛(c09 2/3): 排队期间用户可能已关闭自动导入 —— 回调必须复核
+                if (!AutoImporter.canStart()) return;
                 Utils.runWhenBrowserIdle(() => AutoImporter.run());
             }
         });
@@ -89,6 +91,11 @@ const AutoImporter = {
     },
 
     stopPolling: () => {
+        // P4 收敛(c09 2/3): init 的延迟启动定时器必须可取消, 否则禁用后仍会跑一轮导出并复活轮询
+        if (AutoImporter._initTimer) {
+            clearTimeout(AutoImporter._initTimer);
+            AutoImporter._initTimer = null;
+        }
         const { SyncScheduler } = require("../adapter/SyncScheduler");
         SyncScheduler.stop("linuxdo");
     },
@@ -96,7 +103,10 @@ const AutoImporter = {
     init: () => {
         if (!AutoImporter.canStart()) return;
         AutoImporter.ensureVisibilityListener();
-        setTimeout(() => {
+        AutoImporter._initTimer = setTimeout(() => {
+            AutoImporter._initTimer = null;
+            // P4 收敛(c09 2/3): 3s 窗口内可能已禁用/改配置 —— 执行前复核
+            if (!AutoImporter.canStart()) return;
             Utils.runWhenBrowserIdle(() => AutoImporter.run());
             const interval = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval);
             if (interval > 0) AutoImporter.startPolling(interval);
@@ -134,6 +144,38 @@ AutoImporter.run = async () => {
     AutoImporter.isRunning = true;
     // v3.14.6 (CC-03): 自动导入占用导出互斥, 防手动/AI/自动并发交错; finally 复位
     SyncLock.isExporting = true;
+    // P4 收敛(c09): 与 GitHub/Bookmark/RSS 同构 —— 取跨 tab 租约。
+    // 仅置进程内 isExporting 无法防两 tab 同时读-标记 isTopicExported 的竞态(重复建页)。
+    let lease = null;
+    try {
+        lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+    } catch (leaseError) {
+        AutoImporter.isRunning = false;
+        SyncLock.isExporting = false;
+        console.error("[LD-Notion] 自动导入获取租约失败:", leaseError);
+        AutoImporter.updateStatus("❌ 获取同步租约失败，本轮跳过");
+        return;
+    }
+    if (!lease) {
+        AutoImporter.isRunning = false;
+        SyncLock.isExporting = false;
+        AutoImporter.updateStatus("⏸ 其他标签页正在同步，本轮自动导入跳过");
+        return;
+    }
+    AutoImporter._leaseLost = false;
+    const renewTimer = setInterval(() => {
+        let renewed;
+        try {
+            renewed = SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+        } catch (renewError) {
+            console.warn("[LD-Notion] 自动导入续约失败:", renewError);
+            renewed = false;
+        }
+        if (!renewed) {
+            AutoImporter._leaseLost = true;
+            clearInterval(renewTimer);
+        }
+    }, 30000);
     const attemptAt = Date.now();
     const exportBtn = document.querySelector("#ldb-export");
 
@@ -211,6 +253,8 @@ AutoImporter.run = async () => {
 
         const worker = async () => {
             while (true) {
+                // P4 收敛(c09): 批量写页可能耗时数分钟 —— 租约丢失须逐项中止
+                if (AutoImporter._leaseLost) break;
                 const i = remaining.shift();
                 if (i === undefined) return;
 
@@ -312,6 +356,9 @@ AutoImporter.run = async () => {
         });
         AutoImporter.updateStatus(`❌ 自动导入出错: ${error.message}`);
     } finally {
+        clearInterval(renewTimer);
+        SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+        AutoImporter._leaseLost = false;
         AutoImporter.isRunning = false;
         // v3.14.6 (CC-03): 复位互斥
         SyncLock.isExporting = false;

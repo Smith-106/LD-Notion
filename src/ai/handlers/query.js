@@ -39,7 +39,10 @@ handleQuery: async (params, settings, explanation) => {
                 "标签": { name: "标签", type: "multi_select" },
                 "AI分类": { name: "AI分类", type: "select" }
             };
-            const config = fieldConfig[filter_field] || { name: filter_field, type: "rich_text" };
+            // P4 收敛(c02): 原型链键(toString/constructor/__proto__)会命中继承属性 —— 自定义字段兜底失效
+            const config = Object.prototype.hasOwnProperty.call(fieldConfig, filter_field)
+                ? fieldConfig[filter_field]
+                : { name: filter_field, type: "rich_text" };
 
             // 根据属性类型构建正确的过滤器
             if (config.type === "select") {

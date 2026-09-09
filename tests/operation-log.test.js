@@ -44,6 +44,9 @@ describe("AT-007: OperationLog 纯函数", () => {
             // Non-sensitive keys are preserved
             expect(result.context.pageId).toBe("page-123");
             expect(result.context.itemName).toBe("Test Page");
+            // P4 收敛(c10): 不得原地脱敏调用方 context(撤销路径仍需真实 pageId/apiKey)
+            expect(entry.context["ldb_notion_api_key"]).toBe("secret-api-key-123");
+            expect(entry.context.pageId).toBe("page-123");
         });
 
         it("preserves non-sensitive field values", () => {

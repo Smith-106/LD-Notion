@@ -151,10 +151,18 @@ const RSSAutoImporter = {
     extractLink: (block, isAtom = false) => {
         const source = String(block || "");
         if (isAtom) {
-            const alternateMatch = source.match(/<link\b[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["'][^>]*\/?>/i);
-            if (alternateMatch?.[1]) return RSSAutoImporter.decodeXmlEntities(alternateMatch[1]).trim();
-            const hrefMatch = source.match(/<link\b[^>]*href=["']([^"']+)["'][^>]*\/?>/i);
-            if (hrefMatch?.[1]) return RSSAutoImporter.decodeXmlEntities(hrefMatch[1]).trim();
+            // P4 收敛(c07): 逐个 <link> 标签按属性判定, 不假定 rel 先于 href ——
+            // 原回退正则会取第一个带 href 的 link(可能是 rel="self" 的 feed 自身地址)
+            const linkTags = source.match(/<link\b[^>]*\/?>/gi) || [];
+            let firstHref = "";
+            for (const tag of linkTags) {
+                const href = tag.match(/href=["']([^"']+)["']/i)?.[1];
+                if (!href) continue;
+                const rel = tag.match(/rel=["']([^"']*)["']/i)?.[1]?.toLowerCase();
+                if (rel === "alternate") return RSSAutoImporter.decodeXmlEntities(href).trim();
+                if (!rel && !firstHref) firstHref = href;
+            }
+            if (firstHref) return RSSAutoImporter.decodeXmlEntities(firstHref).trim();
         }
         return RSSAutoImporter.extractTagText(source, ["link"]);
     },
@@ -457,6 +465,8 @@ const RSSAutoImporter = {
         const canUseAI = !!(settings?.aiApiKey && settings?.aiService && Array.isArray(settings?.categories) && settings.categories.length > 0);
         const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
         if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
+            // P4 收敛(c07): 配额在 await 前预占 —— 并发 worker 各自读到旧计数会超发 AI 调用
+            context.aiUsedCount = (context.aiUsedCount || 0) + 1;
             try {
                 const aiCategory = await BookmarkExporter.generateAICategory(
                     { title: normalized.title, url: normalized.url },
@@ -475,7 +485,6 @@ const RSSAutoImporter = {
                         console.warn(`[LD-Notion] RSS AI 分类不在白名单，使用启发式 fallback: ${aiCategory}`);
                     }
                 }
-                context.aiUsedCount = (context.aiUsedCount || 0) + 1;
             } catch (e) {
                 // AI 分类失败降级到启发式，但留 warn + 计数保证可观测（H1，与 BookmarkExporter:288 一致）。
                 console.warn("[LD-Notion] RSS AI 分类失败，使用启发式 fallback:", e);
@@ -587,10 +596,14 @@ const RSSAutoImporter = {
             }));
         }
         let feedCount = RSSAutoImporter.getFeedUrls().length;
+        // P4 收敛(c07 2/3): 标记 currentItems 是否为完整 feed 条目集 —— 增量路径只含本轮新增项,
+        // 不得据此剪枝历史快照(剪枝仅在全量回填路径生效)
+        let hasFullItemSet = false;
         if (currentItems.length === 0) {
             const fallback = await RSSAutoImporter.loadCurrentItems();
             currentItems = fallback.items || [];
             feedCount = fallback.feedCount || feedCount;
+            hasFullItemSet = true;
         }
 
         const trackedPages = await RSSAutoImporter.fetchTrackedPages(settings.databaseId, settings.apiKey);
@@ -601,6 +614,7 @@ const RSSAutoImporter = {
             previousSnapshot,
             currentItems,
             feedCount,
+            hasFullItemSet,
             index,
             nextSnapshot: { ...previousSnapshot },
             delay: Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay),
@@ -612,9 +626,15 @@ const RSSAutoImporter = {
     _syncSingleRssItem: async (item, ctx) => {
         const { settings, index, previousSnapshot, nextSnapshot, enrichContext, total } = ctx;
         const snapshotEntry = previousSnapshot[item.itemKey] || null;
+        // P4 收敛(c07): 标题非唯一键 —— byTitle 兑底仅在页面 URL 缺失或与条目一致时生效,
+        // 否则同标题不同 URL 的条目会被绑定到同一页面并覆盖其内容
+        const titleMatch = item.title ? index.byTitle.get(item.title) : null;
+        const safeTitleMatch = titleMatch && (!titleMatch.url || !item.url || titleMatch.url === item.url)
+            ? titleMatch
+            : null;
         let pageMeta = (item.url ? index.byUrl.get(item.url) : null)
             || (snapshotEntry?.pageId ? index.byPageId.get(snapshotEntry.pageId) : null)
-            || (item.title ? index.byTitle.get(item.title) : null);
+            || safeTitleMatch;
 
         let result = { created: 0, updated: 0, unchanged: 0, failed: 0, denied: 0, itemKey: item.itemKey };
 
@@ -656,7 +676,9 @@ const RSSAutoImporter = {
                     RSSAutoImporter._auditAutoSync("updatePage", "denied",
                         { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title, reason: "权限不足：RSS 自动同步更新需 level≥1" });
                     result.denied = 1;
-                    nextSnapshot[item.itemKey] = snapshotEntry || RSSAutoImporter.buildSnapshotEntry(item, pageMeta.pageId);
+                    // P4 收敛(c07): 不得为拒绝的更新伪造新快照(否则下轮被判 unchanged,
+                    // 页面永远停在旧内容); 仅保留已有快照
+                    if (snapshotEntry) nextSnapshot[item.itemKey] = snapshotEntry;
                     result.success = false;
                     return result;
                 }
@@ -710,15 +732,19 @@ const RSSAutoImporter = {
 
     // 汇总 RSS 同步状态与 watermark（MNT-002 提取自 run）
     _aggregateRssState: (ctx, stats, successfulKeys, attemptAt) => {
-        const { currentItems, feedCount, nextSnapshot } = ctx;
+        const { currentItems, feedCount, nextSnapshot, hasFullItemSet } = ctx;
         const { created, updated, unchanged, failed } = stats;
 
         // v3.14.6 (DC-006): nextSnapshot 从 {...previousSnapshot} 起步只增不删 →
         // feed 移除条目永驻, 无界增长违容量约束; 收尾按当前项键集剪枝
         // (失败项也在 currentItems 中, snapshot 保留语义不变)
-        const keptKeys = new Set(currentItems.map((item) => item.itemKey));
-        for (const key of Object.keys(nextSnapshot)) {
-            if (!keptKeys.has(key)) delete nextSnapshot[key];
+        // P4 收敛(c07 2/3): 仅当 currentItems 为完整 feed 条目集(全量路径)且非空时剪枝 ——
+        // 无信息不等于条目已消失(全部 feed 拉取失败/增量路径均不得清空 pageId 快照)
+        if (hasFullItemSet && currentItems.length > 0) {
+            const keptKeys = new Set(currentItems.map((item) => item.itemKey));
+            for (const key of Object.keys(nextSnapshot)) {
+                if (!keptKeys.has(key)) delete nextSnapshot[key];
+            }
         }
 
         const statePatch = {

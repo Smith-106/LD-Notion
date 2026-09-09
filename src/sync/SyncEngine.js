@@ -30,11 +30,25 @@ const SyncEngine = {
         const { on } = require("../coordination/event-bus");
         // 本地状态变更 → 防抖 push
         on("storage:state-committed", (e) => {
-            if (SyncEngine._pushTimer) clearTimeout(SyncEngine._pushTimer);
-            SyncEngine._pushTimer = setTimeout(() => {
-                SyncEngine.push({ reason: "state-committed" });
-            }, SyncConstants.DEBOUNCE_MS);
+            SyncEngine._schedulePush();
         });
+    },
+
+    // P4 收敛(c11 2/3): 防抖 push 遇 _running 会被 busy 短路丢弃 —— 该次已提交状态不再投影。
+    // 重排最多 3 次; 仍繁忙则告警并等下一次状态提交(避免永久定时器循环)。
+    _schedulePush(delay = SyncConstants.DEBOUNCE_MS, attempt = 0) {
+        if (SyncEngine._pushTimer) clearTimeout(SyncEngine._pushTimer);
+        SyncEngine._pushTimer = setTimeout(async () => {
+            SyncEngine._pushTimer = null;
+            const result = await SyncEngine.push({ reason: "state-committed" });
+            if (result?.outcome === "busy") {
+                if (attempt < 3) {
+                    SyncEngine._schedulePush(delay, attempt + 1);
+                } else {
+                    console.warn("[LD-Notion] 多端同步推送持续繁忙，本次变更待下次状态提交时投影");
+                }
+            }
+        }, delay);
     },
 
     _getDeps() {
@@ -402,7 +416,7 @@ const SyncEngine = {
 
     /**
      * pull: 拉远端行 → 校验 → merge → applyRemote(仅胜出项)
-     * @returns {Promise<{ok: boolean, outcome: string, applied: Object, error?: string}>}
+     * @returns {Promise<{ok: boolean, outcome: string, applied: {dedupEntries: number, watermarkWinners: number, settingsWinners: number}, error?: string}>}
      */
     async pull({ reason = "manual" } = {}) {
         if (SyncEngine._running) return { ok: false, outcome: "busy" };
@@ -445,7 +459,7 @@ const SyncEngine = {
             if (validRows === 0) {
                 SyncConfig.setLastPullAt(Date.now());
                 SyncConfig.setLastOutcome("empty");
-                return { ok: true, outcome: "empty", applied: { dedupEntries: [], watermarkWinners: [], settingsWinners: [] } };
+                return { ok: true, outcome: "empty", applied: { dedupEntries: 0, watermarkWinners: 0, settingsWinners: 0 } };
             }
 
             // H-2 校验
@@ -472,7 +486,8 @@ const SyncEngine = {
             // applyRemote(仅胜出项, 绝不全量覆盖)
             const applied = SyncEngine.applyRemote(winners, { SyncStateV2, DedupStore });
             SyncConfig.setLastPullAt(Date.now());
-            SyncConfig.setLastOutcome(`success(applied:${applied.dedupEntries.length}/${applied.watermarkWinners.length}/${applied.settingsWinners.length})`);
+            // P4 收敛(c11): applyRemote 返回的是计数(数字) —— 原 .length 恒 undefined
+            SyncConfig.setLastOutcome(`success(applied:${applied.dedupEntries}/${applied.watermarkWinners}/${applied.settingsWinners})`);
             return { ok: true, outcome: "success", applied };
         } catch (error) {
             SyncConfig.setLastOutcome(`error:${String(error?.message || error).slice(0, 200)}`);
@@ -498,6 +513,8 @@ const SyncEngine = {
 
         // ② watermark 胜出项(epoch 校验在 validateRemote 已做; 应用时再防一次)
         for (const { source, watermark } of winners.watermarkWinners || []) {
+            // P4 收敛(c11): 远端行可携带任意 source —— 非白名单源不得写入本地状态
+            if (!SyncSerializer.WHITELIST.watermarkSources.includes(source)) continue;
             const local = State.getSourceState(source);
             const localEpoch = Number(local.epoch) || 0;
             const remoteEpoch = Number(watermark.epoch) || 0;
@@ -514,6 +531,9 @@ const SyncEngine = {
         for (const { key, entry } of winners.settingsWinners || []) {
             const def = SyncSerializer.WHITELIST.settings[key];
             if (!def) continue;
+            // P4 收敛(c11): buildPayload 在 shared 模式剔除 personal 键 —— 应用侧必须对称,
+            // 否则 shared 设备会被 personal 设备推送的个人设置(persona/AI 模板)覆盖
+            if (def.scope === "personal" && SyncConfig.getMode() === "shared") continue;
             // 全盘审计修复(find 9): 此前闸门用 canExecute("updatePage")(level 1), 与
             // confirmLevel=2 声明不符 → 标准权限设备可被远端改写数据库配置。现按声明级别校验。
             if (def.confirmLevel && OperationGuard.getLevel() < def.confirmLevel) {
