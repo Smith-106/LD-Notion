@@ -864,7 +864,7 @@ const Exporter = {
         }
         const results = { success: [], failed: [], skipped: [] };
         SyncLock.isExporting = true;
-        // 持有期间每 30s 续约(< 60s TTL); 续约失配(被他 tab 抢占)置 leaseLost 中止批次,
+        // 持有期间每 30s 续约(< 180s TTL); 续约失配(被他 tab 抢占)置 leaseLost 中止批次,
         // 绝不双持有并发写(S1 owner 复核语义, 与 BookmarkAutoImporter CC-04 同构)
         let leaseLost = false;
         const renewTimer = setInterval(() => {
@@ -891,20 +891,25 @@ const Exporter = {
         let completedCount = 0;
 
         const worker = async () => {
+            // glm P1 共识(3/3): 失租中止必须在暂停循环内也生效 —— 原实现仅在暂停退出后
+            // 检查, 暂停期间失租则 worker 永困轮询、Promise.all 不返回、isExporting 永为 true
+            const abortIfLeaseLost = () => {
+                if (!leaseLost) return false;
+                Exporter.cancel();
+                results.leaseLost = true;
+                return true;
+            };
             while (true) {
                 // 检查暂停
                 while (Exporter.isPaused) {
                     await Utils.sleep(200);
                     if (Exporter.isCancelled) return;
+                    if (abortIfLeaseLost()) return;
                 }
                 if (Exporter.isCancelled) return;
 
                 // 租约被他 tab 抢占: 中止批次(剩余项入 skipped), 不与他 tab 双持有并发写
-                if (leaseLost) {
-                    Exporter.cancel();
-                    results.leaseLost = true;
-                    return;
-                }
+                if (abortIfLeaseLost()) return;
 
                 // 取任务（shift 在单线程事件循环下是原子的）
                 const i = remaining.shift();

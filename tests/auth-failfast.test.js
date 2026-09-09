@@ -255,3 +255,58 @@ describe("R-AUTH-02: Exporter.exportBookmarks 认证中止", () => {
         }
     });
 });
+
+describe("P1 共识: 导出暂停期间失租必须退出 worker(不永久占用 isExporting)", () => {
+    it("暂停循环内复核 leaseLost → 批次中止且释放互斥", async () => {
+        const { vi } = await import("vitest");
+        const { SyncLock } = require("../src/sync-lock");
+        vi.useFakeTimers();
+        const bookmarks = [{ topic_id: 1, title: "P1" }, { topic_id: 2, title: "P2" }];
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_ok");
+        const { LinuxDoAPI } = require("../src/export");
+        const origFetch = LinuxDoAPI.fetchAllPosts;
+        LinuxDoAPI.fetchAllPosts = async (topicId) => ({
+            topic: { topic_id: topicId, title: `T${topicId}`, url: `https://linux.do/t/${topicId}` },
+            posts: [],
+        });
+        const origBuild = Exporter.buildContentBlocks;
+        Exporter.buildContentBlocks = () => [];
+        const origProps = Exporter.buildProperties;
+        Exporter.buildProperties = () => ({});
+        global.__ldNotionResponder = (opts) => opts.onload({
+            status: 200,
+            responseText: JSON.stringify({ id: "page-1" }),
+            responseHeaders: "",
+        });
+
+        let pausedOnce = false;
+        const promise = Exporter.exportBookmarks(
+            bookmarks,
+            { concurrency: 1, apiKey: "secret_ok", databaseId: "db1", exportTargetType: "database" },
+            (prog) => {
+                if (!pausedOnce && prog.stage === "start") {
+                    pausedOnce = true;
+                    Exporter.pause();
+                    // 模拟他 tab 抢占租约(续约 owner 复核将失败)
+                    GM_setValue(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE,
+                        JSON.stringify({ owner: "rival-tab", expiresAt: Date.now() + 999999 }));
+                }
+            }
+        );
+        try {
+            await vi.advanceTimersByTimeAsync(500);   // 取租约的两次 sleep(150)
+            await vi.advanceTimersByTimeAsync(31000); // 触发续约定时器 → 失租
+            const results = await promise;
+            expect(results.leaseLost).toBe(true);
+            expect(SyncLock.isExporting).toBe(false);
+        } finally {
+            LinuxDoAPI.fetchAllPosts = origFetch;
+            Exporter.buildContentBlocks = origBuild;
+            Exporter.buildProperties = origProps;
+            global.__ldNotionResponder = null;
+            Exporter.reset();
+            SyncLock.isExporting = false;
+            vi.useRealTimers();
+        }
+    });
+});

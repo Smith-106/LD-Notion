@@ -309,7 +309,7 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
 
     // F3(odyssey-review): 租约获取必须位于全部可抛前置校验之后 —
     // 原 cdb0fb9 版本在 apiKey/dbId 校验与 setup 失败抛错路径之前取租约,
-    // 抛错发生在 try/finally 之前 → 租约泄漏 60s, 期间重试全被「其他标签页」跳过
+    // 抛错发生在 try/finally 之前 → 租约泄漏至 TTL 到期, 期间重试全被「其他标签页」跳过
     const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
     if (!lease) {
         return {

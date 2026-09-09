@@ -313,7 +313,7 @@ BookmarkAutoImporter.run = async () => {
     }
     // v3.14.6 (CC-03): 占用导出互斥(租约获证后), 防手动/AI/自动并发交错; finally 复位
     SyncLock.isExporting = true;
-    // 持有期间每 30s 续约(少于 60s TTL, 防中途过期被抢占)
+    // 持有期间每 30s 续约(少于 180s TTL, 防中途过期被抢占)
     // S1: 续约失配(租约被其他 tab 抢占)置 leaseLost 中止本轮, 防双持有并发同步
     let leaseLost = false;
     const renewTimer = setInterval(() => {
