@@ -44,6 +44,9 @@ const PanelResize = {
     },
 
     makeResizable: (element, options = {}) => {
+        // P3 共识(dsf+qwen): 幂等——同一元素重复调用会叠加手柄与 pointer/keydown 监听
+        if (!element || element._ldbResizable) return;
+        element._ldbResizable = true;
         const {
             edges = ["l", "t"],
             storageKey = null,
@@ -62,8 +65,15 @@ const PanelResize = {
         }
         PanelResize.resetSize = (key) => {
             const targets = PanelResize._resizeTargets || new Map();
-            const target = (key && targets.get(key)) || (targets.size > 0 ? targets.values().next().value : null);
-            if (key) Storage.remove(key);
+            // P3 3/3 共识(dsf+glm+qwen): 无参/未注册 key 回退首个面板时, 必须清除该面板
+            // 自身的持久化尺寸, 否则刷新后按旧值回填, 重置静默失效。
+            let resolvedKey = key || "";
+            if (!resolvedKey || !targets.has(resolvedKey)) {
+                const first = targets.keys().next();
+                if (!first.done) resolvedKey = first.value;
+            }
+            const target = (resolvedKey && targets.get(resolvedKey)) || null;
+            if (resolvedKey) Storage.remove(resolvedKey);
             if (target) {
                 target.style.width = "";
                 target.style.maxHeight = "";
@@ -171,7 +181,11 @@ const PanelResize = {
                 const startHeight = element.offsetHeight;
                 document.body.style.userSelect = "none";
                 element.style.transition = "none";
-                try { handle.setPointerCapture(e.pointerId); } catch (_) { /* 旧浏览器降级 */ }
+                // P3 共识(dsf+glm): setPointerCapture 失败时监听须挂到 document,
+                // 否则指针移出手柄后 onMove/endResize 永不触发(userSelect 恒 none、监听泄漏)
+                let captured = false;
+                try { handle.setPointerCapture(e.pointerId); captured = true; } catch (_) { /* 旧浏览器降级 */ }
+                const moveTarget = captured ? handle : document;
 
                 const onMove = (ev) => {
                     if (edge.includes("l")) {
@@ -189,19 +203,21 @@ const PanelResize = {
                 };
 
                 const endResize = (ev) => {
-                    handle.removeEventListener("pointermove", onMove);
-                    handle.removeEventListener("pointerup", endResize);
-                    handle.removeEventListener("pointercancel", endResize);
+                    moveTarget.removeEventListener("pointermove", onMove);
+                    moveTarget.removeEventListener("pointerup", endResize);
+                    moveTarget.removeEventListener("pointercancel", endResize);
                     document.body.style.userSelect = "";
                     element.style.transition = "";
-                    try { handle.releasePointerCapture(ev.pointerId); } catch (_) { /* 旧浏览器降级 */ }
+                    if (captured) {
+                        try { handle.releasePointerCapture(ev.pointerId); } catch (_) { /* 旧浏览器降级 */ }
+                    }
                     syncValueNow();
                     persist();
                 };
 
-                handle.addEventListener("pointermove", onMove);
-                handle.addEventListener("pointerup", endResize);
-                handle.addEventListener("pointercancel", endResize);
+                moveTarget.addEventListener("pointermove", onMove);
+                moveTarget.addEventListener("pointerup", endResize);
+                moveTarget.addEventListener("pointercancel", endResize);
             });
         });
 
@@ -217,13 +233,15 @@ const PanelResize = {
                     if (size.width) {
                         const savedWidth = parseFloat(size.width);
                         if (!Number.isNaN(savedWidth)) {
-                            element.style.width = Math.min(savedWidth, window.innerWidth - 16) + "px";
+                            // P3 共识(qwen+glm): 恢复时补 min/max 钳制, 与拖拽/键盘路径一致
+                            const viewportCap = Math.max(0, window.innerWidth - 16);
+                            element.style.width = Math.min(Math.max(savedWidth, minWidth), maxWidth, viewportCap) + "px";
                         }
                     }
                     if (size.maxHeight) {
                         const savedMaxHeight = parseFloat(size.maxHeight);
                         if (!Number.isNaN(savedMaxHeight)) {
-                            element.style.maxHeight = Math.min(savedMaxHeight, window.innerHeight * 0.9) + "px";
+                            element.style.maxHeight = Math.min(Math.max(savedMaxHeight, minHeight), window.innerHeight * 0.9) + "px";
                         }
                     }
                 } catch (e) {
