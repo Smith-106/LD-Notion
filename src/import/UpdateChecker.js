@@ -8,6 +8,7 @@ const { emit } = require("../coordination/event-bus");
 const UpdateChecker = {
     timerId: null,
     isChecking: false,
+    _epoch: 0,
 
     shouldCheckNow: (intervalHours) => {
         const intervalMs = (parseInt(intervalHours, 10) || 0) * 60 * 60 * 1000;
@@ -53,12 +54,13 @@ const UpdateChecker = {
                 },
                 timeout: 15000,
                 onload: (response) => {
-                    if (response.status !== 200) {
-                        reject(new Error(`更新检查失败: HTTP ${response.status}`));
+                    const status = response?.status;
+                    if (status !== 200) {
+                        reject(new Error(`更新检查失败: HTTP ${status ?? "无响应"}`));
                         return;
                     }
                     try {
-                        const data = JSON.parse(response.responseText || "{}");
+                        const data = JSON.parse(response?.responseText || "{}");
                         const version = String(data.tag_name || data.name || "").replace(/^v/i, "").trim();
                         if (!version) {
                             reject(new Error("未获取到版本号"));
@@ -71,6 +73,9 @@ const UpdateChecker = {
                 },
                 ontimeout: () => reject(new Error("更新检查超时")),
                 onerror: () => reject(new Error("网络错误，无法检查更新")),
+                // 2/3 共识(dsf+qwen): 缺少 onabort 时请求被中止 → Promise 永不 settle,
+                // isChecking 永久为 true 阻塞后续检查。
+                onabort: () => reject(new Error("更新检查已中止")),
             });
         });
     },
@@ -164,13 +169,22 @@ const UpdateChecker = {
         UpdateChecker.stopPolling();
         const intervalHours = parseInt(hours, 10) || 0;
         if (intervalHours > 0) {
+            // qwen P1 共识: 大间隔会溢出 32 位定时器(>596h)导致高频触发风暴, 限幅
+            const intervalMs = Math.min(intervalHours * 60 * 60 * 1000, 2147483647);
             UpdateChecker.timerId = setInterval(() => {
-                Utils.runWhenBrowserIdle(() => UpdateChecker.check({ manual: false }));
-            }, intervalHours * 60 * 60 * 1000);
+                // 2/3 共识(dsf+qwen): idle 回调排队后 stopPolling 无法取消 — 捕获 epoch 复核
+                const epoch = UpdateChecker._epoch;
+                Utils.runWhenBrowserIdle(() => {
+                    if (epoch !== UpdateChecker._epoch) return;
+                    UpdateChecker.check({ manual: false });
+                });
+            }, intervalMs);
         }
     },
 
     stopPolling: () => {
+        // 递增 epoch 使已排队的 idle 回调失效(停止后不再执行陈旧检查)
+        UpdateChecker._epoch += 1;
         if (UpdateChecker.timerId) {
             clearInterval(UpdateChecker.timerId);
             UpdateChecker.timerId = null;
@@ -183,10 +197,15 @@ const UpdateChecker = {
         UpdateChecker.stopPolling();
         UpdateChecker.renderLastStatus();
         if (enabled) {
-            if (UpdateChecker.shouldCheckNow(intervalHours)) {
-                Utils.runWhenBrowserIdle(() => UpdateChecker.check({ manual: false }));
-            }
             UpdateChecker.startPolling(intervalHours);
+            if (UpdateChecker.shouldCheckNow(intervalHours)) {
+                // 捕获 startPolling 后的当前 epoch: 若随后 stopPolling 则丢弃本次排队检查
+                const epoch = UpdateChecker._epoch;
+                Utils.runWhenBrowserIdle(() => {
+                    if (epoch !== UpdateChecker._epoch) return;
+                    UpdateChecker.check({ manual: false });
+                });
+            }
         }
     },
 };

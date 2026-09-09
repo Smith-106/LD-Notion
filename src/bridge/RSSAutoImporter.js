@@ -913,7 +913,11 @@ const RSSAutoImporter = {
             RSSAutoImporter.initTimerId = null;
             // 延迟窗口内可能已被禁用(stopPolling 已清理时此路不达; 双保险防竞态)
             if (!Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return;
-            Utils.runWhenBrowserIdle(() => RSSAutoImporter.run());
+            Utils.runWhenBrowserIdle(() => {
+                // glm P1 共识: idle 回调排队期间可能已被禁用(外层检查只覆盖 3s 延迟窗口)
+                if (!Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return;
+                RSSAutoImporter.run();
+            });
             const interval = Storage.get(
                 CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL,
                 CONFIG.DEFAULTS.rssAutoImportInterval

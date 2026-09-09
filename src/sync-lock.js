@@ -25,10 +25,11 @@ const SyncLock = {
     /**
      * 尝试获取跨 tab 租约(owner + expiresAt, TTL 兜底)
      * @param {string} key - 租约存储键(建议 per-source, 如 CONFIG.STORAGE_KEYS.XXX + ":lease")
-     * @param {number} ttlMs - 租约有效期(默认 60s)
+     * @param {number} ttlMs - 租约有效期(默认 180s: 续约 30s 一次, 隐藏标签页定时器
+     *   节流后最多 ~60s 一次, 3× 余量确保节流下不会中途过期被抢占)
      * @returns {Promise<{owner: string, expiresAt: number}|null>} 成功返回租约, 失败/被占返回 null
      */
-    acquireLease: async (key, ttlMs = 60000) => {
+    acquireLease: async (key, ttlMs = 180000) => {
         if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
             // 无 GM 环境: 降级进程内互斥
             if (SyncLock.isExporting) return null;
@@ -76,7 +77,7 @@ const SyncLock = {
      * 盲写续约会覆写新持有者的租约 → 双持有并发同步。owner 失配时返回 false 供调用方中止,
      * 绝不触碰他方租约。
      */
-    renewLease: (key, lease, ttlMs = 60000) => {
+    renewLease: (key, lease, ttlMs = 180000) => {
         if (!lease || typeof GM_setValue !== "function") return lease;
         if (typeof GM_getValue === "function") {
             const current = Utils.safeJsonParse(GM_getValue(key, "{}"), {}) || {};

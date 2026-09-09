@@ -292,3 +292,42 @@ describe("P1 共识第三轮守卫(GitHub 互斥/定时器/续约健壮性)", ()
         expect(releaseBody).toMatch(/if \(!lease\) return;/);
     });
 });
+
+describe("P1 共识第四轮守卫(UpdateChecker / idle 回调复核)", () => {
+    it("UpdateChecker: 停止轮询后已排队的 idle 回调必须失效(epoch) + 间隔限幅", () => {
+        const src = fs.readFileSync("src/import/UpdateChecker.js", "utf8");
+        expect(src).toContain("_epoch");
+        const stopBody = src.slice(src.indexOf("stopPolling: () =>"), src.indexOf("init: () =>"));
+        expect(stopBody).toContain("_epoch += 1");
+        expect(src).toContain("2147483647");
+        // idle 回调内复核 epoch
+        expect(src).toMatch(/runWhenBrowserIdle\(\(\) => \{[\s\S]{0,120}epoch !== UpdateChecker\._epoch/);
+    });
+    it("UpdateChecker.fetchLatestVersion 必须处理 onabort 与空响应", () => {
+        const src = fs.readFileSync("src/import/UpdateChecker.js", "utf8");
+        const fn = src.slice(src.indexOf("fetchLatestVersion: ()"), src.indexOf("saveResult: ("));
+        expect(fn).toContain("onabort");
+        expect(fn).toContain("response?.status");
+    });
+    it("三个导入器 init 的 idle 回调内必须复核启用态", () => {
+        const pairs = [
+            ["src/bridge/BookmarkAutoImporter.js", "BOOKMARK_AUTO_IMPORT_ENABLED"],
+            ["src/bridge/RSSAutoImporter.js", "RSS_AUTO_IMPORT_ENABLED"],
+            ["src/import/GitHubAutoImporter.js", "GITHUB_AUTO_IMPORT_ENABLED"],
+        ];
+        for (const [f, key] of pairs) {
+            const src = fs.readFileSync(f, "utf8");
+            const i = src.indexOf("initTimerId = setTimeout");
+            const block = src.slice(i, src.indexOf("}, 3000)", i));
+            // 回调体内(而非仅回调之前)出现启用态检查
+            const idleStart = block.indexOf("runWhenBrowserIdle(() => {");
+            expect(idleStart).toBeGreaterThan(-1);
+            const idleBlock = block.slice(idleStart, block.indexOf("});", idleStart));
+            expect(idleBlock).toContain(key);
+        }
+    });
+    it("租约 TTL 必须覆盖隐藏标签页定时器节流(≥3× 续约间隔)", () => {
+        const src = fs.readFileSync("src/sync-lock.js", "utf8");
+        expect(src).toContain("ttlMs = 180000");
+    });
+});

@@ -133,7 +133,11 @@ const GitHubAutoImporter = {
             GitHubAutoImporter.initTimerId = null;
             // 延迟窗口内可能已被禁用
             if (!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return;
-            Utils.runWhenBrowserIdle(() => GitHubAutoImporter.run());
+            Utils.runWhenBrowserIdle(() => {
+                // 2/3 共识: idle 回调排队期间可能已被禁用(外层检查只覆盖 3s 延迟窗口)
+                if (!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return;
+                GitHubAutoImporter.run();
+            });
             const interval = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.githubAutoImportInterval);
             if (interval > 0) GitHubAutoImporter.startPolling(interval);
         }, 3000);

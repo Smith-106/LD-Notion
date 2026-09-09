@@ -252,3 +252,38 @@ describe("P1 共识: UndoManager toast 误删与撤销重入(security)", () => {
         expect(calls).toBe(1);
     });
 });
+
+describe("P1 共识: UpdateChecker 悬挂/标志卡死(3 模型)", () => {
+    const { UpdateChecker } = require("../src/import/UpdateChecker");
+    let origXhr;
+
+    beforeEach(() => {
+        origXhr = global.GM_xmlhttpRequest;
+        UpdateChecker.isChecking = false;
+    });
+    afterEach(() => {
+        global.GM_xmlhttpRequest = origXhr;
+        UpdateChecker.isChecking = false;
+    });
+
+    it("fetch 失败后 isChecking 必须复位(finally 保证)", async () => {
+        vi.spyOn(UpdateChecker, "fetchLatestVersion").mockRejectedValue(new Error("网络错误"));
+        await UpdateChecker.check({ manual: false });
+        expect(UpdateChecker.isChecking).toBe(false);
+    });
+
+    it("fetchLatestVersion: onabort 必须 reject 而非永久悬挂", async () => {
+        global.GM_xmlhttpRequest = (opts) => opts.onabort();
+        await expect(UpdateChecker.fetchLatestVersion()).rejects.toThrow("已中止");
+    });
+
+    it("fetchLatestVersion: onload(response=null) 必须 reject", async () => {
+        global.GM_xmlhttpRequest = (opts) => opts.onload(null);
+        await expect(UpdateChecker.fetchLatestVersion()).rejects.toThrow("无响应");
+    });
+
+    it("fetchLatestVersion: 非 200 必须 reject", async () => {
+        global.GM_xmlhttpRequest = (opts) => opts.onload({ status: 404, responseText: "{}" });
+        await expect(UpdateChecker.fetchLatestVersion()).rejects.toThrow("HTTP 404");
+    });
+});
