@@ -253,8 +253,9 @@ AutoImporter.run = async () => {
 
         const worker = async () => {
             while (true) {
-                // P4 收敛(c09): 批量写页可能耗时数分钟 —— 租约丢失须逐项中止
-                if (AutoImporter._leaseLost) break;
+                // P4 收敛(c09): 批量写页可能耗时数分钟 —— 租约丢失/认证终态须逐项中止
+                // (并发 worker 不共享中止标记则继续逐项 401, 与 fail-fast 语义相悛)
+                if (AutoImporter._leaseLost || autoImportAborted) break;
                 const i = remaining.shift();
                 if (i === undefined) return;
 
