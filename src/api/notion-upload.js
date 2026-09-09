@@ -257,7 +257,7 @@ function installUploadMethods(NotionAPI) {
                     if (r.status >= 200 && r.status < 300) resolve(r.response);
                     else reject(new Error(`下载失败: ${r.status}`));
                 },
-                onerror: (e) => reject(new Error(`下载失败: ${e}`)),
+                onerror: (e) => reject(new Error(`下载失败: ${Utils.formatRequestError(e)}`)),
                 ontimeout: () => reject(new Error("下载超时")),
             });
         });
@@ -331,7 +331,7 @@ function installUploadMethods(NotionAPI) {
                             if (r.status >= 200 && r.status < 300) resolve(r.response);
                             else reject(new Error(`下载失败: ${r.status}`));
                         },
-                        onerror: (e) => reject(new Error(`下载失败: ${e}`)),
+                        onerror: (e) => reject(new Error(`下载失败: ${Utils.formatRequestError(e)}`)),
                         ontimeout: () => reject(new Error("下载超时")),
                     });
                 });
