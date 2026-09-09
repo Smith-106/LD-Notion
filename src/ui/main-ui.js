@@ -1386,6 +1386,50 @@ const UI = {
         el.textContent = `导出目标:${targetType} ${targetId ? targetId.slice(0, 12) : "未配置"} · 权限:${levelLabels[level] || level} · 授权:${authMode}`;
     },
 
+    // 跨页配置同步(3/3 共识 dsf+glm+qwen):其他标签页修改导出/AI 目标时回填本页输入与摘要。
+    // 否则陈旧面板保存(events.js 从 refs 读取目标)会把他端新配置覆盖回旧值。
+    installTargetCrossPageWatchers: () => {
+        if (UI._targetWatchersInstalled) return;
+        UI._targetWatchersInstalled = true;
+        if (typeof GM_addValueChangeListener !== "function") return;
+        const keys = [
+            CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID,
+            CONFIG.STORAGE_KEYS.PARENT_PAGE_ID,
+            CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE,
+            CONFIG.STORAGE_KEYS.AI_TARGET_DB,
+        ];
+        const syncFromStorage = () => {
+            if (!UI.panel) return;
+            try {
+                const refs = UI.refs || {};
+                const exportState = TargetState.getExportState();
+                // 正在编辑的输入框不覆盖(避免打断用户输入)
+                if (refs.databaseIdInput && document.activeElement !== refs.databaseIdInput) {
+                    refs.databaseIdInput.value = exportState.databaseId;
+                }
+                if (refs.parentPageIdInput && document.activeElement !== refs.parentPageIdInput) {
+                    refs.parentPageIdInput.value = exportState.parentPageId;
+                }
+                const isPage = exportState.targetType === CONFIG.EXPORT_TARGET_TYPES.PAGE;
+                if (refs.exportTargetPageRadio) refs.exportTargetPageRadio.checked = isPage;
+                if (refs.exportTargetDatabaseRadio) refs.exportTargetDatabaseRadio.checked = !isPage;
+                UI.updateExportTargetSummary();
+            } catch (error) {
+                console.warn("[LD-Notion] 导出目标跨页同步失败", error?.message || error);
+            }
+        };
+        try {
+            for (const key of keys) {
+                GM_addValueChangeListener(key, (_name, _oldValue, _newValue, remote) => {
+                    if (remote) syncFromStorage();
+                });
+            }
+        } catch (error) {
+            // 注册失败静默降级(仅失去跨页刷新),与 auth/storage 既有先例一致
+            console.warn("[LD-Notion] 导出目标跨页监听注册失败", error?.message || error);
+        }
+    },
+
     renderSelfCheckResult: () => {
         const panel = UI.panel;
         if (!panel) return;

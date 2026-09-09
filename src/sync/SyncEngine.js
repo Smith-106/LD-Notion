@@ -65,17 +65,20 @@ const SyncEngine = {
             }
         }
 
-        // settings(白名单键按存储键值从 Storage 读)
+        // settings(白名单键按存储键值从 Storage 读) + 每键 LWW 时间戳(值未变则复用)
         const settings = {};
         for (const key of Object.keys(SyncSerializer.WHITELIST.settings)) {
             const value = Storage.get(key, undefined);
             if (value !== undefined && value !== null) settings[key] = value;
         }
 
+        const nextStamps = {};
         const payload = await SyncSerializer.buildPayload(
-            { dedupSets, watermarks, settings },
-            { deviceId, now: Date.now(), mode, hashUrls: true }
+            { dedupSets, watermarks, settings, settingsStamps: SyncStateV2.getSettingsStamps() },
+            { deviceId, now: Date.now(), mode, hashUrls: true, stampsOut: nextStamps }
         );
+        // 推送失败也不回滚时间戳: 值未变时下轮仍复用同一时间戳(语义等价)
+        SyncStateV2.setSettingsStamps(nextStamps);
         SyncSerializer.assertNoBlacklisted(payload);
         return payload;
     },

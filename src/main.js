@@ -98,6 +98,8 @@ function main() {
 
     // 跨页配置刷新(三模型共识):OAuth 三键 GM_addValueChangeListener,其他页面改动本页即时回填
     NotionOAuth.installCrossPageWatchers();
+    // 导出/AI 目标四键跨页同步(3/3 共识):防陈旧面板保存覆盖他端新配置
+    UI.installTargetCrossPageWatchers();
 
     const initUI = async () => {
       try {

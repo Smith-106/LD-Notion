@@ -165,6 +165,9 @@ const FORBIDDEN_KEYS = new Set(SyncConstants.FORBIDDEN_KEYS);
 const SyncSerializer = {
     WHITELIST,
     BLACKLIST,
+    // 单个字符串设置项上限(设置行整行受 SyncLedger 2000 字符硬限约束, 单键超限会挤掉
+    // 其余键, 故按单键封顶并在丢弃时告警)
+    MAX_STRING_LENGTH: 1000,
 
     /**
      * 断言 payload 不含黑名单键/危险键(契约: 黑名单键经序列化器永不出现)
@@ -200,7 +203,7 @@ const SyncSerializer = {
      * @param {Object} opts { deviceId, now, mode: "personal"|"shared", hashUrls: boolean }
      * @returns {Promise<Object>} payload
      */
-    async buildPayload(raw, { deviceId = "local", now = Date.now(), mode = "personal", hashUrls = true } = {}) {
+    async buildPayload(raw, { deviceId = "local", now = Date.now(), mode = "personal", hashUrls = true, stampsOut = null } = {}) {
         const payload = {
             schemaVersion: SyncConstants.SCHEMA_VERSION,
             deviceId,
@@ -229,10 +232,17 @@ const SyncSerializer = {
                 // v3.14.6 (DC-002): 全源新鲜度裁剪 —— urlKeyed 去重账本同样只投递 90 天内条目
                 // (可再生账本, 本地 TTL 同语义; 仅投影裁, 本地账本不受影响), 防同步介质无限膨胀
                 if (num < tsFloor) continue;
-                if (++count > SyncConstants.MAX_DEDUP_ENTRIES_PER_SOURCE) break;
                 // 本地账本含原文键与 h: 哈希键双条目(DedupStore 双写); 已哈希键跳过再哈希
                 const key = meta.urlKeyed && hashUrls && !k.startsWith("h:") ? `h:${await SyncCrypto.sha256Hex(k)}` : k;
-                clean[key] = num;
+                // 2/3 共识(glm+qwen): 双写使原文键与 h: 键折叠到同一输出键 —— 计数按物理条目递增
+                // 会让有效容量减半, 且后迭代的旧 ts 覆盖新 ts。改为按输出键计数 + 取较大 ts。
+                const prevTs = clean[key];
+                if (prevTs === undefined) {
+                    if (++count > SyncConstants.MAX_DEDUP_ENTRIES_PER_SOURCE) break;
+                    clean[key] = num;
+                } else if (num > prevTs) {
+                    clean[key] = num;
+                }
             }
             if (Object.keys(clean).length > 0) payload.dedup[src] = clean;
         }
@@ -251,17 +261,37 @@ const SyncSerializer = {
         }
 
         // ③ settings: 白名单过滤 + scope 裁剪(shared 模式剔除 personal; personal 模式全含)
+        // 3/3 共识(dsf+glm+qwen): updatedAt 不能一律取本次推送时刻 —— 未修改设置的设备每次推送
+        // 都会刷新全部键时间戳, LWW 退化为“后推送者胜”, 静默覆盖他端更新的修改。
+        // 改为: 值未变则复用上次盖的时间戳(仅本地持久化哈希+时间戳), 值变了才盖 now。
+        const stamps = raw?.settingsStamps && typeof raw.settingsStamps === "object" ? raw.settingsStamps : {};
+        const nextStamps = {};
         for (const [key, def] of Object.entries(WHITELIST.settings)) {
             if (mode === "shared" && def.scope === "personal") continue;
             const value = raw?.settings?.[key];
             if (value === undefined || value === null) continue;
             const clean = SyncSerializer._coerceSetting(value, def.kind);
-            if (clean === undefined) continue;
+            if (clean === undefined) {
+                if (def.kind === "string" && String(value ?? "").length > SyncSerializer.MAX_STRING_LENGTH) {
+                    // 2/3 共识(dsf+glm): 超长设置项被静默丢弃 → 该键永不同步且难以排查
+                    console.warn(`[LD-Notion] 设置项 ${key} 超过 ${SyncSerializer.MAX_STRING_LENGTH} 字符, 本次不参与同步`);
+                }
+                continue;
+            }
+            const hash = await SyncCrypto.sha256Hex(JSON.stringify([def.kind, clean]));
+            const prev = stamps[key];
+            const updatedAt = prev && prev.h === hash && typeof prev.t === "string"
+                ? prev.t
+                : new Date(now).toISOString();
+            nextStamps[key] = { h: hash, t: updatedAt };
             payload.settings[key] = {
                 value: clean,
-                updatedAt: new Date(now).toISOString(),
+                updatedAt,
                 deviceId,
             };
+        }
+        if (stampsOut && typeof stampsOut === "object") {
+            Object.assign(stampsOut, nextStamps);
         }
 
         return payload;
@@ -277,7 +307,7 @@ const SyncSerializer = {
                 return value === true || value === false ? value : undefined;
             case "string": {
                 const s = String(value ?? "");
-                return s.length <= 1000 ? s : undefined;
+                return s.length <= SyncSerializer.MAX_STRING_LENGTH ? s : undefined;
             }
             default:
                 return undefined;
@@ -319,6 +349,14 @@ const SyncSerializer = {
                 if (!Number.isFinite(num) || num < tsMin || num > tsMax) {
                     return { ok: false, error: `dedup.${src} ts 越界: ${k}` };
                 }
+            }
+        }
+
+        // 设置项 updatedAt 偏斜: 越界时间戳会永久赢得 LWW(且 buildPayload 会据此复用), 拒绝
+        for (const [key, entry] of Object.entries(payload.settings || {})) {
+            const stamp = Date.parse(entry?.updatedAt);
+            if (!Number.isFinite(stamp) || stamp < tsMin || stamp > tsMax) {
+                return { ok: false, error: `settings.${key} updatedAt 越界` };
             }
         }
 

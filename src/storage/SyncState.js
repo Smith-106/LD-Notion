@@ -305,6 +305,24 @@ const SyncStateV2 = {
         return this.getSourceState(sourceType);
     },
 
+    /**
+     * 设置项 LWW 时间戳(仅本地持久化, 不参与同步投影)
+     * 3/3 共识(dsf+glm+qwen): 推送时若对所有白名单键盖 now, 未修改设置的设备会把陈旧值
+     * 盖上新时间戳, 在合并时覆盖他端更新的修改。{key: {h: 值哈希, t: iso}} 供 buildPayload
+     * 判断“值未变则复用旧时间戳”。容量天然受白名单键数上限约束(≤38 键)。
+     */
+    getSettingsStamps() {
+        const state = this._load();
+        const stamps = state.settingsStamps;
+        return stamps && typeof stamps === "object" ? stamps : {};
+    },
+
+    setSettingsStamps(stamps) {
+        const state = this._load();
+        state.settingsStamps = stamps && typeof stamps === "object" ? stamps : {};
+        this._save(state);
+    },
+
     buildWatermark(items = [], getTime, getId) {
         if (!Array.isArray(items) || items.length === 0) return null;
         let latestTime = "";

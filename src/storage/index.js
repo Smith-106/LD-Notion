@@ -169,6 +169,9 @@ const SyncState = {
     getSourceState: (sourceType) => SyncStateV2.getSourceState(sourceType),
     updateSourceState: (sourceType, patch) => SyncStateV2.updateSourceState(sourceType, patch),
     forceFlush: () => SyncStateV2.forceFlush(),
+    // 设置项 LWW 时间戳(仅本地持久化; 同步投影复用旧时间戳防止未修改设备覆盖他端修改)
+    getSettingsStamps: () => SyncStateV2.getSettingsStamps(),
+    setSettingsStamps: (stamps) => SyncStateV2.setSettingsStamps(stamps),
 
     // V1 兼容 API 代理到 V2
     getLinuxDoState: () => SyncStateV2.getSourceState("linuxdo"),
