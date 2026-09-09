@@ -13,6 +13,8 @@ const { Utils } = require("./utils");
 
 const SyncLock = {
     _exporting: false,
+    // 无 GM 环境的按 key 租约槽(浏览器/GM 环境不参与)
+    _localLeases: new Map(),
 
     get isExporting() {
         return this._exporting;
@@ -31,10 +33,15 @@ const SyncLock = {
      */
     acquireLease: async (key, ttlMs = 180000) => {
         if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
-            // 无 GM 环境: 降级进程内互斥
-            if (SyncLock.isExporting) return null;
+            // 无 GM 环境: 降级为进程内互斥。2/3 共识(dsf+qwen): 原实现忽略 key 共用
+            // 全局 isExporting 位 → 不同源的租约互相假冲突且释放会误清他人标志。
+            // 改为按 key 分槽(保留 isExporting 副作用向后兼容)。
+            const held = SyncLock._localLeases.get(key);
+            if (held && Number(held.expiresAt) > Date.now()) return null;
+            const lease = { owner: Utils.randomToken(), expiresAt: Date.now() + ttlMs };
+            SyncLock._localLeases.set(key, lease);
             SyncLock.isExporting = true;
-            return { owner: "local", expiresAt: Date.now() + ttlMs };
+            return lease;
         }
         const now = Date.now();
         const existing = Utils.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
@@ -63,6 +70,9 @@ const SyncLock = {
         if (lease.expiresAt <= Date.now()) {
             lease.expiresAt = Date.now() + ttlMs;
             GM_setValue(key, JSON.stringify(lease));
+            // 2/3 共识(dsf+glm): 此分支原为立即复读(必然读到自己刚写的值, 判别恒真)。
+            // 与主路径对称补 150ms 稳态等待, 让并发写入得以传播/暴露。
+            await Utils.sleep(150);
             const refreshed = Utils.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
             if (!refreshed.owner || refreshed.owner !== lease.owner) {
                 return null;
@@ -107,6 +117,8 @@ const SyncLock = {
         // 原实现在此分支无条件清 isExporting, 会误清他人持有的锁。
         if (!lease) return;
         if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
+            const held = SyncLock._localLeases.get(key);
+            if (held && held.owner === lease.owner) SyncLock._localLeases.delete(key);
             SyncLock.isExporting = false;
             return;
         }

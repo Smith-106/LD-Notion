@@ -86,34 +86,47 @@ const SyncRateLimiter = {
 
     /**
      * 同 key 防抖合并: 窗口内对同一 key 的多次调用合并为 1 次(最后一次胜出)
+     * 3/3 共识(dsf+glm+qwen): 原单槽 _pending 被不同 key 覆盖后, 旧条目的定时器守卫
+     * (this._pending === entry)必失配 → 旧 fn 永不执行且旧 promise 永不 settle(调用方挂死)。
+     * 改为按 key 分槽的 Map; 同步抛错也 settle; maxWaitMs 到点立即冲刷。
      * @param {string} key
      * @param {Function} fn - 执行体
      * @param {Object} opts { windowMs=5000, maxWaitMs=30000 }
      * @returns {Promise<*>}
      */
     schedule(key, fn, { windowMs = SyncConstants.DEBOUNCE_MS, maxWaitMs = 30000 } = {}) {
+        if (!(this._pending instanceof Map)) this._pending = new Map();
         const now = Date.now();
-        if (this._pending && this._pending.key === key && now - this._pending.startedAt < windowMs) {
-            // 已排队: 替换执行体(最后一次胜出), 延长等待窗口
-            this._pending.fn = fn;
-            return this._pending.promise;
+        const existing = this._pending.get(key);
+        if (existing) {
+            // 同 key 合并: 替换执行体(最后一次胜出), 共享同一 promise
+            existing.fn = fn;
+            if (now - existing.startedAt >= maxWaitMs) this._flushPending(key, existing);
+            return existing.promise;
         }
-        if (this._pending && this._pending.key === key) {
-            // 超窗: 立即执行
-            this._pending = null;
-            return fn();
-        }
-        const p = new Promise((resolve, reject) => {
-            const timer = setTimeout(() => {
-                if (this._pending === entry) {
-                    this._pending = null;
-                    Promise.resolve(entry.fn()).then(resolve, reject);
-                }
-            }, windowMs);
-            const entry = { key, fn, startedAt: now, promise: p, timer };
-            this._pending = entry;
+        let resolveOuter;
+        let rejectOuter;
+        const promise = new Promise((resolve, reject) => {
+            resolveOuter = resolve;
+            rejectOuter = reject;
         });
-        return p;
+        const entry = { key, fn, startedAt: now, promise, resolve: resolveOuter, reject: rejectOuter, timer: null };
+        // 首次排队的等待也受 maxWaitMs 约束(否则 maxWaitMs 形同虚设)
+        const wait = Math.max(0, Math.min(windowMs, maxWaitMs));
+        entry.timer = setTimeout(() => this._flushPending(key, entry), wait);
+        this._pending.set(key, entry);
+        return promise;
+    },
+
+    _flushPending(key, entry) {
+        if (!(this._pending instanceof Map) || this._pending.get(key) !== entry) return;
+        this._pending.delete(key);
+        if (entry.timer) {
+            clearTimeout(entry.timer);
+            entry.timer = null;
+        }
+        // fn 同步抛错也必须 settle(否则调用方永久挂起)
+        Promise.resolve().then(() => entry.fn()).then(entry.resolve, entry.reject);
     },
 
     /**
@@ -142,6 +155,13 @@ const SyncRateLimiter = {
         this._waiters = [];
         this._selfLimitTokens = SyncConstants.SYNC_SELF_LIMIT_PER_SEC;
         this._selfLastRefill = Date.now();
+        // glm P2 共识: 防抖槽也需清空, 否则旧定时器跨 reset 存活并执行陈旧 fn
+        if (this._pending instanceof Map) {
+            for (const entry of this._pending.values()) {
+                if (entry.timer) clearTimeout(entry.timer);
+            }
+        }
+        this._pending = new Map();
     },
 };
 
