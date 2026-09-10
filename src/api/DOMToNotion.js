@@ -199,6 +199,12 @@ const DOMToNotion = {
                 });
             }
         });
+        // P4 收敛(c05a-glm): 段落内嵌 video/audio/iframe 无任何消费点 —— iframe/video 属短语
+        // 内容, <p><iframe …></iframe></p> 是合法 HTML 且 DOMParser 原样保留; 段落分支提前
+        // return 使这些块静默丢失(与上方 img/a.attachment 后处理同口径)
+        el.querySelectorAll("video").forEach((video) => DOMToNotion._cookVideo(video, blocks, imgMode));
+        el.querySelectorAll("audio").forEach((audio) => DOMToNotion._cookAudio(audio, blocks, imgMode));
+        el.querySelectorAll("iframe").forEach((frame) => { DOMToNotion._cookIframe(frame, blocks); });
     },
 
     // 代码块 pre
@@ -281,15 +287,31 @@ const DOMToNotion = {
         }
 
         const tbody = table.querySelector("tbody") || table;
-        directRows(tbody).forEach((tr) => {
-            if (tr.closest("thead")) return;
-            const cells = [];
-            directCells(tr).forEach((cell) => {
-                const richText = DOMToNotion.serializeRichText(cell);
-                cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
+        // P4 收敛(c05a-glm): 合法 HTML 可有多个 tbody, tfoot 行同样属于表格正文 ——
+        // 原实现只取第一个 tbody 且从不读 tfoot, 其余行静默丢失
+        const bodyContainers = Array.from(table.children || [])
+            .filter((child) => child.tagName && ["tbody", "tfoot"].includes(child.tagName.toLowerCase()));
+        (bodyContainers.length > 0 ? bodyContainers : [tbody]).forEach((container) => {
+            directRows(container).forEach((tr) => {
+                if (tr.closest("thead")) return;
+                const cells = [];
+                directCells(tr).forEach((cell) => {
+                    const richText = DOMToNotion.serializeRichText(cell);
+                    cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
+                });
+                if (cells.length > 0) rows.push(cells);
             });
-            if (cells.length > 0) rows.push(cells);
         });
+
+        // P4 收敛(c05a-glm): Notion table.children 上限 100 —— 超限整批 400, 该页导入全失败;
+        // 与长文本同口径: 截断并留可见标记, 不静默丢弃
+        const MAX_TABLE_ROWS = 100;
+        if (rows.length > MAX_TABLE_ROWS) {
+            const droppedRows = rows.length - (MAX_TABLE_ROWS - 1);
+            rows.length = MAX_TABLE_ROWS - 1;
+            rows.push([[{ type: "text", text: { content: `…（表格行数过多，已截断 ${droppedRows} 行）` } }]]);
+            console.warn(`[LD-Notion] 表格行数超 ${MAX_TABLE_ROWS} 上限, 已截断 ${droppedRows} 行`);
+        }
 
         if (rows.length > 0) {
             const tableWidth = Math.max(1, ...rows.map(r => r.length));

@@ -4194,6 +4194,11 @@
               });
             }
           });
+          el.querySelectorAll("video").forEach((video) => DOMToNotion2._cookVideo(video, blocks, imgMode));
+          el.querySelectorAll("audio").forEach((audio) => DOMToNotion2._cookAudio(audio, blocks, imgMode));
+          el.querySelectorAll("iframe").forEach((frame) => {
+            DOMToNotion2._cookIframe(frame, blocks);
+          });
         },
         // 代码块 pre
         _cookCode: (el, blocks) => {
@@ -4261,15 +4266,25 @@
             });
           }
           const tbody = table.querySelector("tbody") || table;
-          directRows(tbody).forEach((tr) => {
-            if (tr.closest("thead")) return;
-            const cells = [];
-            directCells(tr).forEach((cell) => {
-              const richText = DOMToNotion2.serializeRichText(cell);
-              cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
+          const bodyContainers = Array.from(table.children || []).filter((child) => child.tagName && ["tbody", "tfoot"].includes(child.tagName.toLowerCase()));
+          (bodyContainers.length > 0 ? bodyContainers : [tbody]).forEach((container) => {
+            directRows(container).forEach((tr) => {
+              if (tr.closest("thead")) return;
+              const cells = [];
+              directCells(tr).forEach((cell) => {
+                const richText = DOMToNotion2.serializeRichText(cell);
+                cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
+              });
+              if (cells.length > 0) rows.push(cells);
             });
-            if (cells.length > 0) rows.push(cells);
           });
+          const MAX_TABLE_ROWS = 100;
+          if (rows.length > MAX_TABLE_ROWS) {
+            const droppedRows = rows.length - (MAX_TABLE_ROWS - 1);
+            rows.length = MAX_TABLE_ROWS - 1;
+            rows.push([[{ type: "text", text: { content: `\u2026\uFF08\u8868\u683C\u884C\u6570\u8FC7\u591A\uFF0C\u5DF2\u622A\u65AD ${droppedRows} \u884C\uFF09` } }]]);
+            console.warn(`[LD-Notion] \u8868\u683C\u884C\u6570\u8D85 ${MAX_TABLE_ROWS} \u4E0A\u9650, \u5DF2\u622A\u65AD ${droppedRows} \u884C`);
+          }
           if (rows.length > 0) {
             const tableWidth = Math.max(1, ...rows.map((r) => r.length));
             const paddedRows = rows.map((cells) => cells.length >= tableWidth ? cells : cells.concat(Array.from(

@@ -208,3 +208,48 @@ describe("P4: pageCrud 分页与歧义守卫", () => {
         expect(cursors).toEqual([null, "c1"]);
     });
 });
+
+describe("P4 收敛(c05a-glm): 段落内嵌媒体 / 表格行上限与多 tbody", () => {
+    let origSerialize2;
+    beforeEach(() => { origSerialize2 = DOMToNotion.serializeRichText; DOMToNotion.serializeRichText = () => RT(); });
+    afterEach(() => { DOMToNotion.serializeRichText = origSerialize2; });
+
+    it("段落内嵌 iframe 有消费点(embed 不再静默丢失)", () => {
+        const blocks = [];
+        const frame = { getAttribute: () => "https://www.youtube.com/embed/abc" };
+        const el = {
+            querySelectorAll: (sel) => (sel === "iframe" ? [frame] : []),
+        };
+        DOMToNotion._cookParagraph(el, blocks, "external");
+        expect(blocks.some((b) => b.type === "embed")).toBe(true);
+    });
+
+    it("表格行数超 100 时截断并留可见标记", () => {
+        const cell = () => ({ tagName: "TD" });
+        const row = () => ({ closest: () => null, tagName: "TR", children: [cell()] });
+        const table = { tagName: "TABLE", querySelector: () => null, children: Array.from({ length: 130 }, row) };
+        const blocks = [];
+        DOMToNotion._cookTable(table, blocks);
+        const t = blocks[0].table;
+        expect(t.children.length).toBe(100);
+        const lastCell = t.children[99].table_row.cells[0];
+        expect(lastCell[0].text.content).toContain("已截断 31 行");
+    });
+
+    it("多个 tbody + tfoot 的行全部保留", () => {
+        const cell = () => ({ tagName: "TD" });
+        const row = () => ({ closest: () => null, tagName: "TR", children: [cell()] });
+        const table = {
+            tagName: "TABLE",
+            querySelector: () => null,
+            children: [
+                { tagName: "TBODY", children: [row()] },
+                { tagName: "TBODY", children: [row(), row()] },
+                { tagName: "TFOOT", children: [row()] },
+            ],
+        };
+        const blocks = [];
+        DOMToNotion._cookTable(table, blocks);
+        expect(blocks[0].table.children.length).toBe(4);
+    });
+});
