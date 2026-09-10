@@ -295,3 +295,39 @@ describe("wave6 共识(dsf): li 内嵌媒体 + 链接 emoji 文本", () => {
         expect(rt[0].text.link.url).toBe("https://linux.do/u/foo");
     });
 });
+
+describe("wave6 共识(qwen): 嵌套表格隔离 + table_width 上限", () => {
+    let origSerialize3;
+    beforeEach(() => { origSerialize3 = DOMToNotion.serializeRichText; DOMToNotion.serializeRichText = () => RT(); });
+    afterEach(() => { DOMToNotion.serializeRichText = origSerialize3; });
+
+    it("单元格内嵌套表格的 thead/tbody 不并入外层表(has_column_header 不误置)", () => {
+        const cellWithNested = {
+            tagName: "TD",
+            children: [{ tagName: "TABLE", querySelector: () => null, children: [] }],
+        };
+        const outerRow = { tagName: "TR", closest: () => null, children: [cellWithNested] };
+        const table = {
+            tagName: "TABLE",
+            // 后代选择器会命中内层嵌套表格的 thead; 直属子元素没有 thead
+            querySelector: (sel) => (sel === "thead" ? { tagName: "THEAD", children: [{ tagName: "TR", children: [] }] } : null),
+            children: [{ tagName: "TBODY", children: [outerRow] }],
+        };
+        const blocks = [];
+        DOMToNotion._cookTable(table, blocks);
+        expect(blocks[0].table.children.length).toBe(1);
+        expect(blocks[0].table.has_column_header).toBe(false);
+    });
+
+    it("列数超 100 时截断到 100 并在末列留标记", () => {
+        const cells = Array.from({ length: 105 }, () => ({ tagName: "TD", children: [] }));
+        const row = { tagName: "TR", closest: () => null, children: cells };
+        const table = { tagName: "TABLE", querySelector: () => null, children: [{ tagName: "TBODY", children: [row] }] };
+        const blocks = [];
+        DOMToNotion._cookTable(table, blocks);
+        const t = blocks[0].table;
+        expect(t.table_width).toBe(100);
+        expect(t.children[0].table_row.cells.length).toBe(100);
+        expect(t.children[0].table_row.cells[99][0].text.content).toContain("已截断 5 列");
+    });
+});

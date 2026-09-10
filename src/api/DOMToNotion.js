@@ -272,13 +272,17 @@ const DOMToNotion = {
         const rows = [];
         let hasHeader = false;
 
-        const thead = table.querySelector("thead");
         // P4 收敛(c05): 表格行列只取直属子元素 —— 后代选择器会把单元格内嵌套表格的
         // tr/td 并入外层行(列宽污染/内容窜行); 与下方 tbody 分支同口径
         const directRows = (container) => Array.from(container.children || [])
             .filter((child) => child.tagName && child.tagName.toLowerCase() === "tr");
         const directCells = (row) => Array.from(row.children || [])
             .filter((child) => child.tagName && ["td", "th"].includes(child.tagName.toLowerCase()));
+        // wave6 共识(qwen): thead/tbody 同样须取直属子元素 —— querySelector 会把单元格内
+        // 嵌套表格的 thead/tbody 当外层表头/表体(hasHeader 误置 + 行内容窜入)
+        const directSections = (tagNames) => Array.from(table.children || [])
+            .filter((child) => child.tagName && tagNames.includes(child.tagName.toLowerCase()));
+        const thead = directSections(["thead"])[0];
         if (thead) {
             hasHeader = true;
             directRows(thead).forEach((tr) => {
@@ -291,12 +295,10 @@ const DOMToNotion = {
             });
         }
 
-        const tbody = table.querySelector("tbody") || table;
-        // P4 收敛(c05a-glm): 合法 HTML 可有多个 tbody, tfoot 行同样属于表格正文 ——
+        // wave6 共识(qwen): 合法 HTML 可有多个 tbody, tfoot 行同样属于表格正文 ——
         // 原实现只取第一个 tbody 且从不读 tfoot, 其余行静默丢失
-        const bodyContainers = Array.from(table.children || [])
-            .filter((child) => child.tagName && ["tbody", "tfoot"].includes(child.tagName.toLowerCase()));
-        (bodyContainers.length > 0 ? bodyContainers : [tbody]).forEach((container) => {
+        const bodyContainers = directSections(["tbody", "tfoot"]);
+        (bodyContainers.length > 0 ? bodyContainers : [table]).forEach((container) => {
             directRows(container).forEach((tr) => {
                 if (tr.closest("thead")) return;
                 const cells = [];
@@ -316,6 +318,19 @@ const DOMToNotion = {
             rows.length = MAX_TABLE_ROWS - 1;
             rows.push([[{ type: "text", text: { content: `…（表格行数过多，已截断 ${droppedRows} 行）` } }]]);
             console.warn(`[LD-Notion] 表格行数超 ${MAX_TABLE_ROWS} 上限, 已截断 ${droppedRows} 行`);
+        }
+
+        // wave6 共识(qwen): Notion table_width 上限 100 —— 超宽整批 400; 超宽行截断到 100 列
+        // 并在末列留可见标记(不静默丢弃)
+        const MAX_TABLE_COLS = 100;
+        if (rows.some((cells) => cells.length > MAX_TABLE_COLS)) {
+            rows.forEach((cells) => {
+                if (cells.length <= MAX_TABLE_COLS) return;
+                const droppedCols = cells.length - MAX_TABLE_COLS;
+                cells.length = MAX_TABLE_COLS;
+                cells[MAX_TABLE_COLS - 1] = [{ type: "text", text: { content: `…（列数过多，已截断 ${droppedCols} 列）` } }];
+            });
+            console.warn(`[LD-Notion] 表格列数超 ${MAX_TABLE_COLS} 上限, 已截断`);
         }
 
         if (rows.length > 0) {

@@ -71,3 +71,70 @@ describe("c05b2-glm #3: 嵌套列表显式缩进", () => {
         expect(HTMLToMarkdown._convertNode(ol)).toBe("1. a\n  - b\n\n");
     });
 });
+
+describe("wave6 共识(qwen): 重定向边界 + onebox/inline code 转义", () => {
+    it("下载响应 finalUrl 指向内网时拒绝(重定向型 SSRF)", async () => {
+        const origXhr = global.GM_xmlhttpRequest;
+        const { NotionAPI: API2 } = require("../src/api");
+        API2.configureTransport({
+            request: async () => ({ status: 200, responseText: JSON.stringify({ id: "x", upload_url: "https://api.notion.com/v1/file_uploads/x/send", object: "file_upload" }), responseHeaders: "" }),
+        });
+        global.GM_xmlhttpRequest = (opts) => {
+            if (opts.method === "GET") {
+                opts.onload({
+                    status: 200,
+                    response: new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }),
+                    finalUrl: "http://169.254.169.254/latest/meta-data/",
+                });
+                return;
+            }
+            opts.onload({ status: 200, responseText: "{}" });
+        };
+        try {
+            await expect(API2.uploadFileToNotion("https://cdn.example.com/ok.png", "secret_ok"))
+                .rejects.toThrow(/不支持的文件 URL/);
+        } finally {
+            global.GM_xmlhttpRequest = origXhr;
+            API2.resetTransport();
+        }
+    });
+
+    it("onebox 多行内容逐行引用, 不脱离 callout", () => {
+        const origNode = globalThis.Node;
+        globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1 };
+        const div = {
+            nodeType: 1,
+            tagName: "DIV",
+            children: [],
+            childNodes: [{ nodeType: 3, textContent: "line1\n> escaped" }],
+            className: "onebox",
+            parentElement: null,
+            getAttribute: () => null,
+            querySelector: () => null,
+            querySelectorAll: () => [],
+        };
+        const out = HTMLToMarkdown._convertNode(div);
+        if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
+        expect(out).toBe("> [!quote]\n> line1\n> > escaped\n\n");
+    });
+
+    it("内联 code 含反引号时用更长围栏闭合", () => {
+        const origNode = globalThis.Node;
+        globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1 };
+        const make = (text) => ({
+            nodeType: 1,
+            tagName: "CODE",
+            children: [],
+            childNodes: [{ nodeType: 3, textContent: text }],
+            parentElement: { tagName: "P" },
+            getAttribute: () => null,
+            querySelector: () => null,
+            querySelectorAll: () => [],
+        });
+        const a = HTMLToMarkdown._convertNode(make("a`b"));
+        const b = HTMLToMarkdown._convertNode(make("`edge"));
+        if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
+        expect(a).toBe("``a`b``");
+        expect(b).toBe("`` `edge ``");
+    });
+});

@@ -320,6 +320,13 @@ function installUploadMethods(NotionAPI) {
                 responseType: "blob",
                 timeout: 60000,
                 onload: (r) => {
+                    // wave6 共识(qwen): 仅校验初始 URL 不够 —— 公网 URL 可 302 到内网/169.254;
+                    // GM 响应带 finalUrl 时同样过边界校验, 防重定向型 SSRF
+                    const finalUrl = r.finalUrl || r.responseURL || "";
+                    if (finalUrl && !UrlValidator.validatePageExternalUrl(String(finalUrl))) {
+                        reject(new Error("不支持的文件 URL（仅允许 http(s) 公网地址）"));
+                        return;
+                    }
                     // P4 共识(qwen): 2xx 但 response 为空时直接 resolve 会让下游 blob.type 抛错
                     if (r.status >= 200 && r.status < 300 && r.response) resolve(r.response);
                     else reject(new Error(`下载失败: ${r.status}`));

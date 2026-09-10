@@ -4256,9 +4256,10 @@
           if (!table) return;
           const rows = [];
           let hasHeader = false;
-          const thead = table.querySelector("thead");
           const directRows = (container) => Array.from(container.children || []).filter((child) => child.tagName && child.tagName.toLowerCase() === "tr");
           const directCells = (row) => Array.from(row.children || []).filter((child) => child.tagName && ["td", "th"].includes(child.tagName.toLowerCase()));
+          const directSections = (tagNames) => Array.from(table.children || []).filter((child) => child.tagName && tagNames.includes(child.tagName.toLowerCase()));
+          const thead = directSections(["thead"])[0];
           if (thead) {
             hasHeader = true;
             directRows(thead).forEach((tr) => {
@@ -4270,9 +4271,8 @@
               if (cells.length > 0) rows.push(cells);
             });
           }
-          const tbody = table.querySelector("tbody") || table;
-          const bodyContainers = Array.from(table.children || []).filter((child) => child.tagName && ["tbody", "tfoot"].includes(child.tagName.toLowerCase()));
-          (bodyContainers.length > 0 ? bodyContainers : [tbody]).forEach((container) => {
+          const bodyContainers = directSections(["tbody", "tfoot"]);
+          (bodyContainers.length > 0 ? bodyContainers : [table]).forEach((container) => {
             directRows(container).forEach((tr) => {
               if (tr.closest("thead")) return;
               const cells = [];
@@ -4289,6 +4289,16 @@
             rows.length = MAX_TABLE_ROWS - 1;
             rows.push([[{ type: "text", text: { content: `\u2026\uFF08\u8868\u683C\u884C\u6570\u8FC7\u591A\uFF0C\u5DF2\u622A\u65AD ${droppedRows} \u884C\uFF09` } }]]);
             console.warn(`[LD-Notion] \u8868\u683C\u884C\u6570\u8D85 ${MAX_TABLE_ROWS} \u4E0A\u9650, \u5DF2\u622A\u65AD ${droppedRows} \u884C`);
+          }
+          const MAX_TABLE_COLS = 100;
+          if (rows.some((cells) => cells.length > MAX_TABLE_COLS)) {
+            rows.forEach((cells) => {
+              if (cells.length <= MAX_TABLE_COLS) return;
+              const droppedCols = cells.length - MAX_TABLE_COLS;
+              cells.length = MAX_TABLE_COLS;
+              cells[MAX_TABLE_COLS - 1] = [{ type: "text", text: { content: `\u2026\uFF08\u5217\u6570\u8FC7\u591A\uFF0C\u5DF2\u622A\u65AD ${droppedCols} \u5217\uFF09` } }];
+            });
+            console.warn(`[LD-Notion] \u8868\u683C\u5217\u6570\u8D85 ${MAX_TABLE_COLS} \u4E0A\u9650, \u5DF2\u622A\u65AD`);
           }
           if (rows.length > 0) {
             const tableWidth = Math.max(1, ...rows.map((r) => r.length));
@@ -4650,7 +4660,11 @@
             case "code": {
               const parent = node.parentElement;
               if (parent && parent.tagName.toLowerCase() === "pre") return children;
-              return `\`${children}\``;
+              const codeText = String(children);
+              const run = (codeText.match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
+              const fence = "`".repeat(Math.max(1, run + 1));
+              const pad = /^`|`$/.test(codeText) ? " " : "";
+              return `${fence}${pad}${codeText}${pad}${fence}`;
             }
             case "pre": {
               const codeEl = node.querySelector("code");
@@ -4726,8 +4740,9 @@ ${indented}`;
             case "div": {
               const cls = node.className || "";
               if (cls.includes("onebox")) {
+                const quoted = String(children).trim().split("\n").map((line) => `> ${line}`).join("\n");
                 return `> [!quote]
-> ${children.trim()}
+${quoted}
 
 `;
               }
@@ -5189,6 +5204,11 @@ Content-Type: ${safeContentType}\r
                 responseType: "blob",
                 timeout: 6e4,
                 onload: (r) => {
+                  const finalUrl = r.finalUrl || r.responseURL || "";
+                  if (finalUrl && !UrlValidator.validatePageExternalUrl(String(finalUrl))) {
+                    reject(new Error("\u4E0D\u652F\u6301\u7684\u6587\u4EF6 URL\uFF08\u4EC5\u5141\u8BB8 http(s) \u516C\u7F51\u5730\u5740\uFF09"));
+                    return;
+                  }
                   if (r.status >= 200 && r.status < 300 && r.response) resolve(r.response);
                   else reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${r.status}`));
                 },
@@ -5322,6 +5342,30 @@ Content-Type: ${safeContentType}\r
         if (code === "unauthorized" || code === "invalid_bearer_token") return true;
         if (status === 401 && (msg.includes("api token is invalid") || msg.includes("unauthorized"))) return true;
         return false;
+      };
+      var countNestedBlocks = (block) => {
+        const container = block && block[block.type];
+        const kids = Array.isArray(container == null ? void 0 : container.children) ? container.children : [];
+        let total = 1;
+        for (const kid of kids) total += countNestedBlocks(kid);
+        return total;
+      };
+      var chunkBlocksByNotionLimits = (blocks) => {
+        const chunks = [];
+        let current = [];
+        let currentCount = 0;
+        for (const block of blocks || []) {
+          const blockSize = countNestedBlocks(block);
+          if (current.length > 0 && (current.length >= 100 || currentCount + blockSize > 1e3)) {
+            chunks.push(current);
+            current = [];
+            currentCount = 0;
+          }
+          current.push(block);
+          currentCount += blockSize;
+        }
+        if (current.length > 0) chunks.push(current);
+        return chunks;
       };
       var NotionTransport2 = Object.freeze({
         // P4 收敛(c05): endpoint 由调用方拼接 id —— 拒路径穿越/反斜线/片段注入
@@ -5597,8 +5641,7 @@ Content-Type: ${safeContentType}\r
         },
         // 追加 blocks
         appendBlocks: async (pageId, blocks, apiKey) => {
-          for (let i = 0; i < blocks.length; i += 100) {
-            const chunk = blocks.slice(i, i + 100);
+          for (const chunk of chunkBlocksByNotionLimits(blocks)) {
             await NotionAPI2.request("PATCH", `/blocks/${pageId}/children`, { children: chunk }, apiKey);
             await Utils2.sleep(300);
           }
@@ -5626,7 +5669,7 @@ Content-Type: ${safeContentType}\r
         // 获取块的子块
         fetchBlocks: async (blockId, cursor, apiKey) => {
           let endpoint = `/blocks/${blockId}/children`;
-          if (cursor) endpoint += `?start_cursor=${cursor}`;
+          if (cursor) endpoint += `?start_cursor=${encodeURIComponent(cursor)}`;
           return await NotionAPI2.request("GET", endpoint, null, apiKey);
         },
         // 追加子块，支持末尾/开头/某个块之后插入
@@ -5634,27 +5677,7 @@ Content-Type: ${safeContentType}\r
           const safeChildren = Array.isArray(children) ? children : [];
           const endpoint = `/blocks/${blockId}/children`;
           if (safeChildren.length === 0) return null;
-          const countNested = (block) => {
-            const container = block && block[block.type];
-            const kids = Array.isArray(container == null ? void 0 : container.children) ? container.children : [];
-            let total = 1;
-            for (const kid of kids) total += countNested(kid);
-            return total;
-          };
-          const chunks = [];
-          let current = [];
-          let currentCount = 0;
-          for (const block of safeChildren) {
-            const blockSize = countNested(block);
-            if (current.length > 0 && (current.length >= 100 || currentCount + blockSize > 1e3)) {
-              chunks.push(current);
-              current = [];
-              currentCount = 0;
-            }
-            current.push(block);
-            currentCount += blockSize;
-          }
-          if (current.length > 0) chunks.push(current);
+          const chunks = chunkBlocksByNotionLimits(safeChildren);
           if (chunks.length === 0) chunks.push([]);
           let lastResult = null;
           let anchor = options.after ? String(options.after) : null;
@@ -5868,7 +5891,7 @@ Content-Type: ${safeContentType}\r
         // 获取用户列表
         getUsers: async (cursor, apiKey) => {
           let endpoint = "/users";
-          if (cursor) endpoint += `?start_cursor=${cursor}`;
+          if (cursor) endpoint += `?start_cursor=${encodeURIComponent(cursor)}`;
           return await NotionAPI2.request("GET", endpoint, null, apiKey);
         },
         // 获取当前用户信息

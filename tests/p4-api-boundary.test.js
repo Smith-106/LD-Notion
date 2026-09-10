@@ -267,3 +267,40 @@ describe("wave6 共识(dsf): 重试过闸 + retryCount 计数", () => {
     // retryCount 语义 = 已发出的请求尝试次数(含首次), 与 notable 既有契约 notion-api.test.js 一致;
     // wave6 dsf:3 提议改为纯重试次数 → 契约变更且字段无消费点, 裁决 FP(保留原语义)
 });
+
+describe("wave6 共识(qwen): appendBlocks 双上限 + 游标编码", () => {
+    afterEach(() => NotionAPI.resetTransport());
+
+    it("appendBlocks 含嵌套子块同样受 1000 块总上限约束", async () => {
+        const origSleep = Utils.sleep;
+        Utils.sleep = async () => {};
+        const calls = [];
+        NotionAPI.configureTransport({ request: async (opts) => { calls.push(opts); return ok({}); } });
+        const container = () => ({
+            type: "bulleted_list_item",
+            bulleted_list_item: {
+                rich_text: [],
+                children: Array.from({ length: 60 }, () => ({ type: "paragraph", paragraph: { rich_text: [] } })),
+            },
+        });
+        try {
+            await NotionAPI.appendBlocks("page1", Array.from({ length: 20 }, container), "secret_ok");
+            expect(calls.length).toBeGreaterThan(1);
+            calls.forEach((c) => {
+                const total = c.data.children.reduce((acc, b) => acc + 1 + b.bulleted_list_item.children.length, 0);
+                expect(total).toBeLessThanOrEqual(1000);
+            });
+        } finally {
+            Utils.sleep = origSleep;
+        }
+    });
+
+    it("fetchBlocks/getUsers 游标做百分号编码(含保留字符不破坏查询串)", async () => {
+        const calls = [];
+        NotionAPI.configureTransport({ request: async (opts) => { calls.push(opts); return ok({ results: [] }); } });
+        await NotionAPI.fetchBlocks("blk1", "a&b=c d+e", "secret_ok");
+        await NotionAPI.getUsers("x&y=z", "secret_ok");
+        expect(calls[0].endpoint).toBe("/blocks/blk1/children?start_cursor=a%26b%3Dc%20d%2Be");
+        expect(calls[1].endpoint).toBe("/users?start_cursor=x%26y%3Dz");
+    });
+});

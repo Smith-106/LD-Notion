@@ -33,6 +33,35 @@ const isAuthTerminalStatus = (status, result = {}) => {
     return false;
 };
 
+// wave6 共识(qwen/dsf): Notion 单次追加同时受两个上限约束 —— 顶层 ≤100 块、
+// 含嵌套子块 ≤1000 块。仅按顶层切分时, 100 个各含多子块的容器仍会被整包 400。
+const countNestedBlocks = (block) => {
+    const container = block && block[block.type];
+    const kids = Array.isArray(container?.children) ? container.children : [];
+    let total = 1;
+    for (const kid of kids) total += countNestedBlocks(kid);
+    return total;
+};
+
+// 双上限贪心切分; 单个顶层块自身超 1000 时独占一片(本地无法再拆)
+const chunkBlocksByNotionLimits = (blocks) => {
+    const chunks = [];
+    let current = [];
+    let currentCount = 0;
+    for (const block of (blocks || [])) {
+        const blockSize = countNestedBlocks(block);
+        if (current.length > 0 && (current.length >= 100 || currentCount + blockSize > 1000)) {
+            chunks.push(current);
+            current = [];
+            currentCount = 0;
+        }
+        current.push(block);
+        currentCount += blockSize;
+    }
+    if (current.length > 0) chunks.push(current);
+    return chunks;
+};
+
 
 const NotionTransport = Object.freeze({
     // P4 收敛(c05): endpoint 由调用方拼接 id —— 拒路径穿越/反斜线/片段注入
@@ -386,8 +415,8 @@ const NotionAPI = {
 
     // 追加 blocks
     appendBlocks: async (pageId, blocks, apiKey) => {
-        for (let i = 0; i < blocks.length; i += 100) {
-            const chunk = blocks.slice(i, i + 100);
+        // wave6 共识(qwen): 仅按顶层 100 切分同样遗漏嵌套 1000 总上限 —— 与 appendBlockChildren 同口径
+        for (const chunk of chunkBlocksByNotionLimits(blocks)) {
             await NotionAPI.request("PATCH", `/blocks/${pageId}/children`, { children: chunk }, apiKey);
             await Utils.sleep(300); // 避免速率限制
         }
@@ -420,7 +449,7 @@ const NotionAPI = {
     // 获取块的子块
     fetchBlocks: async (blockId, cursor, apiKey) => {
         let endpoint = `/blocks/${blockId}/children`;
-        if (cursor) endpoint += `?start_cursor=${cursor}`;
+        if (cursor) endpoint += `?start_cursor=${encodeURIComponent(cursor)}`;
         return await NotionAPI.request("GET", endpoint, null, apiKey);
     },
 
@@ -429,32 +458,9 @@ const NotionAPI = {
         const safeChildren = Array.isArray(children) ? children : [];
         const endpoint = `/blocks/${blockId}/children`;
 
-        // P4 共识(glm): Notion 单次追加上限 100 块, 超限整包 400 导致全部丢失。
-        // wave6 共识(dsf): 另有含嵌套子块的 1000 块总上限 —— 仅按顶层切分时 100 个各含
-        // 多子块的容器仍会被整包 400。两上限同时遵守, 超限即切片。
         // 空数组不再发请求: children: [] 会被 Notion 400, 属无效调用。
         if (safeChildren.length === 0) return null;
-        const countNested = (block) => {
-            const container = block && block[block.type];
-            const kids = Array.isArray(container?.children) ? container.children : [];
-            let total = 1;
-            for (const kid of kids) total += countNested(kid);
-            return total;
-        };
-        const chunks = [];
-        let current = [];
-        let currentCount = 0;
-        for (const block of safeChildren) {
-            const blockSize = countNested(block);
-            if (current.length > 0 && (current.length >= 100 || currentCount + blockSize > 1000)) {
-                chunks.push(current);
-                current = [];
-                currentCount = 0;
-            }
-            current.push(block);
-            currentCount += blockSize;
-        }
-        if (current.length > 0) chunks.push(current);
+        const chunks = chunkBlocksByNotionLimits(safeChildren);
         if (chunks.length === 0) chunks.push([]);
 
         let lastResult = null;
@@ -718,7 +724,7 @@ const NotionAPI = {
     // 获取用户列表
     getUsers: async (cursor, apiKey) => {
         let endpoint = "/users";
-        if (cursor) endpoint += `?start_cursor=${cursor}`;
+        if (cursor) endpoint += `?start_cursor=${encodeURIComponent(cursor)}`;
         return await NotionAPI.request("GET", endpoint, null, apiKey);
     },
 

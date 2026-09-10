@@ -141,7 +141,13 @@ const HTMLToMarkdown = {
             case "code": {
                 const parent = node.parentElement;
                 if (parent && parent.tagName.toLowerCase() === "pre") return children;
-                return `\`${children}\``;
+                // wave6 共识(qwen): 内容含反引号会提前闭合代码跨度并可注入后续标记 ——
+                // 用比最长反引号串更长的围栏(与 pre 分支同口径), 首尾为反引号时补空格
+                const codeText = String(children);
+                const run = (codeText.match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
+                const fence = "`".repeat(Math.max(1, run + 1));
+                const pad = /^`|`$/.test(codeText) ? " " : "";
+                return `${fence}${pad}${codeText}${pad}${fence}`;
             }
             case "pre": {
                 const codeEl = node.querySelector("code");
@@ -213,7 +219,10 @@ const HTMLToMarkdown = {
             case "div": {
                 const cls = node.className || "";
                 if (cls.includes("onebox")) {
-                    return `> [!quote]\n> ${children.trim()}\n\n`;
+                    // wave6 共识(qwen): 仅首行加 "> " 时, 子内容换行后的行会脱离 callout(可注入 Markdown)
+                    const quoted = String(children).trim().split("\n")
+                        .map((line) => `> ${line}`).join("\n");
+                    return `> [!quote]\n${quoted}\n\n`;
                 }
                 return children;
             }
