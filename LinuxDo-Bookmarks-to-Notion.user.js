@@ -4802,9 +4802,11 @@ ${quoted}
         buildPostCallout: (post, index, isOp) => {
           const type = isOp ? "success" : "note";
           const collapsed = index > 0 ? "+" : "";
-          const username = post.name || post.username || "\u672A\u77E5";
-          const handle = post.username && post.username !== username ? ` (@${post.username})` : "";
-          const postNum = post.post_number || index + 1;
+          const sanitize = (v) => String(v ?? "").replace(/\r?\n/g, " ").trim();
+          const username = sanitize(post.name || post.username) || "\u672A\u77E5";
+          const handleRaw = post.username && post.username !== (post.name || post.username) ? ` (@${sanitize(post.username)})` : "";
+          const handle = sanitize(handleRaw);
+          const postNum = Number(post.post_number) || index + 1;
           const date = post.created_at ? new Date(post.created_at).toLocaleString("zh-CN") : "\u672A\u77E5\u65F6\u95F4";
           const header = `#${postNum} ${username}${handle}${isOp ? " \u697C\u4E3B" : ""} \xB7 ${date}`;
           const content = HTMLToMarkdown2.convert(post.cooked || "");
@@ -5367,6 +5369,11 @@ Content-Type: ${safeContentType}\r
         if (current.length > 0) chunks.push(current);
         return chunks;
       };
+      var firstChunkAndRest = (children) => {
+        const safeChildren = Array.isArray(children) ? children : [];
+        const first = chunkBlocksByNotionLimits(safeChildren)[0] || [];
+        return { first, rest: safeChildren.slice(first.length) };
+      };
       var NotionTransport2 = Object.freeze({
         // P4 收敛(c05): endpoint 由调用方拼接 id —— 拒路径穿越/反斜线/片段注入
         // (../ 会被 HTTP 客户端规范化到同域其他端点; ? 合法用于分页游标)
@@ -5484,6 +5491,7 @@ Content-Type: ${safeContentType}\r
               }
               try {
                 const refreshedToken = await NotionOAuth2.refreshAccessToken();
+                if (NotionAPI2._requestGate) await NotionAPI2._requestGate();
                 return doRequest(attempt, refreshedToken, false);
               } catch (refreshError) {
                 const error = new Error(`Notion OAuth \u7EED\u7B7E\u5931\u8D25: ${refreshError.message}`);
@@ -5594,15 +5602,15 @@ Content-Type: ${safeContentType}\r
         },
         // 创建数据库页面（帖子记录）
         createDatabasePage: async (databaseId, properties, children, apiKey) => {
+          const { first, rest } = firstChunkAndRest(children);
           const data = {
             parent: { database_id: databaseId },
             properties,
-            children: children.slice(0, 100)
-            // Notion 限制
+            children: first
           };
           const page = await NotionAPI2.request("POST", "/pages", data, apiKey);
-          if (children.length > 100) {
-            await NotionAPI2.appendBlocks(page.id, children.slice(100), apiKey);
+          if (rest.length > 0) {
+            await NotionAPI2.appendBlocks(page.id, rest, apiKey);
           }
           return page;
         },
@@ -5611,16 +5619,17 @@ Content-Type: ${safeContentType}\r
           if (!parent || typeof parent !== "object") {
             throw new Error("parent \u4E0D\u80FD\u4E3A\u7A7A");
           }
+          const { first, rest } = firstChunkAndRest(children);
           const data = {
             parent,
             properties: properties || {},
-            children: Array.isArray(children) ? children.slice(0, 100) : []
+            children: first
           };
           if (options.icon !== void 0) data.icon = options.icon;
           if (options.cover !== void 0) data.cover = options.cover;
           const page = await NotionAPI2.request("POST", "/pages", data, apiKey);
-          if (Array.isArray(children) && children.length > 100) {
-            await NotionAPI2.appendBlocks(page.id, children.slice(100), apiKey);
+          if (rest.length > 0) {
+            await NotionAPI2.appendBlocks(page.id, rest, apiKey);
           }
           return page;
         },
@@ -5734,8 +5743,7 @@ Content-Type: ${safeContentType}\r
         // ========== 高级操作 (ADVANCED) ==========
         // 移动页面到新父级
         movePage: async (pageId, newParentId, parentType, apiKey) => {
-          const parent = parentType === "database" ? { database_id: newParentId } : { page_id: newParentId };
-          return await NotionAPI2.request("PATCH", `/pages/${pageId}`, { parent }, apiKey);
+          throw new Error("Notion API \u4E0D\u652F\u6301\u79FB\u52A8\u9875\u9762\uFF08parent \u4E0D\u53EF\u4FEE\u6539\uFF09: \u8BF7\u624B\u52A8\u5728 Notion \u4E2D\u62D6\u62FD\u79FB\u52A8, \u6216\u590D\u5236\u5230\u76EE\u6807\u7236\u7EA7\u540E\u5220\u9664\u539F\u9875\u9762");
         },
         // 创建数据库
         createDatabase: async (parentPageId, title, properties, apiKey) => {
@@ -5824,26 +5832,22 @@ Content-Type: ${safeContentType}\r
           }
           let newPage;
           if (parentType === "database") {
-            newPage = await NotionAPI2.createDatabasePage(
-              targetParentId,
-              properties,
-              cleanBlocks.slice(0, 100),
-              apiKey
-            );
+            newPage = await NotionAPI2.createDatabasePage(targetParentId, properties, cleanBlocks, apiKey);
           } else {
             const titleProp = Object.values(properties || {}).find((prop) => (prop == null ? void 0 : prop.type) === "title");
             const titleText = ((_b = titleProp == null ? void 0 : titleProp.title) == null ? void 0 : _b.map((t) => {
               var _a2;
               return (t == null ? void 0 : t.plain_text) ?? ((_a2 = t == null ? void 0 : t.text) == null ? void 0 : _a2.content) ?? "";
             }).join("")) || "\u65E0\u6807\u9898";
+            const { first, rest } = firstChunkAndRest(cleanBlocks);
             newPage = await NotionAPI2.request("POST", "/pages", {
               parent,
               properties: { title: { title: [{ text: { content: titleText } }] } },
-              children: cleanBlocks.slice(0, 100)
+              children: first
             }, apiKey);
-          }
-          if (cleanBlocks.length > 100) {
-            await NotionAPI2.appendBlocks(newPage.id, cleanBlocks.slice(100), apiKey);
+            if (rest.length > 0) {
+              await NotionAPI2.appendBlocks(newPage.id, rest, apiKey);
+            }
           }
           return newPage;
         },
@@ -5859,6 +5863,7 @@ Content-Type: ${safeContentType}\r
         },
         // 创建子页面（导出为页面而不是数据库条目）
         createChildPage: async (parentPageId, title, children, apiKey) => {
+          const { first, rest } = firstChunkAndRest(children);
           const data = {
             parent: { page_id: parentPageId },
             properties: {
@@ -5866,11 +5871,10 @@ Content-Type: ${safeContentType}\r
                 title: [{ text: { content: title || "\u65E0\u6807\u9898" } }]
               }
             },
-            children: children.slice(0, 100)
-            // Notion 限制
+            children: first
           };
           const page = await NotionAPI2.request("POST", "/pages", data, apiKey);
-          if (children.length > 100) {
+          if (rest.length > 0) {
             await NotionAPI2.appendBlocks(page.id, children.slice(100), apiKey);
           }
           return page;

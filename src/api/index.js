@@ -62,6 +62,14 @@ const chunkBlocksByNotionLimits = (blocks) => {
     return chunks;
 };
 
+// wave7 共识(glm+qwen): createPage 首片同样受双上限约束(仅按顶层 100 切分时, 首片含
+// 嵌套子块合计可超 1000 被整包 400); 首片走双上限, 其余交给 appendBlocks 追加
+const firstChunkAndRest = (children) => {
+    const safeChildren = Array.isArray(children) ? children : [];
+    const first = chunkBlocksByNotionLimits(safeChildren)[0] || [];
+    return { first, rest: safeChildren.slice(first.length) };
+};
+
 
 const NotionTransport = Object.freeze({
     // P4 收敛(c05): endpoint 由调用方拼接 id —— 拒路径穿越/反斜线/片段注入
@@ -209,6 +217,9 @@ const NotionAPI = {
                 }
                 try {
                     const refreshedToken = await NotionOAuth.refreshAccessToken();
+                    // wave7 共识(glm): 续签后的重放与 429 重试同口径 —— 同样须过共享
+                    // gate, 否则并发 401 时续签+重放洪峰可突破限流预算
+                    if (NotionAPI._requestGate) await NotionAPI._requestGate();
                     return doRequest(attempt, refreshedToken, false);
                 } catch (refreshError) {
                     const error = new Error(`Notion OAuth 续签失败: ${refreshError.message}`);
@@ -355,17 +366,19 @@ const NotionAPI = {
 
     // 创建数据库页面（帖子记录）
     createDatabasePage: async (databaseId, properties, children, apiKey) => {
+        // wave7 共识(glm+qwen): 首片双上限(顶层≤100 且含嵌套≤1000), 其余 append 追加
+        const { first, rest } = firstChunkAndRest(children);
         const data = {
             parent: { database_id: databaseId },
             properties: properties,
-            children: children.slice(0, 100), // Notion 限制
+            children: first,
         };
 
         const page = await NotionAPI.request("POST", "/pages", data, apiKey);
 
         // 如果有剩余的 blocks，追加
-        if (children.length > 100) {
-            await NotionAPI.appendBlocks(page.id, children.slice(100), apiKey);
+        if (rest.length > 0) {
+            await NotionAPI.appendBlocks(page.id, rest, apiKey);
         }
 
         return page;
@@ -377,10 +390,12 @@ const NotionAPI = {
             throw new Error("parent 不能为空");
         }
 
+        // wave7 共识(glm+qwen): 首片双上限切分
+        const { first, rest } = firstChunkAndRest(children);
         const data = {
             parent,
             properties: properties || {},
-            children: Array.isArray(children) ? children.slice(0, 100) : [],
+            children: first,
         };
 
         if (options.icon !== undefined) data.icon = options.icon;
@@ -388,8 +403,8 @@ const NotionAPI = {
 
         const page = await NotionAPI.request("POST", "/pages", data, apiKey);
 
-        if (Array.isArray(children) && children.length > 100) {
-            await NotionAPI.appendBlocks(page.id, children.slice(100), apiKey);
+        if (rest.length > 0) {
+            await NotionAPI.appendBlocks(page.id, rest, apiKey);
         }
 
         return page;
@@ -534,10 +549,10 @@ const NotionAPI = {
 
     // 移动页面到新父级
     movePage: async (pageId, newParentId, parentType, apiKey) => {
-        const parent = parentType === "database"
-            ? { database_id: newParentId }
-            : { page_id: newParentId };
-        return await NotionAPI.request("PATCH", `/pages/${pageId}`, { parent }, apiKey);
+        // wave7 共识(glm): Notion update-page 接口不接受 parent 修改(PATCH /pages/{id} 仅
+        // properties/archive/in_trash) —— 带 parent 的请求恒被 400 拒绝, 页面移动功能
+        // 在当前 API 版本下不可达。预检短路并抛明确错误, 不再发注定失败的请求。
+        throw new Error("Notion API 不支持移动页面（parent 不可修改）: 请手动在 Notion 中拖拽移动, 或复制到目标父级后删除原页面");
     },
 
     // 创建数据库
@@ -646,25 +661,21 @@ const NotionAPI = {
         // → Notion 400 Could not find database。数据库父级走原路径(字节级不变), 页面父级用 parent。
         let newPage;
         if (parentType === "database") {
-            newPage = await NotionAPI.createDatabasePage(
-                targetParentId,
-                properties,
-                cleanBlocks.slice(0, 100),
-                apiKey
-            );
+            // wave7 共识(glm+qwen): 传全量, 首片双上限切分由 createDatabasePage 统一处理
+            newPage = await NotionAPI.createDatabasePage(targetParentId, properties, cleanBlocks, apiKey);
         } else {
             const titleProp = Object.values(properties || {}).find((prop) => prop?.type === "title");
             const titleText = titleProp?.title?.map((t) => t?.plain_text ?? t?.text?.content ?? "").join("") || "无标题";
+            // wave7 共识(glm+qwen): 首片双上限切分
+            const { first, rest } = firstChunkAndRest(cleanBlocks);
             newPage = await NotionAPI.request("POST", "/pages", {
                 parent,
                 properties: { title: { title: [{ text: { content: titleText } }] } },
-                children: cleanBlocks.slice(0, 100),
+                children: first,
             }, apiKey);
-        }
-
-        // 如果有更多块，追加
-        if (cleanBlocks.length > 100) {
-            await NotionAPI.appendBlocks(newPage.id, cleanBlocks.slice(100), apiKey);
+            if (rest.length > 0) {
+                await NotionAPI.appendBlocks(newPage.id, rest, apiKey);
+            }
         }
 
         return newPage;
@@ -684,6 +695,8 @@ const NotionAPI = {
 
     // 创建子页面（导出为页面而不是数据库条目）
     createChildPage: async (parentPageId, title, children, apiKey) => {
+        // wave7 共识(glm+qwen): 首片双上限切分
+        const { first, rest } = firstChunkAndRest(children);
         const data = {
             parent: { page_id: parentPageId },
             properties: {
@@ -691,13 +704,13 @@ const NotionAPI = {
                     title: [{ text: { content: title || "无标题" } }]
                 }
             },
-            children: children.slice(0, 100), // Notion 限制
+            children: first,
         };
 
         const page = await NotionAPI.request("POST", "/pages", data, apiKey);
 
         // 如果有剩余的 blocks，追加
-        if (children.length > 100) {
+        if (rest.length > 0) {
             await NotionAPI.appendBlocks(page.id, children.slice(100), apiKey);
         }
 

@@ -290,9 +290,13 @@ const HTMLToMarkdown = {
     buildPostCallout: (post, index, isOp) => {
         const type = isOp ? "success" : "note";
         const collapsed = index > 0 ? "+" : "";
-        const username = post.name || post.username || "未知";
-        const handle = post.username && post.username !== username ? ` (@${post.username})` : "";
-        const postNum = post.post_number || (index + 1);
+        // wave7 共识(qwen): username/postNum 来自用户可控数据 —— 含换行会把 callout 首行
+        // 拆行逃逸引用前缀(注入 Markdown); 折叠换行后再拼入
+        const sanitize = (v) => String(v ?? "").replace(/\r?\n/g, " ").trim();
+        const username = sanitize(post.name || post.username) || "未知";
+        const handleRaw = post.username && post.username !== (post.name || post.username) ? ` (@${sanitize(post.username)})` : "";
+        const handle = sanitize(handleRaw);
+        const postNum = Number(post.post_number) || (index + 1);
         const date = post.created_at
             ? new Date(post.created_at).toLocaleString("zh-CN")
             : "未知时间";

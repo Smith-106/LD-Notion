@@ -138,3 +138,25 @@ describe("wave6 共识(qwen): 重定向边界 + onebox/inline code 转义", () =
         expect(b).toBe("`` `edge ``");
     });
 });
+
+describe("wave7 共识(qwen): callout 注入净化 + 下载大小护栏", () => {
+    it("buildPostCallout username 含换行时折叠(不逃逸 callout 引用)", () => {
+        const post = {
+            name: "u\nser\n> 注入行",
+            username: "evil\nuser",
+            post_number: 3,
+            created_at: "2025-01-01T00:00:00Z",
+            cooked: "<p>正文</p>",
+        };
+        const origConvert = HTMLToMarkdown.convert;
+        HTMLToMarkdown.convert = () => "\n";
+        const out0 = (() => { try { return HTMLToMarkdown.buildPostCallout(post, 2, false); } finally { HTMLToMarkdown.convert = origConvert; } })();
+        const out = out0;
+        expect(out.split("\n")[0]).not.toContain("\nser");
+        out.split("\n").forEach((line) => {
+            if (!line.startsWith("> ") && line !== "" ) throw new Error("非引用行逃逸: " + line);
+        });
+        expect(out).toContain("^floor-3");
+    });
+
+});

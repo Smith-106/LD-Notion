@@ -304,3 +304,76 @@ describe("wave6 共识(qwen): appendBlocks 双上限 + 游标编码", () => {
         expect(calls[1].endpoint).toBe("/users?start_cursor=x%26y%3Dz");
     });
 });
+
+describe("wave7 共识(glm+qwen): create 路径双上限首片 + movePage 预检 + 续签重放过闸", () => {
+    afterEach(() => { NotionAPI.resetTransport(); NotionAPI.setRequestGate(null); });
+
+    it("createDatabasePage 首片嵌套总数 ≤1000, 其余走 appendBlocks 追加", async () => {
+        const origSleep = Utils.sleep;
+        Utils.sleep = async () => {};
+        const calls = [];
+        NotionAPI.configureTransport({ request: async (opts) => { calls.push(opts); return ok({ id: "page-1", object: "page" }); } });
+        const container = () => ({
+            type: "bulleted_list_item",
+            bulleted_list_item: {
+                rich_text: [],
+                children: Array.from({ length: 60 }, () => ({ type: "paragraph", paragraph: { rich_text: [] } })),
+            },
+        });
+        try {
+            await NotionAPI.createDatabasePage("db1", { title: { title: [] } }, Array.from({ length: 20 }, container), "secret_ok");
+            const creates = calls.filter((c) => c.endpoint === "/pages");
+            const appends = calls.filter((c) => c.endpoint === "/blocks/page-1/children");
+            expect(creates.length).toBe(1);
+            expect(appends.length).toBeGreaterThan(0);
+            const total = creates[0].data.children.reduce((acc, b) => acc + 1 + b.bulleted_list_item.children.length, 0);
+            expect(total).toBeLessThanOrEqual(1000);
+            expect(creates[0].data.children.length).toBeLessThanOrEqual(100);
+        } finally {
+            Utils.sleep = origSleep;
+        }
+    });
+
+    it("movePage 预检短路: 不发请求, 抛明确错误(Notion 不支持改 parent)", async () => {
+        const calls = [];
+        NotionAPI.configureTransport({ request: async (opts) => { calls.push(opts); return ok({}); } });
+        await expect(NotionAPI.movePage("p1", "p2", "page", "secret_ok"))
+            .rejects.toThrow(/不支持移动页面/);
+        expect(calls.length).toBe(0);
+    });
+
+    it("401 续签重放同样过闸(与 429 重试同口径)", async () => {
+        const origSleep = Utils.sleep;
+        Utils.sleep = async () => {};
+        const { NotionOAuth } = require("../src/auth");
+        const { Storage } = require("../src/storage");
+        const { CONFIG } = require("../src/config");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "cid");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "csecret");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "rt-ok");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, "https://smith-106.github.io/LD-Notion/oauth-callback");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE, "oauth");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_expired");
+        const origExchange = NotionOAuth.exchangeToken;
+        NotionOAuth.exchangeToken = async () => ({ access_token: "secret_fresh", refresh_token: "rt2" });
+        let gateCalls = 0;
+        NotionAPI.setRequestGate(async () => { gateCalls++; });
+        let calls = 0;
+        NotionAPI.configureTransport({
+            request: async () => {
+                calls++;
+                return calls === 1
+                    ? { status: 401, responseText: JSON.stringify({ object: "error", code: "unauthorized", message: "API token is invalid." }), responseHeaders: "" }
+                    : ok({ ok: true });
+            },
+        });
+        try {
+            const result = await NotionAPI.request("GET", "/pages/x", null, "secret_expired", 3);
+            expect(result.ok).toBe(true);
+            expect(gateCalls).toBe(2); // 首发 1 次 + 续签重放 1 次
+        } finally {
+            NotionOAuth.exchangeToken = origExchange;
+            Utils.sleep = origSleep;
+        }
+    });
+});
