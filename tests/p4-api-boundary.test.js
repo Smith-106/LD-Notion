@@ -439,3 +439,116 @@ describe("wave8 共识(qwen): createChildPage rest + 续签成功清冷却", () 
         }
     });
 });
+
+describe("wave9 共识(glm): 401 续签单飞互斥 + gate 隔离", () => {
+    afterEach(() => { NotionAPI.resetTransport(); NotionAPI.setRequestGate(null); NotionAPI._refreshCooldownUntil = null; });
+
+    it("并发 401 只触发一次 refreshAccessToken(单飞互斥)", async () => {
+        const origSleep = Utils.sleep;
+        Utils.sleep = async () => {};
+        const { NotionOAuth } = require("../src/auth");
+        const { Storage } = require("../src/storage");
+        const { CONFIG } = require("../src/config");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "cid");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "csecret");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "rt-ok");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, "https://smith-106.github.io/LD-Notion/oauth-callback");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE, "oauth");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_expired");
+        let refreshCalls = 0;
+        const origExchange = NotionOAuth.exchangeToken;
+        NotionOAuth.exchangeToken = async () => { refreshCalls += 1; return { access_token: "secret_fresh", refresh_token: "rt2" }; };
+        NotionAPI.configureTransport({
+            request: async (opts) => (opts.token === "secret_fresh"
+                ? ok({ ok: true })
+                : { status: 401, responseText: JSON.stringify({ object: "error", code: "unauthorized", message: "API token is invalid." }), responseHeaders: "" }),
+        });
+        try {
+            // 两个在途请求并发收到 401 —— 单飞下共享同一次续签
+            const [a, b] = await Promise.all([
+                NotionAPI.request("GET", "/pages/a", null, "secret_expired", 3),
+                NotionAPI.request("GET", "/pages/b", null, "secret_expired", 3),
+            ]);
+            expect(refreshCalls).toBe(1);
+            expect(a.ok).toBe(true);
+            expect(b.ok).toBe(true);
+        } finally {
+            NotionOAuth.exchangeToken = origExchange;
+            Utils.sleep = origSleep;
+        }
+    });
+
+    it("gate 拒绝不被误判为续签失败(不写 60s 冷却)", async () => {
+        const origSleep = Utils.sleep;
+        Utils.sleep = async () => {};
+        const { NotionOAuth } = require("../src/auth");
+        const { Storage } = require("../src/storage");
+        const { CONFIG } = require("../src/config");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "cid");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "csecret");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "rt-ok");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, "https://smith-106.github.io/LD-Notion/oauth-callback");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE, "oauth");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_expired");
+        const origExchange = NotionOAuth.exchangeToken;
+        NotionOAuth.exchangeToken = async () => ({ access_token: "secret_fresh", refresh_token: "rt2" });
+        NotionAPI.configureTransport({
+            request: async (opts) => (opts.token === "secret_fresh"
+                ? ok({ ok: true })
+                : { status: 401, responseText: JSON.stringify({ object: "error", code: "unauthorized", message: "API token is invalid." }), responseHeaders: "" }),
+        });
+        // gate 拒绝(模拟限流): 重放路径应抛 gate 错误而非"续签失败", 且不写冷却
+        NotionAPI.setRequestGate(async () => { throw new Error("gate rejected"); });
+        try {
+            await expect(NotionAPI.request("GET", "/pages/x", null, "secret_expired", 3))
+                .rejects.toThrow("gate rejected");
+            expect(NotionAPI._refreshCooldownUntil).toBeNull(); // gate 拒绝不写冷却
+        } finally {
+            NotionOAuth.exchangeToken = origExchange;
+            Utils.sleep = origSleep;
+        }
+    });
+});
+
+describe("wave9 共识(dsf): 空 children 不随 create 请求发出(与 appendBlocks 同口径)", () => {
+    afterEach(() => { NotionAPI.resetTransport(); });
+
+    const capture = () => {
+        const calls = [];
+        NotionAPI.configureTransport({ request: async (opts) => { calls.push(opts); return ok({ id: "pg1", object: "page" }); } });
+        return calls;
+    };
+    const hasChildren = (call) => Object.prototype.hasOwnProperty.call(call.data, "children");
+
+    it("createDatabasePage 空 children 省略(不产生 children: [])", async () => {
+        const calls = capture();
+        await NotionAPI.createDatabasePage("db1", { title: { title: [] } }, [], "secret_ok");
+        expect(calls.length).toBe(1);
+        expect(hasChildren(calls[0])).toBe(false);
+    });
+
+    it("createPageObject 空 children 省略(不产生 children: [])", async () => {
+        const calls = capture();
+        await NotionAPI.createPageObject({ page_id: "p1" }, { title: { title: [] } }, [], "secret_ok");
+        expect(calls.length).toBe(1);
+        expect(hasChildren(calls[0])).toBe(false);
+    });
+
+    it("createChildPage 空 children 省略(不产生 children: [])", async () => {
+        const calls = capture();
+        await NotionAPI.createChildPage("p1", "标题", [], "secret_ok");
+        expect(calls.length).toBe(1);
+        expect(hasChildren(calls[0])).toBe(false);
+    });
+
+    it("非空 children 仍随 create 发出(省略仅针对空数组)", async () => {
+        const calls = capture();
+        await NotionAPI.createPageObject(
+            { page_id: "p1" }, { title: { title: [] } },
+            [{ type: "paragraph", paragraph: { rich_text: [] } }], "secret_ok"
+        );
+        expect(calls.length).toBe(1);
+        expect(hasChildren(calls[0])).toBe(true);
+        expect(calls[0].data.children.length).toBe(1);
+    });
+});

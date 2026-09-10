@@ -164,13 +164,18 @@ const HTMLToMarkdown = {
             }
             case "a": {
                 const href = node.getAttribute("href") || "";
-                if (href.startsWith("http")) return `[${HTMLToMarkdown._mdText(children)}](${HTMLToMarkdown._mdUrl(href)})`;
+                // wave9 共识(dsf): 协议判断不区分大小写(HTTP:// 不再降级纯文本)
+                if (href.toLowerCase().startsWith("http")) return `[${HTMLToMarkdown._mdText(children)}](${HTMLToMarkdown._mdUrl(href)})`;
                 return children;
             }
             case "img": {
                 const src = node.getAttribute("src") || "";
                 const alt = node.getAttribute("alt") || "";
-                return `![${HTMLToMarkdown._mdText(alt)}](${HTMLToMarkdown._mdUrl(src)})`;
+                // wave9 共识(qwen): src 仅放行 http(s) 公网地址(javascript:/data:/内网 拒绝)
+                if (src && UrlValidator.validatePageExternalUrl(src)) {
+                    return `![${HTMLToMarkdown._mdText(alt)}](${HTMLToMarkdown._mdUrl(src)})`;
+                }
+                return HTMLToMarkdown._mdText(alt || "");
             }
             case "ul": return children;
             case "ol": {
@@ -189,36 +194,61 @@ const HTMLToMarkdown = {
                 // 且完全依赖源 HTML 空白节点 —— 显式缩进 2 空格(Obsidian 嵌套列表语法)
                 // wave8 共识(qwen): 改按 childNodes 分段渲染 —— replace(md, "") 在父项文本
                 // 与内层列表 markdown 重叠时会误删父项文本, 不再依赖子串匹配
-                const inlineParts = [];
-                const nestedParts = [];
+                // wave9 共识(dsf): ①按 childNodes 顺序交错收集(嵌套列表后的文本不再被
+                // 挪到前面); ②无嵌套列表时续行也缩进 2 空格(多段内容不再脱离列表)
+                const segments = [];
+                let buf = "";
+                const flushBuf = () => {
+                    const text = buf.replace(/\s+\n/g, "\n").trim();
+                    if (text) text.split("\n").forEach((line) => segments.push(line));
+                    buf = "";
+                };
                 Array.from(node.childNodes || []).forEach((child) => {
                     const isList = child.nodeType === Node.ELEMENT_NODE
                         && child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase());
                     if (isList) {
+                        flushBuf();
                         const md = HTMLToMarkdown._convertNode(child).trim();
                         md.split("\n").filter((line) => line.trim().length > 0)
-                            .forEach((line) => nestedParts.push(`  ${line}`));
+                            .forEach((line) => segments.push(`  ${line}`));
                     } else {
-                        inlineParts.push(HTMLToMarkdown._convertNode(child));
+                        buf += HTMLToMarkdown._convertNode(child);
                     }
                 });
-                const inline = inlineParts.join("").replace(/\s+\n/g, "\n").trim();
-                const nested = nestedParts.join("\n");
-                if (!nested) return `- ${children}\n`;
-                return `- ${inline ? `${inline}\n` : ""}${nested}\n`;
+                flushBuf();
+                if (segments.length === 0) return `- ${children}\n`;
+                const [first, ...rest] = segments;
+                const restLines = rest.map((line) => {
+                    if (line.startsWith("  ")) return line;
+                    if (!line.trim()) return "  ";
+                    return `  ${line}`;
+                });
+                return `- ${[first, ...restLines].join("\n")}\n`;
             }
             case "table": return HTMLToMarkdown._convertTable(node) + "\n\n";
             case "iframe": {
                 const src = node.getAttribute("src") || "";
-                return `[嵌入内容](${HTMLToMarkdown._mdUrl(src)})\n\n`;
+                // wave9 共识(qwen): src 仅放行 http(s) 公网地址(javascript:/data:/内网 拒绝)
+                const safeSrc = String(src || "");
+                if (safeSrc && UrlValidator.validatePageExternalUrl(safeSrc)) {
+                    return `[嵌入内容](${HTMLToMarkdown._mdUrl(safeSrc)})\n\n`;
+                }
+                return "[嵌入内容已拒（非公网 http(s) 地址）]\n\n";
             }
             case "video": {
                 const src = node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "";
-                return `[视频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
+                // wave9 共识(qwen): 同 img —— 非公网 http(s) 不生成链接
+                if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
+                    return `[视频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
+                }
+                return "[视频已拒（非公网 http(s) 地址）]\n\n";
             }
             case "audio": {
                 const src = node.getAttribute("src") || "";
-                return `[音频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
+                if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
+                    return `[音频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
+                }
+                return "[音频已拒（非公网 http(s) 地址）]\n\n";
             }
             case "div": {
                 const cls = node.className || "";
@@ -239,11 +269,22 @@ const HTMLToMarkdown = {
     },
 
     _convertTable: (table) => {
-        const rows = table.querySelectorAll("tr");
+        // wave9 共识(dsf): querySelectorAll("tr") 会把嵌套表格的行列并入外层(重复/错乱)
+        // —— 改为 thead/tbody/tfoot 直属行遍历(与 DOMToNotion 表格隔离同口径),
+        // 无 section 时回退直属 tr(测试桩/残缺 HTML)
+        const direct = (tag) => Array.from(table.children || [])
+            .filter((c) => c.tagName && c.tagName.toLowerCase() === tag);
+        const sections = [...direct("thead"), ...direct("tbody"), ...direct("tfoot")];
+        const rows = sections.length > 0
+            ? sections.flatMap((sec) => Array.from(sec.children || [])
+                .filter((r) => r.tagName && r.tagName.toLowerCase() === "tr"))
+            : Array.from(table.children || []).filter((r) => r.tagName && r.tagName.toLowerCase() === "tr");
         if (rows.length === 0) return "";
         const result = [];
         rows.forEach((row, i) => {
-            const cells = Array.from(row.querySelectorAll("th, td")).map((c) => {
+            const cells = Array.from(row.children || [])
+                .filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase()))
+                .map((c) => {
                 // P4 收敛(c05): 单元格内的竖线会破坏表格列结构
                 return HTMLToMarkdown._convertChildren(c).replace(/\n/g, " ").replace(/\|/g, "\\|").trim();
             });
@@ -296,7 +337,9 @@ const HTMLToMarkdown = {
         const collapsed = index > 0 ? "+" : "";
         // wave7 共识(qwen): username/postNum 来自用户可控数据 —— 含换行会把 callout 首行
         // 拆行逃逸引用前缀(注入 Markdown); 折叠换行后再拼入
-        const sanitize = (v) => String(v ?? "").replace(/\r?\n/g, " ").trim();
+        // wave7 共识(qwen): header 各成分折叠换行(注入防御) —— wave9 共识(glm):
+        // \r?\n 漏孤立 \r(CommonMark 行结束符), 用 \r\n?|\n 全覆盖
+        const sanitize = (v) => String(v ?? "").replace(/\r\n?|\n/g, " ").trim();
         const username = sanitize(post.name || post.username) || "未知";
         const handleRaw = post.username && post.username !== (post.name || post.username) ? ` (@${sanitize(post.username)})` : "";
         const handle = sanitize(handleRaw);

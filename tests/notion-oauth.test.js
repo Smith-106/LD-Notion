@@ -1235,7 +1235,8 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.deepStrictEqual(JSON.parse(capturedRequest.data), {
             parent: { page_id: 'parent_123' },
             properties: { title: { title: [{ text: { content: 'Child Page' } }] } },
-            children: [],
+            // wave9 共识(dsf): 空 children 不随 create 请求发出(children: [] 会被 Notion 400,
+            // 与 appendBlockChildren 同口径) —— 此处断言键缺席而非 children: []
             icon: { type: 'emoji', emoji: '📝' },
             cover: { type: 'external', external: { url: 'https://example.com/cover.png' } }
         });

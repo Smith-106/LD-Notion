@@ -4232,7 +4232,7 @@
           DOMToNotion2._consumeInlineMedia(el, blocks, imgMode);
         },
         // 标题 h1-h6（h4-h6 降级为 h3）
-        _cookHeading: (el, blocks) => {
+        _cookHeading: (el, blocks, imgMode) => {
           const tag = el.tagName.toLowerCase();
           let level = parseInt(tag.substring(1));
           if (level > 3) level = 3;
@@ -4240,6 +4240,7 @@
           if (richText.length > 0) {
             blocks.push({ type: `heading_${level}`, [`heading_${level}`]: { rich_text: richText } });
           }
+          DOMToNotion2._consumeInlineMedia(el, blocks, imgMode);
         },
         // 列表 ul/ol
         _cookList: (el, blocks, imgMode) => {
@@ -4331,12 +4332,12 @@
               }
             });
           }
+          const mediaSections = directSections(["thead", "tbody", "tfoot"]);
+          const mediaRows = mediaSections.length > 0 ? mediaSections.flatMap((sec) => directRows(sec)) : directRows(table);
           const cellMedia = [];
-          directSections(["thead", "tbody", "tfoot"]).forEach((section) => {
-            directRows(section).forEach((tr) => {
-              directCells(tr).forEach((cell) => {
-                cellMedia.push(...cell.querySelectorAll("img, video, audio, a.attachment, iframe"));
-              });
+          mediaRows.forEach((tr) => {
+            directCells(tr).forEach((cell) => {
+              cellMedia.push(...cell.querySelectorAll("img, video, audio, a.attachment, iframe"));
             });
           });
           cellMedia.forEach((m) => {
@@ -4452,6 +4453,10 @@
               if (text) result.push(...DOMToNotion2.splitLongText(text, { ...annotations, code: true }));
               return;
             }
+            if (tag === "br") {
+              result.push(...DOMToNotion2.splitLongText("\n", annotations));
+              return;
+            }
             Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
           };
           processNode(node);
@@ -4504,7 +4509,7 @@
               return;
             }
             if (/^h[1-6]$/.test(tag)) {
-              DOMToNotion2._cookHeading(el, blocks);
+              DOMToNotion2._cookHeading(el, blocks, imgMode);
               return;
             }
             if (tag === "ul" || tag === "ol") {
@@ -4708,13 +4713,16 @@
             }
             case "a": {
               const href = node.getAttribute("href") || "";
-              if (href.startsWith("http")) return `[${HTMLToMarkdown2._mdText(children)}](${HTMLToMarkdown2._mdUrl(href)})`;
+              if (href.toLowerCase().startsWith("http")) return `[${HTMLToMarkdown2._mdText(children)}](${HTMLToMarkdown2._mdUrl(href)})`;
               return children;
             }
             case "img": {
               const src = node.getAttribute("src") || "";
               const alt = node.getAttribute("alt") || "";
-              return `![${HTMLToMarkdown2._mdText(alt)}](${HTMLToMarkdown2._mdUrl(src)})`;
+              if (src && UrlValidator.validatePageExternalUrl(src)) {
+                return `![${HTMLToMarkdown2._mdText(alt)}](${HTMLToMarkdown2._mdUrl(src)})`;
+              }
+              return HTMLToMarkdown2._mdText(alt || "");
             }
             case "ul":
               return children;
@@ -4730,44 +4738,64 @@
               }).join("") + "\n";
             }
             case "li": {
-              const inlineParts = [];
-              const nestedParts = [];
+              const segments = [];
+              let buf = "";
+              const flushBuf = () => {
+                const text = buf.replace(/\s+\n/g, "\n").trim();
+                if (text) text.split("\n").forEach((line) => segments.push(line));
+                buf = "";
+              };
               Array.from(node.childNodes || []).forEach((child) => {
                 const isList = child.nodeType === Node.ELEMENT_NODE && child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase());
                 if (isList) {
+                  flushBuf();
                   const md = HTMLToMarkdown2._convertNode(child).trim();
-                  md.split("\n").filter((line) => line.trim().length > 0).forEach((line) => nestedParts.push(`  ${line}`));
+                  md.split("\n").filter((line) => line.trim().length > 0).forEach((line) => segments.push(`  ${line}`));
                 } else {
-                  inlineParts.push(HTMLToMarkdown2._convertNode(child));
+                  buf += HTMLToMarkdown2._convertNode(child);
                 }
               });
-              const inline = inlineParts.join("").replace(/\s+\n/g, "\n").trim();
-              const nested = nestedParts.join("\n");
-              if (!nested) return `- ${children}
+              flushBuf();
+              if (segments.length === 0) return `- ${children}
 `;
-              return `- ${inline ? `${inline}
-` : ""}${nested}
+              const [first, ...rest] = segments;
+              const restLines = rest.map((line) => {
+                if (line.startsWith("  ")) return line;
+                if (!line.trim()) return "  ";
+                return `  ${line}`;
+              });
+              return `- ${[first, ...restLines].join("\n")}
 `;
             }
             case "table":
               return HTMLToMarkdown2._convertTable(node) + "\n\n";
             case "iframe": {
               const src = node.getAttribute("src") || "";
-              return `[\u5D4C\u5165\u5185\u5BB9](${HTMLToMarkdown2._mdUrl(src)})
+              const safeSrc = String(src || "");
+              if (safeSrc && UrlValidator.validatePageExternalUrl(safeSrc)) {
+                return `[\u5D4C\u5165\u5185\u5BB9](${HTMLToMarkdown2._mdUrl(safeSrc)})
 
 `;
+              }
+              return "[\u5D4C\u5165\u5185\u5BB9\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n";
             }
             case "video": {
               const src = node.getAttribute("src") || ((_c = node.querySelector("source")) == null ? void 0 : _c.getAttribute("src")) || "";
-              return `[\u89C6\u9891](${HTMLToMarkdown2._mdUrl(src)})
+              if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
+                return `[\u89C6\u9891](${HTMLToMarkdown2._mdUrl(src)})
 
 `;
+              }
+              return "[\u89C6\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n";
             }
             case "audio": {
               const src = node.getAttribute("src") || "";
-              return `[\u97F3\u9891](${HTMLToMarkdown2._mdUrl(src)})
+              if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
+                return `[\u97F3\u9891](${HTMLToMarkdown2._mdUrl(src)})
 
 `;
+              }
+              return "[\u97F3\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n";
             }
             case "div": {
               const cls = node.className || "";
@@ -4788,11 +4816,13 @@ ${quoted}
           return Array.from(node.childNodes).map(HTMLToMarkdown2._convertNode).join("");
         },
         _convertTable: (table) => {
-          const rows = table.querySelectorAll("tr");
+          const direct = (tag) => Array.from(table.children || []).filter((c) => c.tagName && c.tagName.toLowerCase() === tag);
+          const sections = [...direct("thead"), ...direct("tbody"), ...direct("tfoot")];
+          const rows = sections.length > 0 ? sections.flatMap((sec) => Array.from(sec.children || []).filter((r) => r.tagName && r.tagName.toLowerCase() === "tr")) : Array.from(table.children || []).filter((r) => r.tagName && r.tagName.toLowerCase() === "tr");
           if (rows.length === 0) return "";
           const result = [];
           rows.forEach((row, i) => {
-            const cells = Array.from(row.querySelectorAll("th, td")).map((c) => {
+            const cells = Array.from(row.children || []).filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).map((c) => {
               return HTMLToMarkdown2._convertChildren(c).replace(/\n/g, " ").replace(/\|/g, "\\|").trim();
             });
             result.push(`| ${cells.join(" | ")} |`);
@@ -4834,7 +4864,7 @@ ${quoted}
         buildPostCallout: (post, index, isOp) => {
           const type = isOp ? "success" : "note";
           const collapsed = index > 0 ? "+" : "";
-          const sanitize = (v) => String(v ?? "").replace(/\r?\n/g, " ").trim();
+          const sanitize = (v) => String(v ?? "").replace(/\r\n?|\n/g, " ").trim();
           const username = sanitize(post.name || post.username) || "\u672A\u77E5";
           const handleRaw = post.username && post.username !== (post.name || post.username) ? ` (@${sanitize(post.username)})` : "";
           const handle = sanitize(handleRaw);
@@ -5295,10 +5325,10 @@ Content-Type: ${safeContentType}\r
               return result;
             } catch (error) {
               if ((_a = error.message) == null ? void 0 : _a.includes("\u4E0D\u652F\u6301")) {
-                console.warn("[LD-Notion] \u56FE\u7247\u7C7B\u578B\u4E0D\u652F\u6301\uFF0C\u8DF3\u8FC7:", imageUrl);
+                console.warn("[LD-Notion] \u56FE\u7247\u7C7B\u578B\u4E0D\u652F\u6301\uFF0C\u8DF3\u8FC7:", String(imageUrl).split("?")[0]);
                 return null;
               }
-              console.warn("[LD-Notion] \u56FE\u7247\u4E0A\u4F20\u5931\u8D25:", imageUrl, error.message);
+              console.warn("[LD-Notion] \u56FE\u7247\u4E0A\u4F20\u5931\u8D25:", String(imageUrl).split("?")[0], error.message);
               try {
                 const blob = await new Promise((resolve, reject) => {
                   GM_xmlhttpRequest({
@@ -5527,20 +5557,23 @@ Content-Type: ${safeContentType}\r
                 cooldownError.statusCode = response.status;
                 throw cooldownError;
               }
-              try {
-                const refreshedToken = await NotionOAuth2.refreshAccessToken();
-                NotionAPI2._refreshCooldownUntil = null;
-                if (NotionAPI2._requestGate) await NotionAPI2._requestGate();
-                return doRequest(attempt, refreshedToken, false);
-              } catch (refreshError) {
-                const error = new Error(`Notion OAuth \u7EED\u7B7E\u5931\u8D25: ${refreshError.message}`);
-                if (NotionOAuth2.isTerminalRefreshError(refreshError)) {
-                  error.isAuthTerminal = true;
-                } else {
-                  NotionAPI2._refreshCooldownUntil = Date.now() + 60 * 1e3;
+              const refreshedToken = await (async () => {
+                try {
+                  const token2 = await NotionOAuth2.refreshAccessToken();
+                  NotionAPI2._refreshCooldownUntil = null;
+                  return token2;
+                } catch (refreshError) {
+                  const error = new Error(`Notion OAuth \u7EED\u7B7E\u5931\u8D25: ${refreshError.message}`);
+                  if (NotionOAuth2.isTerminalRefreshError(refreshError)) {
+                    error.isAuthTerminal = true;
+                  } else {
+                    NotionAPI2._refreshCooldownUntil = Date.now() + 60 * 1e3;
+                  }
+                  throw error;
                 }
-                throw error;
-              }
+              })();
+              if (NotionAPI2._requestGate) await NotionAPI2._requestGate();
+              return doRequest(attempt, refreshedToken, false);
             }
             if (isAuthTerminalStatus(response.status, result)) {
               const authError = new Error(`Notion API \u9519\u8BEF: ${result.message || response.status}`);
@@ -5644,9 +5677,9 @@ Content-Type: ${safeContentType}\r
           const { first, rest } = firstChunkAndRest(children);
           const data = {
             parent: { database_id: databaseId },
-            properties,
-            children: first
+            properties
           };
+          if (first.length > 0) data.children = first;
           const page = await NotionAPI2.request("POST", "/pages", data, apiKey);
           if (rest.length > 0) {
             await NotionAPI2.appendBlocks(page.id, rest, apiKey);
@@ -5661,9 +5694,9 @@ Content-Type: ${safeContentType}\r
           const { first, rest } = firstChunkAndRest(children);
           const data = {
             parent,
-            properties: properties || {},
-            children: first
+            properties: properties || {}
           };
+          if (first.length > 0) data.children = first;
           if (options.icon !== void 0) data.icon = options.icon;
           if (options.cover !== void 0) data.cover = options.cover;
           const page = await NotionAPI2.request("POST", "/pages", data, apiKey);
@@ -5685,7 +5718,7 @@ Content-Type: ${safeContentType}\r
         // 创建页面必须指定 parent.page_id 或 parent.database_id
         // 在数据库中创建页面（简化版，无 children）
         createPage: async (databaseId, properties, apiKey) => {
-          return await NotionAPI2.createDatabasePage(databaseId, properties, [], apiKey);
+          return await NotionAPI2.createDatabasePage(databaseId, properties, null, apiKey);
         },
         // 追加 blocks
         appendBlocks: async (pageId, blocks, apiKey) => {
@@ -5882,7 +5915,7 @@ Content-Type: ${safeContentType}\r
             newPage = await NotionAPI2.request("POST", "/pages", {
               parent,
               properties: { title: { title: [{ text: { content: titleText } }] } },
-              children: first
+              ...first.length > 0 ? { children: first } : {}
             }, apiKey);
             if (rest.length > 0) {
               await NotionAPI2.appendBlocks(newPage.id, rest, apiKey);
@@ -5910,7 +5943,7 @@ Content-Type: ${safeContentType}\r
                 title: [{ text: { content: title || "\u65E0\u6807\u9898" } }]
               }
             },
-            children: first
+            ...first.length > 0 ? { children: first } : {}
           };
           const page = await NotionAPI2.request("POST", "/pages", data, apiKey);
           if (rest.length > 0) {

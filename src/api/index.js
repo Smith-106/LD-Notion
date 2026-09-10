@@ -215,30 +215,40 @@ const NotionAPI = {
                     cooldownError.statusCode = response.status;
                     throw cooldownError;
                 }
-                try {
-                    const refreshedToken = await NotionOAuth.refreshAccessToken();
-                    // wave8 共识(qwen): 续签成功后清除此前非终态失败留下的冷却戳,
-                    // 否则冷却期内再次 401 会跳过本可成功的自动续签
-                    NotionAPI._refreshCooldownUntil = null;
-                    // wave7 共识(glm): 续签后的重放与 429 重试同口径 —— 同样须过共享
-                    // gate, 否则并发 401 时续签+重放洪峰可突破限流预算
-                    if (NotionAPI._requestGate) await NotionAPI._requestGate();
-                    return doRequest(attempt, refreshedToken, false);
-                } catch (refreshError) {
-                    const error = new Error(`Notion OAuth 续签失败: ${refreshError.message}`);
-                    // v3.14.6 (AUD-ARCH-11): 仅认证终态(invalid_grant/invalid_client/凭证类关键词)
-                    // 才标记 isAuthTerminal 中止整批; 网络抖动/超时/5xx 为可恢复瞬态, 抛非终态
-                    // 让批量循环逐项失败重试(60s 冷却压顶, 不重放续签)
-                    if (NotionOAuth.isTerminalRefreshError(refreshError)) {
-                        error.isAuthTerminal = true;
-                    } else {
-                        NotionAPI._refreshCooldownUntil = Date.now() + 60 * 1000;
+                // wave9 共识(glm): 并发 401 续签单飞由 NotionOAuth.refreshAccessToken
+                // 内部 _refreshInFlight + 跨 tab 租约保证(已缓解), 此处不再叠加第二层
+                // 互斥; 仅在续签成功后清除冷却戳
+                const refreshedToken = await (async () => {
+                    try {
+                        const token = await NotionOAuth.refreshAccessToken();
+                        // wave8 共识(qwen): 续签成功后清除此前非终态失败留下的冷却戳,
+                        // 否则冷却期内再次 401 会跳过本可成功的自动续签
+                        NotionAPI._refreshCooldownUntil = null;
+                        return token;
+                    } catch (refreshError) {
+                        const error = new Error(`Notion OAuth 续签失败: ${refreshError.message}`);
+                        // v3.14.6 (AUD-ARCH-11): 仅认证终态(invalid_grant/invalid_client/凭证类关键词)
+                        // 才标记 isAuthTerminal 中止整批; 网络抖动/超时/5xx 为可恢复瞬态, 抛非终态
+                        // 让批量循环逐项失败重试(60s 冷却压顶, 不重放续签)
+                        if (NotionOAuth.isTerminalRefreshError(refreshError)) {
+                            error.isAuthTerminal = true;
+                        } else {
+                            NotionAPI._refreshCooldownUntil = Date.now() + 60 * 1000;
+                        }
+                        throw error;
                     }
-                    throw error;
-                }
+                })();
+                // wave7 共识(glm): 续签后的重放与 429 重试同口径 —— 同样须过共享 gate,
+                // 否则并发 401 时续签+重放洪峰可突破限流预算
+                // wave9 共识(dsf): gate 拒绝(限流)不属于续签失败 —— 独立于续签 try 之外,
+                // 不会误写 60s 冷却、误标续签失败
+                if (NotionAPI._requestGate) await NotionAPI._requestGate();
+                return doRequest(attempt, refreshedToken, false);
             }
             // 认证终态(401 不可续签/续签后仍 401/官方 unauthorized code):携带标记抛出,
             // 供批量导出循环 fail-fast 中止批次(v3.14.5)
+            // wave9 共识(qwen)裁决 FP: 官方 code 401 在 canAutoRefresh 下走续签是既有设计
+            // (过闸测试即以 code=unauthorized 驱动), 非官方 code 的 401 亦走下方通用路径
             if (isAuthTerminalStatus(response.status, result)) {
                 const authError = new Error(`Notion API 错误: ${result.message || response.status}`);
                 authError.isAuthTerminal = true;
@@ -370,12 +380,13 @@ const NotionAPI = {
     // 创建数据库页面（帖子记录）
     createDatabasePage: async (databaseId, properties, children, apiKey) => {
         // wave7 共识(glm+qwen): 首片双上限(顶层≤100 且含嵌套≤1000), 其余 append 追加
+        // wave9 共识(dsf): 空 children 不随 create 请求发出(与 appendBlocks 同口径)
         const { first, rest } = firstChunkAndRest(children);
         const data = {
             parent: { database_id: databaseId },
             properties: properties,
-            children: first,
         };
+        if (first.length > 0) data.children = first;
 
         const page = await NotionAPI.request("POST", "/pages", data, apiKey);
 
@@ -398,8 +409,9 @@ const NotionAPI = {
         const data = {
             parent,
             properties: properties || {},
-            children: first,
         };
+        // wave9 共识(dsf): 空 children 不随 create 请求发出(与 appendBlocks 同口径)
+        if (first.length > 0) data.children = first;
 
         if (options.icon !== undefined) data.icon = options.icon;
         if (options.cover !== undefined) data.cover = options.cover;
@@ -428,7 +440,9 @@ const NotionAPI = {
 
     // 在数据库中创建页面（简化版，无 children）
     createPage: async (databaseId, properties, apiKey) => {
-        return await NotionAPI.createDatabasePage(databaseId, properties, [], apiKey);
+        // wave9 共识(dsf): 空 children 不随 create 请求发出(与 appendBlocks 空数组
+        // 不发请求同口径), 避免 Notion 对空 children 数组的兼容性风险
+        return await NotionAPI.createDatabasePage(databaseId, properties, null, apiKey);
     },
 
     // 追加 blocks
@@ -674,7 +688,7 @@ const NotionAPI = {
             newPage = await NotionAPI.request("POST", "/pages", {
                 parent,
                 properties: { title: { title: [{ text: { content: titleText } }] } },
-                children: first,
+                ...(first.length > 0 ? { children: first } : {}),
             }, apiKey);
             if (rest.length > 0) {
                 await NotionAPI.appendBlocks(newPage.id, rest, apiKey);
@@ -707,7 +721,7 @@ const NotionAPI = {
                     title: [{ text: { content: title || "无标题" } }]
                 }
             },
-            children: first,
+            ...(first.length > 0 ? { children: first } : {}),
         };
 
         const page = await NotionAPI.request("POST", "/pages", data, apiKey);

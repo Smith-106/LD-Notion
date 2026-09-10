@@ -246,7 +246,7 @@ const DOMToNotion = {
     },
 
     // 标题 h1-h6（h4-h6 降级为 h3）
-    _cookHeading: (el, blocks) => {
+    _cookHeading: (el, blocks, imgMode) => {
         const tag = el.tagName.toLowerCase();
         let level = parseInt(tag.substring(1));
         if (level > 3) level = 3;
@@ -254,6 +254,8 @@ const DOMToNotion = {
         if (richText.length > 0) {
             blocks.push({ type: `heading_${level}`, [`heading_${level}`]: { rich_text: richText } });
         }
+        // wave9 共识(dsf): 标题内联媒体此前静默丢弃 —— 与段落/引用/单元格同款补发块
+        DOMToNotion._consumeInlineMedia(el, blocks, imgMode);
     },
 
     // 列表 ul/ol
@@ -373,12 +375,16 @@ const DOMToNotion = {
 
         // wave8 共识(dsf): Notion table_row.cells 只收 rich_text, 单元格内媒体此前静默
         // 丢弃 —— 表格后补发兄弟块(与段落/li/引用补发块同口径)
+        // wave9 共识(qwen): 无 section 时回退直属 tr(与 _convertTable 同口径),
+        // 否则 <table><tr><td><img></td></tr></table> 的单元格媒体漏采
+        const mediaSections = directSections(["thead", "tbody", "tfoot"]);
+        const mediaRows = mediaSections.length > 0
+            ? mediaSections.flatMap((sec) => directRows(sec))
+            : directRows(table);
         const cellMedia = [];
-        directSections(["thead", "tbody", "tfoot"]).forEach((section) => {
-            directRows(section).forEach((tr) => {
-                directCells(tr).forEach((cell) => {
-                    cellMedia.push(...cell.querySelectorAll("img, video, audio, a.attachment, iframe"));
-                });
+        mediaRows.forEach((tr) => {
+            directCells(tr).forEach((cell) => {
+                cellMedia.push(...cell.querySelectorAll("img, video, audio, a.attachment, iframe"));
             });
         });
         cellMedia.forEach((m) => {
@@ -518,6 +524,13 @@ const DOMToNotion = {
                 return;
             }
 
+            // wave9 共识(dsf): Discourse 单次换行输出 <br>, 无分支时相邻文本节点直接拼接
+            // ("line1line2" 词句粘连, 硬换行丢失) —— br 输出带换行的文本片段
+            if (tag === "br") {
+                result.push(...DOMToNotion.splitLongText("\n", annotations));
+                return;
+            }
+
             // 其他元素递归处理
             Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
         };
@@ -599,7 +612,7 @@ const DOMToNotion = {
 
             // 处理标题 (h1-h6, h4-h6 降级为 h3)
             if (/^h[1-6]$/.test(tag)) {
-                DOMToNotion._cookHeading(el, blocks);
+                DOMToNotion._cookHeading(el, blocks, imgMode);
                 return;
             }
 

@@ -393,10 +393,12 @@ function installUploadMethods(NotionAPI) {
         } catch (error) {
             // 不支持的文件类型或上传失败，尝试按 file block 上传
             if (error.message?.includes("不支持")) {
-                console.warn("[LD-Notion] 图片类型不支持，跳过:", imageUrl);
+                // wave9 共识(qwen): URL 可能携带 token/签名参数 —— 日志只留 origin+path, 剔除查询串
+                console.warn("[LD-Notion] 图片类型不支持，跳过:", String(imageUrl).split("?")[0]);
                 return null;
             }
-            console.warn("[LD-Notion] 图片上传失败:", imageUrl, error.message);
+            // wave9 共识(qwen): 日志脱敏 —— 剔除可能的签名参数
+                console.warn("[LD-Notion] 图片上传失败:", String(imageUrl).split("?")[0], error.message);
             try {
                 // 回退: 按 application/octet-stream 上传为 file block
                 const blob = await new Promise((resolve, reject) => {

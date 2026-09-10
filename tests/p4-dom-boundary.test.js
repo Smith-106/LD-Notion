@@ -225,7 +225,7 @@ describe("P4 收敛(c05a-glm): 段落内嵌媒体 / 表格行上限与多 tbody"
     });
 
     it("表格行数超 100 时截断并留可见标记", () => {
-        const cell = () => ({ tagName: "TD" });
+        const cell = () => ({ tagName: "TD", querySelectorAll: () => [] });
         const row = () => ({ closest: () => null, tagName: "TR", children: [cell()] });
         const table = { tagName: "TABLE", querySelector: () => null, children: Array.from({ length: 130 }, row) };
         const blocks = [];
@@ -485,5 +485,76 @@ describe("wave8 共识(dsf): 引用块/表格单元格内嵌媒体补发", () =>
         DOMToNotion._cookAsideQuote(aside, blocks, "external");
         expect(blocks[0].type).toBe("quote");
         expect(blocks[1].type).toBe("file");
+    });
+});
+
+describe("wave9 共识(dsf): 标题内联媒体补发 + br 硬换行", () => {
+    let origSerialize6;
+    beforeEach(() => { origSerialize6 = DOMToNotion.serializeRichText; DOMToNotion.serializeRichText = () => [{ type: "text", text: { content: "h" } }]; });
+    afterEach(() => { DOMToNotion.serializeRichText = origSerialize6; });
+
+    it("h2 内嵌 img 补发 image 块(不再静默丢弃)", () => {
+        const img = { tagName: "IMG", getAttribute: (k) => (k === "src" ? "https://cdn.example.com/h.png" : null), querySelector: () => null, querySelectorAll: () => [] };
+        const h2 = {
+            tagName: "H2",
+            childNodes: [],
+            children: [],
+            getAttribute: () => null,
+            querySelector: () => null,
+            querySelectorAll: (sel) => (sel === "img" ? [img] : []),
+        };
+        const blocks = [];
+        DOMToNotion._cookHeading(h2, blocks, "external");
+        expect(blocks[0].type).toBe("heading_2");
+        expect(blocks[1].type).toBe("image");
+        expect(blocks[1].image.external.url).toBe("https://cdn.example.com/h.png");
+    });
+
+    it("serializeRichText 处理 br: 相邻文本不再粘连(硬换行保留)", () => {
+        const realSerialize = origSerialize6;
+        DOMToNotion.serializeRichText = realSerialize; // 本测试测真实实现
+        const origNode = globalThis.Node;
+        globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1, COMMENT_NODE: 8 };
+        const br = { nodeType: 1, tagName: "BR", childNodes: [], children: [], getAttribute: () => null, querySelector: () => null, querySelectorAll: () => [] };
+        const p = {
+            nodeType: 1,
+            tagName: "P",
+            childNodes: [{ nodeType: 3, nodeValue: "line1" }, br, { nodeType: 3, nodeValue: "line2" }],
+            children: [br],
+            getAttribute: () => null,
+            querySelector: () => null,
+            querySelectorAll: () => [],
+        };
+        try {
+            const rt = DOMToNotion.serializeRichText(p);
+            const content = rt.map((r) => r.text.content).join("");
+            const joined = String(content);
+            expect(joined).toBe("line1\nline2");
+                    } finally {
+            if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
+        }
+    });
+});
+
+describe("wave9 共识(qwen): 表格无 section 时媒体补发", () => {
+    let origSerialize7;
+    beforeEach(() => { origSerialize7 = DOMToNotion.serializeRichText; DOMToNotion.serializeRichText = () => [{ type: "text", text: { content: "c" } }]; });
+    afterEach(() => { DOMToNotion.serializeRichText = origSerialize7; });
+
+    it("<table><tr><td><img></td></tr></table> 单元格媒体补发(无 section 回退直属 tr)", () => {
+        const img = {
+            tagName: "IMG",
+            getAttribute: (k) => (k === "src" ? "https://cdn.example.com/d.png" : null),
+            querySelector: () => null,
+            querySelectorAll: () => [],
+        };
+        const cell = { tagName: "TD", querySelectorAll: (sel) => (sel === "img, video, audio, a.attachment, iframe" ? [img] : []) };
+        const row = { tagName: "TR", closest: () => null, children: [cell] };
+        const table = { tagName: "TABLE", querySelector: () => null, children: [row] }; // 无 thead/tbody/tfoot
+        const blocks = [];
+        DOMToNotion._cookTable(table, blocks, "external");
+        expect(blocks[0].type).toBe("table");
+        expect(blocks[1].type).toBe("image");
+        expect(blocks[1].image.external.url).toBe("https://cdn.example.com/d.png");
     });
 });
