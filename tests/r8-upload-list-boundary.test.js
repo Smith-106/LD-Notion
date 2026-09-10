@@ -446,3 +446,159 @@ describe("wave11 共识(glm): script/style 文本不污染导出正文", () => {
         expect(HTMLToMarkdown._convertNode(body)).not.toContain("color:red");
     });
 });
+
+describe("wave12 共识(dsf): 标题内换行被折叠", () => {
+    const origNode = globalThis.Node;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+    });
+    afterAll(() => { if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode; });
+
+    const txt = (s) => ({ nodeType: 3, textContent: s });
+    const el = (tag, childNodes) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes,
+        children: childNodes.filter((n) => n.nodeType === 1),
+        parentElement: null,
+        className: "",
+        getAttribute: () => null,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("标题内 <br> 折叠为空格(标题不被拆到下一行)", () => {
+        const h = el("h2", [txt("a"), el("br", []), txt("b")]);
+        expect(HTMLToMarkdown._convertNode(h)).toBe("## a b\n\n");
+    });
+
+    it("标题文本自带换行同样折叠", () => {
+        expect(HTMLToMarkdown._convertNode(el("h3", [txt("x\ny")]))).toBe("### x y\n\n");
+    });
+
+    it("各级标题层级符号正确", () => {
+        const out = ["h1", "h4", "h6"].map((t) => HTMLToMarkdown._convertNode(el(t, [txt("t")])));
+        expect(out).toEqual(["# t\n\n", "#### t\n\n", "###### t\n\n"]);
+    });
+});
+
+describe("wave12 共识(dsf): 标题内回车符折叠(补 R12 变异覆盖)", () => {
+    const origNode = globalThis.Node;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+    });
+    afterAll(() => { if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode; });
+
+    const txt = (s) => ({ nodeType: 3, textContent: s });
+    const el = (tag, childNodes) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes,
+        children: childNodes.filter((n) => n.nodeType === 1),
+        parentElement: null,
+        className: "",
+        getAttribute: () => null,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("标题文本含孤立 CR 同样折叠", () => {
+        expect(HTMLToMarkdown._convertNode(el("h2", [txt("a\rb")]))).toBe("## a b\n\n");
+    });
+
+    it("标题文本含 CRLF 折叠为单空格", () => {
+        expect(HTMLToMarkdown._convertNode(el("h2", [txt("a\r\nb")]))).toBe("## a b\n\n");
+    });
+});
+
+describe("wave12 共识(glm): li 内代码围栏空白不被折叠篡改", () => {
+    const origNode = globalThis.Node;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+    });
+    afterAll(() => { if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode; });
+
+    const txt = (s) => ({ nodeType: 3, textContent: s });
+    const el = (tag, childNodes, attrs = {}) => {
+        const node = {
+            nodeType: 1,
+            tagName: tag.toUpperCase(),
+            childNodes,
+            children: childNodes.filter((n) => n.nodeType === 1),
+            parentElement: null,
+            className: attrs.className || "",
+            getAttribute: (n) => attrs[n] || null,
+            querySelector: () => null,
+            querySelectorAll: () => [],
+        };
+        childNodes.forEach((c) => { if (c.nodeType === 1) c.parentElement = node; });
+        return node;
+    };
+
+    const codeNode = (code) => {
+        const codeEl = el("code", [txt(code)]);
+        codeEl.textContent = code;
+        const pre = el("pre", [codeEl]);
+        pre.querySelector = (sel) => (sel === "code" ? codeEl : null);
+        return pre;
+    };
+
+    it("围栏内空行与行尾空白原样保留", () => {
+        const li = el("li", [codeNode("line1\n\nline2  ")]);
+        expect(HTMLToMarkdown._convertNode(li)).toBe("- ```\n  line1\n  \n  line2  \n  ```\n");
+    });
+
+    it("代码围栏前的文本仍按原口径折叠", () => {
+        const li = el("li", [txt("说明文字   "), codeNode("code")]);
+        expect(HTMLToMarkdown._convertNode(li)).toBe("- 说明文字\n  ```\n  code\n  ```\n");
+    });
+});
+
+describe("wave12 系统扫描: 单行上下文内联文本折叠换行(链接标签/图片 alt)", () => {
+    const origNode = globalThis.Node;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+    });
+    afterAll(() => { if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode; });
+
+    const { Utils } = require("../src/utils/index.js");
+    const txt = (s) => ({ nodeType: 3, textContent: s });
+    const el = (tag, childNodes, attrs = {}) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes,
+        children: childNodes.filter((n) => n.nodeType === 1),
+        parentElement: null,
+        className: attrs.className || "",
+        getAttribute: (n) => attrs[n] || null,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("Utils.mdText 折叠换行(列表项/链接标签为单行上下文)", () => {
+        expect(Utils.mdText("标题\n第二行")).toBe("标题 第二行");
+        expect(Utils.mdText("a\r\nb")).toBe("a b");
+        expect(Utils.mdText("仍有]括号[被剥离")).toBe("仍有括号被剥离");
+    });
+
+    it("链接标签内含 <br> 不再拆断链接结构", () => {
+        const a = el("a", [txt("a"), el("br", []), txt("b")], { href: "https://example.com/x" });
+        expect(HTMLToMarkdown._convertNode(a)).toBe("[a b](https://example.com/x)");
+    });
+
+    it("obsidian _mdText 与 Utils.mdText 同源", () => {
+        expect(HTMLToMarkdown._mdText("x\ny")).toBe(Utils.mdText("x\ny"));
+    });
+});

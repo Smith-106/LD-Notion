@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import fs from "fs";
 
 // P4 第三批回归: DOMToNotion 边界(表格补齐/长文本截断/embed 白名单) + pageCrud 分页/歧义守卫
@@ -556,5 +556,76 @@ describe("wave9 共识(qwen): 表格无 section 时媒体补发", () => {
         expect(blocks[0].type).toBe("table");
         expect(blocks[1].type).toBe("image");
         expect(blocks[1].image.external.url).toBe("https://cdn.example.com/d.png");
+    });
+});
+
+describe("wave12 共识(dsf/qwen): 列表直嵌/块级边界/emoji set 同口径", () => {
+    const origNode = globalThis.Node;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+    });
+    afterAll(() => { if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode; });
+
+    const T = (s) => ({ nodeType: 3, textContent: s, nodeValue: s });
+    const E = (tag, kids) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes: kids,
+        children: kids.filter((k) => k.nodeType === 1),
+        textContent: kids.map((k) => k.textContent || "").join(""),
+        getAttribute: () => null,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("_cookList 直接嵌套的列表不再整支丢弃", () => {
+        const blocks = [];
+        DOMToNotion._cookList(E("ul", [E("ul", [E("li", [T("内层项")])])]), blocks, "external");
+        expect(blocks.length).toBe(1);
+        expect(blocks[0].type).toBe("bulleted_list_item");
+        expect(blocks[0].bulleted_list_item.rich_text[0].text.content).toBe("内层项");
+    });
+
+    it("_cookList 非 li 游离子元素的文本不再丢弃", () => {
+        const blocks = [];
+        DOMToNotion._cookList(E("ul", [E("div", [T("游离文本")]), E("li", [T("正常项")])]), blocks, "external");
+        const text = blocks.map((b) => (b.paragraph || b.bulleted_list_item).rich_text[0].text.content);
+        expect(text).toEqual(["游离文本", "正常项"]);
+    });
+
+    it("blockquote 内多段 <p> 之间补换行(不再粘成一段)", () => {
+        const rt = DOMToNotion.serializeRichText(E("blockquote", [E("p", [T("第一段")]), E("p", [T("第二段")])]));
+        expect(rt.map((c) => c.text.content).join("")).toBe("第一段\n第二段");
+    });
+
+    it("单个 <p> 不产生尾随换行(避免空行噪声)", () => {
+        const rt = DOMToNotion.serializeRichText(E("blockquote", [E("p", [T("唯一段")])]));
+        expect(rt.map((c) => c.text.content).join("")).toBe("唯一段");
+    });
+
+    it("_emojiImageName 覆盖 Discourse 任意 emoji set", () => {
+        expect(DOMToNotion._emojiImageName("/images/emoji/win10/1f600.png")).toBe("1f600");
+        expect(DOMToNotion._emojiImageName("/images/emoji/emoji_one/heart.png")).toBe("heart");
+        expect(DOMToNotion._emojiImageName("https://linux.do/images/emoji/twitter/smile.png?v=1")).toBe("smile");
+        expect(DOMToNotion._emojiImageName("https://example.com/pic.png")).toBe(null);
+        expect(DOMToNotion._emojiImageName("")).toBe(null);
+    });
+
+    it("win10 set 的 emoji 图片: 块级跳过与行内转换同口径(不静默丢失)", () => {
+        const src = "https://linux.do/images/emoji/win10/1f600.png";
+        const blocks = [];
+        DOMToNotion._cookImage({ getAttribute: () => src }, blocks, "external");
+        expect(blocks).toEqual([]); // 块级仍跳过(避免与行内 emoji 文本重复)
+
+        const img = {
+            nodeType: 1, tagName: "IMG", childNodes: [], textContent: "",
+            getAttribute: (n) => (n === "src" ? src : n === "alt" ? "😀" : null),
+            querySelector: () => null,
+        };
+        const rt = DOMToNotion.serializeRichText(img);
+        expect(rt.map((c) => c.text.content).join("")).toBe("😀"); // 同一 src 现在会被转成 emoji 文本
     });
 });

@@ -108,7 +108,8 @@ const ObsidianAPI = {
 const HTMLToMarkdown = {
     // P4 共识(glm+qwen): 链接文本/alt 与 href/src 未净化, 含 ]( 的不可信内容可逃逸链接语法。
     // P4 收敛(c05): URL 改用百分号编码(与 Utils.mdUrl 同口径), 删除字符会改写链接目标
-    _mdText: (s) => String(s ?? "").replace(/[\[\]]/g, ""),
+    // wave12 系统扫描: 与 Utils.mdText 同源 —— 引用共享原语而非重复实现
+    _mdText: (s) => Utils.mdText(s),
     _mdUrl: (s) => Utils.mdUrl(s),
 
     convert: (html) => {
@@ -140,9 +141,13 @@ const HTMLToMarkdown = {
             // 挪到前面); ②无嵌套列表时续行也缩进 2 空格(多段内容不再脱离列表)
             const segments = [];
             let buf = "";
-            const flushBuf = () => {
-                const text = buf.replace(/\s+\n/g, "\n").trim();
+            const pushText = (text) => {
                 if (text) text.split("\n").forEach((line) => segments.push(line));
+            };
+            // wave12 共识(glm): 代码围栏不做空白折叠 —— \s+\n → \n 会删掉围栏内的空行
+            // 与行尾空白(代码内容被篡改), 围栏自身成段原样推入
+            const flushBuf = () => {
+                pushText(buf.replace(/\s+\n/g, "\n").trim());
                 buf = "";
             };
             Array.from(node.childNodes || []).forEach((child) => {
@@ -154,7 +159,13 @@ const HTMLToMarkdown = {
                     md.split("\n").filter((line) => line.trim().length > 0)
                         .forEach((line) => segments.push(`  ${line}`));
                 } else {
-                    buf += HTMLToMarkdown._convertNode(child);
+                    const md = HTMLToMarkdown._convertNode(child);
+                    if (/^\s*`{3,}/.test(md)) {
+                        flushBuf();
+                        pushText(md.replace(/^\n+|\n+$/g, ""));
+                    } else {
+                        buf += md;
+                    }
                 }
             });
             flushBuf();
@@ -186,12 +197,12 @@ const HTMLToMarkdown = {
         const children = HTMLToMarkdown._convertChildren(node);
 
         switch (tag) {
-            case "h1": return `# ${children}\n\n`;
-            case "h2": return `## ${children}\n\n`;
-            case "h3": return `### ${children}\n\n`;
-            case "h4": return `#### ${children}\n\n`;
-            case "h5": return `##### ${children}\n\n`;
-            case "h6": return `###### ${children}\n\n`;
+            // wave12 共识(dsf): 标题是单行结构 —— 标题内 <br>(br 分支返回换行)或文本节点自带
+            // 换行会把标题体推到下一行, Markdown 行首起不再属于标题(文本与层级双丢)
+            case "h1": case "h2": case "h3": case "h4": case "h5": case "h6": {
+                const text = children.replace(/\r\n?|\n/g, " ").trim();
+                return `${"#".repeat(Number(tag[1]))} ${text}\n\n`;
+            }
             case "p": return `${children}\n\n`;
             case "br": return "\n";
             case "hr": return "---\n\n";

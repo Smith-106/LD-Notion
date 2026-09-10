@@ -33,7 +33,7 @@ const DOMToNotion = {
         if (!img) return;
         const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
         const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
-        if (full && !src.includes("/images/emoji/")) {
+        if (full && !DOMToNotion._emojiImageName(src)) {
             if (imgMode === "skip") return;
             blocks.push({
                 type: "image",
@@ -163,6 +163,14 @@ const DOMToNotion = {
         }
     },
 
+    // wave12 共识(qwen): emoji 图片“跳过块级图片”与“转 emoji 文本”必须同口径 ——
+    // 前者按 src.includes("/images/emoji/") 跳、后者只认 twemoji|apple|google|twitter 四家 set,
+    // Discourse 其余 set(win10/emoji_one 等)两边都不命中 → 图片静默丢失
+    _emojiImageName: (src) => {
+        const m = String(src || "").match(/\/images\/emoji\/[^/]+\/([^/.]+)\.png/i);
+        return m ? m[1] : null;
+    },
+
     // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发(与 _cookParagraph 同款)
     _consumeInlineMedia: (el, blocks, imgMode) => {
         el.querySelectorAll("img").forEach((img) => DOMToNotion._cookImage(img, blocks, imgMode));
@@ -181,7 +189,7 @@ const DOMToNotion = {
         el.querySelectorAll("img").forEach((img) => {
             const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
             const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
-            if (full && !src.includes("/images/emoji/")) {
+            if (full && !DOMToNotion._emojiImageName(src)) {
                 if (imgMode !== "skip") {
                     blocks.push({
                         type: "image",
@@ -262,8 +270,25 @@ const DOMToNotion = {
     _cookList: (el, blocks, imgMode) => {
         const tag = el.tagName.toLowerCase();
         const listType = tag === "ul" ? "bulleted_list_item" : "numbered_list_item";
-        Array.from(el.children).forEach((li) => {
-            if (li.tagName.toLowerCase() === "li") {
+        Array.from(el.children).forEach((child) => {
+            if (!child.tagName) return;
+            const childTag = child.tagName.toLowerCase();
+            // wave12 共识(dsf): 解析器允许 <ul>/<ol> 直接嵌套其他列表(<ul><ul><li>)——
+            // 此前非 li 子元素整支跳过, 该支文本/媒体静默丢弃
+            if (childTag === "ul" || childTag === "ol") {
+                DOMToNotion._cookList(child, blocks, imgMode);
+                return;
+            }
+            if (childTag !== "li") {
+                const richText = DOMToNotion.serializeRichText(child);
+                if (richText.length > 0) {
+                    blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+                }
+                DOMToNotion._consumeInlineMedia(child, blocks, imgMode);
+                return;
+            }
+            const li = child;
+            {
                 const richText = DOMToNotion.serializeRichText(li);
                 if (richText.length > 0) {
                     blocks.push({ type: listType, [listType]: { rich_text: richText } });
@@ -402,7 +427,7 @@ const DOMToNotion = {
         // wave7 共识(qwen): 懒加载图片 src 为空时回退 data-src(与 _cookLightbox 同口径)
         const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
         const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
-        if (full && !src.includes("/images/emoji/")) {
+        if (full && !DOMToNotion._emojiImageName(src)) {
             if (imgMode !== "skip") {
                 blocks.push({
                     type: "image",
@@ -465,10 +490,10 @@ const DOMToNotion = {
             // 处理 emoji 图片
             if (tag === "img") {
                 // wave8 共识(qwen): 懒加载 emoji 仅在 data-src 时同样识别(与块级图片回退同口径)
+                // wave12 共识(qwen): set 目录放宽到任意值(与 _emojiImageName 同口径, 后者决定块级跳过)
                 const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
-                const emojiMatch = src.match(/\/images\/emoji\/(?:twemoji|apple|google|twitter)\/([^/.]+)\.png/i);
-                if (emojiMatch) {
-                    const emojiName = emojiMatch[1];
+                const emojiName = DOMToNotion._emojiImageName(src);
+                if (emojiName) {
                     const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP, emojiName)
                         ? EMOJI_MAP[emojiName]
                         : (el.getAttribute("alt") || `:${emojiName}:`);
@@ -528,6 +553,17 @@ const DOMToNotion = {
             // ("line1line2" 词句粘连, 硬换行丢失) —— br 输出带换行的文本片段
             if (tag === "br") {
                 result.push(...DOMToNotion.splitLongText("\n", annotations));
+                return;
+            }
+
+            // wave12 共识(dsf): 块级子元素此前无边界 —— <blockquote>/<li> 内多个 <p> 的文本
+            // 被拼成 "第一段第二段"(段间换行与分段丢失); 块级元素之间补换行, 首段不补无尾随空行
+            if (tag === "p" || tag === "div") {
+                const before = result.length;
+                Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
+                if (result.length > before && before > 0) {
+                    result.splice(before, 0, ...DOMToNotion.splitLongText("\n", annotations));
+                }
                 return;
             }
 

@@ -1798,7 +1798,9 @@
         },
         // P4 收敛(c02/c05): Markdown 链接输出净化 —— 不可信标题/URL 含 ]( 等元字符
         // 可破坏链接结构并注入链接目标（标题来自 Notion 页面/搜索结果）。
-        mdText: (text) => String(text ?? "").replace(/[\[\]]/g, ""),
+        // wave12 系统扫描: 链接标签/列表项是单行上下文 —— 标签内换行会拆断 Markdown 行
+        // (与标题/表格单元格同类, 一并收敛)
+        mdText: (text) => String(text ?? "").replace(/[\[\]]/g, "").replace(/\r\n?|\n/g, " "),
         // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
         mdUrl: (url) => String(url ?? "").replace(/[\s<>()]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
         mdLink: (text, url) => `[${Utils2.mdText(text)}](${Utils2.mdUrl(url)})`,
@@ -4039,7 +4041,7 @@
           if (!img) return;
           const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
           const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
-          if (full && !src.includes("/images/emoji/")) {
+          if (full && !DOMToNotion2._emojiImageName(src)) {
             if (imgMode === "skip") return;
             blocks.push({
               type: "image",
@@ -4154,6 +4156,13 @@
             DOMToNotion2._consumeInlineMedia(blockquote, blocks, imgMode);
           }
         },
+        // wave12 共识(qwen): emoji 图片“跳过块级图片”与“转 emoji 文本”必须同口径 ——
+        // 前者按 src.includes("/images/emoji/") 跳、后者只认 twemoji|apple|google|twitter 四家 set,
+        // Discourse 其余 set(win10/emoji_one 等)两边都不命中 → 图片静默丢失
+        _emojiImageName: (src) => {
+          const m = String(src || "").match(/\/images\/emoji\/[^/]+\/([^/.]+)\.png/i);
+          return m ? m[1] : null;
+        },
         // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发(与 _cookParagraph 同款)
         _consumeInlineMedia: (el, blocks, imgMode) => {
           el.querySelectorAll("img").forEach((img) => DOMToNotion2._cookImage(img, blocks, imgMode));
@@ -4173,7 +4182,7 @@
           el.querySelectorAll("img").forEach((img) => {
             const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
             const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
-            if (full && !src.includes("/images/emoji/")) {
+            if (full && !DOMToNotion2._emojiImageName(src)) {
               if (imgMode !== "skip") {
                 blocks.push({
                   type: "image",
@@ -4246,8 +4255,23 @@
         _cookList: (el, blocks, imgMode) => {
           const tag = el.tagName.toLowerCase();
           const listType = tag === "ul" ? "bulleted_list_item" : "numbered_list_item";
-          Array.from(el.children).forEach((li) => {
-            if (li.tagName.toLowerCase() === "li") {
+          Array.from(el.children).forEach((child) => {
+            if (!child.tagName) return;
+            const childTag = child.tagName.toLowerCase();
+            if (childTag === "ul" || childTag === "ol") {
+              DOMToNotion2._cookList(child, blocks, imgMode);
+              return;
+            }
+            if (childTag !== "li") {
+              const richText = DOMToNotion2.serializeRichText(child);
+              if (richText.length > 0) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+              }
+              DOMToNotion2._consumeInlineMedia(child, blocks, imgMode);
+              return;
+            }
+            const li = child;
+            {
               const richText = DOMToNotion2.serializeRichText(li);
               if (richText.length > 0) {
                 blocks.push({ type: listType, [listType]: { rich_text: richText } });
@@ -4353,7 +4377,7 @@
         _cookImage: (el, blocks, imgMode) => {
           const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
           const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
-          if (full && !src.includes("/images/emoji/")) {
+          if (full && !DOMToNotion2._emojiImageName(src)) {
             if (imgMode !== "skip") {
               blocks.push({
                 type: "image",
@@ -4403,9 +4427,8 @@
             const tag = el.tagName.toLowerCase();
             if (tag === "img") {
               const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
-              const emojiMatch = src.match(/\/images\/emoji\/(?:twemoji|apple|google|twitter)\/([^/.]+)\.png/i);
-              if (emojiMatch) {
-                const emojiName = emojiMatch[1];
+              const emojiName = DOMToNotion2._emojiImageName(src);
+              if (emojiName) {
                 const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP2, emojiName) ? EMOJI_MAP2[emojiName] : el.getAttribute("alt") || `:${emojiName}:`;
                 if (emoji) result.push(...DOMToNotion2.splitLongText(emoji, annotations));
               }
@@ -4455,6 +4478,14 @@
             }
             if (tag === "br") {
               result.push(...DOMToNotion2.splitLongText("\n", annotations));
+              return;
+            }
+            if (tag === "p" || tag === "div") {
+              const before = result.length;
+              Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
+              if (result.length > before && before > 0) {
+                result.splice(before, 0, ...DOMToNotion2.splitLongText("\n", annotations));
+              }
               return;
             }
             Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
@@ -4634,7 +4665,8 @@
       var HTMLToMarkdown2 = {
         // P4 共识(glm+qwen): 链接文本/alt 与 href/src 未净化, 含 ]( 的不可信内容可逃逸链接语法。
         // P4 收敛(c05): URL 改用百分号编码(与 Utils.mdUrl 同口径), 删除字符会改写链接目标
-        _mdText: (s) => String(s ?? "").replace(/[\[\]]/g, ""),
+        // wave12 系统扫描: 与 Utils.mdText 同源 —— 引用共享原语而非重复实现
+        _mdText: (s) => Utils2.mdText(s),
         _mdUrl: (s) => Utils2.mdUrl(s),
         convert: (html) => {
           const doc = new DOMParser().parseFromString(html, "text/html");
@@ -4658,9 +4690,11 @@
           if (tag === "li") {
             const segments = [];
             let buf = "";
-            const flushBuf = () => {
-              const text = buf.replace(/\s+\n/g, "\n").trim();
+            const pushText = (text) => {
               if (text) text.split("\n").forEach((line) => segments.push(line));
+            };
+            const flushBuf = () => {
+              pushText(buf.replace(/\s+\n/g, "\n").trim());
               buf = "";
             };
             Array.from(node.childNodes || []).forEach((child) => {
@@ -4670,7 +4704,13 @@
                 const md = HTMLToMarkdown2._convertNode(child).trim();
                 md.split("\n").filter((line) => line.trim().length > 0).forEach((line) => segments.push(`  ${line}`));
               } else {
-                buf += HTMLToMarkdown2._convertNode(child);
+                const md = HTMLToMarkdown2._convertNode(child);
+                if (/^\s*`{3,}/.test(md)) {
+                  flushBuf();
+                  pushText(md.replace(/^\n+|\n+$/g, ""));
+                } else {
+                  buf += md;
+                }
               }
             });
             flushBuf();
@@ -4699,30 +4739,19 @@
           }
           const children = HTMLToMarkdown2._convertChildren(node);
           switch (tag) {
+            // wave12 共识(dsf): 标题是单行结构 —— 标题内 <br>(br 分支返回换行)或文本节点自带
+            // 换行会把标题体推到下一行, Markdown 行首起不再属于标题(文本与层级双丢)
             case "h1":
-              return `# ${children}
-
-`;
             case "h2":
-              return `## ${children}
-
-`;
             case "h3":
-              return `### ${children}
-
-`;
             case "h4":
-              return `#### ${children}
-
-`;
             case "h5":
-              return `##### ${children}
+            case "h6": {
+              const text = children.replace(/\r\n?|\n/g, " ").trim();
+              return `${"#".repeat(Number(tag[1]))} ${text}
 
 `;
-            case "h6":
-              return `###### ${children}
-
-`;
+            }
             case "p":
               return `${children}
 
