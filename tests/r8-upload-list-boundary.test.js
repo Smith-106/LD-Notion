@@ -374,3 +374,75 @@ describe("wave10 共识(dsf): Obsidian 嵌套子树只转换一次(不重复展�
         expect(calls).toBeLessThan(500);
     });
 });
+
+describe("wave11 共识(qwen): 表格单元格孤立 CR 折叠", () => {
+    const origNode = globalThis.Node;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+    });
+    afterAll(() => { if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode; });
+
+    const txt = (s) => ({ nodeType: 3, textContent: s });
+    const el = (tag, childNodes) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes,
+        children: childNodes.filter((n) => n.nodeType === 1),
+        parentElement: null,
+        className: "",
+        getAttribute: () => null,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("单元格内孤立 CR 被折叠, 不拆断表格行", () => {
+        const table = el("table", [el("tbody", [el("tr", [el("td", [txt("a\rc")])])])]);
+        const out = HTMLToMarkdown._convertTable(table);
+        expect(out.includes("\r")).toBe(false);
+        expect(out).toBe("| a c |\n| --- |");
+    });
+
+    it("CRLF 单元格同样折叠为单空格", () => {
+        const table = el("table", [el("tbody", [el("tr", [el("td", [txt("a\r\nc")])])])]);
+        expect(HTMLToMarkdown._convertTable(table)).toBe("| a c |\n| --- |");
+    });
+});
+
+describe("wave11 共识(glm): script/style 文本不污染导出正文", () => {
+    const origNode = globalThis.Node;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+    });
+    afterAll(() => { if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode; });
+
+    const txt = (s) => ({ nodeType: 3, textContent: s });
+    const el = (tag, childNodes) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes,
+        children: childNodes.filter((n) => n.nodeType === 1),
+        parentElement: null,
+        className: "",
+        getAttribute: () => null,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("script 文本不出现在导出结果中", () => {
+        const body = el("div", [txt("正文"), el("script", [txt("window.x=1;")]), txt("尾")]);
+        const out = HTMLToMarkdown._convertNode(body);
+        expect(out).not.toContain("window.x=1;");
+        expect(out).toContain("正文");
+    });
+
+    it("style 文本不出现在导出结果中", () => {
+        const body = el("div", [el("style", [txt(".a{color:red}")]), txt("正文")]);
+        expect(HTMLToMarkdown._convertNode(body)).not.toContain("color:red");
+    });
+});

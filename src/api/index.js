@@ -621,7 +621,10 @@ const NotionAPI = {
         // 修改标题添加"副本"标记
         if (properties["标题"]?.title) {
             const originalTitle = properties["标题"].title.map(t => t.plain_text).join("");
+            // wave11 共识(dsf): 保留 type: "title" —— parentType !== "database" 分支按
+            // prop.type === "title" 定位标题属性, 写成不含 type 的对象会让副本标题退化为"无标题"
             properties["标题"] = {
+                type: "title",
                 title: [{ text: { content: `${originalTitle} (副本)` } }]
             };
         }

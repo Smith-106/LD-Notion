@@ -589,3 +589,37 @@ describe("wave10 共识(dsf): markdown 更新载荷不得被 trim 改写", () =>
             .rejects.toThrow(/old_str/);
     });
 });
+
+describe("wave11 共识(dsf): duplicatePage 副本标题不被丢失(保留 title 类型标记)", () => {
+    afterEach(() => { NotionAPI.resetTransport(); });
+
+    const runDuplicate = async (parentType) => {
+        const calls = [];
+        NotionAPI.configureTransport({
+            request: async (opts) => {
+                calls.push(opts);
+                if (opts.method === "GET" && opts.endpoint === "/pages/src1") {
+                    return ok({
+                        object: "page",
+                        id: "src1",
+                        properties: { "标题": { id: "title", type: "title", title: [{ plain_text: "原标题", type: "text" }] } },
+                    });
+                }
+                if (opts.method === "GET") return ok({ results: [], has_more: false, next_cursor: null });
+                return ok({ object: "page", id: "new1" });
+            },
+        });
+        await NotionAPI.duplicatePage("src1", "target1", parentType, "secret_ok");
+        return calls.filter((c) => c.method === "POST").pop();
+    };
+
+    it("parentType=page: 副本标题为「原标题 (副本)」而非「无标题」", async () => {
+        const created = await runDuplicate("page");
+        expect(created.data.properties.title.title[0].text.content).toBe("原标题 (副本)");
+    });
+
+    it("parentType=database: 副本标题仍带 (副本) 标记", async () => {
+        const created = await runDuplicate("database");
+        expect(created.data.properties["标题"].title[0].text.content).toBe("原标题 (副本)");
+    });
+});

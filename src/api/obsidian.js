@@ -195,6 +195,9 @@ const HTMLToMarkdown = {
             case "p": return `${children}\n\n`;
             case "br": return "\n";
             case "hr": return "---\n\n";
+            // wave11 共识(glm): script/style/noscript 非渲染元素 —— 其文本内容(JS/CSS 源码)
+            // 经 default 原样并入导出正文, 污染笔记
+            case "script": case "style": case "noscript": return "";
             case "strong": case "b": return `**${children}**`;
             case "em": case "i": return `*${children}*`;
             case "del": case "s": return `~~${children}~~`;
@@ -298,7 +301,9 @@ const HTMLToMarkdown = {
                 .filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase()))
                 .map((c) => {
                 // P4 收敛(c05): 单元格内的竖线会破坏表格列结构
-                return HTMLToMarkdown._convertChildren(c).replace(/\n/g, " ").replace(/\|/g, "\\|").trim();
+                // wave11 共识(qwen): 与 buildPostCallout.sanitize 同口径 —— \n 漏孤立 \r
+                // (CommonMark 行结束符), 单元格文本中的 CR 会拆断表格行
+                return HTMLToMarkdown._convertChildren(c).replace(/\r\n?|\n/g, " ").replace(/\|/g, "\\|").trim();
             });
             result.push(`| ${cells.join(" | ")} |`);
             if (i === 0) {

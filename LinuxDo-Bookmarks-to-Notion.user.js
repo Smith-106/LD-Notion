@@ -4731,6 +4731,12 @@
               return "\n";
             case "hr":
               return "---\n\n";
+            // wave11 共识(glm): script/style/noscript 非渲染元素 —— 其文本内容(JS/CSS 源码)
+            // 经 default 原样并入导出正文, 污染笔记
+            case "script":
+            case "style":
+            case "noscript":
+              return "";
             case "strong":
             case "b":
               return `**${children}**`;
@@ -4830,7 +4836,7 @@ ${quoted}
           const result = [];
           rows.forEach((row, i) => {
             const cells = Array.from(row.children || []).filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).map((c) => {
-              return HTMLToMarkdown2._convertChildren(c).replace(/\n/g, " ").replace(/\|/g, "\\|").trim();
+              return HTMLToMarkdown2._convertChildren(c).replace(/\r\n?|\n/g, " ").replace(/\|/g, "\\|").trim();
             });
             result.push(`| ${cells.join(" | ")} |`);
             if (i === 0) {
@@ -5867,6 +5873,7 @@ Content-Type: ${safeContentType}\r
           if ((_a = properties["\u6807\u9898"]) == null ? void 0 : _a.title) {
             const originalTitle = properties["\u6807\u9898"].title.map((t) => t.plain_text).join("");
             properties["\u6807\u9898"] = {
+              type: "title",
               title: [{ text: { content: `${originalTitle} (\u526F\u672C)` } }]
             };
           }
