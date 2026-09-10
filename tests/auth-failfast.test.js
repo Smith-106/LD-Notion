@@ -310,3 +310,45 @@ describe("P1 共识: 导出暂停期间失租必须退出 worker(不永久占用
         }
     });
 });
+
+describe("三模型共识(c05_qwen:1): 文件上传遇认证终态不得降级为外链", () => {
+    it("uploadFileToNotion 抛 isAuthTerminal → processImageUploads 上抛(不吞)", async () => {
+        const authError = new Error("API token is invalid.");
+        authError.isAuthTerminal = true;
+        const orig = NotionAPI.uploadFileToNotion;
+        NotionAPI.uploadFileToNotion = async () => { throw authError; };
+        try {
+            const blocks = [{
+                type: "image",
+                image: { type: "external", external: { url: "https://cdn.example.com/a.png" } },
+                _needsUpload: true,
+                _originalUrl: "https://cdn.example.com/a.png",
+                _fileType: "image",
+            }];
+            await expect(Exporter.processImageUploads(blocks, "secret_invalid", null)).rejects.toMatchObject({
+                isAuthTerminal: true,
+            });
+        } finally {
+            NotionAPI.uploadFileToNotion = orig;
+        }
+    });
+
+    it("非终态失败仍降级外链(保留原有容错)", async () => {
+        const orig = NotionAPI.uploadFileToNotion;
+        NotionAPI.uploadFileToNotion = async () => { throw new Error("网络抖动"); };
+        try {
+            const blocks = [{
+                type: "image",
+                image: { type: "external", external: { url: "https://cdn.example.com/b.png" } },
+                _needsUpload: true,
+                _originalUrl: "https://cdn.example.com/b.png",
+                _fileType: "image",
+            }];
+            await Exporter.processImageUploads(blocks, "secret_ok", null);
+            expect(blocks[0].image.type).toBe("external");
+            expect(blocks[0]._uploaded).not.toBe(true);
+        } finally {
+            NotionAPI.uploadFileToNotion = orig;
+        }
+    });
+});

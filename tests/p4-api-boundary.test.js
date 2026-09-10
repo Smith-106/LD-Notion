@@ -74,19 +74,37 @@ describe("P4: NotionAPI 请求边界", () => {
         }
     });
 
-    it("appendBlockChildren 超过 100 块分片提交且 after 仅在首片", async () => {
+    it("appendBlockChildren 超过 100 块分片提交且 after 逐片链接(不倒序/不落到末尾)", async () => {
         const calls = [];
+        let seq = 0;
         NotionAPI.configureTransport({
-            request: async (opts) => { calls.push(opts); return ok({}); },
+            request: async (opts) => {
+                calls.push(opts);
+                // 模拟 Notion 返回本片新建块(带 id) —— 下一片须锚定在本片末块之后
+                return ok({ results: opts.data.children.map(() => ({ id: `new-${++seq}` })) });
+            },
         });
         const children = Array.from({ length: 250 }, (_, i) => ({ type: "paragraph", paragraph: { rich_text: [] } }));
         await NotionAPI.appendBlockChildren("blk1", children, "secret_ok", { after: "anchor" });
 
         expect(calls.length).toBe(3);
         expect(calls.map((c) => c.data.children.length)).toEqual([100, 100, 50]);
+        // 首片锚定调用方给的 anchor; 后续片锚定上一片最后一个新建块
+        expect(calls[0].data.after).toBe("anchor");
+        expect(calls[1].data.after).toBe("new-100");
+        expect(calls[2].data.after).toBe("new-200");
+    });
+
+    it("appendBlockChildren 响应无 results 时后续分片退回不带 after(避免倒序插入)", async () => {
+        const calls = [];
+        NotionAPI.configureTransport({
+            request: async (opts) => { calls.push(opts); return ok({}); },
+        });
+        const children = Array.from({ length: 150 }, (_, i) => ({ type: "paragraph", paragraph: { rich_text: [] } }));
+        await NotionAPI.appendBlockChildren("blk1", children, "secret_ok", { after: "anchor" });
+
         expect(calls[0].data.after).toBe("anchor");
         expect(calls[1].data.after).toBeUndefined();
-        expect(calls[2].data.after).toBeUndefined();
     });
 
     it("appendBlockChildren 空数组仍发一次请求", async () => {

@@ -668,6 +668,10 @@ const Exporter = {
                 const result = await NotionAPI.uploadFileToNotion(url, apiKey);
                 fileUrlCache.set(url, result);
             } catch (e) {
+                // 三模型共识(c05_qwen:1): 认证终态(401/invalid token)不得走外链降级 —— 该 token
+                // 下后续每个待传文件都注定 401, 继续批量只会重复无效请求并把"鉴权失效"伪装成
+                // "外链回退成功"; 上抛给批次循环的 isAuthTerminalError fail-fast(与 AUD-ARCH-11 同口径)
+                if (Exporter.isAuthTerminalError(e)) throw e;
                 console.warn("[LD-Notion] 文件上传失败:", url, e.message);
                 fileUrlCache.set(url, null);
             }

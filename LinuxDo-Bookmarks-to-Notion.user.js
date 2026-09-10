@@ -5611,12 +5611,15 @@ Content-Type: ${safeContentType}\r
           }
           if (chunks.length === 0) chunks.push([]);
           let lastResult = null;
+          let anchor = options.after ? String(options.after) : null;
           for (let i = 0; i < chunks.length; i++) {
             const payload = { children: chunks[i] };
-            if (options.after && i === 0) {
-              payload.after = String(options.after);
+            if (anchor) {
+              payload.after = anchor;
             }
             lastResult = await NotionAPI2.request("PATCH", endpoint, payload, apiKey);
+            const created = Array.isArray(lastResult == null ? void 0 : lastResult.results) ? lastResult.results : [];
+            anchor = created.length > 0 ? String(created[created.length - 1].id) : null;
           }
           return lastResult;
         },
@@ -15229,6 +15232,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               const result = await NotionAPI2.uploadFileToNotion(url, apiKey);
               fileUrlCache.set(url, result);
             } catch (e) {
+              if (Exporter2.isAuthTerminalError(e)) throw e;
               console.warn("[LD-Notion] \u6587\u4EF6\u4E0A\u4F20\u5931\u8D25:", url, e.message);
               fileUrlCache.set(url, null);
             }

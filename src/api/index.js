@@ -435,12 +435,18 @@ const NotionAPI = {
         if (chunks.length === 0) chunks.push([]);
 
         let lastResult = null;
+        // P4 收敛(c05b1-glm): 不带 after 的追加一律落到父块子列表末尾 —— 多片提交时第 2 片起
+        // 必须锚定在上一片最后新建块之后, 否则内容追加到列表末尾与既有块交错(静默乱序)。
+        // 响应未返回 results 时退回不带 after(固定锚点会让后续分片倒序插入, 比落到末尾更糟)
+        let anchor = options.after ? String(options.after) : null;
         for (let i = 0; i < chunks.length; i++) {
             const payload = { children: chunks[i] };
-            if (options.after && i === 0) {
-                payload.after = String(options.after);
+            if (anchor) {
+                payload.after = anchor;
             }
             lastResult = await NotionAPI.request("PATCH", endpoint, payload, apiKey);
+            const created = Array.isArray(lastResult?.results) ? lastResult.results : [];
+            anchor = created.length > 0 ? String(created[created.length - 1].id) : null;
         }
         return lastResult;
     },
