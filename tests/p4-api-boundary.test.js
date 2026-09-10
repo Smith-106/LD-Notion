@@ -107,12 +107,37 @@ describe("P4: NotionAPI 请求边界", () => {
         expect(calls[1].data.after).toBeUndefined();
     });
 
-    it("appendBlockChildren 空数组仍发一次请求", async () => {
+    it("appendBlockChildren 空数组不发请求(children: [] 会被 Notion 400)", async () => {
         const calls = [];
         NotionAPI.configureTransport({ request: async (opts) => { calls.push(opts); return ok({}); } });
-        await NotionAPI.appendBlockChildren("blk1", [], "secret_ok");
-        expect(calls.length).toBe(1);
-        expect(calls[0].data.children).toEqual([]);
+        const result = await NotionAPI.appendBlockChildren("blk1", [], "secret_ok");
+        expect(calls.length).toBe(0);
+        expect(result).toBeNull();
+    });
+
+    it("appendBlockChildren 含嵌套子块也受 1000 块总上限约束", async () => {
+        const calls = [];
+        NotionAPI.configureTransport({
+            request: async (opts) => {
+                calls.push(opts);
+                return ok({ results: opts.data.children.map((_, i) => ({ id: `n-${calls.length}-${i}` })) });
+            },
+        });
+        // 每个顶层块含 60 个子块(size=61): 16 个 = 976 ≤1000, 第 17 个越界 → 切片
+        const container = (i) => ({
+            type: "bulleted_list_item",
+            bulleted_list_item: {
+                rich_text: [{ type: "text", text: { content: `p${i}` } }],
+                children: Array.from({ length: 60 }, () => ({ type: "paragraph", paragraph: { rich_text: [] } })),
+            },
+        });
+        await NotionAPI.appendBlockChildren("blk1", Array.from({ length: 20 }, (_, i) => container(i)), "secret_ok");
+        expect(calls.length).toBeGreaterThan(1);
+        calls.forEach((c) => {
+            const total = c.data.children.reduce((acc, b) => acc + 1 + b.bulleted_list_item.children.length, 0);
+            expect(total).toBeLessThanOrEqual(1000);
+            expect(c.data.children.length).toBeLessThanOrEqual(100);
+        });
     });
 
     it("duplicatePage 游标重复时终止且 parentType=page 使用 page_id 父级", async () => {
@@ -211,4 +236,34 @@ describe("P4: content handler 边界与降级", () => {
         expect(result).toContain("❌ 模板输出失败");
         expect(result).toContain("ai down");
     });
+});
+
+describe("wave6 共识(dsf): 重试过闸 + retryCount 计数", () => {
+    afterEach(() => { NotionAPI.resetTransport(); NotionAPI.setRequestGate(null); });
+
+    it("429 重试同样经过共享 gate(不绕过令牌桶)", async () => {
+        const origSleep = Utils.sleep;
+        Utils.sleep = async () => {};
+        let gateCalls = 0;
+        NotionAPI.setRequestGate(async () => { gateCalls++; });
+        let calls = 0;
+        NotionAPI.configureTransport({
+            request: async () => {
+                calls++;
+                return calls === 1
+                    ? { status: 429, responseText: "{}", responseHeaders: "retry-after: 1" }
+                    : ok({ ok: true });
+            },
+        });
+        try {
+            await NotionAPI.request("GET", "/pages/x", null, "secret_ok", 3);
+            expect(calls).toBe(2);
+            expect(gateCalls).toBe(2);
+        } finally {
+            Utils.sleep = origSleep;
+        }
+    });
+
+    // retryCount 语义 = 已发出的请求尝试次数(含首次), 与 notable 既有契约 notion-api.test.js 一致;
+    // wave6 dsf:3 提议改为纯重试次数 → 契约变更且字段无消费点, 裁决 FP(保留原语义)
 });

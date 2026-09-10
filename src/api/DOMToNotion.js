@@ -254,6 +254,11 @@ const DOMToNotion = {
                 // P4 收敛(c05): li 内嵌图片/附件此前静默丢弃 —— 与 _cookParagraph 同款补发块
                 li.querySelectorAll("img").forEach((img) => DOMToNotion._cookImage(img, blocks, imgMode));
                 li.querySelectorAll("a.attachment").forEach((a) => DOMToNotion._cookAttachment(a, blocks, imgMode));
+                // wave6 共识(dsf): 与 _cookParagraph 同口径 —— li 内嵌 video/audio/iframe 同样
+                // 有消费点(ul/ol 分支提前 return, 不下钻到这些块)
+                li.querySelectorAll("video").forEach((video) => DOMToNotion._cookVideo(video, blocks, imgMode));
+                li.querySelectorAll("audio").forEach((audio) => DOMToNotion._cookAudio(audio, blocks, imgMode));
+                li.querySelectorAll("iframe").forEach((frame) => { DOMToNotion._cookIframe(frame, blocks); });
             }
         });
     },
@@ -422,7 +427,14 @@ const DOMToNotion = {
                     return;
                 }
                 const link = Utils.absoluteUrl(href);
-                const linkText = el.textContent || link;
+                // wave6 共识(dsf): 链接内非文本内容(如 <a><img class="emoji" alt="😀"></a>)
+                // 让 textContent 为空 —— 回退裸 URL 会丢掉 emoji, 改优先取 emoji alt
+                let linkText = el.textContent || "";
+                if (!linkText) {
+                    const innerImg = el.querySelector("img");
+                    linkText = innerImg ? (innerImg.getAttribute("alt") || "") : "";
+                }
+                if (!linkText) linkText = link;
                 // v3.14.6 (XN-04): 文本链接过 _safeExternalUrl —— 非法(内网/169.254/非 http(s))降级纯文本
                 const safeLink = DOMToNotion._safeExternalUrl(link);
                 if (link && linkText) {

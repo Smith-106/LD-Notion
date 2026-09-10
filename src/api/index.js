@@ -142,6 +142,9 @@ const NotionAPI = {
                 const retryAfter = Math.min(parseInt(response.responseHeaders?.match(/retry-after:\s*(\d+)/i)?.[1]) || 1, 60);
                 console.warn(`Notion API 速率限制，${retryAfter}秒后重试 (${attempt + 1}/${retries})`);
                 await Utils.sleep(retryAfter * 1000 + 500);
+                // wave6 共识(dsf): 重试递归此前绕过共享 gate(token 桶) —— 重试同样须过闸,
+                // 否则 429 重试洪峰可突破调用方限流预算
+                if (NotionAPI._requestGate) await NotionAPI._requestGate();
                 return doRequest(attempt + 1, token, allowRefresh);
             }
 
@@ -427,11 +430,31 @@ const NotionAPI = {
         const endpoint = `/blocks/${blockId}/children`;
 
         // P4 共识(glm): Notion 单次追加上限 100 块, 超限整包 400 导致全部丢失。
-        // 分片提交, 仅首个分片携带 after 插入锚点(后续按顺序追加)。
+        // wave6 共识(dsf): 另有含嵌套子块的 1000 块总上限 —— 仅按顶层切分时 100 个各含
+        // 多子块的容器仍会被整包 400。两上限同时遵守, 超限即切片。
+        // 空数组不再发请求: children: [] 会被 Notion 400, 属无效调用。
+        if (safeChildren.length === 0) return null;
+        const countNested = (block) => {
+            const container = block && block[block.type];
+            const kids = Array.isArray(container?.children) ? container.children : [];
+            let total = 1;
+            for (const kid of kids) total += countNested(kid);
+            return total;
+        };
         const chunks = [];
-        for (let i = 0; i < safeChildren.length; i += 100) {
-            chunks.push(safeChildren.slice(i, i + 100));
+        let current = [];
+        let currentCount = 0;
+        for (const block of safeChildren) {
+            const blockSize = countNested(block);
+            if (current.length > 0 && (current.length >= 100 || currentCount + blockSize > 1000)) {
+                chunks.push(current);
+                current = [];
+                currentCount = 0;
+            }
+            current.push(block);
+            currentCount += blockSize;
         }
+        if (current.length > 0) chunks.push(current);
         if (chunks.length === 0) chunks.push([]);
 
         let lastResult = null;

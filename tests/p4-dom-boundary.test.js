@@ -253,3 +253,45 @@ describe("P4 收敛(c05a-glm): 段落内嵌媒体 / 表格行上限与多 tbody"
         expect(blocks[0].table.children.length).toBe(4);
     });
 });
+
+describe("wave6 共识(dsf): li 内嵌媒体 + 链接 emoji 文本", () => {
+    it("li 内嵌 video/iframe 有消费点(不再静默丢失)", () => {
+        const blocks = [];
+        const li = {
+            tagName: "LI",
+            querySelectorAll: (sel) => {
+                if (sel === "iframe") return [{ getAttribute: () => "https://www.youtube.com/embed/z" }];
+                if (sel === "video") return [{ getAttribute: () => "https://cdn.example.com/v.mp4", querySelector: () => null }];
+                return [];
+            },
+        };
+        const el = { tagName: "UL", children: [li] };
+        const origSerialize = DOMToNotion.serializeRichText;
+        DOMToNotion.serializeRichText = () => [{ type: "text", text: { content: "文本" } }];
+        try {
+            DOMToNotion._cookList(el, blocks, "external");
+        } finally {
+            DOMToNotion.serializeRichText = origSerialize;
+        }
+        expect(blocks.some((b) => b.type === "video")).toBe(true);
+        expect(blocks.some((b) => b.type === "embed")).toBe(true);
+    });
+
+    it("链接内只有 emoji 图片时用 alt 作链接文本(不回退裸 URL)", () => {
+        const origNode = globalThis.Node;
+        globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1, COMMENT_NODE: 8 };
+        const anchor = {
+            nodeType: 1,
+            tagName: "A",
+            textContent: "",
+            childNodes: [],
+            getAttribute: (k) => (k === "href" ? "https://linux.do/u/foo" : null),
+            querySelector: (sel) => (sel === "img" ? { getAttribute: () => "😀" } : null),
+        };
+        const p = { nodeType: 1, tagName: "P", childNodes: [anchor], querySelectorAll: () => [] };
+        const rt = DOMToNotion.serializeRichText(p);
+        if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
+        expect(rt[0].text.content).toBe("😀");
+        expect(rt[0].text.link.url).toBe("https://linux.do/u/foo");
+    });
+});

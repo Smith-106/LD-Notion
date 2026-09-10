@@ -4241,6 +4241,11 @@
               }
               li.querySelectorAll("img").forEach((img) => DOMToNotion2._cookImage(img, blocks, imgMode));
               li.querySelectorAll("a.attachment").forEach((a) => DOMToNotion2._cookAttachment(a, blocks, imgMode));
+              li.querySelectorAll("video").forEach((video) => DOMToNotion2._cookVideo(video, blocks, imgMode));
+              li.querySelectorAll("audio").forEach((audio) => DOMToNotion2._cookAudio(audio, blocks, imgMode));
+              li.querySelectorAll("iframe").forEach((frame) => {
+                DOMToNotion2._cookIframe(frame, blocks);
+              });
             }
           });
         },
@@ -4374,7 +4379,12 @@
                 return;
               }
               const link = Utils2.absoluteUrl(href);
-              const linkText = el.textContent || link;
+              let linkText = el.textContent || "";
+              if (!linkText) {
+                const innerImg = el.querySelector("img");
+                linkText = innerImg ? innerImg.getAttribute("alt") || "" : "";
+              }
+              if (!linkText) linkText = link;
               const safeLink = DOMToNotion2._safeExternalUrl(link);
               if (link && linkText) {
                 const chunks = DOMToNotion2.splitLongText(linkText, annotations);
@@ -5403,6 +5413,7 @@ Content-Type: ${safeContentType}\r
               const retryAfter = Math.min(parseInt((_b = (_a = response.responseHeaders) == null ? void 0 : _a.match(/retry-after:\s*(\d+)/i)) == null ? void 0 : _b[1]) || 1, 60);
               console.warn(`Notion API \u901F\u7387\u9650\u5236\uFF0C${retryAfter}\u79D2\u540E\u91CD\u8BD5 (${attempt + 1}/${retries})`);
               await Utils2.sleep(retryAfter * 1e3 + 500);
+              if (NotionAPI2._requestGate) await NotionAPI2._requestGate();
               return doRequest(attempt + 1, token, allowRefresh);
             }
             const parsedBody = Utils2.safeJsonParse(response.responseText, null);
@@ -5622,10 +5633,28 @@ Content-Type: ${safeContentType}\r
         appendBlockChildren: async (blockId, children, apiKey, options = {}) => {
           const safeChildren = Array.isArray(children) ? children : [];
           const endpoint = `/blocks/${blockId}/children`;
+          if (safeChildren.length === 0) return null;
+          const countNested = (block) => {
+            const container = block && block[block.type];
+            const kids = Array.isArray(container == null ? void 0 : container.children) ? container.children : [];
+            let total = 1;
+            for (const kid of kids) total += countNested(kid);
+            return total;
+          };
           const chunks = [];
-          for (let i = 0; i < safeChildren.length; i += 100) {
-            chunks.push(safeChildren.slice(i, i + 100));
+          let current = [];
+          let currentCount = 0;
+          for (const block of safeChildren) {
+            const blockSize = countNested(block);
+            if (current.length > 0 && (current.length >= 100 || currentCount + blockSize > 1e3)) {
+              chunks.push(current);
+              current = [];
+              currentCount = 0;
+            }
+            current.push(block);
+            currentCount += blockSize;
           }
+          if (current.length > 0) chunks.push(current);
           if (chunks.length === 0) chunks.push([]);
           let lastResult = null;
           let anchor = options.after ? String(options.after) : null;
