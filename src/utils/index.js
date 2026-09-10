@@ -156,9 +156,11 @@ const Utils = {
         const normalized = String(input ?? "");
         if (typeof btoa === "function") {
             try {
+                // P4 收敛(c17): btoa 对 U+0080–U+00FF 不抛错(按 Latin-1 编码), 与
+                // base64DecodeUnicode 的 UTF-8 解码不对称 —— 非 ASCII 必须先转 UTF-8 字节
+                if (/[\u0080-\uFFFF]/.test(normalized)) throw new Error("non-latin1");
                 return btoa(normalized);
             } catch {
-                // P4 收敛(c17): btoa 仅接受 Latin-1 —— 非 ASCII 输入与 base64DecodeUnicode 对称走 UTF-8
                 const bytes = new TextEncoder().encode(normalized);
                 let binary = "";
                 for (const b of bytes) binary += String.fromCharCode(b);

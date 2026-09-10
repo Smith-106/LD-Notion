@@ -1718,6 +1718,7 @@
           const normalized = String(input ?? "");
           if (typeof btoa === "function") {
             try {
+              if (/[\u0080-\uFFFF]/.test(normalized)) throw new Error("non-latin1");
               return btoa(normalized);
             } catch {
               const bytes = new TextEncoder().encode(normalized);
@@ -8151,15 +8152,24 @@ Content-Type: ${safeContentType}\r
           if (cursor) reqBody.start_cursor = cursor;
           let response;
           try {
-            response = await NotionAPI2.request("POST", `/databases/${dbId}/query`, reqBody, apiKey);
+            response = await NotionAPI2.request("POST", `/databases/${encodeURIComponent(String(dbId ?? ""))}/query`, reqBody, apiKey);
           } catch (error) {
             console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
+            truncated = true;
             break;
           }
-          results.push(...response.results || []);
+          if (!Array.isArray(response == null ? void 0 : response.results)) {
+            console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u8FD4\u56DE\u7ED3\u6784\u5F02\u5E38, \u5DF2\u505C\u6B62\u5206\u9875");
+            truncated = true;
+            break;
+          }
+          results.push(...response.results);
           pages++;
           const next = response.has_more ? String(response.next_cursor || "") : "";
-          if (!next || seen.has(next)) break;
+          if (!next || seen.has(next)) {
+            if (response.has_more) truncated = true;
+            break;
+          }
           seen.add(next);
           if (pages >= maxPages) {
             truncated = true;
@@ -8181,12 +8191,21 @@ Content-Type: ${safeContentType}\r
             response = await NotionAPI2.search("", { property: "object", value: "database" }, apiKey, cursor || void 0);
           } catch (error) {
             console.warn("[LD-Notion] \u6570\u636E\u5E93\u53D1\u73B0\u5931\u8D25:", error);
+            truncated = true;
             break;
           }
-          results.push(...response.results || []);
+          if (!Array.isArray(response == null ? void 0 : response.results)) {
+            console.warn("[LD-Notion] \u6570\u636E\u5E93\u53D1\u73B0\u8FD4\u56DE\u7ED3\u6784\u5F02\u5E38, \u5DF2\u505C\u6B62\u5206\u9875");
+            truncated = true;
+            break;
+          }
+          results.push(...response.results);
           pages++;
           const next = response.has_more ? String(response.next_cursor || "") : "";
-          if (!next || seen.has(next)) break;
+          if (!next || seen.has(next)) {
+            if (response.has_more) truncated = true;
+            break;
+          }
           seen.add(next);
           if (pages >= maxPages) {
             truncated = true;
@@ -8795,7 +8814,8 @@ Content-Type: ${safeContentType}\r
               fallbackDatabaseId: settings.notionDatabaseId
             });
             const queryOneDb = async (dbId) => {
-              const { results } = await queryAllPages({ dbId, apiKey: settings.notionApiKey, body: { page_size: 100 } });
+              const { results, truncated } = await queryAllPages({ dbId, apiKey: settings.notionApiKey, body: { page_size: 100 } });
+              if (truncated) dbTruncated = true;
               return results;
             };
             let allPages = [];
@@ -8830,7 +8850,7 @@ Content-Type: ${safeContentType}\r
               bullets.push(`\u5206\u7C7B ${cat}: ${count} \u6761`);
             }
             if (dbTruncated) {
-              bullets.push("\u26A0\uFE0F \u6570\u636E\u5E93\u6570\u91CF\u8D85\u8FC7\u5206\u9875\u4E0A\u9650\uFF0C\u7EDF\u8BA1\u4EC5\u8986\u76D6\u5DF2\u626B\u63CF\u7684\u6570\u636E\u5E93");
+              bullets.push("\u26A0\uFE0F \u53D7\u5206\u9875/\u6570\u636E\u5E93\u6570\u91CF\u4E0A\u9650\u622A\u65AD\uFF0C\u7EDF\u8BA1\u4EC5\u8986\u76D6\u5DF2\u626B\u63CF\u5185\u5BB9");
             }
             return AI()._formatToolResult({
               title: "\u8DE8\u6E90\u6570\u636E\u7EDF\u8BA1",
@@ -21488,7 +21508,7 @@ ${report}
             });
             options += "</optgroup>";
           }
-          const workspacePages = pages.filter((p) => p.parent === "workspace");
+          const workspacePages = pages.filter((p) => NotionSiteUI2.getAITargetPageParentType(p) === "workspace");
           if (workspacePages.length > 0) {
             options += '<optgroup label="\u{1F4C4} \u9875\u9762">';
             workspacePages.forEach((page) => {
@@ -21570,7 +21590,7 @@ ${report}
         applyPostAuthTarget: (payload = {}) => {
           const action = payload.action || "";
           if (action === "autofill") {
-            const title = payload.title ? Utils2.escapeHtml(payload.title) : "";
+            const title = payload.title ? String(payload.title) : "";
             NotionSiteUI2.showStatus(`\u2705 \u6388\u6743\u6210\u529F\uFF0C\u5DF2\u81EA\u52A8\u9009\u62E9\u6570\u636E\u5E93${title ? `\u300C${title}\u300D` : ""}\u3002\u56DE\u5230 LinuxDo \u9875\u9762\u5373\u53EF\u5F00\u59CB\u5BFC\u51FA\u3002`, "success");
           } else if (action === "needs_choice") {
             const count = payload.count || (Array.isArray(payload.candidates) ? payload.candidates.length : 0);
@@ -21656,12 +21676,14 @@ ${report}
         },
         // 初始化
         init: () => {
+          NotionSiteUI2._destroyed = false;
           NotionSiteUI2.injectStyles();
           NotionSiteUI2.createFloatButton();
           NotionSiteUI2.initAIAssistant();
           if (!Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, true)) {
             Utils2.runWhenBrowserIdle(() => {
               if (Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, true)) return;
+              if (NotionSiteUI2._destroyed) return;
               NotionSiteUI2.ensurePanelReady();
               NotionSiteUI2.isMinimized = false;
               NotionSiteUI2.panel.classList.add("visible");
@@ -21671,6 +21693,7 @@ ${report}
         },
         destroy: () => {
           var _a, _b, _c;
+          NotionSiteUI2._destroyed = true;
           (_a = NotionSiteUI2._abortController) == null ? void 0 : _a.abort();
           NotionSiteUI2._abortController = null;
           (_b = NotionSiteUI2.panel) == null ? void 0 : _b.remove();
@@ -22592,8 +22615,11 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             let pathname = parsed.pathname.replace(/\/+$/, "") || "/";
             const host = parsed.host.toLowerCase();
             if (host === "linux.do" || host.endsWith(".linux.do")) {
-              const topicMatch = pathname.match(/^\/t\/(?:[^/]+\/)?(\d+)(?:\/\d+)?$/i);
-              if (topicMatch) pathname = `/t/${topicMatch[1]}`;
+              const parts = pathname.split("/").filter(Boolean);
+              if (String(parts[0] || "").toLowerCase() === "t") {
+                const idIndex = /^\d+$/.test(parts[1] || "") ? 1 : /^\d+$/.test(parts[2] || "") ? 2 : -1;
+                if (idIndex > 0) pathname = `/t/${parts[idIndex]}`;
+              }
             }
             const search = parsed.search || "";
             return `${parsed.protocol.toLowerCase()}//${host}${pathname}${search}`;
@@ -23496,12 +23522,12 @@ ${AIService2.isolateContent(JSON.stringify({
           return "\u6682\u65E0\u7EDF\u8BA1";
         },
         buildUnifiedSyncModel: () => {
-          const githubTypeLabelMap = {
+          const githubTypeLabelMap = Object.assign(/* @__PURE__ */ Object.create(null), {
             stars: "Stars",
             repos: "Repos",
             forks: "Forks",
             gists: "Gists"
-          };
+          });
           const linuxdoState = SyncState2.getLinuxDoState();
           const githubMeta = SyncState2.getGitHubMeta();
           const githubTypes = Array.from(new Set((GitHubAPI2.getImportTypes() || []).filter(Boolean)));
@@ -26101,15 +26127,16 @@ ${AIService2.isolateContent(JSON.stringify({
           };
         },
         saveWorkspaceConnectionCandidatesToNotion: async () => {
-          var _a, _b, _c, _d, _e, _f;
+          var _a, _b, _c, _d, _e;
           const model = UI2.buildWorkspaceVisualizationModel();
+          const abortSignal = (_a = UI2._abortController) == null ? void 0 : _a.signal;
           if (!(model == null ? void 0 : model.scannedAt)) {
             throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
           }
           if (!Array.isArray(model.connectionCandidates) || model.connectionCandidates.length === 0) {
             throw new Error("\u5F53\u524D\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u8DE8\u6E90\u5173\u8054\u5019\u9009\u3002");
           }
-          const apiKey = NotionOAuth2.getAccessToken((_b = (_a = UI2.refs) == null ? void 0 : _a.apiKeyInput) == null ? void 0 : _b.value.trim());
+          const apiKey = NotionOAuth2.getAccessToken((_c = (_b = UI2.refs) == null ? void 0 : _b.apiKeyInput) == null ? void 0 : _c.value.trim());
           if (!apiKey) {
             throw new Error(MSG2.NO_NOTION_KEY);
           }
@@ -26125,14 +26152,14 @@ ${AIService2.isolateContent(JSON.stringify({
           let titlePropertyName = null;
           if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.DATABASE) {
             database = await NotionAPI2.fetchDatabase(exportState.databaseId, apiKey);
-            titlePropertyName = ((_c = Object.entries(database.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _c[0]) || null;
+            titlePropertyName = ((_d = Object.entries(database.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _d[0]) || null;
             if (!titlePropertyName) {
               throw new Error("\u5F53\u524D\u76EE\u6807\u6570\u636E\u5E93\u7F3A\u5C11\u6807\u9898\u5C5E\u6027\uFF0C\u65E0\u6CD5\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u3002");
             }
             database = await UI2.ensureWorkspaceConnectionCandidateDatabaseSchema(exportState.databaseId, apiKey, database);
           }
           for (let index = 0; index < model.connectionCandidates.length; index++) {
-            if ((_e = (_d = UI2._abortController) == null ? void 0 : _d.signal) == null ? void 0 : _e.aborted) break;
+            if (abortSignal == null ? void 0 : abortSignal.aborted) break;
             const candidate = model.connectionCandidates[index];
             const aiDraft = await UI2.buildWorkspaceConnectionCandidateAIDraft(candidate, aiSettings);
             const candidateTitle = UI2.buildWorkspaceConnectionCandidateTitle(candidate, index, aiDraft);
@@ -26190,7 +26217,7 @@ ${AIService2.isolateContent(JSON.stringify({
             }
           }
           if (createdPages.length === 0) {
-            throw new Error(((_f = failedCandidates[0]) == null ? void 0 : _f.error) || "\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u5931\u8D25\u3002");
+            throw new Error(((_e = failedCandidates[0]) == null ? void 0 : _e.error) || "\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u5931\u8D25\u3002");
           }
           const targetLabel = exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93";
           const statusMessage = failedCandidates.length > 0 ? `\u7EDF\u4E00\u5019\u9009\u5DF2\u90E8\u5206\u4FDD\u5B58\u5230 Notion\uFF08${targetLabel}\uFF09\uFF1A\u6210\u529F ${createdPages.length} \u6761\uFF0C\u5931\u8D25 ${failedCandidates.length} \u6761\u3002` : `\u7EDF\u4E00\u5019\u9009\u5DF2\u4FDD\u5B58\u5230 Notion\uFF08${targetLabel}\uFF09\uFF1A\u5171 ${createdPages.length} \u6761\u3002`;

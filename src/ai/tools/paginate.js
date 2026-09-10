@@ -23,15 +23,29 @@ const queryAllPages = async ({ dbId, apiKey, body = {}, maxPages = MAX_QUERY_PAG
         if (cursor) reqBody.start_cursor = cursor;
         let response;
         try {
-            response = await NotionAPI.request("POST", `/databases/${dbId}/query`, reqBody, apiKey);
+            // P4 收敛(c18): dbId 未编码时含 ../、?、# 可改写请求路径/注入参数
+            response = await NotionAPI.request("POST", `/databases/${encodeURIComponent(String(dbId ?? ""))}/query`, reqBody, apiKey);
         } catch (error) {
+            // P4 收敛(c18): 查询失败时已取结果必然不完整 —— 必须置 truncated,
+            // 否则下游把截断结果当全量(与本模块修复目标相悖)
             console.warn("[LD-Notion] 数据库查询失败:", error);
+            truncated = true;
             break;
         }
-        results.push(...(response.results || []));
+        // P4 收敛(c18): 损坏响应(results 非数组)不得在 try 外抛错 —— 优雅降级并标记不完整
+        if (!Array.isArray(response?.results)) {
+            console.warn("[LD-Notion] 数据库查询返回结构异常, 已停止分页");
+            truncated = true;
+            break;
+        }
+        results.push(...response.results);
         pages++;
         const next = response.has_more ? String(response.next_cursor || "") : "";
-        if (!next || seen.has(next)) break;
+        if (!next || seen.has(next)) {
+            // P4 收敛(c18): has_more 为真但游标缺失/重复 —— 分页损坏, 结果不完整
+            if (response.has_more) truncated = true;
+            break;
+        }
         seen.add(next);
         if (pages >= maxPages) {
             truncated = true;
@@ -57,13 +71,23 @@ const searchAllDatabases = async ({ apiKey, maxPages = MAX_SEARCH_PAGES }) => {
         try {
             response = await NotionAPI.search("", { property: "object", value: "database" }, apiKey, cursor || undefined);
         } catch (error) {
+            // P4 收敛(c18): 与 queryAllPages 同口径 —— 失败即不完整
             console.warn("[LD-Notion] 数据库发现失败:", error);
+            truncated = true;
             break;
         }
-        results.push(...(response.results || []));
+        if (!Array.isArray(response?.results)) {
+            console.warn("[LD-Notion] 数据库发现返回结构异常, 已停止分页");
+            truncated = true;
+            break;
+        }
+        results.push(...response.results);
         pages++;
         const next = response.has_more ? String(response.next_cursor || "") : "";
-        if (!next || seen.has(next)) break;
+        if (!next || seen.has(next)) {
+            if (response.has_more) truncated = true;
+            break;
+        }
         seen.add(next);
         if (pages >= maxPages) {
             truncated = true;

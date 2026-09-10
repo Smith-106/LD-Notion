@@ -660,7 +660,9 @@ module.exports = {
 
             const queryOneDb = async (dbId) => {
                 // P4 收敛(c04): 单次 page_size 查询当作全量 —— 超出部分静默遗漏
-                const { results } = await queryAllPages({ dbId, apiKey: settings.notionApiKey, body: { page_size: 100 } });
+                // P4 收敛(c18): 与 batch_tag 同口径 —— 单库分页截断必须计入, 否则统计静默少算
+                const { results, truncated } = await queryAllPages({ dbId, apiKey: settings.notionApiKey, body: { page_size: 100 } });
+                if (truncated) dbTruncated = true;
                 return results;
             };
 
@@ -699,7 +701,7 @@ module.exports = {
                 bullets.push(`分类 ${cat}: ${count} 条`);
             }
             if (dbTruncated) {
-                bullets.push("⚠️ 数据库数量超过分页上限，统计仅覆盖已扫描的数据库");
+                bullets.push("⚠️ 受分页/数据库数量上限截断，统计仅覆盖已扫描内容");
             }
 
             return AI()._formatToolResult({

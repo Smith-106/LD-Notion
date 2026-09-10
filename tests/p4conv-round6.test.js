@@ -231,3 +231,53 @@ describe("P4 收敛(c09/c13/c14): 源码级契约锁定", () => {
         expect(src).toContain('if (floatBtn) floatBtn.className = "gclip-float-btn error";');
     });
 });
+
+describe("P4 收敛(c15/c16/c17): 销毁中止 / 面板复用 / 原型键 / base64 对称", () => {
+    const fs = require("fs");
+    const { Utils } = require("../src/utils");
+
+    it("MainUI 保存候选循环用预先捕获的 signal(destroy 置 null 后仍可中止)", () => {
+        const src = fs.readFileSync("src/ui/main-ui.js", "utf8");
+        expect(src).toContain("const abortSignal = UI._abortController?.signal;");
+        expect(src).toContain("if (abortSignal?.aborted) break;");
+        expect(src).not.toContain("if (UI._abortController?.signal?.aborted) break;");
+    });
+
+    it("NotionSiteUI destroy 后排队 idle 回调不得重建面板", () => {
+        const src = fs.readFileSync("src/ui/notion-site-ui.js", "utf8");
+        expect(src).toContain("NotionSiteUI._destroyed = true;");
+        expect(src).toContain("NotionSiteUI._destroyed = false;");
+        expect(src).toContain("if (NotionSiteUI._destroyed) return;");
+    });
+
+    it("顶级页面判定兼容对象形态 parent", () => {
+        const src = fs.readFileSync("src/ui/notion-site-ui.js", "utf8");
+        expect(src).not.toContain('pages.filter(p => p.parent === "workspace")');
+        expect(src).toContain('pages.filter(p => NotionSiteUI.getAITargetPageParentType(p) === "workspace")');
+    });
+
+    it("applyPostAuthTarget 标题不双重转义", () => {
+        const src = fs.readFileSync("src/ui/notion-site-ui.js", "utf8");
+        expect(src).not.toContain("const title = payload.title ? Utils.escapeHtml(payload.title) : \"\";");
+        expect(src).toContain("const title = payload.title ? String(payload.title) : \"\";");
+    });
+
+    it("GitHub 类型标签映射为无原型对象", () => {
+        const src = fs.readFileSync("src/ui/workspace-insight.js", "utf8");
+        expect(src).toContain("const githubTypeLabelMap = Object.assign(Object.create(null), {");
+    });
+
+    it("base64Encode/DecodeUnicode 对 Latin-1 区间字符对称(UTF-8)", () => {
+        for (const input of ["café", "©2024", "中文abc", "·middle·"]) {
+            expect(Utils.base64Encode(input)).toBe(Buffer.from(input, "utf8").toString("base64"));
+            expect(Utils.base64DecodeUnicode(Utils.base64Encode(input))).toBe(input);
+        }
+    });
+
+    it("githubTypeLabelMap 对原型键不再取到函数源码", () => {
+        const src = fs.readFileSync("src/ui/workspace-insight.js", "utf8");
+        const map = Object.assign(Object.create(null), { stars: "Stars", repos: "Repos", forks: "Forks", gists: "Gists" });
+        expect(map["constructor"] || "constructor").toBe("constructor");
+        expect(src).not.toMatch(/const githubTypeLabelMap = \{\n\s+stars: "Stars",/);
+    });
+});

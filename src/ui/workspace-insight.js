@@ -559,12 +559,14 @@ const WorkspaceInsight = {
     },
 
     buildUnifiedSyncModel: () => {
-        const githubTypeLabelMap = {
+        // P4 收敛(c17): 无原型对象 —— 存储/导入的 githubImportTypes 可含 constructor/__proto__
+        // 等原型键, 直接取值会把函数源码或 [object Object] 显示到同步中心文案
+        const githubTypeLabelMap = Object.assign(Object.create(null), {
             stars: "Stars",
             repos: "Repos",
             forks: "Forks",
             gists: "Gists",
-        };
+        });
         const linuxdoState = SyncState.getLinuxDoState();
         const githubMeta = SyncState.getGitHubMeta();
         const githubTypes = Array.from(new Set((GitHubAPI.getImportTypes() || []).filter(Boolean)));

@@ -2248,6 +2248,9 @@ const UI = {
 
     saveWorkspaceConnectionCandidatesToNotion: async () => {
         const model = UI.buildWorkspaceVisualizationModel();
+        // P4 收敛(c15): 先捕获 signal —— destroy 会 abort 后置 _abortController = null,
+        // 循环内再读 UI._abortController 会得到 null → 中止检查恒失效(销毁后仍写入)
+        const abortSignal = UI._abortController?.signal;
         if (!model?.scannedAt) {
             throw new Error("请先刷新工作区视图。");
         }
@@ -2283,7 +2286,7 @@ const UI = {
 
         for (let index = 0; index < model.connectionCandidates.length; index++) {
             // P4 收敛(c15): 面板销毁(_abortController.abort)后不得继续逐条 AI 调用 + Notion 写入
-            if (UI._abortController?.signal?.aborted) break;
+            if (abortSignal?.aborted) break;
             const candidate = model.connectionCandidates[index];
             const aiDraft = await UI.buildWorkspaceConnectionCandidateAIDraft(candidate, aiSettings);
             const candidateTitle = UI.buildWorkspaceConnectionCandidateTitle(candidate, index, aiDraft);

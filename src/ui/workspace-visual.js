@@ -570,8 +570,15 @@ const WorkspaceVisual = {
             // 本地索引与导出写入均为 `/t/{id}`。不归一则工作区对账永不命中 → 仍显示「待导出」。
             const host = parsed.host.toLowerCase();
             if (host === "linux.do" || host.endsWith(".linux.do")) {
-                const topicMatch = pathname.match(/^\/t\/(?:[^/]+\/)?(\d+)(?:\/\d+)?$/i);
-                if (topicMatch) pathname = `/t/${topicMatch[1]}`;
+                // P4 收敛(c17): 原正则 `(?:[^/]+/)?(\d+)` 对无 slug 的 /t/{id}/{post} 会把
+                // {id} 当 slug 吃掉, 归一成 /t/{post}(对账漏标 / 与真 topic 撞键)。
+                // 改按段位判定: 首个数字段即 topic id, 其后的数字段是楼层号。
+                const parts = pathname.split("/").filter(Boolean);
+                if (String(parts[0] || "").toLowerCase() === "t") {
+                    const idIndex = /^\d+$/.test(parts[1] || "") ? 1
+                        : (/^\d+$/.test(parts[2] || "") ? 2 : -1);
+                    if (idIndex > 0) pathname = `/t/${parts[idIndex]}`;
+                }
             }
             const search = parsed.search || "";
             return `${parsed.protocol.toLowerCase()}//${host}${pathname}${search}`;

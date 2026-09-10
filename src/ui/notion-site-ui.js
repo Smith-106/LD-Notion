@@ -960,7 +960,9 @@ const NotionSiteUI = {
         }
 
         // 只显示工作区顶级页面（value 带 page: 前缀以区分类型）
-        const workspacePages = pages.filter(p => p.parent === "workspace");
+        // P4 收敛(c16): 与下方嵌套组同口径 —— parent 可能是对象形态 {type:"workspace"},
+        // 仅比字符串会使该页面两组皆不入, 目标下拉完全缺失
+        const workspacePages = pages.filter(p => NotionSiteUI.getAITargetPageParentType(p) === "workspace");
         if (workspacePages.length > 0) {
             options += '<optgroup label="📄 页面">';
             workspacePages.forEach(page => {
@@ -1065,7 +1067,8 @@ const NotionSiteUI = {
     applyPostAuthTarget: (payload = {}) => {
         const action = payload.action || "";
         if (action === "autofill") {
-            const title = payload.title ? Utils.escapeHtml(payload.title) : "";
+            // P4 收敛(c16): showStatus 出口已统一 escapeHtml —— 此处再转义会使标题显示为 &amp; 等实体
+            const title = payload.title ? String(payload.title) : "";
             NotionSiteUI.showStatus(`✅ 授权成功，已自动选择数据库${title ? `「${title}」` : ""}。回到 LinuxDo 页面即可开始导出。`, "success");
         } else if (action === "needs_choice") {
             const count = payload.count || (Array.isArray(payload.candidates) ? payload.candidates.length : 0);
@@ -1156,6 +1159,8 @@ const NotionSiteUI = {
 
     // 初始化
     init: () => {
+        // P4 收敛(c16): destroy 后同一页面可能重新 init(SPA 路由/扩展重注入), 复位销毁标记
+        NotionSiteUI._destroyed = false;
         NotionSiteUI.injectStyles();
         NotionSiteUI.createFloatButton();
         NotionSiteUI.initAIAssistant();
@@ -1166,6 +1171,8 @@ const NotionSiteUI = {
                 // P3(dsf, 主 agent 复核): 空闲回调排队期间用户可能已手动关闭面板,
                 // 重新读取持久化标记, 避免强制展开覆盖用户操作。
                 if (Storage.get(CONFIG.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, true)) return;
+                // P4 收敛(c16): 空闲回调排队期间 destroy 已执行时不得重建面板
+                if (NotionSiteUI._destroyed) return;
                 NotionSiteUI.ensurePanelReady();
                 NotionSiteUI.isMinimized = false;
                 NotionSiteUI.panel.classList.add("visible");
@@ -1175,6 +1182,8 @@ const NotionSiteUI = {
     },
 
     destroy: () => {
+        // P4 收敛(c16): 标记已销毁 —— 排队的 idle 回调不得在销毁后重建面板
+        NotionSiteUI._destroyed = true;
         // Odyssey UI N: 浮钮改用 setPointerCapture,btn.remove() 自动清理,无需 document.removeEventListener
         NotionSiteUI._abortController?.abort();
         NotionSiteUI._abortController = null;
