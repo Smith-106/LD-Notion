@@ -5,6 +5,10 @@ const { SyncConstants } = require("./constants");
 // 数据类型工具(纯函数)
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
+// P4 收敛(c11): 远端 JSON.parse 可产出 own __proto__ 键 —— 普通对象赋值会走原型 setter
+// (键被吞入原型, SyncSerializer.assertNoBlacklisted 的 Object.keys 漏检)
+const FORBIDDEN_KEY_SET = new Set(SyncConstants.FORBIDDEN_KEYS || ["__proto__", "constructor", "prototype"]);
+
 const clone = (v) => {
     if (typeof structuredClone === "function") return structuredClone(v);
     return JSON.parse(JSON.stringify(v));
@@ -76,9 +80,9 @@ const SyncPayload = {
             deviceId: (a.updatedAt || "") >= (b.updatedAt || "") ? a.deviceId : b.deviceId,
             version: Math.max(Number(a.version) || 0, Number(b.version) || 0),
             updatedAt: (a.updatedAt || "") >= (b.updatedAt || "") ? a.updatedAt : b.updatedAt,
-            dedup: {},
-            watermarks: {},
-            settings: {},
+            dedup: Object.create(null),
+            watermarks: Object.create(null),
+            settings: Object.create(null),
         };
 
         // ① dedup: union + max ts
@@ -86,11 +90,13 @@ const SyncPayload = {
         const bDedup = b.dedup || {};
         const dedupSources = new Set([...Object.keys(aDedup), ...Object.keys(bDedup)]);
         for (const src of dedupSources) {
+            if (FORBIDDEN_KEY_SET.has(src)) continue;
             const A = aDedup[src] || {};
             const B = bDedup[src] || {};
-            const merged = {};
+            const merged = Object.create(null);
             const keys = new Set([...Object.keys(A), ...Object.keys(B)]);
             for (const k of keys) {
+                if (FORBIDDEN_KEY_SET.has(k)) continue;
                 merged[k] = Math.max(Number(A[k]) || 0, Number(B[k]) || 0);
             }
             out.dedup[src] = merged;
@@ -99,6 +105,7 @@ const SyncPayload = {
         // ② watermarks: (epoch, time) 全序 max, 平局 ids 并集
         const wmSources = new Set([...Object.keys(a.watermarks || {}), ...Object.keys(b.watermarks || {})]);
         for (const src of wmSources) {
+            if (FORBIDDEN_KEY_SET.has(src)) continue;
             const A = a.watermarks[src];
             const B = b.watermarks[src];
             if (!isPlainObject(A)) { out.watermarks[src] = clone(B); continue; }
@@ -120,6 +127,7 @@ const SyncPayload = {
         // (破坏文档声明的交换律)。追加 value 字典序作为最终平局规则。
         const settingKeys = new Set([...Object.keys(a.settings || {}), ...Object.keys(b.settings || {})]);
         for (const k of settingKeys) {
+            if (FORBIDDEN_KEY_SET.has(k)) continue;
             const A = a.settings[k];
             const B = b.settings[k];
             if (!isPlainObject(A)) { out.settings[k] = clone(B); continue; }

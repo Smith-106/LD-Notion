@@ -488,6 +488,9 @@ GitHubAutoImporter.run = async () => {
         GitHubAutoImporter.updateStatus("⏸ 其他标签页正在同步，本轮 GitHub 同步跳过");
         return;
     }
+    // P4 收敛(c09): 记录本 run 是否由自己置位 —— await 租约期间并发导出可能已置位,
+    // finally 无条件清零会误清其互斥(与 BookmarkAutoImporter 同型)
+    const exportMutexAcquired = SyncLock.isExporting !== true;
     SyncLock.isExporting = true;
     GitHubAutoImporter._leaseLost = false;
     const renewTimer = setInterval(() => {
@@ -557,7 +560,8 @@ GitHubAutoImporter.run = async () => {
     } finally {
         clearInterval(renewTimer);
         SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-        SyncLock.isExporting = false;
+        // P4 收敛(c09): 仅当本次由自己置位时才复位
+        if (exportMutexAcquired) SyncLock.isExporting = false;
         GitHubAutoImporter._leaseLost = false;
         GitHubAutoImporter.isRunning = false;
         // v3.14.7 (REV-06): 补 emit bookmarks:updated——收藏列表唯一自动重渲染触发是

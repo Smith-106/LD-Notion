@@ -673,7 +673,7 @@ const NotionOAuth = {
     getConfig: () => ({
         // 纵深防御(三模型共识验证轮):存量脏值(隐形字符)在读取层剥离,续签/授权不再携带
         clientId: String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "") || "").trim().replace(INVISIBLE_CHARS_RE, ""),
-        clientSecret: String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "") || "").trim(),
+        clientSecret: String(Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "") || "").trim().replace(INVISIBLE_CHARS_RE, ""),
         redirectUri: String(
             Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, CONFIG.DEFAULTS.notionOauthRedirectUri)
             || CONFIG.DEFAULTS.notionOauthRedirectUri
@@ -1486,12 +1486,21 @@ const NotionOAuth = {
                         // 用新值重试一次再判终态(防后到者误清凭据)
                         const stored = Storage.get(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "");
                         if (stored && stored !== refreshToken) {
-                            const retryResult = await NotionOAuth.exchangeToken({
-                                grant_type: "refresh_token",
-                                refresh_token: stored,
-                            });
-                            await NotionOAuth.applyTokenResponse(retryResult, { source: "refresh" });
-                            return retryResult.access_token;
+                            // P4 收敛(c06): 重试失败(新 token 同样无效/网络错误)必须继续走下方降级清理,
+                            // 否则异常逃逸跳过清凭据 → 后续续签持续失败
+                            let retryResult = null;
+                            try {
+                                retryResult = await NotionOAuth.exchangeToken({
+                                    grant_type: "refresh_token",
+                                    refresh_token: stored,
+                                });
+                            } catch (retryError) {
+                                console.warn("[LD-Notion] 他 tab 轮换后的 refresh token 重试失败:", retryError);
+                            }
+                            if (retryResult) {
+                                await NotionOAuth.applyTokenResponse(retryResult, { source: "refresh" });
+                                return retryResult.access_token;
+                            }
                         }
                         // invalid_grant/invalid_client 均视为终态(三模型共识 + 全盘审计交叉回归):
                         // invalid_grant=已使用/已过期; invalid_client=clientId 被污染/非法——

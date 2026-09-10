@@ -344,6 +344,21 @@ const SyncEngine = {
                     continue;
                 }
             }
+            // ④ 兑底(P4 收敛 c11): watermark/settings 均已裁剪仍超预算时, 丢弃该行 dedup 集 ——
+            // 否则 SyncLedger 单行 2000 硬限会拒整行, 导致整个 push 失败。同步投影层 dedup 可
+            // 从本地账本下轮重建(不影响本地永久保留)。
+            if (JSON.stringify(row.payload || {}).length > budgetChars && row.payload && row.payload.dedup) {
+                const src = Object.keys(row.payload.dedup)[0];
+                row.payload.dedup = { [src]: {} };
+                try {
+                    const { OperationLog } = SyncEngine._getDeps();
+                    OperationLog.add({
+                        audit_event: "sync.row.dedup.dropped", actor: "system", source: "sync-engine",
+                        operationName: "sync.state.push", status: "success",
+                        context: { source: src, reason: "row budget exhausted" },
+                    }, { force: true });
+                } catch { /* 审计不可用不阻断 push */ }
+            }
             out.push(row);
         }
         return out;

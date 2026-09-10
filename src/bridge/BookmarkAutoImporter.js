@@ -321,6 +321,9 @@ BookmarkAutoImporter.run = async () => {
         return;
     }
     // v3.14.6 (CC-03): 占用导出互斥(租约获证后), 防手动/AI/自动并发交错; finally 复位
+    // P4 收敛(c06): 记录本 run 是否由自己置位 —— await 租约期间并发导出可能已置位,
+    // finally 无条件清零会误清其互斥(与 releaseLease/acquireLease 失败路径同口径)
+    const exportMutexAcquired = SyncLock.isExporting !== true;
     SyncLock.isExporting = true;
     // 持有期间每 30s 续约(少于 180s TTL, 防中途过期被抢占)
     // S1: 续约失配(租约被其他 tab 抢占)置 leaseLost 中止本轮, 防双持有并发同步
@@ -749,8 +752,8 @@ BookmarkAutoImporter.run = async () => {
     } finally {
         clearInterval(renewTimer);
         SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-        // v3.14.6 (CC-03): 复位互斥
-        SyncLock.isExporting = false;
+        // v3.14.6 (CC-03): 复位互斥(仅当本次由自己置位)
+        if (exportMutexAcquired) SyncLock.isExporting = false;
         BookmarkAutoImporter.isRunning = false;
         emit("sync:center-summary-updated");
     }

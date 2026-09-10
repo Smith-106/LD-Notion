@@ -6,6 +6,7 @@ const { Storage } = require("../storage");
 const { NotionAPI } = require("../api");
 const { GitHubAPI } = require("./GitHubAPI");
 const { Exporter } = require("../export");
+const { SyncLock } = require("../sync-lock");
 const { AIService } = require("../ai");
 
 const GitHubExporter = {
@@ -327,6 +328,28 @@ const GitHubExporter = {
             return { total: items.length, exported: 0, failed: 0, message: `没有新的 ${sourceType} 需要导出` };
         }
 
+        // P4 收敛(c09): 手动导出与自动导入/其他 tab 共用 AUTO_SYNC_LEASE —— 此前仅自动路径
+        // 持租约, 手动导出可与自动同步并发建页/互相覆盖已导出标记。顺序同 import/index.js:
+        // 先置进程内互斥(挡同 tab 自动轮) → 再取跨 tab 租约, 失败即复位并跳过
+        SyncLock.isExporting = true;
+        let lease = null;
+        try {
+            lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        } catch (leaseError) {
+            SyncLock.isExporting = false;
+            throw leaseError;
+        }
+        if (!lease) {
+            SyncLock.isExporting = false;
+            return {
+                total: items.length,
+                exported: 0,
+                failed: 0,
+                skipped: newItems.length,
+                message: "其他标签页正在导出/同步，已跳过本次请求",
+            };
+        }
+
         let success = 0, failed = 0;
         let authAbortInfo = null;
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
@@ -386,6 +409,8 @@ const GitHubExporter = {
             // 批量回写已导出映射（DISCOVER P3）：循环内 markExportedFn 仅 mutate 内存缓存，
             // 循环末单次 flush，写侧从 O(N²)→O(N)。与 BookmarkExporter.flushExported 同构。
             // v3.14.6 (DC-009/CC-10): finally 保证异常/中止路径也落盘, flush 幂等
+            SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+            SyncLock.isExporting = false;
             if (flushFn) flushFn();
         }
 
@@ -558,6 +583,8 @@ const GitHubExporter = {
         if (pages.length === 0) {
             return { classified: 0, message: "没有待分类的仓库" };
         }
+        // P4 收敛(c09): 单次查询 page_size=100 —— 超出部分静默遗留, 结果需明示可续跑
+        const hasMore = response.has_more === true;
 
         let classified = 0;
         for (let i = 0; i < pages.length; i++) {
@@ -621,7 +648,14 @@ const GitHubExporter = {
             await Utils.sleep(500);
         }
 
-        return { classified, total: pages.length };
+        return {
+            classified,
+            total: pages.length,
+            hasMore,
+            message: hasMore
+                ? `已分类 ${classified} 个仓库（还有更多待分类条目，请再次运行以继续）`
+                : `已分类 ${classified} 个仓库`,
+        };
     },
 };
 

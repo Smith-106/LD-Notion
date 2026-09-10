@@ -77,6 +77,8 @@ const Storage = {
             const raw = Storage.getRaw(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, "{}");
             let legacy = {};
             try { legacy = JSON.parse(raw); } catch { /* 损坏即忽略 */ }
+            // P4 收敛(c10): 非纯对象(字符串/数组/null) 会污染去重键(下标键)或抛 TypeError
+            if (!legacy || typeof legacy !== "object" || Array.isArray(legacy)) legacy = {};
             const legacyKeys = Object.keys(legacy);
             if (legacyKeys.length === 0) return;
             const set = DedupStore.getSeen("linuxdo") || {};

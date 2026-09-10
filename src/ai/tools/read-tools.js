@@ -10,6 +10,10 @@ const { TargetState } = require("../../auth");
 const { NotionAPI } = require("../../api");
 const { OperationGuard } = require("../../security");
 const { getAI: AI, getService: svc } = require("../deps");
+const { queryAllPages, searchAllDatabases } = require("./paginate");
+
+// 跨源搜索扫描的数据库上限(成本边界; 超限明示而非静默)
+const MAX_QUERY_DBS = 10;
 
 module.exports = {
     search_workspace: {
@@ -589,6 +593,7 @@ module.exports = {
             };
 
             let results = [];
+            let dbTruncated = false;
             const targetDb = TargetState.getEffectiveAIDatabaseId({
                 fallbackDatabaseId: settings.notionDatabaseId,
                 targetValue: aiTargetState.value,
@@ -596,9 +601,11 @@ module.exports = {
             if (aiTargetState.mode !== "all" && targetDb) {
                 results = await queryOneDb(targetDb);
             } else {
-                // 搜索所有数据库
-                const allDbs = await NotionAPI.search("", { property: "object", value: "database" }, settings.notionApiKey);
-                for (const db of (allDbs.results || []).slice(0, 5)) {
+                // 搜索所有数据库(P4 收敛 c04: 发现分页 + 超上限明示, 此前仅前 5 个库且无提示)
+                const discovered = await searchAllDatabases({ apiKey: settings.notionApiKey });
+                const dbs = discovered.results.slice(0, MAX_QUERY_DBS);
+                dbTruncated = discovered.truncated || discovered.results.length > dbs.length;
+                for (const db of dbs) {
                     const dbResults = await queryOneDb(db.id);
                     results.push(...dbResults);
                 }
@@ -626,6 +633,9 @@ module.exports = {
                 const url = page.properties?.["链接"]?.url || "";
                 return `[${src}${srcType ? "/" + srcType : ""}] ${title}${url ? ` (${url})` : ""}`;
             });
+            if (dbTruncated) {
+                lines.push(`⚠️ 数据库数量超过扫描上限（${MAX_QUERY_DBS} 个），结果可能不完整`);
+            }
 
             return AI()._formatToolResult({
                 title: "跨源搜索结果",
@@ -649,16 +659,13 @@ module.exports = {
             });
 
             const queryOneDb = async (dbId) => {
-                try {
-                    const response = await NotionAPI.request("POST", `/databases/${dbId}/query`, { page_size: 100 }, settings.notionApiKey);
-                    return response.results || [];
-                } catch (error) {
-                    console.warn("[LD-Notion] 数据库查询失败:", error);
-                    return [];
-                }
+                // P4 收敛(c04): 单次 page_size 查询当作全量 —— 超出部分静默遗漏
+                const { results } = await queryAllPages({ dbId, apiKey: settings.notionApiKey, body: { page_size: 100 } });
+                return results;
             };
 
             let allPages = [];
+            let dbTruncated = false;
             const targetDb = TargetState.getEffectiveAIDatabaseId({
                 fallbackDatabaseId: settings.notionDatabaseId,
                 targetValue: aiTargetState.value,
@@ -666,8 +673,9 @@ module.exports = {
             if (aiTargetState.mode !== "all" && targetDb) {
                 allPages = await queryOneDb(targetDb);
             } else {
-                const allDbs = await NotionAPI.search("", { property: "object", value: "database" }, settings.notionApiKey);
-                for (const db of (allDbs.results || []).slice(0, 5)) {
+                const discovered = await searchAllDatabases({ apiKey: settings.notionApiKey });
+                dbTruncated = discovered.truncated;
+                for (const db of discovered.results) {
                     allPages.push(...await queryOneDb(db.id));
                 }
             }
@@ -690,11 +698,14 @@ module.exports = {
             for (const [cat, count] of topCats) {
                 bullets.push(`分类 ${cat}: ${count} 条`);
             }
+            if (dbTruncated) {
+                bullets.push("⚠️ 数据库数量超过分页上限，统计仅覆盖已扫描的数据库");
+            }
 
             return AI()._formatToolResult({
                 title: "跨源数据统计",
                 fields: [
-                    { label: "总数", value: allPages.length },
+                    { label: "总数", value: dbTruncated ? `≥${allPages.length}` : allPages.length },
                     { label: "来源种类", value: Object.keys(sourceStats).length },
                     { label: "分类种类", value: Object.keys(categoryStats).length },
                 ],

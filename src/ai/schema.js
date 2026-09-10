@@ -26,6 +26,9 @@ const AISchema = {
         "url", "path", "Name",
     ]),
 
+    // P4 收敛(c03): 原型链危险键 —— 作为普通对象下标赋值会走 setter/污染原型而非自有属性
+    FORBIDDEN_PROP_NAMES: new Set(["__proto__", "constructor", "prototype"]),
+
     // 合法属性类型白名单
     ALLOWED_PROPERTY_TYPES: new Set([
         "title", "rich_text", "number", "select", "multi_select",
@@ -53,6 +56,7 @@ const AISchema = {
         if (n.length > AISchema.MAX_PROP_NAME) n = n.slice(0, AISchema.MAX_PROP_NAME);
         if (!AISchema.PROP_NAME_RE.test(n)) return "";
         if (AISchema.NOTION_RESERVED_NAMES.has(n)) return "";
+        if (AISchema.FORBIDDEN_PROP_NAMES.has(n)) return "";
         return n;
     },
 

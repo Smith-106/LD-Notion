@@ -242,24 +242,30 @@ const OperationGuard = {
             logEntry.endTime = Date.now();
 
             // 记录日志
-            OperationLog.add({
-                audit_event: OperationLog.inferAuditEvent(operation, "success"),
-                actor,
-                source,
-                guard: OperationGuard._buildGuardSnapshot(operation, "allow", context),
-                operation: {
-                    name: operation,
-                    risk: OperationGuard._getPermissionName(requiredLevelForOp),
-                    trigger: context.trigger || "user_requested_write",
-                },
-                target: OperationLog.buildTarget(context),
-                payload: OperationLog.buildPayload(context),
-                result: {
-                    status: "success",
-                },
-                redaction: OperationLog.collectRedactionHints(context),
-                ...logEntry,
-            });
+            // P4 收敛(c10): 审计写入失败不得把已成功的写操作判为失败
+            // (否则调用方收到错误且跳过下方撤销注册)
+            try {
+                OperationLog.add({
+                    audit_event: OperationLog.inferAuditEvent(operation, "success"),
+                    actor,
+                    source,
+                    guard: OperationGuard._buildGuardSnapshot(operation, "allow", context),
+                    operation: {
+                        name: operation,
+                        risk: OperationGuard._getPermissionName(requiredLevelForOp),
+                        trigger: context.trigger || "user_requested_write",
+                    },
+                    target: OperationLog.buildTarget(context),
+                    payload: OperationLog.buildPayload(context),
+                    result: {
+                        status: "success",
+                    },
+                    redaction: OperationLog.collectRedactionHints(context),
+                    ...logEntry,
+                });
+            } catch (auditError) {
+                console.warn("[LD-Notion] 操作审计写入失败(写操作已成功):", auditError);
+            }
 
             // 危险操作提供撤销选项
             if (OperationGuard.isDangerous(operation)) {

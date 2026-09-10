@@ -42,6 +42,9 @@ const AIService = {
         return normalizedBase;
     },
 
+    // P4 收敛(c03): model 拼入 URL 路径 —— 含 / ? # 等字符会篡改路径/查询
+    _modelPathSegment: (model) => encodeURIComponent(String(model ?? "").trim()),
+
     // 服务商配置
     PROVIDERS: {
         openai: {
@@ -294,9 +297,10 @@ const AIService = {
     requestGeminiChat: (prompt, model, apiKey, baseUrl, maxTokens) => {
         // 标准化 baseUrl：移除末尾的 / 和 /v1beta，避免重复路径
         const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1beta");
+        const modelSeg = AIService._modelPathSegment(model);
         const url = normalizedBase
-            ? `${normalizedBase}/v1beta/models/${model}:generateContent`
-            : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+            ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent`
+            : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
 
         return AIService._chatRequest(
             url,
@@ -349,9 +353,10 @@ const AIService = {
         }
         if (aiService === "gemini") {
             const normalizedBase = AIService._normalizeBaseUrl(aiBaseUrl, "v1beta");
+            const modelSeg = AIService._modelPathSegment(model);
             const url = normalizedBase
-                ? `${normalizedBase}/v1beta/models/${model}:generateContent`
-                : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+                ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent`
+                : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
             return await AIService._chatRequest(
                 url,
                 { "Content-Type": "application/json", "x-goog-api-key": aiApiKey },
@@ -1220,7 +1225,7 @@ const AIAssistant = {
             case "date":
                 return { date: { start: v !== null ? String(v) : "" } };
             case "checkbox":
-                return { checkbox: !!value };
+                return { checkbox: v === true };
             default:
                 return { rich_text: [{ type: "text", text: { content: String(value).slice(0, 2000) } }] };
         }
@@ -1245,7 +1250,13 @@ const AIAssistant = {
             if (params.value === undefined || params.value === null) {
                 return { error: "更新属性时必须提供 value。" };
             }
-            propertyUpdates[params.property] = AIAssistant._buildPropertyValuePayload(params.value, params.type || "text");
+            // P4 收敛(c03): 属性名走白名单校验 —— __proto__/constructor 作为普通对象下标会走原型链,
+            // 既污染原型又静默丢更新(不是自有属性)
+            const propName = AISchema.validatePropertyName(params.property);
+            if (!propName) {
+                return { error: `属性名不合法：${String(params.property).slice(0, 60)}` };
+            }
+            propertyUpdates[propName] = AIAssistant._buildPropertyValuePayload(params.value, params.type || "text");
         }
 
         const metaPayload = AIAssistant._buildPageMetaPayload(params);
@@ -2269,25 +2280,32 @@ const ChatUI = {
         if (input) input.disabled = true;
         if (sendBtn) sendBtn.disabled = true;
 
-        // 清空输入框
-        input.value = "";
-        input.style.height = "auto";
-
-        // 添加用户消息
-        ChatState.addMessage("user", message);
-
-        // 添加 AI 回复占位
-        ChatState.isProcessing = true;
-        ChatState.addMessage("assistant", "思考中...", "processing");
-
+        // P4 收敛(c03): 状态变更(存储写入/渲染)纳入 try —— 此前抛错会跳过 finally,
+        // 输入框与发送按钮永久禁用、isProcessing 永久 true
         try {
+            // 清空输入框
+            input.value = "";
+            input.style.height = "auto";
+
+            // 添加用户消息
+            ChatState.addMessage("user", message);
+
+            // 添加 AI 回复占位
+            ChatState.isProcessing = true;
+            ChatState.addMessage("assistant", "思考中...", "processing");
+
             const response = await AIAssistant.handleMessage(message);
             // P3(qwen, 主 agent 复核): handleMessage 可返回 {status:"error"} 结构化结果而非抛错,
             // 原实现一律标 complete, UI 状态机与执行结果相反。
             ChatState.updateLastMessage(response, AIAssistant._isErrorResult(response) ? "error" : "complete");
         } catch (error) {
             console.error("[LD-Notion] AI 处理失败:", error);
-            ChatState.updateLastMessage(`❌ 处理失败: ${error.message}`, "error");
+            // P4 收敛(c03): addMessage 自身抛错时可能无占位消息, 兜底避免异常逃逸
+            try {
+                ChatState.updateLastMessage(`❌ 处理失败: ${error.message}`, "error");
+            } catch (updateError) {
+                console.error("[LD-Notion] 更新失败消息也出错:", updateError);
+            }
         } finally {
             ChatState.isProcessing = false;
             // 恢复输入区域

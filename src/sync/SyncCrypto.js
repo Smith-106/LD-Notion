@@ -146,7 +146,9 @@ const SyncCrypto = {
         const { createDecipheriv } = require("crypto");
         const key = require("crypto").pbkdf2Sync(passphrase, salt, 200000, 32, "sha256");
         try {
-            if (ct.length <= 16) throw new Error("密文过短");
+            // P4 收敛(c10): ct.length === 16 为合法空明文(仅 16 字节 GCM 标签),
+            // 与 WebCrypto 路径一致; 仅 < 16 才是截断密文
+            if (ct.length < 16) throw new Error("密文过短");
             const decipher = createDecipheriv("aes-256-gcm", key, iv);
             // GCM 标签为末 16 字节(与 WebCrypto 输出一致)
             decipher.setAuthTag(ct.subarray(ct.length - 16));

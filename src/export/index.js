@@ -207,7 +207,9 @@ const GenericExporter = {
     // Clipper（知乎/通用页）去重：与 ZhihuAdapter/GenericAdapter.getDedupKey 同构。
     // 此前 GenericUI.doExport 成功后不 markSeen → 连点/重导出必建重复 Notion 页。
     resolveClipperDedup: (meta = {}) => {
-        const url = String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim();
+        // P4 收敛(c08): 与 ZhihuAdapter/GenericAdapter.getDedupKey 同构 —— 必须过 normalizeDedupUrl,
+        // 否则 hash/跟踪参数变体得到不同 dedupKey(与适配器路径不一致 → 重复建页)
+        const url = Utils.normalizeDedupUrl(String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim());
         const site = SiteDetector.detect();
         if (site === SiteDetector.SITES.ZHIHU || GenericExporter.resolveUnifiedSource(meta) === "知乎") {
             return { sourceType: "zhihu", dedupKey: url ? `zhihu:${url}` : "" };

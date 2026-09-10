@@ -155,10 +155,13 @@ const SyncStateV2 = {
         const defaults = this._defaults();
         let parsed = {};
         try {
-            parsed = JSON.parse(_getRaw(CONFIG.STORAGE_KEYS.AUTO_SYNC_STATE, "{}")) || {};
+            parsed = JSON.parse(_getRaw(CONFIG.STORAGE_KEYS.AUTO_SYNC_STATE, "{}"));
         } catch {
             parsed = {};
         }
+        // P4 收敛(c10): 非纯对象(字符串/数组/布尔) → 严格模式下属性赋值抛 TypeError,
+        // 数组则被 JSON.stringify 丢属性静默丢失水位/epoch
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) parsed = {};
 
         // 检测并迁移 V1 结构
         // 2/3 共识(dsf+qwen): 旧条件要求 parsed.linuxdo 存在 —— 仅同步过 bookmark/rss/

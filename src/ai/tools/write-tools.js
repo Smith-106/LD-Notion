@@ -10,6 +10,10 @@ const { TargetState } = require("../../auth");
 const { NotionAPI } = require("../../api");
 const { OperationGuard } = require("../../security");
 const { getAI: AI, getService: svc, getClassifier } = require("../deps");
+const { queryAllPages, searchAllDatabases } = require("./paginate");
+
+// 批量打标签扫描的数据库上限(成本边界; 超限明示)
+const MAX_TAG_DBS = 10;
 
 module.exports = {
     batch_tag: {
@@ -34,16 +38,14 @@ module.exports = {
                     filter: { property: "标签", multi_select: { is_empty: true } },
                     page_size: 50,
                 };
-                try {
-                    const response = await NotionAPI.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
-                    return response.results || [];
-                } catch (error) {
-                    console.warn("[LD-Notion] 数据库查询失败:", error);
-                    return [];
-                }
+                // P4 收敛(c04): 单页查询当作全量 —— 超出 50 条的未标记页面静默遗漏
+                const { results, truncated } = await queryAllPages({ dbId, apiKey: settings.notionApiKey, body });
+                if (truncated) dbTruncated = true;
+                return results;
             };
 
             let pages = [];
+            let dbTruncated = false;
             const targetDb = TargetState.getEffectiveAIDatabaseId({
                 fallbackDatabaseId: settings.notionDatabaseId,
                 targetValue: aiTargetState.value,
@@ -51,8 +53,10 @@ module.exports = {
             if (aiTargetState.mode !== "all" && targetDb) {
                 pages = await queryOneDb(targetDb);
             } else {
-                const allDbs = await NotionAPI.search("", { property: "object", value: "database" }, settings.notionApiKey);
-                for (const db of (allDbs.results || []).slice(0, 3)) {
+                const discovered = await searchAllDatabases({ apiKey: settings.notionApiKey });
+                const dbs = discovered.results.slice(0, MAX_TAG_DBS);
+                if (discovered.truncated || discovered.results.length > dbs.length) dbTruncated = true;
+                for (const db of dbs) {
                     pages.push(...await queryOneDb(db.id));
                 }
             }
@@ -103,7 +107,7 @@ module.exports = {
                 await Utils.sleep(500);
             }
 
-            return `✅ 批量打标签完成：已为 ${tagged}/${pages.length} 个页面添加标签。`;
+            return `✅ 批量打标签完成：已为 ${tagged}/${pages.length} 个页面添加标签。${dbTruncated ? "（⚠️ 受扫描上限截断，可能仍有未处理页面，请再次运行）" : ""}`;
         }
     },
 

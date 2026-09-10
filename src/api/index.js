@@ -35,7 +35,16 @@ const isAuthTerminalStatus = (status, result = {}) => {
 
 
 const NotionTransport = Object.freeze({
-    buildUrl: (endpoint) => `https://api.notion.com/v1${endpoint}`,
+    // P4 收敛(c05): endpoint 由调用方拼接 id —— 拒路径穿越/反斜线/片段注入
+    // (../ 会被 HTTP 客户端规范化到同域其他端点; ? 合法用于分页游标)
+    buildUrl: (endpoint) => {
+        const ep = String(endpoint ?? "");
+        const pathPart = ep.split("?")[0];
+        if (!ep.startsWith("/") || /[\s#\\]/.test(ep) || pathPart.includes("..") || pathPart.includes("//")) {
+            throw new Error(`非法 Notion API 端点: ${ep.slice(0, 80)}`);
+        }
+        return `https://api.notion.com/v1${ep}`;
+    },
 
     buildHeaders: ({ token, notionVersion }) => ({
         "Authorization": `Bearer ${token}`,

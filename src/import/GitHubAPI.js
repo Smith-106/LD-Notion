@@ -302,7 +302,9 @@ const GitHubAPI = {
 
     fetchRepoReadme: (repoFullName, token = "") => {
         if (!repoFullName) return Promise.resolve("");
-        const cacheKey = `${repoFullName}::${token ? "auth" : "anon"}`;
+        // P4 收敛(c08): 缓存键含 token 指纹 —— 仅 auth/anon 两槽会让不同账号(或换 token)
+        // 复用同一 readme 缓存, 私有仓库内容跨账号泄漏/过期
+        const cacheKey = `${repoFullName}::${token ? Utils.apiKeyHash(token) : "anon"}`;
         if (Object.prototype.hasOwnProperty.call(GitHubAPI._readmeCache, cacheKey)) {
             return Promise.resolve(GitHubAPI._readmeCache[cacheKey]);
         }

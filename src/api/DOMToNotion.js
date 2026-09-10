@@ -323,9 +323,15 @@ const DOMToNotion = {
         } else {
             let remaining = text;
             while (remaining.length > 0 && chunks.length < maxItems) {
-                const chunk = remaining.substring(0, maxLength);
+                // P4 收敛(c05): 按 UTF-16 码元硬切会拆散代理对(emoji) → 孤立代理对触发 Notion 400/乱码
+                let cut = maxLength;
+                if (cut < remaining.length) {
+                    const code = remaining.charCodeAt(cut - 1);
+                    if (code >= 0xd800 && code <= 0xdbff) cut -= 1;
+                }
+                const chunk = remaining.substring(0, cut);
                 chunks.push({ type: "text", text: { content: chunk }, annotations: { ...annotations } });
-                remaining = remaining.substring(maxLength);
+                remaining = remaining.substring(cut);
             }
             // P4 共识(glm+qwen): 达 100 项上限后剩余文本此前静默丢弃——末块尾插入截断标记,
             // 保留用户可见状态(项目约定: 不静默丢弃)
