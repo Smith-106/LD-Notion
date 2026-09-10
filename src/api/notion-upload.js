@@ -7,6 +7,7 @@
 const { CONFIG } = require("../config");
 const { Utils } = require("../utils");
 const { NotionOAuth } = require("../auth");
+const { UrlValidator } = require("../security/UrlValidator");
 
 // 文件类型支持检测（内部使用）
 const SUPPORTED_EXTENSIONS = {
@@ -283,6 +284,11 @@ function installUploadMethods(NotionAPI) {
     // 通用文件上传（支持所有类型：图片/视频/音频/附件）
     // 自动判断 single_part / multi_part，自动识别 block 类型
         uploadFileToNotion: async (fileUrl, apiKey, originalFileName = null) => {
+        // P4 收敛(c05b2-glm): “下载→上传”是 SSRF / 内网内容外带的边界 —— 本函数是唯一出口,
+        // 不依赖调用方过滤: 仅 http(s) 公网地址可下载(拒内网/169.254/file:/data: 等)
+        if (!UrlValidator.validatePageExternalUrl(String(fileUrl || "").trim())) {
+            throw new Error("不支持的文件 URL（仅允许 http(s) 公网地址）");
+        }
         const urlObj = new URL(fileUrl);
         let ext = (urlObj.pathname.split(".").pop() || "").split("?")[0].toLowerCase();
 

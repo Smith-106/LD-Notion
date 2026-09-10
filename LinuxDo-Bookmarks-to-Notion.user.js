@@ -4677,9 +4677,22 @@
                 return result;
               }).join("") + "\n";
             }
-            case "li":
-              return `- ${children}
+            case "li": {
+              const nestedLists = Array.from(node.children || []).filter((child) => child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase()));
+              if (nestedLists.length === 0) return `- ${children}
 `;
+              let text = children;
+              nestedLists.forEach((list) => {
+                const md = HTMLToMarkdown2._convertNode(list).trim();
+                if (!md) return;
+                text = text.replace(md, "");
+                const indented = md.split("\n").filter((line) => line.trim().length > 0).map((line) => `  ${line}`).join("\n");
+                text = `${text.trimEnd()}
+${indented}`;
+              });
+              return `- ${text}
+`;
+            }
             case "table":
               return HTMLToMarkdown2._convertTable(node) + "\n\n";
             case "iframe": {
@@ -4790,6 +4803,7 @@ ${quoted}
       var { CONFIG: CONFIG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { NotionOAuth: NotionOAuth2 } = require_auth();
+      var { UrlValidator } = require_UrlValidator();
       var SUPPORTED_EXTENSIONS = {
         image: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "tiff", "tif", "avif", "heic", "heif"],
         video: ["mp4", "webm", "mov", "avi", "mkv", "m4v", "wmv", "flv", "mpeg", "mpg", "3gp", "ogv"],
@@ -5141,6 +5155,9 @@ Content-Type: ${safeContentType}\r
           // 通用文件上传（支持所有类型：图片/视频/音频/附件）
           // 自动判断 single_part / multi_part，自动识别 block 类型
           uploadFileToNotion: async (fileUrl, apiKey, originalFileName = null) => {
+            if (!UrlValidator.validatePageExternalUrl(String(fileUrl || "").trim())) {
+              throw new Error("\u4E0D\u652F\u6301\u7684\u6587\u4EF6 URL\uFF08\u4EC5\u5141\u8BB8 http(s) \u516C\u7F51\u5730\u5740\uFF09");
+            }
             const urlObj = new URL(fileUrl);
             let ext = (urlObj.pathname.split(".").pop() || "").split("?")[0].toLowerCase();
             if (originalFileName) {
