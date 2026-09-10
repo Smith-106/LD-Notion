@@ -4144,14 +4144,25 @@
           return false;
         },
         // 引用块 aside.quote
-        _cookAsideQuote: (el, blocks) => {
+        _cookAsideQuote: (el, blocks, imgMode) => {
           const blockquote = el.querySelector("blockquote");
           if (blockquote) {
             const richText = DOMToNotion2.serializeRichText(blockquote);
             if (richText.length > 0) {
               blocks.push({ type: "quote", quote: { rich_text: richText } });
             }
+            DOMToNotion2._consumeInlineMedia(blockquote, blocks, imgMode);
           }
+        },
+        // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发(与 _cookParagraph 同款)
+        _consumeInlineMedia: (el, blocks, imgMode) => {
+          el.querySelectorAll("img").forEach((img) => DOMToNotion2._cookImage(img, blocks, imgMode));
+          el.querySelectorAll("a.attachment").forEach((a) => DOMToNotion2._cookAttachment(a, blocks, imgMode));
+          el.querySelectorAll("video").forEach((video) => DOMToNotion2._cookVideo(video, blocks, imgMode));
+          el.querySelectorAll("audio").forEach((audio) => DOMToNotion2._cookAudio(audio, blocks, imgMode));
+          el.querySelectorAll("iframe").forEach((frame) => {
+            DOMToNotion2._cookIframe(frame, blocks);
+          });
         },
         // 段落 p（含内部图片与附件）
         _cookParagraph: (el, blocks, imgMode) => {
@@ -4213,11 +4224,12 @@
           });
         },
         // 引用 blockquote
-        _cookBlockquote: (el, blocks) => {
+        _cookBlockquote: (el, blocks, imgMode) => {
           const richText = DOMToNotion2.serializeRichText(el);
           if (richText.length > 0) {
             blocks.push({ type: "quote", quote: { rich_text: richText } });
           }
+          DOMToNotion2._consumeInlineMedia(el, blocks, imgMode);
         },
         // 标题 h1-h6（h4-h6 降级为 h3）
         _cookHeading: (el, blocks) => {
@@ -4250,7 +4262,7 @@
           });
         },
         // 表格 table / .md-table
-        _cookTable: (el, blocks) => {
+        _cookTable: (el, blocks, imgMode) => {
           const tag = el.tagName.toLowerCase();
           const table = tag === "table" ? el : el.querySelector("table");
           if (!table) return;
@@ -4319,6 +4331,22 @@
               }
             });
           }
+          const cellMedia = [];
+          directSections(["thead", "tbody", "tfoot"]).forEach((section) => {
+            directRows(section).forEach((tr) => {
+              directCells(tr).forEach((cell) => {
+                cellMedia.push(...cell.querySelectorAll("img, video, audio, a.attachment, iframe"));
+              });
+            });
+          });
+          cellMedia.forEach((m) => {
+            const t = m.tagName ? m.tagName.toLowerCase() : "";
+            if (t === "img") DOMToNotion2._cookImage(m, blocks, imgMode);
+            else if (t === "a") DOMToNotion2._cookAttachment(m, blocks, imgMode);
+            else if (t === "video") DOMToNotion2._cookVideo(m, blocks, imgMode);
+            else if (t === "audio") DOMToNotion2._cookAudio(m, blocks, imgMode);
+            else if (t === "iframe") DOMToNotion2._cookIframe(m, blocks);
+          });
         },
         // 独立图片 img
         _cookImage: (el, blocks, imgMode) => {
@@ -4460,7 +4488,7 @@
             }
             if (tag === "iframe" && DOMToNotion2._cookIframe(el, blocks)) return;
             if (tag === "aside" && el.classList.contains("quote")) {
-              DOMToNotion2._cookAsideQuote(el, blocks);
+              DOMToNotion2._cookAsideQuote(el, blocks, imgMode);
               return;
             }
             if (tag === "p") {
@@ -4472,7 +4500,7 @@
               return;
             }
             if (tag === "blockquote") {
-              DOMToNotion2._cookBlockquote(el, blocks);
+              DOMToNotion2._cookBlockquote(el, blocks, imgMode);
               return;
             }
             if (/^h[1-6]$/.test(tag)) {
@@ -4484,7 +4512,7 @@
               return;
             }
             if (tag === "table" || el.classList && el.classList.contains("md-table")) {
-              DOMToNotion2._cookTable(el, blocks);
+              DOMToNotion2._cookTable(el, blocks, imgMode);
               return;
             }
             if (tag === "img") {

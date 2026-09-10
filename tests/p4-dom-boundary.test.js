@@ -16,7 +16,7 @@ describe("P4: DOMToNotion 表格与长文本边界", () => {
 
     it("短行 cells 补齐到 table_width", () => {
         // P4 收敛(c05): 行列改为只取直属子元素(children), 不再用后代选择器 —— 嵌套表格不窜行
-        const row = (count) => ({ closest: () => null, tagName: "TR", children: Array.from({ length: count }, () => ({ tagName: "TD" })) });
+        const row = (count) => ({ closest: () => null, tagName: "TR", children: Array.from({ length: count }, () => ({ tagName: "TD", querySelectorAll: () => [] })) });
         const table = { tagName: "TABLE", querySelector: () => null, children: [row(3), row(1)] };
         const blocks = [];
         DOMToNotion._cookTable(table, blocks);
@@ -99,7 +99,7 @@ describe("P4: DOMToNotion 表格与长文本边界", () => {
     });
 
     it("表格行列只取直属子元素, 嵌套表格不并入外层", () => {
-        const cell = (extra) => ({ tagName: "TD", ...extra });
+        const cell = (extra) => ({ tagName: "TD", querySelectorAll: () => [], ...extra });
         // 内层表格: 1 行 3 格(若用后代选择器会被并入外层 → 列宽 4)
         const nestedCells = [cell(), cell(), cell()];
         const nestedRow = { tagName: "TR", closest: () => null, children: nestedCells, querySelectorAll: () => nestedCells };
@@ -237,7 +237,7 @@ describe("P4 收敛(c05a-glm): 段落内嵌媒体 / 表格行上限与多 tbody"
     });
 
     it("多个 tbody + tfoot 的行全部保留", () => {
-        const cell = () => ({ tagName: "TD" });
+        const cell = () => ({ tagName: "TD", querySelectorAll: () => [] });
         const row = () => ({ closest: () => null, tagName: "TR", children: [cell()] });
         const table = {
             tagName: "TABLE",
@@ -312,6 +312,7 @@ describe("wave6 共识(qwen): 嵌套表格隔离 + table_width 上限", () => {
     it("单元格内嵌套表格的 thead/tbody 不并入外层表(has_column_header 不误置)", () => {
         const cellWithNested = {
             tagName: "TD",
+            querySelectorAll: () => [],
             children: [{ tagName: "TABLE", querySelector: () => null, children: [] }],
         };
         const outerRow = { tagName: "TR", closest: () => null, children: [cellWithNested] };
@@ -328,7 +329,7 @@ describe("wave6 共识(qwen): 嵌套表格隔离 + table_width 上限", () => {
     });
 
     it("列数超 100 时保留 99 原列+标记列(截断数不多算)", () => {
-        const cells = Array.from({ length: 105 }, () => ({ tagName: "TD", children: [] }));
+        const cells = Array.from({ length: 105 }, () => ({ tagName: "TD", querySelectorAll: () => [], children: [] }));
         const row = { tagName: "TR", closest: () => null, children: cells };
         const table = { tagName: "TABLE", querySelector: () => null, children: [{ tagName: "TBODY", children: [row] }] };
         const blocks = [];
@@ -410,5 +411,79 @@ describe("wave8 共识(qwen): ext 伪造 + data-src emoji + li 重叠文本", ()
         } finally {
             if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
         }
+    });
+});
+
+describe("wave8 共识(dsf): 引用块/表格单元格内嵌媒体补发", () => {
+    let origSerialize5;
+    beforeEach(() => { origSerialize5 = DOMToNotion.serializeRichText; DOMToNotion.serializeRichText = () => [{ type: "text", text: { content: "q" } }]; });
+    afterEach(() => { DOMToNotion.serializeRichText = origSerialize5; });
+
+    const mediaImg = (src) => ({
+        tagName: "IMG",
+        getAttribute: (k) => (k === "src" ? src : null),
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("blockquote 内嵌 img 补发 image 块(不再静默丢弃)", () => {
+        const bq = {
+            tagName: "BLOCKQUOTE",
+            childNodes: [],
+            children: [],
+            getAttribute: () => null,
+            querySelector: () => null,
+            querySelectorAll: (sel) => (sel === "img" ? [mediaImg("https://cdn.example.com/q.png")] : []),
+        };
+        const blocks = [];
+        DOMToNotion._cookBlockquote(bq, blocks, "external");
+        expect(blocks[0].type).toBe("quote");
+        expect(blocks[1].type).toBe("image");
+        expect(blocks[1].image.external.url).toBe("https://cdn.example.com/q.png");
+    });
+
+    it("表格单元格内 img 补发兄弟块(Notion table_row 只收 rich_text)", () => {
+        const cell = {
+            tagName: "TD",
+            querySelectorAll: (sel) => (sel === "img, video, audio, a.attachment, iframe" ? [mediaImg("https://cdn.example.com/c.png")] : []),
+        };
+        const row = { tagName: "TR", closest: () => null, children: [cell] };
+        const table = {
+            tagName: "TABLE",
+            querySelector: () => null,
+            children: [{ tagName: "TBODY", children: [row] }],
+        };
+        const blocks = [];
+        DOMToNotion._cookTable(table, blocks, "external");
+        expect(blocks[0].type).toBe("table");
+        expect(blocks[1].type).toBe("image");
+        expect(blocks[1].image.external.url).toBe("https://cdn.example.com/c.png");
+    });
+
+    it("aside.quote 内嵌 a.attachment 补发 file 块", () => {
+        const att = {
+            tagName: "A",
+            getAttribute: (k) => (k === "href" ? "https://cdn.example.com/f.pdf" : null),
+            textContent: "doc.pdf",
+            querySelector: () => null,
+            querySelectorAll: () => [],
+        };
+        const bq = {
+            tagName: "BLOCKQUOTE",
+            childNodes: [],
+            children: [],
+            getAttribute: () => null,
+            querySelector: () => null,
+            querySelectorAll: (sel) => (sel === "a.attachment" ? [att] : []),
+        };
+        const aside = {
+            tagName: "ASIDE",
+            classList: { contains: (c) => c === "quote" },
+            querySelector: (sel) => (sel === "blockquote" ? bq : null),
+        };
+        const blocks = [];
+        DOMToNotion._cookAsideQuote(aside, blocks, "external");
+        expect(blocks[0].type).toBe("quote");
+        expect(blocks[1].type).toBe("file");
     });
 });

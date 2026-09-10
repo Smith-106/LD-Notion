@@ -151,14 +151,25 @@ const DOMToNotion = {
     },
 
     // 引用块 aside.quote
-    _cookAsideQuote: (el, blocks) => {
+    _cookAsideQuote: (el, blocks, imgMode) => {
         const blockquote = el.querySelector("blockquote");
         if (blockquote) {
             const richText = DOMToNotion.serializeRichText(blockquote);
             if (richText.length > 0) {
                 blocks.push({ type: "quote", quote: { rich_text: richText } });
             }
+            // wave8 共识(dsf): 引用内嵌媒体此前静默丢弃 —— 与段落/li 同款补发块
+            DOMToNotion._consumeInlineMedia(blockquote, blocks, imgMode);
         }
+    },
+
+    // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发(与 _cookParagraph 同款)
+    _consumeInlineMedia: (el, blocks, imgMode) => {
+        el.querySelectorAll("img").forEach((img) => DOMToNotion._cookImage(img, blocks, imgMode));
+        el.querySelectorAll("a.attachment").forEach((a) => DOMToNotion._cookAttachment(a, blocks, imgMode));
+        el.querySelectorAll("video").forEach((video) => DOMToNotion._cookVideo(video, blocks, imgMode));
+        el.querySelectorAll("audio").forEach((audio) => DOMToNotion._cookAudio(audio, blocks, imgMode));
+        el.querySelectorAll("iframe").forEach((frame) => { DOMToNotion._cookIframe(frame, blocks); });
     },
 
     // 段落 p（含内部图片与附件）
@@ -225,11 +236,13 @@ const DOMToNotion = {
     },
 
     // 引用 blockquote
-    _cookBlockquote: (el, blocks) => {
+    _cookBlockquote: (el, blocks, imgMode) => {
         const richText = DOMToNotion.serializeRichText(el);
         if (richText.length > 0) {
             blocks.push({ type: "quote", quote: { rich_text: richText } });
         }
+        // wave8 共识(dsf): 引用内嵌媒体此前静默丢弃 —— 与段落/li 同款补发块
+        DOMToNotion._consumeInlineMedia(el, blocks, imgMode);
     },
 
     // 标题 h1-h6（h4-h6 降级为 h3）
@@ -266,7 +279,7 @@ const DOMToNotion = {
     },
 
     // 表格 table / .md-table
-    _cookTable: (el, blocks) => {
+    _cookTable: (el, blocks, imgMode) => {
         const tag = el.tagName.toLowerCase();
         const table = tag === "table" ? el : el.querySelector("table");
         if (!table) return;
@@ -357,6 +370,25 @@ const DOMToNotion = {
                 }
             });
         }
+
+        // wave8 共识(dsf): Notion table_row.cells 只收 rich_text, 单元格内媒体此前静默
+        // 丢弃 —— 表格后补发兄弟块(与段落/li/引用补发块同口径)
+        const cellMedia = [];
+        directSections(["thead", "tbody", "tfoot"]).forEach((section) => {
+            directRows(section).forEach((tr) => {
+                directCells(tr).forEach((cell) => {
+                    cellMedia.push(...cell.querySelectorAll("img, video, audio, a.attachment, iframe"));
+                });
+            });
+        });
+        cellMedia.forEach((m) => {
+            const t = m.tagName ? m.tagName.toLowerCase() : "";
+            if (t === "img") DOMToNotion._cookImage(m, blocks, imgMode);
+            else if (t === "a") DOMToNotion._cookAttachment(m, blocks, imgMode);
+            else if (t === "video") DOMToNotion._cookVideo(m, blocks, imgMode);
+            else if (t === "audio") DOMToNotion._cookAudio(m, blocks, imgMode);
+            else if (t === "iframe") DOMToNotion._cookIframe(m, blocks);
+        });
     },
 
     // 独立图片 img
@@ -543,7 +575,7 @@ const DOMToNotion = {
 
             // 处理引用块
             if (tag === "aside" && el.classList.contains("quote")) {
-                DOMToNotion._cookAsideQuote(el, blocks);
+                DOMToNotion._cookAsideQuote(el, blocks, imgMode);
                 return;
             }
 
@@ -561,7 +593,7 @@ const DOMToNotion = {
 
             // 处理引用
             if (tag === "blockquote") {
-                DOMToNotion._cookBlockquote(el, blocks);
+                DOMToNotion._cookBlockquote(el, blocks, imgMode);
                 return;
             }
 
@@ -579,7 +611,7 @@ const DOMToNotion = {
 
             // 处理表格
             if (tag === "table" || (el.classList && el.classList.contains('md-table'))) {
-                DOMToNotion._cookTable(el, blocks);
+                DOMToNotion._cookTable(el, blocks, imgMode);
                 return;
             }
 
