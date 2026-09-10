@@ -166,7 +166,7 @@ const DOMToNotion = {
             blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
         }
         el.querySelectorAll("img").forEach((img) => {
-            const src = img.getAttribute("src") || "";
+            const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
             const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
             if (full && !src.includes("/images/emoji/")) {
                 if (imgMode !== "skip") {
@@ -326,9 +326,10 @@ const DOMToNotion = {
         if (rows.some((cells) => cells.length > MAX_TABLE_COLS)) {
             rows.forEach((cells) => {
                 if (cells.length <= MAX_TABLE_COLS) return;
-                const droppedCols = cells.length - MAX_TABLE_COLS;
-                cells.length = MAX_TABLE_COLS;
-                cells[MAX_TABLE_COLS - 1] = [{ type: "text", text: { content: `…（列数过多，已截断 ${droppedCols} 列）` } }];
+                // 末列留标记：实际丢弃 = length - (MAX-1)，保留 MAX-1 个原单元格
+                const droppedCols = cells.length - (MAX_TABLE_COLS - 1);
+                cells.length = MAX_TABLE_COLS - 1;
+                cells.push([{ type: "text", text: { content: `…（列数过多，已截断 ${droppedCols} 列）` } }]);
             });
             console.warn(`[LD-Notion] 表格列数超 ${MAX_TABLE_COLS} 上限, 已截断`);
         }
@@ -358,7 +359,8 @@ const DOMToNotion = {
 
     // 独立图片 img
     _cookImage: (el, blocks, imgMode) => {
-        const src = el.getAttribute("src") || "";
+        // wave7 共识(qwen): 懒加载图片 src 为空时回退 data-src(与 _cookLightbox 同口径)
+        const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
         const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
         if (full && !src.includes("/images/emoji/")) {
             if (imgMode !== "skip") {

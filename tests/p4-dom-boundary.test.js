@@ -296,6 +296,14 @@ describe("wave6 共识(dsf): li 内嵌媒体 + 链接 emoji 文本", () => {
     });
 });
 
+
+    it("独立图片仅 data-src 时仍导出(懒加载回退, 与 lightbox 同口径)", () => {
+        const blocks = [];
+        const img = { getAttribute: (k) => (k === "data-src" ? "https://cdn.example.com/lazy.png" : null) };
+        DOMToNotion._cookImage(img, blocks, "external");
+        expect(blocks[0].image.external.url).toBe("https://cdn.example.com/lazy.png");
+    });
+
 describe("wave6 共识(qwen): 嵌套表格隔离 + table_width 上限", () => {
     let origSerialize3;
     beforeEach(() => { origSerialize3 = DOMToNotion.serializeRichText; DOMToNotion.serializeRichText = () => RT(); });
@@ -319,7 +327,7 @@ describe("wave6 共识(qwen): 嵌套表格隔离 + table_width 上限", () => {
         expect(blocks[0].table.has_column_header).toBe(false);
     });
 
-    it("列数超 100 时截断到 100 并在末列留标记", () => {
+    it("列数超 100 时保留 99 原列+标记列(截断数不多算)", () => {
         const cells = Array.from({ length: 105 }, () => ({ tagName: "TD", children: [] }));
         const row = { tagName: "TR", closest: () => null, children: cells };
         const table = { tagName: "TABLE", querySelector: () => null, children: [{ tagName: "TBODY", children: [row] }] };
@@ -328,6 +336,8 @@ describe("wave6 共识(qwen): 嵌套表格隔离 + table_width 上限", () => {
         const t = blocks[0].table;
         expect(t.table_width).toBe(100);
         expect(t.children[0].table_row.cells.length).toBe(100);
-        expect(t.children[0].table_row.cells[99][0].text.content).toContain("已截断 5 列");
+        expect(t.children[0].table_row.cells[99][0].text.content).toContain("已截断 6 列");
+        // 第 98 列仍是原单元格内容(RT() 桩输出), 未被标记覆盖
+        expect(t.children[0].table_row.cells[98][0].text.content).toBe(RT()[0].text.content);
     });
 });

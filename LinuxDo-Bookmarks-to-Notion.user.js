@@ -4160,7 +4160,7 @@
             blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
           }
           el.querySelectorAll("img").forEach((img) => {
-            const src = img.getAttribute("src") || "";
+            const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
             const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
             if (full && !src.includes("/images/emoji/")) {
               if (imgMode !== "skip") {
@@ -4294,9 +4294,9 @@
           if (rows.some((cells) => cells.length > MAX_TABLE_COLS)) {
             rows.forEach((cells) => {
               if (cells.length <= MAX_TABLE_COLS) return;
-              const droppedCols = cells.length - MAX_TABLE_COLS;
-              cells.length = MAX_TABLE_COLS;
-              cells[MAX_TABLE_COLS - 1] = [{ type: "text", text: { content: `\u2026\uFF08\u5217\u6570\u8FC7\u591A\uFF0C\u5DF2\u622A\u65AD ${droppedCols} \u5217\uFF09` } }];
+              const droppedCols = cells.length - (MAX_TABLE_COLS - 1);
+              cells.length = MAX_TABLE_COLS - 1;
+              cells.push([{ type: "text", text: { content: `\u2026\uFF08\u5217\u6570\u8FC7\u591A\uFF0C\u5DF2\u622A\u65AD ${droppedCols} \u5217\uFF09` } }]);
             });
             console.warn(`[LD-Notion] \u8868\u683C\u5217\u6570\u8D85 ${MAX_TABLE_COLS} \u4E0A\u9650, \u5DF2\u622A\u65AD`);
           }
@@ -4322,7 +4322,7 @@
         },
         // 独立图片 img
         _cookImage: (el, blocks, imgMode) => {
-          const src = el.getAttribute("src") || "";
+          const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
           const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
           if (full && !src.includes("/images/emoji/")) {
             if (imgMode !== "skip") {
