@@ -1532,9 +1532,17 @@ const UI = {
     // execCommand 降级校验返回值, 失败抛错由调用方提示。
     copyTextToClipboard: async (text) => {
         const value = String(text || "");
+        let clipboardError = null;
         if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(value);
-            return true;
+            try {
+                await navigator.clipboard.writeText(value);
+                return true;
+            } catch (error) {
+                // P4 收敛(c15): Clipboard API 存在但 reject(页面失焦/权限拒绝) —— 原实现直接抛错,
+                // 无 execCommand 降级, 复制功能整体不可用。降级也失败时抛原始错误
+                // (保留 P3 契约: 失败必须可见且带真实原因)
+                clipboardError = error;
+            }
         }
         const textarea = document.createElement("textarea");
         textarea.value = value;
@@ -1549,7 +1557,7 @@ const UI = {
         } finally {
             textarea.remove();
         }
-        if (!copied) throw new Error("浏览器未允许复制到剪贴板");
+        if (!copied) throw clipboardError || new Error("浏览器未允许复制到剪贴板");
         return true;
     },
 
@@ -1803,7 +1811,8 @@ const UI = {
         const action = payload.action || "";
 
         if (action === "autofill") {
-            const title = payload.title ? Utils.escapeHtml(payload.title) : "";
+            // P4 收敛(c15): 此处为 textContent 赋值 —— 预先 escapeHtml 会双重转义(& → &amp; 字面显示)
+            const title = payload.title || "";
             if (workspaceTip) {
                 workspaceTip.textContent = `✅ 已自动选择数据库${title ? `「${title}」` : ""}，可点击「自动设置数据库」初始化属性`;
                 workspaceTip.style.color = "var(--ldb-ui-success)";
@@ -2915,8 +2924,18 @@ const UI = {
             document.removeEventListener("keydown", UI._escMinimizeHandler);
             UI._escMinimizeHandler = null;
         }
+        // P4 收敛(c15): 残留的 showStatus 自动清除定时器仍持有已卸载容器(短时内存滞留),
+        // 在 refs 复位前清掉
+        const statusContainer = UI.refs?.statusContainer;
+        if (statusContainer?._statusTimer) {
+            clearTimeout(statusContainer._statusTimer);
+            statusContainer._statusTimer = null;
+        }
         UI.panel?.remove();
         UI.panel = null;
+        // P4 收敛(c16 2/3 共识 glm+qwen): 清 PanelResize 注册表条目 ——
+        // 否则 Map 持续持有已分离面板子树(含会话 DOM)无法被 GC
+        PanelResize.unregister(CONFIG.STORAGE_KEYS.PANEL_SIZE_MAIN);
         UI.miniBtn?.remove();
         UI.miniBtn = null;
         UI.refs = null;

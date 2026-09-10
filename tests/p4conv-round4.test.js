@@ -209,8 +209,10 @@ describe("P4 收敛(c04-c08): 三模型复审第二批", () => {
     });
 
     it("RSS needsUpdate 与写入侧同口径(用 _safeUrl 比较)", () => {
+        // P4 收敛(c07 续): 写入侧 safeUrl 为空时不发「链接」字段 —— 仅在本次有可写链接时才比对
         const src = read("src/bridge/RSSAutoImporter.js");
-        expect(src).toContain('if (String(pageMeta.url || "") !== RSSAutoImporter._safeUrl(item.url)) return true;');
+        expect(src).toContain("const safeUrl = RSSAutoImporter._safeUrl(item.url);");
+        expect(src).toContain('if (safeUrl && String(pageMeta.url || "") !== safeUrl) return true;');
     });
 
     it("strict 去重含本批内重复 URL", () => {

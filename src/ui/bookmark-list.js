@@ -179,8 +179,19 @@ const BookmarkList = {
             return UI().normalizeWorkspaceInsightUrl(`https://linux.do/t/${bookmarkKey}`);
         }
         const bookmarks = Array.isArray(UI().bookmarks) ? UI().bookmarks : [];
-        const hit = bookmarks.find((b) => UI().getBookmarkKey(b) === bookmarkKey);
-        if (hit) return UI().buildBookmarkCanonicalUrl(hit);
+        // P4 收敛(c11): 本函数随列表逐行调用, 原先每行对全量 bookmarks 线性 find 并重建 key(O(N²));
+        // 与上方导出 URL 集合同口径按「数组身份 + 长度」记忆(列表刷新整体替换数组时自动失效)
+        const cache = UI()._bookmarkKeyUrlCache;
+        if (!cache || cache.arr !== bookmarks || cache.len !== bookmarks.length) {
+            const map = new Map();
+            for (const b of bookmarks) {
+                const k = UI().getBookmarkKey(b);
+                if (k && !map.has(k)) map.set(k, UI().buildBookmarkCanonicalUrl(b));
+            }
+            UI()._bookmarkKeyUrlCache = { arr: bookmarks, len: bookmarks.length, map };
+        }
+        const hit = UI()._bookmarkKeyUrlCache.map.get(bookmarkKey);
+        if (hit) return hit;
         const parts = String(bookmarkKey).split(":");
         const sourceType = parts[1] || "";
         const itemKey = parts.slice(2).join(":");

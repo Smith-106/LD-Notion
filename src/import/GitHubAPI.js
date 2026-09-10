@@ -15,6 +15,12 @@ const GitHubAPI = {
     _fetchPaginated: (url, token = "", label = "GitHub", options = {}) => {
         return new Promise((resolve, reject) => {
             const allItems = [];
+            // P4 收敛(c08): 网络错误/超时 partial resolve 时标记数组, 调用方据此不推进水位
+            // (已拉 N 项的尾部未取到 —— 推进水位会把它们永久甩到水位之下)
+            const resolvePartial = () => {
+                try { allItems.partial = true; } catch (_) { /* 冻结数组兼容 */ }
+                resolve(allItems);
+            };
             let page = 1;
             const perPage = 100;
 
@@ -61,7 +67,7 @@ const GitHubAPI = {
                         // 调用方经 markExported 标记已处理项，partial 不会导致重复导入。
                         if (allItems.length > 0) {
                             console.warn(`[LD-Notion] ${label} 分页拉取网络错误，保留已拉 ${allItems.length} 项（partial）`);
-                            resolve(allItems);
+                            resolvePartial();
                         } else {
                             reject(new Error(`网络错误，无法连接 ${label}`));
                         }
@@ -70,7 +76,7 @@ const GitHubAPI = {
                     ontimeout: () => {
                         if (allItems.length > 0) {
                             console.warn(`[LD-Notion] ${label} 分页拉取超时，保留已拉 ${allItems.length} 项（partial）`);
-                            resolve(allItems);
+                            resolvePartial();
                         } else {
                             reject(new Error("GitHub API 请求超时"));
                         }

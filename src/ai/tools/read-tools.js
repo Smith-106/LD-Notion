@@ -220,6 +220,8 @@ module.exports = {
             }
 
             // 查询单个数据库的辅助函数
+            // P4 收敛(c04): 单库 10 页硬上限是真实的截断点 —— 必须回报, 否则「总数/分类统计」被当完整结果
+            let queryTruncated = false;
             const queryOneDb = async (dbId) => {
                 const pages = [];
                 let cursor = null;
@@ -242,6 +244,7 @@ module.exports = {
                     cursor = response.next_cursor;
                     pageCount++;
                 }
+                if (hasMore) queryTruncated = true;
                 return pages;
             };
 
@@ -250,10 +253,12 @@ module.exports = {
             if (aiTargetState.mode === "all") {
                 // 遍历所有工作区数据库
                 let cached;
-                try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch (error) {
+                // P4 收敛(c01): JSON.parse("null") 不抛错 —— 必须兑底非对象值
+                try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")) || {}; } catch (error) {
                     console.warn("[LD-Notion] 工作区页面缓存解析失败:", error);
                     cached = {};
                 }
+                if (typeof cached !== "object") cached = {};
                 const databases = cached.databases || [];
                 if (databases.length === 0) return "错误: 请先在 AI 设置中点击「🔄」刷新数据库列表。";
 
@@ -302,6 +307,9 @@ module.exports = {
                 const sourceDb = page._sourceDb ? ` [来源: ${page._sourceDb}]` : "";
                 return `${i + 1}. ${title}${author ? ` (作者: ${author})` : ""}${sourceDb} [ID: ${id}]`;
             });
+            if (queryTruncated) {
+                bullets.push("⚠️ 部分数据库超过单库扫描上限（10 页/库），总数与分类统计可能不完整");
+            }
 
             return AI()._formatToolResult({
                 title: "数据库查询结果",
@@ -578,13 +586,17 @@ module.exports = {
             const filters = [];
             if (sourceFilter) filters.push(sourceFilter);
 
+            let dbPageTruncated = false;
             const queryOneDb = async (dbId) => {
-                const body = { page_size: Math.min(limit, 100) };
+                // P4 收敛(c04): 原先 page_size=limit 后客户端过滤 —— 关键词匹配页排在 limit
+                // 之后的库整批漏选且无提示；改为取单页上限并在库内仍有后续页时回报截断
+                const body = { page_size: 100 };
                 if (filters.length > 0) {
                     body.filter = filters.length === 1 ? filters[0] : { and: filters };
                 }
                 try {
                     const response = await NotionAPI.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
+                    if (response.has_more) dbPageTruncated = true;
                     return response.results || [];
                 } catch (error) {
                     console.warn("[LD-Notion] 数据库查询失败:", error);
@@ -635,6 +647,9 @@ module.exports = {
             });
             if (dbTruncated) {
                 lines.push(`⚠️ 数据库数量超过扫描上限（${MAX_QUERY_DBS} 个），结果可能不完整`);
+            }
+            if (dbPageTruncated) {
+                lines.push("⚠️ 部分数据库条目数超过单库扫描上限（100 条/库），结果可能不完整");
             }
 
             return AI()._formatToolResult({
@@ -758,9 +773,12 @@ module.exports = {
             }
 
             // 搜索所有数据库获取候选
-            const allDbs = await NotionAPI.search("", { property: "object", value: "database" }, settings.notionApiKey);
+            // P4 收敛(c04): 原先仅取 search 首页 5 个库且无提示 —— 超出的库静默漏选
+            const discovered = await searchAllDatabases({ apiKey: settings.notionApiKey });
+            const candidateDbs = discovered.results.slice(0, MAX_QUERY_DBS);
+            const dbTruncated = discovered.truncated || discovered.results.length > candidateDbs.length;
             let candidates = [];
-            for (const db of (allDbs.results || []).slice(0, 5)) {
+            for (const db of candidateDbs) {
                 try {
                     const res = await NotionAPI.request("POST", `/databases/${db.id}/query`, { page_size: 50 }, settings.notionApiKey);
                     candidates.push(...(res.results || []));
@@ -810,6 +828,9 @@ ${candidateList}
                     const src = p.properties?.["来源"]?.rich_text?.[0]?.text?.content || "";
                     const url = p.properties?.["链接"]?.url || "";
                     bullets.push(`[${src}] ${t}${url ? ` (${url})` : ""}`);
+                }
+                if (dbTruncated) {
+                    bullets.push(`⚠️ 数据库数量超过扫描上限（${MAX_QUERY_DBS} 个），结果可能不完整`);
                 }
                 return AI()._formatToolResult({
                     title: "相似内容推荐",

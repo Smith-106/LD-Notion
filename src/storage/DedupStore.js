@@ -204,15 +204,33 @@ const DedupStore = {
         const batch = this._batchGet(sourceType);
         if (batch) {
             const set = batch.set;
-            if (Object.prototype.hasOwnProperty.call(set, dedupKey)) return true;
+            // P4 收敛(c10): URL 键源的过期条目读取侧即视为不存在 —— 仅靠写回淘汰会让
+            // 过期条目在下一次写回之前一直阻断重新导入(账本 TTL 语义失效)
+            if (this._isLiveEntry(sourceType, set, dedupKey)) return true;
             // urlKeyed 源: 同步 pull 应用的哈希键也命中(跨设备去重)
             const hashed = this._hashKeyFor(sourceType, dedupKey);
-            return hashed !== dedupKey && Object.prototype.hasOwnProperty.call(set, hashed);
+            return hashed !== dedupKey && this._isLiveEntry(sourceType, set, hashed);
         }
         const set = this._loadSet(sourceType);
-        if (Object.prototype.hasOwnProperty.call(set, dedupKey)) return true;
+        if (this._isLiveEntry(sourceType, set, dedupKey)) return true;
         const hashed = this._hashKeyFor(sourceType, dedupKey);
-        return hashed !== dedupKey && Object.prototype.hasOwnProperty.call(set, hashed);
+        return hashed !== dedupKey && this._isLiveEntry(sourceType, set, hashed);
+    },
+
+    /**
+     * 读取侧存活判定: id 键源(导出账本)永不过期; URL 键源仅 ts 在 TTL 窗口内算命中。
+     * @param {string} sourceType
+     * @param {Object} set - {key: timestamp}
+     * @param {string} key
+     * @returns {boolean}
+     */
+    _isLiveEntry(sourceType, set, key) {
+        if (!Object.prototype.hasOwnProperty.call(set, key)) return false;
+        if (!URL_KEYED_SOURCES.includes(sourceType)) return true;
+        const ts = Number(set[key]);
+        // 无法解析为合法时间戳的旧值回退为存活(不因格式而误放行重新导入)
+        if (!Number.isFinite(ts) || ts <= 0) return true;
+        return ts >= Date.now() - DEDUP_TTL_MS;
     },
 
     /**

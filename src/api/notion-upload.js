@@ -101,6 +101,32 @@ function installUploadMethods(NotionAPI) {
     // file field 放原始二进制，part_number field(1-1000)。原 base64+JSON 实现违反契约且体积膨胀 33%。
     // 仿 uploadFileContent:931 multipart 模式，但走 Notion API endpoint + Authorization Bearer（非 S3 预签名 URL）。
         sendFilePart: async (uploadId, partBlob, partNumber, apiKey, filename) => {
+            // P4 收敛(c05): 分片发送是唯一绕过 NotionAPI.request 的写调用 —— 429/5xx/网络错误
+            // 原先直接失败, 多分片上传已发分片全部作废; 按项目退避口径(1000*2^n)有限重试,
+            // 400/401/403/404 短路(与 NotionAPI 重试口径一致)
+            const MAX_ATTEMPTS = 3;
+            let lastError = null;
+            for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+                try {
+                    return await NotionAPI._sendFilePartOnce(uploadId, partBlob, partNumber, apiKey, filename);
+                } catch (error) {
+                    lastError = error;
+                    const status = Number(error?.status) || 0;
+                    // 仅重试可恢复态: 429 限流 / 5xx 服务端 / 网络与超时(显式标记, 不靠 status 缺失推断
+                    // —— 构造期与编程错误同样无 status, 重试只会放大失败)
+                    const retryable = status === 429 || status >= 500 || error?.isNetworkError === true;
+                    if (!retryable) throw error;
+                    if (attempt < MAX_ATTEMPTS - 1) await Utils.sleep(1000 * Math.pow(2, attempt));
+                }
+            }
+            throw lastError;
+        },
+
+        /**
+         * 分片发送单次尝试(multipart, 不用 NotionAPI.request: 该端点契约唯一)
+         * @returns {Promise<Object>} 服务端响应
+         */
+        _sendFilePartOnce: async (uploadId, partBlob, partNumber, apiKey, filename) => {
         // P4 收敛(c05): 分片请求同样属于 Notion API 调用 —— 绕过 _requestGate 会使
         // 「所有 Notion 请求共享 3 req/s 预算」的契约在多分片上传时失效
         if (NotionAPI._requestGate) {
@@ -153,11 +179,21 @@ function installUploadMethods(NotionAPI) {
                                 try { resolve(Utils.safeJsonParse(response.responseText, {})); }
                                 catch { resolve({}); }
                             } else {
-                                reject(new Error(`发送分片失败: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
+                                const err = new Error(`发送分片失败: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`);
+                                err.status = Number(response.status) || 0;
+                                reject(err);
                             }
                         },
-                        onerror: (error) => reject(new Error(`网络请求失败: ${Utils.formatRequestError(error)}`)),
-                        ontimeout: () => reject(new Error("发送分片超时")),
+                        onerror: (error) => {
+                            const networkError = new Error(`网络请求失败: ${Utils.formatRequestError(error)}`);
+                            networkError.isNetworkError = true;
+                            reject(networkError);
+                        },
+                        ontimeout: () => {
+                            const timeoutError = new Error("发送分片超时");
+                            timeoutError.isNetworkError = true;
+                            reject(timeoutError);
+                        },
                     });
                 } catch (error) {
                     reject(error instanceof Error ? error : new Error(String(error)));
@@ -252,7 +288,11 @@ function installUploadMethods(NotionAPI) {
 
         // 优先使用原始文件名的扩展名
         if (originalFileName) {
-            const origExt = originalFileName.split(".").pop()?.toLowerCase();
+            // P4 收敛(c05): 无点号名称("attachment"/"download")会让 split(".").pop() 整个名称当扩展名,
+            // 覆盖 URL 推导出的合法扩展名 → isSupportedFileType 抛错、图片/附件被静默跳过
+            const name = String(originalFileName);
+            const dotIdx = name.lastIndexOf(".");
+            const origExt = dotIdx > 0 ? name.slice(dotIdx + 1).toLowerCase() : "";
             if (origExt && origExt.length <= 10 && /^[a-z0-9]+$/i.test(origExt)) {
                 ext = origExt;
             }

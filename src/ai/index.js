@@ -144,9 +144,12 @@ const AIService = {
     requestGemini: (prompt, model, apiKey, baseUrl) => {
         // 标准化 baseUrl：移除末尾的 / 和 /v1beta，避免重复路径
         const normalizedBase = AIService._normalizeBaseUrl(baseUrl, "v1beta");
+        // P4 收敛(c03 2/3 共识 dsf+qwen): model 与其他两处 Gemini 调用点一致做路径段编码，
+        // 否则含 /、?、# 的模型名可越出路径段篡改请求
+        const modelSeg = AIService._modelPathSegment(model);
         const url = normalizedBase
-            ? `${normalizedBase}/v1beta/models/${model}:generateContent`
-            : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+            ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent`
+            : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
 
         return AIService._chatRequest(
             url,

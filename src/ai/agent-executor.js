@@ -197,26 +197,30 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
         let dbInfo;
         if (aiTargetState.mode === "all") {
             let cached;
-            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch (error) {
+            // P4 收敛(c01): JSON.parse("null") 不抛错 —— 必须兑底非对象值
+            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")) || {}; } catch (error) {
                 console.warn("[LD-Notion] 工作区页面缓存解析失败:", error);
                 cached = {};
             }
+            if (typeof cached !== "object") cached = {};
             const dbCount = cached.databases?.length || 0;
             dbInfo = `查询模式: 所有工作区数据库 (${dbCount} 个)`;
         } else if (aiTargetState.mode === "database") {
             let cached;
-            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch (error) {
+            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")) || {}; } catch (error) {
                 console.warn("[LD-Notion] 工作区页面缓存解析失败:", error);
                 cached = {};
             }
+            if (typeof cached !== "object") cached = {};
             const dbName = cached.databases?.find(d => d.id === aiTargetState.databaseId)?.title || aiTargetState.databaseId;
             dbInfo = `已配置的数据库: ${dbName} (ID: ${aiTargetState.databaseId})`;
         } else if (aiTargetState.mode === "page") {
             let cached;
-            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")); } catch (error) {
+            try { cached = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.WORKSPACE_PAGES, "{}")) || {}; } catch (error) {
                 console.warn("[LD-Notion] 工作区页面缓存解析失败:", error);
                 cached = {};
             }
+            if (typeof cached !== "object") cached = {};
             const pageName = cached.pages?.find(p => p.id === aiTargetState.pageId)?.title || aiTargetState.pageId;
             dbInfo = `当前 AI 目标页面: ${pageName} (ID: ${aiTargetState.pageId})`;
         } else {

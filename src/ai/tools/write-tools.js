@@ -311,6 +311,11 @@ module.exports = {
             if (!page_id) return "错误: 请提供 page_id。";
             if (!property) return "错误: 请提供 property（属性名）。";
             if (value === undefined || value === null) return "错误: 请提供 value（新值）。";
+            // P4 收敛(c04): 原型链键作为普通对象下标会改原型而非自有属性 ——
+            // updateProps 静默为空却返回「已更新」(与 content.js 同口径)
+            if (["__proto__", "constructor", "prototype"].includes(property)) {
+                return "错误: 属性名无效，请使用非保留名称。";
+            }
 
             const updateProps = {};
             switch (type) {
@@ -621,7 +626,11 @@ module.exports = {
             const unclassified = pages.filter(p => !p.properties["AI分类"]?.select?.name);
             if (unclassified.length === 0) return `所有 ${pages.length} 个页面都已分类。`;
 
-            const maxLimit = args.limit ? Math.min(args.limit, unclassified.length) : unclassified.length;
+            // P4 收敛(c04): 负数/非数字 limit 会退化为 slice(0,-1) 绕过限制批量写入
+            const limitNum = Number(args.limit);
+            const maxLimit = Number.isFinite(limitNum) && limitNum > 0
+                ? Math.min(Math.floor(limitNum), unclassified.length)
+                : unclassified.length;
             const toClassify = unclassified.slice(0, maxLimit);
             const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
             let success = 0, failed = 0;

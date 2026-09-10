@@ -205,9 +205,47 @@ const SyncEngine = {
                     });
                 }
 
+                // P4 收敛(c11 3/3 共识): push 前与介质既有行并集 —— 他端新 push 且本端尚未 pull 的
+                // dedup 条目不得被整行覆写抹除(dedup 为单调账本, 与 dedupSets 投影/CC-05 rebase 同语义)。
+                for (const row of rows) {
+                    if (row.kind !== "dedup") continue;
+                    const priorSet = index.get(`dedup:${row.key}`)?.payload?.dedup?.[row.key];
+                    if (!priorSet || typeof priorSet !== "object") continue;
+                    const merged = { ...(row.payload.dedup[row.key] || {}) };
+                    for (const [k, ts] of Object.entries(priorSet)) {
+                        const num = Number(ts);
+                        // 过期条目不回推(否则整行永不进入 stale 清理, 介质无限膨胀)
+                        if (!Number.isFinite(num) || num < tsFloor) continue;
+                        const prev = Number(merged[k]);
+                        if (!Number.isFinite(prev) || num > prev) merged[k] = num;
+                    }
+                    row.payload.dedup[row.key] = SyncEngine._truncateSetForRow(row.key, merged);
+                }
+
                 // v3.14.6 (DC-003): 行预算逐级截断 —— watermark ids/settings 行此前无预算,
                 // 超 SyncLedger 2000 硬限整行失败; 现在构造后量长, 超限逐级裁剪
                 const budgetedRows = SyncEngine._enforceRowBudget(rows);
+                // P4 收敛(c11 2/3 共识 dsf+qwen): settings 分片残留清理 —— 字段被删/子片收缩后
+                // 介质上旧分片仍被 pull 并集合并 → 已删字段复活。用空 settings 行覆盖非当前分片。
+                const currentSettingsKeys = new Set(
+                    budgetedRows.filter((r) => r.kind === "settings").map((r) => r.key)
+                );
+                for (const [id, prior] of index) {
+                    if (!id.startsWith("settings:") || !prior.pageId) continue;
+                    const key = id.slice("settings:".length);
+                    if (currentSettingsKeys.has(key)) continue;
+                    staleRows.push({
+                        pageId: prior.pageId,
+                        row: {
+                            kind: "settings",
+                            key,
+                            version: payload.version || 0,
+                            updatedAt: payload.updatedAt,
+                            deviceId: payload.deviceId,
+                            payload: { settings: {} },
+                        },
+                    });
+                }
                 for (const row of budgetedRows) {
                     const id = `${row.kind}:${row.key}`;
                     const prior = index.get(id);
@@ -492,12 +530,26 @@ const SyncEngine = {
                     droppedStaleSettings++;
                 }
             }
-            if (droppedStaleSettings > 0) {
+            // P4 收敛(c11 2/3 共识 glm+qwen): dedup 过期 ts 与 settings 同处置 ——
+            // 介质行条目全部老化超 90 天后 validateRemote 整包拒绝, 而 pull 无清理自愈 →
+            // 所有设备周期 pull 持续失败直到某设备 push。过期条目按契约不可应用(本地 TTL 已剔除)。
+            let droppedStaleDedup = 0;
+            for (const set of Object.values(mergedRemote.dedup || {})) {
+                if (!set || typeof set !== "object") continue;
+                for (const [key, ts] of Object.entries(set)) {
+                    const num = Number(ts);
+                    if (!Number.isFinite(num) || num < skewMin || num > skewMax) {
+                        delete set[key];
+                        droppedStaleDedup++;
+                    }
+                }
+            }
+            if (droppedStaleSettings > 0 || droppedStaleDedup > 0) {
                 try {
                     OperationLog.add({
                         audit_event: "sync.state.pulled", actor: "system", source: "sync-engine",
                         operationName: "sync.state.pull", status: "success",
-                        context: { reason, droppedStaleSettings, note: "过期/越界 settings 项已剔除" },
+                        context: { reason, droppedStaleSettings, droppedStaleDedup, note: "过期/越界同步项已剔除" },
                     }, { force: true });
                 } catch { /* 审计不可用不阻断 pull */ }
             }

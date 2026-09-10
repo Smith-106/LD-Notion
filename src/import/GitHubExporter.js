@@ -331,16 +331,18 @@ const GitHubExporter = {
         // P4 收敛(c09): 手动导出与自动导入/其他 tab 共用 AUTO_SYNC_LEASE —— 此前仅自动路径
         // 持租约, 手动导出可与自动同步并发建页/互相覆盖已导出标记。顺序同 import/index.js:
         // 先置进程内互斥(挡同 tab 自动轮) → 再取跨 tab 租约, 失败即复位并跳过
+        // P4 收敛(c09 续): 互斥仅在本轮由自己置位时复位 —— 无条件清会误清并发自动导入的互斥
+        const exportMutexAcquired = SyncLock.isExporting !== true;
         SyncLock.isExporting = true;
         let lease = null;
         try {
             lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
         } catch (leaseError) {
-            SyncLock.isExporting = false;
+            if (exportMutexAcquired) SyncLock.isExporting = false;
             throw leaseError;
         }
         if (!lease) {
-            SyncLock.isExporting = false;
+            if (exportMutexAcquired) SyncLock.isExporting = false;
             return {
                 total: items.length,
                 exported: 0,
@@ -349,12 +351,30 @@ const GitHubExporter = {
                 message: "其他标签页正在导出/同步，已跳过本次请求",
             };
         }
+        // P4 收敛(c09 续, 2/3 共识 dsf+glm): 同库其余三处持租路径均每 30s 续约 ——
+        // 长批量超过租约 TTL(约 180s)后租约静默过期, 他 tab 抢占后重复建页
+        let leaseLost = false;
+        const renewTimer = setInterval(() => {
+            let renewed;
+            try {
+                renewed = SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+            } catch (renewError) {
+                console.warn("[LD-Notion] GitHub 导出续约失败:", renewError);
+                renewed = false;
+            }
+            if (!renewed) {
+                leaseLost = true;
+                clearInterval(renewTimer);
+            }
+        }, 30000);
 
         let success = 0, failed = 0;
         let authAbortInfo = null;
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
         try {
         for (let i = 0; i < newItems.length; i++) {
+            // P4 收敛(c09 续): 租约被抢占后不得继续逐项建页
+            if (leaseLost) break;
             const item = newItems[i];
             const key = getKeyFn(item);
             const pct = Math.round(10 + (i / newItems.length) * 85);
@@ -406,11 +426,12 @@ const GitHubExporter = {
             }
         }
         } finally {
+            clearInterval(renewTimer);
             // 批量回写已导出映射（DISCOVER P3）：循环内 markExportedFn 仅 mutate 内存缓存，
             // 循环末单次 flush，写侧从 O(N²)→O(N)。与 BookmarkExporter.flushExported 同构。
             // v3.14.6 (DC-009/CC-10): finally 保证异常/中止路径也落盘, flush 幂等
             SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-            SyncLock.isExporting = false;
+            if (exportMutexAcquired) SyncLock.isExporting = false;
             if (flushFn) flushFn();
         }
 

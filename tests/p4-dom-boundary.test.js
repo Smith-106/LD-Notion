@@ -15,8 +15,9 @@ describe("P4: DOMToNotion 表格与长文本边界", () => {
     afterEach(() => { DOMToNotion.serializeRichText = origSerialize; });
 
     it("短行 cells 补齐到 table_width", () => {
-        const row = (count) => ({ closest: () => null, querySelectorAll: () => Array.from({ length: count }, () => ({})) });
-        const table = { tagName: "TABLE", querySelector: () => null, querySelectorAll: () => [row(3), row(1)] };
+        // P4 收敛(c05): 行列改为只取直属子元素(children), 不再用后代选择器 —— 嵌套表格不窜行
+        const row = (count) => ({ closest: () => null, tagName: "TR", children: Array.from({ length: count }, () => ({ tagName: "TD" })) });
+        const table = { tagName: "TABLE", querySelector: () => null, children: [row(3), row(1)] };
         const blocks = [];
         DOMToNotion._cookTable(table, blocks);
 
@@ -66,6 +67,74 @@ describe("P4: DOMToNotion 表格与长文本边界", () => {
     it("serializeRichText 超 100 节点告警(源码契约)", () => {
         const src = fs.readFileSync("src/api/DOMToNotion.js", "utf8");
         expect(src).toContain("超 Notion 上限 100, 已截断");
+    });
+
+    // ===== P4 收敛(c05): DOMToNotion 四项边界 =====
+
+    it("长文本分块边界落在代理对中间时回退一个码元", () => {
+        // "a"×1999 后紧跟 emoji(高代理位 1999, 低代理位 2000) —— 硬切 2000 会切出孤立高代理
+        const text = "a".repeat(1999) + "😀" + "b".repeat(10);
+        const chunks = DOMToNotion.splitLongText(text);
+        expect(chunks[0].text.content).toBe("a".repeat(1999));
+        const joined = chunks.map((c) => c.text.content).join("");
+        expect(joined).toBe(text);
+        expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(joined)).toBe(false);
+        expect(/(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]/.test(joined)).toBe(false);
+    });
+
+    it("截断标记插入点同样避让代理对", () => {
+        const remainingLen = 50;
+        const markerLen = `…（内容过长，已截断 ${remainingLen} 字符）`.length;
+        const cut = 2000 - markerLen;
+        // 第 100 块: 高代理位恰在 cut-1、低代理位在 cut —— 原实现 slice(0, cut) 会切出孤立高代理
+        const lastChunk = "a".repeat(cut - 1) + "😀" + "a".repeat(markerLen - 1);
+        expect(lastChunk.length).toBe(2000);
+        const text = "a".repeat(2000 * 99) + lastChunk + "b".repeat(remainingLen);
+        const chunks = DOMToNotion.splitLongText(text);
+        expect(chunks.length).toBe(100);
+        const last = chunks[99].text.content;
+        expect(last).toContain(`已截断 ${remainingLen} 字符`);
+        expect(last.length).toBeLessThanOrEqual(2000);
+        expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(last)).toBe(false);
+    });
+
+    it("表格行列只取直属子元素, 嵌套表格不并入外层", () => {
+        const cell = (extra) => ({ tagName: "TD", ...extra });
+        // 内层表格: 1 行 3 格(若用后代选择器会被并入外层 → 列宽 4)
+        const nestedCells = [cell(), cell(), cell()];
+        const nestedRow = { tagName: "TR", closest: () => null, children: nestedCells, querySelectorAll: () => nestedCells };
+        const nestedTable = { tagName: "TABLE", querySelector: () => null, children: [nestedRow], querySelectorAll: () => [] };
+        const outerCell = cell({ children: [nestedTable], querySelectorAll: () => nestedCells });
+        const row = {
+            tagName: "TR",
+            closest: () => null,
+            children: [outerCell],
+            querySelectorAll: () => [outerCell, ...nestedCells],
+        };
+        const table = {
+            tagName: "TABLE",
+            querySelector: () => null,
+            children: [row],
+            querySelectorAll: () => [row, nestedRow],
+        };
+        const blocks = [];
+        DOMToNotion._cookTable(table, blocks);
+        expect(blocks[0].table.table_width).toBe(1);
+        expect(blocks[0].table.children.length).toBe(1);
+    });
+
+    it("language-c# 不再被截为 c(C# 代码块按 C 导出)", () => {
+        const blocks = [];
+        DOMToNotion._cookCode({ querySelector: () => ({ getAttribute: () => "language-c#", textContent: "var x = 1;" }) }, blocks);
+        expect(blocks[0].code.language).toBe("c#");
+        const plain = [];
+        DOMToNotion._cookCode({ querySelector: () => ({ getAttribute: () => "language-c", textContent: "int x;" }) }, plain);
+        expect(plain[0].code.language).toBe("c");
+    });
+
+    it("emoji 回退文本走 splitLongText(不过长驳回整页)", () => {
+        const src = fs.readFileSync("src/api/DOMToNotion.js", "utf8");
+        expect(src).toContain("result.push(...DOMToNotion.splitLongText(emoji, annotations));");
     });
 });
 

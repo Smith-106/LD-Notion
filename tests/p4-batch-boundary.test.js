@@ -5,6 +5,7 @@ const { AIHandlers, AIAssistant, AIService, ChatState } = require("../src/ai/ind
 const { NotionAPI } = require("../src/api");
 const { OperationGuard, ConfirmationDialog } = require("../src/security");
 const { GitHubExporter, GitHubAPI } = require("../src/import");
+const { Utils } = require("../src/utils");
 
 describe("P4: batch handler 边界", () => {
     const saved = {};
@@ -100,6 +101,12 @@ describe("P4: batch handler 边界", () => {
     });
 
     it("handleGeneratePages 超过 20 个子页面时截断并告知", async () => {
+        // P4 收敛(c02): 子页面循环新增 REQUEST_DELAY 节流 —— 实际等待无意义,
+        // 拦截 sleep 并验证节流确实发生(而非把节流改掉给测试让路)
+        const delays = [];
+        const origSleep = Utils.sleep;
+        Utils.sleep = async (ms) => { delays.push(ms); };
+        try {
         const children = Array.from({ length: 25 }, (_, i) => ({ title: `T${i}`, description: "d", icon: "📄" }));
         AIService.requestChat = async (prompt) => (prompt.includes("内容架构师")
             ? JSON.stringify({ parent_title: "P", parent_summary: "s", children })
@@ -113,6 +120,12 @@ describe("P4: batch handler 边界", () => {
         const result = await AIHandlers.handleGeneratePages({ page_name: "主题", parent_page_id: "parent-1" }, { notionApiKey: "k" }, "");
         expect(result).toContain("20/20");
         expect(result).toContain("已按上限 20 创建");
+        // 19 次子页面之间的节流(上限 20 → 最后一次后不再等待)
+        expect(delays.length).toBe(19);
+        expect(delays.every((ms) => ms > 0)).toBe(true);
+        } finally {
+            Utils.sleep = origSleep;
+        }
     });
 
     it("GitHub 导入各类型均报错时不显示已是最新状态", async () => {

@@ -5,6 +5,17 @@ const { Utils } = require("../utils");
 const { UrlValidator } = require("../security/UrlValidator");
 const { normalizeLanguage, EMOJI_MAP } = require("./constants");
 
+// P4 收敛(c05): 上界处若落在代理对中间(emoji 前半), 回退一个码元 —— 切出孤立代理字符
+// 会被 Notion 拒绝(400)或渲染为乱码。软切/截断标记两处共用同一口径。
+const safeCutIndex = (text, index) => {
+    const cut = Math.max(0, Math.min(index, text.length));
+    if (cut > 0 && cut < text.length) {
+        const code = text.charCodeAt(cut - 1);
+        if (code >= 0xd800 && code <= 0xdbff) return cut - 1;
+    }
+    return cut;
+};
+
 const DOMToNotion = {
     // ===== cookedToBlocks 各元素处理器（MNT-003 提取，保持 if 顺序与逻辑等价）=====
 
@@ -194,7 +205,9 @@ const DOMToNotion = {
     _cookCode: (el, blocks) => {
         const codeEl = el.querySelector("code");
         const langClass = codeEl?.getAttribute("class") || "";
-        const rawLang = (langClass.match(/lang(?:uage)?-([a-z0-9_+-]+)/i) || [])[1] || "plain text";
+        // P4 收敛(c05): 语言标识白名单化前先完整捕获 —— `#` 未入字符类时 `language-c#`
+        // 被截为 "c", 命中 NOTION_LANGUAGES 的 c → C# 代码块按 C 语言写入
+        const rawLang = (langClass.match(/lang(?:uage)?-([a-z0-9_+#-]+)/i) || [])[1] || "plain text";
         const code = (codeEl ? codeEl.textContent : el.textContent) || "";
         const richTextArray = DOMToNotion.splitLongText(code);
         blocks.push({
@@ -249,11 +262,17 @@ const DOMToNotion = {
         let hasHeader = false;
 
         const thead = table.querySelector("thead");
+        // P4 收敛(c05): 表格行列只取直属子元素 —— 后代选择器会把单元格内嵌套表格的
+        // tr/td 并入外层行(列宽污染/内容窜行); 与下方 tbody 分支同口径
+        const directRows = (container) => Array.from(container.children || [])
+            .filter((child) => child.tagName && child.tagName.toLowerCase() === "tr");
+        const directCells = (row) => Array.from(row.children || [])
+            .filter((child) => child.tagName && ["td", "th"].includes(child.tagName.toLowerCase()));
         if (thead) {
             hasHeader = true;
-            thead.querySelectorAll("tr").forEach((tr) => {
+            directRows(thead).forEach((tr) => {
                 const cells = [];
-                tr.querySelectorAll("th, td").forEach((cell) => {
+                directCells(tr).forEach((cell) => {
                     const richText = DOMToNotion.serializeRichText(cell);
                     cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
                 });
@@ -262,10 +281,10 @@ const DOMToNotion = {
         }
 
         const tbody = table.querySelector("tbody") || table;
-        tbody.querySelectorAll("tr").forEach((tr) => {
+        directRows(tbody).forEach((tr) => {
             if (tr.closest("thead")) return;
             const cells = [];
-            tr.querySelectorAll("td, th").forEach((cell) => {
+            directCells(tr).forEach((cell) => {
                 const richText = DOMToNotion.serializeRichText(cell);
                 cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
             });
@@ -324,11 +343,7 @@ const DOMToNotion = {
             let remaining = text;
             while (remaining.length > 0 && chunks.length < maxItems) {
                 // P4 收敛(c05): 按 UTF-16 码元硬切会拆散代理对(emoji) → 孤立代理对触发 Notion 400/乱码
-                let cut = maxLength;
-                if (cut < remaining.length) {
-                    const code = remaining.charCodeAt(cut - 1);
-                    if (code >= 0xd800 && code <= 0xdbff) cut -= 1;
-                }
+                const cut = safeCutIndex(remaining, maxLength);
                 const chunk = remaining.substring(0, cut);
                 chunks.push({ type: "text", text: { content: chunk }, annotations: { ...annotations } });
                 remaining = remaining.substring(cut);
@@ -338,7 +353,8 @@ const DOMToNotion = {
             if (remaining.length > 0 && chunks.length > 0) {
                 const marker = `…（内容过长，已截断 ${remaining.length} 字符）`;
                 const last = chunks[chunks.length - 1];
-                last.text.content = last.text.content.slice(0, Math.max(0, maxLength - marker.length)) + marker;
+                // P4 收敛(c05): 截断点同样需避让代理对(与上方分块同口径)
+                last.text.content = last.text.content.slice(0, safeCutIndex(last.text.content, maxLength - marker.length)) + marker;
                 console.warn(`[LD-Notion] rich_text 达 ${maxItems} 项上限, 已截断 ${remaining.length} 字符`);
             }
         }
@@ -371,7 +387,7 @@ const DOMToNotion = {
                     const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP, emojiName)
                         ? EMOJI_MAP[emojiName]
                         : (el.getAttribute("alt") || `:${emojiName}:`);
-                    if (emoji) result.push({ type: "text", text: { content: emoji }, annotations: { ...annotations } });
+                    if (emoji) result.push(...DOMToNotion.splitLongText(emoji, annotations));
                 }
                 return;
             }

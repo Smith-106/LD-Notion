@@ -655,7 +655,9 @@ const NotionSiteUI = {
 
         // 数据库/页面下拉框选择变更
         panel.querySelector("#ldb-notion-ai-target-db").onchange = (e) => {
-            void UICommandService.execute("select_ai_target", { targetValue: e.target.value });
+            // P4 收敛(c16): execute 可 reject(存储异常) —— 裸 void 产生未处理拒绝且切换静默失败
+            void UICommandService.execute("select_ai_target", { targetValue: e.target.value })
+                .catch((error) => NotionSiteUI.showStatus(`切换 AI 目标失败: ${error.message}`, "error"));
         };
 
         // AI 服务切换 - 仅更新模型列表（F-UI-38:持久化统一走保存按钮）
@@ -699,7 +701,13 @@ const NotionSiteUI = {
                 });
                 // P3 共识(dsf+glm): 等待期间用户可能已切换服务(onchange 已重置模型列表),
                 // 陈旧响应会把旧服务模型写回新状态并被保存按钮持久化。
+                // P4 收敛(c16): 仅校验 service 不够 —— 端点/Key 也在同一面板可改, 陈旧模型列表
+                // 会被应用到新端点(并按新端点持久化)
                 if (panel.querySelector("#ldb-notion-ai-service")?.value !== aiService) return;
+                if ((panel.querySelector("#ldb-notion-ai-base-url")?.value.trim() || "") !== aiBaseUrl) return;
+                const nowAiKey = panel.querySelector("#ldb-notion-ai-api-key").value.trim()
+                    || String(Storage.get(CONFIG.STORAGE_KEYS.AI_API_KEY, "") || "").trim();
+                if (nowAiKey !== aiApiKey) return;
                 NotionSiteUI.updateAIModelOptions(aiService, models, true);
                 modelTip.textContent = `✅ 获取到 ${models.length} 个可用模型`;
                 modelTip.style.color = "var(--ldb-ui-success)";
@@ -866,16 +874,22 @@ const NotionSiteUI = {
         return String(page?.parent?.type || "").trim();
     },
 
-    getAITargetPageParentLabel: (page, { databases = [], pages: allPages = [] } = {}) => {
+    getAITargetPageParentLabel: (page, { databases = [], pages: allPages = [], parentIndex = null } = {}) => {
         const parentType = NotionSiteUI.getAITargetPageParentType(page);
         const parentId = page?.parentId;
         let parentName = "";
         if (parentId) {
-            const parentDb = databases.find(db => db.id === parentId);
-            if (parentDb) parentName = parentDb.title;
-            else {
-                const parentPage = allPages.find(p => p.id === parentId);
-                if (parentPage) parentName = parentPage.title;
+            if (parentIndex instanceof Map) {
+                // P4 收敛(c16 2/3 共识 glm+qwen): 批量构建下拉时逐页线性 find 为 O(N²);
+                // 调用方一次性建 id→title 索引后复用
+                parentName = parentIndex.get(parentId) || "";
+            } else {
+                const parentDb = databases.find(db => db.id === parentId);
+                if (parentDb) parentName = parentDb.title;
+                else {
+                    const parentPage = allPages.find(p => p.id === parentId);
+                    if (parentPage) parentName = parentPage.title;
+                }
             }
         }
         if (parentType === "database_id") {
@@ -889,10 +903,10 @@ const NotionSiteUI = {
         return parentType ? "非顶级页面" : "";
     },
 
-    getAITargetPageOptionLabel: (page, { includeParentLabel = false, databases = [], pages: allPages = [] } = {}) => {
+    getAITargetPageOptionLabel: (page, { includeParentLabel = false, databases = [], pages: allPages = [], parentIndex = null } = {}) => {
         const title = String(page?.title || "").trim() || "未命名页面";
         const parentType = NotionSiteUI.getAITargetPageParentType(page);
-        const parentLabel = NotionSiteUI.getAITargetPageParentLabel(page, { databases, pages: allPages });
+        const parentLabel = NotionSiteUI.getAITargetPageParentLabel(page, { databases, pages: allPages, parentIndex });
         const prefix = parentType === "workspace" ? "📄" : "↳";
 
         if (!includeParentLabel || !parentLabel || parentType === "workspace") {
@@ -975,6 +989,14 @@ const NotionSiteUI = {
             options += '</optgroup>';
         }
 
+        // P4 收敛(c16 2/3 共识 glm+qwen): 嵌套页标签需逐个查父级名 —— 先建索引避免 O(N²)
+        const parentIndex = new Map();
+        for (const db of databases) {
+            if (db && db.id && !parentIndex.has(db.id)) parentIndex.set(db.id, db.title || "");
+        }
+        for (const p of pages) {
+            if (p && p.id && !parentIndex.has(p.id)) parentIndex.set(p.id, p.title || "");
+        }
         const nestedPages = pages.filter(page => NotionSiteUI.getAITargetPageParentType(page) !== "workspace");
         if (nestedPages.length > 0) {
             options += '<optgroup label="📄 嵌套页面（数据库内/子页面）">';
@@ -982,7 +1004,7 @@ const NotionSiteUI = {
                 const val = `page:${page.id}`;
                 knownIds.add(val);
                 options += `<option value="${Utils.escapeHtml(val)}">${Utils.escapeHtml(
-                    NotionSiteUI.getAITargetPageOptionLabel(page, { includeParentLabel: true, databases, pages })
+                    NotionSiteUI.getAITargetPageOptionLabel(page, { includeParentLabel: true, databases, pages, parentIndex })
                 )}</option>`;
             });
             options += '</optgroup>';
@@ -1083,6 +1105,18 @@ const NotionSiteUI = {
     // 拖拽功能
     makeDraggable: (element, handle) => {
         let offsetX, offsetY, isDragging = false;
+        // P4 收敛(c16): setPointerCapture 不可用(旧浏览器/失败)时的 document 级降级监听标记
+        let docListenersAttached = false;
+
+        const onPointerMove = (e) => {
+            if (!isDragging) return;
+            const x = Math.max(0, Math.min(window.innerWidth - element.offsetWidth, e.clientX - offsetX));
+            const y = Math.max(0, Math.min(window.innerHeight - element.offsetHeight, e.clientY - offsetY));
+            element.style.left = x + "px";
+            element.style.top = y + "px";
+            element.style.right = "auto";
+            element.style.bottom = "auto";
+        };
 
         // Odyssey UI F+Q: pointer events + setPointerCapture 替代 document.onmouse*
         handle.addEventListener("pointerdown", (e) => {
@@ -1091,21 +1125,31 @@ const NotionSiteUI = {
             offsetX = e.clientX - element.offsetLeft;
             offsetY = e.clientY - element.offsetTop;
             document.body.style.userSelect = "none";
-            try { handle.setPointerCapture(e.pointerId); } catch (_) { /* 旧浏览器降级 */ }
+            let captured = false;
+            try {
+                handle.setPointerCapture(e.pointerId);
+                captured = true;
+            } catch (_) { /* 旧浏览器降级 */ }
+            // P4 收敛(c16): 捕获失败时指针移出 handle 后的 release 不会派发到 handle ——
+            // isDragging 与 body userSelect 永久卡住; 降级为 document 级监听
+            if (!captured) {
+                docListenersAttached = true;
+                document.addEventListener("pointermove", onPointerMove);
+                document.addEventListener("pointerup", endDrag);
+                document.addEventListener("pointercancel", endDrag);
+            }
         });
 
-        handle.addEventListener("pointermove", (e) => {
-            if (!isDragging) return;
-            const x = Math.max(0, Math.min(window.innerWidth - element.offsetWidth, e.clientX - offsetX));
-            const y = Math.max(0, Math.min(window.innerHeight - element.offsetHeight, e.clientY - offsetY));
-            element.style.left = x + "px";
-            element.style.top = y + "px";
-            element.style.right = "auto";
-            element.style.bottom = "auto";
-        });
+        handle.addEventListener("pointermove", onPointerMove);
 
         const endDrag = (e) => {
             if (!isDragging) return;
+            if (docListenersAttached) {
+                document.removeEventListener("pointermove", onPointerMove);
+                document.removeEventListener("pointerup", endDrag);
+                document.removeEventListener("pointercancel", endDrag);
+                docListenersAttached = false;
+            }
             if (isDragging) {
                 // 保存位置（使用 right 和 bottom）
                 const rect = element.getBoundingClientRect();
@@ -1189,6 +1233,8 @@ const NotionSiteUI = {
         NotionSiteUI._abortController = null;
         NotionSiteUI.panel?.remove();
         NotionSiteUI.panel = null;
+        // P4 收敛(c16 2/3 共识 glm+qwen): 清 PanelResize 注册表条目(防分离面板子树无法 GC)
+        PanelResize.unregister(CONFIG.STORAGE_KEYS.PANEL_SIZE_NOTION);
         NotionSiteUI.floatBtn?.remove();
         NotionSiteUI.floatBtn = null;
         NotionSiteUI.isPanelReady = false;

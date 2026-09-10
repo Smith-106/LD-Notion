@@ -1256,6 +1256,8 @@ const UIEvents = {
                     });
                 }
             } catch (error) {
+                // P4 收敛(c13): 导出失败也必须收掉进度浮层 —— 否则遮罩残留、面板不可用
+                UI.hideProgress();
                 UI.showStatus(`导出出错: ${error.message}`, "error");
             } finally {
                 // P3(qwen, 主 agent 复核): 按当前配置完整性恢复按钮——无条件启用会与
@@ -1358,7 +1360,7 @@ const UIEvents = {
                             let md = HTMLToMarkdown.buildFrontmatter(meta);
 
                             md += `> [!info] 帖子信息\n`;
-                            md += `> - **原始链接**: [${topic.title}](${topic.url})\n`;
+                            md += `> - **原始链接**: ${Utils.mdLink(topic.title, topic.url)}\n`;
                             md += `> - **楼主**: @${topic.opUsername || "未知"}\n`;
                             md += `> - **分类**: ${meta.category || "无"}\n`;
                             md += `> - **标签**: ${(topic.tags || []).join(", ") || "无"}\n`;
@@ -1377,6 +1379,13 @@ const UIEvents = {
                                     imgDownloads.push({ full: match[0], alt: match[1], url: match[2] });
                                 }
                                 for (const img of imgDownloads) {
+                                    // P4 收敛(c13): 与主题循环同口径 —— 取消/暂停必须穿透图片下载循环
+                                    if (Exporter.isCancelled) break;
+                                    while (Exporter.isPaused) {
+                                        await Utils.sleep(200);
+                                        if (Exporter.isCancelled) break;
+                                    }
+                                    if (Exporter.isCancelled) break;
                                     try {
                                         const ext = img.url.split(".").pop().split("?")[0] || "png";
                                         const nameBytes = new Uint8Array(4);
@@ -1400,7 +1409,12 @@ const UIEvents = {
                                                 url: img.url,
                                                 responseType: "blob",
                                                 timeout: 30000,
-                                                onload: (r) => resolve(r.response),
+                                                onload: (r) => {
+                                                    // P4 收敛(c13): onload 对 4xx/5xx 同样触发 ——
+                                                    // 错误页字节不得当图片写入
+                                                    if (r.status >= 200 && r.status < 300) resolve(r.response);
+                                                    else reject(new Error(`图片下载失败: HTTP ${r.status}`));
+                                                },
                                                 onerror: (e) => reject(e),
                                                 ontimeout: () => reject(new Error("图片下载超时")),
                                             });
@@ -1429,6 +1443,13 @@ const UIEvents = {
                                 let m;
                                 while ((m = imgRegex.exec(md)) !== null) matches.push(m);
                                 for (const match of matches.reverse()) {
+                                    // P4 收敛(c13): 与主题循环同口径 —— 取消/暂停必须穿透图片内嵌循环
+                                    if (Exporter.isCancelled) break;
+                                    while (Exporter.isPaused) {
+                                        await Utils.sleep(200);
+                                        if (Exporter.isCancelled) break;
+                                    }
+                                    if (Exporter.isCancelled) break;
                                     try {
                                         // SSRF 防护（SEC-003）：match[2] 同为页面解析的 img src，校验外链 URL。
                                         const { UrlValidator } = require("../security/UrlValidator");
@@ -1441,7 +1462,11 @@ const UIEvents = {
                                                 url: match[2],
                                                 responseType: "blob",
                                                 timeout: 30000,
-                                                onload: (r) => resolve(r),
+                                                // P4 收敛(c13): onload 对 4xx/5xx 同样触发 —— 错误页不得内嵌为 data URL
+                                                onload: (r) => {
+                                                    if (r.status >= 200 && r.status < 300) resolve(r);
+                                                    else reject(new Error(`图片下载失败: HTTP ${r.status}`));
+                                                },
                                                 onerror: (e) => reject(e),
                                                 ontimeout: () => reject(new Error("图片下载超时")),
                                             });
@@ -1451,7 +1476,7 @@ const UIEvents = {
                                             reader.onloadend = () => resolve(reader.result);
                                             reader.readAsDataURL(resp.response);
                                         });
-                                        md = md.replace(match[0], `![${match[1]}](${b64})`);
+                                        md = md.replace(match[0], () => `![${match[1]}](${b64})`);
                                     } catch {
                                         // 跳过失败的图片
                                         imageFailures++;
@@ -1943,7 +1968,9 @@ const UIEvents = {
 
         // AI 查询目标数据库选择
         refs.aiTargetDbSelect.onchange = (e) => {
-            void UICommandService.execute("select_ai_target", { targetValue: e.target.value });
+            // P4 收敛(c16): 与 NotionSiteUI 同口径 —— execute 可 reject, 不可裸 void 丢弃
+            void UICommandService.execute("select_ai_target", { targetValue: e.target.value })
+                .catch((error) => UI.showStatus(`切换 AI 目标失败: ${error.message}`, "error"));
         };
 
         refs.workspaceMaxPagesSelect.onchange = (e) => {

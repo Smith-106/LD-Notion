@@ -508,7 +508,10 @@ const RSSAutoImporter = {
         if (!snapshotEntry) return false;
         // P4 收敛(c07): 与写入侧同口径——_safeUrl 拒绝的链接不写入「链接」属性,
         // 直接比对 item.url 会每轮误判需更新(永不收敛)
-        if (String(pageMeta.url || "") !== RSSAutoImporter._safeUrl(item.url)) return true;
+        // P4 收敛(c07 续): 写入侧 safeUrl 为空时不发「链接」字段 → 页面永久保留旧 URL,
+        // 此时比对恒不等 → 每轮重复 update; 仅在本次有可写链接时才比对
+        const safeUrl = RSSAutoImporter._safeUrl(item.url);
+        if (safeUrl && String(pageMeta.url || "") !== safeUrl) return true;
         if (String(pageMeta.title || "") !== String(item.title || "")) return true;
         if (String(pageMeta.summary || "") !== String(item.summary || "")) return true;
         return SyncState.normalizeTime(pageMeta.publishedAt) !== SyncState.normalizeTime(item.publishedAt);
@@ -518,6 +521,8 @@ const RSSAutoImporter = {
         const feedUrls = RSSAutoImporter.getFeedUrls();
         const dedupMode = RSSAutoImporter.getDedupMode();
         const itemsByKey = new Map();
+        // P4 收敛(c07 2/3 共识 dsf+qwen): 记录拉取失败的 feed 数 —— 全源失败不得被当「无新增」上报成功
+        let failedCount = 0;
 
         for (const feedUrl of feedUrls) {
             // 单 feed 失败不应阻断整次 RSS 同步（优雅降级）：重试用尽后 catch 记录并 continue。
@@ -525,6 +530,7 @@ const RSSAutoImporter = {
             try {
                 parsed = await RSSAutoImporter.fetchFeedWithRetry(feedUrl);
             } catch (error) {
+                failedCount++;
                 console.error(`[LD-Notion] RSS feed 拉取失败（已重试），跳过: ${feedUrl}`, error);
                 continue;
             }
@@ -555,6 +561,7 @@ const RSSAutoImporter = {
 
         return {
             feedCount: feedUrls.length,
+            failedCount,
             items: Array.from(itemsByKey.values()).sort((a, b) => {
                 const aTime = Date.parse(a.publishedAt || "") || 0;
                 const bTime = Date.parse(b.publishedAt || "") || 0;
@@ -609,10 +616,13 @@ const RSSAutoImporter = {
         // P4 收敛(c07 2/3): 标记 currentItems 是否为完整 feed 条目集 —— 增量路径只含本轮新增项,
         // 不得据此剪枝历史快照(剪枝仅在全量回填路径生效)
         let hasFullItemSet = false;
+        // P4 收敛(c07): feed 拉取失败数随 ctx 传递(增量路径无此信息 → 0)
+        let feedFailedCount = 0;
         if (currentItems.length === 0) {
             const fallback = await RSSAutoImporter.loadCurrentItems();
             currentItems = fallback.items || [];
             feedCount = fallback.feedCount || feedCount;
+            feedFailedCount = Number(fallback.failedCount) || 0;
             hasFullItemSet = true;
         }
 
@@ -624,6 +634,7 @@ const RSSAutoImporter = {
             previousSnapshot,
             currentItems,
             feedCount,
+            feedFailedCount,
             hasFullItemSet,
             index,
             nextSnapshot: { ...previousSnapshot },
@@ -647,6 +658,8 @@ const RSSAutoImporter = {
             || safeTitleMatch;
 
         let result = { created: 0, updated: 0, unchanged: 0, failed: 0, denied: 0, itemKey: item.itemKey };
+        // P4 收敛(c07): 审计操作类型须与实际写请求一致 —— 更新失败原被记为建页失败
+        let auditOp = "createDatabasePage";
 
         try {
             // v3.14.13 (P1-3): 每项开工前重读 token——buildSettings 快照在 OAuth 续签后
@@ -680,6 +693,7 @@ const RSSAutoImporter = {
                     { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title, databaseId: settings.databaseId });
                 result.created = 1;
             } else if (RSSAutoImporter.needsUpdate(item, snapshotEntry, pageMeta)) {
+                auditOp = "updatePage";
                 RSSAutoImporter.updateStatus(`正在更新 RSS 条目 (${ctx.position}/${total}): ${item.title}`);
                 const { OperationGuard } = require("../security");
                 if (!OperationGuard.canExecute("updatePage")) {
@@ -729,7 +743,7 @@ const RSSAutoImporter = {
                 throw error;
             }
             console.error(`[LD-Notion] RSS 自动同步失败: ${item.title || item.url}`, error);
-            RSSAutoImporter._auditAutoSync("createDatabasePage", "failed",
+            RSSAutoImporter._auditAutoSync(auditOp, "failed",
                 { itemKey: item.itemKey, itemName: item.title || item.url, reason: String(error?.message || error) });
             result.failed = 1;
             if (snapshotEntry) {
@@ -744,6 +758,10 @@ const RSSAutoImporter = {
     _aggregateRssState: (ctx, stats, successfulKeys, attemptAt) => {
         const { currentItems, feedCount, nextSnapshot, hasFullItemSet } = ctx;
         const { created, updated, unchanged, failed } = stats;
+        // P4 收敛(c07 2/3 共识 dsf+qwen): 全部 feed 拉取失败时 loadCurrentItems 返回空条目集,
+        // 原实现据此写 lastOutcome=success + 推进 lastSuccessAt —— 全源故障被静默上报为同步成功
+        const feedFailedCount = Number(ctx.feedFailedCount) || 0;
+        const allFeedsFailed = feedCount > 0 && feedFailedCount >= feedCount;
 
         // v3.14.6 (DC-006): nextSnapshot 从 {...previousSnapshot} 起步只增不删 →
         // feed 移除条目永驻, 无界增长违容量约束; 收尾按当前项键集剪枝
@@ -760,8 +778,8 @@ const RSSAutoImporter = {
         const statePatch = {
             snapshot: nextSnapshot,
             lastAttemptAt: attemptAt,
-            lastOutcome: failed > 0 ? "partial" : "success",
-            lastError: "",
+            lastOutcome: allFeedsFailed ? "error" : (failed > 0 ? "partial" : "success"),
+            lastError: allFeedsFailed ? `全部 ${feedCount} 个 RSS Feed 拉取失败（已重试）` : "",
             lastStats: {
                 feeds: feedCount,
                 scanned: currentItems.length,
@@ -774,7 +792,8 @@ const RSSAutoImporter = {
             },
         };
         if (currentItems.length === 0) {
-            statePatch.lastSuccessAt = Date.now();
+            // 全源失败不是成功: 不推进 lastSuccessAt(否则同步中心显示「刚刚同步成功」)
+            if (!allFeedsFailed) statePatch.lastSuccessAt = Date.now();
         } else {
             const leadingSuccessfulItems = SyncState.takeLeadingItems(
                 currentItems,
@@ -794,15 +813,21 @@ const RSSAutoImporter = {
         SyncState.updateRssState(statePatch);
 
         if (created === 0 && updated === 0 && failed === 0 && (stats.denied || 0) === 0) {
-            RSSAutoImporter.updateStatus(`RSS 已同步，无新增变更 (${new Date().toLocaleTimeString()})`);
+            if (allFeedsFailed) {
+                RSSAutoImporter.updateStatus(`❌ RSS 同步失败：全部 ${feedCount} 个 Feed 拉取失败（已重试，详见控制台） (${new Date().toLocaleTimeString()})`);
+                return;
+            }
+            const feedFailMsg = feedFailedCount > 0 ? `，${feedFailedCount} 个 Feed 拉取失败` : "";
+            RSSAutoImporter.updateStatus(`RSS 已同步，无新增变更${feedFailMsg} (${new Date().toLocaleTimeString()})`);
             return;
         }
 
         // v3.14.17 (P0-4): 权限不足聚合提示——不再静默丢弃
         const deniedMsg = (stats.denied || 0) > 0 ? `，${stats.denied} 项因权限不足跳过（可在设置中提升权限级别）` : "";
+        const feedFailMsg = feedFailedCount > 0 ? `，${feedFailedCount} 个 Feed 拉取失败` : "";
         RSSAutoImporter.updateStatus(
             `RSS 自动同步完成：新增 ${created}，更新 ${updated}，无变更 ${unchanged}`
-            + `${failed > 0 ? `，失败 ${failed}` : ""}${deniedMsg}`
+            + `${failed > 0 ? `，失败 ${failed}` : ""}${deniedMsg}${feedFailMsg}`
             + ` (${new Date().toLocaleTimeString()})`
         );
     },

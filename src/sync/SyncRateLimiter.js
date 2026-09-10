@@ -10,6 +10,7 @@ const SyncRateLimiter = {
     _tokens: SyncConstants.RATE_CAPACITY,
     _lastRefill: Date.now(),
     _waiters: [],
+    _drainTimer: null,
     _inflight: 0,
     _selfLimitTokens: SyncConstants.SYNC_SELF_LIMIT_PER_SEC,
     _selfLastRefill: Date.now(),
@@ -53,8 +54,14 @@ const SyncRateLimiter = {
         // 同 tick 多 waiter 排队且桶只回 1 个 token 时, 第二个 waiter 永不 resolve →
         // 对应 Notion 请求永久挂起; 全盘审计修复)。
         if (this._waiters.length > 0) {
+            // P4 收敛(c11): 同 tick 多个 waiter 排队各自调 _drain 会各排一个定时器 ——
+            // 定时器数量随 waiter 倍增; 单一定时器守卫
+            if (this._drainTimer !== null) return;
             const delay = Math.max(100, Math.ceil((1 - this._tokens) * 1000));
-            setTimeout(() => this._drain(), delay);
+            this._drainTimer = setTimeout(() => {
+                this._drainTimer = null;
+                this._drain();
+            }, delay);
         }
     },
 
@@ -153,6 +160,10 @@ const SyncRateLimiter = {
         this._tokens = SyncConstants.RATE_CAPACITY;
         this._lastRefill = Date.now();
         this._waiters = [];
+        if (this._drainTimer !== null) {
+            clearTimeout(this._drainTimer);
+            this._drainTimer = null;
+        }
         this._selfLimitTokens = SyncConstants.SYNC_SELF_LIMIT_PER_SEC;
         this._selfLastRefill = Date.now();
         // glm P2 共识: 防抖槽也需清空, 否则旧定时器跨 reset 存活并执行陈旧 fn

@@ -162,10 +162,10 @@ handleEditContent: async (params, settings, explanation) => {
 4. append_markdown 必须是 Markdown。
 
 原文：
-${existingContent}
+${AI().isolateContent(existingContent)}
 
 编辑指令：
-${content_prompt}`;
+${AI().isolateContent(content_prompt)}`;
 
         const editPlanRaw = await svc().requestChat(editPlanPrompt, settings, 2200);
         // ISS-013: 统一走 parseAIJson 接缝（arch-013），消除手工 jsonMatch+JSON.parse 三段式。
@@ -873,6 +873,10 @@ handleTemplateOutput: async (params, settings, explanation) => {
     }
 
     const { template_name, page_name, page_id, custom_context } = params;
+    // P4 收敛(c02): 非字符串 template_name 会让 .includes 抛 TypeError(try 外, 未捕获)
+    if (template_name !== undefined && template_name !== null && typeof template_name !== "string") {
+        return "❌ 模板名必须为文本。";
+    }
 
     // 加载模板列表
     let templates;
@@ -922,8 +926,10 @@ handleTemplateOutput: async (params, settings, explanation) => {
         // 组合 prompt
         state().updateLastMessage(`${template.icon} 正在使用「${template.name}」模板生成...`, "processing");
 
-        const contextBlock = pageContext ? `\n\n以下是参考内容：\n${pageContext}` : "";
-        const customBlock = custom_context ? `\n\n用户补充说明：${custom_context}` : "";
+        // P4 收敛(c02 2/3 共识 dsf+glm): 页面正文与用户补充说明均为不可信输入, 必须过 isolateContent
+        // (与 batch.js:607 页面正文、content.js:83 用户要求同口径)
+        const contextBlock = pageContext ? `\n\n以下是参考内容：\n${AI().isolateContent(pageContext)}` : "";
+        const customBlock = custom_context ? `\n\n用户补充说明：${AI().isolateContent(custom_context)}` : "";
         const fullPrompt = `${template.prompt}${contextBlock}${customBlock}\n\n请使用 Markdown 格式输出。`;
 
         const aiResponse = await svc().requestChat(fullPrompt, settings, 3000);

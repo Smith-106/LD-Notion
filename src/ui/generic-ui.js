@@ -865,7 +865,13 @@ const GenericUI = {
 
             GenericUI.showStatus("正在导出到 Notion...", "info");
             const { page, meta } = await GenericExporter.exportCurrentPage(settings);
-            GenericExporter.markClipperExported(meta);
+            // P4 收敛(c14): 页面已在 Notion 创建 —— 本地账本标记失败不得报「导出失败」,
+            // 否则用户重试会创建重复页面(标记失败仅影响本地去重)
+            try {
+                GenericExporter.markClipperExported(meta);
+            } catch (markError) {
+                console.warn("[LD-Notion] 导出账本标记失败(页面已创建):", markError);
+            }
 
             floatBtn.className = "gclip-float-btn success";
             GenericUI.showStatus(`导出成功: ${meta.title}`, "success");

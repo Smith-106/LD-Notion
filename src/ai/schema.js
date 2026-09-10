@@ -144,6 +144,12 @@ const AISchema = {
                 return { ok: false, reason: "AI 返回的属性结构无效（name/type 缺失）" };
             }
         }
+        // P4 收敛(c04): entries 项类型也必须校验 —— 消费侧逐条解引用, null 会崩
+        for (const entry of data.entries) {
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+                return { ok: false, reason: "AI 返回的条目结构无效（应为对象）" };
+            }
+        }
         return { ok: true };
     },
 

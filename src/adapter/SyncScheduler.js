@@ -78,8 +78,11 @@ const SyncScheduler = {
      * @param {string} sourceType
      */
     getIntervalMinutes(sourceType) {
-        const key = SOURCE_INTERVAL_KEYS[sourceType];
-        const def = SOURCE_INTERVAL_DEFAULTS[sourceType] || 30;
+        // P4 收敛(c01): 原型链键(toString/constructor/__proto__)会命中继承属性 —— 必须自有属性校验
+        const hasOwn = (map, key) => Object.prototype.hasOwnProperty.call(map, key);
+        const key = hasOwn(SOURCE_INTERVAL_KEYS, sourceType) ? SOURCE_INTERVAL_KEYS[sourceType] : undefined;
+        const rawDef = hasOwn(SOURCE_INTERVAL_DEFAULTS, sourceType) ? SOURCE_INTERVAL_DEFAULTS[sourceType] : 30;
+        const def = Number.isFinite(rawDef) ? rawDef : 30;
         if (!key) return def;
         // 0 是有效值(仅手动同步): 不能被 || def 吞掉而回退默认间隔(dsf P1 共识)
         const raw = Number(Storage.getRaw(key, def));
@@ -92,7 +95,10 @@ const SyncScheduler = {
      * @returns {boolean}
      */
     isEnabled(sourceType) {
-        const key = SOURCE_ENABLED_KEYS[sourceType];
+        // P4 收敛(c01): 同 getIntervalMinutes —— 原型键不得命中继承属性
+        const key = Object.prototype.hasOwnProperty.call(SOURCE_ENABLED_KEYS, sourceType)
+            ? SOURCE_ENABLED_KEYS[sourceType]
+            : undefined;
         if (!key) return false;
         return !!Storage.getRaw(key, false);
     },

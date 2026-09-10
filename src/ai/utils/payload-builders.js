@@ -19,7 +19,11 @@ _buildPageIconPayload: (iconType, iconValue) => {
         return { type: "emoji", emoji: iconValue };
     }
     if (iconType === "external") {
-        return { type: "external", external: { url: iconValue } };
+        // P4 收敛(c04): 与 AIAssistant._buildPageIconPayload 同口径 ——
+        // external URL 来自 AI 输出(注入面), 必须拒 javascript:/内网/169.254
+        return UrlValidator.validatePageExternalUrl(String(iconValue).trim())
+            ? { type: "external", external: { url: String(iconValue).trim() } }
+            : null;
     }
     return null;
 },
@@ -30,7 +34,10 @@ _buildPageIconPayload: (iconType, iconValue) => {
  */
 _buildPageCoverPayload: (coverUrl) => {
     if (!coverUrl) return null;
-    return { type: "external", external: { url: coverUrl } };
+    // P4 收敛(c04): 同类注入面 —— cover 外部 URL 同样校验
+    return UrlValidator.validatePageExternalUrl(String(coverUrl).trim())
+        ? { type: "external", external: { url: String(coverUrl).trim() } }
+        : null;
 },
 
 /**
@@ -46,8 +53,12 @@ _buildPropertyValuePayload: (type, value) => {
             return value ? { select: { name: String(value) } } : { select: null };
         case "multi_select":
             return { multi_select: (Array.isArray(value) ? value : [value]).filter(Boolean).map(v => ({ name: String(v) })) };
-        case "number":
-            return { number: value != null ? Number(value) : null };
+        case "number": {
+            // P4 收敛(c04): Number("abc")→NaN 会被序列化为 null 静默清空属性 —— 与 schema.js 同口径拒非有限数
+            if (value == null || value === "") return { number: null };
+            const num = Number(value);
+            return { number: Number.isFinite(num) ? num : null };
+        }
         case "checkbox":
             // P4 收敛(c04 2/3): Boolean("false")===true —— 与 schema.js 同口径严格真值
             return { checkbox: value === true || value === 1 || String(value).trim().toLowerCase() === "true" };

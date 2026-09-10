@@ -486,6 +486,7 @@ ${structure_prompt ? `补充要求：${AI().isolateContent(structure_prompt)}` :
         );
 
         // 创建子页面并生成内容
+        const childDelay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
         let createdCount = 0;
         for (let i = 0; i < plan.children.length; i++) {
             const child = plan.children[i];
@@ -494,7 +495,8 @@ ${structure_prompt ? `补充要求：${AI().isolateContent(structure_prompt)}` :
             try {
                 // 创建子页面
                 const childProps = {
-                    title: { title: [{ text: { content: `${child.icon || ""} ${child.title}`.trim() } }] }
+                    // P4 收敛(c02): validate 截断到 MAX_RICH_TEXT 后拼接 icon 会越界 —— Notion 400
+                    title: { title: [{ text: { content: `${child.icon || ""} ${child.title}`.trim().slice(0, AISchema.MAX_RICH_TEXT) } }] }
                 };
                 const childPage = await AI()._executeGuardedPageWrite("createDatabasePage", parentPage,
                     () => NotionAPI.createPageInPage(parentPage.id, childProps, settings.notionApiKey),
@@ -523,6 +525,9 @@ ${structure_prompt ? `补充要求：${AI().isolateContent(structure_prompt)}` :
                 console.warn(`[LD-Notion] 子页面创建失败: ${child.title}`, error);
                 /* skip failed pages */
             }
+            // P4 收敛(c02 2/3 共识 dsf+glm): 每轮 createPage+appendBlocks 两次写请求背靠背
+            // 连发会触发 429 —— 与同文件其余批处理循环对齐节流
+            if (i < plan.children.length - 1 && childDelay > 0) await Utils.sleep(childDelay);
         }
 
         return `📑 **多页面内容生成完成**\n\n- 父页面: ${plan.parent_title}\n- 子页面: ${createdCount}/${plan.children.length} 创建成功${requestedChildCount > MAX_GENERATED_CHILDREN ? `\n- ⚠️ AI 规划了 ${requestedChildCount} 个子页面，已按上限 ${MAX_GENERATED_CHILDREN} 创建` : ""}\n\n💡 所有页面已创建并填充内容。`;
@@ -569,6 +574,7 @@ handleBatchAnalyze: async (params, settings, explanation) => {
         // 提取内容
         state().updateLastMessage(`🔎 正在提取 ${pages.length} 个页面内容...`, "processing");
 
+        const extractDelay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
         const contentParts = [];
         for (let i = 0; i < pages.length; i++) {
             const page = pages[i];
@@ -584,6 +590,8 @@ handleBatchAnalyze: async (params, settings, explanation) => {
                 console.warn(`[LD-Notion] 页面提取失败: ${title}`, error);
                 contentParts.push(`## ${title}\n（内容提取失败: ${error.message}）`);
             }
+            // P4 收敛(c02 2/3 共识 dsf+glm): 与同文件其余批处理循环同口径 —— 逐页提取需节流
+            if (i < pages.length - 1 && extractDelay > 0) await Utils.sleep(extractDelay);
         }
 
         // AI 生成综合分析

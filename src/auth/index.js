@@ -55,7 +55,10 @@ const CredentialVault = {
             .replace(/Bearer\s+[A-Za-z0-9._\-]{10,}/gi, "Bearer ***REDACTED***")
             .replace(/github_pat_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***")
             .replace(/ghp_[A-Za-z0-9]{20,}/g, "***REDACTED***")
-            .replace(/gho_[A-Za-z0-9]{20,}/g, "***REDACTED***");
+            .replace(/gho_[A-Za-z0-9]{20,}/g, "***REDACTED***")
+            // P4 收敛(c06): 同族前缀 ghu_(user-to-server)/ghs_(server-to-server)/ghr_(refresh)
+            // 原清单遗漏 → 自由文本中的这类 token 明文落盘
+            .replace(/gh[usr]_[A-Za-z0-9]{20,}/g, "***REDACTED***");
     },
 
     hasVault: () => !!CredentialVault._getVaultPayloadRaw(),

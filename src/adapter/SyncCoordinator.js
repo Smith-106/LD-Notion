@@ -69,17 +69,26 @@ const SyncCoordinator = {
                 : await adapter.fetchIncremental(currentState.watermark);
 
             // 去重过滤 (使用 batch 减少 IPC 调用; F6: 只过滤、不 markSeen)
+            // P4 收敛(c01): 批次内重复键也须过滤 —— 账本严格在写入成功后落账(F6),
+            // 同批 rawItems 含重复 dedupKey 时两条都会进入 newItems 被重复写入。
+            // 用本地 Set 而非 markSeen: 不改变「失败项不落账」重试语义。
             DedupStore.beginBatch(sourceType);
             const newItems = [];
             const pendingKeys = [];
+            const seenInBatch = new Set();
             let skippedCount = 0;
             try {
                 for (const item of rawItems) {
                     const dedupKey = adapter.getDedupKey(item);
+                    if (dedupKey && seenInBatch.has(dedupKey)) {
+                        skippedCount++;
+                        continue;
+                    }
                     if (DedupStore.isDuplicate(sourceType, dedupKey)) {
                         skippedCount++;
                         continue;
                     }
+                    if (dedupKey) seenInBatch.add(dedupKey);
                     newItems.push(item);
                     pendingKeys.push(dedupKey);
                 }

@@ -88,6 +88,8 @@ const SyncLock = {
      * 绝不触碰他方租约。
      */
     renewLease: (key, lease, ttlMs = 180000) => {
+        // 降级模式(无 GM)下槽位与 lease 为同一对象引用, 原地更新 expiresAt 即可见;
+        // acquireLease 读的就是该对象的 expiresAt(实测语义等价, 无需重写槽位)
         if (!lease || typeof GM_setValue !== "function") return lease;
         if (typeof GM_getValue === "function") {
             const current = Utils.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
@@ -119,7 +121,9 @@ const SyncLock = {
         if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
             const held = SyncLock._localLeases.get(key);
             if (held && held.owner === lease.owner) SyncLock._localLeases.delete(key);
-            SyncLock.isExporting = false;
+            // P4 收敛(c10): 仅当本进程再无任何 slot 持租时才能清全局标志 ——
+            // 多 key 场景释放其中一个会把仍在持有的互斥一起清掉
+            SyncLock.isExporting = SyncLock._localLeases.size > 0;
             return;
         }
         const current = Utils.safeJsonParse(GM_getValue(key, "{}"), {}) || {};

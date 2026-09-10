@@ -25,6 +25,11 @@ describe("normalizeWorkspaceInsightUrl Discourse slug 对账", () => {
         expect(norm("https://linux.do/t/12345/")).toBe("https://linux.do/t/12345");
     });
 
+    it("纯数字 slug(/t/{数字}/{id})不得取到 slug 伪 id", () => {
+        expect(norm("https://linux.do/t/2024/45678")).toBe("https://linux.do/t/45678");
+        expect(norm("https://linux.do/t/2024/45678/3")).toBe("https://linux.do/t/45678");
+    });
+
     it("大小写 host 与尾斜杠归一", () => {
         expect(norm("https://Linux.Do/t/Slug-Here/99/")).toBe("https://linux.do/t/99");
     });

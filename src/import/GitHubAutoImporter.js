@@ -294,6 +294,10 @@ GitHubAutoImporter._syncSingleType = async (type, settings, attemptAt) => {
 
         const syncState = SyncState.getGitHubState(type);
         const items = await GitHubAutoImporter.fetchTypeItems(type, settings);
+        // P4 收敛(c08): _fetchPaginated 网络错误/超时会 partial resolve(已拉 N 项) ——
+        // 据部分列表推进水位会把未拉到的尾部永久甩到水位之下(永久漏导入且无任何提示)
+        const itemsPartial = items && items.partial === true;
+        const partialNote = itemsPartial ? `${meta.label} 列表拉取不完整(网络错误/超时,已保留已拉项)` : "";
         const incrementalItems = SyncState.filterOrderedItems(
             items,
             syncState.watermark,
@@ -304,9 +308,9 @@ GitHubAutoImporter._syncSingleType = async (type, settings, attemptAt) => {
         if (incrementalItems.length === 0) {
             SyncState.updateGitHubState(type, {
                 lastAttemptAt: typeAttemptAt,
-                lastSuccessAt: Date.now(),
-                lastOutcome: "success",
-                lastError: "",
+                lastSuccessAt: itemsPartial ? syncState.lastSuccessAt : Date.now(),
+                lastOutcome: itemsPartial ? "partial" : "success",
+                lastError: partialNote,
                 lastStats: {
                     scanned: items.length,
                     pending: 0,
@@ -314,18 +318,18 @@ GitHubAutoImporter._syncSingleType = async (type, settings, attemptAt) => {
                     failed: 0,
                 },
             });
-            return { pending: false, success: 0, failed: 0 };
+            return { pending: false, success: 0, failed: 0, syncError: partialNote };
         }
 
         const mappedItems = GitHubAutoImporter._mapItemsToBookmarks(incrementalItems, type, meta);
 
         if (mappedItems.length === 0) {
             SyncState.updateGitHubState(type, {
-                watermark: SyncState.buildWatermark(incrementalItems, meta.getTime, meta.getId),
+                watermark: itemsPartial ? syncState.watermark : SyncState.buildWatermark(incrementalItems, meta.getTime, meta.getId),
                 lastAttemptAt: typeAttemptAt,
-                lastSuccessAt: Date.now(),
-                lastOutcome: "success",
-                lastError: "",
+                lastSuccessAt: itemsPartial ? syncState.lastSuccessAt : Date.now(),
+                lastOutcome: itemsPartial ? "partial" : "success",
+                lastError: partialNote,
                 lastStats: {
                     scanned: items.length,
                     pending: incrementalItems.length,
@@ -333,7 +337,7 @@ GitHubAutoImporter._syncSingleType = async (type, settings, attemptAt) => {
                     failed: 0,
                 },
             });
-            return { pending: true, success: 0, failed: 0 };
+            return { pending: true, success: 0, failed: 0, syncError: partialNote };
         }
 
         const result = await GitHubAutoImporter._exportMappedItems(mappedItems, type, meta, settings);
@@ -347,12 +351,12 @@ GitHubAutoImporter._syncSingleType = async (type, settings, attemptAt) => {
 
         const typeStatePatch = {
             lastAttemptAt: typeAttemptAt,
-            lastOutcome: result.failed.length > 0
+            lastOutcome: (result.failed.length > 0
                 ? (result.success.length > 0 ? "partial" : "error")
-                : "success",
+                : (itemsPartial ? "partial" : "success")),
             lastError: result.success.length === 0 && result.failed.length > 0
                 ? `${meta.label} 导出失败 ${result.failed.length} 项`
-                : "",
+                : partialNote,
             lastStats: {
                 scanned: items.length,
                 pending: incrementalItems.length,
@@ -374,14 +378,17 @@ GitHubAutoImporter._syncSingleType = async (type, settings, attemptAt) => {
                 }
             );
             if (leadingSuccessfulItems.length > 0) {
-                typeStatePatch.watermark = SyncState.buildWatermark(leadingSuccessfulItems, meta.getTime, meta.getId);
+                // 部分列表时不得推进水位(未拉到的尾部会被永久过滤掉)
+                if (!itemsPartial) {
+                    typeStatePatch.watermark = SyncState.buildWatermark(leadingSuccessfulItems, meta.getTime, meta.getId);
+                }
             }
-            typeStatePatch.lastSuccessAt = Date.now();
+            if (!itemsPartial) typeStatePatch.lastSuccessAt = Date.now();
         }
 
         SyncState.updateGitHubState(type, typeStatePatch);
         const createdCount = (result.created || result.success.filter((e) => !e.skippedExisting)).length;
-        return { pending: true, success: createdCount, failed: result.failed.length };
+        return { pending: true, success: createdCount, failed: result.failed.length, syncError: partialNote };
     } catch (error) {
         SyncState.updateGitHubState(type, {
             lastAttemptAt: typeAttemptAt,

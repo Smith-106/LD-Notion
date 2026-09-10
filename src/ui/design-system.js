@@ -59,9 +59,14 @@ const DesignSystem = {
             if (DesignSystem._theme === "auto") {
                 btn.textContent = "🌗";
                 btn.title = "跟随系统(自动)，点击切换亮色";
+            } else if (DesignSystem._theme === "dark") {
+                // P4 收敛(c12 2/3 共识 glm+qwen): 三态循环 dark → auto —— 按 effective 推导
+                // 会承诺「切换亮色」而实际进入 auto(系统为暗色时界面无任何变化)
+                btn.textContent = "🌗";
+                btn.title = "暗色模式，点击切换跟随系统(自动)";
             } else {
-                btn.textContent = effective === "dark" ? "☀️" : "🌙";
-                btn.title = effective === "dark" ? "切换亮色模式" : "切换暗色模式";
+                btn.textContent = "🌙";
+                btn.title = "切换暗色模式";
             }
         });
     },

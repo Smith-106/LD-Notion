@@ -1294,14 +1294,28 @@
           const batch = this._batchGet(sourceType);
           if (batch) {
             const set2 = batch.set;
-            if (Object.prototype.hasOwnProperty.call(set2, dedupKey)) return true;
+            if (this._isLiveEntry(sourceType, set2, dedupKey)) return true;
             const hashed2 = this._hashKeyFor(sourceType, dedupKey);
-            return hashed2 !== dedupKey && Object.prototype.hasOwnProperty.call(set2, hashed2);
+            return hashed2 !== dedupKey && this._isLiveEntry(sourceType, set2, hashed2);
           }
           const set = this._loadSet(sourceType);
-          if (Object.prototype.hasOwnProperty.call(set, dedupKey)) return true;
+          if (this._isLiveEntry(sourceType, set, dedupKey)) return true;
           const hashed = this._hashKeyFor(sourceType, dedupKey);
-          return hashed !== dedupKey && Object.prototype.hasOwnProperty.call(set, hashed);
+          return hashed !== dedupKey && this._isLiveEntry(sourceType, set, hashed);
+        },
+        /**
+         * 读取侧存活判定: id 键源(导出账本)永不过期; URL 键源仅 ts 在 TTL 窗口内算命中。
+         * @param {string} sourceType
+         * @param {Object} set - {key: timestamp}
+         * @param {string} key
+         * @returns {boolean}
+         */
+        _isLiveEntry(sourceType, set, key) {
+          if (!Object.prototype.hasOwnProperty.call(set, key)) return false;
+          if (!URL_KEYED_SOURCES.includes(sourceType)) return true;
+          const ts = Number(set[key]);
+          if (!Number.isFinite(ts) || ts <= 0) return true;
+          return ts >= Date.now() - DEDUP_TTL_MS;
         },
         /**
          * 标记条目为已见(urlKeyed 源双写哈希键, 与同步 payload 键空间一致)
@@ -1455,6 +1469,12 @@
           try {
             on("storage:batch-committed", () => {
               Storage2._exportedTopicsCache = null;
+            });
+          } catch (e) {
+          }
+          try {
+            on("storage:state-committed", (payload) => {
+              if (payload && payload.kind === "dedup") Storage2._exportedTopicsCache = null;
             });
           } catch (e) {
           }
@@ -2085,7 +2105,7 @@
           if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
             const held = SyncLock._localLeases.get(key);
             if (held && held.owner === lease.owner) SyncLock._localLeases.delete(key);
-            SyncLock.isExporting = false;
+            SyncLock.isExporting = SyncLock._localLeases.size > 0;
             return;
           }
           const current = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
@@ -2142,7 +2162,7 @@
           for (const key of CredentialVault2.REDACT_IN_LOGS) {
             out = out.split(key).join("***REDACTED***");
           }
-          return out.replace(/ntn_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/secret_[A-Za-z0-9]{20,}/g, "***REDACTED***").replace(/sk-[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/Bearer\s+[A-Za-z0-9._\-]{10,}/gi, "Bearer ***REDACTED***").replace(/github_pat_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/ghp_[A-Za-z0-9]{20,}/g, "***REDACTED***").replace(/gho_[A-Za-z0-9]{20,}/g, "***REDACTED***");
+          return out.replace(/ntn_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/secret_[A-Za-z0-9]{20,}/g, "***REDACTED***").replace(/sk-[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/Bearer\s+[A-Za-z0-9._\-]{10,}/gi, "Bearer ***REDACTED***").replace(/github_pat_[A-Za-z0-9_\-]{20,}/g, "***REDACTED***").replace(/ghp_[A-Za-z0-9]{20,}/g, "***REDACTED***").replace(/gho_[A-Za-z0-9]{20,}/g, "***REDACTED***").replace(/gh[usr]_[A-Za-z0-9]{20,}/g, "***REDACTED***");
         },
         hasVault: () => !!CredentialVault2._getVaultPayloadRaw(),
         isUnlocked: () => CredentialVault2._unlocked,
@@ -3996,6 +4016,14 @@
       var { Utils: Utils2 } = require_utils();
       var { UrlValidator } = require_UrlValidator();
       var { normalizeLanguage: normalizeLanguage2, EMOJI_MAP: EMOJI_MAP2 } = require_constants();
+      var safeCutIndex = (text, index) => {
+        const cut = Math.max(0, Math.min(index, text.length));
+        if (cut > 0 && cut < text.length) {
+          const code = text.charCodeAt(cut - 1);
+          if (code >= 55296 && code <= 56319) return cut - 1;
+        }
+        return cut;
+      };
       var DOMToNotion2 = {
         // ===== cookedToBlocks 各元素处理器（MNT-003 提取，保持 if 顺序与逻辑等价）=====
         // 过滤导入页面（帖子 HTML）中的外部 URL：复用 UrlValidator.validatePageExternalUrl
@@ -4171,7 +4199,7 @@
         _cookCode: (el, blocks) => {
           const codeEl = el.querySelector("code");
           const langClass = (codeEl == null ? void 0 : codeEl.getAttribute("class")) || "";
-          const rawLang = (langClass.match(/lang(?:uage)?-([a-z0-9_+-]+)/i) || [])[1] || "plain text";
+          const rawLang = (langClass.match(/lang(?:uage)?-([a-z0-9_+#-]+)/i) || [])[1] || "plain text";
           const code = (codeEl ? codeEl.textContent : el.textContent) || "";
           const richTextArray = DOMToNotion2.splitLongText(code);
           blocks.push({
@@ -4219,11 +4247,13 @@
           const rows = [];
           let hasHeader = false;
           const thead = table.querySelector("thead");
+          const directRows = (container) => Array.from(container.children || []).filter((child) => child.tagName && child.tagName.toLowerCase() === "tr");
+          const directCells = (row) => Array.from(row.children || []).filter((child) => child.tagName && ["td", "th"].includes(child.tagName.toLowerCase()));
           if (thead) {
             hasHeader = true;
-            thead.querySelectorAll("tr").forEach((tr) => {
+            directRows(thead).forEach((tr) => {
               const cells = [];
-              tr.querySelectorAll("th, td").forEach((cell) => {
+              directCells(tr).forEach((cell) => {
                 const richText = DOMToNotion2.serializeRichText(cell);
                 cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
               });
@@ -4231,10 +4261,10 @@
             });
           }
           const tbody = table.querySelector("tbody") || table;
-          tbody.querySelectorAll("tr").forEach((tr) => {
+          directRows(tbody).forEach((tr) => {
             if (tr.closest("thead")) return;
             const cells = [];
-            tr.querySelectorAll("td, th").forEach((cell) => {
+            directCells(tr).forEach((cell) => {
               const richText = DOMToNotion2.serializeRichText(cell);
               cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
             });
@@ -4286,11 +4316,7 @@
           } else {
             let remaining = text;
             while (remaining.length > 0 && chunks.length < maxItems) {
-              let cut = maxLength;
-              if (cut < remaining.length) {
-                const code = remaining.charCodeAt(cut - 1);
-                if (code >= 55296 && code <= 56319) cut -= 1;
-              }
+              const cut = safeCutIndex(remaining, maxLength);
               const chunk = remaining.substring(0, cut);
               chunks.push({ type: "text", text: { content: chunk }, annotations: { ...annotations } });
               remaining = remaining.substring(cut);
@@ -4298,7 +4324,7 @@
             if (remaining.length > 0 && chunks.length > 0) {
               const marker = `\u2026\uFF08\u5185\u5BB9\u8FC7\u957F\uFF0C\u5DF2\u622A\u65AD ${remaining.length} \u5B57\u7B26\uFF09`;
               const last = chunks[chunks.length - 1];
-              last.text.content = last.text.content.slice(0, Math.max(0, maxLength - marker.length)) + marker;
+              last.text.content = last.text.content.slice(0, safeCutIndex(last.text.content, maxLength - marker.length)) + marker;
               console.warn(`[LD-Notion] rich_text \u8FBE ${maxItems} \u9879\u4E0A\u9650, \u5DF2\u622A\u65AD ${remaining.length} \u5B57\u7B26`);
             }
           }
@@ -4322,7 +4348,7 @@
               if (emojiMatch) {
                 const emojiName = emojiMatch[1];
                 const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP2, emojiName) ? EMOJI_MAP2[emojiName] : el.getAttribute("alt") || `:${emojiName}:`;
-                if (emoji) result.push({ type: "text", text: { content: emoji }, annotations: { ...annotations } });
+                if (emoji) result.push(...DOMToNotion2.splitLongText(emoji, annotations));
               }
               return;
             }
@@ -4924,6 +4950,26 @@ ${quoted}
           // file field 放原始二进制，part_number field(1-1000)。原 base64+JSON 实现违反契约且体积膨胀 33%。
           // 仿 uploadFileContent:931 multipart 模式，但走 Notion API endpoint + Authorization Bearer（非 S3 预签名 URL）。
           sendFilePart: async (uploadId, partBlob, partNumber, apiKey, filename) => {
+            const MAX_ATTEMPTS = 3;
+            let lastError = null;
+            for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+              try {
+                return await NotionAPI2._sendFilePartOnce(uploadId, partBlob, partNumber, apiKey, filename);
+              } catch (error) {
+                lastError = error;
+                const status = Number(error == null ? void 0 : error.status) || 0;
+                const retryable = status === 429 || status >= 500 || (error == null ? void 0 : error.isNetworkError) === true;
+                if (!retryable) throw error;
+                if (attempt < MAX_ATTEMPTS - 1) await Utils2.sleep(1e3 * Math.pow(2, attempt));
+              }
+            }
+            throw lastError;
+          },
+          /**
+           * 分片发送单次尝试(multipart, 不用 NotionAPI.request: 该端点契约唯一)
+           * @returns {Promise<Object>} 服务端响应
+           */
+          _sendFilePartOnce: async (uploadId, partBlob, partNumber, apiKey, filename) => {
             if (NotionAPI2._requestGate) {
               await NotionAPI2._requestGate();
             }
@@ -4981,11 +5027,21 @@ ${partNumber}\r
                           resolve({});
                         }
                       } else {
-                        reject(new Error(`\u53D1\u9001\u5206\u7247\u5931\u8D25: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
+                        const err = new Error(`\u53D1\u9001\u5206\u7247\u5931\u8D25: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`);
+                        err.status = Number(response.status) || 0;
+                        reject(err);
                       }
                     },
-                    onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
-                    ontimeout: () => reject(new Error("\u53D1\u9001\u5206\u7247\u8D85\u65F6"))
+                    onerror: (error) => {
+                      const networkError = new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`);
+                      networkError.isNetworkError = true;
+                      reject(networkError);
+                    },
+                    ontimeout: () => {
+                      const timeoutError = new Error("\u53D1\u9001\u5206\u7247\u8D85\u65F6");
+                      timeoutError.isNetworkError = true;
+                      reject(timeoutError);
+                    }
                   });
                 } catch (error) {
                   reject(error instanceof Error ? error : new Error(String(error)));
@@ -5070,11 +5126,12 @@ Content-Type: ${safeContentType}\r
           // 通用文件上传（支持所有类型：图片/视频/音频/附件）
           // 自动判断 single_part / multi_part，自动识别 block 类型
           uploadFileToNotion: async (fileUrl, apiKey, originalFileName = null) => {
-            var _a;
             const urlObj = new URL(fileUrl);
             let ext = (urlObj.pathname.split(".").pop() || "").split("?")[0].toLowerCase();
             if (originalFileName) {
-              const origExt = (_a = originalFileName.split(".").pop()) == null ? void 0 : _a.toLowerCase();
+              const name = String(originalFileName);
+              const dotIdx = name.lastIndexOf(".");
+              const origExt = dotIdx > 0 ? name.slice(dotIdx + 1).toLowerCase() : "";
               if (origExt && origExt.length <= 10 && /^[a-z0-9]+$/i.test(origExt)) {
                 ext = origExt;
               }
@@ -6160,25 +6217,29 @@ Content-Type: ${safeContentType}\r
             logEntry.status = "failed";
             logEntry.error = error.message;
             logEntry.endTime = Date.now();
-            OperationLog2.add({
-              audit_event: OperationLog2.inferAuditEvent(operation, "failed"),
-              actor,
-              source,
-              guard: OperationGuard2._buildGuardSnapshot(operation, "allow", context),
-              operation: {
-                name: operation,
-                risk: OperationGuard2._getPermissionName(requiredLevelForOp),
-                trigger: context.trigger || "user_requested_write"
-              },
-              target: OperationLog2.buildTarget(context),
-              payload: OperationLog2.buildPayload(context),
-              result: {
-                status: "failed",
-                reason: error.message
-              },
-              redaction: OperationLog2.collectRedactionHints(context),
-              ...logEntry
-            });
+            try {
+              OperationLog2.add({
+                audit_event: OperationLog2.inferAuditEvent(operation, "failed"),
+                actor,
+                source,
+                guard: OperationGuard2._buildGuardSnapshot(operation, "allow", context),
+                operation: {
+                  name: operation,
+                  risk: OperationGuard2._getPermissionName(requiredLevelForOp),
+                  trigger: context.trigger || "user_requested_write"
+                },
+                target: OperationLog2.buildTarget(context),
+                payload: OperationLog2.buildPayload(context),
+                result: {
+                  status: "failed",
+                  reason: error.message
+                },
+                redaction: OperationLog2.collectRedactionHints(context),
+                ...logEntry
+              });
+            } catch (logError) {
+              console.warn("[LD-Notion] \u5931\u8D25\u8DEF\u5F84\u5BA1\u8BA1\u5199\u5165\u5931\u8D25:", logError);
+            }
             throw error;
           }
         }
@@ -6373,8 +6434,22 @@ Content-Type: ${safeContentType}\r
           if (logs.length > CONFIG2.API.MAX_LOG_ENTRIES) {
             logs.length = CONFIG2.API.MAX_LOG_ENTRIES;
           }
-          Storage2.set(CONFIG2.STORAGE_KEYS.OPERATION_LOG, JSON.stringify(logs));
-          emit("oplog:changed", OperationLog2.projectForBroadcast(logs));
+          const fresh = OperationLog2.getAll();
+          const seenIds = /* @__PURE__ */ new Set();
+          const union = [];
+          for (const item of [...logs, ...fresh]) {
+            const id = item && item.event_id ? String(item.event_id) : "";
+            if (id) {
+              if (seenIds.has(id)) continue;
+              seenIds.add(id);
+            }
+            union.push(item);
+          }
+          if (union.length > CONFIG2.API.MAX_LOG_ENTRIES) {
+            union.length = CONFIG2.API.MAX_LOG_ENTRIES;
+          }
+          Storage2.set(CONFIG2.STORAGE_KEYS.OPERATION_LOG, JSON.stringify(union));
+          emit("oplog:changed", OperationLog2.projectForBroadcast(union));
           return logEntry;
         },
         // v3.14.6 (XN-07): 广播投影 —— 仅安全字段子集(id/timestamp/operationName/actor/source/status/
@@ -6488,7 +6563,7 @@ Content-Type: ${safeContentType}\r
                         </div>
                         <button class="ldb-btn ldb-btn-secondary" id="ldb-confirm-cancel">\u53D6\u6D88</button>
                         <button class="ldb-btn ldb-btn-danger" id="ldb-confirm-ok" disabled>
-                            \u786E\u8BA4 (<span id="ldb-confirm-countdown">${countdown}</span>)
+                            \u786E\u8BA4 (<span id="ldb-confirm-countdown">${Math.max(0, Math.floor(Number(countdown)) || 0)}</span>)
                         </button>
                     </div>
                 </div>
@@ -6731,12 +6806,19 @@ Content-Type: ${safeContentType}\r
         `;
           document.body.appendChild(toast);
           UndoManager2.toastElement = toast;
-          toast.querySelector("#ldb-undo-action").onclick = async () => {
-            const success = await UndoManager2.execute();
-            if (success) {
-              emit("notify", { message: "\u64A4\u9500\u6210\u529F", type: "success" });
-            } else {
-              emit("notify", { message: "\u64A4\u9500\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u68C0\u67E5 Notion \u4E2D\u7684\u53D8\u66F4", type: "error" });
+          toast.querySelector("#ldb-undo-action").onclick = async (e) => {
+            const btn = (e == null ? void 0 : e.currentTarget) || toast.querySelector("#ldb-undo-action");
+            if (btn && btn.disabled) return;
+            if (btn) btn.disabled = true;
+            try {
+              const success = await UndoManager2.execute();
+              if (success) {
+                emit("notify", { message: "\u64A4\u9500\u6210\u529F", type: "success" });
+              } else {
+                emit("notify", { message: "\u64A4\u9500\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u68C0\u67E5 Notion \u4E2D\u7684\u53D8\u66F4", type: "error" });
+              }
+            } finally {
+              if (btn) btn.disabled = false;
             }
           };
           requestAnimationFrame(() => {
@@ -7457,6 +7539,11 @@ Content-Type: ${safeContentType}\r
           for (const prop of data.properties) {
             if (!prop || typeof prop.name !== "string" || !prop.name.trim() || typeof prop.type !== "string" || !prop.type.trim()) {
               return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u5C5E\u6027\u7ED3\u6784\u65E0\u6548\uFF08name/type \u7F3A\u5931\uFF09" };
+            }
+          }
+          for (const entry of data.entries) {
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+              return { ok: false, reason: "AI \u8FD4\u56DE\u7684\u6761\u76EE\u7ED3\u6784\u65E0\u6548\uFF08\u5E94\u4E3A\u5BF9\u8C61\uFF09" };
             }
           }
           return { ok: true };
@@ -8420,6 +8507,7 @@ Content-Type: ${safeContentType}\r
                 filter = { property: config.name, rich_text: { contains: filter_value } };
               }
             }
+            let queryTruncated = false;
             const queryOneDb = async (dbId) => {
               const pages = [];
               let cursor = null;
@@ -8450,17 +8538,19 @@ Content-Type: ${safeContentType}\r
                 cursor = response.next_cursor;
                 pageCount++;
               }
+              if (hasMore) queryTruncated = true;
               return pages;
             };
             let allPages = [];
             if (aiTargetState.mode === "all") {
               let cached;
               try {
-                cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
+                cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}")) || {};
               } catch (error) {
                 console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
                 cached = {};
               }
+              if (typeof cached !== "object") cached = {};
               const databases = cached.databases || [];
               if (databases.length === 0) return "\u9519\u8BEF: \u8BF7\u5148\u5728 AI \u8BBE\u7F6E\u4E2D\u70B9\u51FB\u300C\u{1F504}\u300D\u5237\u65B0\u6570\u636E\u5E93\u5217\u8868\u3002";
               const currentKeyHash = settings.notionApiKey ? Utils2.apiKeyHash(settings.notionApiKey) : "";
@@ -8505,6 +8595,9 @@ Content-Type: ${safeContentType}\r
               const sourceDb = page._sourceDb ? ` [\u6765\u6E90: ${page._sourceDb}]` : "";
               return `${i + 1}. ${title}${author ? ` (\u4F5C\u8005: ${author})` : ""}${sourceDb} [ID: ${id}]`;
             });
+            if (queryTruncated) {
+              bullets.push("\u26A0\uFE0F \u90E8\u5206\u6570\u636E\u5E93\u8D85\u8FC7\u5355\u5E93\u626B\u63CF\u4E0A\u9650\uFF0810 \u9875/\u5E93\uFF09\uFF0C\u603B\u6570\u4E0E\u5206\u7C7B\u7EDF\u8BA1\u53EF\u80FD\u4E0D\u5B8C\u6574");
+            }
             return AI()._formatToolResult({
               title: "\u6570\u636E\u5E93\u67E5\u8BE2\u7ED3\u679C",
               fields: [
@@ -8740,13 +8833,15 @@ Content-Type: ${safeContentType}\r
             }
             const filters = [];
             if (sourceFilter) filters.push(sourceFilter);
+            let dbPageTruncated = false;
             const queryOneDb = async (dbId) => {
-              const body = { page_size: Math.min(limit, 100) };
+              const body = { page_size: 100 };
               if (filters.length > 0) {
                 body.filter = filters.length === 1 ? filters[0] : { and: filters };
               }
               try {
                 const response = await NotionAPI2.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
+                if (response.has_more) dbPageTruncated = true;
                 return response.results || [];
               } catch (error) {
                 console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
@@ -8792,6 +8887,9 @@ Content-Type: ${safeContentType}\r
             });
             if (dbTruncated) {
               lines.push(`\u26A0\uFE0F \u6570\u636E\u5E93\u6570\u91CF\u8D85\u8FC7\u626B\u63CF\u4E0A\u9650\uFF08${MAX_QUERY_DBS} \u4E2A\uFF09\uFF0C\u7ED3\u679C\u53EF\u80FD\u4E0D\u5B8C\u6574`);
+            }
+            if (dbPageTruncated) {
+              lines.push("\u26A0\uFE0F \u90E8\u5206\u6570\u636E\u5E93\u6761\u76EE\u6570\u8D85\u8FC7\u5355\u5E93\u626B\u63CF\u4E0A\u9650\uFF08100 \u6761/\u5E93\uFF09\uFF0C\u7ED3\u679C\u53EF\u80FD\u4E0D\u5B8C\u6574");
             }
             return AI()._formatToolResult({
               title: "\u8DE8\u6E90\u641C\u7D22\u7ED3\u679C",
@@ -8896,9 +8994,11 @@ Content-Type: ${safeContentType}\r
             if (!settings.aiApiKey) {
               return "\u274C \u9700\u8981\u914D\u7F6E AI API Key \u624D\u80FD\u4F7F\u7528\u667A\u80FD\u63A8\u8350\u529F\u80FD\u3002";
             }
-            const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
+            const discovered = await searchAllDatabases({ apiKey: settings.notionApiKey });
+            const candidateDbs = discovered.results.slice(0, MAX_QUERY_DBS);
+            const dbTruncated = discovered.truncated || discovered.results.length > candidateDbs.length;
             let candidates = [];
-            for (const db of (allDbs.results || []).slice(0, 5)) {
+            for (const db of candidateDbs) {
               try {
                 const res = await NotionAPI2.request("POST", `/databases/${db.id}/query`, { page_size: 50 }, settings.notionApiKey);
                 candidates.push(...res.results || []);
@@ -8940,6 +9040,9 @@ ${candidateList}
                 const src = ((_m = (_l = (_k = (_j = (_i = p.properties) == null ? void 0 : _i["\u6765\u6E90"]) == null ? void 0 : _j.rich_text) == null ? void 0 : _k[0]) == null ? void 0 : _l.text) == null ? void 0 : _m.content) || "";
                 const url = ((_o = (_n = p.properties) == null ? void 0 : _n["\u94FE\u63A5"]) == null ? void 0 : _o.url) || "";
                 bullets.push(`[${src}] ${t}${url ? ` (${url})` : ""}`);
+              }
+              if (dbTruncated) {
+                bullets.push(`\u26A0\uFE0F \u6570\u636E\u5E93\u6570\u91CF\u8D85\u8FC7\u626B\u63CF\u4E0A\u9650\uFF08${MAX_QUERY_DBS} \u4E2A\uFF09\uFF0C\u7ED3\u679C\u53EF\u80FD\u4E0D\u5B8C\u6574`);
               }
               return AI()._formatToolResult({
                 title: "\u76F8\u4F3C\u5185\u5BB9\u63A8\u8350",
@@ -9242,6 +9345,9 @@ ${candidateList}
             if (!page_id) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B page_id\u3002";
             if (!property) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B property\uFF08\u5C5E\u6027\u540D\uFF09\u3002";
             if (value === void 0 || value === null) return "\u9519\u8BEF: \u8BF7\u63D0\u4F9B value\uFF08\u65B0\u503C\uFF09\u3002";
+            if (["__proto__", "constructor", "prototype"].includes(property)) {
+              return "\u9519\u8BEF: \u5C5E\u6027\u540D\u65E0\u6548\uFF0C\u8BF7\u4F7F\u7528\u975E\u4FDD\u7559\u540D\u79F0\u3002";
+            }
             const updateProps = {};
             switch (type) {
               case "select":
@@ -9522,7 +9628,8 @@ ${candidateList}
               return !((_b = (_a = p.properties["AI\u5206\u7C7B"]) == null ? void 0 : _a.select) == null ? void 0 : _b.name);
             });
             if (unclassified.length === 0) return `\u6240\u6709 ${pages.length} \u4E2A\u9875\u9762\u90FD\u5DF2\u5206\u7C7B\u3002`;
-            const maxLimit = args.limit ? Math.min(args.limit, unclassified.length) : unclassified.length;
+            const limitNum = Number(args.limit);
+            const maxLimit = Number.isFinite(limitNum) && limitNum > 0 ? Math.min(Math.floor(limitNum), unclassified.length) : unclassified.length;
             const toClassify = unclassified.slice(0, maxLimit);
             const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
             let success = 0, failed = 0;
@@ -9983,7 +10090,7 @@ ${result}`;
 **\u5206\u7C7B\u7EDF\u8BA1\uFF1A**
 `;
               Object.entries(categoryCount).sort((a, b) => b[1] - a[1]).forEach(([cat, count]) => {
-                result += `- ${cat}: ${count} \u4E2A
+                result += `- ${Utils2.mdText(cat)}: ${count} \u4E2A
 `;
               });
             } else {
@@ -9995,8 +10102,8 @@ ${result}`;
                 var _a2, _b2, _c2;
                 const title = Utils2.getPageTitle(page);
                 const author = ((_c2 = (_b2 = (_a2 = page.properties["\u4F5C\u8005"]) == null ? void 0 : _a2.rich_text) == null ? void 0 : _b2[0]) == null ? void 0 : _c2.plain_text) || "\u672A\u77E5";
-                result += `${i + 1}. **${title}**
-   \u4F5C\u8005: ${author}
+                result += `${i + 1}. **${Utils2.mdText(title)}**
+   \u4F5C\u8005: ${Utils2.mdText(author)}
 `;
               });
             }
@@ -10714,10 +10821,10 @@ ${AI()._resultToText(r.result)}
 4. append_markdown \u5FC5\u987B\u662F Markdown\u3002
 
 \u539F\u6587\uFF1A
-${existingContent}
+${AI().isolateContent(existingContent)}
 
 \u7F16\u8F91\u6307\u4EE4\uFF1A
-${content_prompt}`;
+${AI().isolateContent(content_prompt)}`;
             const editPlanRaw = await svc().requestChat(editPlanPrompt, settings, 2200);
             const editPlanResult = AISchema.parseAIJson("editPlan", editPlanRaw);
             let editPlan = null;
@@ -11344,6 +11451,9 @@ ${aiResponse}`;
             return "\u274C \u6743\u9650\u4E0D\u8DB3\uFF1A\u6A21\u677F\u8F93\u51FA\u9700\u8981\u300C\u6807\u51C6\u300D\u6743\u9650\u7EA7\u522B\u3002";
           }
           const { template_name, page_name, page_id, custom_context } = params;
+          if (template_name !== void 0 && template_name !== null && typeof template_name !== "string") {
+            return "\u274C \u6A21\u677F\u540D\u5FC5\u987B\u4E3A\u6587\u672C\u3002";
+          }
           let templates;
           try {
             templates = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, CONFIG2.DEFAULTS.aiTemplates));
@@ -11387,10 +11497,10 @@ ${list}
             const contextBlock = pageContext ? `
 
 \u4EE5\u4E0B\u662F\u53C2\u8003\u5185\u5BB9\uFF1A
-${pageContext}` : "";
+${AI().isolateContent(pageContext)}` : "";
             const customBlock = custom_context ? `
 
-\u7528\u6237\u8865\u5145\u8BF4\u660E\uFF1A${custom_context}` : "";
+\u7528\u6237\u8865\u5145\u8BF4\u660E\uFF1A${AI().isolateContent(custom_context)}` : "";
             const fullPrompt = `${template.prompt}${contextBlock}${customBlock}
 
 \u8BF7\u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002`;
@@ -12663,14 +12773,20 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             DedupStore.beginBatch(sourceType);
             const newItems = [];
             const pendingKeys = [];
+            const seenInBatch = /* @__PURE__ */ new Set();
             let skippedCount = 0;
             try {
               for (const item of rawItems) {
                 const dedupKey = adapter.getDedupKey(item);
+                if (dedupKey && seenInBatch.has(dedupKey)) {
+                  skippedCount++;
+                  continue;
+                }
                 if (DedupStore.isDuplicate(sourceType, dedupKey)) {
                   skippedCount++;
                   continue;
                 }
+                if (dedupKey) seenInBatch.add(dedupKey);
                 newItems.push(item);
                 pendingKeys.push(dedupKey);
               }
@@ -12783,8 +12899,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
          * @param {string} sourceType
          */
         getIntervalMinutes(sourceType) {
-          const key = SOURCE_INTERVAL_KEYS[sourceType];
-          const def = SOURCE_INTERVAL_DEFAULTS[sourceType] || 30;
+          const hasOwn = (map, key2) => Object.prototype.hasOwnProperty.call(map, key2);
+          const key = hasOwn(SOURCE_INTERVAL_KEYS, sourceType) ? SOURCE_INTERVAL_KEYS[sourceType] : void 0;
+          const rawDef = hasOwn(SOURCE_INTERVAL_DEFAULTS, sourceType) ? SOURCE_INTERVAL_DEFAULTS[sourceType] : 30;
+          const def = Number.isFinite(rawDef) ? rawDef : 30;
           if (!key) return def;
           const raw = Number(Storage2.getRaw(key, def));
           return Number.isFinite(raw) && raw >= 0 ? raw : def;
@@ -12795,7 +12913,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
          * @returns {boolean}
          */
         isEnabled(sourceType) {
-          const key = SOURCE_ENABLED_KEYS[sourceType];
+          const key = Object.prototype.hasOwnProperty.call(SOURCE_ENABLED_KEYS, sourceType) ? SOURCE_ENABLED_KEYS[sourceType] : void 0;
           if (!key) return false;
           return !!Storage2.getRaw(key, false);
         },
@@ -14038,7 +14156,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         needsUpdate: (item, snapshotEntry, pageMeta) => {
           if (!pageMeta) return true;
           if (!snapshotEntry) return false;
-          if (String(pageMeta.url || "") !== RSSAutoImporter2._safeUrl(item.url)) return true;
+          const safeUrl = RSSAutoImporter2._safeUrl(item.url);
+          if (safeUrl && String(pageMeta.url || "") !== safeUrl) return true;
           if (String(pageMeta.title || "") !== String(item.title || "")) return true;
           if (String(pageMeta.summary || "") !== String(item.summary || "")) return true;
           return SyncState2.normalizeTime(pageMeta.publishedAt) !== SyncState2.normalizeTime(item.publishedAt);
@@ -14047,11 +14166,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const feedUrls = RSSAutoImporter2.getFeedUrls();
           const dedupMode = RSSAutoImporter2.getDedupMode();
           const itemsByKey = /* @__PURE__ */ new Map();
+          let failedCount = 0;
           for (const feedUrl of feedUrls) {
             let parsed;
             try {
               parsed = await RSSAutoImporter2.fetchFeedWithRetry(feedUrl);
             } catch (error) {
+              failedCount++;
               console.error(`[LD-Notion] RSS feed \u62C9\u53D6\u5931\u8D25\uFF08\u5DF2\u91CD\u8BD5\uFF09\uFF0C\u8DF3\u8FC7: ${feedUrl}`, error);
               continue;
             }
@@ -14081,6 +14202,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           return {
             feedCount: feedUrls.length,
+            failedCount,
             items: Array.from(itemsByKey.values()).sort((a, b) => {
               const aTime = Date.parse(a.publishedAt || "") || 0;
               const bTime = Date.parse(b.publishedAt || "") || 0;
@@ -14123,10 +14245,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           let feedCount = RSSAutoImporter2.getFeedUrls().length;
           let hasFullItemSet = false;
+          let feedFailedCount = 0;
           if (currentItems.length === 0) {
             const fallback = await RSSAutoImporter2.loadCurrentItems();
             currentItems = fallback.items || [];
             feedCount = fallback.feedCount || feedCount;
+            feedFailedCount = Number(fallback.failedCount) || 0;
             hasFullItemSet = true;
           }
           const trackedPages = await RSSAutoImporter2.fetchTrackedPages(settings.databaseId, settings.apiKey);
@@ -14136,6 +14260,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             previousSnapshot,
             currentItems,
             feedCount,
+            feedFailedCount,
             hasFullItemSet,
             index,
             nextSnapshot: { ...previousSnapshot },
@@ -14151,6 +14276,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const safeTitleMatch = titleMatch && (!titleMatch.url || !item.url || titleMatch.url === item.url) ? titleMatch : null;
           let pageMeta = (item.url ? index.byUrl.get(item.url) : null) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? index.byPageId.get(snapshotEntry.pageId) : null) || safeTitleMatch;
           let result = { created: 0, updated: 0, unchanged: 0, failed: 0, denied: 0, itemKey: item.itemKey };
+          let auditOp = "createDatabasePage";
           try {
             settings.apiKey = NotionOAuth2.getAccessToken("");
             if (!pageMeta) {
@@ -14186,6 +14312,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               );
               result.created = 1;
             } else if (RSSAutoImporter2.needsUpdate(item, snapshotEntry, pageMeta)) {
+              auditOp = "updatePage";
               RSSAutoImporter2.updateStatus(`\u6B63\u5728\u66F4\u65B0 RSS \u6761\u76EE (${ctx.position}/${total}): ${item.title}`);
               const { OperationGuard: OperationGuard2 } = require_security();
               if (!OperationGuard2.canExecute("updatePage")) {
@@ -14233,7 +14360,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
             console.error(`[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u5931\u8D25: ${item.title || item.url}`, error);
             RSSAutoImporter2._auditAutoSync(
-              "createDatabasePage",
+              auditOp,
               "failed",
               { itemKey: item.itemKey, itemName: item.title || item.url, reason: String((error == null ? void 0 : error.message) || error) }
             );
@@ -14249,6 +14376,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         _aggregateRssState: (ctx, stats, successfulKeys, attemptAt) => {
           const { currentItems, feedCount, nextSnapshot, hasFullItemSet } = ctx;
           const { created, updated, unchanged, failed } = stats;
+          const feedFailedCount = Number(ctx.feedFailedCount) || 0;
+          const allFeedsFailed = feedCount > 0 && feedFailedCount >= feedCount;
           if (hasFullItemSet && currentItems.length > 0) {
             const keptKeys = new Set(currentItems.map((item) => item.itemKey));
             for (const key of Object.keys(nextSnapshot)) {
@@ -14258,8 +14387,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const statePatch = {
             snapshot: nextSnapshot,
             lastAttemptAt: attemptAt,
-            lastOutcome: failed > 0 ? "partial" : "success",
-            lastError: "",
+            lastOutcome: allFeedsFailed ? "error" : failed > 0 ? "partial" : "success",
+            lastError: allFeedsFailed ? `\u5168\u90E8 ${feedCount} \u4E2A RSS Feed \u62C9\u53D6\u5931\u8D25\uFF08\u5DF2\u91CD\u8BD5\uFF09` : "",
             lastStats: {
               feeds: feedCount,
               scanned: currentItems.length,
@@ -14272,7 +14401,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
           };
           if (currentItems.length === 0) {
-            statePatch.lastSuccessAt = Date.now();
+            if (!allFeedsFailed) statePatch.lastSuccessAt = Date.now();
           } else {
             const leadingSuccessfulItems = SyncState2.takeLeadingItems(
               currentItems,
@@ -14291,12 +14420,18 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           SyncState2.updateRssState(statePatch);
           if (created === 0 && updated === 0 && failed === 0 && (stats.denied || 0) === 0) {
-            RSSAutoImporter2.updateStatus(`RSS \u5DF2\u540C\u6B65\uFF0C\u65E0\u65B0\u589E\u53D8\u66F4 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
+            if (allFeedsFailed) {
+              RSSAutoImporter2.updateStatus(`\u274C RSS \u540C\u6B65\u5931\u8D25\uFF1A\u5168\u90E8 ${feedCount} \u4E2A Feed \u62C9\u53D6\u5931\u8D25\uFF08\u5DF2\u91CD\u8BD5\uFF0C\u8BE6\u89C1\u63A7\u5236\u53F0\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
+              return;
+            }
+            const feedFailMsg2 = feedFailedCount > 0 ? `\uFF0C${feedFailedCount} \u4E2A Feed \u62C9\u53D6\u5931\u8D25` : "";
+            RSSAutoImporter2.updateStatus(`RSS \u5DF2\u540C\u6B65\uFF0C\u65E0\u65B0\u589E\u53D8\u66F4${feedFailMsg2} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
             return;
           }
           const deniedMsg = (stats.denied || 0) > 0 ? `\uFF0C${stats.denied} \u9879\u56E0\u6743\u9650\u4E0D\u8DB3\u8DF3\u8FC7\uFF08\u53EF\u5728\u8BBE\u7F6E\u4E2D\u63D0\u5347\u6743\u9650\u7EA7\u522B\uFF09` : "";
+          const feedFailMsg = feedFailedCount > 0 ? `\uFF0C${feedFailedCount} \u4E2A Feed \u62C9\u53D6\u5931\u8D25` : "";
           RSSAutoImporter2.updateStatus(
-            `RSS \u81EA\u52A8\u540C\u6B65\u5B8C\u6210\uFF1A\u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u65E0\u53D8\u66F4 ${unchanged}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""}${deniedMsg} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
+            `RSS \u81EA\u52A8\u540C\u6B65\u5B8C\u6210\uFF1A\u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u65E0\u53D8\u66F4 ${unchanged}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""}${deniedMsg}${feedFailMsg} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
           );
         },
         run: async () => {
@@ -14806,7 +14941,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             type: "callout",
             callout: {
               icon: { type: "emoji", emoji: "\u{1F517}" },
-              rich_text: [{ type: "text", text: { content: `\u6765\u6E90: ${meta.url}` } }]
+              // P4 收敛(c08): 与属性侧同口径截断 —— 超 rich_text 2000 上限会让整页导出被 Notion 拒
+              rich_text: [{ type: "text", text: { content: `\u6765\u6E90: ${String(meta.url || "").trim().slice(0, 2e3)}` } }]
             }
           });
           if (settings.imgMode === "upload") {
@@ -15236,9 +15372,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
             };
           }
+          SyncLock.isExporting = true;
           Exporter2.reset();
           const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
           if (!lease) {
+            SyncLock.isExporting = false;
             return {
               success: [],
               failed: [],
@@ -15250,7 +15388,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             };
           }
           const results = { success: [], failed: [], skipped: [] };
-          SyncLock.isExporting = true;
           let leaseLost = false;
           const renewTimer = setInterval(() => {
             let renewed;
@@ -15574,6 +15711,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         _fetchPaginated: (url, token = "", label = "GitHub", options = {}) => {
           return new Promise((resolve, reject) => {
             const allItems = [];
+            const resolvePartial = () => {
+              try {
+                allItems.partial = true;
+              } catch (_) {
+              }
+              resolve(allItems);
+            };
             let page = 1;
             const perPage = 100;
             const fetchPage = () => {
@@ -15614,7 +15758,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 onerror: () => {
                   if (allItems.length > 0) {
                     console.warn(`[LD-Notion] ${label} \u5206\u9875\u62C9\u53D6\u7F51\u7EDC\u9519\u8BEF\uFF0C\u4FDD\u7559\u5DF2\u62C9 ${allItems.length} \u9879\uFF08partial\uFF09`);
-                    resolve(allItems);
+                    resolvePartial();
                   } else {
                     reject(new Error(`\u7F51\u7EDC\u9519\u8BEF\uFF0C\u65E0\u6CD5\u8FDE\u63A5 ${label}`));
                   }
@@ -15623,7 +15767,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 ontimeout: () => {
                   if (allItems.length > 0) {
                     console.warn(`[LD-Notion] ${label} \u5206\u9875\u62C9\u53D6\u8D85\u65F6\uFF0C\u4FDD\u7559\u5DF2\u62C9 ${allItems.length} \u9879\uFF08partial\uFF09`);
-                    resolve(allItems);
+                    resolvePartial();
                   } else {
                     reject(new Error("GitHub API \u8BF7\u6C42\u8D85\u65F6"));
                   }
@@ -16172,16 +16316,17 @@ ${insight.summary || ""}`,
           if (newItems.length === 0) {
             return { total: items.length, exported: 0, failed: 0, message: `\u6CA1\u6709\u65B0\u7684 ${sourceType} \u9700\u8981\u5BFC\u51FA` };
           }
+          const exportMutexAcquired = SyncLock.isExporting !== true;
           SyncLock.isExporting = true;
           let lease = null;
           try {
             lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
           } catch (leaseError) {
-            SyncLock.isExporting = false;
+            if (exportMutexAcquired) SyncLock.isExporting = false;
             throw leaseError;
           }
           if (!lease) {
-            SyncLock.isExporting = false;
+            if (exportMutexAcquired) SyncLock.isExporting = false;
             return {
               total: items.length,
               exported: 0,
@@ -16190,11 +16335,26 @@ ${insight.summary || ""}`,
               message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
             };
           }
+          let leaseLost = false;
+          const renewTimer = setInterval(() => {
+            let renewed;
+            try {
+              renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+            } catch (renewError) {
+              console.warn("[LD-Notion] GitHub \u5BFC\u51FA\u7EED\u7EA6\u5931\u8D25:", renewError);
+              renewed = false;
+            }
+            if (!renewed) {
+              leaseLost = true;
+              clearInterval(renewTimer);
+            }
+          }, 3e4);
           let success = 0, failed = 0;
           let authAbortInfo = null;
           const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
           try {
             for (let i = 0; i < newItems.length; i++) {
+              if (leaseLost) break;
               const item = newItems[i];
               const key = getKeyFn(item);
               const pct = Math.round(10 + i / newItems.length * 85);
@@ -16248,8 +16408,9 @@ ${insight.summary || ""}`,
               }
             }
           } finally {
+            clearInterval(renewTimer);
             SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-            SyncLock.isExporting = false;
+            if (exportMutexAcquired) SyncLock.isExporting = false;
             if (flushFn) flushFn();
           }
           return authAbortInfo ? { total: items.length, exported: success, failed, skipped: newItems.length - success - failed, authAborted: authAbortInfo, newCount: newItems.length } : { total: items.length, exported: success, failed, newCount: newItems.length };
@@ -16746,6 +16907,8 @@ ${insight.summary || ""}`,
           GitHubAutoImporter2.updateStatus(`\u{1F4E7} \u6B63\u5728\u68C0\u67E5 GitHub ${meta.label}...`);
           const syncState = SyncState2.getGitHubState(type);
           const items = await GitHubAutoImporter2.fetchTypeItems(type, settings);
+          const itemsPartial = items && items.partial === true;
+          const partialNote = itemsPartial ? `${meta.label} \u5217\u8868\u62C9\u53D6\u4E0D\u5B8C\u6574(\u7F51\u7EDC\u9519\u8BEF/\u8D85\u65F6,\u5DF2\u4FDD\u7559\u5DF2\u62C9\u9879)` : "";
           const incrementalItems = SyncState2.filterOrderedItems(
             items,
             syncState.watermark,
@@ -16755,9 +16918,9 @@ ${insight.summary || ""}`,
           if (incrementalItems.length === 0) {
             SyncState2.updateGitHubState(type, {
               lastAttemptAt: typeAttemptAt,
-              lastSuccessAt: Date.now(),
-              lastOutcome: "success",
-              lastError: "",
+              lastSuccessAt: itemsPartial ? syncState.lastSuccessAt : Date.now(),
+              lastOutcome: itemsPartial ? "partial" : "success",
+              lastError: partialNote,
               lastStats: {
                 scanned: items.length,
                 pending: 0,
@@ -16765,16 +16928,16 @@ ${insight.summary || ""}`,
                 failed: 0
               }
             });
-            return { pending: false, success: 0, failed: 0 };
+            return { pending: false, success: 0, failed: 0, syncError: partialNote };
           }
           const mappedItems = GitHubAutoImporter2._mapItemsToBookmarks(incrementalItems, type, meta);
           if (mappedItems.length === 0) {
             SyncState2.updateGitHubState(type, {
-              watermark: SyncState2.buildWatermark(incrementalItems, meta.getTime, meta.getId),
+              watermark: itemsPartial ? syncState.watermark : SyncState2.buildWatermark(incrementalItems, meta.getTime, meta.getId),
               lastAttemptAt: typeAttemptAt,
-              lastSuccessAt: Date.now(),
-              lastOutcome: "success",
-              lastError: "",
+              lastSuccessAt: itemsPartial ? syncState.lastSuccessAt : Date.now(),
+              lastOutcome: itemsPartial ? "partial" : "success",
+              lastError: partialNote,
               lastStats: {
                 scanned: items.length,
                 pending: incrementalItems.length,
@@ -16782,7 +16945,7 @@ ${insight.summary || ""}`,
                 failed: 0
               }
             });
-            return { pending: true, success: 0, failed: 0 };
+            return { pending: true, success: 0, failed: 0, syncError: partialNote };
           }
           const result = await GitHubAutoImporter2._exportMappedItems(mappedItems, type, meta, settings);
           const successKeys = new Set(
@@ -16791,8 +16954,8 @@ ${insight.summary || ""}`,
           const successfulItems = mappedItems.filter((item) => successKeys.has(String(item.itemKey || ""))).map((item) => item.raw);
           const typeStatePatch = {
             lastAttemptAt: typeAttemptAt,
-            lastOutcome: result.failed.length > 0 ? result.success.length > 0 ? "partial" : "error" : "success",
-            lastError: result.success.length === 0 && result.failed.length > 0 ? `${meta.label} \u5BFC\u51FA\u5931\u8D25 ${result.failed.length} \u9879` : "",
+            lastOutcome: result.failed.length > 0 ? result.success.length > 0 ? "partial" : "error" : itemsPartial ? "partial" : "success",
+            lastError: result.success.length === 0 && result.failed.length > 0 ? `${meta.label} \u5BFC\u51FA\u5931\u8D25 ${result.failed.length} \u9879` : partialNote,
             lastStats: {
               scanned: items.length,
               pending: incrementalItems.length,
@@ -16813,13 +16976,15 @@ ${insight.summary || ""}`,
               }
             );
             if (leadingSuccessfulItems.length > 0) {
-              typeStatePatch.watermark = SyncState2.buildWatermark(leadingSuccessfulItems, meta.getTime, meta.getId);
+              if (!itemsPartial) {
+                typeStatePatch.watermark = SyncState2.buildWatermark(leadingSuccessfulItems, meta.getTime, meta.getId);
+              }
             }
-            typeStatePatch.lastSuccessAt = Date.now();
+            if (!itemsPartial) typeStatePatch.lastSuccessAt = Date.now();
           }
           SyncState2.updateGitHubState(type, typeStatePatch);
           const createdCount = (result.created || result.success.filter((e) => !e.skippedExisting)).length;
-          return { pending: true, success: createdCount, failed: result.failed.length };
+          return { pending: true, success: createdCount, failed: result.failed.length, syncError: partialNote };
         } catch (error) {
           SyncState2.updateGitHubState(type, {
             lastAttemptAt: typeAttemptAt,
@@ -17735,13 +17900,15 @@ ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}**
               settings,
               { itemName: plan.parent_title }
             );
+            const childDelay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
             let createdCount = 0;
             for (let i = 0; i < plan.children.length; i++) {
               const child = plan.children[i];
               state().updateLastMessage(`\u{1F4DD} \u751F\u6210\u5B50\u9875\u9762 (${i + 1}/${plan.children.length}): ${child.title}...`, "processing");
               try {
                 const childProps = {
-                  title: { title: [{ text: { content: `${child.icon || ""} ${child.title}`.trim() } }] }
+                  // P4 收敛(c02): validate 截断到 MAX_RICH_TEXT 后拼接 icon 会越界 —— Notion 400
+                  title: { title: [{ text: { content: `${child.icon || ""} ${child.title}`.trim().slice(0, AISchema.MAX_RICH_TEXT) } }] }
                 };
                 const childPage = await AI()._executeGuardedPageWrite(
                   "createDatabasePage",
@@ -17770,6 +17937,7 @@ ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}**
               } catch (error) {
                 console.warn(`[LD-Notion] \u5B50\u9875\u9762\u521B\u5EFA\u5931\u8D25: ${child.title}`, error);
               }
+              if (i < plan.children.length - 1 && childDelay > 0) await Utils2.sleep(childDelay);
             }
             return `\u{1F4D1} **\u591A\u9875\u9762\u5185\u5BB9\u751F\u6210\u5B8C\u6210**
 
@@ -17808,6 +17976,7 @@ ${plan.children.map((c, i) => `${i + 1}. ${c.icon || "\u{1F4C4}"} **${c.title}**
               return `\u274C \u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u53EF\u5206\u6790\u7684\u9875\u9762\u3002`;
             }
             state().updateLastMessage(`\u{1F50E} \u6B63\u5728\u63D0\u53D6 ${pages.length} \u4E2A\u9875\u9762\u5185\u5BB9...`, "processing");
+            const extractDelay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
             const contentParts = [];
             for (let i = 0; i < pages.length; i++) {
               const page = pages[i];
@@ -17822,6 +17991,7 @@ ${content || "\uFF08\u65E0\u5185\u5BB9\uFF09"}`);
                 contentParts.push(`## ${title}
 \uFF08\u5185\u5BB9\u63D0\u53D6\u5931\u8D25: ${error.message}\uFF09`);
               }
+              if (i < pages.length - 1 && extractDelay > 0) await Utils2.sleep(extractDelay);
             }
             state().updateLastMessage("\u{1F4CA} \u6B63\u5728\u751F\u6210\u7EFC\u5408\u5206\u6790...", "processing");
             const analysisGoal = analysis_prompt || explanation || "\u7EFC\u5408\u5206\u6790\u6240\u6709\u9875\u9762\u5185\u5BB9\uFF0C\u627E\u51FA\u5173\u952E\u4E3B\u9898\u3001\u8D8B\u52BF\u548C\u5EFA\u8BAE";
@@ -18141,9 +18311,12 @@ ${report}
             if (DesignSystem2._theme === "auto") {
               btn.textContent = "\u{1F317}";
               btn.title = "\u8DDF\u968F\u7CFB\u7EDF(\u81EA\u52A8)\uFF0C\u70B9\u51FB\u5207\u6362\u4EAE\u8272";
+            } else if (DesignSystem2._theme === "dark") {
+              btn.textContent = "\u{1F317}";
+              btn.title = "\u6697\u8272\u6A21\u5F0F\uFF0C\u70B9\u51FB\u5207\u6362\u8DDF\u968F\u7CFB\u7EDF(\u81EA\u52A8)";
             } else {
-              btn.textContent = effective === "dark" ? "\u2600\uFE0F" : "\u{1F319}";
-              btn.title = effective === "dark" ? "\u5207\u6362\u4EAE\u8272\u6A21\u5F0F" : "\u5207\u6362\u6697\u8272\u6A21\u5F0F";
+              btn.textContent = "\u{1F319}";
+              btn.title = "\u5207\u6362\u6697\u8272\u6A21\u5F0F";
             }
           });
         },
@@ -19176,6 +19349,16 @@ ${report}
       var { Storage: Storage2 } = require_storage();
       var PanelResize2 = {
         _stylesInjected: false,
+        /**
+         * 注销已销毁面板 —— 注册表若持续持有已分离 DOM 子树(含面板内容),
+         * 页面存续期间无法被 GC
+         * @param {string} storageKey
+         */
+        unregister: (storageKey) => {
+          var _a;
+          if (!storageKey) return;
+          (_a = PanelResize2._resizeTargets) == null ? void 0 : _a.delete(storageKey);
+        },
         injectStyles: () => {
           if (PanelResize2._stylesInjected) return;
           PanelResize2._stylesInjected = true;
@@ -19278,7 +19461,7 @@ ${report}
                 const parsedMaxHeight = parseFloat(element.style.maxHeight);
                 let newHeight = Number.isFinite(parsedMaxHeight) && parsedMaxHeight > 0 ? parsedMaxHeight : element.offsetHeight;
                 if (e.key === "ArrowUp") {
-                  newHeight = Math.min(liveMax, newHeight + step);
+                  newHeight = Math.max(minHeight, Math.min(liveMax, newHeight + step));
                   handled = true;
                 } else if (e.key === "ArrowDown") {
                   newHeight = Math.max(minHeight, newHeight - step);
@@ -21260,7 +21443,7 @@ ${report}
             }
           };
           panel.querySelector("#ldb-notion-ai-target-db").onchange = (e) => {
-            void UICommandService2.execute("select_ai_target", { targetValue: e.target.value });
+            void UICommandService2.execute("select_ai_target", { targetValue: e.target.value }).catch((error) => NotionSiteUI2.showStatus(`\u5207\u6362 AI \u76EE\u6807\u5931\u8D25: ${error.message}`, "error"));
           };
           panel.querySelector("#ldb-notion-ai-service").onchange = (e) => {
             const newService = e.target.value;
@@ -21273,7 +21456,7 @@ ${report}
             }
           };
           panel.querySelector("#ldb-notion-ai-fetch-models").onclick = async () => {
-            var _a;
+            var _a, _b;
             const aiApiKey = panel.querySelector("#ldb-notion-ai-api-key").value.trim() || String(Storage2.get(CONFIG2.STORAGE_KEYS.AI_API_KEY, "") || "").trim();
             const aiService = panel.querySelector("#ldb-notion-ai-service").value;
             const aiBaseUrl = panel.querySelector("#ldb-notion-ai-base-url").value.trim();
@@ -21293,6 +21476,9 @@ ${report}
                 aiBaseUrl
               });
               if (((_a = panel.querySelector("#ldb-notion-ai-service")) == null ? void 0 : _a.value) !== aiService) return;
+              if ((((_b = panel.querySelector("#ldb-notion-ai-base-url")) == null ? void 0 : _b.value.trim()) || "") !== aiBaseUrl) return;
+              const nowAiKey = panel.querySelector("#ldb-notion-ai-api-key").value.trim() || String(Storage2.get(CONFIG2.STORAGE_KEYS.AI_API_KEY, "") || "").trim();
+              if (nowAiKey !== aiApiKey) return;
               NotionSiteUI2.updateAIModelOptions(aiService, models, true);
               modelTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${models.length} \u4E2A\u53EF\u7528\u6A21\u578B`;
               modelTip.style.color = "var(--ldb-ui-success)";
@@ -21430,16 +21616,20 @@ ${report}
           if (typeof (page == null ? void 0 : page.parent) === "string") return page.parent;
           return String(((_a = page == null ? void 0 : page.parent) == null ? void 0 : _a.type) || "").trim();
         },
-        getAITargetPageParentLabel: (page, { databases = [], pages: allPages = [] } = {}) => {
+        getAITargetPageParentLabel: (page, { databases = [], pages: allPages = [], parentIndex = null } = {}) => {
           const parentType = NotionSiteUI2.getAITargetPageParentType(page);
           const parentId = page == null ? void 0 : page.parentId;
           let parentName = "";
           if (parentId) {
-            const parentDb = databases.find((db) => db.id === parentId);
-            if (parentDb) parentName = parentDb.title;
-            else {
-              const parentPage = allPages.find((p) => p.id === parentId);
-              if (parentPage) parentName = parentPage.title;
+            if (parentIndex instanceof Map) {
+              parentName = parentIndex.get(parentId) || "";
+            } else {
+              const parentDb = databases.find((db) => db.id === parentId);
+              if (parentDb) parentName = parentDb.title;
+              else {
+                const parentPage = allPages.find((p) => p.id === parentId);
+                if (parentPage) parentName = parentPage.title;
+              }
             }
           }
           if (parentType === "database_id") {
@@ -21452,10 +21642,10 @@ ${report}
           if (parentType === "workspace") return "\u5DE5\u4F5C\u533A\u9875\u9762";
           return parentType ? "\u975E\u9876\u7EA7\u9875\u9762" : "";
         },
-        getAITargetPageOptionLabel: (page, { includeParentLabel = false, databases = [], pages: allPages = [] } = {}) => {
+        getAITargetPageOptionLabel: (page, { includeParentLabel = false, databases = [], pages: allPages = [], parentIndex = null } = {}) => {
           const title = String((page == null ? void 0 : page.title) || "").trim() || "\u672A\u547D\u540D\u9875\u9762";
           const parentType = NotionSiteUI2.getAITargetPageParentType(page);
-          const parentLabel = NotionSiteUI2.getAITargetPageParentLabel(page, { databases, pages: allPages });
+          const parentLabel = NotionSiteUI2.getAITargetPageParentLabel(page, { databases, pages: allPages, parentIndex });
           const prefix = parentType === "workspace" ? "\u{1F4C4}" : "\u21B3";
           if (!includeParentLabel || !parentLabel || parentType === "workspace") {
             return prefix + " " + title;
@@ -21520,6 +21710,13 @@ ${report}
             });
             options += "</optgroup>";
           }
+          const parentIndex = /* @__PURE__ */ new Map();
+          for (const db of databases) {
+            if (db && db.id && !parentIndex.has(db.id)) parentIndex.set(db.id, db.title || "");
+          }
+          for (const p of pages) {
+            if (p && p.id && !parentIndex.has(p.id)) parentIndex.set(p.id, p.title || "");
+          }
           const nestedPages = pages.filter((page) => NotionSiteUI2.getAITargetPageParentType(page) !== "workspace");
           if (nestedPages.length > 0) {
             options += '<optgroup label="\u{1F4C4} \u5D4C\u5957\u9875\u9762\uFF08\u6570\u636E\u5E93\u5185/\u5B50\u9875\u9762\uFF09">';
@@ -21527,7 +21724,7 @@ ${report}
               const val = `page:${page.id}`;
               knownIds.add(val);
               options += `<option value="${Utils2.escapeHtml(val)}">${Utils2.escapeHtml(
-                NotionSiteUI2.getAITargetPageOptionLabel(page, { includeParentLabel: true, databases, pages })
+                NotionSiteUI2.getAITargetPageOptionLabel(page, { includeParentLabel: true, databases, pages, parentIndex })
               )}</option>`;
             });
             options += "</optgroup>";
@@ -21604,18 +21801,8 @@ ${report}
         // 拖拽功能
         makeDraggable: (element, handle) => {
           let offsetX, offsetY, isDragging = false;
-          handle.addEventListener("pointerdown", (e) => {
-            if (e.target.tagName === "BUTTON") return;
-            isDragging = true;
-            offsetX = e.clientX - element.offsetLeft;
-            offsetY = e.clientY - element.offsetTop;
-            document.body.style.userSelect = "none";
-            try {
-              handle.setPointerCapture(e.pointerId);
-            } catch (_) {
-            }
-          });
-          handle.addEventListener("pointermove", (e) => {
+          let docListenersAttached = false;
+          const onPointerMove = (e) => {
             if (!isDragging) return;
             const x = Math.max(0, Math.min(window.innerWidth - element.offsetWidth, e.clientX - offsetX));
             const y = Math.max(0, Math.min(window.innerHeight - element.offsetHeight, e.clientY - offsetY));
@@ -21623,9 +21810,35 @@ ${report}
             element.style.top = y + "px";
             element.style.right = "auto";
             element.style.bottom = "auto";
+          };
+          handle.addEventListener("pointerdown", (e) => {
+            if (e.target.tagName === "BUTTON") return;
+            isDragging = true;
+            offsetX = e.clientX - element.offsetLeft;
+            offsetY = e.clientY - element.offsetTop;
+            document.body.style.userSelect = "none";
+            let captured = false;
+            try {
+              handle.setPointerCapture(e.pointerId);
+              captured = true;
+            } catch (_) {
+            }
+            if (!captured) {
+              docListenersAttached = true;
+              document.addEventListener("pointermove", onPointerMove);
+              document.addEventListener("pointerup", endDrag);
+              document.addEventListener("pointercancel", endDrag);
+            }
           });
+          handle.addEventListener("pointermove", onPointerMove);
           const endDrag = (e) => {
             if (!isDragging) return;
+            if (docListenersAttached) {
+              document.removeEventListener("pointermove", onPointerMove);
+              document.removeEventListener("pointerup", endDrag);
+              document.removeEventListener("pointercancel", endDrag);
+              docListenersAttached = false;
+            }
             if (isDragging) {
               const rect = element.getBoundingClientRect();
               const right = window.innerWidth - rect.right;
@@ -21698,6 +21911,7 @@ ${report}
           NotionSiteUI2._abortController = null;
           (_b = NotionSiteUI2.panel) == null ? void 0 : _b.remove();
           NotionSiteUI2.panel = null;
+          PanelResize2.unregister(CONFIG2.STORAGE_KEYS.PANEL_SIZE_NOTION);
           (_c = NotionSiteUI2.floatBtn) == null ? void 0 : _c.remove();
           NotionSiteUI2.floatBtn = null;
           NotionSiteUI2.isPanelReady = false;
@@ -22617,8 +22831,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             if (host === "linux.do" || host.endsWith(".linux.do")) {
               const parts = pathname.split("/").filter(Boolean);
               if (String(parts[0] || "").toLowerCase() === "t") {
-                const idIndex = /^\d+$/.test(parts[1] || "") ? 1 : /^\d+$/.test(parts[2] || "") ? 2 : -1;
-                if (idIndex > 0) pathname = `/t/${parts[idIndex]}`;
+                const numeric = parts.slice(1, 3).filter((p) => /^\d+$/.test(p)).map((p) => Number(p));
+                if (numeric.length === 1) pathname = `/t/${numeric[0]}`;
+                else if (numeric.length === 2) pathname = `/t/${Math.max(numeric[0], numeric[1])}`;
               }
             }
             const search = parsed.search || "";
@@ -22807,8 +23022,17 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             return UI2().normalizeWorkspaceInsightUrl(`https://linux.do/t/${bookmarkKey}`);
           }
           const bookmarks = Array.isArray(UI2().bookmarks) ? UI2().bookmarks : [];
-          const hit = bookmarks.find((b) => UI2().getBookmarkKey(b) === bookmarkKey);
-          if (hit) return UI2().buildBookmarkCanonicalUrl(hit);
+          const cache = UI2()._bookmarkKeyUrlCache;
+          if (!cache || cache.arr !== bookmarks || cache.len !== bookmarks.length) {
+            const map = /* @__PURE__ */ new Map();
+            for (const b of bookmarks) {
+              const k = UI2().getBookmarkKey(b);
+              if (k && !map.has(k)) map.set(k, UI2().buildBookmarkCanonicalUrl(b));
+            }
+            UI2()._bookmarkKeyUrlCache = { arr: bookmarks, len: bookmarks.length, map };
+          }
+          const hit = UI2()._bookmarkKeyUrlCache.map.get(bookmarkKey);
+          if (hit) return hit;
           const parts = String(bookmarkKey).split(":");
           const sourceType = parts[1] || "";
           const itemKey = parts.slice(2).join(":");
@@ -25512,9 +25736,14 @@ ${AIService2.isolateContent(JSON.stringify({
         copyTextToClipboard: async (text) => {
           var _a;
           const value = String(text || "");
+          let clipboardError = null;
           if ((_a = navigator.clipboard) == null ? void 0 : _a.writeText) {
-            await navigator.clipboard.writeText(value);
-            return true;
+            try {
+              await navigator.clipboard.writeText(value);
+              return true;
+            } catch (error) {
+              clipboardError = error;
+            }
           }
           const textarea = document.createElement("textarea");
           textarea.value = value;
@@ -25529,7 +25758,7 @@ ${AIService2.isolateContent(JSON.stringify({
           } finally {
             textarea.remove();
           }
-          if (!copied) throw new Error("\u6D4F\u89C8\u5668\u672A\u5141\u8BB8\u590D\u5236\u5230\u526A\u8D34\u677F");
+          if (!copied) throw clipboardError || new Error("\u6D4F\u89C8\u5668\u672A\u5141\u8BB8\u590D\u5236\u5230\u526A\u8D34\u677F");
           return true;
         },
         copyDiagnostics: async () => {
@@ -25736,7 +25965,7 @@ ${AIService2.isolateContent(JSON.stringify({
           const workspaceTip = refs.workspaceTip;
           const action = payload.action || "";
           if (action === "autofill") {
-            const title = payload.title ? Utils2.escapeHtml(payload.title) : "";
+            const title = payload.title || "";
             if (workspaceTip) {
               workspaceTip.textContent = `\u2705 \u5DF2\u81EA\u52A8\u9009\u62E9\u6570\u636E\u5E93${title ? `\u300C${title}\u300D` : ""}\uFF0C\u53EF\u70B9\u51FB\u300C\u81EA\u52A8\u8BBE\u7F6E\u6570\u636E\u5E93\u300D\u521D\u59CB\u5316\u5C5E\u6027`;
               workspaceTip.style.color = "var(--ldb-ui-success)";
@@ -26707,7 +26936,7 @@ ${AIService2.isolateContent(JSON.stringify({
           UI2.maybePromptBookmarkExtensionInstall();
         },
         destroy: () => {
-          var _a, _b, _c;
+          var _a, _b, _c, _d;
           (_a = UI2._abortController) == null ? void 0 : _a.abort();
           UI2._abortController = null;
           if (UI2._oplogDebounceTimer) {
@@ -26723,9 +26952,15 @@ ${AIService2.isolateContent(JSON.stringify({
             document.removeEventListener("keydown", UI2._escMinimizeHandler);
             UI2._escMinimizeHandler = null;
           }
-          (_b = UI2.panel) == null ? void 0 : _b.remove();
+          const statusContainer = (_b = UI2.refs) == null ? void 0 : _b.statusContainer;
+          if (statusContainer == null ? void 0 : statusContainer._statusTimer) {
+            clearTimeout(statusContainer._statusTimer);
+            statusContainer._statusTimer = null;
+          }
+          (_c = UI2.panel) == null ? void 0 : _c.remove();
           UI2.panel = null;
-          (_c = UI2.miniBtn) == null ? void 0 : _c.remove();
+          PanelResize2.unregister(CONFIG2.STORAGE_KEYS.PANEL_SIZE_MAIN);
+          (_d = UI2.miniBtn) == null ? void 0 : _d.remove();
           UI2.miniBtn = null;
           UI2.refs = null;
           UI2.bookmarkListBound = false;
@@ -27794,6 +28029,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 });
               }
             } catch (error) {
+              UI2.hideProgress();
               UI2.showStatus(`\u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
             } finally {
               updateExportButtonState();
@@ -27882,7 +28118,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                     let md = HTMLToMarkdown2.buildFrontmatter(meta);
                     md += `> [!info] \u5E16\u5B50\u4FE1\u606F
 `;
-                    md += `> - **\u539F\u59CB\u94FE\u63A5**: [${topic.title}](${topic.url})
+                    md += `> - **\u539F\u59CB\u94FE\u63A5**: ${Utils2.mdLink(topic.title, topic.url)}
 `;
                     md += `> - **\u697C\u4E3B**: @${topic.opUsername || "\u672A\u77E5"}
 `;
@@ -27905,6 +28141,12 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                         imgDownloads.push({ full: match[0], alt: match[1], url: match[2] });
                       }
                       for (const img of imgDownloads) {
+                        if (Exporter2.isCancelled) break;
+                        while (Exporter2.isPaused) {
+                          await Utils2.sleep(200);
+                          if (Exporter2.isCancelled) break;
+                        }
+                        if (Exporter2.isCancelled) break;
                         try {
                           const ext = img.url.split(".").pop().split("?")[0] || "png";
                           const nameBytes = new Uint8Array(4);
@@ -27925,7 +28167,10 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                               url: img.url,
                               responseType: "blob",
                               timeout: 3e4,
-                              onload: (r) => resolve(r.response),
+                              onload: (r) => {
+                                if (r.status >= 200 && r.status < 300) resolve(r.response);
+                                else reject(new Error(`\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25: HTTP ${r.status}`));
+                              },
                               onerror: (e) => reject(e),
                               ontimeout: () => reject(new Error("\u56FE\u7247\u4E0B\u8F7D\u8D85\u65F6"))
                             });
@@ -27950,6 +28195,12 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                       let m;
                       while ((m = imgRegex.exec(md)) !== null) matches.push(m);
                       for (const match of matches.reverse()) {
+                        if (Exporter2.isCancelled) break;
+                        while (Exporter2.isPaused) {
+                          await Utils2.sleep(200);
+                          if (Exporter2.isCancelled) break;
+                        }
+                        if (Exporter2.isCancelled) break;
                         try {
                           const { UrlValidator } = require_UrlValidator();
                           if (!UrlValidator.validatePageExternalUrl(match[2])) {
@@ -27961,7 +28212,11 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                               url: match[2],
                               responseType: "blob",
                               timeout: 3e4,
-                              onload: (r) => resolve(r),
+                              // P4 收敛(c13): onload 对 4xx/5xx 同样触发 —— 错误页不得内嵌为 data URL
+                              onload: (r) => {
+                                if (r.status >= 200 && r.status < 300) resolve(r);
+                                else reject(new Error(`\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25: HTTP ${r.status}`));
+                              },
                               onerror: (e) => reject(e),
                               ontimeout: () => reject(new Error("\u56FE\u7247\u4E0B\u8F7D\u8D85\u65F6"))
                             });
@@ -27971,7 +28226,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                             reader.onloadend = () => resolve(reader.result);
                             reader.readAsDataURL(resp.response);
                           });
-                          md = md.replace(match[0], `![${match[1]}](${b64})`);
+                          md = md.replace(match[0], () => `![${match[1]}](${b64})`);
                         } catch {
                           imageFailures++;
                         }
@@ -28385,7 +28640,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             Storage2.set(CONFIG2.STORAGE_KEYS.AI_MODEL, e.target.value);
           };
           refs.aiTargetDbSelect.onchange = (e) => {
-            void UICommandService2.execute("select_ai_target", { targetValue: e.target.value });
+            void UICommandService2.execute("select_ai_target", { targetValue: e.target.value }).catch((error) => UI2.showStatus(`\u5207\u6362 AI \u76EE\u6807\u5931\u8D25: ${error.message}`, "error"));
           };
           refs.workspaceMaxPagesSelect.onchange = (e) => {
             Storage2.set(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, parseInt(e.target.value) || 0);
@@ -29388,7 +29643,11 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             };
             GenericUI2.showStatus("\u6B63\u5728\u5BFC\u51FA\u5230 Notion...", "info");
             const { page, meta } = await GenericExporter2.exportCurrentPage(settings);
-            GenericExporter2.markClipperExported(meta);
+            try {
+              GenericExporter2.markClipperExported(meta);
+            } catch (markError) {
+              console.warn("[LD-Notion] \u5BFC\u51FA\u8D26\u672C\u6807\u8BB0\u5931\u8D25(\u9875\u9762\u5DF2\u521B\u5EFA):", markError);
+            }
             floatBtn.className = "gclip-float-btn success";
             GenericUI2.showStatus(`\u5BFC\u51FA\u6210\u529F: ${meta.title}`, "success");
             clearTimeout(GenericUI2._floatResetTimer);
@@ -29766,31 +30025,34 @@ ${AI()._resultToText(r.result)}
           if (aiTargetState.mode === "all") {
             let cached;
             try {
-              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
+              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}")) || {};
             } catch (error) {
               console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
               cached = {};
             }
+            if (typeof cached !== "object") cached = {};
             const dbCount = ((_a = cached.databases) == null ? void 0 : _a.length) || 0;
             dbInfo = `\u67E5\u8BE2\u6A21\u5F0F: \u6240\u6709\u5DE5\u4F5C\u533A\u6570\u636E\u5E93 (${dbCount} \u4E2A)`;
           } else if (aiTargetState.mode === "database") {
             let cached;
             try {
-              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
+              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}")) || {};
             } catch (error) {
               console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
               cached = {};
             }
+            if (typeof cached !== "object") cached = {};
             const dbName = ((_c = (_b = cached.databases) == null ? void 0 : _b.find((d) => d.id === aiTargetState.databaseId)) == null ? void 0 : _c.title) || aiTargetState.databaseId;
             dbInfo = `\u5DF2\u914D\u7F6E\u7684\u6570\u636E\u5E93: ${dbName} (ID: ${aiTargetState.databaseId})`;
           } else if (aiTargetState.mode === "page") {
             let cached;
             try {
-              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}"));
+              cached = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_PAGES, "{}")) || {};
             } catch (error) {
               console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u9875\u9762\u7F13\u5B58\u89E3\u6790\u5931\u8D25:", error);
               cached = {};
             }
+            if (typeof cached !== "object") cached = {};
             const pageName = ((_e = (_d = cached.pages) == null ? void 0 : _d.find((p) => p.id === aiTargetState.pageId)) == null ? void 0 : _e.title) || aiTargetState.pageId;
             dbInfo = `\u5F53\u524D AI \u76EE\u6807\u9875\u9762: ${pageName} (ID: ${aiTargetState.pageId})`;
           } else {
@@ -30067,7 +30329,8 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
         // Gemini 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，maxOutputTokens=50）
         requestGemini: (prompt2, model, apiKey, baseUrl) => {
           const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
-          const url = normalizedBase ? `${normalizedBase}/v1beta/models/${model}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+          const modelSeg = AIService2._modelPathSegment(model);
+          const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
           return AIService2._chatRequest(
             url,
             { "Content-Type": "application/json", "x-goog-api-key": apiKey },

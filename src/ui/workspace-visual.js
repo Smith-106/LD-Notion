@@ -575,9 +575,14 @@ const WorkspaceVisual = {
                 // 改按段位判定: 首个数字段即 topic id, 其后的数字段是楼层号。
                 const parts = pathname.split("/").filter(Boolean);
                 if (String(parts[0] || "").toLowerCase() === "t") {
-                    const idIndex = /^\d+$/.test(parts[1] || "") ? 1
-                        : (/^\d+$/.test(parts[2] || "") ? 2 : -1);
-                    if (idIndex > 0) pathname = `/t/${parts[idIndex]}`;
+                    // P4 收敛(c17): 纯数字 slug 与 id 无法从位置区分 —— /t/2024/45678 既可能是
+                    // 「数字 slug + id」也可能是「id + 楼层号」。Discourse 楼层号远小于全局 topic id,
+                    // 故两段皆数字时取较大者(两种真实形态均正确归一)。
+                    const numeric = parts.slice(1, 3)
+                        .filter((p) => /^\d+$/.test(p))
+                        .map((p) => Number(p));
+                    if (numeric.length === 1) pathname = `/t/${numeric[0]}`;
+                    else if (numeric.length === 2) pathname = `/t/${Math.max(numeric[0], numeric[1])}`;
                 }
             }
             const search = parsed.search || "";

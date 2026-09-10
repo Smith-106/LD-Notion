@@ -290,25 +290,31 @@ const OperationGuard = {
             logEntry.status = "failed";
             logEntry.error = error.message;
             logEntry.endTime = Date.now();
-            OperationLog.add({
-                audit_event: OperationLog.inferAuditEvent(operation, "failed"),
-                actor,
-                source,
-                guard: OperationGuard._buildGuardSnapshot(operation, "allow", context),
-                operation: {
-                    name: operation,
-                    risk: OperationGuard._getPermissionName(requiredLevelForOp),
-                    trigger: context.trigger || "user_requested_write",
-                },
-                target: OperationLog.buildTarget(context),
-                payload: OperationLog.buildPayload(context),
-                result: {
-                    status: "failed",
-                    reason: error.message,
-                },
-                redaction: OperationLog.collectRedactionHints(context),
-                ...logEntry,
-            });
+            // P4 收敛(c10): 审计写入失败(配额/存储异常)不得掩盖原始业务错误 ——
+            // 否则调用方收到审计错误, 错误分类与重试逻辑全部错位
+            try {
+                OperationLog.add({
+                    audit_event: OperationLog.inferAuditEvent(operation, "failed"),
+                    actor,
+                    source,
+                    guard: OperationGuard._buildGuardSnapshot(operation, "allow", context),
+                    operation: {
+                        name: operation,
+                        risk: OperationGuard._getPermissionName(requiredLevelForOp),
+                        trigger: context.trigger || "user_requested_write",
+                    },
+                    target: OperationLog.buildTarget(context),
+                    payload: OperationLog.buildPayload(context),
+                    result: {
+                        status: "failed",
+                        reason: error.message,
+                    },
+                    redaction: OperationLog.collectRedactionHints(context),
+                    ...logEntry,
+                });
+            } catch (logError) {
+                console.warn("[LD-Notion] 失败路径审计写入失败:", logError);
+            }
             throw error;
         }
     },
@@ -533,11 +539,28 @@ const OperationLog = {
             logs.length = CONFIG.API.MAX_LOG_ENTRIES;
         }
 
-        Storage.set(CONFIG.STORAGE_KEYS.OPERATION_LOG, JSON.stringify(logs));
+        // P4 收敛(c10): 写前 rebase(与 flushExported CC-05 同口径) —— 跨 tab 他端新增条目
+        // 不得被本次整键覆写丢弃(审计账本丢失不可接受)。按 event_id 并集去重。
+        const fresh = OperationLog.getAll();
+        const seenIds = new Set();
+        const union = [];
+        for (const item of [...logs, ...fresh]) {
+            const id = item && item.event_id ? String(item.event_id) : "";
+            if (id) {
+                if (seenIds.has(id)) continue;
+                seenIds.add(id);
+            }
+            union.push(item);
+        }
+        if (union.length > CONFIG.API.MAX_LOG_ENTRIES) {
+            union.length = CONFIG.API.MAX_LOG_ENTRIES;
+        }
+
+        Storage.set(CONFIG.STORAGE_KEYS.OPERATION_LOG, JSON.stringify(union));
 
         // 触发UI更新（通过事件总线，消除 security→ui 循环依赖）
         // v3.14.6 (XN-07): 广播投影而非全量深拷贝 —— context/payload/error 原文不回传事件总线
-        emit("oplog:changed", OperationLog.projectForBroadcast(logs));
+        emit("oplog:changed", OperationLog.projectForBroadcast(union));
 
         return logEntry;
     },
@@ -664,7 +687,7 @@ const ConfirmationDialog = {
                         </div>
                         <button class="ldb-btn ldb-btn-secondary" id="ldb-confirm-cancel">取消</button>
                         <button class="ldb-btn ldb-btn-danger" id="ldb-confirm-ok" disabled>
-                            确认 (<span id="ldb-confirm-countdown">${countdown}</span>)
+                            确认 (<span id="ldb-confirm-countdown">${Math.max(0, Math.floor(Number(countdown)) || 0)}</span>)
                         </button>
                     </div>
                 </div>
@@ -961,12 +984,21 @@ const UndoManager = {
         UndoManager.toastElement = toast;
 
         // 绑定撤销按钮（通过事件总线通知 UI，消除 security→ui 循环依赖）
-        toast.querySelector("#ldb-undo-action").onclick = async () => {
-            const success = await UndoManager.execute();
-            if (success) {
-                emit("notify", { message: "撤销成功", type: "success" });
-            } else {
-                emit("notify", { message: "撤销失败，请手动检查 Notion 中的变更", type: "error" });
+        toast.querySelector("#ldb-undo-action").onclick = async (e) => {
+            const btn = e?.currentTarget || toast.querySelector("#ldb-undo-action");
+            // P4 收敛(c10 2/3 共识 dsf+glm): execute 先摘 pendingUndo 再 await ——
+            // 在途重入会因 pendingUndo=null 返回 false 并误报「撤销失败」
+            if (btn && btn.disabled) return;
+            if (btn) btn.disabled = true;
+            try {
+                const success = await UndoManager.execute();
+                if (success) {
+                    emit("notify", { message: "撤销成功", type: "success" });
+                } else {
+                    emit("notify", { message: "撤销失败，请手动检查 Notion 中的变更", type: "error" });
+                }
+            } finally {
+                if (btn) btn.disabled = false;
             }
         };
 

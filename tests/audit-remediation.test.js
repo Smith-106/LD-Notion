@@ -240,7 +240,7 @@ describe("P1 三模型共识修复守卫(异步/定时器/禁用绕过)", () => 
     it("显式 0 间隔(仅手动)不得回退默认并启动定时器", () => {
         const src = fs.readFileSync("src/adapter/SyncScheduler.js", "utf8");
         // getIntervalMinutes 不得用 || def 吞掉 0
-        const gi = src.slice(src.indexOf("getIntervalMinutes(sourceType)"), src.indexOf("getIntervalMinutes(sourceType)") + 420);
+        const gi = src.slice(src.indexOf("getIntervalMinutes(sourceType)"), src.indexOf("getIntervalMinutes(sourceType)") + 900);
         expect(gi).not.toMatch(/return Number\(Storage\.getRaw\(key, def\)\) \|\| def;/);
         expect(gi).toContain("raw >= 0");
         // start 中显式 interval 优先(含 0), 不再要求 > 0 才采用

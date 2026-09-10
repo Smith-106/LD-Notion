@@ -46,8 +46,11 @@ module.exports = {
         setTimeout(() => {
             const loop = () => {
                 // 全盘审计修复(find 6): 禁用后停止周期 pull(不再拉取/应用远端状态)
-                if (!SyncConfig.isEnabled()) return;
-                SyncEngine.pull({ reason: "periodic" });
+                // P4 收敛(c11): 但不能终止定时链 —— 原实现直接 return 会永久停掉排程,
+                // 运行期禁用再启用同步后(直到页面重载)再无周期 pull, 用户以为仍在同步
+                if (SyncConfig.isEnabled()) {
+                    SyncEngine.pull({ reason: "periodic" });
+                }
                 setTimeout(loop, 30 * 60 * 1000 + phase * 60000);
             };
             loop();

@@ -160,7 +160,7 @@ handleQuery: async (params, settings, explanation) => {
             Object.entries(categoryCount)
                 .sort((a, b) => b[1] - a[1])
                 .forEach(([cat, count]) => {
-                    result += `- ${cat}: ${count} 个\n`;
+                    result += `- ${Utils.mdText(cat)}: ${count} 个\n`;
                 });
         } else {
             // 显示前几条
@@ -170,7 +170,8 @@ handleQuery: async (params, settings, explanation) => {
             pages.slice(0, showLimit).forEach((page, i) => {
                 const title = Utils.getPageTitle(page);
                 const author = page.properties["作者"]?.rich_text?.[0]?.plain_text || "未知";
-                result += `${i + 1}. **${title}**\n   作者: ${author}\n`;
+                // P4 收敛(c02): 与同文件其余列表输出同口径 —— 标题/作者取自页面数据, 需 mdText 净化
+                result += `${i + 1}. **${Utils.mdText(title)}**\n   作者: ${Utils.mdText(author)}\n`;
             });
         }
 

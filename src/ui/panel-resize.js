@@ -5,6 +5,16 @@ const { Storage } = require("../storage");
 const PanelResize = {
     _stylesInjected: false,
 
+    /**
+     * 注销已销毁面板 —— 注册表若持续持有已分离 DOM 子树(含面板内容),
+     * 页面存续期间无法被 GC
+     * @param {string} storageKey
+     */
+    unregister: (storageKey) => {
+        if (!storageKey) return;
+        PanelResize._resizeTargets?.delete(storageKey);
+    },
+
     injectStyles: () => {
         if (PanelResize._stylesInjected) return;
         PanelResize._stylesInjected = true;
@@ -133,7 +143,9 @@ const PanelResize = {
                         ? parsedMaxHeight
                         : element.offsetHeight;
                     if (e.key === 'ArrowUp') {
-                        newHeight = Math.min(liveMax, newHeight + step);
+                        // P4 收敛(c16): 下界与拖拽路径同口径(钳制顺序不可反) ——
+                        // 已存 maxHeight 低于 minHeight 时 ArrowUp 会把值写到 aria-valuemin 以下
+                        newHeight = Math.max(minHeight, Math.min(liveMax, newHeight + step));
                         handled = true;
                     } else if (e.key === 'ArrowDown') {
                         newHeight = Math.max(minHeight, newHeight - step);

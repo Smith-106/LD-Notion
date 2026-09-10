@@ -60,6 +60,15 @@ const Storage = {
         } catch (e) {
             // 事件总线不可用不影响功能
         }
+        // P4 收敛(c10): 非 batch 写回(_saveSet/clearSeen)同样同 tab 不发 GM 事件 ——
+        // 仅订阅 batch 事件会让缓存漏掉手动导出/清理产生的账本变更
+        try {
+            on("storage:state-committed", (payload) => {
+                if (payload && payload.kind === "dedup") Storage._exportedTopicsCache = null;
+            });
+        } catch (e) {
+            // 事件总线不可用不影响功能
+        }
         if (typeof GM_addValueChangeListener !== "function") return;
         try {
             GM_addValueChangeListener(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, () => {

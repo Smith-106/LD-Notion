@@ -252,7 +252,10 @@ describe("P4 收敛(c05/c03): 输出净化与端点/模型校验", () => {
 
 describe("P4 收敛(c06/c08/c09): 源码级契约锁定", () => {
     it("RSS needsUpdate 与写入侧同口径", () => {
-        expect(read("src/bridge/RSSAutoImporter.js")).toContain('if (String(pageMeta.url || "") !== RSSAutoImporter._safeUrl(item.url)) return true;');
+        // P4 收敛(c07 续): 写入侧 safeUrl 为空时不发「链接」字段 —— 仅在本次有可写链接时才比对
+        const src = read("src/bridge/RSSAutoImporter.js");
+        expect(src).toContain("const safeUrl = RSSAutoImporter._safeUrl(item.url);");
+        expect(src).toContain('if (safeUrl && String(pageMeta.url || "") !== safeUrl) return true;');
     });
 
     it("BookmarkExporter strict 批内去重", () => {

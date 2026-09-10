@@ -242,4 +242,28 @@ describe("D2: 手动导出跨 tab 租约 (CC-04 补全, 与自动同步互斥)",
             vi.useRealTimers();
         }
     });
+
+    it("P4 收敛(c08): 同 tab 双调用在租约等待期间即被互斥拒绝", async () => {
+        const { SyncLock: MockLock } = require("../src/sync-lock");
+        MockLock.isExporting = false;
+        const originalAcquire = MockLock.acquireLease;
+        // 拉长租约获取窗口: 窗口内第二次调用的入口检查必须已看到互斥置位
+        MockLock.acquireLease = async function (...args) {
+            await new Promise((r) => setTimeout(r, 50));
+            return originalAcquire.apply(this, args);
+        };
+        try {
+            Exporter.exportTopic = vi.fn(async () => {});
+            const bookmarks = mkBookmarks(1);
+            const first = Exporter.exportBookmarks(bookmarks, { concurrency: 1 });
+            const second = await Exporter.exportBookmarks(bookmarks, { concurrency: 1 });
+            expect(second.message).toContain("已有导出进行中");
+            expect(second.skipped).toHaveLength(1);
+            await first;
+            expect(Exporter.exportTopic).toHaveBeenCalledTimes(1);
+        } finally {
+            MockLock.acquireLease = originalAcquire;
+            MockLock.isExporting = false;
+        }
+    });
 });

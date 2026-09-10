@@ -183,7 +183,9 @@ const SyncSerializer = {
         }
         if (payload?.dedup && typeof payload.dedup === "object") {
             for (const [src, set] of Object.entries(payload.dedup)) {
-                if (!WHITELIST.dedupSources[src]) bad.push(`dedup.${src}(源未白名单)`);
+                // P4 收敛(c11): 原型链键(constructor/__proto__)会命中继承属性 —— 必须自有属性校验, 否则
+                // 非白名单源被放行并写入 DedupStore
+                if (!Object.prototype.hasOwnProperty.call(WHITELIST.dedupSources, src)) bad.push(`dedup.${src}(源未白名单)`);
                 if (set && typeof set === "object") {
                     for (const k of Object.keys(set)) {
                         if (FORBIDDEN_KEYS.has(k)) bad.push(`dedup.${src}:${k}(危险键)`);
@@ -220,7 +222,9 @@ const SyncSerializer = {
         // 不过滤会让采用约 90 天后同步全量失败。本地账本不受影响(仅投影裁剪)。
         const tsFloor = now - SyncConstants.TS_PAST_TTL_MS;
         for (const [src, set] of Object.entries(raw?.dedupSets || {})) {
-            const meta = WHITELIST.dedupSources[src];
+            const meta = Object.prototype.hasOwnProperty.call(WHITELIST.dedupSources, src)
+                ? WHITELIST.dedupSources[src]
+                : null;
             if (!meta || !set || typeof set !== "object") continue;
             const clean = {};
             let count = 0;

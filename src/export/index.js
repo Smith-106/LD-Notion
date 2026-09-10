@@ -350,7 +350,8 @@ const GenericExporter = {
             type: "callout",
             callout: {
                 icon: { type: "emoji", emoji: "🔗" },
-                rich_text: [{ type: "text", text: { content: `来源: ${meta.url}` } }],
+                // P4 收敛(c08): 与属性侧同口径截断 —— 超 rich_text 2000 上限会让整页导出被 Notion 拒
+                rich_text: [{ type: "text", text: { content: `来源: ${String(meta.url || "").trim().slice(0, 2000)}` } }],
             },
         });
 
@@ -863,9 +864,16 @@ const Exporter = {
         // TTL 兜底防崩溃锁泄漏。此前仅同 tab isExporting(CC-12), 跨 tab 双写 Notion 防线缺口。
         // qwen P1 共识: reset 必须在取租约之前 —— 取租约 await 期间用户点取消, 原顺序
         // 会把它清除导致取消被忽略。
+        // P4 收敛(c08): 互斥置位必须在同一同步段内完成 —— 原实现把 isExporting = true 放在
+        // 租约 await 之后, 与入口检查相隔一次 await, 同 tab 快速双击时两次调用都能通过检查;
+        // 随后并发 acquireLease 的写-复读仲裁存在 TOCTOU 残留(后写者复读到自己) → 同 tab
+        // 双 worker 并发写 Notion。JS 单线程下检查与置位之间无交错点。
+        SyncLock.isExporting = true;
         Exporter.reset();
         const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
         if (!lease) {
+            // 未实际持有租约 → 立即让出互斥, 否则本 tab 导出永久自锁
+            SyncLock.isExporting = false;
             return {
                 success: [],
                 failed: [],
@@ -877,7 +885,7 @@ const Exporter = {
             };
         }
         const results = { success: [], failed: [], skipped: [] };
-        SyncLock.isExporting = true;
+        // isExporting 已在入口同步置位(见上), 此处不再重复设置
         // 持有期间每 30s 续约(< 180s TTL); 续约失配(被他 tab 抢占)置 leaseLost 中止批次,
         // 绝不双持有并发写(S1 owner 复核语义, 与 BookmarkAutoImporter CC-04 同构)
         let leaseLost = false;
