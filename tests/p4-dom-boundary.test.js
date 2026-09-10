@@ -701,3 +701,79 @@ describe("wave13 共识(dsf/qwen): 评论载荷原样 + script 跳过 + 直属�
         expect(blocks.map((b) => b.type)).toEqual(["paragraph", "quote"]);
     });
 });
+
+describe("wave14 共识(dsf): 块级边界 + 顺序化遍历(顺序不被破坏)", () => {
+    const origNode = globalThis.Node;
+    const origParser = globalThis.DOMParser;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+        globalThis.DOMParser = function () {
+            return {
+                parseFromString: (html) => {
+                    const body = { nodeType: 1, tagName: "BODY", childNodes: [], children: [] };
+                    const re = /<(\w+)>([^<]*)<\/\1>|([^<]+)/g;
+                    let m;
+                    while ((m = re.exec(html))) {
+                        if (m[1]) {
+                            const child = E(m[1], [T(m[2])]);
+                            body.childNodes.push(child);
+                            body.children.push(child);
+                        } else if (m[3] && m[3].trim()) {
+                            body.childNodes.push(T(m[3]));
+                        }
+                    }
+                    return { body };
+                },
+            };
+        };
+    });
+    afterAll(() => {
+        if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
+        if (origParser === undefined) delete globalThis.DOMParser; else globalThis.DOMParser = origParser;
+    });
+
+    const T = (s) => ({ nodeType: 3, textContent: s, nodeValue: s });
+    const E = (tag, kids, attrs = {}) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes: kids,
+        children: kids.filter((k) => k.nodeType === 1),
+        textContent: kids.map((k) => k.textContent || "").join(""),
+        className: attrs.className || "",
+        getAttribute: (n) => attrs[n] || null,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("块级元素后的裸文本不粘连(<blockquote><p>a</p>b</blockquote>)", () => {
+        const bq = E("blockquote", [E("p", [T("Line1")]), T("Line2")]);
+        const text = DOMToNotion.serializeRichText(bq).map((c) => c.text.content).join("");
+        expect(text).toBe("Line1\nLine2");
+    });
+
+    it("块级元素前后的裸文本都不粘连", () => {
+        const bq = E("blockquote", [T("前"), E("p", [T("中")]), T("后")]);
+        const text = DOMToNotion.serializeRichText(bq).map((c) => c.text.content).join("");
+        expect(text).toBe("前\n中\n后");
+    });
+
+    it("内联包装元素不打断文本连续性(<div>Hello <span>world</span> again</div>)", () => {
+        const blocks = DOMToNotion.cookedToBlocks("<div>Hello world again</div>", "external");
+        expect(blocks.length).toBe(1);
+        expect(blocks[0].paragraph.rich_text[0].text.content).toBe("Hello world again");
+    });
+
+    it("根节点裸文本不与后续块级元素顺序颠倒", () => {
+        const blocks = DOMToNotion.cookedToBlocks("Text", "external");
+        expect(blocks.map((b) => (b.paragraph || b.quote).rich_text[0].text.content)).toEqual(["Text"]);
+    });
+
+    it("块级元素与裸文本保持文档顺序", () => {
+        const bq = E("blockquote", [E("p", [T("First")]), T("Second")]);
+        const text = DOMToNotion.serializeRichText(bq).map((c) => c.text.content).join("");
+        expect(text).toBe("First\nSecond");
+    });
+});

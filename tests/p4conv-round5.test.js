@@ -220,6 +220,13 @@ describe("P4 收敛(c05/c03): 输出净化与端点/模型校验", () => {
         expect(() => NotionTransport.buildUrl("/pages/abc#frag")).toThrow("非法 Notion API 端点");
         expect(() => NotionTransport.buildUrl("pages/abc")).toThrow("非法 Notion API 端点");
         expect(() => NotionTransport.buildUrl("/pages/a b")).toThrow("非法 Notion API 端点");
+        // wave14 共识(dsf): 百分号编码的 dot-segment / 斜线同样穿透路径检查
+        expect(() => NotionTransport.buildUrl("/pages/%2e%2e/users/me")).toThrow("非法 Notion API 端点");
+        expect(() => NotionTransport.buildUrl("/pages/%2E%2E/users/me")).toThrow("非法 Notion API 端点");
+        expect(() => NotionTransport.buildUrl("/pages/%2e/users/me")).toThrow("非法 Notion API 端点");
+        expect(() => NotionTransport.buildUrl("/pages/a%2fb/children")).toThrow("非法 Notion API 端点");
+        // 查询串里的百分号编码是合法游标内容, 不受影响
+        expect(NotionTransport.buildUrl("/blocks/abc/children?start_cursor=a%2Fb")).toContain("start_cursor=a%2Fb");
     });
 
     it("AIService._modelPathSegment 编码模型名", () => {

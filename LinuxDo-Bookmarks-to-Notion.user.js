@@ -4018,6 +4018,27 @@
       var { Utils: Utils2 } = require_utils();
       var { UrlValidator } = require_UrlValidator();
       var { normalizeLanguage: normalizeLanguage2, EMOJI_MAP: EMOJI_MAP2 } = require_constants();
+      var BLOCK_TAGS = /* @__PURE__ */ new Set([
+        "div",
+        "p",
+        "pre",
+        "blockquote",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "ul",
+        "ol",
+        "table",
+        "img",
+        "video",
+        "audio",
+        "iframe",
+        "hr",
+        "aside"
+      ]);
       var safeCutIndex = (text, index) => {
         const cut = Math.max(0, Math.min(index, text.length));
         if (cut > 0 && cut < text.length) {
@@ -4415,11 +4436,20 @@
         },
         serializeRichText: (node) => {
           const result = [];
+          let blockEnded = false;
+          const breakIfNeeded = (annotations) => {
+            if (!blockEnded) return;
+            blockEnded = false;
+            if (result.length > 0) result.push(...DOMToNotion2.splitLongText("\n", annotations));
+          };
           const processNode = (n, annotations = {}) => {
             if (!n) return;
             if (n.nodeType === Node.TEXT_NODE) {
               const text = n.nodeValue || "";
-              if (text) result.push(...DOMToNotion2.splitLongText(text, annotations));
+              if (text) {
+                breakIfNeeded(annotations);
+                result.push(...DOMToNotion2.splitLongText(text, annotations));
+              }
               return;
             }
             if (n.nodeType !== Node.ELEMENT_NODE) return;
@@ -4430,7 +4460,10 @@
               const emojiName = DOMToNotion2._emojiImageName(src);
               if (emojiName) {
                 const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP2, emojiName) ? EMOJI_MAP2[emojiName] : el.getAttribute("alt") || `:${emojiName}:`;
-                if (emoji) result.push(...DOMToNotion2.splitLongText(emoji, annotations));
+                if (emoji) {
+                  breakIfNeeded(annotations);
+                  result.push(...DOMToNotion2.splitLongText(emoji, annotations));
+                }
               }
               return;
             }
@@ -4449,6 +4482,7 @@
               if (!linkText) linkText = link;
               const safeLink = DOMToNotion2._safeExternalUrl(link);
               if (link && linkText) {
+                breakIfNeeded(annotations);
                 const chunks = DOMToNotion2.splitLongText(linkText, annotations);
                 if (safeLink) {
                   chunks.forEach((chunk) => {
@@ -4473,20 +4507,24 @@
             }
             if (tag === "code") {
               const text = el.textContent || "";
-              if (text) result.push(...DOMToNotion2.splitLongText(text, { ...annotations, code: true }));
+              if (text) {
+                breakIfNeeded(annotations);
+                result.push(...DOMToNotion2.splitLongText(text, { ...annotations, code: true }));
+              }
               return;
             }
             if (tag === "br") {
               result.push(...DOMToNotion2.splitLongText("\n", annotations));
+              blockEnded = false;
               return;
             }
             if (tag === "script" || tag === "style" || tag === "noscript") return;
             if (tag === "p" || tag === "div") {
+              blockEnded = false;
+              if (result.length > 0) result.push(...DOMToNotion2.splitLongText("\n", annotations));
               const before = result.length;
               Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
-              if (result.length > before && before > 0) {
-                result.splice(before, 0, ...DOMToNotion2.splitLongText("\n", annotations));
-              }
+              if (result.length > before) blockEnded = true;
               return;
             }
             Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
@@ -4556,17 +4594,39 @@
               DOMToNotion2._cookImage(el, blocks, imgMode);
               return;
             }
-            const inlineText = Array.from(el.childNodes || []).filter((c) => c.nodeType === Node.TEXT_NODE).map((c) => c.nodeValue || "").join("").trim();
-            if (inlineText) {
-              blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(inlineText) } });
-            }
-            Array.from(el.children).forEach(processElement);
+            Array.from(el.childNodes || []).forEach(walkNode);
           };
-          const rootText = Array.from(root.childNodes || []).filter((c) => c.nodeType === Node.TEXT_NODE).map((c) => c.nodeValue || "").join("").trim();
-          if (rootText) {
-            blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(rootText) } });
-          }
-          Array.from(root.children).forEach(processElement);
+          let inlineBuf = "";
+          const flushInline = () => {
+            const text = inlineBuf.replace(/[ \t\r\n]+/g, " ").trim();
+            if (text) {
+              blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(text) } });
+            }
+            inlineBuf = "";
+          };
+          const isBlockChild = (child) => {
+            const t = child.tagName ? child.tagName.toLowerCase() : "";
+            if (BLOCK_TAGS.has(t)) return true;
+            const cls = child.classList;
+            if (!cls) return false;
+            return cls.contains("lightbox-wrapper") || cls.contains("image-wrapper") || cls.contains("md-table") || t === "a" && cls.contains("attachment") || t === "aside" && cls.contains("quote");
+          };
+          const walkNode = (node) => {
+            if (!node) return;
+            if (node.nodeType === Node.TEXT_NODE) {
+              inlineBuf += node.nodeValue || "";
+              return;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+            if (isBlockChild(node)) {
+              flushInline();
+              processElement(node);
+              return;
+            }
+            Array.from(node.childNodes || []).forEach(walkNode);
+          };
+          Array.from(root.childNodes || []).forEach(walkNode);
+          flushInline();
           return blocks;
         }
       };
@@ -5499,7 +5559,7 @@ Content-Type: ${safeContentType}\r
         buildUrl: (endpoint) => {
           const ep = String(endpoint ?? "");
           const pathPart = ep.split("?")[0];
-          if (!ep.startsWith("/") || /[\s#\\]/.test(ep) || pathPart.includes("..") || pathPart.includes("//")) {
+          if (!ep.startsWith("/") || /[\s#\\]/.test(ep) || pathPart.includes("..") || pathPart.includes("//") || /%(?:2e|2f)/i.test(pathPart)) {
             throw new Error(`\u975E\u6CD5 Notion API \u7AEF\u70B9: ${ep.slice(0, 80)}`);
           }
           return `https://api.notion.com/v1${ep}`;

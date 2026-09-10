@@ -5,6 +5,13 @@ const { Utils } = require("../utils");
 const { UrlValidator } = require("../security/UrlValidator");
 const { normalizeLanguage, EMOJI_MAP } = require("./constants");
 
+// wave14 共识(dsf): 已识别为块级(有专属烹饪分支或容器块)的元素标签 —— 用于
+// cookedToBlocks 的顺序化遍历(其余元素透明下钻, 其内联内容并入同一段落缓冲)
+const BLOCK_TAGS = new Set([
+    "div", "p", "pre", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "table", "img", "video", "audio", "iframe", "hr", "aside",
+]);
+
 // P4 收敛(c05): 上界处若落在代理对中间(emoji 前半), 回退一个码元 —— 切出孤立代理字符
 // 会被 Notion 拒绝(400)或渲染为乱码。软切/截断标记两处共用同一口径。
 const safeCutIndex = (text, index) => {
@@ -473,12 +480,24 @@ const DOMToNotion = {
     serializeRichText: (node) => {
         const result = [];
 
+        // wave14 共识(dsf): 块级元素结束后需要与后续内容分隔 —— 用待分隔标记, 由下一次
+        // 内联内容落库时消费(后续可能是裸文本, 不一定是 p/div)
+        let blockEnded = false;
+        const breakIfNeeded = (annotations) => {
+            if (!blockEnded) return;
+            blockEnded = false;
+            if (result.length > 0) result.push(...DOMToNotion.splitLongText("\n", annotations));
+        };
+
         const processNode = (n, annotations = {}) => {
             if (!n) return;
 
             if (n.nodeType === Node.TEXT_NODE) {
                 const text = n.nodeValue || "";
-                if (text) result.push(...DOMToNotion.splitLongText(text, annotations));
+                if (text) {
+                    breakIfNeeded(annotations);
+                    result.push(...DOMToNotion.splitLongText(text, annotations));
+                }
                 return;
             }
 
@@ -497,7 +516,10 @@ const DOMToNotion = {
                     const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP, emojiName)
                         ? EMOJI_MAP[emojiName]
                         : (el.getAttribute("alt") || `:${emojiName}:`);
-                    if (emoji) result.push(...DOMToNotion.splitLongText(emoji, annotations));
+                    if (emoji) {
+                        breakIfNeeded(annotations);
+                        result.push(...DOMToNotion.splitLongText(emoji, annotations));
+                    }
                 }
                 return;
             }
@@ -521,6 +543,7 @@ const DOMToNotion = {
                 // v3.14.6 (XN-04): 文本链接过 _safeExternalUrl —— 非法(内网/169.254/非 http(s))降级纯文本
                 const safeLink = DOMToNotion._safeExternalUrl(link);
                 if (link && linkText) {
+                    breakIfNeeded(annotations);
                     const chunks = DOMToNotion.splitLongText(linkText, annotations);
                     if (safeLink) {
                         chunks.forEach(chunk => { chunk.text.link = { url: safeLink }; });
@@ -545,7 +568,10 @@ const DOMToNotion = {
             }
             if (tag === "code") {
                 const text = el.textContent || "";
-                if (text) result.push(...DOMToNotion.splitLongText(text, { ...annotations, code: true }));
+                if (text) {
+                    breakIfNeeded(annotations);
+                    result.push(...DOMToNotion.splitLongText(text, { ...annotations, code: true }));
+                }
                 return;
             }
 
@@ -553,6 +579,7 @@ const DOMToNotion = {
             // ("line1line2" 词句粘连, 硬换行丢失) —— br 输出带换行的文本片段
             if (tag === "br") {
                 result.push(...DOMToNotion.splitLongText("\n", annotations));
+                blockEnded = false; // br 自身已是分隔符, 不再额外补块级边界
                 return;
             }
 
@@ -560,14 +587,16 @@ const DOMToNotion = {
             // 经通用递归进入 rich_text, 内容污染(与 obsidian 同口径)
             if (tag === "script" || tag === "style" || tag === "noscript") return;
 
-            // wave12 共识(dsf): 块级子元素此前无边界 —— <blockquote>/<li> 内多个 <p> 的文本
-            // 被拼成 "第一段第二段"(段间换行与分段丢失); 块级元素之间补换行, 首段不补无尾随空行
+            // wave12 共识(dsf) + wave14 共识(dsf): 块级元素是文本边界 —— 前后都不得与相邻
+            // 内联内容粘连(<blockquote><p>a</p>b</blockquote> 此前输出 "ab"); 仅"下一项也是
+            // p/div 时才补换行"不够, 裸文本同样需要边界
             if (tag === "p" || tag === "div") {
+                // 块级元素前后都是边界: 前面已有内容则先补换行(无论前面是块还是内联文本)
+                blockEnded = false;
+                if (result.length > 0) result.push(...DOMToNotion.splitLongText("\n", annotations));
                 const before = result.length;
                 Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
-                if (result.length > before && before > 0) {
-                    result.splice(before, 0, ...DOMToNotion.splitLongText("\n", annotations));
-                }
+                if (result.length > before) blockEnded = true;
                 return;
             }
 
@@ -674,32 +703,50 @@ const DOMToNotion = {
                 return;
             }
 
-            // wave13 共识(qwen): 未匹配元素此前只递归子元素 —— 直属文本静默丢弃
-            // (顶层 <div>文字</div> / <span>文字</span> 无任何块产出); 直属文本先落段落块,
-            // 元素子节点仍按原路径递归(不在此处补发内联媒体, 避免与子元素递归重复)
-            const inlineText = Array.from(el.childNodes || [])
-                .filter((c) => c.nodeType === Node.TEXT_NODE)
-                .map((c) => c.nodeValue || "")
-                .join("")
-                .trim();
-            if (inlineText) {
-                blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(inlineText) } });
-            }
-
-            // 递归处理子元素
-            Array.from(el.children).forEach(processElement);
+            // 递归处理子节点(未匹配容器的文本已由 walkNode 按序并入内联缓冲)
+            Array.from(el.childNodes || []).forEach(walkNode);
         };
 
-        // wave13 共识(qwen): 顶层裸文本(如 cookedHtml 无标签的纯文本)此前无任何块产出
-        const rootText = Array.from(root.childNodes || [])
-            .filter((c) => c.nodeType === Node.TEXT_NODE)
-            .map((c) => c.nodeValue || "")
-            .join("")
-            .trim();
-        if (rootText) {
-            blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(rootText) } });
-        }
-        Array.from(root.children).forEach(processElement);
+        // wave13/14 共识(dsf/qwen): 未匹配容器与顶层裸文本此前只递归子元素 —— 直属文本
+        // 静默丢弃; 且"先提取直属文本成段再递归子元素"会打乱文档顺序
+        // (<div>Hello <span>world</span> again</div> 变成 "Hello  again" + "world")。
+        // 改为单次顺序遍历: 连续的文本/内联内容合并为同一段落, 遇已识别块级元素
+        // 先落段落再走原路径; 容器元素透明下钻。
+        let inlineBuf = "";
+        const flushInline = () => {
+            const text = inlineBuf.replace(/[ \t\r\n]+/g, " ").trim();
+            if (text) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(text) } });
+            }
+            inlineBuf = "";
+        };
+        const isBlockChild = (child) => {
+            const t = child.tagName ? child.tagName.toLowerCase() : "";
+            if (BLOCK_TAGS.has(t)) return true;
+            const cls = child.classList;
+            if (!cls) return false;
+            return cls.contains("lightbox-wrapper") || cls.contains("image-wrapper")
+                || cls.contains("md-table")
+                || (t === "a" && cls.contains("attachment"))
+                || (t === "aside" && cls.contains("quote"));
+        };
+        const walkNode = (node) => {
+            if (!node) return;
+            if (node.nodeType === Node.TEXT_NODE) {
+                inlineBuf += node.nodeValue || "";
+                return;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+            if (isBlockChild(node)) {
+                flushInline();
+                processElement(node);
+                return;
+            }
+            Array.from(node.childNodes || []).forEach(walkNode);
+        };
+
+        Array.from(root.childNodes || []).forEach(walkNode);
+        flushInline();
         return blocks;
     },
 };

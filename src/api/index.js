@@ -77,7 +77,10 @@ const NotionTransport = Object.freeze({
     buildUrl: (endpoint) => {
         const ep = String(endpoint ?? "");
         const pathPart = ep.split("?")[0];
-        if (!ep.startsWith("/") || /[\s#\\]/.test(ep) || pathPart.includes("..") || pathPart.includes("//")) {
+        // wave14 共识(dsf): 字面 .. / // 之外还需拒百分号编码等价形式 —— URL 解析器把
+        // %2e/%2e%2e 当 dot-segment、%2f 解码后即为 /, 两者都能绕过字面检查
+        if (!ep.startsWith("/") || /[\s#\\]/.test(ep) || pathPart.includes("..")
+            || pathPart.includes("//") || /%(?:2e|2f)/i.test(pathPart)) {
             throw new Error(`非法 Notion API 端点: ${ep.slice(0, 80)}`);
         }
         return `https://api.notion.com/v1${ep}`;
