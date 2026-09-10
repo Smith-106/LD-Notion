@@ -563,6 +563,45 @@ describe("wave12 共识(glm): li 内代码围栏空白不被折叠篡改", () =>
     });
 });
 
+describe("wave13 共识(dsf): audio 与 video 同口径回退 <source src>", () => {
+    const origNode = globalThis.Node;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+    });
+    afterAll(() => { if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode; });
+
+    const el = (tag, attrs = {}, kids = []) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes: kids,
+        children: kids.filter((n) => n.nodeType === 1),
+        parentElement: null,
+        className: attrs.className || "",
+        getAttribute: (n) => attrs[n] || null,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("audio 仅有 <source src> 时不再误判\"已拒\"", () => {
+        const audio = el("audio", {});
+        audio.querySelector = (sel) => (sel === "source" ? el("source", { src: "https://cdn.example.com/a.mp3" }) : null);
+        expect(HTMLToMarkdown._convertNode(audio)).toBe("[音频](https://cdn.example.com/a.mp3)\n\n");
+    });
+
+    it("audio 自身 src 优先于 <source src>", () => {
+        const audio = el("audio", { src: "https://cdn.example.com/self.mp3" });
+        audio.querySelector = () => el("source", { src: "https://cdn.example.com/child.mp3" });
+        expect(HTMLToMarkdown._convertNode(audio)).toBe("[音频](https://cdn.example.com/self.mp3)\n\n");
+    });
+
+    it("audio 完全无地址仍拒(不生成链接)", () => {
+        expect(HTMLToMarkdown._convertNode(el("audio", {}))).toContain("已拒");
+    });
+});
+
 describe("wave12 系统扫描: 单行上下文内联文本折叠换行(链接标签/图片 alt)", () => {
     const origNode = globalThis.Node;
     beforeAll(() => {

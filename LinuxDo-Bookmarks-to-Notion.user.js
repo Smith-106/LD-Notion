@@ -4480,6 +4480,7 @@
               result.push(...DOMToNotion2.splitLongText("\n", annotations));
               return;
             }
+            if (tag === "script" || tag === "style" || tag === "noscript") return;
             if (tag === "p" || tag === "div") {
               const before = result.length;
               Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
@@ -4555,8 +4556,16 @@
               DOMToNotion2._cookImage(el, blocks, imgMode);
               return;
             }
+            const inlineText = Array.from(el.childNodes || []).filter((c) => c.nodeType === Node.TEXT_NODE).map((c) => c.nodeValue || "").join("").trim();
+            if (inlineText) {
+              blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(inlineText) } });
+            }
             Array.from(el.children).forEach(processElement);
           };
+          const rootText = Array.from(root.childNodes || []).filter((c) => c.nodeType === Node.TEXT_NODE).map((c) => c.nodeValue || "").join("").trim();
+          if (rootText) {
+            blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(rootText) } });
+          }
           Array.from(root.children).forEach(processElement);
           return blocks;
         }
@@ -4728,7 +4737,7 @@
           return HTMLToMarkdown2._convertTable(node) + "\n\n";
         },
         _convertNode: (node) => {
-          var _a, _b, _c;
+          var _a, _b, _c, _d;
           if (node.nodeType === Node.TEXT_NODE) {
             return node.textContent || "";
           }
@@ -4831,7 +4840,7 @@
               return "[\u89C6\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n";
             }
             case "audio": {
-              const src = node.getAttribute("src") || "";
+              const src = node.getAttribute("src") || ((_d = node.querySelector("source")) == null ? void 0 : _d.getAttribute("src")) || "";
               if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
                 return `[\u97F3\u9891](${HTMLToMarkdown2._mdUrl(src)})
 
@@ -6064,9 +6073,9 @@ Content-Type: ${safeContentType}\r
           } else {
             body.parent = pageId ? { page_id: pageId } : { block_id: blockId };
           }
-          const commentText = String(content || "").trim();
-          const commentMarkdown = String(markdown || "").trim();
-          if (!!commentText === !!commentMarkdown) {
+          const commentText = String(content || "");
+          const commentMarkdown = String(markdown || "");
+          if (!!commentText.trim() === !!commentMarkdown.trim()) {
             throw new Error("\u5FC5\u987B\u4E14\u53EA\u80FD\u63D0\u4F9B content \u6216 markdown \u4E4B\u4E00");
           }
           if (commentMarkdown) {

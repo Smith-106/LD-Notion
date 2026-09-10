@@ -556,6 +556,10 @@ const DOMToNotion = {
                 return;
             }
 
+            // wave13 共识(qwen): script/style/noscript 非渲染元素 —— 其文本(JS/CSS 源码)
+            // 经通用递归进入 rich_text, 内容污染(与 obsidian 同口径)
+            if (tag === "script" || tag === "style" || tag === "noscript") return;
+
             // wave12 共识(dsf): 块级子元素此前无边界 —— <blockquote>/<li> 内多个 <p> 的文本
             // 被拼成 "第一段第二段"(段间换行与分段丢失); 块级元素之间补换行, 首段不补无尾随空行
             if (tag === "p" || tag === "div") {
@@ -670,10 +674,31 @@ const DOMToNotion = {
                 return;
             }
 
+            // wave13 共识(qwen): 未匹配元素此前只递归子元素 —— 直属文本静默丢弃
+            // (顶层 <div>文字</div> / <span>文字</span> 无任何块产出); 直属文本先落段落块,
+            // 元素子节点仍按原路径递归(不在此处补发内联媒体, 避免与子元素递归重复)
+            const inlineText = Array.from(el.childNodes || [])
+                .filter((c) => c.nodeType === Node.TEXT_NODE)
+                .map((c) => c.nodeValue || "")
+                .join("")
+                .trim();
+            if (inlineText) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(inlineText) } });
+            }
+
             // 递归处理子元素
             Array.from(el.children).forEach(processElement);
         };
 
+        // wave13 共识(qwen): 顶层裸文本(如 cookedHtml 无标签的纯文本)此前无任何块产出
+        const rootText = Array.from(root.childNodes || [])
+            .filter((c) => c.nodeType === Node.TEXT_NODE)
+            .map((c) => c.nodeValue || "")
+            .join("")
+            .trim();
+        if (rootText) {
+            blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(rootText) } });
+        }
         Array.from(root.children).forEach(processElement);
         return blocks;
     },

@@ -270,7 +270,8 @@ const HTMLToMarkdown = {
                 return "[视频已拒（非公网 http(s) 地址）]\n\n";
             }
             case "audio": {
-                const src = node.getAttribute("src") || "";
+                // wave13 共识(dsf): 与 video 同口径 —— 仅有 <source src> 子元素时不再误判"已拒"
+                const src = node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "";
                 if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
                     return `[音频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
                 }

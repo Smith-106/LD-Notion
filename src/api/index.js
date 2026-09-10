@@ -824,9 +824,11 @@ const NotionAPI = {
             body.parent = pageId ? { page_id: pageId } : { block_id: blockId };
         }
 
-        const commentText = String(content || "").trim();
-        const commentMarkdown = String(markdown || "").trim();
-        if (!!commentText === !!commentMarkdown) {
+        const commentText = String(content || "");
+        const commentMarkdown = String(markdown || "");
+        // wave13 共识(dsf): trim 仅用于"二选一"空值校验 —— 载荷原样发送
+        // (缩进代码块的前导空白/首尾空行是 Markdown 语义, 截断即静默改写)
+        if (!!commentText.trim() === !!commentMarkdown.trim()) {
             throw new Error("必须且只能提供 content 或 markdown 之一");
         }
 

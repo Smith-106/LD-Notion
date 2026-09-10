@@ -623,3 +623,31 @@ describe("wave11 共识(dsf): duplicatePage 副本标题不被丢失(保留 titl
         expect(created.data.properties["标题"].title[0].text.content).toBe("原标题 (副本)");
     });
 });
+
+describe("wave13 共识(dsf): createComment 载荷不被 trim 改写", () => {
+    afterEach(() => { NotionAPI.resetTransport(); });
+
+    const runComment = async (markdown) => {
+        const calls = [];
+        NotionAPI.configureTransport({
+            request: async (opts) => { calls.push(opts); return ok({ object: "comment", id: "c1" }); },
+        });
+        await NotionAPI.createComment({ blockId: "b1", markdown }, "secret_ok");
+        return calls.find((c) => c.method === "POST");
+    };
+
+    it("缩进代码块的前导空白原样提交", async () => {
+        const call = await runComment("    indented code\n");
+        expect(call.data.markdown).toBe("    indented code\n");
+    });
+
+    it("首尾空行不被剥离", async () => {
+        const call = await runComment("\n# 标题\n");
+        expect(call.data.markdown).toBe("\n# 标题\n");
+    });
+
+    it("空白-only 仍被判为未提供(校验仍生效)", async () => {
+        await expect(NotionAPI.createComment({ blockId: "b1", markdown: "   " }, "secret_ok"))
+            .rejects.toThrow("必须且只能提供");
+    });
+});

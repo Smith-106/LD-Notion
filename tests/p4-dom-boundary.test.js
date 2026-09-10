@@ -629,3 +629,75 @@ describe("wave12 共识(dsf/qwen): 列表直嵌/块级边界/emoji set 同口径
         expect(rt.map((c) => c.text.content).join("")).toBe("😀"); // 同一 src 现在会被转成 emoji 文本
     });
 });
+
+describe("wave13 共识(dsf/qwen): 评论载荷原样 + script 跳过 + 直属文本不丢", () => {
+    const origNode = globalThis.Node;
+    const origParser = globalThis.DOMParser;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+        // node 环境无 DOMParser —— 极简桩(仅支持本组用例的 <tag>text</tag> 与裸文本)
+        globalThis.DOMParser = function () {
+            return {
+                parseFromString: (html) => {
+                    const body = { nodeType: 1, tagName: "BODY", childNodes: [], children: [] };
+                    const re = /<(\w+)>([^<]*)<\/\1>|([^<]+)/g;
+                    let m;
+                    while ((m = re.exec(html))) {
+                        if (m[1]) {
+                            const child = E(m[1], [T(m[2])]);
+                            body.childNodes.push(child);
+                            body.children.push(child);
+                        } else if (m[3] && m[3].trim()) {
+                            body.childNodes.push(T(m[3]));
+                        }
+                    }
+                    return { body };
+                },
+            };
+        };
+    });
+    afterAll(() => {
+        if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
+        if (origParser === undefined) delete globalThis.DOMParser; else globalThis.DOMParser = origParser;
+    });
+
+    const T = (s) => ({ nodeType: 3, textContent: s, nodeValue: s });
+    const E = (tag, kids, attrs = {}) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes: kids,
+        children: kids.filter((k) => k.nodeType === 1),
+        textContent: kids.map((k) => k.textContent || "").join(""),
+        className: attrs.className || "",
+        getAttribute: (n) => attrs[n] || null,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("serializeRichText 跳过 script/style/noscript 文本", () => {
+        const div = E("div", [T("正文"), E("script", [T("window.x=1;")]), E("style", [T(".a{}")]), T("尾")]);
+        const text = DOMToNotion.serializeRichText(div).map((c) => c.text.content).join("");
+        expect(text).toBe("正文尾");
+    });
+
+    it("未匹配元素(顶层 div/span)的直属文本落段落块", () => {
+        const blocks = DOMToNotion.cookedToBlocks('<div>顶层裸文本</div>', "external");
+        expect(blocks.length).toBe(1);
+        expect(blocks[0].type).toBe("paragraph");
+        expect(blocks[0].paragraph.rich_text[0].text.content).toBe("顶层裸文本");
+    });
+
+    it("纯文本 cookedHtml(无标签)不再整篇丢失", () => {
+        const blocks = DOMToNotion.cookedToBlocks("只有一段纯文本", "external");
+        expect(blocks.length).toBe(1);
+        expect(blocks[0].paragraph.rich_text[0].text.content).toBe("只有一段纯文本");
+    });
+
+    it("已知容器仍走原路径(不产生重复段落)", () => {
+        const blocks = DOMToNotion.cookedToBlocks("<p>段落</p><blockquote>引用</blockquote>", "external");
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph", "quote"]);
+    });
+});
