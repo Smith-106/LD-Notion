@@ -6146,7 +6146,7 @@ Content-Type: ${safeContentType}\r
           if (!!commentText.trim() === !!commentMarkdown.trim()) {
             throw new Error("\u5FC5\u987B\u4E14\u53EA\u80FD\u63D0\u4F9B content \u6216 markdown \u4E4B\u4E00");
           }
-          if (commentMarkdown) {
+          if (commentMarkdown.trim()) {
             body.markdown = commentMarkdown;
           } else {
             body.rich_text = [{ type: "text", text: { content: commentText } }];

@@ -835,7 +835,9 @@ const NotionAPI = {
             throw new Error("必须且只能提供 content 或 markdown 之一");
         }
 
-        if (commentMarkdown) {
+        // wave14 共识(glm/qwen): 分支选择必须与上面的 trim 校验同口径 —— 仅按原始真值判断时
+        // markdown=" "(校验视为未提供)+ content="正文" 会走 markdown 分支, 有效正文静默丢弃
+        if (commentMarkdown.trim()) {
             body.markdown = commentMarkdown;
         } else {
             body.rich_text = [{ type: "text", text: { content: commentText } }];

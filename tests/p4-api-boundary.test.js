@@ -651,3 +651,32 @@ describe("wave13 共识(dsf): createComment 载荷不被 trim 改写", () => {
             .rejects.toThrow("必须且只能提供");
     });
 });
+
+describe("wave14 共识(glm/qwen): createComment 分支选择与 trim 校验同口径", () => {
+    afterEach(() => { NotionAPI.resetTransport(); });
+
+    const run = async (opts) => {
+        const calls = [];
+        NotionAPI.configureTransport({
+            request: async (o) => { calls.push(o); return ok({ object: "comment", id: "c1" }); },
+        });
+        await NotionAPI.createComment({ blockId: "b1", ...opts }, "secret_ok");
+        return calls.find((c) => c.method === "POST");
+    };
+
+    it("仅空白 markdown 不得抢占非空 content", async () => {
+        const call = await run({ content: "正文", markdown: " " });
+        expect(call.data.markdown).toBeUndefined();
+        expect(call.data.rich_text).toEqual([{ type: "text", text: { content: "正文" } }]);
+    });
+
+    it("仅空白 markdown + 仅空白 content 仍判为都未提供", async () => {
+        await expect(run({ content: " ", markdown: "\t\n" })).rejects.toThrow("必须且只能提供 content 或 markdown 之一");
+    });
+
+    it("有效 markdown 仍走 markdown 分支且不被 trim", async () => {
+        const call = await run({ content: " ", markdown: "  **粗体**  " });
+        expect(call.data.markdown).toBe("  **粗体**  ");
+        expect(call.data.rich_text).toBeUndefined();
+    });
+});
