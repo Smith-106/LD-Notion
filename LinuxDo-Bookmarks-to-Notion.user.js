@@ -4754,15 +4754,20 @@
         // 导出时主线程卡顿)。三个分支前置返回, 保证每棵子树只被转换一次。
         _convertNodeBranch: (node, tag) => {
           if (tag === "ol") {
-            const items = node.querySelectorAll(":scope > li");
+            const items = [];
             let idx = 1;
-            return Array.from(items).map((li) => {
-              const md = HTMLToMarkdown2._convertNode(li).trim().replace(/^-\s+/, "");
-              const result = `${idx}. ${md}
-`;
+            Array.from(node.childNodes).forEach((child) => {
+              const isLi = child.nodeType === Node.ELEMENT_NODE && child.tagName.toLowerCase() === "li";
+              if (!isLi) {
+                items.push(HTMLToMarkdown2._convertNode(child));
+                return;
+              }
+              const md = HTMLToMarkdown2._convertNode(child).trim().replace(/^-\s+/, "");
+              items.push(`${idx}. ${md}
+`);
               idx++;
-              return result;
-            }).join("") + "\n";
+            });
+            return items.join("") + "\n";
           }
           if (tag === "li") {
             const segments = [];

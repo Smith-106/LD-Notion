@@ -641,3 +641,46 @@ describe("wave12 系统扫描: 单行上下文内联文本折叠换行(链接标
         expect(HTMLToMarkdown._mdText("x\ny")).toBe(Utils.mdText("x\ny"));
     });
 });
+
+describe("wave14 共识(dsf): ol 非 li 直属内容不被丢弃", () => {
+    const withNode = (fn) => {
+        const orig = globalThis.Node;
+        globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1 };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.Node; else globalThis.Node = orig;
+        }
+    };
+
+    const txt = (s) => ({ nodeType: 3, textContent: s });
+    const el = (tag, childNodes) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes,
+        children: childNodes.filter((n) => n.nodeType === 1),
+        parentElement: null,
+        getAttribute: () => null,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("ol 内裸文本原样保留且不影响序号", () => {
+        const md = withNode(() => HTMLToMarkdown._convertNode(
+            el("ol", [txt("说明"), el("li", [txt("a")]), el("li", [txt("b")])])));
+        expect(md).toContain("说明");
+        expect(md).toContain("1. a");
+        expect(md).toContain("2. b");
+    });
+
+    it("ol 内非 li 元素(p)内容保留", () => {
+        const md = withNode(() => HTMLToMarkdown._convertNode(
+            el("ol", [el("p", [txt("x")]), el("li", [txt("a")])])));
+        expect(md).toContain("x");
+        expect(md).toContain("1. a");
+    });
+
+    it("有序列表序号不受非 li 节点影响", () => {
+        const md = withNode(() => HTMLToMarkdown._convertNode(
+            el("ol", [el("li", [txt("a")]), txt("\n"), el("li", [txt("b")])])));
+        expect(md).toBe("1. a\n\n2. b\n\n");
+    });
+});

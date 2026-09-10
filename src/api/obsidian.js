@@ -122,15 +122,24 @@ const HTMLToMarkdown = {
     // 导出时主线程卡顿)。三个分支前置返回, 保证每棵子树只被转换一次。
     _convertNodeBranch: (node, tag) => {
         if (tag === "ol") {
-            const items = node.querySelectorAll(":scope > li");
+            // wave14 共识(dsf): :scope > li 只取直属 li —— <ol> 内非 li 直属内容(裸文本/
+            // <p>)被静默丢弃(ul 分支走 _convertChildren 会保留); 改为按 childNodes 顺序
+            // 渲染, 非 li 节点原样转换, 只对 li 编序号
+            const items = [];
             let idx = 1;
-            return Array.from(items).map((li) => {
+            Array.from(node.childNodes).forEach((child) => {
+                const isLi = child.nodeType === Node.ELEMENT_NODE
+                    && child.tagName.toLowerCase() === "li";
+                if (!isLi) {
+                    items.push(HTMLToMarkdown._convertNode(child));
+                    return;
+                }
                 // P4 收敛(c05 2/3): li 分支已输出 "- " 前缀 —— 有序列表需剥离, 否则 "1. - x"
-                const md = HTMLToMarkdown._convertNode(li).trim().replace(/^-\s+/, "");
-                const result = `${idx}. ${md}\n`;
+                const md = HTMLToMarkdown._convertNode(child).trim().replace(/^-\s+/, "");
+                items.push(`${idx}. ${md}\n`);
                 idx++;
-                return result;
-            }).join("") + "\n";
+            });
+            return items.join("") + "\n";
         }
         if (tag === "li") {
             // P4 收敛(c05b2-glm): 内层 ul/ol 与父项文本直接拼接会粘连("- a- b"),
