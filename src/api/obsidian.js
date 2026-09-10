@@ -149,6 +149,9 @@ const HTMLToMarkdown = {
             // wave9 共识(dsf): ①按 childNodes 顺序交错收集(嵌套列表后的文本不再被
             // 挪到前面); ②无嵌套列表时续行也缩进 2 空格(多段内容不再脱离列表)
             const segments = [];
+            // wave14 共识(glm): 嵌套列表行已由本分支加过续行缩进 —— 不能再靠
+            // startsWith("  ") 猜(会误伤自带 ≥2 空格缩进的代码围栏内容行, 丢掉列表续行缩进)
+            const preIndented = new Set();
             let buf = "";
             const pushText = (text) => {
                 if (text) text.split("\n").forEach((line) => segments.push(line));
@@ -165,8 +168,12 @@ const HTMLToMarkdown = {
                 if (isList) {
                     flushBuf();
                     const md = HTMLToMarkdown._convertNode(child).trim();
-                    md.split("\n").filter((line) => line.trim().length > 0)
-                        .forEach((line) => segments.push(`  ${line}`));
+                    // wave14 共识(qwen): 不能过滤空行 —— 嵌套列表内代码围栏的空行会被丢
+                    // (md 已 trim, 首尾空行本就不存在, 剩余空行属于代码内容)
+                    md.split("\n").forEach((line) => {
+                        preIndented.add(segments.length);
+                        segments.push(`  ${line}`);
+                    });
                 } else {
                     const md = HTMLToMarkdown._convertNode(child);
                     if (/^\s*`{3,}/.test(md)) {
@@ -180,8 +187,8 @@ const HTMLToMarkdown = {
             flushBuf();
             if (segments.length === 0) return `- ${HTMLToMarkdown._convertChildren(node)}\n`;
             const [first, ...rest] = segments;
-            const restLines = rest.map((line) => {
-                if (line.startsWith("  ")) return line;
+            const restLines = rest.map((line, i) => {
+                if (preIndented.has(i + 1)) return line;
                 if (!line.trim()) return "  ";
                 return `  ${line}`;
             });
@@ -235,7 +242,9 @@ const HTMLToMarkdown = {
             case "pre": {
                 const codeEl = node.querySelector("code");
                 const lang = codeEl?.className?.match(/language-(\w+)/)?.[1] || "";
-                const text = codeEl ? codeEl.textContent : node.textContent;
+                // wave14 共识(glm): 只取 code 元素会丢掉 pre 内其余文本(<pre>foo<code>bar</code></pre>);
+                // 改用整块 textContent, 并按 HTML 规范去掉 <pre> 紧随的首个换行
+                const text = String(node.textContent || "").replace(/^\n/, "");
                 // P4 共识(glm): 内容含 ``` 会提前闭合围栏 —— 用比最长反引号串更长的围栏
                 const longestRun = (String(text).match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
                 const fence = "`".repeat(Math.max(3, longestRun + 1));

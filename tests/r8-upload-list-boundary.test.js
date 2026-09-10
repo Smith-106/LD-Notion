@@ -548,9 +548,25 @@ describe("wave12 共识(glm): li 内代码围栏空白不被折叠篡改", () =>
         const codeEl = el("code", [txt(code)]);
         codeEl.textContent = code;
         const pre = el("pre", [codeEl]);
+        // wave14: pre 分支改读整块 textContent(真实 DOM 下父元素聚合子文本)
+        pre.textContent = code;
         pre.querySelector = (sel) => (sel === "code" ? codeEl : null);
         return pre;
     };
+
+    it("围栏内容自带缩进时不丢列表续行缩进", () => {
+        const li = el("li", [codeNode("  x")]);
+        expect(HTMLToMarkdown._convertNode(li)).toBe("- ```\n    x\n  ```\n");
+    });
+
+    it("pre 内 code 之外的文本不丢失", () => {
+        const codeEl = el("code", [txt("bar")]);
+        codeEl.textContent = "bar";
+        const pre = el("pre", [txt("foo"), codeEl]);
+        pre.textContent = "foobar";
+        pre.querySelector = (sel) => (sel === "code" ? codeEl : null);
+        expect(HTMLToMarkdown._convertNode(pre)).toContain("foobar");
+    });
 
     it("围栏内空行与行尾空白原样保留", () => {
         const li = el("li", [codeNode("line1\n\nline2  ")]);
@@ -682,5 +698,49 @@ describe("wave14 共识(dsf): ol 非 li 直属内容不被丢弃", () => {
         const md = withNode(() => HTMLToMarkdown._convertNode(
             el("ol", [el("li", [txt("a")]), txt("\n"), el("li", [txt("b")])])));
         expect(md).toBe("1. a\n\n2. b\n\n");
+    });
+});
+
+describe("wave14 共识(qwen): 嵌套列表内代码围栏空行不被过滤", () => {
+    const withNode = (fn) => {
+        const orig = globalThis.Node;
+        globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1 };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.Node; else globalThis.Node = orig;
+        }
+    };
+    const txt = (s) => ({ nodeType: 3, textContent: s });
+    const el = (tag, childNodes) => {
+        const node = {
+            nodeType: 1,
+            tagName: tag.toUpperCase(),
+            childNodes,
+            children: childNodes.filter((n) => n.nodeType === 1),
+            parentElement: null,
+            className: "",
+            getAttribute: () => null,
+            querySelector: () => null,
+            querySelectorAll: () => [],
+        };
+        childNodes.forEach((c) => { if (c.nodeType === 1) c.parentElement = node; });
+        return node;
+    };
+    const codeNode = (code) => {
+        const codeEl = el("code", [txt(code)]);
+        codeEl.textContent = code;
+        const pre = el("pre", [codeEl]);
+        pre.textContent = code;
+        pre.querySelector = (sel) => (sel === "code" ? codeEl : null);
+        return pre;
+    };
+
+    it("嵌套列表项内代码围栏的空行原样保留", () => {
+        const outer = el("li", [txt("x"), el("ul", [el("li", [codeNode("a\n\nb")])])]);
+        expect(withNode(() => HTMLToMarkdown._convertNode(outer))).toContain("a\n    \n    b");
+    });
+
+    it("普通嵌套列表不受影响", () => {
+        const outer = el("li", [txt("x"), el("ul", [el("li", [txt("a")]), el("li", [txt("b")])])]);
+        expect(withNode(() => HTMLToMarkdown._convertNode(outer))).toBe("- x\n  - a\n  - b\n");
     });
 });

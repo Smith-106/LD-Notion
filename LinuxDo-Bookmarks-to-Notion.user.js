@@ -4771,6 +4771,7 @@
           }
           if (tag === "li") {
             const segments = [];
+            const preIndented = /* @__PURE__ */ new Set();
             let buf = "";
             const pushText = (text) => {
               if (text) text.split("\n").forEach((line) => segments.push(line));
@@ -4784,7 +4785,10 @@
               if (isList) {
                 flushBuf();
                 const md = HTMLToMarkdown2._convertNode(child).trim();
-                md.split("\n").filter((line) => line.trim().length > 0).forEach((line) => segments.push(`  ${line}`));
+                md.split("\n").forEach((line) => {
+                  preIndented.add(segments.length);
+                  segments.push(`  ${line}`);
+                });
               } else {
                 const md = HTMLToMarkdown2._convertNode(child);
                 if (/^\s*`{3,}/.test(md)) {
@@ -4799,8 +4803,8 @@
             if (segments.length === 0) return `- ${HTMLToMarkdown2._convertChildren(node)}
 `;
             const [first, ...rest] = segments;
-            const restLines = rest.map((line) => {
-              if (line.startsWith("  ")) return line;
+            const restLines = rest.map((line, i) => {
+              if (preIndented.has(i + 1)) return line;
               if (!line.trim()) return "  ";
               return `  ${line}`;
             });
@@ -4869,7 +4873,7 @@
             case "pre": {
               const codeEl = node.querySelector("code");
               const lang = ((_b = (_a = codeEl == null ? void 0 : codeEl.className) == null ? void 0 : _a.match(/language-(\w+)/)) == null ? void 0 : _b[1]) || "";
-              const text = codeEl ? codeEl.textContent : node.textContent;
+              const text = String(node.textContent || "").replace(/^\n/, "");
               const longestRun = (String(text).match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
               const fence = "`".repeat(Math.max(3, longestRun + 1));
               return fence + lang + "\n" + text + "\n" + fence + "\n\n";
