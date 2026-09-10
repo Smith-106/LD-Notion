@@ -2327,7 +2327,9 @@ function createWorkspaceVisualizationFixture(harness) {
         });
 
         assert.deepStrictEqual(capturedBody, {
-            page_size: 5,
+            // P4 收敛(c04): 单次取满一页(100)后再按关键词客户端过滤并截到 limit ——
+            // page_size=limit 时匹配项排在 limit 之后的库整批漏选且无提示
+            page_size: 100,
             filter: {
                 property: '来源',
                 rich_text: { contains: 'GitHub' }

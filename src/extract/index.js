@@ -255,15 +255,31 @@ const WorkspaceService = {
         const requestKey = `${Utils.apiKeyHash(apiKey)}:${maxPages}:${includePages ? "all" : "db"}`;
 
         if (WorkspaceService._inflightRequests.has(requestKey)) {
-            return WorkspaceService._inflightRequests.get(requestKey);
+            const inflight = WorkspaceService._inflightRequests.get(requestKey);
+            // P4 收敛(c08-glm): 复用在途请求不得静默丢弃后来者的进度回调 —— 原实现直接返回
+            // 首个 promise, 后到调用方的 onProgress 永不触发(其进度 UI 全程停滞)
+            if (typeof options.onProgress === "function") inflight.progressListeners.add(options.onProgress);
+            return inflight.promise;
         }
+
+        const progressListeners = new Set();
+        if (typeof options.onProgress === "function") progressListeners.add(options.onProgress);
+        const reportProgress = (payload) => {
+            for (const listener of progressListeners) {
+                try {
+                    listener(payload);
+                } catch (error) {
+                    console.warn("[LD-Notion] 工作区进度回调异常:", error);
+                }
+            }
+        };
 
         const requestPromise = (async () => {
             const dbResults = await WorkspaceService._requestSearchItems(
                 apiKey,
                 "database",
                 maxPages,
-                options.onProgress,
+                reportProgress,
                 "databases"
             );
             const databases = dbResults.map(db => ({
@@ -281,7 +297,7 @@ const WorkspaceService = {
                 apiKey,
                 "page",
                 maxPages,
-                options.onProgress,
+                reportProgress,
                 "pages"
             );
             const pages = pageResults.map(page => ({
@@ -296,7 +312,7 @@ const WorkspaceService = {
             return { databases, pages };
         })();
 
-        WorkspaceService._inflightRequests.set(requestKey, requestPromise);
+        WorkspaceService._inflightRequests.set(requestKey, { promise: requestPromise, progressListeners });
         try {
             return await requestPromise;
         } finally {

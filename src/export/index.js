@@ -346,12 +346,18 @@ const GenericExporter = {
         }
 
         // 添加来源信息头
+        // P4 收敛(c08-glm): 截断上界按最终 content 计 —— 原 slice(0, 2000) 未扣 4 字符前缀,
+        // 拼接后 2004 超 Notion rich_text 单文本 2000 上限 → 整页导出被 400 拒绝
+        const sourcePrefix = "来源: ";
         blocks.unshift({
             type: "callout",
             callout: {
                 icon: { type: "emoji", emoji: "🔗" },
                 // P4 收敛(c08): 与属性侧同口径截断 —— 超 rich_text 2000 上限会让整页导出被 Notion 拒
-                rich_text: [{ type: "text", text: { content: `来源: ${String(meta.url || "").trim().slice(0, 2000)}` } }],
+                rich_text: [{
+                    type: "text",
+                    text: { content: `${sourcePrefix}${String(meta.url || "").trim().slice(0, 2000 - sourcePrefix.length)}` },
+                }],
             },
         });
 

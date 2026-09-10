@@ -7224,14 +7224,27 @@ Content-Type: ${safeContentType}\r
           const maxPages = Number.isFinite(options.maxPages) ? options.maxPages : parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, CONFIG2.DEFAULTS.workspaceMaxPages), 10) || 0;
           const requestKey = `${Utils2.apiKeyHash(apiKey)}:${maxPages}:${includePages ? "all" : "db"}`;
           if (WorkspaceService2._inflightRequests.has(requestKey)) {
-            return WorkspaceService2._inflightRequests.get(requestKey);
+            const inflight = WorkspaceService2._inflightRequests.get(requestKey);
+            if (typeof options.onProgress === "function") inflight.progressListeners.add(options.onProgress);
+            return inflight.promise;
           }
+          const progressListeners = /* @__PURE__ */ new Set();
+          if (typeof options.onProgress === "function") progressListeners.add(options.onProgress);
+          const reportProgress = (payload) => {
+            for (const listener of progressListeners) {
+              try {
+                listener(payload);
+              } catch (error) {
+                console.warn("[LD-Notion] \u5DE5\u4F5C\u533A\u8FDB\u5EA6\u56DE\u8C03\u5F02\u5E38:", error);
+              }
+            }
+          };
           const requestPromise = (async () => {
             const dbResults = await WorkspaceService2._requestSearchItems(
               apiKey,
               "database",
               maxPages,
-              options.onProgress,
+              reportProgress,
               "databases"
             );
             const databases = dbResults.map((db) => {
@@ -7250,7 +7263,7 @@ Content-Type: ${safeContentType}\r
               apiKey,
               "page",
               maxPages,
-              options.onProgress,
+              reportProgress,
               "pages"
             );
             const pages = pageResults.map((page) => {
@@ -7266,7 +7279,7 @@ Content-Type: ${safeContentType}\r
             }).filter((item) => item.id);
             return { databases, pages };
           })();
-          WorkspaceService2._inflightRequests.set(requestKey, requestPromise);
+          WorkspaceService2._inflightRequests.set(requestKey, { promise: requestPromise, progressListeners });
           try {
             return await requestPromise;
           } finally {
@@ -14937,12 +14950,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               paragraph: { rich_text: [{ type: "text", text: { content: meta.url } }] }
             }];
           }
+          const sourcePrefix = "\u6765\u6E90: ";
           blocks.unshift({
             type: "callout",
             callout: {
               icon: { type: "emoji", emoji: "\u{1F517}" },
               // P4 收敛(c08): 与属性侧同口径截断 —— 超 rich_text 2000 上限会让整页导出被 Notion 拒
-              rich_text: [{ type: "text", text: { content: `\u6765\u6E90: ${String(meta.url || "").trim().slice(0, 2e3)}` } }]
+              rich_text: [{
+                type: "text",
+                text: { content: `${sourcePrefix}${String(meta.url || "").trim().slice(0, 2e3 - sourcePrefix.length)}` }
+              }]
             }
           });
           if (settings.imgMode === "upload") {
@@ -15785,7 +15802,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               "Accept": "application/vnd.github.star+json, application/vnd.github+json"
             }
           });
-          return items.map((item) => {
+          const mapped = items.map((item) => {
             if ((item == null ? void 0 : item.repo) && (item == null ? void 0 : item.starred_at)) {
               return {
                 ...item.repo,
@@ -15794,6 +15811,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
             return item;
           });
+          if (items.partial === true) mapped.partial = true;
+          return mapped;
         },
         // 获取用户自己的仓库
         fetchUserRepos: (username, token = "") => {
@@ -15803,7 +15822,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 获取用户 fork 的仓库
         fetchForkedRepos: async (username, token = "") => {
           const allRepos = await GitHubAPI2.fetchUserRepos(username, token);
-          return allRepos.filter((r) => r.fork);
+          const forks = allRepos.filter((r) => r.fork);
+          if (allRepos.partial === true) forks.partial = true;
+          return forks;
         },
         // 获取用户的 Gists
         fetchUserGists: (username, token = "") => {
@@ -15879,6 +15900,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             for (const [key, ts] of Object.entries(GitHubAPI2._exportedCache)) {
               if (merged[key] === void 0 || Number(merged[key]) < Number(ts)) merged[key] = ts;
             }
+            GitHubAPI2._evictByCapacity(merged);
             GitHubAPI2._exportedCache = merged;
             Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(merged));
           }
@@ -15912,6 +15934,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             for (const [key, ts] of Object.entries(GitHubAPI2._exportedGistsCache)) {
               if (merged[key] === void 0 || Number(merged[key]) < Number(ts)) merged[key] = ts;
             }
+            GitHubAPI2._evictByCapacity(merged);
             GitHubAPI2._exportedGistsCache = merged;
             Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(merged));
           }

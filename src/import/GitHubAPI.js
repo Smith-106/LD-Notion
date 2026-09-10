@@ -98,7 +98,7 @@ const GitHubAPI = {
                 "Accept": "application/vnd.github.star+json, application/vnd.github+json",
             },
         });
-        return items.map((item) => {
+        const mapped = items.map((item) => {
             if (item?.repo && item?.starred_at) {
                 return {
                     ...item.repo,
@@ -107,6 +107,10 @@ const GitHubAPI = {
             }
             return item;
         });
+        // P4 收敛(c08-glm): map 返回新数组, _fetchPaginated 挂在原数组上的 partial 标记被丢弃
+        // → 调用方据不完整列表推进水位, 未拉到的尾部永久漏导入
+        if (items.partial === true) mapped.partial = true;
+        return mapped;
     },
 
     // 获取用户自己的仓库
@@ -120,7 +124,10 @@ const GitHubAPI = {
     // 获取用户 fork 的仓库
     fetchForkedRepos: async (username, token = "") => {
         const allRepos = await GitHubAPI.fetchUserRepos(username, token);
-        return allRepos.filter(r => r.fork);
+        const forks = allRepos.filter(r => r.fork);
+        // P4 收敛(c08-glm): filter 同样产出新数组 —— partial 标记需随派生数组传递
+        if (allRepos.partial === true) forks.partial = true;
+        return forks;
     },
 
     // 获取用户的 Gists
@@ -201,6 +208,9 @@ const GitHubAPI = {
             for (const [key, ts] of Object.entries(GitHubAPI._exportedCache)) {
                 if (merged[key] === undefined || Number(merged[key]) < Number(ts)) merged[key] = ts;
             }
+            // P4 收敛(c08-glm): 容量上限须作用于最终落盘账本 —— 仅淘汰内存缓存时,
+            // rebase 会把存储中超出上限的旧条目全量并集回写, 账本永不收缩(无界增长)
+            GitHubAPI._evictByCapacity(merged);
             GitHubAPI._exportedCache = merged;
             Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(merged));
         }
@@ -238,6 +248,8 @@ const GitHubAPI = {
             for (const [key, ts] of Object.entries(GitHubAPI._exportedGistsCache)) {
                 if (merged[key] === undefined || Number(merged[key]) < Number(ts)) merged[key] = ts;
             }
+            // P4 收敛(c08-glm): 同 flushExported —— 上限作用于落盘结果
+            GitHubAPI._evictByCapacity(merged);
             GitHubAPI._exportedGistsCache = merged;
             Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(merged));
         }
