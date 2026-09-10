@@ -4078,7 +4078,7 @@
           const src = el.getAttribute("src") || (source == null ? void 0 : source.getAttribute("src")) || "";
           const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
           if (full && imgMode !== "skip") {
-            const ext = (full.split(".").pop() || "").split("?")[0].toLowerCase();
+            const ext = ((full.split("#")[0] || "").split("?")[0].split(".").pop() || "").toLowerCase();
             if (isSupportedFileType2(ext)) {
               blocks.push({
                 type: "video",
@@ -4373,7 +4373,7 @@
             const el = n;
             const tag = el.tagName.toLowerCase();
             if (tag === "img") {
-              const src = el.getAttribute("src") || "";
+              const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
               const emojiMatch = src.match(/\/images\/emoji\/(?:twemoji|apple|google|twitter)\/([^/.]+)\.png/i);
               if (emojiMatch) {
                 const emojiName = emojiMatch[1];
@@ -4702,19 +4702,23 @@
               }).join("") + "\n";
             }
             case "li": {
-              const nestedLists = Array.from(node.children || []).filter((child) => child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase()));
-              if (nestedLists.length === 0) return `- ${children}
-`;
-              let text = children;
-              nestedLists.forEach((list) => {
-                const md = HTMLToMarkdown2._convertNode(list).trim();
-                if (!md) return;
-                text = text.replace(md, "");
-                const indented = md.split("\n").filter((line) => line.trim().length > 0).map((line) => `  ${line}`).join("\n");
-                text = `${text.trimEnd()}
-${indented}`;
+              const inlineParts = [];
+              const nestedParts = [];
+              Array.from(node.childNodes || []).forEach((child) => {
+                const isList = child.nodeType === Node.ELEMENT_NODE && child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase());
+                if (isList) {
+                  const md = HTMLToMarkdown2._convertNode(child).trim();
+                  md.split("\n").filter((line) => line.trim().length > 0).forEach((line) => nestedParts.push(`  ${line}`));
+                } else {
+                  inlineParts.push(HTMLToMarkdown2._convertNode(child));
+                }
               });
-              return `- ${text}
+              const inline = inlineParts.join("").replace(/\s+\n/g, "\n").trim();
+              const nested = nestedParts.join("\n");
+              if (!nested) return `- ${children}
+`;
+              return `- ${inline ? `${inline}
+` : ""}${nested}
 `;
             }
             case "table":
@@ -5275,8 +5279,14 @@ Content-Type: ${safeContentType}\r
                     responseType: "blob",
                     timeout: 6e4,
                     onload: (r) => {
-                      if (r.status >= 200 && r.status < 300 && r.response) resolve(r.response);
-                      else reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${r.status}`));
+                      if (r.status >= 200 && r.status < 300 && r.response) {
+                        const finalUrl = r.finalUrl || r.responseURL || "";
+                        if (finalUrl && !UrlValidator.validatePageExternalUrl(String(finalUrl))) {
+                          reject(new Error("\u4E0D\u652F\u6301\u7684\u6587\u4EF6 URL\uFF08\u4EC5\u5141\u8BB8 http(s) \u516C\u7F51\u5730\u5740\uFF09"));
+                          return;
+                        }
+                        resolve(r.response);
+                      } else reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${r.status}`));
                     },
                     onerror: (e) => reject(new Error(`\u4E0B\u8F7D\u5931\u8D25: ${Utils2.formatRequestError(e)}`)),
                     ontimeout: () => reject(new Error("\u4E0B\u8F7D\u8D85\u65F6"))
@@ -5491,6 +5501,7 @@ Content-Type: ${safeContentType}\r
               }
               try {
                 const refreshedToken = await NotionOAuth2.refreshAccessToken();
+                NotionAPI2._refreshCooldownUntil = null;
                 if (NotionAPI2._requestGate) await NotionAPI2._requestGate();
                 return doRequest(attempt, refreshedToken, false);
               } catch (refreshError) {
@@ -5875,7 +5886,7 @@ Content-Type: ${safeContentType}\r
           };
           const page = await NotionAPI2.request("POST", "/pages", data, apiKey);
           if (rest.length > 0) {
-            await NotionAPI2.appendBlocks(page.id, children.slice(100), apiKey);
+            await NotionAPI2.appendBlocks(page.id, rest, apiKey);
           }
           return page;
         },

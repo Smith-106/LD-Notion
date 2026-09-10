@@ -186,22 +186,26 @@ const HTMLToMarkdown = {
             }
             case "li": {
                 // P4 收敛(c05b2-glm): 内层 ul/ol 与父项文本直接拼接会粘连("- a- b"),
-                // 且完全依赖源 HTML 空白节点 —— 显式改为缩进 2 空格的嵌套列表(Obsidian 语法)
-                const nestedLists = Array.from(node.children || [])
-                    .filter((child) => child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase()));
-                if (nestedLists.length === 0) return `- ${children}\n`;
-                let text = children;
-                nestedLists.forEach((list) => {
-                    const md = HTMLToMarkdown._convertNode(list).trim();
-                    if (!md) return;
-                    text = text.replace(md, "");
-                    const indented = md.split("\n")
-                        .filter((line) => line.trim().length > 0)
-                        .map((line) => `  ${line}`)
-                        .join("\n");
-                    text = `${text.trimEnd()}\n${indented}`;
+                // 且完全依赖源 HTML 空白节点 —— 显式缩进 2 空格(Obsidian 嵌套列表语法)
+                // wave8 共识(qwen): 改按 childNodes 分段渲染 —— replace(md, "") 在父项文本
+                // 与内层列表 markdown 重叠时会误删父项文本, 不再依赖子串匹配
+                const inlineParts = [];
+                const nestedParts = [];
+                Array.from(node.childNodes || []).forEach((child) => {
+                    const isList = child.nodeType === Node.ELEMENT_NODE
+                        && child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase());
+                    if (isList) {
+                        const md = HTMLToMarkdown._convertNode(child).trim();
+                        md.split("\n").filter((line) => line.trim().length > 0)
+                            .forEach((line) => nestedParts.push(`  ${line}`));
+                    } else {
+                        inlineParts.push(HTMLToMarkdown._convertNode(child));
+                    }
                 });
-                return `- ${text}\n`;
+                const inline = inlineParts.join("").replace(/\s+\n/g, "\n").trim();
+                const nested = nestedParts.join("\n");
+                if (!nested) return `- ${children}\n`;
+                return `- ${inline ? `${inline}\n` : ""}${nested}\n`;
             }
             case "table": return HTMLToMarkdown._convertTable(node) + "\n\n";
             case "iframe": {

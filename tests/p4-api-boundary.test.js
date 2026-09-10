@@ -377,3 +377,65 @@ describe("wave7 共识(glm+qwen): create 路径双上限首片 + movePage 预检
         }
     });
 });
+
+describe("wave8 共识(qwen): createChildPage rest + 续签成功清冷却", () => {
+    afterEach(() => { NotionAPI.resetTransport(); NotionAPI.setRequestGate(null); NotionAPI._refreshCooldownUntil = null; });
+
+    it("createChildPage 首片因嵌套上限 <100 时, 剩余块用 rest 追加(不丢块)", async () => {
+        const origSleep = Utils.sleep;
+        Utils.sleep = async () => {};
+        const calls = [];
+        NotionAPI.configureTransport({ request: async (opts) => { calls.push(opts); return ok({ id: "cp1", object: "page" }); } });
+        const container = () => ({
+            type: "bulleted_list_item",
+            bulleted_list_item: {
+                rich_text: [],
+                children: Array.from({ length: 60 }, () => ({ type: "paragraph", paragraph: { rich_text: [] } })),
+            },
+        });
+        const children = Array.from({ length: 20 }, container);
+        const totalBlocks = children.length; // 顶层块数(append 只传顶层)
+        try {
+            await NotionAPI.createChildPage("pp", "T", children, "secret_ok");
+            const creates = calls.filter((c) => c.endpoint === "/pages");
+            const appended = calls.filter((c) => c.endpoint === "/blocks/cp1/children")
+                .reduce((acc, c) => acc + c.data.children.length, 0);
+            expect(creates.length).toBe(1);
+            expect(creates[0].data.children.length).toBeLessThan(20);
+            // 全部顶层块最终都送达(创建 + 追加)
+            expect(creates[0].data.children.length + appended).toBe(totalBlocks);
+        } finally {
+            Utils.sleep = origSleep;
+        }
+    });
+
+    it("续签成功后清除续签冷却戳", async () => {
+        const origSleep = Utils.sleep;
+        Utils.sleep = async () => {};
+        const { NotionOAuth } = require("../src/auth");
+        const { Storage } = require("../src/storage");
+        const { CONFIG } = require("../src/config");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "cid");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "csecret");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "rt-ok");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, "https://smith-106.github.io/LD-Notion/oauth-callback");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_AUTH_MODE, "oauth");
+        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_expired");
+        // 预置"已过期"冷却(此前非终态失败遗留): 过期后不再拦截, 走正常续签路径
+        NotionAPI._refreshCooldownUntil = Date.now() - 1;
+        const origExchange = NotionOAuth.exchangeToken;
+        NotionOAuth.exchangeToken = async () => ({ access_token: "secret_fresh", refresh_token: "rt2" });
+        NotionAPI.configureTransport({
+            request: async (opts) => (opts.token === "secret_fresh"
+                ? ok({ ok: true })
+                : { status: 401, responseText: JSON.stringify({ object: "error", code: "unauthorized", message: "API token is invalid." }), responseHeaders: "" }),
+        });
+        try {
+            await NotionAPI.request("GET", "/pages/x", null, "secret_expired", 3);
+            expect(NotionAPI._refreshCooldownUntil).toBeNull();
+        } finally {
+            NotionOAuth.exchangeToken = origExchange;
+            Utils.sleep = origSleep;
+        }
+    });
+});

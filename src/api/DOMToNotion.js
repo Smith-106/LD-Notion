@@ -73,7 +73,9 @@ const DOMToNotion = {
         const src = el.getAttribute("src") || source?.getAttribute("src") || "";
         const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
         if (full && imgMode !== "skip") {
-            const ext = (full.split(".").pop() || "").split("?")[0].toLowerCase();
+            // wave8 共识(qwen): 先剥查询串/锚点再取扩展名 —— "a.exe?y=.mp4"/"a.mp4#y.exe"
+            // 否则扩展名可被查询串或锚点伪造, 误选 video/embed 块类型
+            const ext = ((full.split("#")[0] || "").split("?")[0].split(".").pop() || "").toLowerCase();
             if (isSupportedFileType(ext)) {
                 blocks.push({
                     type: "video",
@@ -424,7 +426,8 @@ const DOMToNotion = {
 
             // 处理 emoji 图片
             if (tag === "img") {
-                const src = el.getAttribute("src") || "";
+                // wave8 共识(qwen): 懒加载 emoji 仅在 data-src 时同样识别(与块级图片回退同口径)
+                const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
                 const emojiMatch = src.match(/\/images\/emoji\/(?:twemoji|apple|google|twitter)\/([^/.]+)\.png/i);
                 if (emojiMatch) {
                     const emojiName = emojiMatch[1];

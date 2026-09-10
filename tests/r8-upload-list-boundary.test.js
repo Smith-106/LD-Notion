@@ -3,7 +3,7 @@
 // 收敛轮 wave5 分片补齐(c05b2-glm)回归:
 // ① uploadFileToNotion 下载→上传是 SSRF/内网外带边界, 须自查 URL(不依赖调用方过滤)
 // ② HTMLToMarkdown 嵌套列表须显式缩进, 不能依赖源 HTML 空白节点(否则 "- a- b" 粘连)
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 
 const { NotionAPI, HTMLToMarkdown } = require("../src/api");
 
@@ -159,4 +159,52 @@ describe("wave7 共识(qwen): callout 注入净化 + 下载大小护栏", () => 
         expect(out).toContain("^floor-3");
     });
 
+});
+
+describe("wave8 共识(dsf+glm): uploadImageToNotion 回退路径 finalUrl 校验", () => {
+    const ok = (o) => ({ status: 200, responseText: JSON.stringify(o), responseHeaders: "" });
+    afterEach(() => { NotionAPI.resetTransport(); });
+
+    it("回退路径重下载 302 到内网时拒绝(重定向型 SSRF)", async () => {
+        const origXhr = global.GM_xmlhttpRequest;
+        // 主路径 createFileUpload 失败 → 进入回退重下载 → finalUrl 指向内网须拒绝
+        NotionAPI.configureTransport({ request: async () => ({ status: 500, responseText: "{}", responseHeaders: "" }) });
+        global.GM_xmlhttpRequest = (opts) => opts.onload({
+            status: 200,
+            response: new Blob(["x"]),
+            finalUrl: "http://169.254.169.254/latest/meta-data",
+        });
+        try {
+            const result = await NotionAPI.uploadImageToNotion("https://evil.example.com/a.png", "secret_ok");
+            expect(result).toBeNull(); // 回退也失败 → null(不外带内网资源)
+        } finally {
+            global.GM_xmlhttpRequest = origXhr;
+        }
+    });
+
+    it("回退路径 finalUrl 为公网时正常上传", async () => {
+        const origXhr = global.GM_xmlhttpRequest;
+        const { Utils: U2 } = require("../src/utils");
+        NotionAPI.configureTransport({
+            request: async (opts) => {
+                if (opts.endpoint === "/file_uploads" && opts.method === "POST") return ok({ id: "fu8", upload_url: "https://upload.notion.com/u", object: "file_upload" });
+                if (opts.endpoint === "/file_uploads/fu8/send") return ok({ object: "file_upload", status: "uploaded" });
+                if (opts.endpoint === "/file_uploads/fu8/complete") return ok({ id: "fu8", object: "file_upload" });
+                return { status: 500, responseText: "{}", responseHeaders: "" };
+            },
+        });
+        global.GM_xmlhttpRequest = (opts) => opts.onload({ status: 200, response: new Blob(["x"]), finalUrl: "https://cdn.example.com/a.png" });
+        // uploadFileContent 依赖 FileReader(node 环境无) → 最小桩: 同步触发 onload
+        const origFR = global.FileReader;
+        global.FileReader = class {
+            readAsArrayBuffer() { this.result = new Uint8Array(0); this.onload(); }
+        };
+        try {
+            const fileId = await NotionAPI.uploadImageToNotion("https://cdn.example.com/a.png", "secret_ok");
+            expect(fileId).toBe("fu8");
+        } finally {
+            global.GM_xmlhttpRequest = origXhr;
+            if (origFR === undefined) delete global.FileReader; else global.FileReader = origFR;
+        }
+    });
 });

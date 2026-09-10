@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 
 // P4 第三批回归: DOMToNotion 边界(表格补齐/长文本截断/embed 白名单) + pageCrud 分页/歧义守卫
-const { DOMToNotion, NotionAPI } = require("../src/api");
+const { DOMToNotion, NotionAPI, HTMLToMarkdown } = require("../src/api");
 const { AIHandlers, AIAssistant } = require("../src/ai/index.js");
 const { OperationGuard } = require("../src/security");
 const { ChatState } = require("../src/ai/index.js");
@@ -339,5 +339,76 @@ describe("wave6 共识(qwen): 嵌套表格隔离 + table_width 上限", () => {
         expect(t.children[0].table_row.cells[99][0].text.content).toContain("已截断 6 列");
         // 第 98 列仍是原单元格内容(RT() 桩输出), 未被标记覆盖
         expect(t.children[0].table_row.cells[98][0].text.content).toBe(RT()[0].text.content);
+    });
+});
+
+describe("wave8 共识(qwen): ext 伪造 + data-src emoji + li 重叠文本", () => {
+    let origSerialize4;
+    beforeEach(() => { origSerialize4 = DOMToNotion.serializeRichText; DOMToNotion.serializeRichText = () => RT(); });
+    afterEach(() => { DOMToNotion.serializeRichText = origSerialize4; });
+
+    it("video 扩展名不被锚点伪造(a.mp4#y.exe 仍按 mp4 判定)", () => {
+        const blocks = [];
+        const video = {
+            getAttribute: (k) => (k === "src" ? "https://cdn.example.com/a.mp4#y.exe" : null),
+            querySelector: () => null,
+        };
+        DOMToNotion._cookVideo(video, blocks, "external");
+        expect(blocks[0].type).toBe("video");
+    });
+
+    it("锚点伪造的 video 扩展名不触发 embed 分支(YouTube 宿主 + 伪 .mp4 锚点)", () => {
+        const blocks = [];
+        const video = {
+            getAttribute: (k) => (k === "src" ? "https://youtube.com/a.exe#y=.mp4" : null),
+            querySelector: () => null,
+        };
+        DOMToNotion._cookVideo(video, blocks, "external");
+        // 修复: 剥锚点后 ext=exe → 非媒体类型 → youtube 宿主走 embed; 变异(不剥锚点)
+        // ext=mp4 → 误判媒体 → 走 video external 分支
+        expect(blocks[0].type).toBe("embed");
+        expect(blocks.some((b) => b.type === "video")).toBe(false);
+    });
+
+    it("serializeRichText 识别 data-src 懒加载 emoji", () => {
+        // 本测试测真实实现 —— 还原 describe 级 RT 桩(其余 video 测试仍用桩)
+        DOMToNotion.serializeRichText = origSerialize4;
+        const origNode = globalThis.Node;
+        globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1, COMMENT_NODE: 8 };
+        const img = {
+            nodeType: 1,
+            tagName: "IMG",
+            childNodes: [],
+            getAttribute: (k) => (k === "data-src" ? "/images/emoji/twemoji/1f600.png" : null),
+        };
+        const p = { nodeType: 1, tagName: "P", childNodes: [img], querySelectorAll: () => [] };
+        try {
+            const rt = DOMToNotion.serializeRichText(p);
+            expect(rt[0].text.content).toBe(":1f600:");
+        } finally {
+            if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
+        }
+    });
+
+    it("li 父项文本与内层列表 markdown 重叠时不再误删父项文本", () => {
+        const origNode = globalThis.Node;
+        globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1 };
+        const txt = (t) => ({ nodeType: 3, textContent: t });
+        const el = (tag, childNodes) => ({
+            nodeType: 1,
+            tagName: tag.toUpperCase(),
+            childNodes,
+            children: childNodes.filter((n) => n.nodeType === 1),
+            parentElement: null,
+            getAttribute: () => null,
+            querySelector: () => null,
+            querySelectorAll: (sel) => (sel === ":scope > li" ? childNodes.filter((c) => c.tagName === "LI") : []),
+        });
+        const li = el("li", [txt("- b"), el("ul", [el("li", [txt("b")])])]);
+        try {
+            expect(HTMLToMarkdown._convertNode(li)).toBe("- - b\n  - b\n");
+        } finally {
+            if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
+        }
     });
 });

@@ -217,6 +217,9 @@ const NotionAPI = {
                 }
                 try {
                     const refreshedToken = await NotionOAuth.refreshAccessToken();
+                    // wave8 共识(qwen): 续签成功后清除此前非终态失败留下的冷却戳,
+                    // 否则冷却期内再次 401 会跳过本可成功的自动续签
+                    NotionAPI._refreshCooldownUntil = null;
                     // wave7 共识(glm): 续签后的重放与 429 重试同口径 —— 同样须过共享
                     // gate, 否则并发 401 时续签+重放洪峰可突破限流预算
                     if (NotionAPI._requestGate) await NotionAPI._requestGate();
@@ -710,8 +713,10 @@ const NotionAPI = {
         const page = await NotionAPI.request("POST", "/pages", data, apiKey);
 
         // 如果有剩余的 blocks，追加
+        // wave8 共识(qwen): 首片因嵌套上限可能 < 100 块 —— 追加必须用 rest 而非
+        // children.slice(100), 否则首片之后、索引 100 之前的块被跳过丢失
         if (rest.length > 0) {
-            await NotionAPI.appendBlocks(page.id, children.slice(100), apiKey);
+            await NotionAPI.appendBlocks(page.id, rest, apiKey);
         }
 
         return page;

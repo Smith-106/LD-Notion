@@ -406,7 +406,16 @@ function installUploadMethods(NotionAPI) {
                         responseType: "blob",
                         timeout: 60000,
                         onload: (r) => {
-                            if (r.status >= 200 && r.status < 300 && r.response) resolve(r.response);
+                            if (r.status >= 200 && r.status < 300 && r.response) {
+                                // wave8 共识(dsf+glm): 回退路径重下载同样须过 finalUrl 重定向校验,
+                                // 否则攻击者控制的公网服务器 302 到内网可绕过 wave6 主路径防护
+                                const finalUrl = r.finalUrl || r.responseURL || "";
+                                if (finalUrl && !UrlValidator.validatePageExternalUrl(String(finalUrl))) {
+                                    reject(new Error("不支持的文件 URL（仅允许 http(s) 公网地址）"));
+                                    return;
+                                }
+                                resolve(r.response);
+                            }
                             else reject(new Error(`下载失败: ${r.status}`));
                         },
                         onerror: (e) => reject(new Error(`下载失败: ${Utils.formatRequestError(e)}`)),
