@@ -884,8 +884,10 @@ const NotionAPI = {
 
     // 在页面尾部或指定锚点后插入 Markdown
     appendPageMarkdown: async (pageId, content, apiKey, after) => {
-        const markdown = String(content || "").trim();
-        if (!markdown) throw new Error("content 不能为空");
+        // wave10 共识(dsf): trim 仅用于空值校验 —— 不得写入载荷, 否则首行缩进的代码块
+        // 被降级为段落、首尾空行被静默删除(content 与调用方传入内容不一致)
+        const markdown = String(content || "");
+        if (!markdown.trim()) throw new Error("content 不能为空");
 
         const payload = {
             type: "insert_content",
@@ -907,9 +909,12 @@ const NotionAPI = {
         }
 
         const normalizedUpdates = contentUpdates.map((item) => {
-            const oldStr = String(item.old_str || "").trim();
+            // wave10 共识(dsf): trim 仅用于空值校验 —— old_str 是“精确匹配”串, 写入载荷前
+            // 截去前导/尾随空白(缩进代码块、首尾空行、硬换行两空格)会与页面 markdown 不再逐字
+            // 相等 → 更新被拒或误匹配到另一处文本
+            const oldStr = String(item.old_str || "");
             const newStr = String(item.new_str || "");
-            if (!oldStr) throw new Error("每条 content update 都必须提供 old_str");
+            if (!oldStr.trim()) throw new Error("每条 content update 都必须提供 old_str");
             return {
                 old_str: oldStr,
                 new_str: newStr,

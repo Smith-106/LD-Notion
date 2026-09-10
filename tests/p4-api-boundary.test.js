@@ -552,3 +552,40 @@ describe("wave9 共识(dsf): 空 children 不随 create 请求发出(与 appendB
         expect(calls[0].data.children.length).toBe(1);
     });
 });
+
+describe("wave10 共识(dsf): markdown 更新载荷不得被 trim 改写", () => {
+    afterEach(() => { NotionAPI.resetTransport(); });
+
+    const capture = () => {
+        const calls = [];
+        NotionAPI.configureTransport({ request: async (opts) => { calls.push(opts); return ok({ object: "page", id: "p1" }); } });
+        return calls;
+    };
+
+    it("appendPageMarkdown 原样提交 content(首行缩进的代码块不被降级)", async () => {
+        const calls = capture();
+        await NotionAPI.appendPageMarkdown("p1", "    const a = 1;\n", "secret_ok");
+        expect(calls.length).toBe(1);
+        expect(calls[0].data.insert_content.content).toBe("    const a = 1;\n");
+    });
+
+    it("appendPageMarkdown 纯空白 content 仍拒绝", async () => {
+        NotionAPI.configureTransport({ request: async () => ok({}) });
+        await expect(NotionAPI.appendPageMarkdown("p1", "   \n  ", "secret_ok")).rejects.toThrow(/不能为空/);
+    });
+
+    it("searchReplacePageMarkdown 原样提交 old_str(精确匹配语义不被破坏)", async () => {
+        const calls = capture();
+        await NotionAPI.searchReplacePageMarkdown("p1", [{ old_str: "  indented\n", new_str: "x" }], "secret_ok");
+        expect(calls.length).toBe(1);
+        const update = calls[0].data.update_content.content_updates[0];
+        expect(update.old_str).toBe("  indented\n");
+        expect(update.new_str).toBe("x");
+    });
+
+    it("searchReplacePageMarkdown 纯空白 old_str 仍拒绝", async () => {
+        NotionAPI.configureTransport({ request: async () => ok({}) });
+        await expect(NotionAPI.searchReplacePageMarkdown("p1", [{ old_str: "  \n", new_str: "x" }], "secret_ok"))
+            .rejects.toThrow(/old_str/);
+    });
+});

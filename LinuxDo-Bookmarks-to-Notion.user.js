@@ -4640,6 +4640,53 @@
           const doc = new DOMParser().parseFromString(html, "text/html");
           return HTMLToMarkdown2._convertNode(doc.body);
         },
+        // wave10 共识(dsf): li/ol/table 分支自行转换子树 —— 若在 _convertNode 顶部提前计算
+        // _convertChildren, 同一子树会被转换两遍, 嵌套深度 n 时代价 2^n(深嵌套列表/表格
+        // 导出时主线程卡顿)。三个分支前置返回, 保证每棵子树只被转换一次。
+        _convertNodeBranch: (node, tag) => {
+          if (tag === "ol") {
+            const items = node.querySelectorAll(":scope > li");
+            let idx = 1;
+            return Array.from(items).map((li) => {
+              const md = HTMLToMarkdown2._convertNode(li).trim().replace(/^-\s+/, "");
+              const result = `${idx}. ${md}
+`;
+              idx++;
+              return result;
+            }).join("") + "\n";
+          }
+          if (tag === "li") {
+            const segments = [];
+            let buf = "";
+            const flushBuf = () => {
+              const text = buf.replace(/\s+\n/g, "\n").trim();
+              if (text) text.split("\n").forEach((line) => segments.push(line));
+              buf = "";
+            };
+            Array.from(node.childNodes || []).forEach((child) => {
+              const isList = child.nodeType === Node.ELEMENT_NODE && child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase());
+              if (isList) {
+                flushBuf();
+                const md = HTMLToMarkdown2._convertNode(child).trim();
+                md.split("\n").filter((line) => line.trim().length > 0).forEach((line) => segments.push(`  ${line}`));
+              } else {
+                buf += HTMLToMarkdown2._convertNode(child);
+              }
+            });
+            flushBuf();
+            if (segments.length === 0) return `- ${HTMLToMarkdown2._convertChildren(node)}
+`;
+            const [first, ...rest] = segments;
+            const restLines = rest.map((line) => {
+              if (line.startsWith("  ")) return line;
+              if (!line.trim()) return "  ";
+              return `  ${line}`;
+            });
+            return `- ${[first, ...restLines].join("\n")}
+`;
+          }
+          return HTMLToMarkdown2._convertTable(node) + "\n\n";
+        },
         _convertNode: (node) => {
           var _a, _b, _c;
           if (node.nodeType === Node.TEXT_NODE) {
@@ -4647,6 +4694,9 @@
           }
           if (node.nodeType !== Node.ELEMENT_NODE) return "";
           const tag = node.tagName.toLowerCase();
+          if (tag === "li" || tag === "ol" || tag === "table") {
+            return HTMLToMarkdown2._convertNodeBranch(node, tag);
+          }
           const children = HTMLToMarkdown2._convertChildren(node);
           switch (tag) {
             case "h1":
@@ -4726,49 +4776,6 @@
             }
             case "ul":
               return children;
-            case "ol": {
-              const items = node.querySelectorAll(":scope > li");
-              let idx = 1;
-              return Array.from(items).map((li) => {
-                const md = HTMLToMarkdown2._convertNode(li).trim().replace(/^-\s+/, "");
-                const result = `${idx}. ${md}
-`;
-                idx++;
-                return result;
-              }).join("") + "\n";
-            }
-            case "li": {
-              const segments = [];
-              let buf = "";
-              const flushBuf = () => {
-                const text = buf.replace(/\s+\n/g, "\n").trim();
-                if (text) text.split("\n").forEach((line) => segments.push(line));
-                buf = "";
-              };
-              Array.from(node.childNodes || []).forEach((child) => {
-                const isList = child.nodeType === Node.ELEMENT_NODE && child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase());
-                if (isList) {
-                  flushBuf();
-                  const md = HTMLToMarkdown2._convertNode(child).trim();
-                  md.split("\n").filter((line) => line.trim().length > 0).forEach((line) => segments.push(`  ${line}`));
-                } else {
-                  buf += HTMLToMarkdown2._convertNode(child);
-                }
-              });
-              flushBuf();
-              if (segments.length === 0) return `- ${children}
-`;
-              const [first, ...rest] = segments;
-              const restLines = rest.map((line) => {
-                if (line.startsWith("  ")) return line;
-                if (!line.trim()) return "  ";
-                return `  ${line}`;
-              });
-              return `- ${[first, ...restLines].join("\n")}
-`;
-            }
-            case "table":
-              return HTMLToMarkdown2._convertTable(node) + "\n\n";
             case "iframe": {
               const src = node.getAttribute("src") || "";
               const safeSrc = String(src || "");
@@ -6074,8 +6081,8 @@ Content-Type: ${safeContentType}\r
         },
         // 在页面尾部或指定锚点后插入 Markdown
         appendPageMarkdown: async (pageId, content, apiKey, after) => {
-          const markdown = String(content || "").trim();
-          if (!markdown) throw new Error("content \u4E0D\u80FD\u4E3A\u7A7A");
+          const markdown = String(content || "");
+          if (!markdown.trim()) throw new Error("content \u4E0D\u80FD\u4E3A\u7A7A");
           const payload = {
             type: "insert_content",
             insert_content: {
@@ -6093,9 +6100,9 @@ Content-Type: ${safeContentType}\r
             throw new Error("contentUpdates \u4E0D\u80FD\u4E3A\u7A7A");
           }
           const normalizedUpdates = contentUpdates.map((item) => {
-            const oldStr = String(item.old_str || "").trim();
+            const oldStr = String(item.old_str || "");
             const newStr = String(item.new_str || "");
-            if (!oldStr) throw new Error("\u6BCF\u6761 content update \u90FD\u5FC5\u987B\u63D0\u4F9B old_str");
+            if (!oldStr.trim()) throw new Error("\u6BCF\u6761 content update \u90FD\u5FC5\u987B\u63D0\u4F9B old_str");
             return {
               old_str: oldStr,
               new_str: newStr,

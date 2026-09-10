@@ -330,3 +330,47 @@ describe("wave9 共识(qwen): Obsidian 导出 scheme 白名单", () => {
             .toContain("https://player.example.com/e/1");
     });
 });
+
+describe("wave10 共识(dsf): Obsidian 嵌套子树只转换一次(不重复展开)", () => {
+    const origNode = globalThis.Node;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+    });
+    afterAll(() => { if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode; });
+
+    const txt = (s) => ({ nodeType: 3, textContent: s });
+    const el = (tag, childNodes) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes,
+        children: childNodes.filter((n) => n.nodeType === 1),
+        parentElement: null,
+        className: "",
+        getAttribute: () => null,
+        querySelector: () => null,
+        querySelectorAll: (sel) => (sel === ":scope > li" ? childNodes.filter((c) => c.tagName === "LI") : []),
+    });
+    // depth 层 ul/li 互相嵌套的链式结构
+    const chain = (depth) => {
+        let inner = txt("x");
+        for (let i = 0; i < depth; i++) inner = el("ul", [el("li", [inner])]);
+        return inner;
+    };
+
+    it("深度 14 的嵌套列表转换次数保持线性(旧实现为 2^depth)", () => {
+        const real = HTMLToMarkdown._convertNode;
+        let calls = 0;
+        HTMLToMarkdown._convertNode = (n) => { calls += 1; return real(n); };
+        try {
+            const out = HTMLToMarkdown._convertNode(chain(14));
+            expect(typeof out).toBe("string");
+        } finally {
+            HTMLToMarkdown._convertNode = real;
+        }
+        // 线性约 3*depth+1;重复展开时 ≥ 2^14 = 16384
+        expect(calls).toBeLessThan(500);
+    });
+});

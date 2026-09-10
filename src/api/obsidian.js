@@ -116,6 +116,60 @@ const HTMLToMarkdown = {
         return HTMLToMarkdown._convertNode(doc.body);
     },
 
+    // wave10 共识(dsf): li/ol/table 分支自行转换子树 —— 若在 _convertNode 顶部提前计算
+    // _convertChildren, 同一子树会被转换两遍, 嵌套深度 n 时代价 2^n(深嵌套列表/表格
+    // 导出时主线程卡顿)。三个分支前置返回, 保证每棵子树只被转换一次。
+    _convertNodeBranch: (node, tag) => {
+        if (tag === "ol") {
+            const items = node.querySelectorAll(":scope > li");
+            let idx = 1;
+            return Array.from(items).map((li) => {
+                // P4 收敛(c05 2/3): li 分支已输出 "- " 前缀 —— 有序列表需剥离, 否则 "1. - x"
+                const md = HTMLToMarkdown._convertNode(li).trim().replace(/^-\s+/, "");
+                const result = `${idx}. ${md}\n`;
+                idx++;
+                return result;
+            }).join("") + "\n";
+        }
+        if (tag === "li") {
+            // P4 收敛(c05b2-glm): 内层 ul/ol 与父项文本直接拼接会粘连("- a- b"),
+            // 且完全依赖源 HTML 空白节点 —— 显式缩进 2 空格(Obsidian 嵌套列表语法)
+            // wave8 共识(qwen): 改按 childNodes 分段渲染 —— replace(md, "") 在父项文本
+            // 与内层列表 markdown 重叠时会误删父项文本, 不再依赖子串匹配
+            // wave9 共识(dsf): ①按 childNodes 顺序交错收集(嵌套列表后的文本不再被
+            // 挪到前面); ②无嵌套列表时续行也缩进 2 空格(多段内容不再脱离列表)
+            const segments = [];
+            let buf = "";
+            const flushBuf = () => {
+                const text = buf.replace(/\s+\n/g, "\n").trim();
+                if (text) text.split("\n").forEach((line) => segments.push(line));
+                buf = "";
+            };
+            Array.from(node.childNodes || []).forEach((child) => {
+                const isList = child.nodeType === Node.ELEMENT_NODE
+                    && child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase());
+                if (isList) {
+                    flushBuf();
+                    const md = HTMLToMarkdown._convertNode(child).trim();
+                    md.split("\n").filter((line) => line.trim().length > 0)
+                        .forEach((line) => segments.push(`  ${line}`));
+                } else {
+                    buf += HTMLToMarkdown._convertNode(child);
+                }
+            });
+            flushBuf();
+            if (segments.length === 0) return `- ${HTMLToMarkdown._convertChildren(node)}\n`;
+            const [first, ...rest] = segments;
+            const restLines = rest.map((line) => {
+                if (line.startsWith("  ")) return line;
+                if (!line.trim()) return "  ";
+                return `  ${line}`;
+            });
+            return `- ${[first, ...restLines].join("\n")}\n`;
+        }
+        return HTMLToMarkdown._convertTable(node) + "\n\n";
+    },
+
     _convertNode: (node) => {
         if (node.nodeType === Node.TEXT_NODE) {
             return node.textContent || "";
@@ -123,6 +177,12 @@ const HTMLToMarkdown = {
         if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
         const tag = node.tagName.toLowerCase();
+
+        // wave10 共识(dsf): 这三个分支自行转换子树, 前置返回避免重复转换(见 _convertNodeBranch)
+        if (tag === "li" || tag === "ol" || tag === "table") {
+            return HTMLToMarkdown._convertNodeBranch(node, tag);
+        }
+
         const children = HTMLToMarkdown._convertChildren(node);
 
         switch (tag) {
@@ -178,54 +238,6 @@ const HTMLToMarkdown = {
                 return HTMLToMarkdown._mdText(alt || "");
             }
             case "ul": return children;
-            case "ol": {
-                const items = node.querySelectorAll(":scope > li");
-                let idx = 1;
-                return Array.from(items).map((li) => {
-                    // P4 收敛(c05 2/3): li 分支已输出 "- " 前缀 —— 有序列表需剥离, 否则 "1. - x"
-                    const md = HTMLToMarkdown._convertNode(li).trim().replace(/^-\s+/, "");
-                    const result = `${idx}. ${md}\n`;
-                    idx++;
-                    return result;
-                }).join("") + "\n";
-            }
-            case "li": {
-                // P4 收敛(c05b2-glm): 内层 ul/ol 与父项文本直接拼接会粘连("- a- b"),
-                // 且完全依赖源 HTML 空白节点 —— 显式缩进 2 空格(Obsidian 嵌套列表语法)
-                // wave8 共识(qwen): 改按 childNodes 分段渲染 —— replace(md, "") 在父项文本
-                // 与内层列表 markdown 重叠时会误删父项文本, 不再依赖子串匹配
-                // wave9 共识(dsf): ①按 childNodes 顺序交错收集(嵌套列表后的文本不再被
-                // 挪到前面); ②无嵌套列表时续行也缩进 2 空格(多段内容不再脱离列表)
-                const segments = [];
-                let buf = "";
-                const flushBuf = () => {
-                    const text = buf.replace(/\s+\n/g, "\n").trim();
-                    if (text) text.split("\n").forEach((line) => segments.push(line));
-                    buf = "";
-                };
-                Array.from(node.childNodes || []).forEach((child) => {
-                    const isList = child.nodeType === Node.ELEMENT_NODE
-                        && child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase());
-                    if (isList) {
-                        flushBuf();
-                        const md = HTMLToMarkdown._convertNode(child).trim();
-                        md.split("\n").filter((line) => line.trim().length > 0)
-                            .forEach((line) => segments.push(`  ${line}`));
-                    } else {
-                        buf += HTMLToMarkdown._convertNode(child);
-                    }
-                });
-                flushBuf();
-                if (segments.length === 0) return `- ${children}\n`;
-                const [first, ...rest] = segments;
-                const restLines = rest.map((line) => {
-                    if (line.startsWith("  ")) return line;
-                    if (!line.trim()) return "  ";
-                    return `  ${line}`;
-                });
-                return `- ${[first, ...restLines].join("\n")}\n`;
-            }
-            case "table": return HTMLToMarkdown._convertTable(node) + "\n\n";
             case "iframe": {
                 const src = node.getAttribute("src") || "";
                 // wave9 共识(qwen): src 仅放行 http(s) 公网地址(javascript:/data:/内网 拒绝)
