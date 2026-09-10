@@ -4186,6 +4186,11 @@
         },
         // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发(与 _cookParagraph 同款)
         _consumeInlineMedia: (el, blocks, imgMode) => {
+          const selfTag = el.tagName ? el.tagName.toLowerCase() : "";
+          if (selfTag === "img") DOMToNotion2._cookImage(el, blocks, imgMode);
+          else if (selfTag === "video") DOMToNotion2._cookVideo(el, blocks, imgMode);
+          else if (selfTag === "audio") DOMToNotion2._cookAudio(el, blocks, imgMode);
+          else if (selfTag === "iframe") DOMToNotion2._cookIframe(el, blocks);
           el.querySelectorAll("img").forEach((img) => DOMToNotion2._cookImage(img, blocks, imgMode));
           el.querySelectorAll("a.attachment").forEach((a) => DOMToNotion2._cookAttachment(a, blocks, imgMode));
           el.querySelectorAll("video").forEach((video) => DOMToNotion2._cookVideo(video, blocks, imgMode));
@@ -4436,10 +4441,10 @@
         },
         serializeRichText: (node) => {
           const result = [];
-          let blockEnded = false;
+          let needBreak = false;
           const breakIfNeeded = (annotations) => {
-            if (!blockEnded) return;
-            blockEnded = false;
+            if (!needBreak) return;
+            needBreak = false;
             if (result.length > 0) result.push(...DOMToNotion2.splitLongText("\n", annotations));
           };
           const processNode = (n, annotations = {}) => {
@@ -4514,17 +4519,16 @@
               return;
             }
             if (tag === "br") {
+              needBreak = false;
               result.push(...DOMToNotion2.splitLongText("\n", annotations));
-              blockEnded = false;
               return;
             }
             if (tag === "script" || tag === "style" || tag === "noscript") return;
             if (tag === "p" || tag === "div") {
-              blockEnded = false;
-              if (result.length > 0) result.push(...DOMToNotion2.splitLongText("\n", annotations));
+              if (result.length > 0) needBreak = true;
               const before = result.length;
               Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
-              if (result.length > before) blockEnded = true;
+              if (result.length > before) needBreak = true;
               return;
             }
             Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
@@ -4544,6 +4548,10 @@
           const processElement = (el) => {
             if (!el || el.nodeType !== Node.ELEMENT_NODE) return;
             const tag = el.tagName.toLowerCase();
+            if (tag === "hr") {
+              blocks.push({ type: "divider", divider: {} });
+              return;
+            }
             if (el.classList && el.classList.contains("meta")) return;
             if (el.classList && (el.classList.contains("lightbox-wrapper") || el.classList.contains("image-wrapper"))) {
               DOMToNotion2._cookLightbox(el, blocks, imgMode);

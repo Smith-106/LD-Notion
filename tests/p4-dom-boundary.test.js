@@ -777,3 +777,78 @@ describe("wave14 共识(dsf): 块级边界 + 顺序化遍历(顺序不被破坏)
         expect(text).toBe("First\nSecond");
     });
 });
+
+describe("wave14 共识(glm): 直属媒体消费 + 嵌套块边界 + hr 分隔线", () => {
+    const origNode = globalThis.Node;
+    const origParser = globalThis.DOMParser;
+    beforeAll(() => {
+        const NodeStub = function NodeStub() {};
+        NodeStub.TEXT_NODE = 3;
+        NodeStub.ELEMENT_NODE = 1;
+        globalThis.Node = NodeStub;
+        globalThis.DOMParser = function () {
+            return {
+                parseFromString: (html) => {
+                    const body = { nodeType: 1, tagName: "BODY", childNodes: [], children: [] };
+                    const re = /<hr>|<(\w+)>([^<]*)<\/\1>|([^<]+)/g;
+                    let m;
+                    while ((m = re.exec(html))) {
+                        if (m[0] === "<hr>") {
+                            const child = E("hr", []);
+                            body.childNodes.push(child);
+                            body.children.push(child);
+                        } else if (m[1]) {
+                            const child = E(m[1], [T(m[2])]);
+                            body.childNodes.push(child);
+                            body.children.push(child);
+                        } else if (m[3] && m[3].trim()) {
+                            body.childNodes.push(T(m[3]));
+                        }
+                    }
+                    return { body };
+                },
+            };
+        };
+    });
+    afterAll(() => {
+        if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
+        if (origParser === undefined) delete globalThis.DOMParser; else globalThis.DOMParser = origParser;
+    });
+
+    const T = (s) => ({ nodeType: 3, textContent: s, nodeValue: s });
+    const E = (tag, kids, attrs = {}) => ({
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        childNodes: kids,
+        children: kids.filter((k) => k.nodeType === 1),
+        textContent: kids.map((k) => k.textContent || "").join(""),
+        className: attrs.className || "",
+        getAttribute: (n) => (n in attrs ? attrs[n] : null),
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    });
+
+    it("ul 的直属媒体子元素(非 li 包裹)不静默丢弃", () => {
+        const blocks = [];
+        const img = E("img", [], { src: "https://pub.example.com/x.png" });
+        DOMToNotion._cookList(E("ul", [img]), blocks, "external");
+        expect(blocks.map((b) => b.type)).toContain("image");
+    });
+
+    it("_consumeInlineMedia 自身即媒体时同样产出块", () => {
+        const blocks = [];
+        DOMToNotion._consumeInlineMedia(E("img", [], { src: "https://pub.example.com/y.png" }), blocks, "external");
+        expect(blocks.map((b) => b.type)).toEqual(["image"]);
+    });
+
+    it("嵌套块级元素只补一次边界(不产生空行)", () => {
+        const bq = E("blockquote", [E("p", [T("a")]), E("div", [E("p", [T("b")])])]);
+        const text = DOMToNotion.serializeRichText(bq).map((c) => c.text.content).join("");
+        expect(text).toBe("a\nb");
+    });
+
+    it("<hr> 产出 divider 块而非静默丢弃", () => {
+        const blocks = DOMToNotion.cookedToBlocks("<hr>", "external");
+        expect(blocks).toEqual([{ type: "divider", divider: {} }]);
+    });
+});

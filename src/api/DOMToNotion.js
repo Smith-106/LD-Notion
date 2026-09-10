@@ -180,6 +180,13 @@ const DOMToNotion = {
 
     // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发(与 _cookParagraph 同款)
     _consumeInlineMedia: (el, blocks, imgMode) => {
+        // wave14 共识(glm): querySelectorAll 只查后代 —— 元素自身即媒体(<ul><img src=x></ul>)
+        // 时会被漏掉; 先按自身标签分派叶媒体, 再走后裔查询
+        const selfTag = el.tagName ? el.tagName.toLowerCase() : "";
+        if (selfTag === "img") DOMToNotion._cookImage(el, blocks, imgMode);
+        else if (selfTag === "video") DOMToNotion._cookVideo(el, blocks, imgMode);
+        else if (selfTag === "audio") DOMToNotion._cookAudio(el, blocks, imgMode);
+        else if (selfTag === "iframe") DOMToNotion._cookIframe(el, blocks);
         el.querySelectorAll("img").forEach((img) => DOMToNotion._cookImage(img, blocks, imgMode));
         el.querySelectorAll("a.attachment").forEach((a) => DOMToNotion._cookAttachment(a, blocks, imgMode));
         el.querySelectorAll("video").forEach((video) => DOMToNotion._cookVideo(video, blocks, imgMode));
@@ -480,12 +487,13 @@ const DOMToNotion = {
     serializeRichText: (node) => {
         const result = [];
 
-        // wave14 共识(dsf): 块级元素结束后需要与后续内容分隔 —— 用待分隔标记, 由下一次
-        // 内联内容落库时消费(后续可能是裸文本, 不一定是 p/div)
-        let blockEnded = false;
+        // wave14 共识(dsf/glm): 块级元素前后均为文本边界 —— 用"下次落库前需补分隔符"标记,
+        // 由真正产出内容的那次调用消费(后续可能是裸文本, 不一定是 p/div); 延迟消费
+        // 避免嵌套块(<blockquote><p>a</p><div><p>b</p></div></blockquote>)重复补空行
+        let needBreak = false;
         const breakIfNeeded = (annotations) => {
-            if (!blockEnded) return;
-            blockEnded = false;
+            if (!needBreak) return;
+            needBreak = false;
             if (result.length > 0) result.push(...DOMToNotion.splitLongText("\n", annotations));
         };
 
@@ -578,8 +586,9 @@ const DOMToNotion = {
             // wave9 共识(dsf): Discourse 单次换行输出 <br>, 无分支时相邻文本节点直接拼接
             // ("line1line2" 词句粘连, 硬换行丢失) —— br 输出带换行的文本片段
             if (tag === "br") {
+                // br 自身即分隔符: 清掉待补边界, 不叠加
+                needBreak = false;
                 result.push(...DOMToNotion.splitLongText("\n", annotations));
-                blockEnded = false; // br 自身已是分隔符, 不再额外补块级边界
                 return;
             }
 
@@ -591,12 +600,11 @@ const DOMToNotion = {
             // 内联内容粘连(<blockquote><p>a</p>b</blockquote> 此前输出 "ab"); 仅"下一项也是
             // p/div 时才补换行"不够, 裸文本同样需要边界
             if (tag === "p" || tag === "div") {
-                // 块级元素前后都是边界: 前面已有内容则先补换行(无论前面是块还是内联文本)
-                blockEnded = false;
-                if (result.length > 0) result.push(...DOMToNotion.splitLongText("\n", annotations));
+                // 块级元素前后都是边界(前面是内联文本或块级都算): 标记延迟到真正产出内容时消费
+                if (result.length > 0) needBreak = true;
                 const before = result.length;
                 Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
-                if (result.length > before) blockEnded = true;
+                if (result.length > before) needBreak = true;
                 return;
             }
 
@@ -624,6 +632,12 @@ const DOMToNotion = {
             if (!el || el.nodeType !== Node.ELEMENT_NODE) return;
 
             const tag = el.tagName.toLowerCase();
+
+            // wave14 共识(glm): <hr> 此前无烹饪分支, 分隔线静默丢弃
+            if (tag === "hr") {
+                blocks.push({ type: "divider", divider: {} });
+                return;
+            }
 
             // 跳过元信息容器
             if (el.classList && el.classList.contains('meta')) return;
