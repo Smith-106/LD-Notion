@@ -3,6 +3,7 @@
 const { CONFIG } = require("../config");
 const { SyncStateV2 } = require("./SyncState");
 const { DedupStore } = require("./DedupStore");
+const { on } = require("../coordination/event-bus");
 
 let _credentialVault = null;
 
@@ -51,6 +52,14 @@ const Storage = {
     _registerExportedTopicsWatcher: () => {
         if (Storage._exportedTopicsWatcherBound) return;
         Storage._exportedTopicsWatcherBound = true;
+        // P4 收敛(c10): batch 结束同 tab 落盘不发 GM 事件 —— 订阅专用事件清缓存,
+        // 否则缓存仍指向已脱离的 batch 快照(缺其他 tab 在批窗口内写入的键)。
+        // 必须早于 GM 监听器可用性检查 —— 否则无 GM 事件能力的环境会连批内失效一起丢失。
+        try {
+            on("storage:batch-committed", () => { Storage._exportedTopicsCache = null; });
+        } catch (e) {
+            // 事件总线不可用不影响功能
+        }
         if (typeof GM_addValueChangeListener !== "function") return;
         try {
             GM_addValueChangeListener(CONFIG.STORAGE_KEYS.EXPORTED_TOPICS, () => {

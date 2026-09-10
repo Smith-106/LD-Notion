@@ -468,7 +468,9 @@ const UIEvents = {
                         && (refs.databaseIdInput.value.trim() || refs.parentPageIdInput.value.trim())
                     );
                     if (!githubReady || !notionReady) {
-                        AutoImporter.updateStatus("⚠️ 请先配置 GitHub 用户名/Token 与 Notion 目标");
+                        // P4 收敛(c13): 此处是 GitHub 自动导入开关 —— 警告必须写到 GitHub 状态位,
+                        // 写到 Linux.do 状态位会让 GitHub 状态残留旧值
+                        GitHubAutoImporter.updateStatus("⚠️ 请先配置 GitHub 用户名/Token 与 Notion 目标");
                         e.target.checked = false;
                         Storage.set(cfg.enabledKey, false);
                         refs.autoImportOptions.style.display = "none";
@@ -916,7 +918,10 @@ const UIEvents = {
                             const items = await GitHubAPI.fetchUserGists(username, token);
                             allItems.push(...UI.mapGitHubItemsToBookmarks(items, "gists"));
                         }
-                        UI.refs.bookmarkCount.textContent = allItems.length;
+                        // P4 收敛(c13): 与 Linux.do 分支同口径 —— 加载期间切换来源后不再写计数
+                        if (loadSource === UI.getActiveBookmarkSource() && UI.refs?.bookmarkCount) {
+                            UI.refs.bookmarkCount.textContent = allItems.length;
+                        }
                     }
                     bookmarks = allItems;
                 } else {
@@ -1102,6 +1107,9 @@ const UIEvents = {
             }
 
             // 获取选中的收藏（严格模式过滤已导出，允许重复模式仅按勾选）
+            // P4 收敛(c13): 导出器选择必须与 toExport 同一来源快照 ——
+            // 设置保存 await 期间用户切换来源时, 重读来源会把陈旧列表交给错误导出器
+            const exportIsGitHub = UI.isActiveGitHubSource();
             const toExport = UI.bookmarks.filter((b) => {
                 const bookmarkKey = UI.getBookmarkKey(b);
                 return UI.selectedBookmarks.has(bookmarkKey) && !UI.isBookmarkKeyExported(bookmarkKey);
@@ -1192,7 +1200,7 @@ const UIEvents = {
 
             try {
                 let results;
-                if (UI.isActiveGitHubSource()) {
+                if (exportIsGitHub) {
                     results = await UI.exportGitHubSelected(toExport, settings, (current, total, title) => {
                         UI.showProgress(current, total, `${title}\n导出中`);
                     });

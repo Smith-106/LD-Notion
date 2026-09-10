@@ -500,6 +500,9 @@ const WorkspaceVisual = {
                 url: group.url,
             }));
 
+        // P4 收敛(c17): 合并两类候选后按 count 降序再取前 8 —— 此前固定「先标题后链接」顺序,
+        // 标题候选 ≥8 时链接类(同 URL 跨源, 信号更强)会被整类挤出展示与批量保存列表。
+        // 上限 8 是有意的(展示 + 批量 AI/写入成本边界), 但应按重要性取舍而非按类型偏袒。
         const connectionCandidates = Array.from(new Map([
             ...duplicateCandidatesSorted
                 .filter((group) => group.sourceCount > 1)
@@ -512,7 +515,9 @@ const WorkspaceVisual = {
                     items: group.items,
                 }]),
             ...linkConnectionCandidates.map((group) => [group.key, group]),
-        ]).values()).slice(0, 8);
+        ]).values())
+            .sort((a, b) => b.count - a.count || String(a.label).localeCompare(String(b.label)))
+            .slice(0, 8);
 
         const funnel = [
             { label: "已扫描页面", count: totalPages, pct: UI().getViewPct(totalPages, totalPages) },

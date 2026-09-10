@@ -219,4 +219,35 @@ describe("SyncEngine 双设备收敛", () => {
         expect(st.mode).toBe("personal");
         expect(st.deviceId).toMatch(/^[0-9a-f]{32}$/);
     });
+
+    // P4 收敛(c11): 孤儿 settings 行(旧分片/字段被剔除)带过期 updatedAt 时,
+    // validateRemote 对越界时间戳整包拒绝 → 超过 90 天后所有设备 pull 永久失败。
+    it("越界 updatedAt 的 settings 项被剔除, pull 不整包失败", async () => {
+        initEngine("A");
+        const staleStamp = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+        const freshStamp = new Date().toISOString();
+        const makeSettingsRow = (settings) => ({
+            id: "row-settings",
+            properties: {
+                "键": { title: [{ plain_text: "settings" }] },
+                "类型": { rich_text: [{ plain_text: "settings" }] },
+                "版本": { number: 1 },
+                "更新时间": { rich_text: [{ plain_text: freshStamp }] },
+                "设备": { rich_text: [{ plain_text: "dev-x" }] },
+                "数据": { rich_text: [{ plain_text: JSON.stringify({ settings }) }] },
+            },
+        });
+        medium.rows = [makeSettingsRow({
+            ldb_theme_preference: { value: "dark", updatedAt: freshStamp, deviceId: "dev-x" },
+            ldb_ai_model: { value: "gpt-x", updatedAt: staleStamp, deviceId: "dev-x" },
+        })];
+
+        const res = await SyncEngine.pull({ reason: "test" });
+        expect(res.ok).toBe(true);
+        // 新鲜项照常应用
+        expect(require("../src/storage").Storage.get("ldb_theme_preference", "")).toBe("dark");
+        // 越界项被剔除(未应用且未污染本地)
+        expect(require("../src/storage").Storage.get("ldb_ai_model", "")).toBe("");
+        expect(globalThis.__auditLog.some((e) => e.context && e.context.droppedStaleSettings === 1)).toBe(true);
+    });
 });

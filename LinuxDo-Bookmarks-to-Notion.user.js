@@ -533,10 +533,12 @@
         return SUPPORTED_FILE_TYPES2.has((ext || "").toLowerCase());
       }
       function getMimeType2(ext, fallback = "application/octet-stream") {
-        return EXT_TO_MIME2[(ext || "").toLowerCase()] || fallback;
+        const key = (ext || "").toLowerCase();
+        return Object.prototype.hasOwnProperty.call(EXT_TO_MIME2, key) ? EXT_TO_MIME2[key] : fallback;
       }
       function getFileCategory2(ext) {
-        return FILE_TYPE_CATEGORY2[(ext || "").toLowerCase()] || "file";
+        const key = (ext || "").toLowerCase();
+        return Object.prototype.hasOwnProperty.call(FILE_TYPE_CATEGORY2, key) ? FILE_TYPE_CATEGORY2[key] : "file";
       }
       var MSG2 = {
         NO_NOTION_KEY: "\u8BF7\u5148\u586B\u5199 Notion API Key",
@@ -730,10 +732,11 @@
           const defaults = this._defaults();
           let parsed = {};
           try {
-            parsed = JSON.parse(_getRaw(CONFIG2.STORAGE_KEYS.AUTO_SYNC_STATE, "{}")) || {};
+            parsed = JSON.parse(_getRaw(CONFIG2.STORAGE_KEYS.AUTO_SYNC_STATE, "{}"));
           } catch {
             parsed = {};
           }
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) parsed = {};
           const hasV1Shape = !parsed.version && (parsed.linuxdo || parsed.github || parsed.bookmarks || parsed.rss);
           if (parsed.version < this.VERSION || hasV1Shape) {
             parsed = this._migrateV1toV2(parsed);
@@ -1241,6 +1244,7 @@
           } else {
             this._batchCaches = /* @__PURE__ */ Object.create(null);
           }
+          emit("storage:batch-committed", { sourceType: sourceType || "*" });
         },
         _batchGet(sourceType) {
           return this._batchCaches[sourceType] || null;
@@ -1410,6 +1414,7 @@
       var { CONFIG: CONFIG2 } = require_config();
       var { SyncStateV2 } = require_SyncState();
       var { DedupStore } = require_DedupStore();
+      var { on } = require_event_bus();
       var _credentialVault = null;
       var Storage2 = {
         _exportedTopicsCache: null,
@@ -1447,6 +1452,12 @@
         _registerExportedTopicsWatcher: () => {
           if (Storage2._exportedTopicsWatcherBound) return;
           Storage2._exportedTopicsWatcherBound = true;
+          try {
+            on("storage:batch-committed", () => {
+              Storage2._exportedTopicsCache = null;
+            });
+          } catch (e) {
+          }
           if (typeof GM_addValueChangeListener !== "function") return;
           try {
             GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS, () => {
@@ -1475,6 +1486,7 @@
               legacy = JSON.parse(raw);
             } catch {
             }
+            if (!legacy || typeof legacy !== "object" || Array.isArray(legacy)) legacy = {};
             const legacyKeys = Object.keys(legacy);
             if (legacyKeys.length === 0) return;
             const set = DedupStore.getSeen("linuxdo") || {};
@@ -1588,6 +1600,7 @@
       var { CONFIG: CONFIG2 } = require_config();
       var { Storage: Storage2 } = require_storage();
       var { sha256HexSync } = require_sha256();
+      var MD_URL_ESCAPE = { "(": "%28", ")": "%29", "<": "%3C", ">": "%3E", " ": "%20" };
       var QUOTE_CHARS = "[\\u0022\\u201C\\u201D]";
       var QUOTE_RE = new RegExp(QUOTE_CHARS + "([^" + QUOTE_CHARS.slice(1) + "+)" + QUOTE_CHARS);
       var QUOTE_RE_G = new RegExp(QUOTE_RE.source, "g");
@@ -1765,7 +1778,8 @@
         // P4 收敛(c02/c05): Markdown 链接输出净化 —— 不可信标题/URL 含 ]( 等元字符
         // 可破坏链接结构并注入链接目标（标题来自 Notion 页面/搜索结果）。
         mdText: (text) => String(text ?? "").replace(/[\[\]]/g, ""),
-        mdUrl: (url) => String(url ?? "").replace(/[\s)]/g, ""),
+        // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
+        mdUrl: (url) => String(url ?? "").replace(/[\s<>()]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
         mdLink: (text, url) => `[${Utils2.mdText(text)}](${Utils2.mdUrl(url)})`,
         // GM_xmlhttpRequest onerror 回调参数为对象（如 { error, type }），直接模板串化
         // 会得到 "[object Object]" 吞掉真实原因；按常见字段优先级提取，
@@ -2658,7 +2672,7 @@
         getConfig: () => ({
           // 纵深防御(三模型共识验证轮):存量脏值(隐形字符)在读取层剥离,续签/授权不再携带
           clientId: String(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_ID, "") || "").trim().replace(INVISIBLE_CHARS_RE, ""),
-          clientSecret: String(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "") || "").trim(),
+          clientSecret: String(Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_CLIENT_SECRET, "") || "").trim().replace(INVISIBLE_CHARS_RE, ""),
           redirectUri: String(
             Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REDIRECT_URI, CONFIG2.DEFAULTS.notionOauthRedirectUri) || CONFIG2.DEFAULTS.notionOauthRedirectUri
           ).trim()
@@ -2891,7 +2905,9 @@
           document.querySelectorAll("#ldb-api-key, #ldb-notion-api-key").forEach((input) => {
             if (!input) return;
             if (NotionOAuth2.isOAuthConnected()) {
-              input.value = "";
+              if (document.activeElement !== input) {
+                input.value = "";
+              }
               input.placeholder = status.apiKeyPlaceholder;
             } else {
               CredentialVault2.syncSensitiveInput(input, CONFIG2.STORAGE_KEYS.NOTION_API_KEY, "secret_xxx...");
@@ -3335,12 +3351,19 @@
                 if (isTerminal) {
                   const stored = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_OAUTH_REFRESH_TOKEN, "");
                   if (stored && stored !== refreshToken) {
-                    const retryResult = await NotionOAuth2.exchangeToken({
-                      grant_type: "refresh_token",
-                      refresh_token: stored
-                    });
-                    await NotionOAuth2.applyTokenResponse(retryResult, { source: "refresh" });
-                    return retryResult.access_token;
+                    let retryResult = null;
+                    try {
+                      retryResult = await NotionOAuth2.exchangeToken({
+                        grant_type: "refresh_token",
+                        refresh_token: stored
+                      });
+                    } catch (retryError) {
+                      console.warn("[LD-Notion] \u4ED6 tab \u8F6E\u6362\u540E\u7684 refresh token \u91CD\u8BD5\u5931\u8D25:", retryError);
+                    }
+                    if (retryResult) {
+                      await NotionOAuth2.applyTokenResponse(retryResult, { source: "refresh" });
+                      return retryResult.access_token;
+                    }
                   }
                   await NotionOAuth2.setRefreshToken("");
                   Storage2.remove(CONFIG2.STORAGE_KEYS.NOTION_API_KEY);
@@ -4262,9 +4285,14 @@
           } else {
             let remaining = text;
             while (remaining.length > 0 && chunks.length < maxItems) {
-              const chunk = remaining.substring(0, maxLength);
+              let cut = maxLength;
+              if (cut < remaining.length) {
+                const code = remaining.charCodeAt(cut - 1);
+                if (code >= 55296 && code <= 56319) cut -= 1;
+              }
+              const chunk = remaining.substring(0, cut);
               chunks.push({ type: "text", text: { content: chunk }, annotations: { ...annotations } });
-              remaining = remaining.substring(maxLength);
+              remaining = remaining.substring(cut);
             }
             if (remaining.length > 0 && chunks.length > 0) {
               const marker = `\u2026\uFF08\u5185\u5BB9\u8FC7\u957F\uFF0C\u5DF2\u622A\u65AD ${remaining.length} \u5B57\u7B26\uFF09`;
@@ -4416,6 +4444,7 @@
     "src/api/obsidian.js"(exports, module) {
       "use strict";
       var { UrlValidator } = require_UrlValidator();
+      var { Utils: Utils2 } = require_utils();
       var ObsidianAPI2 = {
         // P4 共识(dsf): 整路径 encodeURIComponent 会把子目录的 "/" 编成 %2F, 且 ".." 段可越权写入。
         // 逐段编码并剔除空/./.. 段。
@@ -4509,8 +4538,9 @@
       };
       var HTMLToMarkdown2 = {
         // P4 共识(glm+qwen): 链接文本/alt 与 href/src 未净化, 含 ]( 的不可信内容可逃逸链接语法。
+        // P4 收敛(c05): URL 改用百分号编码(与 Utils.mdUrl 同口径), 删除字符会改写链接目标
         _mdText: (s) => String(s ?? "").replace(/[\[\]]/g, ""),
-        _mdUrl: (s) => String(s ?? "").replace(/[\s()<>]/g, ""),
+        _mdUrl: (s) => Utils2.mdUrl(s),
         convert: (html) => {
           const doc = new DOMParser().parseFromString(html, "text/html");
           return HTMLToMarkdown2._convertNode(doc.body);
@@ -4651,7 +4681,7 @@
           const result = [];
           rows.forEach((row, i) => {
             const cells = Array.from(row.querySelectorAll("th, td")).map((c) => {
-              return HTMLToMarkdown2._convertChildren(c).replace(/\n/g, " ").trim();
+              return HTMLToMarkdown2._convertChildren(c).replace(/\n/g, " ").replace(/\|/g, "\\|").trim();
             });
             result.push(`| ${cells.join(" | ")} |`);
             if (i === 0) {
@@ -4692,10 +4722,11 @@
         buildPostCallout: (post, index, isOp) => {
           const type = isOp ? "success" : "note";
           const collapsed = index > 0 ? "+" : "";
-          const username = post.username || "\u672A\u77E5";
+          const username = post.name || post.username || "\u672A\u77E5";
+          const handle = post.username && post.username !== username ? ` (@${post.username})` : "";
           const postNum = post.post_number || index + 1;
           const date = post.created_at ? new Date(post.created_at).toLocaleString("zh-CN") : "\u672A\u77E5\u65F6\u95F4";
-          const header = `#${postNum} ${username}${post.username ? ` (@${post.username})` : ""}${isOp ? " \u697C\u4E3B" : ""} \xB7 ${date}`;
+          const header = `#${postNum} ${username}${handle}${isOp ? " \u697C\u4E3B" : ""} \xB7 ${date}`;
           const content = HTMLToMarkdown2.convert(post.cooked || "");
           const lines = content.trim().split("\n");
           const quoted = lines.map((l) => `> ${l}`).join("\n");
@@ -4861,7 +4892,8 @@ ${quoted}
         return "file";
       }
       function getMimeType2(ext) {
-        return MIME_TYPES[(ext || "").toLowerCase()] || "application/octet-stream";
+        const key = (ext || "").toLowerCase();
+        return Object.prototype.hasOwnProperty.call(MIME_TYPES, key) ? MIME_TYPES[key] : "application/octet-stream";
       }
       var sanitizeMultipartFilename = (name) => String(name || "").replace(/["\r\n]/g, "");
       function installUploadMethods(NotionAPI2) {
@@ -5192,7 +5224,16 @@ Content-Type: ${safeContentType}\r
         return false;
       };
       var NotionTransport2 = Object.freeze({
-        buildUrl: (endpoint) => `https://api.notion.com/v1${endpoint}`,
+        // P4 收敛(c05): endpoint 由调用方拼接 id —— 拒路径穿越/反斜线/片段注入
+        // (../ 会被 HTTP 客户端规范化到同域其他端点; ? 合法用于分页游标)
+        buildUrl: (endpoint) => {
+          const ep = String(endpoint ?? "");
+          const pathPart = ep.split("?")[0];
+          if (!ep.startsWith("/") || /[\s#\\]/.test(ep) || pathPart.includes("..") || pathPart.includes("//")) {
+            throw new Error(`\u975E\u6CD5 Notion API \u7AEF\u70B9: ${ep.slice(0, 80)}`);
+          }
+          return `https://api.notion.com/v1${ep}`;
+        },
         buildHeaders: ({ token, notionVersion }) => ({
           "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -5575,9 +5616,19 @@ Content-Type: ${safeContentType}\r
             if (cursor) seenCursors.add(cursor);
           } while (cursor);
           const parent = parentType === "database" ? { database_id: targetParentId } : { page_id: targetParentId };
+          const READONLY_PROPERTY_TYPES = /* @__PURE__ */ new Set([
+            "created_time",
+            "created_by",
+            "last_edited_time",
+            "last_edited_by",
+            "formula",
+            "rollup",
+            "unique_id",
+            "button"
+          ]);
           const properties = {};
           for (const [key, value] of Object.entries(originalPage.properties || {})) {
-            if (!["created_time", "created_by", "last_edited_time", "last_edited_by"].includes(value.type)) {
+            if (!READONLY_PROPERTY_TYPES.has(value == null ? void 0 : value.type)) {
               properties[key] = value;
             }
           }
@@ -6068,24 +6119,28 @@ Content-Type: ${safeContentType}\r
             const result = await executor();
             logEntry.status = "success";
             logEntry.endTime = Date.now();
-            OperationLog2.add({
-              audit_event: OperationLog2.inferAuditEvent(operation, "success"),
-              actor,
-              source,
-              guard: OperationGuard2._buildGuardSnapshot(operation, "allow", context),
-              operation: {
-                name: operation,
-                risk: OperationGuard2._getPermissionName(requiredLevelForOp),
-                trigger: context.trigger || "user_requested_write"
-              },
-              target: OperationLog2.buildTarget(context),
-              payload: OperationLog2.buildPayload(context),
-              result: {
-                status: "success"
-              },
-              redaction: OperationLog2.collectRedactionHints(context),
-              ...logEntry
-            });
+            try {
+              OperationLog2.add({
+                audit_event: OperationLog2.inferAuditEvent(operation, "success"),
+                actor,
+                source,
+                guard: OperationGuard2._buildGuardSnapshot(operation, "allow", context),
+                operation: {
+                  name: operation,
+                  risk: OperationGuard2._getPermissionName(requiredLevelForOp),
+                  trigger: context.trigger || "user_requested_write"
+                },
+                target: OperationLog2.buildTarget(context),
+                payload: OperationLog2.buildPayload(context),
+                result: {
+                  status: "success"
+                },
+                redaction: OperationLog2.collectRedactionHints(context),
+                ...logEntry
+              });
+            } catch (auditError) {
+              console.warn("[LD-Notion] \u64CD\u4F5C\u5BA1\u8BA1\u5199\u5165\u5931\u8D25(\u5199\u64CD\u4F5C\u5DF2\u6210\u529F):", auditError);
+            }
             if (OperationGuard2.isDangerous(operation)) {
               if (operation === "deletePage") {
                 UndoManager2.register({
@@ -6444,6 +6499,11 @@ Content-Type: ${safeContentType}\r
           const nameInputEl = dialog.querySelector("#ldb-confirm-name-input");
           if (nameInputEl) nameInputEl.placeholder = rawItemName;
           document.body.appendChild(dialog);
+          const themedRoot = document.querySelector("[data-ldb-theme]");
+          const dialogPanel = dialog.querySelector(".ldb-confirm-dialog");
+          if (themedRoot && dialogPanel) {
+            dialogPanel.setAttribute("data-ldb-theme", themedRoot.getAttribute("data-ldb-theme"));
+          }
           ConfirmationDialog2.dialogElement = dialog;
           ConfirmationDialog2._activeResolve = resolve;
           const okBtn = dialog.querySelector("#ldb-confirm-ok");
@@ -6757,7 +6817,7 @@ Content-Type: ${safeContentType}\r
             } catch (e) {
               lastErr = e;
               const msg = String(e && e.message || e || "");
-              if (/\bHTTP\s+40[013]\b/.test(msg)) throw e;
+              if (/\bHTTP\s+40[0134]\b/.test(msg)) throw e;
               if (i < retries) await Utils2.sleep(1e3 * Math.pow(2, i));
             } finally {
               clearTimeout(timer);
@@ -7279,6 +7339,8 @@ Content-Type: ${safeContentType}\r
           "path",
           "Name"
         ]),
+        // P4 收敛(c03): 原型链危险键 —— 作为普通对象下标赋值会走 setter/污染原型而非自有属性
+        FORBIDDEN_PROP_NAMES: /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]),
         // 合法属性类型白名单
         ALLOWED_PROPERTY_TYPES: /* @__PURE__ */ new Set([
           "title",
@@ -7320,6 +7382,7 @@ Content-Type: ${safeContentType}\r
           if (n.length > AISchema.MAX_PROP_NAME) n = n.slice(0, AISchema.MAX_PROP_NAME);
           if (!AISchema.PROP_NAME_RE.test(n)) return "";
           if (AISchema.NOTION_RESERVED_NAMES.has(n)) return "";
+          if (AISchema.FORBIDDEN_PROP_NAMES.has(n)) return "";
           return n;
         },
         // 校验属性类型。返回 { valid, type } 或 { valid: false }。
@@ -7680,8 +7743,13 @@ Content-Type: ${safeContentType}\r
         } else {
           let remaining = str;
           while (remaining.length > 0) {
-            chunks.push({ type: "text", text: { content: remaining.substring(0, maxLen) } });
-            remaining = remaining.substring(maxLen);
+            let cut = Math.min(maxLen, remaining.length);
+            if (cut < remaining.length) {
+              const code = remaining.charCodeAt(cut - 1);
+              if (code >= 55296 && code <= 56319) cut -= 1;
+            }
+            chunks.push({ type: "text", text: { content: remaining.substring(0, cut) } });
+            remaining = remaining.substring(cut);
           }
         }
         return chunks;
@@ -7811,7 +7879,7 @@ Content-Type: ${safeContentType}\r
           const normalizeLanguage2 = (lang) => {
             const lower = (lang || "").toLowerCase().trim();
             if (!lower) return "plain text";
-            if (LANG_MAP[lower]) return LANG_MAP[lower];
+            if (Object.prototype.hasOwnProperty.call(LANG_MAP, lower)) return LANG_MAP[lower];
             if (NOTION_LANGS.has(lower)) return lower;
             return "plain text";
           };
@@ -8065,6 +8133,73 @@ Content-Type: ${safeContentType}\r
     }
   });
 
+  // src/ai/tools/paginate.js
+  var require_paginate = __commonJS({
+    "src/ai/tools/paginate.js"(exports, module) {
+      "use strict";
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var MAX_QUERY_PAGES = 10;
+      var MAX_SEARCH_PAGES = 10;
+      var queryAllPages = async ({ dbId, apiKey, body = {}, maxPages = MAX_QUERY_PAGES }) => {
+        const results = [];
+        const seen = /* @__PURE__ */ new Set();
+        let cursor = null;
+        let pages = 0;
+        let truncated = false;
+        do {
+          const reqBody = { ...body };
+          if (cursor) reqBody.start_cursor = cursor;
+          let response;
+          try {
+            response = await NotionAPI2.request("POST", `/databases/${dbId}/query`, reqBody, apiKey);
+          } catch (error) {
+            console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
+            break;
+          }
+          results.push(...response.results || []);
+          pages++;
+          const next = response.has_more ? String(response.next_cursor || "") : "";
+          if (!next || seen.has(next)) break;
+          seen.add(next);
+          if (pages >= maxPages) {
+            truncated = true;
+            break;
+          }
+          cursor = next;
+        } while (cursor);
+        return { results, truncated };
+      };
+      var searchAllDatabases = async ({ apiKey, maxPages = MAX_SEARCH_PAGES }) => {
+        const results = [];
+        const seen = /* @__PURE__ */ new Set();
+        let cursor = null;
+        let pages = 0;
+        let truncated = false;
+        do {
+          let response;
+          try {
+            response = await NotionAPI2.search("", { property: "object", value: "database" }, apiKey, cursor || void 0);
+          } catch (error) {
+            console.warn("[LD-Notion] \u6570\u636E\u5E93\u53D1\u73B0\u5931\u8D25:", error);
+            break;
+          }
+          results.push(...response.results || []);
+          pages++;
+          const next = response.has_more ? String(response.next_cursor || "") : "";
+          if (!next || seen.has(next)) break;
+          seen.add(next);
+          if (pages >= maxPages) {
+            truncated = true;
+            break;
+          }
+          cursor = next;
+        } while (cursor);
+        return { results, truncated };
+      };
+      module.exports = { queryAllPages, searchAllDatabases, MAX_QUERY_PAGES, MAX_SEARCH_PAGES };
+    }
+  });
+
   // src/ai/tools/read-tools.js
   var require_read_tools = __commonJS({
     "src/ai/tools/read-tools.js"(exports, module) {
@@ -8076,6 +8211,8 @@ Content-Type: ${safeContentType}\r
       var { NotionAPI: NotionAPI2 } = require_api();
       var { OperationGuard: OperationGuard2 } = require_security();
       var { getAI: AI, getService: svc } = require_deps();
+      var { queryAllPages, searchAllDatabases } = require_paginate();
+      var MAX_QUERY_DBS = 10;
       module.exports = {
         search_workspace: {
           description: "\u641C\u7D22 Notion \u5DE5\u4F5C\u533A\u4E2D\u7684\u9875\u9762\u6216\u6570\u636E\u5E93",
@@ -8598,6 +8735,7 @@ Content-Type: ${safeContentType}\r
               }
             };
             let results = [];
+            let dbTruncated = false;
             const targetDb = TargetState2.getEffectiveAIDatabaseId({
               fallbackDatabaseId: settings.notionDatabaseId,
               targetValue: aiTargetState.value
@@ -8605,8 +8743,10 @@ Content-Type: ${safeContentType}\r
             if (aiTargetState.mode !== "all" && targetDb) {
               results = await queryOneDb(targetDb);
             } else {
-              const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
-              for (const db of (allDbs.results || []).slice(0, 5)) {
+              const discovered = await searchAllDatabases({ apiKey: settings.notionApiKey });
+              const dbs = discovered.results.slice(0, MAX_QUERY_DBS);
+              dbTruncated = discovered.truncated || discovered.results.length > dbs.length;
+              for (const db of dbs) {
                 const dbResults = await queryOneDb(db.id);
                 results.push(...dbResults);
               }
@@ -8631,6 +8771,9 @@ Content-Type: ${safeContentType}\r
               const url = ((_l = (_k = page.properties) == null ? void 0 : _k["\u94FE\u63A5"]) == null ? void 0 : _l.url) || "";
               return `[${src}${srcType ? "/" + srcType : ""}] ${title}${url ? ` (${url})` : ""}`;
             });
+            if (dbTruncated) {
+              lines.push(`\u26A0\uFE0F \u6570\u636E\u5E93\u6570\u91CF\u8D85\u8FC7\u626B\u63CF\u4E0A\u9650\uFF08${MAX_QUERY_DBS} \u4E2A\uFF09\uFF0C\u7ED3\u679C\u53EF\u80FD\u4E0D\u5B8C\u6574`);
+            }
             return AI()._formatToolResult({
               title: "\u8DE8\u6E90\u641C\u7D22\u7ED3\u679C",
               fields: [
@@ -8652,15 +8795,11 @@ Content-Type: ${safeContentType}\r
               fallbackDatabaseId: settings.notionDatabaseId
             });
             const queryOneDb = async (dbId) => {
-              try {
-                const response = await NotionAPI2.request("POST", `/databases/${dbId}/query`, { page_size: 100 }, settings.notionApiKey);
-                return response.results || [];
-              } catch (error) {
-                console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
-                return [];
-              }
+              const { results } = await queryAllPages({ dbId, apiKey: settings.notionApiKey, body: { page_size: 100 } });
+              return results;
             };
             let allPages = [];
+            let dbTruncated = false;
             const targetDb = TargetState2.getEffectiveAIDatabaseId({
               fallbackDatabaseId: settings.notionDatabaseId,
               targetValue: aiTargetState.value
@@ -8668,8 +8807,9 @@ Content-Type: ${safeContentType}\r
             if (aiTargetState.mode !== "all" && targetDb) {
               allPages = await queryOneDb(targetDb);
             } else {
-              const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
-              for (const db of (allDbs.results || []).slice(0, 5)) {
+              const discovered = await searchAllDatabases({ apiKey: settings.notionApiKey });
+              dbTruncated = discovered.truncated;
+              for (const db of discovered.results) {
                 allPages.push(...await queryOneDb(db.id));
               }
             }
@@ -8689,10 +8829,13 @@ Content-Type: ${safeContentType}\r
             for (const [cat, count] of topCats) {
               bullets.push(`\u5206\u7C7B ${cat}: ${count} \u6761`);
             }
+            if (dbTruncated) {
+              bullets.push("\u26A0\uFE0F \u6570\u636E\u5E93\u6570\u91CF\u8D85\u8FC7\u5206\u9875\u4E0A\u9650\uFF0C\u7EDF\u8BA1\u4EC5\u8986\u76D6\u5DF2\u626B\u63CF\u7684\u6570\u636E\u5E93");
+            }
             return AI()._formatToolResult({
               title: "\u8DE8\u6E90\u6570\u636E\u7EDF\u8BA1",
               fields: [
-                { label: "\u603B\u6570", value: allPages.length },
+                { label: "\u603B\u6570", value: dbTruncated ? `\u2265${allPages.length}` : allPages.length },
                 { label: "\u6765\u6E90\u79CD\u7C7B", value: Object.keys(sourceStats).length },
                 { label: "\u5206\u7C7B\u79CD\u7C7B", value: Object.keys(categoryStats).length }
               ],
@@ -8806,6 +8949,8 @@ ${candidateList}
       var { NotionAPI: NotionAPI2 } = require_api();
       var { OperationGuard: OperationGuard2 } = require_security();
       var { getAI: AI, getService: svc, getClassifier } = require_deps();
+      var { queryAllPages, searchAllDatabases } = require_paginate();
+      var MAX_TAG_DBS = 10;
       module.exports = {
         batch_tag: {
           description: "\u6279\u91CF\u6253\u6807\u7B7E\uFF1A\u7528 AI \u4E3A\u6307\u5B9A\u6765\u6E90\u7684\u6240\u6709\u672A\u6807\u8BB0\u9875\u9762\u81EA\u52A8\u6DFB\u52A0\u6807\u7B7E",
@@ -8828,15 +8973,12 @@ ${candidateList}
                 filter: { property: "\u6807\u7B7E", multi_select: { is_empty: true } },
                 page_size: 50
               };
-              try {
-                const response = await NotionAPI2.request("POST", `/databases/${dbId}/query`, body, settings.notionApiKey);
-                return response.results || [];
-              } catch (error) {
-                console.warn("[LD-Notion] \u6570\u636E\u5E93\u67E5\u8BE2\u5931\u8D25:", error);
-                return [];
-              }
+              const { results, truncated } = await queryAllPages({ dbId, apiKey: settings.notionApiKey, body });
+              if (truncated) dbTruncated = true;
+              return results;
             };
             let pages = [];
+            let dbTruncated = false;
             const targetDb = TargetState2.getEffectiveAIDatabaseId({
               fallbackDatabaseId: settings.notionDatabaseId,
               targetValue: aiTargetState.value
@@ -8844,8 +8986,10 @@ ${candidateList}
             if (aiTargetState.mode !== "all" && targetDb) {
               pages = await queryOneDb(targetDb);
             } else {
-              const allDbs = await NotionAPI2.search("", { property: "object", value: "database" }, settings.notionApiKey);
-              for (const db of (allDbs.results || []).slice(0, 3)) {
+              const discovered = await searchAllDatabases({ apiKey: settings.notionApiKey });
+              const dbs = discovered.results.slice(0, MAX_TAG_DBS);
+              if (discovered.truncated || discovered.results.length > dbs.length) dbTruncated = true;
+              for (const db of dbs) {
                 pages.push(...await queryOneDb(db.id));
               }
             }
@@ -8889,7 +9033,7 @@ ${candidateList}
               }
               await Utils2.sleep(500);
             }
-            return `\u2705 \u6279\u91CF\u6253\u6807\u7B7E\u5B8C\u6210\uFF1A\u5DF2\u4E3A ${tagged}/${pages.length} \u4E2A\u9875\u9762\u6DFB\u52A0\u6807\u7B7E\u3002`;
+            return `\u2705 \u6279\u91CF\u6253\u6807\u7B7E\u5B8C\u6210\uFF1A\u5DF2\u4E3A ${tagged}/${pages.length} \u4E2A\u9875\u9762\u6DFB\u52A0\u6807\u7B7E\u3002${dbTruncated ? "\uFF08\u26A0\uFE0F \u53D7\u626B\u63CF\u4E0A\u9650\u622A\u65AD\uFF0C\u53EF\u80FD\u4ECD\u6709\u672A\u5904\u7406\u9875\u9762\uFF0C\u8BF7\u518D\u6B21\u8FD0\u884C\uFF09" : ""}`;
           }
         },
         // === 写入工具 (Level 1) ===
@@ -9087,9 +9231,14 @@ ${candidateList}
                 const tags = String(value).split(/[,，]/).map((t) => ({ name: t.trim() })).filter((t) => t.name);
                 updateProps[property] = { multi_select: tags };
                 break;
-              case "number":
-                updateProps[property] = { number: Number(value) };
+              case "number": {
+                const num = Number(value);
+                if (!Number.isFinite(num)) {
+                  return `\u9519\u8BEF: \u5C5E\u6027\u300C${property}\u300D\u9700\u8981\u6570\u5B57\u503C\uFF0C\u6536\u5230\u300C${String(value).slice(0, 40)}\u300D\u3002`;
+                }
+                updateProps[property] = { number: num };
                 break;
+              }
               case "date":
                 updateProps[property] = { date: { start: String(value) } };
                 break;
@@ -9700,6 +9849,11 @@ ${result}`;
       var { NameResolver } = require_NameResolver();
       var { AgentTrace } = require_AgentTrace();
       var { getAI: AI, getState: state, getService: svc } = require_deps();
+      var normalizeLimit = (value, fallback = 10, max = 100) => {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return fallback;
+        return Math.max(1, Math.min(Math.floor(n), max));
+      };
       module.exports = {
         handleQuery: async (params, settings, explanation) => {
           var _a, _b, _c;
@@ -9708,7 +9862,8 @@ ${result}`;
           }
           state().updateLastMessage(`\u6B63\u5728\u67E5\u8BE2\u6570\u636E\u5E93...`, "processing");
           try {
-            const { limit = 10, filter_field, filter_value } = params;
+            const { limit: rawLimit = 10, filter_field, filter_value } = params;
+            const limit = normalizeLimit(rawLimit, 10);
             let filter = null;
             if (filter_field && filter_value) {
               const fieldConfig = {
@@ -9797,7 +9952,7 @@ ${result}`;
               result += ` (\u5DF2\u8FBE\u67E5\u8BE2\u4E0A\u9650\uFF0C\u53EF\u80FD\u8FD8\u6709\u66F4\u591A)`;
             }
             if (((_b = params.keyword) == null ? void 0 : _b.includes("\u7EDF\u8BA1")) || ((_c = params.keyword) == null ? void 0 : _c.includes("\u5206\u7C7B"))) {
-              const categoryCount = {};
+              const categoryCount = /* @__PURE__ */ Object.create(null);
               pages.forEach((page) => {
                 var _a2, _b2, _c2, _d, _e;
                 const cat = ((_b2 = (_a2 = page.properties["AI\u5206\u7C7B"]) == null ? void 0 : _a2.select) == null ? void 0 : _b2.name) || ((_e = (_d = (_c2 = page.properties["\u5206\u7C7B"]) == null ? void 0 : _c2.rich_text) == null ? void 0 : _d[0]) == null ? void 0 : _e.plain_text) || "\u672A\u5206\u7C7B";
@@ -9836,7 +9991,8 @@ ${result}`;
           }
           state().updateLastMessage(`\u6B63\u5728\u641C\u7D22...`, "processing");
           try {
-            const { keyword, limit = 10 } = params;
+            const { keyword, limit: rawLimit = 10 } = params;
+            const limit = normalizeLimit(rawLimit, 10);
             if (!keyword) {
               return "\u8BF7\u544A\u8BC9\u6211\u4F60\u60F3\u641C\u7D22\u4EC0\u4E48\u5173\u952E\u8BCD\uFF1F";
             }
@@ -9898,7 +10054,8 @@ ${result}`;
         handleWorkspaceSearch: async (params, settings, explanation) => {
           state().updateLastMessage(`\u6B63\u5728\u641C\u7D22\u6574\u4E2A\u5DE5\u4F5C\u533A...`, "processing");
           try {
-            const { keyword = "", limit = 10, object_type } = params;
+            const { keyword = "", limit: rawLimit = 10, object_type } = params;
+            const limit = normalizeLimit(rawLimit, 10);
             let filter = null;
             if (object_type === "page") {
               filter = { property: "object", value: "page" };
@@ -11058,7 +11215,8 @@ ${summary}`;
               detailed: "\u751F\u6210\u8BE6\u7EC6\u6458\u8981\uFF0C\u5305\u542B\uFF1A\u6838\u5FC3\u4E3B\u9898\u3001\u4E3B\u8981\u8BBA\u70B9\u3001\u5173\u952E\u7EC6\u8282\u548C\u7ED3\u8BBA\u3002",
               bullet: "\u4EE5\u8981\u70B9\u5217\u8868\u5F62\u5F0F\u603B\u7ED3\uFF0C\u6BCF\u4E2A\u8981\u70B9\u4E00\u884C\uFF0C\u63D0\u70BC\u5173\u952E\u4FE1\u606F\u3002"
             };
-            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u6458\u8981\u52A9\u624B\u3002${styleInstructions[style] || styleInstructions.brief}
+            const styleText = Object.prototype.hasOwnProperty.call(styleInstructions, style) ? styleInstructions[style] : styleInstructions.brief;
+            const prompt2 = `\u4F60\u662F\u4E00\u4E2A\u5185\u5BB9\u6458\u8981\u52A9\u624B\u3002${styleText}
 
 \u4F7F\u7528 Markdown \u683C\u5F0F\u8F93\u51FA\u3002
 
@@ -11171,6 +11329,10 @@ ${aiResponse}`;
             templates = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, CONFIG2.DEFAULTS.aiTemplates));
           } catch (error) {
             console.warn("[LD-Notion] AI \u6A21\u677F\u52A0\u8F7D\u5931\u8D25\uFF0C\u4F7F\u7528\u9ED8\u8BA4\u6A21\u677F:", error);
+            templates = JSON.parse(CONFIG2.DEFAULTS.aiTemplates);
+          }
+          if (!Array.isArray(templates) || templates.some((t) => !t || typeof t !== "object" || typeof t.name !== "string")) {
+            console.warn("[LD-Notion] AI \u6A21\u677F\u5F62\u72B6\u5F02\u5E38\uFF0C\u4F7F\u7528\u9ED8\u8BA4\u6A21\u677F");
             templates = JSON.parse(CONFIG2.DEFAULTS.aiTemplates);
           }
           if (!template_name) {
@@ -11791,6 +11953,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               if (merged[norm] === void 0 || Number(merged[norm]) < Number(ts)) merged[norm] = ts;
             }
             BookmarkExporter2._exportedCache = merged;
+            BookmarkExporter2._evictByCapacity(merged);
             Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(merged));
           }
         },
@@ -11844,7 +12007,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             throw setupError;
           }
           const dedupStrict = Utils2.isBookmarkDedupStrict();
-          const newBookmarks = dedupStrict ? bookmarks.filter((b) => !BookmarkExporter2.isExported(b.url)) : bookmarks.slice();
+          let newBookmarks = dedupStrict ? bookmarks.filter((b) => !BookmarkExporter2.isExported(b.url)) : bookmarks.slice();
+          if (dedupStrict) {
+            const seenUrls = /* @__PURE__ */ new Set();
+            newBookmarks = newBookmarks.filter((b) => {
+              const key = Utils2.normalizeDedupUrl(b.url);
+              if (seenUrls.has(key)) return false;
+              seenUrls.add(key);
+              return true;
+            });
+          }
           if (newBookmarks.length === 0) {
             return { total: bookmarks.length, exported: 0, message: "\u6CA1\u6709\u65B0\u7684\u4E66\u7B7E\u9700\u8981\u5BFC\u51FA" };
           }
@@ -12426,8 +12598,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var _adaptersRegistered = false;
       function ensureAdaptersRegistered() {
         if (_adaptersRegistered) return;
-        _adaptersRegistered = true;
         require_adapter();
+        _adaptersRegistered = true;
       }
       var SyncCoordinator = {
         _registryOverride: null,
@@ -12709,7 +12881,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         async _doSyncOnce(sourceType) {
           const epoch = this._epochs.get(sourceType) || 0;
           try {
-            const runner = SOURCE_RUNNERS[sourceType];
+            const runner = Object.prototype.hasOwnProperty.call(SOURCE_RUNNERS, sourceType) ? SOURCE_RUNNERS[sourceType] : void 0;
             if (typeof runner === "function") {
               await runner();
               if (epoch !== (this._epochs.get(sourceType) || 0)) return;
@@ -13061,6 +13233,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           BookmarkAutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\u6D4F\u89C8\u5668\u4E66\u7B7E\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
           return;
         }
+        const exportMutexAcquired = SyncLock.isExporting !== true;
         SyncLock.isExporting = true;
         let leaseLost = false;
         const renewTimer = setInterval(() => {
@@ -13139,6 +13312,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               const snapshotEntry = previousSnapshot[bookmarkId] || null;
               let pageMeta = pageIndex.byBookmarkId.get(bookmarkId) || pageIndex.byUrl.get(bookmark.url) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? pageIndex.byPageId.get(snapshotEntry.pageId) : null);
               let claimResolve = null;
+              let auditOp = "createDatabasePage";
               try {
                 settings.apiKey = NotionOAuth2.getAccessToken("");
                 if (pageMeta == null ? void 0 : pageMeta.archived) {
@@ -13209,6 +13383,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   successfulIds.add(bookmarkId);
                 } else if (!BookmarkAutoImporter2.isSharedWithLiveBookmark(bookmark, pageMeta, currentBookmarks) && BookmarkAutoImporter2.needsUpdate(bookmark, snapshotEntry, pageMeta)) {
                   BookmarkAutoImporter2.updateStatus(`\u{1F4E7} \u6B63\u5728\u66F4\u65B0\u4E66\u7B7E (${itemIndex + 1}/${currentBookmarks.length}): ${bookmark.title}`);
+                  auditOp = "updatePage";
                   const { OperationGuard: OperationGuard2 } = require_security();
                   if (!OperationGuard2.canExecute("updatePage")) {
                     BookmarkAutoImporter2._auditAutoSync(
@@ -13253,7 +13428,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 }
                 console.error(`[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u5931\u8D25: ${bookmark.title || bookmark.url}`, error);
                 BookmarkAutoImporter2._auditAutoSync(
-                  "createDatabasePage",
+                  auditOp,
                   "failed",
                   { bookmarkId, itemName: bookmark.title || bookmark.url, reason: String((error == null ? void 0 : error.message) || error) }
                 );
@@ -13399,7 +13574,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         } finally {
           clearInterval(renewTimer);
           SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-          SyncLock.isExporting = false;
+          if (exportMutexAcquired) SyncLock.isExporting = false;
           BookmarkAutoImporter2.isRunning = false;
           emit("sync:center-summary-updated");
         }
@@ -13843,7 +14018,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         needsUpdate: (item, snapshotEntry, pageMeta) => {
           if (!pageMeta) return true;
           if (!snapshotEntry) return false;
-          if (String(pageMeta.url || "") !== String(item.url || "")) return true;
+          if (String(pageMeta.url || "") !== RSSAutoImporter2._safeUrl(item.url)) return true;
           if (String(pageMeta.title || "") !== String(item.title || "")) return true;
           if (String(pageMeta.summary || "") !== String(item.summary || "")) return true;
           return SyncState2.normalizeTime(pageMeta.publishedAt) !== SyncState2.normalizeTime(item.publishedAt);
@@ -14290,7 +14465,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         init: () => {
           window.addEventListener("ld-notion-bookmarks-data", (event) => {
             const { requestId, success, data, error } = event.detail || {};
-            const pending = BookmarkBridge2._pendingRequests[requestId];
+            const pending = Object.prototype.hasOwnProperty.call(BookmarkBridge2._pendingRequests, requestId) ? BookmarkBridge2._pendingRequests[requestId] : null;
             if (!pending) return;
             clearTimeout(pending.timeout);
             delete BookmarkBridge2._pendingRequests[requestId];
@@ -14488,7 +14663,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // Clipper（知乎/通用页）去重：与 ZhihuAdapter/GenericAdapter.getDedupKey 同构。
         // 此前 GenericUI.doExport 成功后不 markSeen → 连点/重导出必建重复 Notion 页。
         resolveClipperDedup: (meta = {}) => {
-          const url = String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim();
+          const url = Utils2.normalizeDedupUrl(String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim());
           const site = SiteDetector2.detect();
           if (site === SiteDetector2.SITES.ZHIHU || GenericExporter2.resolveUnifiedSource(meta) === "\u77E5\u4E4E") {
             return { sourceType: "zhihu", dedupKey: url ? `zhihu:${url}` : "" };
@@ -14509,6 +14684,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         // 导出当前页面
         exportCurrentPage: async (settings) => {
+          var _a;
           let meta, blocks;
           if (SiteDetector2.detect() === SiteDetector2.SITES.ZHIHU) {
             const content = ZhihuAPI2.extractContent();
@@ -14562,9 +14738,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               blocks = GenericExtractor2.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
             }
           } else if (SiteDetector2.detect() === SiteDetector2.SITES.LINUX_DO) {
-            const topicMatch = window.location.pathname.match(/\/t\/([^/]+)/);
-            if (topicMatch) {
-              const topicId = topicMatch[1];
+            const pathSegments = window.location.pathname.split("/").filter(Boolean);
+            const tIndex = pathSegments.indexOf("t");
+            const numericTopicId = tIndex >= 0 ? pathSegments.slice(tIndex + 1).find((seg) => /^\d+$/.test(seg)) : null;
+            const topicId = numericTopicId || ((_a = window.location.pathname.match(/\/t\/([^/]+)/)) == null ? void 0 : _a[1]) || "";
+            if (topicId) {
               const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
               const filteredPosts = Exporter2.filterPosts(posts, topic, settings);
               meta = {
@@ -14886,10 +15064,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
           }
           const applyUploadedRefs = (items) => {
-            var _a, _b;
+            var _a;
             for (const block of items || []) {
               if (block._needsUpload && block._originalUrl) {
                 const uploadResult = fileUrlCache.get(block._originalUrl);
+                const originalCaption = block._fileType === "file" ? (_a = block.file) == null ? void 0 : _a.caption : null;
                 if (uploadResult == null ? void 0 : uploadResult.fileId) {
                   const blockType = uploadResult.blockType || block._fileType || "image";
                   const blockKey = blockType === "image" ? "image" : blockType === "video" ? "video" : blockType === "audio" ? "audio" : "file";
@@ -14897,8 +15076,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   ["image", "file", "video", "audio"].forEach((k) => {
                     if (k !== blockKey) delete block[k];
                   });
-                  if (block._fileType === "file" && ((_a = block.file) == null ? void 0 : _a.caption)) {
-                    block[blockKey].caption = block.file.caption;
+                  if (blockKey === "file" && originalCaption) {
+                    block[blockKey].caption = originalCaption;
                   }
                   block.type = blockKey;
                   block._uploaded = true;
@@ -14911,8 +15090,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                     type: "external",
                     external: { url: block._originalUrl }
                   };
-                  if (fallbackKey === "file" && ((_b = block.file) == null ? void 0 : _b.caption)) {
-                    block[fallbackBlockKey].caption = block.file.caption;
+                  if (fallbackKey === "file" && originalCaption) {
+                    block[fallbackBlockKey].caption = originalCaption;
                   }
                   ["image", "file", "video", "audio"].forEach((k) => {
                     if (k !== fallbackBlockKey) delete block[k];
@@ -15629,7 +15808,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         fetchRepoReadme: (repoFullName, token = "") => {
           if (!repoFullName) return Promise.resolve("");
-          const cacheKey = `${repoFullName}::${token ? "auth" : "anon"}`;
+          const cacheKey = `${repoFullName}::${token ? Utils2.apiKeyHash(token) : "anon"}`;
           if (Object.prototype.hasOwnProperty.call(GitHubAPI2._readmeCache, cacheKey)) {
             return Promise.resolve(GitHubAPI2._readmeCache[cacheKey]);
           }
@@ -15686,6 +15865,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { NotionAPI: NotionAPI2 } = require_api();
       var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
       var { Exporter: Exporter2 } = require_export();
+      var { SyncLock } = require_sync_lock();
       var { AIService: AIService2 } = require_ai();
       var GitHubExporter2 = {
         // 用户触发导出的写入审计（ISS-20260724-011，CWE-862/778）。与 BookmarkAutoImporter._auditAutoSync
@@ -15972,6 +16152,24 @@ ${insight.summary || ""}`,
           if (newItems.length === 0) {
             return { total: items.length, exported: 0, failed: 0, message: `\u6CA1\u6709\u65B0\u7684 ${sourceType} \u9700\u8981\u5BFC\u51FA` };
           }
+          SyncLock.isExporting = true;
+          let lease = null;
+          try {
+            lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+          } catch (leaseError) {
+            SyncLock.isExporting = false;
+            throw leaseError;
+          }
+          if (!lease) {
+            SyncLock.isExporting = false;
+            return {
+              total: items.length,
+              exported: 0,
+              failed: 0,
+              skipped: newItems.length,
+              message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
+            };
+          }
           let success = 0, failed = 0;
           let authAbortInfo = null;
           const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
@@ -16030,6 +16228,8 @@ ${insight.summary || ""}`,
               }
             }
           } finally {
+            SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+            SyncLock.isExporting = false;
             if (flushFn) flushFn();
           }
           return authAbortInfo ? { total: items.length, exported: success, failed, skipped: newItems.length - success - failed, authAborted: authAbortInfo, newCount: newItems.length } : { total: items.length, exported: success, failed, newCount: newItems.length };
@@ -16188,6 +16388,7 @@ ${insight.summary || ""}`,
           if (pages.length === 0) {
             return { classified: 0, message: "\u6CA1\u6709\u5F85\u5206\u7C7B\u7684\u4ED3\u5E93" };
           }
+          const hasMore = response.has_more === true;
           let classified = 0;
           for (let i = 0; i < pages.length; i++) {
             const page = pages[i];
@@ -16212,12 +16413,13 @@ ${insight.summary || ""}`,
                 aiModel,
                 aiBaseUrl
               });
-              const matched = categories.find((c) => category.trim().includes(c));
+              const trimmedCategory = String(category || "").trim();
+              const matched = categories.includes(trimmedCategory) ? trimmedCategory : categories.filter((c) => trimmedCategory.includes(c)).sort((a, b) => String(b).length - String(a).length)[0];
               if (!matched) {
                 GitHubExporter2._auditExport(
                   "updatePage",
                   "skipped",
-                  { pageId: page.id, itemName: title, reason: `AI \u5206\u7C7B\u300C${category.trim().slice(0, 50)}\u300D\u4E0D\u5728\u767D\u540D\u5355\uFF0C\u8DF3\u8FC7` }
+                  { pageId: page.id, itemName: title, reason: `AI \u5206\u7C7B\u300C${trimmedCategory.slice(0, 50)}\u300D\u4E0D\u5728\u767D\u540D\u5355\uFF0C\u8DF3\u8FC7` }
                 );
                 continue;
               }
@@ -16254,7 +16456,12 @@ ${insight.summary || ""}`,
             }
             await Utils2.sleep(500);
           }
-          return { classified, total: pages.length };
+          return {
+            classified,
+            total: pages.length,
+            hasMore,
+            message: hasMore ? `\u5DF2\u5206\u7C7B ${classified} \u4E2A\u4ED3\u5E93\uFF08\u8FD8\u6709\u66F4\u591A\u5F85\u5206\u7C7B\u6761\u76EE\uFF0C\u8BF7\u518D\u6B21\u8FD0\u884C\u4EE5\u7EE7\u7EED\uFF09` : `\u5DF2\u5206\u7C7B ${classified} \u4E2A\u4ED3\u5E93`
+          };
         }
       };
       module.exports = { GitHubExporter: GitHubExporter2 };
@@ -16678,6 +16885,7 @@ ${insight.summary || ""}`,
           GitHubAutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\uFF0C\u672C\u8F6E GitHub \u540C\u6B65\u8DF3\u8FC7");
           return;
         }
+        const exportMutexAcquired = SyncLock.isExporting !== true;
         SyncLock.isExporting = true;
         GitHubAutoImporter2._leaseLost = false;
         const renewTimer = setInterval(() => {
@@ -16740,7 +16948,7 @@ ${insight.summary || ""}`,
         } finally {
           clearInterval(renewTimer);
           SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-          SyncLock.isExporting = false;
+          if (exportMutexAcquired) SyncLock.isExporting = false;
           GitHubAutoImporter2._leaseLost = false;
           GitHubAutoImporter2.isRunning = false;
           emit("bookmarks:updated");
@@ -16827,7 +17035,9 @@ ${insight.summary || ""}`,
             if (!document.hidden && AutoImporter2.deferredWhileHidden) {
               AutoImporter2.deferredWhileHidden = false;
               if (!AutoImporter2.canStart()) return;
-              Utils2.runWhenBrowserIdle(() => AutoImporter2.run());
+              Utils2.runWhenBrowserIdle(() => {
+                if (AutoImporter2.canStart()) AutoImporter2.run();
+              });
             }
           });
           AutoImporter2.visibilityListenerBound = true;
@@ -16846,7 +17056,9 @@ ${insight.summary || ""}`,
           AutoImporter2._initTimer = setTimeout(() => {
             AutoImporter2._initTimer = null;
             if (!AutoImporter2.canStart()) return;
-            Utils2.runWhenBrowserIdle(() => AutoImporter2.run());
+            Utils2.runWhenBrowserIdle(() => {
+              if (AutoImporter2.canStart()) AutoImporter2.run();
+            });
             const interval = Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.autoImportInterval);
             if (interval > 0) AutoImporter2.startPolling(interval);
           }, 3e3);
@@ -16877,20 +17089,21 @@ ${insight.summary || ""}`,
         if (now - AutoImporter2.lastRunAt < AutoImporter2.minimumRunGapMs) return;
         AutoImporter2.lastRunAt = now;
         AutoImporter2.isRunning = true;
+        const exportMutexAcquired = SyncLock.isExporting !== true;
         SyncLock.isExporting = true;
         let lease = null;
         try {
           lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
         } catch (leaseError) {
           AutoImporter2.isRunning = false;
-          SyncLock.isExporting = false;
+          if (exportMutexAcquired) SyncLock.isExporting = false;
           console.error("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u83B7\u53D6\u79DF\u7EA6\u5931\u8D25:", leaseError);
           AutoImporter2.updateStatus("\u274C \u83B7\u53D6\u540C\u6B65\u79DF\u7EA6\u5931\u8D25\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
           return;
         }
         if (!lease) {
           AutoImporter2.isRunning = false;
-          SyncLock.isExporting = false;
+          if (exportMutexAcquired) SyncLock.isExporting = false;
           AutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\uFF0C\u672C\u8F6E\u81EA\u52A8\u5BFC\u5165\u8DF3\u8FC7");
           return;
         }
@@ -17059,7 +17272,7 @@ ${insight.summary || ""}`,
           SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
           AutoImporter2._leaseLost = false;
           AutoImporter2.isRunning = false;
-          SyncLock.isExporting = false;
+          if (exportMutexAcquired) SyncLock.isExporting = false;
           if (exportBtn) exportBtn.disabled = false;
           const obsExportBtn2 = document.querySelector("#ldb-obs-export");
           if (obsExportBtn2) obsExportBtn2.disabled = false;
@@ -17205,6 +17418,7 @@ ${insight.summary || ""}`,
             if (!confirmed) return "\u274C \u5DF2\u53D6\u6D88\u6279\u91CF\u7FFB\u8BD1\u3002";
             let successCount = 0;
             let failCount = 0;
+            const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
             for (let i = 0; i < pages.length; i++) {
               const page = pages[i];
               const title = Utils2.getPageTitle(page);
@@ -17236,6 +17450,9 @@ ${AI().isolateContent(content)}`;
               } catch (error) {
                 console.warn(`[LD-Notion] \u9875\u9762\u521B\u5EFA\u5931\u8D25: ${title}`, error);
                 failCount++;
+              }
+              if (delay > 0 && i < pages.length - 1) {
+                await Utils2.sleep(delay);
               }
             }
             return `\u{1F310} **\u6279\u91CF\u7FFB\u8BD1\u5B8C\u6210**
@@ -18041,13 +18258,15 @@ ${report}
         [data-ldb-theme="dark"].ldb-mini-btn,
         [data-ldb-theme="dark"].gclip-float-btn,
         [data-ldb-theme="dark"].ldb-undo-toast,
+        [data-ldb-theme="dark"].ldb-confirm-dialog,
         [data-ldb-theme="dark"] .ldb-panel,
         [data-ldb-theme="dark"] .ldb-notion-panel,
         [data-ldb-theme="dark"] .gclip-panel,
         [data-ldb-theme="dark"] .ldb-notion-float-btn,
         [data-ldb-theme="dark"] .ldb-mini-btn,
         [data-ldb-theme="dark"] .gclip-float-btn,
-        [data-ldb-theme="dark"] .ldb-undo-toast {
+        [data-ldb-theme="dark"] .ldb-undo-toast,
+        [data-ldb-theme="dark"] .ldb-confirm-dialog {
             --ldb-ui-text: #e5e7eb;
             --ldb-ui-muted: #9ca3af;
             --ldb-ui-border: rgba(148, 163, 184, 0.22);
@@ -20873,6 +21092,19 @@ ${report}
           ChatUI2.bindEvents();
           NotionSiteUI2.isPanelReady = true;
         },
+        // 面板位置视口钳制
+        // P4 收敛(c16): 必须在面板可见(尺寸可测)时调用 —— loadConfig 阶段 display:none,
+        // offsetWidth/Height 为 0 会使上限退化为视口全尺寸, 旧 right/bottom 可把面板推出视口。
+        clampPanelPosition: () => {
+          const panel = NotionSiteUI2.panel;
+          if (!panel || !panel.offsetWidth) return;
+          const maxRight = Math.max(0, window.innerWidth - panel.offsetWidth);
+          const maxBottom = Math.max(0, window.innerHeight - panel.offsetHeight);
+          const parsedRight = parseFloat(panel.style.right);
+          const parsedBottom = parseFloat(panel.style.bottom);
+          panel.style.right = Math.min(Number.isFinite(parsedRight) ? parsedRight : 24, maxRight) + "px";
+          panel.style.bottom = Math.min(Number.isFinite(parsedBottom) ? parsedBottom : 96, maxBottom) + "px";
+        },
         // 切换面板显示
         togglePanel: () => {
           NotionSiteUI2.ensurePanelReady();
@@ -20882,6 +21114,7 @@ ${report}
             NotionSiteUI2.panel.classList.remove("visible");
           } else {
             NotionSiteUI2.panel.classList.add("visible");
+            NotionSiteUI2.clampPanelPosition();
           }
           Storage2.set(CONFIG2.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, NotionSiteUI2.isMinimized);
         },
@@ -21152,10 +21385,8 @@ ${report}
               const pos = JSON.parse(savedPosition);
               const panelRight = parseFloat(pos.right);
               const panelBottom = parseFloat(pos.bottom);
-              const maxPanelRight = Math.max(0, window.innerWidth - panel.offsetWidth);
-              const maxPanelBottom = Math.max(0, window.innerHeight - panel.offsetHeight);
-              panel.style.right = Math.min(Number.isFinite(panelRight) ? panelRight : 24, maxPanelRight) + "px";
-              panel.style.bottom = Math.min(Number.isFinite(panelBottom) ? panelBottom : 96, maxPanelBottom) + "px";
+              panel.style.right = (Number.isFinite(panelRight) ? panelRight : 24) + "px";
+              panel.style.bottom = (Number.isFinite(panelBottom) ? panelBottom : 96) + "px";
             } catch (e) {
               console.warn("[LD-Notion] corrupted panel position, resetting");
               Storage2.remove(CONFIG2.STORAGE_KEYS.NOTION_PANEL_POSITION);
@@ -21434,6 +21665,7 @@ ${report}
               NotionSiteUI2.ensurePanelReady();
               NotionSiteUI2.isMinimized = false;
               NotionSiteUI2.panel.classList.add("visible");
+              NotionSiteUI2.clampPanelPosition();
             });
           }
         },
@@ -22317,7 +22549,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               items: group.items
             }]),
             ...linkConnectionCandidates.map((group) => [group.key, group])
-          ]).values()).slice(0, 8);
+          ]).values()).sort((a, b) => b.count - a.count || String(a.label).localeCompare(String(b.label))).slice(0, 8);
           const funnel = [
             { label: "\u5DF2\u626B\u63CF\u9875\u9762", count: totalPages, pct: UI2().getViewPct(totalPages, totalPages) },
             { label: "\u8BC6\u522B\u6765\u6E90", count: sourcedPages, pct: UI2().getViewPct(sourcedPages, totalPages) },
@@ -26860,7 +27092,7 @@ ${AIService2.isolateContent(JSON.stringify({
                 const githubReady = !!(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "").trim() || Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "").trim());
                 const notionReady = !!(NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim()) && (refs.databaseIdInput.value.trim() || refs.parentPageIdInput.value.trim()));
                 if (!githubReady || !notionReady) {
-                  AutoImporter2.updateStatus("\u26A0\uFE0F \u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D/Token \u4E0E Notion \u76EE\u6807");
+                  GitHubAutoImporter2.updateStatus("\u26A0\uFE0F \u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D/Token \u4E0E Notion \u76EE\u6807");
                   e.target.checked = false;
                   Storage2.set(cfg.enabledKey, false);
                   refs.autoImportOptions.style.display = "none";
@@ -27217,6 +27449,7 @@ ${AIService2.isolateContent(JSON.stringify({
             refs.bookmarkEmptyLoad.onclick = () => refs.loadBookmarksBtn.click();
           }
           refs.loadBookmarksBtn.onclick = async () => {
+            var _a2;
             const btn = refs.loadBookmarksBtn;
             btn.disabled = true;
             btn.innerHTML = '<span class="ldb-spin">\u{1F504}</span> \u52A0\u8F7D\u4E2D...';
@@ -27247,7 +27480,9 @@ ${AIService2.isolateContent(JSON.stringify({
                     const items = await GitHubAPI2.fetchUserGists(username, token);
                     allItems.push(...UI2.mapGitHubItemsToBookmarks(items, "gists"));
                   }
-                  UI2.refs.bookmarkCount.textContent = allItems.length;
+                  if (loadSource === UI2.getActiveBookmarkSource() && ((_a2 = UI2.refs) == null ? void 0 : _a2.bookmarkCount)) {
+                    UI2.refs.bookmarkCount.textContent = allItems.length;
+                  }
                 }
                 bookmarks = allItems;
               } else {
@@ -27257,9 +27492,9 @@ ${AIService2.isolateContent(JSON.stringify({
                   return;
                 }
                 bookmarks = await LinuxDoAPI2.fetchAllBookmarks(username, (count) => {
-                  var _a2;
+                  var _a3;
                   if (loadSource !== UI2.getActiveBookmarkSource()) return;
-                  if ((_a2 = UI2.refs) == null ? void 0 : _a2.bookmarkCount) UI2.refs.bookmarkCount.textContent = count;
+                  if ((_a3 = UI2.refs) == null ? void 0 : _a3.bookmarkCount) UI2.refs.bookmarkCount.textContent = count;
                 });
               }
               if (loadSource !== UI2.getActiveBookmarkSource()) return;
@@ -27404,6 +27639,7 @@ ${AIService2.isolateContent(JSON.stringify({
               restoreExportBtn();
               return;
             }
+            const exportIsGitHub = UI2.isActiveGitHubSource();
             const toExport = UI2.bookmarks.filter((b) => {
               const bookmarkKey = UI2.getBookmarkKey(b);
               return UI2.selectedBookmarks.has(bookmarkKey) && !UI2.isBookmarkKeyExported(bookmarkKey);
@@ -27484,7 +27720,7 @@ ${AIService2.isolateContent(JSON.stringify({
             UI2.refs.reportContainer.innerHTML = "";
             try {
               let results;
-              if (UI2.isActiveGitHubSource()) {
+              if (exportIsGitHub) {
                 results = await UI2.exportGitHubSelected(toExport, settings, (current, total, title) => {
                   UI2.showProgress(current, total, `${title}
 \u5BFC\u51FA\u4E2D`);
@@ -28875,9 +29111,9 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               obsStatusEl.style.color = "var(--ldb-ui-danger)";
               return;
             }
-            Storage2.set(CONFIG2.STORAGE_KEYS.OBS_API_URL, url);
             try {
               await CredentialVault2.set(CONFIG2.STORAGE_KEYS.OBS_API_KEY, key);
+              Storage2.set(CONFIG2.STORAGE_KEYS.OBS_API_URL, url);
               Storage2.set(CONFIG2.STORAGE_KEYS.OBS_DIR, dir || CONFIG2.DEFAULTS.obsDir);
             } catch (error) {
               obsStatusEl.textContent = `\u274C \u4FDD\u5B58\u5931\u8D25: ${error.message}`;
@@ -28911,7 +29147,11 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             var _a;
             const liveKey = panel.querySelector("#gclip-api-key-input").value.trim();
             if (liveKey) {
-              await NotionOAuth2.setManualApiKey(liveKey);
+              try {
+                await NotionOAuth2.setManualApiKey(liveKey);
+              } catch (error) {
+                return GenericUI2.showStatus(`\u4FDD\u5B58 API Key \u5931\u8D25: ${error.message}`, "error");
+              }
               panel.querySelector("#gclip-api-key-input").value = "";
               NotionOAuth2.syncApiKeyInputs();
             }
@@ -28995,19 +29235,21 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           panel.querySelector("#gclip-obs-export").addEventListener("click", async () => {
             if (GenericUI2.isExporting) return;
             GenericUI2.isExporting = true;
-            const obsUrl = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_API_URL, CONFIG2.DEFAULTS.obsApiUrl);
-            const obsKey = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_API_KEY, CONFIG2.DEFAULTS.obsApiKey);
-            const obsDir = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_DIR, CONFIG2.DEFAULTS.obsDir);
-            if (!obsUrl || !obsKey) {
-              GenericUI2.showStatus("\u8BF7\u5148\u914D\u7F6E Obsidian\uFF1A\u5728\u4E0A\u65B9\u300CObsidian\uFF08Local REST API\uFF09\u300D\u533A\u5757\u586B\u5199 API \u5730\u5740\u4E0E Key \u5E76\u4FDD\u5B58", "error");
-              GenericUI2.isExporting = false;
-              return;
-            }
-            const btn = GenericUI2.panel.querySelector("#gclip-obs-export");
-            btn.disabled = true;
-            btn.textContent = "\u5BFC\u51FA\u4E2D...";
-            GenericUI2.showStatus("\u6B63\u5728\u63D0\u53D6\u9875\u9762\u5185\u5BB9...", "info");
+            let btn = null;
             try {
+              const obsUrl = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_API_URL, CONFIG2.DEFAULTS.obsApiUrl);
+              const obsKey = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_API_KEY, CONFIG2.DEFAULTS.obsApiKey);
+              const obsDir = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_DIR, CONFIG2.DEFAULTS.obsDir);
+              if (!obsUrl || !obsKey) {
+                GenericUI2.showStatus("\u8BF7\u5148\u914D\u7F6E Obsidian\uFF1A\u5728\u4E0A\u65B9\u300CObsidian\uFF08Local REST API\uFF09\u300D\u533A\u5757\u586B\u5199 API \u5730\u5740\u4E0E Key \u5E76\u4FDD\u5B58", "error");
+                return;
+              }
+              btn = GenericUI2.panel.querySelector("#gclip-obs-export");
+              if (btn) {
+                btn.disabled = true;
+                btn.textContent = "\u5BFC\u51FA\u4E2D...";
+              }
+              GenericUI2.showStatus("\u6B63\u5728\u63D0\u53D6\u9875\u9762\u5185\u5BB9...", "info");
               const content = SiteDetector2.detect() === SiteDetector2.SITES.ZHIHU ? ZhihuAPI2.extractContent() : null;
               let md = "";
               let title = document.title || "\u672A\u547D\u540D\u9875\u9762";
@@ -29062,8 +29304,10 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               GenericUI2.showStatus(`Obsidian \u5BFC\u51FA\u5931\u8D25: ${error.message}`, "error");
             } finally {
               GenericUI2.isExporting = false;
-              btn.disabled = false;
-              btn.textContent = "\u5BFC\u51FA\u5230 Obsidian";
+              if (btn) {
+                btn.disabled = false;
+                btn.textContent = "\u5BFC\u51FA\u5230 Obsidian";
+              }
             }
           });
         },
@@ -29071,31 +29315,34 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         doExport: async () => {
           if (GenericUI2.isExporting) return;
           GenericUI2.isExporting = true;
-          const previewMeta = {
-            url: typeof location !== "undefined" ? location.href : "",
-            source: SiteDetector2.detect() === SiteDetector2.SITES.ZHIHU ? "\u77E5\u4E4E" : ""
-          };
-          if (GenericExporter2.isClipperExported(previewMeta)) {
-            const ok = await ConfirmationDialog2.show({
-              title: "\u5DF2\u5BFC\u51FA\u8FC7",
-              message: "\u8BE5\u9875\u9762\u5DF2\u5728\u5BFC\u51FA\u8D26\u672C\u4E2D\u3002\u518D\u6B21\u5BFC\u51FA\u5C06\u5728 Notion \u65B0\u5EFA\u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
-              confirmText: "\u4ECD\u8981\u5BFC\u51FA",
-              countdown: 0
-            });
-            if (!ok) {
-              GenericUI2.isExporting = false;
-              GenericUI2.showStatus("\u5DF2\u53D6\u6D88\uFF1A\u9875\u9762\u6B64\u524D\u5DF2\u5BFC\u51FA", "info");
-              return;
-            }
-          }
-          const btn = GenericUI2.panel.querySelector("#gclip-export");
-          const floatBtn = GenericUI2.floatBtn;
-          btn.disabled = true;
-          btn.textContent = "\u5BFC\u51FA\u4E2D...";
-          clearTimeout(GenericUI2._floatResetTimer);
-          floatBtn.className = "gclip-float-btn exporting";
-          GenericUI2.showStatus("\u6B63\u5728\u63D0\u53D6\u9875\u9762\u5185\u5BB9...", "info");
+          let btn = null;
+          let floatBtn = null;
           try {
+            const previewMeta = {
+              url: typeof location !== "undefined" ? location.href : "",
+              source: SiteDetector2.detect() === SiteDetector2.SITES.ZHIHU ? "\u77E5\u4E4E" : ""
+            };
+            if (GenericExporter2.isClipperExported(previewMeta)) {
+              const ok = await ConfirmationDialog2.show({
+                title: "\u5DF2\u5BFC\u51FA\u8FC7",
+                message: "\u8BE5\u9875\u9762\u5DF2\u5728\u5BFC\u51FA\u8D26\u672C\u4E2D\u3002\u518D\u6B21\u5BFC\u51FA\u5C06\u5728 Notion \u65B0\u5EFA\u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
+                confirmText: "\u4ECD\u8981\u5BFC\u51FA",
+                countdown: 0
+              });
+              if (!ok) {
+                GenericUI2.showStatus("\u5DF2\u53D6\u6D88\uFF1A\u9875\u9762\u6B64\u524D\u5DF2\u5BFC\u51FA", "info");
+                return;
+              }
+            }
+            btn = GenericUI2.panel.querySelector("#gclip-export");
+            floatBtn = GenericUI2.floatBtn;
+            if (btn) {
+              btn.disabled = true;
+              btn.textContent = "\u5BFC\u51FA\u4E2D...";
+            }
+            clearTimeout(GenericUI2._floatResetTimer);
+            if (floatBtn) floatBtn.className = "gclip-float-btn exporting";
+            GenericUI2.showStatus("\u6B63\u5728\u63D0\u53D6\u9875\u9762\u5185\u5BB9...", "info");
             const apiKey = NotionOAuth2.getAccessToken("");
             const exportState = TargetState2.getExportState();
             const imgMode = Storage2.get(CONFIG2.STORAGE_KEYS.IMG_MODE, CONFIG2.DEFAULTS.imgMode);
@@ -29122,16 +29369,18 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               floatBtn.className = "gclip-float-btn";
             }, 3e3);
           } catch (error) {
-            floatBtn.className = "gclip-float-btn error";
+            if (floatBtn) floatBtn.className = "gclip-float-btn error";
             GenericUI2.showStatus(`\u5BFC\u51FA\u5931\u8D25: ${error.message}`, "error");
             clearTimeout(GenericUI2._floatResetTimer);
             GenericUI2._floatResetTimer = setTimeout(() => {
-              floatBtn.className = "gclip-float-btn";
+              if (floatBtn) floatBtn.className = "gclip-float-btn";
             }, 3e3);
           } finally {
             GenericUI2.isExporting = false;
-            btn.disabled = false;
-            btn.textContent = "\u5BFC\u51FA\u5F53\u524D\u9875\u9762";
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = "\u5BFC\u51FA\u5F53\u524D\u9875\u9762";
+            }
           }
         },
         // 显示状态
@@ -29702,6 +29951,8 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
           }
           return normalizedBase;
         },
+        // P4 收敛(c03): model 拼入 URL 路径 —— 含 / ? # 等字符会篡改路径/查询
+        _modelPathSegment: (model) => encodeURIComponent(String(model ?? "").trim()),
         // 服务商配置
         PROVIDERS: {
           openai: {
@@ -29919,7 +30170,8 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
         // Gemini 对话请求
         requestGeminiChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
           const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
-          const url = normalizedBase ? `${normalizedBase}/v1beta/models/${model}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+          const modelSeg = AIService2._modelPathSegment(model);
+          const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
           return AIService2._chatRequest(
             url,
             { "Content-Type": "application/json", "x-goog-api-key": apiKey },
@@ -29974,7 +30226,8 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
           }
           if (aiService === "gemini") {
             const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1beta");
-            const url = normalizedBase ? `${normalizedBase}/v1beta/models/${model}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+            const modelSeg = AIService2._modelPathSegment(model);
+            const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
             return await AIService2._chatRequest(
               url,
               { "Content-Type": "application/json", "x-goog-api-key": aiApiKey },
@@ -30015,9 +30268,11 @@ ${systemText}
           }
         },
         getCachedModels: (service) => {
-          var _a;
           const cache = AIService2.getFetchedModelsCache();
-          return Array.isArray((_a = cache[service]) == null ? void 0 : _a.models) ? cache[service].models : [];
+          const entry = cache[service];
+          if (!Array.isArray(entry == null ? void 0 : entry.models)) return [];
+          if (entry.fingerprint !== AIService2.getModelsCacheFingerprint()) return [];
+          return entry.models;
         },
         getAvailableModels: (service) => {
           var _a;
@@ -30025,10 +30280,20 @@ ${systemText}
           if (cachedModels.length > 0) return cachedModels;
           return ((_a = AIService2.PROVIDERS[service]) == null ? void 0 : _a.models) || [];
         },
+        // 模型缓存指纹: 端点 + 密钥单向哈希(禁止明文子串), 变更即失效
+        getModelsCacheFingerprint: () => {
+          const baseUrl = String(Storage2.get(CONFIG2.STORAGE_KEYS.AI_BASE_URL, "") || "");
+          const keyHash = Utils2.apiKeyHash(String(Storage2.get(CONFIG2.STORAGE_KEYS.AI_API_KEY, "") || ""));
+          return `${baseUrl}|${keyHash}`;
+        },
         persistFetchedModels: (service, models) => {
           const normalizedModels = Array.isArray(models) ? models : [];
           const cache = AIService2.getFetchedModelsCache();
-          const snapshot = { models: normalizedModels, timestamp: Date.now() };
+          const snapshot = {
+            models: normalizedModels,
+            timestamp: Date.now(),
+            fingerprint: AIService2.getModelsCacheFingerprint()
+          };
           cache[service] = snapshot;
           Storage2.set(CONFIG2.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(cache));
           return snapshot;
@@ -30749,7 +31014,7 @@ ${systemText}
             case "date":
               return { date: { start: v !== null ? String(v) : "" } };
             case "checkbox":
-              return { checkbox: !!value };
+              return { checkbox: v === true };
             default:
               return { rich_text: [{ type: "text", text: { content: String(value).slice(0, 2e3) } }] };
           }
@@ -30772,7 +31037,11 @@ ${systemText}
             if (params.value === void 0 || params.value === null) {
               return { error: "\u66F4\u65B0\u5C5E\u6027\u65F6\u5FC5\u987B\u63D0\u4F9B value\u3002" };
             }
-            propertyUpdates[params.property] = AIAssistant2._buildPropertyValuePayload(params.value, params.type || "text");
+            const propName = AISchema.validatePropertyName(params.property);
+            if (!propName) {
+              return { error: `\u5C5E\u6027\u540D\u4E0D\u5408\u6CD5\uFF1A${String(params.property).slice(0, 60)}` };
+            }
+            propertyUpdates[propName] = AIAssistant2._buildPropertyValuePayload(params.value, params.type || "text");
           }
           const metaPayload = AIAssistant2._buildPageMetaPayload(params);
           if (Object.keys(propertyUpdates).length === 0 && Object.keys(metaPayload).length === 0) {
@@ -31641,17 +31910,21 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           if (!message || ChatState2.isProcessing) return;
           if (input) input.disabled = true;
           if (sendBtn) sendBtn.disabled = true;
-          input.value = "";
-          input.style.height = "auto";
-          ChatState2.addMessage("user", message);
-          ChatState2.isProcessing = true;
-          ChatState2.addMessage("assistant", "\u601D\u8003\u4E2D...", "processing");
           try {
+            input.value = "";
+            input.style.height = "auto";
+            ChatState2.addMessage("user", message);
+            ChatState2.isProcessing = true;
+            ChatState2.addMessage("assistant", "\u601D\u8003\u4E2D...", "processing");
             const response = await AIAssistant2.handleMessage(message);
             ChatState2.updateLastMessage(response, AIAssistant2._isErrorResult(response) ? "error" : "complete");
           } catch (error) {
             console.error("[LD-Notion] AI \u5904\u7406\u5931\u8D25:", error);
-            ChatState2.updateLastMessage(`\u274C \u5904\u7406\u5931\u8D25: ${error.message}`, "error");
+            try {
+              ChatState2.updateLastMessage(`\u274C \u5904\u7406\u5931\u8D25: ${error.message}`, "error");
+            } catch (updateError) {
+              console.error("[LD-Notion] \u66F4\u65B0\u5931\u8D25\u6D88\u606F\u4E5F\u51FA\u9519:", updateError);
+            }
           } finally {
             ChatState2.isProcessing = false;
             if (input) input.disabled = false;
@@ -31840,11 +32113,20 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
         fetchPageBlocks: async (pageId, apiKey) => {
           const blocks = [];
           let cursor = null;
+          const seenCursors = /* @__PURE__ */ new Set();
+          const MAX_PAGES = 100;
+          let pageCount = 0;
           do {
             const response = await NotionAPI2.fetchBlocks(pageId, cursor, apiKey);
             blocks.push(...response.results || []);
-            cursor = response.has_more ? response.next_cursor : null;
-          } while (cursor);
+            pageCount++;
+            const nextCursor = response.has_more ? response.next_cursor : null;
+            cursor = nextCursor && !seenCursors.has(nextCursor) ? nextCursor : null;
+            if (cursor) seenCursors.add(nextCursor);
+          } while (cursor && pageCount < MAX_PAGES);
+          if (cursor) {
+            console.warn(`[LD-Notion] \u5757\u5206\u9875\u5DF2\u8FBE\u4E0A\u9650 ${MAX_PAGES} \u9875, \u5269\u4F59\u5B50\u5757\u672A\u52A0\u8F7D`);
+          }
           return blocks;
         },
         // 提取页面文本

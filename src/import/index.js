@@ -84,7 +84,8 @@ const AutoImporter = {
                 AutoImporter.deferredWhileHidden = false;
                 // P4 收敛(c09 2/3): 排队期间用户可能已关闭自动导入 —— 回调必须复核
                 if (!AutoImporter.canStart()) return;
-                Utils.runWhenBrowserIdle(() => AutoImporter.run());
+                // P4 收敛(c09): idle 回调可能延迟数秒才执行 —— 执行前再复核一次
+                Utils.runWhenBrowserIdle(() => { if (AutoImporter.canStart()) AutoImporter.run(); });
             }
         });
         AutoImporter.visibilityListenerBound = true;
@@ -107,7 +108,8 @@ const AutoImporter = {
             AutoImporter._initTimer = null;
             // P4 收敛(c09 2/3): 3s 窗口内可能已禁用/改配置 —— 执行前复核
             if (!AutoImporter.canStart()) return;
-            Utils.runWhenBrowserIdle(() => AutoImporter.run());
+            // P4 收敛(c09): idle 回调延迟期间可能被禁用 —— 回调内再复核
+            Utils.runWhenBrowserIdle(() => { if (AutoImporter.canStart()) AutoImporter.run(); });
             const interval = Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.autoImportInterval);
             if (interval > 0) AutoImporter.startPolling(interval);
         }, 3000);
@@ -143,6 +145,9 @@ AutoImporter.run = async () => {
     AutoImporter.lastRunAt = now;
     AutoImporter.isRunning = true;
     // v3.14.6 (CC-03): 自动导入占用导出互斥, 防手动/AI/自动并发交错; finally 复位
+    // P4 收敛(c09): 记录本 run 是否由自己置位 —— 租约失败/被占路径无条件清 false
+    // 会误清并发手动导出已置位的互斥(与 GitHubAutoImporter glm P1 同型)
+    const exportMutexAcquired = SyncLock.isExporting !== true;
     SyncLock.isExporting = true;
     // P4 收敛(c09): 与 GitHub/Bookmark/RSS 同构 —— 取跨 tab 租约。
     // 仅置进程内 isExporting 无法防两 tab 同时读-标记 isTopicExported 的竞态(重复建页)。
@@ -151,14 +156,14 @@ AutoImporter.run = async () => {
         lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
     } catch (leaseError) {
         AutoImporter.isRunning = false;
-        SyncLock.isExporting = false;
+        if (exportMutexAcquired) SyncLock.isExporting = false;
         console.error("[LD-Notion] 自动导入获取租约失败:", leaseError);
         AutoImporter.updateStatus("❌ 获取同步租约失败，本轮跳过");
         return;
     }
     if (!lease) {
         AutoImporter.isRunning = false;
-        SyncLock.isExporting = false;
+        if (exportMutexAcquired) SyncLock.isExporting = false;
         AutoImporter.updateStatus("⏸ 其他标签页正在同步，本轮自动导入跳过");
         return;
     }
@@ -361,8 +366,8 @@ AutoImporter.run = async () => {
         SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
         AutoImporter._leaseLost = false;
         AutoImporter.isRunning = false;
-        // v3.14.6 (CC-03): 复位互斥
-        SyncLock.isExporting = false;
+        // v3.14.6 (CC-03): 复位互斥(仅当本次由自己置位)
+        if (exportMutexAcquired) SyncLock.isExporting = false;
         if (exportBtn) exportBtn.disabled = false;
         const obsExportBtn2 = document.querySelector("#ldb-obs-export");
         if (obsExportBtn2) obsExportBtn2.disabled = false;

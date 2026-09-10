@@ -473,6 +473,20 @@ const NotionSiteUI = {
         NotionSiteUI.isPanelReady = true;
     },
 
+    // 面板位置视口钳制
+    // P4 收敛(c16): 必须在面板可见(尺寸可测)时调用 —— loadConfig 阶段 display:none,
+    // offsetWidth/Height 为 0 会使上限退化为视口全尺寸, 旧 right/bottom 可把面板推出视口。
+    clampPanelPosition: () => {
+        const panel = NotionSiteUI.panel;
+        if (!panel || !panel.offsetWidth) return;
+        const maxRight = Math.max(0, window.innerWidth - panel.offsetWidth);
+        const maxBottom = Math.max(0, window.innerHeight - panel.offsetHeight);
+        const parsedRight = parseFloat(panel.style.right);
+        const parsedBottom = parseFloat(panel.style.bottom);
+        panel.style.right = Math.min(Number.isFinite(parsedRight) ? parsedRight : 24, maxRight) + "px";
+        panel.style.bottom = Math.min(Number.isFinite(parsedBottom) ? parsedBottom : 96, maxBottom) + "px";
+    },
+
     // 切换面板显示
     togglePanel: () => {
         NotionSiteUI.ensurePanelReady();
@@ -484,6 +498,7 @@ const NotionSiteUI = {
             NotionSiteUI.panel.classList.remove("visible");
         } else {
             NotionSiteUI.panel.classList.add("visible");
+            NotionSiteUI.clampPanelPosition();
         }
 
         Storage.set(CONFIG.STORAGE_KEYS.NOTION_PANEL_MINIMIZED, NotionSiteUI.isMinimized);
@@ -821,10 +836,8 @@ const NotionSiteUI = {
                 // P4 收敛(c16): 与浮钮同款视口钳制 —— 小屏/换屏后旧 right/bottom 可把面板推出视口
                 const panelRight = parseFloat(pos.right);
                 const panelBottom = parseFloat(pos.bottom);
-                const maxPanelRight = Math.max(0, window.innerWidth - panel.offsetWidth);
-                const maxPanelBottom = Math.max(0, window.innerHeight - panel.offsetHeight);
-                panel.style.right = Math.min(Number.isFinite(panelRight) ? panelRight : 24, maxPanelRight) + "px";
-                panel.style.bottom = Math.min(Number.isFinite(panelBottom) ? panelBottom : 96, maxPanelBottom) + "px";
+                panel.style.right = (Number.isFinite(panelRight) ? panelRight : 24) + "px";
+                panel.style.bottom = (Number.isFinite(panelBottom) ? panelBottom : 96) + "px";
             } catch (e) {
                 console.warn("[LD-Notion] corrupted panel position, resetting");
                 Storage.remove(CONFIG.STORAGE_KEYS.NOTION_PANEL_POSITION);
@@ -1156,6 +1169,7 @@ const NotionSiteUI = {
                 NotionSiteUI.ensurePanelReady();
                 NotionSiteUI.isMinimized = false;
                 NotionSiteUI.panel.classList.add("visible");
+                NotionSiteUI.clampPanelPosition();
             });
         }
     },

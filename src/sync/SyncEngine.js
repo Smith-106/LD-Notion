@@ -478,6 +478,29 @@ const SyncEngine = {
             }
 
             // H-2 校验
+            // P4 收敛(c11): 孤儿 settings 行(旧分片/字段被剔除)会带过期 updatedAt ——
+            // validateRemote 对越界时间戳整包拒绝(F-2 契约), 一旦超过 90 天所有设备 pull 永久失败。
+            // 越界项本就不可能赢得 LWW, 故先剔除(可审计), 再交 validateRemote 校验其余契约。
+            const skewNow = Date.now();
+            const skewMin = skewNow - SyncConstants.TS_PAST_TTL_MS;
+            const skewMax = skewNow + SyncConstants.TS_FUTURE_SKEW_MS;
+            let droppedStaleSettings = 0;
+            for (const [key, entry] of Object.entries(mergedRemote.settings || {})) {
+                const stamp = Date.parse(entry?.updatedAt);
+                if (!Number.isFinite(stamp) || stamp < skewMin || stamp > skewMax) {
+                    delete mergedRemote.settings[key];
+                    droppedStaleSettings++;
+                }
+            }
+            if (droppedStaleSettings > 0) {
+                try {
+                    OperationLog.add({
+                        audit_event: "sync.state.pulled", actor: "system", source: "sync-engine",
+                        operationName: "sync.state.pull", status: "success",
+                        context: { reason, droppedStaleSettings, note: "过期/越界 settings 项已剔除" },
+                    }, { force: true });
+                } catch { /* 审计不可用不阻断 pull */ }
+            }
             const localEpochs = {};
             for (const src of SyncSerializer.WHITELIST.watermarkSources) {
                 localEpochs[src] = SyncStateV2.getSourceState(src).epoch || 0;

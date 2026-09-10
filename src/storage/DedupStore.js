@@ -147,6 +147,9 @@ const DedupStore = {
         } else {
             this._batchCaches = Object.create(null);
         }
+        // P4 收敛(c10): 同 tab 落盘不触发 GM 值变更事件 —— Storage._exportedTopicsCache
+        // 会继续指向已脱离的 batch 快照(缺其他 tab 在本批期间写入的键)。专用事件通知清缓存
+        emit("storage:batch-committed", { sourceType: sourceType || "*" });
     },
 
     _batchGet(sourceType) {

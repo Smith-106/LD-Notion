@@ -613,10 +613,15 @@ const GitHubExporter = {
 
                 // SEC-008: AI 返回的 category 必须匹配用户配置白名单之一，否则降级跳过该 page
                 // （不用 AI 原文写入分类字段，防自由文本注入 CWE-94）。审计记录 skipped。
-                const matched = categories.find(c => category.trim().includes(c));
+                // P4 收敛(c09): 子串 includes + find 首个命中会优先选更短/更靠前的分类
+                // (「前端」先于「前端开发」时 AI 返回「前端开发」→ 写入「前端」), 改为精确优先 + 最长匹配
+                const trimmedCategory = String(category || "").trim();
+                const matched = categories.includes(trimmedCategory)
+                    ? trimmedCategory
+                    : categories.filter(c => trimmedCategory.includes(c)).sort((a, b) => String(b).length - String(a).length)[0];
                 if (!matched) {
                     GitHubExporter._auditExport("updatePage", "skipped",
-                        { pageId: page.id, itemName: title, reason: `AI 分类「${category.trim().slice(0, 50)}」不在白名单，跳过` });
+                        { pageId: page.id, itemName: title, reason: `AI 分类「${trimmedCategory.slice(0, 50)}」不在白名单，跳过` });
                     continue;
                 }
 

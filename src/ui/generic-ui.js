@@ -574,11 +574,12 @@ const GenericUI = {
                 obsStatusEl.style.color = "var(--ldb-ui-danger)";
                 return;
             }
-            Storage.set(CONFIG.STORAGE_KEYS.OBS_API_URL, url);
             // v3.14.7 (REV-08): setSecret 已随 v3.14.2 保险箱退役删除, 恒抛 TypeError——
             // 改走统一明文存储入口 CredentialVault.set(非敏感键直落 GM 明文, 审计由 REDACT_IN_LOGS 脱敏)
+            // P4 收敛(c14): URL/目录必须在 Key 落盘成功之后才写 —— 否则 Key 失败会留下新 URL + 旧 Key
             try {
                 await CredentialVault.set(CONFIG.STORAGE_KEYS.OBS_API_KEY, key);
+                Storage.set(CONFIG.STORAGE_KEYS.OBS_API_URL, url);
                 Storage.set(CONFIG.STORAGE_KEYS.OBS_DIR, dir || CONFIG.DEFAULTS.obsDir);
             } catch (error) {
                 // P4 收敛(c14): 存储失败须可见 —— 异常此前直接逃逸 click 监听
@@ -616,7 +617,12 @@ const GenericUI = {
             // 仅当用户主动输入了新 key 时才更新（不从 DOM 预填，防止泄漏）
             const liveKey = panel.querySelector("#gclip-api-key-input").value.trim();
             if (liveKey) {
-                await NotionOAuth.setManualApiKey(liveKey);
+                // P4 收敛(c14): 保存凭证失败须可见 —— 异常此前直接逃逸 async 监听器且后续配置不保存
+                try {
+                    await NotionOAuth.setManualApiKey(liveKey);
+                } catch (error) {
+                    return GenericUI.showStatus(`保存 API Key 失败: ${error.message}`, "error");
+                }
                 panel.querySelector("#gclip-api-key-input").value = "";
                 NotionOAuth.syncApiKeyInputs();
             }
@@ -717,24 +723,27 @@ const GenericUI = {
             if (GenericUI.isExporting) return;
             GenericUI.isExporting = true;
 
-            const obsUrl = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_URL, CONFIG.DEFAULTS.obsApiUrl);
-            const obsKey = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
-            const obsDir = Storage.get(CONFIG.STORAGE_KEYS.OBS_DIR, CONFIG.DEFAULTS.obsDir);
-
-            if (!obsUrl || !obsKey) {
-                // v3.14.7 (REV-30 UI-26): 文案与实机 UI 对齐——gclip 面板现已直接配置
-                // Obsidian API(上方「保存 Obsidian 配置」区块), 不再跳转 Linux.do 论坛。
-                GenericUI.showStatus("请先配置 Obsidian：在上方「Obsidian（Local REST API）」区块填写 API 地址与 Key 并保存", "error");
-                GenericUI.isExporting = false;
-                return;
-            }
-
-            const btn = GenericUI.panel.querySelector("#gclip-obs-export");
-            btn.disabled = true;
-            btn.textContent = "导出中...";
-            GenericUI.showStatus("正在提取页面内容...", "info");
-
+            // P4 收敛(c14): 前置步骤(读配置/DOM 查询/状态渲染)纳入 try ——
+            // 此前任一抛错都会跳过 finally, isExporting 永久 true 导致导出永久不可用
+            let btn = null;
             try {
+                const obsUrl = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_URL, CONFIG.DEFAULTS.obsApiUrl);
+                const obsKey = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_KEY, CONFIG.DEFAULTS.obsApiKey);
+                const obsDir = Storage.get(CONFIG.STORAGE_KEYS.OBS_DIR, CONFIG.DEFAULTS.obsDir);
+
+                if (!obsUrl || !obsKey) {
+                    // v3.14.7 (REV-30 UI-26): 文案与实机 UI 对齐——gclip 面板现已直接配置
+                    // Obsidian API(上方「保存 Obsidian 配置」区块), 不再跳转 Linux.do 论坛。
+                    GenericUI.showStatus("请先配置 Obsidian：在上方「Obsidian（Local REST API）」区块填写 API 地址与 Key 并保存", "error");
+                    return;
+                }
+
+                btn = GenericUI.panel.querySelector("#gclip-obs-export");
+                if (btn) {
+                    btn.disabled = true;
+                    btn.textContent = "导出中...";
+                }
+                GenericUI.showStatus("正在提取页面内容...", "info");
                 const content = SiteDetector.detect() === SiteDetector.SITES.ZHIHU
                     ? ZhihuAPI.extractContent()
                     : null;
@@ -788,8 +797,10 @@ const GenericUI = {
                 GenericUI.showStatus(`Obsidian 导出失败: ${error.message}`, "error");
             } finally {
                 GenericUI.isExporting = false;
-                btn.disabled = false;
-                btn.textContent = "导出到 Obsidian";
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = "导出到 Obsidian";
+                }
             }
         });
     },
@@ -800,35 +811,40 @@ const GenericUI = {
         // P3(dsf, 主 agent 复核): 提前占位——确认弹窗挂起期间守卫此前失效, 双击会并行两次导出。
         GenericUI.isExporting = true;
 
-        // 去重前置：已导出过则确认是否仍要再建页（clipper 此前零 markSeen → 连点必重复）
-        const previewMeta = {
-            url: typeof location !== "undefined" ? location.href : "",
-            source: SiteDetector.detect() === SiteDetector.SITES.ZHIHU ? "知乎" : "",
-        };
-        if (GenericExporter.isClipperExported(previewMeta)) {
-            const ok = await ConfirmationDialog.show({
-                title: "已导出过",
-                message: "该页面已在导出账本中。再次导出将在 Notion 新建页面，是否继续？",
-                confirmText: "仍要导出",
-                countdown: 0,
-            });
-            if (!ok) {
-                GenericUI.isExporting = false;
-                GenericUI.showStatus("已取消：页面此前已导出", "info");
-                return;
-            }
-        }
-
-        const btn = GenericUI.panel.querySelector("#gclip-export");
-        const floatBtn = GenericUI.floatBtn;
-        btn.disabled = true;
-        btn.textContent = "导出中...";
-        // P3(dsf, 主 agent 复核): 清理上一轮未触发的恢复定时器, 避免晚到回调冲掉本轮状态
-        clearTimeout(GenericUI._floatResetTimer);
-        floatBtn.className = "gclip-float-btn exporting";
-        GenericUI.showStatus("正在提取页面内容...", "info");
-
+        // P4 收敛(c14): 前置步骤(去重确认/DOM 查询/状态渲染)纳入 try ——
+        // 此前任一抛错都会跳过 finally, isExporting 永久 true
+        let btn = null;
+        let floatBtn = null;
         try {
+            // 去重前置：已导出过则确认是否仍要再建页（clipper 此前零 markSeen → 连点必重复）
+            const previewMeta = {
+                url: typeof location !== "undefined" ? location.href : "",
+                source: SiteDetector.detect() === SiteDetector.SITES.ZHIHU ? "知乎" : "",
+            };
+            if (GenericExporter.isClipperExported(previewMeta)) {
+                const ok = await ConfirmationDialog.show({
+                    title: "已导出过",
+                    message: "该页面已在导出账本中。再次导出将在 Notion 新建页面，是否继续？",
+                    confirmText: "仍要导出",
+                    countdown: 0,
+                });
+                if (!ok) {
+                    GenericUI.showStatus("已取消：页面此前已导出", "info");
+                    return;
+                }
+            }
+
+            btn = GenericUI.panel.querySelector("#gclip-export");
+            floatBtn = GenericUI.floatBtn;
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = "导出中...";
+            }
+            // P3(dsf, 主 agent 复核): 清理上一轮未触发的恢复定时器, 避免晚到回调冲掉本轮状态
+            clearTimeout(GenericUI._floatResetTimer);
+            if (floatBtn) floatBtn.className = "gclip-float-btn exporting";
+            GenericUI.showStatus("正在提取页面内容...", "info");
+
             const apiKey = NotionOAuth.getAccessToken("");
             const exportState = TargetState.getExportState();
             const imgMode = Storage.get(CONFIG.STORAGE_KEYS.IMG_MODE, CONFIG.DEFAULTS.imgMode);
@@ -860,16 +876,18 @@ const GenericUI = {
                 floatBtn.className = "gclip-float-btn";
             }, 3000);
         } catch (error) {
-            floatBtn.className = "gclip-float-btn error";
+            if (floatBtn) floatBtn.className = "gclip-float-btn error";
             GenericUI.showStatus(`导出失败: ${error.message}`, "error");
             clearTimeout(GenericUI._floatResetTimer);
             GenericUI._floatResetTimer = setTimeout(() => {
-                floatBtn.className = "gclip-float-btn";
+                if (floatBtn) floatBtn.className = "gclip-float-btn";
             }, 3000);
         } finally {
             GenericUI.isExporting = false;
-            btn.disabled = false;
-            btn.textContent = "导出当前页面";
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = "导出当前页面";
+            }
         }
     },
 
