@@ -32,7 +32,7 @@ const DOMToNotion = {
     _cookLightbox: (el, blocks, imgMode) => {
         const img = el.querySelector("img");
         if (!img) return;
-        const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
+        const src = DomSpec.mediaSrc(img);
         const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
         if (full && !DOMToNotion._emojiImageName(src)) {
             if (imgMode === "skip") return;
@@ -70,8 +70,9 @@ const DOMToNotion = {
 
     // 视频元素
     _cookVideo: (el, blocks, imgMode) => {
-        const source = el.querySelector("source");
-        const src = el.getAttribute("src") || source?.getAttribute("src") || "";
+        // P3 收敛: 视频地址判据单一驻 DomSpec.mediaSrc(src → data-src → <source src>),
+        // 与 obsidian 侧同口径
+        const src = DomSpec.mediaSrc(el);
         const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
         if (full && imgMode !== "skip") {
             // wave8 共识(qwen): 先剥查询串/锚点再取扩展名 —— "a.exe?y=.mp4"/"a.mp4#y.exe"
@@ -106,8 +107,8 @@ const DOMToNotion = {
 
     // 音频元素
     _cookAudio: (el, blocks, imgMode) => {
-        const source = el.querySelector("source");
-        const src = el.getAttribute("src") || source?.getAttribute("src") || "";
+        // P3 收敛: 音频地址判据单一驻 DomSpec.mediaSrc(与视频/图片同口径)
+        const src = DomSpec.mediaSrc(el);
         const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
         if (full && imgMode !== "skip") {
             blocks.push({
@@ -185,46 +186,10 @@ const DOMToNotion = {
         if (richText.length > 0) {
             blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
         }
-        el.querySelectorAll("img").forEach((img) => {
-            const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
-            const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
-            if (full && !DOMToNotion._emojiImageName(src)) {
-                if (imgMode !== "skip") {
-                    blocks.push({
-                        type: "image",
-                        image: { type: "external", external: { url: full } },
-                        _needsUpload: imgMode === "upload",
-                        _originalUrl: full,
-                        _fileType: "image",
-                    });
-                }
-            }
-        });
-        el.querySelectorAll("a.attachment").forEach((a) => {
-            const href = a.getAttribute("href") || "";
-            const fileName = a.textContent?.trim() || "attachment";
-            const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(href));
-            if (full && imgMode !== "skip") {
-                blocks.push({
-                    type: "file",
-                    file: {
-                        type: "external",
-                        external: { url: full },
-                        caption: DOMToNotion.splitLongText(fileName),
-                    },
-                    _needsUpload: imgMode === "upload",
-                    _originalUrl: full,
-                    _fileType: "file",
-                    _fileName: fileName,
-                });
-            }
-        });
-        // P4 收敛(c05a-glm): 段落内嵌 video/audio/iframe 无任何消费点 —— iframe/video 属短语
-        // 内容, <p><iframe …></iframe></p> 是合法 HTML 且 DOMParser 原样保留; 段落分支提前
-        // return 使这些块静默丢失(与上方 img/a.attachment 后处理同口径)
-        el.querySelectorAll("video").forEach((video) => DOMToNotion._cookVideo(video, blocks, imgMode));
-        el.querySelectorAll("audio").forEach((audio) => DOMToNotion._cookAudio(audio, blocks, imgMode));
-        el.querySelectorAll("iframe").forEach((frame) => { DOMToNotion._cookIframe(frame, blocks); });
+        // P4 收敛(c05a-glm) + wave6 共识(dsf): 段落内嵌 img/a.attachment/video/audio/iframe
+        // 此前逐类各自实现(段落分支提前 return, 不补发即静默丢失) —— 统一走
+        // _consumeInlineMedia, 采集口径单一驻 DomSpec.eachMedia
+        DOMToNotion._consumeInlineMedia(el, blocks, imgMode);
     },
 
     // 代码块 pre
@@ -292,14 +257,9 @@ const DOMToNotion = {
                 if (richText.length > 0) {
                     blocks.push({ type: listType, [listType]: { rich_text: richText } });
                 }
-                // P4 收敛(c05): li 内嵌图片/附件此前静默丢弃 —— 与 _cookParagraph 同款补发块
-                li.querySelectorAll("img").forEach((img) => DOMToNotion._cookImage(img, blocks, imgMode));
-                li.querySelectorAll("a.attachment").forEach((a) => DOMToNotion._cookAttachment(a, blocks, imgMode));
-                // wave6 共识(dsf): 与 _cookParagraph 同口径 —— li 内嵌 video/audio/iframe 同样
-                // 有消费点(ul/ol 分支提前 return, 不下钻到这些块)
-                li.querySelectorAll("video").forEach((video) => DOMToNotion._cookVideo(video, blocks, imgMode));
-                li.querySelectorAll("audio").forEach((audio) => DOMToNotion._cookAudio(audio, blocks, imgMode));
-                li.querySelectorAll("iframe").forEach((frame) => { DOMToNotion._cookIframe(frame, blocks); });
+                // P4 收敛(c05) + wave6 共识(dsf): li 内嵌媒体统一走 _consumeInlineMedia,
+                // 采集口径单一驻 DomSpec.eachMedia
+                DOMToNotion._consumeInlineMedia(li, blocks, imgMode);
             }
         });
     },
@@ -405,26 +365,20 @@ const DOMToNotion = {
         const mediaRows = mediaSections.length > 0
             ? mediaSections.flatMap((sec) => directRows(sec))
             : directRows(table);
-        const cellMedia = [];
+        // wave8 共识(dsf) + wave9 共识(qwen): 单元格内媒体补发 —— 采集口径统一走
+        // _consumeInlineMedia(DomSpec.eachMedia), 不再自带逗号选择器与 tag 二次分派
         mediaRows.forEach((tr) => {
             directCells(tr).forEach((cell) => {
-                cellMedia.push(...cell.querySelectorAll("img, video, audio, a.attachment, iframe"));
+                DOMToNotion._consumeInlineMedia(cell, blocks, imgMode);
             });
-        });
-        cellMedia.forEach((m) => {
-            const t = m.tagName ? m.tagName.toLowerCase() : "";
-            if (t === "img") DOMToNotion._cookImage(m, blocks, imgMode);
-            else if (t === "a") DOMToNotion._cookAttachment(m, blocks, imgMode);
-            else if (t === "video") DOMToNotion._cookVideo(m, blocks, imgMode);
-            else if (t === "audio") DOMToNotion._cookAudio(m, blocks, imgMode);
-            else if (t === "iframe") DOMToNotion._cookIframe(m, blocks);
         });
     },
 
     // 独立图片 img
     _cookImage: (el, blocks, imgMode) => {
-        // wave7 共识(qwen): 懒加载图片 src 为空时回退 data-src(与 _cookLightbox 同口径)
-        const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
+        // wave7 共识(qwen) → P3 收敛: 图片地址判据统一走 DomSpec.mediaSrc
+        // (src → data-src → <source src>), 与 lightbox/视频/音频/obsidian 同源
+        const src = DomSpec.mediaSrc(el);
         const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
         if (full && !DOMToNotion._emojiImageName(src)) {
             if (imgMode !== "skip") {
@@ -503,7 +457,8 @@ const DOMToNotion = {
             if (tag === "img") {
                 // wave8 共识(qwen): 懒加载 emoji 仅在 data-src 时同样识别(与块级图片回退同口径)
                 // wave12 共识(qwen): set 目录放宽到任意值(与 _emojiImageName 同口径, 后者决定块级跳过)
-                const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
+                // P3 收敛: emoji 图的地址判据同源 DomSpec.mediaSrc(src → data-src)
+                const src = DomSpec.mediaSrc(el);
                 const emojiName = DOMToNotion._emojiImageName(src);
                 if (emojiName) {
                     const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP, emojiName)
@@ -521,7 +476,7 @@ const DOMToNotion = {
             if (tag === "a") {
                 const href = el.getAttribute("href") || "";
                 if (href.startsWith("#")) {
-                    Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
+                    DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
                     return;
                 }
                 const link = Utils.absoluteUrl(href);
@@ -548,15 +503,15 @@ const DOMToNotion = {
 
             // 处理格式标签
             if (tag === "strong" || tag === "b") {
-                Array.from(el.childNodes).forEach((c) => processNode(c, { ...annotations, bold: true }));
+                DomSpec.eachChildOrdered(el, (c) => processNode(c, { ...annotations, bold: true }));
                 return;
             }
             if (tag === "em" || tag === "i") {
-                Array.from(el.childNodes).forEach((c) => processNode(c, { ...annotations, italic: true }));
+                DomSpec.eachChildOrdered(el, (c) => processNode(c, { ...annotations, italic: true }));
                 return;
             }
             if (tag === "s" || tag === "del") {
-                Array.from(el.childNodes).forEach((c) => processNode(c, { ...annotations, strikethrough: true }));
+                DomSpec.eachChildOrdered(el, (c) => processNode(c, { ...annotations, strikethrough: true }));
                 return;
             }
             if (tag === "code") {
@@ -579,7 +534,7 @@ const DOMToNotion = {
 
             // wave13 共识(qwen): script/style/noscript 非渲染元素 —— 其文本(JS/CSS 源码)
             // 经通用递归进入 rich_text, 内容污染(与 obsidian 同口径)
-            if (tag === "script" || tag === "style" || tag === "noscript") return;
+            if (DomSpec.isSkippedNode(n)) return;
 
             // wave12 共识(dsf) + wave14 共识(dsf): 块级元素是文本边界 —— 前后都不得与相邻
             // 内联内容粘连(<blockquote><p>a</p>b</blockquote> 此前输出 "ab"); 仅"下一项也是
@@ -588,13 +543,13 @@ const DOMToNotion = {
                 // 块级元素前后都是边界(前面是内联文本或块级都算): 标记延迟到真正产出内容时消费
                 if (result.length > 0) needBreak = true;
                 const before = result.length;
-                Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
+                DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
                 if (result.length > before) needBreak = true;
                 return;
             }
 
             // 其他元素递归处理
-            Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
+            DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
         };
 
         processNode(node);
@@ -703,7 +658,7 @@ const DOMToNotion = {
             }
 
             // 递归处理子节点(未匹配容器的文本已由 walkNode 按序并入内联缓冲)
-            Array.from(el.childNodes || []).forEach(walkNode);
+            DomSpec.eachChildOrdered(el, walkNode);
         };
 
         // wave13/14 共识(dsf/qwen): 未匹配容器与顶层裸文本此前只递归子元素 —— 直属文本
@@ -731,10 +686,10 @@ const DOMToNotion = {
                 processElement(node);
                 return;
             }
-            Array.from(node.childNodes || []).forEach(walkNode);
+            DomSpec.eachChildOrdered(node, walkNode);
         };
 
-        Array.from(root.childNodes || []).forEach(walkNode);
+        DomSpec.eachChildOrdered(root, walkNode);
         flushInline();
         return blocks;
     },

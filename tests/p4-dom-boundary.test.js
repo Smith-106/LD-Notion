@@ -104,7 +104,7 @@ describe("P4: DOMToNotion 表格与长文本边界", () => {
         const nestedCells = [cell(), cell(), cell()];
         const nestedRow = { tagName: "TR", closest: () => null, children: nestedCells, querySelectorAll: () => nestedCells };
         const nestedTable = { tagName: "TABLE", querySelector: () => null, children: [nestedRow], querySelectorAll: () => [] };
-        const outerCell = cell({ children: [nestedTable], querySelectorAll: () => nestedCells });
+        const outerCell = cell({ children: [nestedTable], querySelectorAll: () => [] });
         const row = {
             tagName: "TR",
             closest: () => null,
@@ -445,7 +445,7 @@ describe("wave8 共识(dsf): 引用块/表格单元格内嵌媒体补发", () =>
     it("表格单元格内 img 补发兄弟块(Notion table_row 只收 rich_text)", () => {
         const cell = {
             tagName: "TD",
-            querySelectorAll: (sel) => (sel === "img, video, audio, a.attachment, iframe" ? [mediaImg("https://cdn.example.com/c.png")] : []),
+            querySelectorAll: (sel) => (sel === "img" ? [mediaImg("https://cdn.example.com/c.png")] : []),
         };
         const row = { tagName: "TR", closest: () => null, children: [cell] };
         const table = {
@@ -548,7 +548,7 @@ describe("wave9 共识(qwen): 表格无 section 时媒体补发", () => {
             querySelector: () => null,
             querySelectorAll: () => [],
         };
-        const cell = { tagName: "TD", querySelectorAll: (sel) => (sel === "img, video, audio, a.attachment, iframe" ? [img] : []) };
+        const cell = { tagName: "TD", querySelectorAll: (sel) => (sel === "img" ? [img] : []) };
         const row = { tagName: "TR", closest: () => null, children: [cell] };
         const table = { tagName: "TABLE", querySelector: () => null, children: [row] }; // 无 thead/tbody/tfoot
         const blocks = [];
