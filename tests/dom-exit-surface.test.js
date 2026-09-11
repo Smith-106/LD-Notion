@@ -679,6 +679,59 @@ describe("wave16: 修复后复验收敛", () => {
     });
 });
 
+// ===== w3 第三模型复审(deepseek-v4-pro 视角): obsidian 出口面 4 条确认缺陷 =====
+// 背景: wave16 的 w3 分片(obsidian.js + constants.js)未取得 glm 产出(通道 0 字符),
+// 由 deepseek-v4-pro 独立复审; 4 条先在真实源码上复现(见 _w3_dspro_candidates.md), 再定值锁定。
+describe("w3 第三模型复审: obsidian 列表/容器边界", () => {
+    const ol = (children, props) => element("ol", children, props);
+    const li = (children, props) => element("li", children, props);
+
+    it("ol: 显式起始序号(start/value, 含 0 与负值)不被静默改写", () => {
+        const a = li([textNode("a")]);
+        // 属性缺失 → 缺省 1(不得把 Number(null)=0 当成 start=0)
+        expect(HTMLToMarkdown._convertNode(ol([a]))).toBe("1. a\n\n");
+        expect(HTMLToMarkdown._convertNode(ol([a], { getAttribute: attrs({ start: "3" }) }))).toBe("3. a\n\n");
+        expect(HTMLToMarkdown._convertNode(ol([a], { getAttribute: attrs({ start: "0" }) }))).toBe("0. a\n\n");
+        expect(HTMLToMarkdown._convertNode(ol([a], { getAttribute: attrs({ start: "-2" }) }))).toBe("-2. a\n\n");
+        // <li value="0"> 覆盖起始编号(同样允许 0)
+        expect(HTMLToMarkdown._convertNode(ol([li([textNode("a")], { getAttribute: attrs({ value: "0" }) })]))).toBe("0. a\n\n");
+        // start 与 value 混合: value 只覆盖该项及其后的计数
+        expect(HTMLToMarkdown._convertNode(ol([li([textNode("a")]), li([textNode("b")], { getAttribute: attrs({ value: "7" }) }), li([textNode("c")])], { getAttribute: attrs({ start: "2" }) })))
+            .toBe("2. a\n7. b\n8. c\n\n");
+        // 非法数值回退缺省, 不被 NaN 污染
+        expect(HTMLToMarkdown._convertNode(ol([a], { getAttribute: attrs({ start: "abc" }) }))).toBe("1. a\n\n");
+    });
+
+    it("ol: 空 li 不注入连字符(裸 \"-\" 也属于 li 前缀)", () => {
+        expect(HTMLToMarkdown._convertNode(ol([li([])]))).toBe("1.\n\n");
+        expect(HTMLToMarkdown._convertNode(ol([li([textNode("   ")])]))).toBe("1.\n\n");
+        // 非空项前缀剥离语义不回退(P4 修复: "1. - x" → "1. x")
+        expect(HTMLToMarkdown._convertNode(ol([li([textNode("x")])]))).toBe("1. x\n\n");
+    });
+
+    it("li: 块级段落分隔不被折叠成软换行", () => {
+        // 两段落: 保留空行(块级边界), 不再被 \s+\n 压成 "- a\n  b\n"
+        expect(HTMLToMarkdown._convertNode(li([element("p", [textNode("a")]), element("p", [textNode("b")])])))
+            .toBe("- a\n  \n  b\n");
+        // 单段落不受影响
+        expect(HTMLToMarkdown._convertNode(li([element("p", [textNode("a")])]))).toBe("- a\n");
+        // 行尾空白仍被清理(折叠语义本身不回退)
+        expect(HTMLToMarkdown._convertNode(li([textNode("a   \n   ")]))).toBe("- a\n");
+    });
+
+    it("_convertChildren: 块级子节点两侧边界不粘连", () => {
+        // 块级子节点后的文本: 此前直接拼接得 "ab"
+        expect(HTMLToMarkdown._convertNode(element("div", [element("div", [textNode("a")]), textNode("b")]))).toBe("a\nb");
+        // 块级子节点前的文本: 同样须起行
+        expect(HTMLToMarkdown._convertNode(element("div", [textNode("a"), element("div", [textNode("b")])]))).toBe("a\nb");
+        // 末尾不无条件补换行(既有单块输出逐字节兼容)
+        expect(HTMLToMarkdown._convertNode(element("div", [element("div", [textNode("a")])]))).toBe("a");
+        // 自带尾换行的块(p)语义不变
+        expect(HTMLToMarkdown._convertNode(element("div", [element("p", [textNode("x")]), element("p", [textNode("y")])]))).toBe("x\n\ny\n\n");
+        expect(HTMLToMarkdown._convertNode(element("div", [element("p", [textNode("x")]), textNode("y")]))).toBe("x\n\ny");
+    });
+});
+
 // ===== 清单自检: 清单与 src/ 现状一致(learnings-006 规则 3) =====
 // 规则 3: 新增出口必须对照 SURFACE_INVENTORY 接入 DomSpec 原语, 不允许"下一轮审计再补"。
 // 本组把清单从文档变成**可执行断言**: 原语消费点缺失 / 实现地重复 = 测试红。

@@ -129,8 +129,12 @@ const HTMLToMarkdown = {
             const items = [];
             // wave17 共识(qwen): <ol start="N"> 与 <li value="N"> 此前被忽略 —— 续接编号被静默
             // 改写为 1..n(内容篡改); CommonMark 支持显式起始序号, 可无损保留
-            const startAttr = Number(node.getAttribute && node.getAttribute("start"));
-            let idx = Number.isFinite(startAttr) && startAttr > 0 ? Math.floor(startAttr) : 1;
+            // wave18 共识(w3 第三模型复审): 判据 `> 0` 把显式 0/负值当成缺省 —— HTML 允许
+            // start="0"/"-2"; 且必须区分「属性缺失」与「数值为 0」(Number(null) === 0)
+            const rawStart = node.getAttribute ? node.getAttribute("start") : null;
+            const startNum = rawStart === null || rawStart === undefined || rawStart === ""
+                ? NaN : Number(rawStart);
+            let idx = Number.isFinite(startNum) ? Math.floor(startNum) : 1;
             DomSpec.eachChildOrdered(node, (child) => {
                 // wave15(glm): 缩进排版的 <ol>\n    <li> 产生项间纯空白文本节点 —— 原样拼入会把
                 // 后续 "1. a" 推到行首缩进位(≥4 空格时整表退化为缩进代码块)
@@ -145,10 +149,14 @@ const HTMLToMarkdown = {
                     return;
                 }
                 // P4 收敛(c05 2/3): li 分支已输出 "- " 前缀 —— 有序列表需剥离, 否则 "1. - x"
-                const valueAttr = Number(child.getAttribute && child.getAttribute("value"));
-                if (Number.isFinite(valueAttr) && valueAttr > 0) idx = Math.floor(valueAttr);
-                const md = HTMLToMarkdown._convertNode(child).trim().replace(/^-\s+/, "");
-                items.push(`${idx}. ${md}\n`);
+                // wave18 共识(w3 复审): value 同样是显式序号(允许 0/负值); 空 li 的 li 分支
+                // 产物 "- " 经 trim 得裸 "-", /^-\s+/ 不匹配 → "1. -"(凭空注入连字符)
+                const rawValue = child.getAttribute ? child.getAttribute("value") : null;
+                const valueNum = rawValue === null || rawValue === undefined || rawValue === ""
+                    ? NaN : Number(rawValue);
+                if (Number.isFinite(valueNum)) idx = Math.floor(valueNum);
+                const md = HTMLToMarkdown._convertNode(child).trim().replace(/^-(?:\s+|$)/, "").trim();
+                items.push(md ? `${idx}. ${md}\n` : `${idx}.\n`);
                 idx++;
             });
             return items.join("") + "\n";
@@ -186,8 +194,10 @@ const HTMLToMarkdown = {
             };
             // wave12 共识(glm): 代码围栏不做空白折叠 —— \s+\n → \n 会删掉围栏内的空行
             // 与行尾空白(代码内容被篡改), 围栏自身成段原样推入
+            // wave18 共识(w3 复审): 折叠只清行尾空白, 不再把 \n\n 压成 \n ——
+            // <li><p>a</p><p>b</p></li> 的块级段落分隔被压成软换行(结构丢失)
             const flushBuf = () => {
-                pushText(buf.replace(/\s+\n/g, "\n").trim());
+                pushText(buf.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim());
                 buf = "";
             };
             DomSpec.eachChildOrdered(node, (child) => {
@@ -358,15 +368,19 @@ const HTMLToMarkdown = {
     // 外层逐行加 "> " 后得 "> 外> 内"(内层引用语法被吞); div.onebox 同族。
     // 与 Notion 出口 serializeRichText 的文本边界同口径: 沿 childNodes 拼接, 块级子节点前补换行。
     _convertChildren: (node) => {
+        // wave18 共识(w3 第三模型复审): 只补「块级子节点之前」的边界仍不够 ——
+        // <div><div>a</div>b</div> 输出 "ab"(块级内容与其后的文本粘连)。沿用 DOMToNotion
+        // wave14 的 needBreak 延迟语义: 块级子节点后若仍拼接内容且 out 未以换行结尾, 补一个
+        // 换行; 末尾不无条件补(单块子节点输出逐字节兼容)
         let out = "";
+        let needBreak = false;
         DomSpec.eachChildOrdered(node, (child) => {
             const md = HTMLToMarkdown._convertNode(child);
             if (!md) return;
-            if (child.nodeType === Node.ELEMENT_NODE && child.tagName
-                && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase())
-                && out && !/\n$/.test(out)) {
-                out += "\n";
-            }
+            const isBlock = child.nodeType === Node.ELEMENT_NODE && child.tagName
+                && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase());
+            if ((needBreak || Boolean(isBlock)) && out && !/\n$/.test(out)) out += "\n";
+            needBreak = Boolean(isBlock);
             out += md;
         });
         return out;

@@ -4956,8 +4956,9 @@
         _convertNodeBranch: (node, tag) => {
           if (tag === "ol") {
             const items = [];
-            const startAttr = Number(node.getAttribute && node.getAttribute("start"));
-            let idx = Number.isFinite(startAttr) && startAttr > 0 ? Math.floor(startAttr) : 1;
+            const rawStart = node.getAttribute ? node.getAttribute("start") : null;
+            const startNum = rawStart === null || rawStart === void 0 || rawStart === "" ? NaN : Number(rawStart);
+            let idx = Number.isFinite(startNum) ? Math.floor(startNum) : 1;
             DomSpec.eachChildOrdered(node, (child) => {
               if (child.nodeType === Node.TEXT_NODE && !String(child.textContent || "").trim()) return;
               const isLi = child.nodeType === Node.ELEMENT_NODE && child.tagName.toLowerCase() === "li";
@@ -4967,10 +4968,12 @@
 `);
                 return;
               }
-              const valueAttr = Number(child.getAttribute && child.getAttribute("value"));
-              if (Number.isFinite(valueAttr) && valueAttr > 0) idx = Math.floor(valueAttr);
-              const md = HTMLToMarkdown2._convertNode(child).trim().replace(/^-\s+/, "");
-              items.push(`${idx}. ${md}
+              const rawValue = child.getAttribute ? child.getAttribute("value") : null;
+              const valueNum = rawValue === null || rawValue === void 0 || rawValue === "" ? NaN : Number(rawValue);
+              if (Number.isFinite(valueNum)) idx = Math.floor(valueNum);
+              const md = HTMLToMarkdown2._convertNode(child).trim().replace(/^-(?:\s+|$)/, "").trim();
+              items.push(md ? `${idx}. ${md}
+` : `${idx}.
 `);
               idx++;
             });
@@ -4999,7 +5002,7 @@
               if (text) text.split("\n").forEach((line) => segments.push(line));
             };
             const flushBuf = () => {
-              pushText(buf.replace(/\s+\n/g, "\n").trim());
+              pushText(buf.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim());
               buf = "";
             };
             DomSpec.eachChildOrdered(node, (child) => {
@@ -5160,12 +5163,13 @@ ${quoted}
         // 与 Notion 出口 serializeRichText 的文本边界同口径: 沿 childNodes 拼接, 块级子节点前补换行。
         _convertChildren: (node) => {
           let out = "";
+          let needBreak = false;
           DomSpec.eachChildOrdered(node, (child) => {
             const md = HTMLToMarkdown2._convertNode(child);
             if (!md) return;
-            if (child.nodeType === Node.ELEMENT_NODE && child.tagName && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase()) && out && !/\n$/.test(out)) {
-              out += "\n";
-            }
+            const isBlock = child.nodeType === Node.ELEMENT_NODE && child.tagName && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase());
+            if ((needBreak || Boolean(isBlock)) && out && !/\n$/.test(out)) out += "\n";
+            needBreak = Boolean(isBlock);
             out += md;
           });
           return out;
