@@ -965,7 +965,12 @@ const DOMToNotion = {
             // wave19 共识(w19 glm): emoji 图是**文本载体**(DomSpec.emojiNameOf 命中), 块级 img
             // 分支会把 "前 🎉 后" 拆成三个块, 而同一 img 在 <p> 内是单段内联(与 Markdown 出口一致)
             // —— 故 emoji 图沿内联路径并入当前缓冲
-            if (DomSpec.mediaKind(node) === "img" && DomSpec.emojiNameOf(DomSpec.mediaSrc(node))) {
+            // wave20 共识(w20 qwen): 同族残余边界 —— 地址被判拒时的 alt 文本回退也是**文本**
+            // (serializeRichText 的内联 alt 回退), 仍走块级分支会把 "前 配图 后" 拆成三块
+            if (DomSpec.mediaKind(node) === "img"
+                && (DomSpec.emojiNameOf(DomSpec.mediaSrc(node))
+                    || (!DomSpec.mediaUrl(node)
+                        && typeof node.getAttribute === "function" && node.getAttribute("alt")))) {
                 inlineParts.push(...DOMToNotion.serializeRichText(node));
                 return;
             }

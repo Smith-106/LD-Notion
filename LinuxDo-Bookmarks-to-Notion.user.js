@@ -1650,7 +1650,11 @@
           if (/^https?:\/\//i.test(value)) return value;
           if (value.startsWith("//")) return window.location.protocol + value;
           if (value.startsWith("/")) return window.location.origin + value;
-          return window.location.origin + "/" + value.replace(/^\.?\//, "");
+          try {
+            return new URL(value, window.location.href).href;
+          } catch {
+            return window.location.origin + "/" + value.replace(/^\.?\//, "");
+          }
         },
         isHttpUrl: (value) => /^https?:\/\//i.test(String(value || "").trim()),
         // v3.14.6 (AUD-ARCH-05): userscript 模式判定 —— 扩展垫片 scriptHandler='chrome-extension'
@@ -1810,6 +1814,12 @@
         // wave18 共识(dsf): 转义字符自身也必须转义 —— 标签以单个 "\" 结尾时(C:\ 一类标题),
         // 产出的 "[C:\](url)" 里 \] 是转义方括号、不闭合标签 → 整串退化为纯文本、链接目标丢失。
         mdText: (text) => String(text ?? "").replace(/([\\\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
+        // wave20 共识(w20 qwen): 文本节点是**字面量**上下文 —— CommonMark 的内联控制符必须转义,
+        // 否则源文里的 "**x**"/"2*3*4"/"a~~b~~c" 被渲染成强调/删除线(Notion 出口把文本放
+        // rich_text.content、格式放 annotations, 同一输入不受害 ⇒ 两出口可见内容不对称)。
+        // 与 mdText 的差别: 不折叠换行(段落内换行是语义), 不转义 "_"(词内下划线无强调语义,
+        // 且 snake_case 极常见, 转义只会引入大量无必要的反斜杠)
+        mdLiteral: (text) => String(text ?? "").replace(/([\\`*~\[\]])/g, "\\$1"),
         // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
         // wave19 共识(w19 qwen): 补 \\(见 MD_URL_ESCAPE)
         mdUrl: (url) => String(url ?? "").replace(/[\s<>()\\]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
@@ -4188,7 +4198,7 @@
           let pruned = false;
           const collect = (node) => {
             if (!node) return "";
-            if (node.nodeType === 3) return node.nodeValue || "";
+            if (node.nodeType === 3) return node.nodeValue || node.textContent || "";
             if (node.nodeType !== 1) return "";
             if (DomSpec.isSkippedNode(node)) {
               pruned = true;
@@ -4910,7 +4920,7 @@
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
             if (DomSpec.isSkippedNode(node)) return;
-            if (DomSpec.mediaKind(node) === "img" && DomSpec.emojiNameOf(DomSpec.mediaSrc(node))) {
+            if (DomSpec.mediaKind(node) === "img" && (DomSpec.emojiNameOf(DomSpec.mediaSrc(node)) || !DomSpec.mediaUrl(node) && typeof node.getAttribute === "function" && node.getAttribute("alt"))) {
               inlineParts.push(...DOMToNotion2.serializeRichText(node));
               return;
             }
@@ -5175,7 +5185,7 @@
           var _a, _b;
           if (node.nodeType === Node.TEXT_NODE) {
             const text = node.textContent || "";
-            return HTMLToMarkdown2._labelDepth > 0 ? Utils2.mdText(text) : text;
+            return HTMLToMarkdown2._labelDepth > 0 ? Utils2.mdText(text) : Utils2.mdLiteral(text);
           }
           if (node.nodeType !== Node.ELEMENT_NODE) return "";
           const tag = node.tagName.toLowerCase();
@@ -5233,8 +5243,8 @@
             }
             case "code": {
               const parent = node.parentElement;
-              if (parent && parent.tagName.toLowerCase() === "pre") return children;
-              const codeText = String(children);
+              if (parent && parent.tagName.toLowerCase() === "pre") return DomSpec.textWithBreaks(node);
+              const codeText = DomSpec.textWithBreaks(node);
               const run = (codeText.match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
               const fence = "`".repeat(Math.max(1, run + 1));
               const pad = /^`|`$/.test(codeText) ? " " : "";

@@ -193,7 +193,8 @@ const DomSpec = {
         let pruned = false;
         const collect = (node) => {
             if (!node) return "";
-            if (node.nodeType === 3) return node.nodeValue || "";
+            // 文本节点: 真实 DOM 下 nodeValue 与 textContent 同值; 后者兼作最小桩回退
+            if (node.nodeType === 3) return node.nodeValue || node.textContent || "";
             if (node.nodeType !== 1) return "";
             // wave18 共识(w1 glm): SKIP_TAGS 子树剪枝 —— <pre><code>x</code><script>…</script></pre>
             // 的 JS/CSS 源码原样并入代码块; 其余文本面(serializeRichText 通用递归、obsidian

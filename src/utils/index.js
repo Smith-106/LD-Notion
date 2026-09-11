@@ -53,7 +53,14 @@ const Utils = {
         if (/^https?:\/\//i.test(value)) return value;
         if (value.startsWith("//")) return window.location.protocol + value;
         if (value.startsWith("/")) return window.location.origin + value;
-        return window.location.origin + "/" + value.replace(/^\.?\//, "");
+        // wave20 共识(w20 qwen): 裸相对地址须按**文档基路径**解析 —— 原实现一律拼到 origin 根,
+        // <img src="assets/pic.png"> 在 https://site/posts/42/ 下产出 https://site/assets/pic.png
+        // (结构合法但 404, 同域 ⇒ safeUrl 放行), 与浏览器语义及用户在源页面所见不一致
+        try {
+            return new URL(value, window.location.href).href;
+        } catch {
+            return window.location.origin + "/" + value.replace(/^\.?\//, "");
+        }
     },
 
     isHttpUrl: (value) => /^https?:\/\//i.test(String(value || "").trim()),
@@ -249,6 +256,12 @@ const Utils = {
     // wave18 共识(dsf): 转义字符自身也必须转义 —— 标签以单个 "\" 结尾时(C:\ 一类标题),
     // 产出的 "[C:\](url)" 里 \] 是转义方括号、不闭合标签 → 整串退化为纯文本、链接目标丢失。
     mdText: (text) => String(text ?? "").replace(/([\\\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
+    // wave20 共识(w20 qwen): 文本节点是**字面量**上下文 —— CommonMark 的内联控制符必须转义,
+    // 否则源文里的 "**x**"/"2*3*4"/"a~~b~~c" 被渲染成强调/删除线(Notion 出口把文本放
+    // rich_text.content、格式放 annotations, 同一输入不受害 ⇒ 两出口可见内容不对称)。
+    // 与 mdText 的差别: 不折叠换行(段落内换行是语义), 不转义 "_"(词内下划线无强调语义,
+    // 且 snake_case 极常见, 转义只会引入大量无必要的反斜杠)
+    mdLiteral: (text) => String(text ?? "").replace(/([\\`*~\[\]])/g, "\\$1"),
     // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
     // wave19 共识(w19 qwen): 补 \\(见 MD_URL_ESCAPE)
     mdUrl: (url) => String(url ?? "").replace(/[\s<>()\\]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),

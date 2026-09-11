@@ -301,7 +301,10 @@ const HTMLToMarkdown = {
     _convertNode: (node) => {
         if (node.nodeType === Node.TEXT_NODE) {
             const text = node.textContent || "";
-            return HTMLToMarkdown._labelDepth > 0 ? Utils.mdText(text) : text;
+            // wave20 共识(w20 qwen): 文本节点是字面量上下文 —— 不转义时源文里的
+            // "**重点**"/"2*3*4"/"a~~b~~c" 会被渲染成强调/删除线(内容不保真); 标签内
+            // 走 mdText(需剔方括号防链接语法被破坏), 其余走 mdLiteral(不折叠换行)
+            return HTMLToMarkdown._labelDepth > 0 ? Utils.mdText(text) : Utils.mdLiteral(text);
         }
         if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
@@ -359,10 +362,14 @@ const HTMLToMarkdown = {
             }
             case "code": {
                 const parent = node.parentElement;
-                if (parent && parent.tagName.toLowerCase() === "pre") return children;
+                // wave20 共识(w20 qwen): 代码跨度是字面量上下文 —— CommonMark 规定代码跨度内
+                // 反斜杠转义**不生效**, 故标签/字面量转义会把 arr[0] 变成字面 "arr\[0\]"
+                // (与源代码不符)。统一取原始文本(与 _cookCode / pre 分支同源),
+                // 顺带获得 <code>a<br>b</code> 的换行语义
+                if (parent && parent.tagName.toLowerCase() === "pre") return DomSpec.textWithBreaks(node);
                 // wave6 共识(qwen): 内容含反引号会提前闭合代码跨度并可注入后续标记 ——
                 // 用比最长反引号串更长的围栏(与 pre 分支同口径), 首尾为反引号时补空格
-                const codeText = String(children);
+                const codeText = DomSpec.textWithBreaks(node);
                 const run = (codeText.match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
                 const fence = "`".repeat(Math.max(1, run + 1));
                 const pad = /^`|`$/.test(codeText) ? " " : "";

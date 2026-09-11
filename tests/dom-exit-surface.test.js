@@ -1358,6 +1358,91 @@ describe("wave19 确认轮: 出口面残余边界", () => {
     });
 });
 
+describe("wave20 确认轮: 字面量/基路径/内联回退边界", () => {
+    const withDom = (body, fn) => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body }) };
+        };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
+    };
+    const run = (body) => withDom(element("body", body), () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
+    const paraText = (blocks) => blocks
+        .map((b) => ((b.paragraph && b.paragraph.rich_text) || []).map((r) => r.text.content).join(""))
+        .join("|");
+
+    it("absoluteUrl: 裸相对地址按文档基路径解析(不再一律拼到 origin 根)", () => {
+        const loc = globalThis.window.location;
+        const origHref = loc.href;
+        const origOrigin = loc.origin;
+        loc.href = "http://localhost/posts/42/index.html";
+        loc.origin = "http://localhost";
+        try {
+            expect(Utils.absoluteUrl("assets/pic.png")).toBe("http://localhost/posts/42/assets/pic.png");
+            expect(Utils.absoluteUrl("./notes.md")).toBe("http://localhost/posts/42/notes.md");
+            // 根相对与已绝对形态不回退
+            expect(Utils.absoluteUrl("/uploads/a.png")).toBe("http://localhost/uploads/a.png");
+            expect(Utils.absoluteUrl("https://cdn.example.com/a.png")).toBe("https://cdn.example.com/a.png");
+        } finally {
+            loc.href = origHref;
+            loc.origin = origOrigin;
+        }
+    });
+
+    it("文本节点的 CommonMark 内联控制符被转义(字面星号不被渲染为强调)", () => {
+        expect(HTMLToMarkdown._convertNode(element("p", [textNode("**注意** 2*3*4 a~~b~~c")])))
+            .toBe("\\*\\*注意\\*\\* 2\\*3\\*4 a\\~\\~b\\~\\~c\n\n");
+        // 反引号同样字面化(避免被当作未闭合代码跨度)
+        expect(HTMLToMarkdown._convertNode(element("p", [textNode("a`b")]))).toBe("a\\`b\n\n");
+        // 元素产生的强调语法不受影响, 且换行不被折叠(mdLiteral 不收换行)
+        expect(HTMLToMarkdown._convertNode(element("strong", [textNode("重点")]))).toBe("**重点**");
+    });
+
+    it("代码跨度是字面量上下文(标签内 arr[0] 不带反斜杠)", () => {
+        const a = element("a", [textNode("见 "), element("code", [textNode("arr[0]")])],
+            { getAttribute: attrs({ href: "https://cdn.example.com/p" }) });
+        expect(HTMLToMarkdown._convertNode(a)).toBe("[见 `arr[0]`](https://cdn.example.com/p)");
+        // 非标签上下文同口径(含星号的代码不被转义, 围栏按原文本加宽)
+        expect(HTMLToMarkdown._convertNode(element("p", [element("code", [textNode("a*b")])]))).toBe("`a*b`\n\n");
+    });
+
+    it("地址被拒图片的 alt 回退在透明下钻路径仍为内联文本", () => {
+        const rejected = element("img", [], { getAttribute: attrs({ src: "http://127.0.0.1/x.png", alt: "配图" }) });
+        const blocks = run([element("div", [textNode("前 "), rejected, textNode(" 后")])]);
+        expect(blocks.length).toBe(1);
+        expect(blocks[0].type).toBe("paragraph");
+        expect(paraText(blocks)).toBe("前 配图 后");
+        // 真正能落块的图片仍是独立块(不被内联截流)
+        const ok = element("img", [], { getAttribute: attrs({ src: "https://cdn.example.com/a.png" }) });
+        expect(run([element("div", [textNode("前 "), ok, textNode(" 后")])]).map((b) => b.type)).toContain("image");
+    });
+
+    it("safeUrl 的 scheme/片段判据不依赖测试环境原点(公网原点下同样拒绝)", () => {
+        // 测试环境原点为 localhost(内网) —— 公网校验会把任何补齐结果都判拒,
+        // 使「危险 scheme / 纯片段不得被补齐」的判据在测试下消失。此处显式切到公网原点断言
+        const loc = globalThis.window.location;
+        const origHref = loc.href;
+        const origOrigin = loc.origin;
+        loc.href = "https://linux.do/t/1";
+        loc.origin = "https://linux.do";
+        try {
+            expect(DomSpec.safeUrl("javascript:alert(1)")).toBe("");
+            expect(DomSpec.safeUrl("data:text/html,<script>")).toBe("");
+            expect(DomSpec.safeUrl("#sec")).toBe("");
+            expect(DomSpec.safeUrl("#")).toBe("");
+            // 相对形态仍按文档基路径补齐并过公网校验
+            expect(DomSpec.safeUrl("/uploads/a.png")).toBe("https://linux.do/uploads/a.png");
+            expect(DomSpec.safeUrl("assets/a.png")).toBe("https://linux.do/t/assets/a.png");
+        } finally {
+            loc.href = origHref;
+            loc.origin = origOrigin;
+        }
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;
