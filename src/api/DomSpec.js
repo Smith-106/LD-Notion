@@ -8,6 +8,7 @@
 // 故按 spec:project:learnings-006(出口面统一枚举法)收束为单一定义。
 
 const { Utils } = require("../utils");
+const { UrlValidator } = require("../security/UrlValidator");
 
 // wave14 共识(dsf): 已识别为块级(有专属烹饪分支或容器块)的元素标签 —— 用于顺序化遍历
 // (其余元素透明下钻, 其内联内容并入同一段落缓冲)
@@ -82,6 +83,26 @@ const DomSpec = {
         const source = typeof el.querySelector === "function" ? el.querySelector("source") : null;
         return (source && typeof source.getAttribute === "function" && source.getAttribute("src")) || "";
     },
+
+    // 地址出口面唯一判据(媒体 src 与文件/链接 href 共用): 仅 http(s) 与相对形式可入,
+    // 其余 scheme(javascript:/data:/vbscript:/file:/mailto: 等)一律拒绝 —— 关键在**先判
+    // scheme 再补齐**: Utils.absoluteUrl 会把未知 scheme 拼成 "<origin>/<scheme>:…" 并被
+    // validatePageExternalUrl 判为合法公网 http(s)(旧契约测试仅因测试环境 origin 为内网
+    // localhost 才显绿, 实网 origin=https://linux.do 下 javascript:/data: 均放行)。
+    // 相对(/x)、协议相对(//host/x)、裸相对(x)、已绝对 http(s) 地址补齐后过公网校验。
+    safeUrl: (raw) => {
+        const value = String(raw == null ? "" : raw).trim();
+        if (!value || value.startsWith("#")) return "";
+        const scheme = (value.match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
+        if (scheme && !/^https?$/i.test(scheme)) return "";
+        const abs = scheme ? value : Utils.absoluteUrl(value);
+        return abs && UrlValidator.validatePageExternalUrl(abs) ? abs : "";
+    },
+
+    // 媒体地址出口面唯一入口: 回退(mediaSrc) + 地址判据(safeUrl)。消费方不得再各自
+    // absoluteUrl + validatePageExternalUrl —— 两导出器口径曾因此不对称: 相对与协议相对
+    // 媒体地址在 Markdown 侧被整体判为"非公网"而静默丢弃(Notion 侧正常落块)。
+    mediaUrl: (el) => DomSpec.safeUrl(DomSpec.mediaSrc(el)),
 
     // 单行上下文出口面的唯一入口(引用块内/callout 行/表格单元格/标题/link label/img alt)。
     // 实现仍驻 Utils.mdText(公开壳, 供 ai/ui 跨模块调用), 此处只做导出层命名收束 ——

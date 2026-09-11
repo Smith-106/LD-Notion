@@ -176,6 +176,308 @@ describe("出口面: 媒体采集覆盖自身与后代", () => {
     });
 });
 
+// ===== 出口面 4: 地址判据(相对地址补齐 / scheme 白名单) =====
+// R15 实缺陷(本组是它的回归锁, 对应变异: 去掉 safeUrl 的 scheme 前置判定 / 去掉原点补齐):
+//   ①Markdown 侧只放行 "http" 前缀 → 相对(/uploads/x.png)与协议相对(//cdn/x.png)媒体与
+//     链接被整体判为"非公网"静默丢弃(Notion 侧正常);
+//   ②Utils.absoluteUrl 对未知 scheme 一律原点补齐 → javascript:/data:/file: 在公网原点页面上
+//     被拼成 "https://<origin>/<scheme>:…" 并通过 validatePageExternalUrl(旧断言仅因测试环境
+//     origin=http://localhost 是内网 host 才显绿 —— 假绿)。
+// 断言必须在**公网原点**下进行, 否则测不出 scheme 前置判定。
+const imgSrc = (src) => element("img", [], { getAttribute: attrs({ src }) });
+const anchor = (href, text) => element("a", [textNode(text)], { getAttribute: attrs({ href }), textContent: text });
+const attachment = (href, text) => element("a", [textNode(text)], {
+    getAttribute: attrs({ href }),
+    textContent: text,
+    classList: { contains: (c) => c === "attachment" },
+});
+
+describe("出口面: 地址判据(相对地址补齐 / scheme 白名单)", () => {
+    const PUBLIC_ORIGIN = "https://linux.do";
+    let origLocation;
+    beforeAll(() => {
+        origLocation = { ...globalThis.window.location };
+        Object.assign(globalThis.window.location, { origin: PUBLIC_ORIGIN, protocol: "https:", hostname: "linux.do" });
+    });
+    afterAll(() => {
+        Object.assign(globalThis.window.location, origLocation);
+    });
+
+    const DANGEROUS = ["javascript:alert(1)", "data:text/html;base64,PHN2Zz4=", "vbscript:msgbox", "file:///etc/passwd", "mailto:a@b.c"];
+
+    it("公网原点下危险 scheme 不被原点补齐放行(两导出器)", () => {
+        for (const raw of DANGEROUS) {
+            expect(`${raw} -> ${JSON.stringify(DomSpec.safeUrl(raw))}`).toBe(`${raw} -> ""`);
+            const blocks = [];
+            DOMToNotion._cookImage(imgSrc(raw), blocks, "external");
+            expect(`${raw} -> ${blocks.length}`).toBe(`${raw} -> 0`);
+            const md = HTMLToMarkdown._convertNode(imgSrc(raw));
+            expect(`${raw} -> ${md.includes("](")}`).toBe(`${raw} -> false`);
+            // 链接面同口径: 危险 href 不得写成链接(文本保留)
+            expect(HTMLToMarkdown._convertNode(anchor(raw, "点"))).toBe("点");
+            const rt = DOMToNotion.serializeRichText(anchor(raw, "点"));
+            expect(rt.map((r) => r.text.content).join("")).toBe("点");
+            expect(rt.some((r) => r.text.link)).toBe(false);
+        }
+    });
+
+    it("相对 / 协议相对地址两导出器同口径补齐", () => {
+        const cases = [
+            ["//cdn.example.com/x.png", "https://cdn.example.com/x.png"],
+            ["/uploads/x.png", `${PUBLIC_ORIGIN}/uploads/x.png`],
+        ];
+        for (const [raw, abs] of cases) {
+            expect(`${raw} -> ${DomSpec.safeUrl(raw)}`).toBe(`${raw} -> ${abs}`);
+            const blocks = [];
+            DOMToNotion._cookImage(imgSrc(raw), blocks, "external");
+            expect(blocks.map((b) => b.image.external.url)).toEqual([abs]);
+            expect(HTMLToMarkdown._convertNode(imgSrc(raw))).toBe(`![](${abs})`);
+        }
+        // 链接面: 相对 href 不再降级纯文本
+        expect(DomSpec.safeUrl("/t/2")).toBe(`${PUBLIC_ORIGIN}/t/2`);
+        expect(HTMLToMarkdown._convertNode(anchor("/t/2", "帖"))).toBe(`[帖](${PUBLIC_ORIGIN}/t/2)`);
+        expect(DOMToNotion.serializeRichText(anchor("/t/2", "帖"))[0].text.link.url).toBe(`${PUBLIC_ORIGIN}/t/2`);
+        // 附件(href 面)同判据
+        const att = [];
+        DOMToNotion._cookAttachment(attachment("/uploads/doc.pdf", "doc.pdf"), att, "external");
+        expect(att.map((b) => b.file.external.url)).toEqual([`${PUBLIC_ORIGIN}/uploads/doc.pdf`]);
+    });
+
+    it("补齐后仍需过公网校验(内网/环回/169.254 两侧都拒)", () => {
+        for (const raw of ["http://127.0.0.1/x.png", "http://169.254.169.254/x", "http://10.0.0.5/x", "http://localhost/x"]) {
+            expect(`${raw} -> ${DomSpec.safeUrl(raw)}`).toBe(`${raw} -> `);
+            const blocks = [];
+            DOMToNotion._cookImage(imgSrc(raw), blocks, "external");
+            expect(blocks.length).toBe(0);
+            expect(HTMLToMarkdown._convertNode(imgSrc(raw))).toBe("");
+        }
+        // 片段链接保持纯文本(两导出器一致; DOMToNotion 另有 # 分支但判据结果相同)
+        expect(DomSpec.safeUrl("#top")).toBe("");
+        expect(HTMLToMarkdown._convertNode(anchor("#top", "顶"))).toBe("顶");
+    });
+
+    it("已绝对 http(s) 地址大小写不敏感(仍走同一判据)", () => {
+        expect(DomSpec.safeUrl("HTTP://cdn.example.com/x.png")).toBe("HTTP://cdn.example.com/x.png");
+        expect(DomSpec.safeUrl("HTTPS://cdn.example.com/x.png")).toBe("HTTPS://cdn.example.com/x.png");
+    });
+
+    it("四类媒体在 Markdown 侧同口径(相对地址补齐后写出)", () => {
+        const base = `${PUBLIC_ORIGIN}/`;
+        expect(HTMLToMarkdown._convertNode(element("video", [], { getAttribute: attrs({ src: "/s.mp4" }) }))).toBe(`[视频](${base}s.mp4)\n\n`);
+        expect(HTMLToMarkdown._convertNode(element("audio", [], { getAttribute: attrs({ src: "/s.mp3" }) }))).toBe(`[音频](${base}s.mp3)\n\n`);
+        expect(HTMLToMarkdown._convertNode(element("iframe", [], { getAttribute: attrs({ src: "/embed" }) }))).toBe(`[嵌入内容](${base}embed)\n\n`);
+        const blocks = [];
+        DOMToNotion._cookVideo(element("video", [], { getAttribute: attrs({ src: "/s.mp4" }) }), blocks, "external");
+        expect(blocks.map((b) => b.video.external.url)).toEqual([`${base}s.mp4`]);
+    });
+
+    it("地址回退仍经同一入口(data-src / <source src>)", () => {
+        const lazy = element("img", [], { getAttribute: attrs({ "data-src": "//cdn.example.com/lazy.png" }) });
+        expect(DomSpec.mediaUrl(lazy)).toBe("https://cdn.example.com/lazy.png");
+        const withSource = element("video", [], {
+            getAttribute: attrs({}),
+            querySelector: () => element("source", [], { getAttribute: attrs({ src: "/v.mp4" }) }),
+        });
+        expect(DomSpec.mediaUrl(withSource)).toBe(`${PUBLIC_ORIGIN}/v.mp4`);
+    });
+});
+
+// ===== 出口面 5: 单行上下文(记录在案的双出口面差异) =====
+// Markdown 语法是单行的(标题/表格单元格内的 CR/LF 会破坏结构) → obsidian 折叠;
+// Notion rich_text 本身可以承载 "\n"(br 是硬换行) → DOMToNotion 不折叠。
+// 两个折叠原语语义**不可互代**: collapseOneLine(链接标签/alt) 需剔方括号以免破坏链接结构,
+// foldToSingleLine(标题/单元格) 不可剔("[RFC]" 是合法标题内容)。
+describe("出口面: 单行上下文(折叠语义与已登记差异)", () => {
+    const withBreak = (tag) => element(tag, [textNode("a"), element("br"), textNode("b")]);
+
+    it("Markdown 侧单行位置折叠 CR/LF(标题 / 表格单元格)", () => {
+        expect(HTMLToMarkdown._convertNode(withBreak("h2")).split("\n")[0]).toBe("## a b");
+        const table = element("table", [element("tbody", [element("tr", [withBreak("td")])])]);
+        expect(HTMLToMarkdown._convertNode(table).split("\n")[0]).toBe("| a b |");
+    });
+
+    it("Notion 侧保留换行(rich_text 承载 \\n, 不引入折叠)", () => {
+        const blocks = [];
+        DOMToNotion._cookHeading(withBreak("h2"), blocks, "external");
+        expect(blocks[0].heading_2.rich_text.map((r) => r.text.content).join("")).toBe("a\nb");
+    });
+
+    it("折叠原语不可互换: foldToSingleLine 保方括号, collapseOneLine 剔方括号", () => {
+        expect(DomSpec.foldToSingleLine("[RFC]\r\n8601")).toBe("[RFC] 8601");
+        expect(DomSpec.foldToSingleLine("a\rb")).toBe("a b");
+        expect(DomSpec.foldToSingleLine(null)).toBe("");
+        expect(DomSpec.collapseOneLine("[RFC] 8601")).toBe("RFC 8601");
+        expect(DomSpec.foldToSingleLine("[RFC] 8601")).not.toBe(DomSpec.collapseOneLine("[RFC] 8601"));
+    });
+});
+
+// ===== 出口面 6: 媒体宿主矩阵 =====
+// 每个宿主都必须经同一条采集入口(DomSpec.eachMedia)消费媒体: 恰一次 + 同类保文档序。
+// 对应变异: eachMedia 去掉"自身即媒体"分派 / 交换类序 / 删某一类查询。
+describe("出口面: 媒体宿主矩阵(恰一次 / 同类保序 / 不丢失)", () => {
+    const P1 = "https://cdn.example.com/p1.png";
+    const P2 = "https://cdn.example.com/p2.png";
+    const DOC = "https://cdn.example.com/doc.pdf";
+    const VID = "https://cdn.example.com/v.mp4";
+    const videoSrc = (src) => element("video", [], { getAttribute: attrs({ src }) });
+    // 同类两个 + 附件 + 视频: 既测"每节点恰一次", 也测"同类内文档序"
+    const mediaChildren = () => [textNode("marker"), imgSrc(P1), imgSrc(P2), attachment(DOC, "doc.pdf"), videoSrc(VID)];
+
+    // 桩宿主按真实 DOM 语义回答后代查询(否则采集器无输入)
+    const matches = (node, sel) => {
+        const t = String(node.tagName || "").toLowerCase();
+        if (sel === "img") return t === "img";
+        if (sel === "a.attachment") return t === "a" && !!node.classList && node.classList.contains("attachment");
+        return t === sel;
+    };
+    const queryAll = (root, sel) => {
+        const out = [];
+        const walk = (n) => (n.children || []).forEach((c) => { if (matches(c, sel)) out.push(c); walk(c); });
+        walk(root);
+        return out;
+    };
+    const withQuery = (node) => {
+        node.querySelectorAll = (sel) => queryAll(node, sel);
+        (node.children || []).forEach(withQuery);
+        return node;
+    };
+    const mdCount = (md, url) => md.split(url).length - 1;
+
+    const HOSTS = [
+        ["段落", (kids) => element("p", kids)],
+        ["li", (kids) => element("ul", [element("li", kids)])],
+        ["ul 非 li 直属子", (kids) => element("ul", kids)],
+        ["表格单元格", (kids) => element("table", [element("tbody", [element("tr", [element("td", kids)])])])],
+        ["blockquote", (kids) => element("blockquote", kids)],
+        ["未匹配容器(article)", (kids) => element("article", kids)],
+    ];
+
+    for (const [name, build] of HOSTS) {
+        it(`${name}: 恰一次 + 同类保序 + 两导出器同口径`, () => {
+            const host = withQuery(build(mediaChildren()));
+            const blocks = [];
+            DOMToNotion._consumeInlineMedia(host, blocks, "external");
+            const urls = blocks.map((b) => ((b.image || b.video || b.file || {}).external || {}).url || "");
+            expect(`${name} | ${urls.join(" ")}`).toBe(`${name} | ${P1} ${P2} ${DOC} ${VID}`);
+            const md = HTMLToMarkdown._convertNode(host);
+            for (const url of [P1, P2, DOC, VID]) {
+                expect(`${name} | ${url} | ${mdCount(md, url)}`).toBe(`${name} | ${url} | 1`);
+            }
+        });
+    }
+
+    it("body 根: cookedToBlocks 端到端同口径", () => {
+        const origParser = globalThis.DOMParser;
+        const body = withQuery(element("body", [element("p", mediaChildren())]));
+        globalThis.DOMParser = function () { return { parseFromString: () => ({ body }) }; };
+        let blocks;
+        try {
+            blocks = DOMToNotion.cookedToBlocks("<p>marker</p>", "external");
+        } finally {
+            if (origParser === undefined) delete globalThis.DOMParser; else globalThis.DOMParser = origParser;
+        }
+        const urls = blocks.map((b) => ((b.image || b.video || b.file || {}).external || {}).url || "").filter(Boolean);
+        expect(urls).toEqual([P1, P2, DOC, VID]);
+    });
+
+    it("自身即媒体: 宿主元素本身被消费(不依赖后代查询)", () => {
+        const blocks = [];
+        DOMToNotion._consumeInlineMedia(imgSrc(P1), blocks, "external");
+        expect(blocks.map((b) => b.image.external.url)).toEqual([P1]);
+        const att = [];
+        DOMToNotion._consumeInlineMedia(attachment(DOC, "doc.pdf"), att, "external");
+        expect(att.map((b) => b.file.external.url)).toEqual([DOC]);
+    });
+});
+
+// ===== 出口面 7: 有序遍历 =====
+describe("出口面: 有序遍历(文本节点不丢且保序)", () => {
+    it("eachChildOrdered 含文本节点、按文档序、空值安全", () => {
+        const seen = [];
+        DomSpec.eachChildOrdered(element("div", [textNode("t1"), element("b"), textNode("t2")]), (n) => seen.push(n.nodeValue || n.tagName));
+        expect(seen).toEqual(["t1", "B", "t2"]);
+        const empty = [];
+        DomSpec.eachChildOrdered(null, (n) => empty.push(n));
+        expect(empty).toEqual([]);
+    });
+
+    it("script 剔除但相邻文本按文档序保留(两导出器)", () => {
+        const tree = element("div", [textNode("前"), element("script", [textNode("var x=1;")]), textNode("后")]);
+        // 真实 DOM 语义: children 只含元素, childNodes 含文本 —— 桩必须同样区分,
+        // 否则"按 children 遍历"的变异在桩上不可观测(等价变异假象)
+        tree.children = tree.children.filter((c) => c.nodeType === 1);
+        expect(DOMToNotion.serializeRichText(tree).map((r) => r.text.content).join("")).toBe("前后");
+        expect(HTMLToMarkdown._convertNode(tree)).toBe("前后");
+    });
+});
+
+// ===== 出口面 8: emoji 判据 =====
+// emoji 判据单一来源 DomSpec.emojiNameOf; 消费方只有 DOMToNotion(转 emoji 文本)。
+// obsidian 侧无 emoji 判据: 其图片分支按普通图片写出 emoji 图链接(不失信息, 形态不同,
+// 已登记在清单 note 中)。变异: emojiNameOf 返回 null / set 目录收窄。
+describe("出口面: emoji 判据(单一来源 DomSpec.emojiNameOf)", () => {
+    const EMOJI = "/images/emoji/win10/smile.png";
+
+    it("emoji 图不落图片块, 转 emoji 文本", () => {
+        expect(DomSpec.emojiNameOf(EMOJI)).toBe("smile");
+        expect(DomSpec.emojiNameOf("/images/emoji/twitter/+1.png")).toBe("+1");
+        expect(DomSpec.emojiNameOf("/uploads/x.png")).toBe(null);
+        const blocks = [];
+        DOMToNotion._cookImage(imgSrc(EMOJI), blocks, "external");
+        expect(blocks.length).toBe(0);
+        const p = element("p", [textNode("hi "), imgSrc(EMOJI)]);
+        expect(DOMToNotion.serializeRichText(p).map((r) => r.text.content).join("")).toContain("😊");
+    });
+});
+
+// ===== 清单自检: 清单与 src/ 现状一致(learnings-006 规则 3) =====
+// 规则 3: 新增出口必须对照 SURFACE_INVENTORY 接入 DomSpec 原语, 不允许"下一轮审计再补"。
+// 本组把清单从文档变成**可执行断言**: 原语消费点缺失 / 实现地重复 = 测试红。
+describe("清单自检: 出口面清单与 src/ 现状一致", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const read = (p) => fs.readFileSync(path.resolve(process.cwd(), p), "utf8");
+    const EXPORTERS = ["src/api/DOMToNotion.js", "src/api/obsidian.js"];
+
+    it("清单条目结构完整", () => {
+        expect(SURFACE_INVENTORY.length).toBe(6);
+        for (const item of SURFACE_INVENTORY) {
+            expect(`${item.surface.length > 0} ${item.primitive.length > 0}`).toBe("true true");
+            expect(item.hosts).toBeGreaterThan(0);
+            expect(item.exporters).toBeGreaterThanOrEqual(1);
+            expect(item.exporters).toBeLessThanOrEqual(2);
+        }
+        // 双出口共担的出口面必须两导出器都接(emoji 判据已登记为单侧)
+        for (const item of SURFACE_INVENTORY.filter((i) => !i.note)) {
+            expect(`${item.surface} | ${item.exporters}`).toBe(`${item.surface} | 2`);
+        }
+    });
+
+    it("两导出器不再各持本地媒体采集/地址判据实现", () => {
+        for (const p of EXPORTERS) {
+            const src = read(p);
+            expect(`${p} | querySelectorAll 调用 | ${/\.querySelectorAll\(/.test(src)}`).toBe(`${p} | querySelectorAll 调用 | false`);
+            expect(`${p} | mediaUrl 缺失 | ${src.includes("DomSpec.mediaUrl")}`).toBe(`${p} | mediaUrl 缺失 | true`);
+            expect(`${p} | eachChildOrdered 缺失 | ${src.includes("DomSpec.eachChildOrdered")}`).toBe(`${p} | eachChildOrdered 缺失 | true`);
+            expect(`${p} | isSkippedNode 缺失 | ${src.includes("DomSpec.isSkippedNode")}`).toBe(`${p} | isSkippedNode 缺失 | true`);
+        }
+        // Markdown 侧不得再自带公网校验(单一入口 safeUrl/mediaUrl)
+        expect(read(EXPORTERS[1]).includes("validatePageExternalUrl")).toBe(false);
+    });
+
+    it("原语唯一实现地: 导出器不得重声明跳过表/折叠/遍历", () => {
+        const spec = read("src/api/DomSpec.js");
+        for (const name of ["SKIP_TAGS", "eachChildOrdered", "foldToSingleLine", "safeUrl", "mediaUrl", "mediaSrc", "eachMedia"]) {
+            expect(`DomSpec | ${name} | ${spec.includes(name)}`).toBe(`DomSpec | ${name} | true`);
+        }
+        for (const p of EXPORTERS) {
+            const src = read(p);
+            expect(`${p} | 重声明跳过表 | ${/SKIP_TAGS\s*=/.test(src)}`).toBe(`${p} | 重声明跳过表 | false`);
+            expect(`${p} | 重写 script 跳过 | ${/tag === "script"|case "script"/.test(src)}`).toBe(`${p} | 重写 script 跳过 | false`);
+        }
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;
@@ -183,5 +485,8 @@ describe("出口面: 媒体采集覆盖自身与后代", () => {
 export const SURFACE_INVENTORY = [
     { surface: "非渲染标签(script/style/noscript)", primitive: "DomSpec.SKIP_TAGS / isSkippedNode", hosts: 6, exporters: 2 },
     { surface: "媒体地址回退(src/data-src/<source src>)", primitive: "DomSpec.mediaSrc", hosts: 4, exporters: 2 },
+    { surface: "地址判据(相对补齐 / scheme 白名单 / 公网校验)", primitive: "DomSpec.safeUrl / mediaUrl", hosts: 5, exporters: 2 },
     { surface: "媒体采集(自身+后代)", primitive: "DomSpec.eachMedia / mediaKind", hosts: 7, exporters: 2 },
+    { surface: "单行上下文折叠", primitive: "DomSpec.foldToSingleLine / collapseOneLine", hosts: 11, exporters: 2, note: "记录在案的差异: Markdown 侧折叠 CR/LF, Notion 侧 rich_text 保留 \\n" },
+    { surface: "emoji 判据", primitive: "DomSpec.emojiNameOf", hosts: 1, exporters: 1, note: "仅 DOMToNotion 消费(转 emoji 文本); obsidian 侧按普通图片写出 emoji 图链接, 不失信息" },
 ];

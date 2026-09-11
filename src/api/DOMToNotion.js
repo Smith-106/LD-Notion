@@ -33,7 +33,7 @@ const DOMToNotion = {
         const img = el.querySelector("img");
         if (!img) return;
         const src = DomSpec.mediaSrc(img);
-        const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
+        const full = DomSpec.mediaUrl(img);
         if (full && !DOMToNotion._emojiImageName(src)) {
             if (imgMode === "skip") return;
             blocks.push({
@@ -50,7 +50,7 @@ const DOMToNotion = {
     _cookAttachment: (el, blocks, imgMode) => {
         const href = el.getAttribute("href") || "";
         const fileName = el.textContent?.trim() || "attachment";
-        const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(href));
+        const full = DomSpec.safeUrl(href);
         if (full && imgMode !== "skip") {
             blocks.push({
                 type: "file",
@@ -70,10 +70,8 @@ const DOMToNotion = {
 
     // 视频元素
     _cookVideo: (el, blocks, imgMode) => {
-        // P3 收敛: 视频地址判据单一驻 DomSpec.mediaSrc(src → data-src → <source src>),
-        // 与 obsidian 侧同口径
-        const src = DomSpec.mediaSrc(el);
-        const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
+        // P3 收敛 + R15: 地址判据单一驻 DomSpec.mediaUrl(回退 → 补齐 → 公网校验)
+        const full = DomSpec.mediaUrl(el);
         if (full && imgMode !== "skip") {
             // wave8 共识(qwen): 先剥查询串/锚点再取扩展名 —— "a.exe?y=.mp4"/"a.mp4#y.exe"
             // 否则扩展名可被查询串或锚点伪造, 误选 video/embed 块类型
@@ -107,9 +105,8 @@ const DOMToNotion = {
 
     // 音频元素
     _cookAudio: (el, blocks, imgMode) => {
-        // P3 收敛: 音频地址判据单一驻 DomSpec.mediaSrc(与视频/图片同口径)
-        const src = DomSpec.mediaSrc(el);
-        const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
+        // P3 收敛 + R15: 地址判据单一驻 DomSpec.mediaUrl(与视频/图片同口径)
+        const full = DomSpec.mediaUrl(el);
         if (full && imgMode !== "skip") {
             blocks.push({
                 type: "audio",
@@ -379,7 +376,7 @@ const DOMToNotion = {
         // wave7 共识(qwen) → P3 收敛: 图片地址判据统一走 DomSpec.mediaSrc
         // (src → data-src → <source src>), 与 lightbox/视频/音频/obsidian 同源
         const src = DomSpec.mediaSrc(el);
-        const full = DOMToNotion._safeExternalUrl(Utils.absoluteUrl(src));
+        const full = DomSpec.mediaUrl(el);
         if (full && !DOMToNotion._emojiImageName(src)) {
             if (imgMode !== "skip") {
                 blocks.push({
@@ -479,7 +476,8 @@ const DOMToNotion = {
                     DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
                     return;
                 }
-                const link = Utils.absoluteUrl(href);
+                // R15: 地址判据统一走 DomSpec.safeUrl(非 http(s) scheme 不再被原点补齐成假链接)
+                const link = DomSpec.safeUrl(href);
                 // wave6 共识(dsf): 链接内非文本内容(如 <a><img class="emoji" alt="😀"></a>)
                 // 让 textContent 为空 —— 回退裸 URL 会丢掉 emoji, 改优先取 emoji alt
                 let linkText = el.textContent || "";
@@ -488,13 +486,13 @@ const DOMToNotion = {
                     linkText = innerImg ? (innerImg.getAttribute("alt") || "") : "";
                 }
                 if (!linkText) linkText = link;
-                // v3.14.6 (XN-04): 文本链接过 _safeExternalUrl —— 非法(内网/169.254/非 http(s))降级纯文本
-                const safeLink = DOMToNotion._safeExternalUrl(link);
-                if (link && linkText) {
+                // v3.14.6 (XN-04) + R15: 链接判据即上方 safeUrl 结果 —— 非法(内网/169.254/非 http(s))
+                // 时 link 为空串, 文本仍照常落 rich_text(降级纯文本, 不再把伪 URL 当文本输出)
+                if (linkText) {
                     breakIfNeeded(annotations);
                     const chunks = DOMToNotion.splitLongText(linkText, annotations);
-                    if (safeLink) {
-                        chunks.forEach(chunk => { chunk.text.link = { url: safeLink }; });
+                    if (link) {
+                        chunks.forEach(chunk => { chunk.text.link = { url: link }; });
                     }
                     result.push(...chunks);
                 }

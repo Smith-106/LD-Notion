@@ -258,42 +258,44 @@ const HTMLToMarkdown = {
                 return lines.map((l) => `> ${l}`).join("\n") + "\n\n";
             }
             case "a": {
-                const href = node.getAttribute("href") || "";
-                // wave9 共识(dsf): 协议判断不区分大小写(HTTP:// 不再降级纯文本)
-                if (href.toLowerCase().startsWith("http")) return `[${HTMLToMarkdown._mdText(children)}](${HTMLToMarkdown._mdUrl(href)})`;
+                // wave9 共识(dsf) + R15: 地址判据统一走 DomSpec.safeUrl —— 此前仅放行 "http"
+                // 前缀, 相对(/t/1)与协议相对(//host/t/1)链接被降级为纯文本(链接静默丢失);
+                // 且 http://127.0.0.1/… 等内网链接未经公网校验直接被写入
+                const link = DomSpec.safeUrl(node.getAttribute("href") || "");
+                if (link) return `[${HTMLToMarkdown._mdText(children)}](${HTMLToMarkdown._mdUrl(link)})`;
                 return children;
             }
             case "img": {
-                const src = DomSpec.mediaSrc(node);
                 const alt = node.getAttribute("alt") || "";
-                // wave9 共识(qwen): src 仅放行 http(s) 公网地址(javascript:/data:/内网 拒绝)
-                if (src && UrlValidator.validatePageExternalUrl(src)) {
+                // wave9 共识(qwen) + R15: 地址判据(回退 → 原点补齐 → 公网 http(s) 校验)
+                // 单一驻 DomSpec.mediaUrl —— 相对/协议相对地址此前被整体判为"非公网"而丢失
+                const src = DomSpec.mediaUrl(node);
+                if (src) {
                     return `![${HTMLToMarkdown._mdText(alt)}](${HTMLToMarkdown._mdUrl(src)})`;
                 }
                 return HTMLToMarkdown._mdText(alt || "");
             }
             case "ul": return children;
             case "iframe": {
-                const src = DomSpec.mediaSrc(node);
-                // wave9 共识(qwen): src 仅放行 http(s) 公网地址(javascript:/data:/内网 拒绝)
-                const safeSrc = String(src || "");
-                if (safeSrc && UrlValidator.validatePageExternalUrl(safeSrc)) {
+                // wave9 共识(qwen) + R15: 地址判据统一走 DomSpec.mediaUrl
+                const safeSrc = DomSpec.mediaUrl(node);
+                if (safeSrc) {
                     return `[嵌入内容](${HTMLToMarkdown._mdUrl(safeSrc)})\n\n`;
                 }
                 return "[嵌入内容已拒（非公网 http(s) 地址）]\n\n";
             }
             case "video": {
-                const src = DomSpec.mediaSrc(node);
-                // wave9 共识(qwen): 同 img —— 非公网 http(s) 不生成链接
-                if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
+                // wave9 共识(qwen) + R15: 同 img —— 地址判据统一走 DomSpec.mediaUrl
+                const src = DomSpec.mediaUrl(node);
+                if (src) {
                     return `[视频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
                 }
                 return "[视频已拒（非公网 http(s) 地址）]\n\n";
             }
             case "audio": {
-                // wave13 共识(dsf): 与 video 同口径 —— 仅有 <source src> 子元素时不再误判"已拒"
-                const src = DomSpec.mediaSrc(node);
-                if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
+                // wave13 共识(dsf) + R15: 与 video 同口径 —— 地址判据统一走 DomSpec.mediaUrl
+                const src = DomSpec.mediaUrl(node);
+                if (src) {
                     return `[音频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
                 }
                 return "[音频已拒（非公网 http(s) 地址）]\n\n";
