@@ -514,6 +514,166 @@ describe("wave15: 容器分支不静默丢弃 + 缩进排版", () => {
     });
 });
 
+// ===== wave16: 修复后复验收敛(三模型第二轮) =====
+describe("wave16: 修复后复验收敛", () => {
+    const REAL = "https://cdn.example.com/real.png";
+
+    it("DomSpec.mediaSrc: 占位 src(data:/about:) 不阻断懒加载回退", () => {
+        const placeholder = element("img", [], { getAttribute: attrs({ src: "data:image/gif;base64,R0lGOD", "data-src": REAL }) });
+        expect(DomSpec.mediaSrc(placeholder)).toBe(REAL);
+        expect(DomSpec.mediaUrl(placeholder)).toBe(REAL);
+        const blocks = [];
+        DOMToNotion._cookImage(placeholder, blocks, "external");
+        expect(blocks.map((b) => b.image.external.url)).toEqual([REAL]);
+        // 无回退可用的占位 src 仍被地址判据拒绝(不因放宽而放行)
+        expect(DomSpec.mediaUrl(element("img", [], { getAttribute: attrs({ src: "data:image/gif;base64,R0lGOD" }) }))).toBe("");
+        expect(DomSpec.mediaUrl(element("img", [], { getAttribute: attrs({ src: "about:blank" }) }))).toBe("");
+    });
+
+    it("DomSpec.textWithBreaks: <br> 在纯文本上下文产出换行", () => {
+        expect(DomSpec.textWithBreaks(element("code", [textNode("line1"), element("br"), textNode("line2")]))).toBe("line1\nline2");
+        expect(DomSpec.textWithBreaks(element("pre", [element("span", [textNode("a")]), textNode("b")]))).toBe("ab");
+        expect(DomSpec.textWithBreaks(null)).toBe("");
+    });
+
+    it("_cookCode: 代码块内 <br> 换行不丢失", () => {
+        const code = () => element("code", [textNode("a"), element("br"), textNode("b")], { getAttribute: () => null });
+        const pre = element("pre", [code()], { querySelector: (sel) => (sel === "code" ? code() : null) });
+        const blocks = [];
+        DOMToNotion._cookCode(pre, blocks);
+        expect(blocks.map((b) => b.code.rich_text.map((r) => r.text.content).join("")).join("")).toBe("a\nb");
+    });
+
+    it("obsidian: pre 内 <br> 换行不丢失", () => {
+        const code = () => element("code", [textNode("a"), element("br"), textNode("b")], { getAttribute: () => null });
+        const pre = element("pre", [code()], { querySelector: () => code() });
+        expect(HTMLToMarkdown._convertNode(pre)).toContain("a\nb");
+    });
+
+    it("_cookAttachment: 被地址判据拒绝时不丢可见文本", () => {
+        const blocks = [];
+        DOMToNotion._cookAttachment(attachment("http://169.254.169.254/latest/meta-data", "file.txt"), blocks, "external");
+        const dumped = JSON.stringify(blocks);
+        expect(dumped).toContain("file.txt");
+        expect(dumped.includes("169.254.169.254")).toBe(false);
+        // 合法地址仍产出 file 块(原行为不变)
+        const ok = [];
+        DOMToNotion._cookAttachment(attachment("https://cdn.example.com/doc.pdf", "doc.pdf"), ok, "external");
+        expect(ok.map((b) => b.type)).toEqual(["file"]);
+    });
+
+    it("_cookAsideQuote: 多个 blockquote 都产出引用块", () => {
+        const aside = element("aside", [element("blockquote", [textNode("第一")]), element("blockquote", [textNode("第二")])], {
+            classList: { contains: (c) => c === "quote" },
+        });
+        const blocks = [];
+        DOMToNotion._cookAsideQuote(aside, blocks, "external");
+        expect(blocks.map((b) => b.type).join(" ")).toBe("quote quote");
+        expect(blocks.map((b) => b.quote.rich_text.map((r) => r.text.content).join("")).join("|")).toBe("第一|第二");
+    });
+
+    it("_cookLightbox: 容器内多图都不丢失", () => {
+        const A = "https://cdn.example.com/a.png";
+        const B = "https://cdn.example.com/b.png";
+        const img = (src) => element("img", [], { getAttribute: attrs({ src }) });
+        const wrapper = element("div", [], {
+            classList: { contains: (c) => c === "lightbox-wrapper" },
+            querySelector: () => img(A),
+            querySelectorAll: (sel) => (sel === "img" ? [img(A), img(B)] : []),
+        });
+        const blocks = [];
+        DOMToNotion._cookLightbox(wrapper, blocks, "external");
+        expect(blocks.map((b) => b.image.external.url)).toEqual([A, B]);
+    });
+
+    it("_cookTable: 空 thead 时以数据首行全 th 判表头", () => {
+        const th = () => element("th", [textNode("H")], { closest: () => null });
+        const td = (v) => element("td", [textNode(v)], { closest: () => null });
+        const blocks = [];
+        DOMToNotion._cookTable(element("table", [element("thead"),
+            element("tbody", [element("tr", [th(), th()], { closest: () => null }),
+                element("tr", [td("1"), td("2")], { closest: () => null })])]), blocks, "external");
+        expect(blocks.map((b) => `${b.type}:${b.table.has_column_header}`).join(" ")).toBe("table:true");
+        // 首行为 td 时仍不置表头(wave15 修复不回退)
+        const plain = [];
+        DOMToNotion._cookTable(element("table", [element("thead"),
+            element("tbody", [element("tr", [td("1"), td("2")], { closest: () => null })])]), plain, "external");
+        expect(plain.map((b) => `${b.type}:${b.table.has_column_header}`).join(" ")).toBe("table:false");
+    });
+
+    it("_cookTable: caption 文本与内嵌媒体不丢失", () => {
+        const img = element("img", [], { getAttribute: attrs({ src: REAL }) });
+        const caption = element("caption", [textNode("表标题"), img], {
+            querySelectorAll: (sel) => (sel === "img" ? [img] : []),
+        });
+        const blocks = [];
+        DOMToNotion._cookTable(element("table", [caption,
+            element("tbody", [element("tr", [element("td", [textNode("1")], { closest: () => null })], { closest: () => null })])]), blocks, "external");
+        expect(blocks.map((b) => b.type).join(" ")).toBe("paragraph image table");
+        expect(blocks[0].paragraph.rich_text.map((r) => r.text.content).join("")).toBe("表标题");
+        expect(blocks[1].image.external.url).toBe(REAL);
+        expect(blocks[2].table.children.length).toBe(1);
+    });
+
+    it("serializeRichText: 块级引用/aside 与前文分行(嵌套引用不粘连)", () => {
+        const rt = DOMToNotion.serializeRichText(element("div", [textNode("前"), element("blockquote", [textNode("引")])]));
+        expect(rt.map((r) => r.text.content).join("")).toBe("前\n引");
+        const nested = DOMToNotion.serializeRichText(element("aside", [textNode("外"), element("blockquote", [textNode("内")])]));
+        expect(nested.map((r) => r.text.content).join("")).toBe("外\n内");
+    });
+
+    it("obsidian: ol/ul 内非 li 内容与相邻列表行分行", () => {
+        expect(HTMLToMarkdown._convertNode(element("ol", [textNode("intro"), element("li", [textNode("a")])]))).toBe("intro\n1. a\n\n");
+        expect(HTMLToMarkdown._convertNode(element("ul", [textNode("intro"), element("li", [textNode("a")])]))).toBe("intro\n- a\n");
+        // 非 li 的**元素**子节点同样不与其后列表行粘连(文本节点路径之外的分支)
+        expect(HTMLToMarkdown._convertNode(element("ol", [element("span", [textNode("intro")]), element("li", [textNode("a")])]))).toBe("intro\n1. a\n\n");
+        expect(HTMLToMarkdown._convertNode(element("ul", [element("span", [textNode("intro")]), element("li", [textNode("a")])]))).toBe("intro\n- a\n");
+    });
+
+    it("obsidian: buildFrontmatter 对非数组 tags 不抛错(单值数组化)", () => {
+        expect(HTMLToMarkdown.buildFrontmatter({ title: "T", tags: "solo" })).toContain('  - "solo"');
+        expect(HTMLToMarkdown.buildFrontmatter({ title: "T" })).not.toContain("tags:");
+        expect(HTMLToMarkdown.buildFrontmatter({ title: "T", tags: [] })).not.toContain("tags:");
+    });
+
+    it("obsidian: li 内联 code(反引号开头)不被误判为代码围栏", () => {
+        const li = element("li", [textNode("foo"), element("code", [textNode("``a``")]), textNode("bar")]);
+        // 定值断言: 误判为围栏会把列表项拆成多行("- foo\n``` ``a`` ```\nbar\n")
+        expect(HTMLToMarkdown._convertNode(li)).toBe("- foo``` ``a`` ```bar\n");
+        // 真代码围栏(嵌套 pre)仍按围栏分段, 不因收紧判据而回退(wave12/14 修复不回退)
+        const withFence = HTMLToMarkdown._convertNode(element("li", [textNode("t"),
+            element("pre", [element("code", [textNode("x = 1")])], { querySelector: () => element("code", [textNode("x = 1")], { getAttribute: () => null }) })]));
+        expect(withFence).toContain("\n  ```\n  x = 1\n  ```\n");
+    });
+
+    it("_cookTable: <caption> 文本与内嵌媒体不被静默丢弃", () => {
+        const td = (v) => element("td", [textNode(v)], { closest: () => null });
+        const caption = element("caption", [textNode("表 1")], { closest: () => null });
+        const blocks = [];
+        DOMToNotion._cookTable(element("table", [caption,
+            element("tbody", [element("tr", [td("1"), td("2")], { closest: () => null })])]), blocks, "external");
+        expect(blocks.map((b) => b.type).join(" ")).toBe("paragraph table");
+        expect(blocks[0].paragraph.rich_text.map((r) => r.text.content).join("")).toBe("表 1");
+    });
+
+    it("obsidian: buildFrontmatter 对非数组 tags 不抛错且不丢标签", () => {
+        const fm = HTMLToMarkdown.buildFrontmatter({ title: "T", tags: "solo" });
+        expect(fm).toContain('  - "solo"');
+        expect(HTMLToMarkdown.buildFrontmatter({ title: "T" })).not.toContain("tags:");
+        expect(HTMLToMarkdown.buildFrontmatter({ title: "T", tags: [] })).not.toContain("tags:");
+    });
+
+    it("serializeRichText: 空块级元素不飘移边界(needBreak 语义复核)", () => {
+        const rt = (node) => DOMToNotion.serializeRichText(node).map((r) => r.text.content).join("");
+        // 空块级元素不产出内容: 相邻两侧各一次边界(不多不少)
+        expect(rt(element("div", [element("p", [textNode("a")]), element("p"), element("p", [textNode("b")])]))).toBe("a\nb");
+        // 空嵌套块不叠加边界
+        expect(rt(element("div", [element("p", [textNode("a")]), element("div", [element("div")]), element("p", [textNode("b")])]))).toBe("a\nb");
+        // 首子块无前导换行, 末子块无尾随换行
+        expect(rt(element("div", [element("p", [textNode("a")]), element("p", [textNode("b")])]))).toBe("a\nb");
+    });
+});
+
 // ===== 清单自检: 清单与 src/ 现状一致(learnings-006 规则 3) =====
 // 规则 3: 新增出口必须对照 SURFACE_INVENTORY 接入 DomSpec 原语, 不允许"下一轮审计再补"。
 // 本组把清单从文档变成**可执行断言**: 原语消费点缺失 / 实现地重复 = 测试红。
@@ -524,7 +684,7 @@ describe("清单自检: 出口面清单与 src/ 现状一致", () => {
     const EXPORTERS = ["src/api/DOMToNotion.js", "src/api/obsidian.js"];
 
     it("清单条目结构完整", () => {
-        expect(SURFACE_INVENTORY.length).toBe(6);
+        expect(SURFACE_INVENTORY.length).toBe(7);
         for (const item of SURFACE_INVENTORY) {
             expect(`${item.surface.length > 0} ${item.primitive.length > 0}`).toBe("true true");
             expect(item.hosts).toBeGreaterThan(0);
@@ -551,7 +711,7 @@ describe("清单自检: 出口面清单与 src/ 现状一致", () => {
 
     it("原语唯一实现地: 导出器不得重声明跳过表/折叠/遍历", () => {
         const spec = read("src/api/DomSpec.js");
-        for (const name of ["SKIP_TAGS", "eachChildOrdered", "foldToSingleLine", "safeUrl", "mediaUrl", "mediaSrc", "eachMedia"]) {
+        for (const name of ["SKIP_TAGS", "eachChildOrdered", "foldToSingleLine", "safeUrl", "mediaUrl", "mediaSrc", "eachMedia", "textWithBreaks"]) {
             expect(`DomSpec | ${name} | ${spec.includes(name)}`).toBe(`DomSpec | ${name} | true`);
         }
         for (const p of EXPORTERS) {
@@ -573,4 +733,5 @@ export const SURFACE_INVENTORY = [
     { surface: "媒体采集(自身+后代)", primitive: "DomSpec.eachMedia / mediaKind", hosts: 7, exporters: 2 },
     { surface: "单行上下文折叠", primitive: "DomSpec.foldToSingleLine / collapseOneLine", hosts: 11, exporters: 2, note: "记录在案的差异: Markdown 侧折叠 CR/LF, Notion 侧 rich_text 保留 \\n" },
     { surface: "emoji 判据", primitive: "DomSpec.emojiNameOf", hosts: 1, exporters: 1, note: "仅 DOMToNotion 消费(转 emoji 文本); obsidian 侧按普通图片写出 emoji 图链接, 不失信息" },
+    { surface: "代码块文本提取(<br> 换行保留)", primitive: "DomSpec.textWithBreaks", hosts: 2, exporters: 2 },
 ];

@@ -76,8 +76,10 @@ const DomSpec = {
     // 互不覆盖 —— 懒加载图在 Obsidian 侧被丢、<source> 型视频在 Notion 侧被丢。
     mediaSrc: (el) => {
         if (!el || typeof el.getAttribute !== "function") return "";
+        // wave16 共识(qwen): 占位 src(data:/about: 内联图)会阻断懒加载真实地址 ——
+        // mediaUrl 经 safeUrl 判空后整体丢弃, 而真实地址就在同一元素的 data-src 上
         const own = el.getAttribute("src");
-        if (own) return own;
+        if (own && !/^(?:data|about):/i.test(String(own).trim())) return own;
         const lazy = el.getAttribute("data-src");
         if (lazy) return lazy;
         const source = typeof el.querySelector === "function" ? el.querySelector("source") : null;
@@ -113,6 +115,25 @@ const DomSpec = {
     // 与 collapseOneLine 语义不同 —— 后者用于链接标签/alt, 需剔方括号防链接结构被破坏;
     // 此处**不可**剔方括号("[RFC]" 是合法标题内容), 二者不可互替。
     foldToSingleLine: (text) => String(text ?? "").replace(/\r\n?|\n/g, " ").trim(),
+
+    // wave16 共识(qwen + dsf): 代码块文本提取 —— <br> 在 textContent 下不产生换行
+    // (<pre><code>line1<br>line2</code></pre> 导出为 "line1line2", 代码行粘连且缩进丢失)。
+    // 逐节点递归: <br> → "\n", 文本节点原样, 其余元素下钻; 不产出 Notion 注解(纯文本上下文)。
+    // nodeType 用字面量而非全局 Node —— 本模块为 leaf, 不依赖宿主全局。
+    // 无 childNodes 的宿主(测试替身/最小桩)回退 textContent, 保持既有取文本口径。
+    textWithBreaks: (el) => {
+        if (!el) return "";
+        const collect = (node) => {
+            if (!node) return "";
+            if (node.nodeType === 3) return node.nodeValue || "";
+            if (node.nodeType !== 1) return "";
+            if (tagOf(node) === "br") return "\n";
+            return Array.from(node.childNodes || []).map(collect).join("");
+        };
+        const walked = collect(el);
+        if (walked) return walked;
+        return String(el.textContent || "");
+    },
 
     // 有序子节点遍历(含文本节点, 文档序)。单一来源取代各处的
     // Array.from(el.childNodes || []).forEach(...)(部分站点漏了 || [] 保护)。

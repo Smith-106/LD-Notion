@@ -135,7 +135,10 @@ const HTMLToMarkdown = {
                 const isLi = child.nodeType === Node.ELEMENT_NODE
                     && child.tagName.toLowerCase() === "li";
                 if (!isLi) {
-                    items.push(HTMLToMarkdown._convertNode(child));
+                    // wave16 共识(dsf): 非 li 子节点的转换结果直接入数组, 与其后 "1. a" 行
+                    // 粘连(<ol>intro<li>a</li></ol> → "intro1. a") —— 补齐行边界
+                    const md = HTMLToMarkdown._convertNode(child);
+                    if (md) items.push(/\n$/.test(md) ? md : `${md}\n`);
                     return;
                 }
                 // P4 收敛(c05 2/3): li 分支已输出 "- " 前缀 —— 有序列表需剥离, 否则 "1. - x"
@@ -152,10 +155,12 @@ const HTMLToMarkdown = {
             DomSpec.eachChildOrdered(node, (child) => {
                 if (child.nodeType === Node.TEXT_NODE) {
                     const text = String(child.textContent || "").trim();
-                    if (text) items.push(text);
+                    // wave16 共识(dsf): 裸文本原样入数组与首个列表项粘连("intro- a") —— 补行边界
+                    if (text) items.push(`${text}\n`);
                     return;
                 }
-                items.push(HTMLToMarkdown._convertNode(child));
+                const md = HTMLToMarkdown._convertNode(child);
+                if (md) items.push(/\n$/.test(md) ? md : `${md}\n`);
             });
             return items.join("");
         }
@@ -194,7 +199,10 @@ const HTMLToMarkdown = {
                     });
                 } else {
                     const md = HTMLToMarkdown._convertNode(child);
-                    if (/^\s*`{3,}/.test(md)) {
+                    // wave16 共识(qwen): 仅看行首反引号会把内联 code 误判为围栏 ——
+                    // <code>``a``</code> 转出 "``` ``a`` ```"(单行), 被当作代码块拆行;
+                    // 真围栏必有换行分隔的闭合行
+                    if (/^\s*`{3,}[^\n]*\n[\s\S]*\n\s*`{3,}\s*$/.test(md)) {
                         flushBuf();
                         pushText(md.replace(/^\n+|\n+$/g, ""));
                     } else {
@@ -269,8 +277,9 @@ const HTMLToMarkdown = {
                 const lang = String((codeEl && (codeEl.getAttribute?.("class") || codeEl.className)) || "")
                     .match(/language-([\w+#.-]+)/)?.[1] || "";
                 // wave14 共识(glm): 只取 code 元素会丢掉 pre 内其余文本(<pre>foo<code>bar</code></pre>);
-                // 改用整块 textContent, 并按 HTML 规范去掉 <pre> 紧随的首个换行
-                const text = String(node.textContent || "").replace(/^\n/, "");
+                // wave16 共识(qwen): textContent 下 <br> 不产生换行(<pre>a<br>b</pre> 导出 "ab");
+                // 统一走 DomSpec.textWithBreaks, 并按 HTML 规范去掉 <pre> 紧随的首个换行
+                const text = DomSpec.textWithBreaks(node).replace(/^\n/, "");
                 // P4 共识(glm): 内容含 ``` 会提前闭合围栏 —— 用比最长反引号串更长的围栏
                 const longestRun = (String(text).match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
                 const fence = "`".repeat(Math.max(3, longestRun + 1));
@@ -398,9 +407,14 @@ const HTMLToMarkdown = {
         if (meta.language) lines.push(`language: "${esc(meta.language)}"`);
         if (Number.isFinite(Number(meta.stars))) lines.push(`stars: ${Number(meta.stars)}`);
         if (meta.updatedAt) lines.push(`updated_at: "${esc(meta.updatedAt)}"`);
-        if (meta.tags && meta.tags.length > 0) {
+        // wave16 共识(qwen): meta.tags 为有 length 的非数组(如字符串)时 forEach 抛 TypeError ——
+        // 整个导出中断; 按"单值数组化"降级, 不静默丢标签
+        const tags = Array.isArray(meta.tags)
+            ? meta.tags
+            : (meta.tags != null && meta.tags !== "" ? [meta.tags] : []);
+        if (tags.length > 0) {
             lines.push("tags:");
-            meta.tags.forEach((t) => lines.push(`  - "${esc(t)}"`));
+            tags.forEach((t) => lines.push(`  - "${esc(t)}"`));
         }
         lines.push(`export_time: "${new Date().toISOString()}"`);
         if (meta.floors !== undefined) lines.push(numOrQuoted("floors", meta.floors));

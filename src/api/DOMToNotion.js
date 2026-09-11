@@ -30,20 +30,10 @@ const DOMToNotion = {
 
     // 图片容器 lightbox-wrapper / image-wrapper
     _cookLightbox: (el, blocks, imgMode) => {
-        const img = el.querySelector("img");
-        if (!img) return;
-        const src = DomSpec.mediaSrc(img);
-        const full = DomSpec.mediaUrl(img);
-        if (full && !DOMToNotion._emojiImageName(src)) {
-            if (imgMode === "skip") return;
-            blocks.push({
-                type: "image",
-                image: { type: "external", external: { url: full } },
-                _needsUpload: imgMode === "upload",
-                _originalUrl: full,
-                _fileType: "image",
-            });
-        }
+        // wave16 共识(dsf): 容器内只取首个 <img>(其余图片静默丢弃) —— 统一走
+        // _consumeInlineMedia(采集口径单一驻 DomSpec.eachMedia); 单图路径与 _cookImage
+        // 完全同构(含 emoji 判据与 imgMode 语义), 故直接委托
+        DOMToNotion._consumeInlineMedia(el, blocks, imgMode);
     },
 
     // 附件链接 a.attachment
@@ -65,7 +55,12 @@ const DOMToNotion = {
                 _fileType: "file",
                 _fileName: fileName,
             });
+            return;
         }
+        // wave16 共识(dsf): 地址被拒(或 imgMode=skip)时连可见链接文本一起丢弃 —— 与
+        // obsidian 出口(地址判据被拒时保留子文本, R15)不对称; 保留文本段落, 不静默丢弃
+        const richText = DOMToNotion.serializeRichText(el);
+        if (richText.length > 0) blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
     },
 
     // 视频元素
@@ -151,15 +146,16 @@ const DOMToNotion = {
 
     // 引用块 aside.quote
     _cookAsideQuote: (el, blocks, imgMode) => {
-        // wave15(dsf): 仅在存在 <blockquote> 时产出引用 —— <aside class="quote">text</aside>
-        // (无内层 blockquote 的引用容器)整支静默丢弃; 无 blockquote 时以 aside 自身为引用源
-        const source = el.querySelector("blockquote") || el;
-        const richText = DOMToNotion.serializeRichText(source);
-        if (richText.length > 0) {
-            blocks.push({ type: "quote", quote: { rich_text: richText } });
-        }
-        // wave8 共识(dsf): 引用内嵌媒体此前静默丢弃 —— 与段落/li 同款补发块
-        DOMToNotion._consumeInlineMedia(source, blocks, imgMode);
+        // wave15(dsf): 无内层 blockquote 的引用容器(<aside class="quote">text</aside>)
+        // 整支静默丢弃 —— 无 blockquote 时以 aside 自身为引用源。
+        // wave16 共识(dsf): 容器内有多个 blockquote 时只取首个(其余引用与内嵌媒体静默
+        // 丢弃) —— 逐块产出; 单块路径与 _cookBlockquote 完全同构, 故直接委托(口径单一)
+        const quotes = Array.from(el.children || [])
+            .filter((child) => child.tagName && String(child.tagName).toLowerCase() === "blockquote");
+        // 无直属 blockquote 时回退后代首个(与 wave15 同口径); 无任何 blockquote 时以 aside 自身为源
+        const deep = quotes.length === 0 && typeof el.querySelector === "function" ? el.querySelector("blockquote") : null;
+        const sources = quotes.length > 0 ? quotes : [deep || el];
+        sources.forEach((source) => DOMToNotion._cookBlockquote(source, blocks, imgMode));
     },
 
     // 单一 emoji 判据驻 DomSpec(与块级跳过同源); 保留公开键名供现有测试与 legacy harness
@@ -196,7 +192,9 @@ const DOMToNotion = {
         // P4 收敛(c05): 语言标识白名单化前先完整捕获 —— `#` 未入字符类时 `language-c#`
         // 被截为 "c", 命中 NOTION_LANGUAGES 的 c → C# 代码块按 C 语言写入
         const rawLang = (langClass.match(/lang(?:uage)?-([a-z0-9_+#-]+)/i) || [])[1] || "plain text";
-        const code = (codeEl ? codeEl.textContent : el.textContent) || "";
+        // wave16 共识(dsf+qwen): textContent 下 <br> 不产生换行 —— <pre><code>a<br>b</code></pre>
+        // 导出为 "ab"(代码行粘连); 统一走 DomSpec.textWithBreaks(<br> → \n)
+        const code = DomSpec.textWithBreaks(codeEl || el);
         const richTextArray = DOMToNotion.splitLongText(code);
         blocks.push({
             type: "code",
@@ -307,11 +305,22 @@ const DOMToNotion = {
         // wave6 共识(qwen): 合法 HTML 可有多个 tbody, tfoot 行同样属于表格正文 ——
         // 原实现只取第一个 tbody 且从不读 tfoot, 其余行静默丢失
         const bodyContainers = directSections(["tbody", "tfoot"]);
+        // wave16 共识(qwen): 空 <thead> 但数据首行全为 <th> 时同属表头 —— wave15 的修复
+        // (空 thead 不置表头)只覆盖"有 thead 行"的情形, 此处按首行单元格标签补齐判据
+        let firstBodyRow = true;
         (bodyContainers.length > 0 ? bodyContainers : [table]).forEach((container) => {
             directRows(container).forEach((tr) => {
                 if (tr.closest("thead")) return;
+                const rowCells = directCells(tr);
+                if (firstBodyRow) {
+                    firstBodyRow = false;
+                    if (!hasHeader && rowCells.length > 0
+                        && rowCells.every((cell) => String(cell.tagName).toLowerCase() === "th")) {
+                        hasHeader = true;
+                    }
+                }
                 const cells = [];
-                directCells(tr).forEach((cell) => {
+                rowCells.forEach((cell) => {
                     const richText = DOMToNotion.serializeRichText(cell);
                     cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
                 });
@@ -341,6 +350,17 @@ const DOMToNotion = {
                 cells.push([{ type: "text", text: { content: `…（列数过多，已截断 ${droppedCols} 列）` } }]);
             });
             console.warn(`[LD-Notion] 表格列数超 ${MAX_TABLE_COLS} 上限, 已截断`);
+        }
+
+        // wave16 共识(glm): <caption> 既不在 thead/tbody/tfoot 也不属 tr —— 表格标题文字
+        // 与内嵌媒体整支丢弃(与 wave6 已修的 tfoot 行同族); 以段落补发, 不静默丢弃
+        const caption = directSections(["caption"])[0];
+        if (caption) {
+            const captionText = DOMToNotion.serializeRichText(caption);
+            if (captionText.length > 0) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: captionText } });
+            }
+            DOMToNotion._consumeInlineMedia(caption, blocks, imgMode);
         }
 
         if (rows.length > 0) {
@@ -548,7 +568,10 @@ const DOMToNotion = {
             // wave12 共识(dsf) + wave14 共识(dsf): 块级元素是文本边界 —— 前后都不得与相邻
             // 内联内容粘连(<blockquote><p>a</p>b</blockquote> 此前输出 "ab"); 仅"下一项也是
             // p/div 时才补换行"不够, 裸文本同样需要边界
-            if (tag === "p" || tag === "div") {
+            // wave16 共识(qwen): 嵌套引用(Discourse 引用内含引用)缺块级边界 —— blockquote/
+            // aside 与 p/div 同为文本边界(顶层的两者由 _cookBlockquote/_cookAsideQuote 产出
+            // 独立块, 此处只覆盖内层/嵌入场景), 否则 "外内" 直接拼接
+            if (tag === "p" || tag === "div" || tag === "blockquote" || tag === "aside") {
                 // 块级元素前后都是边界(前面是内联文本或块级都算): 标记延迟到真正产出内容时消费
                 if (result.length > 0) needBreak = true;
                 const before = result.length;

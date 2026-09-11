@@ -323,6 +323,11 @@ describe("wave9 共识(qwen): Obsidian 导出 scheme 白名单", () => {
     it("iframe src 非公网时输出拒绝标记", () => {
         expect(HTMLToMarkdown._convertNode(el("iframe", { src: "data:text/html,<script>" })))
             .toContain("已拒");
+        // wave16: 危险 scheme 不得因 mediaSrc 跳过 data:/about: 占位而绕过判别
+        // (占位跳过仅适用于可回退到 data-src/source 的媒体, 非将占位当作安全值)
+        for (const src of ["javascript:alert(1)", "vbscript:msgbox", "file:///etc/passwd", "http://127.0.0.1/x"] ) {
+            expect(`${src} :: ${HTMLToMarkdown._convertNode(el("iframe", { src }))}`).toContain("已拒");
+        }
     });
 
     it("iframe src 公网 https 正常输出嵌入链接", () => {

@@ -4085,7 +4085,7 @@
         mediaSrc: (el) => {
           if (!el || typeof el.getAttribute !== "function") return "";
           const own = el.getAttribute("src");
-          if (own) return own;
+          if (own && !/^(?:data|about):/i.test(String(own).trim())) return own;
           const lazy = el.getAttribute("data-src");
           if (lazy) return lazy;
           const source = typeof el.querySelector === "function" ? el.querySelector("source") : null;
@@ -4117,6 +4117,24 @@
         // 与 collapseOneLine 语义不同 —— 后者用于链接标签/alt, 需剔方括号防链接结构被破坏;
         // 此处**不可**剔方括号("[RFC]" 是合法标题内容), 二者不可互替。
         foldToSingleLine: (text) => String(text ?? "").replace(/\r\n?|\n/g, " ").trim(),
+        // wave16 共识(qwen + dsf): 代码块文本提取 —— <br> 在 textContent 下不产生换行
+        // (<pre><code>line1<br>line2</code></pre> 导出为 "line1line2", 代码行粘连且缩进丢失)。
+        // 逐节点递归: <br> → "\n", 文本节点原样, 其余元素下钻; 不产出 Notion 注解(纯文本上下文)。
+        // nodeType 用字面量而非全局 Node —— 本模块为 leaf, 不依赖宿主全局。
+        // 无 childNodes 的宿主(测试替身/最小桩)回退 textContent, 保持既有取文本口径。
+        textWithBreaks: (el) => {
+          if (!el) return "";
+          const collect = (node) => {
+            if (!node) return "";
+            if (node.nodeType === 3) return node.nodeValue || "";
+            if (node.nodeType !== 1) return "";
+            if (tagOf(node) === "br") return "\n";
+            return Array.from(node.childNodes || []).map(collect).join("");
+          };
+          const walked = collect(el);
+          if (walked) return walked;
+          return String(el.textContent || "");
+        },
         // 有序子节点遍历(含文本节点, 文档序)。单一来源取代各处的
         // Array.from(el.childNodes || []).forEach(...)(部分站点漏了 || [] 保护)。
         eachChildOrdered: (el, visit) => {
@@ -4155,20 +4173,7 @@
         },
         // 图片容器 lightbox-wrapper / image-wrapper
         _cookLightbox: (el, blocks, imgMode) => {
-          const img = el.querySelector("img");
-          if (!img) return;
-          const src = DomSpec.mediaSrc(img);
-          const full = DomSpec.mediaUrl(img);
-          if (full && !DOMToNotion2._emojiImageName(src)) {
-            if (imgMode === "skip") return;
-            blocks.push({
-              type: "image",
-              image: { type: "external", external: { url: full } },
-              _needsUpload: imgMode === "upload",
-              _originalUrl: full,
-              _fileType: "image"
-            });
-          }
+          DOMToNotion2._consumeInlineMedia(el, blocks, imgMode);
         },
         // 附件链接 a.attachment
         _cookAttachment: (el, blocks, imgMode) => {
@@ -4190,7 +4195,10 @@
               _fileType: "file",
               _fileName: fileName
             });
+            return;
           }
+          const richText = DOMToNotion2.serializeRichText(el);
+          if (richText.length > 0) blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
         },
         // 视频元素
         _cookVideo: (el, blocks, imgMode) => {
@@ -4261,12 +4269,10 @@
         },
         // 引用块 aside.quote
         _cookAsideQuote: (el, blocks, imgMode) => {
-          const source = el.querySelector("blockquote") || el;
-          const richText = DOMToNotion2.serializeRichText(source);
-          if (richText.length > 0) {
-            blocks.push({ type: "quote", quote: { rich_text: richText } });
-          }
-          DOMToNotion2._consumeInlineMedia(source, blocks, imgMode);
+          const quotes = Array.from(el.children || []).filter((child) => child.tagName && String(child.tagName).toLowerCase() === "blockquote");
+          const deep = quotes.length === 0 && typeof el.querySelector === "function" ? el.querySelector("blockquote") : null;
+          const sources = quotes.length > 0 ? quotes : [deep || el];
+          sources.forEach((source) => DOMToNotion2._cookBlockquote(source, blocks, imgMode));
         },
         // 单一 emoji 判据驻 DomSpec(与块级跳过同源); 保留公开键名供现有测试与 legacy harness
         _emojiImageName: (src) => DomSpec.emojiNameOf(src),
@@ -4294,7 +4300,7 @@
           const codeEl = el.querySelector("code");
           const langClass = (codeEl == null ? void 0 : codeEl.getAttribute("class")) || "";
           const rawLang = (langClass.match(/lang(?:uage)?-([a-z0-9_+#-]+)/i) || [])[1] || "plain text";
-          const code = (codeEl ? codeEl.textContent : el.textContent) || "";
+          const code = DomSpec.textWithBreaks(codeEl || el);
           const richTextArray = DOMToNotion2.splitLongText(code);
           blocks.push({
             type: "code",
@@ -4379,11 +4385,19 @@
             });
           }
           const bodyContainers = directSections(["tbody", "tfoot"]);
+          let firstBodyRow = true;
           (bodyContainers.length > 0 ? bodyContainers : [table]).forEach((container) => {
             directRows(container).forEach((tr) => {
               if (tr.closest("thead")) return;
+              const rowCells = directCells(tr);
+              if (firstBodyRow) {
+                firstBodyRow = false;
+                if (!hasHeader && rowCells.length > 0 && rowCells.every((cell) => String(cell.tagName).toLowerCase() === "th")) {
+                  hasHeader = true;
+                }
+              }
               const cells = [];
-              directCells(tr).forEach((cell) => {
+              rowCells.forEach((cell) => {
                 const richText = DOMToNotion2.serializeRichText(cell);
                 cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
               });
@@ -4406,6 +4420,14 @@
               cells.push([{ type: "text", text: { content: `\u2026\uFF08\u5217\u6570\u8FC7\u591A\uFF0C\u5DF2\u622A\u65AD ${droppedCols} \u5217\uFF09` } }]);
             });
             console.warn(`[LD-Notion] \u8868\u683C\u5217\u6570\u8D85 ${MAX_TABLE_COLS} \u4E0A\u9650, \u5DF2\u622A\u65AD`);
+          }
+          const caption = directSections(["caption"])[0];
+          if (caption) {
+            const captionText = DOMToNotion2.serializeRichText(caption);
+            if (captionText.length > 0) {
+              blocks.push({ type: "paragraph", paragraph: { rich_text: captionText } });
+            }
+            DOMToNotion2._consumeInlineMedia(caption, blocks, imgMode);
           }
           if (rows.length > 0) {
             const tableWidth = Math.max(1, ...rows.map((r) => r.length));
@@ -4558,7 +4580,7 @@
               return;
             }
             if (DomSpec.isSkippedNode(n)) return;
-            if (tag === "p" || tag === "div") {
+            if (tag === "p" || tag === "div" || tag === "blockquote" || tag === "aside") {
               if (result.length > 0) needBreak = true;
               const before = result.length;
               DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
@@ -4789,7 +4811,9 @@
               if (child.nodeType === Node.TEXT_NODE && !String(child.textContent || "").trim()) return;
               const isLi = child.nodeType === Node.ELEMENT_NODE && child.tagName.toLowerCase() === "li";
               if (!isLi) {
-                items.push(HTMLToMarkdown2._convertNode(child));
+                const md2 = HTMLToMarkdown2._convertNode(child);
+                if (md2) items.push(/\n$/.test(md2) ? md2 : `${md2}
+`);
                 return;
               }
               const md = HTMLToMarkdown2._convertNode(child).trim().replace(/^-\s+/, "");
@@ -4804,10 +4828,13 @@
             DomSpec.eachChildOrdered(node, (child) => {
               if (child.nodeType === Node.TEXT_NODE) {
                 const text = String(child.textContent || "").trim();
-                if (text) items.push(text);
+                if (text) items.push(`${text}
+`);
                 return;
               }
-              items.push(HTMLToMarkdown2._convertNode(child));
+              const md = HTMLToMarkdown2._convertNode(child);
+              if (md) items.push(/\n$/.test(md) ? md : `${md}
+`);
             });
             return items.join("");
           }
@@ -4833,7 +4860,7 @@
                 });
               } else {
                 const md = HTMLToMarkdown2._convertNode(child);
-                if (/^\s*`{3,}/.test(md)) {
+                if (/^\s*`{3,}[^\n]*\n[\s\S]*\n\s*`{3,}\s*$/.test(md)) {
                   flushBuf();
                   pushText(md.replace(/^\n+|\n+$/g, ""));
                 } else {
@@ -4910,7 +4937,7 @@
             case "pre": {
               const codeEl = node.querySelector("code");
               const lang = ((_b = String(codeEl && (((_a = codeEl.getAttribute) == null ? void 0 : _a.call(codeEl, "class")) || codeEl.className) || "").match(/language-([\w+#.-]+)/)) == null ? void 0 : _b[1]) || "";
-              const text = String(node.textContent || "").replace(/^\n/, "");
+              const text = DomSpec.textWithBreaks(node).replace(/^\n/, "");
               const longestRun = (String(text).match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
               const fence = "`".repeat(Math.max(3, longestRun + 1));
               return fence + lang + "\n" + text + "\n" + fence + "\n\n";
@@ -5018,9 +5045,10 @@ ${quoted}
           if (meta.language) lines.push(`language: "${esc(meta.language)}"`);
           if (Number.isFinite(Number(meta.stars))) lines.push(`stars: ${Number(meta.stars)}`);
           if (meta.updatedAt) lines.push(`updated_at: "${esc(meta.updatedAt)}"`);
-          if (meta.tags && meta.tags.length > 0) {
+          const tags = Array.isArray(meta.tags) ? meta.tags : meta.tags != null && meta.tags !== "" ? [meta.tags] : [];
+          if (tags.length > 0) {
             lines.push("tags:");
-            meta.tags.forEach((t) => lines.push(`  - "${esc(t)}"`));
+            tags.forEach((t) => lines.push(`  - "${esc(t)}"`));
           }
           lines.push(`export_time: "${(/* @__PURE__ */ new Date()).toISOString()}"`);
           if (meta.floors !== void 0) lines.push(numOrQuoted("floors", meta.floors));
