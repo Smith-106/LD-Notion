@@ -4,13 +4,7 @@ const { isSupportedFileType } = require("../config");
 const { Utils } = require("../utils");
 const { UrlValidator } = require("../security/UrlValidator");
 const { normalizeLanguage, EMOJI_MAP } = require("./constants");
-
-// wave14 共识(dsf): 已识别为块级(有专属烹饪分支或容器块)的元素标签 —— 用于
-// cookedToBlocks 的顺序化遍历(其余元素透明下钻, 其内联内容并入同一段落缓冲)
-const BLOCK_TAGS = new Set([
-    "div", "p", "pre", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6",
-    "ul", "ol", "table", "img", "video", "audio", "iframe", "hr", "aside",
-]);
+const { DomSpec } = require("./DomSpec");
 
 // P4 收敛(c05): 上界处若落在代理对中间(emoji 前半), 回退一个码元 —— 切出孤立代理字符
 // 会被 Notion 拒绝(400)或渲染为乱码。软切/截断标记两处共用同一口径。
@@ -170,28 +164,19 @@ const DOMToNotion = {
         }
     },
 
-    // wave12 共识(qwen): emoji 图片“跳过块级图片”与“转 emoji 文本”必须同口径 ——
-    // 前者按 src.includes("/images/emoji/") 跳、后者只认 twemoji|apple|google|twitter 四家 set,
-    // Discourse 其余 set(win10/emoji_one 等)两边都不命中 → 图片静默丢失
-    _emojiImageName: (src) => {
-        const m = String(src || "").match(/\/images\/emoji\/[^/]+\/([^/.]+)\.png/i);
-        return m ? m[1] : null;
-    },
+    // 单一 emoji 判据驻 DomSpec(与块级跳过同源); 保留公开键名供现有测试与 legacy harness
+    _emojiImageName: (src) => DomSpec.emojiNameOf(src),
 
-    // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发(与 _cookParagraph 同款)
+    // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发
+    // 采集逻辑单一驻 DomSpec.eachMedia(自身+后代, 每节点恰一次); 此处保留公开键名转发
     _consumeInlineMedia: (el, blocks, imgMode) => {
-        // wave14 共识(glm): querySelectorAll 只查后代 —— 元素自身即媒体(<ul><img src=x></ul>)
-        // 时会被漏掉; 先按自身标签分派叶媒体, 再走后裔查询
-        const selfTag = el.tagName ? el.tagName.toLowerCase() : "";
-        if (selfTag === "img") DOMToNotion._cookImage(el, blocks, imgMode);
-        else if (selfTag === "video") DOMToNotion._cookVideo(el, blocks, imgMode);
-        else if (selfTag === "audio") DOMToNotion._cookAudio(el, blocks, imgMode);
-        else if (selfTag === "iframe") DOMToNotion._cookIframe(el, blocks);
-        el.querySelectorAll("img").forEach((img) => DOMToNotion._cookImage(img, blocks, imgMode));
-        el.querySelectorAll("a.attachment").forEach((a) => DOMToNotion._cookAttachment(a, blocks, imgMode));
-        el.querySelectorAll("video").forEach((video) => DOMToNotion._cookVideo(video, blocks, imgMode));
-        el.querySelectorAll("audio").forEach((audio) => DOMToNotion._cookAudio(audio, blocks, imgMode));
-        el.querySelectorAll("iframe").forEach((frame) => { DOMToNotion._cookIframe(frame, blocks); });
+        DomSpec.eachMedia(el, (node, kind) => {
+            if (kind === "img") DOMToNotion._cookImage(node, blocks, imgMode);
+            else if (kind === "attachment") DOMToNotion._cookAttachment(node, blocks, imgMode);
+            else if (kind === "video") DOMToNotion._cookVideo(node, blocks, imgMode);
+            else if (kind === "audio") DOMToNotion._cookAudio(node, blocks, imgMode);
+            else if (kind === "iframe") DOMToNotion._cookIframe(node, blocks);
+        });
     },
 
     // 段落 p（含内部图片与附件）
@@ -734,16 +719,6 @@ const DOMToNotion = {
             }
             inlineBuf = "";
         };
-        const isBlockChild = (child) => {
-            const t = child.tagName ? child.tagName.toLowerCase() : "";
-            if (BLOCK_TAGS.has(t)) return true;
-            const cls = child.classList;
-            if (!cls) return false;
-            return cls.contains("lightbox-wrapper") || cls.contains("image-wrapper")
-                || cls.contains("md-table")
-                || (t === "a" && cls.contains("attachment"))
-                || (t === "aside" && cls.contains("quote"));
-        };
         const walkNode = (node) => {
             if (!node) return;
             if (node.nodeType === Node.TEXT_NODE) {
@@ -751,7 +726,7 @@ const DOMToNotion = {
                 return;
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
-            if (isBlockChild(node)) {
+            if (DomSpec.isBlockNode(node)) {
                 flushInline();
                 processElement(node);
                 return;
