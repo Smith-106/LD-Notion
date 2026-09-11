@@ -71,6 +71,9 @@ const DomSpec = {
     // wave9(标题补发)、wave14(自身即媒体)的统一来源。
     eachMedia: (el, visit) => {
         if (!el) return;
+        // wave18 共识(w1 glm): 参数自身为跳过元素时其后代媒体照采(与 walk 的子树剪枝不对称 ——
+        // 容器分支以 <noscript> 为参数时会产出幽灵媒体块)
+        if (DomSpec.isSkippedNode(el)) return;
         const selfKind = DomSpec.mediaKind(el);
         if (selfKind) visit(el, selfKind);
         // wave17 共识(dsf): 原实现分五次按固定类序采集(img → a.attachment → video → audio →
@@ -120,10 +123,19 @@ const DomSpec = {
             attrOf(el, "src"), attrOf(el, "data-src"), attrOf(el, "data-lazy-src"),
             attrOf(el, "data-original"), firstSrcset(attrOf(el, "srcset")),
         ];
-        const source = typeof el.querySelector === "function" ? el.querySelector("source") : null;
-        if (source) {
-            candidates.push(attrOf(source, "src"), firstSrcset(attrOf(source, "srcset")));
+        // wave18 共识(w1 glm): 响应式图片(<picture><source srcset><img src=占位>)的首选源
+        // 挂在父级 <picture> 上 —— 只查元素自身下属的 <source> 会整体零产出
+        const sources = [
+            typeof el.querySelector === "function" ? el.querySelector("source") : null,
+        ];
+        const picture = typeof el.closest === "function" ? el.closest("picture") : null;
+        if (picture && typeof picture.querySelector === "function") {
+            sources.push(picture.querySelector("source"));
         }
+        sources.forEach((node) => {
+            if (!node) return;
+            candidates.push(attrOf(node, "src"), firstSrcset(attrOf(node, "srcset")));
+        });
         for (const candidate of candidates) {
             const value = String(candidate == null ? "" : candidate).trim();
             if (!value) continue;
@@ -182,6 +194,10 @@ const DomSpec = {
             if (!node) return "";
             if (node.nodeType === 3) return node.nodeValue || "";
             if (node.nodeType !== 1) return "";
+            // wave18 共识(w1 glm): SKIP_TAGS 子树剪枝 —— <pre><code>x</code><script>…</script></pre>
+            // 的 JS/CSS 源码原样并入代码块; 其余文本面(serializeRichText 通用递归、obsidian
+            // _convertChildren)均有同款守卫, 唯此原语漏判(与 wave17 已修的 eachMedia 剪枝同族)
+            if (DomSpec.isSkippedNode(node)) return "";
             if (tagOf(node) === "br") return "\n";
             return Array.from(node.childNodes || []).map(collect).join("");
         };

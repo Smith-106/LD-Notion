@@ -4092,6 +4092,7 @@
         // wave9(标题补发)、wave14(自身即媒体)的统一来源。
         eachMedia: (el, visit) => {
           if (!el) return;
+          if (DomSpec.isSkippedNode(el)) return;
           const selfKind = DomSpec.mediaKind(el);
           if (selfKind) visit(el, selfKind);
           const walk = (node) => {
@@ -4125,10 +4126,17 @@
             attrOf(el, "data-original"),
             firstSrcset(attrOf(el, "srcset"))
           ];
-          const source = typeof el.querySelector === "function" ? el.querySelector("source") : null;
-          if (source) {
-            candidates.push(attrOf(source, "src"), firstSrcset(attrOf(source, "srcset")));
+          const sources = [
+            typeof el.querySelector === "function" ? el.querySelector("source") : null
+          ];
+          const picture = typeof el.closest === "function" ? el.closest("picture") : null;
+          if (picture && typeof picture.querySelector === "function") {
+            sources.push(picture.querySelector("source"));
           }
+          sources.forEach((node) => {
+            if (!node) return;
+            candidates.push(attrOf(node, "src"), firstSrcset(attrOf(node, "srcset")));
+          });
           for (const candidate of candidates) {
             const value = String(candidate == null ? "" : candidate).trim();
             if (!value) continue;
@@ -4180,6 +4188,7 @@
             if (!node) return "";
             if (node.nodeType === 3) return node.nodeValue || "";
             if (node.nodeType !== 1) return "";
+            if (DomSpec.isSkippedNode(node)) return "";
             if (tagOf(node) === "br") return "\n";
             return Array.from(node.childNodes || []).map(collect).join("");
           };
@@ -4203,7 +4212,6 @@
       "use strict";
       var { isSupportedFileType: isSupportedFileType2 } = require_config();
       var { Utils: Utils2 } = require_utils();
-      var { UrlValidator } = require_UrlValidator();
       var { normalizeLanguage: normalizeLanguage2, EMOJI_MAP: EMOJI_MAP2 } = require_constants();
       var { DomSpec } = require_DomSpec();
       var safeCutIndex = (text, index) => {
@@ -4216,13 +4224,12 @@
       };
       var DOMToNotion2 = {
         // ===== cookedToBlocks 各元素处理器（MNT-003 提取，保持 if 顺序与逻辑等价）=====
-        // 过滤导入页面（帖子 HTML）中的外部 URL：复用 UrlValidator.validatePageExternalUrl
-        // 拒绝内网/私有/链路本地（169.254 云元数据 SSRF 防御）与非 http(s) 协议。
+        // 过滤导入页面（帖子 HTML）中的外部 URL：地址判据单一驻 DomSpec.safeUrl
+        // (scheme 白名单 + 公网/内网校验(含 169.254 云元数据 SSRF 防御) + 2000 字符上限);
         // 与 src/ai/schema.js 的 AISchema.validatePageExternalUrl 同原语（ISS-20260723-009 CWE-94 sibling）。
-        _safeExternalUrl: (full) => {
-          if (!full || !UrlValidator.validatePageExternalUrl(full)) return "";
-          return full;
-        },
+        // wave18 共识(w2 glm): 与 DomSpec.safeUrl 合一 —— 此前只做公网/协议校验, 漏长度上限
+        // (MAX_URL_LENGTH 2000), <iframe> 白名单宿主的超长 src 仍可写入 embed.url 触发整页 400
+        _safeExternalUrl: (full) => DomSpec.safeUrl(full),
         // 图片容器 lightbox-wrapper / image-wrapper
         _cookLightbox: (el, blocks, imgMode) => {
           DOMToNotion2._consumeInlineMedia(el, blocks, imgMode);
@@ -4475,53 +4482,10 @@
             }
           });
         },
-        // 后代表格收集(不含自身): 沿 childNodes 递归 —— 不依赖宿主复合选择器, 与导出层单一遍历口径一致,
-        // 也保持「DOMToNotion 不自持查询实现」的清单自检(出口面清单第 5 条)
-        _descendantTables: (el) => {
-          const found = [];
-          const walk = (node) => {
-            DomSpec.eachChildOrdered(node, (child) => {
-              if (!child || child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
-              if (String(child.tagName).toLowerCase() === "table") {
-                found.push(child);
-                return;
-              }
-              walk(child);
-            });
-          };
-          walk(el);
-          return found;
-        },
-        // 表格 table / .md-table
+        // 表格 table(容器 .md-table 的分派在 processElement —— 与容器外同一条分派表)
         _cookTable: (el, blocks, imgMode) => {
           const tag = el.tagName.toLowerCase();
-          if (tag !== "table") {
-            let handled = false;
-            DomSpec.eachChildOrdered(el, (child) => {
-              if (!child) return;
-              if (child.nodeType === Node.TEXT_NODE) {
-                const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
-                if (text) {
-                  blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(text) } });
-                  handled = true;
-                }
-                return;
-              }
-              if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
-              if (String(child.tagName).toLowerCase() === "table") {
-                DOMToNotion2._cookTable(child, blocks, imgMode);
-                handled = true;
-                return;
-              }
-              const richText = DOMToNotion2.serializeRichText(child);
-              if (richText.length > 0) {
-                blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
-              }
-              DOMToNotion2._consumeInlineMedia(child, blocks, imgMode);
-              handled = true;
-            });
-            return handled;
-          }
+          if (tag !== "table") return;
           const table = el;
           const rows = [];
           let hasHeader = false;
@@ -4611,7 +4575,6 @@
               DOMToNotion2._consumeInlineMedia(cell, blocks, imgMode);
             });
           });
-          return true;
         },
         // 独立图片 img
         _cookImage: (el, blocks, imgMode) => {
@@ -4854,8 +4817,27 @@
               DOMToNotion2._cookList(el, blocks, imgMode);
               return;
             }
-            if (tag === "table" || el.classList && el.classList.contains("md-table")) {
-              if (DOMToNotion2._cookTable(el, blocks, imgMode)) return;
+            if (tag === "table") {
+              DOMToNotion2._cookTable(el, blocks, imgMode);
+              return;
+            }
+            if (el.classList && el.classList.contains("md-table")) {
+              let handled = false;
+              DomSpec.eachChildOrdered(el, (child) => {
+                if (!child) return;
+                if (child.nodeType === Node.ELEMENT_NODE && child.tagName && String(child.tagName).toLowerCase() === "table") {
+                  flushInline();
+                  DOMToNotion2._cookTable(child, blocks, imgMode);
+                  handled = true;
+                  return;
+                }
+                handled = true;
+                walkNode(child);
+              });
+              if (handled) {
+                flushInline();
+                return;
+              }
             }
             if (tag === "img") {
               DOMToNotion2._cookBlockImage(el, blocks, imgMode);
@@ -4872,7 +4854,7 @@
             for (const part of inlineParts) {
               if (!part || !part.text || !part.text.content) continue;
               const prev = merged[merged.length - 1];
-              const sameMarks = prev && JSON.stringify(prev.annotations || {}) === JSON.stringify(part.annotations || {}) && (((_a = prev.text.link) == null ? void 0 : _a.url) || "") === (((_b = part.text.link) == null ? void 0 : _b.url) || "");
+              const sameMarks = prev && JSON.stringify(prev.annotations || {}) === JSON.stringify(part.annotations || {}) && (((_a = prev.text.link) == null ? void 0 : _a.url) || "") === (((_b = part.text.link) == null ? void 0 : _b.url) || "") && prev.text.content.length + part.text.content.length <= 2e3;
               if (sameMarks) prev.text.content += part.text.content;
               else merged.push({ ...part, text: { ...part.text } });
             }
@@ -4885,6 +4867,12 @@
               merged[i].text.content = normalizeInline(merged[i].text.content);
             }
             const richText = merged.filter((part) => part.text.content);
+            if (richText.length > 100) {
+              const dropped = richText.length - 99;
+              console.warn(`[LD-Notion] \u6BB5\u843D\u5BCC\u6587\u672C\u7247\u6BB5 ${richText.length} \u8D85\u4E0A\u9650 100, \u5DF2\u622A\u65AD ${dropped} \u6BB5`);
+              richText.length = 99;
+              richText.push({ type: "text", text: { content: `\u2026\uFF08\u5BCC\u6587\u672C\u7247\u6BB5\u8FC7\u591A\uFF0C\u5DF2\u622A\u65AD ${dropped} \u6BB5\uFF09` } });
+            }
             if (richText.length > 0) {
               blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
             }
@@ -5050,6 +5038,12 @@
         _convertNodeBranch: (node, tag) => {
           if (tag === "ol") {
             const items = [];
+            const pushSeparated = (md) => {
+              if (items.length > 0 && !/\n\n$/.test(items[items.length - 1])) {
+                items[items.length - 1] = items[items.length - 1].replace(/\n?$/, "\n\n");
+              }
+              items.push(/\n\n$/.test(md) ? md : `${md.replace(/\n?$/, "\n\n")}`);
+            };
             const rawStart = node.getAttribute ? node.getAttribute("start") : null;
             const startNum = rawStart === null || rawStart === void 0 || rawStart === "" ? NaN : Number(rawStart);
             let idx = Number.isFinite(startNum) ? Math.floor(startNum) : 1;
@@ -5058,14 +5052,14 @@
               const isLi = child.nodeType === Node.ELEMENT_NODE && child.tagName.toLowerCase() === "li";
               if (!isLi) {
                 const md2 = HTMLToMarkdown2._convertNode(child);
-                if (md2) items.push(/\n$/.test(md2) ? md2 : `${md2}
-`);
+                if (md2) pushSeparated(child.nodeType === Node.TEXT_NODE ? String(md2).trim() : md2);
                 return;
               }
               const rawValue = child.getAttribute ? child.getAttribute("value") : null;
               const valueNum = rawValue === null || rawValue === void 0 || rawValue === "" ? NaN : Number(rawValue);
               if (Number.isFinite(valueNum)) idx = Math.floor(valueNum);
-              const md = HTMLToMarkdown2._convertNode(child).trim().replace(/^-(?:\s+|$)/, "").trim();
+              const indent = " ".repeat(String(idx).length + 2);
+              const md = HTMLToMarkdown2._convertNode(child).trim().replace(/^-(?:\s+|$)/, "").split("\n").map((line, i) => i === 0 || !/^ {2}/.test(line) ? line : line.replace(/^ {2}/, indent)).join("\n").trim();
               items.push(md ? `${idx}. ${md}
 ` : `${idx}.
 `);
@@ -5075,16 +5069,27 @@
           }
           if (tag === "ul") {
             const items = [];
+            const pushSeparated = (md) => {
+              if (items.length > 0 && !/\n\n$/.test(items[items.length - 1])) {
+                items[items.length - 1] = items[items.length - 1].replace(/\n?$/, "\n\n");
+              }
+              items.push(/\n\n$/.test(md) ? md : `${md.replace(/\n?$/, "\n\n")}`);
+            };
             DomSpec.eachChildOrdered(node, (child) => {
               if (child.nodeType === Node.TEXT_NODE) {
                 const text = String(child.textContent || "").trim();
-                if (text) items.push(`${text}
+                if (text) pushSeparated(text);
+                return;
+              }
+              const isLi = child.nodeType === Node.ELEMENT_NODE && child.tagName && String(child.tagName).toLowerCase() === "li";
+              const md = HTMLToMarkdown2._convertNode(child);
+              if (!md) return;
+              if (isLi) {
+                items.push(/\n$/.test(md) ? md : `${md}
 `);
                 return;
               }
-              const md = HTMLToMarkdown2._convertNode(child);
-              if (md) items.push(/\n$/.test(md) ? md : `${md}
-`);
+              pushSeparated(md.trim().split("\n").map((line) => `  ${line}`).join("\n"));
             });
             return items.join("");
           }
@@ -5132,10 +5137,16 @@
           }
           return HTMLToMarkdown2._convertTable(node) + "\n\n";
         },
+        // wave18 共识(w3 qwen): 链接标签既可能是纯文本(需转义 [ ] \\ 以防 "](url)" 逃逸链接语法),
+        // 也可能是已生成的内联 Markdown(内嵌 ![]())。对整体跑 _mdText 会把内嵌图片语法转义成
+        // 字面文本(<a href><img alt="A"></a> → "[!\[A\](…)](…)"); 完全不转义又可注入。
+        // 故以「标签转换深度」为界: 仅标签内的**文本节点**转义, 已生成的结构原样保留。
+        _labelDepth: 0,
         _convertNode: (node) => {
           var _a, _b;
           if (node.nodeType === Node.TEXT_NODE) {
-            return node.textContent || "";
+            const text = node.textContent || "";
+            return HTMLToMarkdown2._labelDepth > 0 ? Utils2.mdText(text) : text;
           }
           if (node.nodeType !== Node.ELEMENT_NODE) return "";
           const tag = node.tagName.toLowerCase();
@@ -5143,7 +5154,17 @@
             return HTMLToMarkdown2._convertNodeBranch(node, tag);
           }
           if (DomSpec.isSkippedNode(node)) return "";
-          const children = HTMLToMarkdown2._convertChildren(node);
+          let children;
+          if (tag === "a") {
+            HTMLToMarkdown2._labelDepth++;
+            try {
+              children = HTMLToMarkdown2._convertChildren(node);
+            } finally {
+              HTMLToMarkdown2._labelDepth--;
+            }
+          } else {
+            children = HTMLToMarkdown2._convertChildren(node);
+          }
           switch (tag) {
             // wave12 共识(dsf): 标题是单行结构 —— 标题内 <br>(br 分支返回换行)或文本节点自带
             // 换行会把标题体推到下一行, Markdown 行首起不再属于标题(文本与层级双丢)
@@ -5167,14 +5188,20 @@
             case "hr":
               return "---\n\n";
             case "strong":
-            case "b":
-              return `**${children}**`;
+            case "b": {
+              const text = String(children).trim();
+              return text ? `**${text}**` : children;
+            }
             case "em":
-            case "i":
-              return `*${children}*`;
+            case "i": {
+              const text = String(children).trim();
+              return text ? `*${text}*` : children;
+            }
             case "del":
-            case "s":
-              return `~~${children}~~`;
+            case "s": {
+              const text = String(children).trim();
+              return text ? `~~${text}~~` : children;
+            }
             case "code": {
               const parent = node.parentElement;
               if (parent && parent.tagName.toLowerCase() === "pre") return children;
@@ -5193,12 +5220,12 @@
               return fence + lang + "\n" + text + "\n" + fence + "\n\n";
             }
             case "blockquote": {
-              const lines = children.trim().split("\n");
+              const lines = String(children).replace(/\r\n?/g, "\n").trim().split("\n");
               return lines.map((l) => `> ${l}`).join("\n") + "\n\n";
             }
             case "a": {
               const link = DomSpec.safeUrl(node.getAttribute("href") || "");
-              if (link) return `[${HTMLToMarkdown2._mdText(children)}](${HTMLToMarkdown2._mdUrl(link)})`;
+              if (link) return `[${String(children).replace(/\r\n?|\n/g, " ")}](${HTMLToMarkdown2._mdUrl(link)})`;
               return children;
             }
             case "img": {
@@ -5207,7 +5234,8 @@
               if (src) {
                 return `![${HTMLToMarkdown2._mdText(alt)}](${HTMLToMarkdown2._mdUrl(src)})`;
               }
-              return HTMLToMarkdown2._mdText(alt || "");
+              if (alt) return HTMLToMarkdown2._mdText(alt);
+              return DomSpec.mediaSrc(node) ? "[\u56FE\u7247\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]" : "";
             }
             case "iframe": {
               const safeSrc = DomSpec.mediaUrl(node);
@@ -5216,7 +5244,7 @@
 
 `;
               }
-              return "[\u5D4C\u5165\u5185\u5BB9\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n";
+              return DomSpec.mediaSrc(node) ? "[\u5D4C\u5165\u5185\u5BB9\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n" : "";
             }
             case "video": {
               const src = DomSpec.mediaUrl(node);
@@ -5225,7 +5253,7 @@
 
 `;
               }
-              return "[\u89C6\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n";
+              return DomSpec.mediaSrc(node) ? "[\u89C6\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n" : "";
             }
             case "audio": {
               const src = DomSpec.mediaUrl(node);
@@ -5234,12 +5262,12 @@
 
 `;
               }
-              return "[\u97F3\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n";
+              return DomSpec.mediaSrc(node) ? "[\u97F3\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n" : "";
             }
             case "div": {
               const cls = node.className || "";
               if (cls.includes("onebox")) {
-                const quoted = String(children).trim().split("\n").map((line) => `> ${line}`).join("\n");
+                const quoted = String(children).replace(/\r\n?/g, "\n").trim().split("\n").map((line) => `> ${line}`).join("\n");
                 return `> [!quote]
 ${quoted}
 
@@ -5262,7 +5290,9 @@ ${quoted}
             const md = HTMLToMarkdown2._convertNode(child);
             if (!md) return;
             const isBlock = child.nodeType === Node.ELEMENT_NODE && child.tagName && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase());
-            if ((needBreak || Boolean(isBlock)) && out && !/\n$/.test(out)) out += "\n";
+            if ((needBreak || Boolean(isBlock)) && out && !/\n\n$/.test(out)) {
+              out = out.replace(/\n?$/, "\n\n");
+            }
             needBreak = Boolean(isBlock);
             out += md;
           });
@@ -5342,7 +5372,7 @@ ${quoted}
           const date = post.created_at ? new Date(post.created_at).toLocaleString("zh-CN") : "\u672A\u77E5\u65F6\u95F4";
           const header = `#${postNum} ${username}${handle}${isOp ? " \u697C\u4E3B" : ""} \xB7 ${date}`;
           const content = HTMLToMarkdown2.convert(post.cooked || "");
-          const lines = content.trim().split("\n");
+          const lines = content.replace(/\r\n?/g, "\n").trim().split("\n");
           const quoted = lines.map((l) => `> ${l}`).join("\n");
           return `> [!${type}]${collapsed} ${header}
 ${quoted}

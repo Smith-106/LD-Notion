@@ -314,8 +314,7 @@ describe("P4 收敛(c06/c08/c09): 源码级契约锁定", () => {
 
     it("上传回退写入的 URL 已过 UrlValidator(DOMToNotion 唯一生产者)", () => {
         const dom = read("src/api/DOMToNotion.js");
-        expect(dom).toContain("_safeExternalUrl: (full) => {");
-        expect(dom).toContain("if (!full || !UrlValidator.validatePageExternalUrl(full)) return \"\";");
+        expect(dom).toContain("_safeExternalUrl: (full) => DomSpec.safeUrl(full)");
         const others = ["src/ai/BlockConverter.js", "src/export/index.js"].map(read).join("\n");
         expect(others).not.toContain("_needsUpload: true");
     });

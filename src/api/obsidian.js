@@ -127,6 +127,13 @@ const HTMLToMarkdown = {
             // <p>)被静默丢弃(ul 分支走 _convertChildren 会保留); 改为按 childNodes 顺序
             // 渲染, 非 li 节点原样转换, 只对 li 编序号
             const items = [];
+            // wave18 共识(w3 dsf): 空行边界(同 ul 分支, 见 pushSeparated 注释)
+            const pushSeparated = (md) => {
+                if (items.length > 0 && !/\n\n$/.test(items[items.length - 1])) {
+                    items[items.length - 1] = items[items.length - 1].replace(/\n?$/, "\n\n");
+                }
+                items.push(/\n\n$/.test(md) ? md : `${md.replace(/\n?$/, "\n\n")}`);
+            };
             // wave17 共识(qwen): <ol start="N"> 与 <li value="N"> 此前被忽略 —— 续接编号被静默
             // 改写为 1..n(内容篡改); CommonMark 支持显式起始序号, 可无损保留
             // wave18 共识(w3 第三模型复审): 判据 `> 0` 把显式 0/负值当成缺省 —— HTML 允许
@@ -144,8 +151,9 @@ const HTMLToMarkdown = {
                 if (!isLi) {
                     // wave16 共识(dsf): 非 li 子节点的转换结果直接入数组, 与其后 "1. a" 行
                     // 粘连(<ol>intro<li>a</li></ol> → "intro1. a") —— 补齐行边界
+                    // wave18 共识(w3 dsf): 且需空行分隔, 否则被并进相邻列表项
                     const md = HTMLToMarkdown._convertNode(child);
-                    if (md) items.push(/\n$/.test(md) ? md : `${md}\n`);
+                    if (md) pushSeparated(child.nodeType === Node.TEXT_NODE ? String(md).trim() : md);
                     return;
                 }
                 // P4 收敛(c05 2/3): li 分支已输出 "- " 前缀 —— 有序列表需剥离, 否则 "1. - x"
@@ -155,7 +163,14 @@ const HTMLToMarkdown = {
                 const valueNum = rawValue === null || rawValue === undefined || rawValue === ""
                     ? NaN : Number(rawValue);
                 if (Number.isFinite(valueNum)) idx = Math.floor(valueNum);
-                const md = HTMLToMarkdown._convertNode(child).trim().replace(/^-(?:\s+|$)/, "").trim();
+                // wave18 共识(w3 qwen): 续行/嵌套缩进须按**父项内容列**算 —— 固定 2 空格对
+                // 有序项不足("10. " 的内容列是 4 = 数字位数 + 点和空格), 嵌套列表与多段内容
+                // 会脱离父项(层级丢失)
+                const indent = " ".repeat(String(idx).length + 2);
+                const md = HTMLToMarkdown._convertNode(child).trim().replace(/^-(?:\s+|$)/, "")
+                    .split("\n")
+                    .map((line, i) => (i === 0 || !/^ {2}/.test(line) ? line : line.replace(/^ {2}/, indent)))
+                    .join("\n").trim();
                 items.push(md ? `${idx}. ${md}\n` : `${idx}.\n`);
                 idx++;
             });
@@ -165,15 +180,32 @@ const HTMLToMarkdown = {
             // wave15(glm): 同 ol —— 项间缩进空白文本节点(缩进排版)不产出内容, 非 li 直属
             // 文本仍保留; 否则 "- a" 行会被前置缩进(≥4 空格时退化为缩进代码块)
             const items = [];
+            // wave18 共识(w3 dsf): 列表块与相邻块级内容之间须有空行 —— 单个换行会使后续段落
+            // 成为末个列表项的懒延续行(内容被并进列表项, 段落结构丢失)
+            const pushSeparated = (md) => {
+                if (items.length > 0 && !/\n\n$/.test(items[items.length - 1])) {
+                    items[items.length - 1] = items[items.length - 1].replace(/\n?$/, "\n\n");
+                }
+                items.push(/\n\n$/.test(md) ? md : `${md.replace(/\n?$/, "\n\n")}`);
+            };
             DomSpec.eachChildOrdered(node, (child) => {
                 if (child.nodeType === Node.TEXT_NODE) {
                     const text = String(child.textContent || "").trim();
                     // wave16 共识(dsf): 裸文本原样入数组与首个列表项粘连("intro- a") —— 补行边界
-                    if (text) items.push(`${text}\n`);
+                    if (text) pushSeparated(text);
                     return;
                 }
+                const isLi = child.nodeType === Node.ELEMENT_NODE && child.tagName
+                    && String(child.tagName).toLowerCase() === "li";
                 const md = HTMLToMarkdown._convertNode(child);
-                if (md) items.push(/\n$/.test(md) ? md : `${md}\n`);
+                if (!md) return;
+                if (isLi) {
+                    items.push(/\n$/.test(md) ? md : `${md}\n`);
+                    return;
+                }
+                // wave18 共识(w3 glm): 容器层直属的块级子元素(HTML 解析器不包裹的 <ol>/<table>/<div>)
+                // 此前零缩进原样拼接 —— 渲染为顶层块(层级丢失); 与 li 分支同行 2 空格缩进
+                pushSeparated(md.trim().split("\n").map((line) => `  ${line}`).join("\n"));
             });
             return items.join("");
         }
@@ -238,9 +270,16 @@ const HTMLToMarkdown = {
         return HTMLToMarkdown._convertTable(node) + "\n\n";
     },
 
+    // wave18 共识(w3 qwen): 链接标签既可能是纯文本(需转义 [ ] \\ 以防 "](url)" 逃逸链接语法),
+    // 也可能是已生成的内联 Markdown(内嵌 ![]())。对整体跑 _mdText 会把内嵌图片语法转义成
+    // 字面文本(<a href><img alt="A"></a> → "[!\[A\](…)](…)"); 完全不转义又可注入。
+    // 故以「标签转换深度」为界: 仅标签内的**文本节点**转义, 已生成的结构原样保留。
+    _labelDepth: 0,
+
     _convertNode: (node) => {
         if (node.nodeType === Node.TEXT_NODE) {
-            return node.textContent || "";
+            const text = node.textContent || "";
+            return HTMLToMarkdown._labelDepth > 0 ? Utils.mdText(text) : text;
         }
         if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
@@ -258,7 +297,18 @@ const HTMLToMarkdown = {
         // _convertChildren 之前(源码不必先转换再丢弃)
         if (DomSpec.isSkippedNode(node)) return "";
 
-        const children = HTMLToMarkdown._convertChildren(node);
+        let children;
+        // wave18 共识(w3 qwen): 链接标签的子树内文本需转义(见 _labelDepth)
+        if (tag === "a") {
+            HTMLToMarkdown._labelDepth++;
+            try {
+                children = HTMLToMarkdown._convertChildren(node);
+            } finally {
+                HTMLToMarkdown._labelDepth--;
+            }
+        } else {
+            children = HTMLToMarkdown._convertChildren(node);
+        }
 
         switch (tag) {
             // wave12 共识(dsf): 标题是单行结构 —— 标题内 <br>(br 分支返回换行)或文本节点自带
@@ -270,9 +320,21 @@ const HTMLToMarkdown = {
             case "p": return `${children}\n\n`;
             case "br": return "\n";
             case "hr": return "---\n\n";
-            case "strong": case "b": return `**${children}**`;
-            case "em": case "i": return `*${children}*`;
-            case "del": case "s": return `~~${children}~~`;
+            case "strong": case "b": {
+                // wave18 共识(w3 dsf): 定界符内侧留白会使 CommonMark 判为非 flanking ——
+                // <strong> 重点 </strong> 原样输出 "** 重点 **" 不渲染为强调(星号字面可见)。
+                // 内层留白移到定界符外(空白在 Markdown 中本就折叠, 内容无损)
+                const text = String(children).trim();
+                return text ? `**${text}**` : children;
+            }
+            case "em": case "i": {
+                const text = String(children).trim();
+                return text ? `*${text}*` : children;
+            }
+            case "del": case "s": {
+                const text = String(children).trim();
+                return text ? `~~${text}~~` : children;
+            }
             case "code": {
                 const parent = node.parentElement;
                 if (parent && parent.tagName.toLowerCase() === "pre") return children;
@@ -304,7 +366,10 @@ const HTMLToMarkdown = {
                 return fence + lang + "\n" + text + "\n" + fence + "\n\n";
             }
             case "blockquote": {
-                const lines = children.trim().split("\n");
+                // wave18 共识(w3 glm): 拆行前需统一行结束符 —— 源文本中的孤立 \r
+                // (&#13; 实体可达, 输入流规范化不覆盖字符引用)在 CommonMark 中同样是行结束符,
+                // 未归一则该行脱离 "> " 前缀(引用/callout 结构被逃逸)
+                const lines = String(children).replace(/\r\n?/g, "\n").trim().split("\n");
                 return lines.map((l) => `> ${l}`).join("\n") + "\n\n";
             }
             case "a": {
@@ -312,7 +377,11 @@ const HTMLToMarkdown = {
                 // 前缀, 相对(/t/1)与协议相对(//host/t/1)链接被降级为纯文本(链接静默丢失);
                 // 且 http://127.0.0.1/… 等内网链接未经公网校验直接被写入
                 const link = DomSpec.safeUrl(node.getAttribute("href") || "");
-                if (link) return `[${HTMLToMarkdown._mdText(children)}](${HTMLToMarkdown._mdUrl(link)})`;
+                // wave18 共识(w3 qwen): children 已是子树 Markdown(内嵌图片/强调原样保留),
+                // 标签内文本的转义由 TEXT_NODE 分支在 _labelDepth 内完成
+                // 标签是单行上下文 —— <br>/文本内换行会拆断链接语法(wave12);
+                // 已生成的内联 Markdown 结构不受影响(只折叠换行, 不再整体转义)
+                if (link) return `[${String(children).replace(/\r\n?|\n/g, " ")}](${HTMLToMarkdown._mdUrl(link)})`;
                 return children;
             }
             case "img": {
@@ -323,7 +392,11 @@ const HTMLToMarkdown = {
                 if (src) {
                     return `![${HTMLToMarkdown._mdText(alt)}](${HTMLToMarkdown._mdUrl(src)})`;
                 }
-                return HTMLToMarkdown._mdText(alt || "");
+                if (alt) return HTMLToMarkdown._mdText(alt);
+                // wave18 共识(w3 glm + qwen): 有候选地址但被判拒时此前零产出 —— 与同文件
+                // iframe/video/audio 分支及 Notion 出口 _cookBlockImage 不对称, 改留可见标记;
+                // 完全无候选地址(未加载完成)仍静默, 不造「已拒」噪声块
+                return DomSpec.mediaSrc(node) ? "[图片已拒（非公网 http(s) 地址）]" : "";
             }
             case "iframe": {
                 // wave9 共识(qwen) + R15: 地址判据统一走 DomSpec.mediaUrl
@@ -331,7 +404,9 @@ const HTMLToMarkdown = {
                 if (safeSrc) {
                     return `[嵌入内容](${HTMLToMarkdown._mdUrl(safeSrc)})\n\n`;
                 }
-                return "[嵌入内容已拒（非公网 http(s) 地址）]\n\n";
+                // wave18 共识(w3 qwen): 无任何候选地址时不得输出「已拒」标记(与 Notion 出口
+                // _cookIframe/_cookVideo 以 DomSpec.mediaSrc 为前置的判据同口径, 不造噪声块)
+                return DomSpec.mediaSrc(node) ? "[嵌入内容已拒（非公网 http(s) 地址）]\n\n" : "";
             }
             case "video": {
                 // wave9 共识(qwen) + R15: 同 img —— 地址判据统一走 DomSpec.mediaUrl
@@ -339,7 +414,8 @@ const HTMLToMarkdown = {
                 if (src) {
                     return `[视频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
                 }
-                return "[视频已拒（非公网 http(s) 地址）]\n\n";
+                // wave18 共识(w3 qwen): 同 iframe —— 无候选地址不输出「已拒」标记
+                return DomSpec.mediaSrc(node) ? "[视频已拒（非公网 http(s) 地址）]\n\n" : "";
             }
             case "audio": {
                 // wave13 共识(dsf) + R15: 与 video 同口径 —— 地址判据统一走 DomSpec.mediaUrl
@@ -347,13 +423,15 @@ const HTMLToMarkdown = {
                 if (src) {
                     return `[音频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
                 }
-                return "[音频已拒（非公网 http(s) 地址）]\n\n";
+                // wave18 共识(w3 qwen): 同 iframe/video —— 无候选地址不输出「已拒」标记
+                return DomSpec.mediaSrc(node) ? "[音频已拒（非公网 http(s) 地址）]\n\n" : "";
             }
             case "div": {
                 const cls = node.className || "";
                 if (cls.includes("onebox")) {
                     // wave6 共识(qwen): 仅首行加 "> " 时, 子内容换行后的行会脱离 callout(可注入 Markdown)
-                    const quoted = String(children).trim().split("\n")
+                    // wave18 共识(w3 glm): 拆行前统一行结束符(孤立 \r 同样会断行并逃逸前缀)
+                    const quoted = String(children).replace(/\r\n?/g, "\n").trim().split("\n")
                         .map((line) => `> ${line}`).join("\n");
                     return `> [!quote]\n${quoted}\n\n`;
                 }
@@ -372,6 +450,10 @@ const HTMLToMarkdown = {
         // <div><div>a</div>b</div> 输出 "ab"(块级内容与其后的文本粘连)。沿用 DOMToNotion
         // wave14 的 needBreak 延迟语义: 块级子节点后若仍拼接内容且 out 未以换行结尾, 补一个
         // 换行; 末尾不无条件补(单块子节点输出逐字节兼容)
+        // wave18 共识(w3 dsf + w2 glm): 块级子节点前后此前只补**单个**换行 ——
+        // ① 列表块后紧跟段落时("1. x\n" + "after")按 CommonMark 成为末个列表项的懒延续行
+        // (段落被并进列表项); ② "前言" + "---" 构成 setext 二级标题(分隔线被吞);
+        // ③ 相邻块级 div 被并为同一段落(软换行, 结构丢失)。统一改为块级边界处保证空行。
         let out = "";
         let needBreak = false;
         DomSpec.eachChildOrdered(node, (child) => {
@@ -379,7 +461,9 @@ const HTMLToMarkdown = {
             if (!md) return;
             const isBlock = child.nodeType === Node.ELEMENT_NODE && child.tagName
                 && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase());
-            if ((needBreak || Boolean(isBlock)) && out && !/\n$/.test(out)) out += "\n";
+            if ((needBreak || Boolean(isBlock)) && out && !/\n\n$/.test(out)) {
+                out = out.replace(/\n?$/, "\n\n");
+            }
             needBreak = Boolean(isBlock);
             out += md;
         });
@@ -493,7 +577,8 @@ const HTMLToMarkdown = {
             : "未知时间";
         const header = `#${postNum} ${username}${handle}${isOp ? " 楼主" : ""} · ${date}`;
         const content = HTMLToMarkdown.convert(post.cooked || "");
-        const lines = content.trim().split("\n");
+        // wave18 共识(w3 glm): 同 blockquote/onebox —— 孤立 \r 会在渲染时断行并脱离 "> " 前缀
+        const lines = content.replace(/\r\n?/g, "\n").trim().split("\n");
         const quoted = lines.map((l) => `> ${l}`).join("\n");
         return `> [!${type}]${collapsed} ${header}\n${quoted}\n> ^floor-${postNum}\n\n`;
     },

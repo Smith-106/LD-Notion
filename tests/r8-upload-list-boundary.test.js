@@ -68,7 +68,9 @@ describe("c05b2-glm #3: 嵌套列表显式缩进", () => {
 
     it("有序列表内嵌无序列表不出现 1. - 双前缀", () => {
         const ol = el("ol", [el("li", [txt("a"), el("ul", [el("li", [txt("b")])])])]);
-        expect(HTMLToMarkdown._convertNode(ol)).toBe("1. a\n  - b\n\n");
+        // wave18 共识(w3 qwen): 续行缩进按父项内容列("1. " → 3), 固定 2 空格会让嵌套列表
+        // 在 CommonMark 中脱离父项(渲染为顶层列表)
+        expect(HTMLToMarkdown._convertNode(ol)).toBe("1. a\n   - b\n\n");
     });
 });
 
@@ -321,12 +323,13 @@ describe("wave9 共识(qwen): Obsidian 导出 scheme 白名单", () => {
     });
 
     it("iframe src 非公网时输出拒绝标记", () => {
-        expect(HTMLToMarkdown._convertNode(el("iframe", { src: "data:text/html,<script>" })))
+        expect(HTMLToMarkdown._convertNode(el("iframe", { src: "http://127.0.0.1/x" })))
             .toContain("已拒");
         // wave16: 危险 scheme 不得因 mediaSrc 跳过 data:/about: 占位而绕过判别
         // (占位跳过仅适用于可回退到 data-src/source 的媒体, 非将占位当作安全值)
-        for (const src of ["javascript:alert(1)", "vbscript:msgbox", "file:///etc/passwd", "http://127.0.0.1/x"] ) {
-            expect(`${src} :: ${HTMLToMarkdown._convertNode(el("iframe", { src }))}`).toContain("已拒");
+        for (const src of ["javascript:alert(1)", "vbscript:msgbox", "file:///etc/passwd"] ) {
+            // wave18 共识(w3 qwen): 无候选地址(占位/危险 scheme)与 Notion 出口同口径静默
+            expect(`${src} :: ${HTMLToMarkdown._convertNode(el("iframe", { src }))}`).toBe(`${src} :: `);
         }
     });
 
@@ -618,8 +621,10 @@ describe("wave13 共识(dsf): audio 与 video 同口径回退 <source src>", () 
         expect(HTMLToMarkdown._convertNode(audio)).toBe("[音频](https://cdn.example.com/self.mp3)\n\n");
     });
 
-    it("audio 完全无地址仍拒(不生成链接)", () => {
-        expect(HTMLToMarkdown._convertNode(el("audio", {}))).toContain("已拒");
+    it("audio 完全无地址时不产出链接也不造「已拒」噪声(与 Notion 出口同口径)", () => {
+        expect(HTMLToMarkdown._convertNode(el("audio", {}))).toBe("");
+        // 有候选地址但被判拒 → 可见标记(不静默丢弃)
+        expect(HTMLToMarkdown._convertNode(el("audio", { src: "http://127.0.0.1/x.mp3" }))).toContain("已拒");
     });
 });
 

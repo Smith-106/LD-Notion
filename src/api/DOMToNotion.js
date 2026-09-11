@@ -2,7 +2,6 @@
 
 const { isSupportedFileType } = require("../config");
 const { Utils } = require("../utils");
-const { UrlValidator } = require("../security/UrlValidator");
 const { normalizeLanguage, EMOJI_MAP } = require("./constants");
 const { DomSpec } = require("./DomSpec");
 
@@ -20,13 +19,12 @@ const safeCutIndex = (text, index) => {
 const DOMToNotion = {
     // ===== cookedToBlocks 各元素处理器（MNT-003 提取，保持 if 顺序与逻辑等价）=====
 
-    // 过滤导入页面（帖子 HTML）中的外部 URL：复用 UrlValidator.validatePageExternalUrl
-    // 拒绝内网/私有/链路本地（169.254 云元数据 SSRF 防御）与非 http(s) 协议。
+    // 过滤导入页面（帖子 HTML）中的外部 URL：地址判据单一驻 DomSpec.safeUrl
+    // (scheme 白名单 + 公网/内网校验(含 169.254 云元数据 SSRF 防御) + 2000 字符上限);
     // 与 src/ai/schema.js 的 AISchema.validatePageExternalUrl 同原语（ISS-20260723-009 CWE-94 sibling）。
-    _safeExternalUrl: (full) => {
-        if (!full || !UrlValidator.validatePageExternalUrl(full)) return "";
-        return full;
-    },
+    // wave18 共识(w2 glm): 与 DomSpec.safeUrl 合一 —— 此前只做公网/协议校验, 漏长度上限
+    // (MAX_URL_LENGTH 2000), <iframe> 白名单宿主的超长 src 仍可写入 embed.url 触发整页 400
+    _safeExternalUrl: (full) => DomSpec.safeUrl(full),
 
     // 图片容器 lightbox-wrapper / image-wrapper
     _cookLightbox: (el, blocks, imgMode) => {
@@ -356,61 +354,12 @@ const DOMToNotion = {
         });
     },
 
-    // 后代表格收集(不含自身): 沿 childNodes 递归 —— 不依赖宿主复合选择器, 与导出层单一遍历口径一致,
-    // 也保持「DOMToNotion 不自持查询实现」的清单自检(出口面清单第 5 条)
-    _descendantTables: (el) => {
-        const found = [];
-        const walk = (node) => {
-            DomSpec.eachChildOrdered(node, (child) => {
-                if (!child || child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
-                if (String(child.tagName).toLowerCase() === "table") {
-                    // wave18 共识(qwen): 嵌套在表格内的表格不再单独产出 —— 其文本已被外层表格
-                    // 单元格的 rich_text 覆盖, 媒体也由外层单元格的 _consumeInlineMedia 采集,
-                    // 单独再产一次会双写同一内容(qwen w2 F1 第二症状)
-                    found.push(child);
-                    return;
-                }
-                walk(child);
-            });
-        };
-        walk(el);
-        return found;
-    },
-
-    // 表格 table / .md-table
+    // 表格 table(容器 .md-table 的分派在 processElement —— 与容器外同一条分派表)
     _cookTable: (el, blocks, imgMode) => {
         const tag = el.tagName.toLowerCase();
-        if (tag !== "table") {
-            // wave18 共识(dsf + qwen): .md-table 容器 —— 此前只处理后代表格, 容器其余直属内容
-            // (说明文字/段落/媒体)在 processElement 命中该分支后即 return, 整支静默丢失;
-            // 无后代表格时更连容器全部内容一起丢。改按文档序分派, 无任何产出时返回 false
-            // 交回通用下钻(与"未匹配容器透明下钻"同口径)。
-            let handled = false;
-            DomSpec.eachChildOrdered(el, (child) => {
-                if (!child) return;
-                if (child.nodeType === Node.TEXT_NODE) {
-                    const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
-                    if (text) {
-                        blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(text) } });
-                        handled = true;
-                    }
-                    return;
-                }
-                if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
-                if (String(child.tagName).toLowerCase() === "table") {
-                    DOMToNotion._cookTable(child, blocks, imgMode);
-                    handled = true;
-                    return;
-                }
-                const richText = DOMToNotion.serializeRichText(child);
-                if (richText.length > 0) {
-                    blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
-                }
-                DOMToNotion._consumeInlineMedia(child, blocks, imgMode);
-                handled = true;
-            });
-            return handled;
-        }
+        // wave18 共识(dsf + qwen + w2 glm): 容器(.md-table)分派已上移至 processElement,
+        // 容器内非表格内容改走同一条透明下钻路径(walkNode)
+        if (tag !== "table") return;
         const table = el;
 
         const rows = [];
@@ -538,7 +487,6 @@ const DOMToNotion = {
                 DOMToNotion._consumeInlineMedia(cell, blocks, imgMode);
             });
         });
-        return true;
     },
 
     // 独立图片 img
@@ -882,9 +830,34 @@ const DOMToNotion = {
             }
 
             // 处理表格
-            if (tag === "table" || (el.classList && el.classList.contains('md-table'))) {
-                // wave18 共识(dsf+qwen): .md-table 容器无表格时交由通用下钻(不再整支丢弃)
-                if (DOMToNotion._cookTable(el, blocks, imgMode)) return;
+            if (tag === "table") {
+                DOMToNotion._cookTable(el, blocks, imgMode);
+                return;
+            }
+
+            // wave18 共识(dsf + qwen + w2 glm): .md-table 容器按文档序分派 —— 直属表格走
+            // _cookTable, 其余内容走同一条透明下钻路径(walkNode), 与容器外的分派口径一致。
+            // 此前只处理后代表格: 容器其余直属内容静默丢失、无表格时整支丢失; 以段落/媒体
+            // 兑底又会让 <hr>/<ul>/<blockquote> 丢结构或零产出
+            if (el.classList && el.classList.contains('md-table')) {
+                let handled = false;
+                DomSpec.eachChildOrdered(el, (child) => {
+                    if (!child) return;
+                    if (child.nodeType === Node.ELEMENT_NODE && child.tagName
+                        && String(child.tagName).toLowerCase() === "table") {
+                        // 保持文档序: 表格是块级产出, 先落缓冲中的内联文本
+                        flushInline();
+                        DOMToNotion._cookTable(child, blocks, imgMode);
+                        handled = true;
+                        return;
+                    }
+                    handled = true;
+                    walkNode(child);
+                });
+                if (handled) {
+                    flushInline();
+                    return;
+                }
             }
 
             // 处理独立图片(块级: emoji 图与地址被拒的图片经 _cookBlockImage 补可见回退)
@@ -922,7 +895,10 @@ const DOMToNotion = {
                 const prev = merged[merged.length - 1];
                 const sameMarks = prev
                     && JSON.stringify(prev.annotations || {}) === JSON.stringify(part.annotations || {})
-                    && (prev.text.link?.url || "") === (part.text.link?.url || "");
+                    && (prev.text.link?.url || "") === (part.text.link?.url || "")
+                    // wave18 共识(w2 glm): 不得把已按 2000 字符切分的片段重新合并回去 ——
+                    // 合并后的单段会重新突破 rich_text 单段上限(Notion 400)
+                    && prev.text.content.length + part.text.content.length <= 2000;
                 if (sameMarks) prev.text.content += part.text.content;
                 else merged.push({ ...part, text: { ...part.text } });
             }
@@ -935,6 +911,14 @@ const DOMToNotion = {
                 merged[i].text.content = normalizeInline(merged[i].text.content);
             }
             const richText = merged.filter((part) => part.text.content);
+            // wave18 共识(w2 glm): 多内联元素可累计出超过 Notion 上限的片段数 ——
+            // 与 serializeRichText/splitLongText 同口径保留可见截断标记
+            if (richText.length > 100) {
+                const dropped = richText.length - 99;
+                console.warn(`[LD-Notion] 段落富文本片段 ${richText.length} 超上限 100, 已截断 ${dropped} 段`);
+                richText.length = 99;
+                richText.push({ type: "text", text: { content: `…（富文本片段过多，已截断 ${dropped} 段）` } });
+            }
             if (richText.length > 0) {
                 blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
             }
