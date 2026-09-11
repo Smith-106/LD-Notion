@@ -70,10 +70,28 @@ const DomSpec = {
         return m ? m[1] : null;
     },
 
+    // 媒体地址回退口径: src → data-src(懒加载, Discourse 常见) → <source src>(video/audio)。
+    // 此前 img 只认 src|data-src 而 video/audio 只认 src|<source src>, 两导出器各自实现且
+    // 互不覆盖 —— 懒加载图在 Obsidian 侧被丢、<source> 型视频在 Notion 侧被丢。
+    mediaSrc: (el) => {
+        if (!el || typeof el.getAttribute !== "function") return "";
+        const own = el.getAttribute("src");
+        if (own) return own;
+        const lazy = el.getAttribute("data-src");
+        if (lazy) return lazy;
+        const source = typeof el.querySelector === "function" ? el.querySelector("source") : null;
+        return (source && typeof source.getAttribute === "function" && source.getAttribute("src")) || "";
+    },
+
     // 单行上下文出口面的唯一入口(引用块内/callout 行/表格单元格/标题/link label/img alt)。
     // 实现仍驻 Utils.mdText(公开壳, 供 ai/ui 跨模块调用), 此处只做导出层命名收束 ——
     // 依赖方向保持 api → utils, 且折叠语义只有一处实现。
     collapseOneLine: Utils.mdText,
+
+    // 纯空白单行折叠(标题/表格单元格等非 Markdown 语法上下文): 折叠 CR/LF 并去首尾空白。
+    // 与 collapseOneLine 语义不同 —— 后者用于链接标签/alt, 需剔方括号防链接结构被破坏;
+    // 此处**不可**剔方括号("[RFC]" 是合法标题内容), 二者不可互替。
+    foldToSingleLine: (text) => String(text ?? "").replace(/\r\n?|\n/g, " ").trim(),
 
     // 有序子节点遍历(含文本节点, 文档序)。单一来源取代各处的
     // Array.from(el.childNodes || []).forEach(...)(部分站点漏了 || [] 保护)。

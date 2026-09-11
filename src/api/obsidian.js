@@ -2,6 +2,7 @@
 
 const { UrlValidator } = require("../security/UrlValidator");
 const { Utils } = require("../utils");
+const { DomSpec } = require("./DomSpec");
 
 const ObsidianAPI = {
     // P4 共识(dsf): 整路径 encodeURIComponent 会把子目录的 "/" 编成 %2F, 且 ".." 段可越权写入。
@@ -127,7 +128,7 @@ const HTMLToMarkdown = {
             // 渲染, 非 li 节点原样转换, 只对 li 编序号
             const items = [];
             let idx = 1;
-            Array.from(node.childNodes).forEach((child) => {
+            DomSpec.eachChildOrdered(node, (child) => {
                 const isLi = child.nodeType === Node.ELEMENT_NODE
                     && child.tagName.toLowerCase() === "li";
                 if (!isLi) {
@@ -162,7 +163,7 @@ const HTMLToMarkdown = {
                 pushText(buf.replace(/\s+\n/g, "\n").trim());
                 buf = "";
             };
-            Array.from(node.childNodes || []).forEach((child) => {
+            DomSpec.eachChildOrdered(node, (child) => {
                 const isList = child.nodeType === Node.ELEMENT_NODE
                     && child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase());
                 if (isList) {
@@ -210,21 +211,23 @@ const HTMLToMarkdown = {
             return HTMLToMarkdown._convertNodeBranch(node, tag);
         }
 
+        // wave11 共识(glm): script/style/noscript 非渲染元素 —— 其文本内容(JS/CSS 源码)
+        // 经 default 原样并入导出正文, 污染笔记。判据统一驻 DomSpec.SKIP_TAGS, 且置于
+        // _convertChildren 之前(源码不必先转换再丢弃)
+        if (DomSpec.isSkippedNode(node)) return "";
+
         const children = HTMLToMarkdown._convertChildren(node);
 
         switch (tag) {
             // wave12 共识(dsf): 标题是单行结构 —— 标题内 <br>(br 分支返回换行)或文本节点自带
             // 换行会把标题体推到下一行, Markdown 行首起不再属于标题(文本与层级双丢)
             case "h1": case "h2": case "h3": case "h4": case "h5": case "h6": {
-                const text = children.replace(/\r\n?|\n/g, " ").trim();
+                const text = DomSpec.foldToSingleLine(children);
                 return `${"#".repeat(Number(tag[1]))} ${text}\n\n`;
             }
             case "p": return `${children}\n\n`;
             case "br": return "\n";
             case "hr": return "---\n\n";
-            // wave11 共识(glm): script/style/noscript 非渲染元素 —— 其文本内容(JS/CSS 源码)
-            // 经 default 原样并入导出正文, 污染笔记
-            case "script": case "style": case "noscript": return "";
             case "strong": case "b": return `**${children}**`;
             case "em": case "i": return `*${children}*`;
             case "del": case "s": return `~~${children}~~`;
@@ -261,7 +264,7 @@ const HTMLToMarkdown = {
                 return children;
             }
             case "img": {
-                const src = node.getAttribute("src") || "";
+                const src = DomSpec.mediaSrc(node);
                 const alt = node.getAttribute("alt") || "";
                 // wave9 共识(qwen): src 仅放行 http(s) 公网地址(javascript:/data:/内网 拒绝)
                 if (src && UrlValidator.validatePageExternalUrl(src)) {
@@ -271,7 +274,7 @@ const HTMLToMarkdown = {
             }
             case "ul": return children;
             case "iframe": {
-                const src = node.getAttribute("src") || "";
+                const src = DomSpec.mediaSrc(node);
                 // wave9 共识(qwen): src 仅放行 http(s) 公网地址(javascript:/data:/内网 拒绝)
                 const safeSrc = String(src || "");
                 if (safeSrc && UrlValidator.validatePageExternalUrl(safeSrc)) {
@@ -280,7 +283,7 @@ const HTMLToMarkdown = {
                 return "[嵌入内容已拒（非公网 http(s) 地址）]\n\n";
             }
             case "video": {
-                const src = node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "";
+                const src = DomSpec.mediaSrc(node);
                 // wave9 共识(qwen): 同 img —— 非公网 http(s) 不生成链接
                 if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
                     return `[视频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
@@ -289,7 +292,7 @@ const HTMLToMarkdown = {
             }
             case "audio": {
                 // wave13 共识(dsf): 与 video 同口径 —— 仅有 <source src> 子元素时不再误判"已拒"
-                const src = node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "";
+                const src = DomSpec.mediaSrc(node);
                 if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
                     return `[音频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
                 }
@@ -310,7 +313,9 @@ const HTMLToMarkdown = {
     },
 
     _convertChildren: (node) => {
-        return Array.from(node.childNodes).map(HTMLToMarkdown._convertNode).join("");
+        let out = "";
+        DomSpec.eachChildOrdered(node, (child) => { out += HTMLToMarkdown._convertNode(child); });
+        return out;
     },
 
     _convertTable: (table) => {
@@ -332,8 +337,8 @@ const HTMLToMarkdown = {
                 .map((c) => {
                 // P4 收敛(c05): 单元格内的竖线会破坏表格列结构
                 // wave11 共识(qwen): 与 buildPostCallout.sanitize 同口径 —— \n 漏孤立 \r
-                // (CommonMark 行结束符), 单元格文本中的 CR 会拆断表格行
-                return HTMLToMarkdown._convertChildren(c).replace(/\r\n?|\n/g, " ").replace(/\|/g, "\\|").trim();
+                // (CommonMark 行结束符), 单元格文本中的 CR 会拆断表格行; 折叠口径统一驻 DomSpec
+                return DomSpec.foldToSingleLine(HTMLToMarkdown._convertChildren(c)).replace(/\|/g, "\\|");
             });
             result.push(`| ${cells.join(" | ")} |`);
             if (i === 0) {
