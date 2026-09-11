@@ -10,6 +10,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 
 const { DOMToNotion, HTMLToMarkdown } = require("../src/api");
 const { DomSpec } = require("../src/api/DomSpec");
+const { Utils } = require("../src/utils");
 
 // ---- 桩工具(与 tests/p4-dom-boundary.test.js 同风格: 纯对象 + 局部 Node 常量) ----
 // Node 桩必须是**函数**形态: 以普通对象冒充 globalThis.Node 会使 chai/type-detect 的
@@ -322,11 +323,13 @@ describe("出口面: 单行上下文(折叠语义与已登记差异)", () => {
         expect(blocks[0].heading_2.rich_text.map((r) => r.text.content).join("")).toBe("a\nb");
     });
 
-    it("折叠原语不可互换: foldToSingleLine 保方括号, collapseOneLine 剔方括号", () => {
+    it("折叠原语不可互换: foldToSingleLine 保方括号原样, collapseOneLine 转义方括号", () => {
         expect(DomSpec.foldToSingleLine("[RFC]\r\n8601")).toBe("[RFC] 8601");
         expect(DomSpec.foldToSingleLine("a\rb")).toBe("a b");
         expect(DomSpec.foldToSingleLine(null)).toBe("");
-        expect(DomSpec.collapseOneLine("[RFC] 8601")).toBe("RFC 8601");
+        // wave17 共识(glm): 链接标签面由「删除方括号」改为「反斜杠转义」—— 删除会破坏标签内的
+        // 嵌套 Markdown(可点击图片 [![alt](u)](link) 被改写成损坏文本); 转义同样阻止 ]( 逃逸链接语法
+        expect(DomSpec.collapseOneLine("[RFC] 8601")).toBe("\\[RFC\\] 8601");
         expect(DomSpec.foldToSingleLine("[RFC] 8601")).not.toBe(DomSpec.collapseOneLine("[RFC] 8601"));
     });
 });
@@ -576,7 +579,9 @@ describe("wave16: 修复后复验收敛", () => {
         const A = "https://cdn.example.com/a.png";
         const B = "https://cdn.example.com/b.png";
         const img = (src) => element("img", [], { getAttribute: attrs({ src }) });
-        const wrapper = element("div", [], {
+        // wave17: 媒体采集改为沿 childNodes 文档序递归(不再依赖 querySelectorAll 复合选择器),
+        // 粧须提供真实子节点树才能反映真实 DOM 行为
+        const wrapper = element("div", [img(A), img(B)], {
             classList: { contains: (c) => c === "lightbox-wrapper" },
             querySelector: () => img(A),
             querySelectorAll: (sel) => (sel === "img" ? [img(A), img(B)] : []),
@@ -719,6 +724,214 @@ describe("清单自检: 出口面清单与 src/ 现状一致", () => {
             expect(`${p} | 重声明跳过表 | ${/SKIP_TAGS\s*=/.test(src)}`).toBe(`${p} | 重声明跳过表 | false`);
             expect(`${p} | 重写 script 跳过 | ${/tag === "script"|case "script"/.test(src)}`).toBe(`${p} | 重写 script 跳过 | false`);
         }
+    });
+});
+
+// ===== wave17: 三模型共识复审确认项的出口面契约(A–W) =====
+// 动机与来源模型逐条登记于 _matrix.txt; 每条都断言**行为**(不丢失/不篡改/两出口同口径),
+// 不断言内部函数名或调用形态。
+describe("wave17 共识: 出口面契约", () => {
+    const PUBLIC = "https://cdn.example.com/a.png";
+    const src = (value) => ({ getAttribute: attrs({ src: value }) });
+
+    it("A/C eachMedia: 按文档序采集(类序不再重排) + 不下探跳过面子树", () => {
+        const kinds = [];
+        const body = element("div", [
+            element("video", [], src("https://cdn.example.com/v.mp4")),
+            element("img", [], src(PUBLIC)),
+            element("a", [], { classList: { contains: (c) => c === "attachment" }, getAttribute: attrs({ href: "https://cdn.example.com/f.pdf" }) }),
+            element("audio", [], src("https://cdn.example.com/a.mp3")),
+            element("iframe", [], src("https://www.youtube.com/embed/x")),
+        ]);
+        DomSpec.eachMedia(body, (_n, kind) => kinds.push(kind));
+        // 旧实现按固定类序(img → attachment → video → audio → iframe)重排, 与源文档序相反
+        expect(kinds).toEqual(["video", "img", "attachment", "audio", "iframe"]);
+
+        const skipped = [];
+        DomSpec.eachMedia(element("div", [
+            element("noscript", [element("img", [], src(PUBLIC))]),
+            element("style", [element("img", [], src(PUBLIC))]),
+            element("script", [element("img", [], src(PUBLIC))]),
+        ]), (_n, kind) => skipped.push(kind));
+        expect(skipped).toEqual([]);
+    });
+
+    it("D mediaSrc: 非 http(s) scheme 一律视为占位并回退 data-src", () => {
+        const holder = (own, lazy) => element("img", [], { getAttribute: attrs({ src: own, "data-src": lazy }) });
+        for (const placeholder of ["data:image/png;base64,AAA", "about:blank", "blob:https://x/y", "javascript:void(0)", "file:///c:/a.png"]) {
+            expect(`${placeholder} → ${DomSpec.mediaSrc(holder(placeholder, PUBLIC))}`).toBe(`${placeholder} → ${PUBLIC}`);
+        }
+        // 无 scheme(相对/协议相对)与已绝对 http(s) 地址仍是真实地址(交由 safeUrl 补齐 + 公网校验)
+        expect(DomSpec.mediaSrc(holder("/a.png", PUBLIC))).toBe("/a.png");
+        expect(DomSpec.mediaSrc(holder("//cdn.example.com/a.png", PUBLIC))).toBe("//cdn.example.com/a.png");
+        expect(DomSpec.mediaSrc(holder(PUBLIC, "https://cdn.example.com/lazy.png"))).toBe(PUBLIC);
+    });
+
+    it("B absoluteUrl: scheme 大小写不敏感(不再被当成相对地址重拼)", () => {
+        expect(Utils.absoluteUrl("HTTPS://cdn.example.com/a.png")).toBe("HTTPS://cdn.example.com/a.png");
+        expect(Utils.absoluteUrl("Http://cdn.example.com/a.png")).toBe("Http://cdn.example.com/a.png");
+        expect(Utils.absoluteUrl("https://cdn.example.com/a.png")).toBe(PUBLIC);
+    });
+
+    it("R mdText: 方括号转义而非删除(可点击图片标签不再被破坏, 且仍阻止 ]( 逃逸)", () => {
+        const out = Utils.mdText("[![alt](u)](l)");
+        expect(out).toBe("\\[!\\[alt\\](u)\\](l)");
+        expect(/(^|[^\\])\]\(/.test(out)).toBe(false);
+    });
+
+    it("E _cookCode: 取整棵 <pre>(非首个 code 元素的文本不丢失)", () => {
+        const pre = element("pre", [textNode("head"), element("code", [textNode("body")]), textNode("tail")]);
+        const blocks = [];
+        DOMToNotion._cookCode(pre, blocks);
+        const content = blocks[0].code.rich_text.map((r) => r.text.content).join("");
+        expect(content).toContain("head");
+        expect(content).toContain("body");
+        expect(content).toContain("tail");
+    });
+
+    it("F/L 块级边界: <br> 与块级元素两侧产生换行(内联文本不与之粘连)", () => {
+        const p = element("p", [textNode("a"), element("br", []), textNode("b")]);
+        expect(DOMToNotion.serializeRichText(p).map((r) => r.text.content).join("")).toBe("a\nb");
+        const div = element("div", [textNode("前"), element("h3", [textNode("标题")]), textNode("后")]);
+        expect(DOMToNotion.serializeRichText(div).map((r) => r.text.content).join("")).toBe("前\n标题\n后");
+        // 透明下钻路径(cookedToBlocks): 同一 <br> 语义(此前 inlineBuf 直接拼接 → "ab")
+        const origParser = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body: element("body", [element("div", [textNode("line1"), element("br", []), textNode("line2")])]) }) };
+        };
+        try {
+            const blocks = DOMToNotion.cookedToBlocks("<div>x</div>", "external");
+            const text = blocks.map((b) => (b.paragraph?.rich_text || []).map((r) => r.text.content).join("")).join("");
+            expect(text).toBe("line1\nline2");
+        } finally {
+            if (origParser === undefined) delete globalThis.DOMParser; else globalThis.DOMParser = origParser;
+        }
+    });
+
+    it("G _cookAsideQuote: 保留非 blockquote 的直属署名行(按文档序)", () => {
+        const aside = element("aside", [
+            element("div", [textNode("署名")]),
+            element("blockquote", [textNode("引用")]),
+        ], { classList: { contains: (c) => c === "quote" } });
+        const blocks = [];
+        DOMToNotion._cookAsideQuote(aside, blocks, "external");
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph", "quote"]);
+        expect(blocks[0].paragraph.rich_text.map((r) => r.text.content).join("")).toContain("署名");
+    });
+
+    it("H 被拒地址的媒体留可见标记(视频/音频不静默丢弃)", () => {
+        const internal = (tag) => ({ tagName: tag, getAttribute: attrs({ src: "http://127.0.0.1/m.bin" }), querySelector: () => null });
+        const v = [];
+        DOMToNotion._cookVideo(internal("VIDEO"), v, "external");
+        expect(v.length).toBe(1);
+        expect(v[0].paragraph.rich_text.map((r) => r.text.content).join("")).toContain("视频已拒");
+        const a = [];
+        DOMToNotion._cookAudio(internal("AUDIO"), a, "external");
+        expect(a.length).toBe(1);
+        expect(a[0].paragraph.rich_text.map((r) => r.text.content).join("")).toContain("音频已拒");
+        // imgMode=skip 是用户显式设置, 仍保持静默(与图片同口径)
+        const s = [];
+        DOMToNotion._cookVideo(internal("VIDEO"), s, "skip");
+        expect(s).toEqual([]);
+    });
+
+    it("I/O _cookIframe: data-src 懒加载回退 + imgMode=skip 静默 + 非白名单降级为链接", () => {
+        const frame = (props) => element("iframe", [], { getAttribute: attrs(props), querySelector: () => null });
+        const embed = [];
+        expect(DOMToNotion._cookIframe(frame({ "data-src": "https://www.youtube.com/embed/x" }), embed, "external")).toBe(true);
+        expect(embed[0].type).toBe("embed");
+        const skipped = [];
+        expect(DOMToNotion._cookIframe(frame({ src: "https://www.youtube.com/embed/x" }), skipped, "skip")).toBe(false);
+        expect(skipped).toEqual([]);
+        const fallback = [];
+        expect(DOMToNotion._cookIframe(frame({ src: "https://player.evil.com/v" }), fallback, "external")).toBe(true);
+        expect(fallback.every((b) => b.type !== "embed")).toBe(true);
+        expect(JSON.stringify(fallback)).toContain("https://player.evil.com/v");
+    });
+
+    it("J 内联 code 保留 <br> 换行", () => {
+        const p = element("p", [element("code", [textNode("a"), element("br", []), textNode("b")])]);
+        expect(DOMToNotion.serializeRichText(p).map((r) => r.text.content).join("")).toContain("a\nb");
+    });
+
+    it("K rich_text 超 100 段保留可见截断标记", () => {
+        const p = element("p", Array.from({ length: 140 }, (_v, i) => element("span", [textNode(`s${i}`)])));
+        const rt = DOMToNotion.serializeRichText(p);
+        expect(rt.length).toBeLessThanOrEqual(100);
+        expect(rt[rt.length - 1].text.content).toContain("截断");
+    });
+
+    it("M li 内嵌套列表不粘连 + 媒体不重复落块", () => {
+        const inner = element("ul", [element("li", [textNode("内")])]);
+        const outer = element("ul", [element("li", [textNode("外"), inner, element("img", [], src(PUBLIC))])]);
+        const blocks = [];
+        DOMToNotion._cookList(outer, blocks, "external");
+        expect(blocks.filter((b) => b.type === "bulleted_list_item").length).toBe(2);
+        expect(blocks.filter((b) => b.type === "image").length).toBe(1);
+    });
+
+    it("N <a> 内联标注保留(递归子节点, 不丢 code/文本)", () => {
+        const a = element("a", [textNode("前"), element("code", [textNode("码")]), textNode("后")], { getAttribute: attrs({ href: "https://cdn.example.com/p" }) });
+        const linked = DOMToNotion.serializeRichText(element("p", [a])).filter((r) => r.text.link);
+        expect(linked.map((r) => r.text.content).join("")).toBe("前码后");
+    });
+
+    it("P .md-table 容器内多个表格逐个产出(不再只取首个)", () => {
+        const table = (v) => element("table", [element("tbody", [element("tr", [element("td", [textNode(v)])], { closest: () => null })])]);
+        const holder = element("div", [table("T1"), table("T2")], { classList: { contains: (c) => c === "md-table" } });
+        const blocks = [];
+        DOMToNotion._cookTable(holder, blocks, "external");
+        expect(blocks.filter((b) => b.type === "table").length).toBe(2);
+    });
+
+    it("Q 块级图片地址被拒时保留 alt(不零产出)", () => {
+        const img = element("img", [], { getAttribute: attrs({ src: "http://127.0.0.1/x.png", alt: "图注" }) });
+        const blocks = [];
+        DOMToNotion._cookBlockImage(img, blocks, "external");
+        expect(blocks.length).toBe(1);
+        expect(JSON.stringify(blocks[0])).toContain("图注");
+    });
+
+    it("T/U/V/W Markdown 出口: caption / 嵌套引用边界 / ol start·li value / 语言判据", () => {
+        const table = element("table", [
+            element("caption", [textNode("表题")]),
+            element("tbody", [element("tr", [element("td", [textNode("c")])])]),
+        ]);
+        expect(HTMLToMarkdown._convertNode(table)).toContain("表题");
+
+        const quote = element("blockquote", [textNode("外"), element("blockquote", [textNode("内")])]);
+        const qmd = HTMLToMarkdown._convertNode(quote);
+        expect(qmd).toContain("> 外");
+        expect(qmd).toContain("> > 内");
+        expect(qmd).not.toContain("外> 内");
+
+        const list = element("ol", [
+            element("li", [textNode("a")]),
+            element("li", [textNode("b")], { getAttribute: attrs({ value: "7" }) }),
+        ], { getAttribute: attrs({ start: "3" }) });
+        const lmd = HTMLToMarkdown._convertNode(list);
+        expect(lmd).toContain("3. a");
+        expect(lmd).toContain("7. b");
+
+        const codeEl = element("code", [textNode("x")], { getAttribute: attrs({ class: "lang-python" }), querySelector: () => null });
+        const pre = element("pre", [codeEl], { querySelector: (sel) => (sel === "code" ? codeEl : null) });
+        expect(HTMLToMarkdown._convertNode(pre)).toContain("```python");
+    });
+
+    it("S Markdown frontmatter: 缺值/非数值不再被伪造成 0 或 1", () => {
+        const empty = HTMLToMarkdown.buildFrontmatter({ stars: null, floors: "", topicId: undefined });
+        expect(empty).not.toContain("stars:");
+        expect(empty).not.toContain("floors:");
+        expect(empty).not.toContain("topic_id:");
+
+        const numeric = HTMLToMarkdown.buildFrontmatter({ stars: "12", floors: 3, topicId: 9 });
+        expect(numeric).toContain("stars: 12");
+        expect(numeric).toContain("floors: 3");
+        expect(numeric).toContain("topic_id: 9");
+
+        const coerced = HTMLToMarkdown.buildFrontmatter({ stars: true, floors: "abc" });
+        expect(coerced).not.toContain("stars: 1");
+        expect(coerced).toContain('floors: "abc"');
     });
 });
 

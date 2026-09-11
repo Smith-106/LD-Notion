@@ -650,7 +650,8 @@ describe("wave12 系统扫描: 单行上下文内联文本折叠换行(链接标
     it("Utils.mdText 折叠换行(列表项/链接标签为单行上下文)", () => {
         expect(Utils.mdText("标题\n第二行")).toBe("标题 第二行");
         expect(Utils.mdText("a\r\nb")).toBe("a b");
-        expect(Utils.mdText("仍有]括号[被剥离")).toBe("仍有括号被剥离");
+        // wave17 共识(glm): 方括号由删除改为反斜杠转义(内容无损, 且仍阻止 ]( 逃逸链接语法)
+        expect(Utils.mdText("仍有]括号[被剥离")).toBe("仍有\\]括号\\[被剥离");
     });
 
     it("链接标签内含 <br> 不再拆断链接结构", () => {

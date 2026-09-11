@@ -127,7 +127,10 @@ const HTMLToMarkdown = {
             // <p>)被静默丢弃(ul 分支走 _convertChildren 会保留); 改为按 childNodes 顺序
             // 渲染, 非 li 节点原样转换, 只对 li 编序号
             const items = [];
-            let idx = 1;
+            // wave17 共识(qwen): <ol start="N"> 与 <li value="N"> 此前被忽略 —— 续接编号被静默
+            // 改写为 1..n(内容篡改); CommonMark 支持显式起始序号, 可无损保留
+            const startAttr = Number(node.getAttribute && node.getAttribute("start"));
+            let idx = Number.isFinite(startAttr) && startAttr > 0 ? Math.floor(startAttr) : 1;
             DomSpec.eachChildOrdered(node, (child) => {
                 // wave15(glm): 缩进排版的 <ol>\n    <li> 产生项间纯空白文本节点 —— 原样拼入会把
                 // 后续 "1. a" 推到行首缩进位(≥4 空格时整表退化为缩进代码块)
@@ -142,6 +145,8 @@ const HTMLToMarkdown = {
                     return;
                 }
                 // P4 收敛(c05 2/3): li 分支已输出 "- " 前缀 —— 有序列表需剥离, 否则 "1. - x"
+                const valueAttr = Number(child.getAttribute && child.getAttribute("value"));
+                if (Number.isFinite(valueAttr) && valueAttr > 0) idx = Math.floor(valueAttr);
                 const md = HTMLToMarkdown._convertNode(child).trim().replace(/^-\s+/, "");
                 items.push(`${idx}. ${md}\n`);
                 idx++;
@@ -274,8 +279,11 @@ const HTMLToMarkdown = {
                 // wave15 共识(qwen/glm): className 在 SVG 命名空间元素上是 SVGAnimatedString
                 // (无 .match → TypeError 中断整个导出); \w+ 在 c++/c#/objective-c 的 +/#/- 处
                 // 截断(与 NOTION_LANGUAGES 已收录 c++/c# 的口径不一致)
+                // wave17 共识(qwen): 判据与 Notion 出口(DOMToNotion._cookCode 的
+                // /lang(?:uage)?-([a-z0-9_+#-]+)/i)不一致 —— class="lang-python" 在两出口得到不同
+                // 结果(prism 写法在 Markdown 侧丢语言标注); 统一为同一形态并大小写不敏感
                 const lang = String((codeEl && (codeEl.getAttribute?.("class") || codeEl.className)) || "")
-                    .match(/language-([\w+#.-]+)/)?.[1] || "";
+                    .match(/lang(?:uage)?-([\w+#.-]+)/i)?.[1] || "";
                 // wave14 共识(glm): 只取 code 元素会丢掉 pre 内其余文本(<pre>foo<code>bar</code></pre>);
                 // wave16 共识(qwen): textContent 下 <br> 不产生换行(<pre>a<br>b</pre> 导出 "ab");
                 // 统一走 DomSpec.textWithBreaks, 并按 HTML 规范去掉 <pre> 紧随的首个换行
@@ -345,9 +353,22 @@ const HTMLToMarkdown = {
         }
     },
 
+    // wave17 共识(qwen): 块级子节点与相邻内联文本/嵌套引用之间缺行边界 ——
+    // <blockquote>外<blockquote>内</blockquote></blockquote> 的子树输出为 "外> 内\n\n",
+    // 外层逐行加 "> " 后得 "> 外> 内"(内层引用语法被吞); div.onebox 同族。
+    // 与 Notion 出口 serializeRichText 的文本边界同口径: 沿 childNodes 拼接, 块级子节点前补换行。
     _convertChildren: (node) => {
         let out = "";
-        DomSpec.eachChildOrdered(node, (child) => { out += HTMLToMarkdown._convertNode(child); });
+        DomSpec.eachChildOrdered(node, (child) => {
+            const md = HTMLToMarkdown._convertNode(child);
+            if (!md) return;
+            if (child.nodeType === Node.ELEMENT_NODE && child.tagName
+                && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase())
+                && out && !/\n$/.test(out)) {
+                out += "\n";
+            }
+            out += md;
+        });
         return out;
     },
 
@@ -362,8 +383,13 @@ const HTMLToMarkdown = {
             ? sections.flatMap((sec) => Array.from(sec.children || [])
                 .filter((r) => r.tagName && r.tagName.toLowerCase() === "tr"))
             : Array.from(table.children || []).filter((r) => r.tagName && r.tagName.toLowerCase() === "tr");
-        if (rows.length === 0) return "";
+        const caption = direct("caption")[0];
+        // wave17 共识(dsf/qwen): <caption> 既非 thead/tbody/tfoot 也不属 tr, 此前整支丢弃 ——
+        // Notion 出口已在 wave16 按同族缺陷补发段落, 此处补可见文本(表格标题, 置于表格行之前)
+        const captionText = caption ? DomSpec.foldToSingleLine(HTMLToMarkdown._convertChildren(caption)).trim() : "";
+        if (rows.length === 0) return captionText ? `${captionText}\n\n` : "";
         const result = [];
+        if (captionText) result.push(captionText);
         rows.forEach((row, i) => {
             const cells = Array.from(row.children || [])
                 .filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase()))
@@ -390,22 +416,36 @@ const HTMLToMarkdown = {
             .replace(/[\r\n\u2028\u2029]/g, " ")
             .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
         // P4 共识(qwen): 数值字段直插 —— 非数值输入可注入 YAML 片段, 数值化后再写
+        // wave17 共识(glm/qwen): Number(null)/Number("")/Number([]) 均为 0、Number(true) 为 1
+        // —— 缺失/空值/非数值真值被静默伪造成合法数字写进 YAML(下游按真实楼层/话题号/星数读取
+        // 即得错误数据)。改为: 仅接受 number 类型或非空数字字符串, 缺失值直接省略该字段。
+        const hasValue = (v) => v !== undefined && v !== null && v !== "";
+        const asNumber = (value) => {
+            if (typeof value === "number") return Number.isFinite(value) ? value : null;
+            if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
+            return null;
+        };
         const numOrQuoted = (key, value) => {
-            const num = Number(value);
-            return Number.isFinite(num) ? `${key}: ${num}` : `${key}: "${esc(value)}"`;
+            if (!hasValue(value)) return "";
+            const num = asNumber(value);
+            return num === null ? `${key}: "${esc(value)}"` : `${key}: ${num}`;
+        };
+        const pushNum = (key, value) => {
+            const line = numOrQuoted(key, value);
+            if (line) lines.push(line);
         };
         if (meta.title) lines.push(`title: "${esc(meta.title)}"`);
         if (meta.url) lines.push(`url: "${esc(meta.url)}"`);
         if (meta.author) lines.push(`author: "${esc(meta.author)}"`);
         if (meta.source) lines.push(`source: "${esc(meta.source)}"`);
         if (meta.sourceType) lines.push(`source_type: "${esc(meta.sourceType)}"`);
-        if (meta.topicId) lines.push(numOrQuoted("topic_id", meta.topicId));
+        if (meta.topicId) pushNum("topic_id", meta.topicId);
         if (meta.owner) lines.push(`owner: "${esc(meta.owner)}"`);
         if (meta.repo) lines.push(`repo: "${esc(meta.repo)}"`);
         if (meta.gistId) lines.push(`gist_id: "${esc(meta.gistId)}"`);
         if (meta.category) lines.push(`category: "${esc(meta.category)}"`);
         if (meta.language) lines.push(`language: "${esc(meta.language)}"`);
-        if (Number.isFinite(Number(meta.stars))) lines.push(`stars: ${Number(meta.stars)}`);
+        pushNum("stars", meta.stars);
         if (meta.updatedAt) lines.push(`updated_at: "${esc(meta.updatedAt)}"`);
         // wave16 共识(qwen): meta.tags 为有 length 的非数组(如字符串)时 forEach 抛 TypeError ——
         // 整个导出中断; 按"单值数组化"降级, 不静默丢标签
@@ -417,7 +457,7 @@ const HTMLToMarkdown = {
             tags.forEach((t) => lines.push(`  - "${esc(t)}"`));
         }
         lines.push(`export_time: "${new Date().toISOString()}"`);
-        if (meta.floors !== undefined) lines.push(numOrQuoted("floors", meta.floors));
+        pushNum("floors", meta.floors);
         lines.push("---");
         return lines.join("\n") + "\n\n";
     },

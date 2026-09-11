@@ -57,11 +57,19 @@ describe("P4: DOMToNotion 表格与长文本边界", () => {
         expect(yt[0].type).toBe("embed");
     });
 
-    it("_cookIframe 仍拒绝非白名单宿主", () => {
+    it("_cookIframe 非白名单宿主不得写入 embed(降级为可见链接)", () => {
         const blocks = [];
-        const handled = DOMToNotion._cookIframe({ getAttribute: () => "https://evil.com/player.html" }, blocks);
-        expect(handled).toBe(false);
-        expect(blocks).toEqual([]);
+        const handled = DOMToNotion._cookIframe(
+            { getAttribute: () => "https://evil.com/player.html", querySelector: () => null },
+            blocks,
+            "external"
+        );
+        // wave17 共识(dsf/glm/qwen): 被拒媒体不再静默丢弃 —— 公网非白名单地址降级为链接段落
+        // (客户端点击, 不经 Notion 服务端抓取); 但 embed 面仍只允许 _isAllowedEmbedHost 通过的宿主
+        expect(handled).toBe(true);
+        expect(blocks.every((b) => b.type !== "embed")).toBe(true);
+        expect(blocks[0].type).toBe("paragraph");
+        expect(JSON.stringify(blocks[0])).toContain("https://evil.com/player.html");
     });
 
     it("serializeRichText 超 100 节点告警(源码契约)", () => {
@@ -216,10 +224,15 @@ describe("P4 收敛(c05a-glm): 段落内嵌媒体 / 表格行上限与多 tbody"
 
     it("段落内嵌 iframe 有消费点(embed 不再静默丢失)", () => {
         const blocks = [];
-        const frame = { getAttribute: () => "https://www.youtube.com/embed/abc" };
-        const el = {
-            querySelectorAll: (sel) => (sel === "iframe" ? [frame] : []),
+        // wave17: 媒体采集改为沿 childNodes 文档序递归(不再依赖 querySelectorAll 复合选择器),
+        // 粧须给出真实子节点树; 宿主白名单/地址校验面不变
+        const frame = {
+            tagName: "IFRAME",
+            getAttribute: (k) => (k === "src" ? "https://www.youtube.com/embed/abc" : null),
+            querySelector: () => null,
+            querySelectorAll: () => [],
         };
+        const el = { childNodes: [frame], children: [frame], querySelectorAll: () => [] };
         DOMToNotion._cookParagraph(el, blocks, "external");
         expect(blocks.some((b) => b.type === "embed")).toBe(true);
     });
@@ -261,13 +274,28 @@ describe("wave6 共识(dsf): li 内嵌媒体 + 链接 emoji 文本", () => {
     afterAll(() => { if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode; });
     it("li 内嵌 video/iframe 有消费点(不再静默丢失)", () => {
         const blocks = [];
+        const mkFrame = () => ({
+            tagName: "IFRAME",
+            getAttribute: (k) => (k === "src" ? "https://www.youtube.com/embed/z" : null),
+            querySelector: () => null,
+            querySelectorAll: () => [],
+        });
+        const mkVideo = () => ({
+            tagName: "VIDEO",
+            getAttribute: (k) => (k === "src" ? "https://cdn.example.com/v.mp4" : null),
+            querySelector: () => null,
+            querySelectorAll: () => [],
+        });
+        // wave17: 粧改为真实子节点树(媒体沿 childNodes 文档序采集)
+        const frame = mkFrame();
+        const video = mkVideo();
         const li = {
             tagName: "LI",
-            querySelectorAll: (sel) => {
-                if (sel === "iframe") return [{ getAttribute: () => "https://www.youtube.com/embed/z" }];
-                if (sel === "video") return [{ getAttribute: () => "https://cdn.example.com/v.mp4", querySelector: () => null }];
-                return [];
-            },
+            childNodes: [frame, video],
+            children: [frame, video],
+            getAttribute: () => null,
+            querySelector: () => null,
+            querySelectorAll: () => [],
         };
         const el = { tagName: "UL", childNodes: [li], children: [li] };
         const origSerialize = DOMToNotion.serializeRichText;
@@ -419,6 +447,10 @@ describe("wave8 共识(qwen): ext 伪造 + data-src emoji + li 重叠文本", ()
 });
 
 describe("wave8 共识(dsf): 引用块/表格单元格内嵌媒体补发", () => {
+    // wave17: 媒体/子节点遍历改走 DomSpec.eachChildOrdered(依赖 Node 常量), 本块不再只走选择器面
+    let origNode8;
+    beforeAll(() => { origNode8 = globalThis.Node; globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1, COMMENT_NODE: 8 }; });
+    afterAll(() => { if (origNode8 === undefined) delete globalThis.Node; else globalThis.Node = origNode8; });
     let origSerialize5;
     beforeEach(() => { origSerialize5 = DOMToNotion.serializeRichText; DOMToNotion.serializeRichText = () => [{ type: "text", text: { content: "q" } }]; });
     afterEach(() => { DOMToNotion.serializeRichText = origSerialize5; });
@@ -431,13 +463,14 @@ describe("wave8 共识(dsf): 引用块/表格单元格内嵌媒体补发", () =>
     });
 
     it("blockquote 内嵌 img 补发 image 块(不再静默丢弃)", () => {
+        const img = mediaImg("https://cdn.example.com/q.png");
         const bq = {
             tagName: "BLOCKQUOTE",
-            childNodes: [],
-            children: [],
+            childNodes: [img],
+            children: [img],
             getAttribute: () => null,
             querySelector: () => null,
-            querySelectorAll: (sel) => (sel === "img" ? [mediaImg("https://cdn.example.com/q.png")] : []),
+            querySelectorAll: () => [],
         };
         const blocks = [];
         DOMToNotion._cookBlockquote(bq, blocks, "external");
@@ -447,9 +480,12 @@ describe("wave8 共识(dsf): 引用块/表格单元格内嵌媒体补发", () =>
     });
 
     it("表格单元格内 img 补发兄弟块(Notion table_row 只收 rich_text)", () => {
+        const cellImg = mediaImg("https://cdn.example.com/c.png");
         const cell = {
             tagName: "TD",
-            querySelectorAll: (sel) => (sel === "img" ? [mediaImg("https://cdn.example.com/c.png")] : []),
+            childNodes: [cellImg],
+            children: [cellImg],
+            querySelectorAll: () => [],
         };
         const row = { tagName: "TR", closest: () => null, children: [cell] };
         const table = {
@@ -466,22 +502,28 @@ describe("wave8 共识(dsf): 引用块/表格单元格内嵌媒体补发", () =>
 
     it("aside.quote 内嵌 a.attachment 补发 file 块", () => {
         const att = {
+            nodeType: 1,
             tagName: "A",
+            classList: { contains: (c) => c === "attachment" },
             getAttribute: (k) => (k === "href" ? "https://cdn.example.com/f.pdf" : null),
             textContent: "doc.pdf",
             querySelector: () => null,
             querySelectorAll: () => [],
         };
         const bq = {
+            nodeType: 1,
             tagName: "BLOCKQUOTE",
-            childNodes: [],
-            children: [],
+            childNodes: [att],
+            children: [att],
             getAttribute: () => null,
             querySelector: () => null,
-            querySelectorAll: (sel) => (sel === "a.attachment" ? [att] : []),
+            querySelectorAll: () => [],
         };
         const aside = {
+            nodeType: 1,
             tagName: "ASIDE",
+            childNodes: [bq],
+            children: [bq],
             classList: { contains: (c) => c === "quote" },
             querySelector: (sel) => (sel === "blockquote" ? bq : null),
         };
@@ -501,11 +543,11 @@ describe("wave9 共识(dsf): 标题内联媒体补发 + br 硬换行", () => {
         const img = { tagName: "IMG", getAttribute: (k) => (k === "src" ? "https://cdn.example.com/h.png" : null), querySelector: () => null, querySelectorAll: () => [] };
         const h2 = {
             tagName: "H2",
-            childNodes: [],
-            children: [],
+            childNodes: [img],
+            children: [img],
             getAttribute: () => null,
             querySelector: () => null,
-            querySelectorAll: (sel) => (sel === "img" ? [img] : []),
+            querySelectorAll: () => [],
         };
         const blocks = [];
         DOMToNotion._cookHeading(h2, blocks, "external");
@@ -552,7 +594,7 @@ describe("wave9 共识(qwen): 表格无 section 时媒体补发", () => {
             querySelector: () => null,
             querySelectorAll: () => [],
         };
-        const cell = { tagName: "TD", querySelectorAll: (sel) => (sel === "img" ? [img] : []) };
+        const cell = { tagName: "TD", childNodes: [img], children: [img], querySelectorAll: () => [] };
         const row = { tagName: "TR", closest: () => null, children: [cell] };
         const table = { tagName: "TABLE", querySelector: () => null, children: [row] }; // 无 thead/tbody/tfoot
         const blocks = [];

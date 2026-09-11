@@ -43,10 +43,15 @@ const Utils = {
 
     absoluteUrl: (src) => {
         if (!src) return "";
-        if (src.startsWith("http://") || src.startsWith("https://")) return src;
-        if (src.startsWith("//")) return window.location.protocol + src;
-        if (src.startsWith("/")) return window.location.origin + src;
-        return window.location.origin + "/" + src.replace(/^\.?\//, "");
+        // wave17 共识(glm): scheme 前缀判定原为字面量 startsWith(大小写敏感) —— HTML 属性值中
+        // "HTTP://host/x" 保留原样且浏览器按大小写不敏感语义正常加载, 此处却落入相对分支被
+        // 拼成 "<origin>/HTTP://host/x"(hostname 变成站点自身) → 合法嵌入被静默丢弃。
+        // 与同文件 isHttpUrl(:52) 及 DomSpec.safeUrl 的 scheme 正则(带 /i)口径对齐。
+        const value = String(src);
+        if (/^https?:\/\//i.test(value)) return value;
+        if (value.startsWith("//")) return window.location.protocol + value;
+        if (value.startsWith("/")) return window.location.origin + value;
+        return window.location.origin + "/" + value.replace(/^\.?\//, "");
     },
 
     isHttpUrl: (value) => /^https?:\/\//i.test(String(value || "").trim()),
@@ -228,7 +233,10 @@ const Utils = {
     // 可破坏链接结构并注入链接目标（标题来自 Notion 页面/搜索结果）。
     // wave12 系统扫描: 链接标签/列表项是单行上下文 —— 标签内换行会拆断 Markdown 行
     // (与标题/表格单元格同类, 一并收敛)
-    mdText: (text) => String(text ?? "").replace(/[\[\]]/g, "").replace(/\r\n?|\n/g, " "),
+    // wave17 共识(glm): 原实现对 [ ] 直接**删除** —— 链接标签是子树 Markdown(可含内嵌图片
+    // ![alt](url)), 删除内层方括号会把 "[![alt](u)](link)" 改写成损坏的 "[!alt(u)](link)"。
+    // 改为反斜杠转义: 注入防护等价(]( 不再能逃逸链接语法), 且内容无损。
+    mdText: (text) => String(text ?? "").replace(/([\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
     // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
     mdUrl: (url) => String(url ?? "").replace(/[\s<>()]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
     mdLink: (text, url) => `[${Utils.mdText(text)}](${Utils.mdUrl(url)})`,

@@ -67,7 +67,19 @@ const DOMToNotion = {
     _cookVideo: (el, blocks, imgMode) => {
         // P3 收敛 + R15: 地址判据单一驻 DomSpec.mediaUrl(回退 → 补齐 → 公网校验)
         const full = DomSpec.mediaUrl(el);
-        if (full && imgMode !== "skip") {
+        // wave17 共识(dsf/glm/qwen): 地址被判拒时此前零产出 —— 与 Markdown 出口的可见标记
+        // ([视频已拒…])及「fallback 保留用户可见状态」约定不一致; imgMode=skip 属用户显式设置,
+        // 仍保持静默(与图片/音频同口径)
+        if (!full) {
+            if (imgMode !== "skip" && DomSpec.mediaSrc(el)) {
+                blocks.push({
+                    type: "paragraph",
+                    paragraph: { rich_text: DOMToNotion.splitLongText("[视频已拒（非公网 http(s) 地址）]") },
+                });
+            }
+            return;
+        }
+        if (imgMode !== "skip") {
             // wave8 共识(qwen): 先剥查询串/锚点再取扩展名 —— "a.exe?y=.mp4"/"a.mp4#y.exe"
             // 否则扩展名可被查询串或锚点伪造, 误选 video/embed 块类型
             const ext = ((full.split("#")[0] || "").split("?")[0].split(".").pop() || "").toLowerCase();
@@ -102,7 +114,17 @@ const DOMToNotion = {
     _cookAudio: (el, blocks, imgMode) => {
         // P3 收敛 + R15: 地址判据单一驻 DomSpec.mediaUrl(与视频/图片同口径)
         const full = DomSpec.mediaUrl(el);
-        if (full && imgMode !== "skip") {
+        // wave17 共识(dsf/glm/qwen): 与 _cookVideo 同款可见回退(地址被拒不静默丢弃)
+        if (!full) {
+            if (imgMode !== "skip" && DomSpec.mediaSrc(el)) {
+                blocks.push({
+                    type: "paragraph",
+                    paragraph: { rich_text: DOMToNotion.splitLongText("[音频已拒（非公网 http(s) 地址）]") },
+                });
+            }
+            return;
+        }
+        if (imgMode !== "skip") {
             blocks.push({
                 type: "audio",
                 audio: { type: "external", external: { url: full } },
@@ -125,9 +147,13 @@ const DOMToNotion = {
             host === "bilibili.com" || host.endsWith(".bilibili.com");
     },
 
-    _cookIframe: (el, blocks) => {
-        const src = el.getAttribute("src") || "";
-        if (!src) return false;
+    _cookIframe: (el, blocks, imgMode) => {
+        // wave17 共识(glm): 原实现只取原始 src(无 data-src 回退) —— 懒加载 iframe 在 Notion 侧零产出。
+        // 地址回退口径统一走 DomSpec.mediaSrc; SSRF 面不变: 两条分支最终都经 _isAllowedEmbedHost
+        // (hostname 严格白名单) + _safeExternalUrl(拒内网/169.254/非 http(s))。
+        // wave17 共识(dsf): imgMode=skip 时同其它媒体静默跳过(原先 iframe 绕过用户设置写 embed)
+        const src = DomSpec.mediaSrc(el);
+        if (!src || imgMode === "skip") return false;
         // 子串匹配（src.includes）可被 evil.com/youtube.com 或 169.254.169.254/player.html 绕过
         // 写入 Notion embed.url（服务端抓取触发 SSRF，CWE-918，ISS-009 sibling 补全）。
         // 改 hostname 严格白名单 + _safeExternalUrl 校验（拒内网/169.254/非 http(s)）。
@@ -141,7 +167,22 @@ const DOMToNotion = {
                 return true;
             }
         }
-        return false;
+        // wave17 共识(dsf/glm/qwen): 非白名单宿主(或地址被拒)时此前恒零产出且调用点无兜底 ——
+        // 公网地址降级为**链接文本**(客户端点击, 不经 Notion 服务端抓取), 非法/内网地址留可见标记。
+        // 与 Markdown 出口(obsidian.js iframe 分支产出 [嵌入内容](url) / 拒标记)同口径。
+        const linkable = DomSpec.safeUrl(src);
+        if (linkable) {
+            blocks.push({
+                type: "paragraph",
+                paragraph: { rich_text: [{ type: "text", text: { content: "嵌入内容", link: { url: linkable } } }] },
+            });
+            return true;
+        }
+        blocks.push({
+            type: "paragraph",
+            paragraph: { rich_text: DOMToNotion.splitLongText("[嵌入内容已拒（非公网 http(s) 地址）]") },
+        });
+        return true;
     },
 
     // 引用块 aside.quote
@@ -152,10 +193,27 @@ const DOMToNotion = {
         // 丢弃) —— 逐块产出; 单块路径与 _cookBlockquote 完全同构, 故直接委托(口径单一)
         const quotes = Array.from(el.children || [])
             .filter((child) => child.tagName && String(child.tagName).toLowerCase() === "blockquote");
+        if (quotes.length > 0) {
+            // wave17 共识(dsf/glm): 有 blockquote 时 aside 内其余直属内容(如 Discourse 引用自带的
+            // <div class="title">署名行</div>)此前整支丢弃 —— 按文档序逐一直属子节点分派:
+            // blockquote 走引用块, 其余非空内容走段落(含内嵌媒体), 与无-blockquote 回退同口径
+            DomSpec.eachChildOrdered(el, (child) => {
+                if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+                if (String(child.tagName).toLowerCase() === "blockquote") {
+                    DOMToNotion._cookBlockquote(child, blocks, imgMode);
+                    return;
+                }
+                const richText = DOMToNotion.serializeRichText(child);
+                if (richText.length > 0) {
+                    blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+                }
+                DOMToNotion._consumeInlineMedia(child, blocks, imgMode);
+            });
+            return;
+        }
         // 无直属 blockquote 时回退后代首个(与 wave15 同口径); 无任何 blockquote 时以 aside 自身为源
-        const deep = quotes.length === 0 && typeof el.querySelector === "function" ? el.querySelector("blockquote") : null;
-        const sources = quotes.length > 0 ? quotes : [deep || el];
-        sources.forEach((source) => DOMToNotion._cookBlockquote(source, blocks, imgMode));
+        const deep = typeof el.querySelector === "function" ? el.querySelector("blockquote") : null;
+        DOMToNotion._cookBlockquote(deep || el, blocks, imgMode);
     },
 
     // 单一 emoji 判据驻 DomSpec(与块级跳过同源); 保留公开键名供现有测试与 legacy harness
@@ -169,7 +227,7 @@ const DOMToNotion = {
             else if (kind === "attachment") DOMToNotion._cookAttachment(node, blocks, imgMode);
             else if (kind === "video") DOMToNotion._cookVideo(node, blocks, imgMode);
             else if (kind === "audio") DOMToNotion._cookAudio(node, blocks, imgMode);
-            else if (kind === "iframe") DOMToNotion._cookIframe(node, blocks);
+            else if (kind === "iframe") DOMToNotion._cookIframe(node, blocks, imgMode);
         });
     },
 
@@ -194,7 +252,9 @@ const DOMToNotion = {
         const rawLang = (langClass.match(/lang(?:uage)?-([a-z0-9_+#-]+)/i) || [])[1] || "plain text";
         // wave16 共识(dsf+qwen): textContent 下 <br> 不产生换行 —— <pre><code>a<br>b</code></pre>
         // 导出为 "ab"(代码行粘连); 统一走 DomSpec.textWithBreaks(<br> → \n)
-        const code = DomSpec.textWithBreaks(codeEl || el);
+        // wave17 共识(dsf/glm): 原实现只取 <code> 子树 —— <pre>foo<code>bar</code>baz</pre> 的
+        // 非 code 文本静默丢弃(Markdown 出口 wave14 已改为整棵 pre, 两面不对称) → 统一取整个 pre
+        const code = DomSpec.textWithBreaks(el);
         const richTextArray = DOMToNotion.splitLongText(code);
         blocks.push({
             type: "code",
@@ -226,7 +286,9 @@ const DOMToNotion = {
     },
 
     // 列表 ul/ol
-    _cookList: (el, blocks, imgMode) => {
+    // skipMedia: 由 li 内嵌套列表的分派方置 true —— 媒体已由外层 _consumeInlineMedia(li) 统一采集,
+    // 嵌套分派不得重复消费(wave17 共识: 否则同一图片落两个块)
+    _cookList: (el, blocks, imgMode, skipMedia = false) => {
         const tag = el.tagName.toLowerCase();
         const listType = tag === "ul" ? "bulleted_list_item" : "numbered_list_item";
         // wave15(dsf): el.children 只含元素 —— <ul>text<li> 的直属文本静默丢弃(obsidian 侧
@@ -245,7 +307,7 @@ const DOMToNotion = {
             // wave12 共识(dsf): 解析器允许 <ul>/<ol> 直接嵌套其他列表(<ul><ul><li>)——
             // 此前非 li 子元素整支跳过, 该支文本/媒体静默丢弃
             if (childTag === "ul" || childTag === "ol") {
-                DOMToNotion._cookList(child, blocks, imgMode);
+                DOMToNotion._cookList(child, blocks, imgMode, skipMedia);
                 return;
             }
             if (childTag !== "li") {
@@ -253,26 +315,60 @@ const DOMToNotion = {
                 if (richText.length > 0) {
                     blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
                 }
-                DOMToNotion._consumeInlineMedia(child, blocks, imgMode);
+                if (!skipMedia) DOMToNotion._consumeInlineMedia(child, blocks, imgMode);
                 return;
             }
             const li = child;
             {
-                const richText = DOMToNotion.serializeRichText(li);
+                // wave17 共识(glm/qwen): li 内含嵌套 ul/ol 时原实现把它并入父项 rich_text
+                // (<li>a<ul><li>b</li></ul></li> → "ab" 粘连, 层级信息丢失)。现按 childNodes 分派:
+                // 嵌套列表交给 _cookList 产出同级列表项(与容器级嵌套列表同口径), serializeRichText
+                // 以 skipNestedLists 跳过该子树避免重复落块; 媒体仍由外层一次采集(skipMedia=true)。
+                const richText = DOMToNotion.serializeRichText(li, { skipNestedLists: true });
                 if (richText.length > 0) {
                     blocks.push({ type: listType, [listType]: { rich_text: richText } });
                 }
+                DomSpec.eachChildOrdered(li, (inner) => {
+                    if (inner.nodeType !== Node.ELEMENT_NODE || !inner.tagName) return;
+                    const innerTag = String(inner.tagName).toLowerCase();
+                    if (innerTag === "ul" || innerTag === "ol") {
+                        DOMToNotion._cookList(inner, blocks, imgMode, true);
+                    }
+                });
                 // P4 收敛(c05) + wave6 共识(dsf): li 内嵌媒体统一走 _consumeInlineMedia,
                 // 采集口径单一驻 DomSpec.eachMedia
-                DOMToNotion._consumeInlineMedia(li, blocks, imgMode);
+                if (!skipMedia) DOMToNotion._consumeInlineMedia(li, blocks, imgMode);
             }
         });
+    },
+
+    // 后代表格收集(不含自身): 沿 childNodes 递归 —— 不依赖宿主复合选择器, 与导出层单一遍历口径一致,
+    // 也保持「DOMToNotion 不自持查询实现」的清单自检(出口面清单第 5 条)
+    _descendantTables: (el) => {
+        const found = [];
+        const walk = (node) => {
+            DomSpec.eachChildOrdered(node, (child) => {
+                if (!child || child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+                if (String(child.tagName).toLowerCase() === "table") found.push(child);
+                walk(child);
+            });
+        };
+        walk(el);
+        return found;
     },
 
     // 表格 table / .md-table
     _cookTable: (el, blocks, imgMode) => {
         const tag = el.tagName.toLowerCase();
-        const table = tag === "table" ? el : el.querySelector("table");
+        // wave17 共识(qwen): 非 table 容器(.md-table)原实现只取首个 table —— 容器内后续表格的
+        // 行列与媒体整体静默丢失(与 wave16 只取首个 blockquote/首个 img 同族同因)。逐个产出。
+        const tables = tag === "table" ? [el] : DOMToNotion._descendantTables(el);
+        if (tables.length === 0) return;
+        if (tables.length > 1) {
+            tables.forEach((one) => DOMToNotion._cookTable(one, blocks, imgMode));
+            return;
+        }
+        const table = tables[0];
         if (!table) return;
 
         const rows = [];
@@ -421,6 +517,37 @@ const DOMToNotion = {
         }
     },
 
+    // 块级(非内联)图片: 内联路径由 serializeRichText 处理 emoji 文本与 alt 回退; 块级路径此前对
+    // emoji 图与地址被拒的图片**零产出**(wave17 共识 qwen), 此处补齐可见回退, 不静默丢弃。
+    _cookBlockImage: (el, blocks, imgMode) => {
+        const src = DomSpec.mediaSrc(el);
+        const emojiName = DOMToNotion._emojiImageName(src);
+        const full = DomSpec.mediaUrl(el);
+        if (full && !emojiName) {
+            DOMToNotion._cookImage(el, blocks, imgMode);
+            return;
+        }
+        if (imgMode === "skip") return;
+        if (emojiName) {
+            const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP, emojiName)
+                ? EMOJI_MAP[emojiName]
+                : (el.getAttribute("alt") || `:${emojiName}:`);
+            if (emoji) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(emoji) } });
+            }
+            return;
+        }
+        // 无任何候选地址时无可报告(不造占位噪声); 有地址但被判拒时保留 alt 或可见标记
+        if (!src) return;
+        const alt = el.getAttribute("alt") || "";
+        blocks.push({
+            type: "paragraph",
+            paragraph: {
+                rich_text: DOMToNotion.splitLongText(alt || "[图片已拒（非公网 http(s) 地址）]"),
+            },
+        });
+    },
+
     // ===== 通用文本切分与序列化 =====
 
     splitLongText: (text, annotations = {}) => {
@@ -451,7 +578,10 @@ const DOMToNotion = {
         return chunks;
     },
 
-    serializeRichText: (node) => {
+    // options.skipNestedLists: 由 _cookList 的 li 分支传入 —— 嵌套 ul/ol 已分派给 _cookList 产出
+    // 独立列表块, 本函数跳过该子树以免同一内容重复落块(wave17 共识 glm/qwen)
+    serializeRichText: (node, options = {}) => {
+        const skipNestedLists = options.skipNestedLists === true;
         const result = [];
 
         // wave14 共识(dsf/glm): 块级元素前后均为文本边界 —— 用"下次落库前需补分隔符"标记,
@@ -496,6 +626,17 @@ const DOMToNotion = {
                         breakIfNeeded(annotations);
                         result.push(...DOMToNotion.splitLongText(emoji, annotations));
                     }
+                    return;
+                }
+                // wave17 共识(glm/qwen): 地址被判拒/缺失时图片的可见替代文本(alt)此前随 _cookImage
+                // 的不产块一起丢失(与 Markdown 出口 img 分支回退 alt 不对称, 违反「不静默丢弃」)。
+                // 仅在 mediaUrl 判空时回退 alt; 正常图片仍只由媒体补发块承载, 不重复。
+                if (!DomSpec.mediaUrl(el)) {
+                    const alt = el.getAttribute("alt") || "";
+                    if (alt) {
+                        breakIfNeeded(annotations);
+                        result.push(...DOMToNotion.splitLongText(alt, annotations));
+                    }
                 }
                 return;
             }
@@ -509,23 +650,28 @@ const DOMToNotion = {
                 }
                 // R15: 地址判据统一走 DomSpec.safeUrl(非 http(s) scheme 不再被原点补齐成假链接)
                 const link = DomSpec.safeUrl(href);
-                // wave6 共识(dsf): 链接内非文本内容(如 <a><img class="emoji" alt="😀"></a>)
-                // 让 textContent 为空 —— 回退裸 URL 会丢掉 emoji, 改优先取 emoji alt
-                let linkText = el.textContent || "";
-                if (!linkText) {
+                // wave17 共识(glm): 原实现取 el.textContent 拍平 —— 链接内格式(<a><b>x</b></a>)与
+                // 内嵌 emoji 的标注全部丢失(Notion rich_text 本可同时携带 link 与注解)。
+                // 改为按子节点递归产出, 再把 link 合并到本次新增的每个片段上。
+                breakIfNeeded(annotations);
+                const before = result.length;
+                DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
+                if (result.length === before) {
+                    // wave6 共识(dsf): 链接内非文本内容(如 <a><img class="emoji" alt="😀"></a>)
+                    // 让 textContent 为空 —— 回退裸 URL 会丢掉 emoji, 改优先取 emoji alt
                     const innerImg = el.querySelector("img");
-                    linkText = innerImg ? (innerImg.getAttribute("alt") || "") : "";
-                }
-                if (!linkText) linkText = link;
-                // v3.14.6 (XN-04) + R15: 链接判据即上方 safeUrl 结果 —— 非法(内网/169.254/非 http(s))
-                // 时 link 为空串, 文本仍照常落 rich_text(降级纯文本, 不再把伪 URL 当文本输出)
-                if (linkText) {
-                    breakIfNeeded(annotations);
-                    const chunks = DOMToNotion.splitLongText(linkText, annotations);
-                    if (link) {
-                        chunks.forEach(chunk => { chunk.text.link = { url: link }; });
+                    let linkText = el.textContent || (innerImg ? (innerImg.getAttribute("alt") || "") : "");
+                    if (!linkText) linkText = link;
+                    if (linkText) {
+                        result.push(...DOMToNotion.splitLongText(linkText, annotations));
                     }
-                    result.push(...chunks);
+                }
+                // v3.14.6 (XN-04) + R15: link 为空串时文本仍照常落 rich_text(降级纯文本)
+                if (link) {
+                    for (let i = before; i < result.length; i++) {
+                        const chunk = result[i];
+                        if (chunk && chunk.text && !chunk.text.link) chunk.text.link = { url: link };
+                    }
                 }
                 return;
             }
@@ -544,7 +690,10 @@ const DOMToNotion = {
                 return;
             }
             if (tag === "code") {
-                const text = el.textContent || "";
+                // wave17 共识(dsf/qwen): 内联 code 原用 el.textContent —— <br> 不产生换行
+                // (<p>见 <code>a<br>b</code></p> → "ab"), 与已修的 _cookCode/obsidian br 分支同族;
+                // 统一走 DomSpec.textWithBreaks
+                const text = DomSpec.textWithBreaks(el);
                 if (text) {
                     breakIfNeeded(annotations);
                     result.push(...DOMToNotion.splitLongText(text, { ...annotations, code: true }));
@@ -571,7 +720,13 @@ const DOMToNotion = {
             // wave16 共识(qwen): 嵌套引用(Discourse 引用内含引用)缺块级边界 —— blockquote/
             // aside 与 p/div 同为文本边界(顶层的两者由 _cookBlockquote/_cookAsideQuote 产出
             // 独立块, 此处只覆盖内层/嵌入场景), 否则 "外内" 直接拼接
-            if (tag === "p" || tag === "div" || tag === "blockquote" || tag === "aside") {
+            // wave17 共识(glm/qwen): 嵌套列表子树已由 _cookList 分派, 此处只补文本边界不产出内容
+            if (skipNestedLists && (tag === "ul" || tag === "ol")) {
+                if (result.length > 0) needBreak = true;
+                return;
+            }
+
+            if (DomSpec.TEXT_BOUNDARY_TAGS.has(tag)) {
                 // 块级元素前后都是边界(前面是内联文本或块级都算): 标记延迟到真正产出内容时消费
                 if (result.length > 0) needBreak = true;
                 const before = result.length;
@@ -587,9 +742,15 @@ const DOMToNotion = {
         processNode(node);
         // Notion API 限制 rich_text 数组最多 100 个元素
         // P4 共识(dsf): 超限此前静默 slice, 补告警(内联节点数异常时用户可见)
+        // wave17 共识(dsf): 仅 console.warn 不满足「不静默丢弃、保留用户可见状态」—— 与
+        // splitLongText 的 100 项上限处理(末块插入可见截断标记)同口径: 保留 99 段 + 1 标记段
         if (result.length > 100) {
-            console.warn(`[LD-Notion] rich_text 节点数 ${result.length} 超 Notion 上限 100, 已截断`);
-            return result.slice(0, 100);
+            const dropped = result.length - 99;
+            console.warn(`[LD-Notion] rich_text 节点数 ${result.length} 超 Notion 上限 100, 已截断 ${dropped} 段`);
+            return [
+                ...result.slice(0, 99),
+                { type: "text", text: { content: `…（富文本片段过多，已截断 ${dropped} 段）` } },
+            ];
         }
         return result;
     },
@@ -639,7 +800,7 @@ const DOMToNotion = {
             }
 
             // 处理 iframe 嵌入（视频/外部内容），未匹配则 fallthrough
-            if (tag === "iframe" && DOMToNotion._cookIframe(el, blocks)) return;
+            if (tag === "iframe" && DOMToNotion._cookIframe(el, blocks, imgMode)) return;
 
             // 处理引用块
             if (tag === "aside" && el.classList.contains("quote")) {
@@ -683,9 +844,9 @@ const DOMToNotion = {
                 return;
             }
 
-            // 处理独立图片
+            // 处理独立图片(块级: emoji 图与地址被拒的图片经 _cookBlockImage 补可见回退)
             if (tag === "img") {
-                DOMToNotion._cookImage(el, blocks, imgMode);
+                DOMToNotion._cookBlockImage(el, blocks, imgMode);
                 return;
             }
 
@@ -700,7 +861,14 @@ const DOMToNotion = {
         // 先落段落再走原路径; 容器元素透明下钻。
         let inlineBuf = "";
         const flushInline = () => {
-            const text = inlineBuf.replace(/[ \t\r\n]+/g, " ").trim();
+            // wave17 共识(dsf): 原归一会把 br 产出的 \n 一并压成空格 —— 改为保留单个换行
+            // (与 serializeRichText 的 rich_text \n 语义一致), 仅折叠缩进与连续空行
+            const text = inlineBuf
+                .replace(/\r\n?/g, "\n")
+                .replace(/[ \t]+/g, " ")
+                .replace(/ *\n */g, "\n")
+                .replace(/\n{2,}/g, "\n")
+                .trim();
             if (text) {
                 blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(text) } });
             }
@@ -718,6 +886,14 @@ const DOMToNotion = {
             // 触发面为 GenericExtractor 的 body.innerHTML 兜底源(普遍含 <style>)。
             // 判据统一驻 DomSpec, 不得在此重声明
             if (DomSpec.isSkippedNode(node)) return;
+            // wave17 共识(dsf): 本路径(未匹配容器的透明下钻)此前不识别 <br> ——
+            // <div>line1<br>line2</div> 的两段文本被 inlineBuf 直接拼接为 "line1line2"
+            // (与 serializeRichText 的 br 分支语义相反; GenericExtractor 的 body.innerHTML
+            // 兜底源正是这条路径) → br 落为硬换行
+            if (node.tagName && String(node.tagName).toLowerCase() === "br") {
+                inlineBuf += "\n";
+                return;
+            }
             if (DomSpec.isBlockNode(node)) {
                 flushInline();
                 processElement(node);

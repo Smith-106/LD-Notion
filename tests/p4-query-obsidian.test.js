@@ -80,7 +80,10 @@ describe("P4: query handler 分页边界", () => {
             { notionDatabaseId: "db", notionApiKey: "k" },
             ""
         );
-        expect(result).not.toContain("](https://evil.example)");
+        // wave17 共识(glm): 标签面由「删除方括号」改为「反斜杠转义」—— 删除会破坏标签内嵌套 Markdown,
+        // 转义同样阻止 ]( 逃逸链接语法(恶意 URL 不会成为链接目标)
+        expect(result).toContain("标题\\](https://evil.example)");
+        expect(/(^|[^\\])\]\(https:\/\/evil\.example\)/.test(result)).toBe(false);
         expect(result).toContain("](https://www.notion.so/s1)");
     });
 
@@ -146,8 +149,8 @@ describe("P4: Obsidian 边界", () => {
         expect(fm).toContain("floors: 3");
     });
 
-    it("Markdown 文本/URL 净化剥离元字符", () => {
-        expect(HTMLToMarkdown._mdText("标题](https://evil)")).toBe("标题(https://evil)");
+    it("Markdown 文本/URL 净化转义元字符", () => {
+        expect(HTMLToMarkdown._mdText("标题](https://evil)")).toBe("标题\\](https://evil)");
         // P4 收敛(c05): URL 用百分号编码保留目标(删除会改写链接)
         expect(HTMLToMarkdown._mdUrl("https://a.example/x)y z")).toBe("https://a.example/x%29y%20z");
     });

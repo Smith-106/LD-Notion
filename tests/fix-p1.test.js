@@ -209,8 +209,11 @@ describe("P1-XN-04: DOMToNotion 链接降级 + iframe 白名单收紧", () => {
             querySelector: () => null,
             querySelectorAll: () => [],
         };
-        expect(DOMToNotion._cookIframe(el, blocks)).toBe(false);
-        expect(blocks.length).toBe(0);
+        expect(DOMToNotion._cookIframe(el, blocks, "external")).toBe(true);
+        // wave17 共识(dsf/glm/qwen): 拒写 embed 不变, 但不再静默丢弃 —— 降级为可见链接段落
+        expect(blocks.some((b) => b.type === "embed")).toBe(false);
+        expect(blocks.length).toBe(1);
+        expect(blocks[0].type).toBe("paragraph");
     });
 
     it("_cookIframe: 白名单视频宿主放行", () => {

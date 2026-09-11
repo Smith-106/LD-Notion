@@ -20,11 +20,22 @@ const BLOCK_TAGS = new Set([
 // wave11/wave13 共识: 非渲染元素 —— 其文本(JS/CSS 源码)不得进入 rich_text / Markdown
 const SKIP_TAGS = new Set(["script", "style", "noscript"]);
 
+// wave17 共识(glm/qwen): 内联序列化的「文本边界」判据单一来源 —— 原实现内联 4 个标签字面量
+// (p/div/blockquote/aside), 其余容器块(h1-h6/ul/ol/table/pre/hr)内的文本与相邻内联内容直接
+// 拼接(<li>a<ul><li>b</li></ul></li> 的 rich_text 为 "ab"; 嵌套引用为 "外内")。
+// 与 BLOCK_TAGS 的差别: 不含 img/video/audio/iframe —— 它们有独立块产出与内联 emoji 语义,
+// 纳入边界会把内联 emoji 拆成独立行(回归风险)。
+const TEXT_BOUNDARY_TAGS = new Set([
+    "div", "p", "pre", "blockquote", "aside", "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "table", "hr",
+]);
+
 const tagOf = (el) => (el && el.tagName ? String(el.tagName).toLowerCase() : "");
 
 const DomSpec = {
     BLOCK_TAGS,
     SKIP_TAGS,
+    TEXT_BOUNDARY_TAGS,
 
     // 块级判据: 标签集 ∪ 类名容器(灯箱/图片容器/md-table/a.attachment/aside.quote)
     isBlockNode: (el) => {
@@ -49,18 +60,29 @@ const DomSpec = {
     },
 
     // 媒体采集: 元素自身先按自身标签分派(querySelectorAll 只查后代, 元素本身即媒体时会漏采),
-    // 再按固定类序采集后代(img → a.attachment → video → audio → iframe, 各类内部保持文档序),
-    // 每节点恰一次。wave8(段落/li/引用/单元格补发)、wave9(标题补发)、wave14(自身即媒体)的统一来源。
+    // 再按**文档序**采集后代, 每节点恰一次。wave8(段落/li/引用/单元格补发)、
+    // wave9(标题补发)、wave14(自身即媒体)的统一来源。
     eachMedia: (el, visit) => {
         if (!el) return;
         const selfKind = DomSpec.mediaKind(el);
         if (selfKind) visit(el, selfKind);
-        if (typeof el.querySelectorAll !== "function") return;
-        el.querySelectorAll("img").forEach((node) => visit(node, "img"));
-        el.querySelectorAll("a.attachment").forEach((node) => visit(node, "attachment"));
-        el.querySelectorAll("video").forEach((node) => visit(node, "video"));
-        el.querySelectorAll("audio").forEach((node) => visit(node, "audio"));
-        el.querySelectorAll("iframe").forEach((node) => visit(node, "iframe"));
+        // wave17 共识(dsf): 原实现分五次按固定类序采集(img → a.attachment → video → audio →
+        // iframe), 类内部保序但**类之间被重排** —— <p>文字<video><img></p> 产出
+        // paragraph → image → video, 与源文档序相反, 且与 Markdown 出口(_convertChildren 沿
+        // childNodes 文档序)不对称。改为沿 childNodes 的文档序递归(与 eachChildOrdered 同源),
+        // 每节点仍恰一次, 且不依赖宿主 querySelectorAll 的复合选择器支持。
+        // wave17 共识(qwen): 文本面三处均有 script/style/noscript 跳过守卫, 唯此采集面漏判 ——
+        // noscript 内的降级媒体(DOMParser 非脚本上下文下解析为真元素)被误采为幽灵媒体块;
+        // 递归时遇 SKIP_TAGS 子树直接剪枝(与文本面同口径)。
+        const walk = (node) => {
+            DomSpec.eachChildOrdered(node, (child) => {
+                if (DomSpec.isSkippedNode(child)) return;
+                const kind = DomSpec.mediaKind(child);
+                if (kind) visit(child, kind);
+                walk(child);
+            });
+        };
+        walk(el);
     },
 
     // wave12 共识(qwen): emoji 图"跳过块级图片"与"转 emoji 文本"必须同口径 ——
@@ -76,10 +98,13 @@ const DomSpec = {
     // 互不覆盖 —— 懒加载图在 Obsidian 侧被丢、<source> 型视频在 Notion 侧被丢。
     mediaSrc: (el) => {
         if (!el || typeof el.getAttribute !== "function") return "";
-        // wave16 共识(qwen): 占位 src(data:/about: 内联图)会阻断懒加载真实地址 ——
-        // mediaUrl 经 safeUrl 判空后整体丢弃, 而真实地址就在同一元素的 data-src 上
+        // wave16 共识(qwen) + wave17 共识(qwen): 占位 src 会阻断懒加载真实地址 —— 原判据只列
+        // data:/about:, 而 blob:/javascript:/file: 等非 http(s) scheme 同样经 safeUrl 判空后整体
+        // 丢弃(真实地址就在同一元素的 data-src 上)。改为「非 http(s) scheme 一律视为占位」。
+        // 无 scheme(相对/协议相对/裸相对)仍按真实地址返回, 交由 safeUrl 补齐 + 公网校验。
         const own = el.getAttribute("src");
-        if (own && !/^(?:data|about):/i.test(String(own).trim())) return own;
+        const ownScheme = (String(own == null ? "" : own).match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
+        if (own && !(ownScheme && !/^https?$/i.test(ownScheme))) return own;
         const lazy = el.getAttribute("data-src");
         if (lazy) return lazy;
         const source = typeof el.querySelector === "function" ? el.querySelector("source") : null;

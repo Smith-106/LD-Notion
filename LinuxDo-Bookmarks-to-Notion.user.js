@@ -1646,10 +1646,11 @@
         },
         absoluteUrl: (src) => {
           if (!src) return "";
-          if (src.startsWith("http://") || src.startsWith("https://")) return src;
-          if (src.startsWith("//")) return window.location.protocol + src;
-          if (src.startsWith("/")) return window.location.origin + src;
-          return window.location.origin + "/" + src.replace(/^\.?\//, "");
+          const value = String(src);
+          if (/^https?:\/\//i.test(value)) return value;
+          if (value.startsWith("//")) return window.location.protocol + value;
+          if (value.startsWith("/")) return window.location.origin + value;
+          return window.location.origin + "/" + value.replace(/^\.?\//, "");
         },
         isHttpUrl: (value) => /^https?:\/\//i.test(String(value || "").trim()),
         // v3.14.6 (AUD-ARCH-05): userscript 模式判定 —— 扩展垫片 scriptHandler='chrome-extension'
@@ -1800,7 +1801,10 @@
         // 可破坏链接结构并注入链接目标（标题来自 Notion 页面/搜索结果）。
         // wave12 系统扫描: 链接标签/列表项是单行上下文 —— 标签内换行会拆断 Markdown 行
         // (与标题/表格单元格同类, 一并收敛)
-        mdText: (text) => String(text ?? "").replace(/[\[\]]/g, "").replace(/\r\n?|\n/g, " "),
+        // wave17 共识(glm): 原实现对 [ ] 直接**删除** —— 链接标签是子树 Markdown(可含内嵌图片
+        // ![alt](url)), 删除内层方括号会把 "[![alt](u)](link)" 改写成损坏的 "[!alt(u)](link)"。
+        // 改为反斜杠转义: 注入防护等价(]( 不再能逃逸链接语法), 且内容无损。
+        mdText: (text) => String(text ?? "").replace(/([\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
         // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
         mdUrl: (url) => String(url ?? "").replace(/[\s<>()]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
         mdLink: (text, url) => `[${Utils2.mdText(text)}](${Utils2.mdUrl(url)})`,
@@ -4038,10 +4042,28 @@
         "aside"
       ]);
       var SKIP_TAGS = /* @__PURE__ */ new Set(["script", "style", "noscript"]);
+      var TEXT_BOUNDARY_TAGS = /* @__PURE__ */ new Set([
+        "div",
+        "p",
+        "pre",
+        "blockquote",
+        "aside",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "ul",
+        "ol",
+        "table",
+        "hr"
+      ]);
       var tagOf = (el) => el && el.tagName ? String(el.tagName).toLowerCase() : "";
       var DomSpec = {
         BLOCK_TAGS,
         SKIP_TAGS,
+        TEXT_BOUNDARY_TAGS,
         // 块级判据: 标签集 ∪ 类名容器(灯箱/图片容器/md-table/a.attachment/aside.quote)
         isBlockNode: (el) => {
           const t = tagOf(el);
@@ -4059,18 +4081,21 @@
           return null;
         },
         // 媒体采集: 元素自身先按自身标签分派(querySelectorAll 只查后代, 元素本身即媒体时会漏采),
-        // 再按固定类序采集后代(img → a.attachment → video → audio → iframe, 各类内部保持文档序),
-        // 每节点恰一次。wave8(段落/li/引用/单元格补发)、wave9(标题补发)、wave14(自身即媒体)的统一来源。
+        // 再按**文档序**采集后代, 每节点恰一次。wave8(段落/li/引用/单元格补发)、
+        // wave9(标题补发)、wave14(自身即媒体)的统一来源。
         eachMedia: (el, visit) => {
           if (!el) return;
           const selfKind = DomSpec.mediaKind(el);
           if (selfKind) visit(el, selfKind);
-          if (typeof el.querySelectorAll !== "function") return;
-          el.querySelectorAll("img").forEach((node) => visit(node, "img"));
-          el.querySelectorAll("a.attachment").forEach((node) => visit(node, "attachment"));
-          el.querySelectorAll("video").forEach((node) => visit(node, "video"));
-          el.querySelectorAll("audio").forEach((node) => visit(node, "audio"));
-          el.querySelectorAll("iframe").forEach((node) => visit(node, "iframe"));
+          const walk = (node) => {
+            DomSpec.eachChildOrdered(node, (child) => {
+              if (DomSpec.isSkippedNode(child)) return;
+              const kind = DomSpec.mediaKind(child);
+              if (kind) visit(child, kind);
+              walk(child);
+            });
+          };
+          walk(el);
         },
         // wave12 共识(qwen): emoji 图"跳过块级图片"与"转 emoji 文本"必须同口径 ——
         // 前者按 src.includes("/images/emoji/") 跳、后者只认四家 set 会致 Discourse 其余
@@ -4085,7 +4110,8 @@
         mediaSrc: (el) => {
           if (!el || typeof el.getAttribute !== "function") return "";
           const own = el.getAttribute("src");
-          if (own && !/^(?:data|about):/i.test(String(own).trim())) return own;
+          const ownScheme = (String(own == null ? "" : own).match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
+          if (own && !(ownScheme && !/^https?$/i.test(ownScheme))) return own;
           const lazy = el.getAttribute("data-src");
           if (lazy) return lazy;
           const source = typeof el.querySelector === "function" ? el.querySelector("source") : null;
@@ -4203,7 +4229,16 @@
         // 视频元素
         _cookVideo: (el, blocks, imgMode) => {
           const full = DomSpec.mediaUrl(el);
-          if (full && imgMode !== "skip") {
+          if (!full) {
+            if (imgMode !== "skip" && DomSpec.mediaSrc(el)) {
+              blocks.push({
+                type: "paragraph",
+                paragraph: { rich_text: DOMToNotion2.splitLongText("[\u89C6\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]") }
+              });
+            }
+            return;
+          }
+          if (imgMode !== "skip") {
             const ext = ((full.split("#")[0] || "").split("?")[0].split(".").pop() || "").toLowerCase();
             if (isSupportedFileType2(ext)) {
               blocks.push({
@@ -4232,7 +4267,16 @@
         // 音频元素
         _cookAudio: (el, blocks, imgMode) => {
           const full = DomSpec.mediaUrl(el);
-          if (full && imgMode !== "skip") {
+          if (!full) {
+            if (imgMode !== "skip" && DomSpec.mediaSrc(el)) {
+              blocks.push({
+                type: "paragraph",
+                paragraph: { rich_text: DOMToNotion2.splitLongText("[\u97F3\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]") }
+              });
+            }
+            return;
+          }
+          if (imgMode !== "skip") {
             blocks.push({
               type: "audio",
               audio: { type: "external", external: { url: full } },
@@ -4254,9 +4298,9 @@
           }
           return host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtu.be" || host.endsWith(".youtu.be") || host === "vimeo.com" || host.endsWith(".vimeo.com") || host === "bilibili.com" || host.endsWith(".bilibili.com");
         },
-        _cookIframe: (el, blocks) => {
-          const src = el.getAttribute("src") || "";
-          if (!src) return false;
+        _cookIframe: (el, blocks, imgMode) => {
+          const src = DomSpec.mediaSrc(el);
+          if (!src || imgMode === "skip") return false;
           const absoluteSrc = Utils2.absoluteUrl(src);
           if (DOMToNotion2._isAllowedEmbedHost(absoluteSrc)) {
             const full = DOMToNotion2._safeExternalUrl(absoluteSrc);
@@ -4265,14 +4309,40 @@
               return true;
             }
           }
-          return false;
+          const linkable = DomSpec.safeUrl(src);
+          if (linkable) {
+            blocks.push({
+              type: "paragraph",
+              paragraph: { rich_text: [{ type: "text", text: { content: "\u5D4C\u5165\u5185\u5BB9", link: { url: linkable } } }] }
+            });
+            return true;
+          }
+          blocks.push({
+            type: "paragraph",
+            paragraph: { rich_text: DOMToNotion2.splitLongText("[\u5D4C\u5165\u5185\u5BB9\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]") }
+          });
+          return true;
         },
         // 引用块 aside.quote
         _cookAsideQuote: (el, blocks, imgMode) => {
           const quotes = Array.from(el.children || []).filter((child) => child.tagName && String(child.tagName).toLowerCase() === "blockquote");
-          const deep = quotes.length === 0 && typeof el.querySelector === "function" ? el.querySelector("blockquote") : null;
-          const sources = quotes.length > 0 ? quotes : [deep || el];
-          sources.forEach((source) => DOMToNotion2._cookBlockquote(source, blocks, imgMode));
+          if (quotes.length > 0) {
+            DomSpec.eachChildOrdered(el, (child) => {
+              if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+              if (String(child.tagName).toLowerCase() === "blockquote") {
+                DOMToNotion2._cookBlockquote(child, blocks, imgMode);
+                return;
+              }
+              const richText = DOMToNotion2.serializeRichText(child);
+              if (richText.length > 0) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+              }
+              DOMToNotion2._consumeInlineMedia(child, blocks, imgMode);
+            });
+            return;
+          }
+          const deep = typeof el.querySelector === "function" ? el.querySelector("blockquote") : null;
+          DOMToNotion2._cookBlockquote(deep || el, blocks, imgMode);
         },
         // 单一 emoji 判据驻 DomSpec(与块级跳过同源); 保留公开键名供现有测试与 legacy harness
         _emojiImageName: (src) => DomSpec.emojiNameOf(src),
@@ -4284,7 +4354,7 @@
             else if (kind === "attachment") DOMToNotion2._cookAttachment(node, blocks, imgMode);
             else if (kind === "video") DOMToNotion2._cookVideo(node, blocks, imgMode);
             else if (kind === "audio") DOMToNotion2._cookAudio(node, blocks, imgMode);
-            else if (kind === "iframe") DOMToNotion2._cookIframe(node, blocks);
+            else if (kind === "iframe") DOMToNotion2._cookIframe(node, blocks, imgMode);
           });
         },
         // 段落 p（含内部图片与附件）
@@ -4300,7 +4370,7 @@
           const codeEl = el.querySelector("code");
           const langClass = (codeEl == null ? void 0 : codeEl.getAttribute("class")) || "";
           const rawLang = (langClass.match(/lang(?:uage)?-([a-z0-9_+#-]+)/i) || [])[1] || "plain text";
-          const code = DomSpec.textWithBreaks(codeEl || el);
+          const code = DomSpec.textWithBreaks(el);
           const richTextArray = DOMToNotion2.splitLongText(code);
           blocks.push({
             type: "code",
@@ -4327,7 +4397,9 @@
           DOMToNotion2._consumeInlineMedia(el, blocks, imgMode);
         },
         // 列表 ul/ol
-        _cookList: (el, blocks, imgMode) => {
+        // skipMedia: 由 li 内嵌套列表的分派方置 true —— 媒体已由外层 _consumeInlineMedia(li) 统一采集,
+        // 嵌套分派不得重复消费(wave17 共识: 否则同一图片落两个块)
+        _cookList: (el, blocks, imgMode, skipMedia = false) => {
           const tag = el.tagName.toLowerCase();
           const listType = tag === "ul" ? "bulleted_list_item" : "numbered_list_item";
           DomSpec.eachChildOrdered(el, (child) => {
@@ -4341,7 +4413,7 @@
             if (!child.tagName) return;
             const childTag = child.tagName.toLowerCase();
             if (childTag === "ul" || childTag === "ol") {
-              DOMToNotion2._cookList(child, blocks, imgMode);
+              DOMToNotion2._cookList(child, blocks, imgMode, skipMedia);
               return;
             }
             if (childTag !== "li") {
@@ -4349,23 +4421,50 @@
               if (richText.length > 0) {
                 blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
               }
-              DOMToNotion2._consumeInlineMedia(child, blocks, imgMode);
+              if (!skipMedia) DOMToNotion2._consumeInlineMedia(child, blocks, imgMode);
               return;
             }
             const li = child;
             {
-              const richText = DOMToNotion2.serializeRichText(li);
+              const richText = DOMToNotion2.serializeRichText(li, { skipNestedLists: true });
               if (richText.length > 0) {
                 blocks.push({ type: listType, [listType]: { rich_text: richText } });
               }
-              DOMToNotion2._consumeInlineMedia(li, blocks, imgMode);
+              DomSpec.eachChildOrdered(li, (inner) => {
+                if (inner.nodeType !== Node.ELEMENT_NODE || !inner.tagName) return;
+                const innerTag = String(inner.tagName).toLowerCase();
+                if (innerTag === "ul" || innerTag === "ol") {
+                  DOMToNotion2._cookList(inner, blocks, imgMode, true);
+                }
+              });
+              if (!skipMedia) DOMToNotion2._consumeInlineMedia(li, blocks, imgMode);
             }
           });
+        },
+        // 后代表格收集(不含自身): 沿 childNodes 递归 —— 不依赖宿主复合选择器, 与导出层单一遍历口径一致,
+        // 也保持「DOMToNotion 不自持查询实现」的清单自检(出口面清单第 5 条)
+        _descendantTables: (el) => {
+          const found = [];
+          const walk = (node) => {
+            DomSpec.eachChildOrdered(node, (child) => {
+              if (!child || child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+              if (String(child.tagName).toLowerCase() === "table") found.push(child);
+              walk(child);
+            });
+          };
+          walk(el);
+          return found;
         },
         // 表格 table / .md-table
         _cookTable: (el, blocks, imgMode) => {
           const tag = el.tagName.toLowerCase();
-          const table = tag === "table" ? el : el.querySelector("table");
+          const tables = tag === "table" ? [el] : DOMToNotion2._descendantTables(el);
+          if (tables.length === 0) return;
+          if (tables.length > 1) {
+            tables.forEach((one) => DOMToNotion2._cookTable(one, blocks, imgMode));
+            return;
+          }
+          const table = tables[0];
           if (!table) return;
           const rows = [];
           let hasHeader = false;
@@ -4472,6 +4571,33 @@
             }
           }
         },
+        // 块级(非内联)图片: 内联路径由 serializeRichText 处理 emoji 文本与 alt 回退; 块级路径此前对
+        // emoji 图与地址被拒的图片**零产出**(wave17 共识 qwen), 此处补齐可见回退, 不静默丢弃。
+        _cookBlockImage: (el, blocks, imgMode) => {
+          const src = DomSpec.mediaSrc(el);
+          const emojiName = DOMToNotion2._emojiImageName(src);
+          const full = DomSpec.mediaUrl(el);
+          if (full && !emojiName) {
+            DOMToNotion2._cookImage(el, blocks, imgMode);
+            return;
+          }
+          if (imgMode === "skip") return;
+          if (emojiName) {
+            const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP2, emojiName) ? EMOJI_MAP2[emojiName] : el.getAttribute("alt") || `:${emojiName}:`;
+            if (emoji) {
+              blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(emoji) } });
+            }
+            return;
+          }
+          if (!src) return;
+          const alt = el.getAttribute("alt") || "";
+          blocks.push({
+            type: "paragraph",
+            paragraph: {
+              rich_text: DOMToNotion2.splitLongText(alt || "[\u56FE\u7247\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]")
+            }
+          });
+        },
         // ===== 通用文本切分与序列化 =====
         splitLongText: (text, annotations = {}) => {
           const maxLength = 2e3;
@@ -4496,7 +4622,10 @@
           }
           return chunks;
         },
-        serializeRichText: (node) => {
+        // options.skipNestedLists: 由 _cookList 的 li 分支传入 —— 嵌套 ul/ol 已分派给 _cookList 产出
+        // 独立列表块, 本函数跳过该子树以免同一内容重复落块(wave17 共识 glm/qwen)
+        serializeRichText: (node, options = {}) => {
+          const skipNestedLists = options.skipNestedLists === true;
           const result = [];
           let needBreak = false;
           const breakIfNeeded = (annotations) => {
@@ -4526,6 +4655,14 @@
                   breakIfNeeded(annotations);
                   result.push(...DOMToNotion2.splitLongText(emoji, annotations));
                 }
+                return;
+              }
+              if (!DomSpec.mediaUrl(el)) {
+                const alt = el.getAttribute("alt") || "";
+                if (alt) {
+                  breakIfNeeded(annotations);
+                  result.push(...DOMToNotion2.splitLongText(alt, annotations));
+                }
               }
               return;
             }
@@ -4536,21 +4673,22 @@
                 return;
               }
               const link = DomSpec.safeUrl(href);
-              let linkText = el.textContent || "";
-              if (!linkText) {
+              breakIfNeeded(annotations);
+              const before = result.length;
+              DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
+              if (result.length === before) {
                 const innerImg = el.querySelector("img");
-                linkText = innerImg ? innerImg.getAttribute("alt") || "" : "";
-              }
-              if (!linkText) linkText = link;
-              if (linkText) {
-                breakIfNeeded(annotations);
-                const chunks = DOMToNotion2.splitLongText(linkText, annotations);
-                if (link) {
-                  chunks.forEach((chunk) => {
-                    chunk.text.link = { url: link };
-                  });
+                let linkText = el.textContent || (innerImg ? innerImg.getAttribute("alt") || "" : "");
+                if (!linkText) linkText = link;
+                if (linkText) {
+                  result.push(...DOMToNotion2.splitLongText(linkText, annotations));
                 }
-                result.push(...chunks);
+              }
+              if (link) {
+                for (let i = before; i < result.length; i++) {
+                  const chunk = result[i];
+                  if (chunk && chunk.text && !chunk.text.link) chunk.text.link = { url: link };
+                }
               }
               return;
             }
@@ -4567,7 +4705,7 @@
               return;
             }
             if (tag === "code") {
-              const text = el.textContent || "";
+              const text = DomSpec.textWithBreaks(el);
               if (text) {
                 breakIfNeeded(annotations);
                 result.push(...DOMToNotion2.splitLongText(text, { ...annotations, code: true }));
@@ -4580,7 +4718,11 @@
               return;
             }
             if (DomSpec.isSkippedNode(n)) return;
-            if (tag === "p" || tag === "div" || tag === "blockquote" || tag === "aside") {
+            if (skipNestedLists && (tag === "ul" || tag === "ol")) {
+              if (result.length > 0) needBreak = true;
+              return;
+            }
+            if (DomSpec.TEXT_BOUNDARY_TAGS.has(tag)) {
               if (result.length > 0) needBreak = true;
               const before = result.length;
               DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
@@ -4591,8 +4733,12 @@
           };
           processNode(node);
           if (result.length > 100) {
-            console.warn(`[LD-Notion] rich_text \u8282\u70B9\u6570 ${result.length} \u8D85 Notion \u4E0A\u9650 100, \u5DF2\u622A\u65AD`);
-            return result.slice(0, 100);
+            const dropped = result.length - 99;
+            console.warn(`[LD-Notion] rich_text \u8282\u70B9\u6570 ${result.length} \u8D85 Notion \u4E0A\u9650 100, \u5DF2\u622A\u65AD ${dropped} \u6BB5`);
+            return [
+              ...result.slice(0, 99),
+              { type: "text", text: { content: `\u2026\uFF08\u5BCC\u6587\u672C\u7247\u6BB5\u8FC7\u591A\uFF0C\u5DF2\u622A\u65AD ${dropped} \u6BB5\uFF09` } }
+            ];
           }
           return result;
         },
@@ -4625,7 +4771,7 @@
               DOMToNotion2._cookAudio(el, blocks, imgMode);
               return;
             }
-            if (tag === "iframe" && DOMToNotion2._cookIframe(el, blocks)) return;
+            if (tag === "iframe" && DOMToNotion2._cookIframe(el, blocks, imgMode)) return;
             if (tag === "aside" && el.classList.contains("quote")) {
               DOMToNotion2._cookAsideQuote(el, blocks, imgMode);
               return;
@@ -4655,14 +4801,14 @@
               return;
             }
             if (tag === "img") {
-              DOMToNotion2._cookImage(el, blocks, imgMode);
+              DOMToNotion2._cookBlockImage(el, blocks, imgMode);
               return;
             }
             DomSpec.eachChildOrdered(el, walkNode);
           };
           let inlineBuf = "";
           const flushInline = () => {
-            const text = inlineBuf.replace(/[ \t\r\n]+/g, " ").trim();
+            const text = inlineBuf.replace(/\r\n?/g, "\n").replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{2,}/g, "\n").trim();
             if (text) {
               blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(text) } });
             }
@@ -4676,6 +4822,10 @@
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
             if (DomSpec.isSkippedNode(node)) return;
+            if (node.tagName && String(node.tagName).toLowerCase() === "br") {
+              inlineBuf += "\n";
+              return;
+            }
             if (DomSpec.isBlockNode(node)) {
               flushInline();
               processElement(node);
@@ -4806,7 +4956,8 @@
         _convertNodeBranch: (node, tag) => {
           if (tag === "ol") {
             const items = [];
-            let idx = 1;
+            const startAttr = Number(node.getAttribute && node.getAttribute("start"));
+            let idx = Number.isFinite(startAttr) && startAttr > 0 ? Math.floor(startAttr) : 1;
             DomSpec.eachChildOrdered(node, (child) => {
               if (child.nodeType === Node.TEXT_NODE && !String(child.textContent || "").trim()) return;
               const isLi = child.nodeType === Node.ELEMENT_NODE && child.tagName.toLowerCase() === "li";
@@ -4816,6 +4967,8 @@
 `);
                 return;
               }
+              const valueAttr = Number(child.getAttribute && child.getAttribute("value"));
+              if (Number.isFinite(valueAttr) && valueAttr > 0) idx = Math.floor(valueAttr);
               const md = HTMLToMarkdown2._convertNode(child).trim().replace(/^-\s+/, "");
               items.push(`${idx}. ${md}
 `);
@@ -4936,7 +5089,7 @@
             }
             case "pre": {
               const codeEl = node.querySelector("code");
-              const lang = ((_b = String(codeEl && (((_a = codeEl.getAttribute) == null ? void 0 : _a.call(codeEl, "class")) || codeEl.className) || "").match(/language-([\w+#.-]+)/)) == null ? void 0 : _b[1]) || "";
+              const lang = ((_b = String(codeEl && (((_a = codeEl.getAttribute) == null ? void 0 : _a.call(codeEl, "class")) || codeEl.className) || "").match(/lang(?:uage)?-([\w+#.-]+)/i)) == null ? void 0 : _b[1]) || "";
               const text = DomSpec.textWithBreaks(node).replace(/^\n/, "");
               const longestRun = (String(text).match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
               const fence = "`".repeat(Math.max(3, longestRun + 1));
@@ -5001,10 +5154,19 @@ ${quoted}
               return children;
           }
         },
+        // wave17 共识(qwen): 块级子节点与相邻内联文本/嵌套引用之间缺行边界 ——
+        // <blockquote>外<blockquote>内</blockquote></blockquote> 的子树输出为 "外> 内\n\n",
+        // 外层逐行加 "> " 后得 "> 外> 内"(内层引用语法被吞); div.onebox 同族。
+        // 与 Notion 出口 serializeRichText 的文本边界同口径: 沿 childNodes 拼接, 块级子节点前补换行。
         _convertChildren: (node) => {
           let out = "";
           DomSpec.eachChildOrdered(node, (child) => {
-            out += HTMLToMarkdown2._convertNode(child);
+            const md = HTMLToMarkdown2._convertNode(child);
+            if (!md) return;
+            if (child.nodeType === Node.ELEMENT_NODE && child.tagName && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase()) && out && !/\n$/.test(out)) {
+              out += "\n";
+            }
+            out += md;
           });
           return out;
         },
@@ -5012,8 +5174,13 @@ ${quoted}
           const direct = (tag) => Array.from(table.children || []).filter((c) => c.tagName && c.tagName.toLowerCase() === tag);
           const sections = [...direct("thead"), ...direct("tbody"), ...direct("tfoot")];
           const rows = sections.length > 0 ? sections.flatMap((sec) => Array.from(sec.children || []).filter((r) => r.tagName && r.tagName.toLowerCase() === "tr")) : Array.from(table.children || []).filter((r) => r.tagName && r.tagName.toLowerCase() === "tr");
-          if (rows.length === 0) return "";
+          const caption = direct("caption")[0];
+          const captionText = caption ? DomSpec.foldToSingleLine(HTMLToMarkdown2._convertChildren(caption)).trim() : "";
+          if (rows.length === 0) return captionText ? `${captionText}
+
+` : "";
           const result = [];
+          if (captionText) result.push(captionText);
           rows.forEach((row, i) => {
             const cells = Array.from(row.children || []).filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).map((c) => {
               return DomSpec.foldToSingleLine(HTMLToMarkdown2._convertChildren(c)).replace(/\|/g, "\\|");
@@ -5028,22 +5195,33 @@ ${quoted}
         buildFrontmatter: (meta) => {
           const lines = ["---"];
           const esc = (s) => String(s ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n\u2028\u2029]/g, " ").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+          const hasValue = (v) => v !== void 0 && v !== null && v !== "";
+          const asNumber = (value) => {
+            if (typeof value === "number") return Number.isFinite(value) ? value : null;
+            if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
+            return null;
+          };
           const numOrQuoted = (key, value) => {
-            const num = Number(value);
-            return Number.isFinite(num) ? `${key}: ${num}` : `${key}: "${esc(value)}"`;
+            if (!hasValue(value)) return "";
+            const num = asNumber(value);
+            return num === null ? `${key}: "${esc(value)}"` : `${key}: ${num}`;
+          };
+          const pushNum = (key, value) => {
+            const line = numOrQuoted(key, value);
+            if (line) lines.push(line);
           };
           if (meta.title) lines.push(`title: "${esc(meta.title)}"`);
           if (meta.url) lines.push(`url: "${esc(meta.url)}"`);
           if (meta.author) lines.push(`author: "${esc(meta.author)}"`);
           if (meta.source) lines.push(`source: "${esc(meta.source)}"`);
           if (meta.sourceType) lines.push(`source_type: "${esc(meta.sourceType)}"`);
-          if (meta.topicId) lines.push(numOrQuoted("topic_id", meta.topicId));
+          if (meta.topicId) pushNum("topic_id", meta.topicId);
           if (meta.owner) lines.push(`owner: "${esc(meta.owner)}"`);
           if (meta.repo) lines.push(`repo: "${esc(meta.repo)}"`);
           if (meta.gistId) lines.push(`gist_id: "${esc(meta.gistId)}"`);
           if (meta.category) lines.push(`category: "${esc(meta.category)}"`);
           if (meta.language) lines.push(`language: "${esc(meta.language)}"`);
-          if (Number.isFinite(Number(meta.stars))) lines.push(`stars: ${Number(meta.stars)}`);
+          pushNum("stars", meta.stars);
           if (meta.updatedAt) lines.push(`updated_at: "${esc(meta.updatedAt)}"`);
           const tags = Array.isArray(meta.tags) ? meta.tags : meta.tags != null && meta.tags !== "" ? [meta.tags] : [];
           if (tags.length > 0) {
@@ -5051,7 +5229,7 @@ ${quoted}
             tags.forEach((t) => lines.push(`  - "${esc(t)}"`));
           }
           lines.push(`export_time: "${(/* @__PURE__ */ new Date()).toISOString()}"`);
-          if (meta.floors !== void 0) lines.push(numOrQuoted("floors", meta.floors));
+          pushNum("floors", meta.floors);
           lines.push("---");
           return lines.join("\n") + "\n\n";
         },
