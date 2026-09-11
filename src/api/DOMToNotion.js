@@ -198,6 +198,17 @@ const DOMToNotion = {
             // <div class="title">署名行</div>)此前整支丢弃 —— 按文档序逐一直属子节点分派:
             // blockquote 走引用块, 其余非空内容走段落(含内嵌媒体), 与无-blockquote 回退同口径
             DomSpec.eachChildOrdered(el, (child) => {
+                // wave18 共识(dsf): 裸文本子节点此前直接 return 丢弃
+                // (<aside class="quote">署名文本<blockquote>引用</blockquote></aside> 只出引用块)
+                // —— 与同函数无-blockquote 回退分支(serializeRichText 会带上 aside 自身裸文本)
+                // 口径不一致, 改按段落补发
+                if (child.nodeType === Node.TEXT_NODE) {
+                    const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+                    if (text) {
+                        blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(text) } });
+                    }
+                    return;
+                }
                 if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
                 if (String(child.tagName).toLowerCase() === "blockquote") {
                     DOMToNotion._cookBlockquote(child, blocks, imgMode);
@@ -244,7 +255,7 @@ const DOMToNotion = {
     },
 
     // 代码块 pre
-    _cookCode: (el, blocks) => {
+    _cookCode: (el, blocks, imgMode) => {
         const codeEl = el.querySelector("code");
         const langClass = codeEl?.getAttribute("class") || "";
         // P4 收敛(c05): 语言标识白名单化前先完整捕获 —— `#` 未入字符类时 `language-c#`
@@ -260,6 +271,9 @@ const DOMToNotion = {
             type: "code",
             code: { rich_text: richTextArray, language: normalizeLanguage(rawLang) },
         });
+        // wave18 共识(dsf): <pre> 内媒体此前静默丢弃 —— 与 _cookParagraph/_cookHeading/
+        // _cookBlockquote/_cookTable 的既有补发口径不一致; 统一走 _consumeInlineMedia
+        DOMToNotion._consumeInlineMedia(el, blocks, imgMode);
     },
 
     // 引用 blockquote
@@ -349,7 +363,13 @@ const DOMToNotion = {
         const walk = (node) => {
             DomSpec.eachChildOrdered(node, (child) => {
                 if (!child || child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
-                if (String(child.tagName).toLowerCase() === "table") found.push(child);
+                if (String(child.tagName).toLowerCase() === "table") {
+                    // wave18 共识(qwen): 嵌套在表格内的表格不再单独产出 —— 其文本已被外层表格
+                    // 单元格的 rich_text 覆盖, 媒体也由外层单元格的 _consumeInlineMedia 采集,
+                    // 单独再产一次会双写同一内容(qwen w2 F1 第二症状)
+                    found.push(child);
+                    return;
+                }
                 walk(child);
             });
         };
@@ -360,16 +380,38 @@ const DOMToNotion = {
     // 表格 table / .md-table
     _cookTable: (el, blocks, imgMode) => {
         const tag = el.tagName.toLowerCase();
-        // wave17 共识(qwen): 非 table 容器(.md-table)原实现只取首个 table —— 容器内后续表格的
-        // 行列与媒体整体静默丢失(与 wave16 只取首个 blockquote/首个 img 同族同因)。逐个产出。
-        const tables = tag === "table" ? [el] : DOMToNotion._descendantTables(el);
-        if (tables.length === 0) return;
-        if (tables.length > 1) {
-            tables.forEach((one) => DOMToNotion._cookTable(one, blocks, imgMode));
-            return;
+        if (tag !== "table") {
+            // wave18 共识(dsf + qwen): .md-table 容器 —— 此前只处理后代表格, 容器其余直属内容
+            // (说明文字/段落/媒体)在 processElement 命中该分支后即 return, 整支静默丢失;
+            // 无后代表格时更连容器全部内容一起丢。改按文档序分派, 无任何产出时返回 false
+            // 交回通用下钻(与"未匹配容器透明下钻"同口径)。
+            let handled = false;
+            DomSpec.eachChildOrdered(el, (child) => {
+                if (!child) return;
+                if (child.nodeType === Node.TEXT_NODE) {
+                    const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+                    if (text) {
+                        blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(text) } });
+                        handled = true;
+                    }
+                    return;
+                }
+                if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+                if (String(child.tagName).toLowerCase() === "table") {
+                    DOMToNotion._cookTable(child, blocks, imgMode);
+                    handled = true;
+                    return;
+                }
+                const richText = DOMToNotion.serializeRichText(child);
+                if (richText.length > 0) {
+                    blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+                }
+                DOMToNotion._consumeInlineMedia(child, blocks, imgMode);
+                handled = true;
+            });
+            return handled;
         }
-        const table = tables[0];
-        if (!table) return;
+        const table = el;
 
         const rows = [];
         let hasHeader = false;
@@ -496,6 +538,7 @@ const DOMToNotion = {
                 DOMToNotion._consumeInlineMedia(cell, blocks, imgMode);
             });
         });
+        return true;
     },
 
     // 独立图片 img
@@ -816,7 +859,7 @@ const DOMToNotion = {
 
             // 处理代码块
             if (tag === "pre") {
-                DOMToNotion._cookCode(el, blocks);
+                DOMToNotion._cookCode(el, blocks, imgMode);
                 return;
             }
 
@@ -840,8 +883,8 @@ const DOMToNotion = {
 
             // 处理表格
             if (tag === "table" || (el.classList && el.classList.contains('md-table'))) {
-                DOMToNotion._cookTable(el, blocks, imgMode);
-                return;
+                // wave18 共识(dsf+qwen): .md-table 容器无表格时交由通用下钻(不再整支丢弃)
+                if (DOMToNotion._cookTable(el, blocks, imgMode)) return;
             }
 
             // 处理独立图片(块级: emoji 图与地址被拒的图片经 _cookBlockImage 补可见回退)
@@ -859,25 +902,60 @@ const DOMToNotion = {
         // (<div>Hello <span>world</span> again</div> 变成 "Hello  again" + "world")。
         // 改为单次顺序遍历: 连续的文本/内联内容合并为同一段落, 遇已识别块级元素
         // 先落段落再走原路径; 容器元素透明下钻。
-        let inlineBuf = "";
+        // wave18 共识(w2 dsf + qwen): 内联缓冲此前只存纯文本 —— 未匹配容器透明下钻路径
+        // (GenericExtractor 的 body.innerHTML 兜底源主路径)会把 <a href> 的链接目标与
+        // <strong>/<em>/<code> 的注解、内联 emoji 全部压成纯文本; 同一输入经 <p> 走
+        // _cookParagraph 时链接完好 ⇒ 同文件内两套口径。改为按 rich_text 片段累积:
+        // 文本节点归一空白, 内联元素委托 serializeRichText(与块级路径同源),
+        // 块级元素到来时统一 flush 为一个段落。
+        let inlineParts = [];
+        const normalizeInline = (value) => value
+            .replace(/\r\n?/g, "\n")
+            .replace(/[ \t]+/g, " ")
+            .replace(/ *\n */g, "\n")
+            .replace(/\n{2,}/g, "\n");
         const flushInline = () => {
-            // wave17 共识(dsf): 原归一会把 br 产出的 \n 一并压成空格 —— 改为保留单个换行
-            // (与 serializeRichText 的 rich_text \n 语义一致), 仅折叠缩进与连续空行
-            const text = inlineBuf
-                .replace(/\r\n?/g, "\n")
-                .replace(/[ \t]+/g, " ")
-                .replace(/ *\n */g, "\n")
-                .replace(/\n{2,}/g, "\n")
-                .trim();
-            if (text) {
-                blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(text) } });
+            if (inlineParts.length === 0) return;
+            const merged = [];
+            for (const part of inlineParts) {
+                if (!part || !part.text || !part.text.content) continue;
+                const prev = merged[merged.length - 1];
+                const sameMarks = prev
+                    && JSON.stringify(prev.annotations || {}) === JSON.stringify(part.annotations || {})
+                    && (prev.text.link?.url || "") === (part.text.link?.url || "");
+                if (sameMarks) prev.text.content += part.text.content;
+                else merged.push({ ...part, text: { ...part.text } });
             }
-            inlineBuf = "";
+            inlineParts = [];
+            if (merged.length === 0) return;
+            merged[0].text.content = normalizeInline(merged[0].text.content).replace(/^\s+/, "");
+            const last = merged[merged.length - 1];
+            last.text.content = normalizeInline(last.text.content).replace(/\s+$/, "");
+            for (let i = 1; i < merged.length - 1; i++) {
+                merged[i].text.content = normalizeInline(merged[i].text.content);
+            }
+            const richText = merged.filter((part) => part.text.content);
+            if (richText.length > 0) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+            }
+        };
+        // 容器(非块级元素且后代含块级/媒体)继续透明下钻 —— 保持内层块级结构不被拍平
+        const hasBlockOrMedia = (node) => {
+            let found = false;
+            const scan = (n) => {
+                DomSpec.eachChildOrdered(n, (child) => {
+                    if (found || !child || child.nodeType !== Node.ELEMENT_NODE) return;
+                    if (DomSpec.isBlockNode(child) || DomSpec.mediaKind(child)) { found = true; return; }
+                    scan(child);
+                });
+            };
+            scan(node);
+            return found;
         };
         const walkNode = (node) => {
             if (!node) return;
             if (node.nodeType === Node.TEXT_NODE) {
-                inlineBuf += node.nodeValue || "";
+                inlineParts.push(...DOMToNotion.splitLongText(node.nodeValue || ""));
                 return;
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -886,17 +964,20 @@ const DOMToNotion = {
             // 触发面为 GenericExtractor 的 body.innerHTML 兜底源(普遍含 <style>)。
             // 判据统一驻 DomSpec, 不得在此重声明
             if (DomSpec.isSkippedNode(node)) return;
-            // wave17 共识(dsf): 本路径(未匹配容器的透明下钻)此前不识别 <br> ——
-            // <div>line1<br>line2</div> 的两段文本被 inlineBuf 直接拼接为 "line1line2"
-            // (与 serializeRichText 的 br 分支语义相反; GenericExtractor 的 body.innerHTML
-            // 兜底源正是这条路径) → br 落为硬换行
+            // wave17 共识(dsf): 本路径不识别 <br> → 两段文本被直接拼接("line1line2");
+            // wave18: 统一入内联片段缓冲(仍为硬换行)
             if (node.tagName && String(node.tagName).toLowerCase() === "br") {
-                inlineBuf += "\n";
+                inlineParts.push(...DOMToNotion.splitLongText("\n"));
                 return;
             }
             if (DomSpec.isBlockNode(node)) {
                 flushInline();
                 processElement(node);
+                return;
+            }
+            if (!hasBlockOrMedia(node)) {
+                // wave18 共识(dsf + qwen): 纯内联子树保留语义(link/annotations/emoji)
+                inlineParts.push(...DOMToNotion.serializeRichText(node));
                 return;
             }
             DomSpec.eachChildOrdered(node, walkNode);

@@ -4066,6 +4066,7 @@
         "hr"
       ]);
       var tagOf = (el) => el && el.tagName ? String(el.tagName).toLowerCase() : "";
+      var MAX_URL_LENGTH = 2e3;
       var DomSpec = {
         BLOCK_TAGS,
         SKIP_TAGS,
@@ -4149,7 +4150,12 @@
           const scheme = (value.match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
           if (scheme && !/^https?$/i.test(scheme)) return "";
           const abs = scheme ? value : Utils2.absoluteUrl(value);
-          return abs && UrlValidator.validatePageExternalUrl(abs) ? abs : "";
+          if (!abs || !UrlValidator.validatePageExternalUrl(abs)) return "";
+          if (abs.length > MAX_URL_LENGTH) {
+            console.warn(`[LD-Notion] URL \u957F\u5EA6 ${abs.length} \u8D85 Notion \u4E0A\u9650 ${MAX_URL_LENGTH}, \u5DF2\u5FFD\u7565\u8BE5\u5730\u5740`);
+            return "";
+          }
+          return abs;
         },
         // 媒体地址出口面唯一入口: 回退(mediaSrc) + 地址判据(safeUrl)。消费方不得再各自
         // absoluteUrl + validatePageExternalUrl —— 两导出器口径曾因此不对称: 相对与协议相对
@@ -4348,6 +4354,13 @@
           const quotes = Array.from(el.children || []).filter((child) => child.tagName && String(child.tagName).toLowerCase() === "blockquote");
           if (quotes.length > 0) {
             DomSpec.eachChildOrdered(el, (child) => {
+              if (child.nodeType === Node.TEXT_NODE) {
+                const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+                if (text) {
+                  blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(text) } });
+                }
+                return;
+              }
               if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
               if (String(child.tagName).toLowerCase() === "blockquote") {
                 DOMToNotion2._cookBlockquote(child, blocks, imgMode);
@@ -4386,7 +4399,7 @@
           DOMToNotion2._consumeInlineMedia(el, blocks, imgMode);
         },
         // 代码块 pre
-        _cookCode: (el, blocks) => {
+        _cookCode: (el, blocks, imgMode) => {
           const codeEl = el.querySelector("code");
           const langClass = (codeEl == null ? void 0 : codeEl.getAttribute("class")) || "";
           const rawLang = (langClass.match(/lang(?:uage)?-([a-z0-9_+#-]+)/i) || [])[1] || "plain text";
@@ -4396,6 +4409,7 @@
             type: "code",
             code: { rich_text: richTextArray, language: normalizeLanguage2(rawLang) }
           });
+          DOMToNotion2._consumeInlineMedia(el, blocks, imgMode);
         },
         // 引用 blockquote
         _cookBlockquote: (el, blocks, imgMode) => {
@@ -4468,7 +4482,10 @@
           const walk = (node) => {
             DomSpec.eachChildOrdered(node, (child) => {
               if (!child || child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
-              if (String(child.tagName).toLowerCase() === "table") found.push(child);
+              if (String(child.tagName).toLowerCase() === "table") {
+                found.push(child);
+                return;
+              }
               walk(child);
             });
           };
@@ -4478,14 +4495,34 @@
         // 表格 table / .md-table
         _cookTable: (el, blocks, imgMode) => {
           const tag = el.tagName.toLowerCase();
-          const tables = tag === "table" ? [el] : DOMToNotion2._descendantTables(el);
-          if (tables.length === 0) return;
-          if (tables.length > 1) {
-            tables.forEach((one) => DOMToNotion2._cookTable(one, blocks, imgMode));
-            return;
+          if (tag !== "table") {
+            let handled = false;
+            DomSpec.eachChildOrdered(el, (child) => {
+              if (!child) return;
+              if (child.nodeType === Node.TEXT_NODE) {
+                const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+                if (text) {
+                  blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(text) } });
+                  handled = true;
+                }
+                return;
+              }
+              if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+              if (String(child.tagName).toLowerCase() === "table") {
+                DOMToNotion2._cookTable(child, blocks, imgMode);
+                handled = true;
+                return;
+              }
+              const richText = DOMToNotion2.serializeRichText(child);
+              if (richText.length > 0) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+              }
+              DOMToNotion2._consumeInlineMedia(child, blocks, imgMode);
+              handled = true;
+            });
+            return handled;
           }
-          const table = tables[0];
-          if (!table) return;
+          const table = el;
           const rows = [];
           let hasHeader = false;
           const directRows = (container) => Array.from(container.children || []).filter((child) => child.tagName && child.tagName.toLowerCase() === "tr");
@@ -4574,6 +4611,7 @@
               DOMToNotion2._consumeInlineMedia(cell, blocks, imgMode);
             });
           });
+          return true;
         },
         // 独立图片 img
         _cookImage: (el, blocks, imgMode) => {
@@ -4801,7 +4839,7 @@
               return;
             }
             if (tag === "pre") {
-              DOMToNotion2._cookCode(el, blocks);
+              DOMToNotion2._cookCode(el, blocks, imgMode);
               return;
             }
             if (tag === "blockquote") {
@@ -4817,8 +4855,7 @@
               return;
             }
             if (tag === "table" || el.classList && el.classList.contains("md-table")) {
-              DOMToNotion2._cookTable(el, blocks, imgMode);
-              return;
+              if (DOMToNotion2._cookTable(el, blocks, imgMode)) return;
             }
             if (tag === "img") {
               DOMToNotion2._cookBlockImage(el, blocks, imgMode);
@@ -4826,29 +4863,66 @@
             }
             DomSpec.eachChildOrdered(el, walkNode);
           };
-          let inlineBuf = "";
+          let inlineParts = [];
+          const normalizeInline = (value) => value.replace(/\r\n?/g, "\n").replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{2,}/g, "\n");
           const flushInline = () => {
-            const text = inlineBuf.replace(/\r\n?/g, "\n").replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{2,}/g, "\n").trim();
-            if (text) {
-              blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(text) } });
+            var _a, _b;
+            if (inlineParts.length === 0) return;
+            const merged = [];
+            for (const part of inlineParts) {
+              if (!part || !part.text || !part.text.content) continue;
+              const prev = merged[merged.length - 1];
+              const sameMarks = prev && JSON.stringify(prev.annotations || {}) === JSON.stringify(part.annotations || {}) && (((_a = prev.text.link) == null ? void 0 : _a.url) || "") === (((_b = part.text.link) == null ? void 0 : _b.url) || "");
+              if (sameMarks) prev.text.content += part.text.content;
+              else merged.push({ ...part, text: { ...part.text } });
             }
-            inlineBuf = "";
+            inlineParts = [];
+            if (merged.length === 0) return;
+            merged[0].text.content = normalizeInline(merged[0].text.content).replace(/^\s+/, "");
+            const last = merged[merged.length - 1];
+            last.text.content = normalizeInline(last.text.content).replace(/\s+$/, "");
+            for (let i = 1; i < merged.length - 1; i++) {
+              merged[i].text.content = normalizeInline(merged[i].text.content);
+            }
+            const richText = merged.filter((part) => part.text.content);
+            if (richText.length > 0) {
+              blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+            }
+          };
+          const hasBlockOrMedia = (node) => {
+            let found = false;
+            const scan = (n) => {
+              DomSpec.eachChildOrdered(n, (child) => {
+                if (found || !child || child.nodeType !== Node.ELEMENT_NODE) return;
+                if (DomSpec.isBlockNode(child) || DomSpec.mediaKind(child)) {
+                  found = true;
+                  return;
+                }
+                scan(child);
+              });
+            };
+            scan(node);
+            return found;
           };
           const walkNode = (node) => {
             if (!node) return;
             if (node.nodeType === Node.TEXT_NODE) {
-              inlineBuf += node.nodeValue || "";
+              inlineParts.push(...DOMToNotion2.splitLongText(node.nodeValue || ""));
               return;
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
             if (DomSpec.isSkippedNode(node)) return;
             if (node.tagName && String(node.tagName).toLowerCase() === "br") {
-              inlineBuf += "\n";
+              inlineParts.push(...DOMToNotion2.splitLongText("\n"));
               return;
             }
             if (DomSpec.isBlockNode(node)) {
               flushInline();
               processElement(node);
+              return;
+            }
+            if (!hasBlockOrMedia(node)) {
+              inlineParts.push(...DOMToNotion2.serializeRichText(node));
               return;
             }
             DomSpec.eachChildOrdered(node, walkNode);

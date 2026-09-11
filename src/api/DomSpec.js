@@ -35,6 +35,10 @@ const TEXT_BOUNDARY_TAGS = new Set([
 
 const tagOf = (el) => (el && el.tagName ? String(el.tagName).toLowerCase() : "");
 
+// wave18 共识(qwen): Notion 的 url 字段上限 2000 字符 —— 超长直链原样写入会 400 并
+// **整页导入失败**; 与 caption / rich_text 的 2000 上限同因。集中在此判据(单一出口面)。
+const MAX_URL_LENGTH = 2000;
+
 const DomSpec = {
     BLOCK_TAGS,
     SKIP_TAGS,
@@ -142,7 +146,14 @@ const DomSpec = {
         const scheme = (value.match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
         if (scheme && !/^https?$/i.test(scheme)) return "";
         const abs = scheme ? value : Utils.absoluteUrl(value);
-        return abs && UrlValidator.validatePageExternalUrl(abs) ? abs : "";
+        if (!abs || !UrlValidator.validatePageExternalUrl(abs)) return "";
+        // wave18 共识(qwen): 超长 URL 会使整页导入 400(见 MAX_URL_LENGTH); URL 截断即失效,
+        // 故整体判空 —— 链接退化为纯文本、文件/媒体块降级为可见标记, 用户可见内容不丢。
+        if (abs.length > MAX_URL_LENGTH) {
+            console.warn(`[LD-Notion] URL 长度 ${abs.length} 超 Notion 上限 ${MAX_URL_LENGTH}, 已忽略该地址`);
+            return "";
+        }
+        return abs;
     },
 
     // 媒体地址出口面唯一入口: 回退(mediaSrc) + 地址判据(safeUrl)。消费方不得再各自

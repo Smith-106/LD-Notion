@@ -1039,6 +1039,94 @@ describe("wave18 共识: 出口面契约(第二轮复审零新缺陷)", () => {
     });
 });
 
+describe("wave18 w2 共识: DOMToNotion 出口面契约", () => {
+    const PUBLIC = "https://cdn.example.com/a.png";
+    const withDom = (body, fn) => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body }) };
+        };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
+    };
+
+    it("透明下钻路径保留内联语义(链接目标与注解不再被拍成纯文本)", () => {
+        const div = element("div", [
+            textNode("看 "),
+            element("a", [textNode("链接")], { getAttribute: attrs({ href: PUBLIC }) }),
+            textNode(" "),
+            element("strong", [textNode("重点")]),
+        ]);
+        const blocks = withDom(element("body", [div]), () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph"]);
+        const rich = blocks[0].paragraph.rich_text;
+        expect(rich.some((r) => r.text.link && r.text.link.url === PUBLIC)).toBe(true);
+        expect(rich.some((r) => r.annotations && r.annotations.bold === true)).toBe(true);
+        expect(rich.map((r) => r.text.content).join("")).toContain("重点");
+    });
+
+    it("引用容器裸文本子节点不再丢弃(与无-blockquote 回退分支同口径)", () => {
+        const aside = element("aside", [
+            textNode("署名文本"),
+            element("blockquote", [textNode("引用")]),
+        ], { classList: { contains: (c) => c === "quote" } });
+        const blocks = [];
+        DOMToNotion._cookAsideQuote(aside, blocks, "external");
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph", "quote"]);
+        expect(blocks[0].paragraph.rich_text.map((r) => r.text.content).join("")).toContain("署名文本");
+    });
+
+    it("<pre> 内媒体补发(与段落/标题/引用/表格补发口径一致)", () => {
+        const img = element("img", [], { getAttribute: attrs({ src: PUBLIC }) });
+        const pre = element("pre", [element("code", [textNode("x")]), img], { querySelector: () => null });
+        const blocks = [];
+        DOMToNotion._cookCode(pre, blocks, "external");
+        expect(blocks.map((b) => b.type)).toContain("code");
+        expect(blocks.map((b) => b.type)).toContain("image");
+    });
+
+    it(".md-table 容器不再整支丢弃 / 嵌套表不重复产出", () => {
+        const mdTable = (children) => element("div", children, { classList: { contains: (c) => c === "md-table" } });
+        const tbody = (text) => element("tbody", [element("tr", [element("td", [textNode(text)])], { closest: () => null })]);
+        const table = element("table", [tbody("a")]);
+        // 容器内文本 + 表格: 两者都产出(此前只出表格, 说明文字静默丢失)
+        const mixed = withDom(element("body", [mdTable([textNode("表格说明"), table])]), () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
+        expect(mixed.map((b) => b.type)).toEqual(["paragraph", "table"]);
+        // 容器内无表格元素: 内容仍不丢
+        const noTable = withDom(element("body", [mdTable([element("p", [textNode("正文")])])]), () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
+        expect(noTable.map((b) => b.type)).toContain("paragraph");
+        // 嵌套表不由 _descendantTables 重复产出(外层单元格已含其文本)
+        const inner = element("table", [tbody("y")]);
+        const outer = element("table", [element("tbody", [element("tr", [element("td", [textNode("x"), inner])], { closest: () => null })])]);
+        expect(DOMToNotion._descendantTables(mdTable([outer]))).toEqual([outer]);
+    });
+
+    it("透明下钻不进入跳过子树(noscript 内降级媒体不产出)", () => {
+        const body = element("body", [element("div", [
+            element("noscript", [element("img", [], { getAttribute: attrs({ src: PUBLIC }) })]),
+        ])]);
+        const blocks = withDom(body, () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
+        expect(blocks.map((b) => b.type)).not.toContain("image");
+        expect(blocks.length).toBe(0);
+    });
+
+    it("超长 URL(>2000 字符)不写入 Notion 字段(避免整页 400), 可见文本保留", () => {
+        const longUrl = "https://cdn.example.com/" + "a".repeat(2100);
+        expect(DomSpec.safeUrl(longUrl)).toBe("");
+        expect(DomSpec.safeUrl(PUBLIC)).toBe(PUBLIC);
+        const attachment = element("a", [textNode("f.pdf")], {
+            classList: { contains: (c) => c === "attachment" },
+            getAttribute: attrs({ href: longUrl }),
+        });
+        const blocks = [];
+        DOMToNotion._cookAttachment(attachment, blocks, "external");
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph"]);
+        expect(blocks[0].paragraph.rich_text.map((r) => r.text.content).join("")).toContain("f.pdf");
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;
