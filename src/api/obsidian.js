@@ -129,6 +129,9 @@ const HTMLToMarkdown = {
             const items = [];
             let idx = 1;
             DomSpec.eachChildOrdered(node, (child) => {
+                // wave15(glm): 缩进排版的 <ol>\n    <li> 产生项间纯空白文本节点 —— 原样拼入会把
+                // 后续 "1. a" 推到行首缩进位(≥4 空格时整表退化为缩进代码块)
+                if (child.nodeType === Node.TEXT_NODE && !String(child.textContent || "").trim()) return;
                 const isLi = child.nodeType === Node.ELEMENT_NODE
                     && child.tagName.toLowerCase() === "li";
                 if (!isLi) {
@@ -141,6 +144,20 @@ const HTMLToMarkdown = {
                 idx++;
             });
             return items.join("") + "\n";
+        }
+        if (tag === "ul") {
+            // wave15(glm): 同 ol —— 项间缩进空白文本节点(缩进排版)不产出内容, 非 li 直属
+            // 文本仍保留; 否则 "- a" 行会被前置缩进(≥4 空格时退化为缩进代码块)
+            const items = [];
+            DomSpec.eachChildOrdered(node, (child) => {
+                if (child.nodeType === Node.TEXT_NODE) {
+                    const text = String(child.textContent || "").trim();
+                    if (text) items.push(text);
+                    return;
+                }
+                items.push(HTMLToMarkdown._convertNode(child));
+            });
+            return items.join("");
         }
         if (tag === "li") {
             // P4 收敛(c05b2-glm): 内层 ul/ol 与父项文本直接拼接会粘连("- a- b"),
@@ -206,8 +223,10 @@ const HTMLToMarkdown = {
 
         const tag = node.tagName.toLowerCase();
 
-        // wave10 共识(dsf): 这三个分支自行转换子树, 前置返回避免重复转换(见 _convertNodeBranch)
-        if (tag === "li" || tag === "ol" || tag === "table") {
+        // wave10 共识(dsf): 这些分支自行转换子树, 前置返回避免重复转换(见 _convertNodeBranch)
+        // wave15(glm): ul 同 ol —— 项间缩进空白文本节点必须在容器层过滤, 否则
+        // _convertChildren 会把 "\n    " 拼到列表项行首
+        if (tag === "li" || tag === "ol" || tag === "ul" || tag === "table") {
             return HTMLToMarkdown._convertNodeBranch(node, tag);
         }
 
@@ -244,7 +263,11 @@ const HTMLToMarkdown = {
             }
             case "pre": {
                 const codeEl = node.querySelector("code");
-                const lang = codeEl?.className?.match(/language-(\w+)/)?.[1] || "";
+                // wave15 共识(qwen/glm): className 在 SVG 命名空间元素上是 SVGAnimatedString
+                // (无 .match → TypeError 中断整个导出); \w+ 在 c++/c#/objective-c 的 +/#/- 处
+                // 截断(与 NOTION_LANGUAGES 已收录 c++/c# 的口径不一致)
+                const lang = String((codeEl && (codeEl.getAttribute?.("class") || codeEl.className)) || "")
+                    .match(/language-([\w+#.-]+)/)?.[1] || "";
                 // wave14 共识(glm): 只取 code 元素会丢掉 pre 内其余文本(<pre>foo<code>bar</code></pre>);
                 // 改用整块 textContent, 并按 HTML 规范去掉 <pre> 紧随的首个换行
                 const text = String(node.textContent || "").replace(/^\n/, "");
@@ -275,7 +298,6 @@ const HTMLToMarkdown = {
                 }
                 return HTMLToMarkdown._mdText(alt || "");
             }
-            case "ul": return children;
             case "iframe": {
                 // wave9 共识(qwen) + R15: 地址判据统一走 DomSpec.mediaUrl
                 const safeSrc = DomSpec.mediaUrl(node);

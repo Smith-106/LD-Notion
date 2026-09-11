@@ -4010,14 +4010,12 @@
     }
   });
 
-  // src/api/DOMToNotion.js
-  var require_DOMToNotion = __commonJS({
-    "src/api/DOMToNotion.js"(exports, module) {
+  // src/api/DomSpec.js
+  var require_DomSpec = __commonJS({
+    "src/api/DomSpec.js"(exports, module) {
       "use strict";
-      var { isSupportedFileType: isSupportedFileType2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { UrlValidator } = require_UrlValidator();
-      var { normalizeLanguage: normalizeLanguage2, EMOJI_MAP: EMOJI_MAP2 } = require_constants();
       var BLOCK_TAGS = /* @__PURE__ */ new Set([
         "div",
         "p",
@@ -4039,6 +4037,105 @@
         "hr",
         "aside"
       ]);
+      var SKIP_TAGS = /* @__PURE__ */ new Set(["script", "style", "noscript"]);
+      var tagOf = (el) => el && el.tagName ? String(el.tagName).toLowerCase() : "";
+      var DomSpec = {
+        BLOCK_TAGS,
+        SKIP_TAGS,
+        // 块级判据: 标签集 ∪ 类名容器(灯箱/图片容器/md-table/a.attachment/aside.quote)
+        isBlockNode: (el) => {
+          const t = tagOf(el);
+          if (BLOCK_TAGS.has(t)) return true;
+          const cls = el && el.classList;
+          if (!cls) return false;
+          return cls.contains("lightbox-wrapper") || cls.contains("image-wrapper") || cls.contains("md-table") || t === "a" && cls.contains("attachment") || t === "aside" && cls.contains("quote");
+        },
+        isSkippedNode: (el) => SKIP_TAGS.has(tagOf(el)),
+        // 媒体判据: 标签 → 块类型; a.attachment 视为附件
+        mediaKind: (el) => {
+          const t = tagOf(el);
+          if (t === "img" || t === "video" || t === "audio" || t === "iframe") return t;
+          if (t === "a" && el.classList && el.classList.contains("attachment")) return "attachment";
+          return null;
+        },
+        // 媒体采集: 元素自身先按自身标签分派(querySelectorAll 只查后代, 元素本身即媒体时会漏采),
+        // 再按固定类序采集后代(img → a.attachment → video → audio → iframe, 各类内部保持文档序),
+        // 每节点恰一次。wave8(段落/li/引用/单元格补发)、wave9(标题补发)、wave14(自身即媒体)的统一来源。
+        eachMedia: (el, visit) => {
+          if (!el) return;
+          const selfKind = DomSpec.mediaKind(el);
+          if (selfKind) visit(el, selfKind);
+          if (typeof el.querySelectorAll !== "function") return;
+          el.querySelectorAll("img").forEach((node) => visit(node, "img"));
+          el.querySelectorAll("a.attachment").forEach((node) => visit(node, "attachment"));
+          el.querySelectorAll("video").forEach((node) => visit(node, "video"));
+          el.querySelectorAll("audio").forEach((node) => visit(node, "audio"));
+          el.querySelectorAll("iframe").forEach((node) => visit(node, "iframe"));
+        },
+        // wave12 共识(qwen): emoji 图"跳过块级图片"与"转 emoji 文本"必须同口径 ——
+        // 前者按 src.includes("/images/emoji/") 跳、后者只认四家 set 会致 Discourse 其余
+        // set(win10/emoji_one 等)两边都不命中而静默丢失; 此处 set 目录放宽为任意值
+        emojiNameOf: (src) => {
+          const m = String(src || "").match(/\/images\/emoji\/[^/]+\/([^/.]+)\.png/i);
+          return m ? m[1] : null;
+        },
+        // 媒体地址回退口径: src → data-src(懒加载, Discourse 常见) → <source src>(video/audio)。
+        // 此前 img 只认 src|data-src 而 video/audio 只认 src|<source src>, 两导出器各自实现且
+        // 互不覆盖 —— 懒加载图在 Obsidian 侧被丢、<source> 型视频在 Notion 侧被丢。
+        mediaSrc: (el) => {
+          if (!el || typeof el.getAttribute !== "function") return "";
+          const own = el.getAttribute("src");
+          if (own) return own;
+          const lazy = el.getAttribute("data-src");
+          if (lazy) return lazy;
+          const source = typeof el.querySelector === "function" ? el.querySelector("source") : null;
+          return source && typeof source.getAttribute === "function" && source.getAttribute("src") || "";
+        },
+        // 地址出口面唯一判据(媒体 src 与文件/链接 href 共用): 仅 http(s) 与相对形式可入,
+        // 其余 scheme(javascript:/data:/vbscript:/file:/mailto: 等)一律拒绝 —— 关键在**先判
+        // scheme 再补齐**: Utils.absoluteUrl 会把未知 scheme 拼成 "<origin>/<scheme>:…" 并被
+        // validatePageExternalUrl 判为合法公网 http(s)(旧契约测试仅因测试环境 origin 为内网
+        // localhost 才显绿, 实网 origin=https://linux.do 下 javascript:/data: 均放行)。
+        // 相对(/x)、协议相对(//host/x)、裸相对(x)、已绝对 http(s) 地址补齐后过公网校验。
+        safeUrl: (raw) => {
+          const value = String(raw == null ? "" : raw).trim();
+          if (!value || value.startsWith("#")) return "";
+          const scheme = (value.match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
+          if (scheme && !/^https?$/i.test(scheme)) return "";
+          const abs = scheme ? value : Utils2.absoluteUrl(value);
+          return abs && UrlValidator.validatePageExternalUrl(abs) ? abs : "";
+        },
+        // 媒体地址出口面唯一入口: 回退(mediaSrc) + 地址判据(safeUrl)。消费方不得再各自
+        // absoluteUrl + validatePageExternalUrl —— 两导出器口径曾因此不对称: 相对与协议相对
+        // 媒体地址在 Markdown 侧被整体判为"非公网"而静默丢弃(Notion 侧正常落块)。
+        mediaUrl: (el) => DomSpec.safeUrl(DomSpec.mediaSrc(el)),
+        // 单行上下文出口面的唯一入口(引用块内/callout 行/表格单元格/标题/link label/img alt)。
+        // 实现仍驻 Utils.mdText(公开壳, 供 ai/ui 跨模块调用), 此处只做导出层命名收束 ——
+        // 依赖方向保持 api → utils, 且折叠语义只有一处实现。
+        collapseOneLine: Utils2.mdText,
+        // 纯空白单行折叠(标题/表格单元格等非 Markdown 语法上下文): 折叠 CR/LF 并去首尾空白。
+        // 与 collapseOneLine 语义不同 —— 后者用于链接标签/alt, 需剔方括号防链接结构被破坏;
+        // 此处**不可**剔方括号("[RFC]" 是合法标题内容), 二者不可互替。
+        foldToSingleLine: (text) => String(text ?? "").replace(/\r\n?|\n/g, " ").trim(),
+        // 有序子节点遍历(含文本节点, 文档序)。单一来源取代各处的
+        // Array.from(el.childNodes || []).forEach(...)(部分站点漏了 || [] 保护)。
+        eachChildOrdered: (el, visit) => {
+          Array.from(el && el.childNodes || []).forEach((node) => visit(node));
+        }
+      };
+      module.exports = { DomSpec };
+    }
+  });
+
+  // src/api/DOMToNotion.js
+  var require_DOMToNotion = __commonJS({
+    "src/api/DOMToNotion.js"(exports, module) {
+      "use strict";
+      var { isSupportedFileType: isSupportedFileType2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { UrlValidator } = require_UrlValidator();
+      var { normalizeLanguage: normalizeLanguage2, EMOJI_MAP: EMOJI_MAP2 } = require_constants();
+      var { DomSpec } = require_DomSpec();
       var safeCutIndex = (text, index) => {
         const cut = Math.max(0, Math.min(index, text.length));
         if (cut > 0 && cut < text.length) {
@@ -4060,8 +4157,8 @@
         _cookLightbox: (el, blocks, imgMode) => {
           const img = el.querySelector("img");
           if (!img) return;
-          const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
-          const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
+          const src = DomSpec.mediaSrc(img);
+          const full = DomSpec.mediaUrl(img);
           if (full && !DOMToNotion2._emojiImageName(src)) {
             if (imgMode === "skip") return;
             blocks.push({
@@ -4078,7 +4175,7 @@
           var _a;
           const href = el.getAttribute("href") || "";
           const fileName = ((_a = el.textContent) == null ? void 0 : _a.trim()) || "attachment";
-          const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(href));
+          const full = DomSpec.safeUrl(href);
           if (full && imgMode !== "skip") {
             blocks.push({
               type: "file",
@@ -4097,9 +4194,7 @@
         },
         // 视频元素
         _cookVideo: (el, blocks, imgMode) => {
-          const source = el.querySelector("source");
-          const src = el.getAttribute("src") || (source == null ? void 0 : source.getAttribute("src")) || "";
-          const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
+          const full = DomSpec.mediaUrl(el);
           if (full && imgMode !== "skip") {
             const ext = ((full.split("#")[0] || "").split("?")[0].split(".").pop() || "").toLowerCase();
             if (isSupportedFileType2(ext)) {
@@ -4128,9 +4223,7 @@
         },
         // 音频元素
         _cookAudio: (el, blocks, imgMode) => {
-          const source = el.querySelector("source");
-          const src = el.getAttribute("src") || (source == null ? void 0 : source.getAttribute("src")) || "";
-          const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
+          const full = DomSpec.mediaUrl(el);
           if (full && imgMode !== "skip") {
             blocks.push({
               type: "audio",
@@ -4168,35 +4261,24 @@
         },
         // 引用块 aside.quote
         _cookAsideQuote: (el, blocks, imgMode) => {
-          const blockquote = el.querySelector("blockquote");
-          if (blockquote) {
-            const richText = DOMToNotion2.serializeRichText(blockquote);
-            if (richText.length > 0) {
-              blocks.push({ type: "quote", quote: { rich_text: richText } });
-            }
-            DOMToNotion2._consumeInlineMedia(blockquote, blocks, imgMode);
+          const source = el.querySelector("blockquote") || el;
+          const richText = DOMToNotion2.serializeRichText(source);
+          if (richText.length > 0) {
+            blocks.push({ type: "quote", quote: { rich_text: richText } });
           }
+          DOMToNotion2._consumeInlineMedia(source, blocks, imgMode);
         },
-        // wave12 共识(qwen): emoji 图片“跳过块级图片”与“转 emoji 文本”必须同口径 ——
-        // 前者按 src.includes("/images/emoji/") 跳、后者只认 twemoji|apple|google|twitter 四家 set,
-        // Discourse 其余 set(win10/emoji_one 等)两边都不命中 → 图片静默丢失
-        _emojiImageName: (src) => {
-          const m = String(src || "").match(/\/images\/emoji\/[^/]+\/([^/.]+)\.png/i);
-          return m ? m[1] : null;
-        },
-        // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发(与 _cookParagraph 同款)
+        // 单一 emoji 判据驻 DomSpec(与块级跳过同源); 保留公开键名供现有测试与 legacy harness
+        _emojiImageName: (src) => DomSpec.emojiNameOf(src),
+        // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发
+        // 采集逻辑单一驻 DomSpec.eachMedia(自身+后代, 每节点恰一次); 此处保留公开键名转发
         _consumeInlineMedia: (el, blocks, imgMode) => {
-          const selfTag = el.tagName ? el.tagName.toLowerCase() : "";
-          if (selfTag === "img") DOMToNotion2._cookImage(el, blocks, imgMode);
-          else if (selfTag === "video") DOMToNotion2._cookVideo(el, blocks, imgMode);
-          else if (selfTag === "audio") DOMToNotion2._cookAudio(el, blocks, imgMode);
-          else if (selfTag === "iframe") DOMToNotion2._cookIframe(el, blocks);
-          el.querySelectorAll("img").forEach((img) => DOMToNotion2._cookImage(img, blocks, imgMode));
-          el.querySelectorAll("a.attachment").forEach((a) => DOMToNotion2._cookAttachment(a, blocks, imgMode));
-          el.querySelectorAll("video").forEach((video) => DOMToNotion2._cookVideo(video, blocks, imgMode));
-          el.querySelectorAll("audio").forEach((audio) => DOMToNotion2._cookAudio(audio, blocks, imgMode));
-          el.querySelectorAll("iframe").forEach((frame) => {
-            DOMToNotion2._cookIframe(frame, blocks);
+          DomSpec.eachMedia(el, (node, kind) => {
+            if (kind === "img") DOMToNotion2._cookImage(node, blocks, imgMode);
+            else if (kind === "attachment") DOMToNotion2._cookAttachment(node, blocks, imgMode);
+            else if (kind === "video") DOMToNotion2._cookVideo(node, blocks, imgMode);
+            else if (kind === "audio") DOMToNotion2._cookAudio(node, blocks, imgMode);
+            else if (kind === "iframe") DOMToNotion2._cookIframe(node, blocks);
           });
         },
         // 段落 p（含内部图片与附件）
@@ -4205,46 +4287,7 @@
           if (richText.length > 0) {
             blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
           }
-          el.querySelectorAll("img").forEach((img) => {
-            const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
-            const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
-            if (full && !DOMToNotion2._emojiImageName(src)) {
-              if (imgMode !== "skip") {
-                blocks.push({
-                  type: "image",
-                  image: { type: "external", external: { url: full } },
-                  _needsUpload: imgMode === "upload",
-                  _originalUrl: full,
-                  _fileType: "image"
-                });
-              }
-            }
-          });
-          el.querySelectorAll("a.attachment").forEach((a) => {
-            var _a;
-            const href = a.getAttribute("href") || "";
-            const fileName = ((_a = a.textContent) == null ? void 0 : _a.trim()) || "attachment";
-            const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(href));
-            if (full && imgMode !== "skip") {
-              blocks.push({
-                type: "file",
-                file: {
-                  type: "external",
-                  external: { url: full },
-                  caption: DOMToNotion2.splitLongText(fileName)
-                },
-                _needsUpload: imgMode === "upload",
-                _originalUrl: full,
-                _fileType: "file",
-                _fileName: fileName
-              });
-            }
-          });
-          el.querySelectorAll("video").forEach((video) => DOMToNotion2._cookVideo(video, blocks, imgMode));
-          el.querySelectorAll("audio").forEach((audio) => DOMToNotion2._cookAudio(audio, blocks, imgMode));
-          el.querySelectorAll("iframe").forEach((frame) => {
-            DOMToNotion2._cookIframe(frame, blocks);
-          });
+          DOMToNotion2._consumeInlineMedia(el, blocks, imgMode);
         },
         // 代码块 pre
         _cookCode: (el, blocks) => {
@@ -4281,7 +4324,14 @@
         _cookList: (el, blocks, imgMode) => {
           const tag = el.tagName.toLowerCase();
           const listType = tag === "ul" ? "bulleted_list_item" : "numbered_list_item";
-          Array.from(el.children).forEach((child) => {
+          DomSpec.eachChildOrdered(el, (child) => {
+            if (child.nodeType === Node.TEXT_NODE) {
+              const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+              if (text) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(text) } });
+              }
+              return;
+            }
             if (!child.tagName) return;
             const childTag = child.tagName.toLowerCase();
             if (childTag === "ul" || childTag === "ol") {
@@ -4302,13 +4352,7 @@
               if (richText.length > 0) {
                 blocks.push({ type: listType, [listType]: { rich_text: richText } });
               }
-              li.querySelectorAll("img").forEach((img) => DOMToNotion2._cookImage(img, blocks, imgMode));
-              li.querySelectorAll("a.attachment").forEach((a) => DOMToNotion2._cookAttachment(a, blocks, imgMode));
-              li.querySelectorAll("video").forEach((video) => DOMToNotion2._cookVideo(video, blocks, imgMode));
-              li.querySelectorAll("audio").forEach((audio) => DOMToNotion2._cookAudio(audio, blocks, imgMode));
-              li.querySelectorAll("iframe").forEach((frame) => {
-                DOMToNotion2._cookIframe(frame, blocks);
-              });
+              DOMToNotion2._consumeInlineMedia(li, blocks, imgMode);
             }
           });
         },
@@ -4323,7 +4367,7 @@
           const directCells = (row) => Array.from(row.children || []).filter((child) => child.tagName && ["td", "th"].includes(child.tagName.toLowerCase()));
           const directSections = (tagNames) => Array.from(table.children || []).filter((child) => child.tagName && tagNames.includes(child.tagName.toLowerCase()));
           const thead = directSections(["thead"])[0];
-          if (thead) {
+          if (thead && directRows(thead).length > 0) {
             hasHeader = true;
             directRows(thead).forEach((tr) => {
               const cells = [];
@@ -4384,25 +4428,16 @@
           }
           const mediaSections = directSections(["thead", "tbody", "tfoot"]);
           const mediaRows = mediaSections.length > 0 ? mediaSections.flatMap((sec) => directRows(sec)) : directRows(table);
-          const cellMedia = [];
           mediaRows.forEach((tr) => {
             directCells(tr).forEach((cell) => {
-              cellMedia.push(...cell.querySelectorAll("img, video, audio, a.attachment, iframe"));
+              DOMToNotion2._consumeInlineMedia(cell, blocks, imgMode);
             });
-          });
-          cellMedia.forEach((m) => {
-            const t = m.tagName ? m.tagName.toLowerCase() : "";
-            if (t === "img") DOMToNotion2._cookImage(m, blocks, imgMode);
-            else if (t === "a") DOMToNotion2._cookAttachment(m, blocks, imgMode);
-            else if (t === "video") DOMToNotion2._cookVideo(m, blocks, imgMode);
-            else if (t === "audio") DOMToNotion2._cookAudio(m, blocks, imgMode);
-            else if (t === "iframe") DOMToNotion2._cookIframe(m, blocks);
           });
         },
         // 独立图片 img
         _cookImage: (el, blocks, imgMode) => {
-          const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
-          const full = DOMToNotion2._safeExternalUrl(Utils2.absoluteUrl(src));
+          const src = DomSpec.mediaSrc(el);
+          const full = DomSpec.mediaUrl(el);
           if (full && !DOMToNotion2._emojiImageName(src)) {
             if (imgMode !== "skip") {
               blocks.push({
@@ -4461,7 +4496,7 @@
             const el = n;
             const tag = el.tagName.toLowerCase();
             if (tag === "img") {
-              const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
+              const src = DomSpec.mediaSrc(el);
               const emojiName = DOMToNotion2._emojiImageName(src);
               if (emojiName) {
                 const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP2, emojiName) ? EMOJI_MAP2[emojiName] : el.getAttribute("alt") || `:${emojiName}:`;
@@ -4475,23 +4510,22 @@
             if (tag === "a") {
               const href = el.getAttribute("href") || "";
               if (href.startsWith("#")) {
-                Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
+                DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
                 return;
               }
-              const link = Utils2.absoluteUrl(href);
+              const link = DomSpec.safeUrl(href);
               let linkText = el.textContent || "";
               if (!linkText) {
                 const innerImg = el.querySelector("img");
                 linkText = innerImg ? innerImg.getAttribute("alt") || "" : "";
               }
               if (!linkText) linkText = link;
-              const safeLink = DOMToNotion2._safeExternalUrl(link);
-              if (link && linkText) {
+              if (linkText) {
                 breakIfNeeded(annotations);
                 const chunks = DOMToNotion2.splitLongText(linkText, annotations);
-                if (safeLink) {
+                if (link) {
                   chunks.forEach((chunk) => {
-                    chunk.text.link = { url: safeLink };
+                    chunk.text.link = { url: link };
                   });
                 }
                 result.push(...chunks);
@@ -4499,15 +4533,15 @@
               return;
             }
             if (tag === "strong" || tag === "b") {
-              Array.from(el.childNodes).forEach((c) => processNode(c, { ...annotations, bold: true }));
+              DomSpec.eachChildOrdered(el, (c) => processNode(c, { ...annotations, bold: true }));
               return;
             }
             if (tag === "em" || tag === "i") {
-              Array.from(el.childNodes).forEach((c) => processNode(c, { ...annotations, italic: true }));
+              DomSpec.eachChildOrdered(el, (c) => processNode(c, { ...annotations, italic: true }));
               return;
             }
             if (tag === "s" || tag === "del") {
-              Array.from(el.childNodes).forEach((c) => processNode(c, { ...annotations, strikethrough: true }));
+              DomSpec.eachChildOrdered(el, (c) => processNode(c, { ...annotations, strikethrough: true }));
               return;
             }
             if (tag === "code") {
@@ -4523,15 +4557,15 @@
               result.push(...DOMToNotion2.splitLongText("\n", annotations));
               return;
             }
-            if (tag === "script" || tag === "style" || tag === "noscript") return;
+            if (DomSpec.isSkippedNode(n)) return;
             if (tag === "p" || tag === "div") {
               if (result.length > 0) needBreak = true;
               const before = result.length;
-              Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
+              DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
               if (result.length > before) needBreak = true;
               return;
             }
-            Array.from(el.childNodes).forEach((c) => processNode(c, annotations));
+            DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
           };
           processNode(node);
           if (result.length > 100) {
@@ -4602,7 +4636,7 @@
               DOMToNotion2._cookImage(el, blocks, imgMode);
               return;
             }
-            Array.from(el.childNodes || []).forEach(walkNode);
+            DomSpec.eachChildOrdered(el, walkNode);
           };
           let inlineBuf = "";
           const flushInline = () => {
@@ -4612,13 +4646,6 @@
             }
             inlineBuf = "";
           };
-          const isBlockChild = (child) => {
-            const t = child.tagName ? child.tagName.toLowerCase() : "";
-            if (BLOCK_TAGS.has(t)) return true;
-            const cls = child.classList;
-            if (!cls) return false;
-            return cls.contains("lightbox-wrapper") || cls.contains("image-wrapper") || cls.contains("md-table") || t === "a" && cls.contains("attachment") || t === "aside" && cls.contains("quote");
-          };
           const walkNode = (node) => {
             if (!node) return;
             if (node.nodeType === Node.TEXT_NODE) {
@@ -4626,14 +4653,15 @@
               return;
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
-            if (isBlockChild(node)) {
+            if (DomSpec.isSkippedNode(node)) return;
+            if (DomSpec.isBlockNode(node)) {
               flushInline();
               processElement(node);
               return;
             }
-            Array.from(node.childNodes || []).forEach(walkNode);
+            DomSpec.eachChildOrdered(node, walkNode);
           };
-          Array.from(root.childNodes || []).forEach(walkNode);
+          DomSpec.eachChildOrdered(root, walkNode);
           flushInline();
           return blocks;
         }
@@ -4648,6 +4676,7 @@
       "use strict";
       var { UrlValidator } = require_UrlValidator();
       var { Utils: Utils2 } = require_utils();
+      var { DomSpec } = require_DomSpec();
       var ObsidianAPI2 = {
         // P4 共识(dsf): 整路径 encodeURIComponent 会把子目录的 "/" 编成 %2F, 且 ".." 段可越权写入。
         // 逐段编码并剔除空/./.. 段。
@@ -4756,7 +4785,8 @@
           if (tag === "ol") {
             const items = [];
             let idx = 1;
-            Array.from(node.childNodes).forEach((child) => {
+            DomSpec.eachChildOrdered(node, (child) => {
+              if (child.nodeType === Node.TEXT_NODE && !String(child.textContent || "").trim()) return;
               const isLi = child.nodeType === Node.ELEMENT_NODE && child.tagName.toLowerCase() === "li";
               if (!isLi) {
                 items.push(HTMLToMarkdown2._convertNode(child));
@@ -4769,6 +4799,18 @@
             });
             return items.join("") + "\n";
           }
+          if (tag === "ul") {
+            const items = [];
+            DomSpec.eachChildOrdered(node, (child) => {
+              if (child.nodeType === Node.TEXT_NODE) {
+                const text = String(child.textContent || "").trim();
+                if (text) items.push(text);
+                return;
+              }
+              items.push(HTMLToMarkdown2._convertNode(child));
+            });
+            return items.join("");
+          }
           if (tag === "li") {
             const segments = [];
             const preIndented = /* @__PURE__ */ new Set();
@@ -4780,7 +4822,7 @@
               pushText(buf.replace(/\s+\n/g, "\n").trim());
               buf = "";
             };
-            Array.from(node.childNodes || []).forEach((child) => {
+            DomSpec.eachChildOrdered(node, (child) => {
               const isList = child.nodeType === Node.ELEMENT_NODE && child.tagName && ["ul", "ol"].includes(child.tagName.toLowerCase());
               if (isList) {
                 flushBuf();
@@ -4814,15 +4856,16 @@
           return HTMLToMarkdown2._convertTable(node) + "\n\n";
         },
         _convertNode: (node) => {
-          var _a, _b, _c, _d;
+          var _a, _b;
           if (node.nodeType === Node.TEXT_NODE) {
             return node.textContent || "";
           }
           if (node.nodeType !== Node.ELEMENT_NODE) return "";
           const tag = node.tagName.toLowerCase();
-          if (tag === "li" || tag === "ol" || tag === "table") {
+          if (tag === "li" || tag === "ol" || tag === "ul" || tag === "table") {
             return HTMLToMarkdown2._convertNodeBranch(node, tag);
           }
+          if (DomSpec.isSkippedNode(node)) return "";
           const children = HTMLToMarkdown2._convertChildren(node);
           switch (tag) {
             // wave12 共识(dsf): 标题是单行结构 —— 标题内 <br>(br 分支返回换行)或文本节点自带
@@ -4833,7 +4876,7 @@
             case "h4":
             case "h5":
             case "h6": {
-              const text = children.replace(/\r\n?|\n/g, " ").trim();
+              const text = DomSpec.foldToSingleLine(children);
               return `${"#".repeat(Number(tag[1]))} ${text}
 
 `;
@@ -4846,12 +4889,6 @@
               return "\n";
             case "hr":
               return "---\n\n";
-            // wave11 共识(glm): script/style/noscript 非渲染元素 —— 其文本内容(JS/CSS 源码)
-            // 经 default 原样并入导出正文, 污染笔记
-            case "script":
-            case "style":
-            case "noscript":
-              return "";
             case "strong":
             case "b":
               return `**${children}**`;
@@ -4872,7 +4909,7 @@
             }
             case "pre": {
               const codeEl = node.querySelector("code");
-              const lang = ((_b = (_a = codeEl == null ? void 0 : codeEl.className) == null ? void 0 : _a.match(/language-(\w+)/)) == null ? void 0 : _b[1]) || "";
+              const lang = ((_b = String(codeEl && (((_a = codeEl.getAttribute) == null ? void 0 : _a.call(codeEl, "class")) || codeEl.className) || "").match(/language-([\w+#.-]+)/)) == null ? void 0 : _b[1]) || "";
               const text = String(node.textContent || "").replace(/^\n/, "");
               const longestRun = (String(text).match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
               const fence = "`".repeat(Math.max(3, longestRun + 1));
@@ -4883,24 +4920,21 @@
               return lines.map((l) => `> ${l}`).join("\n") + "\n\n";
             }
             case "a": {
-              const href = node.getAttribute("href") || "";
-              if (href.toLowerCase().startsWith("http")) return `[${HTMLToMarkdown2._mdText(children)}](${HTMLToMarkdown2._mdUrl(href)})`;
+              const link = DomSpec.safeUrl(node.getAttribute("href") || "");
+              if (link) return `[${HTMLToMarkdown2._mdText(children)}](${HTMLToMarkdown2._mdUrl(link)})`;
               return children;
             }
             case "img": {
-              const src = node.getAttribute("src") || "";
               const alt = node.getAttribute("alt") || "";
-              if (src && UrlValidator.validatePageExternalUrl(src)) {
+              const src = DomSpec.mediaUrl(node);
+              if (src) {
                 return `![${HTMLToMarkdown2._mdText(alt)}](${HTMLToMarkdown2._mdUrl(src)})`;
               }
               return HTMLToMarkdown2._mdText(alt || "");
             }
-            case "ul":
-              return children;
             case "iframe": {
-              const src = node.getAttribute("src") || "";
-              const safeSrc = String(src || "");
-              if (safeSrc && UrlValidator.validatePageExternalUrl(safeSrc)) {
+              const safeSrc = DomSpec.mediaUrl(node);
+              if (safeSrc) {
                 return `[\u5D4C\u5165\u5185\u5BB9](${HTMLToMarkdown2._mdUrl(safeSrc)})
 
 `;
@@ -4908,8 +4942,8 @@
               return "[\u5D4C\u5165\u5185\u5BB9\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n";
             }
             case "video": {
-              const src = node.getAttribute("src") || ((_c = node.querySelector("source")) == null ? void 0 : _c.getAttribute("src")) || "";
-              if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
+              const src = DomSpec.mediaUrl(node);
+              if (src) {
                 return `[\u89C6\u9891](${HTMLToMarkdown2._mdUrl(src)})
 
 `;
@@ -4917,8 +4951,8 @@
               return "[\u89C6\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n";
             }
             case "audio": {
-              const src = node.getAttribute("src") || ((_d = node.querySelector("source")) == null ? void 0 : _d.getAttribute("src")) || "";
-              if (String(src || "") && UrlValidator.validatePageExternalUrl(String(src))) {
+              const src = DomSpec.mediaUrl(node);
+              if (src) {
                 return `[\u97F3\u9891](${HTMLToMarkdown2._mdUrl(src)})
 
 `;
@@ -4941,7 +4975,11 @@ ${quoted}
           }
         },
         _convertChildren: (node) => {
-          return Array.from(node.childNodes).map(HTMLToMarkdown2._convertNode).join("");
+          let out = "";
+          DomSpec.eachChildOrdered(node, (child) => {
+            out += HTMLToMarkdown2._convertNode(child);
+          });
+          return out;
         },
         _convertTable: (table) => {
           const direct = (tag) => Array.from(table.children || []).filter((c) => c.tagName && c.tagName.toLowerCase() === tag);
@@ -4951,7 +4989,7 @@ ${quoted}
           const result = [];
           rows.forEach((row, i) => {
             const cells = Array.from(row.children || []).filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).map((c) => {
-              return HTMLToMarkdown2._convertChildren(c).replace(/\r\n?|\n/g, " ").replace(/\|/g, "\\|").trim();
+              return DomSpec.foldToSingleLine(HTMLToMarkdown2._convertChildren(c)).replace(/\|/g, "\\|");
             });
             result.push(`| ${cells.join(" | ")} |`);
             if (i === 0) {

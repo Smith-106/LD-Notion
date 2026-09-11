@@ -255,6 +255,10 @@ describe("P4 收敛(c05a-glm): 段落内嵌媒体 / 表格行上限与多 tbody"
 });
 
 describe("wave6 共识(dsf): li 内嵌媒体 + 链接 emoji 文本", () => {
+    // wave15: li 容器改按 childNodes 渲染 —— 该路径需 globalThis.Node(真实运行时具备)
+    const origNode = globalThis.Node;
+    beforeAll(() => { globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1, COMMENT_NODE: 8 }; });
+    afterAll(() => { if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode; });
     it("li 内嵌 video/iframe 有消费点(不再静默丢失)", () => {
         const blocks = [];
         const li = {
@@ -265,7 +269,7 @@ describe("wave6 共识(dsf): li 内嵌媒体 + 链接 emoji 文本", () => {
                 return [];
             },
         };
-        const el = { tagName: "UL", children: [li] };
+        const el = { tagName: "UL", childNodes: [li], children: [li] };
         const origSerialize = DOMToNotion.serializeRichText;
         DOMToNotion.serializeRichText = () => [{ type: "text", text: { content: "文本" } }];
         try {

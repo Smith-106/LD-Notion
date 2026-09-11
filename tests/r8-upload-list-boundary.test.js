@@ -697,7 +697,8 @@ describe("wave14 共识(dsf): ol 非 li 直属内容不被丢弃", () => {
     it("有序列表序号不受非 li 节点影响", () => {
         const md = withNode(() => HTMLToMarkdown._convertNode(
             el("ol", [el("li", [txt("a")]), txt("\n"), el("li", [txt("b")])])));
-        expect(md).toBe("1. a\n\n2. b\n\n");
+        // wave15: 项间纯空白文本节点不再产出空行/行首缩进(紧凑列表) —— 序号契约不变
+        expect(md).toBe("1. a\n2. b\n\n");
     });
 });
 

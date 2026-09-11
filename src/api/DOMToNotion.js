@@ -151,15 +151,15 @@ const DOMToNotion = {
 
     // 引用块 aside.quote
     _cookAsideQuote: (el, blocks, imgMode) => {
-        const blockquote = el.querySelector("blockquote");
-        if (blockquote) {
-            const richText = DOMToNotion.serializeRichText(blockquote);
-            if (richText.length > 0) {
-                blocks.push({ type: "quote", quote: { rich_text: richText } });
-            }
-            // wave8 共识(dsf): 引用内嵌媒体此前静默丢弃 —— 与段落/li 同款补发块
-            DOMToNotion._consumeInlineMedia(blockquote, blocks, imgMode);
+        // wave15(dsf): 仅在存在 <blockquote> 时产出引用 —— <aside class="quote">text</aside>
+        // (无内层 blockquote 的引用容器)整支静默丢弃; 无 blockquote 时以 aside 自身为引用源
+        const source = el.querySelector("blockquote") || el;
+        const richText = DOMToNotion.serializeRichText(source);
+        if (richText.length > 0) {
+            blocks.push({ type: "quote", quote: { rich_text: richText } });
         }
+        // wave8 共识(dsf): 引用内嵌媒体此前静默丢弃 —— 与段落/li 同款补发块
+        DOMToNotion._consumeInlineMedia(source, blocks, imgMode);
     },
 
     // 单一 emoji 判据驻 DomSpec(与块级跳过同源); 保留公开键名供现有测试与 legacy harness
@@ -231,7 +231,17 @@ const DOMToNotion = {
     _cookList: (el, blocks, imgMode) => {
         const tag = el.tagName.toLowerCase();
         const listType = tag === "ul" ? "bulleted_list_item" : "numbered_list_item";
-        Array.from(el.children).forEach((child) => {
+        // wave15(dsf): el.children 只含元素 —— <ul>text<li> 的直属文本静默丢弃(obsidian 侧
+        // ol/ul 分支已在 wave14 按 childNodes 渲染)。改按 childNodes 顺序: 纯空白(缩进排版)
+        // 不产块, 其余文本按段落落块; 元素分支语义不变
+        DomSpec.eachChildOrdered(el, (child) => {
+            if (child.nodeType === Node.TEXT_NODE) {
+                const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+                if (text) {
+                    blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(text) } });
+                }
+                return;
+            }
             if (!child.tagName) return;
             const childTag = child.tagName.toLowerCase();
             // wave12 共识(dsf): 解析器允许 <ul>/<ol> 直接嵌套其他列表(<ul><ul><li>)——
@@ -281,7 +291,8 @@ const DOMToNotion = {
         const directSections = (tagNames) => Array.from(table.children || [])
             .filter((child) => child.tagName && tagNames.includes(child.tagName.toLowerCase()));
         const thead = directSections(["thead"])[0];
-        if (thead) {
+        // wave15(dsf): 空 thead 也置 hasHeader → 正文首行被误标为列标题(数据行降级为表头)
+        if (thead && directRows(thead).length > 0) {
             hasHeader = true;
             directRows(thead).forEach((tr) => {
                 const cells = [];
@@ -679,6 +690,11 @@ const DOMToNotion = {
                 return;
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
+            // wave15(dsf): 本路径(未匹配容器的透明下钻)此前无跳过判据 —— script/style/
+            // noscript 的文本(JS/CSS 源码)直入正文; serializeRichText 的同款守卫在 :535。
+            // 触发面为 GenericExtractor 的 body.innerHTML 兜底源(普遍含 <style>)。
+            // 判据统一驻 DomSpec, 不得在此重声明
+            if (DomSpec.isSkippedNode(node)) return;
             if (DomSpec.isBlockNode(node)) {
                 flushInline();
                 processElement(node);

@@ -84,6 +84,26 @@ describe("出口面: 非渲染标签在每个宿主内均被排除", () => {
         }
     });
 
+    it("cookedToBlocks: 透明下钻不把源码并入正文(GenericExtractor 兜底源)", () => {
+        // 该路径(未匹配容器/list 容器下钻)此前无跳过判据 —— 而 GenericExtractor 的
+        // body.innerHTML 兜底源普遍含 <style>, 且该路径是 cookedToBlocks 的入口
+        const origParser = globalThis.DOMParser;
+        const body = element("body", [
+            skipChild("style", CSS_SOURCE),
+            skipChild("script", JS_SOURCE),
+            element("p", [textNode("正文")]),
+        ]);
+        globalThis.DOMParser = function () { return { parseFromString: () => ({ body }) }; };
+        let blocks;
+        try {
+            blocks = DOMToNotion.cookedToBlocks("<p>marker</p>", "external");
+        } finally {
+            if (origParser === undefined) delete globalThis.DOMParser; else globalThis.DOMParser = origParser;
+        }
+        const text = blocks.map((b) => ((b.paragraph || {}).rich_text || []).map((r) => r.text.content).join("")).join("|");
+        expect(`${text} | ${text.includes(CSS_SOURCE)} | ${text.includes(JS_SOURCE)}`).toBe("正文 | false | false");
+    });
+
     it("单一判据: 跳过表只有 DomSpec.SKIP_TAGS 一处", () => {
         expect([...DomSpec.SKIP_TAGS].sort()).toEqual(["noscript", "script", "style"]);
         expect(DomSpec.isSkippedNode(element("script"))).toBe(true);
@@ -427,6 +447,70 @@ describe("出口面: emoji 判据(单一来源 DomSpec.emojiNameOf)", () => {
         expect(blocks.length).toBe(0);
         const p = element("p", [textNode("hi "), imgSrc(EMOJI)]);
         expect(DOMToNotion.serializeRichText(p).map((r) => r.text.content).join("")).toContain("😊");
+    });
+});
+
+// ===== wave15 补口: 容器分支不静默丢弃 + 缩进排版不入列表行 =====
+// 均属"同构出口各自实现"的余留面: 容器层在非 li 元素 / 无 blockquote / 空分区 / 缩进
+// 空白节点上分支, 此前直接丢弃内容或原样透传缩进 —— 内容丢失与 Markdown 结构退化。
+describe("wave15: 容器分支不静默丢弃 + 缩进排版", () => {
+    it("_cookList: ul/ol 直属文本落段落, 纯空白节点不产块", () => {
+        const blocks = [];
+        DOMToNotion._cookList(
+            element("ul", [textNode("前"), element("li", [textNode("a")]), textNode("\n   "), element("li", [textNode("b")]), textNode("后")]),
+            blocks, "external",
+        );
+        expect(blocks.map((b) => b.type).join(" ")).toBe("paragraph bulleted_list_item bulleted_list_item paragraph");
+        const text = blocks.map((b) => Object.keys(b).filter((k) => k !== "type")
+            .map((k) => (b[k].rich_text || []).map((r) => r.text.content).join("")).join("")).join("|");
+        expect(text).toBe("前|a|b|后");
+    });
+
+    it("_cookAsideQuote: 无内层 blockquote 时以 aside 自身为引用源", () => {
+        const blocks = [];
+        DOMToNotion._cookAsideQuote(
+            element("aside", [element("p", [textNode("引用文本")])], { classList: { contains: (c) => c === "quote" } }),
+            blocks, "external",
+        );
+        expect(blocks.map((b) => b.type).join(" ")).toBe("quote");
+        expect(blocks[0].quote.rich_text.map((r) => r.text.content).join("")).toBe("引用文本");
+        const withBq = [];
+        DOMToNotion._cookAsideQuote(
+            element("aside", [element("blockquote", [textNode("原式")])], {
+                classList: { contains: (c) => c === "quote" },
+                querySelector: (sel) => (sel === "blockquote" ? element("blockquote", [textNode("原式")]) : null),
+            }),
+            withBq, "external",
+        );
+        expect(withBq.map((b) => b.type).join(" ")).toBe("quote");
+    });
+
+    it("_cookTable: 空 thead 不置表头, 有行 thead 仍置表头", () => {
+        const empty = [];
+        DOMToNotion._cookTable(element("table", [element("thead"),
+            element("tbody", [element("tr", [element("td", [textNode("data")])], { closest: () => null })])]), empty, "external");
+        expect(empty.map((b) => `${b.type}:${b.table.has_column_header}:${b.table.children.length}`).join(" ")).toBe("table:false:1");
+        const filled = [];
+        DOMToNotion._cookTable(element("table", [element("thead", [element("tr", [element("th", [textNode("H")])], { closest: () => null })])]), filled, "external");
+        expect(filled.map((b) => `${b.type}:${b.table.has_column_header}`).join(" ")).toBe("table:true");
+    });
+
+    it("obsidian: 缩进排版的 ol/ul 不把项间空白拼进列表行", () => {
+        const prettyOl = element("ol", [textNode("\n    "), element("li", [textNode("a")]), textNode("\n    "), element("li", [textNode("b")]), textNode("\n")]);
+        expect(HTMLToMarkdown._convertNode(prettyOl)).toBe("1. a\n2. b\n\n");
+        const prettyUl = element("ul", [textNode("\n    "), element("li", [textNode("a")]), textNode("\n    "), element("li", [textNode("b")]), textNode("\n")]);
+        expect(HTMLToMarkdown._convertNode(prettyUl)).toBe("- a\n- b\n");
+    });
+
+    it("obsidian: pre 语言名对 SVG className 不崩溃且保留 +/#", () => {
+        const svgCode = { nodeType: 1, tagName: "CODE", className: { toString: () => "[object SVGAnimatedString]" }, getAttribute: () => null };
+        const svgPre = { nodeType: 1, tagName: "PRE", querySelector: () => svgCode, childNodes: [], textContent: "int main(){}" };
+        expect(() => HTMLToMarkdown._convertNode(svgPre)).not.toThrow();
+        const cxx = element("pre", [], {
+            querySelector: () => element("code", [], { getAttribute: attrs({ class: "language-c++" }) }),
+            textContent: "int main(){}",
+        });
+        expect(HTMLToMarkdown._convertNode(cxx)).toContain("```c++");
     });
 });
 
