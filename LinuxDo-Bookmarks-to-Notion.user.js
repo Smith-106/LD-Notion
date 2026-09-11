@@ -1620,7 +1620,7 @@
       var { CONFIG: CONFIG2 } = require_config();
       var { Storage: Storage2 } = require_storage();
       var { sha256HexSync } = require_sha256();
-      var MD_URL_ESCAPE = { "(": "%28", ")": "%29", "<": "%3C", ">": "%3E", " ": "%20" };
+      var MD_URL_ESCAPE = { "(": "%28", ")": "%29", "<": "%3C", ">": "%3E", " ": "%20", "\\": "%5C" };
       var QUOTE_CHARS = "[\\u0022\\u201C\\u201D]";
       var QUOTE_RE = new RegExp(QUOTE_CHARS + "([^" + QUOTE_CHARS.slice(1) + "+)" + QUOTE_CHARS);
       var QUOTE_RE_G = new RegExp(QUOTE_RE.source, "g");
@@ -1811,7 +1811,8 @@
         // 产出的 "[C:\](url)" 里 \] 是转义方括号、不闭合标签 → 整串退化为纯文本、链接目标丢失。
         mdText: (text) => String(text ?? "").replace(/([\\\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
         // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
-        mdUrl: (url) => String(url ?? "").replace(/[\s<>()]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
+        // wave19 共识(w19 qwen): 补 \\(见 MD_URL_ESCAPE)
+        mdUrl: (url) => String(url ?? "").replace(/[\s<>()\\]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
         mdLink: (text, url) => `[${Utils2.mdText(text)}](${Utils2.mdUrl(url)})`,
         // GM_xmlhttpRequest onerror 回调参数为对象（如 { error, type }），直接模板串化
         // 会得到 "[object Object]" 吞掉真实原因；按常见字段优先级提取，
@@ -4184,16 +4185,21 @@
         // 无 childNodes 的宿主(测试替身/最小桩)回退 textContent, 保持既有取文本口径。
         textWithBreaks: (el) => {
           if (!el) return "";
+          let pruned = false;
           const collect = (node) => {
             if (!node) return "";
             if (node.nodeType === 3) return node.nodeValue || "";
             if (node.nodeType !== 1) return "";
-            if (DomSpec.isSkippedNode(node)) return "";
+            if (DomSpec.isSkippedNode(node)) {
+              pruned = true;
+              return "";
+            }
             if (tagOf(node) === "br") return "\n";
             return Array.from(node.childNodes || []).map(collect).join("");
           };
           const walked = collect(el);
           if (walked) return walked;
+          if (pruned) return "";
           return String(el.textContent || "");
         },
         // 有序子节点遍历(含文本节点, 文档序)。单一来源取代各处的
@@ -4602,7 +4608,6 @@
             DOMToNotion2._cookImage(el, blocks, imgMode);
             return;
           }
-          if (imgMode === "skip") return;
           if (emojiName) {
             const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP2, emojiName) ? EMOJI_MAP2[emojiName] : el.getAttribute("alt") || `:${emojiName}:`;
             if (emoji) {
@@ -4610,6 +4615,7 @@
             }
             return;
           }
+          if (imgMode === "skip") return;
           if (!src) return;
           const alt = el.getAttribute("alt") || "";
           blocks.push({
@@ -4739,7 +4745,7 @@
               return;
             }
             if (DomSpec.isSkippedNode(n)) return;
-            if (skipNestedLists && (tag === "ul" || tag === "ol")) {
+            if (skipNestedLists && (tag === "ul" || tag === "ol") && (!n.parentNode || n.parentNode === node)) {
               if (result.length > 0) needBreak = true;
               return;
             }
@@ -4846,7 +4852,11 @@
             DomSpec.eachChildOrdered(el, walkNode);
           };
           let inlineParts = [];
-          const normalizeInline = (value) => value.replace(/\r\n?/g, "\n").replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{2,}/g, "\n");
+          const normalizeInline = (value, annotations) => {
+            const base = value.replace(/\r\n?/g, "\n");
+            if (annotations && annotations.code) return base;
+            return base.replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n");
+          };
           const flushInline = () => {
             var _a, _b;
             if (inlineParts.length === 0) return;
@@ -4860,11 +4870,11 @@
             }
             inlineParts = [];
             if (merged.length === 0) return;
-            merged[0].text.content = normalizeInline(merged[0].text.content).replace(/^\s+/, "");
+            merged[0].text.content = normalizeInline(merged[0].text.content, merged[0].annotations).replace(/^\s+/, "");
             const last = merged[merged.length - 1];
-            last.text.content = normalizeInline(last.text.content).replace(/\s+$/, "");
+            last.text.content = normalizeInline(last.text.content, last.annotations).replace(/\s+$/, "");
             for (let i = 1; i < merged.length - 1; i++) {
-              merged[i].text.content = normalizeInline(merged[i].text.content);
+              merged[i].text.content = normalizeInline(merged[i].text.content, merged[i].annotations);
             }
             const richText = merged.filter((part) => part.text.content);
             if (richText.length > 100) {
@@ -4900,6 +4910,10 @@
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
             if (DomSpec.isSkippedNode(node)) return;
+            if (DomSpec.mediaKind(node) === "img" && DomSpec.emojiNameOf(DomSpec.mediaSrc(node))) {
+              inlineParts.push(...DOMToNotion2.serializeRichText(node));
+              return;
+            }
             if (node.tagName && String(node.tagName).toLowerCase() === "br") {
               inlineParts.push(...DOMToNotion2.splitLongText("\n"));
               return;
@@ -5100,6 +5114,18 @@
             const pushText = (text) => {
               if (text) text.split("\n").forEach((line) => segments.push(line));
             };
+            const pushBlock = (md) => {
+              flushBuf();
+              if (segments.length > 0) segments.push("  ");
+              md.replace(/^\n+|\n+$/g, "").split("\n").forEach((line) => {
+                if (segments.length === 0) {
+                  pushText(line);
+                  return;
+                }
+                preIndented.add(segments.length);
+                segments.push(line ? `  ${line}` : "  ");
+              });
+            };
             const flushBuf = () => {
               pushText(buf.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim());
               buf = "";
@@ -5115,9 +5141,12 @@
                 });
               } else {
                 const md = HTMLToMarkdown2._convertNode(child);
+                const childTag = child.nodeType === Node.ELEMENT_NODE && child.tagName ? String(child.tagName).toLowerCase() : "";
                 if (/^\s*`{3,}[^\n]*\n[\s\S]*\n\s*`{3,}\s*$/.test(md)) {
                   flushBuf();
                   pushText(md.replace(/^\n+|\n+$/g, ""));
+                } else if (DomSpec.TEXT_BOUNDARY_TAGS.has(childTag)) {
+                  pushBlock(md);
                 } else {
                   buf += md;
                 }
@@ -5225,7 +5254,10 @@
             }
             case "a": {
               const link = DomSpec.safeUrl(node.getAttribute("href") || "");
-              if (link) return `[${String(children).replace(/\r\n?|\n/g, " ")}](${HTMLToMarkdown2._mdUrl(link)})`;
+              if (link) {
+                const label = String(children).replace(/\r\n?|\n/g, " ").trim();
+                return label ? `[${label}](${HTMLToMarkdown2._mdUrl(link)})` : `[${HTMLToMarkdown2._mdText(link)}](${HTMLToMarkdown2._mdUrl(link)})`;
+              }
               return children;
             }
             case "img": {

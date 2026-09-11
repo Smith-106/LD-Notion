@@ -1249,6 +1249,115 @@ describe("wave18 w3 共识 + w1/w2 补派: 出口面契约", () => {
     });
 });
 
+describe("wave19 确认轮: 出口面残余边界", () => {
+    const withDom = (body, fn) => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body }) };
+        };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
+    };
+    const EMOJI_SRC = "/images/emoji/twitter/tada.png";
+    const emojiImg = () => element("img", [], { getAttribute: attrs({ class: "emoji", alt: ":tada:", src: EMOJI_SRC }) });
+    const run = (body, imgMode) => withDom(element("body", body), () => DOMToNotion.cookedToBlocks("<div>x</div>", imgMode));
+    const paraText = (blocks) => blocks
+        .map((b) => ((b.paragraph && b.paragraph.rich_text) || []).map((r) => r.text.content).join(""))
+        .join("|");
+
+    it("li 内块级子节点不与父项文本同行拼接(分隔线/引用前缀不被吞)", () => {
+        // 此前 hr 分支产物直接拼进行内缓冲: "a" + "---\\n\\n" → "a---"(分隔线字面化)
+        expect(HTMLToMarkdown._convertNode(element("li", [textNode("a"), element("hr", []), textNode("b")])))
+            .toBe("- a\n  \n  ---\n  b\n");
+        // 引用前缀 "> " 与父项文本粘连 → 引用结构丢失
+        expect(HTMLToMarkdown._convertNode(element("li", [textNode("a"), element("blockquote", [textNode("x")])])))
+            .toBe("- a\n  \n  > x\n");
+        // 表格同理(行首竖线粘连)
+        const table = element("table", [element("tbody", [
+            element("tr", [element("td", [textNode("c")])], { closest: () => null }),
+        ])]);
+        expect(HTMLToMarkdown._convertNode(element("li", [textNode("a"), table])))
+            .toBe("- a\n  \n  | c |\n  | --- |\n");
+        // 项内首个块不重复缩进("- " 已由 li 分支补上)
+        expect(HTMLToMarkdown._convertNode(element("li", [element("p", [textNode("a")]), element("p", [textNode("b")])])))
+            .toBe("- a\n  \n  b\n");
+    });
+
+    it("skipNestedLists 只跳过 li 直属嵌套列表(深层列表不得零产出)", () => {
+        const inner = element("ul", [element("li", [textNode("引用内")])]);
+        const bq = element("blockquote", [inner]);
+        inner.parentNode = bq;
+        const li = element("li", [textNode("要点"), bq]);
+        bq.parentNode = li;
+        const rich = DOMToNotion.serializeRichText(li, { skipNestedLists: true });
+        const text = rich.map((r) => r.text.content).join("");
+        expect(text).toContain("要点");
+        expect(text).toContain("引用内");
+        // 直属嵌套列表仍被跳过(_cookList 负责产出独立列表项, 不得重复)
+        const direct = element("ul", [element("li", [textNode("直接")])]);
+        const li2 = element("li", [textNode("父"), direct]);
+        direct.parentNode = li2;
+        expect(DOMToNotion.serializeRichText(li2, { skipNestedLists: true })
+            .map((r) => r.text.content).join("")).not.toContain("直接");
+    });
+
+    it("emoji 图在透明下钻路径仍为内联文本载体(不拆成独立段落)", () => {
+        const blocks = run([element("div", [textNode("前 "), emojiImg(), textNode(" 后")])]);
+        expect(blocks.length).toBe(1);
+        expect(blocks[0].type).toBe("paragraph");
+        expect(paraText(blocks)).toBe("前 🎉 后");
+    });
+
+    it("imgMode=skip 不影响 emoji 文本块(emoji 非图片资源)", () => {
+        const blocks = run([element("div", [emojiImg()])], "skip");
+        expect(blocks.length).toBe(1);
+        expect(paraText(blocks)).toBe("🎉");
+        // 透明下钻的 emoji 已由内联路径截走, 此处直接锁定块级处理器自身的口径
+        const direct = [];
+        DOMToNotion._cookBlockImage(emojiImg(), direct, "skip");
+        expect(paraText(direct)).toBe("🎉");
+        // 普通图片仍随 skip 静默(用户显式设置)
+        expect(run([element("div", [element("img", [], { getAttribute: attrs({ src: "https://cdn.example.com/a.png" }) })])], "skip")
+            .map((b) => b.type)).not.toContain("image");
+    });
+
+    it("透明下钻段落保留 br 产生的空行, 且不改写 code 片段内空白", () => {
+        const blocks = run([element("div", [textNode("a"), element("br", []), element("br", []), textNode("b")])]);
+        expect(paraText(blocks)).toBe("a\n\nb");
+        const codeBlocks = run([element("div", [element("code", [textNode("a  b")])])]);
+        expect(paraText(codeBlocks)).toBe("a  b");
+    });
+
+    it("textWithBreaks 剪枝后不得回退 textContent(脚本源码不入代码块)", () => {
+        const scriptEl = element("script", [textNode("fetch('/session/'+token)")]);
+        const pre = element("pre", [scriptEl]);
+        // 真实 DOM 下父元素 textContent 聚合子树文本(含被剪枝的 script)
+        pre.textContent = "fetch('/session/'+token)";
+        expect(DomSpec.textWithBreaks(pre)).toBe("");
+        // 无 childNodes 的宿主(最小桩)仍回退 textContent —— 既有取文本口径不回退
+        const bare = element("pre", []);
+        delete bare.childNodes;
+        bare.textContent = "code";
+        expect(DomSpec.textWithBreaks(bare)).toBe("code");
+    });
+
+    it("链接标签被剪空时回退为 URL 文本(不产出空标签)", () => {
+        const a = element("a", [element("script", [textNode("x")])], { getAttribute: attrs({ href: "https://cdn.example.com/p" }) });
+        expect(HTMLToMarkdown._convertNode(a)).toBe("[https://cdn.example.com/p](https://cdn.example.com/p)");
+        // 正常标签不变
+        expect(HTMLToMarkdown._convertNode(element("a", [textNode("看这里")], { getAttribute: attrs({ href: "https://cdn.example.com/p" }) })))
+            .toBe("[看这里](https://cdn.example.com/p)");
+    });
+
+    it("mdUrl 编码反斜杠(目标串不得吞掉闭合括号)", () => {
+        expect(Utils.mdUrl("https://ex.com/dir\\")).toBe("https://ex.com/dir%5C");
+        const a = element("a", [textNode("看这里")], { getAttribute: attrs({ href: "https://ex.com/dir\\" }) });
+        expect(HTMLToMarkdown._convertNode(a)).toBe("[看这里](https://ex.com/dir%5C)");
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;

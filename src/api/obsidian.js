@@ -224,6 +224,23 @@ const HTMLToMarkdown = {
             const pushText = (text) => {
                 if (text) text.split("\n").forEach((line) => segments.push(line));
             };
+            // wave19 共识(w19 dsf + w19 glm): 块级子节点(hr/引用/表格/块容器)此前走 `buf += md`
+            // —— 与父项文本**同行拼接**(<li>a<hr>b</li> → "a---" 分隔线字面化;
+            // <li>a<blockquote>x</blockquote></li> → "a> x" 引用前缀被吞)。与嵌套列表分支同口径:
+            // 先落缓冲, 块内容逐行按内容列缩进, 并在其前补空行(否则 "---" 会与前文构成 setext 标题)
+            const pushBlock = (md) => {
+                flushBuf();
+                if (segments.length > 0) segments.push("  ");
+                md.replace(/^\n+|\n+$/g, "").split("\n").forEach((line) => {
+                    // 项内首个块行不缩进("- " 已由本分支补上, 与 pushText 首段同口径)
+                    if (segments.length === 0) {
+                        pushText(line);
+                        return;
+                    }
+                    preIndented.add(segments.length);
+                    segments.push(line ? `  ${line}` : "  ");
+                });
+            };
             // wave12 共识(glm): 代码围栏不做空白折叠 —— \s+\n → \n 会删掉围栏内的空行
             // 与行尾空白(代码内容被篡改), 围栏自身成段原样推入
             // wave18 共识(w3 复审): 折叠只清行尾空白, 不再把 \n\n 压成 \n ——
@@ -249,9 +266,14 @@ const HTMLToMarkdown = {
                     // wave16 共识(qwen): 仅看行首反引号会把内联 code 误判为围栏 ——
                     // <code>``a``</code> 转出 "``` ``a`` ```"(单行), 被当作代码块拆行;
                     // 真围栏必有换行分隔的闭合行
+                    const childTag = child.nodeType === Node.ELEMENT_NODE && child.tagName
+                        ? String(child.tagName).toLowerCase() : "";
                     if (/^\s*`{3,}[^\n]*\n[\s\S]*\n\s*`{3,}\s*$/.test(md)) {
                         flushBuf();
                         pushText(md.replace(/^\n+|\n+$/g, ""));
+                    } else if (DomSpec.TEXT_BOUNDARY_TAGS.has(childTag)) {
+                        // wave19 共识(w19 dsf + w19 glm): 块级子节点改走 pushBlock(见上)
+                        pushBlock(md);
                     } else {
                         buf += md;
                     }
@@ -381,7 +403,15 @@ const HTMLToMarkdown = {
                 // 标签内文本的转义由 TEXT_NODE 分支在 _labelDepth 内完成
                 // 标签是单行上下文 —— <br>/文本内换行会拆断链接语法(wave12);
                 // 已生成的内联 Markdown 结构不受影响(只折叠换行, 不再整体转义)
-                if (link) return `[${String(children).replace(/\r\n?|\n/g, " ")}](${HTMLToMarkdown._mdUrl(link)})`;
+                if (link) {
+                    // wave19 共识(w19 qwen): 标签被剪空时(子树全为 script/style/noscript)
+                    // 产出 "[](url)" —— CommonMark 中空标签不构成链接(渲染为字面垃圾且不可点),
+                    // 与 Notion 出口的回退(linkText = link)不对称; 改为以 URL 自身作标签
+                    const label = String(children).replace(/\r\n?|\n/g, " ").trim();
+                    return label
+                        ? `[${label}](${HTMLToMarkdown._mdUrl(link)})`
+                        : `[${HTMLToMarkdown._mdText(link)}](${HTMLToMarkdown._mdUrl(link)})`;
+                }
                 return children;
             }
             case "img": {

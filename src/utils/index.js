@@ -5,7 +5,9 @@ const { Storage } = require("../storage");
 const { sha256HexSync } = require("./sha256");
 
 // Markdown 链接目标需转义字符（百分号编码，不删除字符）
-const MD_URL_ESCAPE = { "(": "%28", ")": "%29", "<": "%3C", ">": "%3E", " ": "%20" };
+// wave19 共识(w19 qwen): 反斜杠必须一并编码 —— 目标串以 "\" 结尾时, 其后的 ")" 在 CommonMark
+// 中被视作转义右括号(不闭合链接), 整个链接退化为字面文本(wave18 已在标签面修掉同类逃逸向量)
+const MD_URL_ESCAPE = { "(": "%28", ")": "%29", "<": "%3C", ">": "%3E", " ": "%20", "\\": "%5C" };
 
 // ===========================================
 // 工具函数
@@ -248,7 +250,8 @@ const Utils = {
     // 产出的 "[C:\](url)" 里 \] 是转义方括号、不闭合标签 → 整串退化为纯文本、链接目标丢失。
     mdText: (text) => String(text ?? "").replace(/([\\\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
     // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
-    mdUrl: (url) => String(url ?? "").replace(/[\s<>()]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
+    // wave19 共识(w19 qwen): 补 \\(见 MD_URL_ESCAPE)
+    mdUrl: (url) => String(url ?? "").replace(/[\s<>()\\]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
     mdLink: (text, url) => `[${Utils.mdText(text)}](${Utils.mdUrl(url)})`,
 
     // GM_xmlhttpRequest onerror 回调参数为对象（如 { error, type }），直接模板串化

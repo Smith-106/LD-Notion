@@ -518,7 +518,9 @@ const DOMToNotion = {
             DOMToNotion._cookImage(el, blocks, imgMode);
             return;
         }
-        if (imgMode === "skip") return;
+        // wave19 共识(w19 glm): emoji 以**文本**承载(不下载/不上传) —— skip 语义只针对图片资源,
+        // 原顺序(imgMode 判先于 emoji 分支)令块级路径在 imgMode=skip 时静默丢失 emoji,
+        // 而同一 img 走 <p>/serializeRichText 的内联路径不受 imgMode 影响(两路径口径不一致)
         if (emojiName) {
             const emoji = Object.prototype.hasOwnProperty.call(EMOJI_MAP, emojiName)
                 ? EMOJI_MAP[emojiName]
@@ -528,6 +530,7 @@ const DOMToNotion = {
             }
             return;
         }
+        if (imgMode === "skip") return;
         // 无任何候选地址时无可报告(不造占位噪声); 有地址但被判拒时保留 alt 或可见标记
         if (!src) return;
         const alt = el.getAttribute("alt") || "";
@@ -712,7 +715,11 @@ const DOMToNotion = {
             // aside 与 p/div 同为文本边界(顶层的两者由 _cookBlockquote/_cookAsideQuote 产出
             // 独立块, 此处只覆盖内层/嵌入场景), 否则 "外内" 直接拼接
             // wave17 共识(glm/qwen): 嵌套列表子树已由 _cookList 分派, 此处只补文本边界不产出内容
-            if (skipNestedLists && (tag === "ul" || tag === "ol")) {
+            if (skipNestedLists && (tag === "ul" || tag === "ol")
+                // wave19 共识(w19 dsf): 跳过范围须与 _cookList 的分派范围**一致** —— 分派只认 li
+                // 的直属 ul/ol, 而这里原为深度不限: 包裹在 blockquote/div 内的嵌套列表既被跳过、
+                // 又不被分派 ⇒ 既不在 rich_text 也不产出块(内容静默丢失)
+                && (!n.parentNode || n.parentNode === node)) {
                 if (result.length > 0) needBreak = true;
                 return;
             }
@@ -882,11 +889,18 @@ const DOMToNotion = {
         // 文本节点归一空白, 内联元素委托 serializeRichText(与块级路径同源),
         // 块级元素到来时统一 flush 为一个段落。
         let inlineParts = [];
-        const normalizeInline = (value) => value
-            .replace(/\r\n?/g, "\n")
-            .replace(/[ \t]+/g, " ")
-            .replace(/ *\n */g, "\n")
-            .replace(/\n{2,}/g, "\n");
+        // wave19 共识(w19 dsf + w19 glm): 归一化不得吞掉 br 产生的空行(<div>a<br><br>b</div>
+        // 经本路径得 "a\nb", 而同一输入经 <p>/Markdown 出口保留空行 ⇒ 同一 HTML 两种结构),
+        // 也不得改写已生成片段内部的空白(code 注解的片段是多空格语义)。
+        // 折叠目标改为「最多一个空行」: \n{3,} → \n\n(源缩进排版仍被收敛)
+        const normalizeInline = (value, annotations) => {
+            const base = value.replace(/\r\n?/g, "\n");
+            if (annotations && annotations.code) return base;
+            return base
+                .replace(/[ \t]+/g, " ")
+                .replace(/ *\n */g, "\n")
+                .replace(/\n{3,}/g, "\n\n");
+        };
         const flushInline = () => {
             if (inlineParts.length === 0) return;
             const merged = [];
@@ -904,11 +918,11 @@ const DOMToNotion = {
             }
             inlineParts = [];
             if (merged.length === 0) return;
-            merged[0].text.content = normalizeInline(merged[0].text.content).replace(/^\s+/, "");
+            merged[0].text.content = normalizeInline(merged[0].text.content, merged[0].annotations).replace(/^\s+/, "");
             const last = merged[merged.length - 1];
-            last.text.content = normalizeInline(last.text.content).replace(/\s+$/, "");
+            last.text.content = normalizeInline(last.text.content, last.annotations).replace(/\s+$/, "");
             for (let i = 1; i < merged.length - 1; i++) {
-                merged[i].text.content = normalizeInline(merged[i].text.content);
+                merged[i].text.content = normalizeInline(merged[i].text.content, merged[i].annotations);
             }
             const richText = merged.filter((part) => part.text.content);
             // wave18 共识(w2 glm): 多内联元素可累计出超过 Notion 上限的片段数 ——
@@ -948,6 +962,13 @@ const DOMToNotion = {
             // 触发面为 GenericExtractor 的 body.innerHTML 兜底源(普遍含 <style>)。
             // 判据统一驻 DomSpec, 不得在此重声明
             if (DomSpec.isSkippedNode(node)) return;
+            // wave19 共识(w19 glm): emoji 图是**文本载体**(DomSpec.emojiNameOf 命中), 块级 img
+            // 分支会把 "前 🎉 后" 拆成三个块, 而同一 img 在 <p> 内是单段内联(与 Markdown 出口一致)
+            // —— 故 emoji 图沿内联路径并入当前缓冲
+            if (DomSpec.mediaKind(node) === "img" && DomSpec.emojiNameOf(DomSpec.mediaSrc(node))) {
+                inlineParts.push(...DOMToNotion.serializeRichText(node));
+                return;
+            }
             // wave17 共识(dsf): 本路径不识别 <br> → 两段文本被直接拼接("line1line2");
             // wave18: 统一入内联片段缓冲(仍为硬换行)
             if (node.tagName && String(node.tagName).toLowerCase() === "br") {

@@ -190,6 +190,7 @@ const DomSpec = {
     // 无 childNodes 的宿主(测试替身/最小桩)回退 textContent, 保持既有取文本口径。
     textWithBreaks: (el) => {
         if (!el) return "";
+        let pruned = false;
         const collect = (node) => {
             if (!node) return "";
             if (node.nodeType === 3) return node.nodeValue || "";
@@ -197,12 +198,16 @@ const DomSpec = {
             // wave18 共识(w1 glm): SKIP_TAGS 子树剪枝 —— <pre><code>x</code><script>…</script></pre>
             // 的 JS/CSS 源码原样并入代码块; 其余文本面(serializeRichText 通用递归、obsidian
             // _convertChildren)均有同款守卫, 唯此原语漏判(与 wave17 已修的 eachMedia 剪枝同族)
-            if (DomSpec.isSkippedNode(node)) return "";
+            if (DomSpec.isSkippedNode(node)) { pruned = true; return ""; }
             if (tagOf(node) === "br") return "\n";
             return Array.from(node.childNodes || []).map(collect).join("");
         };
         const walked = collect(el);
+        // wave19 共识(w19 qwen): 回退分支的本意是「宿主无可遍历子节点(测试替身/最小桩)时保持
+        // 既有取文本口径」, 但它把「剪枝后确实为空」也当成该情形 —— <pre><script>…</script></pre>
+        // 的脚本源码又经 el.textContent 泄入代码块。故仅当**未发生任何剪枝**时才回退
         if (walked) return walked;
+        if (pruned) return "";
         return String(el.textContent || "");
     },
 
