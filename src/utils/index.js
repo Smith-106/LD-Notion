@@ -141,8 +141,16 @@ const Utils = {
     },
 
     truncateText: (text, maxLen = 100) => {
-        if (!text || text.length <= maxLen) return text;
-        return text.substring(0, maxLen) + "...";
+        // wave18 共识(dsf): 直接 text.length/substring —— 非字符串 truthy 输入(number/对象,
+        // 如导入数据/报告条目里的 title 字段)在此抛 TypeError, 且调用点多在 UI 拼接与错误
+        // 路径上, 二次抛错会掩盖真实原因 → 统一先字符串化(此前 !text 短路还会原样回传 0/false)。
+        const value = String(text ?? "");
+        if (value.length <= maxLen) return value;
+        // wave18 共识(qwen): 按 UTF-16 码元截断会在代理对中间断开(孤立高代理项 → 替换字符),
+        // 与 BlockConverter.splitLongText 的代理对保护同口径。
+        const last = value.charCodeAt(maxLen - 1);
+        const cut = (last >= 0xd800 && last <= 0xdbff) ? maxLen - 1 : maxLen;
+        return value.substring(0, cut) + "...";
     },
 
     base64DecodeUnicode: (input) => {
@@ -236,7 +244,9 @@ const Utils = {
     // wave17 共识(glm): 原实现对 [ ] 直接**删除** —— 链接标签是子树 Markdown(可含内嵌图片
     // ![alt](url)), 删除内层方括号会把 "[![alt](u)](link)" 改写成损坏的 "[!alt(u)](link)"。
     // 改为反斜杠转义: 注入防护等价(]( 不再能逃逸链接语法), 且内容无损。
-    mdText: (text) => String(text ?? "").replace(/([\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
+    // wave18 共识(dsf): 转义字符自身也必须转义 —— 标签以单个 "\" 结尾时(C:\ 一类标题),
+    // 产出的 "[C:\](url)" 里 \] 是转义方括号、不闭合标签 → 整串退化为纯文本、链接目标丢失。
+    mdText: (text) => String(text ?? "").replace(/([\\\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
     // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
     mdUrl: (url) => String(url ?? "").replace(/[\s<>()]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
     mdLink: (text, url) => `[${Utils.mdText(text)}](${Utils.mdUrl(url)})`,
@@ -275,8 +285,10 @@ const Utils = {
             for (const p of trackingParams) parsed.searchParams.delete(p);
             let normalized = parsed.toString();
             // 去尾部斜杠(根路径 https://a.com/ → https://a.com)
-            // P4 收敛(c17) 裁决: 查询串内的尾斜杠已被 searchParams 序列化编码为 %2F,
-            // 本正则不会触及; 改按 pathname 去斜杠反而会改变既有去重键(存量迁移失配) → 保持原实现
+            // wave18 复核(驳回 qwen 提案): “查询串内的尾斜杠未被编码、会被本正则剥掉”的前提不成立 ——
+            // 上面的 searchParams.delete() 一旦执行即触发 query 重新序列化(application/x-www-form-urlencoded),
+            // 查询值中的 "/" 会先变成 %2F(实测: ?q=foo/ → 键 https://linux.do/search?q=foo%2F),
+            // 故本正则不可能触及查询值内的斜杠, 不存在“不同页面合并为同一去重键”。保持原实现。
             normalized = normalized.replace(/\/+$/, "");
             return normalized;
         } catch {

@@ -988,13 +988,64 @@ describe("wave17 共识: 出口面契约", () => {
     });
 });
 
+describe("wave18 共识: 出口面契约(第二轮复审零新缺陷)", () => {
+    const PUBLIC = "https://cdn.example.com/a.png";
+    const holder = (map, tag = "img") => element(tag, [], { getAttribute: attrs(map) });
+
+    it("mediaSrc: 占位候选不返回(不造「已拒」噪声块); 回退链覆盖响应式/懒加载属性", () => {
+        // 懒加载骨架: 无真实候选 → 空串(消费侧静默, 不再把"未加载完成"误报为"地址被安全策略拒绝")
+        expect(DomSpec.mediaSrc(holder({ src: "data:image/gif;base64,R0lGOD", "data-src": "data:image/gif;base64,R0lGOD" }))).toBe("");
+        expect(DomSpec.mediaSrc(holder({ src: "about:blank", "data-src": "about:blank" }, "iframe"))).toBe("");
+        // 无 src 的响应式/懒加载元素回退
+        expect(DomSpec.mediaSrc(holder({ "data-lazy-src": PUBLIC }))).toBe(PUBLIC);
+        expect(DomSpec.mediaSrc(holder({ "data-original": PUBLIC }))).toBe(PUBLIC);
+        expect(DomSpec.mediaSrc(holder({ srcset: `${PUBLIC} 1x, https://cdn.example.com/b.png 2x` }))).toBe(PUBLIC);
+        expect(DomSpec.mediaSrc(holder({ srcset: "data:image/gif;base64,AA 1x" }))).toBe("");
+        const source = { getAttribute: attrs({ srcset: `${PUBLIC} 1x` }) };
+        const video = element("video", [], { getAttribute: () => null, querySelector: (sel) => (sel === "source" ? source : null) });
+        expect(DomSpec.mediaSrc(video)).toBe(PUBLIC);
+    });
+
+    it("li 为块级文本边界: 容器块内同层列表项不再粘连", () => {
+        expect(DomSpec.TEXT_BOUNDARY_TAGS.has("li")).toBe(true);
+        const quote = element("blockquote", [element("ul", [element("li", [textNode("第一条")]), element("li", [textNode("第二条")])])]);
+        const joined = DOMToNotion.serializeRichText(quote).map((r) => r.text.content).join("");
+        expect(joined).toContain("第一条\n第二条");
+        expect(joined).not.toContain("第一条第二条");
+    });
+
+    it("mdText/mdLink: 转义字符自身也被转义(标签以 \\ 结尾不再吞掉链接闭合符)", () => {
+        expect(Utils.mdText("C:\\")).toBe("C:\\\\");
+        expect(Utils.mdLink("C:\\", "https://a.com/1")).toBe("[C:\\\\](https://a.com/1)");
+        expect(Utils.mdText("[![alt](u)](l)")).toBe("\\[!\\[alt\\](u)\\](l)");
+    });
+
+    it("truncateText: 非字符串输入不抛错, 且不切断代理对", () => {
+        expect(Utils.truncateText(42)).toBe("42");
+        expect(Utils.truncateText(null)).toBe("");
+        expect(Utils.truncateText("短")).toBe("短");
+        expect(Utils.truncateText("a".repeat(99) + "😀" + "bbb", 100)).toBe("a".repeat(99) + "...");
+    });
+
+    it("normalizeDedupUrl: 查询值末尾的 / 先被编码为 %2F(不同页面不会合并为同一去重键)", () => {
+        // wave18 复核(qwen 提案被实测驳回): searchParams.delete() 触发 query 重新序列化,
+        // 查询值内的 "/" 变 %2F, 尾斜杠正则只作用于 path → 不同页面的键保持不同
+        expect(Utils.normalizeDedupUrl("https://linux.do/search?q=foo/")).toBe("https://linux.do/search?q=foo%2F");
+        expect(Utils.normalizeDedupUrl("https://linux.do/search?q=foo/")).not.toBe(Utils.normalizeDedupUrl("https://linux.do/search?q=foo"));
+        // 既有口径不变: 根路径与路径段尾斜杠仍被剥离, 跟踪参数仍被剔除
+        expect(Utils.normalizeDedupUrl("https://a.com/")).toBe("https://a.com");
+        expect(Utils.normalizeDedupUrl("https://a.com/a/")).toBe("https://a.com/a");
+        expect(Utils.normalizeDedupUrl("https://a.com/a/?utm_source=x")).toBe("https://a.com/a");
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;
 //   2) 在对应 describe 中补一组断言(合法原样 / 危险输入 / 空)。
 export const SURFACE_INVENTORY = [
     { surface: "非渲染标签(script/style/noscript)", primitive: "DomSpec.SKIP_TAGS / isSkippedNode", hosts: 6, exporters: 2 },
-    { surface: "媒体地址回退(src/data-src/<source src>)", primitive: "DomSpec.mediaSrc", hosts: 4, exporters: 2 },
+    { surface: "媒体地址回退(src/data-src/data-lazy-src/data-original/srcset/<source>)", primitive: "DomSpec.mediaSrc", hosts: 4, exporters: 2, note: "wave18: 候选统一走「非 http(s) scheme 即占位」判据; 全无候选时返回空(消费侧静默, 不造'已拒'噪声块)" },
     { surface: "地址判据(相对补齐 / scheme 白名单 / 公网校验)", primitive: "DomSpec.safeUrl / mediaUrl", hosts: 5, exporters: 2 },
     { surface: "媒体采集(自身+后代)", primitive: "DomSpec.eachMedia / mediaKind", hosts: 7, exporters: 2 },
     { surface: "单行上下文折叠", primitive: "DomSpec.foldToSingleLine / collapseOneLine", hosts: 11, exporters: 2, note: "记录在案的差异: Markdown 侧折叠 CR/LF, Notion 侧 rich_text 保留 \\n" },

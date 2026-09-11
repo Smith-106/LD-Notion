@@ -1721,8 +1721,11 @@
           return new Date(dateStr).toLocaleString("zh-CN");
         },
         truncateText: (text, maxLen = 100) => {
-          if (!text || text.length <= maxLen) return text;
-          return text.substring(0, maxLen) + "...";
+          const value = String(text ?? "");
+          if (value.length <= maxLen) return value;
+          const last = value.charCodeAt(maxLen - 1);
+          const cut = last >= 55296 && last <= 56319 ? maxLen - 1 : maxLen;
+          return value.substring(0, cut) + "...";
         },
         base64DecodeUnicode: (input) => {
           if (!input) return "";
@@ -1804,7 +1807,9 @@
         // wave17 共识(glm): 原实现对 [ ] 直接**删除** —— 链接标签是子树 Markdown(可含内嵌图片
         // ![alt](url)), 删除内层方括号会把 "[![alt](u)](link)" 改写成损坏的 "[!alt(u)](link)"。
         // 改为反斜杠转义: 注入防护等价(]( 不再能逃逸链接语法), 且内容无损。
-        mdText: (text) => String(text ?? "").replace(/([\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
+        // wave18 共识(dsf): 转义字符自身也必须转义 —— 标签以单个 "\" 结尾时(C:\ 一类标题),
+        // 产出的 "[C:\](url)" 里 \] 是转义方括号、不闭合标签 → 整串退化为纯文本、链接目标丢失。
+        mdText: (text) => String(text ?? "").replace(/([\\\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
         // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
         mdUrl: (url) => String(url ?? "").replace(/[\s<>()]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
         mdLink: (text, url) => `[${Utils2.mdText(text)}](${Utils2.mdUrl(url)})`,
@@ -4056,6 +4061,7 @@
         "h6",
         "ul",
         "ol",
+        "li",
         "table",
         "hr"
       ]);
@@ -4109,13 +4115,27 @@
         // 互不覆盖 —— 懒加载图在 Obsidian 侧被丢、<source> 型视频在 Notion 侧被丢。
         mediaSrc: (el) => {
           if (!el || typeof el.getAttribute !== "function") return "";
-          const own = el.getAttribute("src");
-          const ownScheme = (String(own == null ? "" : own).match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
-          if (own && !(ownScheme && !/^https?$/i.test(ownScheme))) return own;
-          const lazy = el.getAttribute("data-src");
-          if (lazy) return lazy;
+          const attrOf = (node, name) => node && typeof node.getAttribute === "function" ? node.getAttribute(name) : null;
+          const firstSrcset = (value) => String(value || "").split(",")[0].trim().split(/\s+/)[0] || "";
+          const candidates = [
+            attrOf(el, "src"),
+            attrOf(el, "data-src"),
+            attrOf(el, "data-lazy-src"),
+            attrOf(el, "data-original"),
+            firstSrcset(attrOf(el, "srcset"))
+          ];
           const source = typeof el.querySelector === "function" ? el.querySelector("source") : null;
-          return source && typeof source.getAttribute === "function" && source.getAttribute("src") || "";
+          if (source) {
+            candidates.push(attrOf(source, "src"), firstSrcset(attrOf(source, "srcset")));
+          }
+          for (const candidate of candidates) {
+            const value = String(candidate == null ? "" : candidate).trim();
+            if (!value) continue;
+            const scheme = (value.match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
+            if (scheme && !/^https?$/i.test(scheme)) continue;
+            return value;
+          }
+          return "";
         },
         // 地址出口面唯一判据(媒体 src 与文件/链接 href 共用): 仅 http(s) 与相对形式可入,
         // 其余 scheme(javascript:/data:/vbscript:/file:/mailto: 等)一律拒绝 —— 关键在**先判

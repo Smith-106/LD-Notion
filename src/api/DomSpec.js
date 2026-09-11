@@ -25,9 +25,12 @@ const SKIP_TAGS = new Set(["script", "style", "noscript"]);
 // 拼接(<li>a<ul><li>b</li></ul></li> 的 rich_text 为 "ab"; 嵌套引用为 "外内")。
 // 与 BLOCK_TAGS 的差别: 不含 img/video/audio/iframe —— 它们有独立块产出与内联 emoji 语义,
 // 纳入边界会把内联 emoji 拆成独立行(回归风险)。
+// wave18 共识(dsf): li 亦为文本边界 —— 容器块(h1-h6/引用/表格单元格)内的同层列表项原本走
+// 透明下钻拼进同一段落缓冲(<blockquote><ul><li>a</li><li>b</li></ul></blockquote> → "ab"),
+// 项边界与词边界同时丢失。
 const TEXT_BOUNDARY_TAGS = new Set([
     "div", "p", "pre", "blockquote", "aside", "h1", "h2", "h3", "h4", "h5", "h6",
-    "ul", "ol", "table", "hr",
+    "ul", "ol", "li", "table", "hr",
 ]);
 
 const tagOf = (el) => (el && el.tagName ? String(el.tagName).toLowerCase() : "");
@@ -102,13 +105,29 @@ const DomSpec = {
         // data:/about:, 而 blob:/javascript:/file: 等非 http(s) scheme 同样经 safeUrl 判空后整体
         // 丢弃(真实地址就在同一元素的 data-src 上)。改为「非 http(s) scheme 一律视为占位」。
         // 无 scheme(相对/协议相对/裸相对)仍按真实地址返回, 交由 safeUrl 补齐 + 公网校验。
-        const own = el.getAttribute("src");
-        const ownScheme = (String(own == null ? "" : own).match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
-        if (own && !(ownScheme && !/^https?$/i.test(ownScheme))) return own;
-        const lazy = el.getAttribute("data-src");
-        if (lazy) return lazy;
+        // wave18 共识(qwen): ① 占位判据此前只施加在 src 上 —— 懒加载骨架
+        // (<img src="data:…" data-src="data:…">)会返回占位串, 消费侧据此把"未加载完成"
+        // 误报成"地址被安全策略拒绝"(自造噪声块); ② 回退链缺响应式属性 —— 无 src 的
+        // <img srcset=…>/<img data-lazy-src=…>/<img data-original=…> 整体零产出。
+        // 统一为: 按优先级取第一个「非占位」候选, 全无候选时返回 ""(消费侧据此静默)。
+        const attrOf = (node, name) => (node && typeof node.getAttribute === "function" ? node.getAttribute(name) : null);
+        const firstSrcset = (value) => String(value || "").split(",")[0].trim().split(/\s+/)[0] || "";
+        const candidates = [
+            attrOf(el, "src"), attrOf(el, "data-src"), attrOf(el, "data-lazy-src"),
+            attrOf(el, "data-original"), firstSrcset(attrOf(el, "srcset")),
+        ];
         const source = typeof el.querySelector === "function" ? el.querySelector("source") : null;
-        return (source && typeof source.getAttribute === "function" && source.getAttribute("src")) || "";
+        if (source) {
+            candidates.push(attrOf(source, "src"), firstSrcset(attrOf(source, "srcset")));
+        }
+        for (const candidate of candidates) {
+            const value = String(candidate == null ? "" : candidate).trim();
+            if (!value) continue;
+            const scheme = (value.match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
+            if (scheme && !/^https?$/i.test(scheme)) continue;
+            return value;
+        }
+        return "";
     },
 
     // 地址出口面唯一判据(媒体 src 与文件/链接 href 共用): 仅 http(s) 与相对形式可入,
