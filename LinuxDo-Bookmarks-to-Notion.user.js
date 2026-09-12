@@ -1829,7 +1829,7 @@
         // 注: "*" 与 "```"/"~~~" 已由上一行的字符转义覆盖(行首 "*" 已成 "\*"), 故此处只处理
         // 尚未被覆盖的 > # = + 与 "- ", 以及有序列表的 "数字."/"数字)"(数字前的反斜杠无效,
         // 须转义分隔符)。未覆盖: 块首行以 ≥4 空格缩进(段落中间不受影响 —— 缩进代码块不能中断段落)。
-        mdLiteral: (text) => String(text ?? "").replace(/([\\`*~_\[\]<&|])/g, "\\$1").replace(/^([ \t]*)([>#=]|-{2,}(?=[ \t]*$)|[-+*](?=\s|$)|(\d+)([.)])(?=\s|$))/gm, (m, indent, marker, num, delim) => num ? `${indent}${num}\\${delim}` : `${indent}\\${marker}`),
+        mdLiteral: (text) => String(text ?? "").replace(/([\\`*~_\[\]<&|])/g, "\\$1").replace(/^([ \t]*)([>#=]|-{2,}(?=[ \t]*$)|[-+*](?=\s|$)|-(?=[- \t]*$)(?=(?:[- \t]*-){2})|(\d+)([.)])(?=\s|$))/gm, (m, indent, marker, num, delim) => num ? `${indent}${num}\\${delim}` : `${indent}\\${marker}`),
         // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
         // wave19 共识(w19 qwen): 补 \\(见 MD_URL_ESCAPE)
         mdUrl: (url) => String(url ?? "").replace(/[\s<>()\\]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
@@ -4962,6 +4962,9 @@
                 cur.text.content = cur.text.content.replace(/^[ \t]+/, "");
               }
             }
+            const kept = richText.filter((part) => part.text.content);
+            richText.length = 0;
+            richText.push(...kept);
             if (richText.length > 100) {
               const dropped = richText.length - 99;
               console.warn(`[LD-Notion] \u6BB5\u843D\u5BCC\u6587\u672C\u7247\u6BB5 ${richText.length} \u8D85\u4E0A\u9650 100, \u5DF2\u622A\u65AD ${dropped} \u6BB5`);

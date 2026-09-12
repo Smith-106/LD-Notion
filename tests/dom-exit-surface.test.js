@@ -1865,6 +1865,35 @@ describe("wave27 确认轮: 附件锚分派与跨片段空白折叠", () => {
     });
 });
 
+describe("wave28 确认轮: 连字符混合间距分隔线与边界折叠后的空片段", () => {
+    it("≥3 个连字符夹杂空白的整行字面量被行首判据转义(thematic break 不再生成)", () => {
+        const BS = String.fromCharCode(92);
+        for (const src of ["-- --", "-- -", "--  --", "--\t--", "   -- --", "Foo\n-- -"]) {
+            const out = Utils.mdLiteral(src);
+            expect(out).not.toBe(src);
+            expect(out.split(BS).join("")).toBe(src);
+            const lastLine = out.split("\n").pop();
+            expect(lastLine.trimStart().charAt(0)).toBe(BS);
+        }
+        expect(Utils.mdLiteral("- -").split(BS).join("")).toBe("- -");
+    });
+
+    it("边界折叠把中间片段清空后不再下发空 content(Notion 400)", () => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body: element("body", [element("div", [
+                element("b", [textNode("x ")]), textNode(" "), element("i", [textNode("y")]),
+            ])]) }) };
+        };
+        let blocks;
+        try { blocks = DOMToNotion.cookedToBlocks("<div>x</div>", "external"); }
+        finally { if (orig === undefined) delete globalThis.DOMParser; else globalThis.DOMParser = orig; }
+        const rt = blocks[0].paragraph.rich_text;
+        expect(rt.every((r) => r.text.content.length > 0)).toBe(true);
+        expect(rt.filter((r) => r.annotations && r.annotations.bold).length).toBe(1);
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;

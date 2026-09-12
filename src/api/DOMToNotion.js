@@ -1025,6 +1025,11 @@ const DOMToNotion = {
                     cur.text.content = cur.text.content.replace(/^[ \t]+/, "");
                 }
             }
+            // wave28 共识(w28 dsf): 折叠会把纯空白中间片段清空(<div><b>x </b> <i>y</i></div> 的中段
+            // " " → ""), 必须**在折叠之后**再过滤 —— 否则空 content 片段被下发给 Notion(400)
+            const kept = richText.filter((part) => part.text.content);
+            richText.length = 0;
+            richText.push(...kept);
             // wave18 共识(w2 glm): 多内联元素可累计出超过 Notion 上限的片段数 ——
             // 与 serializeRichText/splitLongText 同口径保留可见截断标记
             if (richText.length > 100) {
