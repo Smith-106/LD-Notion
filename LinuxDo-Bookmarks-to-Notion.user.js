@@ -1829,7 +1829,7 @@
         // 注: "*" 与 "```"/"~~~" 已由上一行的字符转义覆盖(行首 "*" 已成 "\*"), 故此处只处理
         // 尚未被覆盖的 > # = + 与 "- ", 以及有序列表的 "数字."/"数字)"(数字前的反斜杠无效,
         // 须转义分隔符)。未覆盖: 块首行以 ≥4 空格缩进(段落中间不受影响 —— 缩进代码块不能中断段落)。
-        mdLiteral: (text) => String(text ?? "").replace(/([\\`*~\[\]<])/g, "\\$1").replace(/^([ \t]*)([>#=]|[-+*](?=\s)|(\d+)([.)])(?=\s))/gm, (m, indent, marker, num, delim) => num ? `${indent}${num}\\${delim}` : `${indent}\\${marker}`),
+        mdLiteral: (text) => String(text ?? "").replace(/([\\`*~_\[\]<])/g, "\\$1").replace(/^([ \t]*)([>#=]|-{2,}(?=[ \t]*$)|[-+*](?=\s)|(\d+)([.)])(?=\s))/gm, (m, indent, marker, num, delim) => num ? `${indent}${num}\\${delim}` : `${indent}\\${marker}`),
         // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
         // wave19 共识(w19 qwen): 补 \\(见 MD_URL_ESCAPE)
         mdUrl: (url) => String(url ?? "").replace(/[\s<>()\\]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),

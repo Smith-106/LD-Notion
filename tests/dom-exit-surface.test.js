@@ -1720,6 +1720,39 @@ describe("wave24 确认轮: 图片容器内的分派口径(.meta/文档序/片�
     });
 });
 
+describe("wave25 确认轮: 行首整行连字符与字面下划线", () => {
+    it("行首整行 `-{2,}` 被转义(setext 下划线/主题分隔线不再吞行)", () => {
+        expect(Utils.mdLiteral("---")).toBe("\\---");
+        expect(Utils.mdLiteral("abc\n---")).toBe("abc\n\\---");
+        expect(Utils.mdLiteral("abc\n--- ")).toBe("abc\n\\--- ");
+        // 词内/行内连字符不受影响
+        expect(Utils.mdLiteral("a-b")).toBe("a-b");
+        expect(Utils.mdLiteral("a--b")).toBe("a--b");
+    });
+
+    it("行首整行 `_{2,}` 与字面下划线被转义(`___` 不再吞行、`_x_` 不再变斜体)", () => {
+        expect(Utils.mdLiteral("___")).toBe("\\_\\_\\_");
+        expect(Utils.mdLiteral("_x_")).toBe("\\_x\\_");
+        expect(Utils.mdLiteral("snake_case")).toBe("snake\\_case");
+    });
+
+    it("段落内 <br> 分隔的整行连字符经导出器同样被转义", () => {
+        expect(HTMLToMarkdown._convertNode(element("p", [textNode("abc"), element("br"), textNode("---")])))
+            .toBe("abc\n\\---\n\n");
+    });
+
+    it("表格单元格内竖线仍按 GFM 转义(含行内 code 跨度)", () => {
+        const cell = (tag, kids) => element(tag, kids, { classList: { contains: () => false } });
+        const row = element("tr", [
+            cell("td", [textNode("a|b")]),
+            cell("td", [element("code", [textNode("c|d")])]),
+        ]);
+        const table = element("table", [element("tbody", [row])]);
+        const md = HTMLToMarkdown._convertNode(table);
+        expect(md).toContain("| a\\|b | `c\\|d` |");
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;
