@@ -1813,7 +1813,7 @@
         // 改为反斜杠转义: 注入防护等价(]( 不再能逃逸链接语法), 且内容无损。
         // wave18 共识(dsf): 转义字符自身也必须转义 —— 标签以单个 "\" 结尾时(C:\ 一类标题),
         // 产出的 "[C:\](url)" 里 \] 是转义方括号、不闭合标签 → 整串退化为纯文本、链接目标丢失。
-        mdText: (text) => String(text ?? "").replace(/([\\\[\]<])/g, "\\$1").replace(/\r\n?|\n/g, " "),
+        mdText: (text) => String(text ?? "").replace(/([\\\[\]<`])/g, "\\$1").replace(/\r\n?|\n/g, " "),
         // wave20 共识(w20 qwen): 文本节点是**字面量**上下文 —— CommonMark 的内联控制符必须转义,
         // 否则源文里的 "**x**"/"2*3*4"/"a~~b~~c" 被渲染成强调/删除线(Notion 出口把文本放
         // rich_text.content、格式放 annotations, 同一输入不受害 ⇒ 两出口可见内容不对称)。
@@ -1829,7 +1829,7 @@
         // 注: "*" 与 "```"/"~~~" 已由上一行的字符转义覆盖(行首 "*" 已成 "\*"), 故此处只处理
         // 尚未被覆盖的 > # = + 与 "- ", 以及有序列表的 "数字."/"数字)"(数字前的反斜杠无效,
         // 须转义分隔符)。未覆盖: 块首行以 ≥4 空格缩进(段落中间不受影响 —— 缩进代码块不能中断段落)。
-        mdLiteral: (text) => String(text ?? "").replace(/([\\`*~_\[\]<])/g, "\\$1").replace(/^([ \t]*)([>#=]|-{2,}(?=[ \t]*$)|[-+*](?=\s)|(\d+)([.)])(?=\s))/gm, (m, indent, marker, num, delim) => num ? `${indent}${num}\\${delim}` : `${indent}\\${marker}`),
+        mdLiteral: (text) => String(text ?? "").replace(/([\\`*~_\[\]<&|])/g, "\\$1").replace(/^([ \t]*)([>#=]|-{2,}(?=[ \t]*$)|[-+*](?=\s|$)|(\d+)([.)])(?=\s|$))/gm, (m, indent, marker, num, delim) => num ? `${indent}${num}\\${delim}` : `${indent}\\${marker}`),
         // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
         // wave19 共识(w19 qwen): 补 \\(见 MD_URL_ESCAPE)
         mdUrl: (url) => String(url ?? "").replace(/[\s<>()\\]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
@@ -4067,7 +4067,7 @@
         "hr",
         "aside"
       ]);
-      var SKIP_TAGS = /* @__PURE__ */ new Set(["script", "style", "noscript"]);
+      var SKIP_TAGS = /* @__PURE__ */ new Set(["script", "style", "noscript", "object", "embed", "canvas"]);
       var TEXT_BOUNDARY_TAGS = /* @__PURE__ */ new Set([
         "div",
         "p",
@@ -4839,6 +4839,11 @@
               DomSpec.eachChildOrdered(el, (child) => {
                 if (!child) return;
                 if (child.nodeType === Node.ELEMENT_NODE && child.tagName && DomSpec.mediaKind(child) === "img") {
+                  if (DomSpec.emojiNameOf(DomSpec.mediaSrc(child)) || !DomSpec.mediaUrl(child) && typeof child.getAttribute === "function" && child.getAttribute("alt")) {
+                    walkNode(child);
+                    handled = true;
+                    return;
+                  }
                   flushInline();
                   DOMToNotion2._cookBlockImage(child, blocks, imgMode);
                   handled = true;
@@ -5426,7 +5431,7 @@ ${quoted}
           const width = Math.max(1, ...rows.map(cellCount));
           rows.forEach((row, i) => {
             const cells = Array.from(row.children || []).filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).map((c) => {
-              return DomSpec.foldToSingleLine(HTMLToMarkdown2._convertChildren(c)).replace(/\|/g, "\\|");
+              return DomSpec.foldToSingleLine(HTMLToMarkdown2._convertChildren(c)).replace(/(?<!\\)\|/g, "\\|");
             });
             while (cells.length < width) cells.push("");
             result.push(`| ${cells.join(" | ")} |`);

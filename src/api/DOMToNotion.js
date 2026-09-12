@@ -835,6 +835,16 @@ const DOMToNotion = {
                     if (!child) return;
                     if (child.nodeType === Node.ELEMENT_NODE && child.tagName
                         && DomSpec.mediaKind(child) === "img") {
+                        // wave26 共识(w26 dsf): 与 walkNode 同口径 —— emoji 图与被拒地址且有 alt 的
+                        // 图片是**文本载体**(内联 emoji 字符 / alt 回退), 不得在此直落块级图片:
+                        // 同一 <img> 因是否直系子节点会得到不同结构(块级段落 vs 内联并入相邻文本)
+                        if (DomSpec.emojiNameOf(DomSpec.mediaSrc(child))
+                            || (!DomSpec.mediaUrl(child)
+                                && typeof child.getAttribute === "function" && child.getAttribute("alt"))) {
+                            walkNode(child);
+                            handled = true;
+                            return;
+                        }
                         flushInline();
                         DOMToNotion._cookBlockImage(child, blocks, imgMode);
                         handled = true;

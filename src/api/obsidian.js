@@ -561,10 +561,13 @@ const HTMLToMarkdown = {
             const cells = Array.from(row.children || [])
                 .filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase()))
                 .map((c) => {
-                // P4 收敛(c05): 单元格内的竖线会破坏表格列结构
+                // wrap25/26 共识: 单元格内的竖线会破坏表格列结构
+                // P4 收敛(c05): 同上
                 // wave11 共识(qwen): 与 buildPostCallout.sanitize 同口径 —— \n 漏孤立 \r
                 // (CommonMark 行结束符), 单元格文本中的 CR 会拆断表格行; 折叠口径统一驻 DomSpec
-                return DomSpec.foldToSingleLine(HTMLToMarkdown._convertChildren(c)).replace(/\|/g, "\\|");
+                // wave26 共识(w26 qwen): mdLiteral 已对 `|` 转义(行首表格注入), 此处只补
+                // **未转义**的 `|`(如行内 code 跳度内的原始文本) —— 否则会双重转义为可见的 `\\|`
+                return DomSpec.foldToSingleLine(HTMLToMarkdown._convertChildren(c)).replace(/(?<!\\)\|/g, "\\|");
             });
             while (cells.length < width) cells.push("");
             result.push(`| ${cells.join(" | ")} |`);

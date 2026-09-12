@@ -18,7 +18,7 @@ const BLOCK_TAGS = new Set([
 ]);
 
 // wave11/wave13 共识: 非渲染元素 —— 其文本(JS/CSS 源码)不得进入 rich_text / Markdown
-const SKIP_TAGS = new Set(["script", "style", "noscript"]);
+const SKIP_TAGS = new Set(["script", "style", "noscript", "object", "embed", "canvas"]);
 
 // wave17 共识(glm/qwen): 内联序列化的「文本边界」判据单一来源 —— 原实现内联 4 个标签字面量
 // (p/div/blockquote/aside), 其余容器块(h1-h6/ul/ol/table/pre/hr)内的文本与相邻内联内容直接

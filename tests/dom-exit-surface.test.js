@@ -44,8 +44,9 @@ const element = (tag, children = [], props = {}) => ({
 const JS_SOURCE = "var leaked = 1;";
 const CSS_SOURCE = ".leaked { color: red }";
 const NOSCRIPT_SOURCE = "noscript-fallback-text";
+const FALLBACK_CONTAINER_SOURCE = "object-fallback-text";
 
-// ===== 出口面 1: 非渲染标签(script / style / noscript) =====
+// ===== 出口面 1: 非渲染标签(script / style / noscript / object / embed / canvas) =====
 // 每个宿主都必须排除; 两导出器必须同口径
 describe("出口面: 非渲染标签在每个宿主内均被排除", () => {
     const SKIPPED = [
@@ -106,7 +107,7 @@ describe("出口面: 非渲染标签在每个宿主内均被排除", () => {
     });
 
     it("单一判据: 跳过表只有 DomSpec.SKIP_TAGS 一处", () => {
-        expect([...DomSpec.SKIP_TAGS].sort()).toEqual(["noscript", "script", "style"]);
+        expect([...DomSpec.SKIP_TAGS].sort()).toEqual(["canvas", "embed", "noscript", "object", "script", "style"]);
         expect(DomSpec.isSkippedNode(element("script"))).toBe(true);
         expect(DomSpec.isSkippedNode(element("STYLE"))).toBe(true);
         expect(DomSpec.isSkippedNode(element("div"))).toBe(false);
@@ -1750,6 +1751,67 @@ describe("wave25 确认轮: 行首整行连字符与字面下划线", () => {
         const table = element("table", [element("tbody", [row])]);
         const md = HTMLToMarkdown._convertNode(table);
         expect(md).toContain("| a\\|b | `c\\|d` |");
+    });
+});
+
+describe("wave26 确认轮: 实体/表格/行尾结构符/容器内图片口径", () => {
+    const EMOJI = "/images/emoji/win10/smile.png";
+    const withDom = (body, fn) => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body }) };
+        };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
+    };
+    const run = (body, mode = "external") => withDom(element("body", body), () => DOMToNotion.cookedToBlocks("<div>x</div>", mode));
+    const texts = (blocks) => blocks.map((b) => {
+        const holder = b.paragraph || b.quote || b.heading_3;
+        return ((holder && holder.rich_text) || []).map((r) => r.text.content).join("");
+    });
+
+    it("字符串末尾的单个 `-` 行被转义(setext 下划线不再吞行)", () => {
+        expect(Utils.mdLiteral("Title\n-")).toBe("Title\n\\-");
+        expect(Utils.mdLiteral("Title\n- ")).toBe("Title\n\\- ");
+        expect(Utils.mdLiteral("Title\n*")).toBe("Title\n\\*");
+    });
+
+    it("实体引用与 GFM 表格分隔符被转义(字面量不被解码/不成表格)", () => {
+        expect(Utils.mdLiteral("Tom &amp; Jerry")).toBe("Tom \\&amp; Jerry");
+        expect(Utils.mdLiteral("a & b")).toBe("a \\& b");
+        expect(Utils.mdLiteral("| a | b |")).toBe("\\| a \\| b \\|");
+    });
+
+    it("mdText 转义反引号——链接标签内的 code span 不再吞掉反斜杠", () => {
+        expect(Utils.mdText("see `[copy](x)`")).toBe("see \\`\\[copy\\](x)\\`");
+        expect(Utils.mdLink("`a`", "https://a.b")).toBe("[\\`a\\`](https://a.b)");
+    });
+
+    it("表格单元格竖线只转义一次(mdLiteral 与单元格补转义不叠加)", () => {
+        const cell = (kids) => element("td", kids, { classList: { contains: () => false } });
+        const table = element("table", [element("tbody", [element("tr", [cell([textNode("a|b")])])])]);
+        const md = HTMLToMarkdown._convertNode(table);
+        expect(md).toContain("| a\\|b |");
+        expect(md).not.toContain("a\\\\|b");
+    });
+
+    it("容器内直系 emoji 图与 walkNode 同口径(内联文本载体, 不落块级图片)", () => {
+        const emoji = element("img", [], { getAttribute: attrs({ src: EMOJI, alt: "smile" }) });
+        const wrapper = element("div", [textNode("前"), emoji, textNode("后")],
+            { classList: { contains: (c) => c === "lightbox-wrapper" } });
+        const blocks = run([wrapper]);
+        expect(blocks.filter((b) => b.type === "image").length).toBe(0);
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph"]);
+        expect(texts(blocks)[0]).toContain("前");
+    });
+
+    it("浏览器降级副本(object / embed / canvas)不进正文", () => {
+        for (const tag of ["object", "embed", "canvas"]) {
+            const blocks = run([element(tag, [textNode("fallback-text")])]);
+            expect(blocks).toEqual([]);
+        }
     });
 });
 

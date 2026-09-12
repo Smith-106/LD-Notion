@@ -204,7 +204,7 @@ describe("P4 收敛(c04-c08): 三模型复审第二批", () => {
 
     it("Obsidian 表格单元格转义竖线 + 楼层头部不重复 handle", () => {
         const src = read("src/api/obsidian.js");
-        expect(src).toContain('.replace(/\\|/g, "\\\\|")');
+        expect(src).toContain('.replace(/(?<!\\\\)\\|/g, "\\\\|")');
         // wave7: username/postNum 经 sanitize 折叠换行(注入防御), handle 仍仅在 name≠username 时附加
         expect(src).toContain("const handleRaw = post.username && post.username !== (post.name || post.username) ?");
     });
