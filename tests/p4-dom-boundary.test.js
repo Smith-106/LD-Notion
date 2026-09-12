@@ -439,7 +439,9 @@ describe("wave8 共识(qwen): ext 伪造 + data-src emoji + li 重叠文本", ()
         });
         const li = el("li", [txt("- b"), el("ul", [el("li", [txt("b")])])]);
         try {
-            expect(HTMLToMarkdown._convertNode(li)).toBe("- - b\n  - b\n");
+            // wave22: 文本节点行首的列表标记被转义 —— "- - b" 会被 CommonMark 渲染为**嵌套列表**
+            // (源 li 的字面文本 "- b" 被解释为结构); 转义后回显字面文本, 父项文本不再被误删
+            expect(HTMLToMarkdown._convertNode(li)).toBe("- \\- b\n  - b\n");
         } finally {
             if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
         }

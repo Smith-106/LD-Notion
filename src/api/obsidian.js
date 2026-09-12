@@ -470,8 +470,13 @@ const HTMLToMarkdown = {
                 return DomSpec.mediaSrc(node) ? "[音频已拒（非公网 http(s) 地址）]\n\n" : "";
             }
             case "div": {
-                const cls = node.className || "";
-                if (cls.includes("onebox")) {
+                // wave22 共识(w22 qwen): 子串匹配会把 "onebox-wrapper"/"not-onebox" 一并命中 ——
+                // 非引用语义的普通 div 被伪造成 callout, 而 Discourse 的多层包裹(.onebox-wrapper >
+                // .onebox)还会被双层嵌套加前缀; 与 DomSpec.isBlockNode 的 token 严格判定同口径
+                // (className 在 SVG 命名空间下为 SVGAnimatedString, 转字符串后不命中任一 token)
+                const cls = node.classList
+                    || { contains: (name) => String(node.className || "").split(/\s+/).includes(name) };
+                if (cls.contains("onebox")) {
                     // wave6 共识(qwen): 仅首行加 "> " 时, 子内容换行后的行会脱离 callout(可注入 Markdown)
                     // wave18 共识(w3 glm): 拆行前统一行结束符(孤立 \r 同样会断行并逃逸前缀)
                     const quoted = String(children).replace(/\r\n?/g, "\n").trim().split("\n")

@@ -117,7 +117,10 @@ describe("wave6 共识(qwen): 重定向边界 + onebox/inline code 转义", () =
         };
         const out = HTMLToMarkdown._convertNode(div);
         if (origNode === undefined) delete globalThis.Node; else globalThis.Node = origNode;
-        expect(out).toBe("> [!quote]\n> line1\n> > escaped\n\n");
+        // wave22: 文本节点行首的 "=>" 块结构符被转义(wave22 行首结构符修复) —— 源文本里的字面
+        // "> escaped" 此前在 callout 内被渲染为**嵌套引用**(结构注入), 现回显为字面文本;
+        // 每行仍带 "> " 前缀, 仍不脱离 callout
+        expect(out).toBe("> [!quote]\n> line1\n> \\> escaped\n\n");
     });
 
     it("内联 code 含反引号时用更长围栏闭合", () => {

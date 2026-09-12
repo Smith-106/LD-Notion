@@ -31,7 +31,9 @@ const DOMToNotion = {
         // wave16 共识(dsf): 容器内只取首个 <img>(其余图片静默丢弃) —— 统一走
         // _consumeInlineMedia(采集口径单一驻 DomSpec.eachMedia); 单图路径与 _cookImage
         // 完全同构(含 emoji 判据与 imgMode 语义), 故直接委托
-        DOMToNotion._consumeInlineMedia(el, blocks, imgMode);
+        // wave22 共识(w22 qwen): 本路径不经 serializeRichText —— 图片一律走 _cookBlockImage,
+        // 使地址被判拒/为 emoji 时同样有可见回退(alt → 标记), 与顶层 img 及 <p> 内 img 同口径
+        DOMToNotion._consumeInlineMedia(el, blocks, imgMode, true);
     },
 
     // 附件链接 a.attachment
@@ -156,6 +158,9 @@ const DOMToNotion = {
         // (hostname 严格白名单) + _safeExternalUrl(拒内网/169.254/非 http(s))。
         // wave17 共识(dsf): imgMode=skip 时同其它媒体静默跳过(原先 iframe 绕过用户设置写 embed)
         const src = DomSpec.mediaSrc(el);
+        // wave22 共识(w22 dsf + w22 qwen): iframe 的浏览器降级文案不得经 processElement 兜底
+        // 落成段落 —— 由调用方在 _cookIframe 返回 false 时终止该元素的子树遍历(见 processElement),
+        // 返回值语义("已处理/未匹配")保持为既有契约
         if (!src || imgMode === "skip") return false;
         // 子串匹配（src.includes）可被 evil.com/youtube.com 或 169.254.169.254/player.html 绕过
         // 写入 Notion embed.url（服务端抓取触发 SSRF，CWE-918，ISS-009 sibling 补全）。
@@ -227,7 +232,38 @@ const DOMToNotion = {
         }
         // 无直属 blockquote 时回退后代首个(与 wave15 同口径); 无任何 blockquote 时以 aside 自身为源
         const deep = typeof el.querySelector === "function" ? el.querySelector("blockquote") : null;
-        DOMToNotion._cookBlockquote(deep || el, blocks, imgMode);
+        // wave22 共识(w22 dsf + w22 qwen): 该回退此前只消费后代首个 blockquote —— aside 内其余
+        // 直属内容(Discourse 引用自带的署名行 <div class="title">张三</div>、裸文本、内嵌媒体)
+        // 整支静默丢弃, 与上方直属分支(逐子节点分派)及 Markdown 出口口径不一致。
+        // 改为: 逐直属子节点分派 —— 命中引用源的子树走引用块, 其余走段落 + 内联媒体
+        if (deep) {
+            DomSpec.eachChildOrdered(el, (child) => {
+                if (child.nodeType === Node.TEXT_NODE) {
+                    const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+                    if (text) {
+                        blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(text) } });
+                    }
+                    return;
+                }
+                if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+                if (String(child.tagName).toLowerCase() === "blockquote") {
+                    DOMToNotion._cookBlockquote(child, blocks, imgMode);
+                    return;
+                }
+                const quote = typeof child.querySelector === "function" ? child.querySelector("blockquote") : null;
+                if (quote) {
+                    DOMToNotion._cookBlockquote(quote, blocks, imgMode);
+                    return;
+                }
+                const richText = DOMToNotion.serializeRichText(child);
+                if (richText.length > 0) {
+                    blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+                }
+                DOMToNotion._consumeInlineMedia(child, blocks, imgMode);
+            });
+            return;
+        }
+        DOMToNotion._cookBlockquote(el, blocks, imgMode);
     },
 
     // 单一 emoji 判据驻 DomSpec(与块级跳过同源); 保留公开键名供现有测试与 legacy harness
@@ -235,9 +271,14 @@ const DOMToNotion = {
 
     // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发
     // 采集逻辑单一驻 DomSpec.eachMedia(自身+后代, 每节点恰一次); 此处保留公开键名转发
-    _consumeInlineMedia: (el, blocks, imgMode) => {
+    _consumeInlineMedia: (el, blocks, imgMode, blockImages = false) => {
         DomSpec.eachMedia(el, (node, kind) => {
-            if (kind === "img") DOMToNotion._cookImage(node, blocks, imgMode);
+            // wave22 共识(w22 qwen): 不经 serializeRichText 的采集路径(lightbox/image-wrapper 容器)
+            // 用 _cookImage 时地址被判拒/为 emoji 会零产出 —— 该路径改走 _cookBlockImage(含可见回退)
+            if (kind === "img") {
+                if (blockImages) DOMToNotion._cookBlockImage(node, blocks, imgMode);
+                else DOMToNotion._cookImage(node, blocks, imgMode);
+            }
             else if (kind === "attachment") DOMToNotion._cookAttachment(node, blocks, imgMode);
             else if (kind === "video") DOMToNotion._cookVideo(node, blocks, imgMode);
             else if (kind === "audio") DOMToNotion._cookAudio(node, blocks, imgMode);
@@ -269,6 +310,9 @@ const DOMToNotion = {
         // wave17 共识(dsf/glm): 原实现只取 <code> 子树 —— <pre>foo<code>bar</code>baz</pre> 的
         // 非 code 文本静默丢弃(Markdown 出口 wave14 已改为整棵 pre, 两面不对称) → 统一取整个 pre
         const code = DomSpec.textWithBreaks(el);
+        // wave22 裁决(w22 dsf 提出「空 pre 不应落空 code 块」): 驳回 —— code 块的**存在**是源文档的
+        // 结构事实(<pre></pre> 在 Markdown 出口同样产出空围栏, 两出口对称), 且空 content 片段在本
+        // 模块内本就使用(表格空单元格补齐), 不构成「静默丢弃」或结构错误
         const richTextArray = DOMToNotion.splitLongText(code);
         blocks.push({
             type: "code",
@@ -294,6 +338,9 @@ const DOMToNotion = {
         const tag = el.tagName.toLowerCase();
         let level = parseInt(tag.substring(1));
         if (level > 3) level = 3;
+        // wave22 裁决: qwen 提出「标题/单元格应折叠换行」—— 该差异为本文件已登记并有契约测试的
+        // 口径(Notion 侧 rich_text 允许承载 \n, Markdown 侧折叠), 且 wave21 的 td/th 边界未引入
+        // 新的暴露类别(<br> 早已可达) ⇒ 驳回, 保持既有口径
         const richText = DOMToNotion.serializeRichText(el);
         if (richText.length > 0) {
             blocks.push({ type: `heading_${level}`, [`heading_${level}`]: { rich_text: richText } });
@@ -820,8 +867,15 @@ const DOMToNotion = {
                 return;
             }
 
-            // 处理 iframe 嵌入（视频/外部内容），未匹配则 fallthrough
-            if (tag === "iframe" && DOMToNotion._cookIframe(el, blocks, imgMode)) return;
+            // 处理 iframe 嵌入（视频/外部内容），未匹配则终止该子树（降级文案不得入正文）
+            if (tag === "iframe") {
+                if (DOMToNotion._cookIframe(el, blocks, imgMode)) return;
+                // wave22 共识(w22 dsf + w22 qwen): 未处理(无候选地址/imgMode=skip)时若继续
+                // 走到末尾的 walkNode, iframe 内的浏览器降级文案会被落成段落; Markdown 出口的
+                // iframe 分支从不转换其子树 ⇒ 两出口不一致。此处终止遍历(先落缓冲中的内联文本)
+                flushInline();
+                return;
+            }
 
             // 处理引用块
             if (tag === "aside" && el.classList.contains("quote")) {

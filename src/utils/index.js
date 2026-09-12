@@ -264,7 +264,17 @@ const Utils = {
     // wave21 共识(w21 glm): 补 "<" —— 源文里的字面 HTML 标签(论坛中提及 "&lt;div&gt;" 极常见)
     // 未被转义时, CommonMark 将其判为 inline raw HTML 透传, 宿主按真实元素渲染
     // (未闭合块容器可吞并后续内容, 用户可见文本丢失); Notion 出口作为纯文本写 rich_text 不受害
-    mdLiteral: (text) => String(text ?? "").replace(/([\\`*~\[\]<])/g, "\\$1"),
+    // wave22 共识(用户裁定 A, w21 glm 残余): 行首块结构符转义 —— CommonMark 允许列表/引用/
+    // ATX 标题/setext 下划线**中断段落**, 文本里的换行(源文换行或 <br>)后紧跟这些序列时
+    // 会被解析为块结构(用户字面内容被改写成结构)。在行首前置反斜杠恒为字面量(ASCII 标点
+    // 转义), 不依赖渲染器对 lazy continuation / setext 细节的处理。
+    // 注: "*" 与 "```"/"~~~" 已由上一行的字符转义覆盖(行首 "*" 已成 "\*"), 故此处只处理
+    // 尚未被覆盖的 > # = + 与 "- ", 以及有序列表的 "数字."/"数字)"(数字前的反斜杠无效,
+    // 须转义分隔符)。未覆盖: 块首行以 ≥4 空格缩进(段落中间不受影响 —— 缩进代码块不能中断段落)。
+    mdLiteral: (text) => String(text ?? "")
+        .replace(/([\\`*~\[\]<])/g, "\\$1")
+        .replace(/^([ \t]*)([>#=]|[-+*](?=\s)|(\d+)([.)])(?=\s))/gm, (m, indent, marker, num, delim) =>
+            (num ? `${indent}${num}\\${delim}` : `${indent}\\${marker}`)),
     // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
     // wave19 共识(w19 qwen): 补 \\(见 MD_URL_ESCAPE)
     mdUrl: (url) => String(url ?? "").replace(/[\s<>()\\]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),

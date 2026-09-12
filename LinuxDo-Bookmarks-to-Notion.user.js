@@ -1822,7 +1822,14 @@
         // wave21 共识(w21 glm): 补 "<" —— 源文里的字面 HTML 标签(论坛中提及 "&lt;div&gt;" 极常见)
         // 未被转义时, CommonMark 将其判为 inline raw HTML 透传, 宿主按真实元素渲染
         // (未闭合块容器可吞并后续内容, 用户可见文本丢失); Notion 出口作为纯文本写 rich_text 不受害
-        mdLiteral: (text) => String(text ?? "").replace(/([\\`*~\[\]<])/g, "\\$1"),
+        // wave22 共识(用户裁定 A, w21 glm 残余): 行首块结构符转义 —— CommonMark 允许列表/引用/
+        // ATX 标题/setext 下划线**中断段落**, 文本里的换行(源文换行或 <br>)后紧跟这些序列时
+        // 会被解析为块结构(用户字面内容被改写成结构)。在行首前置反斜杠恒为字面量(ASCII 标点
+        // 转义), 不依赖渲染器对 lazy continuation / setext 细节的处理。
+        // 注: "*" 与 "```"/"~~~" 已由上一行的字符转义覆盖(行首 "*" 已成 "\*"), 故此处只处理
+        // 尚未被覆盖的 > # = + 与 "- ", 以及有序列表的 "数字."/"数字)"(数字前的反斜杠无效,
+        // 须转义分隔符)。未覆盖: 块首行以 ≥4 空格缩进(段落中间不受影响 —— 缩进代码块不能中断段落)。
+        mdLiteral: (text) => String(text ?? "").replace(/([\\`*~\[\]<])/g, "\\$1").replace(/^([ \t]*)([>#=]|[-+*](?=\s)|(\d+)([.)])(?=\s))/gm, (m, indent, marker, num, delim) => num ? `${indent}${num}\\${delim}` : `${indent}\\${marker}`),
         // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
         // wave19 共识(w19 qwen): 补 \\(见 MD_URL_ESCAPE)
         mdUrl: (url) => String(url ?? "").replace(/[\s<>()\\]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
@@ -4261,7 +4268,7 @@
         _safeExternalUrl: (full) => DomSpec.safeUrl(full),
         // 图片容器 lightbox-wrapper / image-wrapper
         _cookLightbox: (el, blocks, imgMode) => {
-          DOMToNotion2._consumeInlineMedia(el, blocks, imgMode);
+          DOMToNotion2._consumeInlineMedia(el, blocks, imgMode, true);
         },
         // 附件链接 a.attachment
         _cookAttachment: (el, blocks, imgMode) => {
@@ -4410,16 +4417,45 @@
             return;
           }
           const deep = typeof el.querySelector === "function" ? el.querySelector("blockquote") : null;
-          DOMToNotion2._cookBlockquote(deep || el, blocks, imgMode);
+          if (deep) {
+            DomSpec.eachChildOrdered(el, (child) => {
+              if (child.nodeType === Node.TEXT_NODE) {
+                const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+                if (text) {
+                  blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(text) } });
+                }
+                return;
+              }
+              if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+              if (String(child.tagName).toLowerCase() === "blockquote") {
+                DOMToNotion2._cookBlockquote(child, blocks, imgMode);
+                return;
+              }
+              const quote = typeof child.querySelector === "function" ? child.querySelector("blockquote") : null;
+              if (quote) {
+                DOMToNotion2._cookBlockquote(quote, blocks, imgMode);
+                return;
+              }
+              const richText = DOMToNotion2.serializeRichText(child);
+              if (richText.length > 0) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+              }
+              DOMToNotion2._consumeInlineMedia(child, blocks, imgMode);
+            });
+            return;
+          }
+          DOMToNotion2._cookBlockquote(el, blocks, imgMode);
         },
         // 单一 emoji 判据驻 DomSpec(与块级跳过同源); 保留公开键名供现有测试与 legacy harness
         _emojiImageName: (src) => DomSpec.emojiNameOf(src),
         // wave8 共识(dsf): 段落/li/引用/表格单元格共用的内联媒体补发
         // 采集逻辑单一驻 DomSpec.eachMedia(自身+后代, 每节点恰一次); 此处保留公开键名转发
-        _consumeInlineMedia: (el, blocks, imgMode) => {
+        _consumeInlineMedia: (el, blocks, imgMode, blockImages = false) => {
           DomSpec.eachMedia(el, (node, kind) => {
-            if (kind === "img") DOMToNotion2._cookImage(node, blocks, imgMode);
-            else if (kind === "attachment") DOMToNotion2._cookAttachment(node, blocks, imgMode);
+            if (kind === "img") {
+              if (blockImages) DOMToNotion2._cookBlockImage(node, blocks, imgMode);
+              else DOMToNotion2._cookImage(node, blocks, imgMode);
+            } else if (kind === "attachment") DOMToNotion2._cookAttachment(node, blocks, imgMode);
             else if (kind === "video") DOMToNotion2._cookVideo(node, blocks, imgMode);
             else if (kind === "audio") DOMToNotion2._cookAudio(node, blocks, imgMode);
             else if (kind === "iframe") DOMToNotion2._cookIframe(node, blocks, imgMode);
@@ -4826,7 +4862,11 @@
               DOMToNotion2._cookAudio(el, blocks, imgMode);
               return;
             }
-            if (tag === "iframe" && DOMToNotion2._cookIframe(el, blocks, imgMode)) return;
+            if (tag === "iframe") {
+              if (DOMToNotion2._cookIframe(el, blocks, imgMode)) return;
+              flushInline();
+              return;
+            }
             if (tag === "aside" && el.classList.contains("quote")) {
               DOMToNotion2._cookAsideQuote(el, blocks, imgMode);
               return;
@@ -5329,8 +5369,8 @@
               return DomSpec.mediaSrc(node) ? "[\u97F3\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n" : "";
             }
             case "div": {
-              const cls = node.className || "";
-              if (cls.includes("onebox")) {
+              const cls = node.classList || { contains: (name) => String(node.className || "").split(/\s+/).includes(name) };
+              if (cls.contains("onebox")) {
                 const quoted = String(children).replace(/\r\n?/g, "\n").trim().split("\n").map((line) => `> ${line}`).join("\n");
                 return `> [!quote]
 ${quoted}

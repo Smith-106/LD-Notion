@@ -1532,6 +1532,76 @@ describe("wave21 确认轮: 表格结构/字面量转义/媒体回退边界", ()
     });
 });
 
+describe("wave22 确认轮: 媒体兜底路径/容器分派/行首结构符", () => {
+    const PUBLIC = "https://cdn.example.com/a.png";
+    const withDom = (body, fn) => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body }) };
+        };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
+    };
+    const run = (body, mode = "external") => withDom(element("body", body), () => DOMToNotion.cookedToBlocks("<div>x</div>", mode));
+    const texts = (blocks) => blocks.map((b) => {
+        const holder = b.paragraph || b.quote || b.heading_3;
+        return ((holder && holder.rich_text) || []).map((r) => r.text.content).join("");
+    });
+    const quoteClass = { classList: { contains: (c) => c === "quote" } };
+
+    it("未处理的 iframe 不把浏览器降级文案落成段落(终止子树遍历)", () => {
+        const noSrc = element("iframe", [textNode("您的浏览器不支持此内容")], { getAttribute: attrs({}) });
+        expect(run([element("div", [noSrc])])).toEqual([]);
+        const skipped = element("iframe", [textNode("您的浏览器不支持此内容")],
+            { getAttribute: attrs({ src: "https://www.youtube.com/embed/x" }) });
+        expect(run([element("div", [skipped])], "skip")).toEqual([]);
+    });
+
+    it("aside.quote 的深嵌套引用回退保留其余直属内容与裸文本", () => {
+        const quote = element("blockquote", [textNode("引用")]);
+        const holder = element("div", [quote], { querySelector: (sel) => (sel === "blockquote" ? quote : null) });
+        const aside = element("aside", [
+            textNode(" \n "),
+            element("div", [textNode("张三")]),
+            holder,
+        ], { classList: { contains: (c) => c === "quote" }, querySelector: (sel) => (sel === "blockquote" ? quote : null) });
+        const blocks = run([aside]);
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph", "quote"]);
+        expect(texts(blocks)).toEqual(["张三", "引用"]);
+    });
+
+    it("lightbox/image-wrapper 容器内图片同样有可见回退(alt 不丢)", () => {
+        const img = element("img", [], { getAttribute: attrs({ src: "javascript:alert(1)", alt: "配图" }) });
+        const blocks = run([element("div", [img], { classList: { contains: (c) => c === "lightbox-wrapper" } })]);
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph"]);
+        expect(texts(blocks)).toEqual(["配图"]);
+    });
+
+    it("onebox 判据按类名 token 严格匹配(子串不命中, 不伪造 callout)", () => {
+        expect(HTMLToMarkdown._convertNode(element("div", [textNode("x")],
+            { classList: undefined, className: "not-onebox" }))).toBe("x");
+        expect(HTMLToMarkdown._convertNode(element("div", [textNode("x")],
+            { classList: { contains: (c) => c === "onebox" } }))).toBe("> [!quote]\n> x\n\n");
+        // 多层包裹(.onebox-wrapper > .onebox)不再双层嵌套加前缀
+        const wrapper = element("div", [element("div", [textNode("t")],
+            { classList: { contains: (c) => c === "onebox" } })],
+            { classList: { contains: (c) => c === "onebox-wrapper" } });
+        expect(HTMLToMarkdown._convertNode(wrapper)).toBe("> [!quote]\n> t\n\n");
+    });
+
+    it("文本行首的块结构符被转义(不再被解析为列表/引用/标题/setext)", () => {
+        expect(Utils.mdLiteral("a\n- b\n1) c\n> d\n# e\n=== f"))
+            .toBe("a\n\\- b\n1\\) c\n\\> d\n\\# e\n\\=== f");
+        // 起始行同样转义(如 <br> 后的文本节点)
+        expect(HTMLToMarkdown._convertNode(element("p", [textNode("第一步"), element("br"), textNode("===")])))
+            .toBe("第一步\n\\===\n\n");
+        // 普通文本与词内字符不受影响
+        expect(Utils.mdLiteral("a-b 2*3 1.5")).toBe("a-b 2\\*3 1.5");
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;
