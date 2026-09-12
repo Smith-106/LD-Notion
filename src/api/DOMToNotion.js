@@ -27,35 +27,12 @@ const DOMToNotion = {
     _safeExternalUrl: (full) => DomSpec.safeUrl(full),
 
     // 图片容器 lightbox-wrapper / image-wrapper
+    // wave22 共识(w22 qwen): 本路径不经 serializeRichText —— 图片一律走 _cookBlockImage
+    // (含 alt → 标记的可见回退), 与顶层 img 及 <p> 内 img 同口径
+    // wave24 共识(w24 qwen): 生产路径改由 processElement 按**文档序**逐直属子节点分派(见该处);
+    // 本键保留为公开壳(既有测试/legacy harness 直接调用), 语义 = 容器内媒体统一采集, 零可见文本
     _cookLightbox: (el, blocks, imgMode) => {
-        // wave16 共识(dsf): 容器内只取首个 <img>(其余图片静默丢弃) —— 统一走
-        // _consumeInlineMedia(采集口径单一驻 DomSpec.eachMedia); 单图路径与 _cookImage
-        // 完全同构(含 emoji 判据与 imgMode 语义), 故直接委托
-        // wave22 共识(w22 qwen): 本路径不经 serializeRichText —— 图片一律走 _cookBlockImage,
-        // 使地址被判拒/为 emoji 时同样有可见回退(alt → 标记), 与顶层 img 及 <p> 内 img 同口径
         DOMToNotion._consumeInlineMedia(el, blocks, imgMode, true);
-        // wave23 共识(w23 dsf): 容器内非媒体可见内容(图注 / 包裹链接文本)此前静默丢弃 ——
-        // 与 .md-table 容器(wave18)、aside.quote(wave22)同族。只取自**不含媒体**的子节点:
-        // 含媒体的子树已由上面的统一采集承载, 再取会产生重复块(emoji 文本 / 判拒 alt 亦然)
-        const visible = [];
-        const collectVisible = (node) => {
-            if (!node) return;
-            if (node.nodeType === Node.TEXT_NODE) {
-                const text = String(node.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
-                if (text) visible.push(...DOMToNotion.splitLongText(text));
-                return;
-            }
-            if (node.nodeType !== Node.ELEMENT_NODE || !node.tagName) return;
-            if (DomSpec.mediaKind(node)) return;
-            let hasMedia = false;
-            DomSpec.eachMedia(node, () => { hasMedia = true; });
-            if (hasMedia) return;
-            visible.push(...DOMToNotion.serializeRichText(node));
-        };
-        DomSpec.eachChildOrdered(el, collectVisible);
-        if (visible.length > 0) {
-            blocks.push({ type: "paragraph", paragraph: { rich_text: visible } });
-        }
     },
 
     // 附件链接 a.attachment
@@ -847,8 +824,29 @@ const DOMToNotion = {
             // 跳过元信息容器
             if (el.classList && el.classList.contains('meta')) return;
 
-            // 处理图片容器
+            // 处理图片容器(lightbox-wrapper / image-wrapper)
+            // wave22/23/24 共识: 容器内媒体走 _cookBlockImage(含 alt 可见回退), 其余内容按**文档序**
+            // 分派 —— 统一走 walkNode(与 .md-table 容器同口径): 媒体到来前先落已累积的内联内容
+            // (前后说明文字不再粘连、顺序不乱), 容器内 .meta(图片元信息)与 script/style 子树经同一
+            // 分派表被跳过, 内联片段数上限由 flushInline 统一守卫(避免超 100 段触发 Notion 400)
             if (el.classList && (el.classList.contains('lightbox-wrapper') || el.classList.contains('image-wrapper'))) {
+                let handled = false;
+                DomSpec.eachChildOrdered(el, (child) => {
+                    if (!child) return;
+                    if (child.nodeType === Node.ELEMENT_NODE && child.tagName
+                        && DomSpec.mediaKind(child) === "img") {
+                        flushInline();
+                        DOMToNotion._cookBlockImage(child, blocks, imgMode);
+                        handled = true;
+                        return;
+                    }
+                    handled = true;
+                    walkNode(child);
+                });
+                if (handled) {
+                    flushInline();
+                    return;
+                }
                 DOMToNotion._cookLightbox(el, blocks, imgMode);
                 return;
             }

@@ -1656,6 +1656,70 @@ describe("wave23 确认轮: 容器可见内容/媒体回退/字面量上下文�
     });
 });
 
+describe("wave24 确认轮: 图片容器内的分派口径(.meta/文档序/片段上限)", () => {
+    const PUBLIC = "https://cdn.example.com/a.png";
+    const withDom = (body, fn) => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body }) };
+        };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
+    };
+    const run = (body, mode = "external") => withDom(element("body", body), () => DOMToNotion.cookedToBlocks("<div>x</div>", mode));
+    const texts = (blocks) => blocks.map((b) => {
+        const holder = b.paragraph || b.quote || b.heading_3;
+        return ((holder && holder.rich_text) || []).map((r) => r.text.content).join("");
+    });
+    const wrapper = (kids) => element("div", kids, { classList: { contains: (c) => c === "lightbox-wrapper" } });
+    const img = () => element("img", [], { getAttribute: attrs({ src: PUBLIC, alt: "图" }) });
+
+    it("容器内 .meta 元信息按同一条分派表被跳过", () => {
+        const meta = element("div", [element("span", [textNode("a.png")]), textNode(" 1024×768")],
+            { classList: { contains: (c) => c === "meta" } });
+        const blocks = run([wrapper([img(), meta])]);
+        expect(blocks.map((b) => b.type)).toEqual(["image"]);
+    });
+
+    it("容器内文本与媒体保持文档序且不粘连", () => {
+        const blocks = run([wrapper([textNode("图前说明"), img(), textNode("图后说明")])]);
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph", "image", "paragraph"]);
+        expect(texts(blocks)).toEqual(["图前说明", "", "图后说明"]);
+    });
+
+    it("容器内可见内容片段数超限时保留可见截断标记", () => {
+        const kids = [];
+        for (let i = 0; i < 51; i++) {
+            kids.push(element("strong", [textNode("t")]));
+            kids.push(textNode("x"));
+        }
+        const blocks = run([wrapper(kids)]);
+        const rich = blocks[0].paragraph.rich_text;
+        expect(rich.length).toBe(100);
+        expect(rich[rich.length - 1].text.content).toContain("已截断");
+    });
+
+    it("容器内集合仍走 DomSpec.eachMedia(不重复采集嵌套媒体)", () => {
+        const nested = element("div", [img()], {
+            querySelector: () => null,
+            classList: { contains: () => false },
+        });
+        const blocks = run([wrapper([nested])]);
+        expect(blocks.filter((b) => b.type === "image").length).toBe(1);
+    });
+
+    it("容器内多图按文档序全部采集(不只首张)", () => {
+        const second = "https://cdn.example.com/b.png";
+        const a = element("img", [], { getAttribute: attrs({ src: PUBLIC, alt: "A" }) });
+        const b = element("img", [], { getAttribute: attrs({ src: second, alt: "B" }) });
+        const blocks = run([wrapper([a, b])]);
+        const images = blocks.filter((x) => x.type === "image");
+        expect(images.map((x) => x.image.external.url)).toEqual([PUBLIC, second]);
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;
