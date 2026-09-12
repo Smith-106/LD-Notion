@@ -1815,6 +1815,56 @@ describe("wave26 确认轮: 实体/表格/行尾结构符/容器内图片口径"
     });
 });
 
+describe("wave27 确认轮: 附件锚分派与跨片段空白折叠", () => {
+    const withDom = (body, fn) => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body }) };
+        };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
+    };
+    const run = (body, mode = "external") => withDom(element("body", body), () => DOMToNotion.cookedToBlocks("<div>x</div>", mode));
+
+    it("a.attachment 经块级分派进入 _cookAttachment(不再退化为普通内联链接)", () => {
+        const calls = [];
+        const orig = DOMToNotion._cookAttachment;
+        DOMToNotion._cookAttachment = (el, blocks, imgMode) => {
+            calls.push(el.getAttribute("href"));
+            blocks.push({ type: "paragraph", paragraph: { rich_text: [{ type: "text", text: { content: "ATT" } }] } });
+        };
+        try {
+            const anchor = element("a", [textNode("report.pdf")], {
+                classList: { contains: (c) => c === "attachment" },
+                getAttribute: attrs({ href: "https://cdn.example.com/r.pdf" }),
+            });
+            const blocks = run([anchor]);
+            expect(calls).toEqual(["https://cdn.example.com/r.pdf"]);
+            expect(blocks[0].paragraph.rich_text[0].text.content).toBe("ATT");
+        } finally {
+            DOMToNotion._cookAttachment = orig;
+        }
+    });
+
+    it("注解切换处的边界空白按 HTML 规则折叠(不再出现双空格)", () => {
+        const blocks = run([element("div", [
+            textNode("a "),
+            element("strong", [textNode("b ")]),
+            textNode(" c"),
+        ])]);
+        const text = blocks[0].paragraph.rich_text.map((r) => r.text.content).join("");
+        expect(text).toBe("a b c");
+    });
+
+    it("换行边界不被空白折叠吞掉(<br> 产生的空行保留)", () => {
+        const blocks = run([element("div", [textNode("a"), element("br"), element("br"), textNode("b")])]);
+        const text = blocks[0].paragraph.rich_text.map((r) => r.text.content).join("");
+        expect(text).toContain("\n\n");
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;

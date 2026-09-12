@@ -4954,6 +4954,14 @@
               merged[i].text.content = normalizeInline(merged[i].text.content, merged[i].annotations);
             }
             const richText = merged.filter((part) => part.text.content);
+            for (let i = 1; i < richText.length; i++) {
+              const prev = richText[i - 1];
+              const cur = richText[i];
+              if (prev.annotations && prev.annotations.code || cur.annotations && cur.annotations.code) continue;
+              if (/[ \t]$/.test(prev.text.content) && /^[ \t]/.test(cur.text.content)) {
+                cur.text.content = cur.text.content.replace(/^[ \t]+/, "");
+              }
+            }
             if (richText.length > 100) {
               const dropped = richText.length - 99;
               console.warn(`[LD-Notion] \u6BB5\u843D\u5BCC\u6587\u672C\u7247\u6BB5 ${richText.length} \u8D85\u4E0A\u9650 100, \u5DF2\u622A\u65AD ${dropped} \u6BB5`);

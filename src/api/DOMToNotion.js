@@ -1014,6 +1014,17 @@ const DOMToNotion = {
                 merged[i].text.content = normalizeInline(merged[i].text.content, merged[i].annotations);
             }
             const richText = merged.filter((part) => part.text.content);
+            // wave27 共识(w27 dsf): 边界空白折叠 —— 归一化此前逐段执行, 注解切换处两侧的空格均被保留
+            // (<div>a <strong>b </strong> c</div> 渲染为 "a b  c" 双空格), 与 HTML 空白折叠规则不一致。
+            // 只折叠空格/制表符: 换行是段落内的硬边界语义(<br> 产生的空行不得被吞)
+            for (let i = 1; i < richText.length; i++) {
+                const prev = richText[i - 1];
+                const cur = richText[i];
+                if ((prev.annotations && prev.annotations.code) || (cur.annotations && cur.annotations.code)) continue;
+                if (/[ \t]$/.test(prev.text.content) && /^[ \t]/.test(cur.text.content)) {
+                    cur.text.content = cur.text.content.replace(/^[ \t]+/, "");
+                }
+            }
             // wave18 共识(w2 glm): 多内联元素可累计出超过 Notion 上限的片段数 ——
             // 与 serializeRichText/splitLongText 同口径保留可见截断标记
             if (richText.length > 100) {
