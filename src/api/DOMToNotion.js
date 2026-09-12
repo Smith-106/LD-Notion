@@ -38,10 +38,11 @@ const DOMToNotion = {
     // 附件链接 a.attachment
     _cookAttachment: (el, blocks, imgMode) => {
         const href = el.getAttribute("href") || "";
-        // wave21: textContent 在最小桩/测试替身上可能缺失 —— 回退 DomSpec.textWithBreaks(逐节点取文本)
-        const fileName = (el.textContent || "").trim()
-            || DomSpec.foldToSingleLine(DomSpec.textWithBreaks(el))
-            || "attachment";
+        // wave21: textContent 在最小桩/测试替身上可能缺失 —— 回退 DomSpec.textWithBreaks(逐节点取文本)。
+        // wave29 共识(dsf-w2 + qwen-w2): 优先级反转为 textWithBreaks 优先 —— 裸 textContent 会把
+        // 链接内非渲染元素(<a class=attachment><script>var t=1</script></a>)的 JS 源码当附件名
+        // (textWithBreaks 剪掉 SKIP_TAGS 子树, 与 rich_text/Markdown 两出口同口径)
+        const fileName = DomSpec.foldToSingleLine(DomSpec.textWithBreaks(el)) || "attachment";
         const full = DomSpec.safeUrl(href);
         if (full && imgMode !== "skip") {
             blocks.push({
@@ -408,44 +409,34 @@ const DOMToNotion = {
         // 嵌套表格的 thead/tbody 当外层表头/表体(hasHeader 误置 + 行内容窜入)
         const directSections = (tagNames) => Array.from(table.children || [])
             .filter((child) => child.tagName && tagNames.includes(child.tagName.toLowerCase()));
-        const thead = directSections(["thead"])[0];
-        // wave15(dsf): 空 thead 也置 hasHeader → 正文首行被误标为列标题(数据行降级为表头)
-        if (thead && directRows(thead).length > 0) {
-            hasHeader = true;
-            directRows(thead).forEach((tr) => {
-                const cells = [];
-                directCells(tr).forEach((cell) => {
-                    const richText = DOMToNotion.serializeRichText(cell);
-                    cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
-                });
-                if (cells.length > 0) rows.push(cells);
+        // wave29 共识(dsf-w2 + qwen-w1 + qwen-w2): 行采集收束到 DomSpec.collectTableRows ——
+        // 原实现按源序取 tbody+tfoot 且只取**首个** thead(第二个 thead 的行静默丢失),
+        // Markdown 出口同输入按浏览器序输出 ⇒ 两出口行序/行数不一致
+        const collected = DomSpec.collectTableRows(table);
+        const pushRow = (tr) => {
+            const cells = [];
+            directCells(tr).forEach((cell) => {
+                const richText = DOMToNotion.serializeRichText(cell);
+                cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
             });
-        }
-
-        // wave6 共识(qwen): 合法 HTML 可有多个 tbody, tfoot 行同样属于表格正文 ——
-        // 原实现只取第一个 tbody 且从不读 tfoot, 其余行静默丢失
-        const bodyContainers = directSections(["tbody", "tfoot"]);
+            if (cells.length > 0) rows.push(cells);
+        };
+        // wave15(dsf): 空 thead 也置 hasHeader → 正文首行被误标为列标题(数据行降级为表头)
+        if (collected.header.length > 0) hasHeader = true;
         // wave16 共识(qwen): 空 <thead> 但数据首行全为 <th> 时同属表头 —— wave15 的修复
         // (空 thead 不置表头)只覆盖"有 thead 行"的情形, 此处按首行单元格标签补齐判据
         let firstBodyRow = true;
-        (bodyContainers.length > 0 ? bodyContainers : [table]).forEach((container) => {
-            directRows(container).forEach((tr) => {
-                if (tr.closest("thead")) return;
+        collected.header.forEach(pushRow);
+        collected.body.forEach((tr) => {
+            if (firstBodyRow) {
+                firstBodyRow = false;
                 const rowCells = directCells(tr);
-                if (firstBodyRow) {
-                    firstBodyRow = false;
-                    if (!hasHeader && rowCells.length > 0
-                        && rowCells.every((cell) => String(cell.tagName).toLowerCase() === "th")) {
-                        hasHeader = true;
-                    }
+                if (!hasHeader && rowCells.length > 0
+                    && rowCells.every((cell) => String(cell.tagName).toLowerCase() === "th")) {
+                    hasHeader = true;
                 }
-                const cells = [];
-                rowCells.forEach((cell) => {
-                    const richText = DOMToNotion.serializeRichText(cell);
-                    cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
-                });
-                if (cells.length > 0) rows.push(cells);
-            });
+            }
+            pushRow(tr);
         });
 
         // P4 收敛(c05a-glm): Notion table.children 上限 100 —— 超限整批 400, 该页导入全失败;
@@ -699,7 +690,11 @@ const DOMToNotion = {
                     // wave6 共识(dsf): 链接内非文本内容(如 <a><img class="emoji" alt="😀"></a>)
                     // 让 textContent 为空 —— 回退裸 URL 会丢掉 emoji, 改优先取 emoji alt
                     const innerImg = el.querySelector("img");
-                    let linkText = el.textContent || (innerImg ? (innerImg.getAttribute("alt") || "") : "");
+                    // wave29 共识(dsf-w2 + qwen-w2): 回退分支原取裸 textContent —— 链接内非渲染元素
+                    // (<a href><script>var t=1</script></a>)的 JS 源码会成为可见链接文本(与
+                    // _cookAttachment 同族); 改走 DomSpec.textWithBreaks(逐节点取文本 + SKIP_TAGS 剪枝)
+                    let linkText = DomSpec.foldToSingleLine(DomSpec.textWithBreaks(el))
+                        || (innerImg ? (innerImg.getAttribute("alt") || "") : "");
                     if (!linkText) linkText = link;
                     if (linkText) {
                         result.push(...DOMToNotion.splitLongText(linkText, annotations));
@@ -752,6 +747,22 @@ const DOMToNotion = {
             // wave13 共识(qwen): script/style/noscript 非渲染元素 —— 其文本(JS/CSS 源码)
             // 经通用递归进入 rich_text, 内容污染(与 obsidian 同口径)
             if (DomSpec.isSkippedNode(n)) return;
+
+            // wave29 共识(7 格): .meta(图片文件名/尺寸, 源页由 CSS 隐藏)的跳过判据收束到
+            // DomSpec —— 内联路径(<p>/引用/单元格内的 .meta)原本无此守卫, Markdown 出口亦然
+            if (DomSpec.isMetaNode(el)) return;
+
+            // wave29 共识(dsf-w1 + glm-w1 + qwen-w1): <hr> 在 rich_text 上下文(引用/列表项/
+            // 单元格/标题内)原本只由 TEXT_BOUNDARY_TAGS 分支置换行、零产出 —— 引用块内的分隔线
+            // 在 Notion 侧不可见, 而 Markdown 出口同输入产出 "> ---"。以可见标记补发
+            if (tag === "hr") {
+                // 分隔线自身成行: 先消费待补边界("---" 不得与前文同行), 其后重新置位
+                if (result.length > 0) needBreak = true;
+                breakIfNeeded(annotations);
+                result.push(...DOMToNotion.splitLongText(DomSpec.HR_TEXT, annotations));
+                needBreak = true;
+                return;
+            }
 
             // wave21 共识(w21 qwen): 媒体元素的子树是**浏览器降级文案**(<video>您的浏览器
             // 不支持 video 标签</video>), 不是正文 —— Markdown 出口的 video/audio/iframe
@@ -822,7 +833,7 @@ const DOMToNotion = {
             }
 
             // 跳过元信息容器
-            if (el.classList && el.classList.contains('meta')) return;
+            if (DomSpec.isMetaNode(el)) return;
 
             // 处理图片容器(lightbox-wrapper / image-wrapper)
             // wave22/23/24 共识: 容器内媒体走 _cookBlockImage(含 alt 可见回退), 其余内容按**文档序**
@@ -963,7 +974,11 @@ const DOMToNotion = {
             }
 
             // 递归处理子节点(未匹配容器的文本已由 walkNode 按序并入内联缓冲)
+            // wave29 共识(dsf-w1 + qwen-w2): 未匹配容器是块级元素, 其内部/其后的内联文本原先
+            // 不落缓冲 —— <div>a<div>b</div>c</div> 的内层 div 把 "b" 留在缓冲, 与出栈后的 "c"
+            // 合并成同一段落("bc"), 而 Markdown 出口同输入是 a/b/c 三段
             DomSpec.eachChildOrdered(el, walkNode);
+            flushInline();
         };
 
         // wave13/14 共识(dsf/qwen): 未匹配容器与顶层裸文本此前只递归子元素 —— 直属文本
@@ -1007,9 +1022,16 @@ const DOMToNotion = {
             }
             inlineParts = [];
             if (merged.length === 0) return;
-            merged[0].text.content = normalizeInline(merged[0].text.content, merged[0].annotations).replace(/^\s+/, "");
-            const last = merged[merged.length - 1];
-            last.text.content = normalizeInline(last.text.content, last.annotations).replace(/\s+$/, "");
+            // wave29 共识(glm-w2): 段落边界的空白裁剪不得吞掉 code 片段的内容 —— code 内的首尾
+            // 空白是语义(与 normalizeInline 的 code 分支同口径): <div><code>  x  </code></div>
+            // 原本被裁成 "x", 而同一输入经 <p> 路径与 Markdown 出口均保留 "  x  "
+            const trimEdge = (part, edge) => {
+                part.text.content = normalizeInline(part.text.content, part.annotations);
+                if (part.annotations && part.annotations.code) return;
+                part.text.content = part.text.content.replace(edge, "");
+            };
+            trimEdge(merged[0], /^\s+/);
+            trimEdge(merged[merged.length - 1], /\s+$/);
             for (let i = 1; i < merged.length - 1; i++) {
                 merged[i].text.content = normalizeInline(merged[i].text.content, merged[i].annotations);
             }

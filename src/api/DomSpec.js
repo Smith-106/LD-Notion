@@ -66,6 +66,34 @@ const DomSpec = {
 
     isSkippedNode: (el) => SKIP_TAGS.has(tagOf(el)),
 
+    // 元信息容器判据(Discourse lightbox 的图片文件名/尺寸容器 .meta): 源页由 CSS 隐藏, 非正文。
+    // wave29 共识(7 格, 本轮最高共识项): 判据原内联在 DOMToNotion.processElement(单出口) ——
+    // Markdown 出口把 "thumb.png1024×768" 当正文导出, 同一段笔记两处可见内容不同。收束于此,
+    // 两出口共用(与 emoji/mediaKind 同类的判据单一来源约束)。
+    isMetaNode: (el) => Boolean(el && el.classList && el.classList.contains("meta")),
+
+    // <hr> 在 rich_text 上下文(引用/列表项/单元格/标题内)的可见标记。块级上下文由各出口产出
+    // 原生分隔线(Notion divider 块 / Markdown "---"); 无法落块时以本标记保持两出口可见内容一致。
+    HR_TEXT: "---",
+
+    // 表格行采集(两出口唯一来源): 浏览器渲染序 thead → tbody → tfoot(与源序无关)。
+    // wave29 共识(dsf-w2 + qwen-w1 + qwen-w2): Notion 出口原按源序只取首个 thead(第二个 thead
+    // 的行静默丢失)、tbody 与 tfoot 按源序; Markdown 出口按浏览器序 —— <tfoot> 在 <tbody> 之前
+    // 的表两出口行序相反。返回 { header, body }, 均含全部对应段(section)的直属行。
+    collectTableRows: (table) => {
+        const direct = (container, names) => Array.from((container && container.children) || [])
+            .filter((child) => child && child.tagName && names.includes(String(child.tagName).toLowerCase()));
+        const rowsOf = (section) => direct(section, ["tr"]);
+        const header = [];
+        direct(table, ["thead"]).forEach((section) => rowsOf(section).forEach((tr) => header.push(tr)));
+        const body = [];
+        direct(table, ["tbody"]).forEach((section) => rowsOf(section).forEach((tr) => body.push(tr)));
+        direct(table, ["tfoot"]).forEach((section) => rowsOf(section).forEach((tr) => body.push(tr)));
+        // 无 section 的残缺 HTML/测试桩: 直属行属正文
+        if (header.length === 0 && body.length === 0) rowsOf(table).forEach((tr) => body.push(tr));
+        return { header, body };
+    },
+
     // 媒体判据: 标签 → 块类型; a.attachment 视为附件
     mediaKind: (el) => {
         const t = tagOf(el);

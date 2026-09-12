@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.21`
+- 当前仓库源码版本：`v3.14.22`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -391,6 +391,17 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.22
+
+- **双出口内容保真 wave29：三模型九格共识复审确认的 16 项缺陷**（35 条原始 FINDING → 探针逐条实证 → 16 确认 / 1 驳回）：
+  - `.meta`（图片文件名/尺寸）跳过判据收束到 `DomSpec.isMetaNode`——Markdown 出口曾把源页 CSS 隐藏的元信息当正文导出（本轮最高共识 7 格）
+  - 表格行采集收束到 `DomSpec.collectTableRows`（浏览器序 `thead → tbody → tfoot` 且含全部段）——Notion 侧曾丢第二个 `thead` 的行、两出口 `tfoot` 行序相反
+  - 富文本上下文（引用/列表项/单元格）内的 `<hr>` 以 `DomSpec.HR_TEXT` 补可见标记（此前 Notion 侧零产出）
+  - `<a>` / 附件名回退改走 `DomSpec.textWithBreaks`（此前链接内 `<script>` 源码成为可见链接文本与附件标题）
+  - 嵌套未匹配容器的块级边界、透明下钻的 code 片段首尾空白不再丢失
+  - Markdown 出口：`<a>` 内媒体的二次转义与会嵌套图片字面化；空 `<code>` 注入字面反引号；行内 code 首尾空格被 CommonMark 剥掉；强调跨块级子节点泄漏字面 `**`；空块级子节点致词融合；`<pre>` 首换行与 pre 内媒体；`<aside class="quote">` 引用语义；表格单元格块级结构符泄漏
+- 出口面契约测试新增 18 例，全量 1530 例 / 81 文件全绿；新增可复现变异锁运行器 `npm run verify:mutation`
 
 ### v3.14.21
 

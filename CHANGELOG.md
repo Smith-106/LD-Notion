@@ -1,5 +1,33 @@
 # 更新日志
 
+## [3.14.22] - 2026-09-12
+
+### fix (双出口内容保真：wave29 三模型九格共识复审确认的 16 项缺陷)
+
+**方法**：三模型（deepseek-v4-flash / GLM-5.3-flash / qwen3.8-flash）× 三出口面分片（Markdown 转义链 / Notion 遍历与富文本 / 表格与容器）共 9 格独立复审，每格独立读源并给出可构造输入；35 条原始 FINDING 去重后由只读探针（与契约测试同款 DOM/DOMParser 桩）逐条实证：确认 **16 项**、驳回误报 1 项（`mdLiteral` 行首判据“漏孤立 \r”—— JS `m` 标志的 `^` 本就匹配 `\r` 之后位置，探针实测转义已生效）。
+
+- **元信息容器 `.meta`**（本轮最高共识，7 格）：跳过判据原内联在 Notion 出口，Markdown 出口把源页 CSS 隐藏的图片文件名/尺寸当正文导出——判据收束到 `DomSpec.isMetaNode`（两出口 + 内联路径同口径）
+- **表格行采集**（`DomSpec.collectTableRows`）：Notion 侧原按源序只取**首个** `thead`（第二个 `thead` 的行静默丢失）且 `tfoot` 按源序，Markdown 侧按浏览器序——两出口行序/行数不一致；统一为浏览器渲染序 `thead → tbody → tfoot`（含全部段）
+- **富文本上下文内的 `<hr>`**：引用/列表项/单元格/标题内的分隔线在 Notion 侧零产出（Markdown 侧有 `---`）——以 `DomSpec.HR_TEXT` 补可见标记，两出口一致
+- **`<a>` / 附件名回退**：原取裸 `textContent`，链接内非渲染元素（`<a href><script>…</script></a>`）的 JS 源码成为可见链接文本与附件标题——改走 `DomSpec.textWithBreaks` 剪枝
+- **嵌套未匹配容器的块级边界**：`<div>a<div>b</div>c</div>` 的内层容器出栈后未落缓冲，与后续文本并成同一段（`"a" | "bc"`）——容器进出均落缓冲（Markdown 侧同为 `a`/`b`/`c` 三段）
+- **透明下钻的 code 片段空白**：`<div><code>  x  </code></div>` 被边界裁剪吞掉首尾空格（`<p>` 路径与 Markdown 出口均保留）——code 注解片段豁免边界裁剪
+- **Markdown 出口**：
+  - `<a>` 内 video/audio/iframe 时整段标签被**二次转义**（`2*3*4` → 可见 `2\*3\*4`）且合法的嵌套图片被字面化——改为媒体分支自身字面化（`_literalLink`），文本节点只转义一次
+  - 空 `<code>` 注入字面反引号（两个空 `<code>` 之间的内容还会被吞成代码跨度、中间斜体丢失）；行内 code 首尾空格被 CommonMark §6.3 各剥一个——空内容零产出 + 首尾空格补位
+  - 内联强调跨块级子节点（`<strong>a<hr>b</strong>`）定界符跨空行失配、字面 `**` 泄漏——按行包裹（结构行不包裹）
+  - 空块级子节点丢块边界致词融合（`<div>Hello<div></div>World</div>` → `HelloWorld`）
+  - `<pre>` 内容自身的行首换行被吞（Notion 侧保留）；`<pre>` 内媒体整体丢弃（Notion 侧经 `_cookCode` 补发兄弟块保留）
+  - `<aside class="quote">` 无内层 `blockquote` 时引用语义丢失
+  - 表格单元格注入块级结构符（`<ul>` → `- a`、嵌套表 → 字面 `| inner | | --- |`）——单元格改按单行上下文投影块级子节点
+
+### test
+
+- 出口面契约测试新增 **18 例**（逐项锁定上述 16 项），`tests/dom-exit-surface.test.js` 168 例；全量 **1530 例 / 81 文件** + legacy 三件套全绿
+- 出口面清单（`SURFACE_INVENTORY`）登记 3 条新判据（`isMetaNode` / `collectTableRows` / `HR_TEXT`）并纳入「单一判据」自检
+- 新增仓库内可复现变异锁运行器 `scripts/verify-mutation.js`（`npm run verify:mutation`）：单一切口、语法不合法记 `INVALID` 不计入 `SURVIVED`、逐条打印 `file:line:col op => KILLED|SURVIVED`；本轮改动区间 65 切口 → KILLED 57 / 其余 8 条为行为不可观测的等效变异（逐条退役理由见 `docs/architecture/content-fidelity.md`「等效变异退役清单」）
+- 交付链：`node build.js` + `verify:build`（root ≡ dist）+ `verify:equivalence` + `verify:delivery` 全绿
+
 ## [Unreleased]
 
 ## [3.14.21] - 2026-09-12

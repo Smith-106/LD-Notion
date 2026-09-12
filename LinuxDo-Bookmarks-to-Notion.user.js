@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.21
+// @version      3.14.22
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -4111,6 +4111,29 @@
           return cls.contains("lightbox-wrapper") || cls.contains("image-wrapper") || cls.contains("md-table") || t === "a" && cls.contains("attachment") || t === "aside" && cls.contains("quote");
         },
         isSkippedNode: (el) => SKIP_TAGS.has(tagOf(el)),
+        // 元信息容器判据(Discourse lightbox 的图片文件名/尺寸容器 .meta): 源页由 CSS 隐藏, 非正文。
+        // wave29 共识(7 格, 本轮最高共识项): 判据原内联在 DOMToNotion.processElement(单出口) ——
+        // Markdown 出口把 "thumb.png1024×768" 当正文导出, 同一段笔记两处可见内容不同。收束于此,
+        // 两出口共用(与 emoji/mediaKind 同类的判据单一来源约束)。
+        isMetaNode: (el) => Boolean(el && el.classList && el.classList.contains("meta")),
+        // <hr> 在 rich_text 上下文(引用/列表项/单元格/标题内)的可见标记。块级上下文由各出口产出
+        // 原生分隔线(Notion divider 块 / Markdown "---"); 无法落块时以本标记保持两出口可见内容一致。
+        HR_TEXT: "---",
+        // 表格行采集(两出口唯一来源): 浏览器渲染序 thead → tbody → tfoot(与源序无关)。
+        // wave29 共识(dsf-w2 + qwen-w1 + qwen-w2): Notion 出口原按源序只取首个 thead(第二个 thead
+        // 的行静默丢失)、tbody 与 tfoot 按源序; Markdown 出口按浏览器序 —— <tfoot> 在 <tbody> 之前
+        // 的表两出口行序相反。返回 { header, body }, 均含全部对应段(section)的直属行。
+        collectTableRows: (table) => {
+          const direct = (container, names) => Array.from(container && container.children || []).filter((child) => child && child.tagName && names.includes(String(child.tagName).toLowerCase()));
+          const rowsOf = (section) => direct(section, ["tr"]);
+          const header = [];
+          direct(table, ["thead"]).forEach((section) => rowsOf(section).forEach((tr) => header.push(tr)));
+          const body = [];
+          direct(table, ["tbody"]).forEach((section) => rowsOf(section).forEach((tr) => body.push(tr)));
+          direct(table, ["tfoot"]).forEach((section) => rowsOf(section).forEach((tr) => body.push(tr)));
+          if (header.length === 0 && body.length === 0) rowsOf(table).forEach((tr) => body.push(tr));
+          return { header, body };
+        },
         // 媒体判据: 标签 → 块类型; a.attachment 视为附件
         mediaKind: (el) => {
           const t = tagOf(el);
@@ -4277,7 +4300,7 @@
         // 附件链接 a.attachment
         _cookAttachment: (el, blocks, imgMode) => {
           const href = el.getAttribute("href") || "";
-          const fileName = (el.textContent || "").trim() || DomSpec.foldToSingleLine(DomSpec.textWithBreaks(el)) || "attachment";
+          const fileName = DomSpec.foldToSingleLine(DomSpec.textWithBreaks(el)) || "attachment";
           const full = DomSpec.safeUrl(href);
           if (full && imgMode !== "skip") {
             blocks.push({
@@ -4544,37 +4567,27 @@
           const directRows = (container) => Array.from(container.children || []).filter((child) => child.tagName && child.tagName.toLowerCase() === "tr");
           const directCells = (row) => Array.from(row.children || []).filter((child) => child.tagName && ["td", "th"].includes(child.tagName.toLowerCase()));
           const directSections = (tagNames) => Array.from(table.children || []).filter((child) => child.tagName && tagNames.includes(child.tagName.toLowerCase()));
-          const thead = directSections(["thead"])[0];
-          if (thead && directRows(thead).length > 0) {
-            hasHeader = true;
-            directRows(thead).forEach((tr) => {
-              const cells = [];
-              directCells(tr).forEach((cell) => {
-                const richText = DOMToNotion2.serializeRichText(cell);
-                cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
-              });
-              if (cells.length > 0) rows.push(cells);
+          const collected = DomSpec.collectTableRows(table);
+          const pushRow = (tr) => {
+            const cells = [];
+            directCells(tr).forEach((cell) => {
+              const richText = DOMToNotion2.serializeRichText(cell);
+              cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
             });
-          }
-          const bodyContainers = directSections(["tbody", "tfoot"]);
+            if (cells.length > 0) rows.push(cells);
+          };
+          if (collected.header.length > 0) hasHeader = true;
           let firstBodyRow = true;
-          (bodyContainers.length > 0 ? bodyContainers : [table]).forEach((container) => {
-            directRows(container).forEach((tr) => {
-              if (tr.closest("thead")) return;
+          collected.header.forEach(pushRow);
+          collected.body.forEach((tr) => {
+            if (firstBodyRow) {
+              firstBodyRow = false;
               const rowCells = directCells(tr);
-              if (firstBodyRow) {
-                firstBodyRow = false;
-                if (!hasHeader && rowCells.length > 0 && rowCells.every((cell) => String(cell.tagName).toLowerCase() === "th")) {
-                  hasHeader = true;
-                }
+              if (!hasHeader && rowCells.length > 0 && rowCells.every((cell) => String(cell.tagName).toLowerCase() === "th")) {
+                hasHeader = true;
               }
-              const cells = [];
-              rowCells.forEach((cell) => {
-                const richText = DOMToNotion2.serializeRichText(cell);
-                cells.push(richText.length > 0 ? richText : [{ type: "text", text: { content: "" } }]);
-              });
-              if (cells.length > 0) rows.push(cells);
-            });
+            }
+            pushRow(tr);
           });
           const MAX_TABLE_ROWS = 100;
           if (rows.length > MAX_TABLE_ROWS) {
@@ -4756,7 +4769,7 @@
               DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
               if (result.length === before) {
                 const innerImg = el.querySelector("img");
-                let linkText = el.textContent || (innerImg ? innerImg.getAttribute("alt") || "" : "");
+                let linkText = DomSpec.foldToSingleLine(DomSpec.textWithBreaks(el)) || (innerImg ? innerImg.getAttribute("alt") || "" : "");
                 if (!linkText) linkText = link;
                 if (linkText) {
                   result.push(...DOMToNotion2.splitLongText(linkText, annotations));
@@ -4796,6 +4809,14 @@
               return;
             }
             if (DomSpec.isSkippedNode(n)) return;
+            if (DomSpec.isMetaNode(el)) return;
+            if (tag === "hr") {
+              if (result.length > 0) needBreak = true;
+              breakIfNeeded(annotations);
+              result.push(...DOMToNotion2.splitLongText(DomSpec.HR_TEXT, annotations));
+              needBreak = true;
+              return;
+            }
             if (DomSpec.mediaKind(el)) return;
             if (skipNestedLists && (tag === "ul" || tag === "ol") && (!n.parentNode || n.parentNode === node)) {
               if (result.length > 0) needBreak = true;
@@ -4833,7 +4854,7 @@
               blocks.push({ type: "divider", divider: {} });
               return;
             }
-            if (el.classList && el.classList.contains("meta")) return;
+            if (DomSpec.isMetaNode(el)) return;
             if (el.classList && (el.classList.contains("lightbox-wrapper") || el.classList.contains("image-wrapper"))) {
               let handled = false;
               DomSpec.eachChildOrdered(el, (child) => {
@@ -4927,6 +4948,7 @@
               return;
             }
             DomSpec.eachChildOrdered(el, walkNode);
+            flushInline();
           };
           let inlineParts = [];
           const normalizeInline = (value, annotations) => {
@@ -4947,9 +4969,13 @@
             }
             inlineParts = [];
             if (merged.length === 0) return;
-            merged[0].text.content = normalizeInline(merged[0].text.content, merged[0].annotations).replace(/^\s+/, "");
-            const last = merged[merged.length - 1];
-            last.text.content = normalizeInline(last.text.content, last.annotations).replace(/\s+$/, "");
+            const trimEdge = (part, edge) => {
+              part.text.content = normalizeInline(part.text.content, part.annotations);
+              if (part.annotations && part.annotations.code) return;
+              part.text.content = part.text.content.replace(edge, "");
+            };
+            trimEdge(merged[0], /^\s+/);
+            trimEdge(merged[merged.length - 1], /\s+$/);
             for (let i = 1; i < merged.length - 1; i++) {
               merged[i].text.content = normalizeInline(merged[i].text.content, merged[i].annotations);
             }
@@ -5263,6 +5289,23 @@
         // 字面文本(<a href><img alt="A"></a> → "[!\[A\](…)](…)"); 完全不转义又可注入。
         // 故以「标签转换深度」为界: 仅标签内的**文本节点**转义, 已生成的结构原样保留。
         _labelDepth: 0,
+        // wave29 共识(qwen-w3): strong/em/del 的 children 在子树含块级子节点时会自带空行
+        // (HTML 解析器不会因块级内容关闭内联格式元素) —— 定界符跨空行无法匹配, CommonMark 把
+        // "**" 当字面字符输出(<blockquote><strong>a<hr>b</strong></blockquote> → "> **a" /
+        // "> ---**")。按行包裹: 结构行(引用/分隔线/列表/标题/围栏)保持原样(内容无损, 不注入字面定界符)。
+        // 单行输入(绝大多数情形)与原实现逐字节一致。
+        _wrapInline: (delimiter, text) => String(text).split("\n").map((line) => {
+          if (!line.trim()) return line;
+          if (/^\s*(?:>|#{1,6}\s|```|~~~|[-+*](?:\s|$)|\d+[.)](?:\s|$)|-{2,})/.test(line)) return line;
+          return `${delimiter}${line.trim()}${delimiter}`;
+        }).join("\n"),
+        // wave29 共识(5 格): 链接标签的字面量上下文 —— <a> 内含 video/audio/iframe 时该媒体的产出
+        // 形态是 Markdown 链接, 内层先成立、外层方括号失效(CommonMark 禁止链接嵌套)。原实现对
+        // **整段**标签再跑 mdText: 文本节点已被 _mdLabel 转义一次, 二次转义把 "2*3*4" 变成可见的
+        // "2\\*3\\*4"; 同源缺陷还把合法的嵌套图片 ![alt](u) 一并字面化(两出口内容不对称)。
+        // 改为深度标记, 只在媒体分支自身字面化(见 _literalLink)。
+        _literalLinkDepth: 0,
+        _literalLink: (link) => HTMLToMarkdown2._literalLinkDepth > 0 ? Utils2.mdText(link) : link,
         _convertNode: (node) => {
           var _a, _b;
           if (node.nodeType === Node.TEXT_NODE) {
@@ -5275,6 +5318,7 @@
             return HTMLToMarkdown2._convertNodeBranch(node, tag);
           }
           if (DomSpec.isSkippedNode(node)) return "";
+          if (DomSpec.isMetaNode(node)) return "";
           let children;
           if (tag === "a") {
             HTMLToMarkdown2._labelDepth++;
@@ -5311,34 +5355,39 @@
             case "strong":
             case "b": {
               const text = String(children).trim();
-              return text ? `**${text}**` : children;
+              return text ? HTMLToMarkdown2._wrapInline("**", text) : children;
             }
             case "em":
             case "i": {
               const text = String(children).trim();
-              return text ? `*${text}*` : children;
+              return text ? HTMLToMarkdown2._wrapInline("*", text) : children;
             }
             case "del":
             case "s": {
               const text = String(children).trim();
-              return text ? `~~${text}~~` : children;
+              return text ? HTMLToMarkdown2._wrapInline("~~", text) : children;
             }
             case "code": {
               const parent = node.parentElement;
               if (parent && parent.tagName.toLowerCase() === "pre") return DomSpec.textWithBreaks(node);
               const codeText = DomSpec.textWithBreaks(node);
+              if (!codeText) return "";
               const run = (codeText.match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
               const fence = "`".repeat(Math.max(1, run + 1));
-              const pad = /^`|`$/.test(codeText) ? " " : "";
+              const pad = /^`|`$/.test(codeText) || /^ /.test(codeText) && / $/.test(codeText) && /\S/.test(codeText) ? " " : "";
               return `${fence}${pad}${codeText}${pad}${fence}`;
             }
             case "pre": {
               const codeEl = node.querySelector("code");
               const lang = ((_b = String(codeEl && (((_a = codeEl.getAttribute) == null ? void 0 : _a.call(codeEl, "class")) || codeEl.className) || "").match(/lang(?:uage)?-([\w+#.-]+)/i)) == null ? void 0 : _b[1]) || "";
-              const text = DomSpec.textWithBreaks(node).replace(/^\n/, "");
+              const text = DomSpec.textWithBreaks(node);
               const longestRun = (String(text).match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
               const fence = "`".repeat(Math.max(3, longestRun + 1));
-              return fence + lang + "\n" + text + "\n" + fence + "\n\n";
+              const media = [];
+              DomSpec.eachMedia(node, (el) => media.push(HTMLToMarkdown2._convertNode(el)));
+              return fence + lang + "\n" + text + "\n" + fence + "\n\n" + media.map((md) => /\n\n$/.test(md) ? md : `${md}
+
+`).join("");
             }
             case "blockquote": {
               const lines = String(children).replace(/\r\n?/g, "\n").trim().split("\n");
@@ -5347,10 +5396,18 @@
             case "a": {
               const link = DomSpec.safeUrl(node.getAttribute("href") || "");
               if (link) {
-                let label = String(children).replace(/\r\n?|\n/g, " ").trim();
-                if (label && ["video", "audio", "iframe"].some((t) => typeof node.querySelector === "function" && node.querySelector(t))) {
-                  label = Utils2.mdText(label);
+                let labelChildren = children;
+                if (["video", "audio", "iframe"].some((t) => typeof node.querySelector === "function" && node.querySelector(t))) {
+                  HTMLToMarkdown2._labelDepth++;
+                  HTMLToMarkdown2._literalLinkDepth++;
+                  try {
+                    labelChildren = HTMLToMarkdown2._convertChildren(node);
+                  } finally {
+                    HTMLToMarkdown2._labelDepth--;
+                    HTMLToMarkdown2._literalLinkDepth--;
+                  }
                 }
+                const label = String(labelChildren).replace(/\r\n?|\n/g, " ").trim();
                 return label ? `[${label}](${HTMLToMarkdown2._mdUrl(link)})` : `[${HTMLToMarkdown2._mdLabel(link)}](${HTMLToMarkdown2._mdUrl(link)})`;
               }
               return children;
@@ -5367,29 +5424,40 @@
             case "iframe": {
               const safeSrc = DomSpec.mediaUrl(node);
               if (safeSrc) {
-                return `[\u5D4C\u5165\u5185\u5BB9](${HTMLToMarkdown2._mdUrl(safeSrc)})
-
-`;
+                return HTMLToMarkdown2._literalLink(`[\u5D4C\u5165\u5185\u5BB9](${HTMLToMarkdown2._mdUrl(safeSrc)})`) + "\n\n";
               }
               return DomSpec.mediaSrc(node) ? "[\u5D4C\u5165\u5185\u5BB9\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n" : "";
             }
             case "video": {
               const src = DomSpec.mediaUrl(node);
               if (src) {
-                return `[\u89C6\u9891](${HTMLToMarkdown2._mdUrl(src)})
-
-`;
+                return HTMLToMarkdown2._literalLink(`[\u89C6\u9891](${HTMLToMarkdown2._mdUrl(src)})`) + "\n\n";
               }
               return DomSpec.mediaSrc(node) ? "[\u89C6\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n" : "";
             }
             case "audio": {
               const src = DomSpec.mediaUrl(node);
               if (src) {
-                return `[\u97F3\u9891](${HTMLToMarkdown2._mdUrl(src)})
-
-`;
+                return HTMLToMarkdown2._literalLink(`[\u97F3\u9891](${HTMLToMarkdown2._mdUrl(src)})`) + "\n\n";
               }
               return DomSpec.mediaSrc(node) ? "[\u97F3\u9891\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]\n\n" : "";
+            }
+            case "aside": {
+              const quoteCls = node.classList || { contains: (name) => String(node.className || "").split(/\s+/).includes(name) };
+              if (!quoteCls.contains("quote")) return children;
+              let hasQuote = false;
+              const scanQuote = (el) => DomSpec.eachChildOrdered(el, (child) => {
+                if (hasQuote || child.nodeType !== Node.ELEMENT_NODE) return;
+                if (String(child.tagName || "").toLowerCase() === "blockquote") {
+                  hasQuote = true;
+                  return;
+                }
+                scanQuote(child);
+              });
+              scanQuote(node);
+              if (hasQuote) return children;
+              const quotedLines = String(children).replace(/\r\n?/g, "\n").trim().split("\n");
+              return quotedLines.map((line) => `> ${line}`).join("\n") + "\n\n";
             }
             case "div": {
               const cls = node.classList || { contains: (name) => String(node.className || "").split(/\s+/).includes(name) };
@@ -5414,9 +5482,12 @@ ${quoted}
           let out = "";
           let needBreak = false;
           DomSpec.eachChildOrdered(node, (child) => {
-            const md = HTMLToMarkdown2._convertNode(child);
-            if (!md) return;
             const isBlock = child.nodeType === Node.ELEMENT_NODE && child.tagName && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase());
+            const md = HTMLToMarkdown2._convertNode(child);
+            if (!md) {
+              if (isBlock && out) needBreak = true;
+              return;
+            }
             if ((needBreak || Boolean(isBlock)) && out && !/\n\n$/.test(out)) {
               out = out.replace(/\n?$/, "\n\n");
             }
@@ -5425,10 +5496,37 @@ ${quoted}
           });
           return out;
         },
+        // wave29 共识(dsf-w3 + glm-w1 + glm-w3): 单元格是单行上下文(GFM 只按内联解析单元格) ——
+        // 块级子节点不得注入结构符(<ul> → "- a"、<pre> → 三反引号、嵌套表 → "| inner | | --- |"),
+        // 原实现直接复用 _convertChildren, 这些标记全部以字面字符落进单元格(可见内容与 Notion 出口
+        // 不一致)。块级子节点改取可见文本投影(DomSpec.textWithBreaks, 与 serializeRichText 对
+        // li/td/引用只保留文本同口径), 内联子节点仍走常规转换(bold/link/code 保留)。
+        // <hr> 无文本, 投影为空 —— 但 Notion 侧单元格经 serializeRichText 会得到可见标记
+        // (DomSpec.HR_TEXT), 故此处同样以该标记保持两出口可见内容一致。
+        _convertCellChildren: (node) => {
+          let out = "";
+          let needSeparator = false;
+          const append = (md, isBlockChild) => {
+            if (!md) return;
+            if (out && (isBlockChild || needSeparator) && !/\s$/.test(out) && !/^\s/.test(md)) out += " ";
+            out += md;
+            needSeparator = Boolean(isBlockChild);
+          };
+          DomSpec.eachChildOrdered(node, (child) => {
+            const tag = child.nodeType === Node.ELEMENT_NODE && child.tagName ? String(child.tagName).toLowerCase() : "";
+            if (tag && DomSpec.TEXT_BOUNDARY_TAGS.has(tag)) {
+              const text = tag === "hr" ? DomSpec.HR_TEXT : DomSpec.foldToSingleLine(DomSpec.textWithBreaks(child));
+              append(text, true);
+              return;
+            }
+            append(HTMLToMarkdown2._convertNode(child), false);
+          });
+          return out;
+        },
         _convertTable: (table) => {
+          const collected = DomSpec.collectTableRows(table);
+          const rows = [...collected.header, ...collected.body];
           const direct = (tag) => Array.from(table.children || []).filter((c) => c.tagName && c.tagName.toLowerCase() === tag);
-          const sections = [...direct("thead"), ...direct("tbody"), ...direct("tfoot")];
-          const rows = sections.length > 0 ? sections.flatMap((sec) => Array.from(sec.children || []).filter((r) => r.tagName && r.tagName.toLowerCase() === "tr")) : Array.from(table.children || []).filter((r) => r.tagName && r.tagName.toLowerCase() === "tr");
           const caption = direct("caption")[0];
           const captionText = caption ? DomSpec.foldToSingleLine(HTMLToMarkdown2._convertChildren(caption)).trim() : "";
           if (rows.length === 0) return captionText ? `${captionText}
@@ -5442,7 +5540,7 @@ ${quoted}
           const width = Math.max(1, ...rows.map(cellCount));
           rows.forEach((row, i) => {
             const cells = Array.from(row.children || []).filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).map((c) => {
-              return DomSpec.foldToSingleLine(HTMLToMarkdown2._convertChildren(c)).replace(/(?<!\\)\|/g, "\\|");
+              return DomSpec.foldToSingleLine(HTMLToMarkdown2._convertCellChildren(c)).replace(/(?<!\\)\|/g, "\\|");
             });
             while (cells.length < width) cells.push("");
             result.push(`| ${cells.join(" | ")} |`);

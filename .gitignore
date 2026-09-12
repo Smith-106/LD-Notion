@@ -60,6 +60,10 @@ node_modules/.vite/
 
 # 会话临时产物(审计/派发/变异/测试日志与脚本; 防回潮)
 _*.py
+_*.sh
+_*.mjs
+_*.cjs
+_*.js
 _*.log
 _*.txt
 _*.md

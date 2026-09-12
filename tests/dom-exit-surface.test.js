@@ -749,7 +749,7 @@ describe("清单自检: 出口面清单与 src/ 现状一致", () => {
     const EXPORTERS = ["src/api/DOMToNotion.js", "src/api/obsidian.js"];
 
     it("清单条目结构完整", () => {
-        expect(SURFACE_INVENTORY.length).toBe(7);
+        expect(SURFACE_INVENTORY.length).toBe(10);
         for (const item of SURFACE_INVENTORY) {
             expect(`${item.surface.length > 0} ${item.primitive.length > 0}`).toBe("true true");
             expect(item.hosts).toBeGreaterThan(0);
@@ -776,7 +776,7 @@ describe("清单自检: 出口面清单与 src/ 现状一致", () => {
 
     it("原语唯一实现地: 导出器不得重声明跳过表/折叠/遍历", () => {
         const spec = read("src/api/DomSpec.js");
-        for (const name of ["SKIP_TAGS", "eachChildOrdered", "foldToSingleLine", "safeUrl", "mediaUrl", "mediaSrc", "eachMedia", "textWithBreaks"]) {
+        for (const name of ["SKIP_TAGS", "eachChildOrdered", "foldToSingleLine", "safeUrl", "mediaUrl", "mediaSrc", "eachMedia", "textWithBreaks", "isMetaNode", "collectTableRows", "HR_TEXT"]) {
             expect(`DomSpec | ${name} | ${spec.includes(name)}`).toBe(`DomSpec | ${name} | true`);
         }
         for (const p of EXPORTERS) {
@@ -1894,6 +1894,216 @@ describe("wave28 确认轮: 连字符混合间距分隔线与边界折叠后的�
     });
 });
 
+// ===== wave29: 三模型九格共识复审确认项的出口面契约 =====
+// 每项均先由只读探针(_probe29b.js, 与本体同款 DOM/DOMParser 桩)测出两出口真实输出,
+// 再按「同一出口面两出口同口径」写成契约。
+describe("wave29 确认轮: 元信息容器 / 表格行序 / 富文本上下文的块级标记", () => {
+    const withDom = (body, fn) => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body }) };
+        };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
+    };
+    const run = (body, mode = "external") => withDom(element("body", body), () => DOMToNotion.cookedToBlocks("<div>x</div>", mode));
+    const texts = (blocks) => blocks.map((b) => {
+        const holder = b.paragraph || b.quote || b.heading_3 || b.bulleted_list_item;
+        return ((holder && holder.rich_text) || []).map((r) => r.text.content).join("");
+    });
+    const meta = (text) => element("div", [textNode(text)], { classList: { contains: (c) => c === "meta" } });
+
+    it(".meta(图片文件名/尺寸)两出口一致跳过", () => {
+        expect(HTMLToMarkdown._convertNode(meta("thumb.png 1024×768"))).toBe("");
+        expect(run([meta("thumb.png 1024×768")]).length).toBe(0);
+        // 内联路径(未匹配容器内)同口径
+        expect(HTMLToMarkdown._convertChildren(element("div", [textNode("前"), meta("m"), textNode("后")])))
+            .not.toContain("m");
+    });
+
+    it("<a> 回退与附件名不取裸 textContent(script 源码不成可见文本)", () => {
+        const script = element("script", [textNode(JS_SOURCE)]);
+        const link = element("a", [script], { getAttribute: attrs({ href: "https://h/x" }), querySelector: () => null });
+        const rt = DOMToNotion.serializeRichText(element("p", [link])).map((r) => r.text.content).join("");
+        expect(rt).not.toContain(JS_SOURCE);
+        expect(rt).toBe("https://h/x");
+        const blocks = [];
+        DOMToNotion._cookAttachment(element("a", [script], {
+            getAttribute: attrs({ href: "https://cdn.example.com/a.pdf" }),
+            classList: { contains: (c) => c === "attachment" },
+        }), blocks, "external");
+        expect(blocks[0].file.caption.map((r) => r.text.content).join("")).toBe("attachment");
+    });
+
+    it("rich_text 上下文内的 <hr> 保留可见标记(与 Markdown 侧同口径)", () => {
+        const quote = element("blockquote", [textNode("a"), element("hr", []), textNode("b")]);
+        expect(texts(run([quote])).join("")).toBe("a\n" + DomSpec.HR_TEXT + "\nb");
+        expect(HTMLToMarkdown._convertNode(quote)).toContain(DomSpec.HR_TEXT);
+    });
+
+    it("表格行采集: 全部 thead 段保留且按浏览器序 thead→tbody→tfoot", () => {
+        const th = (t) => element("th", [textNode(t)]);
+        const td = (t) => element("td", [textNode(t)]);
+        const tr = (cells) => element("tr", cells);
+        const cellTexts = (blocks) => blocks[0].table.children.map((row) => row.table_row.cells
+            .map((cell) => (cell[0] ? cell[0].text.content : "")).join("|"));
+        const twoHead = element("table", [
+            element("thead", [tr([th("T1")])]),
+            element("tbody", [tr([td("B")])]),
+            element("thead", [tr([th("T2")])]),
+        ]);
+        expect(cellTexts(run([twoHead]))).toEqual(["T1", "T2", "B"]);
+        expect(DomSpec.collectTableRows(twoHead).header.length).toBe(2);
+        const footFirst = element("table", [
+            element("tfoot", [tr([td("合计")])]),
+            element("tbody", [tr([td("明细")])]),
+        ]);
+        expect(cellTexts(run([footFirst]))).toEqual(["明细", "合计"]);
+        expect(HTMLToMarkdown._convertTable(footFirst)).toBe("| 明细 |\n| --- |\n| 合计 |");
+        // 表头只由首行（thead 行/首行全 <th>）决定 —— 后续行全为 <th> 不升格为列标题
+        const lateTh = element("table", [element("tbody", [
+            element("tr", [element("td", [textNode("a")])]),
+            element("tr", [element("th", [textNode("b")])]),
+        ])]);
+        const blocks = run([lateTh]);
+        expect(blocks[0].table.has_column_header).toBe(false);
+    });
+
+    it("嵌套未匹配容器的块级边界(两出口均分段)", () => {
+        const inner = element("div", [textNode("b")]);
+        const outer = element("div", [textNode("a"), inner, textNode("c")]);
+        expect(texts(run([outer]))).toEqual(["a", "b", "c"]);
+        expect(HTMLToMarkdown._convertChildren(outer)).toBe("a\n\nb\n\nc");
+    });
+
+    it("空块级子节点不吞词边界", () => {
+        const div = element("div", [textNode("Hello"), element("div", []), textNode("World")]);
+        expect(HTMLToMarkdown._convertChildren(div)).toBe("Hello\n\nWorld");
+    });
+
+    it("容器以块级子节点开头时不注入前导空行", () => {
+        // 块级子节点前的边界只在**已有内容**时补 —— 否则容器产出的首行会多一个空行
+        // (嵌入到引用/列表项上下文时会凭空多出空段落)
+        expect(HTMLToMarkdown._convertChildren(element("div", [element("p", [textNode("x")])])))
+            .toBe("x\n\n");
+        expect(HTMLToMarkdown._convertChildren(element("div", [element("hr", [])]))).toBe("---\n\n");
+    });
+
+    it("表格单元格内的 <hr> 两出口一致保留可见标记", () => {
+        const table = element("table", [element("tbody", [element("tr", [element("td", [
+            textNode("前"), element("hr", []), textNode("后"),
+        ])])])]);
+        // Markdown 单元格是单行上下文(换行会拆断表格行); Notion rich_text 保留 \n ——
+        // 可见文本两出口一致("前"/"---"/"后")
+        expect(HTMLToMarkdown._convertTable(table)).toBe("| 前 " + DomSpec.HR_TEXT + " 后 |\n| --- |");
+        const cells = run([table])[0].table.children[0].table_row.cells;
+        expect(cells.map((cell) => cell.map((r) => r.text.content).join("")).join("")).toBe("前\n" + DomSpec.HR_TEXT + "\n后");
+    });
+
+    it("段落首/末片段带注解时仍归一化并去边界空白", () => {
+        const blocks = run([element("div", [
+            element("b", [textNode(" a ")]), textNode("b c "),
+        ])]);
+        expect(texts(blocks)[0]).toBe("a b c");
+    });
+
+    it("透明下钻不裁掉 code 片段的首尾空白(与 <p> 路径同口径)", () => {
+        const code = (t) => element("code", [textNode(t)]);
+        const divText = texts(run([element("div", [code("  x  ")])])).join("");
+        expect(divText).toBe("  x  ");
+        expect(divText).toBe(texts(run([element("p", [code("  x  ")])])).join(""));
+    });
+
+    it("空 <code> 不注入字面反引号, 也不把中间内容吞成代码跨度", () => {
+        expect(HTMLToMarkdown._convertNode(element("p", [textNode("a"), element("code", []), textNode("b")])))
+            .toBe("ab\n\n");
+        const md = HTMLToMarkdown._convertNode(element("p", [
+            textNode("A"), element("code", []), textNode("B"),
+            element("em", [textNode("C")]), textNode("D"), element("code", []), textNode("E"),
+        ]));
+        expect(md).toContain("*C*");
+        expect(md).not.toContain("``");
+    });
+
+    it("行内 code 首尾空格补位(CommonMark 不再各剥一个)", () => {
+        expect(HTMLToMarkdown._convertNode(element("p", [element("code", [textNode(" a ")])])))
+            .toBe("`  a  `\n\n");
+        // 只有单侧空格时不补位 —— CommonMark §6.3 仅在**首尾同时**为空格时各剥一个,
+        // 此时补位会把可见空白从 " a" 改成 "a"(反而丢内容)
+        expect(HTMLToMarkdown._convertNode(element("p", [element("code", [textNode(" a")])])))
+            .toBe("` a`\n\n");
+        expect(HTMLToMarkdown._convertNode(element("p", [element("code", [textNode("a ")])])))
+            .toBe("`a `\n\n");
+    });
+
+    it("内联强调跨块级子节点不注入字面定界符", () => {
+        const md = HTMLToMarkdown._convertNode(element("blockquote", [
+            element("strong", [textNode("a"), element("hr", []), textNode("b")]),
+        ]));
+        expect(md).toBe("> **a**\n> \n> ---\n> \n> **b**\n\n");
+    });
+
+    it("pre 保留内容自身的行首换行, 且 pre 内媒体在 Markdown 侧补发", () => {
+        expect(HTMLToMarkdown._convertNode(element("pre", [element("code", [textNode("\ncode")])])))
+            .toBe("```\n\ncode\n```\n\n");
+        const img = element("img", [], { getAttribute: attrs({ src: "https://cdn.example.com/a.png" }) });
+        const md = HTMLToMarkdown._convertNode(element("pre", [element("code", [textNode("x")]), img]));
+        expect(md).toContain("```");
+        expect(md).toContain("![](https://cdn.example.com/a.png)");
+    });
+
+    it("<a> 内媒体: 标签文本只转义一次, 嵌套图片仍为图片", () => {
+        const video = () => element("video", [], { getAttribute: attrs({ src: "https://cdn.example.com/v.mp4" }) });
+        const a = element("a", [textNode("[x] 2*3*4"), video()], {
+            getAttribute: attrs({ href: "https://h/x" }),
+            querySelector: (sel) => (sel === "video" ? video() : null),
+        });
+        const md = HTMLToMarkdown._convertNode(a);
+        expect(md).toContain("\\[x\\] 2\\*3\\*4");
+        expect(md).not.toContain("\\\\[x");
+        expect(md).toContain("\\[视频\\](https://cdn.example.com/v.mp4)");
+        const img = () => element("img", [], { getAttribute: attrs({ src: "https://cdn/i.png", alt: "图" }) });
+        const a2 = element("a", [img(), video()], {
+            getAttribute: attrs({ href: "https://h/x" }),
+            querySelector: (sel) => (sel === "video" ? video() : (sel === "img" ? img() : null)),
+        });
+        expect(HTMLToMarkdown._convertNode(a2)).toContain("![图](https://cdn/i.png)");
+    });
+
+    it("表格单元格不注入块级结构符(列表/嵌套表)", () => {
+        const cell = (child) => element("table", [element("tbody", [element("tr", [element("td", [child])])])]);
+        expect(HTMLToMarkdown._convertTable(cell(element("ul", [element("li", [textNode("a")])]))))
+            .toBe("| a |\n| --- |");
+        const nested = cell(element("table", [element("tbody", [element("tr", [element("td", [textNode("inner")])])])]));
+        const md = HTMLToMarkdown._convertTable(nested);
+        expect(md).toBe("| inner |\n| --- |");
+        expect(md).not.toContain("--- |  |");
+    });
+
+    it("单元格内相邻内联内容不注入空白, 内联格式保留", () => {
+        const cell = (children) => element("table", [element("tbody", [element("tr", [element("td", children)])])]);
+        // 分隔只在块级子节点处补 —— 相邻内联文本间本无空白, 不得凭空插入(可见内容改变)
+        expect(HTMLToMarkdown._convertTable(cell([element("b", [textNode("a")]), textNode("b")])))
+            .toBe("| **a**b |\n| --- |");
+        expect(HTMLToMarkdown._convertTable(cell([textNode("前"), element("code", [textNode("x")])])))
+            .toBe("| 前`x` |\n| --- |");
+        // 块级子节点前后仍留分隔(与浏览器上下堆叠的渲染一致)
+        expect(HTMLToMarkdown._convertTable(cell([textNode("前"), element("ul", [element("li", [textNode("a")])])])))
+            .toBe("| 前 a |\n| --- |");
+    });
+
+    it("aside.quote 无内层 blockquote 时保留引用语义", () => {
+        const aside = element("aside", [element("p", [textNode("引用文本")])],
+            { classList: { contains: (c) => c === "quote" } });
+        expect(HTMLToMarkdown._convertNode(aside)).toBe("> 引用文本\n\n");
+        const withQuote = element("aside", [element("blockquote", [textNode("引用")])],
+            { classList: { contains: (c) => c === "quote" } });
+        expect(HTMLToMarkdown._convertNode(withQuote)).toBe("> 引用\n\n");
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;
@@ -1906,4 +2116,7 @@ export const SURFACE_INVENTORY = [
     { surface: "单行上下文折叠", primitive: "DomSpec.foldToSingleLine / collapseOneLine", hosts: 11, exporters: 2, note: "记录在案的差异: Markdown 侧折叠 CR/LF, Notion 侧 rich_text 保留 \\n" },
     { surface: "emoji 判据", primitive: "DomSpec.emojiNameOf", hosts: 1, exporters: 1, note: "仅 DOMToNotion 消费(转 emoji 文本); obsidian 侧按普通图片写出 emoji 图链接, 不失信息" },
     { surface: "代码块文本提取(<br> 换行保留)", primitive: "DomSpec.textWithBreaks", hosts: 2, exporters: 2 },
+    { surface: "元信息容器(.meta 文件名/尺寸)", primitive: "DomSpec.isMetaNode", hosts: 3, exporters: 2, note: "wave29: 判据原内联在 Notion 出口, Markdown 侧曾把 CSS 隐藏的元信息当正文导出" },
+    { surface: "表格行采集(浏览器序 thead→tbody→tfoot)", primitive: "DomSpec.collectTableRows", hosts: 2, exporters: 2, note: "wave29: 原 Notion 侧按源序只取首个 thead(第二个 thead 行静默丢失), Markdown 侧按浏览器序" },
+    { surface: "rich_text 上下文的 <hr> 可见标记", primitive: "DomSpec.HR_TEXT", hosts: 2, exporters: 2, note: "wave29: 块级上下文产出原生分隔线, 富文本上下文以可见标记保持两出口一致" },
 ];

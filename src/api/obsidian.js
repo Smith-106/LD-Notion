@@ -304,6 +304,26 @@ const HTMLToMarkdown = {
     // 故以「标签转换深度」为界: 仅标签内的**文本节点**转义, 已生成的结构原样保留。
     _labelDepth: 0,
 
+    // wave29 共识(qwen-w3): strong/em/del 的 children 在子树含块级子节点时会自带空行
+    // (HTML 解析器不会因块级内容关闭内联格式元素) —— 定界符跨空行无法匹配, CommonMark 把
+    // "**" 当字面字符输出(<blockquote><strong>a<hr>b</strong></blockquote> → "> **a" /
+    // "> ---**")。按行包裹: 结构行(引用/分隔线/列表/标题/围栏)保持原样(内容无损, 不注入字面定界符)。
+    // 单行输入(绝大多数情形)与原实现逐字节一致。
+    _wrapInline: (delimiter, text) => String(text).split("\n").map((line) => {
+        if (!line.trim()) return line;
+        if (/^\s*(?:>|#{1,6}\s|```|~~~|[-+*](?:\s|$)|\d+[.)](?:\s|$)|-{2,})/.test(line)) return line;
+        return `${delimiter}${line.trim()}${delimiter}`;
+    }).join("\n"),
+
+    // wave29 共识(5 格): 链接标签的字面量上下文 —— <a> 内含 video/audio/iframe 时该媒体的产出
+    // 形态是 Markdown 链接, 内层先成立、外层方括号失效(CommonMark 禁止链接嵌套)。原实现对
+    // **整段**标签再跑 mdText: 文本节点已被 _mdLabel 转义一次, 二次转义把 "2*3*4" 变成可见的
+    // "2\\*3\\*4"; 同源缺陷还把合法的嵌套图片 ![alt](u) 一并字面化(两出口内容不对称)。
+    // 改为深度标记, 只在媒体分支自身字面化(见 _literalLink)。
+    _literalLinkDepth: 0,
+
+    _literalLink: (link) => (HTMLToMarkdown._literalLinkDepth > 0 ? Utils.mdText(link) : link),
+
     _convertNode: (node) => {
         if (node.nodeType === Node.TEXT_NODE) {
             const text = node.textContent || "";
@@ -327,6 +347,11 @@ const HTMLToMarkdown = {
         // 经 default 原样并入导出正文, 污染笔记。判据统一驻 DomSpec.SKIP_TAGS, 且置于
         // _convertChildren 之前(源码不必先转换再丢弃)
         if (DomSpec.isSkippedNode(node)) return "";
+
+        // wave29 共识(7 格, 本轮最高共识): 图片元信息容器 .meta(文件名/尺寸, 源页由 CSS 隐藏)
+        // 的跳过判据原内联在 Notion 出口(processElement) —— 本出口把 "thumb.png1024×768"
+        // 当正文导出, 同一段笔记两处可见内容不同。判据收束到 DomSpec.isMetaNode
+        if (DomSpec.isMetaNode(node)) return "";
 
         let children;
         // wave18 共识(w3 qwen): 链接标签的子树内文本需转义(见 _labelDepth)
@@ -356,15 +381,15 @@ const HTMLToMarkdown = {
                 // <strong> 重点 </strong> 原样输出 "** 重点 **" 不渲染为强调(星号字面可见)。
                 // 内层留白移到定界符外(空白在 Markdown 中本就折叠, 内容无损)
                 const text = String(children).trim();
-                return text ? `**${text}**` : children;
+                return text ? HTMLToMarkdown._wrapInline("**", text) : children;
             }
             case "em": case "i": {
                 const text = String(children).trim();
-                return text ? `*${text}*` : children;
+                return text ? HTMLToMarkdown._wrapInline("*", text) : children;
             }
             case "del": case "s": {
                 const text = String(children).trim();
-                return text ? `~~${text}~~` : children;
+                return text ? HTMLToMarkdown._wrapInline("~~", text) : children;
             }
             case "code": {
                 const parent = node.parentElement;
@@ -376,9 +401,17 @@ const HTMLToMarkdown = {
                 // wave6 共识(qwen): 内容含反引号会提前闭合代码跨度并可注入后续标记 ——
                 // 用比最长反引号串更长的围栏(与 pre 分支同口径), 首尾为反引号时补空格
                 const codeText = DomSpec.textWithBreaks(node);
+                // wave29 共识(dsf-w3 + qwen-w3): 空内容原先仍拼出成对围栏 —— 单个空 <code>
+                // 注入可见 "``"; 更严重的是两个空 <code> 之间的内容会被解析为一个代码跨度
+                // (<p>A<code></code>B<em>C</em>D<code></code>E</p> → "B*C*D" 字面化, C 的斜体丢失)
+                if (!codeText) return "";
                 const run = (codeText.match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
                 const fence = "`".repeat(Math.max(1, run + 1));
-                const pad = /^`|`$/.test(codeText) ? " " : "";
+                // wave29 共识(qwen-w1 + qwen-w3): CommonMark §6.3 在内容**首尾同时**为空格
+                // (且不全为空格)时各剥掉一个空格 —— 原 pad 只覆盖首尾为反引号的情形,
+                // <code> a </code> 的可见空白被静默改写(Notion 出口保留 " a ")
+                const pad = /^`|`$/.test(codeText)
+                    || (/^ /.test(codeText) && / $/.test(codeText) && /\S/.test(codeText)) ? " " : "";
                 return `${fence}${pad}${codeText}${pad}${fence}`;
             }
             case "pre": {
@@ -393,12 +426,21 @@ const HTMLToMarkdown = {
                     .match(/lang(?:uage)?-([\w+#.-]+)/i)?.[1] || "";
                 // wave14 共识(glm): 只取 code 元素会丢掉 pre 内其余文本(<pre>foo<code>bar</code></pre>);
                 // wave16 共识(qwen): textContent 下 <br> 不产生换行(<pre>a<br>b</pre> 导出 "ab");
-                // 统一走 DomSpec.textWithBreaks, 并按 HTML 规范去掉 <pre> 紧随的首个换行
-                const text = DomSpec.textWithBreaks(node).replace(/^\n/, "");
+                // 统一走 DomSpec.textWithBreaks。
+                // wave29 共识(glm-w1): 原在此再 .replace(/^\n/, "") 想剥「HTML 解析器在 <pre> 后
+                // 剥掉的首个换行」—— 解析器建树时**已**剥掉紧跟 <pre> 的那一个, 此处的剥离只会命中
+                // 内容自身的行首换行(<pre><code>\ncode</code></pre> 的可见空行丢失, Notion 出口保留)
+                const text = DomSpec.textWithBreaks(node);
                 // P4 共识(glm): 内容含 ``` 会提前闭合围栏 —— 用比最长反引号串更长的围栏
                 const longestRun = (String(text).match(/`+/g) || []).reduce((m, s) => Math.max(m, s.length), 0);
                 const fence = "`".repeat(Math.max(3, longestRun + 1));
-                return fence + lang + "\n" + text + "\n" + fence + "\n\n";
+                // wave29 共识(glm-w2 + qwen-w3): <pre> 内的 <img> 属 phrasing content(HTML 合法) ——
+                // Notion 出口经 _cookCode 补发兄弟块保留该图, 本出口原整体丢弃子树产物(静默丢失);
+                // 围栏之后按文档序补发(围栏内无法承载图片语法)
+                const media = [];
+                DomSpec.eachMedia(node, (el) => media.push(HTMLToMarkdown._convertNode(el)));
+                return fence + lang + "\n" + text + "\n" + fence + "\n\n"
+                    + media.map((md) => (/\n\n$/.test(md) ? md : `${md}\n\n`)).join("");
             }
             case "blockquote": {
                 // wave18 共识(w3 glm): 拆行前需统一行结束符 —— 源文本中的孤立 \r
@@ -420,14 +462,24 @@ const HTMLToMarkdown = {
                     // wave19 共识(w19 qwen): 标签被剪空时(子树全为 script/style/noscript)
                     // 产出 "[](url)" —— CommonMark 中空标签不构成链接(渲染为字面垃圾且不可点),
                     // 与 Notion 出口的回退(linkText = link)不对称; 改为以 URL 自身作标签
-                    let label = String(children).replace(/\r\n?|\n/g, " ").trim();
-                    // wave23 共识(w23 qwen): CommonMark 禁止链接嵌套链接 —— <a> 内 video/audio/iframe
-                    // 的产出形态是 Markdown 链接([视频](u)), 内层先成立、外层方括号失效, 渲染结果
-                    // 多出字面 "] (url)"; 图片(![alt](u)) 是合法的标签内容, 不受影响。仅当标签来源于
-                    // 这三类媒体时把标记整体转义为字面文本(链接目标与可见文本均不丢)
-                    if (label && ["video", "audio", "iframe"].some((t) => typeof node.querySelector === "function" && node.querySelector(t))) {
-                        label = Utils.mdText(label);
+                    // wave23 共识(w23 qwen) + wave29 共识(5 格): CommonMark 禁止链接嵌套链接 ——
+                    // <a> 内 video/audio/iframe 的产出形态是 Markdown 链接([视频](u)), 内层先成立、
+                    // 外层方括号失效; 图片(![alt](u)) 是合法的标签内容, 不受影响。故仅当标签来源于
+                    // 这三类媒体时重算标签, 且只在媒体分支自身字面化(_literalLink): 原实现对整段
+                    // 标签再跑 mdText —— 文本节点已被 _mdLabel 转义一次(二次转义使 "2*3*4" 渲染为
+                    // 可见的 "2\*3*4"), 同源缺陷还把合法的嵌套图片字面化
+                    let labelChildren = children;
+                    if (["video", "audio", "iframe"].some((t) => typeof node.querySelector === "function" && node.querySelector(t))) {
+                        HTMLToMarkdown._labelDepth++;
+                        HTMLToMarkdown._literalLinkDepth++;
+                        try {
+                            labelChildren = HTMLToMarkdown._convertChildren(node);
+                        } finally {
+                            HTMLToMarkdown._labelDepth--;
+                            HTMLToMarkdown._literalLinkDepth--;
+                        }
                     }
+                    const label = String(labelChildren).replace(/\r\n?|\n/g, " ").trim();
                     return label
                         ? `[${label}](${HTMLToMarkdown._mdUrl(link)})`
                         // wave23 共识(w23 qwen): URL 兜底标签同属字面量上下文 —— 改用 _mdLabel
@@ -456,7 +508,7 @@ const HTMLToMarkdown = {
                 // wave9 共识(qwen) + R15: 地址判据统一走 DomSpec.mediaUrl
                 const safeSrc = DomSpec.mediaUrl(node);
                 if (safeSrc) {
-                    return `[嵌入内容](${HTMLToMarkdown._mdUrl(safeSrc)})\n\n`;
+                    return HTMLToMarkdown._literalLink(`[嵌入内容](${HTMLToMarkdown._mdUrl(safeSrc)})`) + "\n\n";
                 }
                 // wave18 共识(w3 qwen): 无任何候选地址时不得输出「已拒」标记(与 Notion 出口
                 // _cookIframe/_cookVideo 以 DomSpec.mediaSrc 为前置的判据同口径, 不造噪声块)
@@ -466,7 +518,7 @@ const HTMLToMarkdown = {
                 // wave9 共识(qwen) + R15: 同 img —— 地址判据统一走 DomSpec.mediaUrl
                 const src = DomSpec.mediaUrl(node);
                 if (src) {
-                    return `[视频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
+                    return HTMLToMarkdown._literalLink(`[视频](${HTMLToMarkdown._mdUrl(src)})`) + "\n\n";
                 }
                 // wave18 共识(w3 qwen): 同 iframe —— 无候选地址不输出「已拒」标记
                 return DomSpec.mediaSrc(node) ? "[视频已拒（非公网 http(s) 地址）]\n\n" : "";
@@ -475,10 +527,29 @@ const HTMLToMarkdown = {
                 // wave13 共识(dsf) + R15: 与 video 同口径 —— 地址判据统一走 DomSpec.mediaUrl
                 const src = DomSpec.mediaUrl(node);
                 if (src) {
-                    return `[音频](${HTMLToMarkdown._mdUrl(src)})\n\n`;
+                    return HTMLToMarkdown._literalLink(`[音频](${HTMLToMarkdown._mdUrl(src)})`) + "\n\n";
                 }
                 // wave18 共识(w3 qwen): 同 iframe/video —— 无候选地址不输出「已拒」标记
                 return DomSpec.mediaSrc(node) ? "[音频已拒（非公网 http(s) 地址）]\n\n" : "";
+            }
+            case "aside": {
+                // wave29 共识(dsf-w3 + glm-w3): <aside class="quote"> 原走 default ⇒ 无内层
+                // blockquote 的引用回退形态(Notion 出口 _cookAsideQuote 已支持)在本出口丢失引用
+                // 语义, 同一段笔记 Markdown 侧只剩裸段落。有内层 blockquote 时其自带 "> " 前缀,
+                // 不再重复包裹
+                const quoteCls = node.classList
+                    || { contains: (name) => String(node.className || "").split(/\s+/).includes(name) };
+                if (!quoteCls.contains("quote")) return children;
+                let hasQuote = false;
+                const scanQuote = (el) => DomSpec.eachChildOrdered(el, (child) => {
+                    if (hasQuote || child.nodeType !== Node.ELEMENT_NODE) return;
+                    if (String(child.tagName || "").toLowerCase() === "blockquote") { hasQuote = true; return; }
+                    scanQuote(child);
+                });
+                scanQuote(node);
+                if (hasQuote) return children;
+                const quotedLines = String(children).replace(/\r\n?/g, "\n").trim().split("\n");
+                return quotedLines.map((line) => `> ${line}`).join("\n") + "\n\n";
             }
             case "div": {
                 // wave22 共识(w22 qwen): 子串匹配会把 "onebox-wrapper"/"not-onebox" 一并命中 ——
@@ -516,10 +587,16 @@ const HTMLToMarkdown = {
         let out = "";
         let needBreak = false;
         DomSpec.eachChildOrdered(node, (child) => {
-            const md = HTMLToMarkdown._convertNode(child);
-            if (!md) return;
             const isBlock = child.nodeType === Node.ELEMENT_NODE && child.tagName
                 && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase());
+            const md = HTMLToMarkdown._convertNode(child);
+            // wave29 共识(dsf-w3 + glm-w3 + qwen-w3): 空块级子节点此前因 !md 早退而不置边界 ——
+            // <div>Hello<div></div>World</div> 的两段被粘成 "HelloWorld"(HTML 源中空 div 亦是
+            // 块级换行, Notion 出口同输入给出两个段落块)
+            if (!md) {
+                if (isBlock && out) needBreak = true;
+                return;
+            }
             if ((needBreak || Boolean(isBlock)) && out && !/\n\n$/.test(out)) {
                 out = out.replace(/\n?$/, "\n\n");
             }
@@ -529,17 +606,49 @@ const HTMLToMarkdown = {
         return out;
     },
 
+    // wave29 共识(dsf-w3 + glm-w1 + glm-w3): 单元格是单行上下文(GFM 只按内联解析单元格) ——
+    // 块级子节点不得注入结构符(<ul> → "- a"、<pre> → 三反引号、嵌套表 → "| inner | | --- |"),
+    // 原实现直接复用 _convertChildren, 这些标记全部以字面字符落进单元格(可见内容与 Notion 出口
+    // 不一致)。块级子节点改取可见文本投影(DomSpec.textWithBreaks, 与 serializeRichText 对
+    // li/td/引用只保留文本同口径), 内联子节点仍走常规转换(bold/link/code 保留)。
+    // <hr> 无文本, 投影为空 —— 但 Notion 侧单元格经 serializeRichText 会得到可见标记
+    // (DomSpec.HR_TEXT), 故此处同样以该标记保持两出口可见内容一致。
+    _convertCellChildren: (node) => {
+        let out = "";
+        // 块级子节点的文本投影前后需留分隔(浏览器将它们渲染为上下堆叠的块),
+        // 否则 <hr> 的 "---" 会与后续文本粘连("---后")
+        let needSeparator = false;
+        const append = (md, isBlockChild) => {
+            if (!md) return;
+            if (out && (isBlockChild || needSeparator) && !/\s$/.test(out) && !/^\s/.test(md)) out += " ";
+            out += md;
+            needSeparator = Boolean(isBlockChild);
+        };
+        DomSpec.eachChildOrdered(node, (child) => {
+            const tag = child.nodeType === Node.ELEMENT_NODE && child.tagName
+                ? String(child.tagName).toLowerCase() : "";
+            if (tag && DomSpec.TEXT_BOUNDARY_TAGS.has(tag)) {
+                const text = tag === "hr" ? DomSpec.HR_TEXT : DomSpec.foldToSingleLine(DomSpec.textWithBreaks(child));
+                append(text, true);
+                return;
+            }
+            append(HTMLToMarkdown._convertNode(child), false);
+        });
+        return out;
+    },
+
     _convertTable: (table) => {
         // wave9 共识(dsf): querySelectorAll("tr") 会把嵌套表格的行列并入外层(重复/错乱)
         // —— 改为 thead/tbody/tfoot 直属行遍历(与 DOMToNotion 表格隔离同口径),
         // 无 section 时回退直属 tr(测试桩/残缺 HTML)
+        // wave29 共识(dsf-w2 + qwen-w1 + qwen-w2): 行采集收束到 DomSpec.collectTableRows ——
+        // Notion 出口原按源序取 tbody+tfoot 且只取**首个** thead(第二个 thead 的行静默丢失),
+        // 本出口原按浏览器序取全部段 ⇒ <tfoot> 在 <tbody> 之前的表两出口行序相反。
+        // 统一为浏览器渲染序 thead → tbody → tfoot 且含全部段
+        const collected = DomSpec.collectTableRows(table);
+        const rows = [...collected.header, ...collected.body];
         const direct = (tag) => Array.from(table.children || [])
             .filter((c) => c.tagName && c.tagName.toLowerCase() === tag);
-        const sections = [...direct("thead"), ...direct("tbody"), ...direct("tfoot")];
-        const rows = sections.length > 0
-            ? sections.flatMap((sec) => Array.from(sec.children || [])
-                .filter((r) => r.tagName && r.tagName.toLowerCase() === "tr"))
-            : Array.from(table.children || []).filter((r) => r.tagName && r.tagName.toLowerCase() === "tr");
         const caption = direct("caption")[0];
         // wave17 共识(dsf/qwen): <caption> 既非 thead/tbody/tfoot 也不属 tr, 此前整支丢弃 ——
         // Notion 出口已在 wave16 按同族缺陷补发段落, 此处补可见文本(表格标题, 置于表格行之前)
@@ -567,7 +676,7 @@ const HTMLToMarkdown = {
                 // (CommonMark 行结束符), 单元格文本中的 CR 会拆断表格行; 折叠口径统一驻 DomSpec
                 // wave26 共识(w26 qwen): mdLiteral 已对 `|` 转义(行首表格注入), 此处只补
                 // **未转义**的 `|`(如行内 code 跳度内的原始文本) —— 否则会双重转义为可见的 `\\|`
-                return DomSpec.foldToSingleLine(HTMLToMarkdown._convertChildren(c)).replace(/(?<!\\)\|/g, "\\|");
+                return DomSpec.foldToSingleLine(HTMLToMarkdown._convertCellChildren(c)).replace(/(?<!\\)\|/g, "\\|");
             });
             while (cells.length < width) cells.push("");
             result.push(`| ${cells.join(" | ")} |`);

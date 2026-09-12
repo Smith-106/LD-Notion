@@ -1,6 +1,6 @@
 {
   "name": "ld-notion-hub",
-  "version": "3.14.21",
+  "version": "3.14.22",
   "private": true,
   "description": "LD-Notion Hub — AI 多源知识中枢",
   "main": "LinuxDo-Bookmarks-to-Notion.user.js",
@@ -13,6 +13,7 @@
     "verify:bridge-extension": "node scripts/verify-bridge-extension.js",
     "verify:extension:surfaces": "node scripts/verify-extension-surfaces.js",
     "verify:equivalence": "node scripts/verify-bundle-equivalence.js",
+    "verify:mutation": "node scripts/verify-mutation.js",
     "verify:delivery": "node scripts/verify-delivery.js",
     "build": "node build.js",
     "verify:build": "node scripts/verify-build.js",
