@@ -1813,13 +1813,16 @@
         // 改为反斜杠转义: 注入防护等价(]( 不再能逃逸链接语法), 且内容无损。
         // wave18 共识(dsf): 转义字符自身也必须转义 —— 标签以单个 "\" 结尾时(C:\ 一类标题),
         // 产出的 "[C:\](url)" 里 \] 是转义方括号、不闭合标签 → 整串退化为纯文本、链接目标丢失。
-        mdText: (text) => String(text ?? "").replace(/([\\\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
+        mdText: (text) => String(text ?? "").replace(/([\\\[\]<])/g, "\\$1").replace(/\r\n?|\n/g, " "),
         // wave20 共识(w20 qwen): 文本节点是**字面量**上下文 —— CommonMark 的内联控制符必须转义,
         // 否则源文里的 "**x**"/"2*3*4"/"a~~b~~c" 被渲染成强调/删除线(Notion 出口把文本放
         // rich_text.content、格式放 annotations, 同一输入不受害 ⇒ 两出口可见内容不对称)。
         // 与 mdText 的差别: 不折叠换行(段落内换行是语义), 不转义 "_"(词内下划线无强调语义,
         // 且 snake_case 极常见, 转义只会引入大量无必要的反斜杠)
-        mdLiteral: (text) => String(text ?? "").replace(/([\\`*~\[\]])/g, "\\$1"),
+        // wave21 共识(w21 glm): 补 "<" —— 源文里的字面 HTML 标签(论坛中提及 "&lt;div&gt;" 极常见)
+        // 未被转义时, CommonMark 将其判为 inline raw HTML 透传, 宿主按真实元素渲染
+        // (未闭合块容器可吞并后续内容, 用户可见文本丢失); Notion 出口作为纯文本写 rich_text 不受害
+        mdLiteral: (text) => String(text ?? "").replace(/([\\`*~\[\]<])/g, "\\$1"),
         // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
         // wave19 共识(w19 qwen): 补 \\(见 MD_URL_ESCAPE)
         mdUrl: (url) => String(url ?? "").replace(/[\s<>()\\]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),
@@ -4074,7 +4077,17 @@
         "ol",
         "li",
         "table",
-        "hr"
+        "hr",
+        // wave21 共识(w21 dsf + w21 qwen, 双模型): 单元格是文本边界 —— 表格一旦落在
+        // serializeRichText 路径内(引用/列表项/单元格/aside 子节点), tr/td/th 既不在 SKIP_TAGS
+        // 也不在边界集, 走通用递归 ⇒ <blockquote><table><tr><td>1</td><td>2</td></tr></table>…
+        // 的 rich_text 为 [{1},{2}], Notion 渲染为不可分辨的 "12"(结构与列边界同时丢失),
+        // 而 Markdown 出口同输入保留完整表格。caption 同族(caption 与单元格粘连)。
+        // 注: 不需要 tr/thead/tbody —— td/th 的边界标记在末个单元格后仍置位, 下一行首单元格
+        // 消费它, 行间同样得到分隔。
+        "td",
+        "th",
+        "caption"
       ]);
       var tagOf = (el) => el && el.tagName ? String(el.tagName).toLowerCase() : "";
       var MAX_URL_LENGTH = 2e3;
@@ -4252,9 +4265,8 @@
         },
         // 附件链接 a.attachment
         _cookAttachment: (el, blocks, imgMode) => {
-          var _a;
           const href = el.getAttribute("href") || "";
-          const fileName = ((_a = el.textContent) == null ? void 0 : _a.trim()) || "attachment";
+          const fileName = (el.textContent || "").trim() || DomSpec.foldToSingleLine(DomSpec.textWithBreaks(el)) || "attachment";
           const full = DomSpec.safeUrl(href);
           if (full && imgMode !== "skip") {
             blocks.push({
@@ -4272,7 +4284,7 @@
             });
             return;
           }
-          const richText = DOMToNotion2.serializeRichText(el);
+          const richText = DOMToNotion2.splitLongText(fileName);
           if (richText.length > 0) blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
         },
         // 视频元素
@@ -4625,13 +4637,17 @@
             }
             return;
           }
+          const alt = typeof el.getAttribute === "function" ? el.getAttribute("alt") || "" : "";
+          if (alt) {
+            blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(alt) } });
+            return;
+          }
           if (imgMode === "skip") return;
           if (!src) return;
-          const alt = el.getAttribute("alt") || "";
           blocks.push({
             type: "paragraph",
             paragraph: {
-              rich_text: DOMToNotion2.splitLongText(alt || "[\u56FE\u7247\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]")
+              rich_text: DOMToNotion2.splitLongText("[\u56FE\u7247\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]")
             }
           });
         },
@@ -4704,6 +4720,7 @@
               return;
             }
             if (tag === "a") {
+              if (el.classList && el.classList.contains("attachment")) return;
               const href = el.getAttribute("href") || "";
               if (href.startsWith("#")) {
                 DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
@@ -4755,6 +4772,7 @@
               return;
             }
             if (DomSpec.isSkippedNode(n)) return;
+            if (DomSpec.mediaKind(el)) return;
             if (skipNestedLists && (tag === "ul" || tag === "ol") && (!n.parentNode || n.parentNode === node)) {
               if (result.length > 0) needBreak = true;
               return;
@@ -5052,6 +5070,10 @@
         // wave12 系统扫描: 与 Utils.mdText 同源 —— 引用共享原语而非重复实现
         _mdText: (s) => Utils2.mdText(s),
         _mdUrl: (s) => Utils2.mdUrl(s),
+        // wave21 共识(w21 dsf): 链接标签内的文本节点同属字面量上下文 —— 原用 mdText 只转义 \ [ ],
+        // 源文 "2*3*4" 在标签内仍被渲染为词内强调(CommonMark 允许 foo*bar*baz); mdLiteral 同样转义
+        // [ ](注入防护等价), 另补 ` * ~ < , 且需折叠换行(单行上下文, 换行会拆断链接语法)
+        _mdLabel: (s) => Utils2.mdLiteral(s).replace(/\r\n?|\n/g, " "),
         convert: (html) => {
           const doc = new DOMParser().parseFromString(html, "text/html");
           return HTMLToMarkdown2._convertNode(doc.body);
@@ -5101,7 +5123,7 @@
             };
             DomSpec.eachChildOrdered(node, (child) => {
               if (child.nodeType === Node.TEXT_NODE) {
-                const text = String(child.textContent || "").trim();
+                const text = HTMLToMarkdown2._convertNode(child).trim();
                 if (text) pushSeparated(text);
                 return;
               }
@@ -5185,7 +5207,7 @@
           var _a, _b;
           if (node.nodeType === Node.TEXT_NODE) {
             const text = node.textContent || "";
-            return HTMLToMarkdown2._labelDepth > 0 ? Utils2.mdText(text) : Utils2.mdLiteral(text);
+            return HTMLToMarkdown2._labelDepth > 0 ? HTMLToMarkdown2._mdLabel(text) : Utils2.mdLiteral(text);
           }
           if (node.nodeType !== Node.ELEMENT_NODE) return "";
           const tag = node.tagName.toLowerCase();
@@ -5350,11 +5372,16 @@ ${quoted}
 
 ` : "";
           const result = [];
-          if (captionText) result.push(captionText);
+          if (captionText) {
+            result.push(captionText, "");
+          }
+          const cellCount = (row) => Array.from(row.children || []).filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).length;
+          const width = Math.max(1, ...rows.map(cellCount));
           rows.forEach((row, i) => {
             const cells = Array.from(row.children || []).filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).map((c) => {
               return DomSpec.foldToSingleLine(HTMLToMarkdown2._convertChildren(c)).replace(/\|/g, "\\|");
             });
+            while (cells.length < width) cells.push("");
             result.push(`| ${cells.join(" | ")} |`);
             if (i === 0) {
               result.push(`| ${cells.map(() => "---").join(" | ")} |`);

@@ -31,6 +31,14 @@ const SKIP_TAGS = new Set(["script", "style", "noscript"]);
 const TEXT_BOUNDARY_TAGS = new Set([
     "div", "p", "pre", "blockquote", "aside", "h1", "h2", "h3", "h4", "h5", "h6",
     "ul", "ol", "li", "table", "hr",
+    // wave21 共识(w21 dsf + w21 qwen, 双模型): 单元格是文本边界 —— 表格一旦落在
+    // serializeRichText 路径内(引用/列表项/单元格/aside 子节点), tr/td/th 既不在 SKIP_TAGS
+    // 也不在边界集, 走通用递归 ⇒ <blockquote><table><tr><td>1</td><td>2</td></tr></table>…
+    // 的 rich_text 为 [{1},{2}], Notion 渲染为不可分辨的 "12"(结构与列边界同时丢失),
+    // 而 Markdown 出口同输入保留完整表格。caption 同族(caption 与单元格粘连)。
+    // 注: 不需要 tr/thead/tbody —— td/th 的边界标记在末个单元格后仍置位, 下一行首单元格
+    // 消费它, 行间同样得到分隔。
+    "td", "th", "caption",
 ]);
 
 const tagOf = (el) => (el && el.tagName ? String(el.tagName).toLowerCase() : "");

@@ -112,6 +112,10 @@ const HTMLToMarkdown = {
     // wave12 系统扫描: 与 Utils.mdText 同源 —— 引用共享原语而非重复实现
     _mdText: (s) => Utils.mdText(s),
     _mdUrl: (s) => Utils.mdUrl(s),
+    // wave21 共识(w21 dsf): 链接标签内的文本节点同属字面量上下文 —— 原用 mdText 只转义 \ [ ],
+    // 源文 "2*3*4" 在标签内仍被渲染为词内强调(CommonMark 允许 foo*bar*baz); mdLiteral 同样转义
+    // [ ](注入防护等价), 另补 ` * ~ < , 且需折叠换行(单行上下文, 换行会拆断链接语法)
+    _mdLabel: (s) => Utils.mdLiteral(s).replace(/\r\n?|\n/g, " "),
 
     convert: (html) => {
         const doc = new DOMParser().parseFromString(html, "text/html");
@@ -190,7 +194,9 @@ const HTMLToMarkdown = {
             };
             DomSpec.eachChildOrdered(node, (child) => {
                 if (child.nodeType === Node.TEXT_NODE) {
-                    const text = String(child.textContent || "").trim();
+                    // wave21 共识(w21 glm): 与 ol 分支同口径经 _convertNode(→ mdLiteral)转义 ——
+                    // 原样 push 会把 <ul>裸文本<li> 里的 "**x**"/"![x](url)" 变成活的 Markdown 标记
+                    const text = HTMLToMarkdown._convertNode(child).trim();
                     // wave16 共识(dsf): 裸文本原样入数组与首个列表项粘连("intro- a") —— 补行边界
                     if (text) pushSeparated(text);
                     return;
@@ -304,7 +310,7 @@ const HTMLToMarkdown = {
             // wave20 共识(w20 qwen): 文本节点是字面量上下文 —— 不转义时源文里的
             // "**重点**"/"2*3*4"/"a~~b~~c" 会被渲染成强调/删除线(内容不保真); 标签内
             // 走 mdText(需剔方括号防链接语法被破坏), 其余走 mdLiteral(不折叠换行)
-            return HTMLToMarkdown._labelDepth > 0 ? Utils.mdText(text) : Utils.mdLiteral(text);
+            return HTMLToMarkdown._labelDepth > 0 ? HTMLToMarkdown._mdLabel(text) : Utils.mdLiteral(text);
         }
         if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
@@ -524,7 +530,17 @@ const HTMLToMarkdown = {
         const captionText = caption ? DomSpec.foldToSingleLine(HTMLToMarkdown._convertChildren(caption)).trim() : "";
         if (rows.length === 0) return captionText ? `${captionText}\n\n` : "";
         const result = [];
-        if (captionText) result.push(captionText);
+        if (captionText) {
+            // wave21 共识(w21 dsf): caption 与表头行之间必须留空行 —— 单换行时表格紧贴段落,
+            // GFM「表格不能中断段落」⇒ 整表退化为字面文本(与 _convertChildren 的块级空行不变量一致,
+            // 也与 Notion 出口把 caption 落为独立段落块同口径)
+            result.push(captionText, "");
+        }
+        // wave21 共识(w21 qwen): 分隔行决定列数 —— 短行之外的单元格会被 GFM 渲染时静默丢弃,
+        // 按最大列数补齐(与 Notion 出口 paddedRows 同口径)
+        const cellCount = (row) => Array.from(row.children || [])
+            .filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).length;
+        const width = Math.max(1, ...rows.map(cellCount));
         rows.forEach((row, i) => {
             const cells = Array.from(row.children || [])
                 .filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase()))
@@ -534,6 +550,7 @@ const HTMLToMarkdown = {
                 // (CommonMark 行结束符), 单元格文本中的 CR 会拆断表格行; 折叠口径统一驻 DomSpec
                 return DomSpec.foldToSingleLine(HTMLToMarkdown._convertChildren(c)).replace(/\|/g, "\\|");
             });
+            while (cells.length < width) cells.push("");
             result.push(`| ${cells.join(" | ")} |`);
             if (i === 0) {
                 result.push(`| ${cells.map(() => "---").join(" | ")} |`);

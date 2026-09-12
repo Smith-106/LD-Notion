@@ -255,13 +255,16 @@ const Utils = {
     // 改为反斜杠转义: 注入防护等价(]( 不再能逃逸链接语法), 且内容无损。
     // wave18 共识(dsf): 转义字符自身也必须转义 —— 标签以单个 "\" 结尾时(C:\ 一类标题),
     // 产出的 "[C:\](url)" 里 \] 是转义方括号、不闭合标签 → 整串退化为纯文本、链接目标丢失。
-    mdText: (text) => String(text ?? "").replace(/([\\\[\]])/g, "\\$1").replace(/\r\n?|\n/g, " "),
+    mdText: (text) => String(text ?? "").replace(/([\\\[\]<])/g, "\\$1").replace(/\r\n?|\n/g, " "),
     // wave20 共识(w20 qwen): 文本节点是**字面量**上下文 —— CommonMark 的内联控制符必须转义,
     // 否则源文里的 "**x**"/"2*3*4"/"a~~b~~c" 被渲染成强调/删除线(Notion 出口把文本放
     // rich_text.content、格式放 annotations, 同一输入不受害 ⇒ 两出口可见内容不对称)。
     // 与 mdText 的差别: 不折叠换行(段落内换行是语义), 不转义 "_"(词内下划线无强调语义,
     // 且 snake_case 极常见, 转义只会引入大量无必要的反斜杠)
-    mdLiteral: (text) => String(text ?? "").replace(/([\\`*~\[\]])/g, "\\$1"),
+    // wave21 共识(w21 glm): 补 "<" —— 源文里的字面 HTML 标签(论坛中提及 "&lt;div&gt;" 极常见)
+    // 未被转义时, CommonMark 将其判为 inline raw HTML 透传, 宿主按真实元素渲染
+    // (未闭合块容器可吞并后续内容, 用户可见文本丢失); Notion 出口作为纯文本写 rich_text 不受害
+    mdLiteral: (text) => String(text ?? "").replace(/([\\`*~\[\]<])/g, "\\$1"),
     // P4 收敛(c05): 百分号编码替代删除——删除会改写链接目标(Wikipedia 带括号条目→404)
     // wave19 共识(w19 qwen): 补 \\(见 MD_URL_ESCAPE)
     mdUrl: (url) => String(url ?? "").replace(/[\s<>()\\]/g, (ch) => MD_URL_ESCAPE[ch] || encodeURIComponent(ch)),

@@ -37,7 +37,10 @@ const DOMToNotion = {
     // 附件链接 a.attachment
     _cookAttachment: (el, blocks, imgMode) => {
         const href = el.getAttribute("href") || "";
-        const fileName = el.textContent?.trim() || "attachment";
+        // wave21: textContent 在最小桩/测试替身上可能缺失 —— 回退 DomSpec.textWithBreaks(逐节点取文本)
+        const fileName = (el.textContent || "").trim()
+            || DomSpec.foldToSingleLine(DomSpec.textWithBreaks(el))
+            || "attachment";
         const full = DomSpec.safeUrl(href);
         if (full && imgMode !== "skip") {
             blocks.push({
@@ -57,7 +60,9 @@ const DOMToNotion = {
         }
         // wave16 共识(dsf): 地址被拒(或 imgMode=skip)时连可见链接文本一起丢弃 —— 与
         // obsidian 出口(地址判据被拒时保留子文本, R15)不对称; 保留文本段落, 不静默丢弃
-        const richText = DOMToNotion.serializeRichText(el);
+        // wave21 共识(w21 qwen): 本元素即 a.attachment, serializeRichText 现按去重契约跳过它
+        // (内联不再产出重复链接) —— 故此处直接以可见文本(fileName)落段落
+        const richText = DOMToNotion.splitLongText(fileName);
         if (richText.length > 0) blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
     },
 
@@ -530,14 +535,22 @@ const DOMToNotion = {
             }
             return;
         }
+        // wave21 共识(w21 dsf): alt 是**文本载体**(与 emoji 同族) —— 原顺序把 imgMode 判在 alt
+        // 之前, 顶层 <img alt=配图> 在 imgMode=skip 下零产出, 而同一 img 在 <p> 内经
+        // serializeRichText 仍回退 alt(该函数无 imgMode) ⇒ 同文件两条路径口径不一致。
+        // 与 Markdown 出口 case "img" 的无地址分支(alt 回退)同口径。
+        const alt = typeof el.getAttribute === "function" ? (el.getAttribute("alt") || "") : "";
+        if (alt) {
+            blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(alt) } });
+            return;
+        }
         if (imgMode === "skip") return;
-        // 无任何候选地址时无可报告(不造占位噪声); 有地址但被判拒时保留 alt 或可见标记
+        // 无任何候选地址时无可报告(不造占位噪声); 有地址但被判拒时留可见标记
         if (!src) return;
-        const alt = el.getAttribute("alt") || "";
         blocks.push({
             type: "paragraph",
             paragraph: {
-                rich_text: DOMToNotion.splitLongText(alt || "[图片已拒（非公网 http(s) 地址）]"),
+                rich_text: DOMToNotion.splitLongText("[图片已拒（非公网 http(s) 地址）]"),
             },
         });
     },
@@ -637,6 +650,10 @@ const DOMToNotion = {
 
             // 处理链接
             if (tag === "a") {
+                // wave21 共识(w21 qwen): a.attachment 已由 _cookAttachment 落 file 块承载 ——
+                // 内联路径再产一次带 link 的文本会把同一附件落两个块(段落链接 + file 块),
+                // 而 img 分支的既有去重契约是「正常图片只由媒体补发块承载」
+                if (el.classList && el.classList.contains("attachment")) return;
                 const href = el.getAttribute("href") || "";
                 if (href.startsWith("#")) {
                     DomSpec.eachChildOrdered(el, (c) => processNode(c, annotations));
@@ -707,6 +724,12 @@ const DOMToNotion = {
             // wave13 共识(qwen): script/style/noscript 非渲染元素 —— 其文本(JS/CSS 源码)
             // 经通用递归进入 rich_text, 内容污染(与 obsidian 同口径)
             if (DomSpec.isSkippedNode(n)) return;
+
+            // wave21 共识(w21 qwen): 媒体元素的子树是**浏览器降级文案**(<video>您的浏览器
+            // 不支持 video 标签</video>), 不是正文 —— Markdown 出口的 video/audio/iframe
+            // 分支从不转换子树(只产 [视频](url) 等), 此处原样递归会把该文案并入段落
+            // (媒体块另由 _consumeInlineMedia 补发承载) ⇒ 两出口内容不对称
+            if (DomSpec.mediaKind(el)) return;
 
             // wave12 共识(dsf) + wave14 共识(dsf): 块级元素是文本边界 —— 前后都不得与相邻
             // 内联内容粘连(<blockquote><p>a</p>b</blockquote> 此前输出 "ab"); 仅"下一项也是

@@ -1443,6 +1443,95 @@ describe("wave20 确认轮: 字面量/基路径/内联回退边界", () => {
     });
 });
 
+describe("wave21 确认轮: 表格结构/字面量转义/媒体回退边界", () => {
+    const PUBLIC = "https://cdn.example.com/a.png";
+    const withDom = (body, fn) => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body }) };
+        };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
+    };
+    const run = (body, mode = "external") => withDom(element("body", body), () => DOMToNotion.cookedToBlocks("<div>x</div>", mode));
+    const paraText = (blocks) => blocks
+        .map((b) => ((b.paragraph && b.paragraph.rich_text) || []).map((r) => r.text.content).join(""))
+        .filter((t) => t !== "")
+        .join("|");
+
+    it("嵌套表格的单元格是文本边界(不再是不可分辨的粘接串)", () => {
+        const table = element("table", [element("tbody", [element("tr", [
+            element("td", [textNode("1")]), element("td", [textNode("2")]),
+        ], { closest: () => null })])]);
+        const blocks = run([element("blockquote", [table])]);
+        expect(blocks.map((b) => b.type)).toEqual(["quote"]);
+        expect(blocks[0].quote.rich_text.map((r) => r.text.content).join("")).toBe("1\n2");
+    });
+
+    it("链接标签内的字面文本不被渲染为强调(标签深度分支同用字面量口径)", () => {
+        const a = element("a", [textNode("2*3*4")], { getAttribute: attrs({ href: "https://cdn.example.com/x" }) });
+        expect(HTMLToMarkdown._convertNode(a)).toBe("[2\\*3\\*4](https://cdn.example.com/x)");
+        // 换行仍折叠(单行上下文), 方括号仍转义(链接语法不被破坏)
+        const b = element("a", [textNode("a[b]\nc")], { getAttribute: attrs({ href: "https://cdn.example.com/x" }) });
+        expect(HTMLToMarkdown._convertNode(b)).toBe("[a\\[b\\] c](https://cdn.example.com/x)");
+    });
+
+    it("字面量文本中的 < 被转义(不成为原生 HTML 透传)", () => {
+        expect(HTMLToMarkdown._convertNode(element("p", [textNode("用 <div> 包")]))).toBe("用 \\<div> 包\n\n");
+    });
+
+    it("ul 分支的直属裸文本同样转义(与 ol 分支同口径)", () => {
+        const out = HTMLToMarkdown._convertNode(element("ul", [textNode("**x**"), element("li", [textNode("a")])]));
+        expect(out).toBe("\\*\\*x\\*\\*\n\n- a\n");
+    });
+
+    it("表格 caption 与表头行之间留空行(GFM 表格不能中断段落)", () => {
+        const table = element("table", [
+            element("caption", [textNode("表标题")]),
+            element("tr", [element("th", [textNode("a")]), element("th", [textNode("b")])]),
+        ]);
+        expect(HTMLToMarkdown._convertNode(table)).toBe("表标题\n\n| a | b |\n| --- | --- |\n\n");
+    });
+
+    it("表格不齐行按最大列数补齐(多余单元格不被渲染时丢弃)", () => {
+        const table = element("table", [
+            element("tr", [element("th", [textNode("a")])]),
+            element("tr", [element("td", [textNode("b")]), element("td", [textNode("c")])]),
+        ]);
+        expect(HTMLToMarkdown._convertNode(table)).toBe("| a |  |\n| --- | --- |\n| b | c |\n\n");
+    });
+
+    it("块级图片的 alt 回退是文本载体(imgMode=skip 下不丢失)", () => {
+        const img = element("img", [], { getAttribute: attrs({ src: "javascript:alert(1)", alt: "配图" }) });
+        const blocks = [];
+        DOMToNotion._cookBlockImage(img, blocks, "skip");
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph"]);
+        expect(blocks[0].paragraph.rich_text.map((r) => r.text.content).join("")).toBe("配图");
+    });
+
+    it("媒体元素的浏览器降级文案不进正文(与 Markdown 出口同口径)", () => {
+        const video = element("video", [textNode("您的浏览器不支持 video 标签")],
+            { getAttribute: attrs({ src: PUBLIC }) });
+        const blocks = run([element("p", [textNode("前"), video, textNode("后")])]);
+        expect(blocks.map((b) => b.type)).toContain("video");
+        expect(paraText(blocks)).toBe("前后");
+    });
+
+    it("a.attachment 不再同时落段落链接与 file 块(与 img 去重契约一致)", () => {
+        const attachment = element("a", [textNode("x.zip")], {
+            classList: { contains: (c) => c === "attachment" },
+            getAttribute: attrs({ href: "https://cdn.example.com/x.zip" }),
+        });
+        const blocks = run([element("p", [textNode("见"), attachment, textNode("谢")])]);
+        expect(blocks.map((b) => b.type)).toContain("file");
+        const inline = blocks.filter((b) => b.type === "paragraph").flatMap((b) => b.paragraph.rich_text);
+        expect(inline.some((r) => r.text.link)).toBe(false);
+        expect(paraText(blocks)).toBe("见谢");
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;
