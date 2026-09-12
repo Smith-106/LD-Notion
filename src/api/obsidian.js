@@ -420,10 +420,18 @@ const HTMLToMarkdown = {
                     // wave19 共识(w19 qwen): 标签被剪空时(子树全为 script/style/noscript)
                     // 产出 "[](url)" —— CommonMark 中空标签不构成链接(渲染为字面垃圾且不可点),
                     // 与 Notion 出口的回退(linkText = link)不对称; 改为以 URL 自身作标签
-                    const label = String(children).replace(/\r\n?|\n/g, " ").trim();
+                    let label = String(children).replace(/\r\n?|\n/g, " ").trim();
+                    // wave23 共识(w23 qwen): CommonMark 禁止链接嵌套链接 —— <a> 内 video/audio/iframe
+                    // 的产出形态是 Markdown 链接([视频](u)), 内层先成立、外层方括号失效, 渲染结果
+                    // 多出字面 "] (url)"; 图片(![alt](u)) 是合法的标签内容, 不受影响。仅当标签来源于
+                    // 这三类媒体时把标记整体转义为字面文本(链接目标与可见文本均不丢)
+                    if (label && ["video", "audio", "iframe"].some((t) => typeof node.querySelector === "function" && node.querySelector(t))) {
+                        label = Utils.mdText(label);
+                    }
                     return label
                         ? `[${label}](${HTMLToMarkdown._mdUrl(link)})`
-                        : `[${HTMLToMarkdown._mdText(link)}](${HTMLToMarkdown._mdUrl(link)})`;
+                        // wave23 共识(w23 qwen): URL 兜底标签同属字面量上下文 —— 改用 _mdLabel
+                        : `[${HTMLToMarkdown._mdLabel(link)}](${HTMLToMarkdown._mdUrl(link)})`;
                 }
                 return children;
             }
@@ -432,10 +440,13 @@ const HTMLToMarkdown = {
                 // wave9 共识(qwen) + R15: 地址判据(回退 → 原点补齐 → 公网 http(s) 校验)
                 // 单一驻 DomSpec.mediaUrl —— 相对/协议相对地址此前被整体判为"非公网"而丢失
                 const src = DomSpec.mediaUrl(node);
+                // wave23 共识(w23 qwen): alt 同属字面量上下文 —— 原用 mdText 只转义 \\ [ ] <,
+                // "2*3*4" 会被解析为强调并使 alt 渲染成 "234"(内容不保真); 与文本节点/链接标签
+                // 同口径改用 _mdLabel(mdLiteral + 折叠换行, 方括号注入防护等价)
                 if (src) {
-                    return `![${HTMLToMarkdown._mdText(alt)}](${HTMLToMarkdown._mdUrl(src)})`;
+                    return `![${HTMLToMarkdown._mdLabel(alt)}](${HTMLToMarkdown._mdUrl(src)})`;
                 }
-                if (alt) return HTMLToMarkdown._mdText(alt);
+                if (alt) return HTMLToMarkdown._mdLabel(alt);
                 // wave18 共识(w3 glm + qwen): 有候选地址但被判拒时此前零产出 —— 与同文件
                 // iframe/video/audio 分支及 Notion 出口 _cookBlockImage 不对称, 改留可见标记;
                 // 完全无候选地址(未加载完成)仍静默, 不造「已拒」噪声块

@@ -4269,6 +4269,27 @@
         // 图片容器 lightbox-wrapper / image-wrapper
         _cookLightbox: (el, blocks, imgMode) => {
           DOMToNotion2._consumeInlineMedia(el, blocks, imgMode, true);
+          const visible = [];
+          const collectVisible = (node) => {
+            if (!node) return;
+            if (node.nodeType === Node.TEXT_NODE) {
+              const text = String(node.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+              if (text) visible.push(...DOMToNotion2.splitLongText(text));
+              return;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE || !node.tagName) return;
+            if (DomSpec.mediaKind(node)) return;
+            let hasMedia = false;
+            DomSpec.eachMedia(node, () => {
+              hasMedia = true;
+            });
+            if (hasMedia) return;
+            visible.push(...DOMToNotion2.serializeRichText(node));
+          };
+          DomSpec.eachChildOrdered(el, collectVisible);
+          if (visible.length > 0) {
+            blocks.push({ type: "paragraph", paragraph: { rich_text: visible } });
+          }
         },
         // 附件链接 a.attachment
         _cookAttachment: (el, blocks, imgMode) => {
@@ -4394,54 +4415,38 @@
         // 引用块 aside.quote
         _cookAsideQuote: (el, blocks, imgMode) => {
           const quotes = Array.from(el.children || []).filter((child) => child.tagName && String(child.tagName).toLowerCase() === "blockquote");
+          const dispatchAsideChild = (child) => {
+            if (!child) return;
+            if (child.nodeType === Node.TEXT_NODE) {
+              const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+              if (text) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(text) } });
+              }
+              return;
+            }
+            if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+            if (String(child.tagName).toLowerCase() === "blockquote") {
+              DOMToNotion2._cookBlockquote(child, blocks, imgMode);
+              return;
+            }
+            const inner = typeof child.querySelector === "function" ? child.querySelector("blockquote") : null;
+            if (inner) {
+              DomSpec.eachChildOrdered(child, dispatchAsideChild);
+              return;
+            }
+            const richText = DOMToNotion2.serializeRichText(child);
+            if (richText.length > 0) {
+              blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+            }
+            DOMToNotion2._consumeInlineMedia(child, blocks, imgMode);
+          };
           if (quotes.length > 0) {
-            DomSpec.eachChildOrdered(el, (child) => {
-              if (child.nodeType === Node.TEXT_NODE) {
-                const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
-                if (text) {
-                  blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(text) } });
-                }
-                return;
-              }
-              if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
-              if (String(child.tagName).toLowerCase() === "blockquote") {
-                DOMToNotion2._cookBlockquote(child, blocks, imgMode);
-                return;
-              }
-              const richText = DOMToNotion2.serializeRichText(child);
-              if (richText.length > 0) {
-                blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
-              }
-              DOMToNotion2._consumeInlineMedia(child, blocks, imgMode);
-            });
+            DomSpec.eachChildOrdered(el, dispatchAsideChild);
             return;
           }
           const deep = typeof el.querySelector === "function" ? el.querySelector("blockquote") : null;
           if (deep) {
-            DomSpec.eachChildOrdered(el, (child) => {
-              if (child.nodeType === Node.TEXT_NODE) {
-                const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
-                if (text) {
-                  blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion2.splitLongText(text) } });
-                }
-                return;
-              }
-              if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
-              if (String(child.tagName).toLowerCase() === "blockquote") {
-                DOMToNotion2._cookBlockquote(child, blocks, imgMode);
-                return;
-              }
-              const quote = typeof child.querySelector === "function" ? child.querySelector("blockquote") : null;
-              if (quote) {
-                DOMToNotion2._cookBlockquote(quote, blocks, imgMode);
-                return;
-              }
-              const richText = DOMToNotion2.serializeRichText(child);
-              if (richText.length > 0) {
-                blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
-              }
-              DOMToNotion2._consumeInlineMedia(child, blocks, imgMode);
-            });
+            DomSpec.eachChildOrdered(el, dispatchAsideChild);
             return;
           }
           DOMToNotion2._cookBlockquote(el, blocks, imgMode);
@@ -5327,8 +5332,11 @@
             case "a": {
               const link = DomSpec.safeUrl(node.getAttribute("href") || "");
               if (link) {
-                const label = String(children).replace(/\r\n?|\n/g, " ").trim();
-                return label ? `[${label}](${HTMLToMarkdown2._mdUrl(link)})` : `[${HTMLToMarkdown2._mdText(link)}](${HTMLToMarkdown2._mdUrl(link)})`;
+                let label = String(children).replace(/\r\n?|\n/g, " ").trim();
+                if (label && ["video", "audio", "iframe"].some((t) => typeof node.querySelector === "function" && node.querySelector(t))) {
+                  label = Utils2.mdText(label);
+                }
+                return label ? `[${label}](${HTMLToMarkdown2._mdUrl(link)})` : `[${HTMLToMarkdown2._mdLabel(link)}](${HTMLToMarkdown2._mdUrl(link)})`;
               }
               return children;
             }
@@ -5336,9 +5344,9 @@
               const alt = node.getAttribute("alt") || "";
               const src = DomSpec.mediaUrl(node);
               if (src) {
-                return `![${HTMLToMarkdown2._mdText(alt)}](${HTMLToMarkdown2._mdUrl(src)})`;
+                return `![${HTMLToMarkdown2._mdLabel(alt)}](${HTMLToMarkdown2._mdUrl(src)})`;
               }
-              if (alt) return HTMLToMarkdown2._mdText(alt);
+              if (alt) return HTMLToMarkdown2._mdLabel(alt);
               return DomSpec.mediaSrc(node) ? "[\u56FE\u7247\u5DF2\u62D2\uFF08\u975E\u516C\u7F51 http(s) \u5730\u5740\uFF09]" : "";
             }
             case "iframe": {

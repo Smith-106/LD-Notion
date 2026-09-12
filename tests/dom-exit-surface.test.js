@@ -1602,6 +1602,60 @@ describe("wave22 确认轮: 媒体兜底路径/容器分派/行首结构符", ()
     });
 });
 
+describe("wave23 确认轮: 容器可见内容/媒体回退/字面量上下文补齐", () => {
+    const PUBLIC = "https://cdn.example.com/a.png";
+    const withDom = (body, fn) => {
+        const orig = globalThis.DOMParser;
+        globalThis.DOMParser = function () {
+            return { parseFromString: () => ({ body }) };
+        };
+        try { return fn(); } finally {
+            if (orig === undefined) delete globalThis.DOMParser;
+            else globalThis.DOMParser = orig;
+        }
+    };
+    const run = (body, mode = "external") => withDom(element("body", body), () => DOMToNotion.cookedToBlocks("<div>x</div>", mode));
+    const texts = (blocks) => blocks.map((b) => {
+        const holder = b.paragraph || b.quote || b.heading_3;
+        return ((holder && holder.rich_text) || []).map((r) => r.text.content).join("");
+    });
+
+    it("aside.quote 深回退: 命中引用源的子节点内部其余内容不丢", () => {
+        const quote = element("blockquote", [textNode("引用正文")]);
+        const holder = element("div", [textNode("张三 说："), quote, textNode("后记")],
+            { querySelector: (sel) => (sel === "blockquote" ? quote : null) });
+        const aside = element("aside", [holder],
+            { classList: { contains: (c) => c === "quote" }, querySelector: (sel) => (sel === "blockquote" ? quote : null) });
+        const blocks = run([aside]);
+        expect(blocks.map((b) => b.type)).toEqual(["paragraph", "quote", "paragraph"]);
+        expect(texts(blocks)).toEqual(["张三 说：", "引用正文", "后记"]);
+    });
+
+    it("lightbox 容器内非媒体可见内容(图注)不丢, 且不重复采集媒体", () => {
+        const img = element("img", [], { getAttribute: attrs({ src: PUBLIC, alt: "图" }) });
+        const blocks = run([element("div", [img, element("span", [textNode("图注文字")])],
+            { classList: { contains: (c) => c === "lightbox-wrapper" } })]);
+        expect(blocks.map((b) => b.type)).toEqual(["image", "paragraph"]);
+        expect(texts(blocks)).toEqual(["", "图注文字"]);
+    });
+
+    it("img alt 与 URL 兑底标签按字面量转义(强调标记不被解释)", () => {
+        expect(HTMLToMarkdown._convertNode(element("img", [],
+            { getAttribute: attrs({ src: PUBLIC, alt: "2*3*4" }) })))
+            .toBe("![2\\*3\\*4](" + PUBLIC + ")");
+        expect(HTMLToMarkdown._convertNode(element("img", [], { getAttribute: attrs({ alt: "a*b" }) })))
+            .toBe("a\\*b");
+    });
+
+    it("链接内 video/audio/iframe 不再截断外层链接(嵌套链接转义为字面)", () => {
+        const video = element("video", [], { getAttribute: attrs({ src: PUBLIC }) });
+        const a = element("a", [textNode("看"), video, textNode("这里")],
+            { getAttribute: attrs({ href: "https://h/x" }), querySelector: () => video });
+        expect(HTMLToMarkdown._convertNode(a))
+            .toBe("[看\\[视频\\](" + PUBLIC + ")  这里](https://h/x)");
+    });
+});
+
 // ===== SURFACE_INVENTORY =====
 // 完整清单与可复现计数见 _surface_inventory.md(P0 产出)。新增出口时:
 //   1) 在此登记面名 + 该面必须接入的 DomSpec 原语;

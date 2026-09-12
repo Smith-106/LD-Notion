@@ -34,6 +34,28 @@ const DOMToNotion = {
         // wave22 共识(w22 qwen): 本路径不经 serializeRichText —— 图片一律走 _cookBlockImage,
         // 使地址被判拒/为 emoji 时同样有可见回退(alt → 标记), 与顶层 img 及 <p> 内 img 同口径
         DOMToNotion._consumeInlineMedia(el, blocks, imgMode, true);
+        // wave23 共识(w23 dsf): 容器内非媒体可见内容(图注 / 包裹链接文本)此前静默丢弃 ——
+        // 与 .md-table 容器(wave18)、aside.quote(wave22)同族。只取自**不含媒体**的子节点:
+        // 含媒体的子树已由上面的统一采集承载, 再取会产生重复块(emoji 文本 / 判拒 alt 亦然)
+        const visible = [];
+        const collectVisible = (node) => {
+            if (!node) return;
+            if (node.nodeType === Node.TEXT_NODE) {
+                const text = String(node.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+                if (text) visible.push(...DOMToNotion.splitLongText(text));
+                return;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE || !node.tagName) return;
+            if (DomSpec.mediaKind(node)) return;
+            let hasMedia = false;
+            DomSpec.eachMedia(node, () => { hasMedia = true; });
+            if (hasMedia) return;
+            visible.push(...DOMToNotion.serializeRichText(node));
+        };
+        DomSpec.eachChildOrdered(el, collectVisible);
+        if (visible.length > 0) {
+            blocks.push({ type: "paragraph", paragraph: { rich_text: visible } });
+        }
     },
 
     // 附件链接 a.attachment
@@ -201,33 +223,38 @@ const DOMToNotion = {
         // 丢弃) —— 逐块产出; 单块路径与 _cookBlockquote 完全同构, 故直接委托(口径单一)
         const quotes = Array.from(el.children || [])
             .filter((child) => child.tagName && String(child.tagName).toLowerCase() === "blockquote");
+        // wave17/wave18/wave22/wave23: 逐直属子节点分派(引用块 / 其余内容段落 + 内联媒体);
+        // 「子树内含引用源」的子节点按同口径再下钻一层 —— 否则该项目身内部的其余内容(与引用源
+        // 同级的说明文字/后记/内嵌媒体)只出引用块、其余静默丢弃(wave23 共识 w23 dsf)
+        const dispatchAsideChild = (child) => {
+            if (!child) return;
+            // wave18 共识(dsf): 裸文本子节点不得丢弃
+            // (<aside class="quote">署名文本<blockquote>引用</blockquote></aside>)
+            if (child.nodeType === Node.TEXT_NODE) {
+                const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
+                if (text) {
+                    blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(text) } });
+                }
+                return;
+            }
+            if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+            if (String(child.tagName).toLowerCase() === "blockquote") {
+                DOMToNotion._cookBlockquote(child, blocks, imgMode);
+                return;
+            }
+            const inner = typeof child.querySelector === "function" ? child.querySelector("blockquote") : null;
+            if (inner) {
+                DomSpec.eachChildOrdered(child, dispatchAsideChild);
+                return;
+            }
+            const richText = DOMToNotion.serializeRichText(child);
+            if (richText.length > 0) {
+                blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
+            }
+            DOMToNotion._consumeInlineMedia(child, blocks, imgMode);
+        };
         if (quotes.length > 0) {
-            // wave17 共识(dsf/glm): 有 blockquote 时 aside 内其余直属内容(如 Discourse 引用自带的
-            // <div class="title">署名行</div>)此前整支丢弃 —— 按文档序逐一直属子节点分派:
-            // blockquote 走引用块, 其余非空内容走段落(含内嵌媒体), 与无-blockquote 回退同口径
-            DomSpec.eachChildOrdered(el, (child) => {
-                // wave18 共识(dsf): 裸文本子节点此前直接 return 丢弃
-                // (<aside class="quote">署名文本<blockquote>引用</blockquote></aside> 只出引用块)
-                // —— 与同函数无-blockquote 回退分支(serializeRichText 会带上 aside 自身裸文本)
-                // 口径不一致, 改按段落补发
-                if (child.nodeType === Node.TEXT_NODE) {
-                    const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
-                    if (text) {
-                        blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(text) } });
-                    }
-                    return;
-                }
-                if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
-                if (String(child.tagName).toLowerCase() === "blockquote") {
-                    DOMToNotion._cookBlockquote(child, blocks, imgMode);
-                    return;
-                }
-                const richText = DOMToNotion.serializeRichText(child);
-                if (richText.length > 0) {
-                    blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
-                }
-                DOMToNotion._consumeInlineMedia(child, blocks, imgMode);
-            });
+            DomSpec.eachChildOrdered(el, dispatchAsideChild);
             return;
         }
         // 无直属 blockquote 时回退后代首个(与 wave15 同口径); 无任何 blockquote 时以 aside 自身为源
@@ -237,30 +264,7 @@ const DOMToNotion = {
         // 整支静默丢弃, 与上方直属分支(逐子节点分派)及 Markdown 出口口径不一致。
         // 改为: 逐直属子节点分派 —— 命中引用源的子树走引用块, 其余走段落 + 内联媒体
         if (deep) {
-            DomSpec.eachChildOrdered(el, (child) => {
-                if (child.nodeType === Node.TEXT_NODE) {
-                    const text = String(child.nodeValue || "").replace(/[ \t\r\n]+/g, " ").trim();
-                    if (text) {
-                        blocks.push({ type: "paragraph", paragraph: { rich_text: DOMToNotion.splitLongText(text) } });
-                    }
-                    return;
-                }
-                if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
-                if (String(child.tagName).toLowerCase() === "blockquote") {
-                    DOMToNotion._cookBlockquote(child, blocks, imgMode);
-                    return;
-                }
-                const quote = typeof child.querySelector === "function" ? child.querySelector("blockquote") : null;
-                if (quote) {
-                    DOMToNotion._cookBlockquote(quote, blocks, imgMode);
-                    return;
-                }
-                const richText = DOMToNotion.serializeRichText(child);
-                if (richText.length > 0) {
-                    blocks.push({ type: "paragraph", paragraph: { rich_text: richText } });
-                }
-                DOMToNotion._consumeInlineMedia(child, blocks, imgMode);
-            });
+            DomSpec.eachChildOrdered(el, dispatchAsideChild);
             return;
         }
         DOMToNotion._cookBlockquote(el, blocks, imgMode);
