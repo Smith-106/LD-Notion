@@ -58,6 +58,15 @@ node_modules/.vite/
 # Session temp artifacts
 .tmp/
 
+# 会话临时产物(审计/派发/变异/测试日志与脚本; 防回潮)
+_*.py
+_*.log
+_*.txt
+_*.md
+_*.patch
+_*.bak
+_*/
+
 # Windows 误创建的设备名文件(防再次出现)
 nul
 NUL

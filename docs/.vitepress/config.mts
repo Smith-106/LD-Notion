@@ -70,7 +70,8 @@ export default defineConfig({
         items: [
           { text: '整体架构', link: '/architecture/overview' },
           { text: '安全与权限', link: '/architecture/security' },
-          { text: '关键流程图', link: '/architecture/flows' }
+          { text: '关键流程图', link: '/architecture/flows' },
+          { text: '双出口内容保真', link: '/architecture/content-fidelity' }
         ]
       },
       {
