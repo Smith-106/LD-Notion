@@ -173,7 +173,7 @@ const HTMLToMarkdown = {
                 const indent = " ".repeat(String(idx).length + 2);
                 const md = HTMLToMarkdown._convertNode(child).trim().replace(/^-(?:\s+|$)/, "")
                     .split("\n")
-                    .map((line, i) => (i === 0 || !/^ {2}/.test(line) ? line : line.replace(/^ {2}/, indent)))
+                    .map((line, i) => (i > 0 && /^ {2}/.test(line) ? line.replace(/^ {2}/, indent) : line))
                     .join("\n").trim();
                 items.push(md ? `${idx}. ${md}\n` : `${idx}.\n`);
                 idx++;
@@ -272,8 +272,7 @@ const HTMLToMarkdown = {
                     // wave16 共识(qwen): 仅看行首反引号会把内联 code 误判为围栏 ——
                     // <code>``a``</code> 转出 "``` ``a`` ```"(单行), 被当作代码块拆行;
                     // 真围栏必有换行分隔的闭合行
-                    const childTag = child.nodeType === Node.ELEMENT_NODE && child.tagName
-                        ? String(child.tagName).toLowerCase() : "";
+                    const childTag = DomSpec.tagOf(child);
                     if (/^\s*`{3,}[^\n]*\n[\s\S]*\n\s*`{3,}\s*$/.test(md)) {
                         flushBuf();
                         pushText(md.replace(/^\n+|\n+$/g, ""));
@@ -542,7 +541,8 @@ const HTMLToMarkdown = {
                 if (!quoteCls.contains("quote")) return children;
                 let hasQuote = false;
                 const scanQuote = (el) => DomSpec.eachChildOrdered(el, (child) => {
-                    if (hasQuote || child.nodeType !== Node.ELEMENT_NODE) return;
+                    if (hasQuote) return;
+                    if (child.nodeType !== Node.ELEMENT_NODE) return;
                     if (String(child.tagName || "").toLowerCase() === "blockquote") { hasQuote = true; return; }
                     scanQuote(child);
                 });
@@ -585,10 +585,9 @@ const HTMLToMarkdown = {
         // (段落被并进列表项); ② "前言" + "---" 构成 setext 二级标题(分隔线被吞);
         // ③ 相邻块级 div 被并为同一段落(软换行, 结构丢失)。统一改为块级边界处保证空行。
         let out = "";
-        let needBreak = false;
+        let needBreak;
         DomSpec.eachChildOrdered(node, (child) => {
-            const isBlock = child.nodeType === Node.ELEMENT_NODE && child.tagName
-                && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase());
+            const isBlock = DomSpec.TEXT_BOUNDARY_TAGS.has(DomSpec.tagOf(child));
             const md = HTMLToMarkdown._convertNode(child);
             // wave29 共识(dsf-w3 + glm-w3 + qwen-w3): 空块级子节点此前因 !md 早退而不置边界 ——
             // <div>Hello<div></div>World</div> 的两段被粘成 "HelloWorld"(HTML 源中空 div 亦是
@@ -617,7 +616,7 @@ const HTMLToMarkdown = {
         let out = "";
         // 块级子节点的文本投影前后需留分隔(浏览器将它们渲染为上下堆叠的块),
         // 否则 <hr> 的 "---" 会与后续文本粘连("---后")
-        let needSeparator = false;
+        let needSeparator;
         const append = (md, isBlockChild) => {
             if (!md) return;
             if (out && (isBlockChild || needSeparator) && !/\s$/.test(out) && !/^\s/.test(md)) out += " ";
@@ -625,8 +624,7 @@ const HTMLToMarkdown = {
             needSeparator = Boolean(isBlockChild);
         };
         DomSpec.eachChildOrdered(node, (child) => {
-            const tag = child.nodeType === Node.ELEMENT_NODE && child.tagName
-                ? String(child.tagName).toLowerCase() : "";
+            const tag = DomSpec.tagOf(child);
             if (tag && DomSpec.TEXT_BOUNDARY_TAGS.has(tag)) {
                 const text = tag === "hr" ? DomSpec.HR_TEXT : DomSpec.foldToSingleLine(DomSpec.textWithBreaks(child));
                 append(text, true);
@@ -664,11 +662,11 @@ const HTMLToMarkdown = {
         // wave21 共识(w21 qwen): 分隔行决定列数 —— 短行之外的单元格会被 GFM 渲染时静默丢弃,
         // 按最大列数补齐(与 Notion 出口 paddedRows 同口径)
         const cellCount = (row) => Array.from(row.children || [])
-            .filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).length;
+            .filter((c) => DomSpec.TABLE_CELL_TAGS.has(DomSpec.tagOf(c))).length;
         const width = Math.max(1, ...rows.map(cellCount));
         rows.forEach((row, i) => {
             const cells = Array.from(row.children || [])
-                .filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase()))
+                .filter((c) => DomSpec.TABLE_CELL_TAGS.has(DomSpec.tagOf(c)))
                 .map((c) => {
                 // wrap25/26 共识: 单元格内的竖线会破坏表格列结构
                 // P4 收敛(c05): 同上

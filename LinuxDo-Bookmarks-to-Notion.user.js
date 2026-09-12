@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.22
+// @version      3.14.23
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -4096,12 +4096,19 @@
         "th",
         "caption"
       ]);
-      var tagOf = (el) => el && el.tagName ? String(el.tagName).toLowerCase() : "";
+      var tagOf = (el) => {
+        if (!el) return "";
+        if (typeof el.tagName !== "string") return "";
+        return el.tagName.toLowerCase();
+      };
+      var TABLE_CELL_TAGS = /* @__PURE__ */ new Set(["td", "th"]);
       var MAX_URL_LENGTH = 2e3;
       var DomSpec = {
         BLOCK_TAGS,
         SKIP_TAGS,
         TEXT_BOUNDARY_TAGS,
+        TABLE_CELL_TAGS,
+        tagOf,
         // 块级判据: 标签集 ∪ 类名容器(灯箱/图片容器/md-table/a.attachment/aside.quote)
         isBlockNode: (el) => {
           const t = tagOf(el);
@@ -4430,7 +4437,7 @@
               }
               return;
             }
-            if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+            if (!DomSpec.tagOf(child)) return;
             if (String(child.tagName).toLowerCase() === "blockquote") {
               DOMToNotion2._cookBlockquote(child, blocks, imgMode);
               return;
@@ -4547,7 +4554,7 @@
                 blocks.push({ type: listType, [listType]: { rich_text: richText } });
               }
               DomSpec.eachChildOrdered(li, (inner) => {
-                if (inner.nodeType !== Node.ELEMENT_NODE || !inner.tagName) return;
+                if (!DomSpec.tagOf(inner)) return;
                 const innerTag = String(inner.tagName).toLowerCase();
                 if (innerTag === "ul" || innerTag === "ol") {
                   DOMToNotion2._cookList(inner, blocks, imgMode, true);
@@ -4564,8 +4571,8 @@
           const table = el;
           const rows = [];
           let hasHeader = false;
-          const directRows = (container) => Array.from(container.children || []).filter((child) => child.tagName && child.tagName.toLowerCase() === "tr");
-          const directCells = (row) => Array.from(row.children || []).filter((child) => child.tagName && ["td", "th"].includes(child.tagName.toLowerCase()));
+          const directRows = (container) => Array.from(container.children || []).filter((child) => DomSpec.tagOf(child) === "tr");
+          const directCells = (row) => Array.from(row.children || []).filter((child) => DomSpec.TABLE_CELL_TAGS.has(DomSpec.tagOf(child)));
           const directSections = (tagNames) => Array.from(table.children || []).filter((child) => child.tagName && tagNames.includes(child.tagName.toLowerCase()));
           const collected = DomSpec.collectTableRows(table);
           const pushRow = (tr) => {
@@ -4848,8 +4855,8 @@
           const root = doc.body;
           const blocks = [];
           const processElement = (el) => {
-            if (!el || el.nodeType !== Node.ELEMENT_NODE) return;
-            const tag = el.tagName.toLowerCase();
+            const tag = DomSpec.tagOf(el);
+            if (!tag) return;
             if (tag === "hr") {
               blocks.push({ type: "divider", divider: {} });
               return;
@@ -4859,7 +4866,7 @@
               let handled = false;
               DomSpec.eachChildOrdered(el, (child) => {
                 if (!child) return;
-                if (child.nodeType === Node.ELEMENT_NODE && child.tagName && DomSpec.mediaKind(child) === "img") {
+                if (DomSpec.tagOf(child) && DomSpec.mediaKind(child) === "img") {
                   if (DomSpec.emojiNameOf(DomSpec.mediaSrc(child)) || !DomSpec.mediaUrl(child) && typeof child.getAttribute === "function" && child.getAttribute("alt")) {
                     walkNode(child);
                     handled = true;
@@ -4929,7 +4936,7 @@
               let handled = false;
               DomSpec.eachChildOrdered(el, (child) => {
                 if (!child) return;
-                if (child.nodeType === Node.ELEMENT_NODE && child.tagName && String(child.tagName).toLowerCase() === "table") {
+                if (DomSpec.tagOf(child) === "table") {
                   flushInline();
                   DOMToNotion2._cookTable(child, blocks, imgMode);
                   handled = true;
@@ -5191,7 +5198,7 @@
               const valueNum = rawValue === null || rawValue === void 0 || rawValue === "" ? NaN : Number(rawValue);
               if (Number.isFinite(valueNum)) idx = Math.floor(valueNum);
               const indent = " ".repeat(String(idx).length + 2);
-              const md = HTMLToMarkdown2._convertNode(child).trim().replace(/^-(?:\s+|$)/, "").split("\n").map((line, i) => i === 0 || !/^ {2}/.test(line) ? line : line.replace(/^ {2}/, indent)).join("\n").trim();
+              const md = HTMLToMarkdown2._convertNode(child).trim().replace(/^-(?:\s+|$)/, "").split("\n").map((line, i) => i > 0 && /^ {2}/.test(line) ? line.replace(/^ {2}/, indent) : line).join("\n").trim();
               items.push(md ? `${idx}. ${md}
 ` : `${idx}.
 `);
@@ -5259,7 +5266,7 @@
                 });
               } else {
                 const md = HTMLToMarkdown2._convertNode(child);
-                const childTag = child.nodeType === Node.ELEMENT_NODE && child.tagName ? String(child.tagName).toLowerCase() : "";
+                const childTag = DomSpec.tagOf(child);
                 if (/^\s*`{3,}[^\n]*\n[\s\S]*\n\s*`{3,}\s*$/.test(md)) {
                   flushBuf();
                   pushText(md.replace(/^\n+|\n+$/g, ""));
@@ -5447,7 +5454,8 @@
               if (!quoteCls.contains("quote")) return children;
               let hasQuote = false;
               const scanQuote = (el) => DomSpec.eachChildOrdered(el, (child) => {
-                if (hasQuote || child.nodeType !== Node.ELEMENT_NODE) return;
+                if (hasQuote) return;
+                if (child.nodeType !== Node.ELEMENT_NODE) return;
                 if (String(child.tagName || "").toLowerCase() === "blockquote") {
                   hasQuote = true;
                   return;
@@ -5480,9 +5488,9 @@ ${quoted}
         // 与 Notion 出口 serializeRichText 的文本边界同口径: 沿 childNodes 拼接, 块级子节点前补换行。
         _convertChildren: (node) => {
           let out = "";
-          let needBreak = false;
+          let needBreak;
           DomSpec.eachChildOrdered(node, (child) => {
-            const isBlock = child.nodeType === Node.ELEMENT_NODE && child.tagName && DomSpec.TEXT_BOUNDARY_TAGS.has(String(child.tagName).toLowerCase());
+            const isBlock = DomSpec.TEXT_BOUNDARY_TAGS.has(DomSpec.tagOf(child));
             const md = HTMLToMarkdown2._convertNode(child);
             if (!md) {
               if (isBlock && out) needBreak = true;
@@ -5505,7 +5513,7 @@ ${quoted}
         // (DomSpec.HR_TEXT), 故此处同样以该标记保持两出口可见内容一致。
         _convertCellChildren: (node) => {
           let out = "";
-          let needSeparator = false;
+          let needSeparator;
           const append = (md, isBlockChild) => {
             if (!md) return;
             if (out && (isBlockChild || needSeparator) && !/\s$/.test(out) && !/^\s/.test(md)) out += " ";
@@ -5513,7 +5521,7 @@ ${quoted}
             needSeparator = Boolean(isBlockChild);
           };
           DomSpec.eachChildOrdered(node, (child) => {
-            const tag = child.nodeType === Node.ELEMENT_NODE && child.tagName ? String(child.tagName).toLowerCase() : "";
+            const tag = DomSpec.tagOf(child);
             if (tag && DomSpec.TEXT_BOUNDARY_TAGS.has(tag)) {
               const text = tag === "hr" ? DomSpec.HR_TEXT : DomSpec.foldToSingleLine(DomSpec.textWithBreaks(child));
               append(text, true);
@@ -5536,10 +5544,10 @@ ${quoted}
           if (captionText) {
             result.push(captionText, "");
           }
-          const cellCount = (row) => Array.from(row.children || []).filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).length;
+          const cellCount = (row) => Array.from(row.children || []).filter((c) => DomSpec.TABLE_CELL_TAGS.has(DomSpec.tagOf(c))).length;
           const width = Math.max(1, ...rows.map(cellCount));
           rows.forEach((row, i) => {
-            const cells = Array.from(row.children || []).filter((c) => c.tagName && ["th", "td"].includes(c.tagName.toLowerCase())).map((c) => {
+            const cells = Array.from(row.children || []).filter((c) => DomSpec.TABLE_CELL_TAGS.has(DomSpec.tagOf(c))).map((c) => {
               return DomSpec.foldToSingleLine(HTMLToMarkdown2._convertCellChildren(c)).replace(/(?<!\\)\|/g, "\\|");
             });
             while (cells.length < width) cells.push("");

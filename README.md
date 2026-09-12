@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.22`
+- 当前仓库源码版本：`v3.14.23`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -391,6 +391,14 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.23
+
+- **出口面判据单一来源收束（wave30）**：`DomSpec.tagOf` 取代 5 处出口面各自内联的 `nodeType === ELEMENT_NODE && tagName` 双判据（`obsidian.js` 表格/单元格/行过滤、`DOMToNotion.js` 行/单元格/容器子节点），`DomSpec.TABLE_CELL_TAGS` 取代两处 `["td", "th"]` 字面量——任一缺漏即把文本节点当元素处理（或反向静默丢行）
+- **死初始化与等价简化**：`obsidian.js` 续行缩进改用 `i > 0 &&` 判据（原 `i === 0 || !…` 三元反义）、`let needBreak` / `let needSeparator` 去死初始化
+- **变异锁**：`npm run verify:mutation` 改动区间 5 切口 → KILLED 4 / 等效 1；全文件深跑 全文件 353 切口 → KILLED 337 / SURVIVED 16 / INVALID 0（幸存 16 条经等效性校验器全数判定为等效变异）
+- **等效变异退役可复现**：新增 `scripts/verify-mutation-equivalence.js`（`npm run verify:mutation:equivalence <log>`）——把变异锁日志里的每条 `SURVIVED` 切口在**固定输入语料**（约 370 项可观测输出：三模式块转换 / Markdown 出口 / 公开判据）上做差分，输出逐字节一致方可退役；不一致则以非零退出并列出切口
+- **测试**：新增 `tests/mutation-gap-lock.test.js`（62 例）锁定此前未被覆盖的分支（判据原语、传输层错误串与 `ok` 值、媒体分派、列表/表格/灯箱边界、段落归一化）；全量 **1594 例 / 82 文件** + legacy 三件套全绿
 
 ### v3.14.22
 

@@ -1,5 +1,24 @@
 # 更新日志
 
+## [3.14.23] - 2026-09-12
+
+### fix (出口面判据单一来源收束 + 变异锁清零)
+
+**方法**：在 wave29 九格复审（三模型 × 三出口面）基础上，把修复区间与全文件的**变异幸存者**当作"未验证行为面"逐条收敛：可观测者补契约测试杀死，不可观测者以差分语料证明等效后退役。
+
+- **标签取值单一来源** `DomSpec.tagOf`：`obsidian.js` 表格行/单元格过滤、`DOMToNotion.js` 行采集、单元格采集、容器子节点分派共 5 处各自内联 `child.nodeType === Node.ELEMENT_NODE && child.tagName`——两个条件任一缺漏即把文本节点当元素处理（或反向静默丢行）。收束为单一原语（非元素 / 无 `tagName` / 无节点统一得 `""`）
+- **单元格标签集单一来源** `DomSpec.TABLE_CELL_TAGS`：两出口各自的 `["td", "th"]` 字面量（含 `includes` 与 `has` 两种写法）收束为一个 `Set`
+- **死初始化清理**：`obsidian.js` 的 `let needBreak` / `let needSeparator` 以 `undefined` 初始化，首项由块边界判据置位（原 `false` 初值不可观测）；续行缩进由 `i === 0 || !/^ {2}/.test(line)` 三元反义改为 `i > 0 && /^ {2}/.test(line)` 正向判据（同一映射，可读性与变异可锁性更好）
+
+### test
+
+- 新增 `tests/mutation-gap-lock.test.js`（62 例）：`DomSpec` 判据原语（类名容器 / 附件 / 媒体地址回退 / 文本回退）、`obsidian` 传输层（三入口错误串精确形态、路径与 URL 校验分支、`ok` 值）、`obsidian` Markdown 出口（`<pre>` 内 `<code>`、链接媒体字面化、`buildPostCallout`）、`DOMToNotion` 媒体分派与列表/表格/灯箱边界、段落归一化与透明下钻
+- `tests/dom-exit-surface.test.js` 追加 2 例（恰 2000 字符合并边界、无 `section` 表直属行）→ **170 例**；全量 **1594 例 / 82 文件** + legacy 三件套全绿（`npm test`）
+- 变异锁运行器默认契约测试集纳入 `tests/mutation-gap-lock.test.js`（此前新补的杀死用例未被运行器计入，`SURVIVED` 数虚高）
+- 新增等效性校验器 `scripts/verify-mutation-equivalence.js`（`npm run verify:mutation:equivalence <mutation-log>`）：对日志中每条 `SURVIVED` 切口在固定语料（约 370 项可观测输出）上做**原始 vs 变异**差分——逐字节一致才判定为等效变异并允许退役，否则以非零退出并列出可观测切口
+- 变异深跑（`src/api/{DomSpec,obsidian,DOMToNotion}.js`，stride 1）：KILLED 337 / SURVIVED 16 / INVALID 0（353 切口，用时 935s）；幸存 16 条全部经等效性校验器判定 EQUIVALENT（exit 0）；改动区间 5 切口 → KILLED 4 / 等效 1（`obsidian.js:176` 续行缩进映射，i=0 分支不可达）
+- 交付链：`node build.js` + `verify:build`（root ≡ dist）+ `verify:equivalence` + `verify:delivery` 全绿
+
 ## [3.14.22] - 2026-09-12
 
 ### fix (双出口内容保真：wave29 三模型九格共识复审确认的 16 项缺陷)

@@ -103,18 +103,35 @@ LD-Notion 把同一份源内容渲染到两个出口：**Notion blocks**（`src/
 
 > 所有确认项均已由 `tests/dom-exit-surface.test.js` 的 wave29 一组契约锁定（合法原样 / 危险输入 / 空），并由 `npm run verify:mutation` 提供可重跑强度证据。
 
-### wave29 改动区间等效变异退役清单
+### wave30 改动区间与全文件变异锁现状
 
-本轮修复改动区间共 65 个切口，KILLED 57，其余 8 条为**行为不可观测的等效变异**（等价变异体），逐条退役理由如下（其余 SURVIVED 落在未改动行：`src/utils/index.js` 转义/折叠工具、`src/api/constants.js` 及未触及的旧分支）：
+wave30 把改动区间与全文件的**变异幸存者**逐条当作“未验证行为面”收敛：
 
-| 切口 | 变异 | 退役理由（为何不可观测） |
+- 改动区间（`DomSpec.tagOf` / `TABLE_CELL_TAGS` 收束 + 死初始化清理）：**5 切口 → KILLED 4 / 等效 1**
+- 全文件深跑（`src/api/{DomSpec,obsidian,DOMToNotion}.js`，stride 1）：**353 切口 → KILLED 337 / SURVIVED 16 / INVALID 0**
+- 16 条幸存切口全部经 `node scripts/verify-mutation-equivalence.js <mutation-log>` 判定为 **EQUIVALENT**（exit 0）：在约 370 项可观测输出（`cookedToBlocks` 三模式 × 72 输入、Markdown 出口、公开判据）上与原始实现逐字节一致；只要有一条不一致，校验器即非零退出并列出切口
+
+一轮 wave29/wave30 之间还被补测试杀死的可观测变异（**可观测不得以“等效”名义退役**）的 5 例：`obsidian.js:759`（`convert(post.cooked \|\| "")` 误改后 callout 正文丢失）、`DOMToNotion.js:373`（`skipNestedLists` 误改后父项富文本吞内层项文本）、`DOMToNotion.js:1070`（`nodeType` 比较反转后内联容器拍平成单段落）、`DOMToNotion.js:1071` 两条（块级/媒体判据失效后 `<span>a<hr>b</span>` 与嵌套列表结构丢失）。
+
+### 等效变异退役清单（16 条）
+
+| 切口 | 变异 | 退役理由（为何对公开出口面不可观测） |
 | --- | --- | --- |
-| `DomSpec.js:93` | `&&` → `||` | 仅「无任何 section」的残缺 HTML/测试桩走到该行；真实 DOM 下 `<table>` 直属 `tr` 已被解析器移入隐式 `tbody`，两侧操作数组合不同时为空时 `rowsOf(table)` 恒空 |
-| `obsidian.js:472` | `&&` → `||` | 决定「是否在字面量模式重算链接标签」；重算只在子树含 video/audio/iframe 时改变输出，无该类子节点时重算结果与已算 `children` 逐字节相同 |
-| `obsidian.js:545` | `||` → `&&` | 早退守卫：`hasQuote` 初值 false 时继续下探只会得到 `tagName == ""` 的文本节点（`scanQuote` 遍历空 childNodes，无副作用）；为 true 时重复置位不改结果 |
-| `obsidian.js:620` | `false` → `true` | `append()` 判据首项为 `out &&`，而**首次** append 时 `out` 必为空串；每次 append 末尾又以 `Boolean(isBlockChild)` 覆盖该初值 |
-| `obsidian.js:628` | `&&` → `||` | `tagName` 为真必是元素（两式同真）；文本节点 `tagName` 为 `undefined`，`false && x` 与 `false \|\| x` 同为假值 |
-| `obsidian.js:667` / `671` | `&&` → `||` | `row.children` 的元素必有 `tagName`，左侧恒真、右侧恒被短路 |
-| `DOMToNotion.js:1019` | `<= 2000` → `< 2000` | 只影响「合并后恰为 2000 字符」的边界：合并为单段（Notion 单段上限即 2000，合法）与保留两段（同样合法）等价，可见文本与总长一致 |
+| `obsidian.js:176` | `&&` → `\|\|` | 属于本轮改动区间：该映射 i=0 分支因上游 `.trim()` 不可能以 2 空格开头，故 `i === 0` 与 `!test` 在同一点恒等价；i>0 且无缩进时 `replace` 为恒等变换 |
+| `obsidian.js:471` | `&&` → `\|\|` | 该判据只决定“标签是否按字面量重算”；querySelector 存在却无媒体时，重算结果与原标签逐字节相同（语料含 `<a>` 裹裸文本/裹图两式） |
+| `DOMToNotion.js:12` | `&&` → `\|\|` | `cut === 0` / `cut === text.length` 均不可达（上游对 `length <= maxLength` 已早退）；不可达时 `charCodeAt(-1)` 为 NaN，不构成代理对判据 |
+| `DOMToNotion.js:35` | `true` → `false` | `_cookLightbox` 公开壳仅在容器无直属子节点时被兜底调用（有子节点时 `processElement` 已逐个分派并 return），空容器下两条图片路径都无节点可采 |
+| `DOMToNotion.js:481` | `>=` → `>` | 等长行 `concat(空数组)` 结果逐元素相同 |
+| `DOMToNotion.js:551` | `\|\|` → `&&` | 该行只在“emoji 名未收录且地址被判拒”的块级路径可达；emoji 图在遍历中始终先被 `walkNode` 按文本载体分流（内联） |
+| `DOMToNotion.js:583` | `<=` → `<` | 长度恰为 2000 时 else 分支的 `safeCutIndex(remaining, 2000)` 仍切出整串单块，与早退分支逐字节相同 |
+| `DOMToNotion.js:616` | `false` → `true` | 首次 `breakIfNeeded` 时 `result` 为空，`result.length > 0` 守卫吞掉初值，且该次调用立即归位 |
+| `DOMToNotion.js:619` | `false` → `true` | 置位只由块边界触发，归位发生在 `if (!needBreak) return` 之后并被当次消费；两次消费之间必有新的块边界重新置位，残留 true 观测不到 |
+| `DOMToNotion.js:842` | `\|\|` → `&&` | `lightbox-wrapper` 与 `image-wrapper` 在真实 DOM 中互斥，两式同真同假 |
+| `DOMToNotion.js:843` | `false` → `true` | 该标志仅在遍历后读取，任何真值子节点都会置真；仅零子节点时保留初值，此时两条兜底路径都不产块 |
+| `DOMToNotion.js:853` | `&&` → `\|\|` | 实测该判据两分支在语料（含灯箱内“有效地址 + alt”图）上产出相同的块级图片（内联 img 路径同样落块级图片） |
+| `DOMToNotion.js:875` | `&&` → `\|\|` | 非 `a` 元素带 `attachment` 类名时 `_cookAttachment` 需 `getAttribute("href")`，语料内含该反例且输出一致（无 href 时两条路径都不产文件块） |
+| `DOMToNotion.js:949` | `false` → `true` | 同 `843`（`.md-table` 容器；零子节点时两条路径都不产块） |
+| `DOMToNotion.js:1010` | `\|\|` → `&&` | 空内容片段即使被合并，也在此后按 `part.text.content` 被两道过滤剔除，不进 `rich_text` |
+| `DOMToNotion.js:1070` | `\|\|` → `&&` | `found` 为假且子节点为元素时，短路顺序变化不改变“是否找到块级/媒体子节点”的结论（`!child` 为真时右侧不再求值） |
 
-> 审计方法：本次以「同一视角由三个模型（deepseek-v4-flash / GLM-5.3-flash / qwen3.8-flash）共同完成」的方式连续多轮查找缺陷，每一轮都要求模型给出**可构造输入**与**规范锚点**，并用测试与变异锁固化结论；对误报需在读源后明确驳回并记录理由。
+> 审计方法：本次以「同一视角由三个模型（deepseek-v4-flash / GLM-5.3-flash / qwen3.8-flash）共同完成」的方式连续多轮查找缺陷，每一轮都要求模型给出**可构造输入**与**规范锚点**，并用契约测试与变异锁固化结论；对误报需在读源后明确驳回并记录理由。wave30 额外要求：每条幸存变异必须有**可复现的等效性依据**（差分语料哈希一致）或**杀死它的契约测试**，两者俱无则不许交付。

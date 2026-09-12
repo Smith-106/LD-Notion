@@ -32,6 +32,7 @@ const DEFAULT_FILES = [
 
 const DEFAULT_TESTS = [
     "tests/dom-exit-surface.test.js",
+    "tests/mutation-gap-lock.test.js",
     "tests/p4-dom-boundary.test.js",
     "tests/p4conv-round1.test.js",
     "tests/p4conv-round2.test.js",

@@ -1232,6 +1232,16 @@ describe("wave18 w3 共识 + w1/w2 补派: 出口面契约", () => {
         expect(rich.map((r) => r.text.content).join("").length).toBe(2500);
     });
 
+    it("恰为 2000 字符的相邻同注解片段仍合并(单段上限含端点)", () => {
+        const body = element("body", [element("div", [textNode("a".repeat(1999)), textNode("b")])]);
+        const blocks = withDom(body, () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
+        const rich = blocks.flatMap((b) => (b.paragraph && b.paragraph.rich_text) || []);
+        // 1999 + 1 = 2000 未超限, 应合并为单段; 切成两段虽不丢内容, 但会多占 rich_text 槽位
+        // (100 项上限)并与 Notion 实际接受的最大单段不一致
+        expect(rich.length).toBe(1);
+        expect(rich[0].text.content.length).toBe(2000);
+    });
+
     it(".md-table 容器内非表格内容走同一分派(hr/列表不丢结构)", () => {
         const mdTable = (children) => element("div", children, { classList: { contains: (c) => c === "md-table" } });
         const hr = withDom(element("body", [mdTable([element("hr", [])])]), () => DOMToNotion.cookedToBlocks("<div>x</div>", "external"));
@@ -2092,6 +2102,21 @@ describe("wave29 确认轮: 元信息容器 / 表格行序 / 富文本上下文�
         // 块级子节点前后仍留分隔(与浏览器上下堆叠的渲染一致)
         expect(HTMLToMarkdown._convertTable(cell([textNode("前"), element("ul", [element("li", [textNode("a")])])])))
             .toBe("| 前 a |\n| --- |");
+    });
+
+    it("无 section 表的直属行仅在完全无段时才算正文", () => {
+        const directOnly = element("table", [element("tr", [element("td", [textNode("r")])])]);
+        expect(DomSpec.collectTableRows(directOnly).body.length).toBe(1);
+        const mixed = element("table", [
+            element("tr", [element("td", [textNode("direct")])]),
+            element("tbody", [element("tr", [element("td", [textNode("body")])])]),
+        ]);
+        const rows = DomSpec.collectTableRows(mixed);
+        expect(rows.header.length).toBe(0);
+        // 直属 tr 不得升格: 真实解析器已把无 section 的 tr 移入隐式 tbody,
+        // 段存在时又并入直属行会把同一行输出两次(行数叠增)
+        expect(rows.body.length).toBe(1);
+        expect(HTMLToMarkdown._convertTable(mixed)).toBe("| body |\n| --- |");
     });
 
     it("aside.quote 无内层 blockquote 时保留引用语义", () => {

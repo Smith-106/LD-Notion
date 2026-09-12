@@ -41,7 +41,17 @@ const TEXT_BOUNDARY_TAGS = new Set([
     "td", "th", "caption",
 ]);
 
-const tagOf = (el) => (el && el.tagName ? String(el.tagName).toLowerCase() : "");
+// wave30 共识: 标签取值单一来源 —— 原 5 处出口面各自内联 `nodeType === ELEMENT_NODE && tagName`
+// 双判据(obsidian 表格/单元格过滤、DOMToNotion 行/单元格/容器子节点), 任一缺漏即把文本节点当元素
+// 处理(或反向静默丢行)。非元素、无 tagName(文本/注释/测试桩)、无节点统一得 ""。
+const tagOf = (el) => {
+    if (!el) return "";
+    if (typeof el.tagName !== "string") return "";
+    return el.tagName.toLowerCase();
+};
+
+// 表格单元格标签集: 两出口共用(原 obsidian/DOMToNotion 各自写 ["td","th"] 字面量)
+const TABLE_CELL_TAGS = new Set(["td", "th"]);
 
 // wave18 共识(qwen): Notion 的 url 字段上限 2000 字符 —— 超长直链原样写入会 400 并
 // **整页导入失败**; 与 caption / rich_text 的 2000 上限同因。集中在此判据(单一出口面)。
@@ -51,6 +61,8 @@ const DomSpec = {
     BLOCK_TAGS,
     SKIP_TAGS,
     TEXT_BOUNDARY_TAGS,
+    TABLE_CELL_TAGS,
+    tagOf,
 
     // 块级判据: 标签集 ∪ 类名容器(灯箱/图片容器/md-table/a.attachment/aside.quote)
     isBlockNode: (el) => {

@@ -215,7 +215,7 @@ const DOMToNotion = {
                 }
                 return;
             }
-            if (child.nodeType !== Node.ELEMENT_NODE || !child.tagName) return;
+            if (!DomSpec.tagOf(child)) return;
             if (String(child.tagName).toLowerCase() === "blockquote") {
                 DOMToNotion._cookBlockquote(child, blocks, imgMode);
                 return;
@@ -375,7 +375,7 @@ const DOMToNotion = {
                     blocks.push({ type: listType, [listType]: { rich_text: richText } });
                 }
                 DomSpec.eachChildOrdered(li, (inner) => {
-                    if (inner.nodeType !== Node.ELEMENT_NODE || !inner.tagName) return;
+                    if (!DomSpec.tagOf(inner)) return;
                     const innerTag = String(inner.tagName).toLowerCase();
                     if (innerTag === "ul" || innerTag === "ol") {
                         DOMToNotion._cookList(inner, blocks, imgMode, true);
@@ -402,9 +402,9 @@ const DOMToNotion = {
         // P4 收敛(c05): 表格行列只取直属子元素 —— 后代选择器会把单元格内嵌套表格的
         // tr/td 并入外层行(列宽污染/内容窜行); 与下方 tbody 分支同口径
         const directRows = (container) => Array.from(container.children || [])
-            .filter((child) => child.tagName && child.tagName.toLowerCase() === "tr");
+            .filter((child) => DomSpec.tagOf(child) === "tr");
         const directCells = (row) => Array.from(row.children || [])
-            .filter((child) => child.tagName && ["td", "th"].includes(child.tagName.toLowerCase()));
+            .filter((child) => DomSpec.TABLE_CELL_TAGS.has(DomSpec.tagOf(child)));
         // wave6 共识(qwen): thead/tbody 同样须取直属子元素 —— querySelector 会把单元格内
         // 嵌套表格的 thead/tbody 当外层表头/表体(hasHeader 误置 + 行内容窜入)
         const directSections = (tagNames) => Array.from(table.children || [])
@@ -822,9 +822,8 @@ const DOMToNotion = {
         const blocks = [];
 
         const processElement = (el) => {
-            if (!el || el.nodeType !== Node.ELEMENT_NODE) return;
-
-            const tag = el.tagName.toLowerCase();
+            const tag = DomSpec.tagOf(el);
+            if (!tag) return;
 
             // wave14 共识(glm): <hr> 此前无烹饪分支, 分隔线静默丢弃
             if (tag === "hr") {
@@ -844,7 +843,7 @@ const DOMToNotion = {
                 let handled = false;
                 DomSpec.eachChildOrdered(el, (child) => {
                     if (!child) return;
-                    if (child.nodeType === Node.ELEMENT_NODE && child.tagName
+                    if (DomSpec.tagOf(child)
                         && DomSpec.mediaKind(child) === "img") {
                         // wave26 共识(w26 dsf): 与 walkNode 同口径 —— emoji 图与被拒地址且有 alt 的
                         // 图片是**文本载体**(内联 emoji 字符 / alt 回退), 不得在此直落块级图片:
@@ -950,8 +949,7 @@ const DOMToNotion = {
                 let handled = false;
                 DomSpec.eachChildOrdered(el, (child) => {
                     if (!child) return;
-                    if (child.nodeType === Node.ELEMENT_NODE && child.tagName
-                        && String(child.tagName).toLowerCase() === "table") {
+                    if (DomSpec.tagOf(child) === "table") {
                         // 保持文档序: 表格是块级产出, 先落缓冲中的内联文本
                         flushInline();
                         DOMToNotion._cookTable(child, blocks, imgMode);
