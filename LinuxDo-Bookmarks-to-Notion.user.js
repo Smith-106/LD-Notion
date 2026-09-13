@@ -13103,7 +13103,22 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             throw setupError;
           }
           const dedupStrict = Utils2.isBookmarkDedupStrict();
-          let newBookmarks = dedupStrict ? bookmarks.filter((b) => !BookmarkExporter2.isExported(b.url)) : bookmarks.slice();
+          let remoteUrls = null;
+          if (dedupStrict) {
+            try {
+              remoteUrls = await NotionAPI2.collectDatabaseUrls(apiKey, databaseId);
+            } catch (_) {
+              remoteUrls = null;
+            }
+          }
+          const normRemoteUrl = (u) => String(u || "").trim().replace(/\/+$/, "");
+          let newBookmarks = dedupStrict ? bookmarks.filter((b) => {
+            if (remoteUrls) {
+              const u = normRemoteUrl(b.url);
+              return !(u && remoteUrls.has(u));
+            }
+            return !BookmarkExporter2.isExported(b.url);
+          }) : bookmarks.slice();
           if (dedupStrict) {
             const seenUrls = /* @__PURE__ */ new Set();
             newBookmarks = newBookmarks.filter((b) => {

@@ -679,9 +679,25 @@ const BookmarkExporter = {
         }
 
         // 过滤已导出的
+        // 20260914 对账(odyssey-debug dedup-state): 远端「链接」索引是 ground truth —— 换库后
+        // 账本残留不得阻断手动导出(与 fetchTrackedPages/_exportViaGitHubExporter 同构);
+        // 查询失败降级账本(旧语义, 防查询故障时重复轰炸)。
         const dedupStrict = Utils.isBookmarkDedupStrict();
+        let remoteUrls = null;
+        if (dedupStrict) {
+            try {
+                remoteUrls = await NotionAPI.collectDatabaseUrls(apiKey, databaseId);
+            } catch (_) { remoteUrls = null; }
+        }
+        const normRemoteUrl = (u) => String(u || "").trim().replace(/\/+$/, "");
         let newBookmarks = dedupStrict
-            ? bookmarks.filter(b => !BookmarkExporter.isExported(b.url))
+            ? bookmarks.filter(b => {
+                if (remoteUrls) {
+                    const u = normRemoteUrl(b.url);
+                    return !(u && remoteUrls.has(u));
+                }
+                return !BookmarkExporter.isExported(b.url);
+            })
             : bookmarks.slice();
         // P4 收敛(c07): strict 去重需含本批内重复 URL —— 循环前仅按历史账本过滤,
         // 同批内相同 URL(多文件夹)会各自建页
