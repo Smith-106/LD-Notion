@@ -1,3 +1,24 @@
+## [3.14.29] - 2026-09-14
+
+### quality (三轮 quality-auto-test 质量基线扩充 + 依赖安全)
+
+**测试基线 1701 用例 / 98 文件**（此前 1643 / 87，累计 +58 用例 / +11 文件，35 场景三轮迭代全绿）
+
+- L1 单元：ai/utils 4 纯函数模块契约（payload SSRF 闸门 / NaN 守卫 / checkbox 严格真值）、AgentTrace 截断+FIFO rotate、enrichBookmark AI 失败降级与成本闸门预占
+- L2 集成：三导入器 run() 全流程（LinuxDo/GitHub/Bookmark）、RSS 全流程（snapshot+needsUpdate 契约）、NotionAPI 传输层网络边界（429 退避/认证终态短路/畸形 JSON/buildUrl 路径穿越）、Exporter.exportTopic Guard 链、NameResolver 三段解析、GitHubAdapter 水位 newest-first 短路契约
+- L3 端到端：分槽租约互斥、Guard→API→账本管线、对账回填→账本→计数链传播
+- 零生产源码缺陷（35 场景 0 bug；3+4+2=9 处测试夹具缺陷经源码核对修正）
+
+**fix**
+
+- `CONFIG.SCRIPT_VERSION` 版本兜底漂移修复（3.14.17 → 3.14.29）：UpdateChecker 在 GM_info 缺失时的回退版本此前落后 12 个发布
+
+**security**
+
+- devDependencies 工具链漏洞清零（npm audit 5→0：nanoid/postcss high、vitest/@vitest/mocker moderate、esbuild low；vitest 4.1.8 → 4.1.11，运行时依赖保持为 0）
+
+---
+
 # 更新日志
 
 ## [3.14.28] - 2026-09-14
