@@ -16745,6 +16745,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 404 与用户名无关, 不 enrich 防误导。
         _wrapUserScoped404: (error, username) => {
           if (!error || !username || !/资源不存在/.test(String((error == null ? void 0 : error.message) || ""))) return error;
+          if (String(username).includes("@")) {
+            return new Error(`${error.message} \u2014\u2014 GitHub \u7528\u6237\u540D\u4E0D\u5E94\u586B\u90AE\u7BB1\u300C${username}\u300D\uFF1A\u8BF7\u6539\u586B github.com/ \u540E\u9762\u90A3\u4E32\uFF08\u5982 octocat\uFF09\uFF1B\u6216\u586B\u5199 Token \u6539\u7528\u8BA4\u8BC1\u63A5\u53E3\uFF08\u65E0\u9700\u7528\u6237\u540D\uFF09`);
+          }
           return new Error(`${error.message} \u2014\u2014 GitHub \u7528\u6237\u540D\u300C${username}\u300D\u53EF\u80FD\u4E0D\u5B58\u5728\u6216\u5DF2\u6539\u540D\uFF1A\u8BF7\u5728 GitHub \u8BBE\u7F6E\u533A\u4FEE\u6B63\u7528\u6237\u540D\uFF0C\u6216\u586B\u5199 Token \u6539\u7528\u8BA4\u8BC1\u63A5\u53E3`);
         },
         // 获取用户 starred repos（带分页）
@@ -18035,6 +18038,10 @@ ${insight.summary || ""}`,
         if (!settings.username && !settings.token) {
           GitHubAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u6216 Token");
           return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u6216 Token"] };
+        }
+        if (!settings.token && settings.username && String(settings.username).includes("@")) {
+          GitHubAutoImporter2.updateStatus("GitHub \u7528\u6237\u540D\u4E0D\u5E94\u586B\u90AE\u7BB1");
+          return { importedCount: 0, failedCount: 0, errors: [`GitHub \u7528\u6237\u540D\u4E0D\u5E94\u586B\u90AE\u7BB1\u300C${settings.username}\u300D\uFF1A\u8BF7\u6539\u586B github.com/ \u540E\u9762\u90A3\u4E32\uFF08\u5982 octocat\uFF09\uFF1B\u6216\u586B\u5199 Token \u6539\u7528\u8BA4\u8BC1\u63A5\u53E3\uFF08\u65E0\u9700\u7528\u6237\u540D\uFF09`] };
         }
         const now = Date.now();
         if (now - GitHubAutoImporter2.lastRunAt < GitHubAutoImporter2.minimumRunGapMs) return;

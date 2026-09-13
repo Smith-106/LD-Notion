@@ -96,6 +96,10 @@ const GitHubAPI = {
     // 404 与用户名无关, 不 enrich 防误导。
     _wrapUserScoped404: (error, username) => {
         if (!error || !username || !/资源不存在/.test(String(error?.message || ""))) return error;
+        // 20260913: 邮箱形用户名是高频误配(GitHub 登录用邮箱, API 路径只认 handle)——给精确指引而非泛化「不存在或已改名」
+        if (String(username).includes("@")) {
+            return new Error(`${error.message} —— GitHub 用户名不应填邮箱「${username}」：请改填 github.com/ 后面那串（如 octocat）；或填写 Token 改用认证接口（无需用户名）`);
+        }
         return new Error(`${error.message} —— GitHub 用户名「${username}」可能不存在或已改名：请在 GitHub 设置区修正用户名，或填写 Token 改用认证接口`);
     },
 

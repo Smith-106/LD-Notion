@@ -470,6 +470,11 @@ GitHubAutoImporter.run = async () => {
         GitHubAutoImporter.updateStatus("请先配置 GitHub 用户名或 Token");
         return { importedCount: 0, failedCount: 0, errors: ["请先配置 GitHub 用户名或 Token"] };
     }
+    // 20260913: 邮箱形用户名是高频误配(登录用邮箱 ≠ API handle), 无 Token 时必然 404——快速失败给精确指引, 不浪费 15s 网络往返
+    if (!settings.token && settings.username && String(settings.username).includes("@")) {
+        GitHubAutoImporter.updateStatus("GitHub 用户名不应填邮箱");
+        return { importedCount: 0, failedCount: 0, errors: [`GitHub 用户名不应填邮箱「${settings.username}」：请改填 github.com/ 后面那串（如 octocat）；或填写 Token 改用认证接口（无需用户名）`] };
+    }
 
     const now = Date.now();
     if (now - GitHubAutoImporter.lastRunAt < GitHubAutoImporter.minimumRunGapMs) return;

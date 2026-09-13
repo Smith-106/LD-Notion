@@ -155,4 +155,29 @@ describe("odyssey-debug 20260913: GitHub 404/401 指引 + run() 错误上抛", (
         expect(result.errors).toEqual(["请先配置 GitHub 用户名或 Token"]);
         expect(GitHubAutoImporter.isRunning).toBe(false);
     });
+
+    it("T10: 邮箱形用户名 404 → 精确邮箱指引(非泛化「不存在或已改名」)", () => {
+        const error = new Error("GitHub Stars 资源不存在");
+        const wrapped = GitHubAPI._wrapUserScoped404(error, "wds2788245684@gmail.com");
+        expect(wrapped.message).toContain("不应填邮箱");
+        expect(wrapped.message).toContain("github.com/ 后面那串");
+    });
+
+    it("T11: 邮箱形用户名无 Token → run() 快速失败, 不发网络请求", async () => {
+        NotionOAuth.getAccessToken = () => "notion-token";
+        Storage.get = (key, d) => {
+            if (key === CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID) return "db-id";
+            if (key === CONFIG.STORAGE_KEYS.GITHUB_USERNAME) return "wds2788245684@gmail.com";
+            return d;
+        };
+        let fetchCalled = 0;
+        global.fetch = async () => { fetchCalled += 1; throw new Error("should not fetch"); };
+        GitHubAutoImporter.lastRunAt = 0;
+
+        const result = await GitHubAutoImporter.run();
+        expect(result).toBeDefined();
+        expect(fetchCalled).toBe(0);
+        expect(result.errors[0]).toContain("不应填邮箱");
+        expect(result.errors[0]).toContain("octocat");
+    });
 });
