@@ -6196,6 +6196,9 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.setRequestHandler((options) => {
             if (options.url.includes('api.github.com') && options.url.includes('/readme')) {
                 respondJson(options, 404, { message: 'Not Found' });
+            } else if (options.method === 'POST' && options.url.includes('/databases/') && options.url.includes('/query')) {
+                // 20260914 对账: collectDatabaseUrls 远端索引查询(空库→全量导出), 不计入建页计数
+                respondJson(options, 200, { results: [], has_more: false });
             } else if (options.method === 'POST' && options.url.includes('api.notion.com')) {
                 const body = JSON.parse(options.data || '{}');
                 notionPostBodies.push(body);
