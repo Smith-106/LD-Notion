@@ -87,6 +87,7 @@ const CONFIG = {
         // GitHub 收藏导入
         GITHUB_USERNAME: "ldb_github_username",
         GITHUB_TOKEN: "ldb_github_token",
+        GITHUB_OAUTH_CLIENT_ID: "ldb_github_oauth_client_id",
         GITHUB_EXPORTED_REPOS: "ldb_github_exported_repos",
         GITHUB_IMPORT_TYPES: "ldb_github_import_types",
         GITHUB_EXPORTED_GISTS: "ldb_github_exported_gists",

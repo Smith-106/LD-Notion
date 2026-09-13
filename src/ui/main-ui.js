@@ -182,6 +182,9 @@ const UI = {
             agentMaxIterationsSelect: panel.querySelector("#ldb-agent-max-iterations"),
             githubUsernameInput: panel.querySelector("#ldb-github-username"),
             githubTokenInput: panel.querySelector("#ldb-github-token"),
+            githubOAuthBtn: panel.querySelector("#ldb-github-oauth-btn"),
+            githubOAuthStatus: panel.querySelector("#ldb-github-oauth-status"),
+            githubOauthClientIdInput: panel.querySelector("#ldb-github-oauth-client-id"),
             githubTypeCheckboxes: panel.querySelectorAll(".ldb-github-type"),
             obsSettingsToggle: panel.querySelector("#ldb-obs-settings-toggle"),
             obsSettingsContent: panel.querySelector("#ldb-obs-settings-content"),
@@ -901,9 +904,21 @@ const UI = {
                                 <input type="text" class="ldb-input" id="ldb-github-username" placeholder="your-username">
                             </div>
                             <div class="ldb-input-group">
+                                <label class="ldb-label">GitHub 授权（推荐，免手动创建 Token）</label>
+                                <div style="display: flex; gap: var(--ldb-ui-spacing-sm); align-items: center; flex-wrap: wrap;">
+                                    <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-github-oauth-btn">🔗 通过 GitHub 授权</button>
+                                    <span id="ldb-github-oauth-status" class="ldb-tip" style="flex: 1;"></span>
+                                </div>
+                                <div class="ldb-tip">首次使用需在下方填入 Client ID（github.com/settings/developers 创建 OAuth App 即可，公开信息无需保密）；授权后 Token 自动填入下方输入框，无需手动去 GitHub 生成</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">GitHub OAuth Client ID（授权用，可选）</label>
+                                <input type="text" class="ldb-input" id="ldb-github-oauth-client-id" placeholder="Iv1.xxxxxxxxxxxxxxxx">
+                            </div>
+                            <div class="ldb-input-group">
                                 <label class="ldb-label">GitHub Token (可选)</label>
                                 <input type="password" class="ldb-input" id="ldb-github-token" placeholder="ghp_xxx...">
-                                <div class="ldb-tip">不填写也可使用，但有速率限制</div>
+                                <div class="ldb-tip">手动粘贴 Personal Access Token（PAT 兑底路径）；推荐用上方「通过 GitHub 授权」自动获取</div>
                             </div>
                             <div class="ldb-input-group">
                                 <label class="ldb-label">导入类型</label>

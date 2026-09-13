@@ -4,7 +4,7 @@
 const { CONFIG, MSG, getMimeType } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState, DedupStore } = require("../storage");
-const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
+const { CredentialVault, NotionOAuth, TargetState, GitHubOAuth } = require("../auth");
 const { buildConfiguredTargetWarning } = require("../auth/target-discovery");
 const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, ObsidianAPI, EMOJI_MAP } = require("../api");
 const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = require("../security");
@@ -52,6 +52,10 @@ const UIEvents = {
             CredentialVault.syncSensitiveInput(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
             CredentialVault.syncSensitiveInput(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
         };
+        // 20260914: GitHub OAuth Client ID 为公开信息, 普通键同步(非敏感)
+        if (refs.githubOauthClientIdInput) {
+            refs.githubOauthClientIdInput.value = GitHubOAuth.getClientId();
+        }
 
         const isUserscriptMode = Utils.isUserscriptMode();
         const hasBridgeMarker = BookmarkBridge.isExtensionAvailable();
@@ -1179,6 +1183,7 @@ const UIEvents = {
                     [CONFIG.STORAGE_KEYS.IMG_MODE]: settings.imgMode,
                     [CONFIG.STORAGE_KEYS.REQUEST_DELAY]: parseInt(refs.requestDelaySelect.value),
                     [CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY]: settings.concurrency,
+                    [CONFIG.STORAGE_KEYS.GITHUB_OAUTH_CLIENT_ID]: refs.githubOauthClientIdInput ? String(refs.githubOauthClientIdInput.value || "").trim() : "",
                 },
                 sensitiveEntries: {
                     [CONFIG.STORAGE_KEYS.AI_API_KEY]: getInputValue(refs.aiApiKeyInput),
@@ -2025,6 +2030,37 @@ const UIEvents = {
                 UI.showStatus(error.message || String(error), "error");
             });
         };
+        // 20260914: GitHub OAuth Device Flow —— OAuth 为主 + 手动 PAT 兑底(与 Notion 双路径一致)
+        if (refs.githubOAuthBtn) {
+            refs.githubOAuthBtn.onclick = async () => {
+                GitHubOAuth.setClientId(refs.githubOauthClientIdInput ? refs.githubOauthClientIdInput.value : "");
+                const setStatus = (text) => {
+                    // textContent 赋值(非 innerHTML 插值): user_code/错误文案均不可信输入
+                    if (refs.githubOAuthStatus) refs.githubOAuthStatus.textContent = text;
+                };
+                try {
+                    refs.githubOAuthBtn.disabled = true;
+                    setStatus("正在申请设备码…");
+                    const result = await GitHubOAuth.startDeviceFlow({
+                        onUserCode: ({ userCode, verificationUri }) => {
+                            try { window.open(verificationUri, "_blank"); } catch (_) { /* 弹窗拦截时用户手动打开 */ }
+                            setStatus(`请在已打开的 GitHub 页面输入代码: ${userCode}`);
+                        },
+                        onStatus: ({ phase }) => {
+                            if (phase === "pending") setStatus("等待你在 GitHub 页面确认授权…");
+                            else if (phase === "slow_down") setStatus("GitHub 限流提示，已自动降速继续等待…");
+                        },
+                    });
+                    await GitHubOAuth.applyTokenResponse(result);
+                    CredentialVault.syncSensitiveInput(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
+                    setStatus("✅ GitHub 授权成功，Token 已自动填入");
+                } catch (error) {
+                    setStatus(error.code === "cancelled" ? "已取消授权" : `❌ ${error.message}`);
+                } finally {
+                    refs.githubOAuthBtn.disabled = false;
+                }
+            };
+        }
         // Obsidian 设置变更保存
         refs.obsApiUrlInput.onchange = (e) => {
             Storage.set(CONFIG.STORAGE_KEYS.OBS_API_URL, e.target.value.trim());

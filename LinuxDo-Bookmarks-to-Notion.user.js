@@ -155,6 +155,7 @@
           // GitHub 收藏导入
           GITHUB_USERNAME: "ldb_github_username",
           GITHUB_TOKEN: "ldb_github_token",
+          GITHUB_OAUTH_CLIENT_ID: "ldb_github_oauth_client_id",
           GITHUB_EXPORTED_REPOS: "ldb_github_exported_repos",
           GITHUB_IMPORT_TYPES: "ldb_github_import_types",
           GITHUB_EXPORTED_GISTS: "ldb_github_exported_gists",
@@ -2085,6 +2086,166 @@
     }
   });
 
+  // src/auth/github-oauth.js
+  var require_github_oauth = __commonJS({
+    "src/auth/github-oauth.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Storage: Storage2 } = require_storage();
+      var DEVICE_CODE_URL = "https://github.com/login/device/code";
+      var TOKEN_URL = "https://github.com/login/oauth/access_token";
+      var DEFAULT_SCOPES = "repo gist";
+      var DEFAULT_INTERVAL_MS = 5e3;
+      var SLOW_DOWN_EXTRA_MS = 5e3;
+      var DEFAULT_MAX_POLL_MS = 15 * 60 * 1e3;
+      function gmPostForm(url, params, timeoutMs = 3e4) {
+        return new Promise((resolve, reject) => {
+          if (typeof GM_xmlhttpRequest === "undefined") {
+            reject(new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301 GM_xmlhttpRequest, \u65E0\u6CD5\u53D1\u8D77 GitHub \u6388\u6743"));
+            return;
+          }
+          GM_xmlhttpRequest({
+            method: "POST",
+            url,
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              "Accept": "application/json"
+            },
+            data: Object.keys(params).map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`).join("&"),
+            onload: (response) => {
+              let body = {};
+              try {
+                body = JSON.parse(response.responseText || "{}");
+              } catch (_) {
+                body = {};
+              }
+              resolve({ status: response.status, body });
+            },
+            onerror: (error) => reject(new Error(`GitHub \u6388\u6743\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${(error == null ? void 0 : error.error) || error}`)),
+            timeout: timeoutMs,
+            ontimeout: () => reject(new Error("GitHub \u6388\u6743\u8BF7\u6C42\u8D85\u65F6\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5"))
+          });
+        });
+      }
+      function describeDeviceCodeError(body, status) {
+        const code = String((body == null ? void 0 : body.error) || "").toLowerCase();
+        const message = String((body == null ? void 0 : body.error_description) || (body == null ? void 0 : body.error_uri) || "").slice(0, 200);
+        const map = {
+          incorrect_client_credentials: "Client ID \u65E0\u6548\uFF08github.com/settings/developers \u6838\u5BF9 OAuth App \u7684 Client ID\uFF09",
+          incorrect_device_code: "\u8BBE\u5907\u7801\u65E0\u6548\u6216\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u53D1\u8D77\u6388\u6743",
+          expired_token: "\u6388\u6743\u7B49\u5F85\u8D85\u65F6\uFF0815 \u5206\u949F\u5185\u672A\u5728 GitHub \u9875\u9762\u786E\u8BA4\uFF09\uFF0C\u8BF7\u91CD\u65B0\u53D1\u8D77\u6388\u6743",
+          device_flow_disabled: "\u8BE5 OAuth App \u672A\u542F\u7528 Device Flow\uFF08GitHub \u9ED8\u8BA4\u542F\u7528\uFF1B\u8001\u5F0F App \u9700\u52FE\u9009 Enable Device Flow\uFF09",
+          unauthorized_client: "\u8BE5 OAuth App \u4E0D\u5141\u8BB8\u6B64\u6388\u6743\u65B9\u5F0F",
+          access_denied: "\u4F60\u5728 GitHub \u9875\u9762\u62D2\u7EDD\u4E86\u6388\u6743"
+        };
+        const error = new Error(map[code] || `GitHub \u6388\u6743\u5931\u8D25(HTTP ${status}${code ? `, ${code}` : ""})`);
+        error.code = code;
+        if (message) error.detail = message;
+        return error;
+      }
+      var GitHubOAuth = {
+        DEVICE_CODE_URL,
+        TOKEN_URL,
+        DEFAULT_SCOPES,
+        // client_id 为公开信息(设计上随请求明文出现), 存普通键即可; 空表示未配置
+        getClientId: () => String(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_OAUTH_CLIENT_ID, "")).trim(),
+        setClientId: (clientId) => {
+          const value = String(clientId || "").trim();
+          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_OAUTH_CLIENT_ID, value);
+          return value;
+        },
+        // —— Device Flow 主流程 ——
+        // options: { clientId?, scopes?, intervalMs?, maxPollMs?, onUserCode?, onStatus? }
+        // 返回 { accessToken, tokenType, scope }; 过程回调用于 UI 展示(用户代码/轮询状态)
+        startDeviceFlow: async (options = {}) => {
+          const clientId = String(options.clientId || GitHubOAuth.getClientId()).trim();
+          if (!clientId) {
+            const error = new Error("\u7F3A\u5C11 GitHub OAuth Client ID \u2014\u2014 \u524D\u5F80 github.com/settings/developers \u521B\u5EFA OAuth App\uFF08\u65E0\u9700\u586B Callback URL\uFF09\uFF0C\u628A Client ID \u7C98\u8D34\u5230\u4E0B\u65B9\u8F93\u5165\u6846");
+            error.code = "missing_client_id";
+            throw error;
+          }
+          const scopes = options.scopes || GitHubOAuth.DEFAULT_SCOPES;
+          let intervalMs = Number(options.intervalMs) > 0 ? Number(options.intervalMs) : DEFAULT_INTERVAL_MS;
+          const maxPollMs = Number(options.maxPollMs) > 0 ? Number(options.maxPollMs) : DEFAULT_MAX_POLL_MS;
+          const slowDownExtraMs = Number(options.slowDownExtraMs) > 0 ? Number(options.slowDownExtraMs) : SLOW_DOWN_EXTRA_MS;
+          const onUserCode = typeof options.onUserCode === "function" ? options.onUserCode : (() => {
+          });
+          const onStatus = typeof options.onStatus === "function" ? options.onStatus : (() => {
+          });
+          GitHubOAuth._pollCancelled = false;
+          const dcResponse = await gmPostForm(DEVICE_CODE_URL, {
+            client_id: clientId,
+            scope: scopes
+          });
+          const dc = dcResponse.body || {};
+          if (dcResponse.status !== 200 || !dc.device_code || !dc.user_code) {
+            throw describeDeviceCodeError(dc, dcResponse.status);
+          }
+          onUserCode({
+            userCode: String(dc.user_code),
+            verificationUri: String(dc.verification_uri || "https://github.com/login/device"),
+            expiresInSeconds: Number(dc.expires_in) > 0 ? Number(dc.expires_in) : 900
+          });
+          const startedAt = Date.now();
+          for (; ; ) {
+            if (GitHubOAuth._pollCancelled) {
+              const cancelError = new Error("\u5DF2\u53D6\u6D88 GitHub \u6388\u6743");
+              cancelError.code = "cancelled";
+              throw cancelError;
+            }
+            if (Date.now() - startedAt > maxPollMs) {
+              const timeoutError = new Error("GitHub \u6388\u6743\u7B49\u5F85\u8D85\u65F6\uFF0C\u8BF7\u91CD\u65B0\u53D1\u8D77\u6388\u6743");
+              timeoutError.code = "expired_token";
+              throw timeoutError;
+            }
+            await new Promise((r) => setTimeout(r, intervalMs));
+            if (GitHubOAuth._pollCancelled) {
+              const cancelError = new Error("\u5DF2\u53D6\u6D88 GitHub \u6388\u6743");
+              cancelError.code = "cancelled";
+              throw cancelError;
+            }
+            const tokenResponse = await gmPostForm(TOKEN_URL, {
+              client_id: clientId,
+              device_code: dc.device_code,
+              grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+            });
+            const tb = tokenResponse.body || {};
+            if (tokenResponse.status === 200 && tb.access_token) {
+              onStatus({ phase: "success" });
+              return {
+                accessToken: String(tb.access_token),
+                tokenType: String(tb.token_type || "bearer"),
+                scope: String(tb.scope || scopes)
+              };
+            }
+            const code = String(tb.error || "").toLowerCase();
+            if (code === "authorization_pending") {
+              onStatus({ phase: "pending", intervalMs });
+              continue;
+            }
+            if (code === "slow_down") {
+              intervalMs += slowDownExtraMs;
+              onStatus({ phase: "slow_down", intervalMs });
+              continue;
+            }
+            throw describeDeviceCodeError(tb, tokenResponse.status);
+          }
+        },
+        // —— 授权结果落库(与手动 PAT 同一存储键, GitHubAPI 零改动) ——
+        applyTokenResponse: async (result = {}) => {
+          if (!(result == null ? void 0 : result.accessToken)) throw new Error("GitHub OAuth \u672A\u8FD4\u56DE access_token");
+          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, result.accessToken);
+          return result.accessToken;
+        },
+        // UI 取消按钮调用; 正在进行的轮询在下一个检查点抛 cancelled
+        cancelPolling: () => {
+          GitHubOAuth._pollCancelled = true;
+        }
+      };
+      module.exports = { GitHubOAuth };
+    }
+  });
+
   // src/sync-lock.js
   var require_sync_lock = __commonJS({
     "src/sync-lock.js"(exports, module) {
@@ -2201,6 +2362,7 @@
         describeExchangeError,
         describeRedirectUriMismatch
       } = require_target_discovery();
+      var { GitHubOAuth } = require_github_oauth();
       var INVISIBLE_CHARS_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u00AD]/g;
       var CLIENT_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       var CredentialVault2 = {
@@ -3565,7 +3727,7 @@
           return true;
         }
       };
-      module.exports = { CredentialVault: CredentialVault2, TargetState: TargetState2, NotionOAuth: NotionOAuth2 };
+      module.exports = { CredentialVault: CredentialVault2, TargetState: TargetState2, NotionOAuth: NotionOAuth2, GitHubOAuth };
     }
   });
 
@@ -25554,6 +25716,9 @@ ${AIService2.isolateContent(JSON.stringify({
             agentMaxIterationsSelect: panel.querySelector("#ldb-agent-max-iterations"),
             githubUsernameInput: panel.querySelector("#ldb-github-username"),
             githubTokenInput: panel.querySelector("#ldb-github-token"),
+            githubOAuthBtn: panel.querySelector("#ldb-github-oauth-btn"),
+            githubOAuthStatus: panel.querySelector("#ldb-github-oauth-status"),
+            githubOauthClientIdInput: panel.querySelector("#ldb-github-oauth-client-id"),
             githubTypeCheckboxes: panel.querySelectorAll(".ldb-github-type"),
             obsSettingsToggle: panel.querySelector("#ldb-obs-settings-toggle"),
             obsSettingsContent: panel.querySelector("#ldb-obs-settings-content"),
@@ -26271,9 +26436,21 @@ ${AIService2.isolateContent(JSON.stringify({
                                 <input type="text" class="ldb-input" id="ldb-github-username" placeholder="your-username">
                             </div>
                             <div class="ldb-input-group">
+                                <label class="ldb-label">GitHub \u6388\u6743\uFF08\u63A8\u8350\uFF0C\u514D\u624B\u52A8\u521B\u5EFA Token\uFF09</label>
+                                <div style="display: flex; gap: var(--ldb-ui-spacing-sm); align-items: center; flex-wrap: wrap;">
+                                    <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-github-oauth-btn">\u{1F517} \u901A\u8FC7 GitHub \u6388\u6743</button>
+                                    <span id="ldb-github-oauth-status" class="ldb-tip" style="flex: 1;"></span>
+                                </div>
+                                <div class="ldb-tip">\u9996\u6B21\u4F7F\u7528\u9700\u5728\u4E0B\u65B9\u586B\u5165 Client ID\uFF08github.com/settings/developers \u521B\u5EFA OAuth App \u5373\u53EF\uFF0C\u516C\u5F00\u4FE1\u606F\u65E0\u9700\u4FDD\u5BC6\uFF09\uFF1B\u6388\u6743\u540E Token \u81EA\u52A8\u586B\u5165\u4E0B\u65B9\u8F93\u5165\u6846\uFF0C\u65E0\u9700\u624B\u52A8\u53BB GitHub \u751F\u6210</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">GitHub OAuth Client ID\uFF08\u6388\u6743\u7528\uFF0C\u53EF\u9009\uFF09</label>
+                                <input type="text" class="ldb-input" id="ldb-github-oauth-client-id" placeholder="Iv1.xxxxxxxxxxxxxxxx">
+                            </div>
+                            <div class="ldb-input-group">
                                 <label class="ldb-label">GitHub Token (\u53EF\u9009)</label>
                                 <input type="password" class="ldb-input" id="ldb-github-token" placeholder="ghp_xxx...">
-                                <div class="ldb-tip">\u4E0D\u586B\u5199\u4E5F\u53EF\u4F7F\u7528\uFF0C\u4F46\u6709\u901F\u7387\u9650\u5236</div>
+                                <div class="ldb-tip">\u624B\u52A8\u7C98\u8D34 Personal Access Token\uFF08PAT \u5151\u5E95\u8DEF\u5F84\uFF09\uFF1B\u63A8\u8350\u7528\u4E0A\u65B9\u300C\u901A\u8FC7 GitHub \u6388\u6743\u300D\u81EA\u52A8\u83B7\u53D6</div>
                             </div>
                             <div class="ldb-input-group">
                                 <label class="ldb-label">\u5BFC\u5165\u7C7B\u578B</label>
@@ -28060,7 +28237,7 @@ ${AIService2.isolateContent(JSON.stringify({
       var { CONFIG: CONFIG2, MSG: MSG2, getMimeType: getMimeType2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
-      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2, GitHubOAuth } = require_auth();
       var { buildConfiguredTargetWarning } = require_target_discovery();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
@@ -28101,6 +28278,9 @@ ${AIService2.isolateContent(JSON.stringify({
             CredentialVault2.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
             CredentialVault2.syncSensitiveInput(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
           };
+          if (refs.githubOauthClientIdInput) {
+            refs.githubOauthClientIdInput.value = GitHubOAuth.getClientId();
+          }
           const isUserscriptMode = Utils2.isUserscriptMode();
           const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           if (refs.runtimeBadge) {
@@ -29040,7 +29220,8 @@ ${AIService2.isolateContent(JSON.stringify({
                 [CONFIG2.STORAGE_KEYS.FILTER_MINLEN]: settings.filterMinLen,
                 [CONFIG2.STORAGE_KEYS.IMG_MODE]: settings.imgMode,
                 [CONFIG2.STORAGE_KEYS.REQUEST_DELAY]: parseInt(refs.requestDelaySelect.value),
-                [CONFIG2.STORAGE_KEYS.EXPORT_CONCURRENCY]: settings.concurrency
+                [CONFIG2.STORAGE_KEYS.EXPORT_CONCURRENCY]: settings.concurrency,
+                [CONFIG2.STORAGE_KEYS.GITHUB_OAUTH_CLIENT_ID]: refs.githubOauthClientIdInput ? String(refs.githubOauthClientIdInput.value || "").trim() : ""
               },
               sensitiveEntries: {
                 [CONFIG2.STORAGE_KEYS.AI_API_KEY]: getInputValue(refs.aiApiKeyInput),
@@ -29764,6 +29945,38 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               UI2.showStatus(error.message || String(error), "error");
             });
           };
+          if (refs.githubOAuthBtn) {
+            refs.githubOAuthBtn.onclick = async () => {
+              GitHubOAuth.setClientId(refs.githubOauthClientIdInput ? refs.githubOauthClientIdInput.value : "");
+              const setStatus = (text) => {
+                if (refs.githubOAuthStatus) refs.githubOAuthStatus.textContent = text;
+              };
+              try {
+                refs.githubOAuthBtn.disabled = true;
+                setStatus("\u6B63\u5728\u7533\u8BF7\u8BBE\u5907\u7801\u2026");
+                const result = await GitHubOAuth.startDeviceFlow({
+                  onUserCode: ({ userCode, verificationUri }) => {
+                    try {
+                      window.open(verificationUri, "_blank");
+                    } catch (_) {
+                    }
+                    setStatus(`\u8BF7\u5728\u5DF2\u6253\u5F00\u7684 GitHub \u9875\u9762\u8F93\u5165\u4EE3\u7801: ${userCode}`);
+                  },
+                  onStatus: ({ phase }) => {
+                    if (phase === "pending") setStatus("\u7B49\u5F85\u4F60\u5728 GitHub \u9875\u9762\u786E\u8BA4\u6388\u6743\u2026");
+                    else if (phase === "slow_down") setStatus("GitHub \u9650\u6D41\u63D0\u793A\uFF0C\u5DF2\u81EA\u52A8\u964D\u901F\u7EE7\u7EED\u7B49\u5F85\u2026");
+                  }
+                });
+                await GitHubOAuth.applyTokenResponse(result);
+                CredentialVault2.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
+                setStatus("\u2705 GitHub \u6388\u6743\u6210\u529F\uFF0CToken \u5DF2\u81EA\u52A8\u586B\u5165");
+              } catch (error) {
+                setStatus(error.code === "cancelled" ? "\u5DF2\u53D6\u6D88\u6388\u6743" : `\u274C ${error.message}`);
+              } finally {
+                refs.githubOAuthBtn.disabled = false;
+              }
+            };
+          }
           refs.obsApiUrlInput.onchange = (e) => {
             Storage2.set(CONFIG2.STORAGE_KEYS.OBS_API_URL, e.target.value.trim());
           };

@@ -7,6 +7,7 @@ const {
     describeExchangeError,
     describeRedirectUriMismatch,
 } = require("./target-discovery");
+const { GitHubOAuth } = require("./github-oauth");
 
 // 隐形字符(零宽空格/连接符/BOM/词连接符/bidi 标记/软连字符)——复制粘贴时易混入,Notion 端无法解析
 const INVISIBLE_CHARS_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u00AD]/g;
@@ -1641,4 +1642,4 @@ const NotionOAuth = {
     },
 };
 
-module.exports = { CredentialVault, TargetState, NotionOAuth };
+module.exports = { CredentialVault, TargetState, NotionOAuth, GitHubOAuth };
