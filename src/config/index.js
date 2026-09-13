@@ -344,6 +344,10 @@ const MSG = {
     NO_NOTION_KEY: "请先填写 Notion API Key",
     NO_AI_KEY: "请先填写 AI API Key",
     SETUP_NOTION_KEY: "请先设置 Notion API Key",
+    // v3.14.18 (debug-odyssey): 刷新工作区返回 0 数据库时的可行动指引 ——
+    // 与 404 notFoundHint(src/api/index.js) 同口径：集成未见任何数据库时
+    // 「✅ 成功 + 0 数据库」让用户无从关联已存目标的 404(未共享给集成)
+    WORKSPACE_NO_DATABASES_HINT: "。当前集成未见任何数据库：请在目标数据库所在页面点 ••• → 连接 → 勾选本集成（或重新 OAuth 授权并勾选该页面），完成后再次刷新",
 };
 
 module.exports = {

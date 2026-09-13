@@ -1777,7 +1777,9 @@ const UIEvents = {
                     },
                 });
                 UI.updateWorkspaceSelect(workspaceData);
-                workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面`;
+                // v3.14.18 (debug-odyssey): 0 数据库时附可行动指引(与 404 notFoundHint 同口径)
+                const noDbHint = workspaceData.databases.length === 0 ? MSG.WORKSPACE_NO_DATABASES_HINT : "";
+                workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面${noDbHint}`;
                 workspaceTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
                 workspaceTip.textContent = `❌ ${error.message}`;
@@ -2055,7 +2057,9 @@ const UIEvents = {
                 });
 
                 UI.updateAITargetDbOptions(workspaceData.databases);
-                UI.showStatus(`获取到 ${workspaceData.databases.length} 个数据库`, "success");
+                // v3.14.18 (debug-odyssey): 0 数据库时附可行动指引(与主面板刷新同口径)
+                const aiNoDbHint = workspaceData.databases.length === 0 ? MSG.WORKSPACE_NO_DATABASES_HINT : "";
+                UI.showStatus(`获取到 ${workspaceData.databases.length} 个数据库${aiNoDbHint}`, "success");
             } catch (error) {
                 UI.showStatus(`获取数据库列表失败: ${error.message}`, "error");
             } finally {

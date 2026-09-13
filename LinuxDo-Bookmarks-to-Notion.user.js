@@ -543,7 +543,11 @@
       var MSG2 = {
         NO_NOTION_KEY: "\u8BF7\u5148\u586B\u5199 Notion API Key",
         NO_AI_KEY: "\u8BF7\u5148\u586B\u5199 AI API Key",
-        SETUP_NOTION_KEY: "\u8BF7\u5148\u8BBE\u7F6E Notion API Key"
+        SETUP_NOTION_KEY: "\u8BF7\u5148\u8BBE\u7F6E Notion API Key",
+        // v3.14.18 (debug-odyssey): 刷新工作区返回 0 数据库时的可行动指引 ——
+        // 与 404 notFoundHint(src/api/index.js) 同口径：集成未见任何数据库时
+        // 「✅ 成功 + 0 数据库」让用户无从关联已存目标的 404(未共享给集成)
+        WORKSPACE_NO_DATABASES_HINT: "\u3002\u5F53\u524D\u96C6\u6210\u672A\u89C1\u4EFB\u4F55\u6570\u636E\u5E93\uFF1A\u8BF7\u5728\u76EE\u6807\u6570\u636E\u5E93\u6240\u5728\u9875\u9762\u70B9 \u2022\u2022\u2022 \u2192 \u8FDE\u63A5 \u2192 \u52FE\u9009\u672C\u96C6\u6210\uFF08\u6216\u91CD\u65B0 OAuth \u6388\u6743\u5E76\u52FE\u9009\u8BE5\u9875\u9762\uFF09\uFF0C\u5B8C\u6210\u540E\u518D\u6B21\u5237\u65B0"
       };
       module.exports = {
         CONFIG: CONFIG2,
@@ -22358,7 +22362,8 @@ ${report}
                 }
               });
               NotionSiteUI2.updateAITargetDbOptions(workspaceData.databases, workspaceData.pages);
-              workspaceTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.length} \u4E2A\u9875\u9762`;
+              const noDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
+              workspaceTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.length} \u4E2A\u9875\u9762${noDbHint}`;
               workspaceTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
               workspaceTip.textContent = `\u274C ${error.message}`;
@@ -29407,7 +29412,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 }
               });
               UI2.updateWorkspaceSelect(workspaceData);
-              workspaceTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.length} \u4E2A\u9875\u9762`;
+              const noDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
+              workspaceTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.length} \u4E2A\u9875\u9762${noDbHint}`;
               workspaceTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
               workspaceTip.textContent = `\u274C ${error.message}`;
@@ -29641,7 +29647,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 }
               });
               UI2.updateAITargetDbOptions(workspaceData.databases);
-              UI2.showStatus(`\u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93`, "success");
+              const aiNoDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
+              UI2.showStatus(`\u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93${aiNoDbHint}`, "success");
             } catch (error) {
               UI2.showStatus(`\u83B7\u53D6\u6570\u636E\u5E93\u5217\u8868\u5931\u8D25: ${error.message}`, "error");
             } finally {
@@ -30228,7 +30235,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             if (isStale()) return;
             GenericUI2.updateTargetSelectOptions(workspaceData.databases, workspaceData.pages);
             if (tip) {
-              tip.textContent = `\u5DF2\u52A0\u8F7D ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.filter((p) => p.parent === "workspace").length} \u4E2A\u9875\u9762`;
+              const noDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
+              tip.textContent = `\u5DF2\u52A0\u8F7D ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.filter((p) => p.parent === "workspace").length} \u4E2A\u9875\u9762${noDbHint}`;
             }
           } catch (error) {
             if (tip && !isStale()) {

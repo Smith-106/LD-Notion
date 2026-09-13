@@ -642,7 +642,9 @@ const NotionSiteUI = {
                 });
 
                 NotionSiteUI.updateAITargetDbOptions(workspaceData.databases, workspaceData.pages);
-                workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面`;
+                // v3.14.18 (debug-odyssey): 0 数据库时附可行动指引(与主面板刷新同口径)
+                const noDbHint = workspaceData.databases.length === 0 ? MSG.WORKSPACE_NO_DATABASES_HINT : "";
+                workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面${noDbHint}`;
                 workspaceTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
                 workspaceTip.textContent = `❌ ${error.message}`;

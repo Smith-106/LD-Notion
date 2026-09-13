@@ -3067,6 +3067,41 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(panel.querySelector('#ldb-notion-workspace-tip').textContent.includes('获取到 1 个数据库，1 个页面'));
     });
 
+    await runTest('NotionSiteUI.bindEvents: workspace refresh with 0 databases appends share-integration hint (v3.14.18 debug-odyssey)', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#ldb-notion-api-key': Object.assign(createElementStub(), { value: 'manual_api_key' }),
+            '#ldb-notion-refresh-workspace': createElementStub(),
+            '#ldb-notion-workspace-tip': createElementStub(),
+            '#ldb-notion-ai-target-db': createElementStub()
+        });
+        let refreshCalls = 0;
+
+        harness.NotionOAuth.getAccessToken = (value) => value;
+        harness.WorkspaceService.refreshWorkspaceSnapshot = async () => {
+            refreshCalls += 1;
+            return {
+                databases: [],
+                pages: [{ id: 'page1', title: '项目计划' }],
+                workspaceData: {
+                    apiKeyHash: apiKeyHashOf("manual_api_key"),
+                    databases: [],
+                    pages: [{ id: 'page1', title: '项目计划' }],
+                    timestamp: 1
+                }
+            };
+        };
+        harness.NotionSiteUI.updateAITargetDbOptions = () => {};
+        harness.NotionSiteUI.panel = panel;
+
+        harness.NotionSiteUI.bindEvents();
+        await panel.querySelector('#ldb-notion-refresh-workspace').onclick();
+
+        assert.strictEqual(refreshCalls, 1);
+        assert.ok(panel.querySelector('#ldb-notion-workspace-tip').textContent.includes('获取到 0 个数据库，1 个页面'));
+        assert.ok(panel.querySelector('#ldb-notion-workspace-tip').textContent.includes(harness.MSG.WORKSPACE_NO_DATABASES_HINT));
+    });
+
     await runTest('NotionSiteUI.bindEvents: AI target selector and save settings delegate through UICommandService', async () => {
         const harness = createHarness();
         const panel = createAutoPanelStub({
@@ -3317,6 +3352,37 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(panel.querySelector('#gclip-target-tip').textContent.includes('已加载 1 个数据库，1 个页面'));
     });
 
+    await runTest('GenericUI.refreshWorkspaceTargets: 0 databases appends share-integration hint (v3.14.18 debug-odyssey)', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#gclip-refresh-workspace': createElementStub(),
+            '#gclip-target-tip': createElementStub()
+        });
+        let refreshCalls = 0;
+
+        harness.GenericUI.panel = panel;
+        harness.WorkspaceService.refreshWorkspaceSnapshot = async () => {
+            refreshCalls += 1;
+            return {
+                databases: [],
+                pages: [{ id: 'page1', title: '项目计划', parent: 'workspace' }],
+                workspaceData: {
+                    apiKeyHash: apiKeyHashOf("manual_api_key"),
+                    databases: [],
+                    pages: [{ id: 'page1', title: '项目计划', parent: 'workspace' }],
+                    timestamp: 1
+                }
+            };
+        };
+        harness.GenericUI.updateTargetSelectOptions = () => {};
+
+        await harness.GenericUI.refreshWorkspaceTargets('manual_api_key');
+
+        assert.strictEqual(refreshCalls, 1);
+        assert.ok(panel.querySelector('#gclip-target-tip').textContent.includes('已加载 0 个数据库，1 个页面'));
+        assert.ok(panel.querySelector('#gclip-target-tip').textContent.includes(harness.MSG.WORKSPACE_NO_DATABASES_HINT));
+    });
+
     await runTest('GenericUI.refreshWorkspaceTargets and save settings delegate through UICommandService', async () => {
         const harness = createHarness();
         const saveSettingsBtn = Object.assign(createElementStub(), {
@@ -3519,6 +3585,41 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(harness.UI.refs.workspaceTip.textContent.includes('获取到 1 个数据库，1 个页面'));
     });
 
+    await runTest('UI.bindEvents: workspace refresh with 0 databases appends share-integration hint (v3.14.18 debug-odyssey)', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#ldb-api-key': Object.assign(createElementStub(), { value: 'manual_api_key' }),
+            '#ldb-refresh-workspace': createElementStub(),
+            '#ldb-workspace-tip': createElementStub()
+        });
+        let refreshCalls = 0;
+
+        harness.UI.panel = panel;
+        harness.UI.cacheRefs();
+        harness.NotionOAuth.getAccessToken = (value) => value;
+        harness.WorkspaceService.refreshWorkspaceSnapshot = async () => {
+            refreshCalls += 1;
+            return {
+                databases: [],
+                pages: [{ id: 'page1', title: '项目计划' }],
+                workspaceData: {
+                    apiKeyHash: apiKeyHashOf("manual_api_key"),
+                    databases: [],
+                    pages: [{ id: 'page1', title: '项目计划' }],
+                    timestamp: 1
+                }
+            };
+        };
+        harness.UI.updateWorkspaceSelect = () => {};
+
+        harness.UI.bindEvents();
+        await harness.UI.refs.refreshWorkspaceBtn.onclick();
+
+        assert.strictEqual(refreshCalls, 1);
+        assert.ok(harness.UI.refs.workspaceTip.textContent.includes('获取到 0 个数据库，1 个页面'));
+        assert.ok(harness.UI.refs.workspaceTip.textContent.includes(harness.MSG.WORKSPACE_NO_DATABASES_HINT));
+    });
+
     await runTest('UI.bindEvents: workspace selector delegates through UICommandService.apply_workspace_selection', async () => {
         const harness = createHarness();
         const panel = createAutoPanelStub();
@@ -3604,6 +3705,48 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(dbUpdates.length, 2);
         assert.strictEqual(dbUpdates[1][0].id, 'db1');
         assert.deepStrictEqual(harness.notifications.at(-1), { message: '获取到 1 个数据库', type: 'success' });
+    });
+
+    await runTest('UI.bindEvents: AI target db refresh with 0 databases appends share-integration hint (v3.14.18 debug-odyssey)', async () => {
+        const harness = createHarness();
+        const panel = createAutoPanelStub({
+            '#ldb-api-key': Object.assign(createElementStub(), { value: 'manual_api_key' }),
+            '#ldb-ai-refresh-dbs': createElementStub(),
+            '#ldb-ai-model-tip': createElementStub()
+        });
+        let refreshCalls = 0;
+
+        harness.UI.panel = panel;
+        harness.UI.cacheRefs();
+        harness.NotionOAuth.getAccessToken = (value) => value;
+        harness.WorkspaceService.fetchWorkspace = async () => {
+            throw new Error('fetchWorkspace should not be called directly from UI AI db refresh');
+        };
+        harness.WorkspaceService.refreshWorkspaceSnapshot = async () => {
+            refreshCalls += 1;
+            return {
+                databases: [],
+                pages: [],
+                workspaceData: {
+                    apiKeyHash: apiKeyHashOf("manual_api_key"),
+                    databases: [],
+                    pages: [],
+                    timestamp: 1
+                }
+            };
+        };
+        harness.UI.updateAITargetDbOptions = () => {};
+        harness.UI.showStatus = (message, type) => {
+            harness.notifications.push({ message, type });
+        };
+
+        harness.UI.bindEvents();
+        await harness.UI.refs.aiRefreshDbsBtn.onclick();
+
+        assert.strictEqual(refreshCalls, 1);
+        assert.ok(harness.notifications.at(-1).message.includes('获取到 0 个数据库'));
+        assert.ok(harness.notifications.at(-1).message.includes(harness.MSG.WORKSPACE_NO_DATABASES_HINT));
+        assert.strictEqual(harness.notifications.at(-1).type, 'success');
     });
 
     await runTest('UI.bindEvents: AI model fetch delegates to AIService.fetchModelsSnapshot', async () => {

@@ -464,7 +464,9 @@ const GenericUI = {
             if (isStale()) return;
             GenericUI.updateTargetSelectOptions(workspaceData.databases, workspaceData.pages);
             if (tip) {
-                tip.textContent = `已加载 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.filter(p => p.parent === "workspace").length} 个页面`;
+                // v3.14.18 (debug-odyssey): 0 数据库时附可行动指引(与主面板刷新同口径)
+                const noDbHint = workspaceData.databases.length === 0 ? MSG.WORKSPACE_NO_DATABASES_HINT : "";
+                tip.textContent = `已加载 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.filter(p => p.parent === "workspace").length} 个页面${noDbHint}`;
             }
         } catch (error) {
             // P4 收敛(c14): 陈旧请求的失败不得覆盖最新刷新状态
