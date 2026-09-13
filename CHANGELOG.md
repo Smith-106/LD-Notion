@@ -1,5 +1,26 @@
 # 更新日志
 
+## [3.14.28] - 2026-09-14
+
+### feat (GitHub OAuth 免手动创建 Token + 浏览器书签写回整理)
+
+**GitHub OAuth Device Flow（授权即可，免手动创建 PAT）**
+
+- 新增 `GitHubOAuth` 模块：Device Flow 纯前端 secret-free 授权（device code 申请 → 用户代码展示 → 轮询 pending/slow_down/expired 分类）——GitHub auth-code 交换强制 client_secret 且不支持 PKCE 纯公开客户端，Device Flow 是官方唯一无需 secret 的路径
+- GitHub 面板新增「🔗 通过 GitHub 授权（推荐）」主路径 + OAuth Client ID 配置项（github.com/settings/developers 注册 OAuth App 即可，公开信息）；授权成功自动填入 Token 输入框；手动粘贴 PAT 保留兑底（与 Notion 的 OAuth+manual 双路径一致）
+- 错误分类可行动化：Client ID 无效/设备码过期/用户拒绝/限流降速均有精确提示；诊断日志仅含 client_id/error code（REDACT_IN_LOGS 纪律）
+
+**浏览器书签写回整理（移动优先，零删除）**
+
+- 书签 Tab 新增「🧹 整理书签」：① 重复书签去重（同 URL 归一化后保留最早一条）② 失效链接检测（HEAD→GET 退避重试，并发 5，单次上限 500）③ 根目录散落书签 AI 归类进现有顶层文件夹（可选，需 AI Key）
+- 安全链：扫描(只读) → 预览确认 → 自动全量备份(JSON 下载) → 二次确认 → 执行 → 审计日志 → 「↩️撤销整理」一键回滚
+- 零删除设计：扩展桥接白名单仅放行 ensureFolder/move，remove/update 直接拒绝——所有整理动作只移动到「LD-Notion 整理/」文件夹，物理删除由用户在浏览器手动完成；OperationGuard `bookmarks.organize`(高级权限)收束
+- 仅 Chrome 扩展模式可用（userscript 无浏览器书签写权限）
+
+### test
+
+- +16 回归用例（OAuth Device Flow 6 + 书签整理 10）；vitest 1639/1639 全绿
+
 ## [3.14.27] - 2026-09-14
 
 ### fix (自动去重对账 Notion 实际状态 + GitHub 邮箱用户名守卫)

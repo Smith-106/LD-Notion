@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.27`
+- 当前仓库源码版本：`v3.14.28`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -391,6 +391,11 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.28
+
+- **GitHub OAuth 授权（免手动创建 PAT）**：点「通过 GitHub 授权」→ 浏览器输入一次性代码即可完成连接（Device Flow，无需 Client Secret）；需先在面板填入 OAuth Client ID（github.com/settings/developers 创建，公开信息）；手动 PAT 保留兑底
+- **浏览器书签写回整理**：书签 Tab「🧹 整理书签」一键去重（同 URL 保留最早）+ 失效链接检测（移入待清理）+ AI 归类散落书签；全程零删除（仅移动到「LD-Notion 整理/」文件夹）+ 自动备份 + 预览确认 + 可撤销；需 Chrome 扩展模式
 
 ### v3.14.27
 

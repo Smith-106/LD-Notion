@@ -18,6 +18,8 @@ LD-Notion Hub 有两种交付形态：Tampermonkey 用户脚本和独立 Chrome 
 5. 点击刷新工作区列表，选择数据库或页面。
 6. 先导入少量内容做 smoke test，再开启批量导入或自动导入。
 
+> 自 v3.14.28 起，① GitHub 连接支持 **OAuth 授权（免手动创建 PAT）**：面板填入 OAuth Client ID（github.com/settings/developers 创建 OAuth App，公开信息）后点「通过 GitHub 授权」，浏览器输入一次性代码即可，Token 自动填入；手动粘贴 PAT 保留兑底。② 书签 Tab 新增「🧹 整理书签」（需 Chrome 扩展模式）：重复去重 + 失效链接检测 + AI 归类散落书签，全程**零删除**（仅移动到「LD-Notion 整理/」文件夹）+ 自动备份 + 预览确认 + 可撤销。
+
 > 自 v3.14.25 起，四个「立即导入」按钮（Linux.do / GitHub / 书签 / RSS）在配置缺失或认证失败时会**就地红显真实原因与行动指引**（如 GitHub 用户名不存在/已改名、Token 失效），不再绿显「完成 0 条」静默吞错；GitHub 未填 Token 时仅依赖用户名探测，推荐填入 Token（PAT）走认证接口。
 
 ## 最小使用闭环
