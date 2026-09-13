@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.24`
+- 当前仓库源码版本：`v3.14.25`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -391,6 +391,13 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.25
+
+- **GitHub 静默失效根因修复（odyssey-debug cycle）**：GitHub 用户名无效+未填 Token → `/users/{name}/starred` 404 被 runner 吞错致按钮绿显「完成 0 条」；修复为 401 专门分支 + 未认证用户域 404 可行动指引（修正用户名/填 Token）+ runner errors 契约——错误红显而非静默
+- **四导入器 errors 契约统一**：`{importedCount, failedCount, errors}` 全出口对齐（GitHub/LinuxDo/Bookmark/RSS），配置守卫与 catch 不再吞错，`bindImportNow` 红显首条；租约竞争等跳过语义保持原样
+- **LinuxDo 用户名 API 第 5 探测**：同步 DOM 探测全空时走 cookie 认证 `/session/current.json`（DOM 无关），修复论坛前端升级/CDN 缓存页导致的轮询连续失败（9/5 起实证）
+- **OAuth 授权单窗口 + 刷新目标可见性交叉校验**：消除双授权弹窗；手动刷新时就地校验已配置目标可见性（`canonicalNotionId` 归一比较），不可见目标不再延迟到导出 404 才暴露
 
 ### v3.14.24
 

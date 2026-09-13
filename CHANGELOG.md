@@ -1,5 +1,19 @@
 # 更新日志
 
+## [3.14.25] - 2026-09-13
+
+### fix (GitHub 静默失效根因修复 + 四导入器 errors 契约统一)
+
+**背景**：用户报 GitHub 全功能(仓库自动导入/导出/版本检查)静默无响应、userscript+扩展双形态同失效。控制台实证复合根因：GitHub 用户名配置无效(或已改名)且未填 Token → 未认证 `GET /users/{username}/starred` 404「资源不存在」；而 runner 吞错后正常返回，按钮绿显「完成：新增 0 条」，真实错误仅落控制台与弱化状态区——用户感知为「完全无反应」。同一吞错型经 3 层泛化扫描证实存在于全部四个导入器；另 Linux.do 轮询自 9/5 起「无法获取当前用户名」连续失败(论坛前端环境变更致 DOM 探测全空)。
+
+- **GitHub 404/401 可行动指引**：`_fetchPaginated` 新增 401 专门分支(Token 无效/过期指引)；`_wrapUserScoped404` 仅对未认证用户域 404 追加「用户名「X」可能不存在或已改名：请修正用户名，或填写 Token 改用认证接口」——token 路径(/user/*)的 404 与用户名无关，不 enrich 防误导
+- **runner errors 契约 4/4**：`{importedCount, failedCount, errors}` 全出口统一(GitHub/LinuxDo/Bookmark/RSS)——配置守卫与 catch 不再吞错，`bindImportNow` 对 errors 非空红显首条；租约竞争/页面隐藏等跳过语义保持原样(瞬态竞争不误报为故障)
+- **LinuxDo 用户名 API 第 5 探测**：新增 `getCurrentLinuxDoUsernameAsync`——同步 4 探测(URL/meta/头像/Discourse 全局)全空时走 cookie 认证 `/session/current.json`(Discourse 标准端点，DOM 无关，15s AbortController)，修复论坛前端升级/CDN 匿名缓存页导致的轮询连续失败
+- **OAuth 授权单窗口**：`startAuthorization` 移除双 `window.open`，消除部分环境双授权弹窗(nonoopener 规范语义误判)，T31/T32 回归锁
+- **刷新目标可见性交叉校验**：手动刷新工作区列表时就地校验已配置目标是否在本次可见列表(`canonicalNotionId` 两态归一比较)，不可见目标不再延迟到导出 404 才暴露；4 个刷新表面接入
+- **UpdateChecker 审计**：语义充分(手动 toast 全覆盖 + 自动失败持久化渲染「上次检查失败」)，无缺陷
+- 测试：+15 回归用例(404 指引/401 分支/run 契约/导入器契约/API 探测/目标校验)；vitest 1615/1615 全绿
+
 ## [3.14.24] - 2026-09-13
 
 ### fix (收藏列表 404 与 0 数据库提示同口径指引)

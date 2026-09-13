@@ -18,6 +18,8 @@ LD-Notion Hub 有两种交付形态：Tampermonkey 用户脚本和独立 Chrome 
 5. 点击刷新工作区列表，选择数据库或页面。
 6. 先导入少量内容做 smoke test，再开启批量导入或自动导入。
 
+> 自 v3.14.25 起，四个「立即导入」按钮（Linux.do / GitHub / 书签 / RSS）在配置缺失或认证失败时会**就地红显真实原因与行动指引**（如 GitHub 用户名不存在/已改名、Token 失效），不再绿显「完成 0 条」静默吞错；GitHub 未填 Token 时仅依赖用户名探测，推荐填入 Token（PAT）走认证接口。
+
 ## 最小使用闭环
 
 ```mermaid
