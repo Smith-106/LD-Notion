@@ -6570,6 +6570,24 @@ Content-Type: ${safeContentType}\r
           }
           return await NotionAPI2.request("POST", `/databases/${databaseId}/query`, data, apiKey);
         },
+        // 20260914: 目标库「链接」属性实际内容索引(分页) —— 自动导入对账用(ground truth)。
+        // 返回归一化 URL Set(去尾斜杠); apiKey/databaseId 缺失时返回空集(不抛错, 调用方据空集全量导出)。
+        collectDatabaseUrls: async (apiKey, databaseId) => {
+          var _a, _b;
+          const urls = /* @__PURE__ */ new Set();
+          if (!apiKey || !databaseId) return urls;
+          const norm = (u) => String(u || "").trim().replace(/\/+$/, "");
+          let cursor = null;
+          do {
+            const response = await NotionAPI2.queryDatabase(databaseId, void 0, null, cursor, apiKey, 100);
+            for (const page of (response == null ? void 0 : response.results) || []) {
+              const u = ((_b = (_a = page == null ? void 0 : page.properties) == null ? void 0 : _a["\u94FE\u63A5"]) == null ? void 0 : _b.url) || "";
+              if (u) urls.add(norm(u));
+            }
+            cursor = (response == null ? void 0 : response.has_more) ? response.next_cursor : null;
+          } while (cursor);
+          return urls;
+        },
         // ========== 更新操作 (STANDARD) ==========
         // 更新页面属性
         updatePage: async (pageId, properties, apiKey) => {
@@ -14174,11 +14192,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           };
           const pages = [];
           let cursor = null;
-          do {
-            const response = await NotionAPI2.queryDatabase(databaseId, filter, null, cursor, apiKey);
-            pages.push(...(response == null ? void 0 : response.results) || []);
-            cursor = (response == null ? void 0 : response.has_more) ? response.next_cursor : null;
-          } while (cursor);
+          try {
+            do {
+              const response = await NotionAPI2.queryDatabase(databaseId, filter, null, cursor, apiKey);
+              pages.push(...(response == null ? void 0 : response.results) || []);
+              cursor = (response == null ? void 0 : response.has_more) ? response.next_cursor : null;
+            } while (cursor);
+          } catch (error) {
+            if (/could not find property|validation/i.test(String((error == null ? void 0 : error.message) || ""))) return [];
+            throw error;
+          }
           return pages.map((page) => BookmarkAutoImporter2.extractPageMeta(page)).filter((page) => page.pageId);
         },
         buildPageIndex: (pages = []) => {
@@ -14966,11 +14989,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           };
           const pages = [];
           let cursor = null;
-          do {
-            const response = await NotionAPI2.queryDatabase(databaseId, filter, null, cursor, apiKey);
-            pages.push(...(response == null ? void 0 : response.results) || []);
-            cursor = (response == null ? void 0 : response.has_more) ? response.next_cursor : null;
-          } while (cursor);
+          try {
+            do {
+              const response = await NotionAPI2.queryDatabase(databaseId, filter, null, cursor, apiKey);
+              pages.push(...(response == null ? void 0 : response.results) || []);
+              cursor = (response == null ? void 0 : response.has_more) ? response.next_cursor : null;
+            } while (cursor);
+          } catch (error) {
+            if (/could not find property|validation/i.test(String((error == null ? void 0 : error.message) || ""))) return [];
+            throw error;
+          }
           return pages.map((page) => ({
             pageId: String((page == null ? void 0 : page.id) || "").trim(),
             url: BookmarkAutoImporter2.getPageUrl(page, "\u94FE\u63A5"),
@@ -17788,15 +17816,26 @@ ${insight.summary || ""}`,
         const successEntries = [];
         const failedEntries = [];
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+        let remoteUrls = null;
+        try {
+          remoteUrls = await NotionAPI2.collectDatabaseUrls(settings.apiKey, settings.databaseId);
+        } catch (_) {
+          remoteUrls = null;
+        }
+        const normUrl = (u) => String(u || "").trim().replace(/\/+$/, "");
         const toExport = [];
         for (const item of mappedItems) {
           const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
-          if (itemKey) {
-            const already = type === "gists" ? GitHubAPI2.isGistExported(itemKey) : GitHubAPI2.isExported(itemKey);
-            if (already) {
-              successEntries.push({ itemKey, skippedExisting: true });
-              continue;
-            }
+          let already = false;
+          if (remoteUrls) {
+            const itemUrl = normUrl(item.url || (item.raw ? item.raw.html_url : ""));
+            already = !!(itemUrl && remoteUrls.has(itemUrl));
+          } else if (itemKey) {
+            already = type === "gists" ? GitHubAPI2.isGistExported(itemKey) : GitHubAPI2.isExported(itemKey);
+          }
+          if (already) {
+            successEntries.push({ itemKey, skippedExisting: true });
+            continue;
           }
           toExport.push(item);
         }
@@ -18146,6 +18185,7 @@ ${insight.summary || ""}`,
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var { NotionOAuth: NotionOAuth2 } = require_auth();
+      var { NotionAPI: NotionAPI2 } = require_api();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2 } = require_export();
       var { SyncLock } = require_sync_lock();
       var { UpdateChecker: UpdateChecker2 } = require_UpdateChecker();
@@ -18161,6 +18201,17 @@ ${insight.summary || ""}`,
         lastRunAt: 0,
         minimumRunGapMs: 60 * 1e3,
         // 从 Storage 读取导出设置（不依赖 UI DOM）
+        // 20260914: 新收藏判定(纯函数, 可单测) —— 远端「链接」索引是 ground truth:
+        // 命中 https://linux.do/t/{id} → 库内已存在跳过; 未命中 → 导出(账本残留不阻断, 换库场景);
+        // remoteUrls=null(查询失败) → 降级本地账本(旧语义)。allow_duplicates 时不做任何去重过滤。
+        resolveNewBookmarks: ({ bookmarks = [], dedupStrict = true, remoteUrls = null } = {}) => {
+          if (!dedupStrict) return bookmarks.slice();
+          return bookmarks.filter((bookmark) => {
+            const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
+            if (remoteUrls) return !remoteUrls.has(`https://linux.do/t/${topicId}`);
+            return !Storage2.isTopicExported(topicId);
+          });
+        },
         buildSettings: () => {
           const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
           return {
@@ -18325,10 +18376,14 @@ ${insight.summary || ""}`,
           const syncState = SyncState2.getLinuxDoState();
           const bookmarks = await LinuxDoAPI2.fetchBookmarksSince(username, syncState.watermark);
           const dedupStrict = Utils2.isLinuxDoDedupStrict();
-          const newBookmarks = dedupStrict ? bookmarks.filter((bookmark) => {
-            const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
-            return !Storage2.isTopicExported(topicId);
-          }) : bookmarks.slice();
+          const settings = AutoImporter2.buildSettings();
+          let remoteUrls = null;
+          try {
+            remoteUrls = await NotionAPI2.collectDatabaseUrls(settings.apiKey, settings.databaseId);
+          } catch (_) {
+            remoteUrls = null;
+          }
+          const newBookmarks = AutoImporter2.resolveNewBookmarks({ bookmarks, dedupStrict, remoteUrls });
           if (newBookmarks.length === 0) {
             const statePatch2 = {
               lastAttemptAt: attemptAt,
@@ -18353,7 +18408,6 @@ ${insight.summary || ""}`,
           if (exportBtn) exportBtn.disabled = true;
           const obsExportBtn = document.querySelector("#ldb-obs-export");
           if (obsExportBtn) obsExportBtn.disabled = true;
-          const settings = AutoImporter2.buildSettings();
           const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
           const concurrency = settings.concurrency || 1;
           let success = 0;

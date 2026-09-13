@@ -174,20 +174,33 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
     const successEntries = [];
     const failedEntries = [];
     const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+    // 20260914: Notion 实际状态对账 —— 远端「链接」索引是 ground truth(换库/重建库后本地
+    // 账本残留会把新库缺失项误判为已导出 → 假跳过致状态发现错误)。判定顺序: 远端命中 →
+    // skip; 远端未命中 → 导出(账本不阻断); 远端查询失败 → 降级本地账本(旧语义, 防查询
+    // 故障时重复轰炸)。Bookmark/RSS 的 fetchTrackedPages 为同构范本。
+    let remoteUrls = null;
+    try {
+        remoteUrls = await NotionAPI.collectDatabaseUrls(settings.apiKey, settings.databaseId);
+    } catch (_) { remoteUrls = null; }
+    const normUrl = (u) => String(u || "").trim().replace(/\/+$/, "");
     // 重置增量基线后 watermark 回退会再次扫到已导出项; 手动路径 GitHubExporter
     // 有 isExported 过滤, 自动路径此前缺失 → 重复建 Notion 页。已导出项计入 success
     // 仅用于推进 watermark(不建页、不计入「新增」语义由调用方用 length 区分时可再拆)。
     const toExport = [];
     for (const item of mappedItems) {
         const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
-        if (itemKey) {
-            const already = type === "gists"
+        let already = false;
+        if (remoteUrls) {
+            const itemUrl = normUrl(item.url || (item.raw ? item.raw.html_url : ""));
+            already = !!(itemUrl && remoteUrls.has(itemUrl));
+        } else if (itemKey) {
+            already = type === "gists"
                 ? GitHubAPI.isGistExported(itemKey)
                 : GitHubAPI.isExported(itemKey);
-            if (already) {
-                successEntries.push({ itemKey, skippedExisting: true });
-                continue;
-            }
+        }
+        if (already) {
+            successEntries.push({ itemKey, skippedExisting: true });
+            continue;
         }
         toExport.push(item);
     }

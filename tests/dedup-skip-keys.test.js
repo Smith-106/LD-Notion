@@ -44,6 +44,12 @@ describe("R-DEDUP-SKIP: GitHub auto skips isExported after watermark reset", () 
         // NotionAPI.request 被 GitHubAutoImporter 用于建页; 通过 stub OperationGuard + 拦截 request
         const { NotionAPI } = require("../src/api");
         const reqSpy = vi.spyOn(NotionAPI, "request").mockResolvedValue({ id: "page-new" });
+        // 20260914 对账语义: 远端「链接」索引是 ground truth —— queryDatabase 返回库内已有页
+        // (already 的链接在库内) → 命中跳过; fresh 不在库内 → 建页。原账本-only 语义退役。
+        vi.spyOn(NotionAPI, "queryDatabase").mockResolvedValue({
+            results: [{ properties: { "链接": { url: "https://github.com/owner/already" } } }],
+            has_more: false,
+        });
         const { OperationGuard } = require("../src/security");
         vi.spyOn(OperationGuard, "canExecute").mockReturnValue(true);
 

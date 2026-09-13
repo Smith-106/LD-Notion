@@ -548,6 +548,24 @@ const NotionAPI = {
         return await NotionAPI.request("POST", `/databases/${databaseId}/query`, data, apiKey);
     },
 
+    // 20260914: 目标库「链接」属性实际内容索引(分页) —— 自动导入对账用(ground truth)。
+    // 返回归一化 URL Set(去尾斜杠); apiKey/databaseId 缺失时返回空集(不抛错, 调用方据空集全量导出)。
+    collectDatabaseUrls: async (apiKey, databaseId) => {
+        const urls = new Set();
+        if (!apiKey || !databaseId) return urls;
+        const norm = (u) => String(u || "").trim().replace(/\/+$/, "");
+        let cursor = null;
+        do {
+            const response = await NotionAPI.queryDatabase(databaseId, undefined, null, cursor, apiKey, 100);
+            for (const page of (response?.results || [])) {
+                const u = page?.properties?.["链接"]?.url || "";
+                if (u) urls.add(norm(u));
+            }
+            cursor = response?.has_more ? response.next_cursor : null;
+        } while (cursor);
+        return urls;
+    },
+
     // ========== 更新操作 (STANDARD) ==========
 
     // 更新页面属性

@@ -4,6 +4,7 @@ const { CONFIG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState } = require("../storage");
 const { NotionOAuth } = require("../auth");
+const { NotionAPI } = require("../api");
 const { Exporter, LinuxDoAPI } = require("../export");
 const { SyncLock } = require("../sync-lock");
 
@@ -22,6 +23,18 @@ const AutoImporter = {
     minimumRunGapMs: 60 * 1000,
 
     // 从 Storage 读取导出设置（不依赖 UI DOM）
+    // 20260914: 新收藏判定(纯函数, 可单测) —— 远端「链接」索引是 ground truth:
+    // 命中 https://linux.do/t/{id} → 库内已存在跳过; 未命中 → 导出(账本残留不阻断, 换库场景);
+    // remoteUrls=null(查询失败) → 降级本地账本(旧语义)。allow_duplicates 时不做任何去重过滤。
+    resolveNewBookmarks: ({ bookmarks = [], dedupStrict = true, remoteUrls = null } = {}) => {
+        if (!dedupStrict) return bookmarks.slice();
+        return bookmarks.filter((bookmark) => {
+            const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
+            if (remoteUrls) return !remoteUrls.has(`https://linux.do/t/${topicId}`);
+            return !Storage.isTopicExported(topicId);
+        });
+    },
+
     buildSettings: () => {
         const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
         return {
@@ -213,12 +226,14 @@ AutoImporter.run = async () => {
         // F4 共识(模式语义一致): allow_duplicates 时跳过本地去重过滤(watermark 照常推进),
         // 与手动导入路径的 allow 语义对齐。
         const dedupStrict = Utils.isLinuxDoDedupStrict();
-        const newBookmarks = dedupStrict
-            ? bookmarks.filter((bookmark) => {
-                const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
-                return !Storage.isTopicExported(topicId);
-            })
-            : bookmarks.slice();
+        // 20260914: Notion 实际状态对账(与 GitHubAutoImporter/_exportViaGitHubExporter 同构) ——
+        // 远端「链接」索引是 ground truth; 查询失败降级本地账本(旧语义)。
+        const settings = AutoImporter.buildSettings();
+        let remoteUrls = null;
+        try {
+            remoteUrls = await NotionAPI.collectDatabaseUrls(settings.apiKey, settings.databaseId);
+        } catch (_) { remoteUrls = null; }
+        const newBookmarks = AutoImporter.resolveNewBookmarks({ bookmarks, dedupStrict, remoteUrls });
 
         if (newBookmarks.length === 0) {
             const statePatch = {
@@ -247,7 +262,7 @@ AutoImporter.run = async () => {
         const obsExportBtn = document.querySelector("#ldb-obs-export");
         if (obsExportBtn) obsExportBtn.disabled = true;
 
-        const settings = AutoImporter.buildSettings();
+        // settings 已在去重对账前构建(远端索引需要 apiKey/databaseId)
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
         const concurrency = settings.concurrency || 1;
         let success = 0;

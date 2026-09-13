@@ -343,11 +343,18 @@ const RSSAutoImporter = {
         };
         const pages = [];
         let cursor = null;
-        do {
-            const response = await NotionAPI.queryDatabase(databaseId, filter, null, cursor, apiKey);
-            pages.push(...(response?.results || []));
-            cursor = response?.has_more ? response.next_cursor : null;
-        } while (cursor);
+        try {
+            do {
+                const response = await NotionAPI.queryDatabase(databaseId, filter, null, cursor, apiKey);
+                pages.push(...(response?.results || []));
+                cursor = response?.has_more ? response.next_cursor : null;
+            } while (cursor);
+        } catch (error) {
+            // 20260914: 手建库缺「来源/来源类型」属性时 Notion 查询 400 —— 空索引自举
+            // (同 BookmarkAutoImporter.fetchTrackedPages 口径), 非属性类错误原样上抛。
+            if (/could not find property|validation/i.test(String(error?.message || ""))) return [];
+            throw error;
+        }
         return pages
             .map((page) => ({
                 pageId: String(page?.id || "").trim(),
