@@ -54,7 +54,7 @@ const buildConfiguredTargetWarning = ({ configuredDatabaseId = "", databases = [
     const list = Array.isArray(databases) ? databases : [];
     const visible = list.some((db) => canonicalNotionId(db?.id) === want);
     if (visible) return "";
-    return "。注意：已配置的目标数据库不在集成可见列表中，导出将失败：请在该库页面点 ••• → 连接 → 勾选本集成（或重新 OAuth 授权并勾选其所在页面），完成后再次刷新；也可从工作区下拉切换到集成可见的资源";
+    return `。注意：已配置的目标数据库不在集成可见列表中，导出将失败：请在该库页面点 ••• → 连接 → 勾选本集成（或重新 OAuth 授权并勾选其所在页面），完成后再次刷新；也可从工作区下拉切换到集成可见的资源。可在浏览器打开 https://www.notion.so/${want} 直接定位该库`;
 };
 
 // 决策矩阵(纯函数,可单测):

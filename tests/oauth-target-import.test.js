@@ -81,6 +81,8 @@ describe("target-discovery L1 纯逻辑", () => {
             });
             expect(warn).toContain("不在集成可见列表中");
             expect(warn).toContain("••• → 连接");
+            // 定位链接:canonical 化后的 dash-less ID 直接拼 URL(20260913)
+            expect(warn).toContain("https://www.notion.so/2fb754b83c7b8072aa78c69fb4c8ccfd");
         });
 
         it("空 databases(0 库刷新) → 已配置目标必触发警示", () => {
