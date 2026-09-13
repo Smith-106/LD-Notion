@@ -81,3 +81,4 @@ coverage/
 .cache/
 .codegraph/
 docs/.vitepress/cache/
+.pi/
