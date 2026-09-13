@@ -1335,22 +1335,15 @@ const NotionOAuth = {
                 state: parsed.searchParams.get("state"),
             });
         } catch (_) { /* 日志失败不影响授权 */ }
-        // 修复(三模型共识 R2):window.open(...,"noopener,noreferrer") 恒返回 null(实测),
-        // 旧判定 if(!opened) 永远为真 → 永远整页跳转丢失上下文。
-        // 先尝试带 noopener 的打开(防反向 tabnabbing);返回 null 时降级无 noopener 重试;
-        // 仍失败才整页跳转(授权仍可完成,但丢失原页面)。
+        // 单次打开(odyssey-debug 20260913 双授权窗口修复):HTML 规范规定带 noopener 的
+        // window.open 打开成功也返回 null,v3.14.0 R2 的 fallback 链把 null 误判为失败
+        // 再开一窗 → 双授权窗口。授权 URL 为自建 api.notion.com 一方地址,无反向
+        // tabnabbing 风险,无需 noopener;返回 null 仅剩弹窗被拦截一种含义 → 整页跳转兜底。
         let opened = null;
         try {
-            opened = window.open(authUrl, "_blank", "noopener,noreferrer");
+            opened = window.open(authUrl, "_blank");
         } catch (_) {
             opened = null;
-        }
-        if (!opened) {
-            try {
-                opened = window.open(authUrl, "_blank");
-            } catch (_) {
-                opened = null;
-            }
         }
         if (!opened) {
             window.location.href = authUrl;

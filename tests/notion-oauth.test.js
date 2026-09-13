@@ -7030,5 +7030,44 @@ function createWorkspaceVisualizationFixture(harness) {
         );
     });
 
+    // ===== odyssey-debug 20260913: OAuth 双授权窗口回归 (noopener 规范语义) =====
+    await runTest('T31 startAuthorization opens exactly one window on success', async () => {
+        const harness = createHarness();
+        await unlockCredentialVault(harness);
+        await harness.NotionOAuth.saveConfig({
+            clientId: VALID_CLIENT_ID,
+            clientSecret: 'secret_test',
+            redirectUri: 'https://smith-106.github.io/LD-Notion/oauth-callback'
+        });
+        const calls = [];
+        harness.window.open = (url, target) => {
+            calls.push({ url, target });
+            return {};
+        };
+        const authUrl = harness.NotionOAuth.startAuthorization();
+        assert.strictEqual(calls.length, 1, `expected exactly one window.open call, got ${calls.length}`);
+        assert.strictEqual(calls[0].url, authUrl);
+        assert.ok(harness.NotionOAuth.getPendingState(), 'pending state must be set');
+    });
+
+    await runTest('T32 startAuthorization popup blocked falls back to full-page redirect once', async () => {
+        const harness = createHarness();
+        await unlockCredentialVault(harness);
+        await harness.NotionOAuth.saveConfig({
+            clientId: VALID_CLIENT_ID,
+            clientSecret: 'secret_test',
+            redirectUri: 'https://smith-106.github.io/LD-Notion/oauth-callback'
+        });
+        const calls = [];
+        harness.window.open = (url, target) => {
+            calls.push({ url, target });
+            return null; // 弹窗被拦截
+        };
+        const authUrl = harness.NotionOAuth.startAuthorization();
+        assert.strictEqual(calls.length, 1, `expected exactly one window.open call before redirect, got ${calls.length}`);
+        assert.strictEqual(harness.getLocation(), authUrl, 'full-page redirect must land on the authorize URL');
+        assert.ok(harness.NotionOAuth.getPendingState(), 'pending state must be set');
+    });
+
 console.log('\nAll NotionOAuth tests passed successfully!');
 })();

@@ -3285,16 +3285,9 @@
           }
           let opened = null;
           try {
-            opened = window.open(authUrl, "_blank", "noopener,noreferrer");
+            opened = window.open(authUrl, "_blank");
           } catch (_) {
             opened = null;
-          }
-          if (!opened) {
-            try {
-              opened = window.open(authUrl, "_blank");
-            } catch (_) {
-              opened = null;
-            }
           }
           if (!opened) {
             window.location.href = authUrl;
