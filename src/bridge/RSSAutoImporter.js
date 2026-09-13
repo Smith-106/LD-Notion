@@ -977,6 +977,8 @@ const RSSAutoImporter = {
             RSSAutoImporter.isRunning = false;
             // v3.14.6 (CC-03): 复位互斥
             SyncLock.isExporting = false;
+            // 20260914: 补 emit bookmarks:updated —— 收藏列表唯一自动重渲染触发链(v3.14.7 REV-06 同款补齐)
+            emit("bookmarks:updated");
             emit("sync:center-summary-updated");
         }
     },

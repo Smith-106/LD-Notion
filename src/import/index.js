@@ -2,7 +2,7 @@
 
 const { CONFIG } = require("../config");
 const { Utils } = require("../utils");
-const { Storage, SyncState } = require("../storage");
+const { Storage, SyncState, DedupStore } = require("../storage");
 const { NotionOAuth } = require("../auth");
 const { NotionAPI } = require("../api");
 const { Exporter, LinuxDoAPI } = require("../export");
@@ -33,6 +33,36 @@ const AutoImporter = {
             if (remoteUrls) return !remoteUrls.has(`https://linux.do/t/${topicId}`);
             return !Storage.isTopicExported(topicId);
         });
+    },
+
+    // 20260914: 远端命中项回写导出账本(仅 strict; 远端是 ground truth, 三定律) ——
+    // skip 语义必须落账, 否则账本缺失项每轮 skip 而永不落账, 本地账本驱动的待导出计数恒冻结。
+    // batch 纪律同 workspace-insight 对账回填: beginBatch→逐条 mark→endBatch+缓存失效(消除写侧 O(N²))。
+    markRemoteExistingTopics: ({ bookmarks = [], newBookmarks = [], remoteUrls = null, dedupStrict = true } = {}) => {
+        if (!remoteUrls || !dedupStrict || bookmarks.length <= newBookmarks.length) return 0;
+        const newIds = new Set(newBookmarks.map((b) => String(b.topic_id || b.bookmarkable_id || "")));
+        let marked = 0;
+        let linuxdoBatchOpened = false;
+        try {
+            DedupStore.beginBatch("linuxdo");
+            linuxdoBatchOpened = true;
+        } catch { /* batch 不可用时降级直写 */ }
+        try {
+            bookmarks.forEach((b) => {
+                const topicId = String(b.topic_id || b.bookmarkable_id || "");
+                if (!topicId || newIds.has(topicId)) return;
+                if (remoteUrls.has(`https://linux.do/t/${topicId}`)) {
+                    Storage.markTopicExported(topicId);
+                    marked++;
+                }
+            });
+        } finally {
+            if (linuxdoBatchOpened) {
+                try { DedupStore.endBatch("linuxdo"); } catch { /* batch 异常时忽略 */ }
+                Storage._exportedTopicsCache = null;
+            }
+        }
+        return marked;
     },
 
     buildSettings: () => {
@@ -234,6 +264,7 @@ AutoImporter.run = async () => {
             remoteUrls = await NotionAPI.collectDatabaseUrls(settings.apiKey, settings.databaseId);
         } catch (_) { remoteUrls = null; }
         const newBookmarks = AutoImporter.resolveNewBookmarks({ bookmarks, dedupStrict, remoteUrls });
+        AutoImporter.markRemoteExistingTopics({ bookmarks, newBookmarks, remoteUrls, dedupStrict });
 
         if (newBookmarks.length === 0) {
             const statePatch = {

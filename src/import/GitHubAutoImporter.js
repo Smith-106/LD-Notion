@@ -199,6 +199,15 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
                 : GitHubAPI.isExported(itemKey);
         }
         if (already) {
+            // 20260914: 远端命中即回写本地账本(远端是 ground truth, 三定律) —— 否则账本缺失项
+            // (容量淘汰/换机/清账本)每轮 skip 而永不落账, 本地账本驱动的待导出计数恒冻结。
+            if (itemKey) {
+                if (type === "gists") {
+                    GitHubAPI.markGistExported(itemKey);
+                } else {
+                    GitHubAPI.markExported(itemKey);
+                }
+            }
             successEntries.push({ itemKey, skippedExisting: true });
             continue;
         }

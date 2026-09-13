@@ -137,4 +137,105 @@ describe("odyssey-debug 20260914: 去重对账 Notion 实际状态", () => {
         NotionAPI.queryDatabase = async () => { throw new Error("network unreachable"); };
         await expect(BookmarkAutoImporter.fetchTrackedPages("db-1", "tok")).rejects.toThrow("network unreachable");
     });
+
+    // odyssey-debug 20260914(export-counter): 远端命中 skip 路径必须回写本地账本 ——
+    // 否则账本缺失项每轮 skip 而永不落账, 待导出计数恒冻结(用户报「不能自动更新」根因)。
+    it("T7: GitHub 远端命中 skip → 账本落账(gists/repos 两型)", async () => {
+        const created = [];
+        stubPageCreation(created);
+        stubExporterAndEnv();
+        const repoLedger = {};
+        const gistLedger = {};
+        GitHubAPI.getExported = () => repoLedger;
+        GitHubAPI.getExportedGists = () => gistLedger;
+        NotionAPI.collectDatabaseUrls = async () => new Set(["https://github.com/u/repo-1", "https://gist.github.com/g9"]);
+        await GitHubAutoImporter._exportViaGitHubExporter(
+            [mkRepo("r1", "https://github.com/u/repo-1")],
+            "stars", ghMeta, ghSettings()
+        );
+        expect(repoLedger["gh-r1"]).toBeTruthy();
+        await GitHubAutoImporter._exportViaGitHubExporter(
+            [mkRepo("g9", "https://gist.github.com/g9")],
+            "gists", ghMeta, ghSettings()
+        );
+        expect(gistLedger["gh-g9"]).toBeTruthy();
+    });
+
+    it("T8: LinuxDo markRemoteExistingTopics 仅 strict 落账 + batch 纪律", () => {
+        const { DedupStore } = require("../src/storage");
+        const marked = [];
+        Storage.markTopicExported = (id) => marked.push(id);
+        let batchOpen = 0, batchClose = 0;
+        DedupStore.beginBatch = () => { batchOpen++; };
+        DedupStore.endBatch = () => { batchClose++; };
+        const bookmarks = [{ topic_id: "42" }, { topic_id: "43" }, { topic_id: "44" }];
+        const remoteUrls = new Set(["https://linux.do/t/42", "https://linux.do/t/44"]);
+        const newBookmarks = AutoImporter.resolveNewBookmarks({ bookmarks, dedupStrict: true, remoteUrls });
+        // 42/44 远端命中被滤除, 43 未命中留下
+        expect(newBookmarks.map((b) => b.topic_id)).toEqual(["43"]);
+        Storage._exportedTopicsCache = { stale: true };
+        const n = AutoImporter.markRemoteExistingTopics({ bookmarks, newBookmarks, remoteUrls, dedupStrict: true });
+        expect(n).toBe(2);
+        expect(marked).toEqual(["42", "44"]);
+        expect(batchOpen).toBe(1);
+        expect(batchClose).toBe(1);
+        expect(Storage._exportedTopicsCache).toBe(null); // endBatch 后缓存失效
+        // allow_duplicates / 无 remoteUrls → 不落账不开 batch
+        expect(AutoImporter.markRemoteExistingTopics({ bookmarks, newBookmarks, remoteUrls, dedupStrict: false })).toBe(0);
+        expect(AutoImporter.markRemoteExistingTopics({ bookmarks, newBookmarks, remoteUrls: null, dedupStrict: true })).toBe(0);
+        expect(batchOpen).toBe(1);
+    });
+
+    it("T9: BookmarkExporter 全部远端命中 → 落账 + 早退前 flush", async () => {
+        const { BookmarkExporter } = require("../src/bridge/BookmarkExporter.js");
+        const ledger = {};
+        let flushed = null;
+        BookmarkExporter.getExported = () => ledger;
+        BookmarkExporter.flushExported = (obj) => { flushed = { ...obj }; };
+        BookmarkExporter.setupDatabaseProperties = async () => ({ success: true });
+        Utils.isBookmarkDedupStrict = () => true;
+        NotionAPI.collectDatabaseUrls = async () => new Set(["https://a.com/x", "https://b.com/y"]);
+        const result = await BookmarkExporter.exportBookmarks({
+            apiKey: "tok", databaseId: "db-1",
+            bookmarks: [{ url: "https://a.com/x/", title: "A" }, { url: "https://b.com/y", title: "B" }],
+        });
+        expect(result.message).toBe("没有新的书签需要导出"); // 两项均远端命中 → 早退路径
+        expect(flushed[Utils.normalizeDedupUrl("https://a.com/x/")]).toBeTruthy();
+        expect(flushed[Utils.normalizeDedupUrl("https://b.com/y")]).toBeTruthy();
+    });
+
+    it("T10: reconcile 回填空快照回退主列表(不再静默 0 命中)", () => {
+        const { WorkspaceInsight } = require("../src/ui/workspace-insight.js");
+        const UIObj = require("../src/ui/main-ui").UI;
+        // 空快照 + 主列表含 linuxdo/github 项; normalize/getCombined 为主js混入方法, 测试内同实现补齐
+        UIObj.visualSnapshots = { linuxdo: [], github: [] };
+        UIObj.bookmarks = [
+            { source: "linuxdo", topic_id: "42" },
+            { source: "github", itemKey: "u/repo-1", sourceType: "stars", raw: { html_url: "https://github.com/u/repo-1" } },
+        ];
+        UIObj.normalizeWorkspaceInsightUrl = (u) => String(u || "").trim().replace(/\/+$/, "");
+        UIObj.getCombinedVisualBookmarks = () => [
+            ...(Array.isArray(UIObj.visualSnapshots.linuxdo) ? UIObj.visualSnapshots.linuxdo : []),
+            ...(Array.isArray(UIObj.visualSnapshots.github) ? UIObj.visualSnapshots.github : []),
+        ];
+        UIObj.recomputeExportStats = () => {};
+        UIObj.updateSelectCount = () => {};
+        UIObj.renderBookmarkList = () => {};
+        const markedTopics = [];
+        const markedGh = [];
+        Storage.isTopicExported = () => false;
+        Storage.markTopicExported = (id) => markedTopics.push(id);
+        GitHubAPI.isExported = () => false;
+        GitHubAPI.markExported = (k) => markedGh.push(k);
+        GitHubAPI.flushExported = () => {};
+        GitHubAPI.flushGistsExported = () => {};
+        Utils.isLinuxDoDedupStrict = () => true;
+        const matched = WorkspaceInsight.reconcileExportedFromWorkspace([
+            { sourceUrl: "https://linux.do/t/42" },
+            { sourceUrl: "https://github.com/u/repo-1" },
+        ]);
+        expect(matched).toBe(2);
+        expect(markedTopics).toEqual(["42"]);
+        expect(markedGh).toEqual(["u/repo-1"]);
+    });
 });

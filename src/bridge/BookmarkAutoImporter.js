@@ -767,6 +767,9 @@ BookmarkAutoImporter.run = async () => {
         // v3.14.6 (CC-03): 复位互斥(仅当本次由自己置位)
         if (exportMutexAcquired) SyncLock.isExporting = false;
         BookmarkAutoImporter.isRunning = false;
+        // 20260914: 补 emit bookmarks:updated —— 收藏列表唯一自动重渲染触发是 bookmarks:updated
+        // (main-ui.js 订阅链), 仅发 sync:center-summary-updated 时计数/徽标冻结(v3.14.7 REV-06 GitHub 路径同款)
+        emit("bookmarks:updated");
         emit("sync:center-summary-updated");
     }
 };

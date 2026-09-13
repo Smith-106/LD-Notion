@@ -852,7 +852,13 @@ const WorkspaceInsight = {
     // ③ 回填后调 renderBookmarkList() 刷新行内徽标, 与状态提示一致。
     // ④ 循环内仅 mutate 账本缓存, 循环末单次 flush(消除写侧 O(N²), 见 AGENTS.md 禁令)。
     reconcileExportedFromWorkspace: (records = []) => {
-        const bookmarks = UI().getCombinedVisualBookmarks();
+        // 20260914: 内存快照为空(页面刷新后未手动加载列表)时回退主列表数据 —— 旧实现仅查
+        // visualSnapshots, 空快照会话恒 0 命中且静默(用户报「重算也没有用」路径之一)。
+        // 按 bookmarkKey 去重合并, 快照优先(保持既有优先级)。
+        const combined = UI().getCombinedVisualBookmarks();
+        const activeList = Array.isArray(UI().bookmarks) ? UI().bookmarks : [];
+        const seenKeys = new Set(combined.map((b) => UI().getBookmarkKey(b)));
+        const bookmarks = combined.concat(activeList.filter((b) => !seenKeys.has(UI().getBookmarkKey(b))));
         if (!Array.isArray(bookmarks) || bookmarks.length === 0 || !Array.isArray(records) || records.length === 0) {
             return 0;
         }

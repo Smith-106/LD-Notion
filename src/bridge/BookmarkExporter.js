@@ -690,11 +690,20 @@ const BookmarkExporter = {
             } catch (_) { remoteUrls = null; }
         }
         const normRemoteUrl = (u) => String(u || "").trim().replace(/\/+$/, "");
+        // 20260914: 循环前取得账本缓存引用 —— 远端命中项也回写落账(ground truth 落账, 计数收敛),
+        // 主循环/全部命中早退路径统一末次 flush(与 finally flush 同构, 消除写侧 O(N²))。
+        const pendingExported = BookmarkExporter.getExported();
         let newBookmarks = dedupStrict
             ? bookmarks.filter(b => {
                 if (remoteUrls) {
                     const u = normRemoteUrl(b.url);
-                    return !(u && remoteUrls.has(u));
+                    if (u && remoteUrls.has(u)) {
+                        // 20260914: 远端已存在 → 回写本地账本后跳过建页(旧实现直接滤除不落账,
+                        // 待导出计数/后续降级账本判定均冻结)
+                        pendingExported[Utils.normalizeDedupUrl(b.url)] = Date.now();
+                        return false;
+                    }
+                    return true;
                 }
                 return !BookmarkExporter.isExported(b.url);
             })
@@ -711,15 +720,16 @@ const BookmarkExporter = {
             });
         }
         if (newBookmarks.length === 0) {
+            // 20260914: 全部远端命中时由此早退, 落账须先 flush(否则零创建路径丢落账)
+            BookmarkExporter.flushExported(pendingExported);
             return { total: bookmarks.length, exported: 0, message: "没有新的书签需要导出" };
         }
 
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
         let success = 0, failed = 0;
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-        // P4 收敛(c07): 持有本轮缓存引用 —— 跨 tab watcher 可能把模块字段置 null,
+        // pendingExported 已在远端对账过滤前取得(见上方 20260914 注): 跨 tab watcher 可能把模块字段置 null,
         // 循环内直接读写模块字段会丢掉此前已标记的导出事实
-        const pendingExported = BookmarkExporter.getExported();
 
         // v3.14.6 (CC-10): 循环包 try/finally flush —— onProgress 抛错/异常路径也不丢导出账本
         try {
