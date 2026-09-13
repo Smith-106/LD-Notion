@@ -127,6 +127,8 @@ const OperationGuard = {
         // 级仍可写零审计。登记后 writeNote/writeImage 统一经 canExecute 闸门 + auditDenied。
         "obsidian.writeNote": 1,
         "obsidian.writeImage": 1,
+        // 20260914: 浏览器书签整理写回(移动优先零删除; 可逆 move, 不入 DANGEROUS)
+        "bookmarks.organize": 2,
         // 多端同步(F-SYNC-05, HIGH-1 共识: 必须 P0 静态注册,接线在后)
         "sync.state.pull": 0,      // 只读拉取 payload
         "sync.state.push": 1,      // 推送本地状态(写介质)

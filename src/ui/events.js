@@ -12,7 +12,7 @@ const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { UICommandService } = require("../coordination/UICommandService");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
-const { BookmarkBridge, BookmarkAutoImporter, RSSAutoImporter, BookmarkExporter } = require("../bridge");
+const { BookmarkBridge, BookmarkAutoImporter, RSSAutoImporter, BookmarkExporter, BookmarkOrganizer } = require("../bridge");
 const { AIService, ChatUI, AIClassifier, AgentTrace, ChatState } = require("../ai");
 const { DesignSystem } = require("./design-system");
 const { PanelResize } = require("./panel-resize");
@@ -1022,6 +1022,88 @@ const UIEvents = {
                 UI.showStatus("AI 面板未就绪，请稍后重试", "error");
             }
         };
+
+        // 20260914: 书签写回整理 —— scan→预览确认→备份→执行; 移动优先零删除, 可撤销
+        const syncUndoOrganizeBtn = () => {
+            if (refs.undoOrganizeBtn) {
+                refs.undoOrganizeBtn.style.display = BookmarkOrganizer.getUndoCount() > 0 ? "" : "none";
+            }
+        };
+        syncUndoOrganizeBtn();
+        if (refs.organizeBookmarksBtn) {
+            refs.organizeBookmarksBtn.onclick = async () => {
+                if (!BookmarkBridge.isExtensionAvailable()) {
+                    UI.showStatus("书签整理需要 LD-Notion 书签桥接扩展（用户脚本模式无浏览器书签写权限）", "error");
+                    return;
+                }
+                const btn = refs.organizeBookmarksBtn;
+                const setStatus = (text, kind) => UI.showStatus(text, kind || "info");
+                try {
+                    btn.disabled = true;
+                    const goOn = await ConfirmationDialog.show({
+                        title: "整理浏览器书签",
+                        message: "将扫描：① 重复书签（同 URL 仅保留最早一条）\n② 失效链接（HTTP 4xx/无法访问，最多检测 500 个，可能耗时几分钟）\n③ 根目录散落书签（若已配置 AI Key 则自动归类到现有文件夹）\n\n所有动作仅移动到「LD-Notion 整理/」文件夹，不删除任何书签；执行前会自动下载全量备份。",
+                        confirmText: "开始扫描",
+                        countdown: 0,
+                    });
+                    if (!goOn) return;
+                    setStatus("正在扫描书签树…");
+                    const { plan } = await BookmarkOrganizer.scan({ checkDeadLinks: true, classifyWithAI: true });
+                    const totalMoves = plan.deadCount + plan.dupCount + plan.looseCount;
+                    if (totalMoves === 0) {
+                        setStatus("扫描完成：未发现重复/失效/待归类书签，无需整理", "success");
+                        return;
+                    }
+                    const previewLines = [
+                        `重复书签: ${plan.dupCount} 条`,
+                        `失效链接: ${plan.deadCount} 条${plan.deadLinkSkipped > 0 ? `（另有 ${plan.deadLinkSkipped} 个 URL 未检测，超出单次上限）` : ""}`,
+                        `AI 归类: ${plan.looseCount} 条${plan.aiNotice ? `\n（${plan.aiNotice}）` : ""}`,
+                        "",
+                        ...plan.preview.duplicates.slice(0, 3),
+                        ...plan.preview.dead.slice(0, 3),
+                        ...plan.preview.loose.slice(0, 3),
+                        "",
+                        `共 ${totalMoves} 条书签将被移动到「${BookmarkOrganizer.ORGANIZE_ROOT_TITLE}/」下，不删除；执行前自动备份。确认执行？`,
+                    ];
+                    const confirmed = await ConfirmationDialog.show({
+                        title: "整理预览",
+                        message: previewLines.join("\n"),
+                        confirmText: `执行整理（${totalMoves} 条）`,
+                        countdown: 0,
+                    });
+                    if (!confirmed) {
+                        setStatus("已取消整理");
+                        return;
+                    }
+                    setStatus("正在执行整理（已先下载备份）…");
+                    const report = await BookmarkOrganizer.execute(plan);
+                    setStatus(`整理完成: 移动 ${report.movedCount} 条到「LD-Notion 整理/」（重复 ${plan.dupCount}/失效 ${plan.deadCount}/归类 ${plan.looseCount}）；备份 ${report.backupFile}${report.failedCount ? `；失败 ${report.failedCount} 条` : ""}`, report.failedCount ? "error" : "success");
+                    syncUndoOrganizeBtn();
+                } catch (error) {
+                    setStatus(`整理失败: ${error.message || error}`, "error");
+                } finally {
+                    btn.disabled = false;
+                }
+            };
+        }
+        if (refs.undoOrganizeBtn) {
+            refs.undoOrganizeBtn.onclick = async () => {
+                try {
+                    const goOn = await ConfirmationDialog.show({
+                        title: "撤销上次整理",
+                        message: `将把上次整理移动的 ${BookmarkOrganizer.getUndoCount()} 条书签移回原位置，确认？`,
+                        confirmText: "撤销",
+                        countdown: 0,
+                    });
+                    if (!goOn) return;
+                    const report = await BookmarkOrganizer.undoLast();
+                    UI.showStatus(`已移回 ${report.movedCount} 条书签`, "success");
+                    syncUndoOrganizeBtn();
+                } catch (error) {
+                    UI.showStatus(`撤销失败: ${error.message || error}`, "error");
+                }
+            };
+        }
 
         // 全选/取消
         refs.selectAll.onchange = (e) => {

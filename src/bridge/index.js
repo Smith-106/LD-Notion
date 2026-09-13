@@ -1,6 +1,10 @@
 "use strict";
 
 const { InstallHelper } = require("../api");
+const { BookmarkExporter } = require("./BookmarkExporter");
+const { BookmarkAutoImporter } = require("./BookmarkAutoImporter");
+const { RSSAutoImporter } = require("./RSSAutoImporter");
+const { BookmarkOrganizer } = require("./BookmarkOrganizer");
 
 const __LD_NOTION_BUILD_BOOKMARK_BRIDGE_START__ = "[LD-NOTION-BUILD:BOOKMARK_BRIDGE_START]";
 const BookmarkBridge = {
@@ -13,7 +17,7 @@ const BookmarkBridge = {
     },
 
     // 发起书签请求
-    _request: (eventName, detail = {}) => {
+    _request: (eventName, detail = {}, options = {}) => {
         return new Promise((resolve, reject) => {
             if (!BookmarkBridge.isExtensionAvailable()) {
                 const installUrl = InstallHelper.getBookmarkExtensionUrl();
@@ -25,7 +29,7 @@ const BookmarkBridge = {
             const timeout = setTimeout(() => {
                 delete BookmarkBridge._pendingRequests[requestId];
                 reject(new Error("书签请求超时，请检查扩展是否正常运行。"));
-            }, 10000);
+            }, Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 10000);
 
             BookmarkBridge._pendingRequests[requestId] = { resolve, reject, timeout };
 
@@ -48,6 +52,12 @@ const BookmarkBridge = {
     // 搜索书签
     searchBookmarks: (query) => {
         return BookmarkBridge._request("ld-notion-search-bookmarks", { query });
+    },
+
+    // 20260914: 书签整理写回(白名单 ensureFolder/move, 扩展侧拒绝其他 action)
+    // 批量操作超时放宽到 60s(默认 10s 面向单次读取)
+    organizeBookmarks: (operations, options = {}) => {
+        return BookmarkBridge._request("ld-notion-organize-bookmarks", { operations }, options);
     },
 
     // 初始化响应监听器
@@ -74,8 +84,4 @@ const BookmarkBridge = {
 };
 const __LD_NOTION_BUILD_BOOKMARK_BRIDGE_END__ = "[LD-NOTION-BUILD:BOOKMARK_BRIDGE_END]";
 
-const { BookmarkExporter } = require("./BookmarkExporter");
-const { BookmarkAutoImporter } = require("./BookmarkAutoImporter");
-const { RSSAutoImporter } = require("./RSSAutoImporter");
-
-module.exports = { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter };
+module.exports = { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter, BookmarkOrganizer };

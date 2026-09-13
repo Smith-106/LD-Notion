@@ -969,6 +969,50 @@ window.addEventListener("ld-notion-search-bookmarks", async (event) => {
         rejectBookmarkBridgeRequest(requestId, error?.message || String(error));
     }
 });
+
+// 20260914: 书签写回整理 —— 白名单仅 ensureFolder/move, 不提供 remove/update。
+// 浏览器书签 remove 不可逆, 整理器采用「移动优先、零删除」设计;
+// 物理删除由用户在浏览器书签管理器手动完成。移动可通过撤销记录回派(原 parentId 持久化)。
+window.addEventListener("ld-notion-organize-bookmarks", async (event) => {
+    const { requestId, operations } = event.detail || {};
+    if (!requestId || !Array.isArray(operations)) return;
+    try {
+        const results = [];
+        const folderCache = new Map();
+        const refMap = Object.create(null);
+        const ensureFolder = async (parentId, title) => {
+            const key = parentId + "::" + title;
+            if (folderCache.has(key)) return folderCache.get(key);
+            const siblings = await chrome.bookmarks.getChildren(parentId);
+            const hit = siblings.find((n) => !n.url && n.title === title);
+            const node = hit || (await chrome.bookmarks.create({ parentId, title }));
+            folderCache.set(key, node.id);
+            return node.id;
+        };
+        for (const op of operations) {
+            try {
+                if (op.action === "ensureFolder") {
+                    const id = await ensureFolder(op.parentId, op.title);
+                    if (op.ref) refMap[op.ref] = id;
+                    results.push({ ok: true, action: op.action, id, ref: op.ref || "" });
+                } else if (op.action === "move") {
+                    const parentId = op.parentIdRef ? refMap[op.parentIdRef] : op.parentId;
+                    if (!parentId) throw new Error("move-target-missing");
+                    await chrome.bookmarks.move(op.id, { parentId });
+                    results.push({ ok: true, action: op.action, id: op.id });
+                } else {
+                    // 白名单外动作(含 remove/update)一律拒绝, 不落到 chrome.bookmarks
+                    results.push({ ok: false, action: op.action || "", id: op.id || "", error: "unsupported-action" });
+                }
+            } catch (opError) {
+                results.push({ ok: false, action: op.action || "", id: op.id || "", error: opError?.message || String(opError) });
+            }
+        }
+        dispatchBookmarkBridgeResponse({ requestId, success: true, data: results });
+    } catch (error) {
+        rejectBookmarkBridgeRequest(requestId, error?.message || String(error));
+    }
+});
 ${GENERATED_SECTION_MARKERS.bookmarkEventBridgeEnd}
 
 // Popup 消息监听 — 接收来自 popup.js 的快捷操作指令

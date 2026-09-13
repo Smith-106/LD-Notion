@@ -124,6 +124,8 @@ const UI = {
             configStatus: panel.querySelector("#ldb-config-status"),
             loadBookmarksBtn: panel.querySelector("#ldb-load-bookmarks"),
             importBrowserBookmarksBtn: panel.querySelector("#ldb-import-browser-bookmarks"),
+            organizeBookmarksBtn: panel.querySelector("#ldb-organize-bookmarks"),
+            undoOrganizeBtn: panel.querySelector("#ldb-undo-organize"),
             exportBtns: panel.querySelector("#ldb-export-btns"),
             exportTargetSummary: panel.querySelector("#ldb-export-target-summary"),
             controlBtns: panel.querySelector("#ldb-control-btns"),
@@ -415,6 +417,12 @@ const UI = {
                             </button>
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-import-browser-bookmarks">
                                 📖 导入浏览器书签
+                            </button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-organize-bookmarks">
+                                🧹 整理书签
+                            </button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-undo-organize" style="display: none;">
+                                ↩️ 撤销整理
                             </button>
                         </div>
 

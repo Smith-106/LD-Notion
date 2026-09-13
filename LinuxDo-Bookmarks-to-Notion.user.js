@@ -156,6 +156,7 @@
           GITHUB_USERNAME: "ldb_github_username",
           GITHUB_TOKEN: "ldb_github_token",
           GITHUB_OAUTH_CLIENT_ID: "ldb_github_oauth_client_id",
+          BOOKMARK_ORGANIZE_UNDO: "ldb_bookmark_organize_undo",
           GITHUB_EXPORTED_REPOS: "ldb_github_exported_repos",
           GITHUB_IMPORT_TYPES: "ldb_github_import_types",
           GITHUB_EXPORTED_GISTS: "ldb_github_exported_gists",
@@ -7198,6 +7199,8 @@ Content-Type: ${safeContentType}\r
           // 级仍可写零审计。登记后 writeNote/writeImage 统一经 canExecute 闸门 + auditDenied。
           "obsidian.writeNote": 1,
           "obsidian.writeImage": 1,
+          // 20260914: 浏览器书签整理写回(移动优先零删除; 可逆 move, 不入 DANGEROUS)
+          "bookmarks.organize": 2,
           // 多端同步(F-SYNC-05, HIGH-1 共识: 必须 P0 静态注册,接线在后)
           "sync.state.pull": 0,
           // 只读拉取 payload
@@ -15733,11 +15736,310 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     }
   });
 
+  // src/bridge/BookmarkOrganizer.js
+  var require_BookmarkOrganizer = __commonJS({
+    "src/bridge/BookmarkOrganizer.js"(exports, module) {
+      "use strict";
+      var { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
+      var { Storage: Storage2 } = require_storage();
+      var { Utils: Utils2 } = require_utils();
+      var getBridge = () => require_bridge().BookmarkBridge;
+      var CONFIG_KEY_UNDO = require_config().CONFIG.STORAGE_KEYS.BOOKMARK_ORGANIZE_UNDO;
+      var ORGANIZE_PARENT_ID = "2";
+      var ORGANIZE_ROOT_TITLE = "LD-Notion \u6574\u7406";
+      var FOLDER_DUPLICATES = "\u91CD\u590D\u4E66\u7B7E";
+      var FOLDER_DEAD = "\u5F85\u6E05\u7406\u5931\u6548";
+      var DEAD_LINK_CONCURRENCY = 5;
+      var DEAD_LINK_TIMEOUT_MS = 15e3;
+      var DEAD_LINK_RETRY_BACKOFF_MS = 1e3;
+      var DEAD_LINK_LIMIT = 500;
+      var AI_CLASSIFY_LIMIT = 50;
+      var UNDO_MAX_ENTRIES = 5e3;
+      function gmProbe(url, method, timeoutMs = DEAD_LINK_TIMEOUT_MS) {
+        return new Promise((resolve) => {
+          if (typeof GM_xmlhttpRequest === "undefined") {
+            resolve({ ok: false, unreachable: true, error: "no-gm" });
+            return;
+          }
+          GM_xmlhttpRequest({
+            method,
+            url,
+            headers: { "User-Agent": "LD-Notion-Bookmark-Organizer/1.0" },
+            timeout: timeoutMs,
+            onload: (response) => resolve({ ok: response.status > 0 && response.status < 400, status: response.status }),
+            onerror: () => resolve({ ok: false, unreachable: true }),
+            ontimeout: () => resolve({ ok: false, unreachable: true, error: "timeout" })
+          });
+        });
+      }
+      async function probeDeadLink(url) {
+        let first = await gmProbe(url, "HEAD");
+        if (first.unreachable || first.error === "timeout") {
+          await new Promise((r) => setTimeout(r, DEAD_LINK_RETRY_BACKOFF_MS));
+          first = await gmProbe(url, "GET");
+        }
+        return first;
+      }
+      async function runQueue(items, worker, concurrency = DEAD_LINK_CONCURRENCY) {
+        const remaining = items.slice();
+        const runners = Array.from({ length: Math.min(concurrency, remaining.length) }, async () => {
+          for (; ; ) {
+            const item = remaining.shift();
+            if (!item) return;
+            await worker(item);
+          }
+        });
+        await Promise.all(runners);
+      }
+      function walkTree(nodes, path, out) {
+        for (const node of nodes || []) {
+          const selfPath = path ? path + "/" + (node.title || "") : node.title || "";
+          const entry = {
+            id: node.id,
+            title: node.title || "",
+            url: node.url || "",
+            dateAdded: node.dateAdded || 0,
+            parentId: node.parentId || "",
+            path: selfPath,
+            isFolder: !node.url
+          };
+          out.push(entry);
+          if (node.children) {
+            walkTree(node.children, selfPath, out);
+          }
+        }
+        return out;
+      }
+      var BookmarkOrganizer = {
+        ORGANIZE_ROOT_TITLE,
+        FOLDER_DUPLICATES,
+        FOLDER_DEAD,
+        // —— 只读扫描: 重复书签 + 失效链接 + 根目录散落(AI 归类可选) ——
+        // 返回 { tree, flat, plan }; plan.operations 可预览, 不含任何删除动作
+        scan: async ({ checkDeadLinks = true, classifyWithAI = false } = {}) => {
+          const BookmarkBridge2 = getBridge();
+          const tree = await BookmarkBridge2.getBookmarkTree();
+          const flat = walkTree(tree, "", []);
+          const bookmarks = flat.filter((n) => !n.isFolder && /^https?:\/\//i.test(n.url));
+          const byUrl = /* @__PURE__ */ new Map();
+          for (const node of bookmarks) {
+            const key = Utils2.normalizeDedupUrl(node.url);
+            if (!byUrl.has(key)) byUrl.set(key, []);
+            byUrl.get(key).push(node);
+          }
+          const duplicateGroups = [];
+          const dupIds = /* @__PURE__ */ new Set();
+          for (const [, group] of byUrl) {
+            if (group.length < 2) continue;
+            const sorted = group.slice().sort((a, b) => a.dateAdded - b.dateAdded || String(a.id).localeCompare(String(b.id)));
+            duplicateGroups.push({ url: sorted[0].url, keep: sorted[0], duplicates: sorted.slice(1) });
+            for (const dup of sorted.slice(1)) dupIds.add(dup.id);
+          }
+          const deadIds = /* @__PURE__ */ new Set();
+          let deadLinkChecked = 0;
+          let deadLinkSkipped = 0;
+          if (checkDeadLinks) {
+            const uniqueUrls = [];
+            const seenUrls = /* @__PURE__ */ new Set();
+            for (const node of bookmarks) {
+              const key = Utils2.normalizeDedupUrl(node.url);
+              if (!seenUrls.has(key)) {
+                seenUrls.add(key);
+                uniqueUrls.push(node.url);
+              }
+            }
+            const toCheck = uniqueUrls.slice(0, DEAD_LINK_LIMIT);
+            deadLinkSkipped = uniqueUrls.length - toCheck.length;
+            const verdicts = /* @__PURE__ */ new Map();
+            await runQueue(toCheck, async (url) => {
+              const verdict = await probeDeadLink(url);
+              verdicts.set(url, verdict);
+              deadLinkChecked++;
+            });
+            for (const node of bookmarks) {
+              const verdict = verdicts.get(node.url);
+              if (verdict && !verdict.ok) deadIds.add(node.id);
+            }
+          }
+          const looseMoves = [];
+          let aiNotice = "";
+          if (classifyWithAI) {
+            try {
+              const { AIService: AIService2, getAISettings } = require_ai();
+              const settings = getAISettings();
+              if (settings && settings.aiApiKey) {
+                const rootIds = /* @__PURE__ */ new Set(["1", "2"]);
+                const folderByTitle = /* @__PURE__ */ new Map();
+                for (const n of flat) {
+                  if (n.isFolder && n.parentId !== "0" && n.path.split("/").length === 2 && n.title) {
+                    folderByTitle.set(n.title, n);
+                  }
+                }
+                const categories = Array.from(folderByTitle.keys());
+                const loose = bookmarks.filter((n) => rootIds.has(String(n.parentId)) && !dupIds.has(n.id) && !deadIds.has(n.id));
+                const targets = loose.slice(0, AI_CLASSIFY_LIMIT);
+                const classified = [];
+                await runQueue(targets, async (node) => {
+                  try {
+                    const category = await AIService2.classify(node.title || node.url, node.url, categories, settings);
+                    const folder = category && folderByTitle.get(category);
+                    if (folder && folder.id !== node.parentId) {
+                      classified.push({ node, folderId: folder.id, folderTitle: folder.title });
+                    }
+                  } catch (_) {
+                  }
+                }, 3);
+                for (const c of classified) looseMoves.push(c);
+                if (loose.length > targets.length) {
+                  aiNotice = `\u6839\u76EE\u5F55\u6563\u843D\u4E66\u7B7E\u5171 ${loose.length} \u6761, \u672C\u8F6E\u4EC5\u5F52\u7C7B\u524D ${targets.length} \u6761`;
+                }
+              } else {
+                aiNotice = "\u672A\u914D\u7F6E AI Key, \u8DF3\u8FC7\u5F52\u7C7B(\u53EF\u5728 AI \u8BBE\u7F6E\u4E2D\u914D\u7F6E\u540E\u91CD\u8BD5)";
+              }
+            } catch (error) {
+              aiNotice = `AI \u5F52\u7C7B\u4E0D\u53EF\u7528, \u5DF2\u8DF3\u8FC7: ${String((error == null ? void 0 : error.message) || error).slice(0, 80)}`;
+            }
+          }
+          const operations = [];
+          const undoRecords = [];
+          const moveOp = (node, parentIdRef, reason) => {
+            operations.push({ action: "move", id: node.id, parentIdRef, reason });
+            undoRecords.push({ id: node.id, fromParentId: node.parentId, reason });
+          };
+          let deadCount = 0;
+          let dupCount = 0;
+          const deadAll = new Set(deadIds);
+          for (const node of bookmarks) {
+            if (deadAll.has(node.id)) {
+              moveOp(node, "folder-dead", "\u5931\u6548\u94FE\u63A5");
+              deadCount++;
+            } else if (dupIds.has(node.id)) {
+              moveOp(node, "folder-dup", "\u91CD\u590D\u4E66\u7B7E");
+              dupCount++;
+            }
+          }
+          if (operations.length > 0 || classifyWithAI) {
+            operations.unshift(
+              { action: "ensureFolder", ref: "organize-root", parentId: ORGANIZE_PARENT_ID, title: ORGANIZE_ROOT_TITLE },
+              { action: "ensureFolder", ref: "folder-dup", parentIdRef: "organize-root", title: FOLDER_DUPLICATES },
+              { action: "ensureFolder", ref: "folder-dead", parentIdRef: "organize-root", title: FOLDER_DEAD }
+            );
+          }
+          for (const c of looseMoves) {
+            operations.push({ action: "move", id: c.node.id, parentId: c.folderId, reason: "AI\u5F52\u7C7B:" + c.folderTitle });
+            undoRecords.push({ id: c.node.id, fromParentId: c.node.parentId, reason: "AI\u5F52\u7C7B:" + c.folderTitle });
+          }
+          const plan = {
+            createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+            checkDeadLinks,
+            classifyWithAI,
+            aiNotice,
+            deadLinkChecked,
+            deadLinkSkipped,
+            duplicateGroupsCount: duplicateGroups.length,
+            deadCount,
+            dupCount,
+            looseCount: looseMoves.length,
+            undoRecords,
+            operations,
+            preview: {
+              duplicates: duplicateGroups.slice(0, 10).map((g) => `${g.duplicates.length} \u4E2A\u91CD\u590D \u2190 ${Utils2.truncateText(g.url, 60)}`),
+              dead: bookmarks.filter((n) => deadIds.has(n.id)).slice(0, 10).map((n) => Utils2.truncateText(n.title || n.url, 60)),
+              loose: looseMoves.slice(0, 10).map((c) => `${Utils2.truncateText(c.node.title || c.node.url, 40)} \u2192 ${c.folderTitle}`)
+            },
+            tree
+          };
+          return { tree, flat, plan };
+        },
+        // —— 全量备份: JSON 下载(执行任何写操作前必须先备份) ——
+        backup: (tree) => {
+          const payload = {
+            kind: "ld-notion-bookmark-backup",
+            version: 1,
+            exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            tree
+          };
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:T]/g, "-").slice(0, 19);
+          a.href = url;
+          a.download = `ldb-bookmark-backup-${stamp}.json`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 5e3);
+          return `ldb-bookmark-backup-${stamp}.json`;
+        },
+        // —— 执行(Guard 闸门 + 审计 + 撤销记录持久化; UI 层负责执行前确认) ——
+        execute: async (plan) => {
+          if (!OperationGuard2.canExecute("bookmarks.organize")) {
+            OperationLog2.add({
+              operation: "bookmarks.organize",
+              phase: "execute",
+              allowed: false,
+              detail: { reason: "permission-denied", moves: (plan.undoRecords || []).length }
+            });
+            throw new Error("\u6743\u9650\u4E0D\u8DB3: \u4E66\u7B7E\u6574\u7406\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\uFF08\u8BBE\u7F6E \u2192 \u5B89\u5168 \u2192 \u6743\u9650\u7B49\u7EA7 \u2265 2\uFF09");
+          }
+          if (!plan || !Array.isArray(plan.operations)) throw new Error("\u6574\u7406\u8BA1\u5212\u65E0\u6548");
+          const backupFile = BookmarkOrganizer.backup(plan.tree);
+          const BookmarkBridge2 = getBridge();
+          const results = await BookmarkBridge2.organizeBookmarks(plan.operations, { timeoutMs: 6e4 });
+          const failed = (results || []).filter((r) => r && r.ok === false);
+          const movedCount = (results || []).filter((r) => r && r.action === "move" && r.ok).length;
+          const successIds = new Set((results || []).filter((r) => r && r.action === "move" && r.ok).map((r) => r.id));
+          const prev = Storage2.get(CONFIG_KEY_UNDO, []);
+          const merged = (Array.isArray(prev) ? prev : []).concat((plan.undoRecords || []).filter((u) => successIds.has(u.id)));
+          Storage2.set(CONFIG_KEY_UNDO, merged.slice(-UNDO_MAX_ENTRIES));
+          OperationLog2.add({
+            operation: "bookmarks.organize",
+            phase: "execute",
+            allowed: true,
+            detail: { moved: movedCount, failed: failed.length, backupFile }
+          });
+          return { backupFile, movedCount, failedCount: failed.length, failed: failed.slice(0, 10) };
+        },
+        // —— 撤销上次整理: 按持久化记录把书签移回原文件夹 ——
+        undoLast: async () => {
+          const records = Storage2.get(CONFIG_KEY_UNDO, []);
+          if (!Array.isArray(records) || records.length === 0) {
+            throw new Error("\u6CA1\u6709\u53EF\u64A4\u9500\u7684\u6574\u7406\u8BB0\u5F55");
+          }
+          if (!OperationGuard2.canExecute("bookmarks.organize")) {
+            throw new Error("\u6743\u9650\u4E0D\u8DB3: \u4E66\u7B7E\u6574\u7406\u9700\u8981\u300C\u9AD8\u7EA7\u300D\u6743\u9650\uFF08\u8BBE\u7F6E \u2192 \u5B89\u5168 \u2192 \u6743\u9650\u7B49\u7EA7 \u2265 2\uFF09");
+          }
+          const operations = records.map((r) => ({ action: "move", id: r.id, parentId: r.fromParentId, reason: "undo" }));
+          const BookmarkBridge2 = getBridge();
+          const results = await BookmarkBridge2.organizeBookmarks(operations, { timeoutMs: 6e4 });
+          const movedCount = (results || []).filter((r) => r && r.action === "move" && r.ok).length;
+          Storage2.set(CONFIG_KEY_UNDO, []);
+          OperationLog2.add({
+            operation: "bookmarks.organize",
+            phase: "execute",
+            allowed: true,
+            detail: { undo: true, moved: movedCount }
+          });
+          return { movedCount };
+        },
+        getUndoCount: () => {
+          const records = Storage2.get(CONFIG_KEY_UNDO, []);
+          return Array.isArray(records) ? records.length : 0;
+        }
+      };
+      module.exports = { BookmarkOrganizer };
+    }
+  });
+
   // src/bridge/index.js
   var require_bridge = __commonJS({
     "src/bridge/index.js"(exports, module) {
       "use strict";
       var { InstallHelper: InstallHelper2 } = require_api();
+      var { BookmarkExporter: BookmarkExporter2 } = require_BookmarkExporter();
+      var { BookmarkAutoImporter: BookmarkAutoImporter2 } = require_BookmarkAutoImporter();
+      var { RSSAutoImporter: RSSAutoImporter2 } = require_RSSAutoImporter();
+      var { BookmarkOrganizer } = require_BookmarkOrganizer();
       // [LD-NOTION-BUILD:BOOKMARK_BRIDGE_START]
       var BookmarkBridge2 = {
         _requestId: 0,
@@ -15747,7 +16049,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return !!document.querySelector('meta[name="ld-notion-ext"][content="ready"]');
         },
         // 发起书签请求
-        _request: (eventName, detail = {}) => {
+        _request: (eventName, detail = {}, options = {}) => {
           return new Promise((resolve, reject) => {
             if (!BookmarkBridge2.isExtensionAvailable()) {
               const installUrl = InstallHelper2.getBookmarkExtensionUrl();
@@ -15758,7 +16060,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             const timeout = setTimeout(() => {
               delete BookmarkBridge2._pendingRequests[requestId];
               reject(new Error("\u4E66\u7B7E\u8BF7\u6C42\u8D85\u65F6\uFF0C\u8BF7\u68C0\u67E5\u6269\u5C55\u662F\u5426\u6B63\u5E38\u8FD0\u884C\u3002"));
-            }, 1e4);
+            }, Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 1e4);
             BookmarkBridge2._pendingRequests[requestId] = { resolve, reject, timeout };
             window.dispatchEvent(new CustomEvent(eventName, {
               detail: { requestId, ...detail }
@@ -15777,6 +16079,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         searchBookmarks: (query) => {
           return BookmarkBridge2._request("ld-notion-search-bookmarks", { query });
         },
+        // 20260914: 书签整理写回(白名单 ensureFolder/move, 扩展侧拒绝其他 action)
+        // 批量操作超时放宽到 60s(默认 10s 面向单次读取)
+        organizeBookmarks: (operations, options = {}) => {
+          return BookmarkBridge2._request("ld-notion-organize-bookmarks", { operations }, options);
+        },
         // 初始化响应监听器
         init: () => {
           window.addEventListener("ld-notion-bookmarks-data", (event) => {
@@ -15794,10 +16101,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         }
       };
       // [LD-NOTION-BUILD:BOOKMARK_BRIDGE_END]
-      var { BookmarkExporter: BookmarkExporter2 } = require_BookmarkExporter();
-      var { BookmarkAutoImporter: BookmarkAutoImporter2 } = require_BookmarkAutoImporter();
-      var { RSSAutoImporter: RSSAutoImporter2 } = require_RSSAutoImporter();
-      module.exports = { BookmarkBridge: BookmarkBridge2, BookmarkExporter: BookmarkExporter2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 };
+      module.exports = { BookmarkBridge: BookmarkBridge2, BookmarkExporter: BookmarkExporter2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2, BookmarkOrganizer };
     }
   });
 
@@ -25658,6 +25962,8 @@ ${AIService2.isolateContent(JSON.stringify({
             configStatus: panel.querySelector("#ldb-config-status"),
             loadBookmarksBtn: panel.querySelector("#ldb-load-bookmarks"),
             importBrowserBookmarksBtn: panel.querySelector("#ldb-import-browser-bookmarks"),
+            organizeBookmarksBtn: panel.querySelector("#ldb-organize-bookmarks"),
+            undoOrganizeBtn: panel.querySelector("#ldb-undo-organize"),
             exportBtns: panel.querySelector("#ldb-export-btns"),
             exportTargetSummary: panel.querySelector("#ldb-export-target-summary"),
             controlBtns: panel.querySelector("#ldb-control-btns"),
@@ -25947,6 +26253,12 @@ ${AIService2.isolateContent(JSON.stringify({
                             </button>
                             <button class="ldb-btn ldb-btn-secondary" id="ldb-import-browser-bookmarks">
                                 \u{1F4D6} \u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E
+                            </button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-organize-bookmarks">
+                                \u{1F9F9} \u6574\u7406\u4E66\u7B7E
+                            </button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-undo-organize" style="display: none;">
+                                \u21A9\uFE0F \u64A4\u9500\u6574\u7406
                             </button>
                         </div>
 
@@ -28245,7 +28557,7 @@ ${AIService2.isolateContent(JSON.stringify({
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
-      var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2, BookmarkExporter: BookmarkExporter2 } = require_bridge();
+      var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2, BookmarkExporter: BookmarkExporter2, BookmarkOrganizer } = require_bridge();
       var { AIService: AIService2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, ChatState: ChatState2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -29086,6 +29398,87 @@ ${AIService2.isolateContent(JSON.stringify({
               UI2.showStatus("AI \u9762\u677F\u672A\u5C31\u7EEA\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5", "error");
             }
           };
+          const syncUndoOrganizeBtn = () => {
+            if (refs.undoOrganizeBtn) {
+              refs.undoOrganizeBtn.style.display = BookmarkOrganizer.getUndoCount() > 0 ? "" : "none";
+            }
+          };
+          syncUndoOrganizeBtn();
+          if (refs.organizeBookmarksBtn) {
+            refs.organizeBookmarksBtn.onclick = async () => {
+              if (!BookmarkBridge2.isExtensionAvailable()) {
+                UI2.showStatus("\u4E66\u7B7E\u6574\u7406\u9700\u8981 LD-Notion \u4E66\u7B7E\u6865\u63A5\u6269\u5C55\uFF08\u7528\u6237\u811A\u672C\u6A21\u5F0F\u65E0\u6D4F\u89C8\u5668\u4E66\u7B7E\u5199\u6743\u9650\uFF09", "error");
+                return;
+              }
+              const btn = refs.organizeBookmarksBtn;
+              const setStatus = (text, kind) => UI2.showStatus(text, kind || "info");
+              try {
+                btn.disabled = true;
+                const goOn = await ConfirmationDialog2.show({
+                  title: "\u6574\u7406\u6D4F\u89C8\u5668\u4E66\u7B7E",
+                  message: "\u5C06\u626B\u63CF\uFF1A\u2460 \u91CD\u590D\u4E66\u7B7E\uFF08\u540C URL \u4EC5\u4FDD\u7559\u6700\u65E9\u4E00\u6761\uFF09\n\u2461 \u5931\u6548\u94FE\u63A5\uFF08HTTP 4xx/\u65E0\u6CD5\u8BBF\u95EE\uFF0C\u6700\u591A\u68C0\u6D4B 500 \u4E2A\uFF0C\u53EF\u80FD\u8017\u65F6\u51E0\u5206\u949F\uFF09\n\u2462 \u6839\u76EE\u5F55\u6563\u843D\u4E66\u7B7E\uFF08\u82E5\u5DF2\u914D\u7F6E AI Key \u5219\u81EA\u52A8\u5F52\u7C7B\u5230\u73B0\u6709\u6587\u4EF6\u5939\uFF09\n\n\u6240\u6709\u52A8\u4F5C\u4EC5\u79FB\u52A8\u5230\u300CLD-Notion \u6574\u7406/\u300D\u6587\u4EF6\u5939\uFF0C\u4E0D\u5220\u9664\u4EFB\u4F55\u4E66\u7B7E\uFF1B\u6267\u884C\u524D\u4F1A\u81EA\u52A8\u4E0B\u8F7D\u5168\u91CF\u5907\u4EFD\u3002",
+                  confirmText: "\u5F00\u59CB\u626B\u63CF",
+                  countdown: 0
+                });
+                if (!goOn) return;
+                setStatus("\u6B63\u5728\u626B\u63CF\u4E66\u7B7E\u6811\u2026");
+                const { plan } = await BookmarkOrganizer.scan({ checkDeadLinks: true, classifyWithAI: true });
+                const totalMoves = plan.deadCount + plan.dupCount + plan.looseCount;
+                if (totalMoves === 0) {
+                  setStatus("\u626B\u63CF\u5B8C\u6210\uFF1A\u672A\u53D1\u73B0\u91CD\u590D/\u5931\u6548/\u5F85\u5F52\u7C7B\u4E66\u7B7E\uFF0C\u65E0\u9700\u6574\u7406", "success");
+                  return;
+                }
+                const previewLines = [
+                  `\u91CD\u590D\u4E66\u7B7E: ${plan.dupCount} \u6761`,
+                  `\u5931\u6548\u94FE\u63A5: ${plan.deadCount} \u6761${plan.deadLinkSkipped > 0 ? `\uFF08\u53E6\u6709 ${plan.deadLinkSkipped} \u4E2A URL \u672A\u68C0\u6D4B\uFF0C\u8D85\u51FA\u5355\u6B21\u4E0A\u9650\uFF09` : ""}`,
+                  `AI \u5F52\u7C7B: ${plan.looseCount} \u6761${plan.aiNotice ? `
+\uFF08${plan.aiNotice}\uFF09` : ""}`,
+                  "",
+                  ...plan.preview.duplicates.slice(0, 3),
+                  ...plan.preview.dead.slice(0, 3),
+                  ...plan.preview.loose.slice(0, 3),
+                  "",
+                  `\u5171 ${totalMoves} \u6761\u4E66\u7B7E\u5C06\u88AB\u79FB\u52A8\u5230\u300C${BookmarkOrganizer.ORGANIZE_ROOT_TITLE}/\u300D\u4E0B\uFF0C\u4E0D\u5220\u9664\uFF1B\u6267\u884C\u524D\u81EA\u52A8\u5907\u4EFD\u3002\u786E\u8BA4\u6267\u884C\uFF1F`
+                ];
+                const confirmed = await ConfirmationDialog2.show({
+                  title: "\u6574\u7406\u9884\u89C8",
+                  message: previewLines.join("\n"),
+                  confirmText: `\u6267\u884C\u6574\u7406\uFF08${totalMoves} \u6761\uFF09`,
+                  countdown: 0
+                });
+                if (!confirmed) {
+                  setStatus("\u5DF2\u53D6\u6D88\u6574\u7406");
+                  return;
+                }
+                setStatus("\u6B63\u5728\u6267\u884C\u6574\u7406\uFF08\u5DF2\u5148\u4E0B\u8F7D\u5907\u4EFD\uFF09\u2026");
+                const report = await BookmarkOrganizer.execute(plan);
+                setStatus(`\u6574\u7406\u5B8C\u6210: \u79FB\u52A8 ${report.movedCount} \u6761\u5230\u300CLD-Notion \u6574\u7406/\u300D\uFF08\u91CD\u590D ${plan.dupCount}/\u5931\u6548 ${plan.deadCount}/\u5F52\u7C7B ${plan.looseCount}\uFF09\uFF1B\u5907\u4EFD ${report.backupFile}${report.failedCount ? `\uFF1B\u5931\u8D25 ${report.failedCount} \u6761` : ""}`, report.failedCount ? "error" : "success");
+                syncUndoOrganizeBtn();
+              } catch (error) {
+                setStatus(`\u6574\u7406\u5931\u8D25: ${error.message || error}`, "error");
+              } finally {
+                btn.disabled = false;
+              }
+            };
+          }
+          if (refs.undoOrganizeBtn) {
+            refs.undoOrganizeBtn.onclick = async () => {
+              try {
+                const goOn = await ConfirmationDialog2.show({
+                  title: "\u64A4\u9500\u4E0A\u6B21\u6574\u7406",
+                  message: `\u5C06\u628A\u4E0A\u6B21\u6574\u7406\u79FB\u52A8\u7684 ${BookmarkOrganizer.getUndoCount()} \u6761\u4E66\u7B7E\u79FB\u56DE\u539F\u4F4D\u7F6E\uFF0C\u786E\u8BA4\uFF1F`,
+                  confirmText: "\u64A4\u9500",
+                  countdown: 0
+                });
+                if (!goOn) return;
+                const report = await BookmarkOrganizer.undoLast();
+                UI2.showStatus(`\u5DF2\u79FB\u56DE ${report.movedCount} \u6761\u4E66\u7B7E`, "success");
+                syncUndoOrganizeBtn();
+              } catch (error) {
+                UI2.showStatus(`\u64A4\u9500\u5931\u8D25: ${error.message || error}`, "error");
+              }
+            };
+          }
           refs.selectAll.onchange = (e) => {
             const checked = e.target.checked;
             if (checked) {
