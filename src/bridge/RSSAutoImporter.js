@@ -844,15 +844,15 @@ const RSSAutoImporter = {
         const feedUrls = RSSAutoImporter.getFeedUrls();
         if (settings.exportTargetType !== "database") {
             RSSAutoImporter.updateStatus("RSS 自动同步仅支持导出到 Notion 数据库");
-            return;
+            return { importedCount: 0, failedCount: 0, errors: ["RSS 自动同步仅支持导出到 Notion 数据库"] };
         }
         if (!settings.apiKey || !settings.databaseId) {
             RSSAutoImporter.updateStatus("请先配置 Notion API Key 和数据库 ID");
-            return;
+            return { importedCount: 0, failedCount: 0, errors: ["请先配置 Notion API Key 和数据库 ID"] };
         }
         if (feedUrls.length === 0) {
             RSSAutoImporter.updateStatus("请先配置至少一个 RSS Feed URL");
-            return;
+            return { importedCount: 0, failedCount: 0, errors: ["请先配置至少一个 RSS Feed URL"] };
         }
 
         const now = Date.now();
@@ -935,6 +935,12 @@ const RSSAutoImporter = {
             if (leaseLost) {
                 RSSAutoImporter.updateStatus("⏸ 同步租约已被其他标签页接管，本轮 RSS 同步中止（已处理部分已记录）");
             }
+            // odyssey-debug 20260913: errors 契约对齐(debug-notes-017)
+            return {
+                importedCount: (stats.created || 0) + (stats.updated || 0),
+                failedCount: stats.failed || 0,
+                errors: [],
+            };
             } finally {
                 // v3.14.6 (DC-004): 结束 batch —— 异常路径也单次 flush
                 DedupStore.endBatch("rss");
@@ -956,6 +962,8 @@ const RSSAutoImporter = {
                 statusText = "RSS 自动同步出错: Notion 拒绝了该 API Key（可能已失效或复制不完整），请重新复制保存或重新 OAuth 授权";
             }
             RSSAutoImporter.updateStatus(statusText);
+            // odyssey-debug 20260913: 吞错面收敛 — 经 errors 上抛供按钮红显
+            return { importedCount: 0, failedCount: 0, errors: [statusText] };
         } finally {
             clearInterval(renewTimer);
             SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);

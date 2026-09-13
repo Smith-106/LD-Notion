@@ -144,6 +144,31 @@ const Utils = {
         return "";
     },
 
+    // odyssey-debug 20260913: LinuxDo 轮询「无法获取当前用户名」(用户面板 9/5 起实证) —
+    // 4 个同步 DOM/JS 探测在论坛前端升级/CDN 匿名缓存页可同时落空。第 5 探测走 cookie
+    // 认证的 Discourse 标准端点 /session/current.json, 与 DOM 无关; 仅在同步探测全空时调用。
+    getCurrentLinuxDoUsernameAsync: async () => {
+        const username = Utils.getCurrentLinuxDoUsername();
+        if (username) return username;
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 15000);
+            try {
+                const res = await fetch(`${window.location.origin}/session/current.json`, {
+                    credentials: "include",
+                    signal: controller.signal,
+                });
+                if (!res.ok) return "";
+                const data = await res.json();
+                return String(data?.current_user?.username || "").trim();
+            } finally {
+                clearTimeout(timer);
+            }
+        } catch (e) {
+            return "";
+        }
+    },
+
     formatDate: (dateStr) => {
         if (!dateStr) return "";
         return new Date(dateStr).toLocaleString("zh-CN");

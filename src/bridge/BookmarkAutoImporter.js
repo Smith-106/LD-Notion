@@ -287,15 +287,15 @@ BookmarkAutoImporter.run = async () => {
     const settings = BookmarkAutoImporter.buildSettings();
     if (!require("./index").BookmarkBridge.isExtensionAvailable()) {
         BookmarkAutoImporter.updateStatus("请先安装并启用书签桥接扩展");
-        return;
+        return { importedCount: 0, failedCount: 0, errors: ["请先安装并启用书签桥接扩展"] };
     }
     if (settings.exportTargetType !== "database") {
         BookmarkAutoImporter.updateStatus("浏览器书签自动同步仅支持导出到 Notion 数据库");
-        return;
+        return { importedCount: 0, failedCount: 0, errors: ["浏览器书签自动同步仅支持导出到 Notion 数据库"] };
     }
     if (!settings.apiKey || !settings.databaseId) {
         BookmarkAutoImporter.updateStatus("请先配置 Notion API Key 和数据库 ID");
-        return;
+        return { importedCount: 0, failedCount: 0, errors: ["请先配置 Notion API Key 和数据库 ID"] };
     }
 
     const now = Date.now();
@@ -710,7 +710,7 @@ BookmarkAutoImporter.run = async () => {
 
         if (created === 0 && updated === 0 && archived === 0 && failed === 0 && deniedCount === 0) {
             BookmarkAutoImporter.updateStatus(`✅ 浏览器书签已同步，无新增变更 (${new Date().toLocaleTimeString()})`);
-            return;
+            return { importedCount: 0, failedCount: 0, errors: [] };
         }
 
         // v3.14.17 (P0-4): 权限不足聚合提示——不再静默丢弃(仅审计日志可见)
@@ -728,6 +728,8 @@ BookmarkAutoImporter.run = async () => {
                 timeout: 5000,
             });
         }
+        // odyssey-debug 20260913: errors 契约对齐(debug-notes-017)
+        return { importedCount: created + updated + archived, failedCount: failed, errors: [] };
         } finally {
             // v3.14.6 (DC-004): 结束 batch —— 异常路径也单次 flush
             DedupStore.endBatch("bookmark");
@@ -749,6 +751,8 @@ BookmarkAutoImporter.run = async () => {
             statusText = "❌ 浏览器书签自动同步出错: Notion 拒绝了该 API Key（可能已失效或复制不完整），请重新复制保存或重新 OAuth 授权";
         }
         BookmarkAutoImporter.updateStatus(statusText);
+        // odyssey-debug 20260913: 吞错面收敛 — 经 errors 上抛供按钮红显
+        return { importedCount: 0, failedCount: 0, errors: [statusText.replace(/^❌\s*/, "")] };
     } finally {
         clearInterval(renewTimer);
         SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);

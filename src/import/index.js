@@ -128,16 +128,17 @@ AutoImporter.run = async () => {
     const apiKey = NotionOAuth.getAccessToken("");
     if (!apiKey) {
         AutoImporter.updateStatus("请先配置 Notion API Key");
-        return;
+        // odyssey-debug 20260913: 配置类故障经 errors 红显(debug-notes-017)
+        return { importedCount: 0, failedCount: 0, errors: ["请先配置 Notion API Key"] };
     }
     const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
     if (exportTargetType === "database" && !Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, "")) {
         AutoImporter.updateStatus("请先配置 Notion 数据库 ID");
-        return;
+        return { importedCount: 0, failedCount: 0, errors: ["请先配置 Notion 数据库 ID"] };
     }
     if (exportTargetType === "page" && !Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, "")) {
         AutoImporter.updateStatus("请先配置父页面 ID");
-        return;
+        return { importedCount: 0, failedCount: 0, errors: ["请先配置父页面 ID"] };
     }
 
     const now = Date.now();
@@ -192,7 +193,7 @@ AutoImporter.run = async () => {
             lastStats: {},
         });
 
-        const username = Utils.getCurrentLinuxDoUsername();
+        const username = await Utils.getCurrentLinuxDoUsernameAsync();
         if (!username) {
             const errorMessage = "无法获取当前 Linux.do 用户名";
             SyncState.updateLinuxDoState({
@@ -202,7 +203,8 @@ AutoImporter.run = async () => {
                 lastStats: {},
             });
             AutoImporter.updateStatus(`❌ ${errorMessage}`);
-            return;
+            // odyssey-debug 20260913: errors 契约对齐(debug-notes-017) — 配置类故障红显而非绿「完成 0 条」
+            return { importedCount: 0, failedCount: 0, errors: [`${errorMessage}：请刷新 linux.do 页面并确认已登录后重试`] };
         }
 
         AutoImporter.updateStatus("📧 正在检查新收藏...");
@@ -236,7 +238,7 @@ AutoImporter.run = async () => {
             }
             SyncState.updateLinuxDoState(statePatch);
             AutoImporter.updateStatus(`✅ 没有新收藏 (${new Date().toLocaleTimeString()})`);
-            return;
+            return { importedCount: 0, failedCount: 0, errors: [] };
         }
 
         AutoImporter.updateStatus(`📬 发现 ${newBookmarks.length} 个新收藏，正在导入...`);
@@ -352,6 +354,14 @@ AutoImporter.run = async () => {
                 timeout: 5000,
             });
         }
+        // odyssey-debug 20260913: errors 契约对齐(debug-notes-017) — 认证中止不再被吞
+        return {
+            importedCount: success,
+            failedCount: failed,
+            errors: autoImportAborted
+                ? [String(autoImportAborted?.message || "认证失败，已中止自动导入（请检查 Notion API Key / OAuth 授权）")]
+                : [],
+        };
     } catch (error) {
         console.error("[LD-Notion] 自动导入出错:", error);
         SyncState.updateLinuxDoState({
@@ -361,6 +371,8 @@ AutoImporter.run = async () => {
             lastStats: {},
         });
         AutoImporter.updateStatus(`❌ 自动导入出错: ${error.message}`);
+        // odyssey-debug 20260913: 吞错面收敛 — catch 后正常返回致调用方误判成功, 经 errors 上抛
+        return { importedCount: 0, failedCount: 0, errors: [error?.message || String(error)] };
     } finally {
         clearInterval(renewTimer);
         SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);

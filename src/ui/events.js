@@ -932,7 +932,7 @@ const UIEvents = {
                     }
                     bookmarks = allItems;
                 } else {
-                    const username = Utils.getCurrentLinuxDoUsername();
+                    const username = await Utils.getCurrentLinuxDoUsernameAsync();
                     if (!username) {
                         UI.showStatus("无法获取当前 Linux.do 用户名，请先登录后重试", "error");
                         return;

@@ -1724,6 +1724,31 @@
           }
           return "";
         },
+        // odyssey-debug 20260913: LinuxDo 轮询「无法获取当前用户名」(用户面板 9/5 起实证) —
+        // 4 个同步 DOM/JS 探测在论坛前端升级/CDN 匿名缓存页可同时落空。第 5 探测走 cookie
+        // 认证的 Discourse 标准端点 /session/current.json, 与 DOM 无关; 仅在同步探测全空时调用。
+        getCurrentLinuxDoUsernameAsync: async () => {
+          var _a;
+          const username = Utils2.getCurrentLinuxDoUsername();
+          if (username) return username;
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 15e3);
+            try {
+              const res = await fetch(`${window.location.origin}/session/current.json`, {
+                credentials: "include",
+                signal: controller.signal
+              });
+              if (!res.ok) return "";
+              const data = await res.json();
+              return String(((_a = data == null ? void 0 : data.current_user) == null ? void 0 : _a.username) || "").trim();
+            } finally {
+              clearTimeout(timer);
+            }
+          } catch (e) {
+            return "";
+          }
+        },
         formatDate: (dateStr) => {
           if (!dateStr) return "";
           return new Date(dateStr).toLocaleString("zh-CN");
@@ -14266,15 +14291,15 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         const settings = BookmarkAutoImporter2.buildSettings();
         if (!require_bridge().BookmarkBridge.isExtensionAvailable()) {
           BookmarkAutoImporter2.updateStatus("\u8BF7\u5148\u5B89\u88C5\u5E76\u542F\u7528\u4E66\u7B7E\u6865\u63A5\u6269\u5C55");
-          return;
+          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u5B89\u88C5\u5E76\u542F\u7528\u4E66\u7B7E\u6865\u63A5\u6269\u5C55"] };
         }
         if (settings.exportTargetType !== "database") {
           BookmarkAutoImporter2.updateStatus("\u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u4EC5\u652F\u6301\u5BFC\u51FA\u5230 Notion \u6570\u636E\u5E93");
-          return;
+          return { importedCount: 0, failedCount: 0, errors: ["\u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u4EC5\u652F\u6301\u5BFC\u51FA\u5230 Notion \u6570\u636E\u5E93"] };
         }
         if (!settings.apiKey || !settings.databaseId) {
           BookmarkAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
-          return;
+          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID"] };
         }
         const now = Date.now();
         if (now - BookmarkAutoImporter2.lastRunAt < BookmarkAutoImporter2.minimumRunGapMs) return;
@@ -14600,7 +14625,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             });
             if (created === 0 && updated === 0 && archived === 0 && failed === 0 && deniedCount === 0) {
               BookmarkAutoImporter2.updateStatus(`\u2705 \u6D4F\u89C8\u5668\u4E66\u7B7E\u5DF2\u540C\u6B65\uFF0C\u65E0\u65B0\u589E\u53D8\u66F4 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
-              return;
+              return { importedCount: 0, failedCount: 0, errors: [] };
             }
             const deniedMsg = deniedCount > 0 ? `\uFF0C${deniedCount} \u9879\u56E0\u6743\u9650\u4E0D\u8DB3\u8DF3\u8FC7\uFF08\u53EF\u5728\u8BBE\u7F6E\u4E2D\u63D0\u5347\u6743\u9650\u7EA7\u522B\uFF09` : "";
             BookmarkAutoImporter2.updateStatus(
@@ -14613,6 +14638,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 timeout: 5e3
               });
             }
+            return { importedCount: created + updated + archived, failedCount: failed, errors: [] };
           } finally {
             DedupStore.endBatch("bookmark");
           }
@@ -14632,6 +14658,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             statusText = "\u274C \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u51FA\u9519: Notion \u62D2\u7EDD\u4E86\u8BE5 API Key\uFF08\u53EF\u80FD\u5DF2\u5931\u6548\u6216\u590D\u5236\u4E0D\u5B8C\u6574\uFF09\uFF0C\u8BF7\u91CD\u65B0\u590D\u5236\u4FDD\u5B58\u6216\u91CD\u65B0 OAuth \u6388\u6743";
           }
           BookmarkAutoImporter2.updateStatus(statusText);
+          return { importedCount: 0, failedCount: 0, errors: [statusText.replace(/^❌\s*/, "")] };
         } finally {
           clearInterval(renewTimer);
           SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
@@ -15368,15 +15395,15 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const feedUrls = RSSAutoImporter2.getFeedUrls();
           if (settings.exportTargetType !== "database") {
             RSSAutoImporter2.updateStatus("RSS \u81EA\u52A8\u540C\u6B65\u4EC5\u652F\u6301\u5BFC\u51FA\u5230 Notion \u6570\u636E\u5E93");
-            return;
+            return { importedCount: 0, failedCount: 0, errors: ["RSS \u81EA\u52A8\u540C\u6B65\u4EC5\u652F\u6301\u5BFC\u51FA\u5230 Notion \u6570\u636E\u5E93"] };
           }
           if (!settings.apiKey || !settings.databaseId) {
             RSSAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
-            return;
+            return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID"] };
           }
           if (feedUrls.length === 0) {
             RSSAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E\u81F3\u5C11\u4E00\u4E2A RSS Feed URL");
-            return;
+            return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E\u81F3\u5C11\u4E00\u4E2A RSS Feed URL"] };
           }
           const now = Date.now();
           if (now - RSSAutoImporter2.lastRunAt < RSSAutoImporter2.minimumRunGapMs) return;
@@ -15445,6 +15472,11 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               if (leaseLost) {
                 RSSAutoImporter2.updateStatus("\u23F8 \u540C\u6B65\u79DF\u7EA6\u5DF2\u88AB\u5176\u4ED6\u6807\u7B7E\u9875\u63A5\u7BA1\uFF0C\u672C\u8F6E RSS \u540C\u6B65\u4E2D\u6B62\uFF08\u5DF2\u5904\u7406\u90E8\u5206\u5DF2\u8BB0\u5F55\uFF09");
               }
+              return {
+                importedCount: (stats.created || 0) + (stats.updated || 0),
+                failedCount: stats.failed || 0,
+                errors: []
+              };
             } finally {
               DedupStore.endBatch("rss");
             }
@@ -15464,6 +15496,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               statusText = "RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519: Notion \u62D2\u7EDD\u4E86\u8BE5 API Key\uFF08\u53EF\u80FD\u5DF2\u5931\u6548\u6216\u590D\u5236\u4E0D\u5B8C\u6574\uFF09\uFF0C\u8BF7\u91CD\u65B0\u590D\u5236\u4FDD\u5B58\u6216\u91CD\u65B0 OAuth \u6388\u6743";
             }
             RSSAutoImporter2.updateStatus(statusText);
+            return { importedCount: 0, failedCount: 0, errors: [statusText] };
           } finally {
             clearInterval(renewTimer);
             SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
@@ -18213,16 +18246,16 @@ ${insight.summary || ""}`,
         const apiKey = NotionOAuth2.getAccessToken("");
         if (!apiKey) {
           AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key");
-          return;
+          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E Notion API Key"] };
         }
         const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
         if (exportTargetType === "database" && !Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "")) {
           AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID");
-          return;
+          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID"] };
         }
         if (exportTargetType === "page" && !Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, "")) {
           AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID");
-          return;
+          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID"] };
         }
         const now = Date.now();
         if (now - AutoImporter2.lastRunAt < AutoImporter2.minimumRunGapMs) return;
@@ -18269,7 +18302,7 @@ ${insight.summary || ""}`,
             lastError: "",
             lastStats: {}
           });
-          const username = Utils2.getCurrentLinuxDoUsername();
+          const username = await Utils2.getCurrentLinuxDoUsernameAsync();
           if (!username) {
             const errorMessage = "\u65E0\u6CD5\u83B7\u53D6\u5F53\u524D Linux.do \u7528\u6237\u540D";
             SyncState2.updateLinuxDoState({
@@ -18279,7 +18312,7 @@ ${insight.summary || ""}`,
               lastStats: {}
             });
             AutoImporter2.updateStatus(`\u274C ${errorMessage}`);
-            return;
+            return { importedCount: 0, failedCount: 0, errors: [`${errorMessage}\uFF1A\u8BF7\u5237\u65B0 linux.do \u9875\u9762\u5E76\u786E\u8BA4\u5DF2\u767B\u5F55\u540E\u91CD\u8BD5`] };
           }
           AutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u68C0\u67E5\u65B0\u6536\u85CF...");
           const syncState = SyncState2.getLinuxDoState();
@@ -18307,7 +18340,7 @@ ${insight.summary || ""}`,
             }
             SyncState2.updateLinuxDoState(statePatch2);
             AutoImporter2.updateStatus(`\u2705 \u6CA1\u6709\u65B0\u6536\u85CF (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
-            return;
+            return { importedCount: 0, failedCount: 0, errors: [] };
           }
           AutoImporter2.updateStatus(`\u{1F4EC} \u53D1\u73B0 ${newBookmarks.length} \u4E2A\u65B0\u6536\u85CF\uFF0C\u6B63\u5728\u5BFC\u5165...`);
           if (exportBtn) exportBtn.disabled = true;
@@ -18397,6 +18430,11 @@ ${insight.summary || ""}`,
               timeout: 5e3
             });
           }
+          return {
+            importedCount: success,
+            failedCount: failed,
+            errors: autoImportAborted ? [String((autoImportAborted == null ? void 0 : autoImportAborted.message) || "\u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\uFF09")] : []
+          };
         } catch (error) {
           console.error("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u51FA\u9519:", error);
           SyncState2.updateLinuxDoState({
@@ -18406,6 +18444,7 @@ ${insight.summary || ""}`,
             lastStats: {}
           });
           AutoImporter2.updateStatus(`\u274C \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
+          return { importedCount: 0, failedCount: 0, errors: [(error == null ? void 0 : error.message) || String(error)] };
         } finally {
           clearInterval(renewTimer);
           SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
@@ -28714,7 +28753,7 @@ ${AIService2.isolateContent(JSON.stringify({
                 }
                 bookmarks = allItems;
               } else {
-                const username = Utils2.getCurrentLinuxDoUsername();
+                const username = await Utils2.getCurrentLinuxDoUsernameAsync();
                 if (!username) {
                   UI2.showStatus("\u65E0\u6CD5\u83B7\u53D6\u5F53\u524D Linux.do \u7528\u6237\u540D\uFF0C\u8BF7\u5148\u767B\u5F55\u540E\u91CD\u8BD5", "error");
                   return;
