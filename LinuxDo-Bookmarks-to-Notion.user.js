@@ -29454,6 +29454,18 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const visible = wrap.style.display !== "none";
             wrap.style.display = visible ? "none" : "block";
           };
+          let lastWorkspaceTargets = null;
+          const renderWorkspaceTip = (workspaceData, configuredId) => {
+            const tip = refs.workspaceTip;
+            if (!tip) return;
+            const noDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
+            const targetWarn = buildConfiguredTargetWarning({
+              configuredDatabaseId: configuredId,
+              databases: workspaceData.databases
+            });
+            tip.textContent = `\u2705 \u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.length} \u4E2A\u9875\u9762${noDbHint}${targetWarn}`;
+            tip.style.color = "var(--ldb-ui-success)";
+          };
           refs.refreshWorkspaceBtn.onclick = async () => {
             var _a2, _b;
             const apiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
@@ -29487,13 +29499,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 }
               });
               UI2.updateWorkspaceSelect(workspaceData);
-              const noDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
-              const targetWarn = buildConfiguredTargetWarning({
-                configuredDatabaseId: (_b = (_a2 = refs.databaseIdInput) == null ? void 0 : _a2.value) == null ? void 0 : _b.trim(),
-                databases: workspaceData.databases
-              });
-              workspaceTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.length} \u4E2A\u9875\u9762${noDbHint}${targetWarn}`;
-              workspaceTip.style.color = "var(--ldb-ui-success)";
+              lastWorkspaceTargets = workspaceData;
+              renderWorkspaceTip(workspaceData, (_b = (_a2 = refs.databaseIdInput) == null ? void 0 : _a2.value) == null ? void 0 : _b.trim());
             } catch (error) {
               workspaceTip.textContent = `\u274C ${error.message}`;
               workspaceTip.style.color = "var(--ldb-ui-danger)";
@@ -29620,12 +29627,14 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 handleExportTargetChange({ target: { value: CONFIG2.EXPORT_TARGET_TYPES.DATABASE } });
                 void UICommandService2.execute("apply_workspace_selection", { selectedValue: `database:${id}` });
                 UI2.showStatus("\u5DF2\u9009\u62E9\u6570\u636E\u5E93\uFF0C\u81EA\u52A8\u5207\u6362\u4E3A\u6570\u636E\u5E93\u5BFC\u51FA\u6A21\u5F0F", "info");
+                if (lastWorkspaceTargets) renderWorkspaceTip(lastWorkspaceTargets, id);
               } else if (type === "page") {
                 refs.parentPageIdInput.value = id;
                 refs.exportTargetPageRadio.checked = true;
                 handleExportTargetChange({ target: { value: CONFIG2.EXPORT_TARGET_TYPES.PAGE } });
                 void UICommandService2.execute("apply_workspace_selection", { selectedValue: `page:${id}` });
                 UI2.showStatus("\u5DF2\u9009\u62E9\u9875\u9762\uFF0C\u81EA\u52A8\u5207\u6362\u4E3A\u9875\u9762\u5BFC\u51FA\u6A21\u5F0F", "info");
+                if (lastWorkspaceTargets) renderWorkspaceTip(lastWorkspaceTargets, "");
               }
             }
           };

@@ -1747,6 +1747,21 @@ const UIEvents = {
         };
 
         // 刷新工作区页面列表
+        // 切换目标时即时重算可见性警告(odyssey-debug 20260913):刷新时旧 ID 占位渲染的警告
+        // 在用户选中新库后不再适用,不能等到下次刷新才消失
+        let lastWorkspaceTargets = null;
+        const renderWorkspaceTip = (workspaceData, configuredId) => {
+            const tip = refs.workspaceTip;
+            if (!tip) return;
+            const noDbHint = workspaceData.databases.length === 0 ? MSG.WORKSPACE_NO_DATABASES_HINT : "";
+            const targetWarn = buildConfiguredTargetWarning({
+                configuredDatabaseId: configuredId,
+                databases: workspaceData.databases,
+            });
+            tip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面${noDbHint}${targetWarn}`;
+            tip.style.color = "var(--ldb-ui-success)";
+        };
+
         refs.refreshWorkspaceBtn.onclick = async () => {
             const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
             const refreshBtn = refs.refreshWorkspaceBtn
@@ -1784,15 +1799,8 @@ const UIEvents = {
                     },
                 });
                 UI.updateWorkspaceSelect(workspaceData);
-                // v3.14.18 (debug-odyssey): 0 数据库时附可行动指引(与 404 notFoundHint 同口径)
-                const noDbHint = workspaceData.databases.length === 0 ? MSG.WORKSPACE_NO_DATABASES_HINT : "";
-                // odyssey-debug 20260913: 刷新时就地校验已配置目标可见性(勿让用户到导出才撞 404)
-                const targetWarn = buildConfiguredTargetWarning({
-                    configuredDatabaseId: refs.databaseIdInput?.value?.trim(),
-                    databases: workspaceData.databases,
-                });
-                workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面${noDbHint}${targetWarn}`;
-                workspaceTip.style.color = "var(--ldb-ui-success)";
+                lastWorkspaceTargets = workspaceData;
+                renderWorkspaceTip(workspaceData, refs.databaseIdInput?.value?.trim());
             } catch (error) {
                 workspaceTip.textContent = `❌ ${error.message}`;
                 workspaceTip.style.color = "var(--ldb-ui-danger)";
@@ -1934,6 +1942,7 @@ const UIEvents = {
                     handleExportTargetChange({ target: { value: CONFIG.EXPORT_TARGET_TYPES.DATABASE } });
                     void UICommandService.execute("apply_workspace_selection", { selectedValue: `database:${id}` });
                     UI.showStatus("已选择数据库，自动切换为数据库导出模式", "info");
+                    if (lastWorkspaceTargets) renderWorkspaceTip(lastWorkspaceTargets, id);
                 } else if (type === "page") {
                     // 页面类型：填入父页面 ID 字段
                     refs.parentPageIdInput.value = id;
@@ -1944,6 +1953,7 @@ const UIEvents = {
                     handleExportTargetChange({ target: { value: CONFIG.EXPORT_TARGET_TYPES.PAGE } });
                     void UICommandService.execute("apply_workspace_selection", { selectedValue: `page:${id}` });
                     UI.showStatus("已选择页面，自动切换为页面导出模式", "info");
+                    if (lastWorkspaceTargets) renderWorkspaceTip(lastWorkspaceTargets, "");
                 }
             }
         };
