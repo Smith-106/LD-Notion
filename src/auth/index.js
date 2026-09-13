@@ -809,7 +809,7 @@ const NotionOAuth = {
                 connected: true,
                 color: "#34d399",
                 text: workspaceName
-                    ? `已通过 OAuth 授权: ${workspaceName}。可留空 API Key 输入框，必要时仍可手动覆盖。`
+                    ? `已通过 OAuth 授权: ${workspaceName}。可留空 API Key 输入框，必要时仍可手动覆盖。注：授权只解决身份认证，集成默认看不到任何库——目标库仍需在库页面 ••• → 连接 勾选本集成。`
                     : "已通过 OAuth 授权，Access Token 将自动续签；必要时仍可切回手动 Token。",
                 apiKeyPlaceholder: "OAuth 已授权；留空即可，手动输入可覆盖",
             };
