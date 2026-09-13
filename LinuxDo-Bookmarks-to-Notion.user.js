@@ -16677,6 +16677,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                     }
                   } else if (response.status === 403) {
                     reject(new Error(`${label} API \u901F\u7387\u9650\u5236\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u6216\u914D\u7F6E Token`));
+                  } else if (response.status === 401) {
+                    reject(new Error("GitHub Token \u65E0\u6548\u6216\u5DF2\u8FC7\u671F(401)\uFF1A\u8BF7\u5728 GitHub \u8BBE\u7F6E\u533A\u66F4\u65B0 Token\uFF0C\u6216\u6E05\u7A7A Token \u6539\u7528\u672A\u8BA4\u8BC1\u63A5\u53E3"));
                   } else if (response.status === 404) {
                     reject(new Error(`${label} \u8D44\u6E90\u4E0D\u5B58\u5728`));
                   } else {
@@ -16705,14 +16707,26 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             fetchPage();
           });
         },
+        // odyssey-debug 20260913: 404 用户域资源根因=未认证路径 /users/{name}/... 的用户名
+        // 不存在或已改名 —— 给出可行动指引(与 Notion 404 同型); token 路径(/user/...)的
+        // 404 与用户名无关, 不 enrich 防误导。
+        _wrapUserScoped404: (error, username) => {
+          if (!error || !username || !/资源不存在/.test(String((error == null ? void 0 : error.message) || ""))) return error;
+          return new Error(`${error.message} \u2014\u2014 GitHub \u7528\u6237\u540D\u300C${username}\u300D\u53EF\u80FD\u4E0D\u5B58\u5728\u6216\u5DF2\u6539\u540D\uFF1A\u8BF7\u5728 GitHub \u8BBE\u7F6E\u533A\u4FEE\u6B63\u7528\u6237\u540D\uFF0C\u6216\u586B\u5199 Token \u6539\u7528\u8BA4\u8BC1\u63A5\u53E3`);
+        },
         // 获取用户 starred repos（带分页）
         fetchStarredRepos: async (username, token = "") => {
           const url = token ? `https://api.github.com/user/starred?sort=created&direction=desc` : `https://api.github.com/users/${encodeURIComponent(username)}/starred?sort=created&direction=desc`;
-          const items = await GitHubAPI2._fetchPaginated(url, token, "GitHub Stars", {
-            headers: {
-              "Accept": "application/vnd.github.star+json, application/vnd.github+json"
-            }
-          });
+          let items;
+          try {
+            items = await GitHubAPI2._fetchPaginated(url, token, "GitHub Stars", {
+              headers: {
+                "Accept": "application/vnd.github.star+json, application/vnd.github+json"
+              }
+            });
+          } catch (error) {
+            throw GitHubAPI2._wrapUserScoped404(error, token ? null : username);
+          }
           const mapped = items.map((item) => {
             if ((item == null ? void 0 : item.repo) && (item == null ? void 0 : item.starred_at)) {
               return {
@@ -16728,7 +16742,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 获取用户自己的仓库
         fetchUserRepos: (username, token = "") => {
           const url = token ? `https://api.github.com/user/repos?type=owner&sort=updated` : `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated`;
-          return GitHubAPI2._fetchPaginated(url, token, "GitHub Repos");
+          return GitHubAPI2._fetchPaginated(url, token, "GitHub Repos").catch((error) => {
+            throw GitHubAPI2._wrapUserScoped404(error, token ? null : username);
+          });
         },
         // 获取用户 fork 的仓库
         fetchForkedRepos: async (username, token = "") => {
@@ -16740,7 +16756,9 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 获取用户的 Gists
         fetchUserGists: (username, token = "") => {
           const url = token ? `https://api.github.com/gists` : `https://api.github.com/users/${encodeURIComponent(username)}/gists`;
-          return GitHubAPI2._fetchPaginated(url, token, "GitHub Gists");
+          return GitHubAPI2._fetchPaginated(url, token, "GitHub Gists").catch((error) => {
+            throw GitHubAPI2._wrapUserScoped404(error, token ? null : username);
+          });
         },
         // F3 共识(缓存失效): 跨 tab 清除/其他 tab 标记必须置空内存缓存
         _registerExportedWatcher: () => {
@@ -17979,11 +17997,11 @@ ${insight.summary || ""}`,
         const settings = GitHubAutoImporter2.buildSettings();
         if (!settings.apiKey || !settings.databaseId) {
           GitHubAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
-          return;
+          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID"] };
         }
         if (!settings.username && !settings.token) {
           GitHubAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u6216 Token");
-          return;
+          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u6216 Token"] };
         }
         const now = Date.now();
         if (now - GitHubAutoImporter2.lastRunAt < GitHubAutoImporter2.minimumRunGapMs) return;
@@ -18047,9 +18065,10 @@ ${insight.summary || ""}`,
           const hasPending = successCount > 0 || failedCount > 0;
           if (!hasPending && syncErrors.length === 0) {
             GitHubAutoImporter2._aggregateMetaState(types, 0, 0, [], attemptAt);
-            return;
+            return { importedCount: 0, failedCount: 0, errors: [] };
           }
           GitHubAutoImporter2._aggregateMetaState(types, successCount, failedCount, syncErrors, attemptAt);
+          return { importedCount: successCount, failedCount, errors: syncErrors };
         } catch (error) {
           console.error("[LD-Notion] GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519:", error);
           SyncState2.updateGitHubMeta({
@@ -18064,6 +18083,7 @@ ${insight.summary || ""}`,
             }
           });
           GitHubAutoImporter2.updateStatus(`\u274C GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
+          return { importedCount: 0, failedCount: 0, errors: [(error == null ? void 0 : error.message) || String(error)] };
         } finally {
           clearInterval(renewTimer);
           SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
@@ -28482,7 +28502,11 @@ ${AIService2.isolateContent(JSON.stringify({
               try {
                 const result = await runner();
                 const count = (result == null ? void 0 : result.importedCount) ?? (result == null ? void 0 : result.count) ?? 0;
-                UI2.showStatus(`${label}\u5B8C\u6210\uFF1A\u65B0\u589E ${count} \u6761`, "success");
+                if (Array.isArray(result == null ? void 0 : result.errors) && result.errors.length > 0) {
+                  UI2.showStatus(`${label}\u5931\u8D25\uFF1A${result.errors[0]}`, "error");
+                } else {
+                  UI2.showStatus(`${label}\u5B8C\u6210\uFF1A\u65B0\u589E ${count} \u6761`, "success");
+                }
               } catch (error) {
                 UI2.showStatus(`${label}\u5931\u8D25\uFF1A${error.message}`, "error");
               } finally {

@@ -463,11 +463,12 @@ GitHubAutoImporter.run = async () => {
     const settings = GitHubAutoImporter.buildSettings();
     if (!settings.apiKey || !settings.databaseId) {
         GitHubAutoImporter.updateStatus("请先配置 Notion API Key 和数据库 ID");
-        return;
+        // odyssey-debug 20260913: 配置缺失是用户可行动故障, 经 errors 红显而非绿"完成 0 条"
+        return { importedCount: 0, failedCount: 0, errors: ["请先配置 Notion API Key 和数据库 ID"] };
     }
     if (!settings.username && !settings.token) {
         GitHubAutoImporter.updateStatus("请先配置 GitHub 用户名或 Token");
-        return;
+        return { importedCount: 0, failedCount: 0, errors: ["请先配置 GitHub 用户名或 Token"] };
     }
 
     const now = Date.now();
@@ -546,10 +547,13 @@ GitHubAutoImporter.run = async () => {
         const hasPending = successCount > 0 || failedCount > 0;
         if (!hasPending && syncErrors.length === 0) {
             GitHubAutoImporter._aggregateMetaState(types, 0, 0, [], attemptAt);
-            return;
+            return { importedCount: 0, failedCount: 0, errors: [] };
         }
 
         GitHubAutoImporter._aggregateMetaState(types, successCount, failedCount, syncErrors, attemptAt);
+        // odyssey-debug 20260913: 统一返回契约 —— 手动按钮此前看到绿"完成 0 条"而真实
+        // 错误仅落 console+状态区(静默失效主诉)。errors 供 bindImportNow 红显首条。
+        return { importedCount: successCount, failedCount: failedCount, errors: syncErrors };
     } catch (error) {
         console.error("[LD-Notion] GitHub 自动导入出错:", error);
         SyncState.updateGitHubMeta({
@@ -564,6 +568,8 @@ GitHubAutoImporter.run = async () => {
             },
         });
         GitHubAutoImporter.updateStatus(`❌ GitHub 自动导入出错: ${error.message}`);
+        // odyssey-debug 20260913: 吞错面收敛 —— catch 后正常返回致调用方误判成功, 经 errors 上抛
+        return { importedCount: 0, failedCount: 0, errors: [error?.message || String(error)] };
     } finally {
         clearInterval(renewTimer);
         SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);

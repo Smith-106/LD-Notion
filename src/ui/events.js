@@ -676,7 +676,13 @@ const UIEvents = {
                 try {
                     const result = await runner();
                     const count = result?.importedCount ?? result?.count ?? 0;
-                    UI.showStatus(`${label}完成：新增 ${count} 条`, "success");
+                    // odyssey-debug 20260913: runner 内部吞错(如 GitHub 404)经 errors 上抛红显真实原因;
+                    // 其余 runner 未返回 errors 时行为不变。
+                    if (Array.isArray(result?.errors) && result.errors.length > 0) {
+                        UI.showStatus(`${label}失败：${result.errors[0]}`, "error");
+                    } else {
+                        UI.showStatus(`${label}完成：新增 ${count} 条`, "success");
+                    }
                 } catch (error) {
                     UI.showStatus(`${label}失败：${error.message}`, "error");
                 } finally {

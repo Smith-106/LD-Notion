@@ -55,6 +55,9 @@ const GitHubAPI = {
                             }
                         } else if (response.status === 403) {
                             reject(new Error(`${label} API 速率限制，请稍后再试或配置 Token`));
+                        } else if (response.status === 401) {
+                            // odyssey-debug 20260913: 401 此前落入通用 "API 错误: 401", token 失效不可辨识
+                            reject(new Error("GitHub Token 无效或已过期(401)：请在 GitHub 设置区更新 Token，或清空 Token 改用未认证接口"));
                         } else if (response.status === 404) {
                             reject(new Error(`${label} 资源不存在`));
                         } else {
@@ -88,16 +91,29 @@ const GitHubAPI = {
         });
     },
 
+    // odyssey-debug 20260913: 404 用户域资源根因=未认证路径 /users/{name}/... 的用户名
+    // 不存在或已改名 —— 给出可行动指引(与 Notion 404 同型); token 路径(/user/...)的
+    // 404 与用户名无关, 不 enrich 防误导。
+    _wrapUserScoped404: (error, username) => {
+        if (!error || !username || !/资源不存在/.test(String(error?.message || ""))) return error;
+        return new Error(`${error.message} —— GitHub 用户名「${username}」可能不存在或已改名：请在 GitHub 设置区修正用户名，或填写 Token 改用认证接口`);
+    },
+
     // 获取用户 starred repos（带分页）
     fetchStarredRepos: async (username, token = "") => {
         const url = token
             ? `https://api.github.com/user/starred?sort=created&direction=desc`
             : `https://api.github.com/users/${encodeURIComponent(username)}/starred?sort=created&direction=desc`;
-        const items = await GitHubAPI._fetchPaginated(url, token, "GitHub Stars", {
-            headers: {
-                "Accept": "application/vnd.github.star+json, application/vnd.github+json",
-            },
-        });
+        let items;
+        try {
+            items = await GitHubAPI._fetchPaginated(url, token, "GitHub Stars", {
+                headers: {
+                    "Accept": "application/vnd.github.star+json, application/vnd.github+json",
+                },
+            });
+        } catch (error) {
+            throw GitHubAPI._wrapUserScoped404(error, token ? null : username);
+        }
         const mapped = items.map((item) => {
             if (item?.repo && item?.starred_at) {
                 return {
@@ -118,7 +134,8 @@ const GitHubAPI = {
         const url = token
             ? `https://api.github.com/user/repos?type=owner&sort=updated`
             : `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated`;
-        return GitHubAPI._fetchPaginated(url, token, "GitHub Repos");
+        return GitHubAPI._fetchPaginated(url, token, "GitHub Repos")
+            .catch((error) => { throw GitHubAPI._wrapUserScoped404(error, token ? null : username); });
     },
 
     // 获取用户 fork 的仓库
@@ -135,7 +152,8 @@ const GitHubAPI = {
         const url = token
             ? `https://api.github.com/gists`
             : `https://api.github.com/users/${encodeURIComponent(username)}/gists`;
-        return GitHubAPI._fetchPaginated(url, token, "GitHub Gists");
+        return GitHubAPI._fetchPaginated(url, token, "GitHub Gists")
+            .catch((error) => { throw GitHubAPI._wrapUserScoped404(error, token ? null : username); });
     },
 
     // F3 共识(缓存失效): 跨 tab 清除/其他 tab 标记必须置空内存缓存
