@@ -13277,10 +13277,15 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
           }
           const normRemoteUrl = (u) => String(u || "").trim().replace(/\/+$/, "");
+          const pendingExported = BookmarkExporter2.getExported();
           let newBookmarks = dedupStrict ? bookmarks.filter((b) => {
             if (remoteUrls) {
               const u = normRemoteUrl(b.url);
-              return !(u && remoteUrls.has(u));
+              if (u && remoteUrls.has(u)) {
+                pendingExported[Utils2.normalizeDedupUrl(b.url)] = Date.now();
+                return false;
+              }
+              return true;
             }
             return !BookmarkExporter2.isExported(b.url);
           }) : bookmarks.slice();
@@ -13294,12 +13299,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             });
           }
           if (newBookmarks.length === 0) {
+            BookmarkExporter2.flushExported(pendingExported);
             return { total: bookmarks.length, exported: 0, message: "\u6CA1\u6709\u65B0\u7684\u4E66\u7B7E\u9700\u8981\u5BFC\u51FA" };
           }
           const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
           let success = 0, failed = 0;
           const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-          const pendingExported = BookmarkExporter2.getExported();
           try {
             for (let i = 0; i < newBookmarks.length; i++) {
               const bm = newBookmarks[i];
@@ -14867,6 +14872,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
           if (exportMutexAcquired) SyncLock.isExporting = false;
           BookmarkAutoImporter2.isRunning = false;
+          emit("bookmarks:updated");
           emit("sync:center-summary-updated");
         }
       };
@@ -15710,6 +15716,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
             RSSAutoImporter2.isRunning = false;
             SyncLock.isExporting = false;
+            emit("bookmarks:updated");
             emit("sync:center-summary-updated");
           }
         },
@@ -18315,6 +18322,13 @@ ${insight.summary || ""}`,
             already = type === "gists" ? GitHubAPI2.isGistExported(itemKey) : GitHubAPI2.isExported(itemKey);
           }
           if (already) {
+            if (itemKey) {
+              if (type === "gists") {
+                GitHubAPI2.markGistExported(itemKey);
+              } else {
+                GitHubAPI2.markExported(itemKey);
+              }
+            }
             successEntries.push({ itemKey, skippedExisting: true });
             continue;
           }
@@ -18664,7 +18678,7 @@ ${insight.summary || ""}`,
       "use strict";
       var { CONFIG: CONFIG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
+      var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
       var { NotionOAuth: NotionOAuth2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2 } = require_export();
@@ -18692,6 +18706,39 @@ ${insight.summary || ""}`,
             if (remoteUrls) return !remoteUrls.has(`https://linux.do/t/${topicId}`);
             return !Storage2.isTopicExported(topicId);
           });
+        },
+        // 20260914: 远端命中项回写导出账本(仅 strict; 远端是 ground truth, 三定律) ——
+        // skip 语义必须落账, 否则账本缺失项每轮 skip 而永不落账, 本地账本驱动的待导出计数恒冻结。
+        // batch 纪律同 workspace-insight 对账回填: beginBatch→逐条 mark→endBatch+缓存失效(消除写侧 O(N²))。
+        markRemoteExistingTopics: ({ bookmarks = [], newBookmarks = [], remoteUrls = null, dedupStrict = true } = {}) => {
+          if (!remoteUrls || !dedupStrict || bookmarks.length <= newBookmarks.length) return 0;
+          const newIds = new Set(newBookmarks.map((b) => String(b.topic_id || b.bookmarkable_id || "")));
+          let marked = 0;
+          let linuxdoBatchOpened = false;
+          try {
+            DedupStore.beginBatch("linuxdo");
+            linuxdoBatchOpened = true;
+          } catch {
+          }
+          try {
+            bookmarks.forEach((b) => {
+              const topicId = String(b.topic_id || b.bookmarkable_id || "");
+              if (!topicId || newIds.has(topicId)) return;
+              if (remoteUrls.has(`https://linux.do/t/${topicId}`)) {
+                Storage2.markTopicExported(topicId);
+                marked++;
+              }
+            });
+          } finally {
+            if (linuxdoBatchOpened) {
+              try {
+                DedupStore.endBatch("linuxdo");
+              } catch {
+              }
+              Storage2._exportedTopicsCache = null;
+            }
+          }
+          return marked;
         },
         buildSettings: () => {
           const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
@@ -18865,6 +18912,7 @@ ${insight.summary || ""}`,
             remoteUrls = null;
           }
           const newBookmarks = AutoImporter2.resolveNewBookmarks({ bookmarks, dedupStrict, remoteUrls });
+          AutoImporter2.markRemoteExistingTopics({ bookmarks, newBookmarks, remoteUrls, dedupStrict });
           if (newBookmarks.length === 0) {
             const statePatch2 = {
               lastAttemptAt: attemptAt,
@@ -25556,7 +25604,10 @@ ${AIService2.isolateContent(JSON.stringify({
         // ③ 回填后调 renderBookmarkList() 刷新行内徽标, 与状态提示一致。
         // ④ 循环内仅 mutate 账本缓存, 循环末单次 flush(消除写侧 O(N²), 见 AGENTS.md 禁令)。
         reconcileExportedFromWorkspace: (records = []) => {
-          const bookmarks = UI2().getCombinedVisualBookmarks();
+          const combined = UI2().getCombinedVisualBookmarks();
+          const activeList = Array.isArray(UI2().bookmarks) ? UI2().bookmarks : [];
+          const seenKeys = new Set(combined.map((b) => UI2().getBookmarkKey(b)));
+          const bookmarks = combined.concat(activeList.filter((b) => !seenKeys.has(UI2().getBookmarkKey(b))));
           if (!Array.isArray(bookmarks) || bookmarks.length === 0 || !Array.isArray(records) || records.length === 0) {
             return 0;
           }
