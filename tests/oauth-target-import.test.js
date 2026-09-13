@@ -5,6 +5,7 @@ const {
     normalizeCandidates,
     sortCandidatesForDisplay,
     decideAutoFill,
+    buildConfiguredTargetWarning,
     describeExchangeError,
     describeRedirectUriMismatch,
 } = require("../src/auth/target-discovery");
@@ -58,6 +59,43 @@ describe("target-discovery L1 纯逻辑", () => {
         });
     });
 
+    describe("buildConfiguredTargetWarning 手动刷新交叉校验", () => {
+        const db = (id) => ({ id, title: "库" });
+
+        it("未配置目标 → 空串(不附加警示)", () => {
+            expect(buildConfiguredTargetWarning({ configuredDatabaseId: "", databases: [db("abc")] })).toBe("");
+            expect(buildConfiguredTargetWarning({ databases: [db("abc")] })).toBe("");
+        });
+
+        it("已配置且可见(归一后匹配) → 空串", () => {
+            expect(buildConfiguredTargetWarning({
+                configuredDatabaseId: "2FB754B8-3C7B-8072-AA78-C69FB4C8CCFD",
+                databases: [db("2fb754b83c7b8072aa78c69fb4c8ccfd")],
+            })).toBe("");
+        });
+
+        it("已配置但不在可见列表 → 警示串(含共享行动指引)", () => {
+            const warn = buildConfiguredTargetWarning({
+                configuredDatabaseId: "2fb754b83c7b8072aa78c69fb4c8ccfd",
+                databases: [db("aaaaaaaa111122223333444455556666")],
+            });
+            expect(warn).toContain("不在集成可见列表中");
+            expect(warn).toContain("••• → 连接");
+        });
+
+        it("空 databases(0 库刷新) → 已配置目标必触发警示", () => {
+            const warn = buildConfiguredTargetWarning({
+                configuredDatabaseId: "2fb754b83c7b8072aa78c69fb4c8ccfd",
+                databases: [],
+            });
+            expect(warn).toContain("导出将失败");
+        });
+
+        it("databases 非法输入不抛错(按空列表处理)", () => {
+            expect(buildConfiguredTargetWarning({ configuredDatabaseId: "abc", databases: "nope" })).toContain("不在集成可见列表中");
+        });
+    });
+
     describe("decideAutoFill 决策矩阵", () => {
         const db = (id, title = "库") => ({ id, title });
 
@@ -92,6 +130,16 @@ describe("target-discovery L1 纯逻辑", () => {
             expect(decision.action).toBe("needs_choice");
             expect(decision.reason).toBe("multi-database");
             expect(decision.count).toBe(2);
+        });
+
+        // odyssey-debug 20260913: ID 形态归一(手填 dashed vs 候选 dash-less)
+        it("已配置为 dashed 形态且归一后可达 → skip(不再假阴性 unreachable)", () => {
+            const decision = decideAutoFill({
+                candidates: [db("2fb754b83c7b8072aa78c69fb4c8ccfd")],
+                currentState: { databaseId: "2FB754B8-3C7B-8072-AA78-C69FB4C8CCFD" },
+            });
+            expect(decision.action).toBe("skip");
+            expect(decision.reason).toBe("already-configured");
         });
 
         it("非法输入不崩溃", () => {

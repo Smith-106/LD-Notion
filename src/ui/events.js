@@ -5,6 +5,7 @@ const { CONFIG, MSG, getMimeType } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState, DedupStore } = require("../storage");
 const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
+const { buildConfiguredTargetWarning } = require("../auth/target-discovery");
 const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, ObsidianAPI, EMOJI_MAP } = require("../api");
 const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = require("../security");
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
@@ -1779,7 +1780,12 @@ const UIEvents = {
                 UI.updateWorkspaceSelect(workspaceData);
                 // v3.14.18 (debug-odyssey): 0 数据库时附可行动指引(与 404 notFoundHint 同口径)
                 const noDbHint = workspaceData.databases.length === 0 ? MSG.WORKSPACE_NO_DATABASES_HINT : "";
-                workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面${noDbHint}`;
+                // odyssey-debug 20260913: 刷新时就地校验已配置目标可见性(勿让用户到导出才撞 404)
+                const targetWarn = buildConfiguredTargetWarning({
+                    configuredDatabaseId: refs.databaseIdInput?.value?.trim(),
+                    databases: workspaceData.databases,
+                });
+                workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面${noDbHint}${targetWarn}`;
                 workspaceTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
                 workspaceTip.textContent = `❌ ${error.message}`;
@@ -2059,7 +2065,12 @@ const UIEvents = {
                 UI.updateAITargetDbOptions(workspaceData.databases);
                 // v3.14.18 (debug-odyssey): 0 数据库时附可行动指引(与主面板刷新同口径)
                 const aiNoDbHint = workspaceData.databases.length === 0 ? MSG.WORKSPACE_NO_DATABASES_HINT : "";
-                UI.showStatus(`获取到 ${workspaceData.databases.length} 个数据库${aiNoDbHint}`, "success");
+                // odyssey-debug 20260913: AI 目标刷新同口径校验当前所选目标库可见性
+                const aiTargetWarn = buildConfiguredTargetWarning({
+                    configuredDatabaseId: refs.aiTargetDbSelect?.value,
+                    databases: workspaceData.databases,
+                });
+                UI.showStatus(`获取到 ${workspaceData.databases.length} 个数据库${aiNoDbHint}${aiTargetWarn}`, "success");
             } catch (error) {
                 UI.showStatus(`获取数据库列表失败: ${error.message}`, "error");
             } finally {

@@ -1959,11 +1959,21 @@
           return 0;
         });
       };
+      var canonicalNotionId = (value) => String(value || "").trim().toLowerCase().replace(/-/g, "");
+      var buildConfiguredTargetWarning = ({ configuredDatabaseId = "", databases = [] } = {}) => {
+        const want = canonicalNotionId(configuredDatabaseId);
+        if (!want) return "";
+        const list = Array.isArray(databases) ? databases : [];
+        const visible = list.some((db) => canonicalNotionId(db == null ? void 0 : db.id) === want);
+        if (visible) return "";
+        return "\u3002\u6CE8\u610F\uFF1A\u5DF2\u914D\u7F6E\u7684\u76EE\u6807\u6570\u636E\u5E93\u4E0D\u5728\u96C6\u6210\u53EF\u89C1\u5217\u8868\u4E2D\uFF0C\u5BFC\u51FA\u5C06\u5931\u8D25\uFF1A\u8BF7\u5728\u8BE5\u5E93\u9875\u9762\u70B9 \u2022\u2022\u2022 \u2192 \u8FDE\u63A5 \u2192 \u52FE\u9009\u672C\u96C6\u6210\uFF08\u6216\u91CD\u65B0 OAuth \u6388\u6743\u5E76\u52FE\u9009\u5176\u6240\u5728\u9875\u9762\uFF09\uFF0C\u5B8C\u6210\u540E\u518D\u6B21\u5237\u65B0\uFF1B\u4E5F\u53EF\u4ECE\u5DE5\u4F5C\u533A\u4E0B\u62C9\u5207\u6362\u5230\u96C6\u6210\u53EF\u89C1\u7684\u8D44\u6E90";
+      };
       var decideAutoFill = ({ candidates = [], currentState = {}, source = "" } = {}) => {
         const list = Array.isArray(candidates) ? candidates : [];
         const existingDatabaseId = String((currentState == null ? void 0 : currentState.databaseId) || "").trim();
         if (existingDatabaseId) {
-          const stillReachable = list.some((db) => db.id === existingDatabaseId);
+          const want = canonicalNotionId(existingDatabaseId);
+          const stillReachable = list.some((db) => canonicalNotionId(db == null ? void 0 : db.id) === want);
           if (stillReachable) {
             return { action: "skip", reason: "already-configured", databaseId: existingDatabaseId };
           }
@@ -2043,6 +2053,7 @@
         normalizeCandidates,
         sortCandidatesForDisplay,
         decideAutoFill,
+        buildConfiguredTargetWarning,
         describeExchangeError,
         describeRedirectUriMismatch
       };
@@ -21773,6 +21784,7 @@ ${report}
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { buildConfiguredTargetWarning } = require_target_discovery();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
@@ -22323,6 +22335,7 @@ ${report}
             }
           };
           panel.querySelector("#ldb-notion-refresh-workspace").onclick = async () => {
+            var _a;
             const liveApiKey = panel.querySelector("#ldb-notion-api-key").value.trim();
             const apiKey = NotionOAuth2.getAccessToken(liveApiKey);
             const refreshBtn = panel.querySelector("#ldb-notion-refresh-workspace");
@@ -22356,7 +22369,11 @@ ${report}
               });
               NotionSiteUI2.updateAITargetDbOptions(workspaceData.databases, workspaceData.pages);
               const noDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
-              workspaceTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.length} \u4E2A\u9875\u9762${noDbHint}`;
+              const targetWarn = buildConfiguredTargetWarning({
+                configuredDatabaseId: (_a = panel.querySelector("#ldb-notion-ai-target-db")) == null ? void 0 : _a.value,
+                databases: workspaceData.databases
+              });
+              workspaceTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.length} \u4E2A\u9875\u9762${noDbHint}${targetWarn}`;
               workspaceTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
               workspaceTip.textContent = `\u274C ${error.message}`;
@@ -27909,6 +27926,7 @@ ${AIService2.isolateContent(JSON.stringify({
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { buildConfiguredTargetWarning } = require_target_discovery();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
@@ -29374,6 +29392,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             wrap.style.display = visible ? "none" : "block";
           };
           refs.refreshWorkspaceBtn.onclick = async () => {
+            var _a2, _b;
             const apiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
             const refreshBtn = refs.refreshWorkspaceBtn;
             const workspaceTip = refs.workspaceTip;
@@ -29406,7 +29425,11 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               });
               UI2.updateWorkspaceSelect(workspaceData);
               const noDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
-              workspaceTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.length} \u4E2A\u9875\u9762${noDbHint}`;
+              const targetWarn = buildConfiguredTargetWarning({
+                configuredDatabaseId: (_b = (_a2 = refs.databaseIdInput) == null ? void 0 : _a2.value) == null ? void 0 : _b.trim(),
+                databases: workspaceData.databases
+              });
+              workspaceTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.length} \u4E2A\u9875\u9762${noDbHint}${targetWarn}`;
               workspaceTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
               workspaceTip.textContent = `\u274C ${error.message}`;
@@ -29623,6 +29646,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             };
           });
           refs.aiRefreshDbsBtn.onclick = async () => {
+            var _a2;
             const apiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
             const refreshBtn = refs.aiRefreshDbsBtn;
             if (!apiKey) {
@@ -29641,7 +29665,11 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               });
               UI2.updateAITargetDbOptions(workspaceData.databases);
               const aiNoDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
-              UI2.showStatus(`\u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93${aiNoDbHint}`, "success");
+              const aiTargetWarn = buildConfiguredTargetWarning({
+                configuredDatabaseId: (_a2 = refs.aiTargetDbSelect) == null ? void 0 : _a2.value,
+                databases: workspaceData.databases
+              });
+              UI2.showStatus(`\u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93${aiNoDbHint}${aiTargetWarn}`, "success");
             } catch (error) {
               UI2.showStatus(`\u83B7\u53D6\u6570\u636E\u5E93\u5217\u8868\u5931\u8D25: ${error.message}`, "error");
             } finally {
@@ -29807,6 +29835,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { buildConfiguredTargetWarning } = require_target_discovery();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
@@ -30187,6 +30216,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           }
         },
         refreshWorkspaceTargets: async (apiKey, silent = false) => {
+          var _a, _b, _c;
           const panel = GenericUI2.panel;
           if (!panel) return;
           const epoch = (GenericUI2._workspaceTargetsEpoch || 0) + 1;
@@ -30229,7 +30259,11 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             GenericUI2.updateTargetSelectOptions(workspaceData.databases, workspaceData.pages);
             if (tip) {
               const noDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
-              tip.textContent = `\u5DF2\u52A0\u8F7D ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.filter((p) => p.parent === "workspace").length} \u4E2A\u9875\u9762${noDbHint}`;
+              const targetWarn = buildConfiguredTargetWarning({
+                configuredDatabaseId: ((_a = panel.querySelector("#gclip-target-select")) == null ? void 0 : _a.value) || ((_c = (_b = panel.querySelector("#gclip-target-id")) == null ? void 0 : _b.value) == null ? void 0 : _c.trim()),
+                databases: workspaceData.databases
+              });
+              tip.textContent = `\u5DF2\u52A0\u8F7D ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93\uFF0C${workspaceData.pages.filter((p) => p.parent === "workspace").length} \u4E2A\u9875\u9762${noDbHint}${targetWarn}`;
             }
           } catch (error) {
             if (tip && !isStale()) {

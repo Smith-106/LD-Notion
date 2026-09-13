@@ -41,6 +41,22 @@ const sortCandidatesForDisplay = (candidates = []) => {
     });
 };
 
+// ID 形态归一(纯层自含,不 require TargetState 以免反向依赖):统一为 32-hex 无连字符小写。
+// normalizeCandidates 产物已是 dash-less,但手填/粘贴的已配置输入可能是 dashed 形态。
+const canonicalNotionId = (value) => String(value || "").trim().toLowerCase().replace(/-/g, "");
+
+// 手动刷新交叉校验(odyssey-debug 20260913):已配置数据库目标不在本次可见列表 → 就地警示串,
+// 可见/未配置 → 空串。与 decideAutoFill 的 configured-target-unreachable 同口径,但手动刷新
+// 路径此前缺失该校验,不可达事实延迟到导出时才以 404 暴露。
+const buildConfiguredTargetWarning = ({ configuredDatabaseId = "", databases = [] } = {}) => {
+    const want = canonicalNotionId(configuredDatabaseId);
+    if (!want) return "";
+    const list = Array.isArray(databases) ? databases : [];
+    const visible = list.some((db) => canonicalNotionId(db?.id) === want);
+    if (visible) return "";
+    return "。注意：已配置的目标数据库不在集成可见列表中，导出将失败：请在该库页面点 ••• → 连接 → 勾选本集成（或重新 OAuth 授权并勾选其所在页面），完成后再次刷新；也可从工作区下拉切换到集成可见的资源";
+};
+
 // 决策矩阵(纯函数,可单测):
 //   currentState.databaseId 已配置 → skip(尊重用户选择,不覆盖)
 //   0 个候选 → empty(引导「在 Notion 中把集成分享给目标数据库」)
@@ -52,7 +68,9 @@ const decideAutoFill = ({ candidates = [], currentState = {}, source = "" } = {}
     const existingDatabaseId = String(currentState?.databaseId || "").trim();
 
     if (existingDatabaseId) {
-        const stillReachable = list.some((db) => db.id === existingDatabaseId);
+        // 归一比较:候选侧虽已 dash-less,但手填输入可能为 dashed/大写形态(20260913)
+        const want = canonicalNotionId(existingDatabaseId);
+        const stillReachable = list.some((db) => canonicalNotionId(db?.id) === want);
         if (stillReachable) {
             return { action: "skip", reason: "already-configured", databaseId: existingDatabaseId };
         }
@@ -141,6 +159,7 @@ module.exports = {
     normalizeCandidates,
     sortCandidatesForDisplay,
     decideAutoFill,
+    buildConfiguredTargetWarning,
     describeExchangeError,
     describeRedirectUriMismatch,
 };

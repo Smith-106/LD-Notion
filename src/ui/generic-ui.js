@@ -5,6 +5,7 @@ const { CONFIG, MSG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState } = require("../storage");
 const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
+const { buildConfiguredTargetWarning } = require("../auth/target-discovery");
 const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, ObsidianAPI, EMOJI_MAP } = require("../api");
 const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = require("../security");
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
@@ -466,7 +467,13 @@ const GenericUI = {
             if (tip) {
                 // v3.14.18 (debug-odyssey): 0 数据库时附可行动指引(与主面板刷新同口径)
                 const noDbHint = workspaceData.databases.length === 0 ? MSG.WORKSPACE_NO_DATABASES_HINT : "";
-                tip.textContent = `已加载 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.filter(p => p.parent === "workspace").length} 个页面${noDbHint}`;
+                // odyssey-debug 20260913: 刷新时就地校验已配置目标可见性
+                const targetWarn = buildConfiguredTargetWarning({
+                    configuredDatabaseId: panel.querySelector("#gclip-target-select")?.value
+                        || panel.querySelector("#gclip-target-id")?.value?.trim(),
+                    databases: workspaceData.databases,
+                });
+                tip.textContent = `已加载 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.filter(p => p.parent === "workspace").length} 个页面${noDbHint}${targetWarn}`;
             }
         } catch (error) {
             // P4 收敛(c14): 陈旧请求的失败不得覆盖最新刷新状态

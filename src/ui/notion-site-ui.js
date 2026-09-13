@@ -5,6 +5,7 @@ const { CONFIG, MSG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState } = require("../storage");
 const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
+const { buildConfiguredTargetWarning } = require("../auth/target-discovery");
 const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, ObsidianAPI, EMOJI_MAP } = require("../api");
 const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = require("../security");
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
@@ -644,7 +645,12 @@ const NotionSiteUI = {
                 NotionSiteUI.updateAITargetDbOptions(workspaceData.databases, workspaceData.pages);
                 // v3.14.18 (debug-odyssey): 0 数据库时附可行动指引(与主面板刷新同口径)
                 const noDbHint = workspaceData.databases.length === 0 ? MSG.WORKSPACE_NO_DATABASES_HINT : "";
-                workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面${noDbHint}`;
+                // odyssey-debug 20260913: 刷新时就地校验已配置目标可见性
+                const targetWarn = buildConfiguredTargetWarning({
+                    configuredDatabaseId: panel.querySelector("#ldb-notion-ai-target-db")?.value,
+                    databases: workspaceData.databases,
+                });
+                workspaceTip.textContent = `✅ 获取到 ${workspaceData.databases.length} 个数据库，${workspaceData.pages.length} 个页面${noDbHint}${targetWarn}`;
                 workspaceTip.style.color = "var(--ldb-ui-success)";
             } catch (error) {
                 workspaceTip.textContent = `❌ ${error.message}`;
