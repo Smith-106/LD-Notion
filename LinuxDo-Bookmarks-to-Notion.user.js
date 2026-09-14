@@ -19931,6 +19931,12 @@ ${report}
 
             --ldb-ui-shadow: 0 18px 55px rgba(2, 6, 23, 0.22);
             --ldb-ui-shadow-sm: 0 10px 26px rgba(2, 6, 23, 0.16);
+            --ldb-ui-shadow-xs: 0 6px 16px rgba(2, 6, 23, 0.18);
+
+            /* 20260914 odyssey-ui: \u5FBD\u7AE0\u5E95/\u8FB9\u4E3B\u9898\u4E0D\u53D8\u8272\u8C03 token\uFF08styles.js \u5B57\u9762\u91CF\u6536\u655B\uFF0C\u503C 1:1 \u4FDD\u7559\uFF09 */
+            --ldb-ui-badge-teal-border: rgba(13, 148, 136, 0.35);
+            --ldb-ui-badge-teal-bg: rgba(20, 184, 166, 0.14);
+            --ldb-ui-badge-blue-bg: rgba(59, 130, 246, 0.14);
 
             --ldb-ui-text: #0f172a;
             --ldb-ui-muted: #64748b;
@@ -19954,8 +19960,10 @@ ${report}
             --ldb-ui-accent-alpha-35: rgba(37, 99, 235, 0.35);
             --ldb-ui-accent-alpha-45: rgba(37, 99, 235, 0.45);
 
-            --ldb-ui-success: #16a34a;
-            --ldb-ui-warning: #d97706;
+            /* 20260914 odyssey-ui A11Y: \u4EAE\u8272 success/warning WCAG AA \u4FEE\u6B63\uFF08\u767D\u5E95 3.30/3.19\u21925.02\uFF0C\u72B6\u6001\u6587\u672C\u5C0F\u5B57\u53F7\u9AD8\u9891\u4F7F\u7528\uFF09\uFF1B
+               \u6697\u8272\u5757\u663E\u5F0F\u8986\u76D6\u56DE\u539F\u503C\uFF0C\u6697\u8272\u89C6\u89C9 1:1 \u4FDD\u7559 */
+            --ldb-ui-success: #15803d;
+            --ldb-ui-warning: #b45309;
             --ldb-ui-danger: #dc2626;
 
             /* v3.14.7 (REV-21 UI-12): danger/success/warning alpha \u53D8\u4F53\u2014\u2014\u6D88\u9664\u786C\u7F16\u7801 rgba \u7ED5\u8FC7\u4EE4\u724C */
@@ -20057,6 +20065,12 @@ ${report}
             --ldb-ui-badge-teal: #2dd4bf;
             --ldb-ui-badge-blue: #93c5fd;
 
+            /* 20260914 odyssey-ui A11Y: \u6697\u8272\u72B6\u6001\u8272\u663E\u5F0F\u8986\u76D6 \u2014 success/warning \u4FDD\u6301\u539F\u503C\uFF08\u89C6\u89C9 1:1\uFF09\uFF0C
+               danger #dc2626\u2192#ef4444\uFF08\u5BF9 #111827 3.67\u21924.71 \u8FBE WCAG AA\uFF09 */
+            --ldb-ui-success: #16a34a;
+            --ldb-ui-warning: #d97706;
+            --ldb-ui-danger: #ef4444;
+
             --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
             /* Tinted near-black toward brand hue for dark backdrop */
             --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
@@ -20085,6 +20099,11 @@ ${report}
 
                 --ldb-ui-badge-teal: #2dd4bf;
                 --ldb-ui-badge-blue: #93c5fd;
+
+                /* 20260914 odyssey-ui A11Y: \u540C\u4E0A\u6697\u8272\u72B6\u6001\u8272\u8986\u76D6\uFF08.ldb-notion-panel/.gclip-panel \u4F5C\u7528\u57DF\uFF09 */
+                --ldb-ui-success: #16a34a;
+                --ldb-ui-warning: #d97706;
+                --ldb-ui-danger: #ef4444;
 
                 --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
                 /* Tinted near-black toward brand hue for dark backdrop */
@@ -20518,6 +20537,22 @@ ${report}
 
         .ldb-status-close:hover {
             background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
+        }
+
+        /* 20260914 odyssey-ui: \u89E6\u63A7\u76EE\u6807\u589E\u5F3A\uFF08\u7C97\u6307\u9488\u8BBE\u5907 30/26px\u219240px\uFF0C\u5411 44px \u6700\u4F73\u5B9E\u8DF5\u9760\u62E2\uFF09\uFF1B
+           \u9762\u677F\u5185\u63A7\u4EF6\u7528\u540E\u4EE3\u9009\u62E9\u5668\u538B\u8FC7 styles.js \u540C\u4F18\u5148\u7EA7\u89C4\u5219 */
+        @media (pointer: coarse) {
+            .ldb-panel .ldb-theme-btn,
+            .ldb-notion-panel .ldb-theme-btn,
+            .ldb-header-btn,
+            .ldb-notion-header-btn,
+            .gclip-panel-header .close-btn,
+            .ldb-status-close {
+                width: 40px;
+                height: 40px;
+                min-width: 40px;
+                min-height: 40px;
+            }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -21511,6 +21546,7 @@ ${report}
                 width: 380px;
                 max-width: calc(100vw - 32px);
                 max-height: 90vh;
+                max-height: 90dvh;
                 z-index: var(--ldb-ui-z-index-panel);
                 display: flex;
                 flex-direction: column;
@@ -21543,14 +21579,14 @@ ${report}
 
             .ldb-runtime-badge.mode-userscript {
                 color: var(--ldb-ui-badge-teal);
-                border-color: rgba(13, 148, 136, 0.35);
-                background: rgba(20, 184, 166, 0.14);
+                border-color: var(--ldb-ui-badge-teal-border);
+                background: var(--ldb-ui-badge-teal-bg);
             }
 
             .ldb-runtime-badge.mode-extension {
                 color: var(--ldb-ui-badge-blue);
                 border-color: var(--ldb-ui-focus-ring);
-                background: rgba(59, 130, 246, 0.14);
+                background: var(--ldb-ui-badge-blue-bg);
             }
 
             /* v3.14.7 (REV-29 UI-25): .ldb-highlight \u7C7B\u6B64\u524D\u4E0D\u5B58\u5728, OAuth \u540E\u300C\u8BF7\u9009\u62E9\u5BFC\u51FA\u76EE\u6807\u300D
@@ -21757,7 +21793,7 @@ ${report}
                 background: var(--ldb-ui-white);
                 transition: transform var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out);
                 border-radius: 50%;
-                box-shadow: 0 6px 16px rgba(2, 6, 23, 0.18);
+                box-shadow: var(--ldb-ui-shadow-xs);
             }
 
             .ldb-toggle-switch input:checked + .ldb-toggle-slider {
@@ -21829,10 +21865,10 @@ ${report}
                 margin-bottom: 3px;
             }
             .ldb-report-item.success {
-                background: rgba(22, 163, 74, 0.06);
+                background: color-mix(in srgb, var(--ldb-ui-success) 6%, transparent);
             }
             .ldb-report-item.failed {
-                background: rgba(220, 38, 38, 0.06);
+                background: color-mix(in srgb, var(--ldb-ui-danger) 6%, transparent);
             }
             .ldb-report-item a {
                 color: var(--ldb-ui-accent);
@@ -22131,6 +22167,8 @@ ${report}
                 font-weight: 650;
                 line-height: 1.45;
                 color: var(--ldb-ui-text);
+                /* 20260914 odyssey-ui: \u8D85\u957F\u65E0\u7A7A\u683C\u6807\u9898\uFF08URL \u4F5C\u6807\u9898\uFF09\u9632\u6A2A\u5411\u6EA2\u51FA\uFF0C\u6298\u884C\u884C\u4E3A 1:1 \u4FDD\u7559 */
+                overflow-wrap: anywhere;
             }
 
             .ldb-bookmark-item .status {
@@ -22387,6 +22425,7 @@ ${report}
                     bottom: 0 !important;
                     width: 100% !important;
                     max-height: 70vh;
+                    max-height: 70dvh;
                     border-radius: var(--ldb-ui-radius) var(--ldb-ui-radius) 0 0;
                 }
                 .ldb-mini-btn {
@@ -22408,6 +22447,7 @@ ${report}
                     width: 100% !important;
                     max-width: 100vw !important;
                     max-height: 70vh !important;
+                    max-height: 70dvh !important;
                     border-radius: var(--ldb-ui-radius) var(--ldb-ui-radius) 0 0;
                 }
                 .ldb-notion-float-btn,
@@ -22501,6 +22541,7 @@ ${report}
                 width: 380px;
                 max-width: calc(100vw - 32px);
                 max-height: 70vh;
+                max-height: 70dvh;
                 z-index: var(--ldb-ui-z-index-overlay);
                 overflow: hidden;
                 display: none;
@@ -30742,13 +30783,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             }
 
             .gclip-panel-header .close-btn {
-                border-color: rgba(255, 255, 255, 0.22);
-                background: rgba(255, 255, 255, 0.14);
+                border-color: color-mix(in srgb, var(--ldb-ui-white) 22%, transparent);
+                background: color-mix(in srgb, var(--ldb-ui-white) 14%, transparent);
                 color: var(--ldb-ui-white);
             }
 
             .gclip-panel-header .close-btn:hover {
-                background: rgba(255, 255, 255, 0.22);
+                background: color-mix(in srgb, var(--ldb-ui-white) 22%, transparent);
             }
 
             .gclip-preview {
@@ -30764,6 +30805,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 font-weight: 700;
                 line-height: 1.45;
                 color: var(--ldb-ui-text);
+                /* 20260914 odyssey-ui \u6CDB\u5316: \u540C\u4E66\u7B7E\u6807\u9898\u9632\u6EA2\u51FA\uFF08\u9875\u9762\u6807\u9898\u4EFB\u610F\u5B57\u7B26\uFF09 */
+                overflow-wrap: anywhere;
             }
 
             .gclip-preview .meta {
@@ -30807,7 +30850,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             .gclip-status.warning {
                 display: block;
                 border-color: var(--ldb-ui-warning-alpha-35);
-                background: rgba(217, 119, 6, 0.12);
+                background: color-mix(in srgb, var(--ldb-ui-warning) 12%, transparent);
                 color: var(--ldb-ui-text);
             }
 
