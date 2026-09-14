@@ -1,4 +1,22 @@
-## [3.14.29] - 2026-09-14
+## [3.14.30] - 2026-09-14
+
+### quality (两轮 auto-test 行为缝隙扩充 + 全库深审修复)
+
+**测试基线 1747 用例 / 103 文件**（此前 1701 / 98，+46 用例 / +5 文件；r5+r6 新增 7 场景 30 用例全绿，六轮累计 40 场景）
+
+- L2 集成：Agent 工具行为缝隙（update_page_property 参数守卫+原型链保留键+五型分派、search_workspace 过滤构建+10 页上限、query_database 筛选映射+排序回退+safeLimit）；pageCrud 编排层（handleMove 守卫+解析回退+源目标拦截+批量失败聚合、handleCopy、handleCompound 多步中断+跳过语义）
+- L1 单元：meta-tools 注册表契约（description/params/level/execute 形状守护，agent-executor 权限过滤前提）
+- 契约固化：AGENT_TOOLS.execute 生产 envelope（assistant_result）断言面 —— 工具函数模块加载后原地包裹为隐式契约，测试顶部显式加载保证确定性
+- 负集方法论升级：覆盖矩阵按层归因（API 层有覆盖≠编排层有覆盖），模块名匹配会漏层间缝隙
+- 全电池验收（r6）：静态分析+L1-L3+UI 回归+生产构建+安全扫描+依赖审计九维全过，npm audit 0，runtime deps 0
+
+**fix**
+
+- 书签整理失效判定键域统一：探测/查表/去重统一 normalized 键，修复 normalized 等价副本（尾斜杠/追踪参数等）漏判失效错归「重复书签」（odyssey-review 全库深审发现，含回归锁）
+- GitHub Device Flow 轮询死线绑定设备码 expires_in（min(maxPollMs, expires_in)），提前过期不再空转到服务端裁决（含回归锁）
+
+---
+
 
 ### quality (三轮 quality-auto-test 质量基线扩充 + 依赖安全)
 
