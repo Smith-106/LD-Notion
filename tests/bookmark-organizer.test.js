@@ -183,3 +183,22 @@ describe("BookmarkOrganizer.undoLast", () => {
         await expect(BookmarkOrganizer.undoLast()).rejects.toThrow(/没有可撤销/);
     });
 });
+
+// 20260914: odyssey-review 修复回归 — 失效判定键域统一(normalized)。
+// 场景: github.com/ 与 github.com normalized 等价; 正本探测 404 时,
+// normalized 等价的副本必须同样归类为失效(folder-dead), 而非漏判成重复书签。
+describe("BookmarkOrganizer.scan — 失效判定键域统一(回归)", () => {
+    it("normalized 等价副本随正本同判失效", async () => {
+        probeRoutes = { "https://github.com/": { status: 404 } };
+        const { plan } = await BookmarkOrganizer.scan({ checkDeadLinks: true, classifyWithAI: false });
+        const deadIds = plan.operations
+            .filter((op) => op.action === "move" && op.parentIdRef === "folder-dead")
+            .map((op) => op.id);
+        expect(deadIds).toEqual(expect.arrayContaining(["100", "101"]));
+        const dupIds = plan.operations
+            .filter((op) => op.action === "move" && op.parentIdRef === "folder-dup")
+            .map((op) => op.id);
+        expect(dupIds).toEqual([]);
+        expect(plan.deadCount).toBe(5); // mock 默认路由全 404: github×2 + dead/alive/loose 全判失效
+    });
+});

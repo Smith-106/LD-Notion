@@ -108,21 +108,25 @@ const GitHubOAuth = {
         }
 
         // ② 展示用户代码(verification_uri 固定 https://github.com/login/device)
+        // 20260914: expires_in 提取复用 — 轮询死线绑定设备码实际有效期(maxPollMs 取小)，
+        // 否则 expires_in < maxPollMs 时会多轮空转到服务端报错才终止
+        const expiresInSeconds = Number(dc.expires_in) > 0 ? Number(dc.expires_in) : 900;
         onUserCode({
             userCode: String(dc.user_code),
             verificationUri: String(dc.verification_uri || "https://github.com/login/device"),
-            expiresInSeconds: Number(dc.expires_in) > 0 ? Number(dc.expires_in) : 900,
+            expiresInSeconds,
         });
 
         // ③ 轮询 token 端点(authorization_pending → 继续; slow_down → 降速; expired → 失败)
         const startedAt = Date.now();
+        const deadlineMs = Math.min(maxPollMs, expiresInSeconds * 1000);
         for (;;) {
             if (GitHubOAuth._pollCancelled) {
                 const cancelError = new Error("已取消 GitHub 授权");
                 cancelError.code = "cancelled";
                 throw cancelError;
             }
-            if (Date.now() - startedAt > maxPollMs) {
+            if (Date.now() - startedAt > deadlineMs) {
                 const timeoutError = new Error("GitHub 授权等待超时，请重新发起授权");
                 timeoutError.code = "expired_token";
                 throw timeoutError;

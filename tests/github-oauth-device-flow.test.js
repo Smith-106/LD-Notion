@@ -148,3 +148,23 @@ describe("GitHubOAuth device flow", () => {
         await expect(pending).rejects.toMatchObject({ code: "cancelled" });
     });
 });
+
+// 20260914: odyssey-review 修复回归 — 轮询死线绑定设备码 expires_in。
+// 场景: expires_in=1s 远小于 maxPollMs=60s → 死线取小, ~1s 内即报 expired_token,
+// 而非空轮询至 maxPollMs 才由服务端裁决。
+describe("GitHubOAuth device flow — expires_in 死线绑定(回归)", () => {
+    it("expires_in < maxPollMs 时按设备码有效期终止", async () => {
+        routeHandlers = {
+            [GitHubOAuth.DEVICE_CODE_URL]: () => tokenResponse({
+                device_code: "DEVCODE-EXP", user_code: "EXP-1234",
+                verification_uri: "https://github.com/login/device", expires_in: 1, interval: 1,
+            }),
+            [GitHubOAuth.TOKEN_URL]: () => tokenResponse({ error: "authorization_pending" }),
+        };
+        const startedAt = Date.now();
+        await expect(
+            GitHubOAuth.startDeviceFlow({ clientId: "cid", intervalMs: 20, maxPollMs: 60000 })
+        ).rejects.toMatchObject({ code: "expired_token" });
+        expect(Date.now() - startedAt).toBeLessThan(5000);
+    });
+});

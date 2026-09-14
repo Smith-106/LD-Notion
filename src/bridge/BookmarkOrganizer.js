@@ -130,25 +130,27 @@ const BookmarkOrganizer = {
         let deadLinkChecked = 0;
         let deadLinkSkipped = 0;
         if (checkDeadLinks) {
+            // 20260914: 判定键域统一 — 探测/查表与去重同用 normalized 键，
+            // 否则 normalized 等价的重复 raw URL 会漏判失效(错归为重复书签)
             const uniqueUrls = [];
             const seenUrls = new Set();
             for (const node of bookmarks) {
                 const key = Utils.normalizeDedupUrl(node.url);
                 if (!seenUrls.has(key)) {
                     seenUrls.add(key);
-                    uniqueUrls.push(node.url);
+                    uniqueUrls.push({ key, url: node.url });
                 }
             }
             const toCheck = uniqueUrls.slice(0, DEAD_LINK_LIMIT);
             deadLinkSkipped = uniqueUrls.length - toCheck.length;
             const verdicts = new Map();
-            await runQueue(toCheck, async (url) => {
-                const verdict = await probeDeadLink(url);
-                verdicts.set(url, verdict);
+            await runQueue(toCheck, async (u) => {
+                const verdict = await probeDeadLink(u.url);
+                verdicts.set(u.key, verdict);
                 deadLinkChecked++;
             });
             for (const node of bookmarks) {
-                const verdict = verdicts.get(node.url);
+                const verdict = verdicts.get(Utils.normalizeDedupUrl(node.url));
                 if (verdict && !verdict.ok) deadIds.add(node.id);
             }
         }
