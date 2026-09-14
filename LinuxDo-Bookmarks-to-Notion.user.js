@@ -2182,19 +2182,21 @@
           if (dcResponse.status !== 200 || !dc.device_code || !dc.user_code) {
             throw describeDeviceCodeError(dc, dcResponse.status);
           }
+          const expiresInSeconds = Number(dc.expires_in) > 0 ? Number(dc.expires_in) : 900;
           onUserCode({
             userCode: String(dc.user_code),
             verificationUri: String(dc.verification_uri || "https://github.com/login/device"),
-            expiresInSeconds: Number(dc.expires_in) > 0 ? Number(dc.expires_in) : 900
+            expiresInSeconds
           });
           const startedAt = Date.now();
+          const deadlineMs = Math.min(maxPollMs, expiresInSeconds * 1e3);
           for (; ; ) {
             if (GitHubOAuth._pollCancelled) {
               const cancelError = new Error("\u5DF2\u53D6\u6D88 GitHub \u6388\u6743");
               cancelError.code = "cancelled";
               throw cancelError;
             }
-            if (Date.now() - startedAt > maxPollMs) {
+            if (Date.now() - startedAt > deadlineMs) {
               const timeoutError = new Error("GitHub \u6388\u6743\u7B49\u5F85\u8D85\u65F6\uFF0C\u8BF7\u91CD\u65B0\u53D1\u8D77\u6388\u6743");
               timeoutError.code = "expired_token";
               throw timeoutError;
@@ -15852,19 +15854,19 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               const key = Utils2.normalizeDedupUrl(node.url);
               if (!seenUrls.has(key)) {
                 seenUrls.add(key);
-                uniqueUrls.push(node.url);
+                uniqueUrls.push({ key, url: node.url });
               }
             }
             const toCheck = uniqueUrls.slice(0, DEAD_LINK_LIMIT);
             deadLinkSkipped = uniqueUrls.length - toCheck.length;
             const verdicts = /* @__PURE__ */ new Map();
-            await runQueue(toCheck, async (url) => {
-              const verdict = await probeDeadLink(url);
-              verdicts.set(url, verdict);
+            await runQueue(toCheck, async (u) => {
+              const verdict = await probeDeadLink(u.url);
+              verdicts.set(u.key, verdict);
               deadLinkChecked++;
             });
             for (const node of bookmarks) {
-              const verdict = verdicts.get(node.url);
+              const verdict = verdicts.get(Utils2.normalizeDedupUrl(node.url));
               if (verdict && !verdict.ok) deadIds.add(node.id);
             }
           }
