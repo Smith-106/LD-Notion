@@ -8,6 +8,7 @@ const UI_CSS = `
                 width: 380px;
                 max-width: calc(100vw - 32px);
                 max-height: 90vh;
+                max-height: 90dvh;
                 z-index: var(--ldb-ui-z-index-panel);
                 display: flex;
                 flex-direction: column;
@@ -40,14 +41,14 @@ const UI_CSS = `
 
             .ldb-runtime-badge.mode-userscript {
                 color: var(--ldb-ui-badge-teal);
-                border-color: rgba(13, 148, 136, 0.35);
-                background: rgba(20, 184, 166, 0.14);
+                border-color: var(--ldb-ui-badge-teal-border);
+                background: var(--ldb-ui-badge-teal-bg);
             }
 
             .ldb-runtime-badge.mode-extension {
                 color: var(--ldb-ui-badge-blue);
                 border-color: var(--ldb-ui-focus-ring);
-                background: rgba(59, 130, 246, 0.14);
+                background: var(--ldb-ui-badge-blue-bg);
             }
 
             /* v3.14.7 (REV-29 UI-25): .ldb-highlight 类此前不存在, OAuth 后「请选择导出目标」
@@ -254,7 +255,7 @@ const UI_CSS = `
                 background: var(--ldb-ui-white);
                 transition: transform var(--ldb-ui-duration-normal) var(--ldb-ui-ease-out);
                 border-radius: 50%;
-                box-shadow: 0 6px 16px rgba(2, 6, 23, 0.18);
+                box-shadow: var(--ldb-ui-shadow-xs);
             }
 
             .ldb-toggle-switch input:checked + .ldb-toggle-slider {
@@ -326,10 +327,10 @@ const UI_CSS = `
                 margin-bottom: 3px;
             }
             .ldb-report-item.success {
-                background: rgba(22, 163, 74, 0.06);
+                background: color-mix(in srgb, var(--ldb-ui-success) 6%, transparent);
             }
             .ldb-report-item.failed {
-                background: rgba(220, 38, 38, 0.06);
+                background: color-mix(in srgb, var(--ldb-ui-danger) 6%, transparent);
             }
             .ldb-report-item a {
                 color: var(--ldb-ui-accent);
@@ -628,6 +629,8 @@ const UI_CSS = `
                 font-weight: 650;
                 line-height: 1.45;
                 color: var(--ldb-ui-text);
+                /* 20260914 odyssey-ui: 超长无空格标题（URL 作标题）防横向溢出，折行行为 1:1 保留 */
+                overflow-wrap: anywhere;
             }
 
             .ldb-bookmark-item .status {
@@ -884,6 +887,7 @@ const UI_CSS = `
                     bottom: 0 !important;
                     width: 100% !important;
                     max-height: 70vh;
+                    max-height: 70dvh;
                     border-radius: var(--ldb-ui-radius) var(--ldb-ui-radius) 0 0;
                 }
                 .ldb-mini-btn {
@@ -905,6 +909,7 @@ const UI_CSS = `
                     width: 100% !important;
                     max-width: 100vw !important;
                     max-height: 70vh !important;
+                    max-height: 70dvh !important;
                     border-radius: var(--ldb-ui-radius) var(--ldb-ui-radius) 0 0;
                 }
                 .ldb-notion-float-btn,

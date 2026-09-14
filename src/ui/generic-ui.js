@@ -109,13 +109,13 @@ const GenericUI = {
             }
 
             .gclip-panel-header .close-btn {
-                border-color: rgba(255, 255, 255, 0.22);
-                background: rgba(255, 255, 255, 0.14);
+                border-color: color-mix(in srgb, var(--ldb-ui-white) 22%, transparent);
+                background: color-mix(in srgb, var(--ldb-ui-white) 14%, transparent);
                 color: var(--ldb-ui-white);
             }
 
             .gclip-panel-header .close-btn:hover {
-                background: rgba(255, 255, 255, 0.22);
+                background: color-mix(in srgb, var(--ldb-ui-white) 22%, transparent);
             }
 
             .gclip-preview {
@@ -131,6 +131,8 @@ const GenericUI = {
                 font-weight: 700;
                 line-height: 1.45;
                 color: var(--ldb-ui-text);
+                /* 20260914 odyssey-ui 泛化: 同书签标题防溢出（页面标题任意字符） */
+                overflow-wrap: anywhere;
             }
 
             .gclip-preview .meta {
@@ -174,7 +176,7 @@ const GenericUI = {
             .gclip-status.warning {
                 display: block;
                 border-color: var(--ldb-ui-warning-alpha-35);
-                background: rgba(217, 119, 6, 0.12);
+                background: color-mix(in srgb, var(--ldb-ui-warning) 12%, transparent);
                 color: var(--ldb-ui-text);
             }
 

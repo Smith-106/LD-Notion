@@ -104,6 +104,12 @@ const DesignSystem = {
 
             --ldb-ui-shadow: 0 18px 55px rgba(2, 6, 23, 0.22);
             --ldb-ui-shadow-sm: 0 10px 26px rgba(2, 6, 23, 0.16);
+            --ldb-ui-shadow-xs: 0 6px 16px rgba(2, 6, 23, 0.18);
+
+            /* 20260914 odyssey-ui: 徽章底/边主题不变色调 token（styles.js 字面量收敛，值 1:1 保留） */
+            --ldb-ui-badge-teal-border: rgba(13, 148, 136, 0.35);
+            --ldb-ui-badge-teal-bg: rgba(20, 184, 166, 0.14);
+            --ldb-ui-badge-blue-bg: rgba(59, 130, 246, 0.14);
 
             --ldb-ui-text: #0f172a;
             --ldb-ui-muted: #64748b;
@@ -127,8 +133,10 @@ const DesignSystem = {
             --ldb-ui-accent-alpha-35: rgba(37, 99, 235, 0.35);
             --ldb-ui-accent-alpha-45: rgba(37, 99, 235, 0.45);
 
-            --ldb-ui-success: #16a34a;
-            --ldb-ui-warning: #d97706;
+            /* 20260914 odyssey-ui A11Y: 亮色 success/warning WCAG AA 修正（白底 3.30/3.19→5.02，状态文本小字号高频使用）；
+               暗色块显式覆盖回原值，暗色视觉 1:1 保留 */
+            --ldb-ui-success: #15803d;
+            --ldb-ui-warning: #b45309;
             --ldb-ui-danger: #dc2626;
 
             /* v3.14.7 (REV-21 UI-12): danger/success/warning alpha 变体——消除硬编码 rgba 绕过令牌 */
@@ -230,6 +238,12 @@ const DesignSystem = {
             --ldb-ui-badge-teal: #2dd4bf;
             --ldb-ui-badge-blue: #93c5fd;
 
+            /* 20260914 odyssey-ui A11Y: 暗色状态色显式覆盖 — success/warning 保持原值（视觉 1:1），
+               danger #dc2626→#ef4444（对 #111827 3.67→4.71 达 WCAG AA） */
+            --ldb-ui-success: #16a34a;
+            --ldb-ui-warning: #d97706;
+            --ldb-ui-danger: #ef4444;
+
             --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
             /* Tinted near-black toward brand hue for dark backdrop */
             --ldb-ui-backdrop: rgba(0, 0, 0, 0.45);
@@ -258,6 +272,11 @@ const DesignSystem = {
 
                 --ldb-ui-badge-teal: #2dd4bf;
                 --ldb-ui-badge-blue: #93c5fd;
+
+                /* 20260914 odyssey-ui A11Y: 同上暗色状态色覆盖（.ldb-notion-panel/.gclip-panel 作用域） */
+                --ldb-ui-success: #16a34a;
+                --ldb-ui-warning: #d97706;
+                --ldb-ui-danger: #ef4444;
 
                 --ldb-ui-focus-ring: rgba(96, 165, 250, 0.35);
                 /* Tinted near-black toward brand hue for dark backdrop */
@@ -691,6 +710,22 @@ const DesignSystem = {
 
         .ldb-status-close:hover {
             background: color-mix(in srgb, rgb(var(--ldb-ui-neutral-overlay)), transparent 82%);
+        }
+
+        /* 20260914 odyssey-ui: 触控目标增强（粗指针设备 30/26px→40px，向 44px 最佳实践靠拢）；
+           面板内控件用后代选择器压过 styles.js 同优先级规则 */
+        @media (pointer: coarse) {
+            .ldb-panel .ldb-theme-btn,
+            .ldb-notion-panel .ldb-theme-btn,
+            .ldb-header-btn,
+            .ldb-notion-header-btn,
+            .gclip-panel-header .close-btn,
+            .ldb-status-close {
+                width: 40px;
+                height: 40px;
+                min-width: 40px;
+                min-height: 40px;
+            }
         }
 
         @media (prefers-reduced-motion: reduce) {

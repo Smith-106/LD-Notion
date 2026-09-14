@@ -75,6 +75,7 @@ const NotionSiteUI = {
                 width: 380px;
                 max-width: calc(100vw - 32px);
                 max-height: 70vh;
+                max-height: 70dvh;
                 z-index: var(--ldb-ui-z-index-overlay);
                 overflow: hidden;
                 display: none;
