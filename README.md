@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.30`
+- 当前仓库源码版本：`v3.14.31`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -303,7 +303,9 @@ https://www.notion.so/xxx/32位数据库ID?v=xxx
 ### GitHub 导入
 
 1. 在设置面板中填写 GitHub 用户名
-2. 可选填写 GitHub Token（提高速率限制到 5000 次/小时）
+2. 授权（二选一）：
+   - 推荐：「🔗 通过 GitHub 授权」OAuth Device Flow——先在面板填入公开的 OAuth App Client ID（github.com/settings/developers 创建，无需 Callback URL），点击授权后在 GitHub 页面输入一次性代码，Token 自动回填，不必手动创建 PAT
+   - 兜底：手动粘贴 GitHub Token（提高速率限制到 5000 次/小时）
 3. 勾选需要导入的类型（Stars / Repos / Forks / Gists）
 4. 在 AI 对话中输入「导入 GitHub 收藏」或点击快捷按钮 🐙 GitHub
 
@@ -312,6 +314,7 @@ https://www.notion.so/xxx/32位数据库ID?v=xxx
 1. 安装配套 Chrome 扩展（见安装步骤第 3 步）
 2. 设置面板中会显示扩展安装状态
 3. 在 AI 对话中输入「导入浏览器书签」或点击快捷按钮 📖 书签
+4. 可选：面板「🧹 整理书签」可写回整理浏览器书签本身——扫描（重复 / 失效链接 / AI 归类）→ 预览确认 → 备份 → 仅移动（零删除）→「↩️ 撤销整理」可回滚；写入需高级权限（OperationGuard `bookmarks.organize`）
 
 ## 常见问题
 
@@ -391,6 +394,10 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.14.31
+
+- **文档与维护版本**：补全两条此前无文档的已交付特性——GitHub OAuth Device Flow 授权（Client ID → 一次性用户代码 → Token 自动回填，含错误码处置表）与浏览器书签写回整理（扫描 → 预览 → 备份 → 仅移动零删除 → 可撤销，需高级权限）；修正 `package-lock.json` 版本漂移；仓库整洁化（本地临时产物与可再生构建缓存清理、远程零冗余核对）
 
 ### v3.14.30
 

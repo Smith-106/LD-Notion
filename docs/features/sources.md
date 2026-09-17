@@ -13,6 +13,8 @@ LD-Notion 可以把 Linux.do 之外的收藏来源统一导入 Notion，形成�
 
 导入时会保留名称、描述、语言、Stars 数、链接等信息；如果配置了 AI，也可以增强分类与标签。
 
+授权推荐面板中的「🔗 通过 GitHub 授权」（OAuth Device Flow，只需填一次公开的 Client ID，无需手工创建 PAT）；也可手动粘贴 Personal Access Token 兜底。详见 [GitHub Adapter](/integrations/github)。
+
 ```mermaid
 flowchart LR
   GitHub[GitHub API] --> Types[Stars / Repos / Forks / Gists]

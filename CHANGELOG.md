@@ -1,3 +1,15 @@
+## [3.14.31] - 2026-09-18
+
+### docs (两条已交付特性此前无文档)
+
+- **GitHub OAuth Device Flow 入档**：`docs/integrations/github.md` 新增 Authorization 章节——Client ID 获取（OAuth App 无需 Callback URL）→ 面板填写 → GitHub 页面输入一次性用户代码 → Token 自动回填；含 scope `repo gist`、设备码 15 分钟时效、6 类错误码处置表，以及"纯前端内嵌 secret 等同于公开泄漏"的 secret-free 设计理由。`docs/features/sources.md` 与 README「GitHub 导入」同步补授权步骤
+- **浏览器书签写回整理入档**：`docs/integrations/bookmarks.md` 新增 Write-back organize 章节——scan 只读扫描（重复判定 / 失效链接探测 / 可选 AI 归类）→ preview 确认 → backup → 仅移动零删除 → 撤销按原 parentId 回滚；含 `bookmarks.organize` 等级 2、桥接白名单不提供 remove、失效检测 500 / AI 归类 50 / 撤销记录 FIFO 5000 上限。README「浏览器书签导入」同步补步骤
+
+### chore (维护)
+
+- 修正 `package-lock.json` 版本漂移（3.14.28 → 与 `package.json` 对齐）：此前发布未同步 lockfile
+- 仓库整洁化：清理本地临时脚本/日志/快照与过期打包 zip、可再生构建产物（dist、chrome-extension-full、docs 构建输出）与测试产物，释放 8MB；远程核对零冗余（分支仅 main、tag↔Release 一一对应、268 个跟踪文件无垃圾）
+
 ## [3.14.30] - 2026-09-14
 
 ### quality (两轮 auto-test 行为缝隙扩充 + 全库深审修复)
