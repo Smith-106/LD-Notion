@@ -185,7 +185,9 @@ describe("debug-aipanel-keys: 确认对话框可见性 + 请求错误文案回�
         expect(css).toContain(".ldb-confirm-dialog");
     });
     it("AI/上传 onerror 不再裸串化对象参数(全部走 Utils.formatRequestError)", () => {
-        for (const f of ["src/ai/index.js", "src/api/notion-upload.js"]) {
+        // M3 波次3: AI 请求服务层(AIService)已提取至 src/ai/ai-service.js,
+        // onerror 文案守卫跟随实现归属文件。
+        for (const f of ["src/ai/ai-service.js", "src/api/notion-upload.js"]) {
             const src = fs.readFileSync(f, "utf8");
             expect(src).not.toContain("网络请求失败: ${error}");
             expect(src).toContain("Utils.formatRequestError(error)");
