@@ -16335,6 +16335,30 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           if (!dedupKey) return false;
           return DedupStore.isDuplicate(sourceType, dedupKey);
         },
+        // ISS-20260914-001: Clipper(知乎/通用页)远端对账 —— 远端「链接」索引是 ground truth。
+        // 与 BookmarkExporter/GitHubAutoImporter 同构,但 dedupKey 为 `zhihu:<normUrl>`/`generic:<normUrl>`
+        // 形式(非裸 URL),故单独抽 URL 段与远端集合比对,不硬套 URL 索引模板。
+        // 返回值三态:
+        //   { remote: Set }            → 远端可达, exported 字段以远端为准(本地账本 hit 被覆盖)
+        //   { remote: null, exported } → 远端不可达, 降级本地 DedupStore.isDuplicate(旧语义,防查询故障误放行)
+        checkClipperRemote: async (apiKey, databaseId, meta = {}) => {
+          const { sourceType, dedupKey } = GenericExporter2.resolveClipperDedup(meta);
+          if (!dedupKey || !apiKey || !databaseId) return { remote: null, exported: GenericExporter2.isClipperExported(meta), dedupKey };
+          let remoteUrls = null;
+          try {
+            remoteUrls = await NotionAPI2.collectDatabaseUrls(apiKey, databaseId);
+          } catch (_) {
+            remoteUrls = null;
+          }
+          if (!remoteUrls) {
+            return { remote: null, exported: GenericExporter2.isClipperExported(meta), dedupKey };
+          }
+          const urlPart = dedupKey.slice(dedupKey.indexOf(":") + 1);
+          const normRemote = (u) => String(u || "").trim().replace(/\/+$/, "");
+          const key = normRemote(urlPart);
+          const exported = key ? [...remoteUrls].some((u) => normRemote(u) === key) : false;
+          return { remote: remoteUrls, exported, dedupKey };
+        },
         markClipperExported: (meta = {}) => {
           const { DedupStore } = require_storage();
           const { sourceType, dedupKey } = GenericExporter2.resolveClipperDedup(meta);
@@ -31929,7 +31953,22 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               url: typeof location !== "undefined" ? location.href : "",
               source: SiteDetector2.detect() === SiteDetector2.SITES.ZHIHU ? "\u77E5\u4E4E" : ""
             };
-            if (GenericExporter2.isClipperExported(previewMeta)) {
+            let clipperExported = GenericExporter2.isClipperExported(previewMeta);
+            const preApiKey = NotionOAuth2.getAccessToken("");
+            const preTarget = TargetState2.getExportState();
+            if (preApiKey && preTarget.databaseId) {
+              const remote = await GenericExporter2.checkClipperRemote(preApiKey, preTarget.databaseId, previewMeta);
+              if (remote.remote) {
+                clipperExported = remote.exported;
+                if (remote.exported) {
+                  try {
+                    GenericExporter2.markClipperExported(previewMeta);
+                  } catch (_) {
+                  }
+                }
+              }
+            }
+            if (clipperExported) {
               const ok = await ConfirmationDialog2.show({
                 title: "\u5DF2\u5BFC\u51FA\u8FC7",
                 message: "\u8BE5\u9875\u9762\u5DF2\u5728\u5BFC\u51FA\u8D26\u672C\u4E2D\u3002\u518D\u6B21\u5BFC\u51FA\u5C06\u5728 Notion \u65B0\u5EFA\u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",

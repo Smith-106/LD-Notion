@@ -224,6 +224,32 @@ const GenericExporter = {
         return DedupStore.isDuplicate(sourceType, dedupKey);
     },
 
+    // ISS-20260914-001: Clipper(知乎/通用页)远端对账 —— 远端「链接」索引是 ground truth。
+    // 与 BookmarkExporter/GitHubAutoImporter 同构,但 dedupKey 为 `zhihu:<normUrl>`/`generic:<normUrl>`
+    // 形式(非裸 URL),故单独抽 URL 段与远端集合比对,不硬套 URL 索引模板。
+    // 返回值三态:
+    //   { remote: Set }            → 远端可达, exported 字段以远端为准(本地账本 hit 被覆盖)
+    //   { remote: null, exported } → 远端不可达, 降级本地 DedupStore.isDuplicate(旧语义,防查询故障误放行)
+    checkClipperRemote: async (apiKey, databaseId, meta = {}) => {
+        const { sourceType, dedupKey } = GenericExporter.resolveClipperDedup(meta);
+        if (!dedupKey || !apiKey || !databaseId) return { remote: null, exported: GenericExporter.isClipperExported(meta), dedupKey };
+        let remoteUrls = null;
+        try {
+            remoteUrls = await NotionAPI.collectDatabaseUrls(apiKey, databaseId);
+        } catch (_) { remoteUrls = null; }
+        if (!remoteUrls) {
+            // 远端不可达 → 降级本地账本(与 collectDatabaseUrls 失败路径一致的旧语义)
+            return { remote: null, exported: GenericExporter.isClipperExported(meta), dedupKey };
+        }
+        // dedupKey = `zhihu:<normUrl>` —— 抽冒号后 URL 段,远端 norm 口径(trim+去尾斜杠)对齐。
+        // 防御: 远端集合条目同样过一遍 norm(allowDuplicated/手写路径可能未统一去尾斜杠)。
+        const urlPart = dedupKey.slice(dedupKey.indexOf(":") + 1);
+        const normRemote = (u) => String(u || "").trim().replace(/\/+$/, "");
+        const key = normRemote(urlPart);
+        const exported = key ? [...remoteUrls].some((u) => normRemote(u) === key) : false;
+        return { remote: remoteUrls, exported, dedupKey };
+    },
+
     markClipperExported: (meta = {}) => {
         const { DedupStore } = require("../storage");
         const { sourceType, dedupKey } = GenericExporter.resolveClipperDedup(meta);

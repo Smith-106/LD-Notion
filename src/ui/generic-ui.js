@@ -832,7 +832,22 @@ const GenericUI = {
                 url: typeof location !== "undefined" ? location.href : "",
                 source: SiteDetector.detect() === SiteDetector.SITES.ZHIHU ? "知乎" : "",
             };
-            if (GenericExporter.isClipperExported(previewMeta)) {
+            // ISS-20260914-001: 远端「链接」索引为 ground truth —— 换库/重建库后本地账本残留
+            // 不得再阻断导出(与 Bookmark/GitHub/LinuxDo dedup-state 修复同构)。远端不可达时
+            // 降级本地 DedupStore(旧语义)。远端命中时回写账本(下轮免查询, 计数收敛)。
+            let clipperExported = GenericExporter.isClipperExported(previewMeta);
+            const preApiKey = NotionOAuth.getAccessToken("");
+            const preTarget = TargetState.getExportState();
+            if (preApiKey && preTarget.databaseId) {
+                const remote = await GenericExporter.checkClipperRemote(preApiKey, preTarget.databaseId, previewMeta);
+                if (remote.remote) {
+                    clipperExported = remote.exported;
+                    if (remote.exported) {
+                        try { GenericExporter.markClipperExported(previewMeta); } catch (_) {}
+                    }
+                } // remote.remote===null → 保留本地账本判定(降级)
+            }
+            if (clipperExported) {
                 const ok = await ConfirmationDialog.show({
                     title: "已导出过",
                     message: "该页面已在导出账本中。再次导出将在 Notion 新建页面，是否继续？",
