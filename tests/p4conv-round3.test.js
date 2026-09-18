@@ -83,16 +83,18 @@ describe("P4 收敛(c13): events.js 跨闭包标识符与保存失败恢复", ()
     });
 
     it("源码: save_command_boundary_settings 失败后恢复导出按钮", () => {
-        const src = fs.readFileSync("src/ui/events.js", "utf8");
+        // M3 events 拆分: exportBtn.onclick 迁 export-bindings.js
+        const src = fs.readFileSync("src/ui/events/export-bindings.js", "utf8");
 
         expect(src).toMatch(/\.then\(\(\) => true, \(error\) => \{/);
         expect(src).toMatch(/if \(!settingsSaved\) \{\s*restoreExportBtn\(\);/);
     });
 
     it("源码: 图片 Markdown 替换用函数形式且进度回调校验来源", () => {
+        // M3 events 拆分: Obsidian 导出图片内嵌迁 export-bindings.js;来源校验仍在 events.js
+        const exp = fs.readFileSync("src/ui/events/export-bindings.js", "utf8");
+        expect(exp).toMatch(/md\.replace\(img\.full, \(\) => `!\[\$\{img\.alt\}\]/);
         const src = fs.readFileSync("src/ui/events.js", "utf8");
-
-        expect(src).toMatch(/md\.replace\(img\.full, \(\) => `!\[\$\{img\.alt\}\]/);
         expect(src).toMatch(/if \(loadSource !== UI\.getActiveBookmarkSource\(\)\) return;\s*\n\s*if \(UI\.refs\?\.bookmarkCount\)/);
     });
 });

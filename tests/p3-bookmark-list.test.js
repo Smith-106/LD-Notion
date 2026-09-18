@@ -7,6 +7,7 @@ const { UI } = require("../src/ui/main-ui.js");
 
 const blSrc = fs.readFileSync("src/ui/bookmark-list.js", "utf8");
 const evSrc = fs.readFileSync("src/ui/events.js", "utf8");
+const exportBindSrc = fs.readFileSync("src/ui/events/export-bindings.js", "utf8");
 
 describe("P3: bookmark-list 空引用与陈旧绑定", () => {
     afterEach(() => {
@@ -43,7 +44,8 @@ describe("P3: 导出状态重算不重复渲染", () => {
 
 describe("P3: Obsidian 导出过滤已导出项", () => {
     it("与 Notion 导出同款过滤", () => {
-        expect(evSrc).toMatch(
+        // M3 events 拆分: Obsidian 导出绑定迁 src/ui/events/export-bindings.js
+        expect(exportBindSrc).toMatch(
             /const selected = UI\.getSelectedBookmarks\(\)\.filter\(\(b\) => !UI\.isBookmarkKeyExported\(UI\.getBookmarkKey\(b\)\)\);/
         );
     });

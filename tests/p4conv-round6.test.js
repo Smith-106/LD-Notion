@@ -205,7 +205,8 @@ describe("P4 收敛(c09/c13/c14): 源码级契约锁定", () => {
     });
 
     it("导出器选择与 toExport 同一来源快照", () => {
-        const src = read("src/ui/events.js");
+        // M3 events 拆分: exportBtn.onclick 迁 export-bindings.js
+        const src = read("src/ui/events/export-bindings.js");
         expect(src).toContain("const exportIsGitHub = UI.isActiveGitHubSource();");
         expect(src).toContain("if (exportIsGitHub) {");
     });

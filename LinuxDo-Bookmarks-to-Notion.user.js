@@ -61,7 +61,13 @@
     // [LD-NOTION-BUILD:USER_SCRIPT_BODY_START]
     "use strict";
   var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __commonJS = (cb, mod) => function __require() {
+  var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+    get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+  }) : x)(function(x) {
+    if (typeof require !== "undefined") return require.apply(this, arguments);
+    throw Error('Dynamic require of "' + x + '" is not supported');
+  });
+  var __commonJS = (cb, mod) => function __require2() {
     try {
       return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
     } catch (e) {
@@ -534,7 +540,7 @@
       function isSupportedFileType2(ext) {
         return SUPPORTED_FILE_TYPES2.has((ext || "").toLowerCase());
       }
-      function getMimeType2(ext, fallback = "application/octet-stream") {
+      function getMimeType3(ext, fallback = "application/octet-stream") {
         const key = (ext || "").toLowerCase();
         return Object.prototype.hasOwnProperty.call(EXT_TO_MIME2, key) ? EXT_TO_MIME2[key] : fallback;
       }
@@ -559,7 +565,7 @@
         SUPPORTED_IMAGE_TYPES: SUPPORTED_IMAGE_TYPES2,
         MULTI_PART_THRESHOLD: MULTI_PART_THRESHOLD2,
         isSupportedFileType: isSupportedFileType2,
-        getMimeType: getMimeType2,
+        getMimeType: getMimeType3,
         getFileCategory: getFileCategory2,
         MSG: MSG2
       };
@@ -5984,7 +5990,7 @@ ${quoted}
         }
         return "file";
       }
-      function getMimeType2(ext) {
+      function getMimeType3(ext) {
         const key = (ext || "").toLowerCase();
         return Object.prototype.hasOwnProperty.call(MIME_TYPES, key) ? MIME_TYPES[key] : "application/octet-stream";
       }
@@ -6228,7 +6234,7 @@ Content-Type: ${safeContentType}\r
                 ontimeout: () => reject(new Error("\u4E0B\u8F7D\u8D85\u65F6"))
               });
             });
-            const contentType = blob.type || getMimeType2(ext);
+            const contentType = blob.type || getMimeType3(ext);
             const category = getFileCategory2(ext);
             let blockType = "image";
             if (category === "video") blockType = "video";
@@ -6336,7 +6342,7 @@ Content-Type: ${safeContentType}\r
           }
         });
       }
-      module.exports = { installUploadMethods, isSupportedFileType: isSupportedFileType2, getFileCategory: getFileCategory2, getMimeType: getMimeType2, MULTI_PART_THRESHOLD: MULTI_PART_THRESHOLD2 };
+      module.exports = { installUploadMethods, isSupportedFileType: isSupportedFileType2, getFileCategory: getFileCategory2, getMimeType: getMimeType3, MULTI_PART_THRESHOLD: MULTI_PART_THRESHOLD2 };
     }
   });
 
@@ -29481,6 +29487,545 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
     }
   });
 
+  // src/ui/events/export-bindings.js
+  var require_export_bindings = __commonJS({
+    "src/ui/events/export-bindings.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2, DedupStore } = require_storage();
+      var { NotionOAuth: NotionOAuth2 } = require_auth();
+      var { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
+      var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2 } = require_export();
+      var { GitHubAPI: GitHubAPI2 } = require_import();
+      var { BookmarkExporter: BookmarkExporter2 } = require_bridge();
+      var { UICommandService: UICommandService2 } = require_UICommandService();
+      var { HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2 } = require_api();
+      var bindExport = (ctx) => {
+        const { UI: UI2, panel, refs, getInputValue, getSensitiveValue, updateExportButtonState, syncUndoOrganizeBtn } = ctx;
+        refs.exportBtn.onclick = async () => {
+          var _a, _b;
+          if (refs.exportBtn.disabled) return;
+          refs.exportBtn.disabled = true;
+          const restoreExportBtn = () => {
+            refs.exportBtn.disabled = false;
+          };
+          const liveApiKey = refs.apiKeyInput.value.trim();
+          const apiKey = NotionOAuth2.getAccessToken(liveApiKey);
+          const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
+          const databaseId = refs.databaseIdInput.value.trim();
+          const parentPageId = refs.parentPageIdInput.value.trim();
+          if (!apiKey) {
+            UI2.showStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key", "error");
+            restoreExportBtn();
+            return;
+          }
+          if (exportTargetType === "database" && !databaseId) {
+            UI2.showStatus("\u8BF7\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID", "error");
+            restoreExportBtn();
+            return;
+          }
+          if (exportTargetType === "page" && !parentPageId) {
+            UI2.showStatus("\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID", "error");
+            restoreExportBtn();
+            return;
+          }
+          if (!UI2.bookmarks || UI2.bookmarks.length === 0) {
+            UI2.showStatus("\u8BF7\u5148\u52A0\u8F7D\u6536\u85CF\u5217\u8868", "error");
+            restoreExportBtn();
+            return;
+          }
+          const exportIsGitHub = UI2.isActiveGitHubSource();
+          const toExport = UI2.bookmarks.filter((b) => {
+            const bookmarkKey = UI2.getBookmarkKey(b);
+            return UI2.selectedBookmarks.has(bookmarkKey) && !UI2.isBookmarkKeyExported(bookmarkKey);
+          });
+          if (toExport.length === 0) {
+            UI2.showStatus("\u6CA1\u6709\u53EF\u5BFC\u51FA\u7684\u6536\u85CF\uFF08\u53EF\u80FD\u90FD\u5DF2\u5BFC\u51FA\u8FC7\u6216\u672A\u9009\u4E2D\uFF09", "info");
+            restoreExportBtn();
+            return;
+          }
+          const settings = {
+            apiKey,
+            // v3.14.7: 透传输入框原文(liveApiKey 为空=OAuth 模式)→ 导出循环每项重解析最新 token
+            liveApiKey,
+            databaseId,
+            parentPageId,
+            exportTargetType,
+            onlyFirst: refs.onlyFirstCheckbox.checked,
+            onlyOp: refs.onlyOpCheckbox.checked,
+            rangeStart: parseInt(refs.rangeStartInput.value) || 1,
+            rangeEnd: parseInt(refs.rangeEndInput.value) || 999999,
+            imgMode: refs.imgModeSelect.value,
+            concurrency: parseInt(refs.exportConcurrencySelect.value) || 1,
+            aiApiKey: getSensitiveValue(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, ""),
+            aiService: refs.aiServiceSelect.value,
+            aiModel: refs.aiModelSelect.value,
+            aiBaseUrl: refs.aiBaseUrlInput.value.trim(),
+            categories: Utils2.parseAICategories(
+              refs.aiCategoriesInput.value.trim() || ""
+            ),
+            githubUsername: refs.githubUsernameInput.value.trim(),
+            token: getSensitiveValue(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, ""),
+            imgFilter: refs.filterImgSelect.value,
+            filterUsers: refs.filterUsersInput.value.trim(),
+            filterInclude: refs.filterIncludeInput.value.trim(),
+            filterExclude: refs.filterExcludeInput.value.trim(),
+            filterMinLen: parseInt(refs.filterMinLenInput.value) || 0
+          };
+          const settingsSaved = await UICommandService2.execute("save_command_boundary_settings", {
+            scope: "main-export-session",
+            liveApiKey,
+            exportState: {
+              targetType: exportTargetType,
+              databaseId: exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.DATABASE ? databaseId : void 0,
+              parentPageId: exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? parentPageId : void 0
+            },
+            storageValues: {
+              [CONFIG2.STORAGE_KEYS.FILTER_ONLY_FIRST]: settings.onlyFirst,
+              [CONFIG2.STORAGE_KEYS.FILTER_ONLY_OP]: settings.onlyOp,
+              [CONFIG2.STORAGE_KEYS.FILTER_RANGE_START]: settings.rangeStart,
+              [CONFIG2.STORAGE_KEYS.FILTER_RANGE_END]: settings.rangeEnd,
+              [CONFIG2.STORAGE_KEYS.FILTER_IMG]: settings.imgFilter,
+              [CONFIG2.STORAGE_KEYS.FILTER_USERS]: settings.filterUsers,
+              [CONFIG2.STORAGE_KEYS.FILTER_INCLUDE]: settings.filterInclude,
+              [CONFIG2.STORAGE_KEYS.FILTER_EXCLUDE]: settings.filterExclude,
+              [CONFIG2.STORAGE_KEYS.FILTER_MINLEN]: settings.filterMinLen,
+              [CONFIG2.STORAGE_KEYS.IMG_MODE]: settings.imgMode,
+              [CONFIG2.STORAGE_KEYS.REQUEST_DELAY]: parseInt(refs.requestDelaySelect.value),
+              [CONFIG2.STORAGE_KEYS.EXPORT_CONCURRENCY]: settings.concurrency,
+              [CONFIG2.STORAGE_KEYS.GITHUB_OAUTH_CLIENT_ID]: refs.githubOauthClientIdInput ? String(refs.githubOauthClientIdInput.value || "").trim() : ""
+            },
+            sensitiveEntries: {
+              [CONFIG2.STORAGE_KEYS.AI_API_KEY]: getInputValue(refs.aiApiKeyInput),
+              [CONFIG2.STORAGE_KEYS.GITHUB_TOKEN]: getInputValue(refs.githubTokenInput)
+            }
+          }).then(() => true, (error) => {
+            UI2.showStatus(`\u4FDD\u5B58\u8BBE\u7F6E\u5931\u8D25: ${error.message}`, "error");
+            return false;
+          });
+          if (!settingsSaved) {
+            restoreExportBtn();
+            return;
+          }
+          refs.exportBtn.disabled = true;
+          refs.exportBtns.style.display = "none";
+          refs.controlBtns.style.display = "flex";
+          refs.pauseBtn.innerHTML = "\u23F8\uFE0F \u6682\u505C";
+          refs.pauseBtn.classList.add("ldb-btn-warning");
+          refs.pauseBtn.classList.remove("ldb-btn-primary");
+          UI2.refs.reportContainer.innerHTML = "";
+          try {
+            let results;
+            if (exportIsGitHub) {
+              results = await UI2.exportGitHubSelected(toExport, settings, (current, total, title) => {
+                UI2.showProgress(current, total, `${title}
+\u5BFC\u51FA\u4E2D`);
+              });
+            } else {
+              results = await Exporter2.exportBookmarks(toExport, settings, (progress) => {
+                UI2.showProgress(
+                  progress.current,
+                  progress.total,
+                  `${progress.title}
+${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C)" : ""}`
+                );
+              });
+            }
+            UI2.hideProgress();
+            UI2.showReport(results);
+            UI2.renderBookmarkList();
+            const successCount = results.success.length;
+            const failCount = results.failed.length;
+            const skippedCount = ((_a = results.skipped) == null ? void 0 : _a.length) || 0;
+            let statusMsg;
+            if (results.authAborted || results.aborted === true) {
+              const authCode = String(((_b = results.authAborted) == null ? void 0 : _b.authCode) || "").toLowerCase();
+              if (authCode === "empty_token") {
+                statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08\u672A\u8BFB\u53D6\u5230 API Key\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u91CD\u65B0\u4FDD\u5B58 API Key \u540E\u91CD\u8BD5`;
+              } else if (authCode === "format_suspect") {
+                statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08API Key \u683C\u5F0F\u5F02\u5E38\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u786E\u8BA4 Key \u4EE5 secret_/ntn_ \u5F00\u5934`;
+              } else if (authCode === "invalid_bearer_token" || authCode === "unauthorized") {
+                statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08Notion \u62D2\u7EDD\u8BE5 Key\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u91CD\u65B0\u590D\u5236 API Key \u6216\u91CD\u65B0 OAuth \u6388\u6743`;
+              } else {
+                statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08Notion \u8BA4\u8BC1\u5931\u8D25\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u68C0\u67E5 API Key / OAuth \u6388\u6743\u540E\u91CD\u65B0\u5BFC\u51FA`;
+              }
+            } else {
+              statusMsg = `\u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${successCount} \u4E2A`;
+              if (failCount > 0) statusMsg += `\uFF0C\u5931\u8D25 ${failCount} \u4E2A`;
+              if (skippedCount > 0) statusMsg += `\uFF0C\u8DF3\u8FC7 ${skippedCount} \u4E2A`;
+            }
+            UI2.showStatus(statusMsg, results.authAborted || results.aborted === true || failCount > successCount ? "error" : "success");
+            if (typeof GM_notification === "function") {
+              GM_notification({
+                title: "\u5BFC\u51FA\u5B8C\u6210",
+                text: statusMsg,
+                timeout: 5e3
+              });
+            }
+          } catch (error) {
+            UI2.hideProgress();
+            UI2.showStatus(`\u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
+          } finally {
+            updateExportButtonState();
+            refs.exportBtns.style.display = "flex";
+            refs.controlBtns.style.display = "none";
+            Exporter2.reset();
+          }
+        };
+        refs.obsExportBtn.onclick = async () => {
+          if (refs.obsExportBtn.disabled) return;
+          const obsUrl = refs.obsApiUrlInput.value.trim();
+          const obsKey = getSensitiveValue(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, CONFIG2.DEFAULTS.obsApiKey);
+          const obsDir = refs.obsDirInput.value.trim() || "Linux.do";
+          const obsImgMode = refs.obsImgModeSelect.value;
+          const obsImgDir = refs.obsImgDirInput.value.trim() || "Linux.do/attachments";
+          if (!obsUrl || !obsKey) {
+            UI2.showStatus("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E Obsidian API \u5730\u5740\u548C Key", "error");
+            return;
+          }
+          const selected = UI2.getSelectedBookmarks().filter((b) => !UI2.isBookmarkKeyExported(UI2.getBookmarkKey(b)));
+          if (selected.length === 0) {
+            UI2.showStatus("\u8BF7\u5148\u9009\u62E9\u8981\u5BFC\u51FA\u7684\u5E16\u5B50", "error");
+            return;
+          }
+          refs.obsExportBtn.disabled = true;
+          refs.exportBtns.style.display = "none";
+          refs.controlBtns.style.display = "flex";
+          refs.pauseBtn.innerHTML = "\u23F8\uFE0F \u6682\u505C";
+          refs.pauseBtn.classList.add("ldb-btn-warning");
+          refs.pauseBtn.classList.remove("ldb-btn-primary");
+          UI2.refs.reportContainer.innerHTML = "";
+          const results = { success: [], failed: [], skipped: [] };
+          let imageFailures = 0;
+          try {
+            if (UI2.isActiveGitHubSource()) {
+              const githubResults = await UI2.exportGitHubSelectedToObsidian(selected, {
+                obsUrl,
+                obsKey,
+                obsDir,
+                aiApiKey: getSensitiveValue(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, ""),
+                aiService: refs.aiServiceSelect.value,
+                aiModel: refs.aiModelSelect.value,
+                aiBaseUrl: refs.aiBaseUrlInput.value.trim(),
+                categories: Utils2.parseAICategories(refs.aiCategoriesInput.value.trim() || ""),
+                token: getSensitiveValue(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "")
+              }, (current, total, title) => {
+                UI2.showProgress(current, total, `${title}
+\u5BFC\u51FA\u5230 Obsidian...`);
+              });
+              results.success.push(...githubResults.success);
+              results.failed.push(...githubResults.failed);
+              results.skipped.push(...githubResults.skipped || []);
+            } else {
+              for (let i = 0; i < selected.length; i++) {
+                if (Exporter2.isCancelled) break;
+                while (Exporter2.isPaused) {
+                  await Utils2.sleep(200);
+                  if (Exporter2.isCancelled) break;
+                }
+                if (Exporter2.isCancelled) break;
+                const bookmark = selected[i];
+                const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
+                UI2.showProgress(i + 1, selected.length, "\u5BFC\u51FA\u5E16\u5B50\u5230 Obsidian...");
+                try {
+                  const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
+                  const filteredPosts = Exporter2.filterPosts(posts, topic, {
+                    onlyFirst: refs.onlyFirstCheckbox.checked,
+                    onlyOp: refs.onlyOpCheckbox.checked,
+                    rangeStart: parseInt(refs.rangeStartInput.value) || 1,
+                    rangeEnd: parseInt(refs.rangeEndInput.value) || 999999,
+                    imgFilter: refs.filterImgSelect.value,
+                    filterUsers: refs.filterUsersInput.value.trim(),
+                    filterInclude: refs.filterIncludeInput.value.trim(),
+                    filterExclude: refs.filterExcludeInput.value.trim(),
+                    filterMinLen: parseInt(refs.filterMinLenInput.value) || 0
+                  });
+                  const meta = {
+                    title: topic.title,
+                    url: topic.url,
+                    author: topic.opUsername,
+                    topicId: topic.topicId || topic.topic_id,
+                    category: topic.categoryName || topic.category,
+                    tags: topic.tags || [],
+                    floors: filteredPosts.length
+                  };
+                  let md = HTMLToMarkdown2.buildFrontmatter(meta);
+                  md += `> [!info] \u5E16\u5B50\u4FE1\u606F
+`;
+                  md += `> - **\u539F\u59CB\u94FE\u63A5**: ${Utils2.mdLink(topic.title, topic.url)}
+`;
+                  md += `> - **\u697C\u4E3B**: @${topic.opUsername || "\u672A\u77E5"}
+`;
+                  md += `> - **\u5206\u7C7B**: ${meta.category || "\u65E0"}
+`;
+                  md += `> - **\u6807\u7B7E**: ${(topic.tags || []).join(", ") || "\u65E0"}
+`;
+                  md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+                  filteredPosts.forEach((post, idx) => {
+                    const isOp = post.username === topic.opUsername;
+                    md += HTMLToMarkdown2.buildPostCallout(post, idx, isOp);
+                  });
+                  if (obsImgMode === "file") {
+                    const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+                    let match;
+                    const imgDownloads = [];
+                    while ((match = imgRegex.exec(md)) !== null) {
+                      imgDownloads.push({ full: match[0], alt: match[1], url: match[2] });
+                    }
+                    for (const img of imgDownloads) {
+                      if (Exporter2.isCancelled) break;
+                      while (Exporter2.isPaused) {
+                        await Utils2.sleep(200);
+                        if (Exporter2.isCancelled) break;
+                      }
+                      if (Exporter2.isCancelled) break;
+                      try {
+                        const ext = img.url.split(".").pop().split("?")[0] || "png";
+                        const nameBytes = new Uint8Array(4);
+                        if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                          crypto.getRandomValues(nameBytes);
+                        } else {
+                          throw new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 Obsidian \u56FE\u7247\u6587\u4EF6\u540D");
+                        }
+                        const safeName = `img-${Date.now()}-${Array.from(nameBytes, (b) => b.toString(16).padStart(2, "0")).join("")}.${ext}`;
+                        const imgPath = `${obsImgDir}/${safeName}`;
+                        const { UrlValidator } = __require("../security/UrlValidator");
+                        if (!UrlValidator.validatePageExternalUrl(img.url)) {
+                          throw new Error("\u56FE\u7247 URL \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C");
+                        }
+                        const blob = await new Promise((resolve, reject) => {
+                          GM_xmlhttpRequest({
+                            method: "GET",
+                            url: img.url,
+                            responseType: "blob",
+                            timeout: 3e4,
+                            onload: (r) => {
+                              if (r.status >= 200 && r.status < 300) resolve(r.response);
+                              else reject(new Error(`\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25: HTTP ${r.status}`));
+                            },
+                            onerror: (e) => reject(e),
+                            ontimeout: () => reject(new Error("\u56FE\u7247\u4E0B\u8F7D\u8D85\u65F6"))
+                          });
+                        });
+                        if (!OperationGuard2.canExecute("obsidian.writeImage")) {
+                          OperationGuard2.auditDenied("obsidian.writeImage", { itemName: topic.title, trigger: "user_requested_write" }, {
+                            phase: "execute",
+                            reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u56FE\u7247\u5199\u5165\u9700\u8981 level\u22651"
+                          });
+                          throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u56FE\u7247\u5199\u5165\u9700\u8981 level\u22651");
+                        }
+                        const imgResult = await ObsidianAPI2.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType(ext));
+                        if (!imgResult.ok) throw new Error(imgResult.error);
+                        md = md.replace(img.full, () => `![${img.alt}](${encodeURI(imgPath)})`);
+                      } catch {
+                        imageFailures++;
+                      }
+                    }
+                  } else if (obsImgMode === "base64") {
+                    const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+                    const matches = [];
+                    let m;
+                    while ((m = imgRegex.exec(md)) !== null) matches.push(m);
+                    for (const match of matches.reverse()) {
+                      if (Exporter2.isCancelled) break;
+                      while (Exporter2.isPaused) {
+                        await Utils2.sleep(200);
+                        if (Exporter2.isCancelled) break;
+                      }
+                      if (Exporter2.isCancelled) break;
+                      try {
+                        const { UrlValidator } = __require("../security/UrlValidator");
+                        if (!UrlValidator.validatePageExternalUrl(match[2])) {
+                          throw new Error("\u56FE\u7247 URL \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C");
+                        }
+                        const resp = await new Promise((resolve, reject) => {
+                          GM_xmlhttpRequest({
+                            method: "GET",
+                            url: match[2],
+                            responseType: "blob",
+                            timeout: 3e4,
+                            // P4 收敛(c13): onload 对 4xx/5xx 同样触发 —— 错误页不得内嵌为 data URL
+                            onload: (r) => {
+                              if (r.status >= 200 && r.status < 300) resolve(r);
+                              else reject(new Error(`\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25: HTTP ${r.status}`));
+                            },
+                            onerror: (e) => reject(e),
+                            ontimeout: () => reject(new Error("\u56FE\u7247\u4E0B\u8F7D\u8D85\u65F6"))
+                          });
+                        });
+                        const b64 = await new Promise((resolve) => {
+                          const reader = new FileReader();
+                          reader.onloadend = () => resolve(reader.result);
+                          reader.readAsDataURL(resp.response);
+                        });
+                        md = md.replace(match[0], () => `![${match[1]}](${b64})`);
+                      } catch {
+                        imageFailures++;
+                      }
+                    }
+                  }
+                  const fileName = UI2.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
+                  if (!OperationGuard2.canExecute("obsidian.writeNote")) {
+                    OperationGuard2.auditDenied("obsidian.writeNote", { itemName: topic.title, trigger: "user_requested_write" }, {
+                      phase: "execute",
+                      reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651"
+                    });
+                    throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651");
+                  }
+                  const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
+                  if (!noteResult.ok) throw new Error(noteResult.error);
+                  Storage2.markTopicExported(topicId);
+                  results.success.push({
+                    title: topic.title,
+                    url: topic.url
+                  });
+                } catch (error) {
+                  results.failed.push({
+                    title: bookmark.title || `\u5E16\u5B50 ${topicId}`,
+                    error: error.message
+                  });
+                  const msgText = String((error == null ? void 0 : error.message) || "");
+                  if (/\bHTTP\s*40[13]\b/.test(msgText) || msgText.includes("invalid") || msgText.includes("Invalid") || msgText.includes("ECONNREFUSED") || msgText.includes("refused")) {
+                    results.authAborted = { reason: error.message, at: i + 1 };
+                    for (let k = i + 1; k < selected.length; k++) {
+                      const skippedBm = selected[k];
+                      results.skipped.push({
+                        title: skippedBm.title || skippedBm.name || `\u5E16\u5B50 ${skippedBm.topic_id || ""}`
+                      });
+                    }
+                    break;
+                  }
+                }
+                if (i < selected.length - 1) {
+                  await Utils2.sleep(300);
+                }
+              }
+            }
+            UI2.hideProgress();
+            UI2.showReport(results);
+            UI2.renderBookmarkList();
+            const msg = results.authAborted ? `\u26D4 Obsidian \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08\u8BA4\u8BC1/\u8FDE\u63A5\u5931\u8D25\uFF09\uFF1A\u6210\u529F ${results.success.length} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${results.skipped.length} \u4E2A\u3002\u8BF7\u68C0\u67E5 Obsidian API \u5730\u5740\u4E0E Key \u540E\u91CD\u8BD5\u3002` : `Obsidian \u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${results.success.length} \u4E2A${results.failed.length ? `\uFF0C\u5931\u8D25 ${results.failed.length} \u4E2A` : ""}${imageFailures > 0 ? `\uFF0C${imageFailures} \u5F20\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25` : ""}`;
+            UI2.showStatus(msg, results.authAborted ? "error" : results.failed.length > 0 || imageFailures > 0 ? "warning" : "success");
+          } catch (error) {
+            UI2.showStatus(`Obsidian \u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
+          } finally {
+            refs.obsExportBtn.disabled = false;
+            refs.exportBtns.style.display = "flex";
+            refs.controlBtns.style.display = "none";
+            Exporter2.reset();
+          }
+        };
+        refs.permissionLevelSelect.onchange = (e) => {
+          const level = parseInt(e.target.value);
+          OperationGuard2.setLevel(level);
+          UI2.showStatus(`\u6743\u9650\u7EA7\u522B\u5DF2\u8BBE\u7F6E\u4E3A: ${CONFIG2.PERMISSION_NAMES[level]}`, "success");
+          try {
+            UI2.updateExportTargetSummary();
+          } catch (err) {
+            console.warn("[LD-Notion] \u6743\u9650\u6458\u8981\u5237\u65B0\u5931\u8D25:", err);
+          }
+        };
+        refs.requireConfirmCheckbox.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.REQUIRE_CONFIRM, e.target.checked);
+        };
+        refs.enableAuditLogCheckbox.onchange = (e) => {
+          const previousState = Storage2.get(CONFIG2.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG2.DEFAULTS.enableAuditLog);
+          const nextState = !!e.target.checked;
+          OperationLog2.add({
+            audit_event: nextState ? "audit.enabled" : "audit.disabled",
+            actor: "user",
+            source: "linuxdo-panel",
+            operation: {
+              name: "toggleAuditLog",
+              risk: "standard",
+              trigger: "user_settings_change"
+            },
+            payload: {
+              previousState,
+              newState: nextState
+            },
+            result: {
+              status: "success",
+              reason: nextState ? "audit_enabled" : "audit_disabled"
+            },
+            redaction: [],
+            operationName: "toggleAuditLog",
+            context: {
+              previousState,
+              newState: nextState
+            },
+            startTime: Date.now(),
+            endTime: Date.now(),
+            status: "success"
+          }, { force: true });
+          Storage2.set(CONFIG2.STORAGE_KEYS.ENABLE_AUDIT_LOG, nextState);
+          const logPanel = refs.logPanel;
+          if (logPanel) {
+            logPanel.style.display = nextState ? "block" : "none";
+          }
+        };
+        refs.logToggleBtn.onclick = () => {
+          const content = refs.logContent;
+          const arrow = refs.logArrow;
+          content.classList.toggle("collapsed");
+          arrow.textContent = content.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
+          refs.logToggleBtn.setAttribute("aria-expanded", String(!content.classList.contains("collapsed")));
+          if (!content.classList.contains("collapsed")) {
+            UI2.updateLogPanel();
+          }
+        };
+        refs.logToggleBtn.onkeydown = (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            refs.logToggleBtn.click();
+          }
+        };
+        refs.logClearBtn.onclick = () => {
+          ConfirmationDialog2.show({
+            title: "\u6E05\u9664\u64CD\u4F5C\u65E5\u5FD7",
+            message: "\u786E\u5B9A\u8981\u6E05\u9664\u6240\u6709\u64CD\u4F5C\u65E5\u5FD7\u5417\uFF1F",
+            confirmText: "\u6E05\u9664",
+            onConfirm: () => {
+              OperationLog2.clear();
+              UI2.showStatus("\u65E5\u5FD7\u5DF2\u6E05\u9664", "success");
+            }
+          });
+        };
+        const renderDedupSummary = () => {
+          const el = refs.dedupSummary;
+          if (!el) return;
+          const linuxdoCount = Object.keys(DedupStore.getSeen("linuxdo") || {}).length;
+          const githubCount = Object.keys(GitHubAPI2.getExported() || {}).length + Object.keys(GitHubAPI2.getExportedGists() || {}).length;
+          const bookmarkCount = Object.keys(BookmarkExporter2.getExported() || {}).length;
+          el.textContent = `\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55 \u2014\u2014 Linux.do: ${linuxdoCount} \u6761\uFF1BGitHub: ${githubCount} \u6761\uFF1B\u4E66\u7B7E: ${bookmarkCount} \u6761`;
+        };
+        const clearWithConfirm = (label, doClear) => {
+          ConfirmationDialog2.show({
+            title: `\u6E05\u9664${label}\u8BB0\u5F55`,
+            message: `\u786E\u5B9A\u6E05\u9664${label}\u8BB0\u5F55\u5417\uFF1F
+\u6E05\u9664\u540E\u8BE5\u6765\u6E90\u7684\u6240\u6709\u5185\u5BB9\u5C06\u53EF\u518D\u6B21\u5BFC\u51FA/\u5BFC\u5165\u3002`,
+            confirmText: "\u6E05\u9664",
+            onConfirm: () => {
+              doClear();
+              renderDedupSummary();
+              UI2.showStatus(`${label}\u8BB0\u5F55\u5DF2\u6E05\u9664`, "success");
+            }
+          });
+        };
+        refs.clearLinuxdoDedupBtn.onclick = () => clearWithConfirm("Linux.do \u53BB\u91CD", () => {
+          Storage2.clearExportedTopics();
+        });
+        refs.clearGithubExportedBtn.onclick = () => clearWithConfirm("GitHub \u5DF2\u5BFC\u51FA", () => GitHubAPI2.clearExportedRecords());
+        refs.clearBookmarkExportedBtn.onclick = () => clearWithConfirm("\u4E66\u7B7E\u5DF2\u5BFC\u51FA", () => BookmarkExporter2.clearExportedRecords());
+        renderDedupSummary();
+      };
+      module.exports = { bindExport };
+    }
+  });
+
   // src/ui/events/ai-bindings.js
   var require_ai_bindings = __commonJS({
     "src/ui/events/ai-bindings.js"(exports, module) {
@@ -29777,7 +30322,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
   var require_events = __commonJS({
     "src/ui/events.js"(exports, module) {
       "use strict";
-      var { CONFIG: CONFIG2, MSG: MSG2, getMimeType: getMimeType2 } = require_config();
+      var { CONFIG: CONFIG2, MSG: MSG2, getMimeType: getMimeType3 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
       var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2, GitHubOAuth } = require_auth();
@@ -30754,524 +31299,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           };
           updateExportButtonState();
           UI2.updateExportButtonState = updateExportButtonState;
-          refs.exportBtn.onclick = async () => {
-            var _a2, _b;
-            if (refs.exportBtn.disabled) return;
-            refs.exportBtn.disabled = true;
-            const restoreExportBtn = () => {
-              refs.exportBtn.disabled = false;
-            };
-            const liveApiKey = refs.apiKeyInput.value.trim();
-            const apiKey = NotionOAuth2.getAccessToken(liveApiKey);
-            const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
-            const databaseId = refs.databaseIdInput.value.trim();
-            const parentPageId = refs.parentPageIdInput.value.trim();
-            if (!apiKey) {
-              UI2.showStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key", "error");
-              restoreExportBtn();
-              return;
-            }
-            if (exportTargetType === "database" && !databaseId) {
-              UI2.showStatus("\u8BF7\u5148\u914D\u7F6E\u6570\u636E\u5E93 ID", "error");
-              restoreExportBtn();
-              return;
-            }
-            if (exportTargetType === "page" && !parentPageId) {
-              UI2.showStatus("\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID", "error");
-              restoreExportBtn();
-              return;
-            }
-            if (!UI2.bookmarks || UI2.bookmarks.length === 0) {
-              UI2.showStatus("\u8BF7\u5148\u52A0\u8F7D\u6536\u85CF\u5217\u8868", "error");
-              restoreExportBtn();
-              return;
-            }
-            const exportIsGitHub = UI2.isActiveGitHubSource();
-            const toExport = UI2.bookmarks.filter((b) => {
-              const bookmarkKey = UI2.getBookmarkKey(b);
-              return UI2.selectedBookmarks.has(bookmarkKey) && !UI2.isBookmarkKeyExported(bookmarkKey);
-            });
-            if (toExport.length === 0) {
-              UI2.showStatus("\u6CA1\u6709\u53EF\u5BFC\u51FA\u7684\u6536\u85CF\uFF08\u53EF\u80FD\u90FD\u5DF2\u5BFC\u51FA\u8FC7\u6216\u672A\u9009\u4E2D\uFF09", "info");
-              restoreExportBtn();
-              return;
-            }
-            const settings = {
-              apiKey,
-              // v3.14.7: 透传输入框原文(liveApiKey 为空=OAuth 模式)→ 导出循环每项重解析最新 token
-              liveApiKey,
-              databaseId,
-              parentPageId,
-              exportTargetType,
-              onlyFirst: refs.onlyFirstCheckbox.checked,
-              onlyOp: refs.onlyOpCheckbox.checked,
-              rangeStart: parseInt(refs.rangeStartInput.value) || 1,
-              rangeEnd: parseInt(refs.rangeEndInput.value) || 999999,
-              imgMode: refs.imgModeSelect.value,
-              concurrency: parseInt(refs.exportConcurrencySelect.value) || 1,
-              aiApiKey: getSensitiveValue(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, ""),
-              aiService: refs.aiServiceSelect.value,
-              aiModel: refs.aiModelSelect.value,
-              aiBaseUrl: refs.aiBaseUrlInput.value.trim(),
-              categories: Utils2.parseAICategories(
-                refs.aiCategoriesInput.value.trim() || ""
-              ),
-              githubUsername: refs.githubUsernameInput.value.trim(),
-              token: getSensitiveValue(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, ""),
-              imgFilter: refs.filterImgSelect.value,
-              filterUsers: refs.filterUsersInput.value.trim(),
-              filterInclude: refs.filterIncludeInput.value.trim(),
-              filterExclude: refs.filterExcludeInput.value.trim(),
-              filterMinLen: parseInt(refs.filterMinLenInput.value) || 0
-            };
-            const settingsSaved = await UICommandService2.execute("save_command_boundary_settings", {
-              scope: "main-export-session",
-              liveApiKey,
-              exportState: {
-                targetType: exportTargetType,
-                databaseId: exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.DATABASE ? databaseId : void 0,
-                parentPageId: exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? parentPageId : void 0
-              },
-              storageValues: {
-                [CONFIG2.STORAGE_KEYS.FILTER_ONLY_FIRST]: settings.onlyFirst,
-                [CONFIG2.STORAGE_KEYS.FILTER_ONLY_OP]: settings.onlyOp,
-                [CONFIG2.STORAGE_KEYS.FILTER_RANGE_START]: settings.rangeStart,
-                [CONFIG2.STORAGE_KEYS.FILTER_RANGE_END]: settings.rangeEnd,
-                [CONFIG2.STORAGE_KEYS.FILTER_IMG]: settings.imgFilter,
-                [CONFIG2.STORAGE_KEYS.FILTER_USERS]: settings.filterUsers,
-                [CONFIG2.STORAGE_KEYS.FILTER_INCLUDE]: settings.filterInclude,
-                [CONFIG2.STORAGE_KEYS.FILTER_EXCLUDE]: settings.filterExclude,
-                [CONFIG2.STORAGE_KEYS.FILTER_MINLEN]: settings.filterMinLen,
-                [CONFIG2.STORAGE_KEYS.IMG_MODE]: settings.imgMode,
-                [CONFIG2.STORAGE_KEYS.REQUEST_DELAY]: parseInt(refs.requestDelaySelect.value),
-                [CONFIG2.STORAGE_KEYS.EXPORT_CONCURRENCY]: settings.concurrency,
-                [CONFIG2.STORAGE_KEYS.GITHUB_OAUTH_CLIENT_ID]: refs.githubOauthClientIdInput ? String(refs.githubOauthClientIdInput.value || "").trim() : ""
-              },
-              sensitiveEntries: {
-                [CONFIG2.STORAGE_KEYS.AI_API_KEY]: getInputValue(refs.aiApiKeyInput),
-                [CONFIG2.STORAGE_KEYS.GITHUB_TOKEN]: getInputValue(refs.githubTokenInput)
-              }
-            }).then(() => true, (error) => {
-              UI2.showStatus(`\u4FDD\u5B58\u8BBE\u7F6E\u5931\u8D25: ${error.message}`, "error");
-              return false;
-            });
-            if (!settingsSaved) {
-              restoreExportBtn();
-              return;
-            }
-            refs.exportBtn.disabled = true;
-            refs.exportBtns.style.display = "none";
-            refs.controlBtns.style.display = "flex";
-            refs.pauseBtn.innerHTML = "\u23F8\uFE0F \u6682\u505C";
-            refs.pauseBtn.classList.add("ldb-btn-warning");
-            refs.pauseBtn.classList.remove("ldb-btn-primary");
-            UI2.refs.reportContainer.innerHTML = "";
-            try {
-              let results;
-              if (exportIsGitHub) {
-                results = await UI2.exportGitHubSelected(toExport, settings, (current, total, title) => {
-                  UI2.showProgress(current, total, `${title}
-\u5BFC\u51FA\u4E2D`);
-                });
-              } else {
-                results = await Exporter2.exportBookmarks(toExport, settings, (progress) => {
-                  UI2.showProgress(
-                    progress.current,
-                    progress.total,
-                    `${progress.title}
-${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C)" : ""}`
-                  );
-                });
-              }
-              UI2.hideProgress();
-              UI2.showReport(results);
-              UI2.renderBookmarkList();
-              const successCount = results.success.length;
-              const failCount = results.failed.length;
-              const skippedCount = ((_a2 = results.skipped) == null ? void 0 : _a2.length) || 0;
-              let statusMsg;
-              if (results.authAborted || results.aborted === true) {
-                const authCode = String(((_b = results.authAborted) == null ? void 0 : _b.authCode) || "").toLowerCase();
-                if (authCode === "empty_token") {
-                  statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08\u672A\u8BFB\u53D6\u5230 API Key\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u91CD\u65B0\u4FDD\u5B58 API Key \u540E\u91CD\u8BD5`;
-                } else if (authCode === "format_suspect") {
-                  statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08API Key \u683C\u5F0F\u5F02\u5E38\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u786E\u8BA4 Key \u4EE5 secret_/ntn_ \u5F00\u5934`;
-                } else if (authCode === "invalid_bearer_token" || authCode === "unauthorized") {
-                  statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08Notion \u62D2\u7EDD\u8BE5 Key\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u91CD\u65B0\u590D\u5236 API Key \u6216\u91CD\u65B0 OAuth \u6388\u6743`;
-                } else {
-                  statusMsg = `\u26D4 \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08Notion \u8BA4\u8BC1\u5931\u8D25\uFF09\uFF1A\u6210\u529F ${successCount} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${skippedCount} \u4E2A\u3002\u8BF7\u68C0\u67E5 API Key / OAuth \u6388\u6743\u540E\u91CD\u65B0\u5BFC\u51FA`;
-                }
-              } else {
-                statusMsg = `\u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${successCount} \u4E2A`;
-                if (failCount > 0) statusMsg += `\uFF0C\u5931\u8D25 ${failCount} \u4E2A`;
-                if (skippedCount > 0) statusMsg += `\uFF0C\u8DF3\u8FC7 ${skippedCount} \u4E2A`;
-              }
-              UI2.showStatus(statusMsg, results.authAborted || results.aborted === true || failCount > successCount ? "error" : "success");
-              if (typeof GM_notification === "function") {
-                GM_notification({
-                  title: "\u5BFC\u51FA\u5B8C\u6210",
-                  text: statusMsg,
-                  timeout: 5e3
-                });
-              }
-            } catch (error) {
-              UI2.hideProgress();
-              UI2.showStatus(`\u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
-            } finally {
-              updateExportButtonState();
-              refs.exportBtns.style.display = "flex";
-              refs.controlBtns.style.display = "none";
-              Exporter2.reset();
-            }
-          };
-          refs.obsExportBtn.onclick = async () => {
-            if (refs.obsExportBtn.disabled) return;
-            const obsUrl = refs.obsApiUrlInput.value.trim();
-            const obsKey = getSensitiveValue(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, CONFIG2.DEFAULTS.obsApiKey);
-            const obsDir = refs.obsDirInput.value.trim() || "Linux.do";
-            const obsImgMode = refs.obsImgModeSelect.value;
-            const obsImgDir = refs.obsImgDirInput.value.trim() || "Linux.do/attachments";
-            if (!obsUrl || !obsKey) {
-              UI2.showStatus("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E Obsidian API \u5730\u5740\u548C Key", "error");
-              return;
-            }
-            const selected = UI2.getSelectedBookmarks().filter((b) => !UI2.isBookmarkKeyExported(UI2.getBookmarkKey(b)));
-            if (selected.length === 0) {
-              UI2.showStatus("\u8BF7\u5148\u9009\u62E9\u8981\u5BFC\u51FA\u7684\u5E16\u5B50", "error");
-              return;
-            }
-            refs.obsExportBtn.disabled = true;
-            refs.exportBtns.style.display = "none";
-            refs.controlBtns.style.display = "flex";
-            refs.pauseBtn.innerHTML = "\u23F8\uFE0F \u6682\u505C";
-            refs.pauseBtn.classList.add("ldb-btn-warning");
-            refs.pauseBtn.classList.remove("ldb-btn-primary");
-            UI2.refs.reportContainer.innerHTML = "";
-            const results = { success: [], failed: [], skipped: [] };
-            let imageFailures = 0;
-            try {
-              if (UI2.isActiveGitHubSource()) {
-                const githubResults = await UI2.exportGitHubSelectedToObsidian(selected, {
-                  obsUrl,
-                  obsKey,
-                  obsDir,
-                  aiApiKey: getSensitiveValue(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, ""),
-                  aiService: refs.aiServiceSelect.value,
-                  aiModel: refs.aiModelSelect.value,
-                  aiBaseUrl: refs.aiBaseUrlInput.value.trim(),
-                  categories: Utils2.parseAICategories(refs.aiCategoriesInput.value.trim() || ""),
-                  token: getSensitiveValue(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "")
-                }, (current, total, title) => {
-                  UI2.showProgress(current, total, `${title}
-\u5BFC\u51FA\u5230 Obsidian...`);
-                });
-                results.success.push(...githubResults.success);
-                results.failed.push(...githubResults.failed);
-                results.skipped.push(...githubResults.skipped || []);
-              } else {
-                for (let i = 0; i < selected.length; i++) {
-                  if (Exporter2.isCancelled) break;
-                  while (Exporter2.isPaused) {
-                    await Utils2.sleep(200);
-                    if (Exporter2.isCancelled) break;
-                  }
-                  if (Exporter2.isCancelled) break;
-                  const bookmark = selected[i];
-                  const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
-                  UI2.showProgress(i + 1, selected.length, "\u5BFC\u51FA\u5E16\u5B50\u5230 Obsidian...");
-                  try {
-                    const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
-                    const filteredPosts = Exporter2.filterPosts(posts, topic, {
-                      onlyFirst: refs.onlyFirstCheckbox.checked,
-                      onlyOp: refs.onlyOpCheckbox.checked,
-                      rangeStart: parseInt(refs.rangeStartInput.value) || 1,
-                      rangeEnd: parseInt(refs.rangeEndInput.value) || 999999,
-                      imgFilter: refs.filterImgSelect.value,
-                      filterUsers: refs.filterUsersInput.value.trim(),
-                      filterInclude: refs.filterIncludeInput.value.trim(),
-                      filterExclude: refs.filterExcludeInput.value.trim(),
-                      filterMinLen: parseInt(refs.filterMinLenInput.value) || 0
-                    });
-                    const meta = {
-                      title: topic.title,
-                      url: topic.url,
-                      author: topic.opUsername,
-                      topicId: topic.topicId || topic.topic_id,
-                      category: topic.categoryName || topic.category,
-                      tags: topic.tags || [],
-                      floors: filteredPosts.length
-                    };
-                    let md = HTMLToMarkdown2.buildFrontmatter(meta);
-                    md += `> [!info] \u5E16\u5B50\u4FE1\u606F
-`;
-                    md += `> - **\u539F\u59CB\u94FE\u63A5**: ${Utils2.mdLink(topic.title, topic.url)}
-`;
-                    md += `> - **\u697C\u4E3B**: @${topic.opUsername || "\u672A\u77E5"}
-`;
-                    md += `> - **\u5206\u7C7B**: ${meta.category || "\u65E0"}
-`;
-                    md += `> - **\u6807\u7B7E**: ${(topic.tags || []).join(", ") || "\u65E0"}
-`;
-                    md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
-
-`;
-                    filteredPosts.forEach((post, idx) => {
-                      const isOp = post.username === topic.opUsername;
-                      md += HTMLToMarkdown2.buildPostCallout(post, idx, isOp);
-                    });
-                    if (obsImgMode === "file") {
-                      const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-                      let match;
-                      const imgDownloads = [];
-                      while ((match = imgRegex.exec(md)) !== null) {
-                        imgDownloads.push({ full: match[0], alt: match[1], url: match[2] });
-                      }
-                      for (const img of imgDownloads) {
-                        if (Exporter2.isCancelled) break;
-                        while (Exporter2.isPaused) {
-                          await Utils2.sleep(200);
-                          if (Exporter2.isCancelled) break;
-                        }
-                        if (Exporter2.isCancelled) break;
-                        try {
-                          const ext = img.url.split(".").pop().split("?")[0] || "png";
-                          const nameBytes = new Uint8Array(4);
-                          if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-                            crypto.getRandomValues(nameBytes);
-                          } else {
-                            throw new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 Obsidian \u56FE\u7247\u6587\u4EF6\u540D");
-                          }
-                          const safeName = `img-${Date.now()}-${Array.from(nameBytes, (b) => b.toString(16).padStart(2, "0")).join("")}.${ext}`;
-                          const imgPath = `${obsImgDir}/${safeName}`;
-                          const { UrlValidator } = require_UrlValidator();
-                          if (!UrlValidator.validatePageExternalUrl(img.url)) {
-                            throw new Error("\u56FE\u7247 URL \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C");
-                          }
-                          const blob = await new Promise((resolve, reject) => {
-                            GM_xmlhttpRequest({
-                              method: "GET",
-                              url: img.url,
-                              responseType: "blob",
-                              timeout: 3e4,
-                              onload: (r) => {
-                                if (r.status >= 200 && r.status < 300) resolve(r.response);
-                                else reject(new Error(`\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25: HTTP ${r.status}`));
-                              },
-                              onerror: (e) => reject(e),
-                              ontimeout: () => reject(new Error("\u56FE\u7247\u4E0B\u8F7D\u8D85\u65F6"))
-                            });
-                          });
-                          if (!OperationGuard2.canExecute("obsidian.writeImage")) {
-                            OperationGuard2.auditDenied("obsidian.writeImage", { itemName: topic.title, trigger: "user_requested_write" }, {
-                              phase: "execute",
-                              reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u56FE\u7247\u5199\u5165\u9700\u8981 level\u22651"
-                            });
-                            throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u56FE\u7247\u5199\u5165\u9700\u8981 level\u22651");
-                          }
-                          const imgResult = await ObsidianAPI2.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType2(ext));
-                          if (!imgResult.ok) throw new Error(imgResult.error);
-                          md = md.replace(img.full, () => `![${img.alt}](${encodeURI(imgPath)})`);
-                        } catch {
-                          imageFailures++;
-                        }
-                      }
-                    } else if (obsImgMode === "base64") {
-                      const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-                      const matches = [];
-                      let m;
-                      while ((m = imgRegex.exec(md)) !== null) matches.push(m);
-                      for (const match of matches.reverse()) {
-                        if (Exporter2.isCancelled) break;
-                        while (Exporter2.isPaused) {
-                          await Utils2.sleep(200);
-                          if (Exporter2.isCancelled) break;
-                        }
-                        if (Exporter2.isCancelled) break;
-                        try {
-                          const { UrlValidator } = require_UrlValidator();
-                          if (!UrlValidator.validatePageExternalUrl(match[2])) {
-                            throw new Error("\u56FE\u7247 URL \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C");
-                          }
-                          const resp = await new Promise((resolve, reject) => {
-                            GM_xmlhttpRequest({
-                              method: "GET",
-                              url: match[2],
-                              responseType: "blob",
-                              timeout: 3e4,
-                              // P4 收敛(c13): onload 对 4xx/5xx 同样触发 —— 错误页不得内嵌为 data URL
-                              onload: (r) => {
-                                if (r.status >= 200 && r.status < 300) resolve(r);
-                                else reject(new Error(`\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25: HTTP ${r.status}`));
-                              },
-                              onerror: (e) => reject(e),
-                              ontimeout: () => reject(new Error("\u56FE\u7247\u4E0B\u8F7D\u8D85\u65F6"))
-                            });
-                          });
-                          const b64 = await new Promise((resolve) => {
-                            const reader = new FileReader();
-                            reader.onloadend = () => resolve(reader.result);
-                            reader.readAsDataURL(resp.response);
-                          });
-                          md = md.replace(match[0], () => `![${match[1]}](${b64})`);
-                        } catch {
-                          imageFailures++;
-                        }
-                      }
-                    }
-                    const fileName = UI2.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
-                    if (!OperationGuard2.canExecute("obsidian.writeNote")) {
-                      OperationGuard2.auditDenied("obsidian.writeNote", { itemName: topic.title, trigger: "user_requested_write" }, {
-                        phase: "execute",
-                        reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651"
-                      });
-                      throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651");
-                    }
-                    const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
-                    if (!noteResult.ok) throw new Error(noteResult.error);
-                    Storage2.markTopicExported(topicId);
-                    results.success.push({
-                      title: topic.title,
-                      url: topic.url
-                    });
-                  } catch (error) {
-                    results.failed.push({
-                      title: bookmark.title || `\u5E16\u5B50 ${topicId}`,
-                      error: error.message
-                    });
-                    const msgText = String((error == null ? void 0 : error.message) || "");
-                    if (/\bHTTP\s*40[13]\b/.test(msgText) || msgText.includes("invalid") || msgText.includes("Invalid") || msgText.includes("ECONNREFUSED") || msgText.includes("refused")) {
-                      results.authAborted = { reason: error.message, at: i + 1 };
-                      for (let k = i + 1; k < selected.length; k++) {
-                        const skippedBm = selected[k];
-                        results.skipped.push({
-                          title: skippedBm.title || skippedBm.name || `\u5E16\u5B50 ${skippedBm.topic_id || ""}`
-                        });
-                      }
-                      break;
-                    }
-                  }
-                  if (i < selected.length - 1) {
-                    await Utils2.sleep(300);
-                  }
-                }
-              }
-              UI2.hideProgress();
-              UI2.showReport(results);
-              UI2.renderBookmarkList();
-              const msg = results.authAborted ? `\u26D4 Obsidian \u5BFC\u51FA\u5DF2\u4E2D\u6B62\uFF08\u8BA4\u8BC1/\u8FDE\u63A5\u5931\u8D25\uFF09\uFF1A\u6210\u529F ${results.success.length} \u4E2A\uFF0C\u672A\u5C1D\u8BD5 ${results.skipped.length} \u4E2A\u3002\u8BF7\u68C0\u67E5 Obsidian API \u5730\u5740\u4E0E Key \u540E\u91CD\u8BD5\u3002` : `Obsidian \u5BFC\u51FA\u5B8C\u6210\uFF1A\u6210\u529F ${results.success.length} \u4E2A${results.failed.length ? `\uFF0C\u5931\u8D25 ${results.failed.length} \u4E2A` : ""}${imageFailures > 0 ? `\uFF0C${imageFailures} \u5F20\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25` : ""}`;
-              UI2.showStatus(msg, results.authAborted ? "error" : results.failed.length > 0 || imageFailures > 0 ? "warning" : "success");
-            } catch (error) {
-              UI2.showStatus(`Obsidian \u5BFC\u51FA\u51FA\u9519: ${error.message}`, "error");
-            } finally {
-              refs.obsExportBtn.disabled = false;
-              refs.exportBtns.style.display = "flex";
-              refs.controlBtns.style.display = "none";
-              Exporter2.reset();
-            }
-          };
-          refs.permissionLevelSelect.onchange = (e) => {
-            const level = parseInt(e.target.value);
-            OperationGuard2.setLevel(level);
-            UI2.showStatus(`\u6743\u9650\u7EA7\u522B\u5DF2\u8BBE\u7F6E\u4E3A: ${CONFIG2.PERMISSION_NAMES[level]}`, "success");
-            try {
-              UI2.updateExportTargetSummary();
-            } catch (err) {
-              console.warn("[LD-Notion] \u6743\u9650\u6458\u8981\u5237\u65B0\u5931\u8D25:", err);
-            }
-          };
-          refs.requireConfirmCheckbox.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.REQUIRE_CONFIRM, e.target.checked);
-          };
-          refs.enableAuditLogCheckbox.onchange = (e) => {
-            const previousState = Storage2.get(CONFIG2.STORAGE_KEYS.ENABLE_AUDIT_LOG, CONFIG2.DEFAULTS.enableAuditLog);
-            const nextState = !!e.target.checked;
-            OperationLog2.add({
-              audit_event: nextState ? "audit.enabled" : "audit.disabled",
-              actor: "user",
-              source: "linuxdo-panel",
-              operation: {
-                name: "toggleAuditLog",
-                risk: "standard",
-                trigger: "user_settings_change"
-              },
-              payload: {
-                previousState,
-                newState: nextState
-              },
-              result: {
-                status: "success",
-                reason: nextState ? "audit_enabled" : "audit_disabled"
-              },
-              redaction: [],
-              operationName: "toggleAuditLog",
-              context: {
-                previousState,
-                newState: nextState
-              },
-              startTime: Date.now(),
-              endTime: Date.now(),
-              status: "success"
-            }, { force: true });
-            Storage2.set(CONFIG2.STORAGE_KEYS.ENABLE_AUDIT_LOG, nextState);
-            const logPanel = refs.logPanel;
-            if (logPanel) {
-              logPanel.style.display = nextState ? "block" : "none";
-            }
-          };
-          refs.logToggleBtn.onclick = () => {
-            const content = refs.logContent;
-            const arrow = refs.logArrow;
-            content.classList.toggle("collapsed");
-            arrow.textContent = content.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
-            refs.logToggleBtn.setAttribute("aria-expanded", String(!content.classList.contains("collapsed")));
-            if (!content.classList.contains("collapsed")) {
-              UI2.updateLogPanel();
-            }
-          };
-          refs.logToggleBtn.onkeydown = (e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              refs.logToggleBtn.click();
-            }
-          };
-          refs.logClearBtn.onclick = () => {
-            ConfirmationDialog2.show({
-              title: "\u6E05\u9664\u64CD\u4F5C\u65E5\u5FD7",
-              message: "\u786E\u5B9A\u8981\u6E05\u9664\u6240\u6709\u64CD\u4F5C\u65E5\u5FD7\u5417\uFF1F",
-              confirmText: "\u6E05\u9664",
-              onConfirm: () => {
-                OperationLog2.clear();
-                UI2.showStatus("\u65E5\u5FD7\u5DF2\u6E05\u9664", "success");
-              }
-            });
-          };
-          const renderDedupSummary = () => {
-            const el = refs.dedupSummary;
-            if (!el) return;
-            const linuxdoCount = Object.keys(DedupStore.getSeen("linuxdo") || {}).length;
-            const githubCount = Object.keys(GitHubAPI2.getExported() || {}).length + Object.keys(GitHubAPI2.getExportedGists() || {}).length;
-            const bookmarkCount = Object.keys(BookmarkExporter2.getExported() || {}).length;
-            el.textContent = `\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55 \u2014\u2014 Linux.do: ${linuxdoCount} \u6761\uFF1BGitHub: ${githubCount} \u6761\uFF1B\u4E66\u7B7E: ${bookmarkCount} \u6761`;
-          };
-          const clearWithConfirm = (label, doClear) => {
-            ConfirmationDialog2.show({
-              title: `\u6E05\u9664${label}\u8BB0\u5F55`,
-              message: `\u786E\u5B9A\u6E05\u9664${label}\u8BB0\u5F55\u5417\uFF1F
-\u6E05\u9664\u540E\u8BE5\u6765\u6E90\u7684\u6240\u6709\u5185\u5BB9\u5C06\u53EF\u518D\u6B21\u5BFC\u51FA/\u5BFC\u5165\u3002`,
-              confirmText: "\u6E05\u9664",
-              onConfirm: () => {
-                doClear();
-                renderDedupSummary();
-                UI2.showStatus(`${label}\u8BB0\u5F55\u5DF2\u6E05\u9664`, "success");
-              }
-            });
-          };
-          refs.clearLinuxdoDedupBtn.onclick = () => clearWithConfirm("Linux.do \u53BB\u91CD", () => {
-            Storage2.clearExportedTopics();
-          });
-          refs.clearGithubExportedBtn.onclick = () => clearWithConfirm("GitHub \u5DF2\u5BFC\u51FA", () => GitHubAPI2.clearExportedRecords());
-          refs.clearBookmarkExportedBtn.onclick = () => clearWithConfirm("\u4E66\u7B7E\u5DF2\u5BFC\u51FA", () => BookmarkExporter2.clearExportedRecords());
-          renderDedupSummary();
+          require_export_bindings().bindExport({ UI: UI2, panel, refs, getInputValue, getSensitiveValue, updateExportButtonState, syncUndoOrganizeBtn });
           const renderAiTraces = () => {
             const resultEl = refs.aiTracesResult;
             if (!resultEl) return;
@@ -34504,7 +34532,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   });
 
   // src/main.js
-  var { CONFIG, SUPPORTED_FILE_TYPES, EXT_TO_MIME, FILE_TYPE_CATEGORY, SUPPORTED_IMAGE_TYPES, MULTI_PART_THRESHOLD, isSupportedFileType, getMimeType, getFileCategory, MSG } = require_config();
+  var { CONFIG, SUPPORTED_FILE_TYPES, EXT_TO_MIME, FILE_TYPE_CATEGORY, SUPPORTED_IMAGE_TYPES, MULTI_PART_THRESHOLD, isSupportedFileType, getMimeType: getMimeType2, getFileCategory, MSG } = require_config();
   var { Utils } = require_utils();
   var { Storage, SyncState } = require_storage();
   var { CredentialVault, TargetState, NotionOAuth } = require_auth();

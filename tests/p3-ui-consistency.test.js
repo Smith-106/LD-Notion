@@ -8,6 +8,7 @@ const eventBus = require("../src/coordination/event-bus.js");
 
 const mainUiSrc = fs.readFileSync("src/ui/main-ui.js", "utf8");
 const eventsSrc = fs.readFileSync("src/ui/events.js", "utf8");
+const exportBindSrc = fs.readFileSync("src/ui/events/export-bindings.js", "utf8");
 
 describe("P3: main-ui 剪贴板统一入口", () => {
     let originalCreateElement;
@@ -114,7 +115,8 @@ describe("P3: 收藏加载竞态与导出按钮就绪", () => {
     });
 
     it("导出结束按配置完整性恢复按钮", () => {
-        expect(eventsSrc).toMatch(/updateExportButtonState\(\);\n\s*refs\.exportBtns\.style\.display = "flex";/);
+        // M3 events 拆分: exportBtn.onclick 迁 export-bindings.js;UI.updateExportButtonState 赋值仍在 events.js
+        expect(exportBindSrc).toMatch(/updateExportButtonState\(\);\n\s*refs\.exportBtns\.style\.display = "flex";/);
         expect(eventsSrc).toContain("UI.updateExportButtonState = updateExportButtonState;");
     });
 });
