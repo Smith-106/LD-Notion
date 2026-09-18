@@ -367,8 +367,10 @@ ${availableTools}
             // 调用 AI
             let response;
             try {
+                // ISS-20260728-020 (OBS-001): 逐次 AI 调用提取 result.usage → trace.usage 累计
                 response = await AIService().requestAgentChat(
-                    systemPrompt, messages, settings, 1500
+                    systemPrompt, messages, settings, 1500,
+                    (usage) => AgentTrace.recordUsage(trace, usage)
                 );
             } catch (error) {
                 AgentTrace.recordError(trace, error);

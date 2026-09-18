@@ -91,6 +91,65 @@ describe("AgentTrace — AI Agent 调用链路追踪 (ISS-012)", () => {
         });
     });
 
+    describe("recordUsage — ISS-20260728-020 (OBS-001) token 用量埋点", () => {
+        it("create 初始化 usage {prompt,completion,total,calls,missing} 全零", () => {
+            const t = AgentTrace.create("test");
+            expect(t.usage).toEqual({ prompt: 0, completion: 0, total: 0, calls: 0, missing: 0 });
+        });
+
+        it("OpenAI usage 字段归一化(prompt_tokens/completion_tokens/total_tokens)", () => {
+            const t = AgentTrace.create("test");
+            AgentTrace.recordUsage(t, { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 });
+            expect(t.usage).toEqual({ prompt: 100, completion: 40, total: 140, calls: 1, missing: 0 });
+        });
+
+        it("Claude usage 字段归一化(input_tokens/output_tokens,total=和)", () => {
+            const t = AgentTrace.create("test");
+            AgentTrace.recordUsage(t, { input_tokens: 200, output_tokens: 60 });
+            expect(t.usage).toEqual({ prompt: 200, completion: 60, total: 260, calls: 1, missing: 0 });
+        });
+
+        it("Gemini usage 字段归一化(promptTokenCount/candidatesTokenCount/totalTokenCount)", () => {
+            const t = AgentTrace.create("test");
+            AgentTrace.recordUsage(t, { promptTokenCount: 80, candidatesTokenCount: 20, totalTokenCount: 100 });
+            expect(t.usage).toEqual({ prompt: 80, completion: 20, total: 100, calls: 1, missing: 0 });
+        });
+
+        it("多次调用累计 per-invocation usage", () => {
+            const t = AgentTrace.create("test");
+            AgentTrace.recordUsage(t, { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 });
+            AgentTrace.recordUsage(t, { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 });
+            expect(t.usage.calls).toBe(2);
+            expect(t.usage.prompt).toBe(150);
+            expect(t.usage.completion).toBe(50);
+            expect(t.usage.total).toBe(200);
+            expect(t.usage.missing).toBe(0);
+        });
+
+        it("usage 缺失(undefined/非对象)计 missing 不抛错", () => {
+            const t = AgentTrace.create("test");
+            AgentTrace.recordUsage(t, undefined);
+            AgentTrace.recordUsage(t, null);
+            AgentTrace.recordUsage(t, "notanobject");
+            expect(t.usage.calls).toBe(3);
+            expect(t.usage.missing).toBe(3);
+            expect(t.usage.total).toBe(0);
+        });
+
+        it("null trace 安全跳过", () => {
+            expect(() => AgentTrace.recordUsage(null, { total_tokens: 1 })).not.toThrow();
+        });
+
+        it("persist 后 usage 随 trace 落盘", () => {
+            const t = AgentTrace.create("test");
+            AgentTrace.recordUsage(t, { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 });
+            const persisted = AgentTrace.persist(t, "completed", "回复");
+            expect(persisted.usage).toEqual({ prompt: 120, completion: 30, total: 150, calls: 1, missing: 0 });
+            const list = AgentTrace.list();
+            expect(list[0].usage.total).toBe(150);
+        });
+    });
+
     describe("persist + rotate", () => {
         it("persist 落盘后 trace 出现在 list", () => {
             const t = AgentTrace.create("test");

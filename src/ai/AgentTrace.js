@@ -23,6 +23,7 @@ const { CredentialVault } = require("../auth");
  *   finalResponse: string,               // 最终 AI 回复（截断 1000 字符）
  *   latencyMs: number,                   // 总耗时
  *   errors: string[],                     // 错误收集（AI 调用失败/工具异常）
+ *   usage: { prompt, completion, total, calls }, // ISS-20260728-020: token 用量累计(per-invocation)
  *   status: "completed" | "failed" | "max_iterations"
  * }
  */
@@ -68,9 +69,36 @@ const AgentTrace = {
             finalResponse: "",
             latencyMs: 0,
             errors: [],
+            // ISS-20260728-020 (OBS-001): token 用量累计 —— _chatRequest onload 提取 result.usage,
+            // runAgentLoop 经 onUsage 回调逐次累计到此。capped 字段标记 provider 未返回 usage 的次数。
+            usage: { prompt: 0, completion: 0, total: 0, calls: 0, missing: 0 },
             status: "in_progress",
             _startedAt: Date.now(),
         };
+    },
+
+    /**
+     * ISS-20260728-020 (OBS-001): 累计一次 AI 调用的 token 用量。
+     * 归一化三 provider 的 usage 字段差异:
+     *   OpenAI: { prompt_tokens, completion_tokens, total_tokens }
+     *   Claude: { input_tokens, output_tokens }
+     *   Gemini: { promptTokenCount, candidatesTokenCount, totalTokenCount }
+     * @param {object} trace — create() 返回的 trace
+     * @param {object} usage — provider 原始 usage 对象(可为 undefined)
+     */
+    recordUsage(trace, usage) {
+        if (!trace || !trace.usage) return;
+        trace.usage.calls += 1;
+        if (!usage || typeof usage !== "object") {
+            trace.usage.missing += 1;
+            return;
+        }
+        const prompt = usage.prompt_tokens ?? usage.input_tokens ?? usage.promptTokenCount ?? 0;
+        const completion = usage.completion_tokens ?? usage.output_tokens ?? usage.candidatesTokenCount ?? 0;
+        const total = usage.total_tokens ?? usage.totalTokenCount ?? (prompt + completion);
+        trace.usage.prompt += Number(prompt) || 0;
+        trace.usage.completion += Number(completion) || 0;
+        trace.usage.total += Number(total) || 0;
     },
 
     /**

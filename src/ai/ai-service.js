@@ -218,7 +218,10 @@ const AIService = {
     // onload/onerror/timeout 模板。三 provider 仅声明差异部分（url/headers/body/extractResponse/errorPrefix）。
     // timeout 默认 90000（长对话）；分类请求（requestOpenAI/Claude/Gemini）传 30000（DISCOVER P6 同类去重）。
     // 90000ms 超时是长对话请求统一值（MAINT-007 已常量化建议，此处暂留内联）。
-    _chatRequest: (url, headers, body, extractResponse, errorPrefix, timeout = 90000) => {
+    // ISS-20260728-020 (OBS-001): onUsage 可选回调 —— 提取 result.usage token 用量,
+    // 此前 extractResponse 只取 content 丢弃 usage(observability 缺口)。调用方(runAgentLoop)
+    // 传入记录函数将 per-invocation token 累计落 AgentTrace.usage。
+    _chatRequest: (url, headers, body, extractResponse, errorPrefix, timeout = 90000, onUsage = null) => {
         return AIService._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST",
@@ -229,6 +232,10 @@ const AIService = {
                     try {
                         const result = JSON.parse(response.responseText);
                         if (response.status >= 200 && response.status < 300) {
+                            // OBS-001: 先上报 usage 再提取 content —— 用量字段在 provider 原始响应中
+                            if (typeof onUsage === "function") {
+                                try { onUsage(result?.usage); } catch { /* 用量记录失败不阻断主流程 */ }
+                            }
                             resolve(extractResponse(result));
                         } else {
                             reject(new Error(result.error?.message || `${errorPrefix}错误: ${response.status} ${Utils.truncateText(response.responseText || "", 300)}`));
@@ -298,7 +305,8 @@ const AIService = {
     // Agent 多轮对话请求 —— v3.14.6 (S-02): 系统指令与不可信用户内容角色分离,
     // OpenAI messages[role=system] / Anthropic 顶层 system / Gemini systemInstruction;
     // 不支持通道保留原压平 + 防伪前缀
-    requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500) => {
+    // ISS-20260728-020: onUsage 可选 —— runAgentLoop 传入,逐次 AI 调用提取 result.usage 落 trace
+    requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500, onUsage = null) => {
         const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
         const provider = AIService.PROVIDERS[aiService];
         if (!provider) throw new Error(`未知的 AI 服务: ${aiService}`);
@@ -319,7 +327,9 @@ const AIService = {
                 { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
                 { model, messages: [{ role: "system", content: systemText }, ...normalizedMessages], max_completion_tokens: maxTokens, temperature: 0.7 },
                 (result) => result.choices?.[0]?.message?.content?.trim() || "",
-                "OpenAI"
+                "OpenAI",
+                90000,
+                onUsage
             );
         }
         if (aiService === "claude") {
@@ -332,7 +342,9 @@ const AIService = {
                 { "x-api-key": aiApiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
                 { model, system: systemText, messages: normalizedMessages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: maxTokens },
                 (result) => result.content?.[0]?.text?.trim() || "",
-                "Claude"
+                "Claude",
+                90000,
+                onUsage
             );
         }
         if (aiService === "gemini") {
@@ -346,7 +358,9 @@ const AIService = {
                 { "Content-Type": "application/json", "x-goog-api-key": aiApiKey },
                 { systemInstruction: { parts: [{ text: systemText }] }, contents: normalizedMessages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })), generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
                 (result) => result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "",
-                "Gemini"
+                "Gemini",
+                90000,
+                onUsage
             );
         }
 
