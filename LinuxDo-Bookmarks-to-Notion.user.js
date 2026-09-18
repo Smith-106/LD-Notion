@@ -15904,8 +15904,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           let aiNotice = "";
           if (classifyWithAI) {
             try {
-              const { AIService: AIService3, getAISettings } = require_ai();
-              const settings = getAISettings();
+              const { AIService: AIService3, getAISettings: getAISettings2 } = require_ai();
+              const settings = getAISettings2();
               if (settings && settings.aiApiKey) {
                 const rootIds = /* @__PURE__ */ new Set(["1", "2"]);
                 const folderByTitle = /* @__PURE__ */ new Map();
@@ -25203,428 +25203,6 @@ ${systemText}
     }
   });
 
-  // src/import/github-obsidian-service.js
-  var require_github_obsidian_service = __commonJS({
-    "src/import/github-obsidian-service.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var { NotionAPI: NotionAPI2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2 } = require_api();
-      var { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
-      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
-      var { OperationGuard: OperationGuard2 } = require_security();
-      var { SyncLock } = require_sync_lock();
-      var sanitizeObsidianFileName = (name, fallback = "untitled") => {
-        const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
-        return base || fallback;
-      };
-      var assertObsidianWriteAllowed = (operation, context = {}) => {
-        if (OperationGuard2.canExecute(operation)) return;
-        OperationGuard2.auditDenied(operation, { ...context, trigger: context.trigger || "user_requested_write" }, {
-          phase: "execute",
-          reason: `\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u5199\u5165(${operation})\u9700\u8981 level\u22651\uFF0C\u53EF\u5728\u4E3B\u9762\u677F\u300C\u6743\u9650\u63A7\u5236\u300D\u4E2D\u8C03\u6574\u3002`
-        });
-        throw new Error(`\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u5199\u5165\u9700\u8981 level\u22651\uFF08\u53EF\u5728\u4E3B\u9762\u677F\u300C\u6743\u9650\u63A7\u5236\u300D\u4E2D\u8C03\u6574\uFF09\u3002`);
-      };
-      var mapGitHubItemsToBookmarks = (items, sourceType) => {
-        return (items || []).map((item) => {
-          const isGist = sourceType === "gists";
-          const itemKey = isGist ? String(item.id || "") : String(item.full_name || item.name || "");
-          const title = isGist ? item.description || Object.keys(item.files || {})[0] || `Gist ${item.id || ""}` : item.full_name || item.name || "\u672A\u547D\u540D\u4ED3\u5E93";
-          return {
-            source: "github",
-            sourceType,
-            itemKey,
-            title,
-            raw: item
-          };
-        }).filter((item) => !!item.itemKey);
-      };
-      var buildGitHubObsidianMarkdown = async (item, settings = {}, enrichContext = null) => {
-        var _a, _b;
-        if (!(item == null ? void 0 : item.raw)) {
-          throw new Error("GitHub \u6761\u76EE\u6570\u636E\u4E0D\u5B8C\u6574");
-        }
-        const sourceTypeMap = {
-          stars: "Stars",
-          repos: "Repos",
-          forks: "Forks",
-          gists: "Gists"
-        };
-        const sourceTypeLabel = sourceTypeMap[item.sourceType] || "GitHub";
-        const bookmark = item.raw;
-        const isGist = item.sourceType === "gists";
-        const owner = isGist ? String(((_a = bookmark.owner) == null ? void 0 : _a.login) || "") : String(((_b = bookmark.owner) == null ? void 0 : _b.login) || String(bookmark.full_name || "").split("/")[0] || "");
-        const inferredTags = Array.isArray(bookmark.inferredTags) ? bookmark.inferredTags : [];
-        const topicTags = Array.isArray(bookmark.topics) ? bookmark.topics : [];
-        const tags = Array.from(new Set([...topicTags, ...inferredTags].filter(Boolean))).slice(0, 20);
-        if (isGist) {
-          const files = Object.values(bookmark.files || {});
-          const primaryFile = files[0] || {};
-          const fileNames = Object.keys(bookmark.files || {});
-          const title2 = item.title || bookmark.description || fileNames[0] || `Gist ${bookmark.id || ""}`;
-          const language = primaryFile.language || "";
-          const meta2 = {
-            title: title2,
-            url: bookmark.html_url || "https://gist.github.com",
-            author: owner || "\u672A\u77E5",
-            owner,
-            gistId: String(bookmark.id || item.itemKey || ""),
-            source: "GitHub",
-            sourceType: sourceTypeLabel,
-            category: "Gist",
-            language,
-            updatedAt: bookmark.updated_at || bookmark.created_at || "",
-            tags
-          };
-          let md2 = HTMLToMarkdown2.buildFrontmatter(meta2);
-          md2 += `> [!info] GitHub Gist
-`;
-          md2 += `> - **\u539F\u59CB\u94FE\u63A5**: [${title2}](${meta2.url})
-`;
-          md2 += `> - **\u4F5C\u8005**: ${owner || "\u672A\u77E5"}
-`;
-          md2 += `> - **\u7C7B\u578B**: ${sourceTypeLabel}
-`;
-          md2 += `> - **\u8BED\u8A00**: ${language || "\u672A\u77E5"}
-`;
-          md2 += `> - **\u6587\u4EF6\u6570**: ${fileNames.length}
-`;
-          md2 += `> - **\u6807\u7B7E**: ${tags.join(", ") || "\u65E0"}
-`;
-          md2 += `> - **\u66F4\u65B0\u65F6\u95F4**: ${bookmark.updated_at ? new Date(bookmark.updated_at).toLocaleString("zh-CN") : "\u672A\u77E5"}
-`;
-          md2 += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
-
-`;
-          if (bookmark.description) {
-            md2 += `## \u63CF\u8FF0
-
-${bookmark.description}
-
-`;
-          }
-          if (fileNames.length > 0) {
-            md2 += "## \u6587\u4EF6\u5217\u8868\n\n";
-            fileNames.forEach((fileName) => {
-              var _a2;
-              const file = ((_a2 = bookmark.files) == null ? void 0 : _a2[fileName]) || {};
-              md2 += `- \`${fileName}\``;
-              if (file.language) md2 += ` \xB7 ${file.language}`;
-              if (Number.isFinite(file.size)) md2 += ` \xB7 ${file.size} bytes`;
-              md2 += "\n";
-            });
-            md2 += "\n";
-          }
-          return {
-            title: title2,
-            fileName: sanitizeObsidianFileName(title2, `gist-${bookmark.id || "untitled"}`),
-            markdown: md2,
-            url: meta2.url
-          };
-        }
-        const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, enrichContext || { aiUsedCount: 0, aiMaxItems: 20 });
-        const title = enriched.generatedTitle || item.title || enriched.full_name || enriched.name || "\u672A\u547D\u540D\u4ED3\u5E93";
-        const meta = {
-          title,
-          url: enriched.html_url || "https://github.com",
-          author: owner || "\u672A\u77E5",
-          owner,
-          repo: enriched.full_name || enriched.name || item.itemKey || "",
-          source: "GitHub",
-          sourceType: sourceTypeLabel,
-          category: enriched.inferredCategory || "Repo",
-          language: enriched.language || "",
-          stars: enriched.stargazers_count || 0,
-          updatedAt: enriched.pushed_at || enriched.updated_at || "",
-          tags
-        };
-        let md = HTMLToMarkdown2.buildFrontmatter(meta);
-        md += `> [!info] GitHub \u9879\u76EE
-`;
-        md += `> - **\u539F\u59CB\u94FE\u63A5**: [${enriched.full_name || title}](${meta.url})
-`;
-        md += `> - **\u4F5C\u8005**: ${owner || "\u672A\u77E5"}
-`;
-        md += `> - **\u7C7B\u578B**: ${sourceTypeLabel}
-`;
-        md += `> - **\u8BED\u8A00**: ${enriched.language || "\u672A\u77E5"}
-`;
-        md += `> - **Stars**: ${enriched.stargazers_count || 0}
-`;
-        md += `> - **\u5206\u7C7B**: ${enriched.inferredCategory || "\u672A\u5206\u7C7B"}
-`;
-        md += `> - **\u6807\u7B7E**: ${tags.join(", ") || "\u65E0"}
-`;
-        md += `> - **\u66F4\u65B0\u65F6\u95F4**: ${enriched.pushed_at || enriched.updated_at ? new Date(enriched.pushed_at || enriched.updated_at).toLocaleString("zh-CN") : "\u672A\u77E5"}
-`;
-        md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
-
-`;
-        if (enriched.description) {
-          md += `## \u9879\u76EE\u63CF\u8FF0
-
-${enriched.description}
-
-`;
-        }
-        if (enriched.readmeSummary) {
-          md += `## README \u6458\u8981
-
-${enriched.readmeSummary}
-
-`;
-        }
-        if (Array.isArray(enriched.topics) && enriched.topics.length > 0) {
-          md += `## Topics
-
-${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
-
-`;
-        }
-        return {
-          title,
-          fileName: sanitizeObsidianFileName(enriched.full_name || title, "github-repo"),
-          markdown: md,
-          url: meta.url
-        };
-      };
-      var exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgress, control = {}) => {
-        const { obsUrl, obsKey, obsDir } = settings;
-        if (!obsUrl || !obsKey) {
-          throw new Error("\u8BF7\u5148\u914D\u7F6E Obsidian API \u5730\u5740\u548C Key");
-        }
-        if (!selectedItems || selectedItems.length === 0) {
-          return { success: [], failed: [], skipped: [] };
-        }
-        const success = [];
-        const failed = [];
-        const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-        let githubDirty = false;
-        let authAbortInfo = null;
-        const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-        try {
-          for (let i = 0; i < selectedItems.length; i++) {
-            if (control.isCancelled) break;
-            while (control.isPaused) {
-              await Utils2.sleep(200);
-              if (control.isCancelled) break;
-            }
-            if (control.isCancelled) break;
-            const item = selectedItems[i];
-            onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
-            try {
-              const note = await buildGitHubObsidianMarkdown(item, settings, enrichContext);
-              assertObsidianWriteAllowed("obsidian.writeNote", { itemKey: item.itemKey, sourceType: item.sourceType, itemName: item.title || item.itemKey });
-              const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
-              if (!noteResult.ok) throw new Error(noteResult.error);
-              if (item.sourceType === "gists") {
-                GitHubAPI2.markGistExported(item.itemKey);
-              } else {
-                GitHubAPI2.markExported(item.itemKey);
-              }
-              githubDirty = true;
-              success.push({
-                title: note.title,
-                url: note.url
-              });
-            } catch (error) {
-              console.warn(`[GitHubObsidianService] Export failed: ${item.itemKey}`, error);
-              failed.push({
-                title: item.title || item.itemKey || "GitHub",
-                error: error.message
-              });
-              const obsErrMsg = String((error == null ? void 0 : error.message) || "");
-              if (/\bHTTP\s*40[13]\b/.test(obsErrMsg) || obsErrMsg.includes("invalid") || obsErrMsg.includes("Invalid") || obsErrMsg.includes("ECONNREFUSED") || obsErrMsg.includes("refused")) {
-                authAbortInfo = { reason: error.message, at: i + 1 };
-                break;
-              }
-            }
-            if (!authAbortInfo && i < selectedItems.length - 1 && delay > 0) {
-              await Utils2.sleep(delay);
-            }
-          }
-        } finally {
-          if (githubDirty) {
-            GitHubAPI2.flushExported();
-            GitHubAPI2.flushGistsExported();
-          }
-        }
-        return {
-          success,
-          failed,
-          skipped: authAbortInfo || control.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
-            title: item.title || item.itemKey || "GitHub"
-          })) : [],
-          ...authAbortInfo ? { authAborted: authAbortInfo } : {}
-        };
-      };
-      var exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress, control = {}) => {
-        if (SyncLock.isExporting) {
-          return {
-            success: [],
-            failed: [],
-            skipped: (selectedItems || []).map((item) => ({ title: (item == null ? void 0 : item.title) || (item == null ? void 0 : item.itemKey) || "GitHub" })),
-            message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
-          };
-        }
-        const { apiKey, databaseId } = settings;
-        if (!apiKey || !databaseId) {
-          throw new Error("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
-        }
-        if (!selectedItems || selectedItems.length === 0) {
-          return { success: [], failed: [], skipped: [] };
-        }
-        const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
-        if (!setupResult.success) {
-          throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
-        }
-        const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
-        if (!lease) {
-          return {
-            success: [],
-            failed: [],
-            skipped: (selectedItems || []).map((item) => ({ title: (item == null ? void 0 : item.title) || (item == null ? void 0 : item.itemKey) || "GitHub" })),
-            message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
-          };
-        }
-        const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-        const success = [];
-        const failed = [];
-        let githubDirty = false;
-        SyncLock.isExporting = true;
-        let leaseLost = false;
-        const renewTimer = setInterval(() => {
-          let renewed;
-          try {
-            renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-          } catch (renewError) {
-            console.warn("[GitHubObsidianService] \u7EED\u7EA6\u5931\u8D25:", renewError);
-            renewed = false;
-          }
-          if (!renewed) {
-            leaseLost = true;
-            clearInterval(renewTimer);
-          }
-        }, 3e4);
-        const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-        try {
-          for (let i = 0; i < selectedItems.length; i++) {
-            if (control.isCancelled) break;
-            if (leaseLost) break;
-            while (control.isPaused) {
-              await Utils2.sleep(200);
-              if (control.isCancelled || leaseLost) break;
-            }
-            if (control.isCancelled || leaseLost) break;
-            const item = selectedItems[i];
-            const bookmark = item.raw;
-            const sourceType = item.sourceType;
-            const label = item.title || item.itemKey;
-            try {
-              onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, label);
-            } catch (progressError) {
-              console.warn(`[GitHubObsidianService] onProgress \u56DE\u8C03\u5F02\u5E38 (${label}):`, progressError);
-            }
-            try {
-              let properties;
-              if (sourceType === "gists") {
-                properties = GitHubExporter2.buildGistProperties(bookmark);
-              } else {
-                const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
-                const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, enrichContext);
-                properties = GitHubExporter2.buildRepoProperties(enriched, sourceMap[sourceType] || "Star");
-              }
-              for (const key of Object.keys(properties)) {
-                if (properties[key] === void 0) delete properties[key];
-              }
-              if (leaseLost) break;
-              if (!OperationGuard2.canExecute("createDatabasePage")) {
-                GitHubExporter2._auditExport(
-                  "createDatabasePage",
-                  "denied",
-                  { itemKey: item.itemKey, sourceType, itemName: item.title || item.itemKey, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u624B\u52A8\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
-                );
-                failed.push({ title: item.title, error: "\u6743\u9650\u4E0D\u8DB3\uFF08\u9700 level\u22651\uFF09", itemKey: item.itemKey, sourceType });
-                continue;
-              }
-              const page = await NotionAPI2.request("POST", "/pages", {
-                parent: { database_id: databaseId },
-                properties
-              }, apiKey);
-              if (sourceType === "gists") {
-                GitHubAPI2.markGistExported(item.itemKey);
-              } else {
-                GitHubAPI2.markExported(item.itemKey);
-              }
-              githubDirty = true;
-              GitHubExporter2._auditExport(
-                "createDatabasePage",
-                "success",
-                { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: item.itemKey, sourceType, databaseId }
-              );
-              success.push({
-                title: item.title,
-                url: (bookmark == null ? void 0 : bookmark.html_url) || "https://github.com",
-                itemKey: item.itemKey,
-                sourceType
-              });
-            } catch (error) {
-              console.warn(`[GitHubObsidianService] Notion export failed: ${item.itemKey}`, error);
-              GitHubExporter2._auditExport(
-                "createDatabasePage",
-                "failed",
-                { itemKey: item.itemKey, sourceType, reason: String((error == null ? void 0 : error.message) || error) }
-              );
-              failed.push({
-                title: item.title,
-                error: error.message,
-                itemKey: item.itemKey,
-                sourceType
-              });
-              if (error && error.isAuthTerminal === true) {
-                const skipped = selectedItems.slice(i + 1).map((skippedItem) => ({
-                  title: skippedItem.title || skippedItem.itemKey || "GitHub"
-                }));
-                if (githubDirty) {
-                  GitHubAPI2.flushExported();
-                  GitHubAPI2.flushGistsExported();
-                }
-                return { success, failed, skipped, authAborted: { reason: error.message, at: i + 1, authCode: error.authCode || "unauthorized" } };
-              }
-            }
-            if (i < selectedItems.length - 1 && delay > 0) {
-              await Utils2.sleep(delay);
-            }
-          }
-        } finally {
-          if (githubDirty) {
-            GitHubAPI2.flushExported();
-            GitHubAPI2.flushGistsExported();
-          }
-          clearInterval(renewTimer);
-          SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-          SyncLock.isExporting = false;
-        }
-        return {
-          success,
-          failed,
-          skipped: control.isCancelled || leaseLost ? selectedItems.slice(success.length + failed.length).map((item) => ({
-            title: item.title || item.itemKey || "GitHub"
-          })) : []
-        };
-      };
-      module.exports = {
-        sanitizeObsidianFileName,
-        mapGitHubItemsToBookmarks,
-        buildGitHubObsidianMarkdown,
-        exportGitHubSelectedToObsidian,
-        exportGitHubSelectedToNotion
-      };
-    }
-  });
-
   // src/ui/workspace-visual.js
   var require_workspace_visual = __commonJS({
     "src/ui/workspace-visual.js"(exports, module) {
@@ -26540,7 +26118,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
-      var { NotionOAuth: NotionOAuth2 } = require_auth();
+      var { NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { WorkspaceService: WorkspaceService2 } = require_extract();
@@ -27573,9 +27151,1048 @@ ${AIService3.isolateContent(JSON.stringify({
                 </div>
             </div>
         `;
+        },
+        // M3 波次7: 工作区协作包/洞察报告/保存到 Notion/可视化摘要 —— 提取自 main-ui.js (~640 LOC),
+        // UI.* 引用统一改 UI(). (lazy accessor,与本文件既有口径一致)。
+        buildWorkspaceCollaborationPackage: (model = UI2().buildWorkspaceVisualizationModel(), syncModel = UI2().buildUnifiedSyncModel()) => {
+          if (!(model == null ? void 0 : model.scannedAt)) {
+            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
+          }
+          const cloneJson = (value, fallback) => {
+            try {
+              return JSON.parse(JSON.stringify(value));
+            } catch {
+              return fallback;
+            }
+          };
+          const markdown = UI2().workspaceInsightMarkdown || UI2().buildWorkspaceInsightMarkdown(model, UI2().workspaceInsightSummary || "");
+          const generatedAt = UI2().workspaceInsightUpdatedAt || Date.now();
+          const summaryText = String(UI2().workspaceInsightSummary || "").trim() || UI2().buildWorkspaceInsightFallbackSummary(model);
+          return {
+            packageType: "ld-notion-workspace-collaboration",
+            packageVersion: 1,
+            generatedAt: new Date(generatedAt).toISOString(),
+            workspace: {
+              scannedAt: new Date(Number(model.scannedAt || generatedAt)).toISOString(),
+              maxPages: Number(model.maxPages || 0),
+              totalPages: Number(model.totalPages || 0),
+              totalDatabases: Number(model.totalDatabases || 0),
+              sourcedPages: Number(model.sourcedPages || 0),
+              datedPages: Number(model.datedPages || 0),
+              categorizedPages: Number(model.categorizedPages || 0),
+              structuredPages: Number(model.structuredPages || 0),
+              missingSourcePages: Number(model.missingSourcePages || 0),
+              missingDatePages: Number(model.missingDatePages || 0),
+              missingCategoryPages: Number(model.missingCategoryPages || 0),
+              recognizedSources: cloneJson(model.recognizedSources || [], []),
+              sourceBreakdown: cloneJson(model.sourceBreakdown || [], []),
+              categoryBreakdown: cloneJson(model.categoryBreakdown || [], []),
+              timeline: cloneJson(model.timeline || [], []),
+              relationships: cloneJson(model.relationships || [], []),
+              funnel: cloneJson(model.funnel || [], []),
+              duplicateCandidates: cloneJson(model.duplicateCandidates || [], []),
+              connectionCandidates: cloneJson(model.connectionCandidates || [], [])
+            },
+            insight: {
+              summary: summaryText,
+              markdown,
+              updatedAt: new Date(generatedAt).toISOString()
+            },
+            syncCenter: {
+              enabledCount: Number((syncModel == null ? void 0 : syncModel.enabledCount) || 0),
+              runningCount: Number((syncModel == null ? void 0 : syncModel.runningCount) || 0),
+              issueCount: Number((syncModel == null ? void 0 : syncModel.issueCount) || 0),
+              latestSuccessSource: String((syncModel == null ? void 0 : syncModel.latestSuccessSource) || "\u5C1A\u672A\u5EFA\u7ACB"),
+              latestSuccessLabel: String((syncModel == null ? void 0 : syncModel.latestSuccessLabel) || "\u6682\u65E0\u6210\u529F\u8BB0\u5F55"),
+              sourceRows: cloneJson((syncModel == null ? void 0 : syncModel.sourceRows) || [], [])
+            }
+          };
+        },
+        buildWorkspaceCollaborationPackageMarkdown: (collabPackage = UI2().buildWorkspaceCollaborationPackage()) => {
+          var _a, _b, _c, _d, _e, _f, _g, _h;
+          const candidateLines = Array.isArray((_a = collabPackage == null ? void 0 : collabPackage.workspace) == null ? void 0 : _a.connectionCandidates) && collabPackage.workspace.connectionCandidates.length > 0 ? collabPackage.workspace.connectionCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u6761\uFF0C\u539F\u56E0 ${item.reason}`) : ["- \u6682\u65E0\u8DE8\u6E90\u5173\u8054\u5019\u9009"];
+          const duplicateLines = Array.isArray((_b = collabPackage == null ? void 0 : collabPackage.workspace) == null ? void 0 : _b.duplicateCandidates) && collabPackage.workspace.duplicateCandidates.length > 0 ? collabPackage.workspace.duplicateCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u6761\uFF0C\u6765\u6E90 ${Array.isArray(item.sources) ? item.sources.join(" + ") : ""}`) : ["- \u6682\u65E0\u91CD\u590D\u5019\u9009"];
+          const syncLines = Array.isArray((_c = collabPackage == null ? void 0 : collabPackage.syncCenter) == null ? void 0 : _c.sourceRows) && collabPackage.syncCenter.sourceRows.length > 0 ? collabPackage.syncCenter.sourceRows.map((row) => `- ${row.label}\uFF1A${row.outcomeLabel}\uFF0C\u6700\u8FD1\u6210\u529F ${row.lastSuccessLabel}\uFF0C\u57FA\u7EBF ${row.watermarkLabel}`) : ["- \u6682\u65E0\u540C\u6B65\u4E2D\u5FC3\u6458\u8981"];
+          const payload = JSON.stringify(collabPackage, null, 2);
+          return [
+            "# \u5DE5\u4F5C\u533A\u534F\u4F5C\u5305",
+            "",
+            `- \u751F\u6210\u65F6\u95F4\uFF1A${(collabPackage == null ? void 0 : collabPackage.generatedAt) || ""}`,
+            `- \u9875\u9762\u603B\u6570\uFF1A${((_d = collabPackage == null ? void 0 : collabPackage.workspace) == null ? void 0 : _d.totalPages) || 0}`,
+            `- \u6570\u636E\u5E93\u603B\u6570\uFF1A${((_e = collabPackage == null ? void 0 : collabPackage.workspace) == null ? void 0 : _e.totalDatabases) || 0}`,
+            `- \u5DF2\u542F\u7528\u540C\u6B65\u6765\u6E90\uFF1A${((_f = collabPackage == null ? void 0 : collabPackage.syncCenter) == null ? void 0 : _f.enabledCount) || 0}`,
+            "",
+            "## \u534F\u4F5C\u6458\u8981",
+            ((_g = collabPackage == null ? void 0 : collabPackage.insight) == null ? void 0 : _g.summary) || "\u6682\u65E0\u534F\u4F5C\u6458\u8981",
+            "",
+            "## \u5DE5\u4F5C\u533A\u6D1E\u5BDF",
+            ((_h = collabPackage == null ? void 0 : collabPackage.insight) == null ? void 0 : _h.markdown) || "\u6682\u65E0\u6D1E\u5BDF\u5185\u5BB9",
+            "",
+            "## \u7EDF\u4E00\u5019\u9009\u6982\u89C8",
+            ...candidateLines,
+            "",
+            "## \u91CD\u590D\u5019\u9009\u6982\u89C8",
+            ...duplicateLines,
+            "",
+            "## \u540C\u6B65\u4E2D\u5FC3\u6458\u8981",
+            ...syncLines,
+            "",
+            "## \u7ED3\u6784\u5316\u534F\u4F5C\u5305 JSON",
+            "```json",
+            payload,
+            "```"
+          ].join("\n");
+        },
+        copyWorkspaceInsightReport: async () => {
+          const model = UI2().buildWorkspaceVisualizationModel();
+          if (!(model == null ? void 0 : model.scannedAt)) {
+            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
+          }
+          const markdown = UI2().workspaceInsightMarkdown || UI2().buildWorkspaceInsightMarkdown(model);
+          try {
+            await UI2().copyTextToClipboard(markdown);
+            UI2().workspaceInsightMarkdown = markdown;
+            UI2().workspaceInsightUpdatedAt = Date.now();
+            UI2().showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u590D\u5236\u3002", "success");
+          } catch (error) {
+            throw new Error((error == null ? void 0 : error.message) || String(error));
+          }
+        },
+        downloadWorkspaceInsightReport: async () => {
+          const model = UI2().buildWorkspaceVisualizationModel();
+          if (!(model == null ? void 0 : model.scannedAt)) {
+            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
+          }
+          const markdown = UI2().workspaceInsightMarkdown || UI2().buildWorkspaceInsightMarkdown(model);
+          const objectUrlApi = typeof window !== "undefined" && window.URL && typeof window.URL.createObjectURL === "function" ? window.URL : typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL : null;
+          if (!objectUrlApi) {
+            throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u62A5\u544A\u4E0B\u8F7D\u3002");
+          }
+          const stampSource = UI2().workspaceInsightUpdatedAt || Date.now();
+          const stamp = new Date(stampSource).toISOString().replace(/[:.]/g, "-");
+          const filename = `ld-notion-workspace-insight-${stamp}.md`;
+          const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+          const href = objectUrlApi.createObjectURL(blob);
+          try {
+            const link = document.createElement("a");
+            link.href = href;
+            link.download = filename;
+            link.style.display = "none";
+            document.body.appendChild(link);
+            link.click();
+            if (typeof link.remove === "function") {
+              link.remove();
+            }
+            UI2().workspaceInsightMarkdown = markdown;
+            UI2().workspaceInsightUpdatedAt = Date.now();
+            UI2().showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u5F00\u59CB\u4E0B\u8F7D\u3002", "success");
+            return { filename, markdown };
+          } catch (error) {
+            throw new Error((error == null ? void 0 : error.message) || String(error));
+          } finally {
+            if (typeof objectUrlApi.revokeObjectURL === "function") {
+              setTimeout(() => objectUrlApi.revokeObjectURL(href), 0);
+            }
+          }
+        },
+        downloadWorkspaceCollaborationPackage: async () => {
+          const model = UI2().buildWorkspaceVisualizationModel();
+          const syncModel = UI2().buildUnifiedSyncModel();
+          const collabPackage = UI2().buildWorkspaceCollaborationPackage(model, syncModel);
+          const objectUrlApi = typeof window !== "undefined" && window.URL && typeof window.URL.createObjectURL === "function" ? window.URL : typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL : null;
+          if (!objectUrlApi) {
+            throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u534F\u4F5C\u5305\u4E0B\u8F7D\u3002");
+          }
+          const stampSource = UI2().workspaceInsightUpdatedAt || Date.now();
+          const stamp = new Date(stampSource).toISOString().replace(/[:.]/g, "-");
+          const filename = `ld-notion-workspace-collaboration-${stamp}.json`;
+          const payload = JSON.stringify(collabPackage, null, 2);
+          const blob = new Blob([payload], { type: "application/json;charset=utf-8" });
+          const href = objectUrlApi.createObjectURL(blob);
+          try {
+            const link = document.createElement("a");
+            link.href = href;
+            link.download = filename;
+            link.style.display = "none";
+            document.body.appendChild(link);
+            link.click();
+            if (typeof link.remove === "function") {
+              link.remove();
+            }
+            UI2().workspaceInsightUpdatedAt = Date.now();
+            UI2().showStatus("\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5DF2\u5F00\u59CB\u4E0B\u8F7D\u3002", "success");
+            return { filename, payload, collabPackage };
+          } catch (error) {
+            throw new Error((error == null ? void 0 : error.message) || String(error));
+          } finally {
+            if (typeof objectUrlApi.revokeObjectURL === "function") {
+              setTimeout(() => objectUrlApi.revokeObjectURL(href), 0);
+            }
+          }
+        },
+        saveWorkspaceCollaborationPackageToNotion: async () => {
+          var _a, _b, _c;
+          const model = UI2().buildWorkspaceVisualizationModel();
+          if (!(model == null ? void 0 : model.scannedAt)) {
+            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
+          }
+          const apiKey = NotionOAuth2.getAccessToken((_b = (_a = UI2().refs) == null ? void 0 : _a.apiKeyInput) == null ? void 0 : _b.value.trim());
+          if (!apiKey) {
+            throw new Error(MSG2.NO_NOTION_KEY);
+          }
+          const exportState = TargetState2.getExportState();
+          if (!exportState.targetId) {
+            throw new Error("\u8BF7\u5148\u914D\u7F6E\u5BFC\u51FA\u76EE\u6807\uFF08\u6570\u636E\u5E93\u6216\u7236\u9875\u9762\uFF09\u3002");
+          }
+          const collabPackage = UI2().buildWorkspaceCollaborationPackage(model, UI2().buildUnifiedSyncModel());
+          const markdown = UI2().buildWorkspaceCollaborationPackageMarkdown(collabPackage);
+          const packageTime = UI2().workspaceInsightUpdatedAt || Date.now();
+          const packageTitle = `\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305 ${new Date(packageTime).toLocaleString("zh-CN", { hour12: false })}`;
+          const contentBlocks = AIAssistant2._textToBlocks(markdown);
+          let page = null;
+          if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
+            const parentPageId = exportState.parentPageId;
+            page = await AIAssistant2._executeGuardedPageWrite(
+              "createDatabasePage",
+              { id: parentPageId, name: packageTitle },
+              () => NotionAPI2.createChildPage(parentPageId, packageTitle, contentBlocks, apiKey),
+              apiKey,
+              {
+                itemName: packageTitle,
+                pageId: parentPageId,
+                source: "ui",
+                surface: "workspace-visualization"
+              }
+            );
+          } else {
+            const databaseId = exportState.databaseId;
+            const database = await NotionAPI2.fetchDatabase(databaseId, apiKey);
+            const titlePropertyName = ((_c = Object.entries(database.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _c[0]) || null;
+            if (!titlePropertyName) {
+              throw new Error("\u5F53\u524D\u76EE\u6807\u6570\u636E\u5E93\u7F3A\u5C11\u6807\u9898\u5C5E\u6027\uFF0C\u65E0\u6CD5\u4FDD\u5B58\u534F\u4F5C\u5305\u3002");
+            }
+            const properties = {
+              [titlePropertyName]: {
+                title: [{ text: { content: packageTitle } }]
+              }
+            };
+            page = await AIAssistant2._executeGuardedDatabaseWrite(
+              "createDatabasePage",
+              databaseId,
+              () => NotionAPI2.createPageObject({ database_id: databaseId }, properties, contentBlocks, apiKey),
+              apiKey,
+              {
+                itemName: packageTitle,
+                databaseId,
+                source: "ui",
+                surface: "workspace-visualization"
+              }
+            );
+          }
+          const pageId = Utils2.extractNotionId(page == null ? void 0 : page.id) || String((page == null ? void 0 : page.id) || "").replace(/-/g, "");
+          UI2().workspaceInsightUpdatedAt = Date.now();
+          UI2().setWorkspaceVisualStatus(
+            `\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5DF2\u4FDD\u5B58\u5230 Notion\uFF08${exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93"}\uFF09\u3002`,
+            "success"
+          );
+          UI2().showStatus("\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5DF2\u4FDD\u5B58\u5230 Notion\u3002", "success");
+          return {
+            pageId,
+            title: packageTitle,
+            targetId: exportState.targetId,
+            targetType: exportState.targetType,
+            markdown,
+            collabPackage
+          };
+        },
+        saveWorkspaceInsightReportToNotion: async () => {
+          var _a, _b, _c;
+          const model = UI2().buildWorkspaceVisualizationModel();
+          if (!(model == null ? void 0 : model.scannedAt)) {
+            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
+          }
+          const apiKey = NotionOAuth2.getAccessToken((_b = (_a = UI2().refs) == null ? void 0 : _a.apiKeyInput) == null ? void 0 : _b.value.trim());
+          if (!apiKey) {
+            throw new Error(MSG2.NO_NOTION_KEY);
+          }
+          const exportState = TargetState2.getExportState();
+          if (!exportState.targetId) {
+            throw new Error("\u8BF7\u5148\u914D\u7F6E\u5BFC\u51FA\u76EE\u6807\uFF08\u6570\u636E\u5E93\u6216\u7236\u9875\u9762\uFF09\u3002");
+          }
+          const markdown = UI2().workspaceInsightMarkdown || UI2().buildWorkspaceInsightMarkdown(model);
+          const reportTime = UI2().workspaceInsightUpdatedAt || Date.now();
+          const reportTitle = `\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A ${new Date(reportTime).toLocaleString("zh-CN", { hour12: false })}`;
+          const contentBlocks = AIAssistant2._textToBlocks(markdown);
+          let page = null;
+          if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
+            const parentPageId = exportState.parentPageId;
+            page = await AIAssistant2._executeGuardedPageWrite(
+              "createDatabasePage",
+              { id: parentPageId, name: reportTitle },
+              () => NotionAPI2.createChildPage(parentPageId, reportTitle, contentBlocks, apiKey),
+              apiKey,
+              {
+                itemName: reportTitle,
+                pageId: parentPageId,
+                source: "ui",
+                surface: "workspace-visualization"
+              }
+            );
+          } else {
+            const databaseId = exportState.databaseId;
+            const database = await NotionAPI2.fetchDatabase(databaseId, apiKey);
+            const titlePropertyName = ((_c = Object.entries(database.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _c[0]) || null;
+            if (!titlePropertyName) {
+              throw new Error("\u5F53\u524D\u76EE\u6807\u6570\u636E\u5E93\u7F3A\u5C11\u6807\u9898\u5C5E\u6027\uFF0C\u65E0\u6CD5\u4FDD\u5B58\u62A5\u544A\u3002");
+            }
+            const properties = {
+              [titlePropertyName]: {
+                title: [{ text: { content: reportTitle } }]
+              }
+            };
+            page = await AIAssistant2._executeGuardedDatabaseWrite(
+              "createDatabasePage",
+              databaseId,
+              () => NotionAPI2.createPageObject({ database_id: databaseId }, properties, contentBlocks, apiKey),
+              apiKey,
+              {
+                itemName: reportTitle,
+                databaseId,
+                source: "ui",
+                surface: "workspace-visualization"
+              }
+            );
+          }
+          const pageId = Utils2.extractNotionId(page == null ? void 0 : page.id) || String((page == null ? void 0 : page.id) || "").replace(/-/g, "");
+          UI2().workspaceInsightMarkdown = markdown;
+          UI2().workspaceInsightUpdatedAt = Date.now();
+          UI2().setWorkspaceVisualStatus(
+            `\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u4FDD\u5B58\u5230 Notion\uFF08${exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93"}\uFF09\u3002`,
+            "success"
+          );
+          UI2().showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u4FDD\u5B58\u5230 Notion\u3002", "success");
+          return {
+            pageId,
+            title: reportTitle,
+            targetId: exportState.targetId,
+            targetType: exportState.targetType,
+            markdown
+          };
+        },
+        saveWorkspaceConnectionCandidatesToNotion: async () => {
+          var _a, _b, _c, _d, _e;
+          const model = UI2().buildWorkspaceVisualizationModel();
+          const abortSignal = (_a = UI2()._abortController) == null ? void 0 : _a.signal;
+          if (!(model == null ? void 0 : model.scannedAt)) {
+            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
+          }
+          if (!Array.isArray(model.connectionCandidates) || model.connectionCandidates.length === 0) {
+            throw new Error("\u5F53\u524D\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u8DE8\u6E90\u5173\u8054\u5019\u9009\u3002");
+          }
+          const apiKey = NotionOAuth2.getAccessToken((_c = (_b = UI2().refs) == null ? void 0 : _b.apiKeyInput) == null ? void 0 : _c.value.trim());
+          if (!apiKey) {
+            throw new Error(MSG2.NO_NOTION_KEY);
+          }
+          const exportState = TargetState2.getExportState();
+          if (!exportState.targetId) {
+            throw new Error("\u8BF7\u5148\u914D\u7F6E\u5BFC\u51FA\u76EE\u6807\uFF08\u6570\u636E\u5E93\u6216\u7236\u9875\u9762\uFF09\u3002");
+          }
+          const savedAt = Date.now();
+          const createdPages = [];
+          const failedCandidates = [];
+          const aiSettings = getAISettings();
+          let database = null;
+          let titlePropertyName = null;
+          if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.DATABASE) {
+            database = await NotionAPI2.fetchDatabase(exportState.databaseId, apiKey);
+            titlePropertyName = ((_d = Object.entries(database.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _d[0]) || null;
+            if (!titlePropertyName) {
+              throw new Error("\u5F53\u524D\u76EE\u6807\u6570\u636E\u5E93\u7F3A\u5C11\u6807\u9898\u5C5E\u6027\uFF0C\u65E0\u6CD5\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u3002");
+            }
+            database = await UI2().ensureWorkspaceConnectionCandidateDatabaseSchema(exportState.databaseId, apiKey, database);
+          }
+          for (let index = 0; index < model.connectionCandidates.length; index++) {
+            if (abortSignal == null ? void 0 : abortSignal.aborted) break;
+            const candidate = model.connectionCandidates[index];
+            const aiDraft = await UI2().buildWorkspaceConnectionCandidateAIDraft(candidate, aiSettings);
+            const candidateTitle = UI2().buildWorkspaceConnectionCandidateTitle(candidate, index, aiDraft);
+            const markdown = UI2().buildWorkspaceConnectionCandidateMarkdown(candidate, savedAt, aiDraft);
+            const contentBlocks = AIAssistant2._textToBlocks(markdown);
+            try {
+              let page = null;
+              if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
+                const parentPageId = exportState.parentPageId;
+                page = await AIAssistant2._executeGuardedPageWrite(
+                  "createDatabasePage",
+                  { id: parentPageId, name: candidateTitle },
+                  () => NotionAPI2.createChildPage(parentPageId, candidateTitle, contentBlocks, apiKey),
+                  apiKey,
+                  {
+                    itemName: candidateTitle,
+                    pageId: parentPageId,
+                    source: "ui",
+                    surface: "workspace-visualization"
+                  }
+                );
+              } else {
+                const properties = UI2().buildWorkspaceConnectionCandidateDatabaseProperties(
+                  database,
+                  titlePropertyName,
+                  candidate,
+                  candidateTitle,
+                  aiDraft
+                );
+                page = await AIAssistant2._executeGuardedDatabaseWrite(
+                  "createDatabasePage",
+                  exportState.databaseId,
+                  () => NotionAPI2.createPageObject({ database_id: exportState.databaseId }, properties, contentBlocks, apiKey),
+                  apiKey,
+                  {
+                    itemName: candidateTitle,
+                    databaseId: exportState.databaseId,
+                    source: "ui",
+                    surface: "workspace-visualization"
+                  }
+                );
+              }
+              createdPages.push({
+                id: Utils2.extractNotionId(page == null ? void 0 : page.id) || String((page == null ? void 0 : page.id) || "").replace(/-/g, ""),
+                title: candidateTitle,
+                markdown,
+                candidateKey: (candidate == null ? void 0 : candidate.key) || "",
+                aiDraft
+              });
+            } catch (error) {
+              failedCandidates.push({
+                title: candidateTitle,
+                error: (error == null ? void 0 : error.message) || String(error)
+              });
+            }
+          }
+          if (createdPages.length === 0) {
+            throw new Error(((_e = failedCandidates[0]) == null ? void 0 : _e.error) || "\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u5931\u8D25\u3002");
+          }
+          const targetLabel = exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93";
+          const statusMessage = failedCandidates.length > 0 ? `\u7EDF\u4E00\u5019\u9009\u5DF2\u90E8\u5206\u4FDD\u5B58\u5230 Notion\uFF08${targetLabel}\uFF09\uFF1A\u6210\u529F ${createdPages.length} \u6761\uFF0C\u5931\u8D25 ${failedCandidates.length} \u6761\u3002` : `\u7EDF\u4E00\u5019\u9009\u5DF2\u4FDD\u5B58\u5230 Notion\uFF08${targetLabel}\uFF09\uFF1A\u5171 ${createdPages.length} \u6761\u3002`;
+          const tone = failedCandidates.length > 0 ? "error" : "success";
+          UI2().setWorkspaceVisualStatus(statusMessage, tone);
+          UI2().showStatus(statusMessage, tone);
+          return {
+            createdCount: createdPages.length,
+            failedCount: failedCandidates.length,
+            candidateCount: model.connectionCandidates.length,
+            targetId: exportState.targetId,
+            targetType: exportState.targetType,
+            pageIds: createdPages.map((page) => page.id),
+            pages: createdPages,
+            failures: failedCandidates
+          };
+        },
+        generateWorkspaceInsight: async () => {
+          var _a;
+          const model = UI2().buildWorkspaceVisualizationModel();
+          if (!(model == null ? void 0 : model.scannedAt)) {
+            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
+          }
+          const btn = (_a = UI2().refs) == null ? void 0 : _a.viewGenerateWorkspaceInsightBtn;
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = "\u751F\u6210\u4E2D...";
+          }
+          try {
+            let aiSummary = "";
+            const settings = getAISettings();
+            if (settings == null ? void 0 : settings.aiApiKey) {
+              const prompt2 = [
+                "\u4F60\u662F\u77E5\u8BC6\u5DE5\u4F5C\u533A\u5206\u6790\u5E08\u3002\u8BF7\u57FA\u4E8E\u4EE5\u4E0B\u5DE5\u4F5C\u533A\u5FEB\u7167\u8F93\u51FA\u4E00\u6BB5\u7B80\u6D01\u7684 Markdown \u6D1E\u5BDF\u6458\u8981\u3002",
+                "\u8981\u6C42\uFF1A",
+                "1. \u53EA\u8F93\u51FA 4-6 \u6761 bullet\u3002",
+                "2. \u4F9D\u6B21\u8986\u76D6\u6574\u4F53\u5224\u65AD\u3001\u7ED3\u6784\u7F3A\u53E3\u3001\u8DE8\u6E90\u5173\u8054\u673A\u4F1A\u3001\u4E0B\u4E00\u6B65\u52A8\u4F5C\u3002",
+                "3. \u4E0D\u8981\u91CD\u590D\u539F\u59CB\u6570\u5B57\u8868\u683C\uFF0C\u91CD\u70B9\u505A\u7ED3\u8BBA\u4E0E\u5EFA\u8BAE\u3002",
+                "",
+                // v3.14.7 (REV-04 UI-08): label 溯源 Notion 页面标题(常来自不可信导入内容),
+                // 裸 JSON.stringify 注入可让页面内容劫持 AI 意图——统一走 isolateContent
+                // 隔离标签(与全仓其余 12+ AI 请求构造点对齐, 五层防御第①层)。
+                `<user_input>
+${AIService3.isolateContent(JSON.stringify({
+                  totalPages: model.totalPages,
+                  totalDatabases: model.totalDatabases,
+                  sourceBreakdown: model.sourceBreakdown,
+                  categoryBreakdown: model.categoryBreakdown,
+                  funnel: model.funnel,
+                  duplicateCandidates: model.duplicateCandidates.map((item) => ({
+                    label: item.label,
+                    count: item.count,
+                    sources: item.sources
+                  })),
+                  connectionCandidates: model.connectionCandidates.map((item) => ({
+                    label: item.label,
+                    count: item.count,
+                    reason: item.reason
+                  })),
+                  missingSourcePages: model.missingSourcePages,
+                  missingDatePages: model.missingDatePages,
+                  missingCategoryPages: model.missingCategoryPages
+                }, null, 2))}
+</user_input>`
+              ].join("\n");
+              aiSummary = String(await AIService3.requestChat(prompt2, settings, 900) || "").trim();
+            }
+            UI2().workspaceInsightSummary = aiSummary;
+            UI2().workspaceInsightMarkdown = UI2().buildWorkspaceInsightMarkdown(model, aiSummary);
+            UI2().workspaceInsightUpdatedAt = Date.now();
+            UI2().renderWorkspaceVisualSummary();
+            UI2().setWorkspaceVisualStatus("\u5DF2\u751F\u6210\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\uFF0C\u53EF\u76F4\u63A5\u590D\u5236\u5206\u4EAB\u3002", "success");
+            return UI2().workspaceInsightMarkdown;
+          } catch (error) {
+            UI2().workspaceInsightSummary = "";
+            UI2().workspaceInsightMarkdown = UI2().buildWorkspaceInsightMarkdown(model, "");
+            UI2().workspaceInsightUpdatedAt = Date.now();
+            UI2().renderWorkspaceVisualSummary();
+            UI2().setWorkspaceVisualStatus(`\u6D1E\u5BDF\u751F\u6210\u5931\u8D25\uFF0C\u5DF2\u56DE\u9000\u4E3A\u89C4\u5219\u62A5\u544A\uFF1A${error.message}`, "error");
+            throw error;
+          } finally {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = "\u751F\u6210\u6D1E\u5BDF";
+            }
+          }
+        },
+        renderVisualSummary: () => {
+          var _a, _b;
+          const container = (_a = UI2().refs) == null ? void 0 : _a.viewSummary;
+          if (!container) return;
+          const subtitle = (_b = UI2().refs) == null ? void 0 : _b.viewSubtitle;
+          const model = UI2().buildVisualizationModel();
+          if (subtitle) {
+            subtitle.textContent = model.loadedSources.length > 0 ? `\u8FD9\u91CC\u7EE7\u7EED\u5C55\u793A\u672C\u8F6E\u5DF2\u52A0\u8F7D\u7684 ${model.loadedSources.join(" + ")} \u5217\u8868\u6458\u8981\uFF1B\u5DE5\u4F5C\u533A\u603B\u89C8\u9700\u8981\u70B9\u51FB\u4E0A\u65B9\u6309\u94AE\u5355\u72EC\u5237\u65B0\u3002` : "\u8FD9\u91CC\u7EE7\u7EED\u5C55\u793A\u5F53\u524D\u5DF2\u52A0\u8F7D\u7684 Linux.do / GitHub \u5217\u8868\u6458\u8981\uFF0C\u4E0D\u4F1A\u4E3B\u52A8\u8BFB\u53D6 Notion \u5DE5\u4F5C\u533A\u3002";
+          }
+          if (model.total === 0) {
+            container.innerHTML = `
+                <div class="ldb-view-empty">
+                    <div class="ldb-view-empty-title">\u89C6\u56FE\u8FD8\u6CA1\u6709\u6570\u636E</div>
+                    <div class="ldb-view-empty-text">\u5148\u52A0\u8F7D Linux.do \u6216 GitHub \u6536\u85CF\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u6765\u6E90\u5206\u5E03\u3001\u5BFC\u51FA\u72B6\u6001\u548C\u65F6\u95F4\u7EBF\u6458\u8981\u3002</div>
+                </div>
+            `;
+            return;
+          }
+          const renderBarRows = (rows) => rows.length > 0 ? `<div class="ldb-view-bars">${rows.map((row) => `
+                <div class="ldb-view-bar-row">
+                    <div class="ldb-view-bar-label">${Utils2.escapeHtml(row.label)}</div>
+                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${row.pct > 0 ? Math.max(8, row.pct) : 0}%;"></div></div>
+                    <div class="ldb-view-bar-value">${row.count} \xB7 ${row.pct}%</div>
+                </div>
+            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u6682\u65E0\u53EF\u5C55\u793A\u7684\u6570\u636E\u3002</div>`;
+          const statusRows = [
+            { label: "\u5DF2\u5BFC\u51FA", count: model.exported, pct: UI2().getViewPct(model.exported, model.total) },
+            { label: "\u5F85\u5BFC\u51FA", count: model.pending, pct: UI2().getViewPct(model.pending, model.total) },
+            { label: "\u5F53\u524D\u5DF2\u9009", count: model.selected, pct: UI2().getViewPct(model.selected, model.total) }
+          ];
+          const timelineMarkup = model.timeline.length > 0 ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
+                <div class="ldb-view-timeline-item">
+                    <!-- v3.14.7 (REV-25 UI-24): label \u88F8\u63D2\u503C\u8F6C\u4E49\u2014\u2014\u5F53\u524D\u6570\u503C\u6765\u6E90\u4E0D\u53EF\u6CE8\u5165,
+                         \u4E00\u65E6\u751F\u6210\u903B\u8F91\u643A\u5E26\u6765\u6E90\u6587\u672C\u5373\u6210 XSS \u70B9, \u7EDF\u4E00 escapeHtml -->
+                    <div class="ldb-view-timeline-label">${Utils2.escapeHtml(String(item.label || ""))}</div>
+                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${item.count > 0 ? Math.max(8, UI2().getViewPct(item.count, model.total)) : 0}%;"></div></div>
+                    <div class="ldb-view-timeline-value">${Utils2.escapeHtml(String(item.count))} \u9879 / \u5DF2\u5BFC\u51FA ${Utils2.escapeHtml(String(item.exported))}</div>
+                </div>
+            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u6570\u636E\u91CC\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u65F6\u95F4\u5B57\u6BB5\u3002</div>`;
+          const typeHighlights = model.typeBreakdown.slice(0, 4).map((item) => {
+            return `<span class="ldb-view-pill">${Utils2.escapeHtml(item.label)} ${item.count}</span>`;
+          }).join("");
+          container.innerHTML = `
+            <div class="ldb-view-grid">
+                <div class="ldb-view-card">
+                    <div class="ldb-view-card-title">\u5DF2\u52A0\u8F7D\u6761\u76EE</div>
+                    <div class="ldb-view-metric-value">${model.total}</div>
+                    <div class="ldb-view-metric-meta">\u6765\u81EA ${Math.max(1, model.loadedSources.length)} \u4E2A\u5DF2\u52A0\u8F7D\u6765\u6E90</div>
+                </div>
+                <div class="ldb-view-card">
+                    <div class="ldb-view-card-title">\u5F53\u524D\u9009\u62E9</div>
+                    <div class="ldb-view-metric-value">${model.selected}</div>
+                    <div class="ldb-view-metric-meta">\u7528\u4E8E\u5F53\u524D\u9762\u677F\u7684\u6279\u91CF\u5BFC\u51FA\u9009\u62E9</div>
+                </div>
+                <div class="ldb-view-card full">
+                    <div class="ldb-view-card-title">\u6765\u6E90\u5206\u5E03</div>
+                    ${renderBarRows(model.sourceBreakdown)}
+                    ${typeHighlights ? `<div class="ldb-view-highlight">${typeHighlights}</div>` : ""}
+                </div>
+                <div class="ldb-view-card full">
+                    <div class="ldb-view-card-title">\u5BFC\u51FA\u72B6\u6001</div>
+                    ${renderBarRows(statusRows)}
+                </div>
+                <div class="ldb-view-card full">
+                    <div class="ldb-view-card-title">\u65F6\u95F4\u7EBF</div>
+                    ${timelineMarkup}
+                </div>
+            </div>
+        `;
         }
       };
       module.exports = { WorkspaceInsight };
+    }
+  });
+
+  // src/import/github-obsidian-service.js
+  var require_github_obsidian_service = __commonJS({
+    "src/import/github-obsidian-service.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { NotionAPI: NotionAPI2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2 } = require_api();
+      var { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
+      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
+      var { OperationGuard: OperationGuard2 } = require_security();
+      var { SyncLock } = require_sync_lock();
+      var sanitizeObsidianFileName = (name, fallback = "untitled") => {
+        const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
+        return base || fallback;
+      };
+      var assertObsidianWriteAllowed = (operation, context = {}) => {
+        if (OperationGuard2.canExecute(operation)) return;
+        OperationGuard2.auditDenied(operation, { ...context, trigger: context.trigger || "user_requested_write" }, {
+          phase: "execute",
+          reason: `\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u5199\u5165(${operation})\u9700\u8981 level\u22651\uFF0C\u53EF\u5728\u4E3B\u9762\u677F\u300C\u6743\u9650\u63A7\u5236\u300D\u4E2D\u8C03\u6574\u3002`
+        });
+        throw new Error(`\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u5199\u5165\u9700\u8981 level\u22651\uFF08\u53EF\u5728\u4E3B\u9762\u677F\u300C\u6743\u9650\u63A7\u5236\u300D\u4E2D\u8C03\u6574\uFF09\u3002`);
+      };
+      var mapGitHubItemsToBookmarks = (items, sourceType) => {
+        return (items || []).map((item) => {
+          const isGist = sourceType === "gists";
+          const itemKey = isGist ? String(item.id || "") : String(item.full_name || item.name || "");
+          const title = isGist ? item.description || Object.keys(item.files || {})[0] || `Gist ${item.id || ""}` : item.full_name || item.name || "\u672A\u547D\u540D\u4ED3\u5E93";
+          return {
+            source: "github",
+            sourceType,
+            itemKey,
+            title,
+            raw: item
+          };
+        }).filter((item) => !!item.itemKey);
+      };
+      var buildGitHubObsidianMarkdown = async (item, settings = {}, enrichContext = null) => {
+        var _a, _b;
+        if (!(item == null ? void 0 : item.raw)) {
+          throw new Error("GitHub \u6761\u76EE\u6570\u636E\u4E0D\u5B8C\u6574");
+        }
+        const sourceTypeMap = {
+          stars: "Stars",
+          repos: "Repos",
+          forks: "Forks",
+          gists: "Gists"
+        };
+        const sourceTypeLabel = sourceTypeMap[item.sourceType] || "GitHub";
+        const bookmark = item.raw;
+        const isGist = item.sourceType === "gists";
+        const owner = isGist ? String(((_a = bookmark.owner) == null ? void 0 : _a.login) || "") : String(((_b = bookmark.owner) == null ? void 0 : _b.login) || String(bookmark.full_name || "").split("/")[0] || "");
+        const inferredTags = Array.isArray(bookmark.inferredTags) ? bookmark.inferredTags : [];
+        const topicTags = Array.isArray(bookmark.topics) ? bookmark.topics : [];
+        const tags = Array.from(new Set([...topicTags, ...inferredTags].filter(Boolean))).slice(0, 20);
+        if (isGist) {
+          const files = Object.values(bookmark.files || {});
+          const primaryFile = files[0] || {};
+          const fileNames = Object.keys(bookmark.files || {});
+          const title2 = item.title || bookmark.description || fileNames[0] || `Gist ${bookmark.id || ""}`;
+          const language = primaryFile.language || "";
+          const meta2 = {
+            title: title2,
+            url: bookmark.html_url || "https://gist.github.com",
+            author: owner || "\u672A\u77E5",
+            owner,
+            gistId: String(bookmark.id || item.itemKey || ""),
+            source: "GitHub",
+            sourceType: sourceTypeLabel,
+            category: "Gist",
+            language,
+            updatedAt: bookmark.updated_at || bookmark.created_at || "",
+            tags
+          };
+          let md2 = HTMLToMarkdown2.buildFrontmatter(meta2);
+          md2 += `> [!info] GitHub Gist
+`;
+          md2 += `> - **\u539F\u59CB\u94FE\u63A5**: [${title2}](${meta2.url})
+`;
+          md2 += `> - **\u4F5C\u8005**: ${owner || "\u672A\u77E5"}
+`;
+          md2 += `> - **\u7C7B\u578B**: ${sourceTypeLabel}
+`;
+          md2 += `> - **\u8BED\u8A00**: ${language || "\u672A\u77E5"}
+`;
+          md2 += `> - **\u6587\u4EF6\u6570**: ${fileNames.length}
+`;
+          md2 += `> - **\u6807\u7B7E**: ${tags.join(", ") || "\u65E0"}
+`;
+          md2 += `> - **\u66F4\u65B0\u65F6\u95F4**: ${bookmark.updated_at ? new Date(bookmark.updated_at).toLocaleString("zh-CN") : "\u672A\u77E5"}
+`;
+          md2 += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+          if (bookmark.description) {
+            md2 += `## \u63CF\u8FF0
+
+${bookmark.description}
+
+`;
+          }
+          if (fileNames.length > 0) {
+            md2 += "## \u6587\u4EF6\u5217\u8868\n\n";
+            fileNames.forEach((fileName) => {
+              var _a2;
+              const file = ((_a2 = bookmark.files) == null ? void 0 : _a2[fileName]) || {};
+              md2 += `- \`${fileName}\``;
+              if (file.language) md2 += ` \xB7 ${file.language}`;
+              if (Number.isFinite(file.size)) md2 += ` \xB7 ${file.size} bytes`;
+              md2 += "\n";
+            });
+            md2 += "\n";
+          }
+          return {
+            title: title2,
+            fileName: sanitizeObsidianFileName(title2, `gist-${bookmark.id || "untitled"}`),
+            markdown: md2,
+            url: meta2.url
+          };
+        }
+        const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, enrichContext || { aiUsedCount: 0, aiMaxItems: 20 });
+        const title = enriched.generatedTitle || item.title || enriched.full_name || enriched.name || "\u672A\u547D\u540D\u4ED3\u5E93";
+        const meta = {
+          title,
+          url: enriched.html_url || "https://github.com",
+          author: owner || "\u672A\u77E5",
+          owner,
+          repo: enriched.full_name || enriched.name || item.itemKey || "",
+          source: "GitHub",
+          sourceType: sourceTypeLabel,
+          category: enriched.inferredCategory || "Repo",
+          language: enriched.language || "",
+          stars: enriched.stargazers_count || 0,
+          updatedAt: enriched.pushed_at || enriched.updated_at || "",
+          tags
+        };
+        let md = HTMLToMarkdown2.buildFrontmatter(meta);
+        md += `> [!info] GitHub \u9879\u76EE
+`;
+        md += `> - **\u539F\u59CB\u94FE\u63A5**: [${enriched.full_name || title}](${meta.url})
+`;
+        md += `> - **\u4F5C\u8005**: ${owner || "\u672A\u77E5"}
+`;
+        md += `> - **\u7C7B\u578B**: ${sourceTypeLabel}
+`;
+        md += `> - **\u8BED\u8A00**: ${enriched.language || "\u672A\u77E5"}
+`;
+        md += `> - **Stars**: ${enriched.stargazers_count || 0}
+`;
+        md += `> - **\u5206\u7C7B**: ${enriched.inferredCategory || "\u672A\u5206\u7C7B"}
+`;
+        md += `> - **\u6807\u7B7E**: ${tags.join(", ") || "\u65E0"}
+`;
+        md += `> - **\u66F4\u65B0\u65F6\u95F4**: ${enriched.pushed_at || enriched.updated_at ? new Date(enriched.pushed_at || enriched.updated_at).toLocaleString("zh-CN") : "\u672A\u77E5"}
+`;
+        md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+        if (enriched.description) {
+          md += `## \u9879\u76EE\u63CF\u8FF0
+
+${enriched.description}
+
+`;
+        }
+        if (enriched.readmeSummary) {
+          md += `## README \u6458\u8981
+
+${enriched.readmeSummary}
+
+`;
+        }
+        if (Array.isArray(enriched.topics) && enriched.topics.length > 0) {
+          md += `## Topics
+
+${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
+
+`;
+        }
+        return {
+          title,
+          fileName: sanitizeObsidianFileName(enriched.full_name || title, "github-repo"),
+          markdown: md,
+          url: meta.url
+        };
+      };
+      var exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgress, control = {}) => {
+        const { obsUrl, obsKey, obsDir } = settings;
+        if (!obsUrl || !obsKey) {
+          throw new Error("\u8BF7\u5148\u914D\u7F6E Obsidian API \u5730\u5740\u548C Key");
+        }
+        if (!selectedItems || selectedItems.length === 0) {
+          return { success: [], failed: [], skipped: [] };
+        }
+        const success = [];
+        const failed = [];
+        const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+        let githubDirty = false;
+        let authAbortInfo = null;
+        const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+        try {
+          for (let i = 0; i < selectedItems.length; i++) {
+            if (control.isCancelled) break;
+            while (control.isPaused) {
+              await Utils2.sleep(200);
+              if (control.isCancelled) break;
+            }
+            if (control.isCancelled) break;
+            const item = selectedItems[i];
+            onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
+            try {
+              const note = await buildGitHubObsidianMarkdown(item, settings, enrichContext);
+              assertObsidianWriteAllowed("obsidian.writeNote", { itemKey: item.itemKey, sourceType: item.sourceType, itemName: item.title || item.itemKey });
+              const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
+              if (!noteResult.ok) throw new Error(noteResult.error);
+              if (item.sourceType === "gists") {
+                GitHubAPI2.markGistExported(item.itemKey);
+              } else {
+                GitHubAPI2.markExported(item.itemKey);
+              }
+              githubDirty = true;
+              success.push({
+                title: note.title,
+                url: note.url
+              });
+            } catch (error) {
+              console.warn(`[GitHubObsidianService] Export failed: ${item.itemKey}`, error);
+              failed.push({
+                title: item.title || item.itemKey || "GitHub",
+                error: error.message
+              });
+              const obsErrMsg = String((error == null ? void 0 : error.message) || "");
+              if (/\bHTTP\s*40[13]\b/.test(obsErrMsg) || obsErrMsg.includes("invalid") || obsErrMsg.includes("Invalid") || obsErrMsg.includes("ECONNREFUSED") || obsErrMsg.includes("refused")) {
+                authAbortInfo = { reason: error.message, at: i + 1 };
+                break;
+              }
+            }
+            if (!authAbortInfo && i < selectedItems.length - 1 && delay > 0) {
+              await Utils2.sleep(delay);
+            }
+          }
+        } finally {
+          if (githubDirty) {
+            GitHubAPI2.flushExported();
+            GitHubAPI2.flushGistsExported();
+          }
+        }
+        return {
+          success,
+          failed,
+          skipped: authAbortInfo || control.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
+            title: item.title || item.itemKey || "GitHub"
+          })) : [],
+          ...authAbortInfo ? { authAborted: authAbortInfo } : {}
+        };
+      };
+      var exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress, control = {}) => {
+        if (SyncLock.isExporting) {
+          return {
+            success: [],
+            failed: [],
+            skipped: (selectedItems || []).map((item) => ({ title: (item == null ? void 0 : item.title) || (item == null ? void 0 : item.itemKey) || "GitHub" })),
+            message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
+          };
+        }
+        const { apiKey, databaseId } = settings;
+        if (!apiKey || !databaseId) {
+          throw new Error("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
+        }
+        if (!selectedItems || selectedItems.length === 0) {
+          return { success: [], failed: [], skipped: [] };
+        }
+        const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
+        if (!setupResult.success) {
+          throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
+        }
+        const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        if (!lease) {
+          return {
+            success: [],
+            failed: [],
+            skipped: (selectedItems || []).map((item) => ({ title: (item == null ? void 0 : item.title) || (item == null ? void 0 : item.itemKey) || "GitHub" })),
+            message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
+          };
+        }
+        const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+        const success = [];
+        const failed = [];
+        let githubDirty = false;
+        SyncLock.isExporting = true;
+        let leaseLost = false;
+        const renewTimer = setInterval(() => {
+          let renewed;
+          try {
+            renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          } catch (renewError) {
+            console.warn("[GitHubObsidianService] \u7EED\u7EA6\u5931\u8D25:", renewError);
+            renewed = false;
+          }
+          if (!renewed) {
+            leaseLost = true;
+            clearInterval(renewTimer);
+          }
+        }, 3e4);
+        const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+        try {
+          for (let i = 0; i < selectedItems.length; i++) {
+            if (control.isCancelled) break;
+            if (leaseLost) break;
+            while (control.isPaused) {
+              await Utils2.sleep(200);
+              if (control.isCancelled || leaseLost) break;
+            }
+            if (control.isCancelled || leaseLost) break;
+            const item = selectedItems[i];
+            const bookmark = item.raw;
+            const sourceType = item.sourceType;
+            const label = item.title || item.itemKey;
+            try {
+              onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, label);
+            } catch (progressError) {
+              console.warn(`[GitHubObsidianService] onProgress \u56DE\u8C03\u5F02\u5E38 (${label}):`, progressError);
+            }
+            try {
+              let properties;
+              if (sourceType === "gists") {
+                properties = GitHubExporter2.buildGistProperties(bookmark);
+              } else {
+                const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
+                const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, enrichContext);
+                properties = GitHubExporter2.buildRepoProperties(enriched, sourceMap[sourceType] || "Star");
+              }
+              for (const key of Object.keys(properties)) {
+                if (properties[key] === void 0) delete properties[key];
+              }
+              if (leaseLost) break;
+              if (!OperationGuard2.canExecute("createDatabasePage")) {
+                GitHubExporter2._auditExport(
+                  "createDatabasePage",
+                  "denied",
+                  { itemKey: item.itemKey, sourceType, itemName: item.title || item.itemKey, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u624B\u52A8\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
+                );
+                failed.push({ title: item.title, error: "\u6743\u9650\u4E0D\u8DB3\uFF08\u9700 level\u22651\uFF09", itemKey: item.itemKey, sourceType });
+                continue;
+              }
+              const page = await NotionAPI2.request("POST", "/pages", {
+                parent: { database_id: databaseId },
+                properties
+              }, apiKey);
+              if (sourceType === "gists") {
+                GitHubAPI2.markGistExported(item.itemKey);
+              } else {
+                GitHubAPI2.markExported(item.itemKey);
+              }
+              githubDirty = true;
+              GitHubExporter2._auditExport(
+                "createDatabasePage",
+                "success",
+                { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: item.itemKey, sourceType, databaseId }
+              );
+              success.push({
+                title: item.title,
+                url: (bookmark == null ? void 0 : bookmark.html_url) || "https://github.com",
+                itemKey: item.itemKey,
+                sourceType
+              });
+            } catch (error) {
+              console.warn(`[GitHubObsidianService] Notion export failed: ${item.itemKey}`, error);
+              GitHubExporter2._auditExport(
+                "createDatabasePage",
+                "failed",
+                { itemKey: item.itemKey, sourceType, reason: String((error == null ? void 0 : error.message) || error) }
+              );
+              failed.push({
+                title: item.title,
+                error: error.message,
+                itemKey: item.itemKey,
+                sourceType
+              });
+              if (error && error.isAuthTerminal === true) {
+                const skipped = selectedItems.slice(i + 1).map((skippedItem) => ({
+                  title: skippedItem.title || skippedItem.itemKey || "GitHub"
+                }));
+                if (githubDirty) {
+                  GitHubAPI2.flushExported();
+                  GitHubAPI2.flushGistsExported();
+                }
+                return { success, failed, skipped, authAborted: { reason: error.message, at: i + 1, authCode: error.authCode || "unauthorized" } };
+              }
+            }
+            if (i < selectedItems.length - 1 && delay > 0) {
+              await Utils2.sleep(delay);
+            }
+          }
+        } finally {
+          if (githubDirty) {
+            GitHubAPI2.flushExported();
+            GitHubAPI2.flushGistsExported();
+          }
+          clearInterval(renewTimer);
+          SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          SyncLock.isExporting = false;
+        }
+        return {
+          success,
+          failed,
+          skipped: control.isCancelled || leaseLost ? selectedItems.slice(success.length + failed.length).map((item) => ({
+            title: item.title || item.itemKey || "GitHub"
+          })) : []
+        };
+      };
+      module.exports = {
+        sanitizeObsidianFileName,
+        mapGitHubItemsToBookmarks,
+        buildGitHubObsidianMarkdown,
+        exportGitHubSelectedToObsidian,
+        exportGitHubSelectedToNotion
+      };
+    }
+  });
+
+  // src/ui/github-obsidian-export.js
+  var require_github_obsidian_export = __commonJS({
+    "src/ui/github-obsidian-export.js"(exports, module) {
+      "use strict";
+      var { Exporter: Exporter2 } = require_export();
+      var GitHubObsidianExport = {
+        sanitizeObsidianFileName: (name, fallback = "untitled") => {
+          return require_github_obsidian_service().sanitizeObsidianFileName(name, fallback);
+        },
+        buildGitHubObsidianMarkdown: async (item, settings = {}) => {
+          return require_github_obsidian_service().buildGitHubObsidianMarkdown(item, settings);
+        },
+        exportGitHubSelectedToObsidian: async (selectedItems, settings, onProgress) => {
+          const { exportGitHubSelectedToObsidian } = require_github_obsidian_service();
+          return exportGitHubSelectedToObsidian(selectedItems, settings, onProgress, {
+            get isCancelled() {
+              return Exporter2.isCancelled;
+            },
+            get isPaused() {
+              return Exporter2.isPaused;
+            }
+          });
+        },
+        mapGitHubItemsToBookmarks: (items, sourceType) => {
+          return require_github_obsidian_service().mapGitHubItemsToBookmarks(items, sourceType);
+        },
+        exportGitHubSelected: async (selectedItems, settings, onProgress) => {
+          return require_github_obsidian_service().exportGitHubSelectedToNotion(selectedItems, settings, onProgress, {
+            get isCancelled() {
+              return Exporter2.isCancelled;
+            },
+            get isPaused() {
+              return Exporter2.isPaused;
+            }
+          });
+        }
+      };
+      module.exports = { GitHubObsidianExport };
     }
   });
 
@@ -27593,7 +28210,7 @@ ${AIService3.isolateContent(JSON.stringify({
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIAssistant: AIAssistant2, AIService: AIService3, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, getAISettings } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService3, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, getAISettings: getAISettings2 } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -28521,610 +29138,6 @@ ${AIService3.isolateContent(JSON.stringify({
             select.value = savedValue;
           }
         },
-        buildWorkspaceCollaborationPackage: (model = UI2.buildWorkspaceVisualizationModel(), syncModel = UI2.buildUnifiedSyncModel()) => {
-          if (!(model == null ? void 0 : model.scannedAt)) {
-            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
-          }
-          const cloneJson = (value, fallback) => {
-            try {
-              return JSON.parse(JSON.stringify(value));
-            } catch {
-              return fallback;
-            }
-          };
-          const markdown = UI2.workspaceInsightMarkdown || UI2.buildWorkspaceInsightMarkdown(model, UI2.workspaceInsightSummary || "");
-          const generatedAt = UI2.workspaceInsightUpdatedAt || Date.now();
-          const summaryText = String(UI2.workspaceInsightSummary || "").trim() || UI2.buildWorkspaceInsightFallbackSummary(model);
-          return {
-            packageType: "ld-notion-workspace-collaboration",
-            packageVersion: 1,
-            generatedAt: new Date(generatedAt).toISOString(),
-            workspace: {
-              scannedAt: new Date(Number(model.scannedAt || generatedAt)).toISOString(),
-              maxPages: Number(model.maxPages || 0),
-              totalPages: Number(model.totalPages || 0),
-              totalDatabases: Number(model.totalDatabases || 0),
-              sourcedPages: Number(model.sourcedPages || 0),
-              datedPages: Number(model.datedPages || 0),
-              categorizedPages: Number(model.categorizedPages || 0),
-              structuredPages: Number(model.structuredPages || 0),
-              missingSourcePages: Number(model.missingSourcePages || 0),
-              missingDatePages: Number(model.missingDatePages || 0),
-              missingCategoryPages: Number(model.missingCategoryPages || 0),
-              recognizedSources: cloneJson(model.recognizedSources || [], []),
-              sourceBreakdown: cloneJson(model.sourceBreakdown || [], []),
-              categoryBreakdown: cloneJson(model.categoryBreakdown || [], []),
-              timeline: cloneJson(model.timeline || [], []),
-              relationships: cloneJson(model.relationships || [], []),
-              funnel: cloneJson(model.funnel || [], []),
-              duplicateCandidates: cloneJson(model.duplicateCandidates || [], []),
-              connectionCandidates: cloneJson(model.connectionCandidates || [], [])
-            },
-            insight: {
-              summary: summaryText,
-              markdown,
-              updatedAt: new Date(generatedAt).toISOString()
-            },
-            syncCenter: {
-              enabledCount: Number((syncModel == null ? void 0 : syncModel.enabledCount) || 0),
-              runningCount: Number((syncModel == null ? void 0 : syncModel.runningCount) || 0),
-              issueCount: Number((syncModel == null ? void 0 : syncModel.issueCount) || 0),
-              latestSuccessSource: String((syncModel == null ? void 0 : syncModel.latestSuccessSource) || "\u5C1A\u672A\u5EFA\u7ACB"),
-              latestSuccessLabel: String((syncModel == null ? void 0 : syncModel.latestSuccessLabel) || "\u6682\u65E0\u6210\u529F\u8BB0\u5F55"),
-              sourceRows: cloneJson((syncModel == null ? void 0 : syncModel.sourceRows) || [], [])
-            }
-          };
-        },
-        buildWorkspaceCollaborationPackageMarkdown: (collabPackage = UI2.buildWorkspaceCollaborationPackage()) => {
-          var _a, _b, _c, _d, _e, _f, _g, _h;
-          const candidateLines = Array.isArray((_a = collabPackage == null ? void 0 : collabPackage.workspace) == null ? void 0 : _a.connectionCandidates) && collabPackage.workspace.connectionCandidates.length > 0 ? collabPackage.workspace.connectionCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u6761\uFF0C\u539F\u56E0 ${item.reason}`) : ["- \u6682\u65E0\u8DE8\u6E90\u5173\u8054\u5019\u9009"];
-          const duplicateLines = Array.isArray((_b = collabPackage == null ? void 0 : collabPackage.workspace) == null ? void 0 : _b.duplicateCandidates) && collabPackage.workspace.duplicateCandidates.length > 0 ? collabPackage.workspace.duplicateCandidates.map((item) => `- ${item.label}\uFF1A${item.count} \u6761\uFF0C\u6765\u6E90 ${Array.isArray(item.sources) ? item.sources.join(" + ") : ""}`) : ["- \u6682\u65E0\u91CD\u590D\u5019\u9009"];
-          const syncLines = Array.isArray((_c = collabPackage == null ? void 0 : collabPackage.syncCenter) == null ? void 0 : _c.sourceRows) && collabPackage.syncCenter.sourceRows.length > 0 ? collabPackage.syncCenter.sourceRows.map((row) => `- ${row.label}\uFF1A${row.outcomeLabel}\uFF0C\u6700\u8FD1\u6210\u529F ${row.lastSuccessLabel}\uFF0C\u57FA\u7EBF ${row.watermarkLabel}`) : ["- \u6682\u65E0\u540C\u6B65\u4E2D\u5FC3\u6458\u8981"];
-          const payload = JSON.stringify(collabPackage, null, 2);
-          return [
-            "# \u5DE5\u4F5C\u533A\u534F\u4F5C\u5305",
-            "",
-            `- \u751F\u6210\u65F6\u95F4\uFF1A${(collabPackage == null ? void 0 : collabPackage.generatedAt) || ""}`,
-            `- \u9875\u9762\u603B\u6570\uFF1A${((_d = collabPackage == null ? void 0 : collabPackage.workspace) == null ? void 0 : _d.totalPages) || 0}`,
-            `- \u6570\u636E\u5E93\u603B\u6570\uFF1A${((_e = collabPackage == null ? void 0 : collabPackage.workspace) == null ? void 0 : _e.totalDatabases) || 0}`,
-            `- \u5DF2\u542F\u7528\u540C\u6B65\u6765\u6E90\uFF1A${((_f = collabPackage == null ? void 0 : collabPackage.syncCenter) == null ? void 0 : _f.enabledCount) || 0}`,
-            "",
-            "## \u534F\u4F5C\u6458\u8981",
-            ((_g = collabPackage == null ? void 0 : collabPackage.insight) == null ? void 0 : _g.summary) || "\u6682\u65E0\u534F\u4F5C\u6458\u8981",
-            "",
-            "## \u5DE5\u4F5C\u533A\u6D1E\u5BDF",
-            ((_h = collabPackage == null ? void 0 : collabPackage.insight) == null ? void 0 : _h.markdown) || "\u6682\u65E0\u6D1E\u5BDF\u5185\u5BB9",
-            "",
-            "## \u7EDF\u4E00\u5019\u9009\u6982\u89C8",
-            ...candidateLines,
-            "",
-            "## \u91CD\u590D\u5019\u9009\u6982\u89C8",
-            ...duplicateLines,
-            "",
-            "## \u540C\u6B65\u4E2D\u5FC3\u6458\u8981",
-            ...syncLines,
-            "",
-            "## \u7ED3\u6784\u5316\u534F\u4F5C\u5305 JSON",
-            "```json",
-            payload,
-            "```"
-          ].join("\n");
-        },
-        copyWorkspaceInsightReport: async () => {
-          const model = UI2.buildWorkspaceVisualizationModel();
-          if (!(model == null ? void 0 : model.scannedAt)) {
-            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
-          }
-          const markdown = UI2.workspaceInsightMarkdown || UI2.buildWorkspaceInsightMarkdown(model);
-          try {
-            await UI2.copyTextToClipboard(markdown);
-            UI2.workspaceInsightMarkdown = markdown;
-            UI2.workspaceInsightUpdatedAt = Date.now();
-            UI2.showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u590D\u5236\u3002", "success");
-          } catch (error) {
-            throw new Error((error == null ? void 0 : error.message) || String(error));
-          }
-        },
-        downloadWorkspaceInsightReport: async () => {
-          const model = UI2.buildWorkspaceVisualizationModel();
-          if (!(model == null ? void 0 : model.scannedAt)) {
-            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
-          }
-          const markdown = UI2.workspaceInsightMarkdown || UI2.buildWorkspaceInsightMarkdown(model);
-          const objectUrlApi = typeof window !== "undefined" && window.URL && typeof window.URL.createObjectURL === "function" ? window.URL : typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL : null;
-          if (!objectUrlApi) {
-            throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u62A5\u544A\u4E0B\u8F7D\u3002");
-          }
-          const stampSource = UI2.workspaceInsightUpdatedAt || Date.now();
-          const stamp = new Date(stampSource).toISOString().replace(/[:.]/g, "-");
-          const filename = `ld-notion-workspace-insight-${stamp}.md`;
-          const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
-          const href = objectUrlApi.createObjectURL(blob);
-          try {
-            const link = document.createElement("a");
-            link.href = href;
-            link.download = filename;
-            link.style.display = "none";
-            document.body.appendChild(link);
-            link.click();
-            if (typeof link.remove === "function") {
-              link.remove();
-            }
-            UI2.workspaceInsightMarkdown = markdown;
-            UI2.workspaceInsightUpdatedAt = Date.now();
-            UI2.showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u5F00\u59CB\u4E0B\u8F7D\u3002", "success");
-            return { filename, markdown };
-          } catch (error) {
-            throw new Error((error == null ? void 0 : error.message) || String(error));
-          } finally {
-            if (typeof objectUrlApi.revokeObjectURL === "function") {
-              setTimeout(() => objectUrlApi.revokeObjectURL(href), 0);
-            }
-          }
-        },
-        downloadWorkspaceCollaborationPackage: async () => {
-          const model = UI2.buildWorkspaceVisualizationModel();
-          const syncModel = UI2.buildUnifiedSyncModel();
-          const collabPackage = UI2.buildWorkspaceCollaborationPackage(model, syncModel);
-          const objectUrlApi = typeof window !== "undefined" && window.URL && typeof window.URL.createObjectURL === "function" ? window.URL : typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL : null;
-          if (!objectUrlApi) {
-            throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u534F\u4F5C\u5305\u4E0B\u8F7D\u3002");
-          }
-          const stampSource = UI2.workspaceInsightUpdatedAt || Date.now();
-          const stamp = new Date(stampSource).toISOString().replace(/[:.]/g, "-");
-          const filename = `ld-notion-workspace-collaboration-${stamp}.json`;
-          const payload = JSON.stringify(collabPackage, null, 2);
-          const blob = new Blob([payload], { type: "application/json;charset=utf-8" });
-          const href = objectUrlApi.createObjectURL(blob);
-          try {
-            const link = document.createElement("a");
-            link.href = href;
-            link.download = filename;
-            link.style.display = "none";
-            document.body.appendChild(link);
-            link.click();
-            if (typeof link.remove === "function") {
-              link.remove();
-            }
-            UI2.workspaceInsightUpdatedAt = Date.now();
-            UI2.showStatus("\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5DF2\u5F00\u59CB\u4E0B\u8F7D\u3002", "success");
-            return { filename, payload, collabPackage };
-          } catch (error) {
-            throw new Error((error == null ? void 0 : error.message) || String(error));
-          } finally {
-            if (typeof objectUrlApi.revokeObjectURL === "function") {
-              setTimeout(() => objectUrlApi.revokeObjectURL(href), 0);
-            }
-          }
-        },
-        saveWorkspaceCollaborationPackageToNotion: async () => {
-          var _a, _b, _c;
-          const model = UI2.buildWorkspaceVisualizationModel();
-          if (!(model == null ? void 0 : model.scannedAt)) {
-            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
-          }
-          const apiKey = NotionOAuth2.getAccessToken((_b = (_a = UI2.refs) == null ? void 0 : _a.apiKeyInput) == null ? void 0 : _b.value.trim());
-          if (!apiKey) {
-            throw new Error(MSG2.NO_NOTION_KEY);
-          }
-          const exportState = TargetState2.getExportState();
-          if (!exportState.targetId) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E\u5BFC\u51FA\u76EE\u6807\uFF08\u6570\u636E\u5E93\u6216\u7236\u9875\u9762\uFF09\u3002");
-          }
-          const collabPackage = UI2.buildWorkspaceCollaborationPackage(model, UI2.buildUnifiedSyncModel());
-          const markdown = UI2.buildWorkspaceCollaborationPackageMarkdown(collabPackage);
-          const packageTime = UI2.workspaceInsightUpdatedAt || Date.now();
-          const packageTitle = `\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305 ${new Date(packageTime).toLocaleString("zh-CN", { hour12: false })}`;
-          const contentBlocks = AIAssistant2._textToBlocks(markdown);
-          let page = null;
-          if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
-            const parentPageId = exportState.parentPageId;
-            page = await AIAssistant2._executeGuardedPageWrite(
-              "createDatabasePage",
-              { id: parentPageId, name: packageTitle },
-              () => NotionAPI2.createChildPage(parentPageId, packageTitle, contentBlocks, apiKey),
-              apiKey,
-              {
-                itemName: packageTitle,
-                pageId: parentPageId,
-                source: "ui",
-                surface: "workspace-visualization"
-              }
-            );
-          } else {
-            const databaseId = exportState.databaseId;
-            const database = await NotionAPI2.fetchDatabase(databaseId, apiKey);
-            const titlePropertyName = ((_c = Object.entries(database.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _c[0]) || null;
-            if (!titlePropertyName) {
-              throw new Error("\u5F53\u524D\u76EE\u6807\u6570\u636E\u5E93\u7F3A\u5C11\u6807\u9898\u5C5E\u6027\uFF0C\u65E0\u6CD5\u4FDD\u5B58\u534F\u4F5C\u5305\u3002");
-            }
-            const properties = {
-              [titlePropertyName]: {
-                title: [{ text: { content: packageTitle } }]
-              }
-            };
-            page = await AIAssistant2._executeGuardedDatabaseWrite(
-              "createDatabasePage",
-              databaseId,
-              () => NotionAPI2.createPageObject({ database_id: databaseId }, properties, contentBlocks, apiKey),
-              apiKey,
-              {
-                itemName: packageTitle,
-                databaseId,
-                source: "ui",
-                surface: "workspace-visualization"
-              }
-            );
-          }
-          const pageId = Utils2.extractNotionId(page == null ? void 0 : page.id) || String((page == null ? void 0 : page.id) || "").replace(/-/g, "");
-          UI2.workspaceInsightUpdatedAt = Date.now();
-          UI2.setWorkspaceVisualStatus(
-            `\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5DF2\u4FDD\u5B58\u5230 Notion\uFF08${exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93"}\uFF09\u3002`,
-            "success"
-          );
-          UI2.showStatus("\u5DE5\u4F5C\u533A\u534F\u4F5C\u5305\u5DF2\u4FDD\u5B58\u5230 Notion\u3002", "success");
-          return {
-            pageId,
-            title: packageTitle,
-            targetId: exportState.targetId,
-            targetType: exportState.targetType,
-            markdown,
-            collabPackage
-          };
-        },
-        saveWorkspaceInsightReportToNotion: async () => {
-          var _a, _b, _c;
-          const model = UI2.buildWorkspaceVisualizationModel();
-          if (!(model == null ? void 0 : model.scannedAt)) {
-            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
-          }
-          const apiKey = NotionOAuth2.getAccessToken((_b = (_a = UI2.refs) == null ? void 0 : _a.apiKeyInput) == null ? void 0 : _b.value.trim());
-          if (!apiKey) {
-            throw new Error(MSG2.NO_NOTION_KEY);
-          }
-          const exportState = TargetState2.getExportState();
-          if (!exportState.targetId) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E\u5BFC\u51FA\u76EE\u6807\uFF08\u6570\u636E\u5E93\u6216\u7236\u9875\u9762\uFF09\u3002");
-          }
-          const markdown = UI2.workspaceInsightMarkdown || UI2.buildWorkspaceInsightMarkdown(model);
-          const reportTime = UI2.workspaceInsightUpdatedAt || Date.now();
-          const reportTitle = `\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A ${new Date(reportTime).toLocaleString("zh-CN", { hour12: false })}`;
-          const contentBlocks = AIAssistant2._textToBlocks(markdown);
-          let page = null;
-          if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
-            const parentPageId = exportState.parentPageId;
-            page = await AIAssistant2._executeGuardedPageWrite(
-              "createDatabasePage",
-              { id: parentPageId, name: reportTitle },
-              () => NotionAPI2.createChildPage(parentPageId, reportTitle, contentBlocks, apiKey),
-              apiKey,
-              {
-                itemName: reportTitle,
-                pageId: parentPageId,
-                source: "ui",
-                surface: "workspace-visualization"
-              }
-            );
-          } else {
-            const databaseId = exportState.databaseId;
-            const database = await NotionAPI2.fetchDatabase(databaseId, apiKey);
-            const titlePropertyName = ((_c = Object.entries(database.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _c[0]) || null;
-            if (!titlePropertyName) {
-              throw new Error("\u5F53\u524D\u76EE\u6807\u6570\u636E\u5E93\u7F3A\u5C11\u6807\u9898\u5C5E\u6027\uFF0C\u65E0\u6CD5\u4FDD\u5B58\u62A5\u544A\u3002");
-            }
-            const properties = {
-              [titlePropertyName]: {
-                title: [{ text: { content: reportTitle } }]
-              }
-            };
-            page = await AIAssistant2._executeGuardedDatabaseWrite(
-              "createDatabasePage",
-              databaseId,
-              () => NotionAPI2.createPageObject({ database_id: databaseId }, properties, contentBlocks, apiKey),
-              apiKey,
-              {
-                itemName: reportTitle,
-                databaseId,
-                source: "ui",
-                surface: "workspace-visualization"
-              }
-            );
-          }
-          const pageId = Utils2.extractNotionId(page == null ? void 0 : page.id) || String((page == null ? void 0 : page.id) || "").replace(/-/g, "");
-          UI2.workspaceInsightMarkdown = markdown;
-          UI2.workspaceInsightUpdatedAt = Date.now();
-          UI2.setWorkspaceVisualStatus(
-            `\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u4FDD\u5B58\u5230 Notion\uFF08${exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93"}\uFF09\u3002`,
-            "success"
-          );
-          UI2.showStatus("\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\u5DF2\u4FDD\u5B58\u5230 Notion\u3002", "success");
-          return {
-            pageId,
-            title: reportTitle,
-            targetId: exportState.targetId,
-            targetType: exportState.targetType,
-            markdown
-          };
-        },
-        saveWorkspaceConnectionCandidatesToNotion: async () => {
-          var _a, _b, _c, _d, _e;
-          const model = UI2.buildWorkspaceVisualizationModel();
-          const abortSignal = (_a = UI2._abortController) == null ? void 0 : _a.signal;
-          if (!(model == null ? void 0 : model.scannedAt)) {
-            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
-          }
-          if (!Array.isArray(model.connectionCandidates) || model.connectionCandidates.length === 0) {
-            throw new Error("\u5F53\u524D\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u8DE8\u6E90\u5173\u8054\u5019\u9009\u3002");
-          }
-          const apiKey = NotionOAuth2.getAccessToken((_c = (_b = UI2.refs) == null ? void 0 : _b.apiKeyInput) == null ? void 0 : _c.value.trim());
-          if (!apiKey) {
-            throw new Error(MSG2.NO_NOTION_KEY);
-          }
-          const exportState = TargetState2.getExportState();
-          if (!exportState.targetId) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E\u5BFC\u51FA\u76EE\u6807\uFF08\u6570\u636E\u5E93\u6216\u7236\u9875\u9762\uFF09\u3002");
-          }
-          const savedAt = Date.now();
-          const createdPages = [];
-          const failedCandidates = [];
-          const aiSettings = getAISettings();
-          let database = null;
-          let titlePropertyName = null;
-          if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.DATABASE) {
-            database = await NotionAPI2.fetchDatabase(exportState.databaseId, apiKey);
-            titlePropertyName = ((_d = Object.entries(database.properties || {}).find(([_, prop]) => (prop == null ? void 0 : prop.type) === "title")) == null ? void 0 : _d[0]) || null;
-            if (!titlePropertyName) {
-              throw new Error("\u5F53\u524D\u76EE\u6807\u6570\u636E\u5E93\u7F3A\u5C11\u6807\u9898\u5C5E\u6027\uFF0C\u65E0\u6CD5\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u3002");
-            }
-            database = await UI2.ensureWorkspaceConnectionCandidateDatabaseSchema(exportState.databaseId, apiKey, database);
-          }
-          for (let index = 0; index < model.connectionCandidates.length; index++) {
-            if (abortSignal == null ? void 0 : abortSignal.aborted) break;
-            const candidate = model.connectionCandidates[index];
-            const aiDraft = await UI2.buildWorkspaceConnectionCandidateAIDraft(candidate, aiSettings);
-            const candidateTitle = UI2.buildWorkspaceConnectionCandidateTitle(candidate, index, aiDraft);
-            const markdown = UI2.buildWorkspaceConnectionCandidateMarkdown(candidate, savedAt, aiDraft);
-            const contentBlocks = AIAssistant2._textToBlocks(markdown);
-            try {
-              let page = null;
-              if (exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
-                const parentPageId = exportState.parentPageId;
-                page = await AIAssistant2._executeGuardedPageWrite(
-                  "createDatabasePage",
-                  { id: parentPageId, name: candidateTitle },
-                  () => NotionAPI2.createChildPage(parentPageId, candidateTitle, contentBlocks, apiKey),
-                  apiKey,
-                  {
-                    itemName: candidateTitle,
-                    pageId: parentPageId,
-                    source: "ui",
-                    surface: "workspace-visualization"
-                  }
-                );
-              } else {
-                const properties = UI2.buildWorkspaceConnectionCandidateDatabaseProperties(
-                  database,
-                  titlePropertyName,
-                  candidate,
-                  candidateTitle,
-                  aiDraft
-                );
-                page = await AIAssistant2._executeGuardedDatabaseWrite(
-                  "createDatabasePage",
-                  exportState.databaseId,
-                  () => NotionAPI2.createPageObject({ database_id: exportState.databaseId }, properties, contentBlocks, apiKey),
-                  apiKey,
-                  {
-                    itemName: candidateTitle,
-                    databaseId: exportState.databaseId,
-                    source: "ui",
-                    surface: "workspace-visualization"
-                  }
-                );
-              }
-              createdPages.push({
-                id: Utils2.extractNotionId(page == null ? void 0 : page.id) || String((page == null ? void 0 : page.id) || "").replace(/-/g, ""),
-                title: candidateTitle,
-                markdown,
-                candidateKey: (candidate == null ? void 0 : candidate.key) || "",
-                aiDraft
-              });
-            } catch (error) {
-              failedCandidates.push({
-                title: candidateTitle,
-                error: (error == null ? void 0 : error.message) || String(error)
-              });
-            }
-          }
-          if (createdPages.length === 0) {
-            throw new Error(((_e = failedCandidates[0]) == null ? void 0 : _e.error) || "\u4FDD\u5B58\u7EDF\u4E00\u5019\u9009\u5931\u8D25\u3002");
-          }
-          const targetLabel = exportState.targetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE ? "\u7236\u9875\u9762" : "\u6570\u636E\u5E93";
-          const statusMessage = failedCandidates.length > 0 ? `\u7EDF\u4E00\u5019\u9009\u5DF2\u90E8\u5206\u4FDD\u5B58\u5230 Notion\uFF08${targetLabel}\uFF09\uFF1A\u6210\u529F ${createdPages.length} \u6761\uFF0C\u5931\u8D25 ${failedCandidates.length} \u6761\u3002` : `\u7EDF\u4E00\u5019\u9009\u5DF2\u4FDD\u5B58\u5230 Notion\uFF08${targetLabel}\uFF09\uFF1A\u5171 ${createdPages.length} \u6761\u3002`;
-          const tone = failedCandidates.length > 0 ? "error" : "success";
-          UI2.setWorkspaceVisualStatus(statusMessage, tone);
-          UI2.showStatus(statusMessage, tone);
-          return {
-            createdCount: createdPages.length,
-            failedCount: failedCandidates.length,
-            candidateCount: model.connectionCandidates.length,
-            targetId: exportState.targetId,
-            targetType: exportState.targetType,
-            pageIds: createdPages.map((page) => page.id),
-            pages: createdPages,
-            failures: failedCandidates
-          };
-        },
-        generateWorkspaceInsight: async () => {
-          var _a;
-          const model = UI2.buildWorkspaceVisualizationModel();
-          if (!(model == null ? void 0 : model.scannedAt)) {
-            throw new Error("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002");
-          }
-          const btn = (_a = UI2.refs) == null ? void 0 : _a.viewGenerateWorkspaceInsightBtn;
-          if (btn) {
-            btn.disabled = true;
-            btn.textContent = "\u751F\u6210\u4E2D...";
-          }
-          try {
-            let aiSummary = "";
-            const settings = getAISettings();
-            if (settings == null ? void 0 : settings.aiApiKey) {
-              const prompt2 = [
-                "\u4F60\u662F\u77E5\u8BC6\u5DE5\u4F5C\u533A\u5206\u6790\u5E08\u3002\u8BF7\u57FA\u4E8E\u4EE5\u4E0B\u5DE5\u4F5C\u533A\u5FEB\u7167\u8F93\u51FA\u4E00\u6BB5\u7B80\u6D01\u7684 Markdown \u6D1E\u5BDF\u6458\u8981\u3002",
-                "\u8981\u6C42\uFF1A",
-                "1. \u53EA\u8F93\u51FA 4-6 \u6761 bullet\u3002",
-                "2. \u4F9D\u6B21\u8986\u76D6\u6574\u4F53\u5224\u65AD\u3001\u7ED3\u6784\u7F3A\u53E3\u3001\u8DE8\u6E90\u5173\u8054\u673A\u4F1A\u3001\u4E0B\u4E00\u6B65\u52A8\u4F5C\u3002",
-                "3. \u4E0D\u8981\u91CD\u590D\u539F\u59CB\u6570\u5B57\u8868\u683C\uFF0C\u91CD\u70B9\u505A\u7ED3\u8BBA\u4E0E\u5EFA\u8BAE\u3002",
-                "",
-                // v3.14.7 (REV-04 UI-08): label 溯源 Notion 页面标题(常来自不可信导入内容),
-                // 裸 JSON.stringify 注入可让页面内容劫持 AI 意图——统一走 isolateContent
-                // 隔离标签(与全仓其余 12+ AI 请求构造点对齐, 五层防御第①层)。
-                `<user_input>
-${AIService3.isolateContent(JSON.stringify({
-                  totalPages: model.totalPages,
-                  totalDatabases: model.totalDatabases,
-                  sourceBreakdown: model.sourceBreakdown,
-                  categoryBreakdown: model.categoryBreakdown,
-                  funnel: model.funnel,
-                  duplicateCandidates: model.duplicateCandidates.map((item) => ({
-                    label: item.label,
-                    count: item.count,
-                    sources: item.sources
-                  })),
-                  connectionCandidates: model.connectionCandidates.map((item) => ({
-                    label: item.label,
-                    count: item.count,
-                    reason: item.reason
-                  })),
-                  missingSourcePages: model.missingSourcePages,
-                  missingDatePages: model.missingDatePages,
-                  missingCategoryPages: model.missingCategoryPages
-                }, null, 2))}
-</user_input>`
-              ].join("\n");
-              aiSummary = String(await AIService3.requestChat(prompt2, settings, 900) || "").trim();
-            }
-            UI2.workspaceInsightSummary = aiSummary;
-            UI2.workspaceInsightMarkdown = UI2.buildWorkspaceInsightMarkdown(model, aiSummary);
-            UI2.workspaceInsightUpdatedAt = Date.now();
-            UI2.renderWorkspaceVisualSummary();
-            UI2.setWorkspaceVisualStatus("\u5DF2\u751F\u6210\u5DE5\u4F5C\u533A\u6D1E\u5BDF\u62A5\u544A\uFF0C\u53EF\u76F4\u63A5\u590D\u5236\u5206\u4EAB\u3002", "success");
-            return UI2.workspaceInsightMarkdown;
-          } catch (error) {
-            UI2.workspaceInsightSummary = "";
-            UI2.workspaceInsightMarkdown = UI2.buildWorkspaceInsightMarkdown(model, "");
-            UI2.workspaceInsightUpdatedAt = Date.now();
-            UI2.renderWorkspaceVisualSummary();
-            UI2.setWorkspaceVisualStatus(`\u6D1E\u5BDF\u751F\u6210\u5931\u8D25\uFF0C\u5DF2\u56DE\u9000\u4E3A\u89C4\u5219\u62A5\u544A\uFF1A${error.message}`, "error");
-            throw error;
-          } finally {
-            if (btn) {
-              btn.disabled = false;
-              btn.textContent = "\u751F\u6210\u6D1E\u5BDF";
-            }
-          }
-        },
-        renderVisualSummary: () => {
-          var _a, _b;
-          const container = (_a = UI2.refs) == null ? void 0 : _a.viewSummary;
-          if (!container) return;
-          const subtitle = (_b = UI2.refs) == null ? void 0 : _b.viewSubtitle;
-          const model = UI2.buildVisualizationModel();
-          if (subtitle) {
-            subtitle.textContent = model.loadedSources.length > 0 ? `\u8FD9\u91CC\u7EE7\u7EED\u5C55\u793A\u672C\u8F6E\u5DF2\u52A0\u8F7D\u7684 ${model.loadedSources.join(" + ")} \u5217\u8868\u6458\u8981\uFF1B\u5DE5\u4F5C\u533A\u603B\u89C8\u9700\u8981\u70B9\u51FB\u4E0A\u65B9\u6309\u94AE\u5355\u72EC\u5237\u65B0\u3002` : "\u8FD9\u91CC\u7EE7\u7EED\u5C55\u793A\u5F53\u524D\u5DF2\u52A0\u8F7D\u7684 Linux.do / GitHub \u5217\u8868\u6458\u8981\uFF0C\u4E0D\u4F1A\u4E3B\u52A8\u8BFB\u53D6 Notion \u5DE5\u4F5C\u533A\u3002";
-          }
-          if (model.total === 0) {
-            container.innerHTML = `
-                <div class="ldb-view-empty">
-                    <div class="ldb-view-empty-title">\u89C6\u56FE\u8FD8\u6CA1\u6709\u6570\u636E</div>
-                    <div class="ldb-view-empty-text">\u5148\u52A0\u8F7D Linux.do \u6216 GitHub \u6536\u85CF\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u6765\u6E90\u5206\u5E03\u3001\u5BFC\u51FA\u72B6\u6001\u548C\u65F6\u95F4\u7EBF\u6458\u8981\u3002</div>
-                </div>
-            `;
-            return;
-          }
-          const renderBarRows = (rows) => rows.length > 0 ? `<div class="ldb-view-bars">${rows.map((row) => `
-                <div class="ldb-view-bar-row">
-                    <div class="ldb-view-bar-label">${Utils2.escapeHtml(row.label)}</div>
-                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${row.pct > 0 ? Math.max(8, row.pct) : 0}%;"></div></div>
-                    <div class="ldb-view-bar-value">${row.count} \xB7 ${row.pct}%</div>
-                </div>
-            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u6682\u65E0\u53EF\u5C55\u793A\u7684\u6570\u636E\u3002</div>`;
-          const statusRows = [
-            { label: "\u5DF2\u5BFC\u51FA", count: model.exported, pct: UI2.getViewPct(model.exported, model.total) },
-            { label: "\u5F85\u5BFC\u51FA", count: model.pending, pct: UI2.getViewPct(model.pending, model.total) },
-            { label: "\u5F53\u524D\u5DF2\u9009", count: model.selected, pct: UI2.getViewPct(model.selected, model.total) }
-          ];
-          const timelineMarkup = model.timeline.length > 0 ? `<div class="ldb-view-timeline">${model.timeline.map((item) => `
-                <div class="ldb-view-timeline-item">
-                    <!-- v3.14.7 (REV-25 UI-24): label \u88F8\u63D2\u503C\u8F6C\u4E49\u2014\u2014\u5F53\u524D\u6570\u503C\u6765\u6E90\u4E0D\u53EF\u6CE8\u5165,
-                         \u4E00\u65E6\u751F\u6210\u903B\u8F91\u643A\u5E26\u6765\u6E90\u6587\u672C\u5373\u6210 XSS \u70B9, \u7EDF\u4E00 escapeHtml -->
-                    <div class="ldb-view-timeline-label">${Utils2.escapeHtml(String(item.label || ""))}</div>
-                    <div class="ldb-view-bar-track"><div class="ldb-view-bar-fill" style="width: ${item.count > 0 ? Math.max(8, UI2.getViewPct(item.count, model.total)) : 0}%;"></div></div>
-                    <div class="ldb-view-timeline-value">${Utils2.escapeHtml(String(item.count))} \u9879 / \u5DF2\u5BFC\u51FA ${Utils2.escapeHtml(String(item.exported))}</div>
-                </div>
-            `).join("")}</div>` : `<div class="ldb-view-empty-text">\u5F53\u524D\u6570\u636E\u91CC\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u65F6\u95F4\u5B57\u6BB5\u3002</div>`;
-          const typeHighlights = model.typeBreakdown.slice(0, 4).map((item) => {
-            return `<span class="ldb-view-pill">${Utils2.escapeHtml(item.label)} ${item.count}</span>`;
-          }).join("");
-          container.innerHTML = `
-            <div class="ldb-view-grid">
-                <div class="ldb-view-card">
-                    <div class="ldb-view-card-title">\u5DF2\u52A0\u8F7D\u6761\u76EE</div>
-                    <div class="ldb-view-metric-value">${model.total}</div>
-                    <div class="ldb-view-metric-meta">\u6765\u81EA ${Math.max(1, model.loadedSources.length)} \u4E2A\u5DF2\u52A0\u8F7D\u6765\u6E90</div>
-                </div>
-                <div class="ldb-view-card">
-                    <div class="ldb-view-card-title">\u5F53\u524D\u9009\u62E9</div>
-                    <div class="ldb-view-metric-value">${model.selected}</div>
-                    <div class="ldb-view-metric-meta">\u7528\u4E8E\u5F53\u524D\u9762\u677F\u7684\u6279\u91CF\u5BFC\u51FA\u9009\u62E9</div>
-                </div>
-                <div class="ldb-view-card full">
-                    <div class="ldb-view-card-title">\u6765\u6E90\u5206\u5E03</div>
-                    ${renderBarRows(model.sourceBreakdown)}
-                    ${typeHighlights ? `<div class="ldb-view-highlight">${typeHighlights}</div>` : ""}
-                </div>
-                <div class="ldb-view-card full">
-                    <div class="ldb-view-card-title">\u5BFC\u51FA\u72B6\u6001</div>
-                    ${renderBarRows(statusRows)}
-                </div>
-                <div class="ldb-view-card full">
-                    <div class="ldb-view-card-title">\u65F6\u95F4\u7EBF</div>
-                    ${timelineMarkup}
-                </div>
-            </div>
-        `;
-        },
-        sanitizeObsidianFileName: (name, fallback = "untitled") => {
-          return require_github_obsidian_service().sanitizeObsidianFileName(name, fallback);
-        },
-        buildGitHubObsidianMarkdown: async (item, settings = {}) => {
-          return require_github_obsidian_service().buildGitHubObsidianMarkdown(item, settings);
-        },
-        exportGitHubSelectedToObsidian: async (selectedItems, settings, onProgress) => {
-          const { exportGitHubSelectedToObsidian } = require_github_obsidian_service();
-          return exportGitHubSelectedToObsidian(selectedItems, settings, onProgress, {
-            get isCancelled() {
-              return Exporter2.isCancelled;
-            },
-            get isPaused() {
-              return Exporter2.isPaused;
-            }
-          });
-        },
-        mapGitHubItemsToBookmarks: (items, sourceType) => {
-          return require_github_obsidian_service().mapGitHubItemsToBookmarks(items, sourceType);
-        },
-        exportGitHubSelected: async (selectedItems, settings, onProgress) => {
-          return require_github_obsidian_service().exportGitHubSelectedToNotion(selectedItems, settings, onProgress, {
-            get isCancelled() {
-              return Exporter2.isCancelled;
-            },
-            get isPaused() {
-              return Exporter2.isPaused;
-            }
-          });
-        },
         // 重算导出统计（在列表变更后调用）
         recomputeExportStats: () => {
           if (!UI2.bookmarks || UI2.bookmarks.length === 0) {
@@ -29463,7 +29476,7 @@ ${AIService3.isolateContent(JSON.stringify({
       Object.assign(UI2, require_workspace_visual().WorkspaceVisual);
       Object.assign(UI2, require_bookmark_list().BookmarkList);
       Object.assign(UI2, require_workspace_insight().WorkspaceInsight);
-      ;
+      Object.assign(UI2, require_github_obsidian_export().GitHubObsidianExport);
       module.exports = { UI: UI2 };
     }
   });
@@ -31522,7 +31535,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
-      var { AIAssistant: AIAssistant2, getAISettings } = require_ai();
+      var { AIAssistant: AIAssistant2, getAISettings: getAISettings2 } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -32286,7 +32299,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const apiKey = NotionOAuth2.getAccessToken("");
             const exportState = TargetState2.getExportState();
             const imgMode = Storage2.get(CONFIG2.STORAGE_KEYS.IMG_MODE, CONFIG2.DEFAULTS.imgMode);
-            const aiSettings = getAISettings();
+            const aiSettings = getAISettings2();
             const settings = {
               apiKey,
               exportTargetType: exportState.targetType,
@@ -34450,11 +34463,11 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       var { AI_WELCOME_ENTRY_POINTS, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2 } = require_ai_chat_ui();
       var { AIClassifier: AIClassifier2 } = require_ai_classifier();
       Object.assign(AIAssistant2, require_guarded_write().GuardedWrite);
-      var getAISettings = () => AIAssistant2.getSettings();
+      var getAISettings2 = () => AIAssistant2.getSettings();
       var isolateContent2 = (content) => String(content ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       AIService3.isolateContent = isolateContent2;
       Object.assign(AIAssistant2, { isolateContent: isolateContent2 });
-      module.exports = { AIService: AIService3, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, getAISettings };
+      module.exports = { AIService: AIService3, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, getAISettings: getAISettings2 };
       Object.assign(AIAssistant2, require_agent_executor().AgentExecutor);
     }
   });

@@ -105,9 +105,12 @@ describe("P4 收敛(c15): MainUI 长任务与防抖定时器", () => {
         expect(src).toMatch(/clearTimeout\(UI\._oplogDebounceTimer\)/);
         // P4 收敛(c15): destroy 会 abort 后置 _abortController = null —— 循环必须用预先捕获的 signal,
         // 否则中止检查恒失效(销毁后仍继续 AI 调用 + Notion 写入)
-        expect(src).toMatch(/const abortSignal = UI\._abortController\?\.signal;/);
-        expect(src).toMatch(/if \(abortSignal\?\.aborted\) break;/);
-        expect(src).not.toMatch(/if \(UI\._abortController\?\.signal\?\.aborted\) break;/);
+        // M3 波次7: 该长任务循环(saveWorkspaceConnectionCandidatesToNotion)迁 workspace-insight.js,
+        // signal 捕获/中止检查随实现迁移,accessor 形式 UI()._abortController
+        const wi = fs.readFileSync("src/ui/workspace-insight.js", "utf8");
+        expect(wi).toMatch(/const abortSignal = UI\(\)\._abortController\?\.signal;/);
+        expect(wi).toMatch(/if \(abortSignal\?\.aborted\) break;/);
+        expect(wi).not.toMatch(/if \(UI\(\)\._abortController\?\.signal\?\.aborted\) break;/);
     });
 
     it("源码: GitHub 凭证判定经 String() 守卫(脏存储值不再抛 TypeError)", () => {

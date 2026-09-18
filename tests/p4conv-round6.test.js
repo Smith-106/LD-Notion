@@ -237,8 +237,10 @@ describe("P4 收敛(c15/c16/c17): 销毁中止 / 面板复用 / 原型键 / base
     const { Utils } = require("../src/utils");
 
     it("MainUI 保存候选循环用预先捕获的 signal(destroy 置 null 后仍可中止)", () => {
-        const src = fs.readFileSync("src/ui/main-ui.js", "utf8");
-        expect(src).toContain("const abortSignal = UI._abortController?.signal;");
+        // M3 波次7: saveWorkspaceConnectionCandidatesToNotion 迁 workspace-insight.js,
+        // signal 捕获/中止检查随实现迁移(accessor 形式 UI()._abortController)
+        const src = fs.readFileSync("src/ui/workspace-insight.js", "utf8");
+        expect(src).toContain("const abortSignal = UI()._abortController?.signal;");
         expect(src).toContain("if (abortSignal?.aborted) break;");
         expect(src).not.toContain("if (UI._abortController?.signal?.aborted) break;");
     });
