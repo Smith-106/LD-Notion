@@ -2249,125 +2249,13 @@
     }
   });
 
-  // src/sync-lock.js
-  var require_sync_lock = __commonJS({
-    "src/sync-lock.js"(exports, module) {
+  // src/auth/credential-vault.js
+  var require_credential_vault = __commonJS({
+    "src/auth/credential-vault.js"(exports, module) {
       "use strict";
       var { CONFIG: CONFIG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
-      var SyncLock = {
-        _exporting: false,
-        // 无 GM 环境的按 key 租约槽(浏览器/GM 环境不参与)
-        _localLeases: /* @__PURE__ */ new Map(),
-        get isExporting() {
-          return this._exporting;
-        },
-        set isExporting(val) {
-          this._exporting = Boolean(val);
-        },
-        /**
-         * 尝试获取跨 tab 租约(owner + expiresAt, TTL 兜底)
-         * @param {string} key - 租约存储键(建议 per-source, 如 CONFIG.STORAGE_KEYS.XXX + ":lease")
-         * @param {number} ttlMs - 租约有效期(默认 180s: 续约 30s 一次, 隐藏标签页定时器
-         *   节流后最多 ~60s 一次, 3× 余量确保节流下不会中途过期被抢占)
-         * @returns {Promise<{owner: string, expiresAt: number}|null>} 成功返回租约, 失败/被占返回 null
-         */
-        acquireLease: async (key, ttlMs = 18e4) => {
-          if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
-            const held = SyncLock._localLeases.get(key);
-            if (held && Number(held.expiresAt) > Date.now()) return null;
-            const lease2 = { owner: Utils2.randomToken(), expiresAt: Date.now() + ttlMs };
-            SyncLock._localLeases.set(key, lease2);
-            SyncLock.isExporting = true;
-            return lease2;
-          }
-          const now = Date.now();
-          const existing = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
-          if (existing.owner && Number(existing.expiresAt) > now) {
-            return null;
-          }
-          const lease = { owner: Utils2.randomToken(), expiresAt: now + ttlMs };
-          GM_setValue(key, JSON.stringify(lease));
-          await Utils2.sleep(150);
-          const reread = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
-          if (!reread.owner || reread.owner !== lease.owner) {
-            return null;
-          }
-          await Utils2.sleep(150);
-          const confirm = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
-          if (!confirm.owner || confirm.owner !== lease.owner) {
-            return null;
-          }
-          if (lease.expiresAt <= Date.now()) {
-            lease.expiresAt = Date.now() + ttlMs;
-            GM_setValue(key, JSON.stringify(lease));
-            await Utils2.sleep(150);
-            const refreshed = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
-            if (!refreshed.owner || refreshed.owner !== lease.owner) {
-              return null;
-            }
-          }
-          return lease;
-        },
-        /**
-         * 续约(持有期间定期调用, 防 TTL 中途过期)
-         * S1: 续约前复核 owner —— 后台节流可致续约延迟超 TTL, 期间租约可被其他 tab 抢占;
-         * 盲写续约会覆写新持有者的租约 → 双持有并发同步。owner 失配时返回 false 供调用方中止,
-         * 绝不触碰他方租约。
-         */
-        renewLease: (key, lease, ttlMs = 18e4) => {
-          if (!lease || typeof GM_setValue !== "function") return lease;
-          if (typeof GM_getValue === "function") {
-            const current = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
-            if (!current.owner || current.owner !== lease.owner) {
-              return false;
-            }
-          }
-          lease.expiresAt = Date.now() + ttlMs;
-          GM_setValue(key, JSON.stringify(lease));
-          if (typeof GM_getValue === "function") {
-            const after = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
-            if (!after.owner || after.owner !== lease.owner) {
-              return false;
-            }
-          }
-          return lease;
-        },
-        /**
-         * 释放租约(仅 owner 本人删除; finally 中调用)
-         */
-        releaseLease: (key, lease) => {
-          if (!lease) return;
-          if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
-            const held = SyncLock._localLeases.get(key);
-            if (held && held.owner === lease.owner) SyncLock._localLeases.delete(key);
-            SyncLock.isExporting = SyncLock._localLeases.size > 0;
-            return;
-          }
-          const current = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
-          if (current.owner && current.owner === lease.owner) {
-            GM_setValue(key, "{}");
-          }
-        }
-      };
-      module.exports = { SyncLock };
-    }
-  });
-
-  // src/auth/index.js
-  var require_auth = __commonJS({
-    "src/auth/index.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var {
-        describeExchangeError,
-        describeRedirectUriMismatch
-      } = require_target_discovery();
-      var { GitHubOAuth } = require_github_oauth();
-      var INVISIBLE_CHARS_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u00AD]/g;
-      var CLIENT_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      var { Storage: Storage2 } = require_storage();
       var CredentialVault2 = {
         VERSION: 1,
         // 敏感键集已全部清空(v3.14.2):
@@ -2790,6 +2678,130 @@
           return Uint8Array.from(binary, (char) => char.charCodeAt(0));
         }
       };
+      module.exports = { CredentialVault: CredentialVault2 };
+    }
+  });
+
+  // src/sync-lock.js
+  var require_sync_lock = __commonJS({
+    "src/sync-lock.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var SyncLock = {
+        _exporting: false,
+        // 无 GM 环境的按 key 租约槽(浏览器/GM 环境不参与)
+        _localLeases: /* @__PURE__ */ new Map(),
+        get isExporting() {
+          return this._exporting;
+        },
+        set isExporting(val) {
+          this._exporting = Boolean(val);
+        },
+        /**
+         * 尝试获取跨 tab 租约(owner + expiresAt, TTL 兜底)
+         * @param {string} key - 租约存储键(建议 per-source, 如 CONFIG.STORAGE_KEYS.XXX + ":lease")
+         * @param {number} ttlMs - 租约有效期(默认 180s: 续约 30s 一次, 隐藏标签页定时器
+         *   节流后最多 ~60s 一次, 3× 余量确保节流下不会中途过期被抢占)
+         * @returns {Promise<{owner: string, expiresAt: number}|null>} 成功返回租约, 失败/被占返回 null
+         */
+        acquireLease: async (key, ttlMs = 18e4) => {
+          if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
+            const held = SyncLock._localLeases.get(key);
+            if (held && Number(held.expiresAt) > Date.now()) return null;
+            const lease2 = { owner: Utils2.randomToken(), expiresAt: Date.now() + ttlMs };
+            SyncLock._localLeases.set(key, lease2);
+            SyncLock.isExporting = true;
+            return lease2;
+          }
+          const now = Date.now();
+          const existing = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+          if (existing.owner && Number(existing.expiresAt) > now) {
+            return null;
+          }
+          const lease = { owner: Utils2.randomToken(), expiresAt: now + ttlMs };
+          GM_setValue(key, JSON.stringify(lease));
+          await Utils2.sleep(150);
+          const reread = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+          if (!reread.owner || reread.owner !== lease.owner) {
+            return null;
+          }
+          await Utils2.sleep(150);
+          const confirm = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+          if (!confirm.owner || confirm.owner !== lease.owner) {
+            return null;
+          }
+          if (lease.expiresAt <= Date.now()) {
+            lease.expiresAt = Date.now() + ttlMs;
+            GM_setValue(key, JSON.stringify(lease));
+            await Utils2.sleep(150);
+            const refreshed = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+            if (!refreshed.owner || refreshed.owner !== lease.owner) {
+              return null;
+            }
+          }
+          return lease;
+        },
+        /**
+         * 续约(持有期间定期调用, 防 TTL 中途过期)
+         * S1: 续约前复核 owner —— 后台节流可致续约延迟超 TTL, 期间租约可被其他 tab 抢占;
+         * 盲写续约会覆写新持有者的租约 → 双持有并发同步。owner 失配时返回 false 供调用方中止,
+         * 绝不触碰他方租约。
+         */
+        renewLease: (key, lease, ttlMs = 18e4) => {
+          if (!lease || typeof GM_setValue !== "function") return lease;
+          if (typeof GM_getValue === "function") {
+            const current = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+            if (!current.owner || current.owner !== lease.owner) {
+              return false;
+            }
+          }
+          lease.expiresAt = Date.now() + ttlMs;
+          GM_setValue(key, JSON.stringify(lease));
+          if (typeof GM_getValue === "function") {
+            const after = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+            if (!after.owner || after.owner !== lease.owner) {
+              return false;
+            }
+          }
+          return lease;
+        },
+        /**
+         * 释放租约(仅 owner 本人删除; finally 中调用)
+         */
+        releaseLease: (key, lease) => {
+          if (!lease) return;
+          if (typeof GM_getValue !== "function" || typeof GM_setValue !== "function") {
+            const held = SyncLock._localLeases.get(key);
+            if (held && held.owner === lease.owner) SyncLock._localLeases.delete(key);
+            SyncLock.isExporting = SyncLock._localLeases.size > 0;
+            return;
+          }
+          const current = Utils2.safeJsonParse(GM_getValue(key, "{}"), {}) || {};
+          if (current.owner && current.owner === lease.owner) {
+            GM_setValue(key, "{}");
+          }
+        }
+      };
+      module.exports = { SyncLock };
+    }
+  });
+
+  // src/auth/index.js
+  var require_auth = __commonJS({
+    "src/auth/index.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
+      var {
+        describeExchangeError,
+        describeRedirectUriMismatch
+      } = require_target_discovery();
+      var { GitHubOAuth } = require_github_oauth();
+      var { CredentialVault: CredentialVault2 } = require_credential_vault();
+      var INVISIBLE_CHARS_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u00AD]/g;
+      var CLIENT_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       var TargetState2 = {
         _AI_TARGET_MISSING: "__ldb_ai_target_missing__",
         normalizeNotionId: (value) => {
@@ -13305,68 +13317,86 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             return { total: bookmarks.length, exported: 0, message: "\u6CA1\u6709\u65B0\u7684\u4E66\u7B7E\u9700\u8981\u5BFC\u51FA" };
           }
           const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-          let success = 0, failed = 0;
+          let success = 0, failed = 0, skipped = 0;
+          const CONCURRENCY = 3;
+          let authAborted = false;
           const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-          try {
-            for (let i = 0; i < newBookmarks.length; i++) {
-              const bm = newBookmarks[i];
-              const pct = Math.round(5 + i / newBookmarks.length * 90);
-              try {
-                if (onProgress) onProgress(`\u6B63\u5728\u5BFC\u51FA (${i + 1}/${newBookmarks.length}): ${bm.title}`, pct);
-              } catch (progressError) {
-                console.warn("[BookmarkExporter] onProgress \u56DE\u8C03\u5F02\u5E38:", progressError);
-              }
-              try {
-                const enriched = await BookmarkExporter2.enrichBookmark(bm, settings, enrichContext);
-                const properties = BookmarkExporter2.buildProperties(enriched);
-                const { OperationGuard: OperationGuard2 } = require_security();
-                if (!OperationGuard2.canExecute("createDatabasePage")) {
-                  BookmarkExporter2._auditExport(
-                    "createDatabasePage",
-                    "denied",
-                    { bookmarkUrl: bm.url, itemName: bm.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
-                  );
-                  failed++;
-                  continue;
-                }
-                const page = await NotionAPI2.request("POST", "/pages", {
-                  parent: { database_id: databaseId },
-                  properties
-                }, apiKey);
-                pendingExported[Utils2.normalizeDedupUrl(bm.url)] = Date.now();
+          const { OperationGuard: OperationGuard2 } = require_security();
+          const processOne = async (bm, itemIndex) => {
+            if (authAborted) {
+              skipped++;
+              return;
+            }
+            const pct = Math.round(5 + (itemIndex + 1) / newBookmarks.length * 90);
+            try {
+              if (onProgress) onProgress(`\u6B63\u5728\u5BFC\u51FA (${itemIndex + 1}/${newBookmarks.length}): ${bm.title}`, pct);
+            } catch (progressError) {
+              console.warn("[BookmarkExporter] onProgress \u56DE\u8C03\u5F02\u5E38:", progressError);
+            }
+            try {
+              const enriched = await BookmarkExporter2.enrichBookmark(bm, settings, enrichContext);
+              const properties = BookmarkExporter2.buildProperties(enriched);
+              if (!OperationGuard2.canExecute("createDatabasePage")) {
                 BookmarkExporter2._auditExport(
                   "createDatabasePage",
-                  "success",
-                  { pageId: String((page == null ? void 0 : page.id) || ""), bookmarkUrl: bm.url, itemName: bm.title, databaseId }
-                );
-                success++;
-              } catch (e) {
-                console.warn(`[BookmarkExporter] \u5BFC\u51FA\u5931\u8D25: ${bm.url}`, e);
-                BookmarkExporter2._auditExport(
-                  "createDatabasePage",
-                  "failed",
-                  { bookmarkUrl: bm.url, itemName: bm.title, reason: String((e == null ? void 0 : e.message) || e) }
+                  "denied",
+                  { bookmarkUrl: bm.url, itemName: bm.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
                 );
                 failed++;
-                if (e && e.isAuthTerminal === true) {
-                  BookmarkExporter2.flushExported(pendingExported);
-                  const remainingCount = newBookmarks.length - i - 1;
-                  return {
-                    total: bookmarks.length,
-                    exported: success,
-                    failed,
-                    skipped: remainingCount,
-                    aborted: true,
-                    message: `\u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF08\u6210\u529F ${success} \u4E2A\uFF0C\u5269\u4F59 ${remainingCount} \u4E2A\u672A\u5C1D\u8BD5\uFF09\u3002\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\u540E\u91CD\u8BD5\u3002`
-                  };
-                }
+                return;
               }
-              if (i < newBookmarks.length - 1) {
+              const page = await NotionAPI2.request("POST", "/pages", {
+                parent: { database_id: databaseId },
+                properties
+              }, apiKey);
+              pendingExported[Utils2.normalizeDedupUrl(bm.url)] = Date.now();
+              BookmarkExporter2._auditExport(
+                "createDatabasePage",
+                "success",
+                { pageId: String((page == null ? void 0 : page.id) || ""), bookmarkUrl: bm.url, itemName: bm.title, databaseId }
+              );
+              success++;
+            } catch (e) {
+              console.warn(`[BookmarkExporter] \u5BFC\u51FA\u5931\u8D25: ${bm.url}`, e);
+              BookmarkExporter2._auditExport(
+                "createDatabasePage",
+                "failed",
+                { bookmarkUrl: bm.url, itemName: bm.title, reason: String((e == null ? void 0 : e.message) || e) }
+              );
+              failed++;
+              if (e && e.isAuthTerminal === true) {
+                authAborted = true;
+              }
+            }
+          };
+          try {
+            for (let i = 0; i < newBookmarks.length; i += CONCURRENCY) {
+              if (authAborted) {
+                skipped += newBookmarks.length - i;
+                break;
+              }
+              const batch = newBookmarks.slice(i, i + CONCURRENCY);
+              await Promise.allSettled(batch.map((bm, j) => processOne(bm, i + j)));
+              if (authAborted) {
+                skipped += newBookmarks.length - i - batch.length;
+                break;
+              }
+              if (delay > 0 && i + CONCURRENCY < newBookmarks.length) {
                 await Utils2.sleep(delay);
               }
             }
           } finally {
             BookmarkExporter2.flushExported(pendingExported);
+          }
+          if (authAborted) {
+            return {
+              total: bookmarks.length,
+              exported: success,
+              failed,
+              skipped,
+              aborted: true,
+              message: `\u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u5BFC\u51FA\uFF08\u6210\u529F ${success} \u4E2A\uFF0C\u5269\u4F59 ${skipped} \u4E2A\u672A\u5C1D\u8BD5\uFF09\u3002\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\u540E\u91CD\u8BD5\u3002`
+            };
           }
           return { total: bookmarks.length, exported: success, failed, newCount: newBookmarks.length };
         }
@@ -23556,6 +23586,835 @@ ${report}
     }
   });
 
+  // src/ui/panel-template.js
+  var require_panel_template = __commonJS({
+    "src/ui/panel-template.js"(exports, module) {
+      "use strict";
+      var { Utils: Utils2 } = require_utils();
+      var { AIWelcomeUI: AIWelcomeUI2 } = require_ai();
+      function renderPanel(personaName) {
+        return `
+            <div class="ldb-header">
+                <h3>\u{1F4DA} LD-Notion <span class="ldb-runtime-badge" id="ldb-runtime-badge">\u68C0\u6D4B\u4E2D...</span></h3>
+                <div class="ldb-header-btns">
+                    <button class="ldb-theme-btn" id="ldb-theme-toggle" title="\u5207\u6362\u4E3B\u9898" aria-label="\u5207\u6362\u4E3B\u9898">\u{1F319}</button>
+                    <button class="ldb-header-btn" id="ldb-minimize" title="\u6700\u5C0F\u5316" aria-label="\u6700\u5C0F\u5316\u9762\u677F">\u2212</button>
+                    <button class="ldb-header-btn" id="ldb-close" title="\u5173\u95ED" aria-label="\u5173\u95ED\u9762\u677F">\xD7</button>
+                </div>
+            </div>
+            <div class="ldb-tabs" role="tablist" aria-orientation="horizontal">
+                <button class="ldb-tab active" data-tab="bookmarks" role="tab" aria-selected="true" aria-controls="ldb-tab-bookmarks">\u{1F4DA} \u6536\u85CF</button>
+                <button class="ldb-tab" data-tab="visuals" role="tab" aria-selected="false" aria-controls="ldb-tab-visuals">\u{1F4CA} \u89C6\u56FE</button>
+                <button class="ldb-tab" data-tab="ai" role="tab" aria-selected="false" aria-controls="ldb-tab-ai">\u{1F916} AI</button>
+                <button class="ldb-tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="ldb-tab-settings">\u2699\uFE0F \u8BBE\u7F6E</button>
+            </div>
+            <div class="ldb-body">
+                <!-- ============ Tab 1: \u6536\u85CF ============ -->
+                <div class="ldb-tab-content active" data-tab-content="bookmarks" role="tabpanel" id="ldb-tab-bookmarks">
+                    <!-- \u6536\u85CF\u4FE1\u606F -->
+                    <div class="ldb-section">
+                        <div class="ldb-bookmarks-info">
+                            <div class="ldb-bookmarks-count" id="ldb-bookmark-count">-</div>
+                            <div class="ldb-bookmarks-label" id="ldb-bookmarks-label">\u5DF2\u52A0\u8F7D\u6536\u85CF\u6570\u91CF</div>
+                        </div>
+
+                        <div class="ldb-toggle-section" id="ldb-source-partitions-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-source-partitions-content" style="margin-top: var(--ldb-ui-spacing-lg); margin-bottom: var(--ldb-ui-spacing-md);">
+                            <span>\u6536\u85CF\u6765\u6E90\u5206\u533A</span>
+                            <span class="ldb-arrow" id="ldb-source-partitions-arrow">\u25B6</span>
+                        </div>
+                        <div class="ldb-toggle-content collapsed ldb-mb-8" id="ldb-source-partitions-content">
+                            <div class="ldb-source-option-group">
+                                <button class="ldb-source-option" id="ldb-source-select-linuxdo" type="button" aria-pressed="true">Linux.do \u6536\u85CF\u5206\u533A</button>
+                                <button class="ldb-source-option" id="ldb-source-select-github" type="button" aria-pressed="false">GitHub \u6536\u85CF\u5206\u533A</button>
+                            </div>
+                        </div>
+
+                        <div class="ldb-toggle-section ldb-mb-8" id="ldb-source-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-source-settings-content">
+                            <span>\u6765\u6E90\u81EA\u52A8\u5316\u8BBE\u7F6E</span>
+                            <span class="ldb-arrow" id="ldb-source-settings-arrow">\u25B6</span>
+                        </div>
+                        <div class="ldb-toggle-content collapsed ldb-mb-8" id="ldb-source-settings-content">
+                            <div class="ldb-setting-row ldb-mb-8">
+                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
+                                    <input type="checkbox" id="ldb-auto-import-enabled">
+                                    <span id="ldb-auto-import-label">\u542F\u7528\u81EA\u52A8\u5BFC\u5165\u65B0\u6536\u85CF</span>
+                                </label>
+                            </div>
+                            <div id="ldb-auto-import-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
+                                <div class="ldb-setting-row ldb-flex-center-gap">
+                                    <label id="ldb-auto-import-interval-label" style="white-space: nowrap;">\u8F6E\u8BE2\u95F4\u9694</label>
+                                    <select id="ldb-auto-import-interval" class="ldb-input ldb-flex-1">
+                                        <option value="0">\u4EC5\u9875\u9762\u52A0\u8F7D\u65F6</option>
+                                        <option value="3">\u6BCF 3 \u5206\u949F</option>
+                                        <option value="5" selected>\u6BCF 5 \u5206\u949F</option>
+                                        <option value="10">\u6BCF 10 \u5206\u949F</option>
+                                        <option value="30">\u6BCF 30 \u5206\u949F</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="ldb-setting-row ldb-mb-8">
+                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
+                                    <input type="checkbox" id="ldb-bookmark-auto-import-enabled">
+                                    <span>\u542F\u7528\u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65</span>
+                                </label>
+                            </div>
+                            <div id="ldb-bookmark-auto-import-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
+                                <div class="ldb-setting-row ldb-flex-center-gap">
+                                    <label for="ldb-bookmark-auto-import-interval" style="white-space: nowrap;">\u4E66\u7B7E\u540C\u6B65\u95F4\u9694</label>
+                                    <select id="ldb-bookmark-auto-import-interval" class="ldb-input ldb-flex-1">
+                                        <option value="0">\u4EC5\u9875\u9762\u52A0\u8F7D\u65F6</option>
+                                        <option value="3">\u6BCF 3 \u5206\u949F</option>
+                                        <option value="5" selected>\u6BCF 5 \u5206\u949F</option>
+                                        <option value="10">\u6BCF 10 \u5206\u949F</option>
+                                        <option value="30">\u6BCF 30 \u5206\u949F</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="ldb-bookmark-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
+                            <div class="ldb-setting-row ldb-mb-8">
+                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
+                                    <input type="checkbox" id="ldb-rss-auto-import-enabled">
+                                    <span>\u542F\u7528 RSS \u81EA\u52A8\u540C\u6B65</span>
+                                </label>
+                            </div>
+                            <div id="ldb-rss-auto-import-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
+                                <div class="ldb-setting-row" style="margin-bottom: var(--ldb-ui-spacing-md);">
+                                    <label for="ldb-rss-feed-urls" style="display: block; margin-bottom: var(--ldb-ui-spacing-sm);">RSS Feed URL</label>
+                                    <textarea id="ldb-rss-feed-urls" class="ldb-input" rows="3" placeholder="\u6BCF\u884C\u4E00\u4E2A RSS / Atom \u5730\u5740\uFF0C\u6216\u7528\u9017\u53F7\u5206\u9694"></textarea>
+                                </div>
+                                <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
+                                    <label for="ldb-rss-auto-import-interval" style="white-space: nowrap;">RSS \u540C\u6B65\u95F4\u9694</label>
+                                    <select id="ldb-rss-auto-import-interval" class="ldb-input ldb-flex-1">
+                                        <option value="0">\u4EC5\u9875\u9762\u52A0\u8F7D\u65F6</option>
+                                        <option value="3">\u6BCF 3 \u5206\u949F</option>
+                                        <option value="5" selected>\u6BCF 5 \u5206\u949F</option>
+                                        <option value="10">\u6BCF 10 \u5206\u949F</option>
+                                        <option value="30">\u6BCF 30 \u5206\u949F</option>
+                                    </select>
+                                </div>
+                                <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
+                                    <label for="ldb-rss-dedup-mode" style="white-space: nowrap;">RSS \u5BFC\u5165\u53BB\u91CD</label>
+                                    <select id="ldb-rss-dedup-mode" class="ldb-input ldb-flex-1">
+                                        <option value="strict">\u6309\u94FE\u63A5\u53BB\u91CD</option>
+                                        <option value="allow_duplicates">\u6309 Feed + ID \u4FDD\u7559\u91CD\u590D</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="ldb-rss-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
+                            <!-- F-UI-05:\u5404\u6765\u6E90\u300C\u7ACB\u5373\u5BFC\u5165\u300D\u6309\u94AE(\u4E0D\u4F9D\u8D56 AI \u6307\u4EE4,\u76F4\u63A5\u89E6\u53D1\u5B8C\u6574\u540C\u6B65) -->
+                            <div class="ldb-input-group ldb-mt-12">
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-linuxdo">\u7ACB\u5373\u5BFC\u5165 Linux.do</button>
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-github">\u7ACB\u5373\u5BFC\u5165 GitHub</button>
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-bookmark">\u7ACB\u5373\u5BFC\u5165\u4E66\u7B7E</button>
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-rss">\u7ACB\u5373\u5BFC\u5165 RSS</button>
+                            </div>
+                            <div class="ldb-tip">\u7ACB\u5373\u5BFC\u5165\u4F1A\u6267\u884C\u5B8C\u6574\u540C\u6B65\uFF08\u62C9\u53D6 + \u5199\u5165 Notion + \u63A8\u8FDB\u6C34\u4F4D\uFF09\uFF0C\u4E0E\u81EA\u52A8\u540C\u6B65\u8DEF\u5F84\u4E00\u81F4\u3002</div>
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
+                                <label for="ldb-linuxdo-dedup-mode" style="white-space: nowrap;">Linux.do \u5BFC\u5165\u53BB\u91CD</label>
+                                <select id="ldb-linuxdo-dedup-mode" class="ldb-input ldb-flex-1">
+                                    <option value="strict">\u81EA\u52A8\u53BB\u91CD</option>
+                                    <option value="allow_duplicates">\u5141\u8BB8\u91CD\u590D\uFF08\u624B\u52A8\u52FE\u9009\uFF09</option>
+                                </select>
+                            </div>
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
+                                <label for="ldb-export-status-source" style="white-space: nowrap;">\u5BFC\u51FA\u72B6\u6001\u4F9D\u636E</label>
+                                <select id="ldb-export-status-source" class="ldb-input ldb-flex-1">
+                                    <option value="local">\u672C\u5730\u8D26\u672C</option>
+                                    <option value="notion">Notion \u5DE5\u4F5C\u533A</option>
+                                </select>
+                            </div>
+                            <div class="ldb-tip" id="ldb-export-status-tip">\u300C\u672C\u5730\u8D26\u672C\u300D\u6CBF\u7528\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55\uFF1B\u300CNotion \u5DE5\u4F5C\u533A\u300D\u6309\u6700\u8FD1\u4E00\u6B21\u5DE5\u4F5C\u533A\u5FEB\u7167\u4E2D\u7684\u94FE\u63A5\u5224\u5B9A\u5DF2\u5BFC\u51FA\uFF08\u53EA\u8BFB\uFF0C\u4E0D\u6539\u672C\u5730\u8D26\u672C\uFF09\u3002</div>
+                            <div class="ldb-setting-row ldb-mb-8">
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-recompute-export-status" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);">\u6309 Notion \u91CD\u7B97\u5BFC\u51FA\u72B6\u6001</button>
+                            </div>
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
+                                <label for="ldb-bookmark-dedup-mode" style="white-space: nowrap;">\u4E66\u7B7E\u5BFC\u5165\u53BB\u91CD</label>
+                                <select id="ldb-bookmark-dedup-mode" class="ldb-input ldb-flex-1">
+                                    <option value="strict">\u81EA\u52A8\u53BB\u91CD</option>
+                                    <option value="allow_duplicates">\u5141\u8BB8\u91CD\u590D\uFF08\u624B\u52A8\u52FE\u9009\uFF09</option>
+                                </select>
+                            </div>
+                            <div class="ldb-setting-row ldb-mb-8">
+                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
+                                    <input type="checkbox" id="ldb-ai-category-auto-dedup" checked>
+                                    <span>\u5206\u7C7B\u5217\u8868\u81EA\u52A8\u53BB\u91CD</span>
+                                </label>
+                            </div>
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
+                                <label for="ldb-cross-source-mode" style="white-space: nowrap;">\u8DE8\u6E90\u5B58\u50A8\u6A21\u5F0F</label>
+                                <select id="ldb-cross-source-mode" class="ldb-input ldb-flex-1">
+                                    <option value="separate">\u5206\u5E93\uFF08\u5404\u6765\u6E90\u72EC\u7ACB\u6570\u636E\u5E93\uFF09</option>
+                                    <option value="unified">\u7EDF\u4E00\u5E93\uFF08\u6240\u6709\u6765\u6E90\u540C\u4E00\u6570\u636E\u5E93\uFF09</option>
+                                </select>
+                            </div>
+                            <div id="ldb-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
+
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-update-check-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);">\u68C0\u67E5\u66F4\u65B0</button>
+                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer; margin: 0;">
+                                    <input type="checkbox" id="ldb-update-auto-enabled">
+                                    <span>\u81EA\u52A8\u68C0\u67E5\u66F4\u65B0</span>
+                                </label>
+                            </div>
+                            <div id="ldb-update-auto-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
+                                <div class="ldb-setting-row ldb-flex-center-gap">
+                                    <label for="ldb-update-interval-hours" style="white-space: nowrap;">\u68C0\u67E5\u95F4\u9694</label>
+                                    <select id="ldb-update-interval-hours" class="ldb-input ldb-flex-1">
+                                        <option value="24">\u6BCF 24 \u5C0F\u65F6</option>
+                                        <option value="72">\u6BCF 72 \u5C0F\u65F6</option>
+                                        <option value="168">\u6BCF 168 \u5C0F\u65F6</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="ldb-update-check-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-xs);"></div>
+                        </div>
+
+                        <div class="ldb-btn-group" style="margin-bottom: var(--ldb-ui-spacing-xl);">
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-load-bookmarks">
+                                \u{1F504} \u52A0\u8F7D\u6536\u85CF\u5217\u8868
+                            </button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-import-browser-bookmarks">
+                                \u{1F4D6} \u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E
+                            </button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-organize-bookmarks">
+                                \u{1F9F9} \u6574\u7406\u4E66\u7B7E
+                            </button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-undo-organize" style="display: none;">
+                                \u21A9\uFE0F \u64A4\u9500\u6574\u7406
+                            </button>
+                        </div>
+
+                        <!-- F-UI-32:\u672A\u52A0\u8F7D\u65F6\u7684\u7A7A\u72B6\u6001\u5F15\u5BFC -->
+                        <div class="ldb-view-empty" id="ldb-bookmark-empty-state">
+                            <div class="ldb-view-empty-title">\u8FD8\u6CA1\u6709\u52A0\u8F7D\u6536\u85CF</div>
+                            <div class="ldb-view-empty-text">\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u52A0\u8F7D\u5F53\u524D\u6765\u6E90\u7684\u6536\u85CF\u5217\u8868\uFF0C\u52A0\u8F7D\u540E\u53EF\u52FE\u9009\u5E76\u5BFC\u51FA\u5230 Notion\u3002</div>
+                            <button class="ldb-btn ldb-btn-primary" id="ldb-bookmark-empty-load" type="button">\u{1F504} \u52A0\u8F7D\u6536\u85CF\u5217\u8868</button>
+                        </div>
+
+                        <!-- \u6536\u85CF\u5217\u8868 (\u52A0\u8F7D\u540E\u663E\u793A) -->
+                        <div id="ldb-bookmark-list-container" style="display: none;">
+                            <div class="ldb-select-all">
+                                <label>
+                                    <input type="checkbox" id="ldb-select-all" checked>
+                                    <span>\u5168\u9009/\u53D6\u6D88</span>
+                                </label>
+                                <span class="ldb-select-count" id="ldb-select-count">\u5DF2\u9009 0 \u4E2A</span>
+                            </div>
+                            <div class="ldb-bookmark-list" id="ldb-bookmark-list"></div>
+                        </div>
+
+                        <!-- F-UI-35:\u5BFC\u51FA\u76EE\u6807/\u6388\u6743/\u6743\u9650\u53EA\u8BFB\u6458\u8981 -->
+                        <div id="ldb-export-target-summary" style="font-size: var(--ldb-ui-font-size-xs); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-sm);"></div>
+
+                        <!-- \u5BFC\u51FA\u6309\u94AE\u7EC4 -->
+                        <div class="ldb-btn-group" id="ldb-export-btns">
+                            <button class="ldb-btn ldb-btn-primary" id="ldb-export" disabled>
+                                \u{1F4E4} \u5F00\u59CB\u5BFC\u51FA
+                            </button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-obs-export" disabled>
+                                \u{1F4DD} \u5BFC\u51FA\u5230 Obsidian
+                            </button>
+                        </div>
+
+                        <!-- \u63A7\u5236\u6309\u94AE (\u5BFC\u51FA\u65F6\u663E\u793A) -->
+                        <div class="ldb-control-btns" id="ldb-control-btns" style="display: none;">
+                            <button class="ldb-btn ldb-btn-warning ldb-btn-small" id="ldb-pause">
+                                \u23F8\uFE0F \u6682\u505C
+                            </button>
+                            <button class="ldb-btn ldb-btn-danger ldb-btn-small" id="ldb-cancel">
+                                \u23F9\uFE0F \u53D6\u6D88
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- \u72B6\u6001\u663E\u793A -->
+                    <div id="ldb-status-container" aria-live="polite"></div>
+
+                    <!-- \u5BFC\u51FA\u62A5\u544A -->
+                    <div id="ldb-report-container"></div>
+                </div>
+
+                <!-- ============ Tab 2: \u89C6\u56FE ============ -->
+                <div class="ldb-tab-content" data-tab-content="visuals" role="tabpanel" id="ldb-tab-visuals">
+                    <div class="ldb-section">
+                        <div class="ldb-view-header">
+                            <div>
+                                <div class="ldb-section-title" style="margin-bottom: var(--ldb-ui-spacing-xs);">\u5DE5\u4F5C\u533A\u89C6\u56FE</div>
+                                <div class="ldb-tip" id="ldb-view-subtitle">\u5237\u65B0\u540E\u4F1A\u57FA\u4E8E\u5F53\u524D Notion \u5DE5\u4F5C\u533A\u6570\u636E\u5E93\u751F\u6210\u5168\u5C40\u65F6\u95F4\u7EBF\u3001\u6765\u6E90\u5173\u7CFB\u56FE\u548C\u5BFC\u51FA\u6F0F\u6597\uFF1B\u4E0B\u65B9\u7EE7\u7EED\u4FDD\u7559\u672C\u8F6E\u5DF2\u52A0\u8F7D\u6458\u8981\u3002</div>
+                            </div>
+                            <div class="ldb-view-actions">
+                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-refresh-workspace" type="button">\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE</button>
+                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-generate-insight" type="button">\u751F\u6210\u6D1E\u5BDF</button>
+                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-save-workspace-candidates" type="button">\u4FDD\u5B58\u5019\u9009</button>
+                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-save-workspace-package" type="button">\u4FDD\u5B58\u534F\u4F5C\u5305</button>
+                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-save-workspace-report" type="button">\u4FDD\u5B58\u5230 Notion</button>
+                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-copy-workspace-report" type="button">\u590D\u5236\u62A5\u544A</button>
+                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-download-workspace-report" type="button">\u4E0B\u8F7D\u62A5\u544A</button>
+                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-download-workspace-package" type="button">\u4E0B\u8F7D\u534F\u4F5C\u5305</button>
+                            </div>
+                        </div>
+                        <div class="ldb-view-status" id="ldb-view-workspace-status" aria-live="polite" aria-atomic="true">\u5C1A\u672A\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002</div>
+                        <div class="ldb-view-summary" id="ldb-view-workspace-summary">
+                            <div class="ldb-view-empty">
+                                <div class="ldb-view-empty-title">\u5DE5\u4F5C\u533A\u603B\u89C8\u8FD8\u6CA1\u6709\u6570\u636E</div>
+                                <div class="ldb-view-empty-text">\u70B9\u51FB\u4E0A\u65B9\u6309\u94AE\u540E\uFF0C\u4F1A\u626B\u63CF\u5F53\u524D\u5DE5\u4F5C\u533A\u6570\u636E\u5E93\u91CC\u7684\u9875\u9762\u5C5E\u6027\uFF0C\u751F\u6210\u5168\u5C40\u65F6\u95F4\u7EBF\u3001\u6765\u6E90\u5173\u7CFB\u56FE\u548C\u5BFC\u51FA\u6F0F\u6597\u3002</div>
+                            </div>
+                        </div>
+                        <div class="ldb-view-subsection">
+                            <div class="ldb-view-header">
+                                <div>
+                                    <div class="ldb-view-section-title">\u7EDF\u4E00\u540C\u6B65\u4E2D\u5FC3</div>
+                                    <div class="ldb-tip">\u7EDF\u4E00\u67E5\u770B Linux.do\u3001GitHub \u4E0E\u6D4F\u89C8\u5668\u4E66\u7B7E\u4E09\u6761\u589E\u91CF\u540C\u6B65\u94FE\u7684\u542F\u7528\u72B6\u6001\u3001\u589E\u91CF\u57FA\u7EBF\u548C\u6700\u8FD1\u4E00\u6B21\u6210\u529F\u7ED3\u679C\u3002</div>
+                                </div>
+                                <div class="ldb-view-actions">
+                                    <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-sync-now" type="button">\u7ACB\u5373\u540C\u6B65\u5168\u90E8</button>
+                                </div>
+                            </div>
+                            <div class="ldb-view-summary" id="ldb-view-sync-summary">
+                                <div class="ldb-view-empty">
+                                    <div class="ldb-view-empty-title">\u7EDF\u4E00\u540C\u6B65\u4E2D\u5FC3\u8FD8\u6CA1\u6709\u6458\u8981</div>
+                                    <div class="ldb-view-empty-text">\u542F\u7528\u4EFB\u4E00\u81EA\u52A8\u540C\u6B65\u6765\u6E90\u540E\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u8F6E\u8BE2\u7B56\u7565\u3001\u589E\u91CF\u6C34\u4F4D\u7EBF\u548C\u6700\u8FD1\u6210\u529F\u65F6\u95F4\u3002</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="ldb-view-subsection">
+                            <div class="ldb-view-section-title">\u672C\u8F6E\u5DF2\u52A0\u8F7D\u6458\u8981</div>
+                            <div class="ldb-view-summary" id="ldb-view-summary">
+                                <div class="ldb-view-empty">
+                                    <div class="ldb-view-empty-title">\u89C6\u56FE\u8FD8\u6CA1\u6709\u6570\u636E</div>
+                                    <div class="ldb-view-empty-text">\u5148\u52A0\u8F7D Linux.do \u6216 GitHub \u6536\u85CF\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u6765\u6E90\u5206\u5E03\u3001\u5BFC\u51FA\u72B6\u6001\u548C\u65F6\u95F4\u7EBF\u6458\u8981\u3002</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============ Tab 3: AI \u52A9\u624B ============ -->
+                <div class="ldb-tab-content" data-tab-content="ai" role="tabpanel" id="ldb-tab-ai">
+                    <div class="ldb-section">
+                        <!-- \u5BF9\u8BDD\u533A\u57DF -->
+                        <!-- v3.14.7 (REV-27 UI-13): \u804A\u5929\u5BB9\u5668 aria-live=polite \u2014\u2014 AI \u6D41\u5F0F\u56DE\u590D\u5BF9\u8F85\u52A9\u6280\u672F\u53EF\u611F\u77E5 -->
+                        <div class="ldb-chat-container" id="ldb-chat-messages" aria-live="polite" aria-relevant="additions">
+                            ${AIWelcomeUI2.render(personaName)}
+                        </div>
+
+                        <!-- \u8F93\u5165\u533A\u57DF -->
+                        <div class="ldb-chat-input-container">
+                            <textarea
+                                id="ldb-chat-input"
+                                class="ldb-chat-input"
+                                placeholder="${Utils2.escapeHtml(AIWelcomeUI2.getInputPlaceholder())}"
+                                rows="1"
+                            ></textarea>
+                            <button id="ldb-chat-send" class="ldb-chat-send-btn">\u53D1\u9001</button>
+                        </div>
+
+                        <!-- \u5FEB\u6377\u64CD\u4F5C -->
+                        <div class="ldb-chat-actions">
+                            <button class="ldb-chat-action-btn" id="ldb-chat-clear">\u{1F5D1}\uFE0F \u6E05\u7A7A</button>
+                            <!-- F-03 \u4FEE\u590D\uFF1A\u6279\u91CF\u5206\u7C7B\u63A7\u5236\uFF08\u4E0E Exporter \u6682\u505C/\u53D6\u6D88\u4E00\u81F4\uFF0C\u5E38\u9A7B\uFF09 -->
+                            <span id="ldb-classify-controls">
+                                <button class="ldb-chat-action-btn" id="ldb-classify-pause">\u23F8\uFE0F \u6682\u505C\u5206\u7C7B</button>
+                                <button class="ldb-chat-action-btn" id="ldb-classify-cancel">\u2715 \u53D6\u6D88\u5206\u7C7B</button>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ============ Tab 4: \u8BBE\u7F6E ============ -->
+                <div class="ldb-tab-content" data-tab-content="settings" role="tabpanel" id="ldb-tab-settings">
+                    <!-- Notion \u914D\u7F6E -->
+                    <div class="ldb-section">
+                        <div class="ldb-section-title">Notion \u914D\u7F6E</div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">\u8BA4\u8BC1\u65B9\u5F0F</label>
+                            <div class="ldb-checkbox-group ldb-mb-8" role="radiogroup" aria-label="Notion \u8BA4\u8BC1\u65B9\u5F0F">
+                                <label class="ldb-checkbox-item">
+                                    <input type="radio" name="ldb-auth-mode" data-ldb-auth-mode="manual" id="ldb-auth-mode-manual" value="manual">
+                                    <span>\u4F7F\u7528 API Key\uFF08Internal\uFF09</span>
+                                </label>
+                                <label class="ldb-checkbox-item">
+                                    <input type="radio" name="ldb-auth-mode" data-ldb-auth-mode="oauth" id="ldb-auth-mode-oauth" value="oauth">
+                                    <span>\u4F7F\u7528\u516C\u5F00 OAuth</span>
+                                </label>
+                            </div>
+                            <div class="ldb-tip" data-ldb-auth-mode-status id="ldb-auth-mode-status">\u5F53\u524D\u542F\u7528\uFF1AAPI Key</div>
+                            <div class="ldb-tip">API Key \u4E0E OAuth \u51ED\u8BC1\u90FD\u53EF\u9884\u5148\u586B\u5199\uFF0C\u4F46\u53EA\u6709\u4E0A\u65B9\u6240\u9009\u6A21\u5F0F\u4F1A\u88AB\u5BFC\u51FA / getAccessToken \u4F7F\u7528\u3002</div>
+                        </div>
+                        <div class="ldb-input-group" data-ldb-auth-section="manual" id="ldb-auth-section-manual">
+                                                        <label class="ldb-label" for="ldb-api-key">API Key</label>
+                            <input type="password" class="ldb-input" id="ldb-api-key" placeholder="secret_xxx...">
+                            <div class="ldb-tip">
+                                \u5728 <a href="https://www.notion.so/my-integrations" target="_blank" class="ldb-link">Notion Integrations</a> \u521B\u5EFA
+                            </div>
+                        </div>
+                        <div class="ldb-input-group" data-ldb-auth-section="oauth" id="ldb-auth-section-oauth">
+                            <label class="ldb-label">\u516C\u5F00 OAuth \u6388\u6743\uFF08\u53EF\u9009\uFF09</label>
+                            <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID" aria-label="OAuth Client ID">
+                            <input type="password" class="ldb-input ldb-mt-8" id="ldb-oauth-client-secret" placeholder="Client Secret" aria-label="OAuth Client Secret">
+                            <input type="text" class="ldb-input ldb-mt-8" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" aria-label="OAuth Redirect URI">
+                            <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
+                                <button class="ldb-btn ldb-btn-primary" id="ldb-oauth-authorize">\u{1F510} \u4E00\u952E\u6388\u6743</button>
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">\u65AD\u5F00\u6388\u6743</button>
+                            </div>
+                            <div class="ldb-tip" id="ldb-oauth-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
+                            <div class="ldb-tip">\u5982\u679C\u4F60\u4F7F\u7528 Notion \u516C\u5F00\u96C6\u6210\uFF1A\u2460 Redirect URI \u63A8\u8350\u586B\u5171\u4EAB\u56DE\u8C03 <code>https://smith-106.github.io/LD-Notion/oauth-callback</code>\uFF08\u987B\u4E0E Notion \u540E\u53F0\u9010\u5B57\u7B26\u4E00\u81F4\uFF1BNotion \u65B0\u8FDE\u63A5\u8868\u5355\u5DF2\u62D2\u7EDD <code>https://www.notion.so/</code>\uFF0C\u7EC8\u7AEF\u7528\u6237\u65E0\u9700\u81EA\u5EFA\u7F51\u7AD9\uFF09\uFF1B\u2461 Notion \u8981\u6C42\u516C\u5F00\u96C6\u6210<strong>\u63D0\u4EA4\u5BA1\u6838\u5E76\u901A\u8FC7\u540E</strong> Authorization URL \u624D\u4F1A\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\uFF08\u4E0D\u662F Client Secret\uFF09\u3001URI \u5DF2\u6CE8\u518C\u3001\u96C6\u6210\u5DF2\u901A\u8FC7\u5BA1\u6838\u3002\u654F\u611F\u51ED\u8BC1\u4FDD\u5B58\u5728\u6D4F\u89C8\u5668\u672C\u5730\uFF08GM \u5B58\u50A8\uFF09\uFF0C\u811A\u672C\u66F4\u65B0\u540E\u65E0\u9700\u91CD\u65B0\u8F93\u5165\u3002</div>
+                        </div>
+                        <div class="ldb-input-group">
+                            <label class="ldb-label" for="ldb-workspace-select">\u6570\u636E\u5E93 / \u9875\u9762</label>
+                            <div class="ldb-flex-gap">
+                                <select class="ldb-select ldb-flex-1" id="ldb-workspace-select">
+                                    <option value="">-- \u4ECE\u5DE5\u4F5C\u533A\u9009\u62E9 --</option>
+                                </select>
+                                <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-refresh-workspace" title="\u5237\u65B0\u5DE5\u4F5C\u533A\u9875\u9762\u5217\u8868" aria-label="\u5237\u65B0\u5DE5\u4F5C\u533A\u9875\u9762\u5217\u8868">\u{1F504}</button>
+                            </div>
+                            <div class="ldb-input-group" id="ldb-manual-db-wrap" style="display: none; margin-top: var(--ldb-ui-spacing-md);">
+                                <input type="text" class="ldb-input ldb-flex-1" id="ldb-database-id" placeholder="\u624B\u52A8\u8F93\u5165 32 \u4F4D\u6570\u636E\u5E93 ID\uFF08\u9AD8\u7EA7\uFF09">
+                            </div>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-toggle-manual-db" style="margin-top: var(--ldb-ui-spacing-sm); padding: var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">\u9AD8\u7EA7\uFF1A\u624B\u52A8\u8F93\u5165\u6570\u636E\u5E93 ID</button>
+                            <div class="ldb-tip" id="ldb-workspace-tip">
+                                \u4F18\u5148\u4ECE\u5DE5\u4F5C\u533A\u5217\u8868\u9009\u62E9\uFF0C\u65E0\u6CD5\u52A0\u8F7D\u65F6\u518D\u624B\u52A8\u8F93\u5165
+                            </div>
+                        </div>
+
+                        <!-- \u5BFC\u51FA\u76EE\u6807\u7C7B\u578B\u9009\u62E9 -->
+                        <div class="ldb-input-group">
+                            <label class="ldb-label">\u5BFC\u51FA\u76EE\u6807</label>
+                            <div class="ldb-checkbox-group ldb-mb-8">
+                                <label class="ldb-checkbox-item">
+                                    <input type="radio" name="ldb-export-target" id="ldb-export-target-database" value="database" checked>
+                                    <span>\u6570\u636E\u5E93\uFF08\u63A8\u8350\uFF09</span>
+                                </label>
+                                <label class="ldb-checkbox-item">
+                                    <input type="radio" name="ldb-export-target" id="ldb-export-target-page" value="page">
+                                    <span>\u9875\u9762\uFF08\u5B50\u9875\u9762\uFF09</span>
+                                </label>
+                            </div>
+                            <div class="ldb-tip" id="ldb-export-target-tip">
+                                \u5BFC\u51FA\u4E3A\u6570\u636E\u5E93\u6761\u76EE\uFF0C\u652F\u6301\u7B5B\u9009\u548C\u6392\u5E8F
+                            </div>
+                        </div>
+
+                        <!-- \u7236\u9875\u9762 ID\uFF08\u9875\u9762\u6A21\u5F0F\u65F6\u663E\u793A\uFF09 -->
+                        <div class="ldb-input-group" id="ldb-parent-page-group" style="display: none;">
+                            <label class="ldb-label" for="ldb-parent-page-id">\u7236\u9875\u9762 ID</label>
+                            <input type="text" class="ldb-input" id="ldb-parent-page-id" placeholder="32\u4F4D\u9875\u9762ID">
+                            <div class="ldb-tip">
+                                \u5E16\u5B50\u5C06\u4F5C\u4E3A\u5B50\u9875\u9762\u521B\u5EFA\u5728\u6B64\u9875\u9762\u4E0B
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: var(--ldb-ui-spacing-md); align-items: center; flex-wrap: wrap;">
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-validate-config">\u9A8C\u8BC1\u914D\u7F6E</button>
+                            <button class="ldb-btn ldb-btn-primary" id="ldb-setup-database" title="\u81EA\u52A8\u5728\u6570\u636E\u5E93\u4E2D\u521B\u5EFA\u6240\u9700\u5C5E\u6027">\u81EA\u52A8\u8BBE\u7F6E\u6570\u636E\u5E93</button>
+                            <span id="ldb-config-status" style="font-size: var(--ldb-ui-font-size-sm); margin-left: var(--ldb-ui-spacing-xs);"></span>
+                        </div>
+
+                        <!-- \u6743\u9650\u8BBE\u7F6E -->
+                        <div class="ldb-permission-panel ldb-mt-12">
+                            <div class="ldb-permission-row">
+                                <span class="ldb-permission-label">\u6743\u9650\u7EA7\u522B</span>
+                                <select class="ldb-permission-select" id="ldb-permission-level">
+                                    <option value="0">\u53EA\u8BFB</option>
+                                    <option value="1">\u6807\u51C6</option>
+                                    <option value="2">\u9AD8\u7EA7</option>
+                                    <option value="3">\u7BA1\u7406\u5458</option>
+                                </select>
+                            </div>
+                            <div class="ldb-permission-row">
+                                <span class="ldb-permission-label">\u5371\u9669\u64CD\u4F5C\u786E\u8BA4</span>
+                                <label class="ldb-toggle-switch">
+                                    <input type="checkbox" id="ldb-require-confirm" checked>
+                                    <span class="ldb-toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="ldb-permission-row">
+                                <span class="ldb-permission-label">\u5BA1\u8BA1\u65E5\u5FD7</span>
+                                <label class="ldb-toggle-switch">
+                                    <input type="checkbox" id="ldb-enable-audit-log" checked>
+                                    <span class="ldb-toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ldb-divider"></div>
+
+                    <!-- \u7B5B\u9009\u8BBE\u7F6E -->
+                    <div class="ldb-section">
+                        <div class="ldb-toggle-section" id="ldb-filter-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-filter-content">
+                            <span class="ldb-section-title" style="margin-bottom: 0;">\u7B5B\u9009\u8BBE\u7F6E</span>
+                            <span id="ldb-filter-arrow">\u25B6</span>
+                        </div>
+                        <div class="ldb-toggle-content collapsed" id="ldb-filter-content">
+                            <div class="ldb-input-group ldb-mt-12">
+                                <div class="ldb-checkbox-group">
+                                    <label class="ldb-checkbox-item">
+                                        <input type="checkbox" id="ldb-only-first">
+                                        <span>\u4EC5\u4E3B\u697C</span>
+                                    </label>
+                                    <label class="ldb-checkbox-item">
+                                        <input type="checkbox" id="ldb-only-op">
+                                        <span>\u4EC5\u697C\u4E3B</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">\u697C\u5C42\u8303\u56F4</label>
+                                <div class="ldb-range-group">
+                                    <input type="number" id="ldb-range-start" value="1" min="1" aria-label="\u8D77\u59CB\u697C\u5C42">
+                                    <span>\u81F3</span>
+                                    <input type="number" id="ldb-range-end" value="999999" min="1" aria-label="\u7ED3\u675F\u697C\u5C42">
+                                </div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label" for="ldb-img-mode">\u56FE\u7247\u5904\u7406</label>
+                                <select class="ldb-select" id="ldb-img-mode">
+                                    <option value="upload">\u4E0A\u4F20\u5230 Notion</option>
+                                    <option value="external">\u5916\u94FE\u5F15\u7528</option>
+                                    <option value="skip">\u8DF3\u8FC7\u56FE\u7247</option>
+                                </select>
+                                <div class="ldb-tip">Notion \u514D\u8D39\u5957\u9910\u6587\u4EF6\u9700\u5C0F\u4E8E 5MB\uFF1B\u4ED8\u8D39\u5957\u9910 PDF \u5C0F\u4E8E 20MB\u3001\u56FE\u7247\u5C0F\u4E8E 5MB\u3002\u82E5\u56FE\u7247\u4E0A\u4F20\u62A5\u9519\uFF0C\u811A\u672C\u4F1A\u81EA\u52A8\u5C1D\u8BD5\u6309\u6587\u4EF6\u4E0A\u4F20\u3002</div>
+                            </div>
+                            <div class="ldb-form-group">
+                                <label for="ldb-request-delay">\u8BF7\u6C42\u95F4\u9694</label>
+                                <select class="ldb-select" id="ldb-request-delay">
+                                    <option value="200">\u5FEB\u901F (200ms)</option>
+                                    <option value="500">\u6B63\u5E38 (500ms)</option>
+                                    <option value="1000">\u6162\u901F (1\u79D2)</option>
+                                    <option value="2000">\u8F83\u6162 (2\u79D2)</option>
+                                    <option value="3000">\u5F88\u6162 (3\u79D2)</option>
+                                    <option value="5000">\u8D85\u6162 (5\u79D2)</option>
+                                    <option value="10000">\u6781\u6162 (10\u79D2)</option>
+                                    <option value="30000">\u9F9F\u901F (30\u79D2)</option>
+                                </select>
+                            </div>
+                            <div class="ldb-form-group">
+                                <label for="ldb-export-concurrency">\u5E76\u53D1\u6570</label>
+                                <select class="ldb-select" id="ldb-export-concurrency">
+                                    <option value="1">\u4E32\u884C (1\u4E2A)</option>
+                                    <option value="2">2 \u4E2A\u5E76\u53D1</option>
+                                    <option value="3">3 \u4E2A\u5E76\u53D1</option>
+                                    <option value="5">5 \u4E2A\u5E76\u53D1</option>
+                                </select>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label" for="ldb-filter-img">\u56FE\u7247\u7B5B\u9009</label>
+                                <select class="ldb-select" id="ldb-filter-img">
+                                    <option value="all">\u5168\u90E8</option>
+                                    <option value="only_img">\u4EC5\u542B\u56FE\u697C\u5C42</option>
+                                    <option value="no_img">\u4EC5\u65E0\u56FE\u697C\u5C42</option>
+                                </select>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label" for="ldb-filter-users">\u6307\u5B9A\u7528\u6237</label>
+                                <input type="text" class="ldb-input" id="ldb-filter-users" placeholder="user1, user2">
+                                <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u4EC5\u5BFC\u51FA\u8FD9\u4E9B\u7528\u6237\u7684\u56DE\u590D</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label" for="ldb-filter-include">\u5305\u542B\u5173\u952E\u8BCD</label>
+                                <input type="text" class="ldb-input" id="ldb-filter-include" placeholder="\u6559\u7A0B, \u6307\u5357">
+                                <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u5FC5\u987B\u5305\u542B\u4EFB\u4E00\u5173\u952E\u8BCD</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label" for="ldb-filter-exclude">\u6392\u9664\u5173\u952E\u8BCD</label>
+                                <input type="text" class="ldb-input" id="ldb-filter-exclude" placeholder="\u5E7F\u544A, \u6C34\u8D34">
+                                <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u6392\u9664\u5305\u542B\u5173\u952E\u8BCD\u7684\u697C\u5C42</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label" for="ldb-filter-minlen">\u6700\u5C11\u5B57\u6570</label>
+                                <input type="number" class="ldb-input" id="ldb-filter-minlen" value="0" min="0" placeholder="0">
+                                <div class="ldb-tip">\u8FC7\u6EE4\u5B57\u6570\u4E0D\u8DB3\u7684\u697C\u5C42</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ldb-divider"></div>
+
+                    <!-- AI \u8BBE\u7F6E -->
+                    <div class="ldb-section">
+                        <div class="ldb-toggle-section" id="ldb-ai-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-ai-settings-content">
+                            <span class="ldb-section-title" style="margin-bottom: 0;">AI \u8BBE\u7F6E</span>
+                            <span id="ldb-ai-settings-arrow">\u25B6</span>
+                        </div>
+                        <div class="ldb-toggle-content collapsed" id="ldb-ai-settings-content">
+                            <div class="ldb-input-group ldb-mt-12">
+                                <label class="ldb-label" for="ldb-ai-service">AI \u670D\u52A1</label>
+                                <select class="ldb-select" id="ldb-ai-service">
+                                    <option value="openai">OpenAI</option>
+                                    <option value="claude">Claude</option>
+                                    <option value="gemini">Gemini</option>
+                                </select>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label" for="ldb-ai-model">\u6A21\u578B</label>
+                                <div class="ldb-flex-gap">
+                                    <select class="ldb-select ldb-flex-1" id="ldb-ai-model"></select>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-ai-fetch-models">\u{1F504} \u83B7\u53D6</button>
+                                </div>
+                                <div class="ldb-tip" id="ldb-ai-model-tip"></div>
+                            </div>
+                            <div class="ldb-input-group">
+                                                            <label class="ldb-label" for="ldb-ai-api-key">API Key</label>
+                                <input type="password" class="ldb-input" id="ldb-ai-api-key" placeholder="AI \u670D\u52A1\u7684 API Key">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label" for="ldb-ai-base-url">\u81EA\u5B9A\u4E49\u7AEF\u70B9 (\u53EF\u9009)</label>
+                                <input type="text" class="ldb-input" id="ldb-ai-base-url" placeholder="\u7559\u7A7A\u4F7F\u7528\u5B98\u65B9 API">
+                                <div class="ldb-tip">\u652F\u6301\u7B2C\u4E09\u65B9 OpenAI \u517C\u5BB9 API</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label" for="ldb-ai-categories">\u5206\u7C7B\u5217\u8868</label>
+                                <input type="text" class="ldb-input" id="ldb-ai-categories" placeholder="\u6280\u672F, \u751F\u6D3B, \u95EE\u7B54, \u5206\u4EAB, \u8D44\u6E90, \u5176\u4ED6">
+                                <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u7528\u4E8E\u81EA\u52A8\u5206\u7C7B\u529F\u80FD</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label" for="ldb-ai-target-db">\u67E5\u8BE2\u6570\u636E\u5E93</label>
+                                <div class="ldb-flex-gap">
+                                    <select class="ldb-select ldb-flex-1" id="ldb-ai-target-db">
+                                        <option value="">\u5F53\u524D\u914D\u7F6E\u7684\u6570\u636E\u5E93</option>
+                                        <option value="__all__">\u6240\u6709\u5DE5\u4F5C\u533A\u6570\u636E\u5E93</option>
+                                    </select>
+                                    <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-ai-refresh-dbs">\u{1F504}</button>
+                                </div>
+                                <div class="ldb-tip">AI \u67E5\u8BE2\u6570\u636E\u5E93\u65F6\u7684\u76EE\u6807\u8303\u56F4</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">\u5237\u65B0\u9875\u6570\u4E0A\u9650</label>
+                                <select class="ldb-select" id="ldb-workspace-max-pages">
+                                    <option value="5">5 \u9875 (500 \u6761)</option>
+                                    <option value="10">10 \u9875 (1000 \u6761)</option>
+                                    <option value="20">20 \u9875 (2000 \u6761)</option>
+                                    <option value="50">50 \u9875 (5000 \u6761)</option>
+                                    <option value="0">\u65E0\u9650\u5236</option>
+                                </select>
+                                <div class="ldb-tip">\u5237\u65B0\u5DE5\u4F5C\u533A\u5217\u8868\u65F6\u6BCF\u7C7B\u7684\u6700\u5927\u5206\u9875\u6570</div>
+                            </div>
+                            <div class="ldb-btn-group ldb-flex-center-gap">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-test">\u6D4B\u8BD5\u8FDE\u63A5</button>
+                                <span id="ldb-ai-test-status" style="font-size: var(--ldb-ui-font-size-sm);"></span>
+                            </div>
+
+                            <!-- AI \u8F93\u51FA\u6A21\u677F\u7BA1\u7406 -->
+                            <div class="ldb-section-divider">
+                                <span class="ldb-hint">\u{1F4CB} AI \u8F93\u51FA\u6A21\u677F</span>
+                            </div>
+                            <div id="ldb-template-list" style="margin-bottom: var(--ldb-ui-spacing-md);"></div>
+                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
+                                <input type="text" class="ldb-input" id="ldb-template-name" placeholder="\u6A21\u677F\u540D\u79F0" style="width: 80px;">
+                                <input type="text" class="ldb-input" id="ldb-template-icon" placeholder="\u56FE\u6807" style="width: 50px;">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-template-add" style="padding: var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-md); font-size: var(--ldb-ui-font-size-sm);">\u6DFB\u52A0</button>
+                            </div>
+                            <div class="ldb-input-group" style="margin-bottom: var(--ldb-ui-spacing-xs);">
+                                <textarea class="ldb-input" id="ldb-template-prompt" rows="2" placeholder="\u6A21\u677F prompt\uFF0C\u7528\u4E8E AI \u751F\u6210\u5185\u5BB9" style="resize: vertical;"></textarea>
+                            </div>
+                            <div class="ldb-tip">\u6DFB\u52A0\u540E\u53EF\u5728 AI \u5BF9\u8BDD\u4E2D\u4F7F\u7528\u300C\u7528xx\u6A21\u677F\u603B\u7ED3xxx\u9875\u9762\u300D</div>
+
+                            <!-- Agent \u4E2A\u6027\u5316\u8BBE\u7F6E -->
+                            <div class="ldb-section-divider">
+                                <span class="ldb-hint">\u{1F916} Agent \u4E2A\u6027\u5316</span>
+                            </div>
+                            <div class="ldb-input-group ldb-mt-8">
+                                <label class="ldb-label">\u52A9\u624B\u540D\u5B57</label>
+                                <input type="text" class="ldb-input" id="ldb-agent-persona-name" placeholder="AI \u52A9\u624B">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">\u8BED\u6C14\u98CE\u683C</label>
+                                <select class="ldb-select" id="ldb-agent-persona-tone">
+                                    <option value="\u53CB\u597D">\u53CB\u597D</option>
+                                    <option value="\u4E13\u4E1A">\u4E13\u4E1A</option>
+                                    <option value="\u5E7D\u9ED8">\u5E7D\u9ED8</option>
+                                    <option value="\u7B80\u6D01">\u7B80\u6D01</option>
+                                    <option value="\u70ED\u60C5">\u70ED\u60C5</option>
+                                </select>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">\u4E13\u4E1A\u9886\u57DF</label>
+                                <input type="text" class="ldb-input" id="ldb-agent-persona-expertise" placeholder="Notion \u5DE5\u4F5C\u533A\u7BA1\u7406">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">\u81EA\u5B9A\u4E49\u6307\u4EE4 (\u53EF\u9009)</label>
+                                <textarea class="ldb-input" id="ldb-agent-persona-instructions" rows="2" placeholder="\u989D\u5916\u7684\u884C\u4E3A\u6307\u4EE4\uFF0C\u5982\uFF1A\u603B\u662F\u7528\u5217\u8868\u683C\u5F0F\u56DE\u590D" style="resize: vertical;"></textarea>
+                                <div class="ldb-tip">Agent \u6BCF\u6B21\u5BF9\u8BDD\u90FD\u4F1A\u9075\u5FAA\u7684\u4E2A\u6027\u5316\u6307\u4EE4</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">Agent \u6700\u5927\u6267\u884C\u6B65\u6570</label>
+                                <select class="ldb-select" id="ldb-agent-max-iterations">
+                                    <option value="4">4 \u6B65 (\u5FEB\u901F)</option>
+                                    <option value="8" selected>8 \u6B65 (\u9ED8\u8BA4)</option>
+                                    <option value="12">12 \u6B65 (\u6DF1\u5165)</option>
+                                    <option value="16">16 \u6B65 (\u590D\u6742\u4EFB\u52A1)</option>
+                                    <option value="24">24 \u6B65 (\u6781\u9650)</option>
+                                </select>
+                                <div class="ldb-tip">Agent \u5FAA\u73AF\u7684\u6700\u5927\u5DE5\u5177\u8C03\u7528\u6B21\u6570</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ldb-divider"></div>
+
+                    <!-- GitHub \u6536\u85CF\u5BFC\u5165\u8BBE\u7F6E -->
+                    <div class="ldb-section">
+                        <div class="ldb-toggle-section" id="ldb-github-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-github-settings-content">
+                            <span class="ldb-section-title" style="margin-bottom: 0;">\u{1F419} GitHub \u5BFC\u5165</span>
+                            <span id="ldb-github-settings-arrow">\u25B6</span>
+                        </div>
+                        <div style="margin-top: var(--ldb-ui-spacing-md); margin-bottom: var(--ldb-ui-spacing-sm);">
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-open-github-settings" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">
+                                \u{1F3AF} \u4E00\u952E\u5B9A\u4F4D GitHub Token
+                            </button>
+                        </div>
+                        <div class="ldb-toggle-content collapsed" id="ldb-github-settings-content">
+                            <div class="ldb-input-group ldb-mt-12">
+                                <label class="ldb-label">GitHub \u7528\u6237\u540D</label>
+                                <input type="text" class="ldb-input" id="ldb-github-username" placeholder="your-username">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">GitHub \u6388\u6743\uFF08\u63A8\u8350\uFF0C\u514D\u624B\u52A8\u521B\u5EFA Token\uFF09</label>
+                                <div style="display: flex; gap: var(--ldb-ui-spacing-sm); align-items: center; flex-wrap: wrap;">
+                                    <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-github-oauth-btn">\u{1F517} \u901A\u8FC7 GitHub \u6388\u6743</button>
+                                    <span id="ldb-github-oauth-status" class="ldb-tip" style="flex: 1;"></span>
+                                </div>
+                                <div class="ldb-tip">\u9996\u6B21\u4F7F\u7528\u9700\u5728\u4E0B\u65B9\u586B\u5165 Client ID\uFF08github.com/settings/developers \u521B\u5EFA OAuth App \u5373\u53EF\uFF0C\u516C\u5F00\u4FE1\u606F\u65E0\u9700\u4FDD\u5BC6\uFF09\uFF1B\u6388\u6743\u540E Token \u81EA\u52A8\u586B\u5165\u4E0B\u65B9\u8F93\u5165\u6846\uFF0C\u65E0\u9700\u624B\u52A8\u53BB GitHub \u751F\u6210</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">GitHub OAuth Client ID\uFF08\u6388\u6743\u7528\uFF0C\u53EF\u9009\uFF09</label>
+                                <input type="text" class="ldb-input" id="ldb-github-oauth-client-id" placeholder="Iv1.xxxxxxxxxxxxxxxx">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">GitHub Token (\u53EF\u9009)</label>
+                                <input type="password" class="ldb-input" id="ldb-github-token" placeholder="ghp_xxx...">
+                                <div class="ldb-tip">\u624B\u52A8\u7C98\u8D34 Personal Access Token\uFF08PAT \u5151\u5E95\u8DEF\u5F84\uFF09\uFF1B\u63A8\u8350\u7528\u4E0A\u65B9\u300C\u901A\u8FC7 GitHub \u6388\u6743\u300D\u81EA\u52A8\u83B7\u53D6</div>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">\u5BFC\u5165\u7C7B\u578B</label>
+                                <div class="ldb-checkbox-group" style="margin-top: var(--ldb-ui-spacing-xs);">
+                                    <label class="ldb-checkbox-item">
+                                        <input type="checkbox" class="ldb-github-type" value="stars" checked> \u2B50 Stars
+                                    </label>
+                                    <label class="ldb-checkbox-item">
+                                        <input type="checkbox" class="ldb-github-type" value="repos"> \u{1F4E6} Repos
+                                    </label>
+                                    <label class="ldb-checkbox-item">
+                                        <input type="checkbox" class="ldb-github-type" value="forks"> \u{1F374} Forks
+                                    </label>
+                                    <label class="ldb-checkbox-item">
+                                        <input type="checkbox" class="ldb-github-type" value="gists"> \u{1F4DD} Gists
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ldb-divider"></div>
+
+                    <!-- Obsidian \u5BFC\u51FA\u8BBE\u7F6E -->
+                    <div class="ldb-section">
+                        <div class="ldb-toggle-section" id="ldb-obs-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-obs-settings-content">
+                            <span class="ldb-section-title" style="margin-bottom: 0;">\u{1F4DD} Obsidian \u5BFC\u51FA</span>
+                            <span id="ldb-obs-settings-arrow">\u25B6</span>
+                        </div>
+                        <div class="ldb-toggle-content collapsed" id="ldb-obs-settings-content">
+                            <div class="ldb-input-group ldb-mt-12">
+                                <label class="ldb-label">API \u5730\u5740</label>
+                                <input type="text" class="ldb-input" id="ldb-obs-api-url" placeholder="https://127.0.0.1:27124">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">API Key</label>
+                                <input type="password" class="ldb-input" id="ldb-obs-api-key" placeholder="Obsidian Local REST API Key">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">\u5BFC\u51FA\u76EE\u5F55</label>
+                                <input type="text" class="ldb-input" id="ldb-obs-dir" placeholder="Linux.do">
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">\u56FE\u7247\u6A21\u5F0F</label>
+                                <select class="ldb-select" id="ldb-obs-img-mode">
+                                    <option value="file">\u4FDD\u5B58\u56FE\u7247\u5E76\u5F15\u7528</option>
+                                    <option value="base64">Base64 \u5185\u5D4C</option>
+                                    <option value="skip">\u4E0D\u5BFC\u51FA\u56FE\u7247</option>
+                                </select>
+                            </div>
+                            <div class="ldb-input-group">
+                                <label class="ldb-label">\u56FE\u7247\u76EE\u5F55</label>
+                                <input type="text" class="ldb-input" id="ldb-obs-img-dir" placeholder="Linux.do/attachments">
+                                <div class="ldb-tip">\u4EC5"\u4FDD\u5B58\u56FE\u7247\u5E76\u5F15\u7528"\u6A21\u5F0F\u6709\u6548</div>
+                            </div>
+                            <div style="margin-top: var(--ldb-ui-spacing-md);">
+                                <button class="ldb-btn ldb-btn-secondary" id="ldb-obs-test-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">\u{1F517} \u6D4B\u8BD5\u8FDE\u63A5</button>
+                                <span id="ldb-obs-test-status" aria-live="polite" style="font-size: var(--ldb-ui-font-size-sm); margin-left: var(--ldb-ui-spacing-md);"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ldb-divider"></div>
+
+                    <!-- F-UI-42:\u6D4F\u89C8\u5668\u4E66\u7B7E\u5165\u53E3\uFF08\u72B6\u6001 + \u8DF3\u8F6C\u6536\u85CF Tab\uFF0C\u4E0D\u518D\u7A7A\u58F3\uFF09 -->
+                    <div class="ldb-section">
+                        <div style="font-size: var(--ldb-ui-font-size-md); font-weight: 700; color: var(--ldb-ui-text);">\u{1F4D6} \u6D4F\u89C8\u5668\u4E66\u7B7E</div>
+                        <div id="ldb-bookmark-ext-status" style="font-size: var(--ldb-ui-font-size-xs); margin-top: var(--ldb-ui-spacing-xs); color: var(--ldb-ui-muted);"></div>
+                        <div class="ldb-input-group ldb-mt-12">
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-bookmark-settings-jump" type="button">\u{1F4DA} \u524D\u5F80\u6536\u85CF Tab \u914D\u7F6E</button>
+                        </div>
+                    </div>
+
+                    <div class="ldb-divider"></div>
+
+                    <!-- \u8FD0\u884C\u81EA\u68C0 -->
+                    <div class="ldb-section">
+                        <div style="font-size: var(--ldb-ui-font-size-md); font-weight: 700; color: var(--ldb-ui-text);">\u{1FA7A} \u8FD0\u884C\u81EA\u68C0</div>
+                        <div class="ldb-btn-group" style="margin-top: var(--ldb-ui-spacing-md); margin-bottom: var(--ldb-ui-spacing-md);">
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-self-check-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">\u6267\u884C\u81EA\u68C0</button>
+                            <button class="ldb-btn ldb-btn-secondary" id="ldb-copy-diagnostics-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">\u590D\u5236\u8BCA\u65AD\u4FE1\u606F</button>
+                        </div>
+                        <div id="ldb-self-check-result" class="ldb-hint"></div>
+                    </div>
+
+                    <div class="ldb-divider"></div>
+
+                    <!-- F-05 \u4FEE\u590D\uFF1A\u6570\u636E\u7BA1\u7406\uFF08\u53BB\u91CD/\u5DF2\u5BFC\u51FA\u8BB0\u5F55\u6E05\u7406\uFF09 -->
+                    <div class="ldb-section">
+                        <div class="ldb-section-title">\u6570\u636E\u7BA1\u7406</div>
+                        <div class="ldb-tip" id="ldb-dedup-summary"></div>
+                        <div class="ldb-input-group ldb-mt-12">
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-linuxdo-dedup">\u6E05\u9664 Linux.do \u53BB\u91CD</button>
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-github-exported">\u6E05\u9664 GitHub \u5DF2\u5BFC\u51FA\u8BB0\u5F55</button>
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-bookmark-exported">\u6E05\u9664\u4E66\u7B7E\u5DF2\u5BFC\u51FA\u8BB0\u5F55</button>
+                        </div>
+                        <div class="ldb-tip">\u4EC5\u6E05\u9664\u672C\u5730\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u4E0D\u5F71\u54CD Notion \u4E2D\u5DF2\u6709\u5185\u5BB9\uFF1B\u6E05\u9664\u540E\u5BF9\u5E94\u6765\u6E90\u53EF\u518D\u6B21\u5BFC\u51FA\u3002\u82E5\u300C\u5BFC\u51FA\u72B6\u6001\u4F9D\u636E\u300D\u4E3A Notion \u5DE5\u4F5C\u533A\uFF0C\u6E05\u7A7A Notion \u540E\u5237\u65B0\u5DE5\u4F5C\u533A\u5373\u53EF\u5168\u90E8\u56DE\u5230\u5F85\u5BFC\u51FA\uFF0C\u65E0\u9700\u5148\u6E05\u672C\u5730\u8D26\u672C\u3002</div>
+                        <!-- F-UI-04:AI \u8C03\u7528\u94FE\u8FFD\u8E2A\u53EF\u89C2\u6D4B\u5165\u53E3 -->
+                        <div class="ldb-input-group ldb-mt-12">
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-view-ai-traces">\u67E5\u770B AI \u8C03\u7528\u94FE</button>
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-ai-traces">\u6E05\u9664 AI \u8C03\u7528\u94FE</button>
+                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-reset-panel-size">\u91CD\u7F6E\u9762\u677F\u5C3A\u5BF8</button>
+                        </div>
+                        <div id="ldb-ai-traces-result" class="ldb-hint" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
+                    </div>
+
+                    <!-- \u64CD\u4F5C\u65E5\u5FD7\u9762\u677F -->
+                    <div class="ldb-log-panel" id="ldb-log-panel">
+                        <div class="ldb-log-header" id="ldb-log-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-log-content">
+                            <span class="ldb-log-title">
+                                \u{1F4CB} \u64CD\u4F5C\u65E5\u5FD7
+                                <span class="ldb-log-badge" id="ldb-log-count">0</span>
+                            </span>
+                            <span id="ldb-log-arrow">\u25B6</span>
+                        </div>
+                        <div class="ldb-log-content collapsed" id="ldb-log-content">
+                            <div id="ldb-log-list"></div>
+                            <div class="ldb-log-actions">
+                                <button class="ldb-log-clear-btn" id="ldb-log-clear">\u6E05\u9664\u65E5\u5FD7</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+`;
+      }
+      module.exports = { renderPanel };
+    }
+  });
+
   // src/import/github-obsidian-service.js
   var require_github_obsidian_service = __commonJS({
     "src/import/github-obsidian-service.js"(exports, module) {
@@ -25952,6 +26811,7 @@ ${AIService2.isolateContent(JSON.stringify({
       var { PanelResize: PanelResize2 } = require_panel_resize();
       var { UI_CSS: UI_CSS2 } = require_styles();
       var { UIEvents: UIEvents2 } = require_events();
+      var { renderPanel } = require_panel_template();
       var UI2 = {
         panel: null,
         miniBtn: null,
@@ -26165,823 +27025,7 @@ ${AIService2.isolateContent(JSON.stringify({
           const personaName = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG2.DEFAULTS.agentPersonaName);
           panel.className = "ldb-panel";
           panel.setAttribute("data-ldb-root", "");
-          panel.innerHTML = `
-            <div class="ldb-header">
-                <h3>\u{1F4DA} LD-Notion <span class="ldb-runtime-badge" id="ldb-runtime-badge">\u68C0\u6D4B\u4E2D...</span></h3>
-                <div class="ldb-header-btns">
-                    <button class="ldb-theme-btn" id="ldb-theme-toggle" title="\u5207\u6362\u4E3B\u9898" aria-label="\u5207\u6362\u4E3B\u9898">\u{1F319}</button>
-                    <button class="ldb-header-btn" id="ldb-minimize" title="\u6700\u5C0F\u5316" aria-label="\u6700\u5C0F\u5316\u9762\u677F">\u2212</button>
-                    <button class="ldb-header-btn" id="ldb-close" title="\u5173\u95ED" aria-label="\u5173\u95ED\u9762\u677F">\xD7</button>
-                </div>
-            </div>
-            <div class="ldb-tabs" role="tablist" aria-orientation="horizontal">
-                <button class="ldb-tab active" data-tab="bookmarks" role="tab" aria-selected="true" aria-controls="ldb-tab-bookmarks">\u{1F4DA} \u6536\u85CF</button>
-                <button class="ldb-tab" data-tab="visuals" role="tab" aria-selected="false" aria-controls="ldb-tab-visuals">\u{1F4CA} \u89C6\u56FE</button>
-                <button class="ldb-tab" data-tab="ai" role="tab" aria-selected="false" aria-controls="ldb-tab-ai">\u{1F916} AI</button>
-                <button class="ldb-tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="ldb-tab-settings">\u2699\uFE0F \u8BBE\u7F6E</button>
-            </div>
-            <div class="ldb-body">
-                <!-- ============ Tab 1: \u6536\u85CF ============ -->
-                <div class="ldb-tab-content active" data-tab-content="bookmarks" role="tabpanel" id="ldb-tab-bookmarks">
-                    <!-- \u6536\u85CF\u4FE1\u606F -->
-                    <div class="ldb-section">
-                        <div class="ldb-bookmarks-info">
-                            <div class="ldb-bookmarks-count" id="ldb-bookmark-count">-</div>
-                            <div class="ldb-bookmarks-label" id="ldb-bookmarks-label">\u5DF2\u52A0\u8F7D\u6536\u85CF\u6570\u91CF</div>
-                        </div>
-
-                        <div class="ldb-toggle-section" id="ldb-source-partitions-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-source-partitions-content" style="margin-top: var(--ldb-ui-spacing-lg); margin-bottom: var(--ldb-ui-spacing-md);">
-                            <span>\u6536\u85CF\u6765\u6E90\u5206\u533A</span>
-                            <span class="ldb-arrow" id="ldb-source-partitions-arrow">\u25B6</span>
-                        </div>
-                        <div class="ldb-toggle-content collapsed ldb-mb-8" id="ldb-source-partitions-content">
-                            <div class="ldb-source-option-group">
-                                <button class="ldb-source-option" id="ldb-source-select-linuxdo" type="button" aria-pressed="true">Linux.do \u6536\u85CF\u5206\u533A</button>
-                                <button class="ldb-source-option" id="ldb-source-select-github" type="button" aria-pressed="false">GitHub \u6536\u85CF\u5206\u533A</button>
-                            </div>
-                        </div>
-
-                        <div class="ldb-toggle-section ldb-mb-8" id="ldb-source-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-source-settings-content">
-                            <span>\u6765\u6E90\u81EA\u52A8\u5316\u8BBE\u7F6E</span>
-                            <span class="ldb-arrow" id="ldb-source-settings-arrow">\u25B6</span>
-                        </div>
-                        <div class="ldb-toggle-content collapsed ldb-mb-8" id="ldb-source-settings-content">
-                            <div class="ldb-setting-row ldb-mb-8">
-                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
-                                    <input type="checkbox" id="ldb-auto-import-enabled">
-                                    <span id="ldb-auto-import-label">\u542F\u7528\u81EA\u52A8\u5BFC\u5165\u65B0\u6536\u85CF</span>
-                                </label>
-                            </div>
-                            <div id="ldb-auto-import-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
-                                <div class="ldb-setting-row ldb-flex-center-gap">
-                                    <label id="ldb-auto-import-interval-label" style="white-space: nowrap;">\u8F6E\u8BE2\u95F4\u9694</label>
-                                    <select id="ldb-auto-import-interval" class="ldb-input ldb-flex-1">
-                                        <option value="0">\u4EC5\u9875\u9762\u52A0\u8F7D\u65F6</option>
-                                        <option value="3">\u6BCF 3 \u5206\u949F</option>
-                                        <option value="5" selected>\u6BCF 5 \u5206\u949F</option>
-                                        <option value="10">\u6BCF 10 \u5206\u949F</option>
-                                        <option value="30">\u6BCF 30 \u5206\u949F</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="ldb-setting-row ldb-mb-8">
-                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
-                                    <input type="checkbox" id="ldb-bookmark-auto-import-enabled">
-                                    <span>\u542F\u7528\u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65</span>
-                                </label>
-                            </div>
-                            <div id="ldb-bookmark-auto-import-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
-                                <div class="ldb-setting-row ldb-flex-center-gap">
-                                    <label for="ldb-bookmark-auto-import-interval" style="white-space: nowrap;">\u4E66\u7B7E\u540C\u6B65\u95F4\u9694</label>
-                                    <select id="ldb-bookmark-auto-import-interval" class="ldb-input ldb-flex-1">
-                                        <option value="0">\u4EC5\u9875\u9762\u52A0\u8F7D\u65F6</option>
-                                        <option value="3">\u6BCF 3 \u5206\u949F</option>
-                                        <option value="5" selected>\u6BCF 5 \u5206\u949F</option>
-                                        <option value="10">\u6BCF 10 \u5206\u949F</option>
-                                        <option value="30">\u6BCF 30 \u5206\u949F</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div id="ldb-bookmark-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
-                            <div class="ldb-setting-row ldb-mb-8">
-                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
-                                    <input type="checkbox" id="ldb-rss-auto-import-enabled">
-                                    <span>\u542F\u7528 RSS \u81EA\u52A8\u540C\u6B65</span>
-                                </label>
-                            </div>
-                            <div id="ldb-rss-auto-import-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
-                                <div class="ldb-setting-row" style="margin-bottom: var(--ldb-ui-spacing-md);">
-                                    <label for="ldb-rss-feed-urls" style="display: block; margin-bottom: var(--ldb-ui-spacing-sm);">RSS Feed URL</label>
-                                    <textarea id="ldb-rss-feed-urls" class="ldb-input" rows="3" placeholder="\u6BCF\u884C\u4E00\u4E2A RSS / Atom \u5730\u5740\uFF0C\u6216\u7528\u9017\u53F7\u5206\u9694"></textarea>
-                                </div>
-                                <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                    <label for="ldb-rss-auto-import-interval" style="white-space: nowrap;">RSS \u540C\u6B65\u95F4\u9694</label>
-                                    <select id="ldb-rss-auto-import-interval" class="ldb-input ldb-flex-1">
-                                        <option value="0">\u4EC5\u9875\u9762\u52A0\u8F7D\u65F6</option>
-                                        <option value="3">\u6BCF 3 \u5206\u949F</option>
-                                        <option value="5" selected>\u6BCF 5 \u5206\u949F</option>
-                                        <option value="10">\u6BCF 10 \u5206\u949F</option>
-                                        <option value="30">\u6BCF 30 \u5206\u949F</option>
-                                    </select>
-                                </div>
-                                <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                    <label for="ldb-rss-dedup-mode" style="white-space: nowrap;">RSS \u5BFC\u5165\u53BB\u91CD</label>
-                                    <select id="ldb-rss-dedup-mode" class="ldb-input ldb-flex-1">
-                                        <option value="strict">\u6309\u94FE\u63A5\u53BB\u91CD</option>
-                                        <option value="allow_duplicates">\u6309 Feed + ID \u4FDD\u7559\u91CD\u590D</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div id="ldb-rss-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
-                            <!-- F-UI-05:\u5404\u6765\u6E90\u300C\u7ACB\u5373\u5BFC\u5165\u300D\u6309\u94AE(\u4E0D\u4F9D\u8D56 AI \u6307\u4EE4,\u76F4\u63A5\u89E6\u53D1\u5B8C\u6574\u540C\u6B65) -->
-                            <div class="ldb-input-group ldb-mt-12">
-                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-linuxdo">\u7ACB\u5373\u5BFC\u5165 Linux.do</button>
-                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-github">\u7ACB\u5373\u5BFC\u5165 GitHub</button>
-                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-bookmark">\u7ACB\u5373\u5BFC\u5165\u4E66\u7B7E</button>
-                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-rss">\u7ACB\u5373\u5BFC\u5165 RSS</button>
-                            </div>
-                            <div class="ldb-tip">\u7ACB\u5373\u5BFC\u5165\u4F1A\u6267\u884C\u5B8C\u6574\u540C\u6B65\uFF08\u62C9\u53D6 + \u5199\u5165 Notion + \u63A8\u8FDB\u6C34\u4F4D\uFF09\uFF0C\u4E0E\u81EA\u52A8\u540C\u6B65\u8DEF\u5F84\u4E00\u81F4\u3002</div>
-                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                <label for="ldb-linuxdo-dedup-mode" style="white-space: nowrap;">Linux.do \u5BFC\u5165\u53BB\u91CD</label>
-                                <select id="ldb-linuxdo-dedup-mode" class="ldb-input ldb-flex-1">
-                                    <option value="strict">\u81EA\u52A8\u53BB\u91CD</option>
-                                    <option value="allow_duplicates">\u5141\u8BB8\u91CD\u590D\uFF08\u624B\u52A8\u52FE\u9009\uFF09</option>
-                                </select>
-                            </div>
-                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                <label for="ldb-export-status-source" style="white-space: nowrap;">\u5BFC\u51FA\u72B6\u6001\u4F9D\u636E</label>
-                                <select id="ldb-export-status-source" class="ldb-input ldb-flex-1">
-                                    <option value="local">\u672C\u5730\u8D26\u672C</option>
-                                    <option value="notion">Notion \u5DE5\u4F5C\u533A</option>
-                                </select>
-                            </div>
-                            <div class="ldb-tip" id="ldb-export-status-tip">\u300C\u672C\u5730\u8D26\u672C\u300D\u6CBF\u7528\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55\uFF1B\u300CNotion \u5DE5\u4F5C\u533A\u300D\u6309\u6700\u8FD1\u4E00\u6B21\u5DE5\u4F5C\u533A\u5FEB\u7167\u4E2D\u7684\u94FE\u63A5\u5224\u5B9A\u5DF2\u5BFC\u51FA\uFF08\u53EA\u8BFB\uFF0C\u4E0D\u6539\u672C\u5730\u8D26\u672C\uFF09\u3002</div>
-                            <div class="ldb-setting-row ldb-mb-8">
-                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-recompute-export-status" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);">\u6309 Notion \u91CD\u7B97\u5BFC\u51FA\u72B6\u6001</button>
-                            </div>
-                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                <label for="ldb-bookmark-dedup-mode" style="white-space: nowrap;">\u4E66\u7B7E\u5BFC\u5165\u53BB\u91CD</label>
-                                <select id="ldb-bookmark-dedup-mode" class="ldb-input ldb-flex-1">
-                                    <option value="strict">\u81EA\u52A8\u53BB\u91CD</option>
-                                    <option value="allow_duplicates">\u5141\u8BB8\u91CD\u590D\uFF08\u624B\u52A8\u52FE\u9009\uFF09</option>
-                                </select>
-                            </div>
-                            <div class="ldb-setting-row ldb-mb-8">
-                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
-                                    <input type="checkbox" id="ldb-ai-category-auto-dedup" checked>
-                                    <span>\u5206\u7C7B\u5217\u8868\u81EA\u52A8\u53BB\u91CD</span>
-                                </label>
-                            </div>
-                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                <label for="ldb-cross-source-mode" style="white-space: nowrap;">\u8DE8\u6E90\u5B58\u50A8\u6A21\u5F0F</label>
-                                <select id="ldb-cross-source-mode" class="ldb-input ldb-flex-1">
-                                    <option value="separate">\u5206\u5E93\uFF08\u5404\u6765\u6E90\u72EC\u7ACB\u6570\u636E\u5E93\uFF09</option>
-                                    <option value="unified">\u7EDF\u4E00\u5E93\uFF08\u6240\u6709\u6765\u6E90\u540C\u4E00\u6570\u636E\u5E93\uFF09</option>
-                                </select>
-                            </div>
-                            <div id="ldb-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
-
-                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-update-check-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);">\u68C0\u67E5\u66F4\u65B0</button>
-                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer; margin: 0;">
-                                    <input type="checkbox" id="ldb-update-auto-enabled">
-                                    <span>\u81EA\u52A8\u68C0\u67E5\u66F4\u65B0</span>
-                                </label>
-                            </div>
-                            <div id="ldb-update-auto-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
-                                <div class="ldb-setting-row ldb-flex-center-gap">
-                                    <label for="ldb-update-interval-hours" style="white-space: nowrap;">\u68C0\u67E5\u95F4\u9694</label>
-                                    <select id="ldb-update-interval-hours" class="ldb-input ldb-flex-1">
-                                        <option value="24">\u6BCF 24 \u5C0F\u65F6</option>
-                                        <option value="72">\u6BCF 72 \u5C0F\u65F6</option>
-                                        <option value="168">\u6BCF 168 \u5C0F\u65F6</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div id="ldb-update-check-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-xs);"></div>
-                        </div>
-
-                        <div class="ldb-btn-group" style="margin-bottom: var(--ldb-ui-spacing-xl);">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-load-bookmarks">
-                                \u{1F504} \u52A0\u8F7D\u6536\u85CF\u5217\u8868
-                            </button>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-import-browser-bookmarks">
-                                \u{1F4D6} \u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E
-                            </button>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-organize-bookmarks">
-                                \u{1F9F9} \u6574\u7406\u4E66\u7B7E
-                            </button>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-undo-organize" style="display: none;">
-                                \u21A9\uFE0F \u64A4\u9500\u6574\u7406
-                            </button>
-                        </div>
-
-                        <!-- F-UI-32:\u672A\u52A0\u8F7D\u65F6\u7684\u7A7A\u72B6\u6001\u5F15\u5BFC -->
-                        <div class="ldb-view-empty" id="ldb-bookmark-empty-state">
-                            <div class="ldb-view-empty-title">\u8FD8\u6CA1\u6709\u52A0\u8F7D\u6536\u85CF</div>
-                            <div class="ldb-view-empty-text">\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u52A0\u8F7D\u5F53\u524D\u6765\u6E90\u7684\u6536\u85CF\u5217\u8868\uFF0C\u52A0\u8F7D\u540E\u53EF\u52FE\u9009\u5E76\u5BFC\u51FA\u5230 Notion\u3002</div>
-                            <button class="ldb-btn ldb-btn-primary" id="ldb-bookmark-empty-load" type="button">\u{1F504} \u52A0\u8F7D\u6536\u85CF\u5217\u8868</button>
-                        </div>
-
-                        <!-- \u6536\u85CF\u5217\u8868 (\u52A0\u8F7D\u540E\u663E\u793A) -->
-                        <div id="ldb-bookmark-list-container" style="display: none;">
-                            <div class="ldb-select-all">
-                                <label>
-                                    <input type="checkbox" id="ldb-select-all" checked>
-                                    <span>\u5168\u9009/\u53D6\u6D88</span>
-                                </label>
-                                <span class="ldb-select-count" id="ldb-select-count">\u5DF2\u9009 0 \u4E2A</span>
-                            </div>
-                            <div class="ldb-bookmark-list" id="ldb-bookmark-list"></div>
-                        </div>
-
-                        <!-- F-UI-35:\u5BFC\u51FA\u76EE\u6807/\u6388\u6743/\u6743\u9650\u53EA\u8BFB\u6458\u8981 -->
-                        <div id="ldb-export-target-summary" style="font-size: var(--ldb-ui-font-size-xs); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-sm);"></div>
-
-                        <!-- \u5BFC\u51FA\u6309\u94AE\u7EC4 -->
-                        <div class="ldb-btn-group" id="ldb-export-btns">
-                            <button class="ldb-btn ldb-btn-primary" id="ldb-export" disabled>
-                                \u{1F4E4} \u5F00\u59CB\u5BFC\u51FA
-                            </button>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-obs-export" disabled>
-                                \u{1F4DD} \u5BFC\u51FA\u5230 Obsidian
-                            </button>
-                        </div>
-
-                        <!-- \u63A7\u5236\u6309\u94AE (\u5BFC\u51FA\u65F6\u663E\u793A) -->
-                        <div class="ldb-control-btns" id="ldb-control-btns" style="display: none;">
-                            <button class="ldb-btn ldb-btn-warning ldb-btn-small" id="ldb-pause">
-                                \u23F8\uFE0F \u6682\u505C
-                            </button>
-                            <button class="ldb-btn ldb-btn-danger ldb-btn-small" id="ldb-cancel">
-                                \u23F9\uFE0F \u53D6\u6D88
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- \u72B6\u6001\u663E\u793A -->
-                    <div id="ldb-status-container" aria-live="polite"></div>
-
-                    <!-- \u5BFC\u51FA\u62A5\u544A -->
-                    <div id="ldb-report-container"></div>
-                </div>
-
-                <!-- ============ Tab 2: \u89C6\u56FE ============ -->
-                <div class="ldb-tab-content" data-tab-content="visuals" role="tabpanel" id="ldb-tab-visuals">
-                    <div class="ldb-section">
-                        <div class="ldb-view-header">
-                            <div>
-                                <div class="ldb-section-title" style="margin-bottom: var(--ldb-ui-spacing-xs);">\u5DE5\u4F5C\u533A\u89C6\u56FE</div>
-                                <div class="ldb-tip" id="ldb-view-subtitle">\u5237\u65B0\u540E\u4F1A\u57FA\u4E8E\u5F53\u524D Notion \u5DE5\u4F5C\u533A\u6570\u636E\u5E93\u751F\u6210\u5168\u5C40\u65F6\u95F4\u7EBF\u3001\u6765\u6E90\u5173\u7CFB\u56FE\u548C\u5BFC\u51FA\u6F0F\u6597\uFF1B\u4E0B\u65B9\u7EE7\u7EED\u4FDD\u7559\u672C\u8F6E\u5DF2\u52A0\u8F7D\u6458\u8981\u3002</div>
-                            </div>
-                            <div class="ldb-view-actions">
-                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-refresh-workspace" type="button">\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE</button>
-                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-generate-insight" type="button">\u751F\u6210\u6D1E\u5BDF</button>
-                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-save-workspace-candidates" type="button">\u4FDD\u5B58\u5019\u9009</button>
-                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-save-workspace-package" type="button">\u4FDD\u5B58\u534F\u4F5C\u5305</button>
-                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-save-workspace-report" type="button">\u4FDD\u5B58\u5230 Notion</button>
-                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-copy-workspace-report" type="button">\u590D\u5236\u62A5\u544A</button>
-                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-download-workspace-report" type="button">\u4E0B\u8F7D\u62A5\u544A</button>
-                                <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-download-workspace-package" type="button">\u4E0B\u8F7D\u534F\u4F5C\u5305</button>
-                            </div>
-                        </div>
-                        <div class="ldb-view-status" id="ldb-view-workspace-status" aria-live="polite" aria-atomic="true">\u5C1A\u672A\u5237\u65B0\u5DE5\u4F5C\u533A\u89C6\u56FE\u3002</div>
-                        <div class="ldb-view-summary" id="ldb-view-workspace-summary">
-                            <div class="ldb-view-empty">
-                                <div class="ldb-view-empty-title">\u5DE5\u4F5C\u533A\u603B\u89C8\u8FD8\u6CA1\u6709\u6570\u636E</div>
-                                <div class="ldb-view-empty-text">\u70B9\u51FB\u4E0A\u65B9\u6309\u94AE\u540E\uFF0C\u4F1A\u626B\u63CF\u5F53\u524D\u5DE5\u4F5C\u533A\u6570\u636E\u5E93\u91CC\u7684\u9875\u9762\u5C5E\u6027\uFF0C\u751F\u6210\u5168\u5C40\u65F6\u95F4\u7EBF\u3001\u6765\u6E90\u5173\u7CFB\u56FE\u548C\u5BFC\u51FA\u6F0F\u6597\u3002</div>
-                            </div>
-                        </div>
-                        <div class="ldb-view-subsection">
-                            <div class="ldb-view-header">
-                                <div>
-                                    <div class="ldb-view-section-title">\u7EDF\u4E00\u540C\u6B65\u4E2D\u5FC3</div>
-                                    <div class="ldb-tip">\u7EDF\u4E00\u67E5\u770B Linux.do\u3001GitHub \u4E0E\u6D4F\u89C8\u5668\u4E66\u7B7E\u4E09\u6761\u589E\u91CF\u540C\u6B65\u94FE\u7684\u542F\u7528\u72B6\u6001\u3001\u589E\u91CF\u57FA\u7EBF\u548C\u6700\u8FD1\u4E00\u6B21\u6210\u529F\u7ED3\u679C\u3002</div>
-                                </div>
-                                <div class="ldb-view-actions">
-                                    <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-sync-now" type="button">\u7ACB\u5373\u540C\u6B65\u5168\u90E8</button>
-                                </div>
-                            </div>
-                            <div class="ldb-view-summary" id="ldb-view-sync-summary">
-                                <div class="ldb-view-empty">
-                                    <div class="ldb-view-empty-title">\u7EDF\u4E00\u540C\u6B65\u4E2D\u5FC3\u8FD8\u6CA1\u6709\u6458\u8981</div>
-                                    <div class="ldb-view-empty-text">\u542F\u7528\u4EFB\u4E00\u81EA\u52A8\u540C\u6B65\u6765\u6E90\u540E\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u8F6E\u8BE2\u7B56\u7565\u3001\u589E\u91CF\u6C34\u4F4D\u7EBF\u548C\u6700\u8FD1\u6210\u529F\u65F6\u95F4\u3002</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="ldb-view-subsection">
-                            <div class="ldb-view-section-title">\u672C\u8F6E\u5DF2\u52A0\u8F7D\u6458\u8981</div>
-                            <div class="ldb-view-summary" id="ldb-view-summary">
-                                <div class="ldb-view-empty">
-                                    <div class="ldb-view-empty-title">\u89C6\u56FE\u8FD8\u6CA1\u6709\u6570\u636E</div>
-                                    <div class="ldb-view-empty-text">\u5148\u52A0\u8F7D Linux.do \u6216 GitHub \u6536\u85CF\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u6765\u6E90\u5206\u5E03\u3001\u5BFC\u51FA\u72B6\u6001\u548C\u65F6\u95F4\u7EBF\u6458\u8981\u3002</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ============ Tab 3: AI \u52A9\u624B ============ -->
-                <div class="ldb-tab-content" data-tab-content="ai" role="tabpanel" id="ldb-tab-ai">
-                    <div class="ldb-section">
-                        <!-- \u5BF9\u8BDD\u533A\u57DF -->
-                        <!-- v3.14.7 (REV-27 UI-13): \u804A\u5929\u5BB9\u5668 aria-live=polite \u2014\u2014 AI \u6D41\u5F0F\u56DE\u590D\u5BF9\u8F85\u52A9\u6280\u672F\u53EF\u611F\u77E5 -->
-                        <div class="ldb-chat-container" id="ldb-chat-messages" aria-live="polite" aria-relevant="additions">
-                            ${AIWelcomeUI2.render(personaName)}
-                        </div>
-
-                        <!-- \u8F93\u5165\u533A\u57DF -->
-                        <div class="ldb-chat-input-container">
-                            <textarea
-                                id="ldb-chat-input"
-                                class="ldb-chat-input"
-                                placeholder="${Utils2.escapeHtml(AIWelcomeUI2.getInputPlaceholder())}"
-                                rows="1"
-                            ></textarea>
-                            <button id="ldb-chat-send" class="ldb-chat-send-btn">\u53D1\u9001</button>
-                        </div>
-
-                        <!-- \u5FEB\u6377\u64CD\u4F5C -->
-                        <div class="ldb-chat-actions">
-                            <button class="ldb-chat-action-btn" id="ldb-chat-clear">\u{1F5D1}\uFE0F \u6E05\u7A7A</button>
-                            <!-- F-03 \u4FEE\u590D\uFF1A\u6279\u91CF\u5206\u7C7B\u63A7\u5236\uFF08\u4E0E Exporter \u6682\u505C/\u53D6\u6D88\u4E00\u81F4\uFF0C\u5E38\u9A7B\uFF09 -->
-                            <span id="ldb-classify-controls">
-                                <button class="ldb-chat-action-btn" id="ldb-classify-pause">\u23F8\uFE0F \u6682\u505C\u5206\u7C7B</button>
-                                <button class="ldb-chat-action-btn" id="ldb-classify-cancel">\u2715 \u53D6\u6D88\u5206\u7C7B</button>
-                            </span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ============ Tab 4: \u8BBE\u7F6E ============ -->
-                <div class="ldb-tab-content" data-tab-content="settings" role="tabpanel" id="ldb-tab-settings">
-                    <!-- Notion \u914D\u7F6E -->
-                    <div class="ldb-section">
-                        <div class="ldb-section-title">Notion \u914D\u7F6E</div>
-                        <div class="ldb-input-group">
-                            <label class="ldb-label">\u8BA4\u8BC1\u65B9\u5F0F</label>
-                            <div class="ldb-checkbox-group ldb-mb-8" role="radiogroup" aria-label="Notion \u8BA4\u8BC1\u65B9\u5F0F">
-                                <label class="ldb-checkbox-item">
-                                    <input type="radio" name="ldb-auth-mode" data-ldb-auth-mode="manual" id="ldb-auth-mode-manual" value="manual">
-                                    <span>\u4F7F\u7528 API Key\uFF08Internal\uFF09</span>
-                                </label>
-                                <label class="ldb-checkbox-item">
-                                    <input type="radio" name="ldb-auth-mode" data-ldb-auth-mode="oauth" id="ldb-auth-mode-oauth" value="oauth">
-                                    <span>\u4F7F\u7528\u516C\u5F00 OAuth</span>
-                                </label>
-                            </div>
-                            <div class="ldb-tip" data-ldb-auth-mode-status id="ldb-auth-mode-status">\u5F53\u524D\u542F\u7528\uFF1AAPI Key</div>
-                            <div class="ldb-tip">API Key \u4E0E OAuth \u51ED\u8BC1\u90FD\u53EF\u9884\u5148\u586B\u5199\uFF0C\u4F46\u53EA\u6709\u4E0A\u65B9\u6240\u9009\u6A21\u5F0F\u4F1A\u88AB\u5BFC\u51FA / getAccessToken \u4F7F\u7528\u3002</div>
-                        </div>
-                        <div class="ldb-input-group" data-ldb-auth-section="manual" id="ldb-auth-section-manual">
-                                                        <label class="ldb-label" for="ldb-api-key">API Key</label>
-                            <input type="password" class="ldb-input" id="ldb-api-key" placeholder="secret_xxx...">
-                            <div class="ldb-tip">
-                                \u5728 <a href="https://www.notion.so/my-integrations" target="_blank" class="ldb-link">Notion Integrations</a> \u521B\u5EFA
-                            </div>
-                        </div>
-                        <div class="ldb-input-group" data-ldb-auth-section="oauth" id="ldb-auth-section-oauth">
-                            <label class="ldb-label">\u516C\u5F00 OAuth \u6388\u6743\uFF08\u53EF\u9009\uFF09</label>
-                            <input type="text" class="ldb-input" id="ldb-oauth-client-id" placeholder="Client ID" aria-label="OAuth Client ID">
-                            <input type="password" class="ldb-input ldb-mt-8" id="ldb-oauth-client-secret" placeholder="Client Secret" aria-label="OAuth Client Secret">
-                            <input type="text" class="ldb-input ldb-mt-8" id="ldb-oauth-redirect-uri" placeholder="Redirect URI" aria-label="OAuth Redirect URI">
-                            <div style="display: flex; gap: var(--ldb-ui-spacing-md); flex-wrap: wrap; margin-top: var(--ldb-ui-spacing-md);">
-                                <button class="ldb-btn ldb-btn-primary" id="ldb-oauth-authorize">\u{1F510} \u4E00\u952E\u6388\u6743</button>
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-oauth-clear">\u65AD\u5F00\u6388\u6743</button>
-                            </div>
-                            <div class="ldb-tip" id="ldb-oauth-status" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                            <div class="ldb-tip">\u5982\u679C\u4F60\u4F7F\u7528 Notion \u516C\u5F00\u96C6\u6210\uFF1A\u2460 Redirect URI \u63A8\u8350\u586B\u5171\u4EAB\u56DE\u8C03 <code>https://smith-106.github.io/LD-Notion/oauth-callback</code>\uFF08\u987B\u4E0E Notion \u540E\u53F0\u9010\u5B57\u7B26\u4E00\u81F4\uFF1BNotion \u65B0\u8FDE\u63A5\u8868\u5355\u5DF2\u62D2\u7EDD <code>https://www.notion.so/</code>\uFF0C\u7EC8\u7AEF\u7528\u6237\u65E0\u9700\u81EA\u5EFA\u7F51\u7AD9\uFF09\uFF1B\u2461 Notion \u8981\u6C42\u516C\u5F00\u96C6\u6210<strong>\u63D0\u4EA4\u5BA1\u6838\u5E76\u901A\u8FC7\u540E</strong> Authorization URL \u624D\u4F1A\u751F\u6548\u3002\u82E5\u6388\u6743\u9875\u63D0\u793A\u300C\u5BA2\u6237\u7AEF ID \u7F3A\u5931\u6216\u4E0D\u5B8C\u6574\u300D\uFF0C\u8BF7\u6838\u5BF9 Client ID \u4E3A\u5B8C\u6574 UUID\uFF08\u4E0D\u662F Client Secret\uFF09\u3001URI \u5DF2\u6CE8\u518C\u3001\u96C6\u6210\u5DF2\u901A\u8FC7\u5BA1\u6838\u3002\u654F\u611F\u51ED\u8BC1\u4FDD\u5B58\u5728\u6D4F\u89C8\u5668\u672C\u5730\uFF08GM \u5B58\u50A8\uFF09\uFF0C\u811A\u672C\u66F4\u65B0\u540E\u65E0\u9700\u91CD\u65B0\u8F93\u5165\u3002</div>
-                        </div>
-                        <div class="ldb-input-group">
-                            <label class="ldb-label" for="ldb-workspace-select">\u6570\u636E\u5E93 / \u9875\u9762</label>
-                            <div class="ldb-flex-gap">
-                                <select class="ldb-select ldb-flex-1" id="ldb-workspace-select">
-                                    <option value="">-- \u4ECE\u5DE5\u4F5C\u533A\u9009\u62E9 --</option>
-                                </select>
-                                <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-refresh-workspace" title="\u5237\u65B0\u5DE5\u4F5C\u533A\u9875\u9762\u5217\u8868" aria-label="\u5237\u65B0\u5DE5\u4F5C\u533A\u9875\u9762\u5217\u8868">\u{1F504}</button>
-                            </div>
-                            <div class="ldb-input-group" id="ldb-manual-db-wrap" style="display: none; margin-top: var(--ldb-ui-spacing-md);">
-                                <input type="text" class="ldb-input ldb-flex-1" id="ldb-database-id" placeholder="\u624B\u52A8\u8F93\u5165 32 \u4F4D\u6570\u636E\u5E93 ID\uFF08\u9AD8\u7EA7\uFF09">
-                            </div>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-toggle-manual-db" style="margin-top: var(--ldb-ui-spacing-sm); padding: var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">\u9AD8\u7EA7\uFF1A\u624B\u52A8\u8F93\u5165\u6570\u636E\u5E93 ID</button>
-                            <div class="ldb-tip" id="ldb-workspace-tip">
-                                \u4F18\u5148\u4ECE\u5DE5\u4F5C\u533A\u5217\u8868\u9009\u62E9\uFF0C\u65E0\u6CD5\u52A0\u8F7D\u65F6\u518D\u624B\u52A8\u8F93\u5165
-                            </div>
-                        </div>
-
-                        <!-- \u5BFC\u51FA\u76EE\u6807\u7C7B\u578B\u9009\u62E9 -->
-                        <div class="ldb-input-group">
-                            <label class="ldb-label">\u5BFC\u51FA\u76EE\u6807</label>
-                            <div class="ldb-checkbox-group ldb-mb-8">
-                                <label class="ldb-checkbox-item">
-                                    <input type="radio" name="ldb-export-target" id="ldb-export-target-database" value="database" checked>
-                                    <span>\u6570\u636E\u5E93\uFF08\u63A8\u8350\uFF09</span>
-                                </label>
-                                <label class="ldb-checkbox-item">
-                                    <input type="radio" name="ldb-export-target" id="ldb-export-target-page" value="page">
-                                    <span>\u9875\u9762\uFF08\u5B50\u9875\u9762\uFF09</span>
-                                </label>
-                            </div>
-                            <div class="ldb-tip" id="ldb-export-target-tip">
-                                \u5BFC\u51FA\u4E3A\u6570\u636E\u5E93\u6761\u76EE\uFF0C\u652F\u6301\u7B5B\u9009\u548C\u6392\u5E8F
-                            </div>
-                        </div>
-
-                        <!-- \u7236\u9875\u9762 ID\uFF08\u9875\u9762\u6A21\u5F0F\u65F6\u663E\u793A\uFF09 -->
-                        <div class="ldb-input-group" id="ldb-parent-page-group" style="display: none;">
-                            <label class="ldb-label" for="ldb-parent-page-id">\u7236\u9875\u9762 ID</label>
-                            <input type="text" class="ldb-input" id="ldb-parent-page-id" placeholder="32\u4F4D\u9875\u9762ID">
-                            <div class="ldb-tip">
-                                \u5E16\u5B50\u5C06\u4F5C\u4E3A\u5B50\u9875\u9762\u521B\u5EFA\u5728\u6B64\u9875\u9762\u4E0B
-                            </div>
-                        </div>
-
-                        <div style="display: flex; gap: var(--ldb-ui-spacing-md); align-items: center; flex-wrap: wrap;">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-validate-config">\u9A8C\u8BC1\u914D\u7F6E</button>
-                            <button class="ldb-btn ldb-btn-primary" id="ldb-setup-database" title="\u81EA\u52A8\u5728\u6570\u636E\u5E93\u4E2D\u521B\u5EFA\u6240\u9700\u5C5E\u6027">\u81EA\u52A8\u8BBE\u7F6E\u6570\u636E\u5E93</button>
-                            <span id="ldb-config-status" style="font-size: var(--ldb-ui-font-size-sm); margin-left: var(--ldb-ui-spacing-xs);"></span>
-                        </div>
-
-                        <!-- \u6743\u9650\u8BBE\u7F6E -->
-                        <div class="ldb-permission-panel ldb-mt-12">
-                            <div class="ldb-permission-row">
-                                <span class="ldb-permission-label">\u6743\u9650\u7EA7\u522B</span>
-                                <select class="ldb-permission-select" id="ldb-permission-level">
-                                    <option value="0">\u53EA\u8BFB</option>
-                                    <option value="1">\u6807\u51C6</option>
-                                    <option value="2">\u9AD8\u7EA7</option>
-                                    <option value="3">\u7BA1\u7406\u5458</option>
-                                </select>
-                            </div>
-                            <div class="ldb-permission-row">
-                                <span class="ldb-permission-label">\u5371\u9669\u64CD\u4F5C\u786E\u8BA4</span>
-                                <label class="ldb-toggle-switch">
-                                    <input type="checkbox" id="ldb-require-confirm" checked>
-                                    <span class="ldb-toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="ldb-permission-row">
-                                <span class="ldb-permission-label">\u5BA1\u8BA1\u65E5\u5FD7</span>
-                                <label class="ldb-toggle-switch">
-                                    <input type="checkbox" id="ldb-enable-audit-log" checked>
-                                    <span class="ldb-toggle-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="ldb-divider"></div>
-
-                    <!-- \u7B5B\u9009\u8BBE\u7F6E -->
-                    <div class="ldb-section">
-                        <div class="ldb-toggle-section" id="ldb-filter-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-filter-content">
-                            <span class="ldb-section-title" style="margin-bottom: 0;">\u7B5B\u9009\u8BBE\u7F6E</span>
-                            <span id="ldb-filter-arrow">\u25B6</span>
-                        </div>
-                        <div class="ldb-toggle-content collapsed" id="ldb-filter-content">
-                            <div class="ldb-input-group ldb-mt-12">
-                                <div class="ldb-checkbox-group">
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" id="ldb-only-first">
-                                        <span>\u4EC5\u4E3B\u697C</span>
-                                    </label>
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" id="ldb-only-op">
-                                        <span>\u4EC5\u697C\u4E3B</span>
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">\u697C\u5C42\u8303\u56F4</label>
-                                <div class="ldb-range-group">
-                                    <input type="number" id="ldb-range-start" value="1" min="1" aria-label="\u8D77\u59CB\u697C\u5C42">
-                                    <span>\u81F3</span>
-                                    <input type="number" id="ldb-range-end" value="999999" min="1" aria-label="\u7ED3\u675F\u697C\u5C42">
-                                </div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label" for="ldb-img-mode">\u56FE\u7247\u5904\u7406</label>
-                                <select class="ldb-select" id="ldb-img-mode">
-                                    <option value="upload">\u4E0A\u4F20\u5230 Notion</option>
-                                    <option value="external">\u5916\u94FE\u5F15\u7528</option>
-                                    <option value="skip">\u8DF3\u8FC7\u56FE\u7247</option>
-                                </select>
-                                <div class="ldb-tip">Notion \u514D\u8D39\u5957\u9910\u6587\u4EF6\u9700\u5C0F\u4E8E 5MB\uFF1B\u4ED8\u8D39\u5957\u9910 PDF \u5C0F\u4E8E 20MB\u3001\u56FE\u7247\u5C0F\u4E8E 5MB\u3002\u82E5\u56FE\u7247\u4E0A\u4F20\u62A5\u9519\uFF0C\u811A\u672C\u4F1A\u81EA\u52A8\u5C1D\u8BD5\u6309\u6587\u4EF6\u4E0A\u4F20\u3002</div>
-                            </div>
-                            <div class="ldb-form-group">
-                                <label for="ldb-request-delay">\u8BF7\u6C42\u95F4\u9694</label>
-                                <select class="ldb-select" id="ldb-request-delay">
-                                    <option value="200">\u5FEB\u901F (200ms)</option>
-                                    <option value="500">\u6B63\u5E38 (500ms)</option>
-                                    <option value="1000">\u6162\u901F (1\u79D2)</option>
-                                    <option value="2000">\u8F83\u6162 (2\u79D2)</option>
-                                    <option value="3000">\u5F88\u6162 (3\u79D2)</option>
-                                    <option value="5000">\u8D85\u6162 (5\u79D2)</option>
-                                    <option value="10000">\u6781\u6162 (10\u79D2)</option>
-                                    <option value="30000">\u9F9F\u901F (30\u79D2)</option>
-                                </select>
-                            </div>
-                            <div class="ldb-form-group">
-                                <label for="ldb-export-concurrency">\u5E76\u53D1\u6570</label>
-                                <select class="ldb-select" id="ldb-export-concurrency">
-                                    <option value="1">\u4E32\u884C (1\u4E2A)</option>
-                                    <option value="2">2 \u4E2A\u5E76\u53D1</option>
-                                    <option value="3">3 \u4E2A\u5E76\u53D1</option>
-                                    <option value="5">5 \u4E2A\u5E76\u53D1</option>
-                                </select>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label" for="ldb-filter-img">\u56FE\u7247\u7B5B\u9009</label>
-                                <select class="ldb-select" id="ldb-filter-img">
-                                    <option value="all">\u5168\u90E8</option>
-                                    <option value="only_img">\u4EC5\u542B\u56FE\u697C\u5C42</option>
-                                    <option value="no_img">\u4EC5\u65E0\u56FE\u697C\u5C42</option>
-                                </select>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label" for="ldb-filter-users">\u6307\u5B9A\u7528\u6237</label>
-                                <input type="text" class="ldb-input" id="ldb-filter-users" placeholder="user1, user2">
-                                <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u4EC5\u5BFC\u51FA\u8FD9\u4E9B\u7528\u6237\u7684\u56DE\u590D</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label" for="ldb-filter-include">\u5305\u542B\u5173\u952E\u8BCD</label>
-                                <input type="text" class="ldb-input" id="ldb-filter-include" placeholder="\u6559\u7A0B, \u6307\u5357">
-                                <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u5FC5\u987B\u5305\u542B\u4EFB\u4E00\u5173\u952E\u8BCD</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label" for="ldb-filter-exclude">\u6392\u9664\u5173\u952E\u8BCD</label>
-                                <input type="text" class="ldb-input" id="ldb-filter-exclude" placeholder="\u5E7F\u544A, \u6C34\u8D34">
-                                <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u6392\u9664\u5305\u542B\u5173\u952E\u8BCD\u7684\u697C\u5C42</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label" for="ldb-filter-minlen">\u6700\u5C11\u5B57\u6570</label>
-                                <input type="number" class="ldb-input" id="ldb-filter-minlen" value="0" min="0" placeholder="0">
-                                <div class="ldb-tip">\u8FC7\u6EE4\u5B57\u6570\u4E0D\u8DB3\u7684\u697C\u5C42</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="ldb-divider"></div>
-
-                    <!-- AI \u8BBE\u7F6E -->
-                    <div class="ldb-section">
-                        <div class="ldb-toggle-section" id="ldb-ai-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-ai-settings-content">
-                            <span class="ldb-section-title" style="margin-bottom: 0;">AI \u8BBE\u7F6E</span>
-                            <span id="ldb-ai-settings-arrow">\u25B6</span>
-                        </div>
-                        <div class="ldb-toggle-content collapsed" id="ldb-ai-settings-content">
-                            <div class="ldb-input-group ldb-mt-12">
-                                <label class="ldb-label" for="ldb-ai-service">AI \u670D\u52A1</label>
-                                <select class="ldb-select" id="ldb-ai-service">
-                                    <option value="openai">OpenAI</option>
-                                    <option value="claude">Claude</option>
-                                    <option value="gemini">Gemini</option>
-                                </select>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label" for="ldb-ai-model">\u6A21\u578B</label>
-                                <div class="ldb-flex-gap">
-                                    <select class="ldb-select ldb-flex-1" id="ldb-ai-model"></select>
-                                    <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-ai-fetch-models">\u{1F504} \u83B7\u53D6</button>
-                                </div>
-                                <div class="ldb-tip" id="ldb-ai-model-tip"></div>
-                            </div>
-                            <div class="ldb-input-group">
-                                                            <label class="ldb-label" for="ldb-ai-api-key">API Key</label>
-                                <input type="password" class="ldb-input" id="ldb-ai-api-key" placeholder="AI \u670D\u52A1\u7684 API Key">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label" for="ldb-ai-base-url">\u81EA\u5B9A\u4E49\u7AEF\u70B9 (\u53EF\u9009)</label>
-                                <input type="text" class="ldb-input" id="ldb-ai-base-url" placeholder="\u7559\u7A7A\u4F7F\u7528\u5B98\u65B9 API">
-                                <div class="ldb-tip">\u652F\u6301\u7B2C\u4E09\u65B9 OpenAI \u517C\u5BB9 API</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label" for="ldb-ai-categories">\u5206\u7C7B\u5217\u8868</label>
-                                <input type="text" class="ldb-input" id="ldb-ai-categories" placeholder="\u6280\u672F, \u751F\u6D3B, \u95EE\u7B54, \u5206\u4EAB, \u8D44\u6E90, \u5176\u4ED6">
-                                <div class="ldb-tip">\u9017\u53F7\u5206\u9694\uFF0C\u7528\u4E8E\u81EA\u52A8\u5206\u7C7B\u529F\u80FD</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label" for="ldb-ai-target-db">\u67E5\u8BE2\u6570\u636E\u5E93</label>
-                                <div class="ldb-flex-gap">
-                                    <select class="ldb-select ldb-flex-1" id="ldb-ai-target-db">
-                                        <option value="">\u5F53\u524D\u914D\u7F6E\u7684\u6570\u636E\u5E93</option>
-                                        <option value="__all__">\u6240\u6709\u5DE5\u4F5C\u533A\u6570\u636E\u5E93</option>
-                                    </select>
-                                    <button class="ldb-btn ldb-btn-secondary ldb-nowrap-badge" id="ldb-ai-refresh-dbs">\u{1F504}</button>
-                                </div>
-                                <div class="ldb-tip">AI \u67E5\u8BE2\u6570\u636E\u5E93\u65F6\u7684\u76EE\u6807\u8303\u56F4</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">\u5237\u65B0\u9875\u6570\u4E0A\u9650</label>
-                                <select class="ldb-select" id="ldb-workspace-max-pages">
-                                    <option value="5">5 \u9875 (500 \u6761)</option>
-                                    <option value="10">10 \u9875 (1000 \u6761)</option>
-                                    <option value="20">20 \u9875 (2000 \u6761)</option>
-                                    <option value="50">50 \u9875 (5000 \u6761)</option>
-                                    <option value="0">\u65E0\u9650\u5236</option>
-                                </select>
-                                <div class="ldb-tip">\u5237\u65B0\u5DE5\u4F5C\u533A\u5217\u8868\u65F6\u6BCF\u7C7B\u7684\u6700\u5927\u5206\u9875\u6570</div>
-                            </div>
-                            <div class="ldb-btn-group ldb-flex-center-gap">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-ai-test">\u6D4B\u8BD5\u8FDE\u63A5</button>
-                                <span id="ldb-ai-test-status" style="font-size: var(--ldb-ui-font-size-sm);"></span>
-                            </div>
-
-                            <!-- AI \u8F93\u51FA\u6A21\u677F\u7BA1\u7406 -->
-                            <div class="ldb-section-divider">
-                                <span class="ldb-hint">\u{1F4CB} AI \u8F93\u51FA\u6A21\u677F</span>
-                            </div>
-                            <div id="ldb-template-list" style="margin-bottom: var(--ldb-ui-spacing-md);"></div>
-                            <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                <input type="text" class="ldb-input" id="ldb-template-name" placeholder="\u6A21\u677F\u540D\u79F0" style="width: 80px;">
-                                <input type="text" class="ldb-input" id="ldb-template-icon" placeholder="\u56FE\u6807" style="width: 50px;">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-template-add" style="padding: var(--ldb-ui-spacing-xs) var(--ldb-ui-spacing-md); font-size: var(--ldb-ui-font-size-sm);">\u6DFB\u52A0</button>
-                            </div>
-                            <div class="ldb-input-group" style="margin-bottom: var(--ldb-ui-spacing-xs);">
-                                <textarea class="ldb-input" id="ldb-template-prompt" rows="2" placeholder="\u6A21\u677F prompt\uFF0C\u7528\u4E8E AI \u751F\u6210\u5185\u5BB9" style="resize: vertical;"></textarea>
-                            </div>
-                            <div class="ldb-tip">\u6DFB\u52A0\u540E\u53EF\u5728 AI \u5BF9\u8BDD\u4E2D\u4F7F\u7528\u300C\u7528xx\u6A21\u677F\u603B\u7ED3xxx\u9875\u9762\u300D</div>
-
-                            <!-- Agent \u4E2A\u6027\u5316\u8BBE\u7F6E -->
-                            <div class="ldb-section-divider">
-                                <span class="ldb-hint">\u{1F916} Agent \u4E2A\u6027\u5316</span>
-                            </div>
-                            <div class="ldb-input-group ldb-mt-8">
-                                <label class="ldb-label">\u52A9\u624B\u540D\u5B57</label>
-                                <input type="text" class="ldb-input" id="ldb-agent-persona-name" placeholder="AI \u52A9\u624B">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">\u8BED\u6C14\u98CE\u683C</label>
-                                <select class="ldb-select" id="ldb-agent-persona-tone">
-                                    <option value="\u53CB\u597D">\u53CB\u597D</option>
-                                    <option value="\u4E13\u4E1A">\u4E13\u4E1A</option>
-                                    <option value="\u5E7D\u9ED8">\u5E7D\u9ED8</option>
-                                    <option value="\u7B80\u6D01">\u7B80\u6D01</option>
-                                    <option value="\u70ED\u60C5">\u70ED\u60C5</option>
-                                </select>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">\u4E13\u4E1A\u9886\u57DF</label>
-                                <input type="text" class="ldb-input" id="ldb-agent-persona-expertise" placeholder="Notion \u5DE5\u4F5C\u533A\u7BA1\u7406">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">\u81EA\u5B9A\u4E49\u6307\u4EE4 (\u53EF\u9009)</label>
-                                <textarea class="ldb-input" id="ldb-agent-persona-instructions" rows="2" placeholder="\u989D\u5916\u7684\u884C\u4E3A\u6307\u4EE4\uFF0C\u5982\uFF1A\u603B\u662F\u7528\u5217\u8868\u683C\u5F0F\u56DE\u590D" style="resize: vertical;"></textarea>
-                                <div class="ldb-tip">Agent \u6BCF\u6B21\u5BF9\u8BDD\u90FD\u4F1A\u9075\u5FAA\u7684\u4E2A\u6027\u5316\u6307\u4EE4</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">Agent \u6700\u5927\u6267\u884C\u6B65\u6570</label>
-                                <select class="ldb-select" id="ldb-agent-max-iterations">
-                                    <option value="4">4 \u6B65 (\u5FEB\u901F)</option>
-                                    <option value="8" selected>8 \u6B65 (\u9ED8\u8BA4)</option>
-                                    <option value="12">12 \u6B65 (\u6DF1\u5165)</option>
-                                    <option value="16">16 \u6B65 (\u590D\u6742\u4EFB\u52A1)</option>
-                                    <option value="24">24 \u6B65 (\u6781\u9650)</option>
-                                </select>
-                                <div class="ldb-tip">Agent \u5FAA\u73AF\u7684\u6700\u5927\u5DE5\u5177\u8C03\u7528\u6B21\u6570</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="ldb-divider"></div>
-
-                    <!-- GitHub \u6536\u85CF\u5BFC\u5165\u8BBE\u7F6E -->
-                    <div class="ldb-section">
-                        <div class="ldb-toggle-section" id="ldb-github-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-github-settings-content">
-                            <span class="ldb-section-title" style="margin-bottom: 0;">\u{1F419} GitHub \u5BFC\u5165</span>
-                            <span id="ldb-github-settings-arrow">\u25B6</span>
-                        </div>
-                        <div style="margin-top: var(--ldb-ui-spacing-md); margin-bottom: var(--ldb-ui-spacing-sm);">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-open-github-settings" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">
-                                \u{1F3AF} \u4E00\u952E\u5B9A\u4F4D GitHub Token
-                            </button>
-                        </div>
-                        <div class="ldb-toggle-content collapsed" id="ldb-github-settings-content">
-                            <div class="ldb-input-group ldb-mt-12">
-                                <label class="ldb-label">GitHub \u7528\u6237\u540D</label>
-                                <input type="text" class="ldb-input" id="ldb-github-username" placeholder="your-username">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">GitHub \u6388\u6743\uFF08\u63A8\u8350\uFF0C\u514D\u624B\u52A8\u521B\u5EFA Token\uFF09</label>
-                                <div style="display: flex; gap: var(--ldb-ui-spacing-sm); align-items: center; flex-wrap: wrap;">
-                                    <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-github-oauth-btn">\u{1F517} \u901A\u8FC7 GitHub \u6388\u6743</button>
-                                    <span id="ldb-github-oauth-status" class="ldb-tip" style="flex: 1;"></span>
-                                </div>
-                                <div class="ldb-tip">\u9996\u6B21\u4F7F\u7528\u9700\u5728\u4E0B\u65B9\u586B\u5165 Client ID\uFF08github.com/settings/developers \u521B\u5EFA OAuth App \u5373\u53EF\uFF0C\u516C\u5F00\u4FE1\u606F\u65E0\u9700\u4FDD\u5BC6\uFF09\uFF1B\u6388\u6743\u540E Token \u81EA\u52A8\u586B\u5165\u4E0B\u65B9\u8F93\u5165\u6846\uFF0C\u65E0\u9700\u624B\u52A8\u53BB GitHub \u751F\u6210</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">GitHub OAuth Client ID\uFF08\u6388\u6743\u7528\uFF0C\u53EF\u9009\uFF09</label>
-                                <input type="text" class="ldb-input" id="ldb-github-oauth-client-id" placeholder="Iv1.xxxxxxxxxxxxxxxx">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">GitHub Token (\u53EF\u9009)</label>
-                                <input type="password" class="ldb-input" id="ldb-github-token" placeholder="ghp_xxx...">
-                                <div class="ldb-tip">\u624B\u52A8\u7C98\u8D34 Personal Access Token\uFF08PAT \u5151\u5E95\u8DEF\u5F84\uFF09\uFF1B\u63A8\u8350\u7528\u4E0A\u65B9\u300C\u901A\u8FC7 GitHub \u6388\u6743\u300D\u81EA\u52A8\u83B7\u53D6</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">\u5BFC\u5165\u7C7B\u578B</label>
-                                <div class="ldb-checkbox-group" style="margin-top: var(--ldb-ui-spacing-xs);">
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="stars" checked> \u2B50 Stars
-                                    </label>
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="repos"> \u{1F4E6} Repos
-                                    </label>
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="forks"> \u{1F374} Forks
-                                    </label>
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="gists"> \u{1F4DD} Gists
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="ldb-divider"></div>
-
-                    <!-- Obsidian \u5BFC\u51FA\u8BBE\u7F6E -->
-                    <div class="ldb-section">
-                        <div class="ldb-toggle-section" id="ldb-obs-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-obs-settings-content">
-                            <span class="ldb-section-title" style="margin-bottom: 0;">\u{1F4DD} Obsidian \u5BFC\u51FA</span>
-                            <span id="ldb-obs-settings-arrow">\u25B6</span>
-                        </div>
-                        <div class="ldb-toggle-content collapsed" id="ldb-obs-settings-content">
-                            <div class="ldb-input-group ldb-mt-12">
-                                <label class="ldb-label">API \u5730\u5740</label>
-                                <input type="text" class="ldb-input" id="ldb-obs-api-url" placeholder="https://127.0.0.1:27124">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">API Key</label>
-                                <input type="password" class="ldb-input" id="ldb-obs-api-key" placeholder="Obsidian Local REST API Key">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">\u5BFC\u51FA\u76EE\u5F55</label>
-                                <input type="text" class="ldb-input" id="ldb-obs-dir" placeholder="Linux.do">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">\u56FE\u7247\u6A21\u5F0F</label>
-                                <select class="ldb-select" id="ldb-obs-img-mode">
-                                    <option value="file">\u4FDD\u5B58\u56FE\u7247\u5E76\u5F15\u7528</option>
-                                    <option value="base64">Base64 \u5185\u5D4C</option>
-                                    <option value="skip">\u4E0D\u5BFC\u51FA\u56FE\u7247</option>
-                                </select>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">\u56FE\u7247\u76EE\u5F55</label>
-                                <input type="text" class="ldb-input" id="ldb-obs-img-dir" placeholder="Linux.do/attachments">
-                                <div class="ldb-tip">\u4EC5"\u4FDD\u5B58\u56FE\u7247\u5E76\u5F15\u7528"\u6A21\u5F0F\u6709\u6548</div>
-                            </div>
-                            <div style="margin-top: var(--ldb-ui-spacing-md);">
-                                <button class="ldb-btn ldb-btn-secondary" id="ldb-obs-test-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">\u{1F517} \u6D4B\u8BD5\u8FDE\u63A5</button>
-                                <span id="ldb-obs-test-status" aria-live="polite" style="font-size: var(--ldb-ui-font-size-sm); margin-left: var(--ldb-ui-spacing-md);"></span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="ldb-divider"></div>
-
-                    <!-- F-UI-42:\u6D4F\u89C8\u5668\u4E66\u7B7E\u5165\u53E3\uFF08\u72B6\u6001 + \u8DF3\u8F6C\u6536\u85CF Tab\uFF0C\u4E0D\u518D\u7A7A\u58F3\uFF09 -->
-                    <div class="ldb-section">
-                        <div style="font-size: var(--ldb-ui-font-size-md); font-weight: 700; color: var(--ldb-ui-text);">\u{1F4D6} \u6D4F\u89C8\u5668\u4E66\u7B7E</div>
-                        <div id="ldb-bookmark-ext-status" style="font-size: var(--ldb-ui-font-size-xs); margin-top: var(--ldb-ui-spacing-xs); color: var(--ldb-ui-muted);"></div>
-                        <div class="ldb-input-group ldb-mt-12">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-bookmark-settings-jump" type="button">\u{1F4DA} \u524D\u5F80\u6536\u85CF Tab \u914D\u7F6E</button>
-                        </div>
-                    </div>
-
-                    <div class="ldb-divider"></div>
-
-                    <!-- \u8FD0\u884C\u81EA\u68C0 -->
-                    <div class="ldb-section">
-                        <div style="font-size: var(--ldb-ui-font-size-md); font-weight: 700; color: var(--ldb-ui-text);">\u{1FA7A} \u8FD0\u884C\u81EA\u68C0</div>
-                        <div class="ldb-btn-group" style="margin-top: var(--ldb-ui-spacing-md); margin-bottom: var(--ldb-ui-spacing-md);">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-self-check-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">\u6267\u884C\u81EA\u68C0</button>
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-copy-diagnostics-btn" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">\u590D\u5236\u8BCA\u65AD\u4FE1\u606F</button>
-                        </div>
-                        <div id="ldb-self-check-result" class="ldb-hint"></div>
-                    </div>
-
-                    <div class="ldb-divider"></div>
-
-                    <!-- F-05 \u4FEE\u590D\uFF1A\u6570\u636E\u7BA1\u7406\uFF08\u53BB\u91CD/\u5DF2\u5BFC\u51FA\u8BB0\u5F55\u6E05\u7406\uFF09 -->
-                    <div class="ldb-section">
-                        <div class="ldb-section-title">\u6570\u636E\u7BA1\u7406</div>
-                        <div class="ldb-tip" id="ldb-dedup-summary"></div>
-                        <div class="ldb-input-group ldb-mt-12">
-                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-linuxdo-dedup">\u6E05\u9664 Linux.do \u53BB\u91CD</button>
-                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-github-exported">\u6E05\u9664 GitHub \u5DF2\u5BFC\u51FA\u8BB0\u5F55</button>
-                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-bookmark-exported">\u6E05\u9664\u4E66\u7B7E\u5DF2\u5BFC\u51FA\u8BB0\u5F55</button>
-                        </div>
-                        <div class="ldb-tip">\u4EC5\u6E05\u9664\u672C\u5730\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u4E0D\u5F71\u54CD Notion \u4E2D\u5DF2\u6709\u5185\u5BB9\uFF1B\u6E05\u9664\u540E\u5BF9\u5E94\u6765\u6E90\u53EF\u518D\u6B21\u5BFC\u51FA\u3002\u82E5\u300C\u5BFC\u51FA\u72B6\u6001\u4F9D\u636E\u300D\u4E3A Notion \u5DE5\u4F5C\u533A\uFF0C\u6E05\u7A7A Notion \u540E\u5237\u65B0\u5DE5\u4F5C\u533A\u5373\u53EF\u5168\u90E8\u56DE\u5230\u5F85\u5BFC\u51FA\uFF0C\u65E0\u9700\u5148\u6E05\u672C\u5730\u8D26\u672C\u3002</div>
-                        <!-- F-UI-04:AI \u8C03\u7528\u94FE\u8FFD\u8E2A\u53EF\u89C2\u6D4B\u5165\u53E3 -->
-                        <div class="ldb-input-group ldb-mt-12">
-                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-view-ai-traces">\u67E5\u770B AI \u8C03\u7528\u94FE</button>
-                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-ai-traces">\u6E05\u9664 AI \u8C03\u7528\u94FE</button>
-                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-reset-panel-size">\u91CD\u7F6E\u9762\u677F\u5C3A\u5BF8</button>
-                        </div>
-                        <div id="ldb-ai-traces-result" class="ldb-hint" style="margin-top: var(--ldb-ui-spacing-sm);"></div>
-                    </div>
-
-                    <!-- \u64CD\u4F5C\u65E5\u5FD7\u9762\u677F -->
-                    <div class="ldb-log-panel" id="ldb-log-panel">
-                        <div class="ldb-log-header" id="ldb-log-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-log-content">
-                            <span class="ldb-log-title">
-                                \u{1F4CB} \u64CD\u4F5C\u65E5\u5FD7
-                                <span class="ldb-log-badge" id="ldb-log-count">0</span>
-                            </span>
-                            <span id="ldb-log-arrow">\u25B6</span>
-                        </div>
-                        <div class="ldb-log-content collapsed" id="ldb-log-content">
-                            <div id="ldb-log-list"></div>
-                            <div class="ldb-log-actions">
-                                <button class="ldb-log-clear-btn" id="ldb-log-clear">\u6E05\u9664\u65E5\u5FD7</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
+          panel.innerHTML = renderPanel(personaName);
           document.body.appendChild(panel);
           UI2.panel = panel;
           UI2._abortController = new AbortController();
