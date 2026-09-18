@@ -1039,4 +1039,7 @@ const UndoManager = {
     },
 };
 
-module.exports = { OperationGuard, OperationLog, ConfirmationDialog, UndoManager };
+// ISS-20260728-018 (OBS-002): 业务批量操作结构化 trace —— 泛化 AgentTrace 模式到非 AI 路径
+const { BatchTrace } = require("./BatchTrace");
+
+module.exports = { OperationGuard, OperationLog, ConfirmationDialog, UndoManager, BatchTrace };

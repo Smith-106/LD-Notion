@@ -351,6 +351,11 @@ BookmarkAutoImporter.run = async () => {
         }
     }, 30000);
     const attemptAt = Date.now();
+    // ISS-20260728-018 (OBS-002): 自动同步批量结构化 trace —— 聚合 lastStats + 状态 + 耗时,
+    // 泛化 AgentTrace 模式到非 AI 业务路径(GM FIFO rotate)。批级观测,与逐项 OperationLog 互补。
+    // try/catch 块外声明,catch 路径也可 persist(成功/异常均落盘)。
+    const { BatchTrace } = require("../security");
+    let batchTrace = null;
 
     try {
         SyncState.updateBookmarkState({
@@ -393,6 +398,13 @@ BookmarkAutoImporter.run = async () => {
         const nextSnapshot = {};
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+
+        batchTrace = BatchTrace.create({
+            operation: "bookmark-auto-sync",
+            source: "bookmark-auto-sync",
+            actor: "system",
+            itemTotal: currentBookmarks.length,
+        });
 
         let created = 0;
         let updated = 0;
@@ -716,6 +728,13 @@ BookmarkAutoImporter.run = async () => {
             },
         });
 
+        // ISS-20260728-018 (OBS-002): 批量 trace 落盘 —— 聚合 created/updated/archived/
+        // unchanged/failed/denied 细分计数 + 批级状态。per-item 明细由逐项 OperationLog 承担,
+        // 本 trace 记批级结构(与 AI 路径 AgentTrace 对等的业务侧观测)。
+        BatchTrace.persist(batchTrace, failed > 0 ? "partial" : "completed", {
+            created, updated, archived, unchanged, failed, denied: deniedCount,
+        });
+
         if (created === 0 && updated === 0 && archived === 0 && failed === 0 && deniedCount === 0) {
             BookmarkAutoImporter.updateStatus(`✅ 浏览器书签已同步，无新增变更 (${new Date().toLocaleTimeString()})`);
             return { importedCount: 0, failedCount: 0, errors: [] };
@@ -744,6 +763,11 @@ BookmarkAutoImporter.run = async () => {
         }
     } catch (error) {
         console.error("[LD-Notion] 浏览器书签自动同步出错:", error);
+        // ISS-20260728-018 (OBS-002): 异常路径批量 trace 也落盘(若已 create)
+        if (batchTrace) {
+            BatchTrace.recordError(batchTrace, error);
+            BatchTrace.persist(batchTrace, "failed");
+        }
         SyncState.updateBookmarkState({
             lastAttemptAt: attemptAt,
             lastOutcome: "error",

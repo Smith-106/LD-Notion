@@ -727,6 +727,15 @@ const BookmarkExporter = {
 
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
         let success = 0, failed = 0, skipped = 0;
+        // ISS-20260728-018 (OBS-002): 批量导出结构化 trace —— 聚合计数 + per-item 结果 + 耗时,
+        // 替代仅 console 散落 + 单条 OperationLog;GM FIFO rotate(security/BatchTrace)。
+        const { BatchTrace } = require("../security");
+        const batchTrace = BatchTrace.create({
+            operation: "exportBookmarks",
+            source: "bookmark-export",
+            actor: "user",
+            itemTotal: newBookmarks.length,
+        });
         // ISS-20260728-017 (PERF-002): 串行 for+await+sleep 改为 CONCURRENCY=3 分批并发,
         // 对齐 BookmarkAutoImporter.processInBatches;最坏 50 书签 150 次串行往返 → 3 并发批。
         // authAborted 控制认证终态 fail-fast(语义同 v3.14.5/v3.14.7),批间节流保留 REQUEST_DELAY 意图。
@@ -740,7 +749,7 @@ const BookmarkExporter = {
         // 单项处理:进度上报 → enrich+guard+POST+审计;失败隔离,认证终态置 authAborted 中止后续
         const processOne = async (bm, itemIndex) => {
             // 批内某项已触发认证终态时,未开工项直接进 skipped(不重复注定失败的请求)
-            if (authAborted) { skipped++; return; }
+            if (authAborted) { skipped++; BatchTrace.record(batchTrace, { key: bm.url, action: "export", status: "skipped", reason: "认证中止" }); return; }
             const pct = Math.round(5 + ((itemIndex + 1) / newBookmarks.length) * 90);
             try {
                 if (onProgress) onProgress(`正在导出 (${itemIndex + 1}/${newBookmarks.length}): ${bm.title}`, pct);
@@ -757,6 +766,7 @@ const BookmarkExporter = {
                 if (!OperationGuard.canExecute("createDatabasePage")) {
                     BookmarkExporter._auditExport("createDatabasePage", "denied",
                         { bookmarkUrl: bm.url, itemName: bm.title, reason: "权限不足：导出建页需 level≥1" });
+                    BatchTrace.record(batchTrace, { key: bm.url, action: "create", status: "denied", reason: "权限不足：导出建页需 level≥1" });
                     failed++;
                     return;
                 }
@@ -769,16 +779,19 @@ const BookmarkExporter = {
                 pendingExported[Utils.normalizeDedupUrl(bm.url)] = Date.now();
                 BookmarkExporter._auditExport("createDatabasePage", "success",
                     { pageId: String(page?.id || ""), bookmarkUrl: bm.url, itemName: bm.title, databaseId });
+                BatchTrace.record(batchTrace, { key: bm.url, action: "create", status: "success" });
                 success++;
             } catch (e) {
                 console.warn(`[BookmarkExporter] 导出失败: ${bm.url}`, e);
                 BookmarkExporter._auditExport("createDatabasePage", "failed",
                     { bookmarkUrl: bm.url, itemName: bm.title, reason: String(e?.message || e) });
+                BatchTrace.record(batchTrace, { key: bm.url, action: "create", status: "failed", reason: String(e?.message || e) });
                 failed++;
                 // 认证终态 fail-fast(v3.14.5):中止剩余书签导出,返回部分结果供重试
                 // v3.14.7: 仅信 isAuthTerminal 标记(与 api 层终态/瞬态区分对齐), 消息子串会误杀瞬态续签失败
                 if (e && e.isAuthTerminal === true) {
                     authAborted = true;
+                    BatchTrace.recordError(batchTrace, e);
                 }
             }
         };
@@ -786,11 +799,27 @@ const BookmarkExporter = {
         // v3.14.6 (CC-10): 循环包 try/finally flush —— onProgress 抛错/异常路径也不丢导出账本
         try {
             for (let i = 0; i < newBookmarks.length; i += CONCURRENCY) {
-                if (authAborted) { skipped += newBookmarks.length - i; break; }
+                if (authAborted) {
+                    const bulkSkipped = newBookmarks.length - i;
+                    if (bulkSkipped > 0) {
+                        BatchTrace.record(batchTrace, { key: `bulk:${bulkSkipped}项未尝试`, action: "export", status: "skipped", reason: "认证中止整批" });
+                    }
+                    skipped += bulkSkipped;
+                    break;
+                }
                 const batch = newBookmarks.slice(i, i + CONCURRENCY);
                 await Promise.allSettled(batch.map((bm, j) => processOne(bm, i + j)));
                 // 认证终态:本批内并发项已全部收尾,中止后续批(剩余全部进 skipped)
-                if (authAborted) { skipped += newBookmarks.length - i - batch.length; break; }
+                if (authAborted) {
+                    // OBS-002: 未开工项未进 processOne(不逐项 record),此处补一条聚合 skipped 记录
+                    // 保证 trace.counts.skipped 与真实 skipped 一致(items 摘要用 batch 标记)。
+                    const bulkSkipped = newBookmarks.length - i - batch.length;
+                    if (bulkSkipped > 0) {
+                        BatchTrace.record(batchTrace, { key: `bulk:${bulkSkipped}项未尝试`, action: "export", status: "skipped", reason: "认证中止整批" });
+                    }
+                    skipped += bulkSkipped;
+                    break;
+                }
                 // 批间节流:保留 REQUEST_DELAY 用户配置意图,不再逐条串行
                 if (delay > 0 && i + CONCURRENCY < newBookmarks.length) {
                     await Utils.sleep(delay);
@@ -800,6 +829,10 @@ const BookmarkExporter = {
             // 批量回写已导出映射（PERF-003）：无论 success/failed/异常，结束单次 flush，
             // 写侧从 O(N²)→O(N)。v3.14.6 (CC-10): finally 保证回调抛错也不丢账本
             BookmarkExporter.flushExported(pendingExported);
+            // ISS-20260728-018 (OBS-002): 批量 trace 落盘 —— finally 保证异常路径也不丢。
+            // 聚合计数由 BatchTrace.record 逐项累计(success/failed/denied/skipped),
+            // 不重复传 extraCounts(避免与逐项 record 计数叠加)。
+            BatchTrace.persist(batchTrace, authAborted ? "aborted" : (failed > 0 ? "partial" : "completed"));
         }
 
         if (authAborted) {
