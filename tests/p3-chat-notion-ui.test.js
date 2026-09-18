@@ -8,7 +8,8 @@ const { NotionSiteUI } = require("../src/ui/notion-site-ui.js");
 const { Storage } = require("../src/storage");
 const { CONFIG } = require("../src/config");
 
-const aiSrc = fs.readFileSync("src/ai/index.js", "utf8");
+// M3 波次4 (ISS-016): ChatUI/sendMessage 迁 src/ui/ai-chat-ui.js; 结构化错误状态判定随实现迁移。
+const aiSrc = fs.readFileSync("src/ui/ai-chat-ui.js", "utf8");
 const nsSrc = fs.readFileSync("src/ui/notion-site-ui.js", "utf8");
 
 describe("P3: ChatState.load 历史恢复", () => {
@@ -104,6 +105,7 @@ describe("P3: NotionSiteUI 空引用与陈旧响应", () => {
 
 describe("P3: sendMessage 结构化错误状态", () => {
     it("结构化 error 结果不标 complete", () => {
-        expect(aiSrc).toMatch(/AIAssistant\._isErrorResult\(response\) \? "error" : "complete"/);
+        // ChatUI 经 lazy accessor AIAssistant() 取回边模块, 判定式为 AIAssistant()._isErrorResult
+        expect(aiSrc).toMatch(/AIAssistant\(\)\._isErrorResult\(response\) \? "error" : "complete"/);
     });
 });

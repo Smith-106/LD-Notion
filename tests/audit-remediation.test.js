@@ -144,8 +144,9 @@ describe("debug-ui-bugs: AI 面板接线回归守卫(2978b01 拆分丢失 ChatUI
     it("bug1: 主面板 initPanel 含 ChatUI.init 接线(拆分前 ui/index.js:4219 同款)", () => {
         const src = fs.readFileSync("src/ui/main-ui.js", "utf8");
         expect(src).toContain("ChatUI.init();");
-        // 绑定体仍在 ai/index.js(唯一归属)
-        const ai = fs.readFileSync("src/ai/index.js", "utf8");
+        // M3 波次4 (ISS-016): ChatUI/AIWelcomeUI 迁 src/ui/ai-chat-ui.js 消层级倒置,
+        // 绑定体归属文件随实现迁移;ai/index 反向 require 再导出保契约。
+        const ai = fs.readFileSync("src/ui/ai-chat-ui.js", "utf8");
         expect(ai).toMatch(/bindEvents: \(\) => \{/);
         expect(ai).toContain("#ldb-chat-send");
     });

@@ -12690,7 +12690,7 @@ ${aiResponse}
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2 } = require_api();
-      var { AIService: AIService2 } = require_ai();
+      var { AIService: AIService3 } = require_ai();
       var { AISchema } = require_schema();
       var BookmarkExporter2 = {
         _pageInsightCache: {},
@@ -12896,12 +12896,12 @@ ${aiResponse}
 
 JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
 
-\u7F51\u9875 URL\uFF1A${AIService2.isolateContent(bookmark.url)}
-\u539F\u59CB\u6807\u9898\uFF1A${AIService2.isolateContent(bookmark.title || "")}
-\u9875\u9762\u6807\u9898\uFF1A${AIService2.isolateContent(insight.title || "")}
-\u9875\u9762\u6458\u8981\uFF1A${AIService2.isolateContent(insight.summary || "")}`;
+\u7F51\u9875 URL\uFF1A${AIService3.isolateContent(bookmark.url)}
+\u539F\u59CB\u6807\u9898\uFF1A${AIService3.isolateContent(bookmark.title || "")}
+\u9875\u9762\u6807\u9898\uFF1A${AIService3.isolateContent(insight.title || "")}
+\u9875\u9762\u6458\u8981\uFF1A${AIService3.isolateContent(insight.summary || "")}`;
           try {
-            const response = await AIService2.requestChat(prompt2, settings, 220);
+            const response = await AIService3.requestChat(prompt2, settings, 220);
             const parsed = AISchema.parseAIJson("bookmarkSummary", response);
             if (!parsed.ok) return null;
             const data = parsed.value;
@@ -12970,7 +12970,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const categories = Array.isArray(settings == null ? void 0 : settings.categories) ? settings.categories.filter(Boolean) : [];
           if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService) || categories.length === 0) return "";
           try {
-            return await AIService2.classify(
+            return await AIService3.classify(
               insight.title || bookmark.title || "",
               insight.summary || "",
               categories,
@@ -15904,7 +15904,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           let aiNotice = "";
           if (classifyWithAI) {
             try {
-              const { AIService: AIService2, getAISettings } = require_ai();
+              const { AIService: AIService3, getAISettings } = require_ai();
               const settings = getAISettings();
               if (settings && settings.aiApiKey) {
                 const rootIds = /* @__PURE__ */ new Set(["1", "2"]);
@@ -15920,7 +15920,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 const classified = [];
                 await runQueue(targets, async (node) => {
                   try {
-                    const category = await AIService2.classify(node.title || node.url, node.url, categories, settings);
+                    const category = await AIService3.classify(node.title || node.url, node.url, categories, settings);
                     const folder = category && folderByTitle.get(category);
                     if (folder && folder.id !== node.parentId) {
                       classified.push({ node, folderId: folder.id, folderTitle: folder.title });
@@ -17590,7 +17590,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
       var { Exporter: Exporter2 } = require_export();
       var { SyncLock } = require_sync_lock();
-      var { AIService: AIService2 } = require_ai();
+      var { AIService: AIService3 } = require_ai();
       var GitHubExporter2 = {
         // 用户触发导出的写入审计（ISS-20260724-011，CWE-862/778）。与 BookmarkAutoImporter._auditAutoSync
         // 同模式但信任边界不同：用户主动触发（actor="user"）而非系统自动同步（actor="system"）。
@@ -17679,7 +17679,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const categories = Array.isArray(settings == null ? void 0 : settings.categories) ? settings.categories.filter(Boolean) : [];
           if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService) || categories.length === 0) return "";
           try {
-            return await AIService2.classify(
+            return await AIService3.classify(
               `${repo.full_name || repo.name || ""} ${insight.title || ""}`,
               `${repo.description || ""}
 ${insight.summary || ""}`,
@@ -18142,13 +18142,13 @@ ${insight.summary || ""}`,
             try {
               const prompt2 = `\u8BF7\u6839\u636E\u4EE5\u4E0B GitHub \u4ED3\u5E93\u4FE1\u606F\uFF0C\u4ECE\u8FD9\u4E9B\u5206\u7C7B\u4E2D\u9009\u62E9\u6700\u5408\u9002\u7684\u4E00\u4E2A: [${categories.join(", ")}]
 
-\u4ED3\u5E93\u540D: ${AIService2.isolateContent(title)}
-\u63CF\u8FF0: ${AIService2.isolateContent(desc)}
-\u8BED\u8A00: ${AIService2.isolateContent(lang)}
-\u6807\u7B7E: ${AIService2.isolateContent(tags)}
+\u4ED3\u5E93\u540D: ${AIService3.isolateContent(title)}
+\u63CF\u8FF0: ${AIService3.isolateContent(desc)}
+\u8BED\u8A00: ${AIService3.isolateContent(lang)}
+\u6807\u7B7E: ${AIService3.isolateContent(tags)}
 
 \u53EA\u56DE\u590D\u5206\u7C7B\u540D\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\u3002`;
-              const category = await AIService2.request(prompt2, {
+              const category = await AIService3.request(prompt2, {
                 aiService,
                 aiApiKey,
                 aiModel,
@@ -19883,7 +19883,7 @@ ${report}
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { UrlValidator } = require_UrlValidator();
-      var AIService2 = {
+      var AIService3 = {
         // 标准化 + 安全校验 baseUrl，返回 null 表示非法（调用方应 reject）
         // versionPath: "v1" 或 "v1beta"
         _normalizeBaseUrl: (baseUrl, versionPath) => {
@@ -19930,29 +19930,29 @@ ${report}
 </user_content>
 
 \u5206\u7C7B\uFF1A`;
-          const response = await AIService2.request(prompt2, settings);
-          return AIService2.matchCategory(response, categories);
+          const response = await AIService3.request(prompt2, settings);
+          return AIService3.matchCategory(response, categories);
         },
         // 发送请求（根据不同服务商格式化）
         request: async (prompt2, settings) => {
           const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
-          const provider = AIService2.PROVIDERS[aiService];
+          const provider = AIService3.PROVIDERS[aiService];
           if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
           const model = aiModel || provider.defaultModel;
           if (aiService === "openai") {
-            return await AIService2.requestOpenAI(prompt2, model, aiApiKey, aiBaseUrl);
+            return await AIService3.requestOpenAI(prompt2, model, aiApiKey, aiBaseUrl);
           } else if (aiService === "claude") {
-            return await AIService2.requestClaude(prompt2, model, aiApiKey, aiBaseUrl);
+            return await AIService3.requestClaude(prompt2, model, aiApiKey, aiBaseUrl);
           } else if (aiService === "gemini") {
-            return await AIService2.requestGemini(prompt2, model, aiApiKey, aiBaseUrl);
+            return await AIService3.requestGemini(prompt2, model, aiApiKey, aiBaseUrl);
           }
           throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
         },
         // OpenAI 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，max_completion_tokens=50）
         requestOpenAI: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
-          return AIService2._chatRequest(
+          return AIService3._chatRequest(
             url,
             { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
             { model, messages: [{ role: "user", content: prompt2 }], max_completion_tokens: 50, temperature: 0 },
@@ -19966,9 +19966,9 @@ ${report}
         },
         // Claude 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，max_tokens=50）
         requestClaude: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-          return AIService2._chatRequest(
+          return AIService3._chatRequest(
             url,
             { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
             { model, messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }], max_tokens: 50 },
@@ -19982,10 +19982,10 @@ ${report}
         },
         // Gemini 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，maxOutputTokens=50）
         requestGemini: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
-          const modelSeg = AIService2._modelPathSegment(model);
+          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1beta");
+          const modelSeg = AIService3._modelPathSegment(model);
           const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
-          return AIService2._chatRequest(
+          return AIService3._chatRequest(
             url,
             { "Content-Type": "application/json", "x-goog-api-key": apiKey },
             { contents: [{ parts: [{ text: prompt2 }] }], generationConfig: { maxOutputTokens: 50, temperature: 0 } },
@@ -20017,15 +20017,15 @@ ${report}
         // 对话式请求（支持更长输出）
         requestChat: async (prompt2, settings, maxTokens = 1e3) => {
           const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
-          const provider = AIService2.PROVIDERS[aiService];
+          const provider = AIService3.PROVIDERS[aiService];
           if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
           const model = aiModel || provider.defaultModel;
           if (aiService === "openai") {
-            return await AIService2.requestOpenAIChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+            return await AIService3.requestOpenAIChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
           } else if (aiService === "claude") {
-            return await AIService2.requestClaudeChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+            return await AIService3.requestClaudeChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
           } else if (aiService === "gemini") {
-            return await AIService2.requestGeminiChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+            return await AIService3.requestGeminiChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
           }
           throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
         },
@@ -20057,7 +20057,7 @@ ${report}
         // timeout 默认 90000（长对话）；分类请求（requestOpenAI/Claude/Gemini）传 30000（DISCOVER P6 同类去重）。
         // 90000ms 超时是长对话请求统一值（MAINT-007 已常量化建议，此处暂留内联）。
         _chatRequest: (url, headers, body, extractResponse, errorPrefix, timeout = 9e4) => {
-          return AIService2._retryable(() => new Promise((resolve, reject) => {
+          return AIService3._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
               method: "POST",
               url,
@@ -20083,9 +20083,9 @@ ${report}
           }));
         },
         requestOpenAIChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
-          return AIService2._chatRequest(
+          return AIService3._chatRequest(
             url,
             { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
             { model, messages: [{ role: "user", content: prompt2 }], max_completion_tokens: maxTokens, temperature: 0.7 },
@@ -20098,9 +20098,9 @@ ${report}
         },
         // Claude 对话请求
         requestClaudeChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-          return AIService2._chatRequest(
+          return AIService3._chatRequest(
             url,
             { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
             { model, messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }], max_tokens: maxTokens },
@@ -20113,10 +20113,10 @@ ${report}
         },
         // Gemini 对话请求
         requestGeminiChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
-          const modelSeg = AIService2._modelPathSegment(model);
+          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1beta");
+          const modelSeg = AIService3._modelPathSegment(model);
           const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
-          return AIService2._chatRequest(
+          return AIService3._chatRequest(
             url,
             { "Content-Type": "application/json", "x-goog-api-key": apiKey },
             { contents: [{ parts: [{ text: prompt2 }] }], generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
@@ -20132,7 +20132,7 @@ ${report}
         // 不支持通道保留原压平 + 防伪前缀
         requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500) => {
           const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
-          const provider = AIService2.PROVIDERS[aiService];
+          const provider = AIService3.PROVIDERS[aiService];
           if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
           const model = aiModel || provider.defaultModel;
           const normalizedMessages = (messages || []).map((msg) => ({
@@ -20141,9 +20141,9 @@ ${report}
           }));
           const systemText = String(systemPrompt ?? "");
           if (aiService === "openai") {
-            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1");
+            const normalizedBase = AIService3._normalizeBaseUrl(aiBaseUrl, "v1");
             const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
-            return await AIService2._chatRequest(
+            return await AIService3._chatRequest(
               url,
               { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
               { model, messages: [{ role: "system", content: systemText }, ...normalizedMessages], max_completion_tokens: maxTokens, temperature: 0.7 },
@@ -20155,9 +20155,9 @@ ${report}
             );
           }
           if (aiService === "claude") {
-            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1");
+            const normalizedBase = AIService3._normalizeBaseUrl(aiBaseUrl, "v1");
             const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-            return await AIService2._chatRequest(
+            return await AIService3._chatRequest(
               url,
               { "x-api-key": aiApiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
               { model, system: systemText, messages: normalizedMessages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: maxTokens },
@@ -20169,10 +20169,10 @@ ${report}
             );
           }
           if (aiService === "gemini") {
-            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1beta");
-            const modelSeg = AIService2._modelPathSegment(model);
+            const normalizedBase = AIService3._normalizeBaseUrl(aiBaseUrl, "v1beta");
+            const modelSeg = AIService3._modelPathSegment(model);
             const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
-            return await AIService2._chatRequest(
+            return await AIService3._chatRequest(
               url,
               { "Content-Type": "application/json", "x-goog-api-key": aiApiKey },
               { systemInstruction: { parts: [{ text: systemText }] }, contents: normalizedMessages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })), generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
@@ -20198,7 +20198,7 @@ ${systemText}
 `;
             }
           }
-          return await AIService2.requestChat(prompt2, settings, maxTokens);
+          return await AIService3.requestChat(prompt2, settings, maxTokens);
         },
         // 获取可用模型列表
         getFetchedModelsCache: () => {
@@ -20212,17 +20212,17 @@ ${systemText}
           }
         },
         getCachedModels: (service) => {
-          const cache = AIService2.getFetchedModelsCache();
+          const cache = AIService3.getFetchedModelsCache();
           const entry = cache[service];
           if (!Array.isArray(entry == null ? void 0 : entry.models)) return [];
-          if (entry.fingerprint !== AIService2.getModelsCacheFingerprint()) return [];
+          if (entry.fingerprint !== AIService3.getModelsCacheFingerprint()) return [];
           return entry.models;
         },
         getAvailableModels: (service) => {
           var _a;
-          const cachedModels = AIService2.getCachedModels(service);
+          const cachedModels = AIService3.getCachedModels(service);
           if (cachedModels.length > 0) return cachedModels;
-          return ((_a = AIService2.PROVIDERS[service]) == null ? void 0 : _a.models) || [];
+          return ((_a = AIService3.PROVIDERS[service]) == null ? void 0 : _a.models) || [];
         },
         // 模型缓存指纹: 端点 + 密钥单向哈希(禁止明文子串), 变更即失效
         getModelsCacheFingerprint: () => {
@@ -20232,34 +20232,34 @@ ${systemText}
         },
         persistFetchedModels: (service, models) => {
           const normalizedModels = Array.isArray(models) ? models : [];
-          const cache = AIService2.getFetchedModelsCache();
+          const cache = AIService3.getFetchedModelsCache();
           const snapshot = {
             models: normalizedModels,
             timestamp: Date.now(),
-            fingerprint: AIService2.getModelsCacheFingerprint()
+            fingerprint: AIService3.getModelsCacheFingerprint()
           };
           cache[service] = snapshot;
           Storage2.set(CONFIG2.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(cache));
           return snapshot;
         },
         fetchModelsSnapshot: async (service, apiKey, baseUrl) => {
-          const models = await AIService2.fetchModels(service, apiKey, baseUrl);
-          const snapshot = AIService2.persistFetchedModels(service, models);
+          const models = await AIService3.fetchModels(service, apiKey, baseUrl);
+          const snapshot = AIService3.persistFetchedModels(service, models);
           return { models: snapshot.models, timestamp: snapshot.timestamp };
         },
         fetchModels: async (service, apiKey, baseUrl) => {
           if (service === "openai") {
-            return await AIService2.fetchOpenAIModels(apiKey, baseUrl);
+            return await AIService3.fetchOpenAIModels(apiKey, baseUrl);
           } else if (service === "claude") {
-            return AIService2.PROVIDERS.claude.models;
+            return AIService3.PROVIDERS.claude.models;
           } else if (service === "gemini") {
-            return await AIService2.fetchGeminiModels(apiKey, baseUrl);
+            return await AIService3.fetchGeminiModels(apiKey, baseUrl);
           }
           throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${service}`);
         },
         // 获取 OpenAI 模型列表
         fetchOpenAIModels: (apiKey, baseUrl) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/models` : "https://api.openai.com/v1/models";
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -20282,7 +20282,7 @@ ${systemText}
                       if (bIdx !== -1) return 1;
                       return a.localeCompare(b);
                     });
-                    resolve(chatModels.length > 0 ? chatModels : AIService2.PROVIDERS.openai.models);
+                    resolve(chatModels.length > 0 ? chatModels : AIService3.PROVIDERS.openai.models);
                   } else {
                     reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${response.status}`));
                   }
@@ -20298,7 +20298,7 @@ ${systemText}
         },
         // 获取 Gemini 模型列表
         fetchGeminiModels: (apiKey, baseUrl) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
+          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1beta");
           const url = normalizedBase ? `${normalizedBase}/v1beta/models` : `https://generativelanguage.googleapis.com/v1beta/models`;
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -20325,7 +20325,7 @@ ${systemText}
                       if (bIdx !== -1) return 1;
                       return a.localeCompare(b);
                     });
-                    resolve(models.length > 0 ? models : AIService2.PROVIDERS.gemini.models);
+                    resolve(models.length > 0 ? models : AIService3.PROVIDERS.gemini.models);
                   } else {
                     reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${response.status}`));
                   }
@@ -20340,7 +20340,301 @@ ${systemText}
           });
         }
       };
-      module.exports = { AIService: AIService2 };
+      module.exports = { AIService: AIService3 };
+    }
+  });
+
+  // src/ai/quick-intent.js
+  var require_quick_intent = __commonJS({
+    "src/ai/quick-intent.js"(exports, module) {
+      "use strict";
+      var QUICK_INTENT_PATTERNS2 = Object.freeze({
+        blockId: /\bblock[_:-]?([A-Za-z0-9-]{6,})\b/i,
+        commentId: /\bcomment[_:-]?([A-Za-z0-9-]{3,})\b/i,
+        notionUrl: /https?:\/\/(?:www\.)?notion\.so\/\S+/i,
+        url: /https?:\/\/\S+/i,
+        emoji: /[\p{Extended_Pictographic}]/u,
+        commentReplyTail: /\bcomment[_:-]?([A-Za-z0-9-]{3,})\b[：:]\s*(.+)$/i,
+        replyVerb: /(回复|reply|回覆)/i,
+        commentReadVerb: /(查看|读取|显示|详情|comment)/i,
+        restoreVerb: /(恢复|还原|取消归档|取消存档|移出归档|从归档恢复)/,
+        archiveVerb: /(归档|删除到归档|软删除|移到归档|放到归档|送到归档)/,
+        unlockVerb: /(?:解锁|取消锁定|取消上锁|取消锁住|\bunlock\b)/i,
+        lockVerb: /(?:锁定|锁住|上锁|\block\b)/i,
+        iconKeyword: /(图标|icon)/i,
+        coverKeyword: /(封面|cover)/i,
+        markdownKeyword: /(markdown|md|原文|全文)/i,
+        commentKeyword: /(评论|讨论)/,
+        commentReadKeyword: /(查看|读取|列出|显示)/,
+        databaseKeyword: /(数据库|db|database)/i,
+        schemaKeyword: /(结构|schema|字段|属性|列)/i,
+        detailKeyword: /(详情|信息|对象|看看|读取)/,
+        blockUpdateVerb: /(改成|修改为|更新为|替换为)/,
+        appendVerb: /(插入|追加|添加)/,
+        pageKeyword: /(页面|page)/i,
+        blockStructurePhrase: /(块结构|子块)/,
+        blockKeyword: /block/i,
+        objectReadVerb: /(查看|读取|详情|对象|fetch)/i,
+        rawIdReadVerb: /(查看|读取|详情|对象|页面|数据库)/,
+        afterBlockKeyword: /(后插入|后面插入|后追加|after)/i
+      });
+      var QUICK_INTENT_RULES2 = Object.freeze([
+        {
+          id: "comment.reply",
+          intent: "create_comment",
+          priority: 1e3,
+          requires: ["commentId", "hasReplyVerb", "commentReplyContent"],
+          buildResult: (ctx) => ({
+            intent: "create_comment",
+            params: {
+              comment_id: ctx.commentId,
+              content: ctx.commentReplyContent
+            },
+            explanation: "\u6839\u636E\u660E\u786E\u7684 comment_id \u56DE\u590D\u5DF2\u6709\u8BC4\u8BBA"
+          })
+        },
+        {
+          id: "comment.detail",
+          intent: "get_comment",
+          priority: 990,
+          requires: ["commentId", "hasCommentReadVerb"],
+          rejects: ["hasReplyVerb"],
+          buildResult: (ctx) => ({
+            intent: "get_comment",
+            params: { comment_id: ctx.commentId },
+            explanation: "\u6839\u636E\u660E\u786E\u7684 comment_id \u8BFB\u53D6\u8BC4\u8BBA\u8BE6\u60C5"
+          })
+        },
+        {
+          id: "page.restore",
+          intent: "restore_page",
+          priority: 950,
+          requires: ["firstQuoted", "hasRestoreVerb"],
+          rejects: ["hasDatabaseKeyword"],
+          buildResult: (ctx) => ({
+            intent: "restore_page",
+            params: { page_name: ctx.firstQuoted },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u6062\u590D\u9875\u9762"
+          })
+        },
+        {
+          id: "page.archive",
+          intent: "archive_page",
+          priority: 940,
+          requires: ["firstQuoted", "hasArchiveVerb"],
+          rejects: ["hasDatabaseKeyword"],
+          buildResult: (ctx) => ({
+            intent: "archive_page",
+            params: { page_name: ctx.firstQuoted },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u5F52\u6863\u9875\u9762"
+          })
+        },
+        {
+          id: "page.unlock",
+          intent: "update_page",
+          priority: 930,
+          requires: ["firstQuoted", "hasUnlockVerb"],
+          rejects: ["hasDatabaseKeyword"],
+          buildResult: (ctx) => ({
+            intent: "update_page",
+            params: { page_name: ctx.firstQuoted, is_locked: false },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u89E3\u9501\u9875\u9762"
+          })
+        },
+        {
+          id: "page.lock",
+          intent: "update_page",
+          priority: 920,
+          requires: ["firstQuoted", "hasLockVerb"],
+          rejects: ["hasUnlockVerb", "hasDatabaseKeyword"],
+          buildResult: (ctx) => ({
+            intent: "update_page",
+            params: { page_name: ctx.firstQuoted, is_locked: true },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u9501\u5B9A\u9875\u9762"
+          })
+        },
+        {
+          id: "page.icon",
+          intent: "update_page",
+          priority: 910,
+          requires: ["firstQuoted", "hasIconKeyword", "emoji"],
+          rejects: ["hasDatabaseKeyword"],
+          buildResult: (ctx) => ({
+            intent: "update_page",
+            params: { page_name: ctx.firstQuoted, icon_emoji: ctx.emoji },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u66F4\u65B0\u9875\u9762\u56FE\u6807"
+          })
+        },
+        {
+          id: "page.cover",
+          intent: "update_page",
+          priority: 900,
+          requires: ["firstQuoted", "hasCoverKeyword", "url"],
+          rejects: ["hasDatabaseKeyword"],
+          buildResult: (ctx) => ({
+            intent: "update_page",
+            params: { page_name: ctx.firstQuoted, cover_url: ctx.url },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u66F4\u65B0\u9875\u9762\u5C01\u9762"
+          })
+        },
+        {
+          id: "page.markdown",
+          intent: "fetch_page_markdown",
+          priority: 890,
+          requires: ["firstQuoted", "hasMarkdownKeyword"],
+          rejects: ["hasDatabaseKeyword"],
+          buildResult: (ctx) => ({
+            intent: "fetch_page_markdown",
+            params: { page_name: ctx.firstQuoted },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u8BFB\u53D6\u9875\u9762 Markdown"
+          })
+        },
+        {
+          id: "page.comments",
+          intent: "get_comments",
+          priority: 880,
+          requires: ["firstQuoted", "hasPageCommentReadIntent"],
+          rejects: ["hasDatabaseKeyword"],
+          buildResult: (ctx) => ({
+            intent: "get_comments",
+            params: { page_name: ctx.firstQuoted },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u8BFB\u53D6\u9875\u9762\u8BC4\u8BBA"
+          })
+        },
+        {
+          id: "database.schema",
+          intent: "get_database_schema",
+          priority: 870,
+          requires: ["firstQuoted", "hasDatabaseKeyword", "hasSchemaKeyword"],
+          rejects: ["hasPageKeyword", "hasBlockStructurePhrase"],
+          buildResult: (ctx) => ({
+            intent: "get_database_schema",
+            params: { database_name: ctx.firstQuoted },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u6570\u636E\u5E93\u540D\u79F0\u8BFB\u53D6\u6570\u636E\u5E93\u7ED3\u6784"
+          })
+        },
+        {
+          id: "database.detail",
+          intent: "fetch_notion_object",
+          priority: 860,
+          requires: ["firstQuoted", "hasDatabaseKeyword", "hasDetailKeyword"],
+          rejects: ["hasPageKeyword", "hasMarkdownKeyword"],
+          buildResult: (ctx) => ({
+            intent: "fetch_notion_object",
+            params: { reference: ctx.firstQuoted, type: "database" },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u6570\u636E\u5E93\u540D\u79F0\u8BFB\u53D6\u5BF9\u8C61\u8BE6\u60C5"
+          })
+        },
+        {
+          id: "page.append",
+          intent: "append_block_children",
+          priority: 850,
+          requires: ["firstQuoted", "hasAppendVerb", "hasMultipleQuotedTexts", "hasPageKeyword"],
+          rejects: ["hasDatabaseKeyword"],
+          buildResult: (ctx) => ({
+            intent: "append_block_children",
+            params: {
+              page_name: ctx.firstQuoted,
+              content: ctx.lastQuoted,
+              insert_position: "end"
+            },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u63D2\u5165\u5185\u5BB9\u5757"
+          })
+        },
+        {
+          id: "block.update",
+          intent: "update_block_content",
+          priority: 840,
+          requires: ["blockId", "hasBlockUpdateVerb", "quoted"],
+          buildResult: (ctx) => ({
+            intent: "update_block_content",
+            params: {
+              block_id: ctx.blockId,
+              content: ctx.quoted
+            },
+            explanation: "\u6839\u636E\u660E\u786E\u7684 block_id \u66F4\u65B0\u5757\u5185\u5BB9"
+          })
+        },
+        {
+          id: "block.append",
+          intent: "append_block_children",
+          priority: 830,
+          requires: ["blockId", "hasAppendVerb", "quoted"],
+          buildResult: (ctx) => {
+            const insertPosition = ctx.hasAfterBlockKeyword ? "after_block" : "end";
+            return {
+              intent: "append_block_children",
+              params: {
+                block_id: ctx.blockId,
+                content: ctx.quoted,
+                insert_position: insertPosition,
+                after_block_id: insertPosition === "after_block" ? ctx.blockId : void 0
+              },
+              explanation: "\u6839\u636E\u660E\u786E\u7684 block_id \u63D2\u5165\u5185\u5BB9\u5757"
+            };
+          }
+        },
+        {
+          id: "page.blocks",
+          intent: "fetch_page_blocks",
+          priority: 820,
+          requires: ["firstQuoted", "hasBlockStructurePhrase", "hasPageKeyword"],
+          rejects: ["hasDatabaseKeyword"],
+          buildResult: (ctx) => ({
+            intent: "fetch_page_blocks",
+            params: { page_name: ctx.firstQuoted },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u67E5\u770B\u5757\u7ED3\u6784"
+          })
+        },
+        {
+          id: "block.blocks",
+          intent: "fetch_page_blocks",
+          priority: 810,
+          requires: ["hasBlockStructureIntent"],
+          rejects: ["hasDatabaseKeyword"],
+          when: (ctx) => !!ctx.blockId || !ctx.firstQuoted,
+          buildResult: (ctx) => ({
+            intent: "fetch_page_blocks",
+            params: ctx.blockId ? { block_id: ctx.blockId } : {},
+            explanation: "\u67E5\u770B\u5757\u7ED3\u6784"
+          })
+        },
+        {
+          id: "notion.url.object",
+          intent: "fetch_notion_object",
+          priority: 800,
+          requires: ["notionUrl", "hasObjectReadVerb"],
+          buildResult: (ctx) => ({
+            intent: "fetch_notion_object",
+            params: { reference: ctx.notionUrl },
+            explanation: "\u6839\u636E\u660E\u786E\u7684 Notion \u94FE\u63A5\u8BFB\u53D6\u5BF9\u8C61\u8BE6\u60C5"
+          })
+        },
+        {
+          id: "notion.id.object",
+          intent: "fetch_notion_object",
+          priority: 790,
+          requires: ["rawNotionId", "hasRawIdReadVerb"],
+          buildResult: (ctx) => ({
+            intent: "fetch_notion_object",
+            params: { reference: ctx.rawNotionId },
+            explanation: "\u6839\u636E\u660E\u786E\u7684 Notion ID \u8BFB\u53D6\u5BF9\u8C61\u8BE6\u60C5"
+          })
+        },
+        {
+          id: "page.detail",
+          intent: "fetch_notion_object",
+          priority: 780,
+          requires: ["firstQuoted", "hasDetailKeyword"],
+          rejects: ["hasDatabaseKeyword", "hasBlockStructurePhrase"],
+          buildResult: (ctx) => ({
+            intent: "fetch_notion_object",
+            params: { reference: ctx.firstQuoted, type: "page" },
+            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u8BFB\u53D6\u5BF9\u8C61\u8BE6\u60C5"
+          })
+        }
+      ]);
+      module.exports = { QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2 };
     }
   });
 
@@ -23008,7 +23302,7 @@ ${systemText}
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2 } = require_bridge();
       var { StyleManager: StyleManager2 } = require_style_manager();
-      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatState: ChatState2, ChatUI: ChatUI2 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService3, AIWelcomeUI: AIWelcomeUI2, ChatState: ChatState2, ChatUI: ChatUI2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
       var { UI_CSS: UI_CSS2 } = require_styles();
@@ -23604,9 +23898,9 @@ ${systemText}
           };
           panel.querySelector("#ldb-notion-ai-service").onchange = (e) => {
             const newService = e.target.value;
-            const availableModels = AIService2.getAvailableModels(newService);
+            const availableModels = AIService3.getAvailableModels(newService);
             NotionSiteUI2.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : void 0);
-            const provider = AIService2.PROVIDERS[newService];
+            const provider = AIService3.PROVIDERS[newService];
             const modelSelect = panel.querySelector("#ldb-notion-ai-model");
             if ((provider == null ? void 0 : provider.defaultModel) && modelSelect) {
               modelSelect.value = provider.defaultModel;
@@ -23726,7 +24020,7 @@ ${systemText}
           }
           NotionSiteUI2.updateAITargetDbOptions(cachedDatabases, cachedPages);
           const aiService = Storage2.get(CONFIG2.STORAGE_KEYS.AI_SERVICE, CONFIG2.DEFAULTS.aiService);
-          const notionSiteModels = AIService2.getAvailableModels(aiService);
+          const notionSiteModels = AIService3.getAvailableModels(aiService);
           NotionSiteUI2.updateAIModelOptions(aiService, notionSiteModels.length > 0 ? notionSiteModels : void 0);
           const savedModel = Storage2.get(CONFIG2.STORAGE_KEYS.AI_MODEL, "");
           if (savedModel) {
@@ -23904,7 +24198,7 @@ ${systemText}
         updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
           var _a;
           const modelSelect = (_a = NotionSiteUI2.panel) == null ? void 0 : _a.querySelector("#ldb-notion-ai-model");
-          const provider = AIService2.PROVIDERS[service];
+          const provider = AIService3.PROVIDERS[service];
           if (!provider || !modelSelect) return;
           const models = customModels || provider.models;
           const defaultModel = provider.defaultModel;
@@ -24022,7 +24316,7 @@ ${systemText}
             }
             const aiService = ((_a = notionPanel.querySelector("#ldb-notion-ai-service")) == null ? void 0 : _a.value) || Storage2.get(CONFIG2.STORAGE_KEYS.AI_SERVICE, CONFIG2.DEFAULTS.aiService);
             const selectedModel = ((_b = notionPanel.querySelector("#ldb-notion-ai-model")) == null ? void 0 : _b.value) || Storage2.get(CONFIG2.STORAGE_KEYS.AI_MODEL, "");
-            const provider = AIService2.PROVIDERS[aiService];
+            const provider = AIService3.PROVIDERS[aiService];
             const aiModel = selectedModel || (provider == null ? void 0 : provider.defaultModel) || "";
             return {
               notionApiKey: NotionOAuth2.getAccessToken((_c = notionPanel.querySelector("#ldb-notion-api-key")) == null ? void 0 : _c.value.trim()),
@@ -26252,7 +26546,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { WorkspaceService: WorkspaceService2 } = require_extract();
       var { AutoImporter: AutoImporter2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2 } = require_import();
       var { BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIAssistant: AIAssistant2, AIService: AIService2, ChatUI: ChatUI2 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService3, ChatUI: ChatUI2 } = require_ai();
       var { AISchema } = require_schema();
       var _UI = null;
       var UI2 = () => {
@@ -26381,7 +26675,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             "",
             // 候选标题/URL/来源来自 Notion 页面元数据，不可信——与 main-ui 同构，走 isolateContent 防 prompt injection
             `<user_content>
-${AIService2.isolateContent(JSON.stringify({
+${AIService3.isolateContent(JSON.stringify({
               label: (candidate == null ? void 0 : candidate.label) || "",
               reason: (candidate == null ? void 0 : candidate.reason) || "",
               count: Number((candidate == null ? void 0 : candidate.count) || items.length || 0),
@@ -26401,7 +26695,7 @@ ${AIService2.isolateContent(JSON.stringify({
           if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService)) return null;
           try {
             const prompt2 = UI2().buildWorkspaceConnectionCandidateAIPrompt(candidate);
-            const raw = String(await AIService2.requestChat(prompt2, settings, 700) || "").trim();
+            const raw = String(await AIService3.requestChat(prompt2, settings, 700) || "").trim();
             const parseResult = AISchema.parseAIJson("workspaceConnection", raw);
             if (!parseResult.ok) {
               throw new Error(parseResult.reason);
@@ -27299,7 +27593,7 @@ ${AIService2.isolateContent(JSON.stringify({
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, getAISettings } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService3, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, getAISettings } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -27594,8 +27888,8 @@ ${AIService2.isolateContent(JSON.stringify({
           refs.aiServiceSelect.value = aiService;
           const savedModel = Storage2.get(CONFIG2.STORAGE_KEYS.AI_MODEL, "");
           const modelSelect = refs.aiModelSelect;
-          const provider = AIService2.PROVIDERS[aiService];
-          const validModels = AIService2.getAvailableModels(aiService);
+          const provider = AIService3.PROVIDERS[aiService];
+          const validModels = AIService3.getAvailableModels(aiService);
           UI2.updateAIModelOptions(aiService, validModels.length > 0 ? validModels : void 0);
           if (savedModel) {
             const optionExists = Array.from(modelSelect.options).some((opt) => opt.value === savedModel);
@@ -28104,7 +28398,7 @@ ${AIService2.isolateContent(JSON.stringify({
         updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
           const refs = UI2.refs || {};
           const modelSelect = refs.aiModelSelect;
-          const provider = AIService2.PROVIDERS[service];
+          const provider = AIService3.PROVIDERS[service];
           if (!provider || !modelSelect) return;
           const models = customModels || provider.models;
           const defaultModel = provider.defaultModel;
@@ -28687,7 +28981,7 @@ ${AIService2.isolateContent(JSON.stringify({
                 // 裸 JSON.stringify 注入可让页面内容劫持 AI 意图——统一走 isolateContent
                 // 隔离标签(与全仓其余 12+ AI 请求构造点对齐, 五层防御第①层)。
                 `<user_input>
-${AIService2.isolateContent(JSON.stringify({
+${AIService3.isolateContent(JSON.stringify({
                   totalPages: model.totalPages,
                   totalDatabases: model.totalDatabases,
                   sourceBreakdown: model.sourceBreakdown,
@@ -28709,7 +29003,7 @@ ${AIService2.isolateContent(JSON.stringify({
                 }, null, 2))}
 </user_input>`
               ].join("\n");
-              aiSummary = String(await AIService2.requestChat(prompt2, settings, 900) || "").trim();
+              aiSummary = String(await AIService3.requestChat(prompt2, settings, 900) || "").trim();
             }
             UI2.workspaceInsightSummary = aiSummary;
             UI2.workspaceInsightMarkdown = UI2.buildWorkspaceInsightMarkdown(model, aiSummary);
@@ -29190,7 +29484,7 @@ ${AIService2.isolateContent(JSON.stringify({
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2, BookmarkExporter: BookmarkExporter2, BookmarkOrganizer } = require_bridge();
-      var { AIService: AIService2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, ChatState: ChatState2 } = require_ai();
+      var { AIService: AIService3, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, ChatState: ChatState2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
       var UIEvents2 = {
@@ -30923,7 +31217,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           ChatUI2.init();
           refs.aiServiceSelect.onchange = (e) => {
             const newService = e.target.value;
-            const availableModels = AIService2.getAvailableModels(newService);
+            const availableModels = AIService3.getAvailableModels(newService);
             UI2.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : void 0);
             Storage2.set(CONFIG2.STORAGE_KEYS.AI_SERVICE, newService);
           };
@@ -31111,7 +31405,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             btn.disabled = true;
             btn.innerHTML = '<span class="ldb-spin">\u{1F504}</span> \u6D4B\u8BD5\u4E2D...';
             try {
-              const response = await AIService2.request(
+              const response = await AIService3.request(
                 "\u8BF7\u56DE\u590D\uFF1A\u8FDE\u63A5\u6210\u529F",
                 { aiService, aiApiKey, aiModel, aiBaseUrl }
               );
@@ -32149,6 +32443,438 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
     }
   });
 
+  // src/ui/ai-chat-ui.js
+  var require_ai_chat_ui = __commonJS({
+    "src/ui/ai-chat-ui.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { ConfirmationDialog: ConfirmationDialog2 } = require_security();
+      var _ai = null;
+      var AI = () => _ai || (_ai = require_ai());
+      var ChatState2 = () => AI().ChatState;
+      var AIAssistant2 = () => AI().AIAssistant;
+      var AIClassifier2 = () => AI().AIClassifier;
+      var AI_WELCOME_ENTRY_POINTS = Object.freeze({
+        subtitle: "\u7A33\u5B9A\u652F\u6301\uFF1A\u6570\u636E\u5E93 / \u9875\u9762\u68C0\u7D22\u3001\u8DE8\u6E90\u641C\u7D22\u3001\u6279\u91CF\u5206\u7C7B\u3001GitHub / \u4E66\u7B7E\u5BFC\u5165\u3001\u9875\u9762\u6458\u8981\uFF1B\u66F4\u591A\u80FD\u529B\u770B\u300C\u5E2E\u52A9\u300D",
+        inputPlaceholder: "\u8F93\u5165\u6307\u4EE4\uFF0C\u5982\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6216\u300C\u5BFC\u5165GitHub\u6536\u85CF\u300D...",
+        chips: Object.freeze([
+          { command: "\u5E2E\u52A9", label: "\u{1F4A1} \u5E2E\u52A9" },
+          { command: "\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93", label: "\u{1F5C2}\uFE0F \u6570\u636E\u5E93" },
+          { command: "\u5728\u5DE5\u4F5C\u533A\u641C\u7D22\u6240\u6709\u9875\u9762", label: "\u{1F4C4} \u9875\u9762" },
+          { command: "\u8DE8\u6E90\u641C\u7D22\u6700\u8FD1\u6536\u85CF\u7684\u5E16\u5B50", label: "\u{1F50D} \u8DE8\u6E90\u641C\u7D22" },
+          { command: "\u81EA\u52A8\u5206\u7C7B\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50", label: "\u{1F3F7}\uFE0F \u5206\u7C7B" },
+          { command: "\u5BFC\u5165GitHub\u6536\u85CF", label: "\u{1F419} GitHub" },
+          { command: "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E", label: "\u{1F4D6} \u4E66\u7B7E" }
+        ])
+      });
+      var AIWelcomeUI2 = {
+        render: (personaName) => {
+          const chips = AI_WELCOME_ENTRY_POINTS.chips.map((chip) => `<button class="ldb-chat-chip" data-cmd="${Utils2.escapeHtml(chip.command)}">${Utils2.escapeHtml(chip.label)}</button>`).join("");
+          return `
+            <div class="ldb-chat-welcome">
+                <div class="ldb-chat-welcome-icon">\u{1F916}</div>
+                <div class="ldb-chat-welcome-text">
+                    \u4F60\u597D\uFF01\u6211\u662F ${Utils2.escapeHtml(personaName)}<br>
+                    <small>${Utils2.escapeHtml(AI_WELCOME_ENTRY_POINTS.subtitle)}</small>
+                </div>
+                <div class="ldb-chat-chips">
+                    ${chips}
+                </div>
+            </div>
+        `;
+        },
+        getInputPlaceholder: () => AI_WELCOME_ENTRY_POINTS.inputPlaceholder
+      };
+      var ChatUI2 = {
+        // HTML 转义函数，防止 XSS 攻击
+        escapeHtml: (text) => {
+          const div = document.createElement("div");
+          div.textContent = text;
+          return div.innerHTML;
+        },
+        // 安全的 Markdown 渲染（先转义再处理 Markdown）
+        safeMarkdown: (text) => {
+          let escaped = Utils2.escapeHtml(text);
+          return escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>");
+        },
+        // 增量更新最后一个气泡 DOM（PERF-006）。
+        // 返回 true 表示已成功 patch，false 表示需要回退到全量 renderMessages。
+        _patchLastBubble: () => {
+          var _a;
+          const container = document.querySelector("#ldb-chat-messages");
+          if (!container) return false;
+          const bubbles = container.querySelectorAll(".ldb-chat-message");
+          if (bubbles.length !== ChatState2().messages.length) return false;
+          const lastMsg = ChatState2().messages[ChatState2().messages.length - 1];
+          const lastBubble = (_a = bubbles[bubbles.length - 1]) == null ? void 0 : _a.querySelector(".ldb-chat-bubble");
+          if (!lastBubble) return false;
+          const statusClass = lastMsg.status === "processing" ? "processing" : lastMsg.status === "error" ? "error" : "";
+          const content = lastMsg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI2.safeMarkdown(AIAssistant2()._resultToText(lastMsg.content));
+          lastBubble.className = `ldb-chat-bubble ${lastMsg.role === "user" ? "user" : "assistant"} ${statusClass}`.trim();
+          lastBubble.innerHTML = content;
+          container.scrollTop = container.scrollHeight;
+          return true;
+        },
+        // 渲染消息列表
+        renderMessages: () => {
+          const container = document.querySelector("#ldb-chat-messages");
+          if (!container) return;
+          if (ChatState2().messages.length === 0) {
+            const personaName = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG2.DEFAULTS.agentPersonaName);
+            container.innerHTML = AIWelcomeUI2.render(personaName);
+            container.querySelectorAll(".ldb-chat-chip").forEach((chip) => {
+              chip.onclick = () => {
+                const input = document.querySelector("#ldb-chat-input");
+                if (input) {
+                  input.value = chip.getAttribute("data-cmd");
+                  ChatUI2.sendMessage();
+                }
+              };
+            });
+            return;
+          }
+          container.innerHTML = ChatState2().messages.map((msg) => {
+            const isUser = msg.role === "user";
+            const statusClass = msg.status === "processing" ? "processing" : msg.status === "error" ? "error" : "";
+            const content = msg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI2.safeMarkdown(AIAssistant2()._resultToText(msg.content));
+            return `
+                <div class="ldb-chat-message ${isUser ? "user" : "assistant"}">
+                    <div class="ldb-chat-bubble ${isUser ? "user" : "assistant"} ${statusClass}">
+                        ${content}
+                    </div>
+                </div>
+            `;
+          }).join("");
+          container.scrollTop = container.scrollHeight;
+        },
+        // 发送消息
+        sendMessage: async () => {
+          const input = document.querySelector("#ldb-chat-input");
+          const sendBtn = document.querySelector("#ldb-chat-send");
+          if (!input) return;
+          const message = input.value.trim();
+          if (!message || ChatState2().isProcessing) return;
+          if (input) input.disabled = true;
+          if (sendBtn) sendBtn.disabled = true;
+          try {
+            input.value = "";
+            input.style.height = "auto";
+            ChatState2().addMessage("user", message);
+            ChatState2().isProcessing = true;
+            ChatState2().addMessage("assistant", "\u601D\u8003\u4E2D...", "processing");
+            const response = await AIAssistant2().handleMessage(message);
+            ChatState2().updateLastMessage(response, AIAssistant2()._isErrorResult(response) ? "error" : "complete");
+          } catch (error) {
+            console.error("[LD-Notion] AI \u5904\u7406\u5931\u8D25:", error);
+            try {
+              ChatState2().updateLastMessage(`\u274C \u5904\u7406\u5931\u8D25: ${error.message}`, "error");
+            } catch (updateError) {
+              console.error("[LD-Notion] \u66F4\u65B0\u5931\u8D25\u6D88\u606F\u4E5F\u51FA\u9519:", updateError);
+            }
+          } finally {
+            ChatState2().isProcessing = false;
+            if (input) input.disabled = false;
+            if (sendBtn) sendBtn.disabled = false;
+            if (input) input.focus();
+          }
+        },
+        // 绑定事件
+        bindEvents: () => {
+          const sendBtn = document.querySelector("#ldb-chat-send");
+          if (sendBtn) {
+            sendBtn.onclick = ChatUI2.sendMessage;
+          }
+          const input = document.querySelector("#ldb-chat-input");
+          if (input) {
+            input.onkeydown = (e) => {
+              e.stopPropagation();
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                ChatUI2.sendMessage();
+              }
+            };
+            input.onpaste = (e) => e.stopPropagation();
+            input.oncopy = (e) => e.stopPropagation();
+            input.oncut = (e) => e.stopPropagation();
+            input.oninput = (e) => {
+              e.stopPropagation();
+              input.style.height = "auto";
+              input.style.height = Math.min(input.scrollHeight, 80) + "px";
+            };
+            input.onkeyup = (e) => e.stopPropagation();
+            input.onkeypress = (e) => e.stopPropagation();
+          }
+          const clearBtn = document.querySelector("#ldb-chat-clear");
+          if (clearBtn) {
+            clearBtn.onclick = async () => {
+              const confirmed = await ConfirmationDialog2.show({
+                title: "\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2",
+                message: "\u786E\u5B9A\u8981\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2\u5417\uFF1F",
+                countdown: 3
+              });
+              if (confirmed) {
+                ChatState2().clear();
+              }
+            };
+          }
+          const classifyPauseBtn = document.querySelector("#ldb-classify-pause");
+          if (classifyPauseBtn) {
+            classifyPauseBtn.onclick = () => {
+              if (AIClassifier2().isPaused) {
+                AIClassifier2().resume();
+                classifyPauseBtn.textContent = "\u23F8\uFE0F \u6682\u505C\u5206\u7C7B";
+              } else {
+                AIClassifier2().pause();
+                classifyPauseBtn.textContent = "\u25B6\uFE0F \u7EE7\u7EED\u5206\u7C7B";
+              }
+            };
+          }
+          const classifyCancelBtn = document.querySelector("#ldb-classify-cancel");
+          if (classifyCancelBtn) {
+            classifyCancelBtn.onclick = async () => {
+              const confirmed = await ConfirmationDialog2.show({
+                title: "\u53D6\u6D88\u6279\u91CF\u5206\u7C7B",
+                message: "\u786E\u5B9A\u8981\u53D6\u6D88\u6279\u91CF\u5206\u7C7B\u5417\uFF1F\u5DF2\u5B8C\u6210\u7684\u90E8\u5206\u4E0D\u4F1A\u4E22\u5931\u3002",
+                countdown: 3
+              });
+              if (confirmed) {
+                AIClassifier2().cancel();
+              }
+            };
+          }
+        },
+        // 初始化
+        init: () => {
+          ChatState2().load();
+          ChatUI2.renderMessages();
+          ChatUI2.bindEvents();
+        }
+      };
+      module.exports = { AI_WELCOME_ENTRY_POINTS, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2 };
+    }
+  });
+
+  // src/ai/ai-classifier.js
+  var require_ai_classifier = __commonJS({
+    "src/ai/ai-classifier.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var _a = null;
+      var AIAssistant2 = () => _a || (_a = require_ai().AIAssistant);
+      var AIClassifier2 = {
+        isPaused: false,
+        isCancelled: false,
+        // 批量分类
+        classifyBatch: async (settings, onProgress) => {
+          AIClassifier2.reset();
+          await AIClassifier2.ensureAICategoryProperty(settings);
+          const pages = await AIClassifier2.fetchAllPages(settings);
+          if (pages.length === 0) {
+            throw new Error("\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762");
+          }
+          const unclassified = pages.filter((p) => {
+            var _a2;
+            const aiCategory = p.properties["AI\u5206\u7C7B"];
+            return !((_a2 = aiCategory == null ? void 0 : aiCategory.select) == null ? void 0 : _a2.name);
+          });
+          if (unclassified.length === 0) {
+            return { total: pages.length, classified: 0, message: "\u6240\u6709\u9875\u9762\u90FD\u5DF2\u5206\u7C7B" };
+          }
+          const results = { success: [], failed: [] };
+          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+          for (let i = 0; i < unclassified.length; i++) {
+            if (AIClassifier2.isCancelled) break;
+            while (AIClassifier2.isPaused) {
+              await Utils2.sleep(500);
+              if (AIClassifier2.isCancelled) break;
+            }
+            if (AIClassifier2.isCancelled) break;
+            const page = unclassified[i];
+            const title = AIClassifier2.getPageTitle(page);
+            onProgress == null ? void 0 : onProgress({
+              current: i + 1,
+              total: unclassified.length,
+              title,
+              isPaused: AIClassifier2.isPaused
+            });
+            try {
+              await AIClassifier2.classifyPage(page, settings);
+              results.success.push({ title });
+            } catch (error) {
+              results.failed.push({ title, error: error.message });
+            }
+            if (i < unclassified.length - 1) {
+              await Utils2.sleep(delay);
+            }
+          }
+          return {
+            total: pages.length,
+            classified: results.success.length,
+            failed: results.failed.length,
+            results
+          };
+        },
+        // 获取所有页面
+        fetchAllPages: async (settings) => {
+          const { notionApiKey, notionDatabaseId } = settings;
+          const pages = [];
+          let cursor = null;
+          const seenCursors = /* @__PURE__ */ new Set();
+          const MAX_PAGES = 100;
+          let pageCount = 0;
+          do {
+            const response = await NotionAPI2.queryDatabase(
+              notionDatabaseId,
+              null,
+              null,
+              cursor,
+              notionApiKey
+            );
+            pages.push(...response.results || []);
+            pageCount++;
+            const nextCursor = response.has_more ? response.next_cursor : null;
+            cursor = nextCursor && !seenCursors.has(nextCursor) ? nextCursor : null;
+            if (cursor) seenCursors.add(cursor);
+          } while (cursor && pageCount < MAX_PAGES);
+          if (cursor) {
+            console.warn(`[LD-Notion] \u5206\u9875\u5DF2\u8FBE\u4E0A\u9650 ${MAX_PAGES} \u9875, \u5269\u4F59\u9875\u9762\u672A\u52A0\u8F7D`);
+          }
+          return pages;
+        },
+        // 获取页面标题（复用 Utils.getPageTitle）
+        getPageTitle: (page) => {
+          return Utils2.getPageTitle(page, "\u672A\u547D\u540D");
+        },
+        // 分类单个页面
+        classifyPage: async (page, settings) => {
+          const title = AIClassifier2.getPageTitle(page);
+          const blocks = await AIClassifier2.fetchPageBlocks(page.id, settings.notionApiKey);
+          const content = AIClassifier2.extractText(blocks);
+          const category = await AIService.classify(
+            title,
+            content,
+            settings.categories,
+            settings
+          );
+          await AIAssistant2()._executeGuardedPageWrite(
+            "updatePage",
+            { id: page.id, name: title },
+            () => NotionAPI2.updatePage(page.id, {
+              "AI\u5206\u7C7B": { select: { name: category } }
+            }, settings.notionApiKey),
+            settings
+          );
+          return category;
+        },
+        // 获取页面所有块
+        fetchPageBlocks: async (pageId, apiKey) => {
+          const blocks = [];
+          let cursor = null;
+          const seenCursors = /* @__PURE__ */ new Set();
+          const MAX_PAGES = 100;
+          let pageCount = 0;
+          do {
+            const response = await NotionAPI2.fetchBlocks(pageId, cursor, apiKey);
+            blocks.push(...response.results || []);
+            pageCount++;
+            const nextCursor = response.has_more ? response.next_cursor : null;
+            cursor = nextCursor && !seenCursors.has(nextCursor) ? nextCursor : null;
+            if (cursor) seenCursors.add(nextCursor);
+          } while (cursor && pageCount < MAX_PAGES);
+          if (cursor) {
+            console.warn(`[LD-Notion] \u5757\u5206\u9875\u5DF2\u8FBE\u4E0A\u9650 ${MAX_PAGES} \u9875, \u5269\u4F59\u5B50\u5757\u672A\u52A0\u8F7D`);
+          }
+          return blocks;
+        },
+        // 提取页面文本
+        extractText: (blocks) => {
+          const texts = [];
+          const extractFromBlock = (block) => {
+            const type = block.type;
+            const content = block[type];
+            if (!content) return;
+            if (content.rich_text) {
+              const text = content.rich_text.map((rt) => rt.plain_text).join("");
+              if (text) texts.push(text);
+            }
+            if (content.title) {
+              const text = content.title.map((t) => t.plain_text).join("");
+              if (text) texts.push(text);
+            }
+            if (content.caption) {
+              const text = content.caption.map((c) => c.plain_text).join("");
+              if (text) texts.push(text);
+            }
+          };
+          blocks.forEach(extractFromBlock);
+          return texts.join("\n").slice(0, 4e3);
+        },
+        // 确保数据库有 "AI分类" Select 属性
+        ensureAICategoryProperty: async (settings) => {
+          var _a2;
+          const { notionApiKey, notionDatabaseId, categories } = settings;
+          const database = await NotionAPI2.fetchDatabase(notionDatabaseId, notionApiKey);
+          const properties = database.properties || {};
+          if (properties["AI\u5206\u7C7B"]) {
+            const existingOptions = ((_a2 = properties["AI\u5206\u7C7B"].select) == null ? void 0 : _a2.options) || [];
+            const existingNames = new Set(existingOptions.map((o) => o.name));
+            const newOptions = categories.filter((cat) => !existingNames.has(cat));
+            if (newOptions.length > 0) {
+              const allOptions = [
+                ...existingOptions,
+                ...newOptions.map((name) => ({ name }))
+              ];
+              await AIAssistant2()._executeGuardedDatabaseWrite(
+                "updateDatabase",
+                notionDatabaseId,
+                () => NotionAPI2.updateDatabase(notionDatabaseId, {
+                  "AI\u5206\u7C7B": {
+                    select: { options: allOptions }
+                  }
+                }, notionApiKey),
+                notionApiKey
+              );
+            }
+            return;
+          }
+          const options = categories.map((name) => ({ name }));
+          await AIAssistant2()._executeGuardedDatabaseWrite(
+            "updateDatabase",
+            notionDatabaseId,
+            () => NotionAPI2.updateDatabase(notionDatabaseId, {
+              "AI\u5206\u7C7B": {
+                select: { options }
+              }
+            }, notionApiKey),
+            notionApiKey
+          );
+        },
+        // 控制方法
+        pause: () => {
+          AIClassifier2.isPaused = true;
+        },
+        resume: () => {
+          AIClassifier2.isPaused = false;
+        },
+        cancel: () => {
+          AIClassifier2.isCancelled = true;
+        },
+        reset: () => {
+          AIClassifier2.isPaused = false;
+          AIClassifier2.isCancelled = false;
+          const pauseBtn = document.querySelector("#ldb-classify-pause");
+          if (pauseBtn) pauseBtn.textContent = "\u23F8\uFE0F \u6682\u505C\u5206\u7C7B";
+        }
+      };
+      module.exports = { AIClassifier: AIClassifier2 };
+    }
+  });
+
   // src/ai/guarded-write.js
   var require_guarded_write = __commonJS({
     "src/ai/guarded-write.js"(exports, module) {
@@ -32223,7 +32949,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { AgentTrace } = require_AgentTrace();
       var { AISchema } = require_schema();
       var { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 } = require_AgentTools();
-      var { getAI: AI, getState: ChatState2, getService: AIService2 } = require_deps();
+      var { getAI: AI, getState: ChatState2, getService: AIService3 } = require_deps();
       var AgentExecutor = {
         _generateAgentPlan: async (params, settings) => {
           const { task_description } = params;
@@ -32242,7 +32968,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
 }
 
 \u7528\u6237\u4EFB\u52A1\uFF1A${AI().isolateContent(task_description)}`;
-          const planResponse = await AIService2().requestChat(planPrompt, settings, 1500);
+          const planResponse = await AIService3().requestChat(planPrompt, settings, 1500);
           const planResult = AISchema.parseAIJson("agentPlan", planResponse);
           if (!planResult.ok) {
             console.warn("[LD-Notion] Agent \u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", planResult.reason);
@@ -32536,7 +33262,7 @@ ${AI().isolateContent(content)}
             );
             let response;
             try {
-              response = await AIService2().requestAgentChat(
+              response = await AIService3().requestAgentChat(
                 systemPrompt,
                 messages,
                 settings,
@@ -32593,7 +33319,7 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
       var { NameResolver } = require_NameResolver();
       var { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 } = require_AgentTools();
       var { AIHandlers: AIHandlers2 } = require_Handlers();
-      var { AIService: AIService2 } = require_ai_service();
+      var { AIService: AIService3 } = require_ai_service();
       var ChatState2 = {
         messages: [],
         isProcessing: false,
@@ -32651,292 +33377,7 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
           ChatUI2.renderMessages();
         }
       };
-      var QUICK_INTENT_PATTERNS2 = Object.freeze({
-        blockId: /\bblock[_:-]?([A-Za-z0-9-]{6,})\b/i,
-        commentId: /\bcomment[_:-]?([A-Za-z0-9-]{3,})\b/i,
-        notionUrl: /https?:\/\/(?:www\.)?notion\.so\/\S+/i,
-        url: /https?:\/\/\S+/i,
-        emoji: /[\p{Extended_Pictographic}]/u,
-        commentReplyTail: /\bcomment[_:-]?([A-Za-z0-9-]{3,})\b[：:]\s*(.+)$/i,
-        replyVerb: /(回复|reply|回覆)/i,
-        commentReadVerb: /(查看|读取|显示|详情|comment)/i,
-        restoreVerb: /(恢复|还原|取消归档|取消存档|移出归档|从归档恢复)/,
-        archiveVerb: /(归档|删除到归档|软删除|移到归档|放到归档|送到归档)/,
-        unlockVerb: /(?:解锁|取消锁定|取消上锁|取消锁住|\bunlock\b)/i,
-        lockVerb: /(?:锁定|锁住|上锁|\block\b)/i,
-        iconKeyword: /(图标|icon)/i,
-        coverKeyword: /(封面|cover)/i,
-        markdownKeyword: /(markdown|md|原文|全文)/i,
-        commentKeyword: /(评论|讨论)/,
-        commentReadKeyword: /(查看|读取|列出|显示)/,
-        databaseKeyword: /(数据库|db|database)/i,
-        schemaKeyword: /(结构|schema|字段|属性|列)/i,
-        detailKeyword: /(详情|信息|对象|看看|读取)/,
-        blockUpdateVerb: /(改成|修改为|更新为|替换为)/,
-        appendVerb: /(插入|追加|添加)/,
-        pageKeyword: /(页面|page)/i,
-        blockStructurePhrase: /(块结构|子块)/,
-        blockKeyword: /block/i,
-        objectReadVerb: /(查看|读取|详情|对象|fetch)/i,
-        rawIdReadVerb: /(查看|读取|详情|对象|页面|数据库)/,
-        afterBlockKeyword: /(后插入|后面插入|后追加|after)/i
-      });
-      var QUICK_INTENT_RULES2 = Object.freeze([
-        {
-          id: "comment.reply",
-          intent: "create_comment",
-          priority: 1e3,
-          requires: ["commentId", "hasReplyVerb", "commentReplyContent"],
-          buildResult: (ctx) => ({
-            intent: "create_comment",
-            params: {
-              comment_id: ctx.commentId,
-              content: ctx.commentReplyContent
-            },
-            explanation: "\u6839\u636E\u660E\u786E\u7684 comment_id \u56DE\u590D\u5DF2\u6709\u8BC4\u8BBA"
-          })
-        },
-        {
-          id: "comment.detail",
-          intent: "get_comment",
-          priority: 990,
-          requires: ["commentId", "hasCommentReadVerb"],
-          rejects: ["hasReplyVerb"],
-          buildResult: (ctx) => ({
-            intent: "get_comment",
-            params: { comment_id: ctx.commentId },
-            explanation: "\u6839\u636E\u660E\u786E\u7684 comment_id \u8BFB\u53D6\u8BC4\u8BBA\u8BE6\u60C5"
-          })
-        },
-        {
-          id: "page.restore",
-          intent: "restore_page",
-          priority: 950,
-          requires: ["firstQuoted", "hasRestoreVerb"],
-          rejects: ["hasDatabaseKeyword"],
-          buildResult: (ctx) => ({
-            intent: "restore_page",
-            params: { page_name: ctx.firstQuoted },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u6062\u590D\u9875\u9762"
-          })
-        },
-        {
-          id: "page.archive",
-          intent: "archive_page",
-          priority: 940,
-          requires: ["firstQuoted", "hasArchiveVerb"],
-          rejects: ["hasDatabaseKeyword"],
-          buildResult: (ctx) => ({
-            intent: "archive_page",
-            params: { page_name: ctx.firstQuoted },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u5F52\u6863\u9875\u9762"
-          })
-        },
-        {
-          id: "page.unlock",
-          intent: "update_page",
-          priority: 930,
-          requires: ["firstQuoted", "hasUnlockVerb"],
-          rejects: ["hasDatabaseKeyword"],
-          buildResult: (ctx) => ({
-            intent: "update_page",
-            params: { page_name: ctx.firstQuoted, is_locked: false },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u89E3\u9501\u9875\u9762"
-          })
-        },
-        {
-          id: "page.lock",
-          intent: "update_page",
-          priority: 920,
-          requires: ["firstQuoted", "hasLockVerb"],
-          rejects: ["hasUnlockVerb", "hasDatabaseKeyword"],
-          buildResult: (ctx) => ({
-            intent: "update_page",
-            params: { page_name: ctx.firstQuoted, is_locked: true },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u9501\u5B9A\u9875\u9762"
-          })
-        },
-        {
-          id: "page.icon",
-          intent: "update_page",
-          priority: 910,
-          requires: ["firstQuoted", "hasIconKeyword", "emoji"],
-          rejects: ["hasDatabaseKeyword"],
-          buildResult: (ctx) => ({
-            intent: "update_page",
-            params: { page_name: ctx.firstQuoted, icon_emoji: ctx.emoji },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u66F4\u65B0\u9875\u9762\u56FE\u6807"
-          })
-        },
-        {
-          id: "page.cover",
-          intent: "update_page",
-          priority: 900,
-          requires: ["firstQuoted", "hasCoverKeyword", "url"],
-          rejects: ["hasDatabaseKeyword"],
-          buildResult: (ctx) => ({
-            intent: "update_page",
-            params: { page_name: ctx.firstQuoted, cover_url: ctx.url },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u66F4\u65B0\u9875\u9762\u5C01\u9762"
-          })
-        },
-        {
-          id: "page.markdown",
-          intent: "fetch_page_markdown",
-          priority: 890,
-          requires: ["firstQuoted", "hasMarkdownKeyword"],
-          rejects: ["hasDatabaseKeyword"],
-          buildResult: (ctx) => ({
-            intent: "fetch_page_markdown",
-            params: { page_name: ctx.firstQuoted },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u8BFB\u53D6\u9875\u9762 Markdown"
-          })
-        },
-        {
-          id: "page.comments",
-          intent: "get_comments",
-          priority: 880,
-          requires: ["firstQuoted", "hasPageCommentReadIntent"],
-          rejects: ["hasDatabaseKeyword"],
-          buildResult: (ctx) => ({
-            intent: "get_comments",
-            params: { page_name: ctx.firstQuoted },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u8BFB\u53D6\u9875\u9762\u8BC4\u8BBA"
-          })
-        },
-        {
-          id: "database.schema",
-          intent: "get_database_schema",
-          priority: 870,
-          requires: ["firstQuoted", "hasDatabaseKeyword", "hasSchemaKeyword"],
-          rejects: ["hasPageKeyword", "hasBlockStructurePhrase"],
-          buildResult: (ctx) => ({
-            intent: "get_database_schema",
-            params: { database_name: ctx.firstQuoted },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u6570\u636E\u5E93\u540D\u79F0\u8BFB\u53D6\u6570\u636E\u5E93\u7ED3\u6784"
-          })
-        },
-        {
-          id: "database.detail",
-          intent: "fetch_notion_object",
-          priority: 860,
-          requires: ["firstQuoted", "hasDatabaseKeyword", "hasDetailKeyword"],
-          rejects: ["hasPageKeyword", "hasMarkdownKeyword"],
-          buildResult: (ctx) => ({
-            intent: "fetch_notion_object",
-            params: { reference: ctx.firstQuoted, type: "database" },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u6570\u636E\u5E93\u540D\u79F0\u8BFB\u53D6\u5BF9\u8C61\u8BE6\u60C5"
-          })
-        },
-        {
-          id: "page.append",
-          intent: "append_block_children",
-          priority: 850,
-          requires: ["firstQuoted", "hasAppendVerb", "hasMultipleQuotedTexts", "hasPageKeyword"],
-          rejects: ["hasDatabaseKeyword"],
-          buildResult: (ctx) => ({
-            intent: "append_block_children",
-            params: {
-              page_name: ctx.firstQuoted,
-              content: ctx.lastQuoted,
-              insert_position: "end"
-            },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u63D2\u5165\u5185\u5BB9\u5757"
-          })
-        },
-        {
-          id: "block.update",
-          intent: "update_block_content",
-          priority: 840,
-          requires: ["blockId", "hasBlockUpdateVerb", "quoted"],
-          buildResult: (ctx) => ({
-            intent: "update_block_content",
-            params: {
-              block_id: ctx.blockId,
-              content: ctx.quoted
-            },
-            explanation: "\u6839\u636E\u660E\u786E\u7684 block_id \u66F4\u65B0\u5757\u5185\u5BB9"
-          })
-        },
-        {
-          id: "block.append",
-          intent: "append_block_children",
-          priority: 830,
-          requires: ["blockId", "hasAppendVerb", "quoted"],
-          buildResult: (ctx) => {
-            const insertPosition = ctx.hasAfterBlockKeyword ? "after_block" : "end";
-            return {
-              intent: "append_block_children",
-              params: {
-                block_id: ctx.blockId,
-                content: ctx.quoted,
-                insert_position: insertPosition,
-                after_block_id: insertPosition === "after_block" ? ctx.blockId : void 0
-              },
-              explanation: "\u6839\u636E\u660E\u786E\u7684 block_id \u63D2\u5165\u5185\u5BB9\u5757"
-            };
-          }
-        },
-        {
-          id: "page.blocks",
-          intent: "fetch_page_blocks",
-          priority: 820,
-          requires: ["firstQuoted", "hasBlockStructurePhrase", "hasPageKeyword"],
-          rejects: ["hasDatabaseKeyword"],
-          buildResult: (ctx) => ({
-            intent: "fetch_page_blocks",
-            params: { page_name: ctx.firstQuoted },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u67E5\u770B\u5757\u7ED3\u6784"
-          })
-        },
-        {
-          id: "block.blocks",
-          intent: "fetch_page_blocks",
-          priority: 810,
-          requires: ["hasBlockStructureIntent"],
-          rejects: ["hasDatabaseKeyword"],
-          when: (ctx) => !!ctx.blockId || !ctx.firstQuoted,
-          buildResult: (ctx) => ({
-            intent: "fetch_page_blocks",
-            params: ctx.blockId ? { block_id: ctx.blockId } : {},
-            explanation: "\u67E5\u770B\u5757\u7ED3\u6784"
-          })
-        },
-        {
-          id: "notion.url.object",
-          intent: "fetch_notion_object",
-          priority: 800,
-          requires: ["notionUrl", "hasObjectReadVerb"],
-          buildResult: (ctx) => ({
-            intent: "fetch_notion_object",
-            params: { reference: ctx.notionUrl },
-            explanation: "\u6839\u636E\u660E\u786E\u7684 Notion \u94FE\u63A5\u8BFB\u53D6\u5BF9\u8C61\u8BE6\u60C5"
-          })
-        },
-        {
-          id: "notion.id.object",
-          intent: "fetch_notion_object",
-          priority: 790,
-          requires: ["rawNotionId", "hasRawIdReadVerb"],
-          buildResult: (ctx) => ({
-            intent: "fetch_notion_object",
-            params: { reference: ctx.rawNotionId },
-            explanation: "\u6839\u636E\u660E\u786E\u7684 Notion ID \u8BFB\u53D6\u5BF9\u8C61\u8BE6\u60C5"
-          })
-        },
-        {
-          id: "page.detail",
-          intent: "fetch_notion_object",
-          priority: 780,
-          requires: ["firstQuoted", "hasDetailKeyword"],
-          rejects: ["hasDatabaseKeyword", "hasBlockStructurePhrase"],
-          buildResult: (ctx) => ({
-            intent: "fetch_notion_object",
-            params: { reference: ctx.firstQuoted, type: "page" },
-            explanation: "\u6839\u636E\u660E\u786E\u7684\u9875\u9762\u540D\u79F0\u8BFB\u53D6\u5BF9\u8C61\u8BE6\u60C5"
-          })
-        }
-      ]);
+      var { QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2 } = require_quick_intent();
       var AIAssistant2 = {
         // 意图类型
         INTENTS: {
@@ -33772,7 +34213,7 @@ compound \u683C\u5F0F\uFF08\u4EC5\u5F53 intent \u4E3A compound \u65F6\u4F7F\u752
   "explanation": "\u6574\u4F53\u610F\u56FE\u8BF4\u660E"
 }`;
           try {
-            const response = await AIService2.requestChat(
+            const response = await AIService3.requestChat(
               `${systemPrompt}
 
 <user_input>
@@ -34006,413 +34447,14 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           }
         }
       });
-      var AI_WELCOME_ENTRY_POINTS = Object.freeze({
-        subtitle: "\u7A33\u5B9A\u652F\u6301\uFF1A\u6570\u636E\u5E93 / \u9875\u9762\u68C0\u7D22\u3001\u8DE8\u6E90\u641C\u7D22\u3001\u6279\u91CF\u5206\u7C7B\u3001GitHub / \u4E66\u7B7E\u5BFC\u5165\u3001\u9875\u9762\u6458\u8981\uFF1B\u66F4\u591A\u80FD\u529B\u770B\u300C\u5E2E\u52A9\u300D",
-        inputPlaceholder: "\u8F93\u5165\u6307\u4EE4\uFF0C\u5982\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6216\u300C\u5BFC\u5165GitHub\u6536\u85CF\u300D...",
-        chips: Object.freeze([
-          { command: "\u5E2E\u52A9", label: "\u{1F4A1} \u5E2E\u52A9" },
-          { command: "\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93", label: "\u{1F5C2}\uFE0F \u6570\u636E\u5E93" },
-          { command: "\u5728\u5DE5\u4F5C\u533A\u641C\u7D22\u6240\u6709\u9875\u9762", label: "\u{1F4C4} \u9875\u9762" },
-          { command: "\u8DE8\u6E90\u641C\u7D22\u6700\u8FD1\u6536\u85CF\u7684\u5E16\u5B50", label: "\u{1F50D} \u8DE8\u6E90\u641C\u7D22" },
-          { command: "\u81EA\u52A8\u5206\u7C7B\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50", label: "\u{1F3F7}\uFE0F \u5206\u7C7B" },
-          { command: "\u5BFC\u5165GitHub\u6536\u85CF", label: "\u{1F419} GitHub" },
-          { command: "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E", label: "\u{1F4D6} \u4E66\u7B7E" }
-        ])
-      });
-      var AIWelcomeUI2 = {
-        render: (personaName) => {
-          const chips = AI_WELCOME_ENTRY_POINTS.chips.map((chip) => `<button class="ldb-chat-chip" data-cmd="${Utils2.escapeHtml(chip.command)}">${Utils2.escapeHtml(chip.label)}</button>`).join("");
-          return `
-            <div class="ldb-chat-welcome">
-                <div class="ldb-chat-welcome-icon">\u{1F916}</div>
-                <div class="ldb-chat-welcome-text">
-                    \u4F60\u597D\uFF01\u6211\u662F ${Utils2.escapeHtml(personaName)}<br>
-                    <small>${Utils2.escapeHtml(AI_WELCOME_ENTRY_POINTS.subtitle)}</small>
-                </div>
-                <div class="ldb-chat-chips">
-                    ${chips}
-                </div>
-            </div>
-        `;
-        },
-        getInputPlaceholder: () => AI_WELCOME_ENTRY_POINTS.inputPlaceholder
-      };
-      var ChatUI2 = {
-        // HTML 转义函数，防止 XSS 攻击
-        escapeHtml: (text) => {
-          const div = document.createElement("div");
-          div.textContent = text;
-          return div.innerHTML;
-        },
-        // 安全的 Markdown 渲染（先转义再处理 Markdown）
-        safeMarkdown: (text) => {
-          let escaped = Utils2.escapeHtml(text);
-          return escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>");
-        },
-        // 增量更新最后一个气泡 DOM（PERF-006）。
-        // 返回 true 表示已成功 patch，false 表示需要回退到全量 renderMessages。
-        _patchLastBubble: () => {
-          var _a;
-          const container = document.querySelector("#ldb-chat-messages");
-          if (!container) return false;
-          const bubbles = container.querySelectorAll(".ldb-chat-message");
-          if (bubbles.length !== ChatState2.messages.length) return false;
-          const lastMsg = ChatState2.messages[ChatState2.messages.length - 1];
-          const lastBubble = (_a = bubbles[bubbles.length - 1]) == null ? void 0 : _a.querySelector(".ldb-chat-bubble");
-          if (!lastBubble) return false;
-          const statusClass = lastMsg.status === "processing" ? "processing" : lastMsg.status === "error" ? "error" : "";
-          const content = lastMsg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI2.safeMarkdown(AIAssistant2._resultToText(lastMsg.content));
-          lastBubble.className = `ldb-chat-bubble ${lastMsg.role === "user" ? "user" : "assistant"} ${statusClass}`.trim();
-          lastBubble.innerHTML = content;
-          container.scrollTop = container.scrollHeight;
-          return true;
-        },
-        // 渲染消息列表
-        renderMessages: () => {
-          const container = document.querySelector("#ldb-chat-messages");
-          if (!container) return;
-          if (ChatState2.messages.length === 0) {
-            const personaName = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_NAME, CONFIG2.DEFAULTS.agentPersonaName);
-            container.innerHTML = AIWelcomeUI2.render(personaName);
-            container.querySelectorAll(".ldb-chat-chip").forEach((chip) => {
-              chip.onclick = () => {
-                const input = document.querySelector("#ldb-chat-input");
-                if (input) {
-                  input.value = chip.getAttribute("data-cmd");
-                  ChatUI2.sendMessage();
-                }
-              };
-            });
-            return;
-          }
-          container.innerHTML = ChatState2.messages.map((msg) => {
-            const isUser = msg.role === "user";
-            const statusClass = msg.status === "processing" ? "processing" : msg.status === "error" ? "error" : "";
-            const content = msg.status === "processing" ? '\u601D\u8003\u4E2D<span class="ldb-typing-dots"><span></span><span></span><span></span></span>' : ChatUI2.safeMarkdown(AIAssistant2._resultToText(msg.content));
-            return `
-                <div class="ldb-chat-message ${isUser ? "user" : "assistant"}">
-                    <div class="ldb-chat-bubble ${isUser ? "user" : "assistant"} ${statusClass}">
-                        ${content}
-                    </div>
-                </div>
-            `;
-          }).join("");
-          container.scrollTop = container.scrollHeight;
-        },
-        // 发送消息
-        sendMessage: async () => {
-          const input = document.querySelector("#ldb-chat-input");
-          const sendBtn = document.querySelector("#ldb-chat-send");
-          if (!input) return;
-          const message = input.value.trim();
-          if (!message || ChatState2.isProcessing) return;
-          if (input) input.disabled = true;
-          if (sendBtn) sendBtn.disabled = true;
-          try {
-            input.value = "";
-            input.style.height = "auto";
-            ChatState2.addMessage("user", message);
-            ChatState2.isProcessing = true;
-            ChatState2.addMessage("assistant", "\u601D\u8003\u4E2D...", "processing");
-            const response = await AIAssistant2.handleMessage(message);
-            ChatState2.updateLastMessage(response, AIAssistant2._isErrorResult(response) ? "error" : "complete");
-          } catch (error) {
-            console.error("[LD-Notion] AI \u5904\u7406\u5931\u8D25:", error);
-            try {
-              ChatState2.updateLastMessage(`\u274C \u5904\u7406\u5931\u8D25: ${error.message}`, "error");
-            } catch (updateError) {
-              console.error("[LD-Notion] \u66F4\u65B0\u5931\u8D25\u6D88\u606F\u4E5F\u51FA\u9519:", updateError);
-            }
-          } finally {
-            ChatState2.isProcessing = false;
-            if (input) input.disabled = false;
-            if (sendBtn) sendBtn.disabled = false;
-            if (input) input.focus();
-          }
-        },
-        // 绑定事件
-        bindEvents: () => {
-          const sendBtn = document.querySelector("#ldb-chat-send");
-          if (sendBtn) {
-            sendBtn.onclick = ChatUI2.sendMessage;
-          }
-          const input = document.querySelector("#ldb-chat-input");
-          if (input) {
-            input.onkeydown = (e) => {
-              e.stopPropagation();
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                ChatUI2.sendMessage();
-              }
-            };
-            input.onpaste = (e) => e.stopPropagation();
-            input.oncopy = (e) => e.stopPropagation();
-            input.oncut = (e) => e.stopPropagation();
-            input.oninput = (e) => {
-              e.stopPropagation();
-              input.style.height = "auto";
-              input.style.height = Math.min(input.scrollHeight, 80) + "px";
-            };
-            input.onkeyup = (e) => e.stopPropagation();
-            input.onkeypress = (e) => e.stopPropagation();
-          }
-          const clearBtn = document.querySelector("#ldb-chat-clear");
-          if (clearBtn) {
-            clearBtn.onclick = async () => {
-              const confirmed = await ConfirmationDialog2.show({
-                title: "\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2",
-                message: "\u786E\u5B9A\u8981\u6E05\u7A7A\u5BF9\u8BDD\u5386\u53F2\u5417\uFF1F",
-                countdown: 3
-              });
-              if (confirmed) {
-                ChatState2.clear();
-              }
-            };
-          }
-          const classifyPauseBtn = document.querySelector("#ldb-classify-pause");
-          if (classifyPauseBtn) {
-            classifyPauseBtn.onclick = () => {
-              if (AIClassifier2.isPaused) {
-                AIClassifier2.resume();
-                classifyPauseBtn.textContent = "\u23F8\uFE0F \u6682\u505C\u5206\u7C7B";
-              } else {
-                AIClassifier2.pause();
-                classifyPauseBtn.textContent = "\u25B6\uFE0F \u7EE7\u7EED\u5206\u7C7B";
-              }
-            };
-          }
-          const classifyCancelBtn = document.querySelector("#ldb-classify-cancel");
-          if (classifyCancelBtn) {
-            classifyCancelBtn.onclick = async () => {
-              const confirmed = await ConfirmationDialog2.show({
-                title: "\u53D6\u6D88\u6279\u91CF\u5206\u7C7B",
-                message: "\u786E\u5B9A\u8981\u53D6\u6D88\u6279\u91CF\u5206\u7C7B\u5417\uFF1F\u5DF2\u5B8C\u6210\u7684\u90E8\u5206\u4E0D\u4F1A\u4E22\u5931\u3002",
-                countdown: 3
-              });
-              if (confirmed) {
-                AIClassifier2.cancel();
-              }
-            };
-          }
-        },
-        // 初始化
-        init: () => {
-          ChatState2.load();
-          ChatUI2.renderMessages();
-          ChatUI2.bindEvents();
-        }
-      };
-      var AIClassifier2 = {
-        isPaused: false,
-        isCancelled: false,
-        // 批量分类
-        classifyBatch: async (settings, onProgress) => {
-          AIClassifier2.reset();
-          await AIClassifier2.ensureAICategoryProperty(settings);
-          const pages = await AIClassifier2.fetchAllPages(settings);
-          if (pages.length === 0) {
-            throw new Error("\u6570\u636E\u5E93\u4E2D\u6CA1\u6709\u627E\u5230\u4EFB\u4F55\u9875\u9762");
-          }
-          const unclassified = pages.filter((p) => {
-            var _a;
-            const aiCategory = p.properties["AI\u5206\u7C7B"];
-            return !((_a = aiCategory == null ? void 0 : aiCategory.select) == null ? void 0 : _a.name);
-          });
-          if (unclassified.length === 0) {
-            return { total: pages.length, classified: 0, message: "\u6240\u6709\u9875\u9762\u90FD\u5DF2\u5206\u7C7B" };
-          }
-          const results = { success: [], failed: [] };
-          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-          for (let i = 0; i < unclassified.length; i++) {
-            if (AIClassifier2.isCancelled) break;
-            while (AIClassifier2.isPaused) {
-              await Utils2.sleep(500);
-              if (AIClassifier2.isCancelled) break;
-            }
-            if (AIClassifier2.isCancelled) break;
-            const page = unclassified[i];
-            const title = AIClassifier2.getPageTitle(page);
-            onProgress == null ? void 0 : onProgress({
-              current: i + 1,
-              total: unclassified.length,
-              title,
-              isPaused: AIClassifier2.isPaused
-            });
-            try {
-              await AIClassifier2.classifyPage(page, settings);
-              results.success.push({ title });
-            } catch (error) {
-              results.failed.push({ title, error: error.message });
-            }
-            if (i < unclassified.length - 1) {
-              await Utils2.sleep(delay);
-            }
-          }
-          return {
-            total: pages.length,
-            classified: results.success.length,
-            failed: results.failed.length,
-            results
-          };
-        },
-        // 获取所有页面
-        fetchAllPages: async (settings) => {
-          const { notionApiKey, notionDatabaseId } = settings;
-          const pages = [];
-          let cursor = null;
-          const seenCursors = /* @__PURE__ */ new Set();
-          const MAX_PAGES = 100;
-          let pageCount = 0;
-          do {
-            const response = await NotionAPI2.queryDatabase(
-              notionDatabaseId,
-              null,
-              null,
-              cursor,
-              notionApiKey
-            );
-            pages.push(...response.results || []);
-            pageCount++;
-            const nextCursor = response.has_more ? response.next_cursor : null;
-            cursor = nextCursor && !seenCursors.has(nextCursor) ? nextCursor : null;
-            if (cursor) seenCursors.add(cursor);
-          } while (cursor && pageCount < MAX_PAGES);
-          if (cursor) {
-            console.warn(`[LD-Notion] \u5206\u9875\u5DF2\u8FBE\u4E0A\u9650 ${MAX_PAGES} \u9875, \u5269\u4F59\u9875\u9762\u672A\u52A0\u8F7D`);
-          }
-          return pages;
-        },
-        // 获取页面标题（复用 Utils.getPageTitle）
-        getPageTitle: (page) => {
-          return Utils2.getPageTitle(page, "\u672A\u547D\u540D");
-        },
-        // 分类单个页面
-        classifyPage: async (page, settings) => {
-          const title = AIClassifier2.getPageTitle(page);
-          const blocks = await AIClassifier2.fetchPageBlocks(page.id, settings.notionApiKey);
-          const content = AIClassifier2.extractText(blocks);
-          const category = await AIService2.classify(
-            title,
-            content,
-            settings.categories,
-            settings
-          );
-          await AIAssistant2._executeGuardedPageWrite(
-            "updatePage",
-            { id: page.id, name: title },
-            () => NotionAPI2.updatePage(page.id, {
-              "AI\u5206\u7C7B": { select: { name: category } }
-            }, settings.notionApiKey),
-            settings
-          );
-          return category;
-        },
-        // 获取页面所有块
-        fetchPageBlocks: async (pageId, apiKey) => {
-          const blocks = [];
-          let cursor = null;
-          const seenCursors = /* @__PURE__ */ new Set();
-          const MAX_PAGES = 100;
-          let pageCount = 0;
-          do {
-            const response = await NotionAPI2.fetchBlocks(pageId, cursor, apiKey);
-            blocks.push(...response.results || []);
-            pageCount++;
-            const nextCursor = response.has_more ? response.next_cursor : null;
-            cursor = nextCursor && !seenCursors.has(nextCursor) ? nextCursor : null;
-            if (cursor) seenCursors.add(nextCursor);
-          } while (cursor && pageCount < MAX_PAGES);
-          if (cursor) {
-            console.warn(`[LD-Notion] \u5757\u5206\u9875\u5DF2\u8FBE\u4E0A\u9650 ${MAX_PAGES} \u9875, \u5269\u4F59\u5B50\u5757\u672A\u52A0\u8F7D`);
-          }
-          return blocks;
-        },
-        // 提取页面文本
-        extractText: (blocks) => {
-          const texts = [];
-          const extractFromBlock = (block) => {
-            const type = block.type;
-            const content = block[type];
-            if (!content) return;
-            if (content.rich_text) {
-              const text = content.rich_text.map((rt) => rt.plain_text).join("");
-              if (text) texts.push(text);
-            }
-            if (content.title) {
-              const text = content.title.map((t) => t.plain_text).join("");
-              if (text) texts.push(text);
-            }
-            if (content.caption) {
-              const text = content.caption.map((c) => c.plain_text).join("");
-              if (text) texts.push(text);
-            }
-          };
-          blocks.forEach(extractFromBlock);
-          return texts.join("\n").slice(0, 4e3);
-        },
-        // 确保数据库有 "AI分类" Select 属性
-        ensureAICategoryProperty: async (settings) => {
-          var _a;
-          const { notionApiKey, notionDatabaseId, categories } = settings;
-          const database = await NotionAPI2.fetchDatabase(notionDatabaseId, notionApiKey);
-          const properties = database.properties || {};
-          if (properties["AI\u5206\u7C7B"]) {
-            const existingOptions = ((_a = properties["AI\u5206\u7C7B"].select) == null ? void 0 : _a.options) || [];
-            const existingNames = new Set(existingOptions.map((o) => o.name));
-            const newOptions = categories.filter((cat) => !existingNames.has(cat));
-            if (newOptions.length > 0) {
-              const allOptions = [
-                ...existingOptions,
-                ...newOptions.map((name) => ({ name }))
-              ];
-              await AIAssistant2._executeGuardedDatabaseWrite(
-                "updateDatabase",
-                notionDatabaseId,
-                () => NotionAPI2.updateDatabase(notionDatabaseId, {
-                  "AI\u5206\u7C7B": {
-                    select: { options: allOptions }
-                  }
-                }, notionApiKey),
-                notionApiKey
-              );
-            }
-            return;
-          }
-          const options = categories.map((name) => ({ name }));
-          await AIAssistant2._executeGuardedDatabaseWrite(
-            "updateDatabase",
-            notionDatabaseId,
-            () => NotionAPI2.updateDatabase(notionDatabaseId, {
-              "AI\u5206\u7C7B": {
-                select: { options }
-              }
-            }, notionApiKey),
-            notionApiKey
-          );
-        },
-        // 控制方法
-        pause: () => {
-          AIClassifier2.isPaused = true;
-        },
-        resume: () => {
-          AIClassifier2.isPaused = false;
-        },
-        cancel: () => {
-          AIClassifier2.isCancelled = true;
-        },
-        reset: () => {
-          AIClassifier2.isPaused = false;
-          AIClassifier2.isCancelled = false;
-          const pauseBtn = document.querySelector("#ldb-classify-pause");
-          if (pauseBtn) pauseBtn.textContent = "\u23F8\uFE0F \u6682\u505C\u5206\u7C7B";
-        }
-      };
+      var { AI_WELCOME_ENTRY_POINTS, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2 } = require_ai_chat_ui();
+      var { AIClassifier: AIClassifier2 } = require_ai_classifier();
       Object.assign(AIAssistant2, require_guarded_write().GuardedWrite);
       var getAISettings = () => AIAssistant2.getSettings();
       var isolateContent2 = (content) => String(content ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      AIService2.isolateContent = isolateContent2;
+      AIService3.isolateContent = isolateContent2;
       Object.assign(AIAssistant2, { isolateContent: isolateContent2 });
-      module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, getAISettings };
+      module.exports = { AIService: AIService3, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, getAISettings };
       Object.assign(AIAssistant2, require_agent_executor().AgentExecutor);
     }
   });
@@ -34433,7 +34475,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { Storage, SyncState } = require_storage();
   var { CredentialVault, TargetState, NotionOAuth } = require_auth();
   var { SiteDetector, InstallHelper, EMOJI_MAP, NOTION_LANGUAGES, normalizeLanguage, DOMToNotion, NotionTransport, NotionAPI, ObsidianAPI, HTMLToMarkdown } = require_api();
-  var { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier } = require_ai();
+  var { AIService: AIService2, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier } = require_ai();
   var { OperationGuard, OperationLog, ConfirmationDialog, UndoManager } = require_security();
   var { ZhihuAPI, GenericExtractor, WorkspaceService } = require_extract();
   var { GenericExporter, LinuxDoAPI, Exporter } = require_export();

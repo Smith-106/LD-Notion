@@ -128,7 +128,8 @@ describe("P4 收敛(c01/c02/c05/c06/c07/c12): 源码级锁定", () => {
     });
 
     it("fetchPageBlocks 有游标去重与页数上限", () => {
-        const src = read("src/ai/index.js");
+        // M3 波次5: fetchPageBlocks 随 AIClassifier 迁 src/ai/ai-classifier.js
+        const src = read("src/ai/ai-classifier.js");
         const start = src.indexOf("fetchPageBlocks: async (pageId");
         const end = src.indexOf("extractText: (blocks)", start);
         const body = src.slice(start, end > start ? end : start + 1200);

@@ -306,9 +306,10 @@ describe("P4 收敛(c06/c08/c09): 源码级契约锁定", () => {
     });
 
     it("对话发送的状态变更纳入 try(异常也复位 UI)", () => {
-        const src = read("src/ai/index.js");
+        // M3 波次4: ChatUI.sendMessage 迁 src/ui/ai-chat-ui.js; ChatState 为 lazy accessor
+        const src = read("src/ui/ai-chat-ui.js");
         const sendBody = src.slice(src.indexOf("sendMessage: async () =>"), src.indexOf("// 绑定事件"));
-        expect(sendBody.indexOf("try {")).toBeLessThan(sendBody.indexOf('ChatState.addMessage("user"'));
+        expect(sendBody.indexOf("try {")).toBeLessThan(sendBody.indexOf('ChatState().addMessage("user"'));
         expect(sendBody).toContain("} finally {");
     });
 
