@@ -223,7 +223,8 @@ describe("P4 收敛(c12/c15/c16/c17): UI 口径一致性", () => {
 
     it("select_ai_target 失败不再裸 void 丢弃(两处均带 catch)", () => {
         expect(read("src/ui/notion-site-ui.js")).toContain(".catch((error) => NotionSiteUI.showStatus(`切换 AI 目标失败:");
-        expect(read("src/ui/events.js")).toContain(".catch((error) => UI.showStatus(`切换 AI 目标失败:");
+        // M3 events 拆分: 该绑定迁 src/ui/events/ai-bindings.js (bindAISection)
+        expect(read("src/ui/events/ai-bindings.js")).toContain(".catch((error) => UI.showStatus(`切换 AI 目标失败:");
     });
 
     it("收藏列表键→URL 映射按数组身份缓存(消除逐行线性 find)", () => {

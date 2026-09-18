@@ -29481,6 +29481,298 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
     }
   });
 
+  // src/ui/events/ai-bindings.js
+  var require_ai_bindings = __commonJS({
+    "src/ui/events/ai-bindings.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, GitHubOAuth } = require_auth();
+      var { buildConfiguredTargetWarning } = require_target_discovery();
+      var { GitHubAPI: GitHubAPI2 } = require_import();
+      var { ConfirmationDialog: ConfirmationDialog2 } = require_security();
+      var { UICommandService: UICommandService2 } = require_UICommandService();
+      var { ChatUI: ChatUI2, AIService: AIService3 } = require_ai();
+      var bindAISection = (ctx) => {
+        const { UI: UI2, panel, refs, getSensitiveValue, persistSensitiveInput } = ctx;
+        ChatUI2.init();
+        refs.aiServiceSelect.onchange = (e) => {
+          const newService = e.target.value;
+          const availableModels = AIService3.getAvailableModels(newService);
+          UI2.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : void 0);
+          Storage2.set(CONFIG2.STORAGE_KEYS.AI_SERVICE, newService);
+        };
+        refs.aiApiKeyInput.onchange = (e) => {
+          persistSensitiveInput(e.target, CONFIG2.STORAGE_KEYS.AI_API_KEY).catch((error) => {
+            UI2.showStatus(error.message || String(error), "error");
+          });
+        };
+        refs.aiBaseUrlInput.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.AI_BASE_URL, e.target.value.trim());
+        };
+        refs.aiCategoriesInput.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.AI_CATEGORIES, e.target.value.trim());
+        };
+        refs.aiModelSelect.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.AI_MODEL, e.target.value);
+        };
+        refs.aiTargetDbSelect.onchange = (e) => {
+          void UICommandService2.execute("select_ai_target", { targetValue: e.target.value }).catch((error) => UI2.showStatus(`\u5207\u6362 AI \u76EE\u6807\u5931\u8D25: ${error.message}`, "error"));
+        };
+        refs.workspaceMaxPagesSelect.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, parseInt(e.target.value) || 0);
+        };
+        refs.agentPersonaNameInput.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_NAME, e.target.value.trim() || CONFIG2.DEFAULTS.agentPersonaName);
+        };
+        refs.agentPersonaToneSelect.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_TONE, e.target.value);
+        };
+        refs.agentPersonaExpertiseInput.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, e.target.value.trim() || CONFIG2.DEFAULTS.agentPersonaExpertise);
+        };
+        refs.agentPersonaInstructionsInput.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, e.target.value.trim());
+        };
+        refs.agentMaxIterationsSelect.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, parseInt(e.target.value) || 8);
+        };
+        refs.githubUsernameInput.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, e.target.value.trim());
+        };
+        refs.githubTokenInput.onchange = (e) => {
+          persistSensitiveInput(e.target, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN).catch((error) => {
+            UI2.showStatus(error.message || String(error), "error");
+          });
+        };
+        if (refs.githubOAuthBtn) {
+          refs.githubOAuthBtn.onclick = async () => {
+            GitHubOAuth.setClientId(refs.githubOauthClientIdInput ? refs.githubOauthClientIdInput.value : "");
+            const setStatus = (text) => {
+              if (refs.githubOAuthStatus) refs.githubOAuthStatus.textContent = text;
+            };
+            try {
+              refs.githubOAuthBtn.disabled = true;
+              setStatus("\u6B63\u5728\u7533\u8BF7\u8BBE\u5907\u7801\u2026");
+              const result = await GitHubOAuth.startDeviceFlow({
+                onUserCode: ({ userCode, verificationUri }) => {
+                  try {
+                    window.open(verificationUri, "_blank");
+                  } catch (_) {
+                  }
+                  setStatus(`\u8BF7\u5728\u5DF2\u6253\u5F00\u7684 GitHub \u9875\u9762\u8F93\u5165\u4EE3\u7801: ${userCode}`);
+                },
+                onStatus: ({ phase }) => {
+                  if (phase === "pending") setStatus("\u7B49\u5F85\u4F60\u5728 GitHub \u9875\u9762\u786E\u8BA4\u6388\u6743\u2026");
+                  else if (phase === "slow_down") setStatus("GitHub \u9650\u6D41\u63D0\u793A\uFF0C\u5DF2\u81EA\u52A8\u964D\u901F\u7EE7\u7EED\u7B49\u5F85\u2026");
+                }
+              });
+              await GitHubOAuth.applyTokenResponse(result);
+              CredentialVault2.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
+              setStatus("\u2705 GitHub \u6388\u6743\u6210\u529F\uFF0CToken \u5DF2\u81EA\u52A8\u586B\u5165");
+            } catch (error) {
+              setStatus(error.code === "cancelled" ? "\u5DF2\u53D6\u6D88\u6388\u6743" : `\u274C ${error.message}`);
+            } finally {
+              refs.githubOAuthBtn.disabled = false;
+            }
+          };
+        }
+        refs.obsApiUrlInput.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.OBS_API_URL, e.target.value.trim());
+        };
+        refs.obsApiKeyInput.onchange = (e) => {
+          persistSensitiveInput(e.target, CONFIG2.STORAGE_KEYS.OBS_API_KEY).catch((error) => {
+            UI2.showStatus(error.message || String(error), "error");
+          });
+        };
+        refs.obsDirInput.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.OBS_DIR, e.target.value.trim());
+        };
+        refs.obsImgModeSelect.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.OBS_IMG_MODE, e.target.value);
+        };
+        refs.obsImgDirInput.onchange = (e) => {
+          Storage2.set(CONFIG2.STORAGE_KEYS.OBS_IMG_DIR, e.target.value.trim());
+        };
+        refs.githubTypeCheckboxes.forEach((cb) => {
+          cb.onchange = () => {
+            const source = [...refs.githubTypeCheckboxes].filter((c) => c.checked);
+            const types = [...source].filter((c) => c.checked).map((c) => c.value);
+            GitHubAPI2.setImportTypes(types.length > 0 ? types : ["stars"]);
+            if (types.length === 0) {
+              refs.githubTypeCheckboxes.forEach((c) => {
+                c.checked = c.value === "stars";
+              });
+            }
+          };
+        });
+        refs.aiRefreshDbsBtn.onclick = async () => {
+          var _a;
+          const apiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
+          const refreshBtn = refs.aiRefreshDbsBtn;
+          if (!apiKey) {
+            UI2.showStatus(MSG2.NO_NOTION_KEY, "error");
+            return;
+          }
+          refreshBtn.disabled = true;
+          refreshBtn.innerHTML = "\u23F3";
+          try {
+            const { workspaceData } = await UICommandService2.execute("refresh_workspace_targets", {
+              apiKey,
+              includePages: false,
+              onWorkspaceData: (workspaceData2) => {
+                UI2.updateAITargetDbOptions(workspaceData2.databases);
+              }
+            });
+            UI2.updateAITargetDbOptions(workspaceData.databases);
+            const aiNoDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
+            const aiTargetWarn = buildConfiguredTargetWarning({
+              configuredDatabaseId: (_a = refs.aiTargetDbSelect) == null ? void 0 : _a.value,
+              databases: workspaceData.databases
+            });
+            UI2.showStatus(`\u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93${aiNoDbHint}${aiTargetWarn}`, "success");
+          } catch (error) {
+            UI2.showStatus(`\u83B7\u53D6\u6570\u636E\u5E93\u5217\u8868\u5931\u8D25: ${error.message}`, "error");
+          } finally {
+            refreshBtn.disabled = false;
+            refreshBtn.innerHTML = "\u{1F504}";
+          }
+        };
+        refs.aiFetchModelsBtn.onclick = async () => {
+          const aiApiKey = getSensitiveValue(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, "");
+          const aiService = refs.aiServiceSelect.value;
+          const aiBaseUrl = refs.aiBaseUrlInput.value.trim();
+          const fetchBtn = refs.aiFetchModelsBtn;
+          const modelTip = refs.aiModelTip;
+          if (!aiApiKey) {
+            UI2.showStatus(MSG2.NO_AI_KEY, "error");
+            return;
+          }
+          fetchBtn.disabled = true;
+          fetchBtn.innerHTML = "\u23F3 \u83B7\u53D6\u4E2D...";
+          modelTip.textContent = "";
+          try {
+            const { models } = await UICommandService2.execute("fetch_ai_models", {
+              aiService,
+              aiApiKey,
+              aiBaseUrl
+            });
+            UI2.updateAIModelOptions(aiService, models, true);
+            modelTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${models.length} \u4E2A\u53EF\u7528\u6A21\u578B`;
+            modelTip.style.color = "var(--ldb-ui-success)";
+            UI2.showStatus(`\u6210\u529F\u83B7\u53D6 ${models.length} \u4E2A\u6A21\u578B`, "success");
+          } catch (error) {
+            modelTip.textContent = `\u274C ${error.message}`;
+            modelTip.style.color = "var(--ldb-ui-danger)";
+            UI2.showStatus(`\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${error.message}`, "error");
+          } finally {
+            fetchBtn.disabled = false;
+            fetchBtn.innerHTML = "\u{1F504} \u83B7\u53D6";
+          }
+        };
+        refs.aiTestBtn.onclick = async () => {
+          const btn = refs.aiTestBtn;
+          const statusSpan = refs.aiTestStatus;
+          const aiApiKey = getSensitiveValue(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, "");
+          const aiService = refs.aiServiceSelect.value;
+          const aiModel = refs.aiModelSelect.value;
+          const aiBaseUrl = refs.aiBaseUrlInput.value.trim();
+          statusSpan.textContent = "";
+          statusSpan.style.color = "";
+          if (!aiApiKey) {
+            UI2.showStatus(MSG2.NO_AI_KEY, "error");
+            return;
+          }
+          btn.disabled = true;
+          btn.innerHTML = '<span class="ldb-spin">\u{1F504}</span> \u6D4B\u8BD5\u4E2D...';
+          try {
+            const response = await AIService3.request(
+              "\u8BF7\u56DE\u590D\uFF1A\u8FDE\u63A5\u6210\u529F",
+              { aiService, aiApiKey, aiModel, aiBaseUrl }
+            );
+            statusSpan.textContent = `\u2705 ${response}`;
+            statusSpan.style.color = "var(--ldb-ui-success)";
+          } catch (error) {
+            statusSpan.textContent = `\u274C ${error.message}`;
+            statusSpan.style.color = "var(--ldb-ui-danger)";
+          } finally {
+            btn.disabled = false;
+            btn.innerHTML = "\u6D4B\u8BD5\u8FDE\u63A5";
+          }
+        };
+        UI2._loadTemplates = () => {
+          try {
+            return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, CONFIG2.DEFAULTS.aiTemplates));
+          } catch {
+            return JSON.parse(CONFIG2.DEFAULTS.aiTemplates);
+          }
+        };
+        UI2._saveTemplates = (templates) => {
+          const cap = CONFIG2.LIMITS.AI_TEMPLATES_MAX;
+          if (Array.isArray(templates) && templates.length > cap) {
+            templates = templates.slice(templates.length - cap);
+          }
+          Storage2.set(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, JSON.stringify(templates));
+        };
+        UI2.renderTemplateList = () => {
+          const list = refs.templateList;
+          if (!list) return;
+          const templates = UI2._loadTemplates();
+          if (templates.length === 0) {
+            list.innerHTML = '<div class="ldb-tip">\u6682\u65E0\u6A21\u677F\uFF0C\u8BF7\u6DFB\u52A0</div>';
+            return;
+          }
+          list.innerHTML = templates.map((t, i) => {
+            const icon = Utils2.escapeHtml(t.icon || "\u{1F4DD}");
+            const name = Utils2.escapeHtml(t.name || "\u672A\u547D\u540D");
+            const prompt2 = Utils2.escapeHtml((t.prompt || "").substring(0, 50));
+            return `<div class="ldb-setting-row" style="justify-content: space-between; padding: var(--ldb-ui-spacing-3xs) 0;">
+                    <span style="font-size: 12px;">${icon} <strong>${name}</strong> <span style="color: var(--ldb-ui-muted);">${prompt2}${t.prompt && t.prompt.length > 50 ? "..." : ""}</span></span>
+                    <button class="ldb-btn ldb-btn-secondary" data-template-delete="${i}" style="padding: var(--ldb-ui-spacing-3xs) var(--ldb-ui-spacing-sm); font-size: var(--ldb-ui-font-size-xs);">\u5220\u9664</button>
+                </div>`;
+          }).join("");
+          list.querySelectorAll("[data-template-delete]").forEach((btn) => {
+            btn.onclick = () => {
+              const idx = parseInt(btn.dataset.templateDelete);
+              ConfirmationDialog2.show({
+                title: "\u786E\u8BA4\u5220\u9664",
+                message: "\u786E\u5B9A\u8981\u5220\u9664\u6B64\u6A21\u677F\u5417\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002",
+                confirmText: "\u5220\u9664",
+                onConfirm: () => {
+                  const ts = UI2._loadTemplates();
+                  ts.splice(idx, 1);
+                  UI2._saveTemplates(ts);
+                  UI2.renderTemplateList();
+                  UI2.showStatus("\u6A21\u677F\u5DF2\u5220\u9664", "success");
+                }
+              });
+            };
+          });
+        };
+        refs.templateAddBtn.onclick = () => {
+          const name = refs.templateNameInput.value.trim();
+          const icon = refs.templateIconInput.value.trim() || "\u{1F4DD}";
+          const prompt2 = refs.templatePromptInput.value.trim();
+          if (!name || !prompt2) {
+            UI2.showStatus("\u8BF7\u586B\u5199\u6A21\u677F\u540D\u79F0\u548C prompt", "error");
+            return;
+          }
+          const templates = UI2._loadTemplates();
+          templates.push({ name, icon, prompt: prompt2 });
+          UI2._saveTemplates(templates);
+          refs.templateNameInput.value = "";
+          refs.templateIconInput.value = "";
+          refs.templatePromptInput.value = "";
+          UI2.renderTemplateList();
+          UI2.showStatus(`\u6A21\u677F\u300C${name}\u300D\u5DF2\u6DFB\u52A0`, "success");
+        };
+        UI2.renderTemplateList();
+      };
+      module.exports = { bindAISection };
+    }
+  });
+
   // src/ui/events.js
   var require_events = __commonJS({
     "src/ui/events.js"(exports, module) {
@@ -31227,278 +31519,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               }
             }
           };
-          ChatUI2.init();
-          refs.aiServiceSelect.onchange = (e) => {
-            const newService = e.target.value;
-            const availableModels = AIService3.getAvailableModels(newService);
-            UI2.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : void 0);
-            Storage2.set(CONFIG2.STORAGE_KEYS.AI_SERVICE, newService);
-          };
-          refs.aiApiKeyInput.onchange = (e) => {
-            persistSensitiveInput(e.target, CONFIG2.STORAGE_KEYS.AI_API_KEY).catch((error) => {
-              UI2.showStatus(error.message || String(error), "error");
-            });
-          };
-          refs.aiBaseUrlInput.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.AI_BASE_URL, e.target.value.trim());
-          };
-          refs.aiCategoriesInput.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.AI_CATEGORIES, e.target.value.trim());
-          };
-          refs.aiModelSelect.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.AI_MODEL, e.target.value);
-          };
-          refs.aiTargetDbSelect.onchange = (e) => {
-            void UICommandService2.execute("select_ai_target", { targetValue: e.target.value }).catch((error) => UI2.showStatus(`\u5207\u6362 AI \u76EE\u6807\u5931\u8D25: ${error.message}`, "error"));
-          };
-          refs.workspaceMaxPagesSelect.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.WORKSPACE_MAX_PAGES, parseInt(e.target.value) || 0);
-          };
-          refs.agentPersonaNameInput.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_NAME, e.target.value.trim() || CONFIG2.DEFAULTS.agentPersonaName);
-          };
-          refs.agentPersonaToneSelect.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_TONE, e.target.value);
-          };
-          refs.agentPersonaExpertiseInput.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, e.target.value.trim() || CONFIG2.DEFAULTS.agentPersonaExpertise);
-          };
-          refs.agentPersonaInstructionsInput.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, e.target.value.trim());
-          };
-          refs.agentMaxIterationsSelect.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, parseInt(e.target.value) || 8);
-          };
-          refs.githubUsernameInput.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, e.target.value.trim());
-          };
-          refs.githubTokenInput.onchange = (e) => {
-            persistSensitiveInput(e.target, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN).catch((error) => {
-              UI2.showStatus(error.message || String(error), "error");
-            });
-          };
-          if (refs.githubOAuthBtn) {
-            refs.githubOAuthBtn.onclick = async () => {
-              GitHubOAuth.setClientId(refs.githubOauthClientIdInput ? refs.githubOauthClientIdInput.value : "");
-              const setStatus = (text) => {
-                if (refs.githubOAuthStatus) refs.githubOAuthStatus.textContent = text;
-              };
-              try {
-                refs.githubOAuthBtn.disabled = true;
-                setStatus("\u6B63\u5728\u7533\u8BF7\u8BBE\u5907\u7801\u2026");
-                const result = await GitHubOAuth.startDeviceFlow({
-                  onUserCode: ({ userCode, verificationUri }) => {
-                    try {
-                      window.open(verificationUri, "_blank");
-                    } catch (_) {
-                    }
-                    setStatus(`\u8BF7\u5728\u5DF2\u6253\u5F00\u7684 GitHub \u9875\u9762\u8F93\u5165\u4EE3\u7801: ${userCode}`);
-                  },
-                  onStatus: ({ phase }) => {
-                    if (phase === "pending") setStatus("\u7B49\u5F85\u4F60\u5728 GitHub \u9875\u9762\u786E\u8BA4\u6388\u6743\u2026");
-                    else if (phase === "slow_down") setStatus("GitHub \u9650\u6D41\u63D0\u793A\uFF0C\u5DF2\u81EA\u52A8\u964D\u901F\u7EE7\u7EED\u7B49\u5F85\u2026");
-                  }
-                });
-                await GitHubOAuth.applyTokenResponse(result);
-                CredentialVault2.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
-                setStatus("\u2705 GitHub \u6388\u6743\u6210\u529F\uFF0CToken \u5DF2\u81EA\u52A8\u586B\u5165");
-              } catch (error) {
-                setStatus(error.code === "cancelled" ? "\u5DF2\u53D6\u6D88\u6388\u6743" : `\u274C ${error.message}`);
-              } finally {
-                refs.githubOAuthBtn.disabled = false;
-              }
-            };
-          }
-          refs.obsApiUrlInput.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.OBS_API_URL, e.target.value.trim());
-          };
-          refs.obsApiKeyInput.onchange = (e) => {
-            persistSensitiveInput(e.target, CONFIG2.STORAGE_KEYS.OBS_API_KEY).catch((error) => {
-              UI2.showStatus(error.message || String(error), "error");
-            });
-          };
-          refs.obsDirInput.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.OBS_DIR, e.target.value.trim());
-          };
-          refs.obsImgModeSelect.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.OBS_IMG_MODE, e.target.value);
-          };
-          refs.obsImgDirInput.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.OBS_IMG_DIR, e.target.value.trim());
-          };
-          refs.githubTypeCheckboxes.forEach((cb) => {
-            cb.onchange = () => {
-              const source = [...refs.githubTypeCheckboxes].filter((c) => c.checked);
-              const types = [...source].filter((c) => c.checked).map((c) => c.value);
-              GitHubAPI2.setImportTypes(types.length > 0 ? types : ["stars"]);
-              if (types.length === 0) {
-                refs.githubTypeCheckboxes.forEach((c) => {
-                  c.checked = c.value === "stars";
-                });
-              }
-            };
-          });
-          refs.aiRefreshDbsBtn.onclick = async () => {
-            var _a2;
-            const apiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
-            const refreshBtn = refs.aiRefreshDbsBtn;
-            if (!apiKey) {
-              UI2.showStatus(MSG2.NO_NOTION_KEY, "error");
-              return;
-            }
-            refreshBtn.disabled = true;
-            refreshBtn.innerHTML = "\u23F3";
-            try {
-              const { workspaceData } = await UICommandService2.execute("refresh_workspace_targets", {
-                apiKey,
-                includePages: false,
-                onWorkspaceData: (workspaceData2) => {
-                  UI2.updateAITargetDbOptions(workspaceData2.databases);
-                }
-              });
-              UI2.updateAITargetDbOptions(workspaceData.databases);
-              const aiNoDbHint = workspaceData.databases.length === 0 ? MSG2.WORKSPACE_NO_DATABASES_HINT : "";
-              const aiTargetWarn = buildConfiguredTargetWarning({
-                configuredDatabaseId: (_a2 = refs.aiTargetDbSelect) == null ? void 0 : _a2.value,
-                databases: workspaceData.databases
-              });
-              UI2.showStatus(`\u83B7\u53D6\u5230 ${workspaceData.databases.length} \u4E2A\u6570\u636E\u5E93${aiNoDbHint}${aiTargetWarn}`, "success");
-            } catch (error) {
-              UI2.showStatus(`\u83B7\u53D6\u6570\u636E\u5E93\u5217\u8868\u5931\u8D25: ${error.message}`, "error");
-            } finally {
-              refreshBtn.disabled = false;
-              refreshBtn.innerHTML = "\u{1F504}";
-            }
-          };
-          refs.aiFetchModelsBtn.onclick = async () => {
-            const aiApiKey = getSensitiveValue(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, "");
-            const aiService = refs.aiServiceSelect.value;
-            const aiBaseUrl = refs.aiBaseUrlInput.value.trim();
-            const fetchBtn = refs.aiFetchModelsBtn;
-            const modelTip = refs.aiModelTip;
-            if (!aiApiKey) {
-              UI2.showStatus(MSG2.NO_AI_KEY, "error");
-              return;
-            }
-            fetchBtn.disabled = true;
-            fetchBtn.innerHTML = "\u23F3 \u83B7\u53D6\u4E2D...";
-            modelTip.textContent = "";
-            try {
-              const { models } = await UICommandService2.execute("fetch_ai_models", {
-                aiService,
-                aiApiKey,
-                aiBaseUrl
-              });
-              UI2.updateAIModelOptions(aiService, models, true);
-              modelTip.textContent = `\u2705 \u83B7\u53D6\u5230 ${models.length} \u4E2A\u53EF\u7528\u6A21\u578B`;
-              modelTip.style.color = "var(--ldb-ui-success)";
-              UI2.showStatus(`\u6210\u529F\u83B7\u53D6 ${models.length} \u4E2A\u6A21\u578B`, "success");
-            } catch (error) {
-              modelTip.textContent = `\u274C ${error.message}`;
-              modelTip.style.color = "var(--ldb-ui-danger)";
-              UI2.showStatus(`\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${error.message}`, "error");
-            } finally {
-              fetchBtn.disabled = false;
-              fetchBtn.innerHTML = "\u{1F504} \u83B7\u53D6";
-            }
-          };
-          refs.aiTestBtn.onclick = async () => {
-            const btn = refs.aiTestBtn;
-            const statusSpan = refs.aiTestStatus;
-            const aiApiKey = getSensitiveValue(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, "");
-            const aiService = refs.aiServiceSelect.value;
-            const aiModel = refs.aiModelSelect.value;
-            const aiBaseUrl = refs.aiBaseUrlInput.value.trim();
-            statusSpan.textContent = "";
-            statusSpan.style.color = "";
-            if (!aiApiKey) {
-              UI2.showStatus(MSG2.NO_AI_KEY, "error");
-              return;
-            }
-            btn.disabled = true;
-            btn.innerHTML = '<span class="ldb-spin">\u{1F504}</span> \u6D4B\u8BD5\u4E2D...';
-            try {
-              const response = await AIService3.request(
-                "\u8BF7\u56DE\u590D\uFF1A\u8FDE\u63A5\u6210\u529F",
-                { aiService, aiApiKey, aiModel, aiBaseUrl }
-              );
-              statusSpan.textContent = `\u2705 ${response}`;
-              statusSpan.style.color = "var(--ldb-ui-success)";
-            } catch (error) {
-              statusSpan.textContent = `\u274C ${error.message}`;
-              statusSpan.style.color = "var(--ldb-ui-danger)";
-            } finally {
-              btn.disabled = false;
-              btn.innerHTML = "\u6D4B\u8BD5\u8FDE\u63A5";
-            }
-          };
-          UI2._loadTemplates = () => {
-            try {
-              return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, CONFIG2.DEFAULTS.aiTemplates));
-            } catch {
-              return JSON.parse(CONFIG2.DEFAULTS.aiTemplates);
-            }
-          };
-          UI2._saveTemplates = (templates) => {
-            const cap = CONFIG2.LIMITS.AI_TEMPLATES_MAX;
-            if (Array.isArray(templates) && templates.length > cap) {
-              templates = templates.slice(templates.length - cap);
-            }
-            Storage2.set(CONFIG2.STORAGE_KEYS.AI_TEMPLATES, JSON.stringify(templates));
-          };
-          UI2.renderTemplateList = () => {
-            const list = refs.templateList;
-            if (!list) return;
-            const templates = UI2._loadTemplates();
-            if (templates.length === 0) {
-              list.innerHTML = '<div class="ldb-tip">\u6682\u65E0\u6A21\u677F\uFF0C\u8BF7\u6DFB\u52A0</div>';
-              return;
-            }
-            list.innerHTML = templates.map((t, i) => {
-              const icon = Utils2.escapeHtml(t.icon || "\u{1F4DD}");
-              const name = Utils2.escapeHtml(t.name || "\u672A\u547D\u540D");
-              const prompt2 = Utils2.escapeHtml((t.prompt || "").substring(0, 50));
-              return `<div class="ldb-setting-row" style="justify-content: space-between; padding: var(--ldb-ui-spacing-3xs) 0;">
-                    <span style="font-size: 12px;">${icon} <strong>${name}</strong> <span style="color: var(--ldb-ui-muted);">${prompt2}${t.prompt && t.prompt.length > 50 ? "..." : ""}</span></span>
-                    <button class="ldb-btn ldb-btn-secondary" data-template-delete="${i}" style="padding: var(--ldb-ui-spacing-3xs) var(--ldb-ui-spacing-sm); font-size: var(--ldb-ui-font-size-xs);">\u5220\u9664</button>
-                </div>`;
-            }).join("");
-            list.querySelectorAll("[data-template-delete]").forEach((btn) => {
-              btn.onclick = () => {
-                const idx = parseInt(btn.dataset.templateDelete);
-                ConfirmationDialog2.show({
-                  title: "\u786E\u8BA4\u5220\u9664",
-                  message: "\u786E\u5B9A\u8981\u5220\u9664\u6B64\u6A21\u677F\u5417\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002",
-                  confirmText: "\u5220\u9664",
-                  onConfirm: () => {
-                    const ts = UI2._loadTemplates();
-                    ts.splice(idx, 1);
-                    UI2._saveTemplates(ts);
-                    UI2.renderTemplateList();
-                    UI2.showStatus("\u6A21\u677F\u5DF2\u5220\u9664", "success");
-                  }
-                });
-              };
-            });
-          };
-          refs.templateAddBtn.onclick = () => {
-            const name = refs.templateNameInput.value.trim();
-            const icon = refs.templateIconInput.value.trim() || "\u{1F4DD}";
-            const prompt2 = refs.templatePromptInput.value.trim();
-            if (!name || !prompt2) {
-              UI2.showStatus("\u8BF7\u586B\u5199\u6A21\u677F\u540D\u79F0\u548C prompt", "error");
-              return;
-            }
-            const templates = UI2._loadTemplates();
-            templates.push({ name, icon, prompt: prompt2 });
-            UI2._saveTemplates(templates);
-            refs.templateNameInput.value = "";
-            refs.templateIconInput.value = "";
-            refs.templatePromptInput.value = "";
-            UI2.renderTemplateList();
-            UI2.showStatus(`\u6A21\u677F\u300C${name}\u300D\u5DF2\u6DFB\u52A0`, "success");
-          };
-          UI2.renderTemplateList();
+          require_ai_bindings().bindAISection({ UI: UI2, panel, refs, getSensitiveValue, persistSensitiveInput });
           NotionOAuth2.attachControls({
             root: panel,
             selectors: {
