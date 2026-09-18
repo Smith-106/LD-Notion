@@ -187,7 +187,35 @@ describe("负集 r2: ai/tools/meta-tools 委托与校验", () => {
     });
 });
 
-// ============ ai/handlers 表面契约 ============
+// ============ ui/events* (M3 拆分后 3 文件) 导出与委托契约 ============
+describe("负集 r2: ui/events* 拆分后导出与委托", () => {
+    const fs = require("fs");
+    it("events/ai-bindings 导出 bindAISection 函数", () => {
+        const { bindAISection } = require("../src/ui/events/ai-bindings");
+        expect(typeof bindAISection).toBe("function");
+    });
+    it("events/export-bindings 导出 bindExport 函数", () => {
+        const { bindExport } = require("../src/ui/events/export-bindings");
+        expect(typeof bindExport).toBe("function");
+    });
+    it("events.js 导出 UIEvents.bindEvents 函数", () => {
+        const { UIEvents } = require("../src/ui/events");
+        expect(typeof UIEvents.bindEvents).toBe("function");
+    });
+    it("events.js bindEvents 委托拆分域(bindAISection/bindExport 经 require 注入)", () => {
+        const src = fs.readFileSync("src/ui/events.js", "utf8");
+        expect(src).toContain('require("./events/ai-bindings").bindAISection');
+        expect(src).toContain('require("./events/export-bindings").bindExport');
+    });
+    it("events 拆分文件均 <1500 LOC", () => {
+        for (const f of ["src/ui/events.js", "src/ui/events/ai-bindings.js", "src/ui/events/export-bindings.js"]) {
+            const loc = fs.readFileSync(f, "utf8").split("\n").length;
+            expect(loc).toBeLessThan(1500);
+        }
+    });
+});
+
+// ============ ai/handlers 表面契约 + 确定性早退 ============
 describe("负集 r2: ai/handlers 表面契约", () => {
     it("batch/pageCrud/query handler 导出非空对象含函数成员", () => {
         const batch = require("../src/ai/handlers/batch");
@@ -199,5 +227,38 @@ describe("负集 r2: ai/handlers 表面契约", () => {
             // 至少一个可调用成员(handlers 是方法集)
             expect(Object.values(mod).some((v) => typeof v === "function")).toBe(true);
         }
+    });
+});
+
+describe("负集 r2: ai/handlers 确定性早退(无网络)", () => {
+    const query = require("../src/ai/handlers/query");
+    const batch = require("../src/ai/handlers/batch");
+    const pageCrud = require("../src/ai/handlers/pageCrud");
+
+    it("query.handleQuery 缺 notionDatabaseId → 配置指引", async () => {
+        const r = await query.handleQuery({}, {});
+        expect(String(r)).toContain("请先配置 Notion 数据库 ID");
+    });
+    it("batch.handleBatchClassify 缺 notionDatabaseId → 配置指引", async () => {
+        const r = await batch.handleBatchClassify({}, {});
+        expect(String(r)).toContain("请先配置 Notion 数据库 ID");
+    });
+    it("batch.handleBatchClassify 缺分类选项 → 提示配置", async () => {
+        const r = await batch.handleBatchClassify({}, { notionDatabaseId: "db1", categories: [] });
+        expect(String(r)).toContain("分类选项");
+    });
+    // 权限分支需 checkConfig 先过(notionApiKey+aiApiKey), 再触 OperationGuard 级别判定
+    const validCfg = { notionApiKey: "k", aiApiKey: "a", notionDatabaseId: "db" };
+    it("pageCrud.handleMove 权限不足(默认 level 1) → 拒绝文案", async () => {
+        const r = await pageCrud.handleMove({}, validCfg);
+        expect(String(r)).toContain("权限不足");
+    });
+    it("pageCrud.handleCopy 权限不足(默认 level 1) → 拒绝文案", async () => {
+        const r = await pageCrud.handleCopy({}, validCfg);
+        expect(String(r)).toContain("权限不足");
+    });
+    it("pageCrud.handleCreateDatabase 权限不足(默认 level 1) → 拒绝文案", async () => {
+        const r = await pageCrud.handleCreateDatabase({}, validCfg);
+        expect(String(r)).toContain("权限不足");
     });
 });
