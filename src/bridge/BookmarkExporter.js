@@ -726,33 +726,39 @@ const BookmarkExporter = {
         }
 
         const delay = Storage.get(CONFIG.STORAGE_KEYS.REQUEST_DELAY, CONFIG.DEFAULTS.requestDelay);
-        let success = 0, failed = 0;
+        let success = 0, failed = 0, skipped = 0;
+        // ISS-20260728-017 (PERF-002): 串行 for+await+sleep 改为 CONCURRENCY=3 分批并发,
+        // 对齐 BookmarkAutoImporter.processInBatches;最坏 50 书签 150 次串行往返 → 3 并发批。
+        // authAborted 控制认证终态 fail-fast(语义同 v3.14.5/v3.14.7),批间节流保留 REQUEST_DELAY 意图。
+        const CONCURRENCY = 3;
+        let authAborted = false;
         const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+        const { OperationGuard } = require("../security");
         // pendingExported 已在远端对账过滤前取得(见上方 20260914 注): 跨 tab watcher 可能把模块字段置 null,
         // 循环内直接读写模块字段会丢掉此前已标记的导出事实
 
-        // v3.14.6 (CC-10): 循环包 try/finally flush —— onProgress 抛错/异常路径也不丢导出账本
-        try {
-        for (let i = 0; i < newBookmarks.length; i++) {
-            const bm = newBookmarks[i];
-            const pct = Math.round(5 + (i / newBookmarks.length) * 90);
+        // 单项处理:进度上报 → enrich+guard+POST+审计;失败隔离,认证终态置 authAborted 中止后续
+        const processOne = async (bm, itemIndex) => {
+            // 批内某项已触发认证终态时,未开工项直接进 skipped(不重复注定失败的请求)
+            if (authAborted) { skipped++; return; }
+            const pct = Math.round(5 + ((itemIndex + 1) / newBookmarks.length) * 90);
             try {
-                if (onProgress) onProgress(`正在导出 (${i + 1}/${newBookmarks.length}): ${bm.title}`, pct);
+                if (onProgress) onProgress(`正在导出 (${itemIndex + 1}/${newBookmarks.length}): ${bm.title}`, pct);
             } catch (progressError) {
                 console.warn("[BookmarkExporter] onProgress 回调异常:", progressError);
             }
 
             try {
+                // enrichContext 为共享计数:并发下 aiUsedCount 上限可能被并发数短暂突破(成本闸门软上限,与 AutoImporter 同构)
                 const enriched = await BookmarkExporter.enrichBookmark(bm, settings, enrichContext);
                 const properties = BookmarkExporter.buildProperties(enriched);
                 // createDatabasePage 是 level 1 写操作，用户触发的批量导出不可裸调 NotionAPI（ISS-20260724-011）。
                 // canExecute 非阻塞（只查 permissionLevel），权限不足跳过并记审计，与自动同步 C1 模式对称。
-                const { OperationGuard } = require("../security");
                 if (!OperationGuard.canExecute("createDatabasePage")) {
                     BookmarkExporter._auditExport("createDatabasePage", "denied",
                         { bookmarkUrl: bm.url, itemName: bm.title, reason: "权限不足：导出建页需 level≥1" });
                     failed++;
-                    continue;
+                    return;
                 }
                 const page = await NotionAPI.request("POST", "/pages", {
                     parent: { database_id: databaseId },
@@ -772,30 +778,40 @@ const BookmarkExporter = {
                 // 认证终态 fail-fast(v3.14.5):中止剩余书签导出,返回部分结果供重试
                 // v3.14.7: 仅信 isAuthTerminal 标记(与 api 层终态/瞬态区分对齐), 消息子串会误杀瞬态续签失败
                 if (e && e.isAuthTerminal === true) {
-                    // 已成功项的导出事实必须先落盘(flushExported 幂等,与正常路径末次 flush 对称)
-                    BookmarkExporter.flushExported(pendingExported);
-                    const remainingCount = newBookmarks.length - i - 1;
-                    return {
-                        total: bookmarks.length,
-                        exported: success,
-                        failed,
-                        skipped: remainingCount,
-                        aborted: true,
-                        message: `认证失败，已中止导出（成功 ${success} 个，剩余 ${remainingCount} 个未尝试）。请检查 Notion API Key / OAuth 授权后重试。`,
-                    };
+                    authAborted = true;
                 }
             }
+        };
 
-            if (i < newBookmarks.length - 1) {
-                await Utils.sleep(delay);
+        // v3.14.6 (CC-10): 循环包 try/finally flush —— onProgress 抛错/异常路径也不丢导出账本
+        try {
+            for (let i = 0; i < newBookmarks.length; i += CONCURRENCY) {
+                if (authAborted) { skipped += newBookmarks.length - i; break; }
+                const batch = newBookmarks.slice(i, i + CONCURRENCY);
+                await Promise.allSettled(batch.map((bm, j) => processOne(bm, i + j)));
+                // 认证终态:本批内并发项已全部收尾,中止后续批(剩余全部进 skipped)
+                if (authAborted) { skipped += newBookmarks.length - i - batch.length; break; }
+                // 批间节流:保留 REQUEST_DELAY 用户配置意图,不再逐条串行
+                if (delay > 0 && i + CONCURRENCY < newBookmarks.length) {
+                    await Utils.sleep(delay);
+                }
             }
-        }
         } finally {
-            // 批量回写已导出映射（PERF-003）：无论 success/failed/异常，循环结束单次 flush，
-            // 写侧从 O(N²)→O(N)。v3.14.6 (CC-10): finally 保证 onProgress 抛错也不丢账本
+            // 批量回写已导出映射（PERF-003）：无论 success/failed/异常，结束单次 flush，
+            // 写侧从 O(N²)→O(N)。v3.14.6 (CC-10): finally 保证回调抛错也不丢账本
             BookmarkExporter.flushExported(pendingExported);
         }
 
+        if (authAborted) {
+            return {
+                total: bookmarks.length,
+                exported: success,
+                failed,
+                skipped,
+                aborted: true,
+                message: `认证失败，已中止导出（成功 ${success} 个，剩余 ${skipped} 个未尝试）。请检查 Notion API Key / OAuth 授权后重试。`,
+            };
+        }
         return { total: bookmarks.length, exported: success, failed, newCount: newBookmarks.length };
     },
 };
