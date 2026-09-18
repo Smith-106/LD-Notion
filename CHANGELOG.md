@@ -1,3 +1,28 @@
+## [3.14.32] - 2026-09-18
+
+### perf
+
+- **浏览器书签导出并发化**(ISS-20260728-017)：`BookmarkExporter.exportBookmarks` 由串行 `for+await+sleep` 改为 `CONCURRENCY=3` 分批并发（对齐 `BookmarkAutoImporter.processInBatches`）；`Promise.allSettled` 失败隔离、认证终态 fail-fast（v3.14.5/v3.14.7 语义保留）、批间 `REQUEST_DELAY` 节流保留用户配置意图。基线实测 2.54× 提速（1200ms → 473ms，N=30 @40ms 往返）
+
+### fix
+
+- **Clipper（知乎/通用页）远端对账**(ISS-20260914-001)：新增 `GenericExporter.checkClipperRemote` 三态——远端「链接」索引为 ground truth，远端命中→exported+回写账本、远端可达未命中→本地账本 hit 被覆盖（换库/重建库不阻断，与 GitHub/LinuxDo/Bookmark dedup-state 修复同构）、远端不可达/缺凭证→降级本地 DedupStore 旧语义防误放行
+
+### refactor (M3 大文件拆分 milestone 波次1-3)
+
+- `ui/main-ui.js` 2980 → 2165 LOC：`createPanel` 815 LOC innerHTML 模板提取至 `src/ui/panel-template.js`(`renderPanel`)
+- `auth/index.js` 1645 → 1156 LOC（✓ <1500 达标）：`CredentialVault` 490 LOC 提取至 `src/auth/credential-vault.js`
+- `ai/index.js` 2678 → 2166 LOC：`AIService` 515 LOC 提取至 `src/ai/ai-service.js`
+- 勘误固化：「13 静态顶层 require 环」实为 0 加载期环（AST 排除函数体扫描）——deps.js/events.js/workspace-*/bookmark-list 回流均为函数内 lazy require（AGENTS.md 认可的运行时缓解）；验收口径已 spec 化
+
+### test
+
+- 新增 `tests/bookmark-exporter-concurrency.test.js`(6)、`tests/clipper-remote-reconcile.test.js`(7)、`tests/negative-set-ai-submodules.test.js`(13，ISS-20260914-003 负集：payload-builders/paginate/content 转发壳)；测试基线 1747 → 1773
+
+### chore
+
+- 新增 `scripts/perf-baseline.js` 可重复性能基线（renderPanel/buildBookmarkItemHtml/exportBookmarks 并发收益）；`verify:delivery` 13 维度全过
+
 ## [3.14.31] - 2026-09-18
 
 ### docs (两条已交付特性此前无文档)
