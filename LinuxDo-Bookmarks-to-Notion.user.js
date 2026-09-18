@@ -19850,6 +19850,476 @@ ${report}
     }
   });
 
+  // src/ai/ai-service.js
+  var require_ai_service = __commonJS({
+    "src/ai/ai-service.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { UrlValidator } = require_UrlValidator();
+      var AIService2 = {
+        // 标准化 + 安全校验 baseUrl，返回 null 表示非法（调用方应 reject）
+        // versionPath: "v1" 或 "v1beta"
+        _normalizeBaseUrl: (baseUrl, versionPath) => {
+          const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(new RegExp(`/${versionPath}$`), "") : "";
+          if (!normalizedBase) return "";
+          if (!UrlValidator.validateAiBaseUrl(normalizedBase)) {
+            throw new Error(`AI baseUrl \u5B89\u5168\u6821\u9A8C\u5931\u8D25\uFF1A${normalizedBase} \u4E0D\u5728\u767D\u540D\u5355\u6216\u975E HTTPS`);
+          }
+          return normalizedBase;
+        },
+        // P4 收敛(c03): model 拼入 URL 路径 —— 含 / ? # 等字符会篡改路径/查询
+        _modelPathSegment: (model) => encodeURIComponent(String(model ?? "").trim()),
+        // 服务商配置
+        PROVIDERS: {
+          openai: {
+            name: "OpenAI",
+            defaultModel: "gpt-4o-mini",
+            models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+            endpoint: "https://api.openai.com/v1/chat/completions"
+          },
+          claude: {
+            name: "Claude",
+            defaultModel: "claude-3-5-haiku-latest",
+            models: ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-opus-latest"],
+            endpoint: "https://api.anthropic.com/v1/messages"
+          },
+          gemini: {
+            name: "Gemini",
+            defaultModel: "gemini-2.0-flash",
+            models: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+            endpoint: "https://generativelanguage.googleapis.com/v1beta/models"
+          }
+        },
+        // 调用 AI 进行分类
+        classify: async (title, content, categories, settings) => {
+          const prompt2 = `\u8BF7\u6839\u636E\u4EE5\u4E0B\u5E16\u5B50\u5185\u5BB9\uFF0C\u4ECE\u7ED9\u5B9A\u7684\u5206\u7C7B\u4E2D\u9009\u62E9\u6700\u5408\u9002\u7684\u4E00\u4E2A\u3002
+\u53EA\u8FD4\u56DE\u5206\u7C7B\u540D\u79F0\uFF0C\u4E0D\u8981\u4EFB\u4F55\u5176\u4ED6\u5185\u5BB9\u3001\u89E3\u91CA\u6216\u6807\u70B9\u7B26\u53F7\u3002
+
+\u53EF\u9009\u5206\u7C7B\uFF1A${categories.join(", ")}
+
+<user_content>
+<title>${isolateContent(title)}</title>
+<body>${isolateContent(content).slice(0, 2e3)}</body>
+</user_content>
+
+\u5206\u7C7B\uFF1A`;
+          const response = await AIService2.request(prompt2, settings);
+          return AIService2.matchCategory(response, categories);
+        },
+        // 发送请求（根据不同服务商格式化）
+        request: async (prompt2, settings) => {
+          const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
+          const provider = AIService2.PROVIDERS[aiService];
+          if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
+          const model = aiModel || provider.defaultModel;
+          if (aiService === "openai") {
+            return await AIService2.requestOpenAI(prompt2, model, aiApiKey, aiBaseUrl);
+          } else if (aiService === "claude") {
+            return await AIService2.requestClaude(prompt2, model, aiApiKey, aiBaseUrl);
+          } else if (aiService === "gemini") {
+            return await AIService2.requestGemini(prompt2, model, aiApiKey, aiBaseUrl);
+          }
+          throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
+        },
+        // OpenAI 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，max_completion_tokens=50）
+        requestOpenAI: (prompt2, model, apiKey, baseUrl) => {
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
+          const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
+          return AIService2._chatRequest(
+            url,
+            { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            { model, messages: [{ role: "user", content: prompt2 }], max_completion_tokens: 50, temperature: 0 },
+            (result) => {
+              var _a, _b, _c, _d;
+              return ((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "";
+            },
+            "OpenAI",
+            3e4
+          );
+        },
+        // Claude 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，max_tokens=50）
+        requestClaude: (prompt2, model, apiKey, baseUrl) => {
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
+          const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
+          return AIService2._chatRequest(
+            url,
+            { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+            { model, messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }], max_tokens: 50 },
+            (result) => {
+              var _a, _b, _c;
+              return ((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "";
+            },
+            "Claude",
+            3e4
+          );
+        },
+        // Gemini 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，maxOutputTokens=50）
+        requestGemini: (prompt2, model, apiKey, baseUrl) => {
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
+          const modelSeg = AIService2._modelPathSegment(model);
+          const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
+          return AIService2._chatRequest(
+            url,
+            { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            { contents: [{ parts: [{ text: prompt2 }] }], generationConfig: { maxOutputTokens: 50, temperature: 0 } },
+            (result) => {
+              var _a, _b, _c, _d, _e, _f;
+              return ((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "";
+            },
+            "Gemini",
+            3e4
+          );
+        },
+        // 匹配分类（模糊匹配）
+        matchCategory: (response, categories) => {
+          if (!response) return categories[categories.length - 1];
+          const cleaned = response.trim().replace(/[。，,.!！?？]/g, "");
+          if (!cleaned) return categories[categories.length - 1];
+          for (const cat of categories) {
+            if (cleaned === cat || cleaned.toLowerCase() === cat.toLowerCase()) {
+              return cat;
+            }
+          }
+          for (const cat of categories) {
+            if (cleaned.includes(cat) || cat.includes(cleaned)) {
+              return cat;
+            }
+          }
+          return categories[categories.length - 1];
+        },
+        // 对话式请求（支持更长输出）
+        requestChat: async (prompt2, settings, maxTokens = 1e3) => {
+          const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
+          const provider = AIService2.PROVIDERS[aiService];
+          if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
+          const model = aiModel || provider.defaultModel;
+          if (aiService === "openai") {
+            return await AIService2.requestOpenAIChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+          } else if (aiService === "claude") {
+            return await AIService2.requestClaudeChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+          } else if (aiService === "gemini") {
+            return await AIService2.requestGeminiChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+          }
+          throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
+        },
+        // OpenAI 对话请求
+        // AI 请求重试包装（M1 reliability）：瞬时网络抖动/超时/5xx/429 重试 2 次（1s/2s 指数退避），
+        // 401/400 等不可重试错误直接 reject。对比 NotionAPI 429 重试、RSS fetchFeedWithRetry。
+        _retryable: async (requestFn, retries = 2) => {
+          let lastError;
+          for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+              return await requestFn();
+            } catch (error) {
+              lastError = error;
+              const msg = String((error == null ? void 0 : error.message) || error);
+              if (/\b(401|403|400)\b|鉴权|授权|unauthorized|forbidden|invalid[_ -]?(api[ _-]?key|token|client|grant|request|param)/i.test(msg)) {
+                throw error;
+              }
+              if (attempt < retries) {
+                const delay = 1e3 * Math.pow(2, attempt);
+                await new Promise((r) => setTimeout(r, delay));
+              }
+            }
+          }
+          console.warn("[LD-Notion] AI \u8BF7\u6C42\u6700\u7EC8\u5931\u8D25\uFF08\u5DF2\u91CD\u8BD5\uFF09:", String((lastError == null ? void 0 : lastError.message) || lastError));
+          throw lastError;
+        },
+        // 公共 AI 对话请求骨架（MAINT-004）：封装 GM_xmlhttpRequest Promise + _retryable +
+        // onload/onerror/timeout 模板。三 provider 仅声明差异部分（url/headers/body/extractResponse/errorPrefix）。
+        // timeout 默认 90000（长对话）；分类请求（requestOpenAI/Claude/Gemini）传 30000（DISCOVER P6 同类去重）。
+        // 90000ms 超时是长对话请求统一值（MAINT-007 已常量化建议，此处暂留内联）。
+        _chatRequest: (url, headers, body, extractResponse, errorPrefix, timeout = 9e4) => {
+          return AIService2._retryable(() => new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+              method: "POST",
+              url,
+              headers,
+              data: JSON.stringify(body),
+              onload: (response) => {
+                var _a;
+                try {
+                  const result = JSON.parse(response.responseText);
+                  if (response.status >= 200 && response.status < 300) {
+                    resolve(extractResponse(result));
+                  } else {
+                    reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `${errorPrefix}\u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
+                  }
+                } catch (e) {
+                  reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
+                }
+              },
+              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
+              timeout,
+              ontimeout: () => reject(new Error("AI \u5BF9\u8BDD\u8BF7\u6C42\u8D85\u65F6"))
+            });
+          }));
+        },
+        requestOpenAIChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
+          const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
+          return AIService2._chatRequest(
+            url,
+            { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            { model, messages: [{ role: "user", content: prompt2 }], max_completion_tokens: maxTokens, temperature: 0.7 },
+            (result) => {
+              var _a, _b, _c, _d;
+              return ((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "";
+            },
+            "OpenAI"
+          );
+        },
+        // Claude 对话请求
+        requestClaudeChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
+          const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
+          return AIService2._chatRequest(
+            url,
+            { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+            { model, messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }], max_tokens: maxTokens },
+            (result) => {
+              var _a, _b, _c;
+              return ((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "";
+            },
+            "Claude"
+          );
+        },
+        // Gemini 对话请求
+        requestGeminiChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
+          const modelSeg = AIService2._modelPathSegment(model);
+          const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
+          return AIService2._chatRequest(
+            url,
+            { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            { contents: [{ parts: [{ text: prompt2 }] }], generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
+            (result) => {
+              var _a, _b, _c, _d, _e, _f;
+              return ((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "";
+            },
+            "Gemini"
+          );
+        },
+        // Agent 多轮对话请求 —— v3.14.6 (S-02): 系统指令与不可信用户内容角色分离,
+        // OpenAI messages[role=system] / Anthropic 顶层 system / Gemini systemInstruction;
+        // 不支持通道保留原压平 + 防伪前缀
+        requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500) => {
+          const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
+          const provider = AIService2.PROVIDERS[aiService];
+          if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
+          const model = aiModel || provider.defaultModel;
+          const normalizedMessages = (messages || []).map((msg) => ({
+            role: msg.role === "assistant" ? "assistant" : "user",
+            content: String(msg.content ?? "")
+          }));
+          const systemText = String(systemPrompt ?? "");
+          if (aiService === "openai") {
+            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1");
+            const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
+            return await AIService2._chatRequest(
+              url,
+              { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
+              { model, messages: [{ role: "system", content: systemText }, ...normalizedMessages], max_completion_tokens: maxTokens, temperature: 0.7 },
+              (result) => {
+                var _a, _b, _c, _d;
+                return ((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "";
+              },
+              "OpenAI"
+            );
+          }
+          if (aiService === "claude") {
+            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1");
+            const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
+            return await AIService2._chatRequest(
+              url,
+              { "x-api-key": aiApiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+              { model, system: systemText, messages: normalizedMessages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: maxTokens },
+              (result) => {
+                var _a, _b, _c;
+                return ((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "";
+              },
+              "Claude"
+            );
+          }
+          if (aiService === "gemini") {
+            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1beta");
+            const modelSeg = AIService2._modelPathSegment(model);
+            const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
+            return await AIService2._chatRequest(
+              url,
+              { "Content-Type": "application/json", "x-goog-api-key": aiApiKey },
+              { systemInstruction: { parts: [{ text: systemText }] }, contents: normalizedMessages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })), generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
+              (result) => {
+                var _a, _b, _c, _d, _e, _f;
+                return ((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "";
+              },
+              "Gemini"
+            );
+          }
+          let prompt2 = `[\u7CFB\u7EDF\u6307\u4EE4]
+${systemText}
+
+`;
+          for (const msg of normalizedMessages) {
+            if (msg.role === "user") {
+              prompt2 += `[\u7528\u6237]: ${msg.content}
+
+`;
+            } else {
+              prompt2 += `[\u52A9\u624B]: ${msg.content}
+
+`;
+            }
+          }
+          return await AIService2.requestChat(prompt2, settings, maxTokens);
+        },
+        // 获取可用模型列表
+        getFetchedModelsCache: () => {
+          const raw = Storage2.get(CONFIG2.STORAGE_KEYS.FETCHED_MODELS, "{}");
+          try {
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : {};
+          } catch (error) {
+            console.warn("[LD-Notion] \u83B7\u53D6\u6A21\u578B\u7F13\u5B58 JSON \u89E3\u6790\u5931\u8D25:", error);
+            return {};
+          }
+        },
+        getCachedModels: (service) => {
+          const cache = AIService2.getFetchedModelsCache();
+          const entry = cache[service];
+          if (!Array.isArray(entry == null ? void 0 : entry.models)) return [];
+          if (entry.fingerprint !== AIService2.getModelsCacheFingerprint()) return [];
+          return entry.models;
+        },
+        getAvailableModels: (service) => {
+          var _a;
+          const cachedModels = AIService2.getCachedModels(service);
+          if (cachedModels.length > 0) return cachedModels;
+          return ((_a = AIService2.PROVIDERS[service]) == null ? void 0 : _a.models) || [];
+        },
+        // 模型缓存指纹: 端点 + 密钥单向哈希(禁止明文子串), 变更即失效
+        getModelsCacheFingerprint: () => {
+          const baseUrl = String(Storage2.get(CONFIG2.STORAGE_KEYS.AI_BASE_URL, "") || "");
+          const keyHash = Utils2.apiKeyHash(String(Storage2.get(CONFIG2.STORAGE_KEYS.AI_API_KEY, "") || ""));
+          return `${baseUrl}|${keyHash}`;
+        },
+        persistFetchedModels: (service, models) => {
+          const normalizedModels = Array.isArray(models) ? models : [];
+          const cache = AIService2.getFetchedModelsCache();
+          const snapshot = {
+            models: normalizedModels,
+            timestamp: Date.now(),
+            fingerprint: AIService2.getModelsCacheFingerprint()
+          };
+          cache[service] = snapshot;
+          Storage2.set(CONFIG2.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(cache));
+          return snapshot;
+        },
+        fetchModelsSnapshot: async (service, apiKey, baseUrl) => {
+          const models = await AIService2.fetchModels(service, apiKey, baseUrl);
+          const snapshot = AIService2.persistFetchedModels(service, models);
+          return { models: snapshot.models, timestamp: snapshot.timestamp };
+        },
+        fetchModels: async (service, apiKey, baseUrl) => {
+          if (service === "openai") {
+            return await AIService2.fetchOpenAIModels(apiKey, baseUrl);
+          } else if (service === "claude") {
+            return AIService2.PROVIDERS.claude.models;
+          } else if (service === "gemini") {
+            return await AIService2.fetchGeminiModels(apiKey, baseUrl);
+          }
+          throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${service}`);
+        },
+        // 获取 OpenAI 模型列表
+        fetchOpenAIModels: (apiKey, baseUrl) => {
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
+          const url = normalizedBase ? `${normalizedBase}/v1/models` : "https://api.openai.com/v1/models";
+          return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+              method: "GET",
+              url,
+              headers: {
+                "Authorization": `Bearer ${apiKey}`
+              },
+              onload: (response) => {
+                var _a;
+                try {
+                  const result = JSON.parse(response.responseText);
+                  if (response.status >= 200 && response.status < 300) {
+                    const chatModels = (result.data || []).filter((m) => m.id.includes("gpt") || m.id.includes("o1") || m.id.includes("o3")).map((m) => m.id).sort((a, b) => {
+                      const priority = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"];
+                      const aIdx = priority.findIndex((p) => a.startsWith(p));
+                      const bIdx = priority.findIndex((p) => b.startsWith(p));
+                      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+                      if (aIdx !== -1) return -1;
+                      if (bIdx !== -1) return 1;
+                      return a.localeCompare(b);
+                    });
+                    resolve(chatModels.length > 0 ? chatModels : AIService2.PROVIDERS.openai.models);
+                  } else {
+                    reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${response.status}`));
+                  }
+                } catch (e) {
+                  reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
+                }
+              },
+              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
+              timeout: 15e3,
+              ontimeout: () => reject(new Error("\u83B7\u53D6\u6A21\u578B\u5217\u8868\u8D85\u65F6"))
+            });
+          });
+        },
+        // 获取 Gemini 模型列表
+        fetchGeminiModels: (apiKey, baseUrl) => {
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
+          const url = normalizedBase ? `${normalizedBase}/v1beta/models` : `https://generativelanguage.googleapis.com/v1beta/models`;
+          return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+              method: "GET",
+              url,
+              headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": apiKey
+              },
+              onload: (response) => {
+                var _a;
+                try {
+                  const result = JSON.parse(response.responseText);
+                  if (response.status >= 200 && response.status < 300) {
+                    const models = (result.models || []).filter((m) => {
+                      var _a2;
+                      return (_a2 = m.supportedGenerationMethods) == null ? void 0 : _a2.includes("generateContent");
+                    }).map((m) => m.name.replace("models/", "")).filter((m) => m.includes("gemini")).sort((a, b) => {
+                      const priority = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"];
+                      const aIdx = priority.findIndex((p) => a.startsWith(p));
+                      const bIdx = priority.findIndex((p) => b.startsWith(p));
+                      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+                      if (aIdx !== -1) return -1;
+                      if (bIdx !== -1) return 1;
+                      return a.localeCompare(b);
+                    });
+                    resolve(models.length > 0 ? models : AIService2.PROVIDERS.gemini.models);
+                  } else {
+                    reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${response.status}`));
+                  }
+                } catch (e) {
+                  reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
+                }
+              },
+              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
+              timeout: 15e3,
+              ontimeout: () => reject(new Error("\u83B7\u53D6\u6A21\u578B\u5217\u8868\u8D85\u65F6"))
+            });
+          });
+        }
+      };
+      module.exports = { AIService: AIService2 };
+    }
+  });
+
   // src/ui/style-manager.js
   var require_style_manager = __commonJS({
     "src/ui/style-manager.js"(exports, module) {
@@ -32084,463 +32554,7 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
       var { NameResolver } = require_NameResolver();
       var { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 } = require_AgentTools();
       var { AIHandlers: AIHandlers2 } = require_Handlers();
-      var AIService2 = {
-        // 标准化 + 安全校验 baseUrl，返回 null 表示非法（调用方应 reject）
-        // versionPath: "v1" 或 "v1beta"
-        _normalizeBaseUrl: (baseUrl, versionPath) => {
-          const normalizedBase = baseUrl ? baseUrl.replace(/\/$/, "").replace(new RegExp(`/${versionPath}$`), "") : "";
-          if (!normalizedBase) return "";
-          if (!UrlValidator.validateAiBaseUrl(normalizedBase)) {
-            throw new Error(`AI baseUrl \u5B89\u5168\u6821\u9A8C\u5931\u8D25\uFF1A${normalizedBase} \u4E0D\u5728\u767D\u540D\u5355\u6216\u975E HTTPS`);
-          }
-          return normalizedBase;
-        },
-        // P4 收敛(c03): model 拼入 URL 路径 —— 含 / ? # 等字符会篡改路径/查询
-        _modelPathSegment: (model) => encodeURIComponent(String(model ?? "").trim()),
-        // 服务商配置
-        PROVIDERS: {
-          openai: {
-            name: "OpenAI",
-            defaultModel: "gpt-4o-mini",
-            models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-            endpoint: "https://api.openai.com/v1/chat/completions"
-          },
-          claude: {
-            name: "Claude",
-            defaultModel: "claude-3-5-haiku-latest",
-            models: ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-opus-latest"],
-            endpoint: "https://api.anthropic.com/v1/messages"
-          },
-          gemini: {
-            name: "Gemini",
-            defaultModel: "gemini-2.0-flash",
-            models: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
-            endpoint: "https://generativelanguage.googleapis.com/v1beta/models"
-          }
-        },
-        // 调用 AI 进行分类
-        classify: async (title, content, categories, settings) => {
-          const prompt2 = `\u8BF7\u6839\u636E\u4EE5\u4E0B\u5E16\u5B50\u5185\u5BB9\uFF0C\u4ECE\u7ED9\u5B9A\u7684\u5206\u7C7B\u4E2D\u9009\u62E9\u6700\u5408\u9002\u7684\u4E00\u4E2A\u3002
-\u53EA\u8FD4\u56DE\u5206\u7C7B\u540D\u79F0\uFF0C\u4E0D\u8981\u4EFB\u4F55\u5176\u4ED6\u5185\u5BB9\u3001\u89E3\u91CA\u6216\u6807\u70B9\u7B26\u53F7\u3002
-
-\u53EF\u9009\u5206\u7C7B\uFF1A${categories.join(", ")}
-
-<user_content>
-<title>${isolateContent(title)}</title>
-<body>${isolateContent(content).slice(0, 2e3)}</body>
-</user_content>
-
-\u5206\u7C7B\uFF1A`;
-          const response = await AIService2.request(prompt2, settings);
-          return AIService2.matchCategory(response, categories);
-        },
-        // 发送请求（根据不同服务商格式化）
-        request: async (prompt2, settings) => {
-          const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
-          const provider = AIService2.PROVIDERS[aiService];
-          if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
-          const model = aiModel || provider.defaultModel;
-          if (aiService === "openai") {
-            return await AIService2.requestOpenAI(prompt2, model, aiApiKey, aiBaseUrl);
-          } else if (aiService === "claude") {
-            return await AIService2.requestClaude(prompt2, model, aiApiKey, aiBaseUrl);
-          } else if (aiService === "gemini") {
-            return await AIService2.requestGemini(prompt2, model, aiApiKey, aiBaseUrl);
-          }
-          throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
-        },
-        // OpenAI 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，max_completion_tokens=50）
-        requestOpenAI: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
-          const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
-          return AIService2._chatRequest(
-            url,
-            { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-            { model, messages: [{ role: "user", content: prompt2 }], max_completion_tokens: 50, temperature: 0 },
-            (result) => {
-              var _a, _b, _c, _d;
-              return ((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "";
-            },
-            "OpenAI",
-            3e4
-          );
-        },
-        // Claude 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，max_tokens=50）
-        requestClaude: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
-          const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-          return AIService2._chatRequest(
-            url,
-            { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
-            { model, messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }], max_tokens: 50 },
-            (result) => {
-              var _a, _b, _c;
-              return ((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "";
-            },
-            "Claude",
-            3e4
-          );
-        },
-        // Gemini 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，maxOutputTokens=50）
-        requestGemini: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
-          const modelSeg = AIService2._modelPathSegment(model);
-          const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
-          return AIService2._chatRequest(
-            url,
-            { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-            { contents: [{ parts: [{ text: prompt2 }] }], generationConfig: { maxOutputTokens: 50, temperature: 0 } },
-            (result) => {
-              var _a, _b, _c, _d, _e, _f;
-              return ((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "";
-            },
-            "Gemini",
-            3e4
-          );
-        },
-        // 匹配分类（模糊匹配）
-        matchCategory: (response, categories) => {
-          if (!response) return categories[categories.length - 1];
-          const cleaned = response.trim().replace(/[。，,.!！?？]/g, "");
-          if (!cleaned) return categories[categories.length - 1];
-          for (const cat of categories) {
-            if (cleaned === cat || cleaned.toLowerCase() === cat.toLowerCase()) {
-              return cat;
-            }
-          }
-          for (const cat of categories) {
-            if (cleaned.includes(cat) || cat.includes(cleaned)) {
-              return cat;
-            }
-          }
-          return categories[categories.length - 1];
-        },
-        // 对话式请求（支持更长输出）
-        requestChat: async (prompt2, settings, maxTokens = 1e3) => {
-          const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
-          const provider = AIService2.PROVIDERS[aiService];
-          if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
-          const model = aiModel || provider.defaultModel;
-          if (aiService === "openai") {
-            return await AIService2.requestOpenAIChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
-          } else if (aiService === "claude") {
-            return await AIService2.requestClaudeChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
-          } else if (aiService === "gemini") {
-            return await AIService2.requestGeminiChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
-          }
-          throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
-        },
-        // OpenAI 对话请求
-        // AI 请求重试包装（M1 reliability）：瞬时网络抖动/超时/5xx/429 重试 2 次（1s/2s 指数退避），
-        // 401/400 等不可重试错误直接 reject。对比 NotionAPI 429 重试、RSS fetchFeedWithRetry。
-        _retryable: async (requestFn, retries = 2) => {
-          let lastError;
-          for (let attempt = 0; attempt <= retries; attempt++) {
-            try {
-              return await requestFn();
-            } catch (error) {
-              lastError = error;
-              const msg = String((error == null ? void 0 : error.message) || error);
-              if (/\b(401|403|400)\b|鉴权|授权|unauthorized|forbidden|invalid[_ -]?(api[ _-]?key|token|client|grant|request|param)/i.test(msg)) {
-                throw error;
-              }
-              if (attempt < retries) {
-                const delay = 1e3 * Math.pow(2, attempt);
-                await new Promise((r) => setTimeout(r, delay));
-              }
-            }
-          }
-          console.warn("[LD-Notion] AI \u8BF7\u6C42\u6700\u7EC8\u5931\u8D25\uFF08\u5DF2\u91CD\u8BD5\uFF09:", String((lastError == null ? void 0 : lastError.message) || lastError));
-          throw lastError;
-        },
-        // 公共 AI 对话请求骨架（MAINT-004）：封装 GM_xmlhttpRequest Promise + _retryable +
-        // onload/onerror/timeout 模板。三 provider 仅声明差异部分（url/headers/body/extractResponse/errorPrefix）。
-        // timeout 默认 90000（长对话）；分类请求（requestOpenAI/Claude/Gemini）传 30000（DISCOVER P6 同类去重）。
-        // 90000ms 超时是长对话请求统一值（MAINT-007 已常量化建议，此处暂留内联）。
-        _chatRequest: (url, headers, body, extractResponse, errorPrefix, timeout = 9e4) => {
-          return AIService2._retryable(() => new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "POST",
-              url,
-              headers,
-              data: JSON.stringify(body),
-              onload: (response) => {
-                var _a;
-                try {
-                  const result = JSON.parse(response.responseText);
-                  if (response.status >= 200 && response.status < 300) {
-                    resolve(extractResponse(result));
-                  } else {
-                    reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `${errorPrefix}\u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
-                  }
-                } catch (e) {
-                  reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
-                }
-              },
-              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
-              timeout,
-              ontimeout: () => reject(new Error("AI \u5BF9\u8BDD\u8BF7\u6C42\u8D85\u65F6"))
-            });
-          }));
-        },
-        requestOpenAIChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
-          const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
-          return AIService2._chatRequest(
-            url,
-            { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-            { model, messages: [{ role: "user", content: prompt2 }], max_completion_tokens: maxTokens, temperature: 0.7 },
-            (result) => {
-              var _a, _b, _c, _d;
-              return ((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "";
-            },
-            "OpenAI"
-          );
-        },
-        // Claude 对话请求
-        requestClaudeChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
-          const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-          return AIService2._chatRequest(
-            url,
-            { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
-            { model, messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }], max_tokens: maxTokens },
-            (result) => {
-              var _a, _b, _c;
-              return ((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "";
-            },
-            "Claude"
-          );
-        },
-        // Gemini 对话请求
-        requestGeminiChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
-          const modelSeg = AIService2._modelPathSegment(model);
-          const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
-          return AIService2._chatRequest(
-            url,
-            { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-            { contents: [{ parts: [{ text: prompt2 }] }], generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
-            (result) => {
-              var _a, _b, _c, _d, _e, _f;
-              return ((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "";
-            },
-            "Gemini"
-          );
-        },
-        // Agent 多轮对话请求 —— v3.14.6 (S-02): 系统指令与不可信用户内容角色分离,
-        // OpenAI messages[role=system] / Anthropic 顶层 system / Gemini systemInstruction;
-        // 不支持通道保留原压平 + 防伪前缀
-        requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500) => {
-          const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
-          const provider = AIService2.PROVIDERS[aiService];
-          if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
-          const model = aiModel || provider.defaultModel;
-          const normalizedMessages = (messages || []).map((msg) => ({
-            role: msg.role === "assistant" ? "assistant" : "user",
-            content: String(msg.content ?? "")
-          }));
-          const systemText = String(systemPrompt ?? "");
-          if (aiService === "openai") {
-            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1");
-            const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
-            return await AIService2._chatRequest(
-              url,
-              { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
-              { model, messages: [{ role: "system", content: systemText }, ...normalizedMessages], max_completion_tokens: maxTokens, temperature: 0.7 },
-              (result) => {
-                var _a, _b, _c, _d;
-                return ((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "";
-              },
-              "OpenAI"
-            );
-          }
-          if (aiService === "claude") {
-            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1");
-            const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-            return await AIService2._chatRequest(
-              url,
-              { "x-api-key": aiApiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
-              { model, system: systemText, messages: normalizedMessages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: maxTokens },
-              (result) => {
-                var _a, _b, _c;
-                return ((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "";
-              },
-              "Claude"
-            );
-          }
-          if (aiService === "gemini") {
-            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1beta");
-            const modelSeg = AIService2._modelPathSegment(model);
-            const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
-            return await AIService2._chatRequest(
-              url,
-              { "Content-Type": "application/json", "x-goog-api-key": aiApiKey },
-              { systemInstruction: { parts: [{ text: systemText }] }, contents: normalizedMessages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })), generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
-              (result) => {
-                var _a, _b, _c, _d, _e, _f;
-                return ((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "";
-              },
-              "Gemini"
-            );
-          }
-          let prompt2 = `[\u7CFB\u7EDF\u6307\u4EE4]
-${systemText}
-
-`;
-          for (const msg of normalizedMessages) {
-            if (msg.role === "user") {
-              prompt2 += `[\u7528\u6237]: ${msg.content}
-
-`;
-            } else {
-              prompt2 += `[\u52A9\u624B]: ${msg.content}
-
-`;
-            }
-          }
-          return await AIService2.requestChat(prompt2, settings, maxTokens);
-        },
-        // 获取可用模型列表
-        getFetchedModelsCache: () => {
-          const raw = Storage2.get(CONFIG2.STORAGE_KEYS.FETCHED_MODELS, "{}");
-          try {
-            const parsed = JSON.parse(raw);
-            return parsed && typeof parsed === "object" ? parsed : {};
-          } catch (error) {
-            console.warn("[LD-Notion] \u83B7\u53D6\u6A21\u578B\u7F13\u5B58 JSON \u89E3\u6790\u5931\u8D25:", error);
-            return {};
-          }
-        },
-        getCachedModels: (service) => {
-          const cache = AIService2.getFetchedModelsCache();
-          const entry = cache[service];
-          if (!Array.isArray(entry == null ? void 0 : entry.models)) return [];
-          if (entry.fingerprint !== AIService2.getModelsCacheFingerprint()) return [];
-          return entry.models;
-        },
-        getAvailableModels: (service) => {
-          var _a;
-          const cachedModels = AIService2.getCachedModels(service);
-          if (cachedModels.length > 0) return cachedModels;
-          return ((_a = AIService2.PROVIDERS[service]) == null ? void 0 : _a.models) || [];
-        },
-        // 模型缓存指纹: 端点 + 密钥单向哈希(禁止明文子串), 变更即失效
-        getModelsCacheFingerprint: () => {
-          const baseUrl = String(Storage2.get(CONFIG2.STORAGE_KEYS.AI_BASE_URL, "") || "");
-          const keyHash = Utils2.apiKeyHash(String(Storage2.get(CONFIG2.STORAGE_KEYS.AI_API_KEY, "") || ""));
-          return `${baseUrl}|${keyHash}`;
-        },
-        persistFetchedModels: (service, models) => {
-          const normalizedModels = Array.isArray(models) ? models : [];
-          const cache = AIService2.getFetchedModelsCache();
-          const snapshot = {
-            models: normalizedModels,
-            timestamp: Date.now(),
-            fingerprint: AIService2.getModelsCacheFingerprint()
-          };
-          cache[service] = snapshot;
-          Storage2.set(CONFIG2.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(cache));
-          return snapshot;
-        },
-        fetchModelsSnapshot: async (service, apiKey, baseUrl) => {
-          const models = await AIService2.fetchModels(service, apiKey, baseUrl);
-          const snapshot = AIService2.persistFetchedModels(service, models);
-          return { models: snapshot.models, timestamp: snapshot.timestamp };
-        },
-        fetchModels: async (service, apiKey, baseUrl) => {
-          if (service === "openai") {
-            return await AIService2.fetchOpenAIModels(apiKey, baseUrl);
-          } else if (service === "claude") {
-            return AIService2.PROVIDERS.claude.models;
-          } else if (service === "gemini") {
-            return await AIService2.fetchGeminiModels(apiKey, baseUrl);
-          }
-          throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${service}`);
-        },
-        // 获取 OpenAI 模型列表
-        fetchOpenAIModels: (apiKey, baseUrl) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
-          const url = normalizedBase ? `${normalizedBase}/v1/models` : "https://api.openai.com/v1/models";
-          return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "GET",
-              url,
-              headers: {
-                "Authorization": `Bearer ${apiKey}`
-              },
-              onload: (response) => {
-                var _a;
-                try {
-                  const result = JSON.parse(response.responseText);
-                  if (response.status >= 200 && response.status < 300) {
-                    const chatModels = (result.data || []).filter((m) => m.id.includes("gpt") || m.id.includes("o1") || m.id.includes("o3")).map((m) => m.id).sort((a, b) => {
-                      const priority = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"];
-                      const aIdx = priority.findIndex((p) => a.startsWith(p));
-                      const bIdx = priority.findIndex((p) => b.startsWith(p));
-                      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-                      if (aIdx !== -1) return -1;
-                      if (bIdx !== -1) return 1;
-                      return a.localeCompare(b);
-                    });
-                    resolve(chatModels.length > 0 ? chatModels : AIService2.PROVIDERS.openai.models);
-                  } else {
-                    reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${response.status}`));
-                  }
-                } catch (e) {
-                  reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
-                }
-              },
-              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
-              timeout: 15e3,
-              ontimeout: () => reject(new Error("\u83B7\u53D6\u6A21\u578B\u5217\u8868\u8D85\u65F6"))
-            });
-          });
-        },
-        // 获取 Gemini 模型列表
-        fetchGeminiModels: (apiKey, baseUrl) => {
-          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
-          const url = normalizedBase ? `${normalizedBase}/v1beta/models` : `https://generativelanguage.googleapis.com/v1beta/models`;
-          return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "GET",
-              url,
-              headers: {
-                "Content-Type": "application/json",
-                "x-goog-api-key": apiKey
-              },
-              onload: (response) => {
-                var _a;
-                try {
-                  const result = JSON.parse(response.responseText);
-                  if (response.status >= 200 && response.status < 300) {
-                    const models = (result.models || []).filter((m) => {
-                      var _a2;
-                      return (_a2 = m.supportedGenerationMethods) == null ? void 0 : _a2.includes("generateContent");
-                    }).map((m) => m.name.replace("models/", "")).filter((m) => m.includes("gemini")).sort((a, b) => {
-                      const priority = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"];
-                      const aIdx = priority.findIndex((p) => a.startsWith(p));
-                      const bIdx = priority.findIndex((p) => b.startsWith(p));
-                      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-                      if (aIdx !== -1) return -1;
-                      if (bIdx !== -1) return 1;
-                      return a.localeCompare(b);
-                    });
-                    resolve(models.length > 0 ? models : AIService2.PROVIDERS.gemini.models);
-                  } else {
-                    reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${response.status}`));
-                  }
-                } catch (e) {
-                  reject(new Error(`\u89E3\u6790\u54CD\u5E94\u5931\u8D25: ${e.message}`));
-                }
-              },
-              onerror: (error) => reject(new Error(`\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${Utils2.formatRequestError(error)}`)),
-              timeout: 15e3,
-              ontimeout: () => reject(new Error("\u83B7\u53D6\u6A21\u578B\u5217\u8868\u8D85\u65F6"))
-            });
-          });
-        }
-      };
+      var { AIService: AIService2 } = require_ai_service();
       var ChatState2 = {
         messages: [],
         isProcessing: false,
@@ -33723,7 +33737,7 @@ compound \u683C\u5F0F\uFF08\u4EC5\u5F53 intent \u4E3A compound \u65F6\u4F7F\u752
               `${systemPrompt}
 
 <user_input>
-${isolateContent(userMessage)}
+${isolateContent2(userMessage)}
 </user_input>`,
               settings,
               800
@@ -34356,9 +34370,9 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       };
       Object.assign(AIAssistant2, require_guarded_write().GuardedWrite);
       var getAISettings = () => AIAssistant2.getSettings();
-      var isolateContent = (content) => String(content ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      AIService2.isolateContent = isolateContent;
-      Object.assign(AIAssistant2, { isolateContent });
+      var isolateContent2 = (content) => String(content ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      AIService2.isolateContent = isolateContent2;
+      Object.assign(AIAssistant2, { isolateContent: isolateContent2 });
       module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, getAISettings };
       Object.assign(AIAssistant2, require_agent_executor().AgentExecutor);
     }
