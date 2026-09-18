@@ -9,7 +9,7 @@ const { ConfirmationDialog } = require("../security");
 const { WorkspaceService } = require("../extract");
 const { AutoImporter, GitHubAutoImporter, GitHubAPI } = require("../import");
 const { BookmarkAutoImporter, RSSAutoImporter } = require("../bridge");
-const { AIAssistant, AIService, ChatUI } = require("../ai");
+const { AIAssistant, AIService, ChatUI, getAISettings } = require("../ai");
 const { AISchema } = require("../ai/schema");
 
 // 工作区洞察/同步中心/可视化渲染相关方法，引用 UI 自身方法与状态（如 UI.refs、

@@ -1,3 +1,13 @@
+## [3.14.33] - 2026-09-18
+
+### refactor (M3 大文件拆分 milestone 波次4-10 —— 4/4 全部达标)
+
+- `ai/index.js` 2678 → 1376 LOC（✓ <1500）：`AI_WELCOME_ENTRY_POINTS`/`AIWelcomeUI`/`ChatUI` 提取至 `src/ui/ai-chat-ui.js`（消除 ISS-016 层级倒置，回边 lazy accessor）、`AIClassifier` 提取至 `src/ai/ai-classifier.js`、`QUICK_INTENT_*` 纯数据提取至 `src/ai/quick-intent.js`
+- `ui/main-ui.js` 2980 → 1497 LOC（✓ <1500）：工作区协作包/洞察报告/保存到 Notion/可视化摘要 ~640 LOC 并入 `workspace-insight.js`（`UI.`→`UI().` lazy accessor）；GitHub→Obsidian/Notion 导出转发壳提取至 `src/ui/github-obsidian-export.js`
+- `ui/events.js` 2387 → 1481 LOC（✓ <1500）：AI 对话绑定提取至 `src/ui/events/ai-bindings.js`（`bindAISection`）、导出+Obsidian+日志+去重数据管理提取至 `src/ui/events/export-bindings.js`（`bindExport`），ctx 注入共享闭包助手
+- `auth/index.js` 1645 → 1155 LOC（✓ <1500，波次2）：`CredentialVault` → `src/auth/credential-vault.js`
+- 拆分模式统一：提取域块 → 新模块 → `Object.assign`/`ctx` mixin → lazy accessor 回边 → 源断言守卫更新路径保断言；每波 `node --check` + 0 加载期环 + 定向测试 + `npm run build` + 独立提交
+
 ## [3.14.32] - 2026-09-18
 
 ### perf

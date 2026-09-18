@@ -9,8 +9,9 @@ const { Utils } = require("../utils");
 const { Storage } = require("../storage");
 const { NotionAPI } = require("../api");
 
-// lazy accessor —— AIAssistant 为 ai/index 内对象,运行时获取(此时 index 已加载完毕)。
+// lazy accessor —— AIAssistant/AIService 为 ai/index 内对象,运行时获取(此时 index 已加载完毕)。
 let _a = null; const AIAssistant = () => (_a || (_a = require("./index").AIAssistant));
+let _s = null; const AIService = () => (_s || (_s = require("./ai-service").AIService));
 
 const AIClassifier = {
     isPaused: false,
@@ -129,7 +130,7 @@ const AIClassifier = {
         const content = AIClassifier.extractText(blocks);
 
         // 调用 AI 分类
-        const category = await AIService.classify(
+        const category = await AIService().classify(
             title,
             content,
             settings.categories,

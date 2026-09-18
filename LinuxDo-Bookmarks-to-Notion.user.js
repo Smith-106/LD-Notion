@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.32
+// @version      3.14.33
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -81,7 +81,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.14.32",
+        SCRIPT_VERSION: "3.14.33",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -12696,7 +12696,7 @@ ${aiResponse}
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2 } = require_api();
-      var { AIService: AIService3 } = require_ai();
+      var { AIService: AIService2 } = require_ai();
       var { AISchema } = require_schema();
       var BookmarkExporter2 = {
         _pageInsightCache: {},
@@ -12902,12 +12902,12 @@ ${aiResponse}
 
 JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
 
-\u7F51\u9875 URL\uFF1A${AIService3.isolateContent(bookmark.url)}
-\u539F\u59CB\u6807\u9898\uFF1A${AIService3.isolateContent(bookmark.title || "")}
-\u9875\u9762\u6807\u9898\uFF1A${AIService3.isolateContent(insight.title || "")}
-\u9875\u9762\u6458\u8981\uFF1A${AIService3.isolateContent(insight.summary || "")}`;
+\u7F51\u9875 URL\uFF1A${AIService2.isolateContent(bookmark.url)}
+\u539F\u59CB\u6807\u9898\uFF1A${AIService2.isolateContent(bookmark.title || "")}
+\u9875\u9762\u6807\u9898\uFF1A${AIService2.isolateContent(insight.title || "")}
+\u9875\u9762\u6458\u8981\uFF1A${AIService2.isolateContent(insight.summary || "")}`;
           try {
-            const response = await AIService3.requestChat(prompt2, settings, 220);
+            const response = await AIService2.requestChat(prompt2, settings, 220);
             const parsed = AISchema.parseAIJson("bookmarkSummary", response);
             if (!parsed.ok) return null;
             const data = parsed.value;
@@ -12976,7 +12976,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const categories = Array.isArray(settings == null ? void 0 : settings.categories) ? settings.categories.filter(Boolean) : [];
           if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService) || categories.length === 0) return "";
           try {
-            return await AIService3.classify(
+            return await AIService2.classify(
               insight.title || bookmark.title || "",
               insight.summary || "",
               categories,
@@ -15910,8 +15910,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           let aiNotice = "";
           if (classifyWithAI) {
             try {
-              const { AIService: AIService3, getAISettings: getAISettings2 } = require_ai();
-              const settings = getAISettings2();
+              const { AIService: AIService2, getAISettings } = require_ai();
+              const settings = getAISettings();
               if (settings && settings.aiApiKey) {
                 const rootIds = /* @__PURE__ */ new Set(["1", "2"]);
                 const folderByTitle = /* @__PURE__ */ new Map();
@@ -15926,7 +15926,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 const classified = [];
                 await runQueue(targets, async (node) => {
                   try {
-                    const category = await AIService3.classify(node.title || node.url, node.url, categories, settings);
+                    const category = await AIService2.classify(node.title || node.url, node.url, categories, settings);
                     const folder = category && folderByTitle.get(category);
                     if (folder && folder.id !== node.parentId) {
                       classified.push({ node, folderId: folder.id, folderTitle: folder.title });
@@ -17596,7 +17596,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
       var { Exporter: Exporter2 } = require_export();
       var { SyncLock } = require_sync_lock();
-      var { AIService: AIService3 } = require_ai();
+      var { AIService: AIService2 } = require_ai();
       var GitHubExporter2 = {
         // 用户触发导出的写入审计（ISS-20260724-011，CWE-862/778）。与 BookmarkAutoImporter._auditAutoSync
         // 同模式但信任边界不同：用户主动触发（actor="user"）而非系统自动同步（actor="system"）。
@@ -17685,7 +17685,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const categories = Array.isArray(settings == null ? void 0 : settings.categories) ? settings.categories.filter(Boolean) : [];
           if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService) || categories.length === 0) return "";
           try {
-            return await AIService3.classify(
+            return await AIService2.classify(
               `${repo.full_name || repo.name || ""} ${insight.title || ""}`,
               `${repo.description || ""}
 ${insight.summary || ""}`,
@@ -18148,13 +18148,13 @@ ${insight.summary || ""}`,
             try {
               const prompt2 = `\u8BF7\u6839\u636E\u4EE5\u4E0B GitHub \u4ED3\u5E93\u4FE1\u606F\uFF0C\u4ECE\u8FD9\u4E9B\u5206\u7C7B\u4E2D\u9009\u62E9\u6700\u5408\u9002\u7684\u4E00\u4E2A: [${categories.join(", ")}]
 
-\u4ED3\u5E93\u540D: ${AIService3.isolateContent(title)}
-\u63CF\u8FF0: ${AIService3.isolateContent(desc)}
-\u8BED\u8A00: ${AIService3.isolateContent(lang)}
-\u6807\u7B7E: ${AIService3.isolateContent(tags)}
+\u4ED3\u5E93\u540D: ${AIService2.isolateContent(title)}
+\u63CF\u8FF0: ${AIService2.isolateContent(desc)}
+\u8BED\u8A00: ${AIService2.isolateContent(lang)}
+\u6807\u7B7E: ${AIService2.isolateContent(tags)}
 
 \u53EA\u56DE\u590D\u5206\u7C7B\u540D\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\u3002`;
-              const category = await AIService3.request(prompt2, {
+              const category = await AIService2.request(prompt2, {
                 aiService,
                 aiApiKey,
                 aiModel,
@@ -19889,7 +19889,7 @@ ${report}
       var { Storage: Storage2 } = require_storage();
       var { NotionAPI: NotionAPI2 } = require_api();
       var { UrlValidator } = require_UrlValidator();
-      var AIService3 = {
+      var AIService2 = {
         // 标准化 + 安全校验 baseUrl，返回 null 表示非法（调用方应 reject）
         // versionPath: "v1" 或 "v1beta"
         _normalizeBaseUrl: (baseUrl, versionPath) => {
@@ -19936,29 +19936,29 @@ ${report}
 </user_content>
 
 \u5206\u7C7B\uFF1A`;
-          const response = await AIService3.request(prompt2, settings);
-          return AIService3.matchCategory(response, categories);
+          const response = await AIService2.request(prompt2, settings);
+          return AIService2.matchCategory(response, categories);
         },
         // 发送请求（根据不同服务商格式化）
         request: async (prompt2, settings) => {
           const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
-          const provider = AIService3.PROVIDERS[aiService];
+          const provider = AIService2.PROVIDERS[aiService];
           if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
           const model = aiModel || provider.defaultModel;
           if (aiService === "openai") {
-            return await AIService3.requestOpenAI(prompt2, model, aiApiKey, aiBaseUrl);
+            return await AIService2.requestOpenAI(prompt2, model, aiApiKey, aiBaseUrl);
           } else if (aiService === "claude") {
-            return await AIService3.requestClaude(prompt2, model, aiApiKey, aiBaseUrl);
+            return await AIService2.requestClaude(prompt2, model, aiApiKey, aiBaseUrl);
           } else if (aiService === "gemini") {
-            return await AIService3.requestGemini(prompt2, model, aiApiKey, aiBaseUrl);
+            return await AIService2.requestGemini(prompt2, model, aiApiKey, aiBaseUrl);
           }
           throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
         },
         // OpenAI 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，max_completion_tokens=50）
         requestOpenAI: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
-          return AIService3._chatRequest(
+          return AIService2._chatRequest(
             url,
             { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
             { model, messages: [{ role: "user", content: prompt2 }], max_completion_tokens: 50, temperature: 0 },
@@ -19972,9 +19972,9 @@ ${report}
         },
         // Claude 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，max_tokens=50）
         requestClaude: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-          return AIService3._chatRequest(
+          return AIService2._chatRequest(
             url,
             { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
             { model, messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }], max_tokens: 50 },
@@ -19988,10 +19988,10 @@ ${report}
         },
         // Gemini 分类请求（DISCOVER P6 同类去重：复用 _chatRequest 骨架，timeout=30000，maxOutputTokens=50）
         requestGemini: (prompt2, model, apiKey, baseUrl) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1beta");
-          const modelSeg = AIService3._modelPathSegment(model);
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
+          const modelSeg = AIService2._modelPathSegment(model);
           const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
-          return AIService3._chatRequest(
+          return AIService2._chatRequest(
             url,
             { "Content-Type": "application/json", "x-goog-api-key": apiKey },
             { contents: [{ parts: [{ text: prompt2 }] }], generationConfig: { maxOutputTokens: 50, temperature: 0 } },
@@ -20023,15 +20023,15 @@ ${report}
         // 对话式请求（支持更长输出）
         requestChat: async (prompt2, settings, maxTokens = 1e3) => {
           const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
-          const provider = AIService3.PROVIDERS[aiService];
+          const provider = AIService2.PROVIDERS[aiService];
           if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
           const model = aiModel || provider.defaultModel;
           if (aiService === "openai") {
-            return await AIService3.requestOpenAIChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+            return await AIService2.requestOpenAIChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
           } else if (aiService === "claude") {
-            return await AIService3.requestClaudeChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+            return await AIService2.requestClaudeChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
           } else if (aiService === "gemini") {
-            return await AIService3.requestGeminiChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
+            return await AIService2.requestGeminiChat(prompt2, model, aiApiKey, aiBaseUrl, maxTokens);
           }
           throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${aiService}`);
         },
@@ -20063,7 +20063,7 @@ ${report}
         // timeout 默认 90000（长对话）；分类请求（requestOpenAI/Claude/Gemini）传 30000（DISCOVER P6 同类去重）。
         // 90000ms 超时是长对话请求统一值（MAINT-007 已常量化建议，此处暂留内联）。
         _chatRequest: (url, headers, body, extractResponse, errorPrefix, timeout = 9e4) => {
-          return AIService3._retryable(() => new Promise((resolve, reject) => {
+          return AIService2._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
               method: "POST",
               url,
@@ -20089,9 +20089,9 @@ ${report}
           }));
         },
         requestOpenAIChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
-          return AIService3._chatRequest(
+          return AIService2._chatRequest(
             url,
             { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
             { model, messages: [{ role: "user", content: prompt2 }], max_completion_tokens: maxTokens, temperature: 0.7 },
@@ -20104,9 +20104,9 @@ ${report}
         },
         // Claude 对话请求
         requestClaudeChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-          return AIService3._chatRequest(
+          return AIService2._chatRequest(
             url,
             { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
             { model, messages: [{ role: "user", content: [{ type: "text", text: prompt2 }] }], max_tokens: maxTokens },
@@ -20119,10 +20119,10 @@ ${report}
         },
         // Gemini 对话请求
         requestGeminiChat: (prompt2, model, apiKey, baseUrl, maxTokens) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1beta");
-          const modelSeg = AIService3._modelPathSegment(model);
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
+          const modelSeg = AIService2._modelPathSegment(model);
           const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
-          return AIService3._chatRequest(
+          return AIService2._chatRequest(
             url,
             { "Content-Type": "application/json", "x-goog-api-key": apiKey },
             { contents: [{ parts: [{ text: prompt2 }] }], generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
@@ -20138,7 +20138,7 @@ ${report}
         // 不支持通道保留原压平 + 防伪前缀
         requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500) => {
           const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
-          const provider = AIService3.PROVIDERS[aiService];
+          const provider = AIService2.PROVIDERS[aiService];
           if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
           const model = aiModel || provider.defaultModel;
           const normalizedMessages = (messages || []).map((msg) => ({
@@ -20147,9 +20147,9 @@ ${report}
           }));
           const systemText = String(systemPrompt ?? "");
           if (aiService === "openai") {
-            const normalizedBase = AIService3._normalizeBaseUrl(aiBaseUrl, "v1");
+            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1");
             const url = normalizedBase ? `${normalizedBase}/v1/chat/completions` : "https://api.openai.com/v1/chat/completions";
-            return await AIService3._chatRequest(
+            return await AIService2._chatRequest(
               url,
               { "Authorization": `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
               { model, messages: [{ role: "system", content: systemText }, ...normalizedMessages], max_completion_tokens: maxTokens, temperature: 0.7 },
@@ -20161,9 +20161,9 @@ ${report}
             );
           }
           if (aiService === "claude") {
-            const normalizedBase = AIService3._normalizeBaseUrl(aiBaseUrl, "v1");
+            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1");
             const url = normalizedBase ? `${normalizedBase}/v1/messages` : "https://api.anthropic.com/v1/messages";
-            return await AIService3._chatRequest(
+            return await AIService2._chatRequest(
               url,
               { "x-api-key": aiApiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
               { model, system: systemText, messages: normalizedMessages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: maxTokens },
@@ -20175,10 +20175,10 @@ ${report}
             );
           }
           if (aiService === "gemini") {
-            const normalizedBase = AIService3._normalizeBaseUrl(aiBaseUrl, "v1beta");
-            const modelSeg = AIService3._modelPathSegment(model);
+            const normalizedBase = AIService2._normalizeBaseUrl(aiBaseUrl, "v1beta");
+            const modelSeg = AIService2._modelPathSegment(model);
             const url = normalizedBase ? `${normalizedBase}/v1beta/models/${modelSeg}:generateContent` : `https://generativelanguage.googleapis.com/v1beta/models/${modelSeg}:generateContent`;
-            return await AIService3._chatRequest(
+            return await AIService2._chatRequest(
               url,
               { "Content-Type": "application/json", "x-goog-api-key": aiApiKey },
               { systemInstruction: { parts: [{ text: systemText }] }, contents: normalizedMessages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })), generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 } },
@@ -20204,7 +20204,7 @@ ${systemText}
 `;
             }
           }
-          return await AIService3.requestChat(prompt2, settings, maxTokens);
+          return await AIService2.requestChat(prompt2, settings, maxTokens);
         },
         // 获取可用模型列表
         getFetchedModelsCache: () => {
@@ -20218,17 +20218,17 @@ ${systemText}
           }
         },
         getCachedModels: (service) => {
-          const cache = AIService3.getFetchedModelsCache();
+          const cache = AIService2.getFetchedModelsCache();
           const entry = cache[service];
           if (!Array.isArray(entry == null ? void 0 : entry.models)) return [];
-          if (entry.fingerprint !== AIService3.getModelsCacheFingerprint()) return [];
+          if (entry.fingerprint !== AIService2.getModelsCacheFingerprint()) return [];
           return entry.models;
         },
         getAvailableModels: (service) => {
           var _a;
-          const cachedModels = AIService3.getCachedModels(service);
+          const cachedModels = AIService2.getCachedModels(service);
           if (cachedModels.length > 0) return cachedModels;
-          return ((_a = AIService3.PROVIDERS[service]) == null ? void 0 : _a.models) || [];
+          return ((_a = AIService2.PROVIDERS[service]) == null ? void 0 : _a.models) || [];
         },
         // 模型缓存指纹: 端点 + 密钥单向哈希(禁止明文子串), 变更即失效
         getModelsCacheFingerprint: () => {
@@ -20238,34 +20238,34 @@ ${systemText}
         },
         persistFetchedModels: (service, models) => {
           const normalizedModels = Array.isArray(models) ? models : [];
-          const cache = AIService3.getFetchedModelsCache();
+          const cache = AIService2.getFetchedModelsCache();
           const snapshot = {
             models: normalizedModels,
             timestamp: Date.now(),
-            fingerprint: AIService3.getModelsCacheFingerprint()
+            fingerprint: AIService2.getModelsCacheFingerprint()
           };
           cache[service] = snapshot;
           Storage2.set(CONFIG2.STORAGE_KEYS.FETCHED_MODELS, JSON.stringify(cache));
           return snapshot;
         },
         fetchModelsSnapshot: async (service, apiKey, baseUrl) => {
-          const models = await AIService3.fetchModels(service, apiKey, baseUrl);
-          const snapshot = AIService3.persistFetchedModels(service, models);
+          const models = await AIService2.fetchModels(service, apiKey, baseUrl);
+          const snapshot = AIService2.persistFetchedModels(service, models);
           return { models: snapshot.models, timestamp: snapshot.timestamp };
         },
         fetchModels: async (service, apiKey, baseUrl) => {
           if (service === "openai") {
-            return await AIService3.fetchOpenAIModels(apiKey, baseUrl);
+            return await AIService2.fetchOpenAIModels(apiKey, baseUrl);
           } else if (service === "claude") {
-            return AIService3.PROVIDERS.claude.models;
+            return AIService2.PROVIDERS.claude.models;
           } else if (service === "gemini") {
-            return await AIService3.fetchGeminiModels(apiKey, baseUrl);
+            return await AIService2.fetchGeminiModels(apiKey, baseUrl);
           }
           throw new Error(`\u4E0D\u652F\u6301\u7684 AI \u670D\u52A1: ${service}`);
         },
         // 获取 OpenAI 模型列表
         fetchOpenAIModels: (apiKey, baseUrl) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1");
           const url = normalizedBase ? `${normalizedBase}/v1/models` : "https://api.openai.com/v1/models";
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -20288,7 +20288,7 @@ ${systemText}
                       if (bIdx !== -1) return 1;
                       return a.localeCompare(b);
                     });
-                    resolve(chatModels.length > 0 ? chatModels : AIService3.PROVIDERS.openai.models);
+                    resolve(chatModels.length > 0 ? chatModels : AIService2.PROVIDERS.openai.models);
                   } else {
                     reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${response.status}`));
                   }
@@ -20304,7 +20304,7 @@ ${systemText}
         },
         // 获取 Gemini 模型列表
         fetchGeminiModels: (apiKey, baseUrl) => {
-          const normalizedBase = AIService3._normalizeBaseUrl(baseUrl, "v1beta");
+          const normalizedBase = AIService2._normalizeBaseUrl(baseUrl, "v1beta");
           const url = normalizedBase ? `${normalizedBase}/v1beta/models` : `https://generativelanguage.googleapis.com/v1beta/models`;
           return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -20331,7 +20331,7 @@ ${systemText}
                       if (bIdx !== -1) return 1;
                       return a.localeCompare(b);
                     });
-                    resolve(models.length > 0 ? models : AIService3.PROVIDERS.gemini.models);
+                    resolve(models.length > 0 ? models : AIService2.PROVIDERS.gemini.models);
                   } else {
                     reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `\u83B7\u53D6\u6A21\u578B\u5931\u8D25: ${response.status}`));
                   }
@@ -20346,7 +20346,7 @@ ${systemText}
           });
         }
       };
-      module.exports = { AIService: AIService3 };
+      module.exports = { AIService: AIService2 };
     }
   });
 
@@ -23308,7 +23308,7 @@ ${systemText}
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2 } = require_bridge();
       var { StyleManager: StyleManager2 } = require_style_manager();
-      var { AIAssistant: AIAssistant2, AIService: AIService3, AIWelcomeUI: AIWelcomeUI2, ChatState: ChatState2, ChatUI: ChatUI2 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatState: ChatState2, ChatUI: ChatUI2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
       var { UI_CSS: UI_CSS2 } = require_styles();
@@ -23904,9 +23904,9 @@ ${systemText}
           };
           panel.querySelector("#ldb-notion-ai-service").onchange = (e) => {
             const newService = e.target.value;
-            const availableModels = AIService3.getAvailableModels(newService);
+            const availableModels = AIService2.getAvailableModels(newService);
             NotionSiteUI2.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : void 0);
-            const provider = AIService3.PROVIDERS[newService];
+            const provider = AIService2.PROVIDERS[newService];
             const modelSelect = panel.querySelector("#ldb-notion-ai-model");
             if ((provider == null ? void 0 : provider.defaultModel) && modelSelect) {
               modelSelect.value = provider.defaultModel;
@@ -24026,7 +24026,7 @@ ${systemText}
           }
           NotionSiteUI2.updateAITargetDbOptions(cachedDatabases, cachedPages);
           const aiService = Storage2.get(CONFIG2.STORAGE_KEYS.AI_SERVICE, CONFIG2.DEFAULTS.aiService);
-          const notionSiteModels = AIService3.getAvailableModels(aiService);
+          const notionSiteModels = AIService2.getAvailableModels(aiService);
           NotionSiteUI2.updateAIModelOptions(aiService, notionSiteModels.length > 0 ? notionSiteModels : void 0);
           const savedModel = Storage2.get(CONFIG2.STORAGE_KEYS.AI_MODEL, "");
           if (savedModel) {
@@ -24204,7 +24204,7 @@ ${systemText}
         updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
           var _a;
           const modelSelect = (_a = NotionSiteUI2.panel) == null ? void 0 : _a.querySelector("#ldb-notion-ai-model");
-          const provider = AIService3.PROVIDERS[service];
+          const provider = AIService2.PROVIDERS[service];
           if (!provider || !modelSelect) return;
           const models = customModels || provider.models;
           const defaultModel = provider.defaultModel;
@@ -24322,7 +24322,7 @@ ${systemText}
             }
             const aiService = ((_a = notionPanel.querySelector("#ldb-notion-ai-service")) == null ? void 0 : _a.value) || Storage2.get(CONFIG2.STORAGE_KEYS.AI_SERVICE, CONFIG2.DEFAULTS.aiService);
             const selectedModel = ((_b = notionPanel.querySelector("#ldb-notion-ai-model")) == null ? void 0 : _b.value) || Storage2.get(CONFIG2.STORAGE_KEYS.AI_MODEL, "");
-            const provider = AIService3.PROVIDERS[aiService];
+            const provider = AIService2.PROVIDERS[aiService];
             const aiModel = selectedModel || (provider == null ? void 0 : provider.defaultModel) || "";
             return {
               notionApiKey: NotionOAuth2.getAccessToken((_c = notionPanel.querySelector("#ldb-notion-api-key")) == null ? void 0 : _c.value.trim()),
@@ -26130,7 +26130,7 @@ ${systemText}
       var { WorkspaceService: WorkspaceService2 } = require_extract();
       var { AutoImporter: AutoImporter2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2 } = require_import();
       var { BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIAssistant: AIAssistant2, AIService: AIService3, ChatUI: ChatUI2 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, ChatUI: ChatUI2, getAISettings } = require_ai();
       var { AISchema } = require_schema();
       var _UI = null;
       var UI2 = () => {
@@ -26259,7 +26259,7 @@ ${systemText}
             "",
             // 候选标题/URL/来源来自 Notion 页面元数据，不可信——与 main-ui 同构，走 isolateContent 防 prompt injection
             `<user_content>
-${AIService3.isolateContent(JSON.stringify({
+${AIService2.isolateContent(JSON.stringify({
               label: (candidate == null ? void 0 : candidate.label) || "",
               reason: (candidate == null ? void 0 : candidate.reason) || "",
               count: Number((candidate == null ? void 0 : candidate.count) || items.length || 0),
@@ -26279,7 +26279,7 @@ ${AIService3.isolateContent(JSON.stringify({
           if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService)) return null;
           try {
             const prompt2 = UI2().buildWorkspaceConnectionCandidateAIPrompt(candidate);
-            const raw = String(await AIService3.requestChat(prompt2, settings, 700) || "").trim();
+            const raw = String(await AIService2.requestChat(prompt2, settings, 700) || "").trim();
             const parseResult = AISchema.parseAIJson("workspaceConnection", raw);
             if (!parseResult.ok) {
               throw new Error(parseResult.reason);
@@ -27620,7 +27620,7 @@ ${AIService3.isolateContent(JSON.stringify({
                 // 裸 JSON.stringify 注入可让页面内容劫持 AI 意图——统一走 isolateContent
                 // 隔离标签(与全仓其余 12+ AI 请求构造点对齐, 五层防御第①层)。
                 `<user_input>
-${AIService3.isolateContent(JSON.stringify({
+${AIService2.isolateContent(JSON.stringify({
                   totalPages: model.totalPages,
                   totalDatabases: model.totalDatabases,
                   sourceBreakdown: model.sourceBreakdown,
@@ -27642,7 +27642,7 @@ ${AIService3.isolateContent(JSON.stringify({
                 }, null, 2))}
 </user_input>`
               ].join("\n");
-              aiSummary = String(await AIService3.requestChat(prompt2, settings, 900) || "").trim();
+              aiSummary = String(await AIService2.requestChat(prompt2, settings, 900) || "").trim();
             }
             UI2().workspaceInsightSummary = aiSummary;
             UI2().workspaceInsightMarkdown = UI2().buildWorkspaceInsightMarkdown(model, aiSummary);
@@ -28216,7 +28216,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
-      var { AIAssistant: AIAssistant2, AIService: AIService3, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, getAISettings: getAISettings2 } = require_ai();
+      var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, getAISettings } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -28511,8 +28511,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           refs.aiServiceSelect.value = aiService;
           const savedModel = Storage2.get(CONFIG2.STORAGE_KEYS.AI_MODEL, "");
           const modelSelect = refs.aiModelSelect;
-          const provider = AIService3.PROVIDERS[aiService];
-          const validModels = AIService3.getAvailableModels(aiService);
+          const provider = AIService2.PROVIDERS[aiService];
+          const validModels = AIService2.getAvailableModels(aiService);
           UI2.updateAIModelOptions(aiService, validModels.length > 0 ? validModels : void 0);
           if (savedModel) {
             const optionExists = Array.from(modelSelect.options).some((opt) => opt.value === savedModel);
@@ -29021,7 +29021,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         updateAIModelOptions: (service, customModels = null, preserveSelection = false) => {
           const refs = UI2.refs || {};
           const modelSelect = refs.aiModelSelect;
-          const provider = AIService3.PROVIDERS[service];
+          const provider = AIService2.PROVIDERS[service];
           if (!provider || !modelSelect) return;
           const models = customModels || provider.models;
           const defaultModel = provider.defaultModel;
@@ -30038,13 +30038,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { GitHubAPI: GitHubAPI2 } = require_import();
       var { ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { UICommandService: UICommandService2 } = require_UICommandService();
-      var { ChatUI: ChatUI2, AIService: AIService3 } = require_ai();
+      var { ChatUI: ChatUI2, AIService: AIService2 } = require_ai();
       var bindAISection = (ctx) => {
         const { UI: UI2, panel, refs, getSensitiveValue, persistSensitiveInput } = ctx;
         ChatUI2.init();
         refs.aiServiceSelect.onchange = (e) => {
           const newService = e.target.value;
-          const availableModels = AIService3.getAvailableModels(newService);
+          const availableModels = AIService2.getAvailableModels(newService);
           UI2.updateAIModelOptions(newService, availableModels.length > 0 ? availableModels : void 0);
           Storage2.set(CONFIG2.STORAGE_KEYS.AI_SERVICE, newService);
         };
@@ -30232,7 +30232,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           btn.disabled = true;
           btn.innerHTML = '<span class="ldb-spin">\u{1F504}</span> \u6D4B\u8BD5\u4E2D...';
           try {
-            const response = await AIService3.request(
+            const response = await AIService2.request(
               "\u8BF7\u56DE\u590D\uFF1A\u8FDE\u63A5\u6210\u529F",
               { aiService, aiApiKey, aiModel, aiBaseUrl }
             );
@@ -30334,7 +30334,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2, BookmarkExporter: BookmarkExporter2, BookmarkOrganizer } = require_bridge();
-      var { AIService: AIService3, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, ChatState: ChatState2 } = require_ai();
+      var { AIService: AIService2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, ChatState: ChatState2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
       var UIEvents2 = {
@@ -31584,7 +31584,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
-      var { AIAssistant: AIAssistant2, getAISettings: getAISettings2 } = require_ai();
+      var { AIAssistant: AIAssistant2, getAISettings } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -32348,7 +32348,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const apiKey = NotionOAuth2.getAccessToken("");
             const exportState = TargetState2.getExportState();
             const imgMode = Storage2.get(CONFIG2.STORAGE_KEYS.IMG_MODE, CONFIG2.DEFAULTS.imgMode);
-            const aiSettings = getAISettings2();
+            const aiSettings = getAISettings();
             const settings = {
               apiKey,
               exportTargetType: exportState.targetType,
@@ -32728,6 +32728,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { NotionAPI: NotionAPI2 } = require_api();
       var _a = null;
       var AIAssistant2 = () => _a || (_a = require_ai().AIAssistant);
+      var _s = null;
+      var AIService2 = () => _s || (_s = require_ai_service().AIService);
       var AIClassifier2 = {
         isPaused: false,
         isCancelled: false,
@@ -32817,7 +32819,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           const title = AIClassifier2.getPageTitle(page);
           const blocks = await AIClassifier2.fetchPageBlocks(page.id, settings.notionApiKey);
           const content = AIClassifier2.extractText(blocks);
-          const category = await AIService.classify(
+          const category = await AIService2().classify(
             title,
             content,
             settings.categories,
@@ -33011,7 +33013,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { AgentTrace } = require_AgentTrace();
       var { AISchema } = require_schema();
       var { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 } = require_AgentTools();
-      var { getAI: AI, getState: ChatState2, getService: AIService3 } = require_deps();
+      var { getAI: AI, getState: ChatState2, getService: AIService2 } = require_deps();
       var AgentExecutor = {
         _generateAgentPlan: async (params, settings) => {
           const { task_description } = params;
@@ -33030,7 +33032,7 @@ batch_translate, extract_to_database, generate_pages, batch_analyze
 }
 
 \u7528\u6237\u4EFB\u52A1\uFF1A${AI().isolateContent(task_description)}`;
-          const planResponse = await AIService3().requestChat(planPrompt, settings, 1500);
+          const planResponse = await AIService2().requestChat(planPrompt, settings, 1500);
           const planResult = AISchema.parseAIJson("agentPlan", planResponse);
           if (!planResult.ok) {
             console.warn("[LD-Notion] Agent \u8BA1\u5212 JSON \u89E3\u6790\u5931\u8D25:", planResult.reason);
@@ -33324,7 +33326,7 @@ ${AI().isolateContent(content)}
             );
             let response;
             try {
-              response = await AIService3().requestAgentChat(
+              response = await AIService2().requestAgentChat(
                 systemPrompt,
                 messages,
                 settings,
@@ -33381,7 +33383,7 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
       var { NameResolver } = require_NameResolver();
       var { AI_AGENT_TOOLS: AI_AGENT_TOOLS2 } = require_AgentTools();
       var { AIHandlers: AIHandlers2 } = require_Handlers();
-      var { AIService: AIService3 } = require_ai_service();
+      var { AIService: AIService2 } = require_ai_service();
       var ChatState2 = {
         messages: [],
         isProcessing: false,
@@ -34275,7 +34277,7 @@ compound \u683C\u5F0F\uFF08\u4EC5\u5F53 intent \u4E3A compound \u65F6\u4F7F\u752
   "explanation": "\u6574\u4F53\u610F\u56FE\u8BF4\u660E"
 }`;
           try {
-            const response = await AIService3.requestChat(
+            const response = await AIService2.requestChat(
               `${systemPrompt}
 
 <user_input>
@@ -34512,11 +34514,11 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       var { AI_WELCOME_ENTRY_POINTS, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2 } = require_ai_chat_ui();
       var { AIClassifier: AIClassifier2 } = require_ai_classifier();
       Object.assign(AIAssistant2, require_guarded_write().GuardedWrite);
-      var getAISettings2 = () => AIAssistant2.getSettings();
+      var getAISettings = () => AIAssistant2.getSettings();
       var isolateContent2 = (content) => String(content ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      AIService3.isolateContent = isolateContent2;
+      AIService2.isolateContent = isolateContent2;
       Object.assign(AIAssistant2, { isolateContent: isolateContent2 });
-      module.exports = { AIService: AIService3, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, getAISettings: getAISettings2 };
+      module.exports = { AIService: AIService2, ChatState: ChatState2, QUICK_INTENT_PATTERNS: QUICK_INTENT_PATTERNS2, QUICK_INTENT_RULES: QUICK_INTENT_RULES2, AI_AGENT_TOOLS: AI_AGENT_TOOLS2, AIHandlers: AIHandlers2, AIAssistant: AIAssistant2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, getAISettings };
       Object.assign(AIAssistant2, require_agent_executor().AgentExecutor);
     }
   });
@@ -34537,7 +34539,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { Storage, SyncState } = require_storage();
   var { CredentialVault, TargetState, NotionOAuth } = require_auth();
   var { SiteDetector, InstallHelper, EMOJI_MAP, NOTION_LANGUAGES, normalizeLanguage, DOMToNotion, NotionTransport, NotionAPI, ObsidianAPI, HTMLToMarkdown } = require_api();
-  var { AIService: AIService2, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier } = require_ai();
+  var { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGENT_TOOLS, AIHandlers, AIAssistant, AIWelcomeUI, ChatUI, AIClassifier } = require_ai();
   var { OperationGuard, OperationLog, ConfirmationDialog, UndoManager } = require_security();
   var { ZhihuAPI, GenericExtractor, WorkspaceService } = require_extract();
   var { GenericExporter, LinuxDoAPI, Exporter } = require_export();
